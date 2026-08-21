@@ -41,10 +41,10 @@ function hasNamedSpellHeader(
 }
 
 describe('spell knowledge-base completeness', () => {
-  it('has exactly one source-cited KB entry for every implemented cantrip and level-1/2 spell', () => {
-    expect(SPELL_KB_ENTRIES).toHaveLength(176);
-    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.ruleId)).size).toBe(176);
-    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.spellId)).size).toBe(176);
+  it('has exactly one source-cited KB entry for every implemented manifest spell', () => {
+    expect(SPELL_KB_ENTRIES).toHaveLength(181);
+    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.ruleId)).size).toBe(181);
+    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.spellId)).size).toBe(181);
     expect(SPELL_KB_ENTRIES.map((entry) => entry.spellId).sort()).toEqual(
       IMPLEMENTED_SPELL_DEFINITIONS.map((definition) => definition.id).sort(),
     );
@@ -69,7 +69,7 @@ describe('spell knowledge-base completeness', () => {
 
   it.each(SPELL_MANIFEST)('$id class-list locators name the exact spell row', (row) => {
     for (const membership of row.memberships) {
-      const matched = /^(docs\/srd\/source\/(?:cleric|warlock|wizard)-spell-list\.txt):(\d+)$/u.exec(membership.source);
+      const matched = /^(docs\/srd\/source\/(?:bard|cleric|druid|paladin|ranger|sorcerer|warlock|wizard)-spell-list\.txt):(\d+)$/u.exec(membership.source);
       if (matched === null) throw new Error(`Invalid class-list locator: ${membership.source}`);
       const path = matched[1];
       const line = matched[2];
@@ -108,5 +108,37 @@ describe('spell knowledge-base completeness', () => {
       const [start, end] = locatorBounds(locator);
       expect(SPELL_DESCRIPTION_LINES.slice(start - 1, end).join(' ').trim().length).toBeGreaterThan(0);
     }
+  });
+
+  it.each(['divine-favor', 'ensnaring-strike', 'searing-smite', 'heal', 'moonbeam'] as const)(
+    '%s carries complete non-empty field-level SRD citations',
+    (spellId) => {
+      const entry = SPELL_KB_ENTRIES.find((candidate) => candidate.spellId === spellId);
+      expect(entry?.fieldCitations).toBeDefined();
+      expect(Object.keys(entry?.fieldCitations ?? {}).sort()).toEqual([
+        'castingTime', 'components', 'identity', 'operation', 'targeting',
+      ]);
+      for (const locator of Object.values(entry?.fieldCitations ?? {})) {
+        const [start, end] = locatorBounds(locator);
+        expect(SPELL_DESCRIPTION_LINES.slice(start - 1, end).join(' ').trim().length).toBeGreaterThan(0);
+      }
+    },
+  );
+
+  it('records every known r9 engine residual as a closed typed limitation code', () => {
+    expect(SPELL_KB_ENTRIES.find((entry) => entry.spellId === 'ensnaring-strike')?.limitations?.map(
+      (limitation) => limitation.code,
+    )).toEqual([
+      'post_hit_cast_timing_prearmed',
+      'creature_size_save_mode_unavailable',
+      'effect_escape_action_unavailable',
+    ]);
+    expect(SPELL_KB_ENTRIES.find((entry) => entry.spellId === 'moonbeam')?.limitations?.map(
+      (limitation) => limitation.code,
+    )).toEqual([
+      'persistent_area_move_action_unavailable',
+      'persistent_area_entry_trigger_unavailable',
+      'shapechange_reversion_unavailable',
+    ]);
   });
 });

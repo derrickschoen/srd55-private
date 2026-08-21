@@ -28,6 +28,7 @@ const EFFECT_FAMILIES_LEDGER_PATH = 'docs/audits/2026-08-21-party-pack-effect-fa
 const PARTY_MULTISOURCE_LEDGER_PATH = 'docs/audits/2026-08-21-party-pack-multisource-mutation-ledger.md';
 const REGRET_ORACLE_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-regret-mutation-ledger.md';
 const ATTACK_FORM_ELDRITCH_LEDGER_PATH = 'docs/audits/2026-08-21-attack-form-eldritch-blast-mutation-ledger.md';
+const R9_SPELLS_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-r9-spells-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -90,6 +91,18 @@ describe('phase-2 mutation ledger manifest', () => {
     }
     expect(incrementTen).toContain('| Own `token_counts_influence_reducer`');
     expect(incrementTen).toContain('| Own `bundle_version_outside_window_accepted`');
+  });
+
+  it('R9-SPELL-MUTATION-LEDGER records all three restored negative controls and killing tests', () => {
+    const ledger = readFileSync(R9_SPELLS_LEDGER_PATH, 'utf8');
+    for (const name of [
+      'armed_rider_persists_after_hit',
+      'heal_value_drifted',
+      'moonbeam_save_dropped',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(readFileSync('tests/unit/combat/spells-ranking-r9.test.ts', 'utf8')).toContain(name);
+    }
   });
 
   it('SOAK-PARTY-MUTATION-LEDGER pins all required controls and the own control', () => {

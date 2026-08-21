@@ -33,15 +33,20 @@ import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
 const EXPECTED_LEVEL_TOTALS: Readonly<Record<SpellLevel, number>> = {
   0: 21,
-  1: 43,
-  2: 45,
+  1: 46,
+  2: 46,
   3: 37,
   4: 30,
+  5: 0,
+  6: 1,
+  7: 0,
+  8: 0,
+  9: 0,
 };
-const EXPECTED_MANIFEST_TOTAL = 176;
-const EXPECTED_IMPLEMENTED = 176;
+const EXPECTED_MANIFEST_TOTAL = 181;
+const EXPECTED_IMPLEMENTED = 181;
 const EXPECTED_PENDING = 0;
-const EXPECTED_CANTRIP_AND_LEVEL_ONE_IMPLEMENTED = 64;
+const EXPECTED_CANTRIP_AND_LEVEL_ONE_IMPLEMENTED = 67;
 
 interface ValuePin {
   readonly id: string;
@@ -412,6 +417,16 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
     operation: { kind: 'healing', dice: pinnedDice(2, 4, { perSlotCount: 2 }), addSpellcastingModifier: true },
   },
   {
+    id: 'divine-favor', source: 'spell-descriptions.txt:2333-2341',
+    targeting: { kind: 'self' },
+    operation: { kind: 'weapon_attack_augmentation', extraDamage: { type: damageType('Radiant'), dice: pinnedDice(1, 4) }, consumeOnHit: false, concentration: false, durationRounds: 10, followUp: null },
+  },
+  {
+    id: 'ensnaring-strike', source: 'spell-descriptions.txt:2708-2728',
+    targeting: { kind: 'self' },
+    operation: { kind: 'weapon_attack_augmentation', extraDamage: null, consumeOnHit: true, concentration: true, durationRounds: 10, followUp: { kind: 'save_then_restrain', saveAbility: 'strength', rollMode: 'normal', damageType: damageType('Piercing'), dice: pinnedDice(1, 6, { perSlotCount: 1 }), timing: 'target_start', durationRounds: 10 } },
+  },
+  {
     id: 'inflict-wounds', source: 'spell-descriptions.txt:4593',
     targeting: { kind: 'single', rangeFeet: 5, willing: false },
     operation: { kind: 'save_damage', ability: 'constitution', onSuccess: 'half', damageType: damageType('Necrotic'), dice: pinnedDice(2, 10, { perSlotCount: 1 }), riderOnFailure: null, pushFeetOnFailure: 0 },
@@ -425,6 +440,11 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
     id: 'shield', source: 'spell-descriptions.txt:6937',
     targeting: { kind: 'self' },
     operation: { kind: 'effect', effect: pinnedEffect({ kind: 'shield_defense', armorClassBonus: 5, magicMissileImmune: true, trigger: 'hit_by_attack_or_targeted_by_magic_missile' }, { target: 'self', durationRounds: 1 }) },
+  },
+  {
+    id: 'searing-smite', source: 'spell-descriptions.txt:6738-6751',
+    targeting: { kind: 'self' },
+    operation: { kind: 'weapon_attack_augmentation', extraDamage: { type: damageType('Fire'), dice: pinnedDice(1, 6, { perSlotCount: 1 }) }, consumeOnHit: true, concentration: false, durationRounds: 10, followUp: { kind: 'ongoing_damage_save_ends', damageType: damageType('Fire'), dice: pinnedDice(1, 6, { perSlotCount: 1 }), saveAbility: 'constitution', timing: 'target_start', durationRounds: 10 } },
   },
   {
     id: 'shield-of-faith', source: 'spell-descriptions.txt:6956',
@@ -620,6 +640,11 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
       return [operation.dice.baseCount, operation.dice.sides];
     case 'weapon_attack':
       return [operation.extraDamage.baseCount, operation.extraDamage.sides];
+    case 'weapon_attack_augmentation':
+      return operation.extraDamage === null
+        ? null
+        : [operation.extraDamage.dice.baseCount, operation.extraDamage.dice.sides];
+    case 'fixed_healing':
     case 'effect':
     case 'hit_point_maximum_increase':
     case 'save_push':
@@ -665,6 +690,10 @@ function operationPerSlot(definition: SpellDefinition): number {
       return operation.dice.perSlotCount;
     case 'weapon_attack':
       return operation.extraDamage.perSlotCount;
+    case 'weapon_attack_augmentation':
+      return operation.extraDamage?.dice.perSlotCount ?? operation.followUp?.dice.perSlotCount ?? 0;
+    case 'fixed_healing':
+      return operation.additionalPerSlot;
     case 'hit_point_maximum_increase':
       return operation.additionalPerSlot;
     case 'effect':
@@ -792,7 +821,7 @@ function fixture(definition: SpellDefinition): {
 }
 
 describe('reference-party spell manifest', () => {
-  it('is the exact source-list union through level 4 with pinned per-level totals', () => {
+  it('is the exact reference-party union through level 4 plus the five source-pinned r9 additions', () => {
     const levels = new Map(parseSrdSpellDescriptions().map((spell) => [spell.name, spell.level]));
     const expected = new Map<string, Set<string>>();
     for (const list of ['Cleric', 'Wizard'] as const) {
@@ -806,11 +835,16 @@ describe('reference-party spell manifest', () => {
       }
     }
     expected.set('Eldritch Blast', new Set(['Warlock']));
+    expected.set('Divine Favor', new Set(['Paladin']));
+    expected.set('Ensnaring Strike', new Set(['Ranger']));
+    expected.set('Searing Smite', new Set(['Paladin']));
+    expected.set('Moonbeam', new Set(['Druid']));
+    expected.set('Heal', new Set(['Cleric', 'Druid']));
 
     expect(SPELL_MANIFEST).toHaveLength(EXPECTED_MANIFEST_TOTAL);
     expect(new Set(SPELL_MANIFEST.map((row) => row.id)).size).toBe(EXPECTED_MANIFEST_TOTAL);
     expect(SPELL_MANIFEST.map((row) => row.name).sort()).toEqual([...expected.keys()].sort());
-    for (const level of [0, 1, 2, 3, 4] as const) {
+    for (const level of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
       expect(SPELL_MANIFEST.filter((row) => row.level === level), `level ${level}`).toHaveLength(EXPECTED_LEVEL_TOTALS[level]);
     }
     for (const row of SPELL_MANIFEST) {
@@ -818,12 +852,12 @@ describe('reference-party spell manifest', () => {
         [...(expected.get(row.name) ?? [])].sort(),
       );
       expect(row.memberships.every((membership) =>
-        /^docs\/srd\/source\/(?:cleric|warlock|wizard)-spell-list\.txt:\d+$/u.test(membership.source))).toBe(true);
+        /^docs\/srd\/source\/(?:bard|cleric|druid|paladin|ranger|sorcerer|warlock|wizard)-spell-list\.txt:\d+$/u.test(membership.source))).toBe(true);
       if ('partial' in row) expect(row.partial.trim().length).toBeGreaterThan(20);
     }
   });
 
-  it('closes increment 4 with exactly 175 implemented and zero pending rows', () => {
+  it('closes the manifest with exactly 181 implemented and zero pending rows', () => {
     expect(SPELL_MANIFEST.filter((row) => row.status === 'implemented')).toHaveLength(EXPECTED_IMPLEMENTED);
     expect(SPELL_MANIFEST.filter((row) => row.status === 'pending')).toHaveLength(EXPECTED_PENDING);
     expect(IMPLEMENTED_SPELL_DEFINITIONS).toHaveLength(EXPECTED_IMPLEMENTED);

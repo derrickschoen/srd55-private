@@ -3,9 +3,9 @@ import type { EffectPayload } from '../effects';
 import type { AreaTemplate } from '../templates';
 import type { CombatantId, DamageType, LimitedResourcePoolId } from '../values';
 
-export type SpellLevel = 0 | 1 | 2 | 3 | 4;
+export type SpellLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 export type SpellCastingTime = 'action' | 'bonus_action' | 'reaction' | 'minute' | 'ten_minutes' | 'hour';
-export type SpellClassList = 'Cleric' | 'Warlock' | 'Wizard';
+export type SpellClassList = 'Bard' | 'Cleric' | 'Druid' | 'Paladin' | 'Ranger' | 'Sorcerer' | 'Warlock' | 'Wizard';
 
 export interface SpellComponentsData {
   readonly verbal: boolean;
@@ -79,7 +79,7 @@ export interface EffectData {
   readonly repeatedSave?: {
     readonly ability: Ability;
     readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
-    readonly timing: 'target_end';
+    readonly timing: 'target_start' | 'target_end';
   };
   readonly durationRoundsPerSlot?: number;
   readonly slotDurationTiers?: readonly {
@@ -160,6 +160,12 @@ export type SpellOperation =
       readonly kind: 'healing';
       readonly dice: ScaledDice;
       readonly addSpellcastingModifier: boolean;
+    }
+  | {
+      readonly kind: 'fixed_healing';
+      readonly baseAmount: number;
+      readonly additionalPerSlot: number;
+      readonly removesConditions: readonly ('Blinded' | 'Deafened' | 'Poisoned')[];
     }
   | {
       readonly kind: 'temporary_hit_points';
@@ -257,6 +263,35 @@ export type SpellOperation =
       readonly kind: 'weapon_attack';
       readonly extraDamage: ScaledDice;
       readonly extraDamageType: DamageType;
+    }
+  | {
+      readonly kind: 'weapon_attack_augmentation';
+      readonly extraDamage: null | {
+        readonly type: DamageType;
+        readonly dice: ScaledDice;
+      };
+      readonly consumeOnHit: boolean;
+      readonly concentration: boolean;
+      readonly durationRounds: number;
+      readonly followUp: null | (
+        | {
+            readonly kind: 'ongoing_damage_save_ends';
+            readonly damageType: DamageType;
+            readonly dice: ScaledDice;
+            readonly saveAbility: Ability;
+            readonly timing: 'target_start';
+            readonly durationRounds: number;
+          }
+        | {
+            readonly kind: 'save_then_restrain';
+            readonly saveAbility: Ability;
+            readonly rollMode: 'normal';
+            readonly damageType: DamageType;
+            readonly dice: ScaledDice;
+            readonly timing: 'target_start';
+            readonly durationRounds: number;
+          }
+      );
     }
   | {
       readonly kind: 'utility';

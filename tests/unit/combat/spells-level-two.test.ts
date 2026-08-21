@@ -81,6 +81,7 @@ const LEVEL_TWO_MECHANICS_PINS: readonly LevelTwoMechanicsPin[] = [
   { id: 'mind-spike', source: 'spell-descriptions.txt:5398', targeting: { kind: 'single', rangeFeet: 120, willing: false }, operation: { kind: 'save_damage', ability: 'wisdom', onSuccess: 'half', damageType: damageType('Psychic'), dice: dice(3, 8, { perSlotCount: 1 }), riderOnFailure: effect({ kind: 'location_tracking', samePlaneOnly: true, negatesHiddenAndInvisibleBenefits: true }, { concentration: true, durationRounds: 600 }), pushFeetOnFailure: 0 } },
   { id: 'mirror-image', source: 'spell-descriptions.txt:5481', targeting: { kind: 'self' }, operation: { kind: 'effect', effect: effect({ kind: 'mirror_images', duplicates: 3, interceptionDieSides: 6, interceptionMinimum: 3 }, { target: 'self', durationRounds: 10 }) } },
   { id: 'misty-step', source: 'spell-descriptions.txt:5523', targeting: { kind: 'self' }, operation: { kind: 'utility', effect: { kind: 'teleport', maximumDistanceFeet: 30, requiresVisibleUnoccupiedSpace: true }, concentration: false, durationRounds: null } },
+  { id: 'moonbeam', source: 'spell-descriptions.txt:5582', targeting: { kind: 'area', rangeFeet: 120, shape: 'cylinder', baseSizeFeet: 5, sizePerSlotFeet: 0, secondarySizeFeet: 40 }, operation: { kind: 'save_damage_and_effect', ability: 'constitution', onSuccess: 'half', damageType: damageType('Radiant'), dice: dice(2, 10, { perSlotCount: 1 }), effect: effect({ kind: 'moonbeam_area', placement: 'selected_when_cast', saveAbility: 'constitution', saveDc: 'resolved_when_cast', onSuccess: 'half', damageType: 'Radiant', damageCount: 2, damageSides: 10, damagePerSlotCount: 1, moveFeetPerMagicAction: 60, dimLight: true, oncePerTurn: true }, { target: 'self', concentration: true, durationRounds: 10 }) } },
   { id: 'prayer-of-healing', source: 'spell-descriptions.txt:6014', targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 5, additionalPerSlot: 0 }, operation: { kind: 'healing', dice: dice(2, 8, { perSlotCount: 1 }), addSpellcastingModifier: false } },
   { id: 'protection-from-poison', source: 'spell-descriptions.txt:6359', targeting: { kind: 'single', rangeFeet: 5, willing: false }, operation: { kind: 'remove_condition_and_effect', condition: 'Poisoned', effect: effect({ kind: 'poison_protection', saveMode: 'advantage', resistanceType: 'Poison' }, { durationRounds: 600 }) } },
   { id: 'ray-of-enfeeblement', source: 'spell-descriptions.txt:6407', targeting: { kind: 'single', rangeFeet: 60, willing: false }, operation: { kind: 'save_branch_effect', ability: 'constitution', successEffect: effect({ kind: 'ray_enfeeblement', branch: 'success', damagePenaltyCount: 0, damagePenaltySides: 8 }, { concentration: true, durationRounds: 1, expiresAt: 'source_start' }), failureEffect: effect({ kind: 'ray_enfeeblement', branch: 'failure', damagePenaltyCount: 1, damagePenaltySides: 8 }, { concentration: true, durationRounds: 10, expiresAt: 'target_end', repeatedSave: { ability: 'constitution', rollMode: 'normal', timing: 'target_end' } }) } },
@@ -140,6 +141,7 @@ const LEVEL_TWO_COMPONENT_PINS: readonly LevelTwoComponentPin[] = [
   { id: 'mind-spike', castingTime: 'action', components: 'S', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:5398' },
   { id: 'mirror-image', castingTime: 'action', components: 'VS', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:5481' },
   { id: 'misty-step', castingTime: 'bonus_action', components: 'V', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:5523' },
+  { id: 'moonbeam', castingTime: 'action', components: 'VSM', material: 'a moonseed leaf', consumed: false, ritual: false, source: 'spell-descriptions.txt:5582' },
   { id: 'prayer-of-healing', castingTime: 'ten_minutes', components: 'V', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:6014' },
   { id: 'protection-from-poison', castingTime: 'action', components: 'VS', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:6359' },
   { id: 'ray-of-enfeeblement', castingTime: 'action', components: 'VS', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:6407' },
@@ -159,7 +161,7 @@ const LEVEL_TWO_COMPONENT_PINS: readonly LevelTwoComponentPin[] = [
 describe('level-2 spell mechanics pins', () => {
   it('has one exact independent pin for every implemented level-2 definition', () => {
     const implemented = IMPLEMENTED_SPELL_DEFINITIONS.filter((definition) => definition.level === 2);
-    expect(LEVEL_TWO_MECHANICS_PINS).toHaveLength(45);
+    expect(LEVEL_TWO_MECHANICS_PINS).toHaveLength(46);
     expect(LEVEL_TWO_MECHANICS_PINS.map((pin) => pin.id).sort()).toEqual(
       implemented.map((definition) => definition.id).sort(),
     );
@@ -272,6 +274,7 @@ function levelTwoArea(definition: SpellDefinition): SpellCastCommand['area'] {
     case 'cone':
       return { shape: 'cone', template: { origin: feetPoint(5, 5), direction: { x: 1, y: 0 }, length: feet(size), includeOrigin: false } };
     case 'cylinder':
+      return { shape: 'cylinder', template: { origin: feetPoint(10, 10), radius: feet(size), height: feet(definition.targeting.secondarySizeFeet ?? 40) } };
     case 'emanation':
       throw new Error(`No level-2 spell uses a ${definition.targeting.shape} template.`);
   }

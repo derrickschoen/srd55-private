@@ -390,6 +390,7 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'd20_test_modifier':
     case 'damage_reduction':
     case 'damage_rider':
+    case 'moonbeam_area':
     case 'bonus_action_attack_grant':
     case 'extra_attack_count_override':
     case 'action_surge':
@@ -512,6 +513,8 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'damage_resistances':
     case 'wall_of_fire':
       return [];
+    case 'ensnaring_strike':
+      return [{ name: effect.payload.condition }];
     case 'banishment':
       return [{ name: effect.payload.condition }];
     case 'charm_monster':
@@ -1380,6 +1383,62 @@ function processBoundary(
     if (effect === undefined) continue;
 
     if (
+      effect.payload.kind === 'moonbeam_area' &&
+      effect.payload.placement !== 'selected_when_cast' &&
+      combatant(context.state, subjectId).life !== 'dead' &&
+      boundary === 'end' &&
+      creatureOccupiesAffectedCell(
+        [token(context.state, subjectId).position],
+        affectedCells(
+          { bounds: context.state.bounds, blockedCells: context.state.blockedCells },
+          effect.payload.placement,
+        ),
+      )
+    ) {
+      if (effect.payload.saveDc === 'resolved_when_cast') {
+        throw new EncounterRuleError('Moonbeam save DC must resolve when cast.');
+      }
+      const save = resolveTargetSave(
+        context,
+        effect.source,
+        subjectId,
+        effect.payload.saveAbility,
+        effect.payload.saveDc,
+        'normal',
+        effect.id,
+      );
+      const rolled = resolveDamage({
+        terms: [{
+          type: damageType(effect.payload.damageType),
+          dice: { count: effect.payload.damageCount, sides: dieSides(effect.payload.damageSides), modifier: 0 },
+        }],
+        critical: false,
+        responses: [],
+      }, context.rng);
+      applySpellDamageAmount(
+        context,
+        effect.source,
+        subjectId,
+        damageType(effect.payload.damageType),
+        effect.payload.damageSides,
+        save.outcome === 'failure' ? rolled.total : Math.floor(rolled.total / 2),
+      );
+    }
+
+    if (
+      effect.targets.includes(subjectId) &&
+      effect.payload.kind === 'ensnaring_strike' &&
+      boundary === effect.payload.timing
+    ) {
+      const result = resolveDamage({
+        ...effect.payload.damage,
+        responses: targetDamageResponses(context.state, subjectId, effect.payload.damage),
+      }, context.rng);
+      applyDamage(context, effect.source, subjectId, result.total);
+      concentrationCheck(context, subjectId, result.total);
+    }
+
+    if (
       effect.targets.includes(subjectId) &&
       effect.payload.kind === 'ongoing_damage' &&
       effectBoundaryMatches(subjectId, boundary, effect.payload.timing)
@@ -1631,6 +1690,7 @@ function cloneEffectApplication(
       case 'stone_shape':
       case 'damage_resistances':
       case 'wall_of_fire':
+      case 'moonbeam_area':
         return { ...application.payload };
       case 'commanded_action':
         return { ...application.payload, options: [...application.payload.options] };
@@ -1647,6 +1707,30 @@ function cloneEffectApplication(
               ...term,
               dice: { ...term.dice },
             })),
+            responses: application.payload.damage.responses.map((response) => ({ ...response })),
+          },
+          ...(application.payload.followUp === undefined
+            ? {}
+            : {
+                followUp: {
+                  ...application.payload.followUp,
+                  damage: {
+                    ...application.payload.followUp.damage,
+                    terms: application.payload.followUp.damage.terms.map((term) => ({
+                      ...term,
+                      dice: { ...term.dice },
+                    })),
+                    responses: application.payload.followUp.damage.responses.map((response) => ({ ...response })),
+                  },
+                },
+              }),
+        };
+      case 'ensnaring_strike':
+        return {
+          ...application.payload,
+          damage: {
+            ...application.payload.damage,
+            terms: application.payload.damage.terms.map((term) => ({ ...term, dice: { ...term.dice } })),
             responses: application.payload.damage.responses.map((response) => ({ ...response })),
           },
         };
@@ -1721,6 +1805,14 @@ function applyEffect(
   if (owned.payload.kind === 'condition') {
     for (const target of [...targets]) {
       if (combatant(context.state, target).profile.rules.conditionImmunities.includes(owned.payload.condition)) {
+        removeEffectTarget(context, id, target, 'condition_immunity');
+        targets = targets.filter((candidate) => candidate !== target);
+      }
+    }
+  }
+  if (owned.payload.kind === 'ensnaring_strike') {
+    for (const target of [...targets]) {
+      if (combatant(context.state, target).profile.rules.conditionImmunities.includes('Restrained')) {
         removeEffectTarget(context, id, target, 'condition_immunity');
         targets = targets.filter((candidate) => candidate !== target);
       }
@@ -1852,6 +1944,75 @@ function spendRiderSpellSlot(
   });
 }
 
+function applyWeaponHitRiderFollowUp(
+  context: ReductionContext,
+  rider: EncounterEffect,
+  target: CombatantId,
+): void {
+  if (rider.payload.kind !== 'damage_rider' || rider.payload.followUp === undefined) return;
+  if (combatant(context.state, target).life === 'dead') return;
+  const followUp = rider.payload.followUp;
+  switch (followUp.kind) {
+    case 'ongoing_damage_save_ends':
+      applyEffect(context, rider.source, {
+        targets: [target],
+        duration: {
+          kind: 'turn_boundaries',
+          timing: { combatant: target, boundary: followUp.timing, source: String(rider.stackingIdentity) },
+          remaining: followUp.durationRounds,
+        },
+        concentration: rider.concentrationOwner !== null,
+        stackingIdentity: rider.stackingIdentity,
+        stacking: 'replace_same_source',
+        repeatedSave: {
+          timing: { combatant: target, boundary: followUp.timing, source: String(rider.stackingIdentity) },
+          ability: followUp.saveAbility,
+          dc: followUp.saveDc,
+          rollMode: 'normal',
+          onSuccess: 'remove_target',
+        },
+        payload: {
+          kind: 'ongoing_damage',
+          damage: followUp.damage,
+          timing: { combatant: target, boundary: followUp.timing, source: String(rider.stackingIdentity) },
+        },
+      });
+      return;
+    case 'save_then_restrain': {
+      const save = resolveTargetSave(
+        context,
+        rider.source,
+        target,
+        followUp.saveAbility,
+        followUp.saveDc,
+        followUp.rollMode,
+        rider.id,
+      );
+      if (save.outcome === 'success') return;
+      applyEffect(context, rider.source, {
+        targets: [target],
+        duration: {
+          kind: 'turn_boundaries',
+          timing: { combatant: target, boundary: followUp.timing, source: String(rider.stackingIdentity) },
+          remaining: followUp.durationRounds,
+        },
+        concentration: rider.concentrationOwner !== null,
+        stackingIdentity: rider.stackingIdentity,
+        stacking: 'replace_same_source',
+        repeatedSave: null,
+        payload: {
+          kind: 'ensnaring_strike',
+          condition: 'Restrained',
+          damage: followUp.damage,
+          timing: followUp.timing,
+          escapeCheckAbility: 'strength',
+          escapeCheckSkill: 'Athletics',
+        },
+      });
+    }
+  }
+}
+
 function processAttack(
   context: ReductionContext,
   command: Extract<
@@ -1939,7 +2100,29 @@ function processAttack(
         ) <= clause.feet,
     );
     const attacking = combatant(context.state, command.actor);
-    const triggeredRiders = (attacking.profile.rules.featureEffects ?? []).filter((effect) => {
+    const candidateRiders = [
+      ...(attacking.profile.rules.featureEffects ?? []).flatMap((effect) =>
+        effect.payload.kind === 'damage_rider'
+          ? [{
+              id: effect.id,
+              trigger: effect.trigger,
+              resourcePoolId: effect.resourcePoolId,
+              payload: effect.payload,
+              encounterEffect: null,
+            }]
+          : []),
+      ...context.state.effects.flatMap((effect) =>
+        effect.targets.includes(command.actor) && effect.payload.kind === 'damage_rider'
+          ? [{
+              id: effect.id,
+              trigger: 'on_hit' as const,
+              resourcePoolId: null,
+              payload: effect.payload,
+              encounterEffect: effect,
+            }]
+          : []),
+    ];
+    const triggeredRiders = candidateRiders.filter((effect) => {
       if (
         effect.payload.kind !== 'damage_rider' ||
         effect.payload.appliesTo !== 'weapon_attack_by_target' ||
@@ -1965,7 +2148,6 @@ function processAttack(
       }
     });
     for (const rider of triggeredRiders) {
-      if (rider.payload.kind !== 'damage_rider') continue;
       const gating = rider.payload.gating ?? { kind: 'unconditional' as const };
       if (gating.kind === 'slot_spend') {
         if (command.type !== 'attack') {
@@ -1989,7 +2171,6 @@ function processAttack(
       }
     }
     const riderTerms = triggeredRiders.flatMap((effect) => {
-      if (effect.payload.kind !== 'damage_rider') return [];
       const payload = effect.payload;
       return payload.gating?.kind === 'slot_spend' && command.type === 'attack'
           ? payload.damage.terms.map((term) => ({
@@ -2005,11 +2186,12 @@ function processAttack(
             }))
           : payload.damage.terms;
     });
+    const terms = [...command.damage.terms, ...riderTerms];
     const request = {
       ...command.damage,
-      terms: [...command.damage.terms, ...riderTerms],
+      terms,
       critical: attack.outcome === 'critical' || criticalWithin,
-      responses: targetDamageResponses(context.state, command.target, command.damage),
+      responses: targetDamageResponses(context.state, command.target, { ...command.damage, terms }),
     };
     damageResult = resolveDamage(request, context.rng);
     applyDamage(
@@ -2020,6 +2202,11 @@ function processAttack(
       request.critical,
     );
     concentrationCheck(context, command.target, damageResult.total);
+    for (const rider of triggeredRiders) {
+      if (rider.encounterEffect === null || rider.payload.consumeOnHit !== true) continue;
+      endEffects(context, new Set([rider.encounterEffect.id]), 'trigger_consumed');
+      applyWeaponHitRiderFollowUp(context, rider.encounterEffect, command.target);
+    }
   }
   emit(context, {
     type: 'attack_resolved',
@@ -2446,6 +2633,13 @@ function resolvedSpellEffectPayload(
         placement: payload.placement === 'selected_when_cast' ? selectedArea() : payload.placement,
         damageCount: payload.damageCount + payload.damagePerSlotCount * slotDelta,
       };
+    case 'moonbeam_area':
+      return {
+        ...payload,
+        placement: payload.placement === 'selected_when_cast' ? selectedArea() : payload.placement,
+        saveDc: command.saveDc,
+        damageCount: payload.damageCount + payload.damagePerSlotCount * slotDelta,
+      };
     case 'energy_protection': {
       const selected = command.selectedOption;
       if (selected === null || !payload.damageTypes.includes(selected as 'Acid' | 'Cold' | 'Fire' | 'Lightning' | 'Thunder')) {
@@ -2464,6 +2658,7 @@ function resolvedSpellEffectPayload(
     case 'd20_test_modifier':
     case 'movement_modifier':
     case 'damage_rider':
+    case 'ensnaring_strike':
     case 'bonus_action_attack_grant':
     case 'extra_attack_count_override':
     case 'action_surge':
@@ -2606,7 +2801,11 @@ function effectApplication(
     repeatedSave: data.repeatedSave === undefined
       ? null
       : {
-          timing: { combatant: actualTargets[0] as CombatantId, boundary: 'end', source: definition.source },
+          timing: {
+            combatant: actualTargets[0] as CombatantId,
+            boundary: data.repeatedSave.timing === 'target_start' ? 'start' : 'end',
+            source: definition.source,
+          },
           ability: data.repeatedSave.ability,
           dc: command.saveDc,
           rollMode: data.repeatedSave.rollMode,
@@ -2992,6 +3191,15 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
       for (const target of targets) applyHealing(context, command.actor, target, Math.max(0, amount));
       return;
     }
+    case 'fixed_healing': {
+      const amount = operation.baseAmount + operation.additionalPerSlot *
+        ((command.slotLevel as number) - definition.level);
+      for (const target of targets) {
+        applyHealing(context, command.actor, target, amount);
+        removeSpellConditions(context, target, operation.removesConditions);
+      }
+      return;
+    }
     case 'temporary_hit_points': {
       const rolled = rollDice(context.rng, scaledDiceExpression(definition, operation.dice, command));
       grantTemporaryHitPoints(context, command.actor, rolled.total);
@@ -3150,6 +3358,66 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
         applyDamage(context, command.actor, target, result.total, attack.outcome === 'critical');
       }
       emit(context, { type: 'attack_resolved', actor: command.actor, target, attack, damage: result });
+      return;
+    }
+    case 'weapon_attack_augmentation': {
+      const damage: DamageRequest = {
+        terms: operation.extraDamage === null
+          ? []
+          : [{
+              type: operation.extraDamage.type,
+              dice: scaledDiceExpression(definition, operation.extraDamage.dice, command),
+            }],
+        critical: false,
+        responses: [],
+      };
+      const followUp = operation.followUp === null
+        ? undefined
+        : operation.followUp.kind === 'ongoing_damage_save_ends'
+          ? {
+              kind: operation.followUp.kind,
+              damage: {
+                terms: [{
+                  type: operation.followUp.damageType,
+                  dice: scaledDiceExpression(definition, operation.followUp.dice, command),
+                }],
+                critical: false,
+                responses: [],
+              },
+              saveAbility: operation.followUp.saveAbility,
+              saveDc: command.saveDc,
+              timing: 'start',
+              durationRounds: operation.followUp.durationRounds,
+            } as const
+          : {
+              kind: operation.followUp.kind,
+              saveAbility: operation.followUp.saveAbility,
+              saveDc: command.saveDc,
+              rollMode: operation.followUp.rollMode,
+              damage: {
+                terms: [{
+                  type: operation.followUp.damageType,
+                  dice: scaledDiceExpression(definition, operation.followUp.dice, command),
+                }],
+                critical: false,
+                responses: [],
+              },
+              timing: 'start',
+              durationRounds: operation.followUp.durationRounds,
+            } as const;
+      applySpellEffect(context, definition, command, {
+        payload: {
+          kind: 'damage_rider',
+          damage,
+          appliesTo: 'weapon_attack_by_target',
+          consumeOnHit: operation.consumeOnHit,
+          ...(followUp === undefined ? {} : { followUp }),
+        },
+        target: 'self',
+        concentration: operation.concentration,
+        durationRounds: operation.durationRounds,
+        expiresAt: 'source_start',
+      }, [command.actor]);
       return;
     }
     case 'utility':

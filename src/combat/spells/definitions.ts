@@ -287,6 +287,20 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     operation: { kind: 'healing', dice: dice(2, 4, { perSlotCount: 2 }), addSpellcastingModifier: true },
   },
   {
+    id: 'divine-favor', name: 'Divine Favor', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:2333-2341',
+    castingTime: 'bonus_action', components: VS,
+    targeting: { kind: 'self' },
+    operation: { kind: 'weapon_attack_augmentation', extraDamage: { type: damageType('Radiant'), dice: dice(1, 4) }, consumeOnHit: false, concentration: false, durationRounds: 10, followUp: null },
+  },
+  {
+    id: 'ensnaring-strike', name: 'Ensnaring Strike', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:2708-2728',
+    castingTime: 'bonus_action', components: V,
+    targeting: { kind: 'self' },
+    operation: { kind: 'weapon_attack_augmentation', extraDamage: null, consumeOnHit: true, concentration: true, durationRounds: 10, followUp: { kind: 'save_then_restrain', saveAbility: 'strength', rollMode: 'normal', damageType: damageType('Piercing'), dice: dice(1, 6, { perSlotCount: 1 }), timing: 'target_start', durationRounds: 10 } },
+  },
+  {
     id: 'inflict-wounds', name: 'Inflict Wounds', level: 1,
     source: 'docs/srd/source/spell-descriptions.txt:4593',
     castingTime: 'action', components: VS,
@@ -306,6 +320,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     castingTime: 'reaction', components: VS,
     targeting: { kind: 'self' },
     operation: { kind: 'effect', effect: effect({ kind: 'shield_defense', armorClassBonus: 5, magicMissileImmune: true, trigger: 'hit_by_attack_or_targeted_by_magic_missile' }, { target: 'self', durationRounds: 1 }) },
+  },
+  {
+    id: 'searing-smite', name: 'Searing Smite', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:6738-6751',
+    castingTime: 'bonus_action', components: V,
+    targeting: { kind: 'self' },
+    operation: { kind: 'weapon_attack_augmentation', extraDamage: { type: damageType('Fire'), dice: dice(1, 6, { perSlotCount: 1 }) }, consumeOnHit: true, concentration: false, durationRounds: 10, followUp: { kind: 'ongoing_damage_save_ends', damageType: damageType('Fire'), dice: dice(1, 6, { perSlotCount: 1 }), saveAbility: 'constitution', timing: 'target_start', durationRounds: 10 } },
   },
   {
     id: 'shield-of-faith', name: 'Shield of Faith', level: 1,
@@ -747,6 +768,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     castingTime: 'bonus_action', components: V,
     targeting: { kind: 'self' },
     operation: { kind: 'utility', effect: { kind: 'teleport', maximumDistanceFeet: 30, requiresVisibleUnoccupiedSpace: true }, concentration: false, durationRounds: null },
+  },
+  {
+    id: 'moonbeam', name: 'Moonbeam', level: 2,
+    source: 'docs/srd/source/spell-descriptions.txt:5582-5611',
+    castingTime: 'action', components: material('a moonseed leaf'),
+    targeting: { kind: 'area', rangeFeet: 120, shape: 'cylinder', baseSizeFeet: 5, sizePerSlotFeet: 0, secondarySizeFeet: 40 },
+    operation: { kind: 'save_damage_and_effect', ability: 'constitution', onSuccess: 'half', damageType: damageType('Radiant'), dice: dice(2, 10, { perSlotCount: 1 }), effect: effect({ kind: 'moonbeam_area', placement: 'selected_when_cast', saveAbility: 'constitution', saveDc: 'resolved_when_cast', onSuccess: 'half', damageType: 'Radiant', damageCount: 2, damageSides: 10, damagePerSlotCount: 1, moveFeetPerMagicAction: 60, dimLight: true, oncePerTurn: true }, { target: 'self', concentration: true, durationRounds: 10 }) },
   },
   {
     id: 'prayer-of-healing', name: 'Prayer of Healing', level: 2,
@@ -1246,6 +1274,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:8217', castingTime: 'action', components: material('a piece of charcoal'),
     targeting: { kind: 'area', rangeFeet: 120, shape: 'line', baseSizeFeet: 60, sizePerSlotFeet: 0, secondarySizeFeet: 1 },
     operation: { kind: 'save_damage_and_effect', ability: 'dexterity', onSuccess: 'half', damageType: damageType('Fire'), dice: dice(5, 8, { perSlotCount: 1 }), effect: effect({ kind: 'wall_of_fire', placement: 'selected_when_cast', maximumLengthFeet: 60, heightFeet: 20, thicknessFeet: 1, ringDiameterFeet: 20, damagingSideDistanceFeet: 10, damageCount: 5, damageSides: 8, damagePerSlotCount: 1, damageType: 'Fire', opaque: true, requiresSolidSurface: true }, { target: 'self', concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'heal', name: 'Heal', level: 6,
+    source: 'docs/srd/source/spell-descriptions.txt:4158-4167',
+    castingTime: 'action', components: VS,
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'fixed_healing', baseAmount: 70, additionalPerSlot: 10, removesConditions: ['Blinded', 'Deafened', 'Poisoned'] },
   },
 ] as const;
 
