@@ -18,8 +18,10 @@ import {
 import {
   buildExperimentSchedule,
   decodeVttExperimentArguments,
+  EXPERIMENT_REGISTRY,
   preregisterExperiment,
   runE01Table,
+  runE02Table,
   runVttExperiment,
   seededArmOrder,
   type VttExperimentConfig,
@@ -29,10 +31,11 @@ const FAKE_CODEX = 'tests/fixtures/fake-codex-dm.mjs';
 let directory = '';
 let liveRecord: ExperimentTableRecordV2;
 let repeatedRecord: ExperimentTableRecordV2;
+let e02Record: ExperimentTableRecordV2;
 
-function config(outDirectory: string): VttExperimentConfig {
+function config(outDirectory: string, experimentId: 'E01' | 'E02' = 'E01'): VttExperimentConfig {
   return {
-    experimentId: 'E01',
+    experimentId,
     outDirectory,
     skipRegret: true,
     codexBinary: FAKE_CODEX,
@@ -80,10 +83,93 @@ beforeAll(async () => {
     repeatedExecution,
     preregisterExperiment(repeatedExecution),
   );
+  const e02Execution = config(join(directory, 'e02'), 'E02');
+  const firstE02 = buildExperimentSchedule('E02')[0];
+  if (firstE02 === undefined) throw new Error('E02 schedule is empty.');
+  e02Record = await runE02Table(
+    firstE02,
+    e02Execution,
+    preregisterExperiment(e02Execution),
+  );
 }, 30_000);
 
 afterAll(async () => {
   if (directory.length > 0) await rm(directory, { recursive: true, force: true });
+});
+
+describe('E02 worked-example experiment registration', () => {
+  it('arms_share_examples: pins all arms and keeps non-empty example blocks separate from byte-identical instructions', () => {
+    const arms = EXPERIMENT_REGISTRY.E02.arms;
+    expect(arms.map((arm) => [arm.id, arm.exampleCount])).toEqual([
+      ['zero-examples', 0],
+      ['one-branch-rich-example', 1],
+      ['three-worked-examples', 3],
+    ]);
+    expect(arms.every((arm) => arm.exampleBlock.length > 0)).toBe(true);
+    expect(new Set(arms.map((arm) => arm.instructions)).size).toBe(1);
+    expect(arms.every((arm) => !arm.instructions.includes(arm.exampleBlock))).toBe(true);
+    expect(arms.map((arm) => arm.workedExamples.length)).toEqual([0, 1, 3]);
+
+    const oneExample = canonicalJson(arms[1]?.workedExamples);
+    expect(oneExample).toContain('"kind":"priority"');
+    expect(oneExample).toContain('"kind":"if"');
+
+    const threeExamples = canonicalJson(arms[2]?.workedExamples);
+    expect(threeExamples).toContain('multi-monster-fallback');
+    expect(threeExamples).toContain('"value":"living"');
+    expect(threeExamples).toContain('"kind":"move_toward"');
+    expect(threeExamples).toContain('"kind":"force_save"');
+    expect(arms[2]?.workedExamples[0]?.monsters).toHaveLength(2);
+  });
+
+  it('e02_reuses_e01_digest: preregistration is stable across runs and distinct from E01', () => {
+    const first = preregisterExperiment(config('/tmp/e02-first', 'E02'));
+    const second = preregisterExperiment(config('/tmp/e02-second', 'E02'));
+    const e01 = preregisterExperiment(config('/tmp/e01-control'));
+    expect(first.digest).toBe(second.digest);
+    expect(first.digest).not.toBe(e01.digest);
+    expect(first.analysisCodeDigest).not.toBe(e01.analysisCodeDigest);
+    expect(first.promptComponentHashes).not.toEqual(e01.promptComponentHashes);
+  });
+
+  it('seed_pairing_broken: every E02 seed maps all adjacent arms to one fixture', () => {
+    const schedule = buildExperimentSchedule('E02');
+    expect(schedule).toHaveLength(144);
+    for (let index = 0; index < schedule.length; index += 3) {
+      const group = schedule.slice(index, index + 3);
+      expect(new Set(group.map((entry) => entry.seed)).size).toBe(1);
+      expect(new Set(group.map((entry) => entry.fixtureId)).size).toBe(1);
+      expect(new Set(group.map((entry) => entry.armId))).toEqual(new Set([
+        'zero-examples',
+        'one-branch-rich-example',
+        'three-worked-examples',
+      ]));
+    }
+  });
+
+  it('emits capture v2 on a synthetic no-LLM E02 table', () => {
+    expect(() => decodeExperimentTableRecord(e02Record)).not.toThrow();
+    expect(e02Record).toMatchObject({
+      schemaVersion: 2,
+      experimentId: 'E02',
+      schemaVariant: 'compact-grammar-v1',
+      status: 'completed',
+      completedRounds: 5,
+      replayProofPassed: true,
+    });
+    expect(e02Record.calls).toHaveLength(5);
+    expect(e02Record.quality.rolloutInputCaptures).toHaveLength(5);
+    expect(e02Record.calls.every((call) => call.promptComponents.schemaGrammar.bytes > 0)).toBe(true);
+    expect(e02Record.calls.every((call) => call.promptComponents.instructions.version === 'e02-shared-v1')).toBe(true);
+  });
+
+  it('accepts E02 on the otherwise unchanged CLI', () => {
+    expect(decodeVttExperimentArguments([
+      '--experiment', 'E02',
+      '--out', '/tmp/e02',
+      '--skip-regret',
+    ])).toMatchObject({ experimentId: 'E02', skipRegret: true });
+  });
 });
 
 describe('E01 experiment registry and orchestration', () => {
