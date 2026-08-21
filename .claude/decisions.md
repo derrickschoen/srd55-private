@@ -7,6 +7,17 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D325 — OWNER: Colby prerequisites, oracle scope, BFRD (2026-08-20)
+
+1. **Colby soaks start only after BOTH the pack-v2 caster slice AND the
+   typed class/feat-effects slice land** (87 of 89 builds need class
+   effects; casters-only soaking would quarantine nearly everything).
+2. **Regret oracle runs over ALL 144 E01-run2 tables** — the winner is
+   decided on complete evidence, no sampling.
+3. **Black Flag (Tales of the Valiant / BFRD, CC-BY 4.0) support: yes,
+   but later/low priority** — recorded as intent for the pilot second
+   ruleset; no scheduling commitment.
+
 ## D324 — OWNER: naming style, Discord prep, report delivery (2026-08-20)
 
 1. **spike-vtt everywhere** — one form in all contexts: lowercase,
