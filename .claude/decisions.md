@@ -7,6 +7,38 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D328 — OWNER: sixth brainstorm round — E-series ops, Colby arm, Discord v0 (2026-08-21)
+
+Fifteen rulings from the round-6 collaborative brainstorm (two blind
+lists merged):
+
+1. E-series pacing: **setup-overlap** — next experiment's harness builds
+   while the previous run finishes; live runs never overlap.
+2. Stop rule: **confidence + budget cap** — stop a run early when the
+   winner is statistically clear; preregistered table count is the hard
+   ceiling. (Supervisor defines the early-stop test in the harness and
+   documents it in each preregistration.)
+3. Colby 50%: **cumulative** — the running fleet total trends to 50%,
+   bursts allowed.
+4. Colby party composition: **gap-seeking quartets** (D322.8 spirit).
+5. Oracle truncation: **accept lower-bound regret at K=64**, no
+   escalation until the oracle proves decision-relevant.
+6. Tranche reports: **rolling** — the artifact republishes after every
+   completed experiment.
+7. Discord Activity v0: **showcase combat** — an instant AI-vs-AI fight
+   in the iframe.
+8. Adventure features (D321.11-13): **build now on a parallel lane**.
+9. Hotspot correctness wave: **now, concurrent** (dedicated lane).
+10. D286 stranger-walk: **hold for the owner's explicit go** (narrow
+    exception to D323, owner-chosen).
+11. Fixture-fix disagreements: **always escalate splits** — any
+    Fable/Opus/codex disagreement goes on the owner's list.
+12. spike-vtt rename sweep: fold into the **next natural UI increment**.
+13. Adventure slots: **free-text naming at creation**, suggestion
+    prefilled.
+14. Monster roster: **grow on demand** from encounter/adventure needs.
+15. Fleet scale-up: **after E07's recommendation** in the tranche report.
+
 ## D327 — OWNER: three-model collaboration on fixture residue (2026-08-21)
 
 For fixture data-quality issues codex struggles with: **codex (sol, high
