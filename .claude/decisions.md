@@ -7,6 +7,36 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D330 — OWNER: the scraper is a DISTRIBUTION mechanism; private repo is the user test environment (2026-08-21)
+
+Owner ruling, verbatim intent: "Keep the mechanics from the copyrighted
+books out of the public repo. The point of the scraper is to distribute
+it in a way that it produces files that spike-vtt can import and then
+play with. !!Important!! Use the private repo for this purpose !! Private
+repo will be the test environment for a user who downloads the scraper,
+runs it, imports the files and then makes characters and plays on the
+vtt."
+
+This reframes the whole non-SRD thread:
+
+1. **Public repo (spike-vtt) ships the ENGINE plus a typed CONTENT-PACK
+   IMPORT FORMAT** — never copyrighted content. Imported spells,
+   features, species, subclasses, and monsters must work through the
+   same typed machinery as SRD content.
+2. **The scraper is distributed to users**, who run it against content
+   they own; its output is import files. The scraper and its outputs
+   live in the private repo.
+3. **The private repo is the END-TO-END TEST ENVIRONMENT** for that user
+   journey: download scraper -> run -> import -> build characters ->
+   play on the VTT. Colby builds and the 947-record library exercise it.
+4. **Consequence for the roadmap:** implementing individual non-SRD
+   spells in the public manifest is the WRONG lever. The right lever is
+   generic import capability + expressive typed shapes. CAP-012
+   ("missing spell implementations") is superseded: what matters is
+   whether an IMPORTED spell record can be expressed and executed.
+5. D59 unchanged and reinforced: no copyrighted text or mechanics in the
+   public repo, in any form, including tests and fixtures.
+
 ## D329 addendum 2 — OWNER: ep-213 fear theme goes ahead (2026-08-21)
 
 Owner (verbatim intent): the fear-support theme SHOULD work via private
