@@ -534,6 +534,93 @@ describe('external party-pack boundary', () => {
     expect(second.events.find((event) => event.type === 'attack_resolved')).toMatchObject({ damage: { total: 8 } });
   });
 
+  it('reckless_one_sided keeps both Advantage halves through the pinned end/start turn edges', () => {
+    // Reckless Attack is split by the SRD PDF columns: the first-attack choice
+    // and Strength-roll benefit are at docs/srd/full/srd-5.2.1.txt:1858-1863;
+    // its incoming-attack Advantage continuation is at line 1801.
+    const candidate = structuredClone(pack());
+    const actorInput = candidate.members[0]!;
+    actorInput.attacksPerAction = 2;
+    actorInput.effects = [{
+      effectId: 'effect:reckless-attack',
+      kind: 'reckless_attack_mode',
+      strengthBasedMeleeAttackIds: [actorInput.attacks[0]!.attackId],
+    }];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Reckless Attack pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const enemy = loaded.party.members[1]!;
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 1 },
+      combatants: [actor.profile, enemy.profile],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(enemy.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+
+    const first = reduceEncounter(state, loadedPartyAttackCommand(
+      actor,
+      actor.attacks[0]!.attackId,
+      enemy.profile.id,
+      { recklessAttackEffectId: encounterEffectId('effect:reckless-attack') },
+    ), () => 0.5);
+    expect(first.events.find((event) => event.type === 'attack_resolved')).toMatchObject({
+      attack: { roll: { mode: 'advantage', faces: [11, 11] } },
+    });
+    expect(first.state.effects.map((effect) =>
+      effect.payload.kind === 'attack_roll_mode_modifier'
+        ? effect.payload.appliesTo.kind
+        : effect.payload.kind,
+    )).toEqual(['attacks_by_target', 'attacks_against_target']);
+
+    const second = reduceEncounter(first.state, loadedPartyAttackCommand(
+      actor,
+      actor.attacks[0]!.attackId,
+      enemy.profile.id,
+    ), () => 0.5);
+    expect(second.events.find((event) => event.type === 'attack_resolved')).toMatchObject({
+      attack: { roll: { mode: 'advantage', faces: [11, 11] } },
+    });
+
+    const enemyTurn = reduceEncounter(
+      second.state,
+      { type: 'end_turn', actor: actor.profile.id },
+      () => 0.5,
+    );
+    expect(enemyTurn.state.effects).toHaveLength(1);
+    expect(enemyTurn.state.effects[0]?.payload).toMatchObject({
+      kind: 'attack_roll_mode_modifier',
+      appliesTo: { kind: 'attacks_against_target' },
+    });
+    const incoming = reduceEncounter(enemyTurn.state, loadedPartyAttackCommand(
+      enemy,
+      enemy.attacks[0]!.attackId,
+      actor.profile.id,
+    ), () => 0.5);
+    expect(incoming.events.find((event) => event.type === 'attack_resolved')).toMatchObject({
+      attack: { roll: { mode: 'advantage', faces: [11, 11] } },
+    });
+
+    const actorNextTurn = reduceEncounter(
+      incoming.state,
+      { type: 'end_turn', actor: enemy.profile.id },
+      () => 0.5,
+    );
+    expect(actorNextTurn.state.activeCombatant).toBe(actor.profile.id);
+    expect(actorNextTurn.state.effects).toEqual([]);
+    const ordinary = reduceEncounter(actorNextTurn.state, loadedPartyAttackCommand(
+      actor,
+      actor.attacks[0]!.attackId,
+      enemy.profile.id,
+    ), () => 0.5);
+    expect(ordinary.events.find((event) => event.type === 'attack_resolved')).toMatchObject({
+      attack: { roll: { mode: 'normal', faces: [11] } },
+    });
+  });
+
   it('bonus_attack_always_legal offers a granted Bonus Action attack exactly while usable and consumes its pool', () => {
     const candidate = familyPack();
     candidate.members[0]!.effects = candidate.members[0]!.effects?.filter(
@@ -782,6 +869,115 @@ describe('external party-pack boundary', () => {
       maximum: 2,
       remaining: 0,
     }]);
+  });
+
+  it('grant_uses_source_ability casts an outside-list prepared grant with its explicit ability and DC', () => {
+    const candidate = structuredClone(pack());
+    const casterInput = candidate.members[0]!;
+    casterInput.classes = [{ classId: 'Wizard', level: 7 }];
+    casterInput.abilities.intelligence = 16;
+    casterInput.abilities.wisdom = 20;
+    const source = objectSpellcasting(casterInput);
+    source.knownSpellIds = ['fire-bolt'];
+    source.grants = [{ spellId: 'sacred-flame', ability: 'wisdom' }];
+
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Cross-list prepared grant was refused.');
+    const caster = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    expect(caster.spellcasting[0]?.grants).toMatchObject([{
+      spell: { id: 'sacred-flame' },
+      ability: 'wisdom',
+      spellSaveDc: 17,
+      spellAttackBonus: 9,
+      spellcastingModifier: 5,
+    }]);
+    const command = loadedPartySpellCastCommand(caster, 'sacred-flame', {
+      slotLevel: null,
+      castAsRitual: false,
+      targets: [target.profile.id],
+      area: null,
+      weaponAttack: null,
+      selectedOption: null,
+    });
+    expect(command).toMatchObject({ saveDc: 17, attackBonus: 9, spellcastingModifier: 5 });
+
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 1 },
+      combatants: [caster.profile, target.profile],
+      tokens: [
+        combatToken(caster.profile, { column: 0, row: 0 }),
+        combatToken(target.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const cast = reduceEncounter(state, command, () => 0.625);
+    expect(cast.events.find((event) => event.type === 'save_resolved')).toMatchObject({
+      save: { total: 15, outcome: 'failure' },
+    });
+  });
+
+  it('builds True Strike from a named party-pack weapon while the spell supplies attack and damage ability', () => {
+    const candidate = structuredClone(pack());
+    const casterInput = candidate.members[0]!;
+    casterInput.abilities.strength = 8;
+    casterInput.abilities.intelligence = 20;
+    casterInput.attacks[0]!.attackBonus = 5;
+    casterInput.attacks[0]!.damage[0]!.modifier = -1;
+    const source = objectSpellcasting(casterInput);
+    source.spellAttackBonus = 9;
+    source.knownSpellIds = ['true-strike'];
+    source.preparedSpellIds = [];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('True Strike party pack was refused.');
+    const caster = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    const command = loadedPartySpellCastCommand(caster, 'true-strike', {
+      slotLevel: null,
+      castAsRitual: false,
+      targets: [target.profile.id],
+      area: null,
+      weaponAttack: {
+        attackId: caster.attacks[0]!.attackId,
+        damageTermIndex: 0,
+      },
+      selectedOption: 'Radiant',
+    });
+    expect(command).toMatchObject({
+      attackBonus: 9,
+      spellcastingModifier: 5,
+      weaponAttack: { attackBonus: 5, damageModifier: -1 },
+    });
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 1 },
+      combatants: [caster.profile, target.profile],
+      tokens: [
+        combatToken(caster.profile, { column: 0, row: 0 }),
+        combatToken(target.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    let draw = 0;
+    const cast = reduceEncounter(state, command, () => draw++ === 0 ? 0.5 : 0);
+    expect(cast.events.find((event) => event.type === 'attack_resolved')).toMatchObject({
+      attack: { total: 20, outcome: 'hit' },
+      damage: { total: 7 },
+    });
+  });
+
+  it('validates grant spell ids through the manifest refusal boundary', () => {
+    const candidate = structuredClone(pack());
+    objectSpellcasting(candidate.members[0]!).grants = [{
+      spellId: 'not-in-the-181-spell-manifest',
+      ability: 'wisdom',
+    }];
+    expect(loadExternalPartyPack(candidate)).toMatchObject({
+      status: 'refused',
+      refusal: { reason: 'unknown_spell_id' },
+      gaps: [{ featurePath: 'members.0.spellcasting.grants.0.spellId' }],
+    });
   });
 
   it('object_form_rejected accepts legacy object bytes and normalizes them to one source', () => {

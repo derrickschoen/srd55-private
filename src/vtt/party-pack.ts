@@ -117,6 +117,11 @@ const resourceSpellUseSchema = z.strictObject({
   resourcePoolId: resourcePoolIdSchema,
 });
 
+const preparedSpellGrantSchema = z.strictObject({
+  spellId: z.string(),
+  ability: z.enum(abilities),
+});
+
 const startingConditionSchema = z.strictObject({
   effectId: effectIdSchema,
   conditionId: z.enum(conditionNames),
@@ -156,6 +161,7 @@ const FEATURE_EFFECT_KINDS = [
   'action_surge',
   'attack_roll_modifier',
   'attack_roll_mode',
+  'reckless_attack_mode',
   'armor_class_modifier',
   'saving_throw_modifier',
   'skill_modifier',
@@ -237,6 +243,11 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     kind: z.literal('attack_roll_mode'),
     trigger: z.enum(['action', 'bonus_action', 'reaction']),
     mode: z.enum(['advantage', 'disadvantage']),
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('reckless_attack_mode'),
+    strengthBasedMeleeAttackIds: z.array(attackIdSchema).min(1).max(100),
   }),
   z.strictObject({
     ...featureEffectBaseShape,
@@ -341,6 +352,13 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     context.addIssue({ code: 'custom', message: 'Once-per-turn rider gates must be unique.' });
   }
   if (
+    effect.kind === 'reckless_attack_mode' &&
+    (effect.resourcePoolId !== undefined ||
+      new Set(effect.strengthBasedMeleeAttackIds).size !== effect.strengthBasedMeleeAttackIds.length)
+  ) {
+    context.addIssue({ code: 'custom', message: 'Reckless Attack requires unique attack ids and no resource.' });
+  }
+  if (
     (effect.kind === 'attack_ability_substitution' ||
       effect.kind === 'attack_damage_die_override' ||
       effect.kind === 'attack_reach_range_override') &&
@@ -429,6 +447,7 @@ const spellcastingSourceShape = {
   spellAttackBonus: modifierSchema,
   preparedSpellIds: z.array(manifestSpellIdSchema).max(SPELL_MANIFEST.length),
   knownSpellIds: z.array(manifestSpellIdSchema).max(SPELL_MANIFEST.length),
+  grants: z.array(preparedSpellGrantSchema).max(SPELL_MANIFEST.length).optional(),
   resourceSpellUses: z.array(resourceSpellUseSchema).max(SPELL_MANIFEST.length).optional(),
 } as const;
 
@@ -445,6 +464,7 @@ const spellcastingSourceInputShape = {
   spellAttackBonus: modifierSchema,
   preparedSpellIds: z.array(z.string()).max(SPELL_MANIFEST.length),
   knownSpellIds: z.array(z.string()).max(SPELL_MANIFEST.length),
+  grants: z.array(preparedSpellGrantSchema).max(SPELL_MANIFEST.length).optional(),
   resourceSpellUses: z.array(resourceSpellUseSchema).max(SPELL_MANIFEST.length).optional(),
 } as const;
 
@@ -545,6 +565,13 @@ export interface LoadedPartySpellcastingSource {
   readonly casterLevel: number;
   readonly preparedSpells: readonly SpellManifestRow[];
   readonly knownSpells: readonly SpellManifestRow[];
+  readonly grants: readonly {
+    readonly spell: SpellManifestRow;
+    readonly ability: Ability;
+    readonly spellSaveDc: number;
+    readonly spellAttackBonus: number;
+    readonly spellcastingModifier: number;
+  }[];
   readonly resourceSpellUses: readonly {
     readonly spellId: string;
     readonly resourcePoolId: ReturnType<typeof limitedResourcePoolId>;
@@ -665,6 +692,7 @@ const SPELLCASTING_SOURCE_FIELDS = new Set([
   'spellAttackBonus',
   'preparedSpellIds',
   'knownSpellIds',
+  'grants',
   'resourceSpellUses',
 ]);
 const LEGACY_SPELLCASTING_FIELDS = new Set([
@@ -672,6 +700,7 @@ const LEGACY_SPELLCASTING_FIELDS = new Set([
   'spellSlots',
 ]);
 const RESOURCE_SPELL_USE_FIELDS = new Set(['spellId', 'resourcePoolId']);
+const PREPARED_SPELL_GRANT_FIELDS = new Set(['spellId', 'ability']);
 const ATTACK_FIELDS = new Set([
   'attackId', 'kind', 'attackBonus', 'criticalFloor', 'reachFeet', 'rangeFeet', 'damage',
 ]);
@@ -835,6 +864,17 @@ function sanitizedSpellcasting(
           ),
         }
       : {}),
+    ...(Object.hasOwn(input, 'grants')
+      ? {
+          grants: sanitizedArrayRecords(
+            input.grants,
+            PREPARED_SPELL_GRANT_FIELDS,
+            partyEntry,
+            [...prefix, 'grants'],
+            gaps,
+          ),
+        }
+      : {}),
   };
 }
 
@@ -984,7 +1024,15 @@ function loadedFeatureEffect(
     case 'attack_roll_modifier':
       return { ...common, payload: { kind: 'attack_roll_modifier', count: effect.count, sides: effect.sides, sign: effect.sign } };
     case 'attack_roll_mode':
-      return { ...common, payload: { kind: 'attack_roll_mode_modifier', mode: effect.mode, appliesTo: 'next_attack_against_target' } };
+      return { ...common, payload: { kind: 'attack_roll_mode_modifier', mode: effect.mode, appliesTo: { kind: 'next_attack_against_target' } } };
+    case 'reckless_attack_mode':
+      return {
+        ...common,
+        payload: {
+          kind: 'reckless_attack_mode',
+          strengthBasedMeleeAttackIds: effect.strengthBasedMeleeAttackIds,
+        },
+      };
     case 'armor_class_modifier':
       return { ...common, payload: { kind: 'armor_class_modifier', amount: effect.amount } };
     case 'saving_throw_modifier':
@@ -1213,6 +1261,7 @@ export function loadedPartyAttackCommand(
   attackId: string,
   target: Extract<EncounterCommand, { readonly type: 'attack' }>['target'],
   options: {
+    readonly recklessAttackEffectId?: EncounterEffectId;
     readonly bonusActionGrantEffectId?: EncounterEffectId;
     readonly riderSelections?: readonly {
       readonly effectId: EncounterEffectId;
@@ -1240,6 +1289,10 @@ export function loadedPartyAttackCommand(
       critical: false,
       responses: [],
     },
+    attackId: attack.attackId,
+    ...(options.recklessAttackEffectId === undefined
+      ? {}
+      : { recklessAttackEffectId: options.recklessAttackEffectId }),
     ...(options.bonusActionGrantEffectId === undefined
       ? {}
       : { bonusActionGrantEffectId: options.bonusActionGrantEffectId }),
@@ -1286,15 +1339,28 @@ export function loadedPartyTurnLegalActions(
           ? distance <= attack.reach
           : distance <= attack.range;
         if (!inRange) return [];
-        return riderChoices.map((riderSelections) => loadedPartyAttackCommand(
-          member,
-          attack.attackId,
-          target.profile.id,
-          {
+        const recklessChoices = acting.turn.action.kind === 'available'
+          ? member.effects.flatMap((effect) =>
+              effect.payload.kind === 'reckless_attack_mode' &&
+              effect.payload.strengthBasedMeleeAttackIds.includes(attack.attackId)
+                ? [effect.id]
+                : [])
+          : [];
+        return riderChoices.flatMap((riderSelections) => [
+          loadedPartyAttackCommand(member, attack.attackId, target.profile.id, {
             ...(bonusActionGrantEffectId === undefined ? {} : { bonusActionGrantEffectId }),
             ...(riderSelections === undefined ? {} : { riderSelections }),
-          },
-        ));
+          }),
+          ...recklessChoices.map((recklessAttackEffectId) => loadedPartyAttackCommand(
+            member,
+            attack.attackId,
+            target.profile.id,
+            {
+              recklessAttackEffectId,
+              ...(riderSelections === undefined ? {} : { riderSelections }),
+            },
+          )),
+        ]);
       }));
 
     const actions: EncounterCommand[] = [];
@@ -1358,7 +1424,10 @@ export function loadedPartyEffectCommand(
       ...resource,
     };
   }
-  if (isAttackFormSubstitutionPayload(effect.payload)) {
+  if (
+    isAttackFormSubstitutionPayload(effect.payload) ||
+    effect.payload.kind === 'reckless_attack_mode'
+  ) {
     throw new PartyFeatureEffectError('effect_is_automatic');
   }
   const application: EffectApplication = {
@@ -1379,7 +1448,7 @@ export function loadedPartyEffectCommand(
   };
 }
 
-export type LoadedPartySpellCastDetails = Pick<
+export type LoadedPartySpellCastDetails = Omit<Pick<
   SpellCastCommand,
   | 'slotLevel'
   | 'castAsRitual'
@@ -1387,7 +1456,13 @@ export type LoadedPartySpellCastDetails = Pick<
   | 'area'
   | 'weaponAttack'
   | 'selectedOption'
-> & { readonly resourcePoolId?: string };
+>, 'weaponAttack'> & {
+  readonly weaponAttack: null | {
+    readonly attackId: string;
+    readonly damageTermIndex: number;
+  };
+  readonly resourcePoolId?: string;
+};
 
 /** Builds the existing resolver command exclusively from a v2 member's referenced spell vocabulary. */
 export function loadedPartySpellCastCommand(
@@ -1396,15 +1471,22 @@ export function loadedPartySpellCastCommand(
   details: LoadedPartySpellCastDetails,
 ): SpellCastCommand {
   if (member.spellcasting.length === 0) throw new PartySpellcastingError('spellcasting_unavailable');
-  const matchingSources = member.spellcasting.filter((source) =>
-    source.preparedSpells.some((spell) => spell.id === spellId) ||
-    source.knownSpells.some((spell) => spell.id === spellId));
+  const matchingSources = member.spellcasting.flatMap((source) => [
+    ...(source.preparedSpells.some((spell) => spell.id === spellId) ||
+      source.knownSpells.some((spell) => spell.id === spellId)
+      ? [{ source, grant: null }]
+      : []),
+    ...source.grants
+      .filter((grant) => grant.spell.id === spellId)
+      .map((grant) => ({ source, grant })),
+  ]);
   if (matchingSources.length === 0 || !member.spells.some((spell) => spell.id === spellId)) {
     throw new PartySpellcastingError('spell_not_referenced');
   }
   if (matchingSources.length > 1) throw new PartySpellcastingError('ambiguous_spell_source');
-  const spellcasting = matchingSources[0];
-  if (spellcasting === undefined) throw new PartySpellcastingError('spell_not_referenced');
+  const castingRoute = matchingSources[0];
+  if (castingRoute === undefined) throw new PartySpellcastingError('spell_not_referenced');
+  const spellcasting = castingRoute.source;
   const resourceUse = details.resourcePoolId === undefined
     ? undefined
     : spellcasting.resourceSpellUses.find((use) =>
@@ -1414,19 +1496,35 @@ export function loadedPartySpellCastCommand(
       `Spell ${spellId} is not declared for loaded resource pool ${details.resourcePoolId}.`,
     );
   }
+  let weaponAttack: SpellCastCommand['weaponAttack'] = null;
+  if (details.weaponAttack !== null) {
+    const declaredAttack = member.attacks.find((candidate) =>
+      candidate.attackId === details.weaponAttack?.attackId);
+    if (declaredAttack === undefined) throw new PartyAttackError();
+    const attack = effectiveLoadedPartyAttack(member, declaredAttack);
+    const term = attack.damage[details.weaponAttack.damageTermIndex];
+    if (term === undefined) throw new PartyAttackError();
+    weaponAttack = {
+      attackBonus: attack.attackBonus,
+      damageType: term.type,
+      damageCount: term.count,
+      damageSides: term.sides,
+      damageModifier: term.modifier,
+    };
+  }
   return {
     type: 'cast_spell',
     actor: member.profile.id,
     spellId,
     casterLevel: spellcasting.casterLevel,
-    attackBonus: spellcasting.spellAttackBonus,
-    saveDc: spellcasting.spellSaveDc,
-    spellcastingModifier: spellcasting.spellcastingModifier,
+    attackBonus: castingRoute.grant?.spellAttackBonus ?? spellcasting.spellAttackBonus,
+    saveDc: castingRoute.grant?.spellSaveDc ?? spellcasting.spellSaveDc,
+    spellcastingModifier: castingRoute.grant?.spellcastingModifier ?? spellcasting.spellcastingModifier,
     slotLevel: details.slotLevel,
     castAsRitual: details.castAsRitual,
     targets: details.targets,
     area: details.area,
-    weaponAttack: details.weaponAttack,
+    weaponAttack,
     selectedOption: details.selectedOption,
     ...(resourceUse === undefined ? {} : { resourcePoolId: resourceUse.resourcePoolId }),
   };
@@ -1663,6 +1761,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           spellAttackBonus: parsed.data.spellAttackBonus,
           preparedSpellIds: parsed.data.preparedSpellIds,
           knownSpellIds: parsed.data.knownSpellIds,
+          ...(parsed.data.grants === undefined ? {} : { grants: parsed.data.grants }),
           ...(parsed.data.resourceSpellUses === undefined
             ? {}
             : { resourceSpellUses: parsed.data.resourceSpellUses }),
@@ -1748,6 +1847,10 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             value,
             path: [...sourcePrefix, 'knownSpellIds', spellIndex],
           })),
+          ...(source.grants ?? []).map((grant, grantIndex) => ({
+            value: grant.spellId,
+            path: [...sourcePrefix, 'grants', grantIndex, 'spellId'],
+          })),
         ];
         for (const reference of references) {
           const spell = SPELL_MANIFEST.find((candidate) => candidate.id === reference.value);
@@ -1780,6 +1883,19 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           ));
           return false;
         });
+        const grants = (source.grants ?? []).filter((grant, grantIndex, candidates) => {
+          if (!sourceSpellIds.includes(grant.spellId)) return false;
+          if (candidates.findIndex((candidate) => candidate.spellId === grant.spellId) !== grantIndex) {
+            return false;
+          }
+          if (!preparedSet.has(grant.spellId) && !knownSpellIds.includes(grant.spellId)) return true;
+          gaps.push(issueGap(
+            entry,
+            [...sourcePrefix, 'grants', grantIndex, 'spellId'],
+            'value_not_in_engine_vocabulary',
+          ));
+          return false;
+        });
         const resourceSpellUses = (source.resourceSpellUses ?? []).filter((use, useIndex, uses) => {
           if (!sourceSpellIds.includes(use.spellId)) {
             if (!SPELL_MANIFEST.some((spell) => spell.id === use.spellId)) unknownSpellId = true;
@@ -1804,6 +1920,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           ...source,
           preparedSpellIds,
           knownSpellIds,
+          ...(source.grants === undefined ? {} : { grants }),
           ...(source.resourceSpellUses === undefined ? {} : { resourceSpellUses }),
         };
         normalizedSources.push(normalized);
@@ -1817,6 +1934,20 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             spells.filter((spell) => spell.id === id)),
           knownSpells: knownSpellIds.flatMap((id) =>
             spells.filter((spell) => spell.id === id)),
+          grants: grants.flatMap((grant) => {
+            const spell = spells.find((candidate) => candidate.id === grant.spellId);
+            if (spell === undefined) return [];
+            const sourceModifier = Math.floor((core.data.abilities[source.ability] - 10) / 2);
+            const grantModifier = Math.floor((core.data.abilities[grant.ability] - 10) / 2);
+            const modifierDelta = grantModifier - sourceModifier;
+            return [{
+              spell,
+              ability: grant.ability,
+              spellSaveDc: source.spellSaveDc + modifierDelta,
+              spellAttackBonus: source.spellAttackBonus + modifierDelta,
+              spellcastingModifier: grantModifier,
+            }];
+          }),
           resourceSpellUses: resourceSpellUses.map((use) => ({
             spellId: use.spellId,
             resourcePoolId: limitedResourcePoolId(use.resourcePoolId),
@@ -1992,6 +2123,9 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           ? `${effect.kind}:${effect.attackId}:${String(damageTermIndex ?? 'distance')}`
           : null;
         const uniqueAttackForm = attackFormKey === null || !attackFormKeys.has(attackFormKey);
+        const validRecklessAttacks = effect.kind !== 'reckless_attack_mode' ||
+          effect.strengthBasedMeleeAttackIds.every((attackId) =>
+            attacks.some((attack) => attack.attackId === attackId && attack.kind === 'melee'));
         const valid = (effect.resourcePoolId === undefined || referencedPool !== undefined) &&
           (effect.kind !== 'action_surge' || referencedPool?.recharge === 'short_rest') &&
           (effect.kind !== 'extra_attack_count_override' ||
@@ -2002,6 +2136,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             parsedSpellcasting.some((source) => source.ability === effect.spellcastingAbility)) &&
           (effect.kind !== 'attack_damage_die_override' ||
             effect.levels.some((level) => level.minimumLevel <= totalLevel)) &&
+          validRecklessAttacks &&
           uniqueAttackForm;
         if (!valid) {
           const path = 'attackId' in effect && referencedAttack === undefined
@@ -2014,6 +2149,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
                 : effect.kind === 'attack_damage_die_override' &&
                     !effect.levels.some((level) => level.minimumLevel <= totalLevel)
                   ? 'levels'
+                  : !validRecklessAttacks
+                    ? 'strengthBasedMeleeAttackIds'
                   : attackFormKey !== null && !uniqueAttackForm
                     ? 'kind'
                     : effect.kind === 'extra_attack_count_override' ? 'levels' : 'resourcePoolId';

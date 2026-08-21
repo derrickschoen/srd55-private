@@ -260,39 +260,48 @@ export type SpellOperation =
     }
   | { readonly kind: 'stabilize' }
   | {
-      readonly kind: 'weapon_attack';
-      readonly extraDamage: ScaledDice;
-      readonly extraDamageType: DamageType;
-    }
-  | {
       readonly kind: 'weapon_attack_augmentation';
-      readonly extraDamage: null | {
-        readonly type: DamageType;
-        readonly dice: ScaledDice;
-      };
-      readonly consumeOnHit: boolean;
-      readonly concentration: boolean;
-      readonly durationRounds: number;
-      readonly followUp: null | (
-        | {
-            readonly kind: 'ongoing_damage_save_ends';
-            readonly damageType: DamageType;
+    } & (
+      | {
+          readonly timing: 'during_cast';
+          readonly attackAbility: 'spellcasting';
+          readonly damageAbility: 'spellcasting';
+          readonly damageTypeChoice: 'weapon_or_radiant';
+          readonly extraDamage: {
+            readonly type: DamageType;
             readonly dice: ScaledDice;
-            readonly saveAbility: Ability;
-            readonly timing: 'target_start';
-            readonly durationRounds: number;
-          }
-        | {
-            readonly kind: 'save_then_restrain';
-            readonly saveAbility: Ability;
-            readonly rollMode: 'normal';
-            readonly damageType: DamageType;
+          };
+        }
+      | {
+          readonly timing: 'subsequent_weapon_hits';
+          readonly extraDamage: null | {
+            readonly type: DamageType;
             readonly dice: ScaledDice;
-            readonly timing: 'target_start';
-            readonly durationRounds: number;
-          }
-      );
-    }
+          };
+          readonly consumeOnHit: boolean;
+          readonly concentration: boolean;
+          readonly durationRounds: number;
+          readonly followUp: null | (
+            | {
+                readonly kind: 'ongoing_damage_save_ends';
+                readonly damageType: DamageType;
+                readonly dice: ScaledDice;
+                readonly saveAbility: Ability;
+                readonly timing: 'target_start';
+                readonly durationRounds: number;
+              }
+            | {
+                readonly kind: 'save_then_restrain';
+                readonly saveAbility: Ability;
+                readonly rollMode: 'normal';
+                readonly damageType: DamageType;
+                readonly dice: ScaledDice;
+                readonly timing: 'target_start';
+                readonly durationRounds: number;
+              }
+          );
+        }
+    )
   | {
       readonly kind: 'utility';
       readonly effect: Extract<EffectPayload, {

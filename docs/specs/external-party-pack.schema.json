@@ -124,6 +124,15 @@
         "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" }
       }
     },
+    "preparedSpellGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spellId", "ability"],
+      "properties": {
+        "spellId": { "type": "string" },
+        "ability": { "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] }
+      }
+    },
     "spellcastingSource": {
       "type": "object",
       "additionalProperties": false,
@@ -132,9 +141,10 @@
         "ability": { "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] },
         "spellSaveDc": { "type": "integer", "minimum": 1, "maximum": 50 },
         "spellAttackBonus": { "type": "integer", "minimum": -30, "maximum": 30 },
-        "preparedSpellIds": { "type": "array", "maxItems": 176, "items": { "type": "string" } },
-        "knownSpellIds": { "type": "array", "maxItems": 176, "items": { "type": "string" } },
-        "resourceSpellUses": { "type": "array", "maxItems": 176, "items": { "$ref": "#/$defs/resourceSpellUse" } }
+        "preparedSpellIds": { "type": "array", "maxItems": 181, "items": { "type": "string" } },
+        "knownSpellIds": { "type": "array", "maxItems": 181, "items": { "type": "string" } },
+        "grants": { "type": "array", "maxItems": 181, "items": { "$ref": "#/$defs/preparedSpellGrant" } },
+        "resourceSpellUses": { "type": "array", "maxItems": 181, "items": { "$ref": "#/$defs/resourceSpellUse" } }
       }
     },
     "legacySpellcasting": {
@@ -145,10 +155,11 @@
         "ability": { "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] },
         "spellSaveDc": { "type": "integer", "minimum": 1, "maximum": 50 },
         "spellAttackBonus": { "type": "integer", "minimum": -30, "maximum": 30 },
-        "preparedSpellIds": { "type": "array", "maxItems": 176, "items": { "type": "string" } },
-        "knownSpellIds": { "type": "array", "maxItems": 176, "items": { "type": "string" } },
+        "preparedSpellIds": { "type": "array", "maxItems": 181, "items": { "type": "string" } },
+        "knownSpellIds": { "type": "array", "maxItems": 181, "items": { "type": "string" } },
+        "grants": { "type": "array", "maxItems": 181, "items": { "$ref": "#/$defs/preparedSpellGrant" } },
         "spellSlots": { "type": "array", "maxItems": 9, "items": { "$ref": "#/$defs/v2SpellSlot" } },
-        "resourceSpellUses": { "type": "array", "maxItems": 176, "items": { "$ref": "#/$defs/resourceSpellUse" } }
+        "resourceSpellUses": { "type": "array", "maxItems": 181, "items": { "$ref": "#/$defs/resourceSpellUse" } }
       }
     },
     "pactSpellSlot": {
@@ -197,6 +208,7 @@
             "action_surge",
             "attack_roll_modifier",
             "attack_roll_mode",
+            "reckless_attack_mode",
             "armor_class_modifier",
             "saving_throw_modifier",
             "skill_modifier",
@@ -220,6 +232,7 @@
         { "$ref": "#/$defs/actionSurgeEffect" },
         { "$ref": "#/$defs/attackRollModifierEffect" },
         { "$ref": "#/$defs/attackRollModeEffect" },
+        { "$ref": "#/$defs/recklessAttackModeEffect" },
         { "$ref": "#/$defs/armorClassModifierEffect" },
         { "$ref": "#/$defs/savingThrowModifierEffect" },
         { "$ref": "#/$defs/skillModifierEffect" },
@@ -358,6 +371,18 @@
         "trigger": { "enum": ["action", "bonus_action", "reaction"] },
         "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
         "mode": { "enum": ["advantage", "disadvantage"] }
+      }
+    },
+    "recklessAttackModeEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "strengthBasedMeleeAttackIds"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "reckless_attack_mode" },
+        "strengthBasedMeleeAttackIds": {
+          "type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^attack:[a-z0-9][a-z0-9-]{0,79}$" }
+        }
       }
     },
     "armorClassModifierEffect": {
