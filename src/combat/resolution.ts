@@ -13,11 +13,17 @@ export interface DiceExpression {
   readonly count: number;
   readonly sides: DieSides;
   readonly modifier: number;
+  readonly explosion?: {
+    readonly triggerFace: 'maximum';
+    /** Each original die is independently bounded; added dice never explode again. */
+    readonly maximumExplosionsPerDie: 1;
+  };
 }
 
 export interface DiceRollTrace {
   readonly expression: DiceExpression;
   readonly faces: readonly number[];
+  readonly explosionFaces?: readonly number[];
   readonly total: number;
 }
 

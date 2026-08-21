@@ -218,7 +218,14 @@
             "movement_modifier",
             "attack_ability_substitution",
             "attack_damage_die_override",
-            "attack_reach_range_override"
+            "attack_reach_range_override",
+            "save_gated_banishment_on_hit",
+            "spell_damage_ability_modifier",
+            "timed_spellcasting_mode",
+            "attack_damage_type_choice",
+            "resource_die_maneuver",
+            "exploding_spell_damage_die",
+            "elemental_fury"
           ]
         }
       },
@@ -242,7 +249,14 @@
         { "$ref": "#/$defs/movementModifierEffect" },
         { "$ref": "#/$defs/attackAbilitySubstitutionEffect" },
         { "$ref": "#/$defs/attackDamageDieOverrideEffect" },
-        { "$ref": "#/$defs/attackReachRangeOverrideEffect" }
+        { "$ref": "#/$defs/attackReachRangeOverrideEffect" },
+        { "$ref": "#/$defs/saveGatedBanishmentOnHitEffect" },
+        { "$ref": "#/$defs/spellDamageAbilityModifierEffect" },
+        { "$ref": "#/$defs/timedSpellcastingModeEffect" },
+        { "$ref": "#/$defs/attackDamageTypeChoiceEffect" },
+        { "$ref": "#/$defs/resourceDieManeuverEffect" },
+        { "$ref": "#/$defs/explodingSpellDamageDieEffect" },
+        { "$ref": "#/$defs/elementalFuryEffect" }
       ]
     },
     "damageRiderEffect": {
@@ -511,6 +525,101 @@
         "attackId": { "type": "string", "pattern": "^attack:[a-z0-9][a-z0-9-]{0,79}$" },
         "reachFeet": { "type": "integer", "minimum": 0, "maximum": 1000 },
         "rangeFeet": { "type": "integer", "minimum": 0, "maximum": 1000 }
+      }
+    },
+    "saveGatedBanishmentOnHitEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "saveAbility", "saveDc", "rollMode", "returnAt", "returnDamage", "returnPlacement"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "save_gated_banishment_on_hit" },
+        "trigger": { "const": "on_hit" },
+        "saveAbility": { "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] },
+        "saveDc": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "rollMode": { "const": "normal" },
+        "returnAt": { "const": "source_next_turn_start" },
+        "returnDamage": { "$ref": "#/$defs/damage" },
+        "returnPlacement": { "const": "previous_or_nearest_unoccupied" }
+      }
+    },
+    "spellDamageAbilityModifierEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "spellId", "application"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "spell_damage_ability_modifier" },
+        "spellId": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "application": { "const": "one_damage_roll_per_turn" }
+      }
+    },
+    "timedSpellcastingModeEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "resourcePoolId", "additionalLeveledSpellActions", "duration"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "timed_spellcasting_mode" },
+        "trigger": { "const": "bonus_action" },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "additionalLeveledSpellActions": { "const": 1 },
+        "duration": { "const": "this_turn" }
+      }
+    },
+    "attackDamageTypeChoiceEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "attackId", "damageTermIndex", "damageTypeIds"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "attack_damage_type_choice" },
+        "attackId": { "type": "string", "pattern": "^attack:[a-z0-9][a-z0-9-]{0,79}$" },
+        "damageTermIndex": { "type": "integer", "minimum": 0, "maximum": 19 },
+        "damageTypeIds": {
+          "type": "array", "minItems": 2, "maxItems": 3, "uniqueItems": true,
+          "items": { "enum": ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"] }
+        }
+      }
+    },
+    "resourceDieManeuverEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "resourcePoolId", "sides", "damageType", "conditionId", "conditionDuration"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "resource_die_maneuver" },
+        "trigger": { "const": "on_hit" },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "sides": { "enum": [4, 6, 8, 10, 12, 20] },
+        "damageType": { "const": "attack_primary" },
+        "conditionId": { "enum": ["Blinded", "Charmed", "Deafened", "Frightened", "Grappled", "Incapacitated", "Invisible", "Paralyzed", "Petrified", "Poisoned", "Prone", "Restrained", "Stunned", "Unconscious"] },
+        "conditionDuration": { "const": "until_end_of_target_next_turn" }
+      }
+    },
+    "explodingSpellDamageDieEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "spellId", "triggerFace", "maximumExplosionsPerDie"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "exploding_spell_damage_die" },
+        "spellId": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "triggerFace": { "const": "maximum" },
+        "maximumExplosionsPerDie": { "const": 1 }
+      }
+    },
+    "elementalFuryEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "attackIds", "damageTypeIds", "selectedDamageTypeId", "amount", "gate"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "elemental_fury" },
+        "attackIds": {
+          "type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^attack:[a-z0-9][a-z0-9-]{0,79}$" }
+        },
+        "damageTypeIds": {
+          "type": "array", "minItems": 2, "maxItems": 4, "uniqueItems": true,
+          "items": { "enum": ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"] }
+        },
+        "selectedDamageTypeId": { "enum": ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"] },
+        "amount": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "gate": { "const": "first_hit_this_turn" }
       }
     },
     "passives": {

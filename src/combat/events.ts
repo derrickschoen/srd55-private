@@ -46,6 +46,13 @@ export type EncounterCommand =
       /** Chooses the declared first-attack Reckless Attack mode. */
       readonly recklessAttackEffectId?: EncounterEffectId;
       readonly bonusActionGrantEffectId?: EncounterEffectId;
+      /** A declared attack-form damage-type option, validated by the reducer. */
+      readonly damageTypeSelection?: {
+        readonly effectId: EncounterEffectId;
+        readonly damageType: DamageRequest['terms'][number]['type'];
+      };
+      /** A declared resource-die maneuver to spend only if this attack hits. */
+      readonly maneuverEffectId?: EncounterEffectId;
       readonly riderSelections?: readonly {
         readonly effectId: EncounterEffectId;
         readonly slotLevel: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
@@ -89,6 +96,11 @@ export type EncounterCommand =
     }
   | {
       readonly type: 'activate_action_surge';
+      readonly actor: CombatantId;
+      readonly effectId: EncounterEffectId;
+    }
+  | {
+      readonly type: 'activate_timed_spellcasting_mode';
       readonly actor: CombatantId;
       readonly effectId: EncounterEffectId;
     }
@@ -224,8 +236,19 @@ export type EncounterEvent =
   | (SequencedEvent & {
       readonly type: 'resource_spent';
       readonly combatant: CombatantId;
-      readonly resource: 'action' | 'bonus_action' | 'reaction';
+      readonly resource: 'action' | 'bonus_action' | 'reaction' | 'additional_leveled_spell_action';
       readonly purpose: string;
+    })
+  | (SequencedEvent & {
+      readonly type: 'combatant_left_board';
+      readonly combatant: CombatantId;
+      readonly effectId: EncounterEffectId;
+    })
+  | (SequencedEvent & {
+      readonly type: 'combatant_returned_to_board';
+      readonly combatant: CombatantId;
+      readonly effectId: EncounterEffectId;
+      readonly position: GridCell;
     })
   | (SequencedEvent & {
       readonly type: 'limited_resource_spent';

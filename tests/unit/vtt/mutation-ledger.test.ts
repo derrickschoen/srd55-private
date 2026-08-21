@@ -30,6 +30,7 @@ const REGRET_ORACLE_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-regret-mutation-le
 const ATTACK_FORM_ELDRITCH_LEDGER_PATH = 'docs/audits/2026-08-21-attack-form-eldritch-blast-mutation-ledger.md';
 const R9_SPELLS_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-r9-spells-mutation-ledger.md';
 const CAP_019_LEDGER_PATH = 'docs/audits/2026-08-21-cap-019-typed-effects-mutation-ledger.md';
+const CAP_019_TAIL_SWEEP_LEDGER_PATH = 'docs/audits/2026-08-21-cap-019-tail-sweep-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -274,5 +275,22 @@ describe('phase-2 mutation ledger manifest', () => {
     }
     expect(ledger.match(/exit 1/gu)).toHaveLength(3);
     expect(ledger).toContain('final restored gate passed with 1,639 tests');
+  });
+
+  it('CAP-019-TAIL-SWEEP-MUTATION-LEDGER pins all five restored controls to named killing tests', () => {
+    const ledger = readFileSync(CAP_019_TAIL_SWEEP_LEDGER_PATH, 'utf8');
+    const partyPackTests = readFileSync('tests/unit/vtt/party-pack.test.ts', 'utf8');
+    for (const name of [
+      'banish_return_damage_dropped',
+      'agonizing_applied_twice_per_turn',
+      'exploding_die_unbounded',
+      'superiority_die_free',
+      'elemental_fury_every_hit',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(partyPackTests).toContain(name);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(5);
+    expect(ledger).toContain('All five source mutations were restored');
   });
 });

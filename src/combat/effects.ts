@@ -4,6 +4,8 @@ import type { DamageRequest, RollMode } from './resolution';
 import type { AreaTemplate } from './templates';
 import type {
   CombatantId,
+  DamageType,
+  DieSides,
   EffectStackingIdentity,
   EncounterEffectId,
   LimitedResourcePoolId,
@@ -77,6 +79,12 @@ export type AttackFormSubstitutionPayload =
       readonly attackId: string;
       readonly reachFeet?: number;
       readonly rangeFeet?: number;
+    }
+  | {
+      readonly kind: 'attack_damage_type_choice';
+      readonly attackId: string;
+      readonly damageTermIndex: number;
+      readonly options: readonly DamageType[];
     };
 
 /** A first-attack choice whose two Advantage clocks are materialized by the reducer. */
@@ -84,6 +92,50 @@ export interface RecklessAttackPayload {
   readonly kind: 'reckless_attack_mode';
   readonly strengthBasedMeleeAttackIds: readonly string[];
 }
+
+/** Feature-only mechanics interpreted directly by attack/spell action reducers. */
+export type TypedCombatFeaturePayload =
+  | {
+      readonly kind: 'save_gated_banishment_on_hit';
+      readonly saveAbility: Ability;
+      readonly saveDc: number;
+      readonly rollMode: Extract<RollMode, 'normal'>;
+      readonly returnAt: 'source_next_turn_start';
+      readonly returnDamage: DamageRequest;
+      readonly returnPlacement: 'previous_or_nearest_unoccupied';
+    }
+  | {
+      readonly kind: 'spell_damage_ability_modifier';
+      readonly spellId: string;
+      readonly application: 'one_damage_roll_per_turn';
+    }
+  | {
+      readonly kind: 'timed_spellcasting_mode';
+      readonly additionalLeveledSpellActions: 1;
+      readonly duration: 'this_turn';
+    }
+  | {
+      readonly kind: 'resource_die_maneuver';
+      readonly dieSides: DieSides;
+      readonly damageType: 'attack_primary';
+      readonly condition: Exclude<ConditionName, 'Exhaustion'>;
+      readonly conditionDuration: 'until_end_of_target_next_turn';
+    }
+  | {
+      readonly kind: 'exploding_spell_damage_die';
+      readonly spellId: string;
+      readonly triggerFace: 'maximum';
+      /** The bound is part of the mechanic: each original die can add at most one die. */
+      readonly maximumExplosionsPerDie: 1;
+    }
+  | {
+      readonly kind: 'elemental_fury';
+      readonly attackIds: readonly string[];
+      readonly damageTypes: readonly DamageType[];
+      readonly selectedDamageType: DamageType;
+      readonly amount: number;
+      readonly gate: 'first_hit_this_turn';
+    };
 
 /** Reducer-ready class/feat effect retained on a combatant profile. */
 export type CombatFeatureEffect = {
@@ -94,6 +146,7 @@ export type CombatFeatureEffect = {
   | { readonly payload: EffectPayload }
   | { readonly payload: AttackFormSubstitutionPayload }
   | { readonly payload: RecklessAttackPayload }
+  | { readonly payload: TypedCombatFeaturePayload }
   | { readonly payload: { readonly kind: 'temporary_hit_points'; readonly amount: number } }
 );
 
@@ -102,7 +155,19 @@ export function isAttackFormSubstitutionPayload(
 ): payload is AttackFormSubstitutionPayload {
   return payload.kind === 'attack_ability_substitution' ||
     payload.kind === 'attack_damage_die_override' ||
-    payload.kind === 'attack_reach_range_override';
+    payload.kind === 'attack_reach_range_override' ||
+    payload.kind === 'attack_damage_type_choice';
+}
+
+export function isTypedCombatFeaturePayload(
+  payload: CombatFeatureEffect['payload'],
+): payload is TypedCombatFeaturePayload {
+  return payload.kind === 'save_gated_banishment_on_hit' ||
+    payload.kind === 'spell_damage_ability_modifier' ||
+    payload.kind === 'timed_spellcasting_mode' ||
+    payload.kind === 'resource_die_maneuver' ||
+    payload.kind === 'exploding_spell_damage_die' ||
+    payload.kind === 'elemental_fury';
 }
 
 export type TurnBoundary = 'start' | 'end';
@@ -162,6 +227,11 @@ export type EffectPayload =
       readonly kind: 'ongoing_damage';
       readonly damage: DamageRequest;
       readonly timing: SourcedTurnBoundary;
+    }
+  | {
+      readonly kind: 'temporary_banishment';
+      readonly returnDamage: DamageRequest;
+      readonly returnPlacement: 'previous_or_nearest_unoccupied';
     }
   | {
       readonly kind: 'armor_class_modifier';
