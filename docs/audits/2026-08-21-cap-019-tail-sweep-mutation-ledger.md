@@ -11,8 +11,9 @@ then restored and re-run with the same named test.
 | `banish_return_damage_dropped` | Returned the absent token at the source-start boundary without resolving the typed return damage. | exit 1; named test failed; 1 failed, 144 skipped | exit 0; named test passed; 144 skipped |
 | `agonizing_applied_twice_per_turn` | Removed the per-turn used-effect guard from the named-spell damage modifier. | exit 1; named test failed (`[4, 4]` rather than `[4, 1]`); 1 failed, 144 skipped | exit 0; named test passed; 144 skipped |
 | `exploding_die_unbounded` | Allowed each added maximum-face die to explode again. | exit 1; named test failed (42 rather than bounded 40); 1 failed, 144 skipped | exit 0; named test passed; 144 skipped |
-| `superiority_die_free` | Bypassed the maneuver pool decrement while retaining its die and condition. | exit 1; named test failed (2 remaining rather than 1); 1 failed, 144 skipped | exit 0; named test passed; 144 skipped |
+| `superiority_die_free` | Bypassed the maneuver pool decrement while retaining its die and condition. | exit 1; named test failed (2 remaining rather than 0 after two hits); 1 failed, 146 skipped | exit 0; named test passed; 146 skipped |
+| `elemental_fury_every_hit` | Removed the used-effect guard so the selected elemental damage was added to every qualifying hit. | exit 1; named test failed (second hit was 10 rather than 8); 1 failed, 146 skipped | exit 0; named test passed; 146 skipped |
 
-All four source mutations were restored before the final gates.
-The restored VTT/combat/bridge gate passed 1,647 tests, the unchanged simulator
+All five source mutations were restored before the final gates.
+The restored VTT/combat/bridge gate passed 1,648 tests, the unchanged simulator
 gate passed 176 tests, and both TypeScript configurations exited 0.

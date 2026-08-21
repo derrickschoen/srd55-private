@@ -277,7 +277,7 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger).toContain('final restored gate passed with 1,639 tests');
   });
 
-  it('CAP-019-TAIL-SWEEP-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
+  it('CAP-019-TAIL-SWEEP-MUTATION-LEDGER pins all five restored controls to named killing tests', () => {
     const ledger = readFileSync(CAP_019_TAIL_SWEEP_LEDGER_PATH, 'utf8');
     const partyPackTests = readFileSync('tests/unit/vtt/party-pack.test.ts', 'utf8');
     for (const name of [
@@ -285,11 +285,12 @@ describe('phase-2 mutation ledger manifest', () => {
       'agonizing_applied_twice_per_turn',
       'exploding_die_unbounded',
       'superiority_die_free',
+      'elemental_fury_every_hit',
     ]) {
       expect(ledger).toContain(`\`${name}\``);
       expect(partyPackTests).toContain(name);
     }
-    expect(ledger.match(/exit 1/gu)).toHaveLength(4);
-    expect(ledger).toContain('All four source mutations were restored');
+    expect(ledger.match(/exit 1/gu)).toHaveLength(5);
+    expect(ledger).toContain('All five source mutations were restored');
   });
 });

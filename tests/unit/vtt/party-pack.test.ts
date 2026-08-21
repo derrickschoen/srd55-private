@@ -1538,6 +1538,7 @@ describe('external party-pack boundary', () => {
       conditionId: 'Prone',
       conditionDuration: 'until_end_of_target_next_turn',
     }], [{ resourcePoolId: 'resource:maneuver-dice', maximum: 2, recharge: 'short_rest' }]);
+    candidate.members[0]!.attacksPerAction = 2;
     const loaded = loadExternalPartyPack(candidate);
     expect(loaded.status).toBe('loaded');
     if (loaded.status !== 'loaded') throw new Error('Resource-die maneuver shape was refused.');
@@ -1552,18 +1553,25 @@ describe('external party-pack boundary', () => {
       ],
     });
     state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
-    const result = reduceEncounter(state, loadedPartyAttackCommand(
+    const command = loadedPartyAttackCommand(
       actor,
       actor.attacks[0]!.attackId,
       target.profile.id,
       { maneuverEffectId: encounterEffectId('effect:driving-maneuver') },
-    ), sequenceRng([0.5, 0, 0]));
-    expect(result.events).toContainEqual(expect.objectContaining({
+    );
+    const first = reduceEncounter(state, command, sequenceRng([0.5, 0, 0]));
+    const second = reduceEncounter(first.state, command, sequenceRng([0.5, 0, 0]));
+    expect(first.events).toContainEqual(expect.objectContaining({
       type: 'attack_resolved',
       damage: expect.objectContaining({ total: 5 }),
     }));
-    expect(result.state.combatants[0]?.limitedResources?.[0]?.remaining).toBe(1);
-    expect(combatantConditions(result.state, target.profile.id)).toContainEqual({ name: 'Prone' });
+    expect(second.events).toContainEqual(expect.objectContaining({
+      type: 'attack_resolved',
+      damage: expect.objectContaining({ total: 5 }),
+    }));
+    expect(second.state.combatants[0]?.limitedResources?.[0]?.remaining).toBe(0);
+    expect(second.state.combatants[1]?.hitPoints).toBe(22);
+    expect(combatantConditions(second.state, target.profile.id)).toContainEqual({ name: 'Prone' });
   });
 
   it('exploding_die_unbounded explodes each maximum cantrip die exactly once', () => {
@@ -1653,6 +1661,56 @@ describe('external party-pack boundary', () => {
         total: 10,
       },
     });
+  });
+
+  it('elemental_fury_every_hit applies selected flat damage only to the first of two qualifying hits', () => {
+    const candidate = typedShapePack([{
+      effectId: 'effect:elemental-fury',
+      kind: 'elemental_fury',
+      attackIds: ['attack:pack-member-1'],
+      damageTypeIds: ['Cold', 'Fire', 'Lightning', 'Thunder'],
+      selectedDamageTypeId: 'Fire',
+      amount: 4,
+      gate: 'first_hit_this_turn',
+    }]);
+    candidate.members[0]!.attacksPerAction = 2;
+    candidate.members[1]!.passives = {
+      damageResponses: [{ damageTypeId: 'Fire', response: 'resistant' }],
+    };
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Elemental Fury shape was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target.profile],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(target.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const command = loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target.profile.id);
+    const first = reduceEncounter(state, command, () => 0.5);
+    const second = reduceEncounter(first.state, command, () => 0.5);
+
+    expect(first.events.find((event) => event.type === 'attack_resolved')).toMatchObject({
+      damage: {
+        terms: [
+          expect.objectContaining({ type: 'Slashing', afterResponse: 8 }),
+          expect.objectContaining({ type: 'Fire', beforeResponse: 4, afterResponse: 2 }),
+        ],
+        total: 10,
+      },
+    });
+    expect(second.events.find((event) => event.type === 'attack_resolved')).toMatchObject({
+      damage: {
+        terms: [expect.objectContaining({ type: 'Slashing', afterResponse: 8 })],
+        total: 8,
+      },
+    });
+    expect(second.state.combatants[1]?.hitPoints).toBe(14);
   });
 
   it('out_of_union_accepted refuses an unknown effect kind and names the unsupported shape', () => {
