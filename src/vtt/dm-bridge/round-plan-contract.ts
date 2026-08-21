@@ -42,12 +42,13 @@ export type TargetSelector =
 
 export type PlanAction =
   | { readonly kind: 'attack'; readonly target: TargetSelector }
+  | { readonly kind: 'bonus_attack'; readonly target: TargetSelector }
   | { readonly kind: 'force_save'; readonly target: TargetSelector }
   | { readonly kind: 'move_toward'; readonly target: TargetSelector }
   | { readonly kind: 'retreat_toward'; readonly destination: GridCell }
   | {
       readonly kind: 'use_action';
-      readonly action: 'dash' | 'disengage' | 'dodge' | 'end_turn';
+      readonly action: 'dash' | 'disengage' | 'dodge' | 'action_surge' | 'end_turn';
     };
 
 export interface StandingConditionalRider {
@@ -162,12 +163,13 @@ const targetSelectorSchema: z.ZodType<TargetSelector> = z.discriminatedUnion('ki
 
 const planActionSchema: z.ZodType<PlanAction> = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('attack'), target: targetSelectorSchema }),
+  z.strictObject({ kind: z.literal('bonus_attack'), target: targetSelectorSchema }),
   z.strictObject({ kind: z.literal('force_save'), target: targetSelectorSchema }),
   z.strictObject({ kind: z.literal('move_toward'), target: targetSelectorSchema }),
   z.strictObject({ kind: z.literal('retreat_toward'), destination: gridCellSchema }),
   z.strictObject({
     kind: z.literal('use_action'),
-    action: z.enum(['dash', 'disengage', 'dodge', 'end_turn']),
+    action: z.enum(['dash', 'disengage', 'dodge', 'action_surge', 'end_turn']),
   }),
 ]);
 
@@ -401,7 +403,7 @@ export const ROUND_PLAN_COMPACT_JSON_GRAMMAR = [
   'RoundPlan={kind:"round_plan",protocolVersion:2,encounterId:string,requestId:string,expectedRevision:uint,round:uint,monsters:Monster[]}',
   'Monster={monsterId:string,program:Program}',
   'Program={kind:"action",action:Action,riders?:Rider[1..20]}|{kind:"if",predicate:Predicate,then:Program,else:Program}|{kind:"priority",choices:Program[1..20]}',
-  'Action={kind:"attack"|"force_save"|"move_toward",target:Target}|{kind:"retreat_toward",destination:{column:uint,row:uint}}|{kind:"use_action",action:"dash"|"disengage"|"dodge"|"end_turn"}',
+  'Action={kind:"attack"|"bonus_attack"|"force_save"|"move_toward",target:Target}|{kind:"retreat_toward",destination:{column:uint,row:uint}}|{kind:"use_action",action:"dash"|"disengage"|"dodge"|"action_surge"|"end_turn"}',
   'Rider={kind:"on_critical_hit",followUpAction:Action}; riders are fixed follow-ups and are never independent priority choices.',
   'Target={kind:"combatant",combatantId:string}|{kind:"nearest_enemy"}',
   'Predicate={kind:"life_is",combatantId:string,value:"living"|"dying"|"stable"|"dead"}|{kind:"hp_percent_below",combatantId:string,percent:(0,100]}|{kind:"distance_at_most",left:string,right:string,feet:number>=0}|{kind:"not",predicate:Predicate}|{kind:"all"|"any",predicates:Predicate[1..20]}',

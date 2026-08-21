@@ -26,6 +26,7 @@ import {
 import {
   codexSessionId,
   combatantId,
+  encounterEffectId,
   encounterSessionId,
   type CombatantId,
 } from '../../../src/combat/values';
@@ -362,6 +363,53 @@ describe('typed DM round decision programs', () => {
     );
 
     expect(selected.action).toEqual(attack(f.monsterA.id, f.playerB.id));
+  });
+
+  it('selects an explicitly granted bonus_attack DecisionProgram from mixed legal attacks', async () => {
+    const f = fixture();
+    const bonus = {
+      ...attack(f.monsterA.id, f.playerA.id),
+      bonusActionGrantEffectId: encounterEffectId('effect:bridge-bonus-attack'),
+    };
+    const exchange = new FakeExchange((request) => planFor(request, [f.monsterA, f.monsterB].map((monster) => ({
+      monsterId: monster.id,
+      program: monster.id === f.monsterA.id
+        ? {
+            kind: 'action',
+            action: {
+              kind: 'bonus_attack',
+              target: { kind: 'combatant', combatantId: f.playerA.id },
+            },
+          }
+        : { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+    }))));
+    const selected = await new DmRoundPlanSession(exchange).choose(
+      controllerRequest(f.state, f.monsterA.id, [attack(f.monsterA.id, f.playerA.id), bonus]),
+      context(f.state),
+      new AbortController().signal,
+    );
+    expect(selected.action).toEqual(bonus);
+  });
+
+  it('selects an offered action_surge DecisionProgram action', async () => {
+    const f = fixture();
+    const surge = {
+      type: 'activate_action_surge' as const,
+      actor: f.monsterA.id,
+      effectId: encounterEffectId('effect:bridge-action-surge'),
+    };
+    const exchange = new FakeExchange((request) => planFor(request, [f.monsterA, f.monsterB].map((monster) => ({
+      monsterId: monster.id,
+      program: monster.id === f.monsterA.id
+        ? { kind: 'action', action: { kind: 'use_action', action: 'action_surge' } }
+        : { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+    }))));
+    const selected = await new DmRoundPlanSession(exchange).choose(
+      controllerRequest(f.state, f.monsterA.id, [{ type: 'end_turn', actor: f.monsterA.id }, surge]),
+      context(f.state),
+      new AbortController().signal,
+    );
+    expect(selected.action).toEqual(surge);
   });
 
   it('DSL-DRY-RECONSULT scopes an unexpressible invalidation to that monster remaining round in the same session', async () => {

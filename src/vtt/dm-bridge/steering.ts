@@ -59,6 +59,7 @@ export interface AlgorithmRoundPlan {
 function targetAction(action: PlanAction, target: TargetSelector): PlanAction {
   switch (action.kind) {
     case 'attack':
+    case 'bonus_attack':
     case 'force_save':
     case 'move_toward':
       return { ...action, target };

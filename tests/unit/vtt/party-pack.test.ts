@@ -2,15 +2,18 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { combatToken } from '../../../src/combat/combatant';
 import { createEncounter, reduceEncounter } from '../../../src/combat/encounter';
+import { encounterEffectId } from '../../../src/combat/values';
 import {
   externalPartyPackSchema,
   loadExternalPartyPack,
   loadExternalPartyPackBytes,
   loadedPartyAttackCommand,
   loadedPartySpellCastCommand,
+  loadedPartyTurnLegalActions,
   type ExternalPartyPackV1,
   type ExternalPartyPackV2,
 } from '../../../src/vtt/party-pack';
+import { monsterProfile, placedToken } from '../combat/fixtures';
 
 function memberBase(index: number): Omit<ExternalPartyPackV2['members'][number], 'spellcasting'> {
   return {
@@ -127,6 +130,66 @@ function effectPack(): ExternalPartyPackV2 {
   return candidate;
 }
 
+function familyPack(): ExternalPartyPackV2 {
+  const candidate = structuredClone(pack());
+  candidate.members[0]!.attacksPerAction = 1;
+  objectSpellcasting(candidate.members[0]!).spellSlots = [
+    { level: 1, count: 4, recharge: 'long_rest' },
+    { level: 2, count: 1, recharge: 'long_rest' },
+  ];
+  candidate.members[0]!.resources = [
+    { resourcePoolId: 'resource:flurry-shape', maximum: 1, recharge: 'short_rest' },
+    { resourcePoolId: 'resource:surge-shape', maximum: 1, recharge: 'short_rest' },
+  ];
+  candidate.members[0]!.effects = [
+    {
+      effectId: 'effect:sneak-shape',
+      kind: 'once_per_turn_damage_rider',
+      trigger: 'on_hit',
+      oncePerTurnGate: 'first_hit_this_turn',
+      qualifyingGates: ['advantage_on_attack', 'ally_adjacent_to_target'],
+      damage: [{ damageTypeId: 'Force', count: 1, sides: 6, modifier: 0 }],
+    },
+    {
+      effectId: 'effect:smite-shape',
+      kind: 'slot_spend_damage_rider',
+      trigger: 'on_hit',
+      spendGate: 'slot_spent',
+      criticalGate: 'crit_confirmed',
+      damageTypeId: 'Radiant',
+      baseCount: 1,
+      countPerSlotLevel: 1,
+      sides: 8,
+      modifier: 0,
+    },
+    {
+      effectId: 'effect:first-hit-flat',
+      kind: 'first_hit_damage_rider',
+      trigger: 'on_hit',
+      gate: 'first_hit_this_turn',
+      damageTypeId: 'Psychic',
+      amount: 3,
+    },
+    {
+      effectId: 'effect:flurry-shape',
+      kind: 'bonus_action_attack_grant',
+      resourcePoolId: 'resource:flurry-shape',
+      attackCount: 1,
+    },
+    {
+      effectId: 'effect:extra-attack-shape',
+      kind: 'extra_attack_count_override',
+      levels: [{ minimumLevel: 5, attackCount: 2 }, { minimumLevel: 11, attackCount: 3 }],
+    },
+    {
+      effectId: 'effect:surge-shape',
+      kind: 'action_surge',
+      resourcePoolId: 'resource:surge-shape',
+    },
+  ];
+  return candidate;
+}
+
 describe('external party-pack boundary', () => {
   it('loads generated valid 3-5 member packs into branded combat profiles', () => {
     for (let count = 3; count <= 5; count += 1) {
@@ -185,6 +248,226 @@ describe('external party-pack boundary', () => {
       'exhaustion',
       'movement_modifier',
     ]);
+  });
+
+  it('loads all six conditional-rider and action-economy variants into the existing engine effect machinery', () => {
+    const loaded = loadExternalPartyPack(familyPack());
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Effect-family v2 pack was refused.');
+    if (loaded.party.pack.schemaVersion !== 2) throw new Error('Effect-family pack changed schema version.');
+    expect(loaded.party.pack.members[0]!.effects?.map((effect) => effect.kind)).toEqual([
+      'once_per_turn_damage_rider',
+      'slot_spend_damage_rider',
+      'first_hit_damage_rider',
+      'bonus_action_attack_grant',
+      'extra_attack_count_override',
+      'action_surge',
+    ]);
+    expect(loaded.party.members[0]!.effects.map((effect) => effect.payload.kind)).toEqual([
+      'damage_rider',
+      'damage_rider',
+      'damage_rider',
+      'bonus_action_attack_grant',
+      'extra_attack_count_override',
+      'action_surge',
+    ]);
+  });
+
+  it('smite_dice_not_doubled_on_crit spends a level-2 slot only on a confirmed hit and doubles exactly 3d8 on a crit', () => {
+    const candidate = familyPack();
+    candidate.members[0]!.effects = candidate.members[0]!.effects?.filter(
+      (effect) => effect.kind === 'slot_spend_damage_rider',
+    );
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Smite-shape pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('smite-boundary-target', { hitPoints: 200, initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 }), placedToken(target, 1)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.999).state;
+    const command = loadedPartyAttackCommand(
+      actor,
+      actor.attacks[0]!.attackId,
+      target.id,
+      { riderSelections: [{ effectId: encounterEffectId('effect:smite-shape'), slotLevel: 2 }] },
+    );
+    const missed = reduceEncounter(state, command, () => 0);
+    expect(missed.events.some((event) => event.type === 'spell_slot_spent')).toBe(false);
+    expect(missed.state.combatants[0]?.spellSlots).toContainEqual({ level: 2, maximum: 1, remaining: 1 });
+    const result = reduceEncounter(state, command, () => 0.999);
+
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'spell_slot_spent',
+      slotLevel: 2,
+      remaining: 0,
+    }));
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'attack_resolved',
+      attack: { outcome: 'critical', roll: { mode: 'normal', faces: [20], chosen: 20 }, total: 26 },
+      damage: expect.objectContaining({
+        total: 67,
+        terms: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'Radiant',
+            roll: { expression: { count: 6, sides: 8, modifier: 0 }, faces: [8, 8, 8, 8, 8, 8], total: 48 },
+          }),
+        ]),
+      }),
+    }));
+  });
+
+  it('rider_fires_twice_per_turn fires an eligible once-per-turn rider only on the first of two hits', () => {
+    const candidate = familyPack();
+    candidate.members[0]!.effects = candidate.members[0]!.effects?.filter(
+      (effect) => effect.kind === 'once_per_turn_damage_rider' || effect.kind === 'extra_attack_count_override',
+    );
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Once-per-turn rider pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('once-per-turn-target', { hitPoints: 100, initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 }), placedToken(target, 1)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const advantaged = {
+      ...loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target.id),
+      rollMode: 'advantage' as const,
+    };
+    const first = reduceEncounter(state, advantaged, () => 0.5);
+    const second = reduceEncounter(first.state, advantaged, () => 0.5);
+
+    expect(first.events.find((event) => event.type === 'attack_resolved')).toMatchObject({
+      damage: { total: 12 },
+    });
+    expect(second.events.find((event) => event.type === 'attack_resolved')).toMatchObject({
+      damage: { total: 8 },
+    });
+  });
+
+  it('rider_condition_ignored requires advantage or an adjacent ally before sneak-shape dice apply', () => {
+    const candidate = familyPack();
+    candidate.members[0]!.effects = candidate.members[0]!.effects?.filter(
+      (effect) => effect.kind === 'once_per_turn_damage_rider',
+    );
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Conditional rider pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('conditional-rider-target', { hitPoints: 100, initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 }), placedToken(target, 1)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const result = reduceEncounter(
+      state,
+      loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target.id),
+      () => 0.5,
+    );
+    expect(result.events.find((event) => event.type === 'attack_resolved')).toMatchObject({
+      damage: { total: 8, terms: [{ type: 'Slashing' }] },
+    });
+  });
+
+  it('first-hit flat riders apply once across the effective Extra Attack sequence', () => {
+    const candidate = familyPack();
+    candidate.members[0]!.effects = candidate.members[0]!.effects?.filter(
+      (effect) => effect.kind === 'first_hit_damage_rider' || effect.kind === 'extra_attack_count_override',
+    );
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('First-hit rider pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('first-hit-target', { hitPoints: 100, initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 }), placedToken(target, 1)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const command = loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target.id);
+    const first = reduceEncounter(state, command, () => 0.5);
+    const second = reduceEncounter(first.state, command, () => 0.5);
+    expect(first.events.find((event) => event.type === 'attack_resolved')).toMatchObject({ damage: { total: 11 } });
+    expect(second.events.find((event) => event.type === 'attack_resolved')).toMatchObject({ damage: { total: 8 } });
+  });
+
+  it('bonus_attack_always_legal offers a granted Bonus Action attack exactly while usable and consumes its pool', () => {
+    const candidate = familyPack();
+    candidate.members[0]!.effects = candidate.members[0]!.effects?.filter(
+      (effect) => effect.kind === 'bonus_action_attack_grant',
+    );
+    candidate.members[0]!.resources = candidate.members[0]!.resources?.filter(
+      (pool) => pool.resourcePoolId === 'resource:flurry-shape',
+    );
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Bonus-attack pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('bonus-attack-target', { hitPoints: 100, initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 }), placedToken(target, 1)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const legalActions = loadedPartyTurnLegalActions(loaded.party.members);
+    const granted = legalActions(state, actor.profile.id).actions.filter(
+      (action) => action.type === 'attack' && action.bonusActionGrantEffectId !== undefined,
+    );
+    expect(granted).toHaveLength(1);
+    const spent = reduceEncounter(state, granted[0]!, () => 0.5).state;
+    expect(spent.combatants[0]).toMatchObject({
+      turn: { bonusActionAvailable: false, bonusAttacksRemaining: 0 },
+      limitedResources: [{ id: 'resource:flurry-shape', remaining: 0 }],
+    });
+    expect(legalActions(spent, actor.profile.id).actions.filter(
+      (action) => action.type === 'attack' && action.bonusActionGrantEffectId !== undefined,
+    )).toEqual([]);
+  });
+
+  it('level attack overrides and short-rest action surge both alter reducer-owned action legality', () => {
+    const candidate = familyPack();
+    candidate.members[0]!.effects = candidate.members[0]!.effects?.filter(
+      (effect) => effect.kind === 'extra_attack_count_override' || effect.kind === 'action_surge',
+    );
+    candidate.members[0]!.resources = candidate.members[0]!.resources?.filter(
+      (pool) => pool.resourcePoolId === 'resource:surge-shape',
+    );
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Action-economy pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('action-economy-target', { hitPoints: 100, initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 }), placedToken(target, 1)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const command = loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target.id);
+    state = reduceEncounter(state, command, () => 0.5).state;
+    expect(state.combatants[0]?.turn.action).toEqual({ kind: 'attack_sequence', attacksRemaining: 1 });
+    state = reduceEncounter(state, command, () => 0.5).state;
+    expect(state.combatants[0]?.turn.action).toEqual({ kind: 'spent' });
+    const legalActions = loadedPartyTurnLegalActions(loaded.party.members);
+    const surge = legalActions(state, actor.profile.id).actions.filter(
+      (action) => action.type === 'activate_action_surge',
+    );
+    expect(surge).toEqual([{ type: 'activate_action_surge', actor: actor.profile.id, effectId: 'effect:surge-shape' }]);
+    state = reduceEncounter(state, surge[0]!, () => 0.5).state;
+    expect(state.combatants[0]).toMatchObject({
+      turn: { action: { kind: 'available' } },
+      limitedResources: [{ id: 'resource:surge-shape', remaining: 0 }],
+    });
   });
 
   it('slots_not_decremented wires a referenced v2 spell through the existing resolver and spends its slot', () => {

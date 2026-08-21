@@ -133,6 +133,15 @@ function selectAction(
         command.type === action.kind && command.target === selectedTarget,
       ) ?? null;
     }
+    case 'bonus_attack': {
+      const selectedTarget = targetId(action.target, actor, state);
+      if (selectedTarget === null) return null;
+      return actorLegal.find((command) =>
+        command.type === 'attack' &&
+        command.bonusActionGrantEffectId !== undefined &&
+        command.target === selectedTarget,
+      ) ?? null;
+    }
     case 'move_toward': {
       const selectedTarget = targetId(action.target, actor, state);
       if (selectedTarget === null) return null;
@@ -146,7 +155,10 @@ function selectAction(
         .filter((command) => command.type === 'move')
         .sort((left, right) => endpointDistance(left, action.destination) - endpointDistance(right, action.destination))[0] ?? null;
     case 'use_action':
-      return actorLegal.find((command) => command.type === action.action) ?? null;
+      return actorLegal.find((command) =>
+        action.action === 'action_surge'
+          ? command.type === 'activate_action_surge'
+          : command.type === action.action) ?? null;
   }
 }
 

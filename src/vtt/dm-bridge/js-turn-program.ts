@@ -28,9 +28,9 @@ apiArrayCall::= ("alliesWithin" | "enemiesWithin") "(" expression ")"
 Only const declarations, braced if/else, for-of over alliesWithin/enemiesWithin,
 and calls to the documented API are accepted. Programs emit one plan with emit(...).
 API: nearestEnemy(), lowestHp([combatants]), alliesWithin(feet), enemiesWithin(feet),
-hpPercent(combatant), distanceTo(combatant), attack(combatant), forceSave(combatant),
+hpPercent(combatant), distanceTo(combatant), attack(combatant), bonusAttack(combatant), forceSave(combatant),
 move(combatant), retreat(column,row), dash(), disengage(), dodge(), endTurn(),
-priority(program,...), emit(program). attack(combatant, riderOnCrit(action)) attaches
+actionSurge(), priority(program,...), emit(program). attack(combatant, riderOnCrit(action)) attaches
 a fixed conditional follow-up. Cell selectors are strict {column, row} objects.
 No ambient JavaScript objects are available.
 
@@ -746,6 +746,7 @@ class Interpreter {
         return gridDistance(this.#actor.position, this.#subject(args[0], 'distanceTo').position);
       }
       case 'attack': return this.#attack(args);
+      case 'bonusAttack': return this.#targetAction(expression.callee, args, 'bonus_attack');
       case 'forceSave': return this.#targetAction(expression.callee, args, 'force_save');
       case 'move': return this.#targetAction(expression.callee, args, 'move_toward');
       case 'retreat': {
@@ -764,6 +765,7 @@ class Interpreter {
       case 'dash': return this.#useAction(expression.callee, args, 'dash');
       case 'disengage': return this.#useAction(expression.callee, args, 'disengage');
       case 'dodge': return this.#useAction(expression.callee, args, 'dodge');
+      case 'actionSurge': return this.#useAction(expression.callee, args, 'action_surge');
       case 'endTurn': return this.#useAction(expression.callee, args, 'end_turn');
       case 'priority': {
         const choices = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
@@ -907,7 +909,7 @@ class Interpreter {
   #targetAction(
     api: string,
     args: readonly RuntimeValue[],
-    kind: 'attack' | 'force_save' | 'move_toward',
+    kind: 'attack' | 'bonus_attack' | 'force_save' | 'move_toward',
   ): DecisionProgramValue {
     this.#arity(api, args, 1);
     const subject = this.#subject(args[0], api);
@@ -920,7 +922,7 @@ class Interpreter {
   #useAction(
     api: string,
     args: readonly RuntimeValue[],
-    action: 'dash' | 'disengage' | 'dodge' | 'end_turn',
+    action: 'dash' | 'disengage' | 'dodge' | 'action_surge' | 'end_turn',
   ): DecisionProgramValue {
     this.#arity(api, args, 0);
     return this.#programValue({ kind: 'action', action: { kind: 'use_action', action } });

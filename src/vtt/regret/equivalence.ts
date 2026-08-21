@@ -21,6 +21,7 @@ export interface EquivalenceCollapse {
 function actionKey(action: PlanAction): string {
   switch (action.kind) {
     case 'attack':
+    case 'bonus_attack':
     case 'force_save':
     case 'move_toward':
       return canonicalJson({ kind: action.kind, target: action.target });

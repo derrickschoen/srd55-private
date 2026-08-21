@@ -21,6 +21,38 @@ export const featureEffectTriggers = [
 
 export type FeatureEffectTrigger = (typeof featureEffectTriggers)[number];
 
+export const damageRiderGates = [
+  'advantage_on_attack',
+  'ally_adjacent_to_target',
+  'first_hit_this_turn',
+  'crit_confirmed',
+  'slot_spent',
+] as const;
+
+export type DamageRiderGate = (typeof damageRiderGates)[number];
+
+export type DamageRiderGating =
+  | { readonly kind: 'unconditional' }
+  | {
+      readonly kind: 'once_per_turn';
+      readonly oncePerTurnGate: Extract<DamageRiderGate, 'first_hit_this_turn'>;
+      readonly qualifyingGates: readonly Extract<
+        DamageRiderGate,
+        'advantage_on_attack' | 'ally_adjacent_to_target'
+      >[];
+    }
+  | {
+      readonly kind: 'slot_spend';
+      readonly spendGate: Extract<DamageRiderGate, 'slot_spent'>;
+      readonly criticalGate: Extract<DamageRiderGate, 'crit_confirmed'>;
+      readonly baseCount: number;
+      readonly countPerSlotLevel: number;
+    }
+  | {
+      readonly kind: 'first_hit_this_turn';
+      readonly gate: Extract<DamageRiderGate, 'first_hit_this_turn'>;
+    };
+
 /** Reducer-ready class/feat effect retained on a combatant profile. */
 export type CombatFeatureEffect = {
   readonly id: EncounterEffectId;
@@ -100,6 +132,19 @@ export type EffectPayload =
       readonly kind: 'damage_rider';
       readonly damage: DamageRequest;
       readonly appliesTo: 'next_attack_against_target' | 'weapon_attack_by_target';
+      readonly gating?: DamageRiderGating;
+    }
+  | {
+      readonly kind: 'bonus_action_attack_grant';
+      readonly attackCount: number;
+    }
+  | {
+      readonly kind: 'extra_attack_count_override';
+      readonly attackCount: number;
+    }
+  | {
+      readonly kind: 'action_surge';
+      readonly perShortRest: true;
     }
   | {
       readonly kind: 'cannot_regain_hit_points' | 'opportunity_attacks_disabled';

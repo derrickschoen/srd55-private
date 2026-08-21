@@ -305,6 +305,7 @@ const COMMAND_TYPES: ReadonlySet<EncounterCommand['type']> = new Set([
   'dodge',
   'spend_bonus_action',
   'spend_reaction',
+  'activate_action_surge',
   'heal',
   'apply_effect',
   'end_concentration',
