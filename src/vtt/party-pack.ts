@@ -128,7 +128,7 @@ const startingConditionSchema = z.strictObject({
   conditionId: z.enum(conditionNames),
 });
 
-const resourcePoolSchema = z.strictObject({
+export const externalPartyPackResourceSchema = z.strictObject({
   resourcePoolId: resourcePoolIdSchema,
   maximum: integerSchema.min(1).max(999),
   recharge: z.enum(['short_rest', 'long_rest']),
@@ -152,7 +152,7 @@ const nonExhaustionConditionNames = conditionNames.filter(
   (condition): condition is Exclude<ConditionName, 'Exhaustion'> => condition !== 'Exhaustion',
 );
 
-const FEATURE_EFFECT_KINDS = [
+export const FEATURE_EFFECT_KINDS = [
   'damage_rider',
   'once_per_turn_damage_rider',
   'slot_spend_damage_rider',
@@ -471,6 +471,8 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
   }
 });
 
+export const externalPartyPackFeatureEffectSchema = featureEffectSchema;
+
 const passiveSkillSchema = z.strictObject({
   skillId: z.enum(skills),
   bonus: modifierSchema,
@@ -576,8 +578,8 @@ const v2MemberSchema = z.strictObject({
   ]).optional(),
   sharedSpellSlots: z.array(v2SpellSlotSchema).max(9).optional(),
   pactSpellSlots: z.array(pactSpellSlotSchema).max(9).optional(),
-  effects: z.array(featureEffectSchema).max(100).optional(),
-  resources: z.array(resourcePoolSchema).max(100).optional(),
+  effects: z.array(externalPartyPackFeatureEffectSchema).max(100).optional(),
+  resources: z.array(externalPartyPackResourceSchema).max(100).optional(),
   passives: passivesSchema.optional(),
 }).superRefine((member, context) => {
   if (Array.isArray(member.spellcasting) && member.sharedSpellSlots === undefined) {
@@ -624,7 +626,8 @@ export type ExternalPartyPackV1 = z.infer<typeof externalPartyPackV1Schema>;
 export type ExternalPartyPackV2 = z.infer<typeof externalPartyPackV2Schema>;
 export type ExternalPartyPackMember = ExternalPartyPack['members'][number];
 export type ExternalPartyPackAttack = z.infer<typeof attackSchema>;
-export type ExternalPartyPackEffect = z.infer<typeof featureEffectSchema>;
+export type ExternalPartyPackEffect = z.infer<typeof externalPartyPackFeatureEffectSchema>;
+export type ExternalPartyPackResource = z.infer<typeof externalPartyPackResourceSchema>;
 export type PartySource = z.infer<typeof partySourceSchema>;
 
 export interface LoadedPartyAttack {
@@ -1008,7 +1011,7 @@ function loadedAttack(attack: ExternalPartyPackAttack): LoadedPartyAttack {
   };
 }
 
-function loadedFeatureEffect(
+export function loadedFeatureEffect(
   effect: ExternalPartyPackEffect,
   totalLevel: number,
 ): CombatFeatureEffect {
@@ -1260,7 +1263,7 @@ type ExternalPartyPackV2Member = ExternalPartyPackV2['members'][number];
 
 function v2MemberExtensions(member: ExternalPartyPackMember): {
   readonly effects: readonly ExternalPartyPackEffect[];
-  readonly resources: readonly z.infer<typeof resourcePoolSchema>[];
+  readonly resources: readonly ExternalPartyPackResource[];
   readonly passives: z.infer<typeof passivesSchema> | null;
 } {
   if (!Object.hasOwn(member, 'effects') && !Object.hasOwn(member, 'resources') && !Object.hasOwn(member, 'passives')) {
@@ -2238,7 +2241,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     }
 
     let effects: ExternalPartyPackEffect[] = [];
-    const resources: z.infer<typeof resourcePoolSchema>[] = [];
+    const resources: ExternalPartyPackResource[] = [];
     let passives: z.infer<typeof passivesSchema> | undefined;
     if (header.data.schemaVersion === 2) {
       const effectsInput = Object.hasOwn(memberInput, 'effects')
@@ -2265,7 +2268,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             ));
             continue;
           }
-          const parsed = featureEffectSchema.safeParse(effectValue);
+          const parsed = externalPartyPackFeatureEffectSchema.safeParse(effectValue);
           if (!parsed.success) {
             gaps.push(...parsed.error.issues.map((issue) => issueGap(
               entry,
@@ -2296,7 +2299,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
       }
       if (Array.isArray(resourcesInput)) {
         for (const [resourceIndex, resourceValue] of resourcesInput.slice(0, 100).entries()) {
-          const parsed = resourcePoolSchema.safeParse(resourceValue);
+          const parsed = externalPartyPackResourceSchema.safeParse(resourceValue);
           if (!parsed.success) {
             gaps.push(...parsed.error.issues.map((issue) => issueGap(
               entry,
