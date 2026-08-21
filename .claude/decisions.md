@@ -7,6 +7,17 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D329 addendum 2 — OWNER: ep-213 fear theme goes ahead (2026-08-21)
+
+Owner (verbatim intent): the fear-support theme SHOULD work via private
+clean-room equivalents; asked what is missing. Ruling: ep-213's routine
+is "maximize fear on enemies, then normal damage routine" — a party-wide
+boost. Work: (1) engine aura machinery (radius condition effects — the
+one true capability gap, also unlocks Pass without Trace's aura form);
+(2) private clean-room equivalents for the five non-SRD fear sources
+(Wrathful-Smite-shape, Cause-Fear-shape, fear aura, dread-form,
+revelation pulse); (3) fear-first routine mapped for ep-213.
+
 ## D329 addendum — OWNER: ep-208 QUARANTINED (2026-08-21)
 
 ep-208 "Swiss Army Soul Knife" (utility build, metric=other, no combat
