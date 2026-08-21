@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D327 — OWNER: three-model collaboration on fixture residue (2026-08-21)
+
+For fixture data-quality issues codex struggles with: **codex (sol, high
+effort) plus Claude Fable and Claude Opus (both high effort) collaborate
+to shrink the residue** before anything reaches the owner — "five
+hundred is too many." Explicit owner authorization for Fable/Opus passes
+on this task (overrides the standing no-expensive-subagents default for
+this scope only). Order: codex resolves what it can (patch layer);
+Fable reviews the residue; Opus takes an independent pass; disagreements
+and still-unresolved items go to the owner as the final short list.
+Claude-authored patch proposals still get codex verification before
+they land (consensus rule unchanged).
+
 ## D326 — OWNER: Colby soaks start at 16; fixture fixes collaborative (2026-08-21)
 
 1. **The 50% Colby soak arm starts NOW with the 16 runnable builds**
