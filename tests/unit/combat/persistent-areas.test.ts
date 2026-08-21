@@ -131,6 +131,74 @@ describe('persistent areas and deterministic membership hooks', () => {
     expect(effectiveSkillModifier(state, beneficiary.id, 'stealth')).toBe(4);
   });
 
+  it('emanation_origin_occupant_is_affected: an eligible creature on the emanation origin takes the effect', () => {
+    const owner = playerProfile('origin-aura-owner', { initiativeBonus: 20, hitPoints: 30 });
+    const hostile = monsterProfile('origin-aura-hostile', { initiativeBonus: -20, hitPoints: 30 });
+    let state = reduceEncounter(createEncounter({
+      bounds: { columns: 4, rows: 3 }, combatants: [owner, hostile],
+      tokens: [placedToken(owner, 3, 1), placedToken(hostile, 0, 1)],
+    }), { type: 'roll_initiative' }, () => 0.5).state;
+
+    state = createArea(state, baseArea(state, {
+      owner: owner.id,
+      origin: { kind: 'fixed', point: feetPoint(0, 5) },
+      shape: { kind: 'emanation', radius: feet(10) },
+      targetFilter: { kind: 'enemies' },
+      hooks: [{
+        hook: 'on_enter', frequency: 'every_trigger',
+        effect: { kind: 'automatic', payload: { kind: 'damage', damage: fixedDamage(5) } },
+      }],
+    })).state;
+
+    expect(state.persistentAreas[0]?.members).toContain(hostile.id);
+    expect(state.persistentAreas[0]?.members).not.toContain(owner.id);
+    expect(hitPoints(state, hostile.id)).toBe(25);
+    expect(hitPoints(state, owner.id)).toBe(30);
+  });
+
+  it('emanation_owner_membership_follows_filter: an ally aura includes its anchor while a hostile aura excludes it', () => {
+    const owner = playerProfile('filtered-aura-owner', { initiativeBonus: 20 });
+    const hostile = monsterProfile('filtered-aura-hostile', { initiativeBonus: -20 });
+    const initial = (): EncounterState => reduceEncounter(createEncounter({
+      bounds: { columns: 6, rows: 3 }, combatants: [owner, hostile],
+      tokens: [placedToken(owner, 0, 1), placedToken(hostile, 5, 1)],
+    }), { type: 'roll_initiative' }, () => 0.5).state;
+    const conditionHook = {
+      hook: 'on_enter',
+      frequency: 'every_trigger',
+      effect: {
+        kind: 'automatic',
+        payload: {
+          kind: 'effect',
+          payload: { kind: 'condition', condition: 'Frightened' },
+          lifetime: { kind: 'area_duration' },
+        },
+      },
+    } as const;
+
+    const alliedInitial = initial();
+    const allied = createArea(alliedInitial, baseArea(alliedInitial, {
+      owner: owner.id,
+      origin: { kind: 'anchored', combatant: owner.id },
+      shape: { kind: 'emanation', radius: feet(10) },
+      targetFilter: { kind: 'allies' },
+      hooks: [conditionHook],
+    })).state;
+    expect(allied.persistentAreas[0]?.members).toContain(owner.id);
+    expect(combatantConditions(allied, owner.id).map((condition) => condition.name)).toContain('Frightened');
+
+    const hostileInitial = initial();
+    const hostileOnly = createArea(hostileInitial, baseArea(hostileInitial, {
+      owner: owner.id,
+      origin: { kind: 'anchored', combatant: owner.id },
+      shape: { kind: 'emanation', radius: feet(10) },
+      targetFilter: { kind: 'enemies' },
+      hooks: [conditionHook],
+    })).state;
+    expect(hostileOnly.persistentAreas[0]?.members).not.toContain(owner.id);
+    expect(combatantConditions(hostileOnly, owner.id).map((condition) => condition.name)).not.toContain('Frightened');
+  });
+
   it('save_ends_never_ends: a later successful save removes an area-applied condition', () => {
     let state = started([8, 0]);
     const owner = state.combatants[0]!.profile.id;

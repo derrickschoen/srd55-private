@@ -1514,6 +1514,7 @@ function areaMembers(state: EncounterState, area: PersistentArea): readonly Comb
     : null;
   return state.combatants
     .filter((subject) => subject.life !== 'dead')
+    .filter((subject) => areaTargetEligible(state, area, subject.profile.id))
     .flatMap((subject): readonly CombatantId[] => {
       const placed = state.tokens.find((candidate) => candidate.combatantId === subject.profile.id);
       return placed !== undefined && persistentAreaContains(area, placed.position, anchor, state)

@@ -144,15 +144,35 @@ export function persistentAreaTemplate(area: PersistentArea, anchorCell: GridCel
   }
 }
 
+function occupiesOriginCell(
+  area: PersistentArea,
+  cell: GridCell,
+  anchorCell: GridCell | null,
+): boolean {
+  if (area.origin.kind === 'anchored') {
+    return anchorCell !== null && cell.column === anchorCell.column && cell.row === anchorCell.row;
+  }
+  return cell.column === Math.floor(area.origin.point.x / 5) &&
+    cell.row === Math.floor(area.origin.point.y / 5);
+}
+
 export function persistentAreaContains(
   area: PersistentArea,
   cell: GridCell,
   anchorCell: GridCell | null,
   grid: { readonly bounds: { readonly columns: number; readonly rows: number }; readonly blockedCells: readonly GridCell[] },
 ): boolean {
+  const template = persistentAreaTemplate(area, anchorCell);
+  if (
+    template.shape === 'emanation' &&
+    !template.template.includeOrigin &&
+    occupiesOriginCell(area, cell, anchorCell)
+  ) {
+    return false;
+  }
   return creatureOccupiesAffectedCell(
     [cell],
-    affectedCells(grid, persistentAreaTemplate(area, anchorCell)),
+    affectedCells(grid, template),
   );
 }
 
