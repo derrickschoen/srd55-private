@@ -22,6 +22,7 @@ const JS_TURN_PROGRAM_LEDGER_PATH = 'docs/audits/2026-08-20-js-turn-program-muta
 const TURN_PROGRAM_LIBRARY_LEDGER_PATH = 'docs/audits/2026-08-20-turn-program-library-mutation-ledger.md';
 const E04_E06_LEDGER_PATH = 'docs/audits/2026-08-20-e04-e06-engine-prerequisites-mutation-ledger.md';
 const E01_EXPERIMENT_LEDGER_PATH = 'docs/audits/2026-08-20-e01-experiment-orchestrator-mutation-ledger.md';
+const REGRET_ORACLE_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-regret-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -151,6 +152,19 @@ describe('phase-2 mutation ledger manifest', () => {
       'contract_variant_changes_validator',
     ]) {
       expect(ledger).toContain(`\`${name}\``);
+    }
+  });
+
+  it('REGRET-ORACLE-MUTATION-LEDGER pins the three required controls and named killing tests', () => {
+    const ledger = readFileSync(REGRET_ORACLE_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/regret.test.ts', 'utf8');
+    for (const name of [
+      'comparator_hp_before_win',
+      'rollout_rng_shared',
+      'collapse_ignores_movement_order',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(tests).toContain(name);
     }
   });
 });

@@ -3217,9 +3217,6 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       if (context.state.activeCombatant !== command.actor) {
         throw new EncounterRuleError(`Combatant ${command.actor} is not the active combatant.`);
       }
-      if (combatant(context.state, command.actor).life === 'dead') {
-        throw new EncounterRuleError(`Combatant ${command.actor} cannot end a turn while dead.`);
-      }
       const currentIndex = context.state.activeInitiativeIndex;
       if (currentIndex === null) throw new EncounterRuleError('Initiative is not active.');
       processBoundary(context, command.actor, 'end');
