@@ -7,6 +7,25 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D329 — OWNER: seventh brainstorm round — fixtures, reports, endgame (2026-08-21)
+
+1. **No-routine builds (ep-208/213/228/241): presented to the owner ONE
+   BUILD AT A TIME with details and examples** (verbatim: "Give me the
+   details and examples one build at a time"). Supervisor starts with
+   ep-208.
+2. **Open spell choices resolve to the MOST ENGINE-TESTABLE option**
+   (gap-seeking bias), documented per patch.
+3. **Rolling tranche artifact includes recommendations + next bets AND
+   full methodology** (preregistrations, deviations, control ledgers).
+4. **Scaled-fleet budget: ~25 tables/day** (E07 report sizes within it).
+5. **E09 pattern promotion: metric threshold + supervisor typed-shape
+   check, batch-reported to the owner.**
+6. **Scorecard: automatic** — each newly-viable Colby build gets
+   soak-derived DPR compared to its private ceiling; drift flagged.
+7. **Personal session: not soon — AI-only remains the mode.** Keep
+   building; playtest-gated items stay unblocked per D323 but no
+   session scheduling.
+
 ## D328 — OWNER: sixth brainstorm round — E-series ops, Colby arm, Discord v0 (2026-08-21)
 
 Fifteen rulings from the round-6 collaborative brainstorm (two blind
