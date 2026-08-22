@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D337 — OWNER: curation overlay adopted; owner rulings resolve ambiguous records as data (2026-08-22)
+
+The owner offered judgement calls on the ambiguous-parameters residue,
+beginning with: Fire Bolt's flammable-object ignition clause is out-of-combat.
+
+Mechanism adopted: owner rulings are recorded in the PRIVATE repo at
+docs/curation-rulings.md (R1 = fire-bolt) and applied by the converter as a
+provenance-carrying overlay. The refusal rule is unchanged — a record leaves
+the ambiguous bucket only via a recorded ruling or a genuinely mechanical
+mapping, never a mapper guess. Rulings may be per-record or per-pattern; a
+curation worksheet enumerating the 183 ambiguous records by undetermined
+clause, grouped by ruling pattern, is queued behind the E05B run (D336.1
+machine-quiet) and behind wave 1 in lane order.
+
 ## D336 — OWNER: E05B at next quiet slot; wave 1 next; session integrity = closed-union decode + SHA fingerprint (2026-08-22)
 
 Round-11 answers.
