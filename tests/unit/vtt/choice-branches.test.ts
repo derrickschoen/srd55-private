@@ -4,7 +4,7 @@ import { canonicalJson } from '../../../src/commands/canonical-json';
 import type { CombatantProfile } from '../../../src/combat/combatant';
 import { EncounterRuleError, createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { SpellCastCommand } from '../../../src/combat/spells/types';
-import type { SpellOperation } from '../../../src/combat/spells/types';
+import type { NonCompositionSpellOperation, SpellOperation } from '../../../src/combat/spells/types';
 import { mulberry32, type Rng } from '../../../src/combat/random';
 import { damageType, feet } from '../../../src/combat/values';
 import {
@@ -49,7 +49,7 @@ function packWithSpells(specs: readonly SpellSpec[], creatureType?: string): Loa
   return result.content;
 }
 
-function fixedDamage(amount: number, type = 'Force'): SpellOperation {
+function fixedDamage(amount: number, type = 'Force'): NonCompositionSpellOperation {
   return {
     kind: 'damage_operation',
     delivery: { kind: 'automatic' },
@@ -94,7 +94,7 @@ function hitPoints(state: EncounterState, profile: CombatantProfile): number {
   return subject.hitPoints;
 }
 
-function branchTable(): SpellOperation {
+function branchTable(): NonCompositionSpellOperation {
   return {
     kind: 'random_branch', dieSides: 4,
     branches: [
@@ -251,7 +251,7 @@ describe('CAP-IMP-007 imported choice and branch operations', () => {
   });
 
   it('same_hook_order: persistent-area start hooks run before re-evaluated branches and condition removal', () => {
-    const area: SpellOperation = {
+    const area: NonCompositionSpellOperation = {
       kind: 'persistent_area', origin: 'anchored_to_caster',
       shape: { kind: 'emanation', radius: feet(10) }, durationRounds: 4, concentration: false,
       targetFilter: 'selected', includeOwner: false, difficultTerrain: false, movableFeet: null,
@@ -266,7 +266,7 @@ describe('CAP-IMP-007 imported choice and branch operations', () => {
       }],
       initialEffects: [],
     };
-    const removal: SpellOperation = {
+    const removal: NonCompositionSpellOperation = {
       kind: 'reevaluated_branch', hook: 'target_start', durationRounds: 1,
       operation: { kind: 'remove_condition', conditions: ['Poisoned'] },
     };

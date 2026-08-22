@@ -252,36 +252,36 @@ export type CompositionTargetResolution =
 
 export interface CompositionStep {
   readonly targetResolution: CompositionTargetResolution;
-  readonly operation: SpellOperation;
+  readonly operation: NonCompositionSpellOperation;
 }
 
 type CompositionOperationBase = {
   readonly kind: 'composition';
   readonly onRefusal: 'abort' | 'continue';
-  readonly steps: readonly [CompositionStep, ...CompositionStep[]];
+  readonly steps: readonly [CompositionStep, CompositionStep];
 };
 
 export type CompositionOperation = CompositionOperationBase & (
   | { readonly ordering: 'declaration_order' }
   | {
       readonly ordering: 'explicit';
-      /** Zero-based indices forming an exact permutation of `steps`. */
-      readonly order: readonly number[];
+      /** The only two zero-based permutations of the pair. */
+      readonly order: readonly [0, 1] | readonly [1, 0];
     }
 );
 
 /**
  * The SRD gives local sequences such as damage followed by a save
- * (spell-descriptions.txt:6747-6751), but it declares no general ordering for
- * an imported operation list. Packs therefore choose declaration order or an
- * explicit zero-based permutation; neither is an implicit engine default.
+ * (docs/srd/source/spell-descriptions.txt:6747-6751), but it declares no general ordering for
+ * an imported operation pair. Packs therefore choose declaration order or an
+ * explicit two-slot permutation; neither is an implicit engine default.
  */
 export const COMPOSITION_EVALUATION_ORDER = 'declared_ordering' as const;
 
 /**
  * The SRD gives spell-specific success/failure arms such as Thunderwave
- * (spell-descriptions.txt:7874-7886), but no general nested-operation refusal
- * rule. Every composition must declare whether a refused step aborts the
+ * (docs/srd/source/spell-descriptions.txt:7874-7886), but no general pair-operation refusal
+ * rule. Every pair must declare whether a refused step aborts the
  * composition atomically or is rolled back and followed by the next step.
  */
 export const COMPOSITION_REFUSAL_PROPAGATION = Object.freeze(['abort', 'continue'] as const);
@@ -294,28 +294,22 @@ export const COMPOSITION_REFUSAL_PROPAGATION = Object.freeze(['abort', 'continue
 export const COMPOSITION_STATE_VISIBILITY = 'live_prior_step_state' as const;
 
 /**
- * SRD effects sometimes retain one creature set (spell-descriptions.txt:7589-7599)
+ * SRD effects sometimes retain one creature set (docs/srd/source/spell-descriptions.txt:7589-7599)
  * and sometimes address creatures and objects separately
- * (spell-descriptions.txt:7874-7889). Each step therefore declares inheritance
+ * (docs/srd/source/spell-descriptions.txt:7874-7889). Each step therefore declares inheritance
  * or a re-resolution selector; the engine never guesses from operation kind.
  */
 export const COMPOSITION_TARGET_RESOLUTION = Object.freeze(['inherit', 're_resolve'] as const);
 
-/**
- * The SRD has no content-serialization recursion limit. Four nested
- * compositions cover the measured residue; deeper untrusted packs are refused
- * during import before reducer recursion begins.
- */
-export const MAX_COMPOSITION_DEPTH = 4 as const;
+export type SpellOperation = CompositionOperation | NonCompositionSpellOperation;
 
-export type SpellOperation =
-  | CompositionOperation
+export type NonCompositionSpellOperation =
   /** Chromatic Orb chooses a damage type at cast time (spell-descriptions.txt:1087-1090). */
-  | {
+  {
       readonly kind: 'caster_choice';
       readonly modes: readonly {
         readonly mode: string;
-        readonly operation: SpellOperation;
+        readonly operation: NonCompositionSpellOperation;
       }[];
     }
   | {
@@ -325,7 +319,7 @@ export type SpellOperation =
       readonly branches: readonly {
         readonly minimum: number;
         readonly maximum: number;
-        readonly operation: SpellOperation;
+        readonly operation: NonCompositionSpellOperation;
       }[];
     }
   | {
@@ -333,16 +327,16 @@ export type SpellOperation =
       readonly kind: 'target_branch';
       readonly branches: readonly {
         readonly predicate: { readonly kind: 'creature_type'; readonly creatureType: string };
-        readonly operation: SpellOperation;
+        readonly operation: NonCompositionSpellOperation;
       }[];
-      readonly otherwise: SpellOperation | null;
+      readonly otherwise: NonCompositionSpellOperation | null;
     }
   | {
       /** Confusion rolls anew at each target turn start (spell-descriptions.txt:1369-1375). */
       readonly kind: 'reevaluated_branch';
       readonly hook: 'target_start' | 'target_end';
       readonly durationRounds: number;
-      readonly operation: SpellOperation;
+      readonly operation: NonCompositionSpellOperation;
     }
   | ConditionLifecycleOperation
   | RollDiceModifierOperation
