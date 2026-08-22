@@ -7,6 +7,42 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D340 — OWNER: equipment carries stowed items with SRD interaction economy; clause-digest approvals; E05B closed (2026-08-22)
+
+Round-14 answers plus the pre-registered E05B closure.
+
+1. **Equipment model refined (extends D339.4): hands + worn PLUS CARRIED
+   equipable items.** A combatant can stow an equipped sword and equip a
+   carried crossbow. Action economy per SRD 5.2.1 (full text, "Interacting
+   with Things"): one object interaction free per turn during move or
+   action; a second requires the Utilize action. Stow/equip transitions
+   enter the command union with that economy. The first equipment lane
+   still ships the Heat Metal slice as its acceptance package (forced drop
+   to board, pickup, re-equip) — now with stow/equip included per the
+   owner's example. Armor don/doff stays out of combat scale
+   (armor-table.txt timings).
+
+2. **Curation approvals bind to an EXACT CLAUSE DIGEST.** A change to the
+   approved clause voids the approval and re-queues the record; unrelated
+   record changes do not churn approvals.
+
+3. **E05B executed and the line is CLOSED per D339.2's pre-registered
+   rule.** Result, read by the supervisor from report.json: 120 tables at
+   ceiling; the type checker passed 760 of 760 checked programs — zero
+   rejections even under the harder domains (5 monsters, 5-ft budgets,
+   partitioned spell pools). This number is contention-immune (checks run
+   locally) and is the basis for closure: the typed surface stays (zero
+   runtime cost, D331), no E05C. CONTAMINATION NOTE, recorded in full:
+   80/120 tables aborted and completion-dependent metrics (correction
+   rates 2.6% vs 4.2%, wall clock) are NOT trustworthy — Sol brainstorm
+   dispatches shared the codex quota mid-run at owner instruction, so
+   difficulty-aborts cannot be distinguished from contention-aborts.
+   INSTRUMENT GAP found at harvest: aborted table records carry no
+   abort-reason field; the capture schema records failure without cause.
+
+Namespace authority (round-14 Q1) is NOT ruled — the owner asked for
+context and details; the decision stays open.
+
 ## D339 — OWNER: reject-record-load-rest, E05B closes the line, denominator 837, hands+worn with item registry (2026-08-22)
 
 Round-13 answers, all four on recommendation. Brainstormed collaboratively
