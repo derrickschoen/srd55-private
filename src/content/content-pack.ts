@@ -140,6 +140,11 @@ const operationRequiredFields = {
   armed_weapon_hit_rider: ['damage', 'durationRounds', 'concentration', 'persistence', 'saveGatedRider'],
   persistent_area: ['origin', 'shape', 'durationRounds', 'concentration', 'targetFilter', 'includeOwner', 'difficultTerrain', 'movableFeet', 'hooks', 'initialEffects'],
   world_operations: ['operations'],
+  teleport: ['subject', 'maximumDistanceFeet', 'destination'],
+  forced_movement: ['direction', 'origin', 'distanceFeet', 'save'],
+  movement_mode: ['grants', 'difficultTerrainImmunity', 'magicalSpeedReductionImmunity', 'durationRounds', 'concentration', 'expiresAt'],
+  movement_region: ['region', 'difficultTerrain', 'entry', 'damage'],
+  speed_modification: ['modification', 'durationRounds', 'concentration', 'expiresAt'],
   attack_damage: ['attackKind', 'damageType', 'dice', 'rider'],
   attack_then_save_damage: ['attackKind', 'attackDamageType', 'attackDice', 'saveAbility', 'saveDamageType', 'saveDice', 'onSaveSuccess', 'burstShape', 'burstRadiusFeet'],
   attack_damage_over_time: ['attackKind', 'damageType', 'initialDice', 'missDamage', 'laterDice', 'laterTiming'],
@@ -380,6 +385,67 @@ const armedWeaponHitRiderSchema = z.strictObject({
   }
 });
 
+const gridCellSchema = z.strictObject({ column: nonNegativeInteger, row: nonNegativeInteger });
+const movementDurationShape = {
+  durationRounds: positiveInteger.max(1_000_000),
+  concentration: z.boolean(),
+  expiresAt: z.enum(['source_start', 'source_end', 'target_start', 'target_end']),
+} as const;
+const speedChangeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('set'), speedFeet: nonNegativeInteger.max(100_000) }),
+  z.strictObject({ kind: z.literal('increase'), feet: positiveInteger.max(100_000) }),
+  z.strictObject({
+    kind: z.literal('reduce'),
+    reduction: z.discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('feet'), feet: positiveInteger.max(100_000) }),
+      z.strictObject({ kind: z.literal('multiplier'), multiplier: z.number().finite().min(0).max(1) }),
+    ]),
+  }),
+]);
+const movementModeGrantSchema = z.strictObject({
+  mode: z.enum(['flying', 'climbing', 'swimming']),
+  speed: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('fixed'), feet: positiveInteger.max(100_000) }),
+    z.strictObject({ kind: z.literal('walking_speed') }),
+  ]),
+});
+const movementDamageSchema = z.strictObject({
+  damageType: z.enum(damageTypes),
+  dice: z.strictObject({
+    count: positiveInteger.max(100), sides: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(10), z.literal(12), z.literal(20)]),
+    modifier: safeInteger.min(-1_000_000).max(1_000_000),
+  }),
+  unitFeet: z.literal(5),
+  partialUnit: z.literal('completed_units_only'),
+});
+const teleportOperationSchema = z.strictObject({
+  kind: z.literal('teleport'), subject: z.enum(['caster', 'targets']),
+  maximumDistanceFeet: nonNegativeInteger.max(100_000),
+  destination: z.strictObject({
+    requireUnoccupied: z.literal(true), requireOccupiable: z.literal(true), requireLineOfSight: z.boolean(),
+  }),
+});
+const forcedMovementOperationSchema = z.strictObject({
+  kind: z.literal('forced_movement'), direction: z.enum(['away', 'toward']),
+  origin: z.enum(['caster', 'selected_point']), distanceFeet: positiveInteger.max(100_000),
+  save: z.union([z.null(), z.strictObject({
+    ability: z.enum(abilities), rollMode: z.enum(['normal', 'advantage', 'disadvantage']), moveOn: z.literal('failure'),
+  })]),
+});
+const movementModeOperationSchema = z.strictObject({
+  kind: z.literal('movement_mode'), grants: z.array(movementModeGrantSchema).min(1).max(3),
+  difficultTerrainImmunity: z.boolean(), magicalSpeedReductionImmunity: z.boolean(),
+  ...movementDurationShape,
+});
+const movementRegionOperationSchema = z.strictObject({
+  kind: z.literal('movement_region'),
+  region: z.strictObject({ id: identifier, cells: z.array(gridCellSchema).min(1).max(10_000) }),
+  difficultTerrain: z.boolean(), entry: z.enum(['allowed', 'blocked']), damage: movementDamageSchema.nullable(),
+});
+const speedModificationOperationSchema = z.strictObject({
+  kind: z.literal('speed_modification'), modification: speedChangeSchema, ...movementDurationShape,
+});
+
 function structurallyValidOperation(value: unknown): value is SpellOperation {
   const operation = objectRecord(value);
   const kind = operationKind(value);
@@ -393,6 +459,11 @@ function structurallyValidOperation(value: unknown): value is SpellOperation {
   if (typedKind === 'world_operations') return worldOperationSpellSchema.safeParse(value).success;
   if (typedKind === 'damage_operation') return damageOperationSchema.safeParse(value).success;
   if (typedKind === 'armed_weapon_hit_rider') return armedWeaponHitRiderSchema.safeParse(value).success;
+  if (typedKind === 'teleport') return teleportOperationSchema.safeParse(value).success;
+  if (typedKind === 'forced_movement') return forcedMovementOperationSchema.safeParse(value).success;
+  if (typedKind === 'movement_mode') return movementModeOperationSchema.safeParse(value).success;
+  if (typedKind === 'movement_region') return movementRegionOperationSchema.safeParse(value).success;
+  if (typedKind === 'speed_modification') return speedModificationOperationSchema.safeParse(value).success;
   const required = operationRequiredFields[typedKind];
   if (required.some((field) => !Object.hasOwn(operation, field))) return false;
   const allowed = new Set<string>([

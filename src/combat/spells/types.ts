@@ -10,6 +10,7 @@ import type {
 import type { AreaTemplate } from '../templates';
 import type { DamageRequest } from '../resolution';
 import type { CombatantId, DamageType, LimitedResourcePoolId, WorldObjectId } from '../values';
+import type { GridCell } from '../grid';
 import type { LightLevel, WorldObjectChanges, WorldObjectInput } from '../world-objects';
 
 export type SpellLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
@@ -178,6 +179,61 @@ export type SpellOperation =
             readonly damage: DamageRequest;
           }
       )[];
+    }
+  | {
+      readonly kind: 'teleport';
+      readonly subject: 'caster' | 'targets';
+      readonly maximumDistanceFeet: number;
+      readonly destination: {
+        readonly requireUnoccupied: true;
+        readonly requireOccupiable: true;
+        readonly requireLineOfSight: boolean;
+      };
+    }
+  | {
+      readonly kind: 'forced_movement';
+      readonly direction: 'away' | 'toward';
+      readonly origin: 'caster' | 'selected_point';
+      readonly distanceFeet: number;
+      readonly save: null | {
+        readonly ability: Ability;
+        readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
+        readonly moveOn: 'failure';
+      };
+    }
+  | {
+      readonly kind: 'movement_mode';
+      readonly grants: readonly {
+        readonly mode: 'flying' | 'climbing' | 'swimming';
+        readonly speed: { readonly kind: 'fixed'; readonly feet: number } | { readonly kind: 'walking_speed' };
+      }[];
+      readonly difficultTerrainImmunity: boolean;
+      readonly magicalSpeedReductionImmunity: boolean;
+      readonly durationRounds: number;
+      readonly concentration: boolean;
+      readonly expiresAt: 'source_start' | 'source_end' | 'target_start' | 'target_end';
+    }
+  | {
+      readonly kind: 'movement_region';
+      readonly region: { readonly id: string; readonly cells: readonly GridCell[] };
+      readonly difficultTerrain: boolean;
+      readonly entry: 'allowed' | 'blocked';
+      readonly damage: null | {
+        readonly damageType: DamageType;
+        readonly dice: { readonly count: number; readonly sides: 4 | 6 | 8 | 10 | 12 | 20; readonly modifier: number };
+        readonly unitFeet: 5;
+        readonly partialUnit: 'completed_units_only';
+      };
+    }
+  | {
+      readonly kind: 'speed_modification';
+      readonly modification:
+        | { readonly kind: 'set'; readonly speedFeet: number }
+        | { readonly kind: 'increase'; readonly feet: number }
+        | { readonly kind: 'reduce'; readonly reduction: { readonly kind: 'feet'; readonly feet: number } | { readonly kind: 'multiplier'; readonly multiplier: number } };
+      readonly durationRounds: number;
+      readonly concentration: boolean;
+      readonly expiresAt: 'source_start' | 'source_end' | 'target_start' | 'target_end';
     }
   | {
       readonly kind: 'attack_damage';
@@ -470,6 +526,11 @@ export const SPELL_OPERATION_KINDS = [
   'armed_weapon_hit_rider',
   'persistent_area',
   'world_operations',
+  'teleport',
+  'forced_movement',
+  'movement_mode',
+  'movement_region',
+  'speed_modification',
   'attack_damage',
   'attack_then_save_damage',
   'attack_damage_over_time',
@@ -534,6 +595,8 @@ export interface SpellCastCommand {
   readonly spellcastingModifier: number;
   readonly targets: readonly CombatantId[];
   readonly area: AreaTemplate | null;
+  /** Chosen destination for teleportation, or selected origin for forced movement. */
+  readonly spatialPoint?: GridCell;
   readonly weaponAttack: null | {
     readonly attackBonus: number;
     readonly damageType: DamageType;

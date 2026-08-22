@@ -710,18 +710,63 @@ export function effectiveSkillModifier(
       : total, base);
 }
 
+function movementEffects(state: EncounterState, id: CombatantId): readonly Extract<EffectPayload, { readonly kind: 'movement_modifier' }>[] {
+  return state.effects
+    .filter((effect) => effect.targets.includes(id) && effect.payload.kind === 'movement_modifier')
+    .map((effect) => effect.payload as Extract<EffectPayload, { readonly kind: 'movement_modifier' }>);
+}
+
+/**
+ * Movement modifiers resolve in effect-creation order. Sets replace the
+ * every speed currently available; later increases and reductions then apply.
+ * A later fixed mode grant can therefore supersede an earlier reduction, while
+ * a later reduction changes that grant. Any active
+ * magical-reduction immunity suppresses all declared reductions. Finally, the
+ * fastest granted movement mode supplies the usable turn speed.
+ */
 function effectiveSpeed(state: EncounterState, id: CombatantId): number {
   const base = combatant(state, id).profile.rules.speed;
   const penalty = conditionSpeedPenaltyFeet(combatantConditions(state, id));
   if (penalty === Number.NEGATIVE_INFINITY) return 0;
-  const spellDelta = state.effects.reduce(
-    (total, effect) =>
-      effect.targets.includes(id) && effect.payload.kind === 'movement_modifier'
-        ? total + effect.payload.speedDeltaFeet
-        : total,
-    0,
-  );
-  return Math.max(0, base + penalty + spellDelta);
+  const modifiers = movementEffects(state, id);
+  const immuneToReduction = modifiers.some((payload) =>
+    'magicalSpeedReductionImmunity' in payload && payload.magicalSpeedReductionImmunity);
+  const speeds = new Map<'walking' | 'flying' | 'climbing' | 'swimming', number>([['walking', base + penalty]]);
+  for (const payload of modifiers) {
+    if ('speedDeltaFeet' in payload) {
+      speeds.set('walking', (speeds.get('walking') ?? 0) + payload.speedDeltaFeet);
+      continue;
+    }
+    switch (payload.speedChange.kind) {
+      case 'set':
+        for (const mode of speeds.keys()) speeds.set(mode, payload.speedChange.speedFeet);
+        break;
+      case 'increase':
+        for (const [mode, speed] of speeds) speeds.set(mode, speed + payload.speedChange.feet);
+        break;
+      case 'reduce':
+        if (!immuneToReduction) {
+          for (const [mode, speed] of speeds) {
+            speeds.set(mode, payload.speedChange.reduction.kind === 'feet'
+              ? speed - payload.speedChange.reduction.feet
+              : speed * payload.speedChange.reduction.multiplier);
+          }
+        }
+        break;
+    }
+    const walking = Math.max(0, speeds.get('walking') ?? 0);
+    for (const grant of payload.modeGrants) {
+      speeds.set(grant.mode, grant.speed.kind === 'fixed' ? grant.speed.feet : walking);
+    }
+  }
+  return Math.max(0, ...speeds.values());
+}
+
+function ignoresDifficultTerrain(state: EncounterState, id: CombatantId): boolean {
+  return movementEffects(state, id).some((payload) =>
+    'modeGrants' in payload && (
+      payload.difficultTerrainImmunity || payload.modeGrants.some((grant) => grant.mode === 'flying')
+    ));
 }
 
 function effectiveArmorClass(state: EncounterState, id: CombatantId): ReturnType<typeof armorClass> {
@@ -799,7 +844,9 @@ function worldObjectOccupiesCell(object: WorldObject, cell: GridCell): boolean {
 
 function movementBlocked(state: EncounterState, cell: GridCell): boolean {
   return state.blockedCells.some((candidate) => cellKey(candidate) === cellKey(cell)) ||
-    state.worldObjects.some((object) => object.blocking.movement && worldObjectOccupiesCell(object, cell));
+    state.worldObjects.some((object) => object.blocking.movement && worldObjectOccupiesCell(object, cell)) ||
+    (state.environment.movementRegions ?? []).some((region) =>
+      region.entry === 'blocked' && region.cells.some((candidate) => cellKey(candidate) === cellKey(cell)));
 }
 
 function templateBlockedCells(state: EncounterState): readonly GridCell[] {
@@ -1633,7 +1680,7 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
           combatant(state, candidate.combatantId).life !== 'dead' &&
           cellKey(candidate.position) === cellKey(to),
       );
-      const difficult = isEnvironmentDifficultTerrain(state.environment, to) || state.persistentAreas.some((area) => {
+      const difficult = !ignoresDifficultTerrain(state, actorId) && (isEnvironmentDifficultTerrain(state.environment, to) || state.persistentAreas.some((area) => {
         if (!area.difficultTerrain) return false;
         const origin = area.origin;
         const anchor = origin.kind === 'anchored'
@@ -1642,7 +1689,7 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
             ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
             : null;
         return persistentAreaContains(area, to, anchor, state);
-      });
+      }));
       return { kind: 'enterable', cost: feet(difficult ? 10 : 5), canEnd: !occupied };
     },
   };
@@ -1908,6 +1955,43 @@ function createPersistentArea(context: ReductionContext, actor: CombatantId, inp
   return id;
 }
 
+/**
+ * SRD Spike Growth says "for every 5 feet" (spell-descriptions.txt:7309-7312)
+ * and is silent about a partial increment. The grid therefore charges only a
+ * completed 5-foot entered cell; an incomplete increment causes no damage.
+ */
+export const MOVEMENT_DAMAGE_PARTIAL_UNIT_RULE = 'completed_units_only' as const;
+
+/**
+ * Stable entered-cell order: movement regions by id first, then persistent
+ * areas by their creation sequence through membership reevaluation.
+ */
+function processEnteredCell(context: ReductionContext, mover: CombatantId): void {
+  const position = token(context.state, mover).position;
+  const regions = [...(context.state.environment.movementRegions ?? [])]
+    .filter((region) => region.damage !== null && region.cells.some((cell) => cellKey(cell) === cellKey(position)))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  for (const region of regions) {
+    if (region.damage === null || combatant(context.state, mover).life !== 'living') continue;
+    const request: DamageRequest = {
+      terms: [{
+        type: region.damage.damageType,
+        dice: {
+          count: region.damage.dice.count,
+          sides: dieSides(region.damage.dice.sides),
+          modifier: region.damage.dice.modifier,
+        },
+      }],
+      critical: false,
+      responses: [],
+    };
+    const result = resolveDamage({ ...request, responses: targetDamageResponses(context.state, mover, request) }, context.rng);
+    applyDamage(context, region.source, mover, result.total);
+    concentrationCheck(context, mover, result.total);
+  }
+  reevaluatePersistentAreaMembership(context);
+}
+
 function processMove(
   context: ReductionContext,
   command: Extract<EncounterCommand, { readonly type: 'move' }>,
@@ -1959,7 +2043,7 @@ function processMove(
     };
     traversed.push({ ...step.to });
     spent = feet(spent + step.cost);
-    reevaluatePersistentAreaMembership(context);
+    processEnteredCell(context, command.actor);
     if (combatant(context.state, command.actor).life !== 'living') break;
   }
   const movement = spendMovement(subject.turn.movement, spent);
@@ -3849,34 +3933,46 @@ function grantTemporaryHitPoints(
   });
 }
 
-function pushAway(
-  state: EncounterState,
+/**
+ * Thunderwave and Gust of Wind state push distances but the SRD is silent on
+ * collision handling (spell-descriptions.txt:4034-4039, 7878-7883). Product
+ * rule: resolve each entered cell and stop before the first map edge,
+ * movement-blocking object/region, or occupied cell.
+ */
+export const FORCED_MOVEMENT_OBSTACLE_RULE = 'stop_before_first_blocker' as const;
+
+function forceMove(
+  context: ReductionContext,
+  origin: GridCell,
   source: CombatantId,
   target: CombatantId,
-  feetToPush: number,
-): EncounterState {
-  const from = token(state, source).position;
-  const subjectToken = token(state, target);
-  const columnStep = Math.sign(subjectToken.position.column - from.column);
-  const rowStep = Math.sign(subjectToken.position.row - from.row);
-  if (columnStep === 0 && rowStep === 0) return state;
+  distanceFeet: number,
+  direction: 'away' | 'toward',
+): void {
+  const subjectToken = token(context.state, target);
+  const sign = direction === 'away' ? 1 : -1;
+  const columnStep = Math.sign(subjectToken.position.column - origin.column) * sign;
+  const rowStep = Math.sign(subjectToken.position.row - origin.row) * sign;
+  if (columnStep === 0 && rowStep === 0) return;
   let position = subjectToken.position;
-  const occupied = new Set(state.tokens.filter((entry) => entry.combatantId !== target).map((entry) => cellKey(entry.position)));
-  const blocked = new Set([
-    ...state.blockedCells,
-    ...state.worldObjects.flatMap((object) => object.blocking.movement ? object.footprint : []),
-  ].map(cellKey));
-  for (let distance = 0; distance < feetToPush; distance += 5) {
+  const traversed: GridCell[] = [];
+  const occupied = new Set(context.state.tokens.filter((entry) => entry.combatantId !== target).map((entry) => cellKey(entry.position)));
+  for (let distance = 0; distance + 5 <= distanceFeet; distance += 5) {
     const candidate = { column: position.column + columnStep, row: position.row + rowStep };
-    if (!isCellInside(state.bounds, candidate) || blocked.has(cellKey(candidate)) || occupied.has(cellKey(candidate))) break;
+    if (!isCellInside(context.state.bounds, candidate) || movementBlocked(context.state, candidate) || occupied.has(cellKey(candidate))) break;
     position = candidate;
+    context.state = {
+      ...context.state,
+      tokens: context.state.tokens.map((entry) =>
+        entry.combatantId === target ? { ...entry, position: { ...position } } : entry),
+    };
+    traversed.push({ ...position });
+    processEnteredCell(context, target);
+    if (combatant(context.state, target).life !== 'living') break;
   }
-  return {
-    ...state,
-    tokens: state.tokens.map((entry) =>
-      entry.combatantId === target ? { ...entry, position } : entry,
-    ),
-  };
+  const movement = combatant(context.state, target).turn.movement;
+  emit(context, { type: 'movement_completed', combatant: target, path: traversed, spent: feet(0), remaining: movement.remaining });
+  void source;
 }
 
 function resolveSpellAttack(
@@ -4448,6 +4544,129 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
       }
       return;
     }
+    case 'teleport': {
+      const destination = command.spatialPoint;
+      if (destination === undefined) throw new EncounterRuleError(`${definition.name} requires a teleport destination.`);
+      const movers = operation.subject === 'caster' ? [command.actor] : targets;
+      if (movers.length !== 1) throw new EncounterRuleError(`${definition.name} teleports exactly one creature to one cell.`);
+      const mover = movers[0] as CombatantId;
+      const casterPosition = token(context.state, command.actor).position;
+      const occupied = context.state.tokens.some((placed) =>
+        placed.combatantId !== mover && combatant(context.state, placed.combatantId).life !== 'dead' &&
+        cellKey(placed.position) === cellKey(destination));
+      if (
+        !isCellInside(context.state.bounds, destination) ||
+        gridDistance(casterPosition, destination) > operation.maximumDistanceFeet ||
+        movementBlocked(context.state, destination) ||
+        occupied ||
+        (operation.destination.requireLineOfSight && !hasLineOfSight(context.state, casterPosition, destination))
+      ) throw new EncounterRuleError(`${definition.name} requires an unoccupied, occupiable destination satisfying its declared constraint.`);
+      context.state = {
+        ...context.state,
+        tokens: context.state.tokens.map((placed) => placed.combatantId === mover
+          ? { ...placed, position: { ...destination } }
+          : placed),
+      };
+      // Teleport has no intervening cells; only final area membership changes.
+      reevaluatePersistentAreaMembership(context);
+      const movement = combatant(context.state, mover).turn.movement;
+      emit(context, { type: 'movement_completed', combatant: mover, path: [{ ...destination }], spent: feet(0), remaining: movement.remaining });
+      return;
+    }
+    case 'forced_movement': {
+      const origin = operation.origin === 'caster'
+        ? token(context.state, command.actor).position
+        : command.spatialPoint;
+      if (origin === undefined) throw new EncounterRuleError(`${definition.name} requires a forced-movement origin point.`);
+      for (const target of targets) {
+        if (operation.save !== null) {
+          const save = resolveTargetSave(
+            context, command.actor, target, operation.save.ability, command.saveDc, operation.save.rollMode, null,
+          );
+          if (save.outcome !== operation.save.moveOn) continue;
+        }
+        forceMove(context, origin, command.actor, target, operation.distanceFeet, operation.direction);
+      }
+      return;
+    }
+    case 'movement_mode': {
+      const before = new Map(targets.map((target) => [target, effectiveSpeed(context.state, target)] as const));
+      applySpellEffect(context, definition, command, {
+        payload: {
+          kind: 'movement_modifier', speedChange: { kind: 'increase', feet: 0 },
+          modeGrants: operation.grants, difficultTerrainImmunity: operation.difficultTerrainImmunity,
+          magicalSpeedReductionImmunity: operation.magicalSpeedReductionImmunity,
+        },
+        target: 'targets', concentration: operation.concentration, durationRounds: operation.durationRounds,
+        expiresAt: operation.expiresAt,
+      }, targets);
+      for (const target of targets) {
+        const subject = combatant(context.state, target);
+        const nextSpeed = feet(effectiveSpeed(context.state, target));
+        const prior = before.get(target) ?? nextSpeed;
+        context.state = replaceCombatant(context.state, {
+          ...subject,
+          turn: {
+            ...subject.turn,
+            movement: {
+              speed: nextSpeed,
+              spent: subject.turn.movement.spent,
+              remaining: feet(Math.max(0, subject.turn.movement.remaining + nextSpeed - prior)),
+            },
+          },
+        });
+      }
+      return;
+    }
+    case 'movement_region': {
+      assertEnvironmentRegion(context.state.bounds, operation.region);
+      const movementRegions = (context.state.environment.movementRegions ?? [])
+        .filter((region) => region.id !== operation.region.id);
+      const difficultTerrainRegions = context.state.environment.difficultTerrainRegions
+        .filter((region) => region.id !== operation.region.id);
+      context.state = {
+        ...context.state,
+        environment: {
+          ...context.state.environment,
+          movementRegions: [...movementRegions, {
+            ...structuredClone(operation.region), source: command.actor,
+            entry: operation.entry, damage: structuredClone(operation.damage),
+          }],
+          difficultTerrainRegions: operation.difficultTerrain
+            ? [...difficultTerrainRegions, structuredClone(operation.region)]
+            : difficultTerrainRegions,
+        },
+      };
+      return;
+    }
+    case 'speed_modification': {
+      const before = new Map(targets.map((target) => [target, effectiveSpeed(context.state, target)] as const));
+      applySpellEffect(context, definition, command, {
+        payload: {
+          kind: 'movement_modifier', speedChange: operation.modification, modeGrants: [],
+          difficultTerrainImmunity: false, magicalSpeedReductionImmunity: false,
+        },
+        target: 'targets', concentration: operation.concentration, durationRounds: operation.durationRounds,
+        expiresAt: operation.expiresAt,
+      }, targets);
+      for (const target of targets) {
+        const subject = combatant(context.state, target);
+        const nextSpeed = feet(effectiveSpeed(context.state, target));
+        const prior = before.get(target) ?? nextSpeed;
+        context.state = replaceCombatant(context.state, {
+          ...subject,
+          turn: {
+            ...subject.turn,
+            movement: {
+              speed: nextSpeed,
+              spent: subject.turn.movement.spent,
+              remaining: feet(Math.max(0, subject.turn.movement.remaining + nextSpeed - prior)),
+            },
+          },
+        });
+      }
+      return;
+    }
     case 'attack_damage':
       for (const target of targets) {
         resolveSpellAttack(
@@ -4562,7 +4781,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
           applySpellEffect(context, definition, command, operation.riderOnFailure, [target]);
         }
         if (save.outcome === 'failure' && operation.pushFeetOnFailure > 0) {
-          context.state = pushAway(context.state, command.actor, target, operation.pushFeetOnFailure);
+          forceMove(context, token(context.state, command.actor).position, command.actor, target, operation.pushFeetOnFailure, 'away');
         }
       }
       return;
@@ -4670,7 +4889,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
       for (const target of targets) {
         const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
         if (save.outcome === 'failure') {
-          context.state = pushAway(context.state, command.actor, target, operation.pushFeetOnFailure);
+          forceMove(context, token(context.state, command.actor).position, command.actor, target, operation.pushFeetOnFailure, 'away');
         }
       }
       applySpellEffect(context, definition, command, operation.effect, targets);

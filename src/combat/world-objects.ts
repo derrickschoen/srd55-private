@@ -64,11 +64,26 @@ export interface EncounterEnvironment {
   /** Later entries take precedence when light regions overlap. */
   readonly lightRegions: readonly LightRegion[];
   readonly difficultTerrainRegions: readonly EnvironmentRegion[];
+  /** Imported movement hazards. Region ids are the stable execution tie-breaker. */
+  readonly movementRegions?: readonly MovementRegion[];
+}
+
+export interface MovementRegion extends EnvironmentRegion {
+  readonly source: CombatantId;
+  readonly entry: 'allowed' | 'blocked';
+  readonly damage: null | {
+    readonly damageType: DamageType;
+    readonly dice: { readonly count: number; readonly sides: 4 | 6 | 8 | 10 | 12 | 20; readonly modifier: number };
+    readonly unitFeet: 5;
+    /** SRD says "for every 5 feet" but does not specify partial increments. */
+    readonly partialUnit: 'completed_units_only';
+  };
 }
 
 export const EMPTY_ENCOUNTER_ENVIRONMENT: EncounterEnvironment = Object.freeze({
   lightRegions: Object.freeze([]),
   difficultTerrainRegions: Object.freeze([]),
+  movementRegions: Object.freeze([]),
 });
 
 export type WorldObjectChanges = Partial<Pick<

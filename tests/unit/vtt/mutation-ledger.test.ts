@@ -34,6 +34,8 @@ const CAP_019_LEDGER_PATH = 'docs/audits/2026-08-21-cap-019-typed-effects-mutati
 const CAP_019_TAIL_SWEEP_LEDGER_PATH = 'docs/audits/2026-08-21-cap-019-tail-sweep-mutation-ledger.md';
 const SPELL_BATCH_TWO_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-spell-batch-2-mutation-ledger.md';
 const TYPED_JS_LEDGER_PATH = 'docs/audits/2026-08-21-typed-js-turn-program-mutation-ledger.md';
+const SPATIAL_MOVEMENT_LEDGER_PATH = 'docs/audits/2026-08-21-spatial-movement-mutation-ledger.md';
+const E04_CONTEXT_LEDGER_PATH = 'docs/audits/2026-08-21-e04-context-compression-early-stop-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -337,5 +339,32 @@ describe('phase-2 mutation ledger manifest', () => {
     }
     expect(ledger.match(/exit 1/gu)).toHaveLength(3);
     expect(ledger).toContain('All controls were applied to production source one at a time');
+  });
+
+  it('SPATIAL-MOVEMENT-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
+    const ledger = readFileSync(SPATIAL_MOVEMENT_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/spatial-movement.test.ts', 'utf8');
+    for (const name of [
+      'teleport_traverses_cells',
+      'push_ignores_obstacle',
+      'movement_damage_off_by_one',
+      'flight_ignores_immunity',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(tests).toContain(name);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(4);
+    expect(ledger).toContain('All four production mutations were restored');
+  });
+
+  it('E04-CONTEXT-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {
+    const ledger = readFileSync(E04_CONTEXT_LEDGER_PATH, 'utf8');
+    const projectionTests = readFileSync('tests/unit/bridge/projection-transport.test.ts', 'utf8');
+    const experimentTests = readFileSync('tests/unit/vtt/experiment-orchestrator.test.ts', 'utf8');
+    for (const name of ['delta_skips_hash_refusal', 'early_stop_before_half', 'bytes_counter_constant']) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(`${projectionTests}\n${experimentTests}`).toContain(name);
+    }
+    expect(ledger).toContain('Each mutation was applied alone, killed by its named test, and restored');
   });
 });

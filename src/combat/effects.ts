@@ -299,6 +299,19 @@ export type EffectPayload =
       readonly speedDeltaFeet: number;
     }
   | {
+      readonly kind: 'movement_modifier';
+      readonly speedChange: 
+        | { readonly kind: 'set'; readonly speedFeet: number }
+        | { readonly kind: 'increase'; readonly feet: number }
+        | { readonly kind: 'reduce'; readonly reduction: { readonly kind: 'feet'; readonly feet: number } | { readonly kind: 'multiplier'; readonly multiplier: number } };
+      readonly modeGrants: readonly {
+        readonly mode: 'flying' | 'climbing' | 'swimming';
+        readonly speed: { readonly kind: 'fixed'; readonly feet: number } | { readonly kind: 'walking_speed' };
+      }[];
+      readonly difficultTerrainImmunity: boolean;
+      readonly magicalSpeedReductionImmunity: boolean;
+    }
+  | {
       readonly kind: 'damage_rider';
       readonly damage: DamageRequest;
       readonly appliesTo: 'next_attack_against_target' | 'weapon_attack_by_target';

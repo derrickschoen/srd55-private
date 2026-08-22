@@ -407,6 +407,11 @@
             "armed_weapon_hit_rider",
             "persistent_area",
             "world_operations",
+            "teleport",
+            "forced_movement",
+            "movement_mode",
+            "movement_region",
+            "speed_modification",
             "attack_damage",
             "attack_then_save_damage",
             "attack_damage_over_time",
@@ -451,6 +456,21 @@
         },
         {
           "$ref": "#/$defs/operation-world_operations"
+        },
+        {
+          "$ref": "#/$defs/operation-teleport"
+        },
+        {
+          "$ref": "#/$defs/operation-forced_movement"
+        },
+        {
+          "$ref": "#/$defs/operation-movement_mode"
+        },
+        {
+          "$ref": "#/$defs/operation-movement_region"
+        },
+        {
+          "$ref": "#/$defs/operation-speed_modification"
         },
         {
           "$ref": "#/$defs/operation-attack_damage"
@@ -1091,6 +1111,61 @@
             }
           }
         }
+      }
+    },
+    "operation-teleport": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "subject", "maximumDistanceFeet", "destination"],
+      "properties": {
+        "kind": { "const": "teleport" },
+        "subject": { "enum": ["caster", "targets"] },
+        "maximumDistanceFeet": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "destination": {
+          "type": "object", "additionalProperties": false,
+          "required": ["requireUnoccupied", "requireOccupiable", "requireLineOfSight"],
+          "properties": {
+            "requireUnoccupied": { "const": true }, "requireOccupiable": { "const": true },
+            "requireLineOfSight": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "operation-forced_movement": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "direction", "origin", "distanceFeet", "save"],
+      "properties": {
+        "kind": { "const": "forced_movement" }, "direction": { "enum": ["away", "toward"] },
+        "origin": { "enum": ["caster", "selected_point"] },
+        "distanceFeet": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "save": { "type": ["object", "null"] }
+      }
+    },
+    "operation-movement_mode": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "grants", "difficultTerrainImmunity", "magicalSpeedReductionImmunity", "durationRounds", "concentration", "expiresAt"],
+      "properties": {
+        "kind": { "const": "movement_mode" }, "grants": { "type": "array", "minItems": 1, "maxItems": 3 },
+        "difficultTerrainImmunity": { "type": "boolean" }, "magicalSpeedReductionImmunity": { "type": "boolean" },
+        "durationRounds": { "type": "integer", "minimum": 1 }, "concentration": { "type": "boolean" },
+        "expiresAt": { "enum": ["source_start", "source_end", "target_start", "target_end"] }
+      }
+    },
+    "operation-movement_region": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "region", "difficultTerrain", "entry", "damage"],
+      "properties": {
+        "kind": { "const": "movement_region" }, "region": { "type": "object" },
+        "difficultTerrain": { "type": "boolean" }, "entry": { "enum": ["allowed", "blocked"] },
+        "damage": { "type": ["object", "null"] }
+      }
+    },
+    "operation-speed_modification": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "modification", "durationRounds", "concentration", "expiresAt"],
+      "properties": {
+        "kind": { "const": "speed_modification" }, "modification": { "type": "object" },
+        "durationRounds": { "type": "integer", "minimum": 1 }, "concentration": { "type": "boolean" },
+        "expiresAt": { "enum": ["source_start", "source_end", "target_start", "target_end"] }
       }
     },
     "operation-attack_damage": {

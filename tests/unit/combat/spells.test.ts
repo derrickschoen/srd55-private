@@ -673,6 +673,13 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
       const term = damage.damage.terms[0];
       return term === undefined ? null : [term.dice.count, term.dice.sides];
     }
+    case 'movement_region':
+      return operation.damage === null ? null : [operation.damage.dice.count, operation.damage.dice.sides];
+    case 'teleport':
+    case 'forced_movement':
+    case 'movement_mode':
+    case 'speed_modification':
+      return null;
     case 'attack_damage':
     case 'save_damage':
     case 'healing':
@@ -730,6 +737,12 @@ function operationPerSlot(definition: SpellDefinition): number {
     }
     case 'world_operations':
       // World-operation damage uses a concrete DamageRequest and never scales by slot.
+      return 0;
+    case 'teleport':
+    case 'forced_movement':
+    case 'movement_mode':
+    case 'movement_region':
+    case 'speed_modification':
       return 0;
     case 'attack_damage':
     case 'save_damage':
