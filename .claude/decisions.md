@@ -7,6 +7,30 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D336 — OWNER: E05B at next quiet slot; wave 1 next; session integrity = closed-union decode + SHA fingerprint (2026-08-22)
+
+Round-11 answers.
+
+1. **E05B live run launches at the next quiet slot** — after the pairwise
+   remainder measurement is harvested and merged, the machine goes quiet,
+   the 120-table run executes alone so its wall-clock metrics are honest,
+   and implementation lanes resume after.
+
+2. **Wave 1 (trust boundary) takes the next lane slot** — real
+   value-validating schemas for the unvalidated operation kinds, one-source
+   schema generation, bounded SpeedFeet, and the session hardening below.
+   Targeting vocabulary and wave 2 queue behind it.
+
+3. **Session integrity mechanism (owner's own design, modifying D334.2):
+   closed-union decode of transition kinds PLUS a SHA fingerprint embedded
+   in the file to authenticate it.** Recorded consequence, stated at ruling
+   time: a fingerprint any writer can recompute authenticates against
+   corruption and transport damage — tamper-EVIDENCE, not forgery-proofing.
+   D334.2's "not recomputable by the writer" is relaxed to this by the
+   owner's choice; cryptographic signing (the DM-keypair option) was
+   presented and not taken, and can be revisited when player browsers
+   exist.
+
 ## D335 — OWNER: general composition REPLACED by pairwise; measure the remainder (2026-08-22)
 
 Re-evaluation of D333.1, ordered by the owner after the audit measured the
