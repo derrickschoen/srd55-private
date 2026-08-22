@@ -7,6 +7,31 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D338 addendum — OWNER: Heat Metal on a held weapon must be able to DISARM (2026-08-22)
+
+Owner refinement of D338.4, matching SRD 5.2.1 (spell-descriptions, p.140):
+a creature holding or wearing the heated object and taking the damage makes
+a Constitution save or drops the object IF IT CAN; if it does not drop it,
+Disadvantage on attack rolls and ability checks until the caster's next
+turn start.
+
+Equipment-model requirements this pins, so the increment is judged against
+them:
+1. HELD vs WORN distinction — a sword is droppable, worn armor is not
+   ("if it can" is a modelled droppability condition, not prose).
+2. Material property (metal) on items, selectable by targeting.
+3. FORCED DROP as a real state change: the item leaves the creature's
+   grip, exists on the board at the creature's cell, and is retrievable
+   by a pickup action — a dropped sword the enemy can no longer swing IS
+   the disarm.
+4. The can't-drop/won't-drop arm applies the Disadvantage clause via the
+   step-6 roll-modifier machinery (exists).
+5. Re-trigger: caster's Bonus Action on later turns re-deals the damage
+   while concentration holds — step-4/5 hook and concentration machinery
+   (exists).
+6. Contact damage applies to ANY creature in physical contact, not only
+   the holder.
+
 ## D338 — OWNER: four curation-pattern rulings — per-record approval, lit world objects, mechanical tables, equipment model (2026-08-22)
 
 Round-12 answers. Supervisor recommendations overridden on 1-3; 4 accepted
