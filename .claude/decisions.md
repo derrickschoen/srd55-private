@@ -7,6 +7,37 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D335 — OWNER: general composition REPLACED by pairwise; measure the remainder (2026-08-22)
+
+Re-evaluation of D333.1, ordered by the owner after the audit measured the
+general operator's failure mode in the landed code (successful save
+classified as refusal; abort rolled back landed damage, hp 20->20 where 17
+is correct; RNG position leaked through abort).
+
+Ruling: **replace general composition with pairwise composition first, then
+show the measured remainder.**
+
+1. The recursive CompositionOperation is REPLACED (not extended) by a
+   pairwise operator: exactly two steps, and a step CANNOT be a composition
+   — nesting is made unrepresentable in the type and the pack schema,
+   superseding the MAX_COMPOSITION_DEPTH runtime refusal, which is deleted
+   with its boundary tests and controls.
+2. The wave-3 outcome-channel fix lands folded into this replacement at its
+   smaller scope: every step returns a typed applied/refused/no-op outcome;
+   the state-delta refusal heuristic is deleted as a consequence; the
+   measured hp-17 case is pinned; abort-determinism pins the RNG stream.
+   D334.4's additive-then-delete governs the mechanics of the swap.
+3. Consequence accepted and recorded: the 62 deeper true-composition
+   records (51 three-op, 11 four-op — Cloudkill, Evard's Black Tentacles,
+   Elemental Weapon, Illusory Dragon class) remain unexpressible until a
+   later ruling extends pairwise. If pairwise proves out, general becomes
+   an extension rather than a rewrite.
+4. After the replacement lands, the private-repo measurement re-runs over
+   all 947 records and the owner is shown the MEASURED remainder by bucket
+   with recordIds — not a projection. D333.1 is superseded by this entry;
+   D334's pin on the general operator transfers to nothing (the operator is
+   gone) and its wave-3 scope shrinks accordingly.
+
 ## D334 — OWNER: audit rulings — semi-trusted packs, shared sessions, engine-core bar, additive-then-delete (2026-08-22)
 
 Rulings on the four questions from the three-model audit
