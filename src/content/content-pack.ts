@@ -136,6 +136,10 @@ const targetingSchema = z.discriminatedUnion('kind', [
 ]);
 
 const operationRequiredFields = {
+  caster_choice: ['modes'],
+  random_branch: ['dieSides', 'branches'],
+  target_branch: ['branches', 'otherwise'],
+  reevaluated_branch: ['hook', 'durationRounds', 'operation'],
   damage_operation: ['delivery', 'instancesPerTarget', 'packets', 'timing'],
   armed_weapon_hit_rider: ['damage', 'durationRounds', 'concentration', 'persistence', 'saveGatedRider'],
   persistent_area: ['origin', 'shape', 'durationRounds', 'concentration', 'targetFilter', 'includeOwner', 'difficultTerrain', 'movableFeet', 'hooks', 'initialEffects'],
@@ -446,6 +450,96 @@ const speedModificationOperationSchema = z.strictObject({
   kind: z.literal('speed_modification'), modification: speedChangeSchema, ...movementDurationShape,
 });
 
+function hasOnlyKeys(record: Readonly<Record<string, unknown>>, keys: readonly string[]): boolean {
+  const allowed = new Set(keys);
+  return Object.keys(record).every((key) => allowed.has(key));
+}
+
+function validCasterChoiceOperation(operation: Readonly<Record<string, unknown>>): boolean {
+  if (!hasOnlyKeys(operation, ['kind', 'modes']) || !Array.isArray(operation.modes) || operation.modes.length === 0) {
+    return false;
+  }
+  const modes = operation.modes.map(objectRecord);
+  if (modes.some((mode) => mode === null)) return false;
+  const keys: string[] = [];
+  for (const mode of modes) {
+    if (
+      mode === null ||
+      !hasOnlyKeys(mode, ['mode', 'operation']) ||
+      typeof mode.mode !== 'string' ||
+      !identifier.safeParse(mode.mode).success ||
+      !structurallyValidOperation(mode.operation)
+    ) return false;
+    keys.push(mode.mode);
+  }
+  return new Set(keys).size === keys.length;
+}
+
+function validRandomBranchOperation(operation: Readonly<Record<string, unknown>>): boolean {
+  if (
+    !hasOnlyKeys(operation, ['kind', 'dieSides', 'branches']) ||
+    ![4, 6, 8, 10, 12, 20].includes(operation.dieSides as number) ||
+    !Array.isArray(operation.branches) ||
+    operation.branches.length === 0
+  ) return false;
+  const covered = new Set<number>();
+  for (const value of operation.branches) {
+    const branch = objectRecord(value);
+    if (
+      branch === null ||
+      !hasOnlyKeys(branch, ['minimum', 'maximum', 'operation']) ||
+      !Number.isSafeInteger(branch.minimum) ||
+      !Number.isSafeInteger(branch.maximum) ||
+      (branch.minimum as number) < 1 ||
+      (branch.maximum as number) > (operation.dieSides as number) ||
+      (branch.minimum as number) > (branch.maximum as number) ||
+      !structurallyValidOperation(branch.operation)
+    ) return false;
+    for (let face = branch.minimum as number; face <= (branch.maximum as number); face += 1) {
+      if (covered.has(face)) return false;
+      covered.add(face);
+    }
+  }
+  return covered.size === operation.dieSides;
+}
+
+function validTargetBranchOperation(operation: Readonly<Record<string, unknown>>): boolean {
+  if (
+    !hasOnlyKeys(operation, ['kind', 'branches', 'otherwise']) ||
+    !Array.isArray(operation.branches) ||
+    operation.branches.length === 0 ||
+    !(operation.otherwise === null || structurallyValidOperation(operation.otherwise))
+  ) return false;
+  const creatureTypes = new Set<string>();
+  for (const value of operation.branches) {
+    const branch = objectRecord(value);
+    const predicate = objectRecord(branch?.predicate);
+    if (
+      branch === null ||
+      !hasOnlyKeys(branch, ['predicate', 'operation']) ||
+      predicate === null ||
+      !structurallyValidOperation(branch.operation)
+    ) return false;
+    if (
+      predicate.kind !== 'creature_type' ||
+      !hasOnlyKeys(predicate, ['kind', 'creatureType']) ||
+      typeof predicate.creatureType !== 'string' ||
+      !trimmedText.safeParse(predicate.creatureType).success ||
+      creatureTypes.has(predicate.creatureType)
+    ) return false;
+    creatureTypes.add(predicate.creatureType);
+  }
+  return true;
+}
+
+function validReevaluatedBranchOperation(operation: Readonly<Record<string, unknown>>): boolean {
+  return hasOnlyKeys(operation, ['kind', 'hook', 'durationRounds', 'operation']) &&
+    (operation.hook === 'target_start' || operation.hook === 'target_end') &&
+    Number.isSafeInteger(operation.durationRounds) &&
+    (operation.durationRounds as number) >= 1 &&
+    structurallyValidOperation(operation.operation);
+}
+
 function structurallyValidOperation(value: unknown): value is SpellOperation {
   const operation = objectRecord(value);
   const kind = operationKind(value);
@@ -455,6 +549,10 @@ function structurallyValidOperation(value: unknown): value is SpellOperation {
     !SPELL_OPERATION_KINDS.includes(kind as SpellOperation['kind'])
   ) return false;
   const typedKind = kind as SpellOperation['kind'];
+  if (typedKind === 'caster_choice') return validCasterChoiceOperation(operation);
+  if (typedKind === 'random_branch') return validRandomBranchOperation(operation);
+  if (typedKind === 'target_branch') return validTargetBranchOperation(operation);
+  if (typedKind === 'reevaluated_branch') return validReevaluatedBranchOperation(operation);
   if (typedKind === 'persistent_area') return persistentAreaOperationSchema.safeParse(value).success;
   if (typedKind === 'world_operations') return worldOperationSpellSchema.safeParse(value).success;
   if (typedKind === 'damage_operation') return damageOperationSchema.safeParse(value).success;
@@ -540,6 +638,7 @@ const savingThrowBonusesShape = Object.fromEntries(
 const monsterSchema = z.strictObject({
   ...recordIdentityShape,
   statblock: z.strictObject({
+    creatureType: trimmedText.optional(),
     armorClass: positiveInteger.max(100),
     hitPointMaximum: positiveInteger.max(1_000_000),
     speedFeet: nonNegativeInteger.max(1_000),
@@ -625,6 +724,7 @@ export interface LoadedContentMonster {
   readonly sourceId: string;
   readonly recordId: string;
   readonly name: string;
+  readonly creatureType?: string;
   readonly statblock: MonsterStatblock;
   readonly actions: readonly MonsterAction[];
 }
@@ -750,6 +850,7 @@ function loadMonster(monster: ContentPackV1['monsters'][number]): LoadedContentM
     sourceId: monster.sourceId,
     recordId: monster.recordId,
     name: monster.name,
+    ...(monster.statblock.creatureType === undefined ? {} : { creatureType: monster.statblock.creatureType }),
     statblock: monsterStatblock(input),
     actions: monster.actions,
   };
@@ -929,7 +1030,10 @@ export function importedMonsterProfile(
   monster: LoadedContentMonster,
   identity: { readonly combatantId: string; readonly tokenId: string },
 ): CombatantProfile {
-  return monsterCombatantProfile(monster.statblock, identity);
+  const profile = monsterCombatantProfile(monster.statblock, identity);
+  return monster.creatureType === undefined
+    ? profile
+    : { ...profile, rules: { ...profile.rules, creatureType: monster.creatureType } };
 }
 
 export function importedMonsterAttackCommand(

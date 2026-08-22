@@ -111,6 +111,40 @@ export type SpellPersistentAreaEffectSpec =
     };
 
 export type SpellOperation =
+  /** Chromatic Orb chooses a damage type at cast time (spell-descriptions.txt:1087-1090). */
+  | {
+      readonly kind: 'caster_choice';
+      readonly modes: readonly {
+        readonly mode: string;
+        readonly operation: SpellOperation;
+      }[];
+    }
+  | {
+      /** Prismatic Spray rolls per target against a table (spell-descriptions.txt:6067-6076). */
+      readonly kind: 'random_branch';
+      readonly dieSides: 4 | 6 | 8 | 10 | 12 | 20;
+      readonly branches: readonly {
+        readonly minimum: number;
+        readonly maximum: number;
+        readonly operation: SpellOperation;
+      }[];
+    }
+  | {
+      /** Hold Person affects a Humanoid (spell-descriptions.txt:4348-4353). */
+      readonly kind: 'target_branch';
+      readonly branches: readonly {
+        readonly predicate: { readonly kind: 'creature_type'; readonly creatureType: string };
+        readonly operation: SpellOperation;
+      }[];
+      readonly otherwise: SpellOperation | null;
+    }
+  | {
+      /** Confusion rolls anew at each target turn start (spell-descriptions.txt:1369-1375). */
+      readonly kind: 'reevaluated_branch';
+      readonly hook: 'target_start' | 'target_end';
+      readonly durationRounds: number;
+      readonly operation: SpellOperation;
+    }
   | ({ readonly kind: 'damage_operation' } & DamageOperationSpec)
   | {
       readonly kind: 'armed_weapon_hit_rider';
@@ -522,6 +556,10 @@ export type SpellOperation =
 
 /** Runtime inventory for serializers of the closed operation union above. */
 export const SPELL_OPERATION_KINDS = [
+  'caster_choice',
+  'random_branch',
+  'target_branch',
+  'reevaluated_branch',
   'damage_operation',
   'armed_weapon_hit_rider',
   'persistent_area',

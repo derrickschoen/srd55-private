@@ -39,6 +39,7 @@ const E04_CONTEXT_LEDGER_PATH = 'docs/audits/2026-08-21-e04-context-compression-
 const E05_TYPED_UNTYPED_LEDGER_PATH = 'docs/audits/2026-08-21-e05-typed-vs-untyped-mutation-ledger.md';
 const E05_TYPECHECK_INSTRUMENTATION_LEDGER_PATH = 'docs/audits/2026-08-22-e05-typecheck-instrumentation-mutation-ledger.md';
 const ENVELOPE_NORMALIZATION_LEDGER_PATH = 'docs/audits/2026-08-22-envelope-normalization-mutation-ledger.md';
+const CHOICE_BRANCH_LEDGER_PATH = 'docs/audits/2026-08-22-choice-branch-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -429,5 +430,41 @@ describe('phase-2 mutation ledger manifest', () => {
     }
     expect(ledger.match(/exit 1/gu)).toHaveLength(3);
     expect(ledger).toContain('exit 0; 2 files passed and 7 named cases passed');
+  });
+
+  it('CHOICE-BRANCH-MUTATION-LEDGER pins required controls and every boundary mutation to named killing tests', () => {
+    const ledger = readFileSync(CHOICE_BRANCH_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/choice-branches.test.ts', 'utf8');
+    const mutations = [
+      'branch_table_gap_ignored',
+      'invalid_mode_defaults',
+      'branch_rerolled_from_fresh_rng',
+      'branch_fixed_at_cast',
+      'caster_mode_first_skipped',
+      'caster_mode_last_skipped',
+      'random_branch_lower_bound_exclusive',
+      'random_branch_upper_bound_exclusive',
+      'reevaluated_first_hook_delayed',
+      'reevaluated_final_round_dropped',
+      'target_predicate_inverted',
+    ];
+    const killingTests = [
+      'branch_table_gap_ignored refuses both a gap and an overlap instead of loading either table',
+      'caster_choice_boundaries: executes the first and last declared modes and invalid_mode_defaults refuses an undeclared mode',
+      'branch_rerolled_from_fresh_rng: identical seeds produce byte-identical re-evaluated event streams',
+      'branch_fixed_at_cast: re-rolls the branch on its first and final declared rounds',
+      'random_branch_low_face_boundary: selects the first range at face 1',
+      'random_branch_high_face_boundary: selects the last range at the highest face',
+      'same_hook_order: persistent-area start hooks run before re-evaluated branches and condition removal',
+      'target_choice_branch: imported Humanoid metadata selects its branch and an unmatched target does nothing',
+    ];
+    for (const mutation of mutations) expect(ledger).toContain(`\`${mutation}\``);
+    for (const testName of killingTests) {
+      expect(ledger).toContain(`\`${testName}\``);
+      expect(tests).toContain(testName);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(11);
+    expect(ledger).toContain('Each production mutation below was applied alone, killed by its named test, and restored');
+    expect(ledger).toContain('Tests  8 passed (8)');
   });
 });

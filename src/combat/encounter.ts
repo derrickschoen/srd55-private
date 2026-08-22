@@ -50,7 +50,7 @@ import {
   type PersistentAreaHook,
   type PersistentAreaInput,
 } from './persistent-areas';
-import { rollDice, type Rng } from './random';
+import { rollDice, rollDie, type Rng } from './random';
 import {
   resolveAttackRoll,
   resolveDamage,
@@ -63,7 +63,7 @@ import {
 } from './resolution';
 import { spellDefinition } from './spells/definitions';
 import { validateSpellSlotCapacities } from './spells/resources';
-import type { EffectData, ScaledDice, SpellCastCommand, SpellDefinition, SpellPersistentAreaEffectSpec } from './spells/types';
+import type { EffectData, ScaledDice, SpellCastCommand, SpellDefinition, SpellOperation, SpellPersistentAreaEffectSpec } from './spells/types';
 import { affectedCells, creatureOccupiesAffectedCell, type AreaTemplate } from './templates';
 import {
   armorClass,
@@ -206,9 +206,21 @@ export interface EncounterState {
   /** Creation-sequenced areas; reducers never depend on insertion order. */
   readonly persistentAreas: readonly PersistentArea[];
   readonly nextPersistentAreaSequence: number;
+  /** Creation-sequenced later-turn branches; evaluated after area hooks and before effects. */
+  readonly reevaluatedBranches?: readonly ReevaluatedSpellBranch[];
   readonly eventLog: readonly EncounterEvent[];
   /** Exact imported records plus their reducer-ready projections. */
   readonly contentPacks?: readonly LoadedContentPack[];
+}
+
+interface ReevaluatedSpellBranch {
+  readonly sequence: number;
+  readonly spellId: string;
+  readonly command: SpellCastCommand;
+  readonly target: CombatantId;
+  readonly hook: 'target_start' | 'target_end';
+  readonly remaining: number;
+  readonly operation: SpellOperation;
 }
 
 export interface EncounterSetup {
@@ -2101,6 +2113,31 @@ function processBoundary(
     : 'on_end_of_turn_inside';
   for (const area of orderedAreas(context.state)) {
     if (area.members.includes(subjectId)) triggerPersistentAreaHook(context, area.id, areaHook, subjectId);
+  }
+  const branchHook = boundary === 'start' ? 'target_start' : 'target_end';
+  const scheduledBranches = [...(context.state.reevaluatedBranches ?? [])]
+    .sort((left, right) => left.sequence - right.sequence);
+  for (const snapshot of scheduledBranches) {
+    const scheduled = context.state.reevaluatedBranches?.find((candidate) => candidate.sequence === snapshot.sequence);
+    if (scheduled === undefined || scheduled.target !== subjectId || scheduled.hook !== branchHook) continue;
+    const definition = spellDefinition(scheduled.spellId) ??
+      importedSpellDefinition(context.state.contentPacks, scheduled.spellId);
+    if (definition === null) throw new EncounterRuleError(`Scheduled spell ${scheduled.spellId} is not implemented.`);
+    executeSpellOperation(
+      context,
+      definition,
+      { ...scheduled.command, targets: [subjectId] },
+      [subjectId],
+      scheduled.operation,
+    );
+    const remaining = scheduled.remaining - 1;
+    context.state = {
+      ...context.state,
+      reevaluatedBranches: (context.state.reevaluatedBranches ?? []).flatMap((candidate) =>
+        candidate.sequence !== scheduled.sequence
+          ? [candidate]
+          : remaining === 0 ? [] : [{ ...candidate, remaining }]),
+    };
   }
   const effectIds = context.state.effects.map((effect) => effect.id);
   for (const effectId of effectIds) {
@@ -4332,8 +4369,80 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
   spendSpellSlot(context, definition, command);
   emit(context, { type: 'spell_cast', caster: command.actor, spellId: definition.id, slotLevel: command.slotLevel, targets });
 
-  const operation = definition.operation;
+  executeSpellOperation(context, definition, command, targets, definition.operation);
+}
+
+function executeSpellOperation(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  targets: readonly CombatantId[],
+  operation: SpellOperation,
+): void {
   switch (operation.kind) {
+    case 'caster_choice': {
+      const mode = operation.modes.find((candidate) => candidate.mode === command.selectedOption);
+      if (mode === undefined) {
+        throw new EncounterRuleError(`${definition.name} requires one of its declared caster modes.`);
+      }
+      executeSpellOperation(context, definition, command, targets, mode.operation);
+      return;
+    }
+    case 'random_branch': {
+      const covered = new Set<number>();
+      for (const branch of operation.branches) {
+        if (
+          !Number.isSafeInteger(branch.minimum) ||
+          !Number.isSafeInteger(branch.maximum) ||
+          branch.minimum < 1 ||
+          branch.maximum > operation.dieSides ||
+          branch.minimum > branch.maximum
+        ) throw new EncounterRuleError(`${definition.name} has an invalid random-branch range.`);
+        for (let face = branch.minimum; face <= branch.maximum; face += 1) {
+          if (covered.has(face)) throw new EncounterRuleError(`${definition.name} has overlapping random-branch ranges.`);
+          covered.add(face);
+        }
+      }
+      if (covered.size !== operation.dieSides) {
+        throw new EncounterRuleError(`${definition.name} has a gap in its random-branch table.`);
+      }
+      const subjects = targets.length === 0 ? [command.actor] : targets;
+      for (const target of subjects) {
+        const rolled = rollDie(context.rng, dieSides(operation.dieSides));
+        const branch = operation.branches.find((candidate) =>
+          rolled >= candidate.minimum && rolled <= candidate.maximum);
+        if (branch === undefined) throw new EncounterRuleError(`${definition.name} has no branch for roll ${String(rolled)}.`);
+        executeSpellOperation(context, definition, { ...command, targets: [target] }, [target], branch.operation);
+      }
+      return;
+    }
+    case 'target_branch':
+      for (const target of targets) {
+        const subject = combatant(context.state, target);
+        const branch = operation.branches.find((candidate) => {
+          switch (candidate.predicate.kind) {
+            case 'creature_type':
+              return subject.profile.rules.creatureType === candidate.predicate.creatureType;
+          }
+        });
+        const selected = branch?.operation ?? operation.otherwise;
+        if (selected !== null) {
+          executeSpellOperation(context, definition, { ...command, targets: [target] }, [target], selected);
+        }
+      }
+      return;
+    case 'reevaluated_branch': {
+      const current = context.state.reevaluatedBranches ?? [];
+      let sequence = current.reduce((maximum, candidate) => Math.max(maximum, candidate.sequence), 0) + 1;
+      const scheduled = targets.map((target) => ({
+        sequence: sequence++, spellId: definition.id,
+        command: structuredClone({ ...command, targets: [target] }), target,
+        hook: operation.hook, remaining: operation.durationRounds,
+        operation: structuredClone(operation.operation),
+      }));
+      context.state = { ...context.state, reevaluatedBranches: [...current, ...scheduled] };
+      return;
+    }
     case 'damage_operation':
       applyDamageOperation(
         context,

@@ -43,6 +43,8 @@ export interface CombatRulesProfile {
   readonly usesDeathSaves: boolean;
   /** Absence means the source did not establish a mechanical size category. */
   readonly sizeCategory?: KnownCreatureSize;
+  /** Known SRD creature types and homebrew passthrough values share this sourced field. */
+  readonly creatureType?: string;
   /** Reducer-owned expendable spell slots; absent levels are unavailable. */
   readonly spellSlots: readonly SpellSlotCapacity[];
   /** Reducer-owned class/feat pools; spell slots remain a separate resource type. */

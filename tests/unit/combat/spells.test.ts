@@ -651,6 +651,11 @@ function definitionRange(definition: SpellDefinition): number {
 function operationDice(definition: SpellDefinition): readonly [number, number] | null {
   const operation = definition.operation;
   switch (operation.kind) {
+    case 'caster_choice':
+    case 'random_branch':
+    case 'target_branch':
+    case 'reevaluated_branch':
+      return null;
     case 'damage_operation': {
       const packet = operation.packets[0];
       return packet === undefined ? null : [packet.dice.baseCount, packet.dice.sides];
@@ -726,6 +731,11 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
 function operationPerSlot(definition: SpellDefinition): number {
   const operation = definition.operation;
   switch (operation.kind) {
+    case 'caster_choice':
+    case 'random_branch':
+    case 'target_branch':
+    case 'reevaluated_branch':
+      return 0;
     case 'damage_operation':
       return operation.packets[0]?.dice.perSlotCount ?? 0;
     case 'armed_weapon_hit_rider':
@@ -1300,6 +1310,12 @@ describe('every implemented cantrip and level-1 spell executes through the encou
         break;
     }
     switch (definition.operation.kind) {
+      case 'caster_choice':
+      case 'random_branch':
+      case 'target_branch':
+      case 'reevaluated_branch':
+        expect(result.events.some((event) => event.type === 'spell_cast')).toBe(true);
+        break;
       case 'attack_damage':
       case 'attack_damage_over_time':
       case 'attack_rays':
