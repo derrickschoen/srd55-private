@@ -74,6 +74,18 @@ export class ProjectionReconstructor {
     let projection;
     if (transfer.kind === 'full_projection') {
       projection = structuredClone(object(transfer.projection, 'full projection'));
+    } else if (transfer.kind === 'compact_projection') {
+      const view = object(transfer.view, 'compact projection view');
+      const coordinator = object(view.coordinator, 'compact projection coordinator');
+      projection = {
+        audience: 'dm',
+        encounter: structuredClone(object(view.encounter, 'compact projection encounter')),
+        coordinator: { ...structuredClone(coordinator), pendingRequest: structuredClone(view.pendingRequest) },
+        pendingRequest: structuredClone(view.pendingRequest),
+        controllers: structuredClone(array(view.controllers, 'compact projection controllers')),
+        history: structuredClone(array(request.history, 'request.history')),
+        adjudicatedTargets: structuredClone(array(view.adjudicatedTargets, 'compact projection adjudicated targets')),
+      };
     } else if (transfer.kind === 'projection_delta') {
       const previous = this.snapshots.get(request.encounterId);
       if (

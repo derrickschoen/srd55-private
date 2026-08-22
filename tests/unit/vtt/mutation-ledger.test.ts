@@ -33,6 +33,7 @@ const R9_SPELLS_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-r9-spells-mutation-led
 const CAP_019_LEDGER_PATH = 'docs/audits/2026-08-21-cap-019-typed-effects-mutation-ledger.md';
 const CAP_019_TAIL_SWEEP_LEDGER_PATH = 'docs/audits/2026-08-21-cap-019-tail-sweep-mutation-ledger.md';
 const SPELL_BATCH_TWO_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-spell-batch-2-mutation-ledger.md';
+const TYPED_JS_LEDGER_PATH = 'docs/audits/2026-08-21-typed-js-turn-program-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -321,5 +322,20 @@ describe('phase-2 mutation ledger manifest', () => {
     }
     expect(ledger.match(/exit 1/gu)).toHaveLength(3);
     expect(ledger).toContain('All three source mutations were proved present');
+  });
+
+  it('TYPED-JS-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {
+    const ledger = readFileSync(TYPED_JS_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/bridge/js-round-plan-integration.test.ts', 'utf8');
+    for (const name of [
+      'dts_widens_to_string',
+      'typecheck_result_ignored',
+      'dts_ordering_nondeterministic',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(tests).toContain(name);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(3);
+    expect(ledger).toContain('All controls were applied to production source one at a time');
   });
 });

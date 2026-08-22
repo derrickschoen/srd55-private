@@ -4,7 +4,11 @@ import type { EncounterSessionId } from '../../combat/values';
 import type { DmBoardProjection } from '../encounter-projections';
 import type { DmBridgeRequest } from './contracts';
 
-export type ProjectionTransportMode = 'full' | 'revision_delta';
+export type ProjectionTransportMode =
+  | 'full'
+  | 'verified_full'
+  | 'compact_lossless'
+  | 'revision_delta';
 
 export type ProjectionDeltaOperation =
   | {
@@ -25,6 +29,18 @@ export type ProjectionTransfer =
       readonly projection: DmBoardProjection;
     }
   | {
+      readonly kind: 'compact_projection';
+      readonly revision: number;
+      readonly stateHash: string;
+      readonly view: {
+        readonly encounter: DmBoardProjection['encounter'];
+        readonly coordinator: Omit<DmBoardProjection['coordinator'], 'pendingRequest'>;
+        readonly pendingRequest: DmBoardProjection['pendingRequest'];
+        readonly controllers: DmBoardProjection['controllers'];
+        readonly adjudicatedTargets: DmBoardProjection['adjudicatedTargets'];
+      };
+    }
+  | {
       readonly kind: 'projection_delta';
       readonly baseRevision: number;
       readonly baseHash: string;
@@ -35,6 +51,8 @@ export type ProjectionTransfer =
 
 export interface ProjectionTransportTelemetry {
   readonly bytesSent: number;
+  readonly snapshotBytes: number;
+  readonly deltaBytes: number;
   readonly fullSnapshots: number;
   readonly deltaSnapshots: number;
   readonly reconstructionFailures: number;
@@ -116,7 +134,7 @@ export class ProjectionTransferSender {
       projection: structuredClone(request.projection),
     };
     const previous = this.#sent.get(request.encounterId);
-    const transfer: ProjectionTransfer = forceFull || previous === undefined || request.round === 1
+    const transfer: ProjectionTransfer = forceFull || previous === undefined
       ? {
           kind: 'full_projection',
           revision: current.revision,
@@ -132,6 +150,25 @@ export class ProjectionTransferSender {
           operations: delta(previous.projection, current.projection),
         };
     this.#sent.set(request.encounterId, current);
+    const { projection: _projection, ...rest } = request;
+    return { ...rest, projectionTransfer: transfer } as WireProjectionRequest;
+  }
+
+  encodeCompact(request: ProjectionRequest): WireProjectionRequest {
+    const { history: _projectionHistory, audience: _audience, ...projection } = request.projection;
+    const { pendingRequest: _coordinatorPendingRequest, ...coordinator } = projection.coordinator;
+    const transfer: ProjectionTransfer = {
+      kind: 'compact_projection',
+      revision: projection.encounter.revision,
+      stateHash: projectionHash(request.projection),
+      view: {
+        encounter: structuredClone(projection.encounter),
+        coordinator: structuredClone(coordinator),
+        pendingRequest: structuredClone(projection.pendingRequest),
+        controllers: structuredClone(projection.controllers),
+        adjudicatedTargets: structuredClone(projection.adjudicatedTargets),
+      },
+    };
     const { projection: _projection, ...rest } = request;
     return { ...rest, projectionTransfer: transfer } as WireProjectionRequest;
   }
@@ -157,6 +194,19 @@ export class ProjectionTransferReceiver {
     let projection: DmBoardProjection;
     if (transfer.kind === 'full_projection') {
       projection = structuredClone(transfer.projection);
+    } else if (transfer.kind === 'compact_projection') {
+      projection = {
+        audience: 'dm',
+        encounter: structuredClone(transfer.view.encounter),
+        coordinator: {
+          ...structuredClone(transfer.view.coordinator),
+          pendingRequest: structuredClone(transfer.view.pendingRequest),
+        },
+        pendingRequest: structuredClone(transfer.view.pendingRequest),
+        controllers: structuredClone(transfer.view.controllers),
+        history: structuredClone(request.history),
+        adjudicatedTargets: structuredClone(transfer.view.adjudicatedTargets),
+      };
     } else {
       const previous = this.#received.get(request.encounterId);
       if (

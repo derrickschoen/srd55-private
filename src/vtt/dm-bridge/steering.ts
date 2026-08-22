@@ -63,6 +63,8 @@ function targetAction(action: PlanAction, target: TargetSelector): PlanAction {
     case 'force_save':
     case 'move_toward':
       return { ...action, target };
+    case 'cast_spell':
+      return action.target === null ? action : { ...action, target };
     case 'retreat_toward':
     case 'use_action':
       return action;

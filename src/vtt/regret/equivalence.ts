@@ -24,9 +24,11 @@ function actionKey(action: PlanAction): string {
     case 'bonus_attack':
     case 'force_save':
     case 'move_toward':
-      return canonicalJson({ kind: action.kind, target: action.target });
+      return canonicalJson(action);
+    case 'cast_spell':
+      return canonicalJson(action);
     case 'retreat_toward':
-      return canonicalJson({ kind: action.kind, destination: action.destination });
+      return canonicalJson(action);
     case 'use_action':
       return canonicalJson({ kind: action.kind, action: action.action });
   }

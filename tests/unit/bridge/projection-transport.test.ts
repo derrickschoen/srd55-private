@@ -81,7 +81,7 @@ describe('E04 revision-addressed projection transport', () => {
     expect(canonicalJson(result.request.projection)).toBe(canonicalJson(second.projection));
   });
 
-  it('delta_skips_hash_check requests a full snapshot when reconstructed bytes miss the full-projection hash', () => {
+  it('delta_skips_hash_refusal: requests a full snapshot when corrupted delta bytes miss the full-projection hash', () => {
     const sender = new ProjectionTransferSender();
     const receiver = new ProjectionTransferReceiver();
     receiver.reconstruct(sender.encode(request(state(1, 1))));
@@ -164,6 +164,8 @@ describe('E04 revision-addressed projection transport', () => {
     expect(bodies).toEqual([JSON.stringify(full)]);
     expect(client.projectionTransportTelemetry()).toEqual({
       bytesSent: 0,
+      snapshotBytes: 0,
+      deltaBytes: 0,
       fullSnapshots: 0,
       deltaSnapshots: 0,
       reconstructionFailures: 0,

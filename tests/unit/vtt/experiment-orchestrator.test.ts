@@ -14,17 +14,19 @@ import {
   computeTacticalRegretFromCaptures,
   decodeExperimentTableRecord,
   type ExperimentTableRecord,
-  type ExperimentTableRecordV2,
+  type ExperimentTableRecordV3,
 } from '../../../src/vtt/experiment-telemetry';
 import {
   buildExperimentSchedule,
   decodeVttExperimentArguments,
+  evaluateEarlyStop,
   EXPERIMENT_REGISTRY,
   E03_TACTICAL_ADVICE_FORBIDDEN_PHRASES,
   preregisterExperiment,
   runE01Table,
   runE02Table,
   runE03Table,
+  runE04Table,
   runVttExperiment,
   seededArmOrder,
   type VttExperimentConfig,
@@ -32,12 +34,13 @@ import {
 
 const FAKE_CODEX = 'tests/fixtures/fake-codex-dm.mjs';
 let directory = '';
-let liveRecord: ExperimentTableRecordV2;
-let repeatedRecord: ExperimentTableRecordV2;
-let e02Record: ExperimentTableRecordV2;
-let e03Record: ExperimentTableRecordV2;
+let liveRecord: ExperimentTableRecordV3;
+let repeatedRecord: ExperimentTableRecordV3;
+let e02Record: ExperimentTableRecordV3;
+let e03Record: ExperimentTableRecordV3;
+let e04Records: readonly ExperimentTableRecordV3[];
 
-function config(outDirectory: string, experimentId: 'E01' | 'E02' | 'E03' = 'E01'): VttExperimentConfig {
+function config(outDirectory: string, experimentId: 'E01' | 'E02' | 'E03' | 'E04' = 'E01'): VttExperimentConfig {
   return {
     experimentId,
     outDirectory,
@@ -55,10 +58,11 @@ function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function legacyV1Record(record: ExperimentTableRecordV2): unknown {
+function legacyV1Record(record: ExperimentTableRecordV3): unknown {
   return {
     ...structuredClone(record),
     schemaVersion: 1,
+    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, ...call }) => call),
     quality: {
       ...structuredClone(record.quality),
       rolloutInputCaptures: record.quality.rolloutInputCaptures.map((capture) => {
@@ -71,6 +75,14 @@ function legacyV1Record(record: ExperimentTableRecordV2): unknown {
         return legacy;
       }),
     },
+  };
+}
+
+function legacyV2Record(record: ExperimentTableRecordV3): unknown {
+  return {
+    ...structuredClone(record),
+    schemaVersion: 2,
+    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, ...call }) => call),
   };
 }
 
@@ -103,6 +115,13 @@ beforeAll(async () => {
     e03Execution,
     preregisterExperiment(e03Execution),
   );
+  const e04Execution = config(join(directory, 'e04'), 'E04');
+  const e04Schedule = buildExperimentSchedule('E04').slice(0, 3);
+  const e04Preregistration = preregisterExperiment(e04Execution);
+  e04Records = [];
+  for (const entry of e04Schedule) {
+    e04Records = [...e04Records, await runE04Table(entry, e04Execution, e04Preregistration)];
+  }
 }, 30_000);
 
 afterAll(async () => {
@@ -159,10 +178,10 @@ describe('E02 worked-example experiment registration', () => {
     }
   });
 
-  it('emits capture v2 on a synthetic no-LLM E02 table', () => {
+  it('emits capture v3 on a synthetic no-LLM E02 table', () => {
     expect(() => decodeExperimentTableRecord(e02Record)).not.toThrow();
     expect(e02Record).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       experimentId: 'E02',
       schemaVariant: 'compact-grammar-v1',
       status: 'completed',
@@ -272,10 +291,10 @@ describe('E03 instruction-length experiment registration', () => {
     expect(first.promptComponentHashes).not.toEqual(e02.promptComponentHashes);
   });
 
-  it('emits capture v2 on a synthetic no-LLM E03 table', () => {
+  it('emits capture v3 on a synthetic no-LLM E03 table', () => {
     expect(() => decodeExperimentTableRecord(e03Record)).not.toThrow();
     expect(e03Record).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       experimentId: 'E03',
       schemaVariant: 'compact-grammar-v1',
       exampleCount: 3,
@@ -296,6 +315,159 @@ describe('E03 instruction-length experiment registration', () => {
       '--out', '/tmp/e03',
       '--skip-regret',
     ])).toMatchObject({ experimentId: 'E03', skipRegret: true });
+  });
+});
+
+describe('E04 state/context compression registration', () => {
+  it('registers three projection arms and 180 adjacent paired tables', () => {
+    expect(EXPERIMENT_REGISTRY.E04.arms.map((arm) => [arm.id, arm.projectionMode])).toEqual([
+      ['full-projection-history', 'verified_full'],
+      ['compact-lossless-decision-view', 'compact_lossless'],
+      ['initial-snapshot-revision-deltas', 'revision_delta'],
+    ]);
+    const schedule = buildExperimentSchedule('E04');
+    expect(schedule).toHaveLength(180);
+    for (let index = 0; index < schedule.length; index += 3) {
+      const block = schedule.slice(index, index + 3);
+      expect(new Set(block.map((entry) => entry.pairId)).size).toBe(1);
+      expect(new Set(block.map((entry) => entry.armId))).toEqual(new Set([
+        'full-projection-history',
+        'compact-lossless-decision-view',
+        'initial-snapshot-revision-deltas',
+      ]));
+    }
+  });
+
+  it('reconstructs the identical canonical state hash in every arm before model use', () => {
+    expect(e04Records).toHaveLength(3);
+    expect(new Set(e04Records.map((record) => record.projectionMode))).toEqual(new Set([
+      'verified_full',
+      'compact_lossless',
+      'revision_delta',
+    ]));
+    const hashesByArm = e04Records.map((record) => record.calls.map((call) => call.fullStateHash));
+    expect(hashesByArm[1]).toEqual(hashesByArm[0]);
+    expect(hashesByArm[2]).toEqual(hashesByArm[0]);
+    expect(e04Records.every((record) => record.calls.every((call) => call.reconstructionMatched))).toBe(true);
+  });
+
+  it('bytes_counter_constant: records measured, arm-specific wire bytes and zero reconstruction failures', () => {
+    const totals = e04Records.map((record) =>
+      record.calls.reduce((sum, call) => sum + call.bytesSent, 0));
+    expect(new Set(totals).size).toBe(3);
+    expect(e04Records.every((record) => record.calls.every((call) =>
+      call.bytesSent === call.snapshotBytes + call.deltaBytes &&
+      call.reconstructionFailureCount === 0,
+    ))).toBe(true);
+    const delta = e04Records.find((record) => record.armId === 'initial-snapshot-revision-deltas');
+    expect(delta?.calls.filter((call) => call.snapshotBytes > 0)).toHaveLength(1);
+    expect(delta?.calls.filter((call) => call.deltaBytes > 0)).toHaveLength(4);
+  });
+
+  it('has a stable preregistration digest distinct from all upstream experiments', () => {
+    const first = preregisterExperiment(config('/tmp/e04-first', 'E04'));
+    const second = preregisterExperiment(config('/tmp/e04-second', 'E04'));
+    expect(first.digest).toBe(second.digest);
+    expect(first.digest).not.toBe(preregisterExperiment(config('/tmp/e01', 'E01')).digest);
+    expect(first.digest).not.toBe(preregisterExperiment(config('/tmp/e02', 'E02')).digest);
+    expect(first.digest).not.toBe(preregisterExperiment(config('/tmp/e03', 'E03')).digest);
+    expect(first.earlyStopRule).toMatchObject({
+      enabled: true,
+      confidence: 0.99,
+      minimumTableFraction: 0.5,
+      preregisteredTableCeiling: 180,
+    });
+    expect((['E01', 'E02', 'E03'] as const).map((id) =>
+      preregisterExperiment(config(`/tmp/${id.toLowerCase()}-completed`, id)).earlyStopRule.enabled,
+    )).toEqual([false, false, false]);
+  });
+
+  it('early_stop_before_half: stops a clearly separated run at 99% only after 90 tables', async () => {
+    const outDirectory = join(directory, 'e04-early-stop');
+    const execution = config(outDirectory, 'E04');
+    const report = await runVttExperiment(execution, {
+      runTable: async (entry, _config, preregistration) => {
+        const source = e04Records.find((record) => record.armId === entry.armId);
+        if (source === undefined) throw new Error(`Missing E04 source arm ${entry.armId}.`);
+        const speed = entry.armId === 'compact-lossless-decision-view'
+          ? 300
+          : entry.armId === 'initial-snapshot-revision-deltas' ? 200 : 100;
+        return decodeExperimentTableRecord({
+          ...structuredClone(source),
+          preregistrationDigest: preregistration.digest,
+          batchId: entry.batchId,
+          pairId: entry.pairId,
+          replicate: entry.replicate,
+          tableIndex: entry.tableIndex,
+          seed: entry.seed,
+          randomizedArmOrdinal: entry.randomizedArmOrdinal,
+          completedRoundsPerHour: speed,
+        });
+      },
+    });
+    expect(report.tableCount).toBe(90);
+    expect(report.stoppingReason).toMatch(/^leader_compact-lossless-decision-view_clear_at_99_percent/u);
+    expect(await readdir(outDirectory)).toHaveLength(93);
+  });
+
+  it('does not early-stop a synthetic tied dataset and reaches the hard ceiling', async () => {
+    const outDirectory = join(directory, 'e04-tied');
+    const execution = config(outDirectory, 'E04');
+    const report = await runVttExperiment(execution, {
+      runTable: async (entry, _config, preregistration) => {
+        const source = e04Records.find((record) => record.armId === entry.armId);
+        if (source === undefined) throw new Error(`Missing E04 source arm ${entry.armId}.`);
+        return decodeExperimentTableRecord({
+          ...structuredClone(source),
+          preregistrationDigest: preregistration.digest,
+          batchId: entry.batchId,
+          pairId: entry.pairId,
+          replicate: entry.replicate,
+          tableIndex: entry.tableIndex,
+          seed: entry.seed,
+          randomizedArmOrdinal: entry.randomizedArmOrdinal,
+          completedRoundsPerHour: 100,
+        });
+      },
+    });
+    expect(report).toMatchObject({
+      tableCount: 180,
+      preregisteredTableCeiling: 180,
+      stoppingReason: 'preregistered_table_ceiling_reached',
+    });
+    expect(await readdir(outDirectory)).toHaveLength(183);
+  });
+
+  it('supports the generic two-proportion 99% check for binary primary metrics', () => {
+    const records: ExperimentTableRecord[] = [];
+    for (let pair = 0; pair < 30; pair += 1) {
+      for (const source of e04Records) {
+        records.push(decodeExperimentTableRecord({
+          ...structuredClone(source),
+          pairId: `proportion:${String(pair)}`,
+          tableIndex: pair * 3 + records.length % 3,
+          status: source.armId === 'compact-lossless-decision-view' ? 'completed' : 'aborted',
+        }));
+      }
+    }
+    expect(evaluateEarlyStop(records, {
+      armIds: EXPERIMENT_REGISTRY.E04.arms.map((arm) => arm.id),
+      preregisteredTableCeiling: 180,
+      method: 'two_proportion',
+    })).toMatchObject({
+      shouldStop: true,
+      leaderArmId: 'compact-lossless-decision-view',
+      completedTables: 90,
+      confidence: 0.99,
+    });
+  });
+
+  it('accepts E04 on the experiment CLI', () => {
+    expect(decodeVttExperimentArguments([
+      '--experiment', 'E04',
+      '--out', '/tmp/e04',
+      '--skip-regret',
+    ])).toMatchObject({ experimentId: 'E04', skipRegret: true });
   });
 });
 
@@ -340,7 +512,7 @@ describe('E01 experiment registry and orchestration', () => {
     expect(liveRecord.calls.every((call) => call.fullStateHash.length === 64)).toBe(true);
     expect(liveRecord.quality.regretStatus).toBe('deferred');
     expect(liveRecord.quality.rolloutInputCaptures).toHaveLength(5);
-    expect(liveRecord.schemaVersion).toBe(2);
+    expect(liveRecord.schemaVersion).toBe(3);
     expect(liveRecord.quality.rolloutInputCaptures.every((capture) =>
       capture.selectedAction.length === 4 &&
       capture.candidateTurnK === 64 &&
@@ -392,16 +564,19 @@ describe('E01 experiment registry and orchestration', () => {
       .toEqual(liveRecord.quality.rolloutInputCaptures.map((capture) => capture.candidateTurns));
   });
 
-  it('v1_unreadable: the version-window reader loads both legacy v1 and current v2 tables', () => {
+  it('v1_unreadable: the version-window reader loads legacy v1/v2 and current v3 tables', () => {
     const legacy = decodeExperimentTableRecord(legacyV1Record(liveRecord));
+    const previous = decodeExperimentTableRecord(legacyV2Record(liveRecord));
     const current = decodeExperimentTableRecord(structuredClone(liveRecord));
     expect(legacy.schemaVersion).toBe(1);
-    expect(current.schemaVersion).toBe(2);
+    expect(previous.schemaVersion).toBe(2);
+    expect(current.schemaVersion).toBe(3);
     expect(legacy.quality.rolloutInputCaptures).toHaveLength(5);
+    expect(previous.quality.rolloutInputCaptures).toHaveLength(5);
     expect(current.quality.rolloutInputCaptures).toHaveLength(5);
   });
 
-  it('keeps representative inline v2 table captures below the sidecar threshold', () => {
+  it('keeps representative inline v3 table captures below the sidecar threshold', () => {
     const legacyBytes = Buffer.byteLength(canonicalJson(legacyV1Record(liveRecord)));
     const currentBytes = Buffer.byteLength(canonicalJson(liveRecord));
     expect(currentBytes).toBeGreaterThan(legacyBytes);

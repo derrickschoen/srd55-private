@@ -3,6 +3,8 @@ import type {
   DeathSaveState,
   EncounterState,
   LifeState,
+  SpellSlotState,
+  TurnResources,
 } from './encounter';
 import type { EncounterEvent } from './events';
 import type { GridCell } from './grid';
@@ -27,6 +29,8 @@ export interface DmVisibleCombatant extends PlayerVisibleCombatant {
   readonly hitPoints: number;
   readonly rules: CombatRulesProfile;
   readonly deathSaves: DeathSaveState | null;
+  readonly turn: TurnResources;
+  readonly spellSlots: readonly SpellSlotState[];
 }
 
 export type PlayerVisibleEncounterEvent =
@@ -199,6 +203,8 @@ export function projectEncounter(
           active: state.activeCombatant === subject.profile.id,
           rules: subject.profile.rules,
           deathSaves: subject.deathSaves,
+          turn: subject.turn,
+          spellSlots: subject.spellSlots,
         };
       }),
       recentEvents: [...state.eventLog],

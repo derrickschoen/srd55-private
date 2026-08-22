@@ -46,6 +46,13 @@ import {
   type JsTurnProgramExecution,
   type JsTurnProgramLimits,
 } from './js-turn-program';
+import {
+  JsTurnProgramTypeError,
+  generateTurnProgramDeclarations,
+  typeCheckJsTurnProgram,
+  type TurnProgramAmbientDeclaration,
+  type TurnProgramTypeCheckTelemetry,
+} from './turn-program-types';
 
 export {
   DM_BRIDGE_PROTOCOL_VERSION,
@@ -163,6 +170,7 @@ export interface RoundPlanRequest {
   readonly surface: RoundPlanSurface;
   readonly replyContract: RoundPlanReplyContract;
   readonly correctionAttempt: 0;
+  readonly ambientDeclarations?: readonly TurnProgramAmbientDeclaration[];
 }
 
 export interface MonsterReconsultRequest {
@@ -182,6 +190,7 @@ export interface MonsterReconsultRequest {
   readonly surface: RoundPlanSurface;
   readonly replyContract: RoundPlanReplyContract;
   readonly correctionAttempt: 0;
+  readonly ambientDeclarations?: readonly TurnProgramAmbientDeclaration[];
 }
 
 export interface RoundPlanCorrectionRequest {
@@ -201,6 +210,7 @@ export interface RoundPlanCorrectionRequest {
   readonly surface: RoundPlanSurface;
   readonly replyContract: RoundPlanReplyContract;
   readonly correctionAttempt: 1 | 2;
+  readonly ambientDeclarations?: readonly TurnProgramAmbientDeclaration[];
 }
 
 export type SteeringConsultReason =
@@ -304,14 +314,14 @@ function combatantIds(predicate: StatePredicate): readonly CombatantId[] {
 function programCombatantIds(program: DecisionProgram): readonly CombatantId[] {
   switch (program.kind) {
     case 'action': {
-      const actionIds = 'target' in program.action && program.action.target.kind === 'combatant'
-        ? [program.action.target.combatantId]
+      const actionTarget = 'target' in program.action ? program.action.target : null;
+      const actionIds = actionTarget?.kind === 'combatant'
+        ? [actionTarget.combatantId]
         : [];
-      const riderIds = (program.riders ?? []).flatMap((rider) =>
-        'target' in rider.followUpAction && rider.followUpAction.target.kind === 'combatant'
-          ? [rider.followUpAction.target.combatantId]
-          : [],
-      );
+      const riderIds = (program.riders ?? []).flatMap((rider) => {
+        const target = 'target' in rider.followUpAction ? rider.followUpAction.target : null;
+        return target?.kind === 'combatant' ? [target.combatantId] : [];
+      });
       return [...actionIds, ...riderIds];
     }
     case 'if':
@@ -397,6 +407,8 @@ export function decodeSteeringReply(
 
 export interface JsProgramArtifact extends JsTurnProgramExecution {
   readonly monsterId: CombatantId;
+  readonly ambientDeclarations: string;
+  readonly typeCheck: TurnProgramTypeCheckTelemetry;
 }
 
 export interface DecodedRoundPlanReply {
@@ -448,10 +460,20 @@ export function decodeRoundPlanReply(
   if (request.surface === 'json_ast') return { plan: decodeRoundPlan(value, request), jsPrograms: [] };
   const input = decodeJsRoundPlanSourceStructure(value);
   validateJsEnvelope(input, request);
-  const jsPrograms = input.monsters.map((entry): JsProgramArtifact => ({
-    monsterId: entry.monsterId,
-    ...interpretJsTurnProgram(entry.source, request.projection.encounter, entry.monsterId, limits),
-  }));
+  const jsPrograms = input.monsters.map((entry): JsProgramArtifact => {
+    const declarations = request.ambientDeclarations?.find(
+      (candidate) => candidate.actorId === entry.monsterId,
+    ) ?? generateTurnProgramDeclarations(request.projection, entry.monsterId);
+    const typeCheck = typeCheckJsTurnProgram(entry.source, declarations.source, limits.now);
+    limits.onTypeCheckTelemetry?.(typeCheck);
+    if (!typeCheck.passed) throw new JsTurnProgramTypeError(typeCheck.diagnostics);
+    return {
+      monsterId: entry.monsterId,
+      ambientDeclarations: declarations.source,
+      typeCheck,
+      ...interpretJsTurnProgram(entry.source, request.projection.encounter, entry.monsterId, limits),
+    };
+  });
   const plan = decodeRoundPlan({
     kind: 'round_plan',
     protocolVersion: input.protocolVersion,
