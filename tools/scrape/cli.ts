@@ -346,7 +346,13 @@ async function commandBuildSpells(options: Options): Promise<number> {
     ).toISOString();
     let output;
     try {
-      output = buildContentPackDocuments({ pages, parseFailures, importedAt });
+      output = buildContentPackDocuments({
+        pages,
+        queue: queue.items,
+        parseFailures,
+        allowPartial: options.allowPartial,
+        importedAt,
+      });
     } catch (error) {
       if (error instanceof ContentPackBuildRefused) {
         log(`content-pack build refused.\n${error.message}`);
@@ -365,6 +371,12 @@ async function commandBuildSpells(options: Options): Promise<number> {
     log(`  report  ${layout.contentPackReportPath}`);
     for (const [reason, count] of Object.entries(output.report.unemittedByReason)) {
       log(`  ${reason}: ${count}`);
+    }
+    for (const item of output.report.skippedQueueItems) {
+      log(
+        `  skipped queue item: ${item.state} ${item.url}` +
+          (item.reason === null ? '' : ` — ${item.reason}`),
+      );
     }
     return 0;
   }
@@ -846,7 +858,7 @@ function usage(): number {
       '  fetch --namespace spell|feat|subclass|species [--limit N] [--delay 1500]',
       '        [--max-age-days 30] [--offline]',
       '  build --namespace spell [--format catalog] [--list bard] [--allow-partial]',
-      '  build --namespace spell --format content-pack',
+      '  build --namespace spell --format content-pack [--allow-partial]',
       '  build --namespace feat|subclass|species [--allow-partial]',
       '  bridge --namespace feat',
       '',
@@ -871,7 +883,8 @@ function usage(): number {
       '--list has no meaning for --namespace feat, subclass or species.',
       '--format content-pack writes an importable content-pack v1 file plus a',
       'deterministic emission report. It supports the spell namespace only and',
-      'does not accept --list.',
+      'does not accept --list. Unfinished queue items refuse emission unless',
+      '--allow-partial is explicit; allowed omissions are enumerated by state.',
       '',
       'feat/subclass/species build output has no import path yet — see',
       'tools/scrape/build-feat-catalog.ts, build-subclass-catalog.ts and',

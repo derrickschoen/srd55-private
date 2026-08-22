@@ -271,3 +271,4 @@ export function lines(paragraphHtml: string): string[] {
     .map(toText)
     .filter((line) => line !== '');
 }
+import './provenance';

@@ -1,6 +1,5 @@
 import ts from 'typescript';
 import type { EncounterCommand } from '../../combat/events';
-import { gridDistance } from '../../combat/grid';
 import type { CombatantId } from '../../combat/values';
 import type { DmBoardProjection } from '../encounter-projections';
 
@@ -86,20 +85,7 @@ function movementBudget(projection: DmBoardProjection, actorId: CombatantId): nu
   const batch = projection.turnProgramLegalActions?.find((entry) => entry.actorId === actorId);
   if (batch !== undefined) return batch.movementBudgetFeet;
   const actor = projection.encounter.combatants.find((combatant) => combatant.id === actorId);
-  if (actor !== undefined) return actor.turn.movement.remaining;
-  const start = projection.encounter.combatants.find((combatant) => combatant.id === actorId)?.position;
-  if (start === undefined) return 0;
-  return Math.max(0, ...actionsForActor(projection, actorId)
-    .filter((command): command is Extract<EncounterCommand, { readonly type: 'move' }> => command.type === 'move')
-    .map((command) => {
-      let previous = start;
-      let spent = 0;
-      for (const cell of command.path) {
-        spent += gridDistance(previous, cell);
-        previous = cell;
-      }
-      return spent;
-    }));
+  return actor?.turn.movement.remaining ?? 0;
 }
 
 export interface TurnProgramAmbientDeclaration {

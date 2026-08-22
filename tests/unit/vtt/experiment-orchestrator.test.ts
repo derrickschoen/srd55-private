@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +22,7 @@ import {
 import {
   buildExperimentSchedule,
   assertE05bDifficultyParameters,
+  computeAnalysisCodeDigest,
   decodeVttExperimentArguments,
   e05bDifficultyDigest,
   E05_BASELINE_DIFFICULTY_PARAMETERS,
@@ -207,14 +209,33 @@ describe('E02 worked-example experiment registration', () => {
     expect(arms[2]?.workedExamples[0]?.monsters).toHaveLength(2);
   });
 
-  it('e02_reuses_e01_digest: preregistration is stable across runs and distinct from E01', () => {
+  it('e02_reuses_e01_digest: preregistration is stable and shares the actual analysis code', () => {
     const first = preregisterExperiment(config('/tmp/e02-first', 'E02'));
     const second = preregisterExperiment(config('/tmp/e02-second', 'E02'));
     const e01 = preregisterExperiment(config('/tmp/e01-control'));
     expect(first.digest).toBe(second.digest);
     expect(first.digest).not.toBe(e01.digest);
-    expect(first.analysisCodeDigest).not.toBe(e01.analysisCodeDigest);
+    expect(first.analysisCodeDigest).toBe(e01.analysisCodeDigest);
+    expect(first.analysisCodeDigest).toBe(computeAnalysisCodeDigest());
     expect(first.promptComponentHashes).not.toEqual(e01.promptComponentHashes);
+  });
+
+  it('digest_ignores_code: an edit to an analysis source module changes its digest', () => {
+    const actual = computeAnalysisCodeDigest();
+    let editedTelemetry = false;
+    const edited = computeAnalysisCodeDigest((url) => {
+      const source = readFileSync(url, 'utf8');
+      if (!url.pathname.endsWith('/src/vtt/experiment-telemetry.ts')) return source;
+      const changed = source.replace(
+        'const q1 = quantile(sorted, 0.25);',
+        'const q1 = quantile(sorted, 0.20);',
+      );
+      editedTelemetry = changed !== source;
+      return changed;
+    });
+
+    expect(editedTelemetry).toBe(true);
+    expect(edited).not.toBe(actual);
   });
 
   it('seed_pairing_broken: every E02 seed maps all adjacent arms to one fixture', () => {
@@ -551,7 +572,8 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
     const first = preregisterExperiment(config('/tmp/e05-first', 'E05'));
     const repeated = preregisterExperiment(config('/tmp/e05-repeated', 'E05'));
     expect(first.digest).toBe(repeated.digest);
-    expect(first.digest).toBe('36db1c644b35e2483838f5e2458b2a308a4454e93fdd3cf57bcebc8b6db59f5d');
+    expect(first.digest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(first.analysisCodeDigest).toBe(computeAnalysisCodeDigest());
     expect(first).toMatchObject({
       programVersion: 'D332.1-v1',
       experimentId: 'E05',

@@ -27,13 +27,14 @@
 //
 // The last literal guards a SECOND dev-only subgraph, tools/scrape/. Scraped
 // rules text is not free-licensed, and D3 says it must never reach dist/, the
-// repository, an export or a share link. Every module under tools/scrape imports
-// tools/scrape/provenance.ts for its output naming, so the sentinel is present in
-// any bundle that pulled in any part of the scraper — one literal covers the
-// whole subgraph, exactly as AI_BRIDGE_SENTINEL does for the bridge. It also
-// catches the other route in: a scraped file dropped into public/, which is
-// copied verbatim into dist/. That is a live hazard rather than a hypothetical
-// one — dist/_headers and dist/_redirects arrive that way today.
+// repository, an export or a share link. Before scanning dist/, this guard
+// enumerates every TypeScript module under tools/scrape and proves that each can
+// reach provenance.ts through its relative import graph. A new disconnected
+// scraper module therefore makes this command fail with its filename instead of
+// silently invalidating the sentinel premise. The literal also catches the
+// other route in: a scraped file dropped into public/, which is copied verbatim
+// into dist/. That is a live hazard rather than a hypothetical one —
+// dist/_headers and dist/_redirects arrive that way today.
 //
 // THE SCAN MATCHES THE FILENAME AS WELL AS THE CONTENTS, and the filename is the
 // half that does the work for the largest artifact class. Cached HTML is 84 of
@@ -58,6 +59,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { basename, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const FORBIDDEN = [
   'AI_BRIDGE_SENTINEL',
@@ -150,6 +153,83 @@ function walk(dir) {
 function fail(message) {
   process.stderr.write(`assert-dist-clean: ${message}\n`);
   process.exit(1);
+}
+
+function scrapeModulesWithoutProvenance(scrapeRoot) {
+  const modules = walk(scrapeRoot)
+    .filter((path) => path.endsWith('.ts'))
+    .map((path) => resolve(path));
+  const moduleSet = new Set(modules);
+  const provenance = resolve(scrapeRoot, 'provenance.ts');
+  if (!moduleSet.has(provenance)) {
+    fail(`scraper provenance module is missing: ${provenance}.`);
+  }
+
+  const edges = new Map();
+  for (const path of modules) {
+    const source = ts.createSourceFile(
+      path,
+      readFileSync(path, 'utf8'),
+      ts.ScriptTarget.ESNext,
+      false,
+      ts.ScriptKind.TS,
+    );
+    const imports = [];
+    for (const statement of source.statements) {
+      const isImport = ts.isImportDeclaration(statement);
+      const isExport = ts.isExportDeclaration(statement);
+      if (!isImport && !isExport) continue;
+      if (isImport && statement.importClause?.isTypeOnly === true) continue;
+      if (isExport && statement.isTypeOnly) continue;
+      const specifier = statement.moduleSpecifier;
+      if (specifier === undefined || !ts.isStringLiteral(specifier)) continue;
+      if (!specifier.text.startsWith('.')) continue;
+      const unresolved = resolve(path, '..', specifier.text);
+      const target = [unresolved, `${unresolved}.ts`, join(unresolved, 'index.ts')]
+        .find((candidate) => moduleSet.has(candidate));
+      if (target !== undefined) imports.push(target);
+    }
+    edges.set(path, imports);
+  }
+
+  const reachesProvenance = (start) => {
+    const pending = [start];
+    const seen = new Set();
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (current === provenance) return true;
+      if (current === undefined || seen.has(current)) continue;
+      seen.add(current);
+      pending.push(...(edges.get(current) ?? []));
+    }
+    return false;
+  };
+
+  return modules
+    .filter((path) => !reachesProvenance(path))
+    .map((path) => relative(scrapeRoot, path).replaceAll('\\', '/'))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+const scrapeRoot = resolve(
+  process.argv[3] ??
+    fileURLToPath(new URL('./scrape', import.meta.url)),
+);
+let scrapeStats;
+try {
+  scrapeStats = statSync(scrapeRoot);
+} catch {
+  fail(`${scrapeRoot} does not exist — cannot verify the scraper sentinel graph.`);
+}
+if (!scrapeStats.isDirectory()) {
+  fail(`${scrapeRoot} is not a directory — cannot verify the scraper sentinel graph.`);
+}
+const unaccountedScrapeModules = scrapeModulesWithoutProvenance(scrapeRoot);
+if (unaccountedScrapeModules.length > 0) {
+  fail(
+    'scraper modules do not reach provenance.ts in the relative import graph:\n' +
+      unaccountedScrapeModules.map((path) => `  - ${path}`).join('\n'),
+  );
 }
 
 const root = resolve(process.argv[2] ?? 'dist');

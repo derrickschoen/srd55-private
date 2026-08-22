@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -102,6 +102,9 @@ describe('tracked source is greppable', () => {
   it('contains no literal NUL byte anywhere', () => {
     const offenders = files
       .filter((file) => !BINARY_EXEMPT.includes(file))
+      // An explicitly deleted tracked file remains in `git ls-files` until the
+      // supervisor stages it; absent bytes cannot contain a NUL.
+      .filter((file) => existsSync(join(repoRoot, file)))
       .filter((file) => statSync(join(repoRoot, file)).isFile())
       .flatMap((file) => {
         const lines = nulLines(readFileSync(join(repoRoot, file)));
