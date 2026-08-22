@@ -37,6 +37,7 @@ const TYPED_JS_LEDGER_PATH = 'docs/audits/2026-08-21-typed-js-turn-program-mutat
 const SPATIAL_MOVEMENT_LEDGER_PATH = 'docs/audits/2026-08-21-spatial-movement-mutation-ledger.md';
 const E04_CONTEXT_LEDGER_PATH = 'docs/audits/2026-08-21-e04-context-compression-early-stop-mutation-ledger.md';
 const E05_TYPED_UNTYPED_LEDGER_PATH = 'docs/audits/2026-08-21-e05-typed-vs-untyped-mutation-ledger.md';
+const E05_TYPECHECK_INSTRUMENTATION_LEDGER_PATH = 'docs/audits/2026-08-22-e05-typecheck-instrumentation-mutation-ledger.md';
 const ENVELOPE_NORMALIZATION_LEDGER_PATH = 'docs/audits/2026-08-22-envelope-normalization-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -401,6 +402,17 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(5);
     expect(ledger).toContain('Each production mutation was applied alone, killed by its named test, and restored');
     expect(ledger).toContain('Each round-2 production mutation was applied alone');
+  });
+
+  it('E05-TYPECHECK-INSTRUMENTATION-MUTATION-LEDGER pins both restored controls to named killing tests', () => {
+    const ledger = readFileSync(E05_TYPECHECK_INSTRUMENTATION_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/experiment-orchestrator.test.ts', 'utf8');
+    for (const name of ['untyped_reports_zero_not_null', 'run_count_counts_failures_only']) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(tests).toContain(name);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(2);
+    expect(ledger).toContain('Each production mutation was applied alone, killed by its named test, and restored');
   });
 
   it('ENVELOPE-NORMALIZATION-MUTATION-LEDGER pins all three restored controls', () => {

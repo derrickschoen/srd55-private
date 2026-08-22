@@ -150,8 +150,18 @@ export const experimentCallRecordV4Schema = experimentCallRecordV3Schema.extend(
   typeCheckUniqueCatchObservations: z.array(typeCheckUniqueCatchObservationSchema),
 });
 
+const typeCheckProgramCountsSchema = z.strictObject({
+  checkedProgramCount: nonNegativeInteger,
+  passedProgramCount: nonNegativeInteger,
+  failedProgramCount: nonNegativeInteger,
+}).refine(
+  (counts) => counts.checkedProgramCount === counts.passedProgramCount + counts.failedProgramCount,
+  { message: 'Checked program count must equal passed plus failed program counts.' },
+);
+
 export const experimentCallRecordSchema = experimentCallRecordV4Schema.extend({
   envelopeNormalizationRule: z.enum(ROUND_PLAN_ENVELOPE_NORMALIZATION_RULES).nullable(),
+  typeCheckProgramCounts: typeCheckProgramCountsSchema.nullable(),
 });
 
 const experimentCallRecordV2Schema = experimentCallRecordV3Schema.omit({
@@ -409,6 +419,11 @@ export interface ExperimentArmAggregate {
     readonly output: number;
     readonly reasoning: number;
   };
+  readonly typeCheckProgramCounts: {
+    readonly checkedProgramCount: number;
+    readonly passedProgramCount: number;
+    readonly failedProgramCount: number;
+  } | null;
   readonly typeCheckUniqueCatch: {
     readonly rejectedProgramCount: number;
     readonly caughtByBothCount: number;
@@ -488,6 +503,10 @@ export function aggregateExperimentRecords(
       'typeCheckUniqueCatchObservations' in call
         ? typeCheckUniqueCatchObservationSchema.array().parse(call.typeCheckUniqueCatchObservations)
         : []);
+    const typeCheckProgramCounts = calls.flatMap((call) =>
+      'typeCheckProgramCounts' in call && call.typeCheckProgramCounts !== null
+        ? [typeCheckProgramCountsSchema.parse(call.typeCheckProgramCounts)]
+        : []);
     const caughtOnly = uniqueCatchObservations.filter((observation) => observation.outcome === 'caughtOnlyByTypeCheck');
     const diagnosticCounts = new Map<number, { count: number; exampleProgram: string }>();
     for (const observation of caughtOnly) {
@@ -536,6 +555,22 @@ export function aggregateExperimentRecords(
         output: calls.reduce((sum, call) => sum + call.outputTokens, 0),
         reasoning: calls.reduce((sum, call) => sum + call.reasoningTokens, 0),
       },
+      typeCheckProgramCounts: typeCheckProgramCounts.length === 0
+        ? null
+        : {
+            checkedProgramCount: typeCheckProgramCounts.reduce(
+              (sum, counts) => sum + counts.checkedProgramCount,
+              0,
+            ),
+            passedProgramCount: typeCheckProgramCounts.reduce(
+              (sum, counts) => sum + counts.passedProgramCount,
+              0,
+            ),
+            failedProgramCount: typeCheckProgramCounts.reduce(
+              (sum, counts) => sum + counts.failedProgramCount,
+              0,
+            ),
+          },
       typeCheckUniqueCatch: {
         rejectedProgramCount: uniqueCatchObservations.length,
         caughtByBothCount: uniqueCatchObservations.length - caughtOnly.length,

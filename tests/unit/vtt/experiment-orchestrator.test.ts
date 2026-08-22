@@ -67,7 +67,7 @@ function legacyV1Record(record: ExperimentTableRecordV5): unknown {
   return {
     ...structuredClone(record),
     schemaVersion: 1,
-    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, envelopeNormalizationRule: _envelopeNormalizationRule, ...call }) => call),
+    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, envelopeNormalizationRule: _envelopeNormalizationRule, typeCheckProgramCounts: _typeCheckProgramCounts, ...call }) => call),
     quality: {
       ...structuredClone(record.quality),
       rolloutInputCaptures: record.quality.rolloutInputCaptures.map((capture) => {
@@ -87,7 +87,7 @@ function legacyV2Record(record: ExperimentTableRecordV5): unknown {
   return {
     ...structuredClone(record),
     schemaVersion: 2,
-    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, envelopeNormalizationRule: _envelopeNormalizationRule, ...call }) => call),
+    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, envelopeNormalizationRule: _envelopeNormalizationRule, typeCheckProgramCounts: _typeCheckProgramCounts, ...call }) => call),
   };
 }
 
@@ -95,7 +95,7 @@ function legacyV3Record(record: ExperimentTableRecordV5): unknown {
   return {
     ...structuredClone(record),
     schemaVersion: 3,
-    calls: record.calls.map(({ typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, envelopeNormalizationRule: _envelopeNormalizationRule, ...call }) => call),
+    calls: record.calls.map(({ typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, envelopeNormalizationRule: _envelopeNormalizationRule, typeCheckProgramCounts: _typeCheckProgramCounts, ...call }) => call),
   };
 }
 
@@ -103,7 +103,7 @@ function legacyV4Record(record: ExperimentTableRecordV5): unknown {
   return {
     ...structuredClone(record),
     schemaVersion: 4,
-    calls: record.calls.map(({ envelopeNormalizationRule: _envelopeNormalizationRule, ...call }) => call),
+    calls: record.calls.map(({ envelopeNormalizationRule: _envelopeNormalizationRule, typeCheckProgramCounts: _typeCheckProgramCounts, ...call }) => call),
   };
 }
 
@@ -567,6 +567,33 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
       examples: call.promptComponents.examples.digest,
     })));
     expect(promptDigests[1]).toEqual(promptDigests[0]);
+  });
+
+  it('run_count_counts_failures_only: a real E05 fake-model pair records positive typed passes and null untyped counts', () => {
+    const typed = e05Records.find((record) => record.armId === 'typed-js');
+    const untyped = e05Records.find((record) => record.armId === 'untyped-js');
+    if (typed === undefined || untyped === undefined) throw new Error('E05 fake-model pair is incomplete.');
+    const typedAggregate = aggregateExperimentRecords([typed])[0];
+    const untypedAggregate = aggregateExperimentRecords([untyped])[0];
+    expect(typedAggregate?.typeCheckProgramCounts).toEqual({
+      checkedProgramCount: 20,
+      passedProgramCount: 20,
+      failedProgramCount: 0,
+    });
+    expect(typed.calls.every((call) =>
+      call.typeCheckProgramCounts?.checkedProgramCount === 4 &&
+      call.typeCheckProgramCounts.passedProgramCount === 4 &&
+      call.typeCheckProgramCounts.failedProgramCount === 0,
+    )).toBe(true);
+    expect(typedAggregate?.typeCheckProgramCounts?.checkedProgramCount).toBeGreaterThan(0);
+    expect(untypedAggregate?.typeCheckProgramCounts).toBeNull();
+  });
+
+  it('untyped_reports_zero_not_null: every real E05 untyped call records no checker as null', () => {
+    const untyped = e05Records.find((record) => record.armId === 'untyped-js');
+    if (untyped === undefined) throw new Error('E05 untyped fake-model table is missing.');
+    expect(untyped.calls).not.toHaveLength(0);
+    expect(untyped.calls.every((call) => call.typeCheckProgramCounts === null)).toBe(true);
   });
 
   it('empty_schema_path_reintroduced: records a root-path failure from the real E05 JS decoder as null or non-empty', async () => {

@@ -831,6 +831,18 @@ class RecordingExperimentExchange implements DmBridgeExchange {
     private readonly candidateTurnK: number,
   ) {}
 
+  recordTypeCheckResult(passed: boolean): void {
+    const call = this.calls.at(-1);
+    if (call === undefined) throw new Error('Type-check telemetry has no experiment call.');
+    const counts = call.typeCheckProgramCounts;
+    if (counts === null) throw new Error('Untyped experiment call emitted type-check telemetry.');
+    call.typeCheckProgramCounts = {
+      checkedProgramCount: counts.checkedProgramCount + 1,
+      passedProgramCount: counts.passedProgramCount + (passed ? 1 : 0),
+      failedProgramCount: counts.failedProgramCount + (passed ? 0 : 1),
+    };
+  }
+
   async exchange(request: DmBridgeRequest, signal: AbortSignal): Promise<unknown> {
     if (request.kind === 'steering_round_request') return this.delegate.exchange(request, signal);
     const callIndex = this.#callIndex;
@@ -881,12 +893,13 @@ class RecordingExperimentExchange implements DmBridgeExchange {
     let decoded: DecodedRoundPlanReply | null = null;
     let validationError: unknown = null;
     const typeCheckUniqueCatchObservations: ExperimentCallRecord['typeCheckUniqueCatchObservations'][number][] = [];
+    const typeCheckMode = this.entry.experimentId === 'E05'
+      ? e05ArmDefinition(this.entry.armId).typeCheckMode
+      : 'typed';
     if (exchangeError === null) {
       try {
         decoded = decodeRoundPlanReply(reply, wire, {
-          typeCheckMode: this.entry.experimentId === 'E05'
-            ? e05ArmDefinition(this.entry.armId).typeCheckMode
-            : 'typed',
+          typeCheckMode,
           onTypeCheckUniqueCatch: (observation) => typeCheckUniqueCatchObservations.push({
             ...observation,
             diagnosticCodes: [...observation.diagnosticCodes],
@@ -1055,6 +1068,13 @@ class RecordingExperimentExchange implements DmBridgeExchange {
       parsedOrCompiled: decoded?.plan ?? null,
       expandedLibraryForm: null,
       replayProof: null,
+      typeCheckProgramCounts: this.entry.experimentId === 'E05' && typeCheckMode === 'untyped'
+        ? null
+        : {
+            checkedProgramCount: 0,
+            passedProgramCount: 0,
+            failedProgramCount: 0,
+          },
       typeCheckUniqueCatchObservations: typeCheckUniqueCatchObservations.map((observation) => ({
         ...observation,
         runtimeError: nonEmptyText(observation.runtimeError),
@@ -1122,7 +1142,7 @@ export async function runE01Table(
     const model = { model: config.model, reasoningEffort: config.reasoningEffort };
     const sessionId = await client.createSession(encounterId, abort.signal, model);
     const bridgeDirectory = `${config.outDirectory}/bridge/table-${String(entry.tableIndex).padStart(4, '0')}`;
-    recording = new RecordingExperimentExchange(
+    const recordingExchange = new RecordingExperimentExchange(
       client,
       telemetry,
       entry,
@@ -1133,13 +1153,17 @@ export async function runE01Table(
       },
       config.candidateTurnK,
     );
+    recording = recordingExchange;
     const session = new DmRoundPlanSession(
-      recording,
+      recordingExchange,
       model,
       undefined,
       entry.experimentId === 'E05' ? 'js_program' : 'json_ast',
       entry.experimentId === 'E05'
-        ? { typeCheckMode: e05ArmDefinition(entry.armId).typeCheckMode }
+        ? {
+            typeCheckMode: e05ArmDefinition(entry.armId).typeCheckMode,
+            onTypeCheckTelemetry: (typeCheck) => recordingExchange.recordTypeCheckResult(typeCheck.passed),
+          }
         : {},
     );
     const state = fourEnemyState();
@@ -1576,8 +1600,12 @@ function markdownReport(report: ExperimentReport): string {
     lines.push(`| ${arm.armId} | ${String(arm.tableCount)} | ${String(arm.completedCount)} | ${String(arm.abortedCount)} | ${(arm.completionRate * 100).toFixed(1)}% | ${arm.totalWallMs.median?.toFixed(1) ?? 'n/a'} (${arm.totalWallMs.iqr?.toFixed(1) ?? 'n/a'}) | ${arm.wallClockMsPerCompletedRound?.toFixed(1) ?? 'n/a'} | ${arm.latencyMs.median?.toFixed(1) ?? 'n/a'} (${arm.latencyMs.iqr?.toFixed(1) ?? 'n/a'}) | ${(arm.correctionRate * 100).toFixed(2)}% | ${(arm.firstPassValidity * 100).toFixed(2)}% | ${arm.meanCorrectionRoundsPerDecision.toFixed(3)} | ${String(arm.tokenTotals.input)} / ${String(arm.tokenTotals.cachedInput)} / ${String(arm.tokenTotals.output)} / ${String(arm.tokenTotals.reasoning)} | ${String(arm.bytesSent)} | ${String(arm.reconstructionFailures)} |`);
   }
   if (report.experimentId === 'E05') {
-    lines.push('', '## Type-check unique catches', '');
+    lines.push('', '## Type-check instrumentation', '');
     const typed = report.aggregates.find((arm) => arm.armId === 'typed-js');
+    const untyped = report.aggregates.find((arm) => arm.armId === 'untyped-js');
+    lines.push(`Typed checked / passed / failed programs: ${typed?.typeCheckProgramCounts === null || typed === undefined ? 'n/a' : `${String(typed.typeCheckProgramCounts.checkedProgramCount)} / ${String(typed.typeCheckProgramCounts.passedProgramCount)} / ${String(typed.typeCheckProgramCounts.failedProgramCount)}`}`);
+    lines.push(`Untyped checked / passed / failed programs: ${untyped?.typeCheckProgramCounts === null || untyped === undefined ? 'n/a' : `${String(untyped.typeCheckProgramCounts.checkedProgramCount)} / ${String(untyped.typeCheckProgramCounts.passedProgramCount)} / ${String(untyped.typeCheckProgramCounts.failedProgramCount)}`}`);
+    lines.push('', '## Type-check unique catches', '');
     lines.push(`Typed rejected programs: ${String(typed?.typeCheckUniqueCatch.rejectedProgramCount ?? 0)}`);
     lines.push(`Caught only by type check: ${String(typed?.typeCheckUniqueCatch.caughtOnlyByTypeCheckCount ?? 0)}`);
     lines.push(`Unique catch rate: ${typed?.typeCheckUniqueCatch.rate === null || typed === undefined ? 'n/a' : `${(typed.typeCheckUniqueCatch.rate * 100).toFixed(2)}%`}`);
