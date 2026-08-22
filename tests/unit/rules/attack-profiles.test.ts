@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AbilityScores } from '../../../src/rules/ability-scores';
 import {
   attackProfiles,
+  profileProficiency,
   shillelaghDamageDice,
   trueStrikeExtraDice,
   type AttackProfile,
@@ -216,6 +217,35 @@ function bonusFor(profile: AttackProfile, ability: string): number {
     throw new Error(`${ability} attack bonus is undetermined.`);
   }
   return option.attack_bonus;
+}
+
+function explanationFor(profile: AttackProfile): string {
+  if (profile.abilities.state === 'fixed') {
+    throw new Error(`${profile.kind} unexpectedly has no ability explanation.`);
+  }
+  return profile.abilities.reason;
+}
+
+function optionReasonFor(profile: AttackProfile, ability: string): string {
+  if (profile.abilities.state === 'unavailable') {
+    throw new Error(`${profile.kind} has no ability options.`);
+  }
+  const option = profile.abilities.options.find(
+    (entry) => entry.ability === ability,
+  );
+  if (option === undefined) {
+    throw new Error(`No ${ability} option on ${profile.kind}.`);
+  }
+  return option.reason;
+}
+
+function expectMeaningfulContent(
+  actual: string,
+  expected: readonly string[],
+): void {
+  for (const content of expected) {
+    expect(actual).toContain(content);
+  }
 }
 
 describe('the plain weapon attack', () => {
@@ -1373,6 +1403,337 @@ describe('weapon effects', () => {
     expect(profile.notes).toEqual([
       '+1 weapon: +1 to this profile’s attack bonus.',
       '+1 weapon: +1 to this profile’s damage.',
+    ]);
+  });
+});
+
+describe('load-bearing attack-profile explanations', () => {
+  it('states the proficiency decision and only the sourced attack formulas', () => {
+    const proficient = profileProficiency({
+      kind: 'proficient',
+      via: ['Fighter'],
+    });
+    expectMeaningfulContent(proficient.reason, [
+      'One class is enough',
+      'union across a character’s classes',
+    ]);
+
+    const notProficient = profileProficiency({ kind: 'not_proficient' });
+    expectMeaningfulContent(notProficient.reason, [
+      'using it is still allowed',
+      'bonus alone',
+    ]);
+
+    const categoryMissing = profileProficiency({
+      kind: 'category_not_stated',
+    });
+    expectMeaningfulContent(categoryMissing.reason, [
+      'cannot be checked',
+      'ASSUMPTION and not a fact',
+    ]);
+
+    const qualifierMissing = profileProficiency({
+      kind: 'qualifier_not_evaluated',
+      via: ['Runeblade'],
+      qualifiers: ['inscribed with a rune'],
+    });
+    expectMeaningfulContent(qualifierMissing.reason, [
+      'grants this weapon’s category only',
+      'qualifier this application does not read',
+      'same assumption',
+    ]);
+
+    const includedProfile = profileOf(
+      build({
+        weapons: [{ ...LONGSWORD, attack_kind: 'melee' }],
+      }),
+      'normal',
+    );
+    const includedStrength = optionReasonFor(includedProfile, 'strength');
+    const includedDexterity = optionReasonFor(includedProfile, 'dexterity');
+    expectMeaningfulContent(includedStrength, [
+      'Melee attack bonus',
+      'Strength modifier + Proficiency Bonus',
+    ]);
+    expect(includedStrength).not.toContain('row is the Strength modifier alone');
+    expectMeaningfulContent(includedDexterity, [
+      'Ranged attack bonus',
+      'Dexterity modifier + Proficiency Bonus',
+    ]);
+
+    const withheldProfile = profileOf(
+      build({
+        weapons: [{
+          ...LONGSWORD,
+          proficiency: { kind: 'not_proficient' },
+        }],
+      }),
+      'normal',
+    );
+    expectMeaningfulContent(optionReasonFor(withheldProfile, 'strength'), [
+      'formula is Strength modifier',
+      'row is the Strength modifier alone',
+      'Proficiency Bonus is NOT included',
+    ]);
+  });
+
+  it('names the sourced ability branch without making an unrecorded choice', () => {
+    const undecided = profileOf(build(), 'normal');
+    expectMeaningfulContent(explanationFor(undecided), [
+      'Strength for a melee attack',
+      'Dexterity for a ranged one',
+      'unless a weapon property says otherwise',
+      'does not record whether its attack is melee or ranged',
+      'property rules that would override the formula are not among',
+      'both are shown',
+    ]);
+
+    const ranged = profileOf(
+      build({ weapons: [{ ...LONGSWORD, attack_kind: 'ranged' }] }),
+      'normal',
+    );
+    expectMeaningfulContent(explanationFor(ranged), [
+      'records a ranged attack',
+      'Dexterity is shown first',
+      'other ability remains available',
+      'does not evaluate weapon-property',
+    ]);
+
+    const melee = profileOf(
+      build({ weapons: [{ ...LONGSWORD, attack_kind: 'melee' }] }),
+      'normal',
+    );
+    expect(explanationFor(melee)).toContain('Strength is shown first');
+  });
+
+  it('identifies unresolved and ambiguous spellcasting sources', () => {
+    const noNamedSource = build({
+      cantrips: knows('true_strike', []),
+    });
+    expectMeaningfulContent(
+      explanationFor(profileOf(noNamedSource, 'true_strike')),
+      ['no source', 'cannot say what the attack and damage rolls use'],
+    );
+
+    const namedSource = build({
+      cantrips: knows('true_strike', [
+        { source_name: 'Magic Initiate', spellcasting_ability: null },
+      ]),
+    });
+    expectMeaningfulContent(
+      explanationFor(profileOf(namedSource, 'true_strike')),
+      ['Magic Initiate', 'cannot say what the attack and damage rolls use'],
+    );
+
+    const ambiguous = build({
+      cantrips: knows('true_strike', [
+        { source_name: 'Arcane scholar', spellcasting_ability: 'intelligence' },
+        { source_name: 'Magic Initiate', spellcasting_ability: 'charisma' },
+      ]),
+    });
+    expectMeaningfulContent(
+      explanationFor(profileOf(ambiguous, 'true_strike')),
+      ['different spellcasting abilities', 'source the spell was taken from'],
+    );
+  });
+
+  it('keeps True Strike rules claims attached to its numbers', () => {
+    const result = build({
+      classes: [wizardClass(11), fighter(11)],
+      cantrips: knows('true_strike', [
+        { source_name: 'Arcane scholar', spellcasting_ability: 'intelligence' },
+      ]),
+    });
+    const profile = profileOf(result, 'true_strike');
+    expectMeaningfulContent(optionReasonFor(profile, 'intelligence'), [
+      'spellcasting ability for the attack and damage',
+      'instead of Strength or Dexterity',
+    ]);
+    expectMeaningfulContent(profile.notes.join(' '), [
+      'gives one attack',
+      'would give 3',
+    ]);
+    expectMeaningfulContent(profile.damage.extra[0]?.note ?? '', [
+      'extra Radiant damage',
+      'levels 5, 11 and 17',
+      'total character level of 22',
+    ]);
+    expectMeaningfulContent(profile.preconditions.join(' '), [
+      'proficiency with',
+      '1+ CP',
+      'Proficiency Bonus is included',
+      'no coin value',
+    ]);
+  });
+
+  it('keeps Shillelagh rules claims and its derived identity visible', () => {
+    const result = build({
+      classes: [druid(5)],
+      cantrips: knows('shillelagh', [
+        { source_name: 'Druid', spellcasting_ability: 'wisdom' },
+      ]),
+    });
+    const weapon = result.weapons.find((entry) => entry.derived);
+    expect(weapon?.weapon_name).toContain('Club or a Quarterstaff');
+    const profile = profileOf(result, 'shillelagh');
+    expectMeaningfulContent(explanationFor(profile), [
+      'spellcasting ability instead of Strength',
+      'melee attacks with that weapon',
+    ]);
+    expectMeaningfulContent(profile.damage.versatile_note ?? '', [
+      'damage die is replaced',
+      'levels 5, 11 and 17',
+      'total character level of 5',
+    ]);
+    expectMeaningfulContent(profile.preconditions.join(' '), [
+      'Club or a Quarterstaff',
+      'melee attacks with it',
+    ]);
+    expectMeaningfulContent(profile.notes.join(' '), [
+      'Bonus Action',
+      '1 minute',
+      'ends early',
+      'cast it again',
+      'let go of the weapon',
+    ]);
+  });
+
+  it('keeps Martial Arts rules claims and its granting class visible', () => {
+    const profile = profileOf(build({ classes: [monk(5)] }), 'martial_arts');
+    expect(profile.label).toContain('Monk');
+    expectMeaningfulContent(explanationFor(profile), [
+      'Dexterity modifier instead of your Strength',
+      'attack and damage rolls',
+      'Monk weapons',
+    ]);
+    expect(optionReasonFor(profile, 'dexterity')).toContain('Dexterous Attacks');
+    expect(optionReasonFor(profile, 'strength')).toContain('melee weapon attack');
+    expectMeaningfulContent(profile.damage.versatile_note ?? '', [
+      'in place of the weapon',
+      'Monk level 5',
+      'not for your total character level',
+    ]);
+    expectMeaningfulContent(profile.preconditions.join(' '), [
+      'Simple Melee weapons',
+      'Martial Melee weapons',
+      'Light property',
+      'wielding only Monk weapons',
+      'not wearing armor or wielding a Shield',
+      'does not record worn armor or a held Shield',
+      'cannot tell whether this one qualifies',
+    ]);
+    expect(profile.notes).toEqual([]);
+  });
+
+  it('keeps structured effect explanations and warning identities intact', () => {
+    const override = profileOf(
+      build({
+        effects: [{
+          id: 41,
+          effect_kind: 'attack_ability_override',
+          ability: 'charisma',
+          weapon_scope: 'any_weapon',
+          character_weapon_id: null,
+          label: 'Pact Shell Blade',
+        }],
+      }),
+      'attack_ability_override',
+    );
+    expectMeaningfulContent(optionReasonFor(override, 'charisma'), [
+      'Pact Shell Blade',
+      'charisma',
+    ]);
+    expect(override.preconditions.join(' ')).toContain(
+      'Proficiency Bonus is included',
+    );
+    expect(override.notes).toEqual([]);
+
+    const penalized = build({
+      effects: [{
+        id: 42,
+        effect_kind: 'weapon_attack_bonus',
+        amount: -1,
+        weapon_scope: 'any_weapon',
+        character_weapon_id: null,
+        label: 'Boundary penalty',
+      }],
+    });
+    expect(profileOf(penalized, 'normal').notes.join(' ')).toContain(
+      'Boundary penalty: -1 to this profile',
+    );
+
+    const unrecognised = build({
+      cantrips: {
+        ...NO_CANTRIPS,
+        unrecognised: [{
+          cantrip: 'true_strike',
+          content_key: 'other:true-strike',
+          spell_name: 'True Strike',
+          source_name: 'Arcane scholar',
+          reason: 'the content identity is not recognised',
+        }],
+      },
+    });
+    const warning = unrecognised.warnings.find(
+      (entry) => entry.code === 'unrecognised_cantrip',
+    );
+    expectMeaningfulContent(warning?.message ?? '', [
+      'Arcane scholar',
+      'True Strike',
+      'No attack profile has been derived',
+    ]);
+  });
+
+  it('names warning sources, abilities, counts, and the non-stacking rule', () => {
+    const noAbility = build({
+      cantrips: knows('true_strike', [
+        { source_name: 'Magic Initiate', spellcasting_ability: null },
+      ]),
+    }).warnings.find((entry) => entry.code === 'no_spellcasting_ability');
+    expectMeaningfulContent(noAbility?.message ?? '', [
+      'True Strike',
+      'Magic Initiate',
+      'no spellcasting ability recorded',
+      'numbers cannot be derived',
+    ]);
+
+    const ambiguous = build({
+      cantrips: knows('true_strike', [
+        { source_name: 'Arcane scholar', spellcasting_ability: 'intelligence' },
+        { source_name: 'Magic Initiate', spellcasting_ability: 'charisma' },
+      ]),
+    }).warnings.find(
+      (entry) => entry.code === 'ambiguous_spellcasting_ability',
+    );
+    expectMeaningfulContent(ambiguous?.message ?? '', [
+      'True Strike',
+      'different spellcasting abilities',
+      'Arcane scholar: intelligence',
+      'Magic Initiate: charisma',
+    ]);
+
+    const unresolved = build({
+      classes: [{
+        class_name: 'Warlock',
+        level: 5,
+        extra_attack_grants: [{
+          source: 'feature',
+          source_name: 'Thirsting Blade',
+          class_level: 5,
+          attack_count: 2,
+          weapon_scope: 'one_bonded_weapon',
+          unresolved: ['Feature selection is unresolved.'],
+        }],
+      }],
+    }).warnings.find((entry) => entry.code === 'unresolved_extra_attack');
+    expectMeaningfulContent(unresolved?.message ?? '', [
+      'Thirsting Blade',
+      'Warlock 5',
+      'would give 2 attacks',
+      'where 1',
+      'Features that grant Extra Attack do not stack',
+      'largest of them',
+      'never the sum',
     ]);
   });
 });
