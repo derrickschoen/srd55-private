@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D342 — OWNER: curation sprint before any engine lever (2026-08-22)
+
+Lever-round ruling with the curated measurement in hand (executable 142,
+residue 686/828): the next lane is a CURATION SPRINT, not an engine
+increment. A worksheet lane drafts proposed dispositions over the 161
+ambiguous-parameters and 19 curation-remaining-clause records — verbatim
+quoted clauses, R-shape proposals, R6-class pattern candidates surfaced
+explicitly — and the owner approves per-record in batches (D338.1).
+Records whose blockers are mechanical are marked not-curable with their
+lever named and leave the queue. Engine levers (shared-outcome 36,
+equipment, target-selection 25) wait for the sprint's outcome.
+
 ## D341 — OWNER: namespaces are MANIFEST-DECLARED (2026-08-22)
 
 Ruled after full context (round-14 Q1 held open in D340). A content pack
