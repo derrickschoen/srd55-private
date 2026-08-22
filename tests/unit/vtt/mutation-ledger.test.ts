@@ -341,7 +341,7 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger).toContain('All controls were applied to production source one at a time');
   });
 
-  it('SPATIAL-MOVEMENT-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
+  it('SPATIAL-MOVEMENT-MUTATION-LEDGER pins both rounds of restored controls to named killing tests', () => {
     const ledger = readFileSync(SPATIAL_MOVEMENT_LEDGER_PATH, 'utf8');
     const tests = readFileSync('tests/unit/vtt/spatial-movement.test.ts', 'utf8');
     for (const name of [
@@ -349,12 +349,26 @@ describe('phase-2 mutation ledger manifest', () => {
       'push_ignores_obstacle',
       'movement_damage_off_by_one',
       'flight_ignores_immunity',
+      'teleport_maximum_distance_inclusive',
+      'forced_movement_exact_distance',
+      'movement_damage_partial_unit_rounds_up',
+      'speed_reduction_exact_zero_one_step_short',
+      'movement_mode_exact_budget_refused',
     ]) {
       expect(ledger).toContain(`\`${name}\``);
+    }
+    for (const name of [
+      'teleport_range_boundary',
+      'orders damaging movement regions before persistent on_enter hooks during forced movement',
+      'movement_damage_partial_unit_boundary',
+      'speed_reduction_zero_boundary',
+      'movement_mode_grant_speed_boundary',
+    ]) {
       expect(tests).toContain(name);
     }
-    expect(ledger.match(/exit 1/gu)).toHaveLength(4);
+    expect(ledger.match(/exit 1/gu)).toHaveLength(9);
     expect(ledger).toContain('All four production mutations were restored');
+    expect(ledger).toContain('All five round-2 production mutations were proved present one at a time');
   });
 
   it('E04-CONTEXT-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {

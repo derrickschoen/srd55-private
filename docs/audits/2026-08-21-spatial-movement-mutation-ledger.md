@@ -22,3 +22,35 @@ Date: 2026-08-21
 All four production mutations were restored before the final gates.
 
 Final restored gate: `npx tsc -b` exit 0; `npx vitest run --configLoader runner` exit 0 with 419 files and 7,773 tests passed.
+
+## Round 2 — supervisor-found boundary survivor
+
+The supervisor changed the teleport maximum-range comparison from `>` to `>=`. The mutation survived the increment gate, proving that round 1 had no exact-maximum teleport assertion. This was supervisor-found, not self-found.
+
+### Numeric-boundary audit
+
+- Added: `teleport_range_boundary: accepts a destination exactly at maximumDistanceFeet and refuses one grid step beyond` imports a 30-foot teleport, succeeds at 30 feet, and receives `EncounterRuleError` with the engine's declared-constraint reason at 35 feet.
+- Already covered: `orders damaging movement regions before persistent on_enter hooks during forced movement` imports a 5-foot push and asserts the target enters the next cell. Changing the completed-unit comparison from `<=` to `<` killed this existing test.
+- Already covered: that same exact 5-foot push enters one imported damaging movement-region cell and asserts its damage before the persistent hook. The `<=` to `<` mutation removed both movement and region damage, killing the existing assertion.
+- Added: `movement_damage_partial_unit_boundary: a 4-foot forced move completes zero 5-foot units and deals no region damage` pins the lower side of the completed-unit boundary.
+- Added: `speed_reduction_zero_boundary: an imported reduction equal to walking speed reaches exactly 0` distinguishes exact exhaustion from the pre-existing overshoot-to-zero assertion.
+- Added: `movement_mode_grant_speed_boundary: uses exactly the imported granted speed and leaves 0 movement` spends all 60 feet supplied by an imported mode grant.
+
+### Round-2 negative controls
+
+| Control | Production mutation | Named killing test | Mutated result | Restored result |
+|---|---|---|---|---|
+| `teleport_maximum_distance_inclusive` | Changed the teleport refusal comparison from `>` to `>=`. | `teleport_range_boundary: accepts a destination exactly at maximumDistanceFeet and refuses one grid step beyond` | exit 1; 1 failed, 12 skipped; the exact 30-foot teleport threw `EncounterRuleError`. | exit 0; 1 passed, 12 skipped. |
+| `forced_movement_exact_distance` | Changed the forced-movement completed-unit comparison from `<=` to `<`. | `orders damaging movement regions before persistent on_enter hooks during forced movement` | exit 1; 1 failed, 12 skipped; the exact 5-foot push produced no entered-cell events. | exit 0; 1 passed, 12 skipped. |
+| `movement_damage_partial_unit_rounds_up` | Changed `distance + 5 <= distanceFeet` to `distance < distanceFeet`, rounding a positive partial unit up. | `movement_damage_partial_unit_boundary: a 4-foot forced move completes zero 5-foot units and deals no region damage` | exit 1; 1 failed, 12 skipped; the target moved into the damaging cell. | exit 0; 1 passed, 12 skipped. |
+| `speed_reduction_exact_zero_one_step_short` | Added one 5-foot step to fixed-feet reduction arithmetic. | `speed_reduction_zero_boundary: an imported reduction equal to walking speed reaches exactly 0` | exit 1; 1 failed, 12 skipped; effective speed was 5 instead of 0. | exit 0; 1 passed, 12 skipped. |
+| `movement_mode_exact_budget_refused` | Changed the movement over-budget comparison from `>` to `>=`. | `movement_mode_grant_speed_boundary: uses exactly the imported granted speed and leaves 0 movement` | exit 1; 1 failed, 12 skipped; the twelfth step was refused as over budget. | exit 0; 1 passed, 12 skipped. |
+
+All five round-2 production mutations were proved present one at a time, killed by the named test, restored, and followed by a green targeted rerun before the next mutation.
+
+Round-2 final restored gate: `npx tsc -b` exit 0; `npx vitest run --configLoader runner` exit 0:
+
+```text
+ Test Files  419 passed (419)
+      Tests  7777 passed (7777)
+```

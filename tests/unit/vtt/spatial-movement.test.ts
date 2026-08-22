@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { EncounterRuleError, createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { EncounterCommand, EncounterEvent } from '../../../src/combat/events';
 import type { SpellOperation } from '../../../src/combat/spells/types';
 import { damageType, feet } from '../../../src/combat/values';
@@ -100,6 +100,35 @@ const persistentHook: SpellOperation = {
 };
 
 describe('CAP-IMP-009 imported spatial movement operations', () => {
+  it('teleport_range_boundary: accepts a destination exactly at maximumDistanceFeet and refuses one grid step beyond', () => {
+    const pack = packWithSpells([{
+      id: 'silver-skip',
+      operation: {
+        kind: 'teleport', subject: 'caster', maximumDistanceFeet: 30,
+        destination: { requireUnoccupied: true, requireOccupiable: true, requireLineOfSight: true },
+      },
+    }]);
+    const teleporter = playerProfile('range-boundary-teleporter', {
+      initiativeBonus: 20, spellSlots: [{ level: 1, maximum: 1 }],
+    });
+    const state = initiative(createEncounter({
+      bounds: { columns: 8, rows: 1 }, combatants: [teleporter],
+      tokens: [placedToken(teleporter, 0)], contentPacks: [pack],
+    }));
+
+    expect(() => cast(state, command(teleporter, 'silver-skip', [teleporter.id], {
+      spatialPoint: { column: 7, row: 0 },
+    }))).toThrowError(EncounterRuleError);
+    expect(() => cast(state, command(teleporter, 'silver-skip', [teleporter.id], {
+      spatialPoint: { column: 7, row: 0 },
+    }))).toThrowError('silver-skip requires an unoccupied, occupiable destination satisfying its declared constraint.');
+
+    const exact = cast(state, command(teleporter, 'silver-skip', [teleporter.id], {
+      spatialPoint: { column: 6, row: 0 },
+    }));
+    expect(position(exact.state, teleporter.id)).toEqual({ column: 6, row: 0 });
+  });
+
   it('teleport_traverses_cells: teleports to an occupiable visible cell without firing intervening on_enter hooks', () => {
     const pack = packWithSpells([
       { id: 'hook-field', operation: persistentHook },
@@ -205,6 +234,32 @@ describe('CAP-IMP-009 imported spatial movement operations', () => {
     expect(result.events.filter((event) => event.type === 'damage_applied')).toHaveLength(1);
   });
 
+  it('movement_damage_partial_unit_boundary: a 4-foot forced move completes zero 5-foot units and deals no region damage', () => {
+    const pack = packWithSpells([
+      { id: 'thorn-cell', operation: movementRegion('partial-unit-thorns', [{ column: 2, row: 0 }], 'allowed', true) },
+      {
+        id: 'short-push', operation: {
+          kind: 'forced_movement', direction: 'away', origin: 'caster', distanceFeet: 4, save: null,
+        },
+      },
+    ]);
+    const regionCaster = playerProfile('partial-region-caster', { initiativeBonus: 30, spellSlots: [{ level: 1, maximum: 1 }] });
+    const pusher = playerProfile('partial-pusher', { initiativeBonus: 20, spellSlots: [{ level: 1, maximum: 1 }] });
+    const target = monsterProfile('partial-push-target', { hitPoints: 20, initiativeBonus: 0 });
+    let state = initiative(createEncounter({
+      bounds: { columns: 6, rows: 2 }, combatants: [regionCaster, pusher, target],
+      tokens: [placedToken(regionCaster, 5, 1), placedToken(pusher, 0), placedToken(target, 1)], contentPacks: [pack],
+    }));
+    state = cast(state, command(regionCaster, 'thorn-cell', [target.id])).state;
+    state = endTurn(state, regionCaster);
+    const result = cast(state, command(pusher, 'short-push', [target.id]));
+
+    expect(position(result.state, target.id)).toEqual({ column: 1, row: 0 });
+    expect(result.state.combatants.find(({ profile }) => profile.id === target.id)?.hitPoints).toBe(20);
+    expect(result.events.filter((event) => event.type === 'damage_applied')).toHaveLength(0);
+    expect(result.events.find((event) => event.type === 'movement_completed')).toMatchObject({ path: [] });
+  });
+
   it('flight_ignores_immunity: an imported flying-speed grant pays normal cost in difficult terrain', () => {
     const pack = packWithSpells([{
       id: 'sky-step', operation: {
@@ -286,6 +341,51 @@ describe('CAP-IMP-009 imported spatial movement operations', () => {
     state = endTurn(state, stopper);
 
     expect(state.combatants.find(({ profile }) => profile.id === target.id)?.turn.movement).toMatchObject({ speed: 0, remaining: 0 });
+  });
+
+  it('speed_reduction_zero_boundary: an imported reduction equal to walking speed reaches exactly 0', () => {
+    const pack = packWithSpells([{
+      id: 'exact-halt', operation: {
+        kind: 'speed_modification', modification: { kind: 'reduce', reduction: { kind: 'feet', feet: 30 } },
+        durationRounds: 10, concentration: false, expiresAt: 'target_start',
+      },
+    }]);
+    const reducer = playerProfile('exact-speed-reducer', { initiativeBonus: 20, spellSlots: [{ level: 1, maximum: 1 }] });
+    const target = playerProfile('exact-speed-target', { initiativeBonus: 10 });
+    const state = initiative(createEncounter({
+      bounds: { columns: 2, rows: 2 }, combatants: [reducer, target],
+      tokens: [placedToken(reducer, 0, 1), placedToken(target, 0)], contentPacks: [pack],
+    }));
+    const reduced = cast(state, command(reducer, 'exact-halt', [target.id])).state;
+
+    expect(reduced.combatants.find(({ profile }) => profile.id === target.id)?.turn.movement)
+      .toMatchObject({ speed: 0, spent: 0, remaining: 0 });
+  });
+
+  it('movement_mode_grant_speed_boundary: uses exactly the imported granted speed and leaves 0 movement', () => {
+    const pack = packWithSpells([{
+      id: 'long-flight', operation: {
+        kind: 'movement_mode', grants: [{ mode: 'flying', speed: { kind: 'fixed', feet: 60 } }],
+        difficultTerrainImmunity: false, magicalSpeedReductionImmunity: false,
+        durationRounds: 10, concentration: true, expiresAt: 'source_start',
+      },
+    }]);
+    const flyer = playerProfile('exact-grant-flyer', { initiativeBonus: 20, spellSlots: [{ level: 1, maximum: 1 }] });
+    let state = initiative(createEncounter({
+      bounds: { columns: 13, rows: 1 }, combatants: [flyer],
+      tokens: [placedToken(flyer, 0)], contentPacks: [pack],
+    }));
+    state = cast(state, command(flyer, 'long-flight', [flyer.id])).state;
+    const moved = reduceEncounter(state, {
+      type: 'move', actor: flyer.id, cause: 'voluntary',
+      path: Array.from({ length: 12 }, (_, index) => ({ column: index + 1, row: 0 })),
+    }, () => 0);
+
+    expect(position(moved.state, flyer.id)).toEqual({ column: 12, row: 0 });
+    expect(moved.events.find((event) => event.type === 'movement_completed'))
+      .toMatchObject({ spent: 60, remaining: 0 });
+    expect(moved.state.combatants.find(({ profile }) => profile.id === flyer.id)?.turn.movement)
+      .toMatchObject({ speed: 60, spent: 60, remaining: 0 });
   });
 
   it('resolves a speed grant and reduction in stable effect-creation order', () => {
