@@ -18,6 +18,7 @@ import { damageType as brandedDamageType, type DamageType } from '../../src/comb
 import type { SpellLevel } from '../../src/combat/spells/types';
 import type { BuiltPage, BuildFailure } from './build-catalog';
 import { SCRAPED_OWNER_NAMESPACE, SCRAPE_SENTINEL } from './provenance';
+import type { QueueItem } from './queue';
 
 export const CONTENT_PACK_UNEMITTED_REASONS = [
   'ambiguous-parameters',
@@ -44,6 +45,8 @@ export interface ContentPackUnemittedPage {
 export interface ContentPackBuildReport {
   readonly provenance: string;
   readonly pagesSeen: number;
+  readonly partial: boolean;
+  readonly skippedQueueItems: readonly Pick<QueueItem, 'url' | 'state' | 'reason'>[];
   readonly emitted: number;
   readonly unemitted: number;
   readonly unemittedByReason: Readonly<Record<ContentPackUnemittedReason, number>>;
@@ -59,7 +62,9 @@ export interface ContentPackBuildOutput {
 
 export interface ContentPackBuildInput {
   readonly pages: readonly BuiltPage[];
+  readonly queue: readonly QueueItem[];
   readonly parseFailures: readonly BuildFailure[];
+  readonly allowPartial: boolean;
   /** A deterministic timestamp derived by the caller from the cached input. */
   readonly importedAt: string;
 }
@@ -285,6 +290,25 @@ function zeroReasonCounts(): Record<ContentPackUnemittedReason, number> {
 }
 
 export function buildContentPackDocuments(input: ContentPackBuildInput): ContentPackBuildOutput {
+  const skippedQueueItems = input.queue
+    .filter((item) => item.state !== 'done')
+    .map((item) => ({ url: item.url, state: item.state, reason: item.reason }))
+    .sort((left, right) => left.url.localeCompare(right.url));
+  if (skippedQueueItems.length > 0 && !input.allowPartial) {
+    const sample = skippedQueueItems
+      .slice(0, 5)
+      .map((item) => `  ${item.state}  ${item.url}${item.reason === null ? '' : ` — ${item.reason}`}`)
+      .join('\n');
+    throw new ContentPackBuildRefused(
+      `refusing to emit content pack: ${skippedQueueItems.length} of ` +
+        `${input.queue.length} queue entries are not done. Finish the run or ` +
+        `pass --allow-partial.\n${sample}` +
+        (skippedQueueItems.length > 5
+          ? `\n  …and ${String(skippedQueueItems.length - 5)} more`
+          : ''),
+    );
+  }
+
   const spells: ContentPackSpell[] = [];
   const unemittedPages: ContentPackUnemittedPage[] = input.parseFailures.map((failure) => ({
     url: failure.url,
@@ -338,6 +362,8 @@ export function buildContentPackDocuments(input: ContentPackBuildInput): Content
   const report: ContentPackBuildReport = {
     provenance: SCRAPE_SENTINEL,
     pagesSeen: input.pages.length + input.parseFailures.length,
+    partial: skippedQueueItems.length > 0,
+    skippedQueueItems,
     emitted: spells.length,
     unemitted: unemittedPages.length,
     unemittedByReason,

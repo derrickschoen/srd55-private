@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson } from '../src/commands/canonical-json';
@@ -576,6 +577,29 @@ function promptHash(id: ExperimentId, armId: ExperimentArmId): string {
   ]));
 }
 
+const ANALYSIS_SOURCE_MODULES = [
+  {
+    id: 'tools/vtt-experiment.ts',
+    url: new URL('./vtt-experiment.ts', import.meta.url),
+  },
+  {
+    id: 'src/vtt/experiment-telemetry.ts',
+    url: new URL('../src/vtt/experiment-telemetry.ts', import.meta.url),
+  },
+] as const;
+
+type AnalysisSourceReader = (url: URL) => string;
+
+/** Hashes the actual modules that aggregate results and decide early stopping. */
+export function computeAnalysisCodeDigest(
+  readSource: AnalysisSourceReader = (url) => readFileSync(url, 'utf8'),
+): string {
+  return sha256(canonicalJson(ANALYSIS_SOURCE_MODULES.map((module) => [
+    module.id,
+    readSource(module.url),
+  ])));
+}
+
 export function preregisterExperiment(config: VttExperimentConfig): ExperimentPreregistration {
   const definition = EXPERIMENT_REGISTRY[config.experimentId];
   const withoutDigest = {
@@ -636,7 +660,7 @@ export function preregisterExperiment(config: VttExperimentConfig): ExperimentPr
       minimumTableFraction: 0.5 as const,
       preregisteredTableCeiling: definition.seedCount * definition.replicates * definition.arms.length,
     },
-    analysisCodeDigest: sha256(`${definition.id}-analysis-v3:decision-point-corrections:linear-interpolated-quartiles:aborts-retained:paired-bootstrap-99-after-half`),
+    analysisCodeDigest: computeAnalysisCodeDigest(),
   };
   return { ...withoutDigest, digest: sha256(canonicalJson(withoutDigest)) };
 }

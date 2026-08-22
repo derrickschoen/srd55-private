@@ -7,6 +7,7 @@ import {
   type ContentPackUnemittedReason,
 } from '../../../tools/scrape/build-content-pack';
 import type { BuiltPage } from '../../../tools/scrape/build-catalog';
+import type { QueueItem } from '../../../tools/scrape/queue';
 import { parseSpellPage } from '../../../tools/scrape/parse-spell';
 import { SCRAPE_SENTINEL } from '../../../tools/scrape/provenance';
 import { syntheticSpellPage } from '../../fixtures/scrape/synthetic-pages';
@@ -92,17 +93,33 @@ const SYNTHETIC_FIXTURE_SET = [
   OUT_OF_COMBAT_PAGE,
 ] as const;
 
+function doneQueue(
+  pages: readonly BuiltPage[],
+  extraUrls: readonly string[] = [],
+): QueueItem[] {
+  return [...pages.map((page) => page.url), ...extraUrls].map((url) => ({
+    url,
+    lastmod: null,
+    state: 'done',
+    reason: null,
+  }));
+}
+
 describe('scraper content-pack emission', () => {
   it('reports every synthetic page as emitted or unemitted with one reason enum', () => {
     const output = buildContentPackDocuments({
       pages: SYNTHETIC_FIXTURE_SET,
+      queue: doneQueue(SYNTHETIC_FIXTURE_SET),
       parseFailures: [],
+      allowPartial: false,
       importedAt: '2026-08-22T00:00:00.000Z',
     });
 
     expect(output.report).toEqual({
       provenance: SCRAPE_SENTINEL,
       pagesSeen: 5,
+      partial: false,
+      skippedQueueItems: [],
       emitted: 2,
       unemitted: 3,
       unemittedByReason: {
@@ -136,7 +153,12 @@ describe('scraper content-pack emission', () => {
   it('is byte-identical across repeated builds and independent of input order', () => {
     const input = {
       pages: SYNTHETIC_FIXTURE_SET,
+      queue: doneQueue(
+        SYNTHETIC_FIXTURE_SET,
+        ['http://example.invalid/spell:unfinished'],
+      ),
       parseFailures: [{ url: 'http://example.invalid/spell:unfinished', reason: 'synthetic parse miss' }],
+      allowPartial: false,
       importedAt: '2026-08-22T00:00:00.000Z',
     } as const;
     const first = buildContentPackDocuments(input);
@@ -155,10 +177,38 @@ describe('scraper content-pack emission', () => {
     });
   });
 
+  it('partial_emission_silent: refuses pending work and reports it when partial emission is explicit', () => {
+    const pending: QueueItem = {
+      url: 'http://example.invalid/spell:not-fetched',
+      lastmod: null,
+      state: 'pending',
+      reason: 'awaiting fetch',
+    };
+    const input = {
+      pages: [ATTACK_PAGE],
+      queue: [...doneQueue([ATTACK_PAGE]), pending],
+      parseFailures: [],
+      importedAt: '2026-08-22T00:00:00.000Z',
+    } as const;
+
+    expect(() => buildContentPackDocuments({ ...input, allowPartial: false }))
+      .toThrow(/pending\s+http:\/\/example\.invalid\/spell:not-fetched/u);
+
+    const output = buildContentPackDocuments({ ...input, allowPartial: true });
+    expect(output.report.partial).toBe(true);
+    expect(output.report.skippedQueueItems).toEqual([{
+      url: pending.url,
+      state: 'pending',
+      reason: 'awaiting fetch',
+    }]);
+  });
+
   it('roundtrip_not_executed: imports and executes an emitted operation in an encounter', () => {
     const output = buildContentPackDocuments({
       pages: [ATTACK_PAGE],
+      queue: doneQueue([ATTACK_PAGE]),
       parseFailures: [],
+      allowPartial: false,
       importedAt: '2026-08-22T00:00:00.000Z',
     });
     const loaded = loadContentPackBytes(output.packBytes);

@@ -90,11 +90,11 @@ interface Run {
   stderr: string;
 }
 
-function scan(root: string): Promise<Run> {
+function scan(root: string, scrapeRoot?: string): Promise<Run> {
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      [scanner, root],
+      [scanner, root, ...(scrapeRoot === undefined ? [] : [scrapeRoot])],
       (error, stdout, stderr) => {
         const code =
           error === null
@@ -116,6 +116,24 @@ const CLEAN =
   'console.log("hello");\n';
 
 describe('the dist guard passes only a genuinely clean build', () => {
+  it('guard_assumes_again: names a scraper module with no provenance path', async () => {
+    const scrapeRoot = mkdtempSync(join(tmpdir(), 'assert-dist-clean-scrape-'));
+    made.push(scrapeRoot);
+    writeFileSync(join(scrapeRoot, 'provenance.ts'), "export const sentinel = 'sentinel';\n");
+    writeFileSync(join(scrapeRoot, 'accounted.ts'), "import './provenance';\n");
+    writeFileSync(join(scrapeRoot, 'unaccounted.ts'), 'export const value = 1;\n');
+
+    const run = await scan(
+      distWith({ 'assets/index.js': CLEAN }),
+      scrapeRoot,
+    );
+
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('scraper modules do not reach provenance.ts');
+    expect(run.stderr.split('\n')).toContain('  - unaccounted.ts');
+    expect(run.stderr.split('\n')).not.toContain('  - accounted.ts');
+  });
+
   it('passes and says how much it read', async () => {
     const run = await scan(distWith({ 'assets/index.js': CLEAN }));
     expect(run.code).toBe(0);
