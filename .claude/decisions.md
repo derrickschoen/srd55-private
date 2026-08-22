@@ -7,6 +7,36 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D338 — OWNER: four curation-pattern rulings — per-record approval, lit world objects, mechanical tables, equipment model (2026-08-22)
+
+Round-12 answers. Supervisor recommendations overridden on 1-3; 4 accepted
+with an owner extension.
+
+1. **Cosmetic-clause scoping is PER-RECORD, not a standing pattern.** R1's
+   shape does NOT sweep automatically. The curation worksheet becomes an
+   approval queue: one line per record with the exact clause and a proposed
+   disposition; each moves only on individual owner approval.
+
+2. **Illumination is MODELLED AS WORLD OBJECTS now.** Light sources emit as
+   world objects carrying bright/dim radii even though no vision mechanics
+   consume them yet — representation ahead of mechanics, accepted
+   explicitly. Engine consequence: the world-object vocabulary needs an
+   illumination attribute (small engine increment, queued behind wave 1).
+
+3. **DM-adjudicated tables are MODELLED MECHANICALLY.** Mishap/familiarity
+   tables (Teleport class) encode as declared random branches on the step-4
+   machinery; only genuinely free-text outcomes remain DM-adjudicated and
+   say so in the pack.
+
+4. **Objects: creature-facing effects emit now; secondary object clauses
+   unmodelled per-record — PLUS an owner extension: model WEAPONS AND
+   ARMOR as equipment** so Heat Metal works properly (damage to a creature
+   wearing metal armor; a forced drop of a held metal weapon). This is a
+   new engine capability — an equipment/item model on combatants (worn
+   armor, held weapons, material properties, drop mechanics) — entering
+   the lever queue alongside shared-outcome linkage (39) and
+   target-selection (25).
+
 ## D337 — OWNER: curation overlay adopted; owner rulings resolve ambiguous records as data (2026-08-22)
 
 The owner offered judgement calls on the ambiguous-parameters residue,
