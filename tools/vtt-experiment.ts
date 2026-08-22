@@ -47,7 +47,7 @@ import {
   VTT_EXPERIMENT_SCHEMA_VERSION,
   type ExperimentCallRecord,
   type ExperimentTableRecord,
-  type ExperimentTableRecordV4,
+  type ExperimentTableRecordV5,
   type PromptComponentTelemetry,
   type RolloutInputCapture,
 } from '../src/vtt/experiment-telemetry';
@@ -206,7 +206,7 @@ export const E03_TACTICAL_ADVICE_FORBIDDEN_PHRASES = Object.freeze([
   'spend resources',
 ] as const);
 
-function exampleBlock(examples: readonly RoundPlan[]): string {
+function exampleBlock(examples: readonly object[]): string {
   return examples.length === 0
     ? E02_ZERO_EXAMPLE_BLOCK
     : examples.map((example) => canonicalJson(example)).join('\n');
@@ -995,6 +995,7 @@ class RecordingExperimentExchange implements DmBridgeExchange {
       firstPassValid: wire.correctionAttempt === 0 && failed === null,
       validationResult: exchangeError !== null ? 'not_run' : validationError === null ? 'valid' : 'invalid',
       validatorErrorCategory: validationError === null ? null : validatorCategory(validationError),
+      envelopeNormalizationRule: decoded?.envelopeNormalizationRule ?? null,
       compileErrorCategory: null,
       failedSchemaPath: failedRoundPlanSchemaPath(validationError),
       correctionAttempt: wire.correctionAttempt,
@@ -1093,7 +1094,7 @@ export async function runE01Table(
   entry: ExperimentScheduleEntry,
   config: VttExperimentConfig,
   preregistration: ExperimentPreregistration,
-): Promise<ExperimentTableRecordV4> {
+): Promise<ExperimentTableRecordV5> {
   const wallStarted = Date.now();
   const bridge = launchBridge(config, entry);
   const abort = new AbortController();
@@ -1300,7 +1301,7 @@ export async function runE01Table(
       : entry.experimentId === 'E01' ? 'round-plan-json-ast-v1' : 'compact-grammar-v1',
     exampleCount: entry.experimentId === 'E01'
       ? 1
-      : entry.experimentId === 'E02' ? e02ArmDefinition(entry.armId).exampleCount : entry.experimentId === 'E05' ? 1 : 3,
+      : entry.experimentId === 'E02' ? e02ArmDefinition(entry.armId).exampleCount : 3,
     instructionVersion: entry.experimentId === 'E01'
       ? 'e01-terse-v1'
       : entry.experimentId === 'E02'

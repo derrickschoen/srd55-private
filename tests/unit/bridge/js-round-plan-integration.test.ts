@@ -15,13 +15,15 @@ import {
 } from '../../../src/vtt/dm-bridge/decision-program';
 import {
   DM_BRIDGE_PROTOCOL_VERSION,
+  JS_ROUND_PLAN_WORKED_EXAMPLES,
   ROUND_PLAN_JS_REPLY_CONTRACT,
+  decodeRoundPlanReply,
   observeTypeCheckUniqueCatch,
   type DmBridgeExchange,
   type DmBridgeRequest,
+  type RoundPlanRequest,
 } from '../../../src/vtt/dm-bridge/contracts';
 import {
-  JS_TURN_PROGRAM_CANONICAL_EXAMPLE,
   JS_TURN_PROGRAM_GRAMMAR,
 } from '../../../src/vtt/dm-bridge/js-turn-program';
 import {
@@ -170,6 +172,51 @@ function jsReply(request: DmBridgeRequest, source: string): unknown {
   };
 }
 
+function batchFixture() {
+  const monsters = Array.from({ length: 4 }, (_value, index) =>
+    monsterProfile(`normalization-monster-${String(index + 1)}`, { hitPoints: 20 }));
+  const player = playerProfile('normalization-player');
+  const base = createEncounter({
+    bounds: { columns: 10, rows: 2 },
+    combatants: [...monsters, player],
+    tokens: [...monsters.map((monster, index) => placedToken(monster, index)), placedToken(player, 8)],
+  });
+  const state: EncounterState = { ...base, revision: 4, round: 1 };
+  return { monsters, player, state };
+}
+
+function jsRequest(state: EncounterState, livingMonsterIds: readonly CombatantId[]): RoundPlanRequest {
+  const requestContext = context(state);
+  return {
+    kind: 'round_plan_request',
+    protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,
+    encounterId: requestContext.encounterId,
+    requestId: 'request:envelope-normalization',
+    expectedRevision: state.revision,
+    round: state.round,
+    codexSessionId: requestContext.codexSessionId,
+    model: { model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
+    projection: requestContext.projection,
+    history: [],
+    livingMonsterIds,
+    surface: 'js_program',
+    replyContract: ROUND_PLAN_JS_REPLY_CONTRACT,
+    correctionAttempt: 0,
+  };
+}
+
+function canonicalJsEnvelope(request: RoundPlanRequest): Readonly<Record<string, unknown>> {
+  return {
+    kind: 'js_round_plan',
+    protocolVersion: request.protocolVersion,
+    encounterId: request.encounterId,
+    requestId: request.requestId,
+    expectedRevision: request.expectedRevision,
+    round: request.round,
+    monsters: request.livingMonsterIds.map((monsterId) => ({ monsterId, source: 'emit(endTurn());' })),
+  };
+}
+
 class FakeJsExchange implements DmBridgeExchange {
   readonly requests: DmBridgeRequest[] = [];
 
@@ -182,6 +229,146 @@ class FakeJsExchange implements DmBridgeExchange {
 }
 
 describe('JS round-plan protocol and replay integration', () => {
+  it.each([
+    ['program', 'round_plan'],
+    ['source', 'js_program'],
+    ['code', 'round_plan'],
+    ['sourceCode', 'js_program'],
+    ['plan', 'decision_program'],
+  ] as const)(
+    'normalizes the measured bare %s single-program shape through the real decoder',
+    (field, kind) => {
+      const f = fixture();
+      const request = jsRequest(f.state, [f.monster.id]);
+      const decoded = decodeRoundPlanReply({ kind, [field]: 'emit(endTurn());' }, request, {
+        typeCheckMode: 'untyped',
+      });
+
+      expect(decoded.envelopeNormalizationRule).toBe('single_program');
+      expect(decoded.jsPrograms).toMatchObject([{ monsterId: f.monster.id, source: 'emit(endTurn());' }]);
+      expect(decoded.plan.monsters).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    ['programs', 'programs_collection'],
+    ['plans', 'plans_collection'],
+  ] as const)('normalizes the measured %s collection alias with per-entry aliases', (field, rule) => {
+    const f = batchFixture();
+    const ids = f.monsters.map((monster) => monster.id);
+    const request = jsRequest(f.state, ids);
+    const entries = ids.map((monsterId, index) => index % 2 === 0
+      ? { combatantId: monsterId, program: 'emit(endTurn());' }
+      : { actorId: monsterId, source: 'emit(endTurn());' });
+    const decoded = decodeRoundPlanReply({ kind: 'round_plan', [field]: entries }, request, {
+      typeCheckMode: 'untyped',
+    });
+
+    expect(decoded.envelopeNormalizationRule).toBe(rule);
+    expect(decoded.jsPrograms.map((entry) => entry.monsterId)).toEqual(ids);
+  });
+
+  it.each(['source', 'program', 'code', 'sourceCode'] as const)(
+    'normalizes the measured per-entry %s program field inside monsters',
+    (field) => {
+      const f = fixture();
+      const request = jsRequest(f.state, [f.monster.id]);
+      const decoded = decodeRoundPlanReply({
+        monsters: [{ combatantId: f.monster.id, [field]: 'emit(endTurn());' }],
+      }, request, { typeCheckMode: 'untyped' });
+
+      expect(decoded.envelopeNormalizationRule).toBe('monster_entry_aliases');
+      expect(decoded.jsPrograms[0]).toMatchObject({ monsterId: f.monster.id, source: 'emit(endTurn());' });
+    },
+  );
+
+  it('normalizes measured object maps both at the body and collection levels', () => {
+    const f = batchFixture();
+    const ids = f.monsters.map((monster) => monster.id);
+    const request = jsRequest(f.state, ids);
+    const keyed = Object.fromEntries(ids.map((monsterId) => [monsterId, 'emit(endTurn());']));
+
+    const body = decodeRoundPlanReply(keyed, request, { typeCheckMode: 'untyped' });
+    const plans = decodeRoundPlanReply({ plans: keyed }, request, { typeCheckMode: 'untyped' });
+
+    expect(body.envelopeNormalizationRule).toBe('combatant_keyed_object');
+    expect(plans.envelopeNormalizationRule).toBe('plans_collection');
+    expect(body.jsPrograms.map((entry) => entry.monsterId)).toEqual(ids);
+    expect(plans.jsPrograms.map((entry) => entry.monsterId)).toEqual(ids);
+  });
+
+  it('fills only absent envelope identity fields and reports that rule', () => {
+    const f = fixture();
+    const request = jsRequest(f.state, [f.monster.id]);
+    const decoded = decodeRoundPlanReply({
+      monsters: [{ monsterId: f.monster.id, source: 'emit(endTurn());' }],
+    }, request, { typeCheckMode: 'untyped' });
+
+    expect(decoded.envelopeNormalizationRule).toBe('missing_envelope_fields');
+    expect(decoded.plan).toMatchObject({
+      encounterId: request.encounterId,
+      requestId: request.requestId,
+      expectedRevision: request.expectedRevision,
+      round: request.round,
+    });
+  });
+
+  it('single_program_accepted_for_batch: refuses a bare program for a batch and names every missing association', async () => {
+    const f = batchFixture();
+    const ids = f.monsters.map((monster) => monster.id);
+    const exchange = new class implements DmBridgeExchange {
+      readonly requests: DmBridgeRequest[] = [];
+
+      async exchange(request: DmBridgeRequest): Promise<unknown> {
+        this.requests.push(request);
+        if (this.requests.length === 1) return { program: 'emit(endTurn());' };
+        return jsReply(request, 'emit(endTurn());');
+      }
+    }();
+    const session = new DmRoundPlanSession(exchange, undefined, undefined, 'js_program', {
+      typeCheckMode: 'untyped',
+    });
+
+    await expect(session.startRound(context(f.state), new AbortController().signal)).resolves.toMatchObject({
+      monsters: expect.arrayContaining(ids.map((monsterId) => expect.objectContaining({ monsterId }))),
+    });
+    expect(exchange.requests[1]).toMatchObject({
+      validatorError: `Bare single-program reply cannot be associated with multiple requested monsters; programs were required for ${ids.join(', ')}.`,
+      requestedMonsterIds: ids,
+    });
+  });
+
+  it.each([
+    ['protocolVersion', 1],
+    ['encounterId', 'encounter:wrong'],
+    ['requestId', 'request:wrong'],
+    ['expectedRevision', 999],
+    ['round', 999],
+  ] as const)('wrong_identity_filled: refuses present-but-wrong %s instead of replacing it', (field, wrong) => {
+    const f = fixture();
+    const request = jsRequest(f.state, [f.monster.id]);
+    const reply = { ...canonicalJsEnvelope(request), [field]: wrong };
+
+    expect(() => decodeRoundPlanReply(reply, request, { typeCheckMode: 'untyped' })).toThrow();
+  });
+
+  it('refuses an incomplete combatant-keyed batch instead of guessing missing programs', () => {
+    const f = batchFixture();
+    const ids = f.monsters.map((monster) => monster.id);
+    const request = jsRequest(f.state, ids);
+    expect(() => decodeRoundPlanReply({ [String(ids[0])]: 'emit(endTurn());' }, request, {
+      typeCheckMode: 'untyped',
+    })).toThrow('exactly one source program for each requested monster');
+  });
+
+  it('refuses the unmeasured per-entry plan alias while retaining the measured root plan alias', () => {
+    const f = fixture();
+    const request = jsRequest(f.state, [f.monster.id]);
+    expect(() => decodeRoundPlanReply({
+      monsters: [{ monsterId: f.monster.id, plan: 'emit(endTurn());' }],
+    }, request, { typeCheckMode: 'untyped' })).toThrow('unexpected field plan');
+  });
+
   it('dts_widens_to_string is killed by actor-visible literal unions and unavailable combatant diagnostics', () => {
     const f = fixture();
     const projection = decisionProjection(f.state, f.monster.id, [
@@ -374,9 +561,11 @@ describe('JS round-plan protocol and replay integration', () => {
       surface: 'js_program',
       schemaVersion: 1,
       grammar: JS_TURN_PROGRAM_GRAMMAR,
-      canonicalExample: JS_TURN_PROGRAM_CANONICAL_EXAMPLE,
+      workedExamples: JS_ROUND_PLAN_WORKED_EXAMPLES,
       maximumCorrectionAttempts: 2,
     });
+    expect(ROUND_PLAN_JS_REPLY_CONTRACT.workedExamples).toHaveLength(3);
+    expect(ROUND_PLAN_JS_REPLY_CONTRACT.workedExamples[0]?.monsters).toHaveLength(2);
   });
 
   it('a js_program plan drives a fake-exchange table and replays source plus emitted DecisionProgram byte-for-byte', async () => {

@@ -16,7 +16,7 @@ import {
   decisionCorrectionMetrics,
   experimentCallRecordSchema,
   type ExperimentTableRecord,
-  type ExperimentTableRecordV4,
+  type ExperimentTableRecordV5,
 } from '../../../src/vtt/experiment-telemetry';
 import {
   buildExperimentSchedule,
@@ -38,12 +38,12 @@ import {
 
 const FAKE_CODEX = 'tests/fixtures/fake-codex-dm.mjs';
 let directory = '';
-let liveRecord: ExperimentTableRecordV4;
-let repeatedRecord: ExperimentTableRecordV4;
-let e02Record: ExperimentTableRecordV4;
-let e03Record: ExperimentTableRecordV4;
-let e04Records: readonly ExperimentTableRecordV4[];
-let e05Records: readonly ExperimentTableRecordV4[];
+let liveRecord: ExperimentTableRecordV5;
+let repeatedRecord: ExperimentTableRecordV5;
+let e02Record: ExperimentTableRecordV5;
+let e03Record: ExperimentTableRecordV5;
+let e04Records: readonly ExperimentTableRecordV5[];
+let e05Records: readonly ExperimentTableRecordV5[];
 
 function config(outDirectory: string, experimentId: 'E01' | 'E02' | 'E03' | 'E04' | 'E05' = 'E01'): VttExperimentConfig {
   return {
@@ -63,11 +63,11 @@ function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function legacyV1Record(record: ExperimentTableRecordV4): unknown {
+function legacyV1Record(record: ExperimentTableRecordV5): unknown {
   return {
     ...structuredClone(record),
     schemaVersion: 1,
-    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, ...call }) => call),
+    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, envelopeNormalizationRule: _envelopeNormalizationRule, ...call }) => call),
     quality: {
       ...structuredClone(record.quality),
       rolloutInputCaptures: record.quality.rolloutInputCaptures.map((capture) => {
@@ -83,19 +83,27 @@ function legacyV1Record(record: ExperimentTableRecordV4): unknown {
   };
 }
 
-function legacyV2Record(record: ExperimentTableRecordV4): unknown {
+function legacyV2Record(record: ExperimentTableRecordV5): unknown {
   return {
     ...structuredClone(record),
     schemaVersion: 2,
-    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, ...call }) => call),
+    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, envelopeNormalizationRule: _envelopeNormalizationRule, ...call }) => call),
   };
 }
 
-function legacyV3Record(record: ExperimentTableRecordV4): unknown {
+function legacyV3Record(record: ExperimentTableRecordV5): unknown {
   return {
     ...structuredClone(record),
     schemaVersion: 3,
-    calls: record.calls.map(({ typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, ...call }) => call),
+    calls: record.calls.map(({ typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, envelopeNormalizationRule: _envelopeNormalizationRule, ...call }) => call),
+  };
+}
+
+function legacyV4Record(record: ExperimentTableRecordV5): unknown {
+  return {
+    ...structuredClone(record),
+    schemaVersion: 4,
+    calls: record.calls.map(({ envelopeNormalizationRule: _envelopeNormalizationRule, ...call }) => call),
   };
 }
 
@@ -198,10 +206,10 @@ describe('E02 worked-example experiment registration', () => {
     }
   });
 
-  it('emits capture v4 on a synthetic no-LLM E02 table', () => {
+  it('emits capture v5 on a synthetic no-LLM E02 table', () => {
     expect(() => decodeExperimentTableRecord(e02Record)).not.toThrow();
     expect(e02Record).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       experimentId: 'E02',
       schemaVariant: 'compact-grammar-v1',
       status: 'completed',
@@ -311,10 +319,10 @@ describe('E03 instruction-length experiment registration', () => {
     expect(first.promptComponentHashes).not.toEqual(e02.promptComponentHashes);
   });
 
-  it('emits capture v4 on a synthetic no-LLM E03 table', () => {
+  it('emits capture v5 on a synthetic no-LLM E03 table', () => {
     expect(() => decodeExperimentTableRecord(e03Record)).not.toThrow();
     expect(e03Record).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       experimentId: 'E03',
       schemaVariant: 'compact-grammar-v1',
       exampleCount: 3,
@@ -517,7 +525,7 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
     const first = preregisterExperiment(config('/tmp/e05-first', 'E05'));
     const repeated = preregisterExperiment(config('/tmp/e05-repeated', 'E05'));
     expect(first.digest).toBe(repeated.digest);
-    expect(first.digest).toBe('d07cf89f8dcd0a4054bbcc3ca8e98b251dac50a75006fdf2db0fc4c221d3ef8c');
+    expect(first.digest).toBe('36db1c644b35e2483838f5e2458b2a308a4454e93fdd3cf57bcebc8b6db59f5d');
     expect(first).toMatchObject({
       programVersion: 'D332.1-v1',
       experimentId: 'E05',
@@ -549,7 +557,7 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
     expect(e05Records.every((record) =>
       record.planSurface === 'js_program' &&
       record.schemaVariant === 'restricted-js-v1' &&
-      record.exampleCount === 1 &&
+      record.exampleCount === 3 &&
       record.status === 'completed' &&
       record.calls.every((call) => call.typeCheckUniqueCatchObservations.length === 0),
     )).toBe(true);
@@ -570,7 +578,7 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
     const previousStateFile = process.env.FAKE_CODEX_STATE_FILE;
     process.env.FAKE_CODEX_MODE = 'js_schema_error_once';
     process.env.FAKE_CODEX_STATE_FILE = stateFile;
-    let record: ExperimentTableRecordV4;
+    let record: ExperimentTableRecordV5;
     try {
       record = await runE05Table(entry, execution, preregisterExperiment(execution));
     } finally {
@@ -604,6 +612,37 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
       code: 'too_small',
       path: ['failedSchemaPath'],
     }));
+  });
+
+  it('normalization_untracked: records the closed alias rule when the real E05 decoder normalizes a reply', async () => {
+    const execution = config(join(directory, 'e05-js-normalized'), 'E05');
+    const entry = buildExperimentSchedule('E05').find((candidate) => candidate.armId === 'untyped-js');
+    if (entry === undefined) throw new Error('E05 untyped schedule is empty.');
+    const stateFile = join(directory, 'e05-js-normalized-state');
+    const previousMode = process.env.FAKE_CODEX_MODE;
+    const previousStateFile = process.env.FAKE_CODEX_STATE_FILE;
+    process.env.FAKE_CODEX_MODE = 'js_alias_once';
+    process.env.FAKE_CODEX_STATE_FILE = stateFile;
+    let record: ExperimentTableRecordV5;
+    try {
+      record = await runE05Table(entry, execution, preregisterExperiment(execution));
+    } finally {
+      if (previousMode === undefined) delete process.env.FAKE_CODEX_MODE;
+      else process.env.FAKE_CODEX_MODE = previousMode;
+      if (previousStateFile === undefined) delete process.env.FAKE_CODEX_STATE_FILE;
+      else process.env.FAKE_CODEX_STATE_FILE = previousStateFile;
+    }
+
+    expect(record.status).toBe('completed');
+    expect(record.calls[0]).toMatchObject({
+      validationResult: 'valid',
+      envelopeNormalizationRule: 'plans_collection',
+    });
+    expect(record.calls.slice(1).every((call) => call.envelopeNormalizationRule === null)).toBe(true);
+    expect(experimentCallRecordSchema.safeParse({
+      ...record.calls[0],
+      envelopeNormalizationRule: '',
+    }).success).toBe(false);
   });
 
   it('correction_undercount: counts a first-reply failure as one corrected decision and one correction round', () => {
@@ -749,7 +788,7 @@ describe('E01 experiment registry and orchestration', () => {
     expect(liveRecord.calls.every((call) => call.fullStateHash.length === 64)).toBe(true);
     expect(liveRecord.quality.regretStatus).toBe('deferred');
     expect(liveRecord.quality.rolloutInputCaptures).toHaveLength(5);
-    expect(liveRecord.schemaVersion).toBe(4);
+    expect(liveRecord.schemaVersion).toBe(5);
     expect(liveRecord.quality.rolloutInputCaptures.every((capture) =>
       capture.selectedAction.length === 4 &&
       capture.candidateTurnK === 64 &&
@@ -801,22 +840,25 @@ describe('E01 experiment registry and orchestration', () => {
       .toEqual(liveRecord.quality.rolloutInputCaptures.map((capture) => capture.candidateTurns));
   });
 
-  it('v1_unreadable: the version-window reader loads legacy v1/v2/v3 and current v4 tables', () => {
+  it('v1_unreadable: the version-window reader loads legacy v1/v2/v3/v4 and current v5 tables', () => {
     const legacy = decodeExperimentTableRecord(legacyV1Record(liveRecord));
     const previous = decodeExperimentTableRecord(legacyV2Record(liveRecord));
     const prior = decodeExperimentTableRecord(legacyV3Record(liveRecord));
+    const v4 = decodeExperimentTableRecord(legacyV4Record(liveRecord));
     const current = decodeExperimentTableRecord(structuredClone(liveRecord));
     expect(legacy.schemaVersion).toBe(1);
     expect(previous.schemaVersion).toBe(2);
     expect(prior.schemaVersion).toBe(3);
-    expect(current.schemaVersion).toBe(4);
+    expect(v4.schemaVersion).toBe(4);
+    expect(current.schemaVersion).toBe(5);
     expect(legacy.quality.rolloutInputCaptures).toHaveLength(5);
     expect(previous.quality.rolloutInputCaptures).toHaveLength(5);
     expect(prior.quality.rolloutInputCaptures).toHaveLength(5);
+    expect(v4.quality.rolloutInputCaptures).toHaveLength(5);
     expect(current.quality.rolloutInputCaptures).toHaveLength(5);
   });
 
-  it('keeps representative inline v4 table captures below the sidecar threshold', () => {
+  it('keeps representative inline v5 table captures below the sidecar threshold', () => {
     const legacyBytes = Buffer.byteLength(canonicalJson(legacyV1Record(liveRecord)));
     const currentBytes = Buffer.byteLength(canonicalJson(liveRecord));
     expect(currentBytes).toBeGreaterThan(legacyBytes);

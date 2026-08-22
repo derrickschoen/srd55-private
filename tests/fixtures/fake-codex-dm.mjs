@@ -62,7 +62,8 @@ if (isResume && process.env.FAKE_CODEX_MODE === 'hang') {
         };
     if (
       (process.env.FAKE_CODEX_MODE === 'malformed_once' ||
-        process.env.FAKE_CODEX_MODE === 'js_schema_error_once') &&
+        process.env.FAKE_CODEX_MODE === 'js_schema_error_once' ||
+        process.env.FAKE_CODEX_MODE === 'js_alias_once') &&
       process.env.FAKE_CODEX_STATE_FILE !== undefined
     ) {
       let alreadyMalformed = false;
@@ -74,7 +75,12 @@ if (isResume && process.env.FAKE_CODEX_MODE === 'hang') {
       }
       if (!alreadyMalformed) {
         await writeFile(process.env.FAKE_CODEX_STATE_FILE, 'malformed', 'utf8');
-        reply = process.env.FAKE_CODEX_MODE === 'js_schema_error_once' && request.surface === 'js_program'
+        reply = process.env.FAKE_CODEX_MODE === 'js_alias_once' && request.surface === 'js_program'
+          ? {
+              kind: 'round_plan',
+              plans: monsterIds.map((monsterId) => ({ actorId: monsterId, program: 'emit(endTurn());' })),
+            }
+          : process.env.FAKE_CODEX_MODE === 'js_schema_error_once' && request.surface === 'js_program'
           ? { ...reply, unexpectedTelemetryProbe: true }
           : {
               ...reply,

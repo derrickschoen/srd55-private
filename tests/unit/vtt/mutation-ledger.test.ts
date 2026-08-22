@@ -37,6 +37,7 @@ const TYPED_JS_LEDGER_PATH = 'docs/audits/2026-08-21-typed-js-turn-program-mutat
 const SPATIAL_MOVEMENT_LEDGER_PATH = 'docs/audits/2026-08-21-spatial-movement-mutation-ledger.md';
 const E04_CONTEXT_LEDGER_PATH = 'docs/audits/2026-08-21-e04-context-compression-early-stop-mutation-ledger.md';
 const E05_TYPED_UNTYPED_LEDGER_PATH = 'docs/audits/2026-08-21-e05-typed-vs-untyped-mutation-ledger.md';
+const ENVELOPE_NORMALIZATION_LEDGER_PATH = 'docs/audits/2026-08-22-envelope-normalization-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -400,5 +401,21 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(5);
     expect(ledger).toContain('Each production mutation was applied alone, killed by its named test, and restored');
     expect(ledger).toContain('Each round-2 production mutation was applied alone');
+  });
+
+  it('ENVELOPE-NORMALIZATION-MUTATION-LEDGER pins all three restored controls', () => {
+    const ledger = readFileSync(ENVELOPE_NORMALIZATION_LEDGER_PATH, 'utf8');
+    const bridgeTests = readFileSync('tests/unit/bridge/js-round-plan-integration.test.ts', 'utf8');
+    const experimentTests = readFileSync('tests/unit/vtt/experiment-orchestrator.test.ts', 'utf8');
+    for (const name of [
+      'single_program_accepted_for_batch',
+      'wrong_identity_filled',
+      'normalization_untracked',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(`${bridgeTests}\n${experimentTests}`).toContain(name);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(3);
+    expect(ledger).toContain('exit 0; 2 files passed and 7 named cases passed');
   });
 });

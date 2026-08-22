@@ -54,12 +54,17 @@ import {
   type TurnProgramAmbientApiDescription,
   type TurnProgramTypeCheckTelemetry,
 } from './turn-program-types';
+import {
+  normalizeRoundPlanEnvelope,
+  type RoundPlanEnvelopeNormalizationRule,
+} from './round-plan-envelope-normalization';
 
 export {
   DM_BRIDGE_PROTOCOL_VERSION,
   E02_SHARED_INSTRUCTIONS,
   MAX_ROUND_PLAN_CORRECTIONS,
   ROUND_PLAN_CANONICAL_EXAMPLE,
+  JS_ROUND_PLAN_WORKED_EXAMPLES,
   ROUND_PLAN_JS_REPLY_CONTRACT,
   ROUND_PLAN_REPLY_CONTRACT,
   ROUND_PLAN_REPLY_JSON_SCHEMA,
@@ -415,6 +420,7 @@ export interface JsProgramArtifact extends JsTurnProgramExecution {
 export interface DecodedRoundPlanReply {
   readonly plan: RoundPlan;
   readonly jsPrograms: readonly JsProgramArtifact[];
+  readonly envelopeNormalizationRule: RoundPlanEnvelopeNormalizationRule | null;
 }
 
 type ShadowInterpreter = typeof interpretJsTurnProgram;
@@ -494,8 +500,22 @@ export function decodeRoundPlanReply(
   if (request.replyContract.surface !== request.surface) {
     throw new TypeError('Round plan surface and reply contract disagree.');
   }
-  if (request.surface === 'json_ast') return { plan: decodeRoundPlan(value, request), jsPrograms: [] };
-  const input = decodeJsRoundPlanSourceStructure(value);
+  const normalized = normalizeRoundPlanEnvelope(value, {
+    surface: request.surface,
+    encounterId: request.encounterId,
+    requestId: request.requestId,
+    expectedRevision: request.expectedRevision,
+    round: request.round,
+    requestedMonsterIds: expectedMonsterIds(request),
+  });
+  if (request.surface === 'json_ast') {
+    return {
+      plan: decodeRoundPlan(normalized.value, request),
+      jsPrograms: [],
+      envelopeNormalizationRule: normalized.rule,
+    };
+  }
+  const input = decodeJsRoundPlanSourceStructure(normalized.value);
   validateJsEnvelope(input, request);
   const jsPrograms = input.monsters.map((entry): JsProgramArtifact => {
     const typed = limits.typeCheckMode !== 'untyped';
@@ -535,7 +555,7 @@ export function decodeRoundPlanReply(
       program: artifact.emittedDecisionProgram,
     })),
   }, request);
-  return { plan, jsPrograms };
+  return { plan, jsPrograms, envelopeNormalizationRule: normalized.rule };
 }
 
 export function adjudicationCommand(

@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { decisionProgramSchema } from './dm-bridge/round-plan-contract';
+import { ROUND_PLAN_ENVELOPE_NORMALIZATION_RULES } from './dm-bridge/round-plan-envelope-normalization';
 
-export const VTT_EXPERIMENT_SCHEMA_VERSION = 4 as const;
+export const VTT_EXPERIMENT_SCHEMA_VERSION = 5 as const;
 export const VTT_EXPERIMENT_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 const text = z.string().min(1);
@@ -145,8 +146,12 @@ export const typeCheckUniqueCatchObservationSchema = z.strictObject({
   runtimeError: nullableText,
 });
 
-export const experimentCallRecordSchema = experimentCallRecordV3Schema.extend({
+export const experimentCallRecordV4Schema = experimentCallRecordV3Schema.extend({
   typeCheckUniqueCatchObservations: z.array(typeCheckUniqueCatchObservationSchema),
+});
+
+export const experimentCallRecordSchema = experimentCallRecordV4Schema.extend({
+  envelopeNormalizationRule: z.enum(ROUND_PLAN_ENVELOPE_NORMALIZATION_RULES).nullable(),
 });
 
 const experimentCallRecordV2Schema = experimentCallRecordV3Schema.omit({
@@ -318,6 +323,13 @@ export const experimentTableRecordV3Schema = z.strictObject({
   quality: experimentQualityBlockSchema,
 });
 
+export const experimentTableRecordV4Schema = z.strictObject({
+  schemaVersion: z.literal(4),
+  ...experimentTableRecordShape,
+  calls: z.array(experimentCallRecordV4Schema),
+  quality: experimentQualityBlockSchema,
+});
+
 export const experimentTableRecordSchema = z.strictObject({
   schemaVersion: z.literal(VTT_EXPERIMENT_SCHEMA_VERSION),
   ...experimentTableRecordShape,
@@ -332,8 +344,14 @@ export type ExperimentQualityBlock = z.infer<typeof experimentQualityBlockSchema
 export type ExperimentTableRecordV1 = z.infer<typeof experimentTableRecordV1Schema>;
 export type ExperimentTableRecordV2 = z.infer<typeof experimentTableRecordV2Schema>;
 export type ExperimentTableRecordV3 = z.infer<typeof experimentTableRecordV3Schema>;
-export type ExperimentTableRecordV4 = z.infer<typeof experimentTableRecordSchema>;
-export type ExperimentTableRecord = ExperimentTableRecordV1 | ExperimentTableRecordV2 | ExperimentTableRecordV3 | ExperimentTableRecordV4;
+export type ExperimentTableRecordV4 = z.infer<typeof experimentTableRecordV4Schema>;
+export type ExperimentTableRecordV5 = z.infer<typeof experimentTableRecordSchema>;
+export type ExperimentTableRecord =
+  | ExperimentTableRecordV1
+  | ExperimentTableRecordV2
+  | ExperimentTableRecordV3
+  | ExperimentTableRecordV4
+  | ExperimentTableRecordV5;
 
 export function decodeExperimentTableRecord(value: unknown): ExperimentTableRecord {
   if (typeof value !== 'object' || value === null || !('schemaVersion' in value)) {
@@ -356,6 +374,8 @@ export function decodeExperimentTableRecord(value: unknown): ExperimentTableReco
     case 3:
       return experimentTableRecordV3Schema.parse(value);
     case 4:
+      return experimentTableRecordV4Schema.parse(value);
+    case 5:
       return experimentTableRecordSchema.parse(value);
   }
   throw new Error('Experiment table schema-version dispatch is incomplete.');

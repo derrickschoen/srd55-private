@@ -147,6 +147,21 @@ export interface JsRoundPlanSourceReply {
   readonly monsters: readonly JsMonsterProgramSource[];
 }
 
+function jsRoundPlanWorkedExample(
+  name: string,
+  monsters: readonly JsMonsterProgramSource[],
+): JsRoundPlanSourceReply {
+  return decodeJsRoundPlanSourceStructure({
+    kind: 'js_round_plan',
+    protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,
+    encounterId: `encounter:js-example-${name}`,
+    requestId: `request:js-example-${name}`,
+    expectedRevision: 7,
+    round: 2,
+    monsters,
+  });
+}
+
 const trimmedString = z.string().trim().min(1);
 const combatantIdSchema = trimmedString.transform((value) => combatantId(value));
 const encounterSessionIdSchema = trimmedString.transform((value) => encounterSessionId(value));
@@ -339,6 +354,24 @@ export function decodeJsRoundPlanSourceStructure(value: unknown): JsRoundPlanSou
   return result.data;
 }
 
+export const JS_ROUND_PLAN_WORKED_EXAMPLES = Object.freeze([
+  jsRoundPlanWorkedExample('batched', [{
+    monsterId: combatantId('combatant:example-goblin-1'),
+    source: 'const target = nearestEnemy();\nif (target !== null) {\n  emit(attack(target));\n} else {\n  emit(endTurn());\n}',
+  }, {
+    monsterId: combatantId('combatant:example-goblin-2'),
+    source: 'const target = nearestEnemy();\nif (target !== null) {\n  emit(priority(forceSave(target), endTurn()));\n} else {\n  emit(endTurn());\n}',
+  }]),
+  jsRoundPlanWorkedExample('movement', [{
+    monsterId: combatantId('combatant:example-wolf'),
+    source: 'const target = nearestEnemy();\nif (target !== null) {\n  emit(priority(move(target), dash(), endTurn()));\n} else {\n  emit(endTurn());\n}',
+  }]),
+  jsRoundPlanWorkedExample('fallback', [{
+    monsterId: combatantId('combatant:example-cultist'),
+    source: JS_TURN_PROGRAM_CANONICAL_EXAMPLE,
+  }]),
+] as const);
+
 export function decodeDecisionProgramStructure(value: unknown): DecisionProgram {
   const result = programSchema(0).safeParse(value);
   if (!result.success) throw new TypeError(validatorMessage(result.error));
@@ -483,7 +516,11 @@ export type E01RoundPlanReplyContract =
 export interface JsProgramRoundPlanReplyContract extends RoundPlanReplyContractBase {
   readonly surface: 'js_program';
   readonly grammar: typeof JS_TURN_PROGRAM_GRAMMAR;
-  readonly canonicalExample: typeof JS_TURN_PROGRAM_CANONICAL_EXAMPLE;
+  readonly workedExamples: readonly [
+    JsRoundPlanSourceReply,
+    JsRoundPlanSourceReply,
+    JsRoundPlanSourceReply,
+  ];
 }
 
 export type RoundPlanReplyContract =
@@ -505,7 +542,7 @@ export const ROUND_PLAN_JS_REPLY_CONTRACT: JsProgramRoundPlanReplyContract = Obj
   surface: 'js_program',
   schemaVersion: ROUND_PLAN_CONTRACT_SCHEMA_VERSION,
   grammar: JS_TURN_PROGRAM_GRAMMAR,
-  canonicalExample: JS_TURN_PROGRAM_CANONICAL_EXAMPLE,
+  workedExamples: JS_ROUND_PLAN_WORKED_EXAMPLES,
   maximumCorrectionAttempts: MAX_ROUND_PLAN_CORRECTIONS,
 });
 

@@ -427,8 +427,9 @@ function roundPlanPrompt(request) {
         : [
             'The reply MUST use this restricted program grammar:',
             String(contract.grammar),
-            'Canonical valid example:',
-            String(contract.canonicalExample),
+            ...('workedExamples' in contract
+              ? workedExampleInstructions(contract.workedExamples)
+              : ['Canonical valid example:', String(contract.canonicalExample)]),
           ];
   const requestPayload = 'workedExamples' in contract
     ? Object.fromEntries(Object.entries(input).filter(([key]) => key !== 'replyContract'))
