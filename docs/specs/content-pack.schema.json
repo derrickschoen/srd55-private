@@ -406,6 +406,7 @@
             "damage_operation",
             "armed_weapon_hit_rider",
             "persistent_area",
+            "world_operations",
             "attack_damage",
             "attack_then_save_damage",
             "attack_damage_over_time",
@@ -447,6 +448,9 @@
         },
         {
           "$ref": "#/$defs/operation-persistent_area"
+        },
+        {
+          "$ref": "#/$defs/operation-world_operations"
         },
         {
           "$ref": "#/$defs/operation-attack_damage"
@@ -1067,6 +1071,26 @@
         "movableFeet": { "type": ["integer", "null"], "minimum": 1, "maximum": 100000 },
         "hooks": { "type": "array", "maxItems": 16, "items": { "type": "object" } },
         "initialEffects": { "type": "array", "maxItems": 16, "items": { "type": "object" } }
+      }
+    },
+    "operation-world_operations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "operations"],
+      "properties": {
+        "kind": { "const": "world_operations" },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": ["kind"],
+            "properties": {
+              "kind": { "enum": ["create_object", "transform_terrain", "set_light_level", "remove_objects", "modify_objects", "damage_objects"] }
+            }
+          }
+        }
       }
     },
     "operation-attack_damage": {

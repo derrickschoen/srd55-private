@@ -10,7 +10,8 @@ import type {
 import type { EffectApplication, EffectPayload, TurnBoundary } from './effects';
 import type { PersistentAreaInput, PersistentAreaOrigin } from './persistent-areas';
 import type { SpellCastCommand } from './spells/types';
-import type { CombatantId, EncounterEffectId, Feet, LimitedResourcePoolId, PersistentAreaId } from './values';
+import type { CombatantId, EncounterEffectId, Feet, LimitedResourcePoolId, PersistentAreaId, WorldObjectId } from './values';
+import type { LightLevel, WorldObject, WorldOperation } from './world-objects';
 
 export type ActionCost = 'action' | 'bonus_action' | 'reaction' | 'none';
 
@@ -44,6 +45,12 @@ export type EncounterCommand =
       readonly actor: CombatantId;
       readonly areaId: PersistentAreaId;
       readonly origin: Extract<PersistentAreaOrigin, { readonly kind: 'fixed' }>;
+    }
+  | {
+      readonly type: 'world_operation';
+      readonly actor: CombatantId | null;
+      readonly cost: ActionCost;
+      readonly operation: WorldOperation;
     }
   | {
       readonly type: 'attack';
@@ -241,7 +248,44 @@ export type EncounterEvent =
   | (SequencedEvent & {
       readonly type: 'persistent_area_ended';
       readonly areaId: PersistentAreaId;
-      readonly reason: 'duration_expired' | 'concentration_replaced' | 'concentration_ended' | 'concentration_broken';
+      readonly reason: 'duration_expired' | 'concentration_replaced' | 'concentration_ended' | 'concentration_broken' | 'anchor_destroyed';
+    })
+  | (SequencedEvent & {
+      readonly type: 'world_object_created';
+      readonly actor: CombatantId | null;
+      readonly object: WorldObject;
+    })
+  | (SequencedEvent & {
+      readonly type: 'world_object_modified';
+      readonly actor: CombatantId | null;
+      readonly objectId: WorldObjectId;
+    })
+  | (SequencedEvent & {
+      readonly type: 'world_object_damaged';
+      readonly actor: CombatantId | null;
+      readonly objectId: WorldObjectId;
+      readonly attack: AttackRollResult | null;
+      readonly damage: DamageResult | null;
+      readonly hitPointsBefore: number;
+      readonly hitPointsAfter: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'world_object_removed';
+      readonly actor: CombatantId | null;
+      readonly objectId: WorldObjectId;
+      readonly reason: 'destroyed' | 'dismissed';
+    })
+  | (SequencedEvent & {
+      readonly type: 'environment_terrain_changed';
+      readonly actor: CombatantId | null;
+      readonly regionId: string;
+      readonly difficultTerrain: boolean;
+    })
+  | (SequencedEvent & {
+      readonly type: 'environment_light_changed';
+      readonly actor: CombatantId | null;
+      readonly regionId: string;
+      readonly level: LightLevel;
     })
   | (SequencedEvent & {
       readonly type: 'attack_resolved';

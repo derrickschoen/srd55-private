@@ -4,6 +4,7 @@ import type {
   EncounterState,
   LifeState,
 } from './encounter';
+import { canCombatantSee } from './encounter';
 import type { EncounterEvent } from './events';
 import type { GridCell } from './grid';
 import type { CombatantId } from './values';
@@ -44,6 +45,8 @@ interface VisibleEncounterBase<Event> {
   readonly activeCombatant: CombatantId | null;
   readonly bounds: EncounterState['bounds'];
   readonly blockedCells: readonly GridCell[];
+  readonly worldObjects: EncounterState['worldObjects'];
+  readonly environment: EncounterState['environment'];
   readonly recentEvents: readonly Event[];
 }
 
@@ -111,7 +114,13 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'effect_ended':
     case 'effect_clock_ticked':
     case 'persistent_area_ended':
-      return [];
+    case 'world_object_created':
+    case 'world_object_modified':
+    case 'world_object_damaged':
+    case 'world_object_removed':
+    case 'environment_terrain_changed':
+    case 'environment_light_changed':
+      return 'actor' in event && event.actor !== null ? [event.actor] : [];
     case 'persistent_area_created':
     case 'persistent_area_moved':
       return [event.owner];
@@ -179,6 +188,8 @@ export function projectEncounter(
     round: state.round,
     activeCombatant: state.activeCombatant,
     bounds: { ...state.bounds },
+    worldObjects: structuredClone(state.worldObjects),
+    environment: structuredClone(state.environment),
   };
 
   if (viewer.kind === 'dm') {
@@ -214,7 +225,10 @@ export function projectEncounter(
       const token = tokensByCombatant.get(subject.profile.id);
       if (token === undefined) throw new Error('Encounter projection found no token.');
       const isViewer = subject.profile.id === viewer.combatantId;
-      if (!isViewer && fog.has(cellKey(token.position))) return [];
+      if (
+        !isViewer &&
+        (fog.has(cellKey(token.position)) || !canCombatantSee(state, viewer.combatantId, subject.profile.id))
+      ) return [];
       return [{
         id: subject.profile.id,
         name: subject.profile.name,

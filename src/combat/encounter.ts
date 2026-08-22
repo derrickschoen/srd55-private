@@ -74,12 +74,25 @@ import {
   effectStackingIdentity,
   feet,
   persistentAreaId,
+  worldObjectId,
   type CombatantId,
   type DamageType,
   type EncounterEffectId,
   type LimitedResourcePoolId,
   type PersistentAreaId,
+  type WorldObjectId,
 } from './values';
+import {
+  EMPTY_ENCOUNTER_ENVIRONMENT,
+  assertEnvironmentRegion,
+  assertWorldObjectInput,
+  environmentLightAt,
+  isEnvironmentDifficultTerrain,
+  type CoverTier,
+  type EncounterEnvironment,
+  type WorldObject,
+  type WorldOperation,
+} from './world-objects';
 
 export type LifeState = 'living' | 'dying' | 'stable' | 'dead';
 
@@ -176,6 +189,9 @@ export interface EncounterState {
   readonly nextEffectSequence: number;
   readonly bounds: GridBounds;
   readonly blockedCells: readonly GridCell[];
+  readonly worldObjects: readonly WorldObject[];
+  readonly nextWorldObjectSequence: number;
+  readonly environment: EncounterEnvironment;
   readonly foggedCells: readonly GridCell[];
   readonly dmNotes: readonly string[];
   readonly combatants: readonly EncounterCombatantState[];
@@ -199,6 +215,8 @@ export interface EncounterSetup {
   readonly config?: EncounterConfig;
   readonly bounds: GridBounds;
   readonly blockedCells?: readonly GridCell[];
+  readonly worldObjects?: readonly WorldObject[];
+  readonly environment?: EncounterEnvironment;
   readonly foggedCells?: readonly GridCell[];
   readonly dmNotes?: readonly string[];
   readonly combatants: readonly CombatantProfile[];
@@ -295,6 +313,28 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
       throw new EncounterRuleError('A token cannot start in a blocked cell.');
     }
   }
+  const worldObjects = setup.worldObjects ?? [];
+  assertUnique(worldObjects.map((object) => object.id), 'World object ids');
+  for (const object of worldObjects) {
+    try {
+      assertWorldObjectInput(setup.bounds, object);
+    } catch (error) {
+      throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid world object.');
+    }
+    if (object.blocking.movement && setup.tokens.some((token) =>
+      object.footprint.some((cell) => cellKey(cell) === cellKey(token.position)))) {
+      throw new EncounterRuleError('A token cannot start in a movement-blocking world object.');
+    }
+  }
+  const environment = setup.environment ?? EMPTY_ENCOUNTER_ENVIRONMENT;
+  assertUnique(environment.lightRegions.map((region) => region.id), 'Light region ids');
+  assertUnique(environment.difficultTerrainRegions.map((region) => region.id), 'Difficult-terrain region ids');
+  try {
+    for (const region of environment.lightRegions) assertEnvironmentRegion(setup.bounds, region);
+    for (const region of environment.difficultTerrainRegions) assertEnvironmentRegion(setup.bounds, region);
+  } catch (error) {
+    throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid environment region.');
+  }
   const foggedCells = setup.foggedCells ?? [];
   assertUnique(foggedCells.map(cellKey), 'Fogged cells');
   for (const cell of foggedCells) {
@@ -358,6 +398,9 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     nextEffectSequence,
     bounds: { ...setup.bounds },
     blockedCells: blockedCells.map((cell) => ({ ...cell })),
+    worldObjects: structuredClone(worldObjects),
+    nextWorldObjectSequence: 1,
+    environment: structuredClone(environment),
     foggedCells: foggedCells.map((cell) => ({ ...cell })),
     dmNotes: [...(setup.dmNotes ?? [])],
     combatants: setup.combatants.map((profile) => ({
@@ -729,6 +772,112 @@ function combineRollModes(modes: readonly RollMode[]): RollMode {
   return advantage ? 'advantage' : 'disadvantage';
 }
 
+function interveningCells(from: GridCell, to: GridCell): readonly GridCell[] {
+  const columnDelta = to.column - from.column;
+  const rowDelta = to.row - from.row;
+  const steps = Math.max(Math.abs(columnDelta), Math.abs(rowDelta));
+  if (steps <= 1) return [];
+  const result: GridCell[] = [];
+  const seen = new Set<string>();
+  for (let step = 1; step < steps; step += 1) {
+    const cell = {
+      column: Math.round(from.column + columnDelta * step / steps),
+      row: Math.round(from.row + rowDelta * step / steps),
+    };
+    const key = cellKey(cell);
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(cell);
+    }
+  }
+  return result;
+}
+
+function worldObjectOccupiesCell(object: WorldObject, cell: GridCell): boolean {
+  return object.footprint.some((candidate) => cellKey(candidate) === cellKey(cell));
+}
+
+function movementBlocked(state: EncounterState, cell: GridCell): boolean {
+  return state.blockedCells.some((candidate) => cellKey(candidate) === cellKey(cell)) ||
+    state.worldObjects.some((object) => object.blocking.movement && worldObjectOccupiesCell(object, cell));
+}
+
+function templateBlockedCells(state: EncounterState): readonly GridCell[] {
+  const cells = [
+    ...state.blockedCells,
+    ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
+  ];
+  return [...new Map(cells.map((cell) => [cellKey(cell), cell] as const)).values()];
+}
+
+export function hasLineOfSight(
+  state: EncounterState,
+  from: GridCell,
+  to: GridCell,
+): boolean {
+  const blocked = new Set(state.worldObjects
+    .flatMap((object) => object.blocking.lineOfSight ? object.footprint : [])
+    .map(cellKey));
+  return interveningCells(from, to).every((cell) => !blocked.has(cellKey(cell)));
+}
+
+const COVER_ORDER: Readonly<Record<CoverTier, number>> = {
+  none: 0,
+  half: 1,
+  three_quarters: 2,
+  total: 3,
+};
+
+export function coverTierBetween(
+  state: EncounterState,
+  from: GridCell,
+  to: GridCell,
+): CoverTier {
+  let cover: CoverTier = 'none';
+  for (const cell of interveningCells(from, to)) {
+    for (const object of state.worldObjects) {
+      if (
+        worldObjectOccupiesCell(object, cell) &&
+        COVER_ORDER[object.blocking.cover] > COVER_ORDER[cover]
+      ) cover = object.blocking.cover;
+    }
+  }
+  return cover;
+}
+
+export function canCombatantSee(
+  state: EncounterState,
+  observer: CombatantId,
+  subject: CombatantId,
+): boolean {
+  const from = token(state, observer).position;
+  const to = token(state, subject).position;
+  return environmentLightAt(state.environment, to) !== 'darkness' &&
+    hasLineOfSight(state, from, to);
+}
+
+function coverArmorClassBonus(tier: CoverTier): number {
+  switch (tier) {
+    case 'none': return 0;
+    case 'half': return 2;
+    case 'three_quarters': return 5;
+    case 'total': return 0;
+  }
+}
+
+function coverAdjustedArmorClass(
+  state: EncounterState,
+  attacker: CombatantId,
+  target: CombatantId,
+): ReturnType<typeof armorClass> {
+  const tier = coverTierBetween(
+    state,
+    token(state, attacker).position,
+    token(state, target).position,
+  );
+  return armorClass(effectiveArmorClass(state, target) + coverArmorClassBonus(tier));
+}
+
 function attackRollMode(
   state: EncounterState,
   command: Extract<
@@ -737,6 +886,10 @@ function attackRollMode(
   >,
 ): RollMode {
   const modes: RollMode[] = [command.rollMode];
+  const attackerCanSeeTarget = command.attackerCanSeeTarget &&
+    canCombatantSee(state, command.actor, command.target);
+  const targetCanSeeAttacker = command.targetCanSeeAttacker &&
+    canCombatantSee(state, command.target, command.actor);
   for (const effect of state.effects) {
     if (effect.payload.kind === 'faerie_fire') {
       if (effect.targets.includes(command.target)) modes.push(effect.payload.attackModeAgainstTarget);
@@ -770,7 +923,7 @@ function attackRollMode(
       clause.predicate === 'always' ||
       (clause.predicate === 'target_not_source' && clause.source !== command.target) ||
       (clause.predicate === 'source_visible' && clause.source === command.target) ||
-      (clause.predicate === 'recipient_unseen' && !command.targetCanSeeAttacker)
+      (clause.predicate === 'recipient_unseen' && !targetCanSeeAttacker)
     ) {
       modes.push(clause.mode);
     }
@@ -783,7 +936,7 @@ function attackRollMode(
     if (clause.kind !== 'roll_mode' || clause.roll !== 'attack_against') continue;
     if (
       clause.predicate === 'always' ||
-      (clause.predicate === 'recipient_unseen' && !command.attackerCanSeeTarget) ||
+      (clause.predicate === 'recipient_unseen' && !attackerCanSeeTarget) ||
       (clause.predicate === 'attacker_within_5_feet' && distance <= 5) ||
       (clause.predicate === 'attacker_beyond_5_feet' && distance > 5)
     ) {
@@ -794,7 +947,7 @@ function attackRollMode(
   const targetState = combatant(state, command.target);
   if (
     targetState.turn.dodging &&
-    command.targetCanSeeAttacker &&
+    targetCanSeeAttacker &&
     effectiveSpeed(state, command.target) > 0 &&
     !isIncapacitated(combatantConditions(state, command.target))
   ) {
@@ -991,7 +1144,7 @@ function nearestReturnPosition(state: EncounterState, origin: GridCell): GridCel
   for (let row = 0; row < state.bounds.rows; row += 1) {
     for (let column = 0; column < state.bounds.columns; column += 1) {
       const cell = { column, row };
-      if (state.blockedCells.some((blocked) => cellKey(blocked) === cellKey(cell))) continue;
+      if (movementBlocked(state, cell)) continue;
       if (state.tokens.some((occupied) => cellKey(occupied.position) === cellKey(cell))) continue;
       candidates.push(cell);
     }
@@ -1466,12 +1619,12 @@ function beginAttack(
   }
 }
 
-function movementWorld(state: EncounterState): MovementWorld<CombatantId> {
+export function encounterMovementWorld(state: EncounterState): MovementWorld<CombatantId> {
   return {
     bounds: state.bounds,
     canTraverseStep: () => true,
     traversal: (actorId, _from, to) => {
-      if (state.blockedCells.some((cell) => cellKey(cell) === cellKey(to))) {
+      if (movementBlocked(state, to)) {
         return { kind: 'blocked', reason: 'blocked cell' };
       }
       const occupied = state.tokens.some(
@@ -1480,12 +1633,14 @@ function movementWorld(state: EncounterState): MovementWorld<CombatantId> {
           combatant(state, candidate.combatantId).life !== 'dead' &&
           cellKey(candidate.position) === cellKey(to),
       );
-      const difficult = state.persistentAreas.some((area) => {
+      const difficult = isEnvironmentDifficultTerrain(state.environment, to) || state.persistentAreas.some((area) => {
         if (!area.difficultTerrain) return false;
         const origin = area.origin;
         const anchor = origin.kind === 'anchored'
           ? state.tokens.find((candidate) => candidate.combatantId === origin.combatant)?.position ?? null
-          : null;
+          : origin.kind === 'anchored_to_object'
+            ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
+            : null;
         return persistentAreaContains(area, to, anchor, state);
       });
       return { kind: 'enterable', cost: feet(difficult ? 10 : 5), canEnd: !occupied };
@@ -1518,7 +1673,9 @@ function areaMembers(state: EncounterState, area: PersistentArea): readonly Comb
   const origin = area.origin;
   const anchor = origin.kind === 'anchored'
     ? state.tokens.find((candidate) => candidate.combatantId === origin.combatant)?.position ?? null
-    : null;
+    : origin.kind === 'anchored_to_object'
+      ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
+      : null;
   return state.combatants
     .filter((subject) => subject.life !== 'dead')
     .filter((subject) => areaTargetEligible(state, area, subject.profile.id))
@@ -1540,7 +1697,7 @@ function endPersistentArea(
   endEffects(
     context,
     new Set(context.state.effects.filter((effect) => effect.areaSource === areaId).map((effect) => effect.id)),
-    reason,
+    reason === 'anchor_destroyed' ? 'no_targets' : reason,
   );
   context.state = {
     ...context.state,
@@ -1709,6 +1866,13 @@ function validatePersistentAreaInput(state: EncounterState, actor: CombatantId, 
     token(state, input.origin.combatant);
     if (input.movable !== null) throw new EncounterRuleError('An anchored persistent area cannot also be moved independently.');
   }
+  if (input.origin.kind === 'anchored_to_object') {
+    const anchorObjectId = input.origin.object;
+    if (!state.worldObjects.some((object) => object.id === anchorObjectId)) {
+      throw new EncounterRuleError(`Persistent-area anchor object ${anchorObjectId} does not exist.`);
+    }
+    if (input.movable !== null) throw new EncounterRuleError('An object-anchored persistent area cannot also be moved independently.');
+  }
   if (input.targetFilter.kind === 'selected') {
     assertUnique(input.targetFilter.combatants, 'Persistent-area selected targets');
     for (const target of input.targetFilter.combatants) combatant(state, target);
@@ -1770,7 +1934,7 @@ function processMove(
     command.cause === 'reactions_resolved'
       ? 'disengaged'
       : command.cause;
-  const plan = planMovement(movementWorld(context.state), {
+  const plan = planMovement(encounterMovementWorld(context.state), {
     actorId: command.actor,
     start: actorToken.position,
     path: command.path,
@@ -2762,13 +2926,21 @@ function processAttack(
   if (cannotHarmTarget(context.state, command.actor, command.target)) {
     throw new EncounterRuleError('The Charmed condition prohibits harming this target.');
   }
+  const actorPosition = token(context.state, command.actor).position;
+  const targetPosition = token(context.state, command.target).position;
+  if (
+    !hasLineOfSight(context.state, actorPosition, targetPosition) ||
+    coverTierBetween(context.state, actorPosition, targetPosition) === 'total'
+  ) {
+    throw new EncounterRuleError('The target has Total Cover or is outside line of sight.');
+  }
   const attack = resolveAttackRoll(
     {
       attackBonus:
         command.attackBonus +
         exhaustionPenalty(combatantConditions(context.state, command.actor)) +
         effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
-      targetArmorClass: effectiveArmorClass(context.state, command.target),
+      targetArmorClass: coverAdjustedArmorClass(context.state, command.actor, command.target),
       rollMode: attackRollMode(context.state, command),
       criticalFloor: command.criticalFloor,
     },
@@ -3202,7 +3374,7 @@ function placedAreaTargets(
     throw new EncounterRuleError(`${spellName} area origin is out of range.`);
   }
   const cells = affectedCells(
-    { bounds: state.bounds, blockedCells: state.blockedCells },
+    { bounds: state.bounds, blockedCells: templateBlockedCells(state) },
     command.area,
   );
   return state.combatants.flatMap((subject): readonly CombatantId[] => {
@@ -3690,7 +3862,10 @@ function pushAway(
   if (columnStep === 0 && rowStep === 0) return state;
   let position = subjectToken.position;
   const occupied = new Set(state.tokens.filter((entry) => entry.combatantId !== target).map((entry) => cellKey(entry.position)));
-  const blocked = new Set(state.blockedCells.map(cellKey));
+  const blocked = new Set([
+    ...state.blockedCells,
+    ...state.worldObjects.flatMap((object) => object.blocking.movement ? object.footprint : []),
+  ].map(cellKey));
   for (let distance = 0; distance < feetToPush; distance += 5) {
     const candidate = { column: position.column + columnStep, row: position.row + rowStep };
     if (!isCellInside(state.bounds, candidate) || blocked.has(cellKey(candidate)) || occupied.has(cellKey(candidate))) break;
@@ -3713,6 +3888,12 @@ function resolveSpellAttack(
   spellDamageType: DamageType,
   rider: EffectData | null,
 ): ReturnType<typeof resolveAttackRoll> {
+  const actorPosition = token(context.state, command.actor).position;
+  const targetPosition = token(context.state, target).position;
+  if (
+    !hasLineOfSight(context.state, actorPosition, targetPosition) ||
+    coverTierBetween(context.state, actorPosition, targetPosition) === 'total'
+  ) throw new EncounterRuleError('The spell target has Total Cover or is outside line of sight.');
   const rollModeEffects = context.state.effects.filter((effect) => {
     if (effect.payload.kind === 'faerie_fire') return effect.targets.includes(target);
     if (effect.payload.kind !== 'attack_roll_mode_modifier') return false;
@@ -3723,7 +3904,7 @@ function resolveSpellAttack(
   });
   const attack = resolveAttackRoll({
     attackBonus: command.attackBonus + effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
-    targetArmorClass: effectiveArmorClass(context.state, target),
+    targetArmorClass: coverAdjustedArmorClass(context.state, command.actor, target),
     rollMode: combineRollModes(['normal', ...rollModeEffects.map((effect) =>
       effect.payload.kind === 'faerie_fire'
         ? effect.payload.attackModeAgainstTarget
@@ -4167,6 +4348,106 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
       }
       return;
     }
+    case 'world_operations': {
+      const areaCells = (): readonly GridCell[] => {
+        if (command.area === null) {
+          throw new EncounterRuleError(`${definition.name} requires an area placement for its environment operation.`);
+        }
+        return affectedCells(
+          { bounds: context.state.bounds, blockedCells: templateBlockedCells(context.state) },
+          command.area,
+        );
+      };
+      for (const declared of operation.operations) {
+        switch (declared.kind) {
+          case 'create_object': {
+            const position = declared.placement === 'caster_cell'
+              ? token(context.state, command.actor).position
+              : (() => {
+                  if (command.area === null) {
+                    throw new EncounterRuleError(`${definition.name} requires an object placement area.`);
+                  }
+                  const origin = fixedOrigin(command.area);
+                  if (origin.kind !== 'fixed') throw new EncounterRuleError('Object placement did not resolve to a fixed point.');
+                  return { column: Math.floor(origin.point.x / 5), row: Math.floor(origin.point.y / 5) };
+                })();
+            let sequence = context.state.nextWorldObjectSequence;
+            let id = worldObjectId(`object:${String(sequence)}`);
+            while (context.state.worldObjects.some((object) => object.id === id)) {
+              sequence += 1;
+              id = worldObjectId(`object:${String(sequence)}`);
+            }
+            const footprint = declared.footprintOffsets.map((offset) => ({
+              column: position.column + offset.column,
+              row: position.row + offset.row,
+            }));
+            processWorldOperation(context, command.actor, {
+              kind: 'create_object',
+              object: {
+                ...structuredClone(declared.object),
+                id,
+                position,
+                footprint,
+              },
+            });
+            context.state = { ...context.state, nextWorldObjectSequence: sequence + 1 };
+            break;
+          }
+          case 'transform_terrain':
+            processWorldOperation(context, command.actor, {
+              kind: 'transform_terrain',
+              region: { id: declared.regionId, cells: areaCells() },
+              difficultTerrain: declared.difficultTerrain,
+            });
+            break;
+          case 'set_light_level':
+            processWorldOperation(context, command.actor, {
+              kind: 'set_light_level',
+              region: { id: declared.regionId, cells: areaCells() },
+              level: declared.level,
+            });
+            break;
+          case 'remove_objects': {
+            const objectTargets = command.objectTargets ?? [];
+            if (objectTargets.length === 0) {
+              throw new EncounterRuleError(`${definition.name} requires at least one world-object target.`);
+            }
+            for (const objectId of objectTargets) {
+              processWorldOperation(context, command.actor, {
+                kind: 'remove_object', objectId, reason: declared.reason,
+              });
+            }
+            break;
+          }
+          case 'modify_objects': {
+            const objectTargets = command.objectTargets ?? [];
+            if (objectTargets.length === 0) {
+              throw new EncounterRuleError(`${definition.name} requires at least one world-object target.`);
+            }
+            for (const objectId of objectTargets) {
+              processWorldOperation(context, command.actor, {
+                kind: 'modify_object', objectId, changes: structuredClone(declared.changes),
+              });
+            }
+            break;
+          }
+          case 'damage_objects': {
+            const objectTargets = command.objectTargets ?? [];
+            if (objectTargets.length === 0) {
+              throw new EncounterRuleError(`${definition.name} requires at least one world-object target.`);
+            }
+            for (const objectId of objectTargets) {
+              processWorldOperation(context, command.actor, {
+                kind: 'damage_object', objectId, delivery: { kind: 'area_effect' },
+                damage: structuredClone(declared.damage),
+              });
+            }
+            break;
+          }
+        }
+      }
+      return;
+    }
     case 'attack_damage':
       for (const target of targets) {
         resolveSpellAttack(
@@ -4527,7 +4808,7 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
         const attack = resolveAttackRoll({
           attackBonus: command.attackBonus +
             effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
-          targetArmorClass: effectiveArmorClass(context.state, target),
+          targetArmorClass: coverAdjustedArmorClass(context.state, command.actor, target),
           rollMode: combineRollModes(['normal', ...advantageEffects.map((effect) =>
             effect.payload.kind === 'attack_roll_mode_modifier' ? effect.payload.mode : 'normal')]),
           criticalFloor: 20,
@@ -4787,6 +5068,177 @@ function rollInitiativeSlots(context: ReductionContext): readonly InitiativeSlot
   return sortInitiativeSlots(enemySlot === null ? playerSlots : [...playerSlots, enemySlot]);
 }
 
+function worldObject(state: EncounterState, id: WorldObjectId): WorldObject {
+  const found = state.worldObjects.find((object) => object.id === id);
+  if (found === undefined) throw new EncounterRuleError(`Unknown world object ${id}.`);
+  return found;
+}
+
+function validateWorldObjectForState(
+  state: EncounterState,
+  object: WorldObject,
+  replacing: WorldObjectId | null,
+): void {
+  try {
+    assertWorldObjectInput(state.bounds, object);
+  } catch (error) {
+    throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid world object.');
+  }
+  if (state.worldObjects.some((candidate) => candidate.id === object.id && candidate.id !== replacing)) {
+    throw new EncounterRuleError(`World object ${object.id} already exists.`);
+  }
+  if (object.blocking.movement && state.tokens.some((placed) =>
+    object.footprint.some((cell) => cellKey(cell) === cellKey(placed.position)))) {
+    throw new EncounterRuleError('A movement-blocking world object cannot overlap a combatant.');
+  }
+}
+
+function removeWorldObject(
+  context: ReductionContext,
+  actor: CombatantId | null,
+  id: WorldObjectId,
+  reason: 'destroyed' | 'dismissed',
+): void {
+  worldObject(context.state, id);
+  const anchoredAreaIds = context.state.persistentAreas
+    .filter((area) => area.origin.kind === 'anchored_to_object' && area.origin.object === id)
+    .map((area) => area.id);
+  context.state = {
+    ...context.state,
+    worldObjects: context.state.worldObjects.filter((object) => object.id !== id),
+  };
+  emit(context, { type: 'world_object_removed', actor, objectId: id, reason });
+  for (const areaId of anchoredAreaIds) endPersistentArea(context, areaId, 'anchor_destroyed');
+  reevaluatePersistentAreaMembership(context);
+}
+
+function processWorldOperation(
+  context: ReductionContext,
+  actor: CombatantId | null,
+  operation: WorldOperation,
+): void {
+  switch (operation.kind) {
+    case 'create_object': {
+      const object: WorldObject = {
+        ...structuredClone(operation.object),
+        createdRevision: context.state.revision,
+      };
+      validateWorldObjectForState(context.state, object, null);
+      context.state = {
+        ...context.state,
+        worldObjects: [...context.state.worldObjects, object],
+      };
+      emit(context, { type: 'world_object_created', actor, object });
+      reevaluatePersistentAreaMembership(context);
+      return;
+    }
+    case 'modify_object': {
+      const existing = worldObject(context.state, operation.objectId);
+      if (Object.keys(operation.changes).length === 0) {
+        throw new EncounterRuleError('A world-object modification must change at least one field.');
+      }
+      const modified: WorldObject = {
+        ...existing,
+        ...structuredClone(operation.changes),
+        id: existing.id,
+        createdRevision: existing.createdRevision,
+      };
+      validateWorldObjectForState(context.state, modified, existing.id);
+      context.state = {
+        ...context.state,
+        worldObjects: context.state.worldObjects.map((object) =>
+          object.id === existing.id ? modified : object),
+      };
+      emit(context, { type: 'world_object_modified', actor, objectId: existing.id });
+      reevaluatePersistentAreaMembership(context);
+      return;
+    }
+    case 'remove_object':
+      removeWorldObject(context, actor, operation.objectId, operation.reason);
+      return;
+    case 'damage_object': {
+      const existing = worldObject(context.state, operation.objectId);
+      if (existing.durability.kind === 'indestructible') {
+        throw new EncounterRuleError(`World object ${existing.id} is indestructible.`);
+      }
+      const attack = operation.delivery.kind === 'attack'
+        ? resolveAttackRoll({
+            attackBonus: operation.delivery.attackBonus,
+            targetArmorClass: existing.armorClass,
+            criticalFloor: operation.delivery.criticalFloor,
+            rollMode: operation.delivery.rollMode,
+          }, context.rng)
+        : null;
+      const damage = attack?.outcome === 'miss'
+        ? null
+        : resolveDamage({
+            ...operation.damage,
+            critical: operation.damage.critical || attack?.outcome === 'critical',
+            responses: existing.damageResponses,
+          }, context.rng);
+      const before = existing.durability.hitPoints;
+      const after = Math.max(0, before - (damage?.total ?? 0));
+      context.state = {
+        ...context.state,
+        worldObjects: context.state.worldObjects.map((object) => object.id === existing.id
+          ? { ...object, durability: { ...existing.durability, hitPoints: after } }
+          : object),
+      };
+      emit(context, {
+        type: 'world_object_damaged', actor, objectId: existing.id,
+        attack, damage, hitPointsBefore: before, hitPointsAfter: after,
+      });
+      if (after === 0) removeWorldObject(context, actor, existing.id, 'destroyed');
+      return;
+    }
+    case 'transform_terrain': {
+      try {
+        assertEnvironmentRegion(context.state.bounds, operation.region);
+      } catch (error) {
+        throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid terrain region.');
+      }
+      const retained = context.state.environment.difficultTerrainRegions
+        .filter((region) => region.id !== operation.region.id);
+      context.state = {
+        ...context.state,
+        environment: {
+          ...context.state.environment,
+          difficultTerrainRegions: operation.difficultTerrain
+            ? [...retained, structuredClone(operation.region)]
+            : retained,
+        },
+      };
+      emit(context, {
+        type: 'environment_terrain_changed', actor,
+        regionId: operation.region.id, difficultTerrain: operation.difficultTerrain,
+      });
+      return;
+    }
+    case 'set_light_level': {
+      try {
+        assertEnvironmentRegion(context.state.bounds, operation.region);
+      } catch (error) {
+        throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid light region.');
+      }
+      context.state = {
+        ...context.state,
+        environment: {
+          ...context.state.environment,
+          lightRegions: [
+            ...context.state.environment.lightRegions.filter((region) => region.id !== operation.region.id),
+            { ...structuredClone(operation.region), level: operation.level },
+          ],
+        },
+      };
+      emit(context, {
+        type: 'environment_light_changed', actor,
+        regionId: operation.region.id, level: operation.level,
+      });
+      return;
+    }
+  }
+}
+
 function processCommand(context: ReductionContext, command: EncounterCommand): void {
   switch (command.type) {
     case 'adjudicate': {
@@ -4833,7 +5285,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         throw new EncounterRuleError('An adjudicated destination is outside the encounter grid.');
       }
       if (
-        context.state.blockedCells.some((cell) => cellKey(cell) === cellKey(consequence.to)) ||
+        movementBlocked(context.state, consequence.to) ||
         context.state.tokens.some(
           (candidate) =>
             candidate.combatantId !== command.target &&
@@ -4953,6 +5405,18 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       };
       emit(context, { type: 'persistent_area_moved', areaId: area.id, owner: command.actor, origin: command.origin });
       reevaluatePersistentAreaMembership(context);
+      return;
+    }
+    case 'world_operation': {
+      if (command.actor === null) {
+        if (command.cost !== 'none') {
+          throw new EncounterRuleError('An encounter-authored world operation cannot spend a combatant resource.');
+        }
+      } else {
+        if (command.cost !== 'reaction') assertActiveActor(context, command.actor);
+        spendCost(context, command.actor, command.cost, 'World operation');
+      }
+      processWorldOperation(context, command.actor, command.operation);
       return;
     }
     case 'attack':

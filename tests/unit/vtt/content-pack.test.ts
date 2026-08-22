@@ -159,6 +159,52 @@ describe('content-pack v1', () => {
     });
   });
 
+  it('loads typed spell world operations and refuses malformed object durability', () => {
+    const operation = {
+      kind: 'world_operations',
+      operations: [{
+        kind: 'create_object', placement: 'area_origin',
+        footprintOffsets: [{ column: 0, row: 0 }],
+        object: {
+          name: 'Greenforge Glass Wall', kind: 'barrier',
+          durability: { kind: 'hit_points', hitPoints: 12, maximumHitPoints: 12 },
+          armorClass: 13,
+          damageResponses: [{ type: 'Cold', response: 'resistant' }],
+          blocking: { movement: true, lineOfSight: true, cover: 'total' },
+        },
+      }, {
+        kind: 'transform_terrain', regionId: 'greenforge-mire', difficultTerrain: true,
+      }, {
+        kind: 'set_light_level', regionId: 'greenforge-gloom', level: 'dim',
+      }, {
+        kind: 'modify_objects', changes: {
+          blocking: { movement: false, lineOfSight: false, cover: 'half' },
+        },
+      }, {
+        kind: 'damage_objects', damage: {
+          terms: [{ type: 'Force', dice: { count: 1, sides: 6, modifier: 0 } }],
+          critical: false, responses: [],
+        },
+      }],
+    };
+    const candidate = fixture() as { spells: Array<{ operation: unknown }> };
+    candidate.spells[0]!.operation = operation;
+    const result = loadContentPack(candidate);
+    expect(result.status).toBe('loaded');
+    if (result.status !== 'loaded') throw new Error('Typed world operations were refused.');
+    expect(result.content.spells[0]?.definition.operation).toEqual(operation);
+
+    const malformed = structuredClone(candidate) as {
+      spells: Array<{ operation: { operations: Array<{ object?: { durability?: { hitPoints: number; maximumHitPoints: number } } }> } }>;
+    };
+    const durability = malformed.spells[0]!.operation.operations[0]!.object?.durability;
+    if (durability === undefined) throw new Error('Malformed fixture has no durability.');
+    durability.hitPoints = durability.maximumHitPoints + 1;
+    expect(loadContentPack(malformed)).toMatchObject({
+      status: 'refused', refusal: { reason: 'malformed_record', path: ['spells', 0, 'operation'] },
+    });
+  });
+
   it('loads original homebrew examples for every executable content kind with surfaced provenance', () => {
     const content = loaded();
     expect(content.provenance).toEqual({

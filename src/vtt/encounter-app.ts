@@ -48,6 +48,8 @@ function actionLabel(action: EncounterCommand): string {
       return 'Create persistent area';
     case 'move_persistent_area':
       return 'Move persistent area';
+    case 'world_operation':
+      return 'Change world';
     case 'activate_damage_operation':
       return 'Use damage feature';
     case 'arm_weapon_hit_rider':

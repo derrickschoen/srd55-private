@@ -8,7 +8,9 @@ import type {
   PersistentAreaShape,
 } from '../persistent-areas';
 import type { AreaTemplate } from '../templates';
-import type { CombatantId, DamageType, LimitedResourcePoolId } from '../values';
+import type { DamageRequest } from '../resolution';
+import type { CombatantId, DamageType, LimitedResourcePoolId, WorldObjectId } from '../values';
+import type { LightLevel, WorldObjectChanges, WorldObjectInput } from '../world-objects';
 
 export type SpellLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 export type SpellCastingTime = 'action' | 'bonus_action' | 'reaction' | 'minute' | 'ten_minutes' | 'hour';
@@ -143,6 +145,39 @@ export type SpellOperation =
         readonly excludeOwner: boolean;
         readonly effect: SpellPersistentAreaEffectSpec;
       }[];
+    }
+  | {
+      readonly kind: 'world_operations';
+      readonly operations: readonly (
+        | {
+            readonly kind: 'create_object';
+            readonly placement: 'caster_cell' | 'area_origin';
+            readonly footprintOffsets: readonly { readonly column: number; readonly row: number }[];
+            readonly object: Omit<WorldObjectInput, 'id' | 'position' | 'footprint'>;
+          }
+        | {
+            readonly kind: 'transform_terrain';
+            readonly regionId: string;
+            readonly difficultTerrain: boolean;
+          }
+        | {
+            readonly kind: 'set_light_level';
+            readonly regionId: string;
+            readonly level: LightLevel;
+          }
+        | {
+            readonly kind: 'remove_objects';
+            readonly reason: 'destroyed' | 'dismissed';
+          }
+        | {
+            readonly kind: 'modify_objects';
+            readonly changes: WorldObjectChanges;
+          }
+        | {
+            readonly kind: 'damage_objects';
+            readonly damage: DamageRequest;
+          }
+      )[];
     }
   | {
       readonly kind: 'attack_damage';
@@ -434,6 +469,7 @@ export const SPELL_OPERATION_KINDS = [
   'damage_operation',
   'armed_weapon_hit_rider',
   'persistent_area',
+  'world_operations',
   'attack_damage',
   'attack_then_save_damage',
   'attack_damage_over_time',
@@ -506,6 +542,7 @@ export interface SpellCastCommand {
     readonly damageModifier: number;
   };
   readonly selectedOption: string | null;
+  readonly objectTargets?: readonly WorldObjectId[];
   /** A declared class/feat pool can replace slot spending for this cast. */
   readonly resourcePoolId?: LimitedResourcePoolId;
 }
