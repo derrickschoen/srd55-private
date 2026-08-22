@@ -7,6 +7,34 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D339 — OWNER: reject-record-load-rest, E05B closes the line, denominator 837, hands+worn with item registry (2026-08-22)
+
+Round-13 answers, all four on recommendation. Brainstormed collaboratively
+(Fable + Opus; Sol held out while E05B ran on the shared codex quota).
+
+1. **Diagnostic-failure semantics (wave 1): REJECT THE FAILING RECORD, LOAD
+   THE REST.** Each refused record carries its diagnostic; healthy records
+   import. Sessions: a SHA-fingerprint mismatch refuses the file. Covers
+   both surfaces per the owner's answer.
+
+2. **E05B decision rule, PRE-REGISTERED before the report was visible:
+   CLOSE THE LINE EITHER WAY.** E05B is the final typed-vs-untyped run;
+   the result is recorded, the typed surface is kept (zero runtime cost),
+   no E05C regardless of outcome.
+
+3. **The 110 out-of-combat records are PERMANENTLY out of scope. The
+   coverage denominator is 837** from now on; every report names the
+   scope-out once.
+
+4. **Equipment model: HANDS + WORN slots resolved by id from a pack ITEM
+   REGISTRY.** No containers, no quantities. Heat Metal's D338-addendum
+   contract (metal property, forced drop to board, pickup, disadvantage
+   arm) is the acceptance test; packs can ship custom items.
+
+Standing default noted, not a ruling: the curation worksheet is drafted by
+codex one proposed disposition per record; the owner approves each
+individually per D338.1.
+
 ## D338 addendum — OWNER: Heat Metal on a held weapon must be able to DISARM (2026-08-22)
 
 Owner refinement of D338.4, matching SRD 5.2.1 (spell-descriptions, p.140):
