@@ -3,11 +3,6 @@ import type { CombatantProfile } from '../combat/combatant';
 import { monsterCombatantProfile } from '../combat/combatant';
 import type { CombatFeatureEffect } from '../combat/effects';
 import { conditionNames } from '../combat/conditions';
-import {
-  armedWeaponHitRiderShape,
-  damageOperationSpecSchema,
-  operationDiceSchema,
-} from '../combat/damage-operation-schema';
 import type { EncounterCommand } from '../combat/events';
 import type { MonsterAction, MonsterStatblock, MonsterStatblockInput, SenseKind } from '../combat/statblock';
 import { monsterStatblock } from '../combat/statblock';
@@ -25,7 +20,7 @@ import {
   limitedResourcePoolId,
   type CombatantId,
 } from '../combat/values';
-import { abilities, damageTypes, skills, type Ability, type Skill } from '../domain/enums';
+import { abilities, creatureSizes, damageTypes, skills, type Ability, type Skill } from '../domain/enums';
 import {
   FEATURE_EFFECT_KINDS,
   externalPartyPackFeatureEffectSchema,
@@ -34,6 +29,15 @@ import {
   type ExternalPartyPackEffect,
   type ExternalPartyPackResource,
 } from '../vtt/party-pack';
+import {
+  contentPackOperationSchema,
+  contentPackOperationJsonSchema,
+  MAX_IMPORTED_DICE_COUNT,
+  MAX_IMPORTED_DISTANCE_FEET,
+  MAX_IMPORTED_LEVEL,
+  MAX_IMPORTED_ROUNDS,
+  MAX_IMPORTED_SPEED_FEET,
+} from './content-pack-operation-schema';
 
 export const CONTENT_PACK_SCHEMA_VERSION = 1 as const;
 
@@ -59,6 +63,11 @@ const provenanceSchema = z.strictObject({
   sourceKind: z.enum(['srd', 'homebrew', 'user_import']),
   importedAt: z.iso.datetime({ offset: true }),
 });
+
+const namespaceDeclarationSchema = z.array(identifier).max(1_000)
+  .refine((namespaces) => new Set(namespaces).size === namespaces.length, {
+    message: 'Manifest namespace declarations must be unique.',
+  });
 
 const spellSchoolSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -135,67 +144,11 @@ const targetingSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('utility'), rangeFeet: nonNegativeInteger }),
 ]);
 
-const operationRequiredFields = {
-  composition: ['onRefusal', 'steps', 'ordering'],
-  caster_choice: ['modes'],
-  random_branch: ['dieSides', 'branches'],
-  target_branch: ['branches', 'otherwise'],
-  reevaluated_branch: ['hook', 'durationRounds', 'operation'],
-  condition_lifecycle: ['condition', 'immunity', 'initialSave', 'repeatedSave', 'damageBreak', 'duration', 'stacking'],
-  roll_dice_modifier: ['die', 'sign', 'duration'],
-  damage_dice_reduction: ['damageType', 'die', 'uses', 'duration'],
-  roll_mode_modifier: ['mode', 'duration'],
-  armor_class_modifier: ['modification', 'duration'],
-  damage_response_modifier: ['damageType', 'response', 'duration'],
-  targeted_defense_modifier: ['against', 'armorClassBonus', 'duration'],
-  damage_operation: ['delivery', 'instancesPerTarget', 'packets', 'timing'],
-  armed_weapon_hit_rider: ['damage', 'durationRounds', 'concentration', 'persistence', 'saveGatedRider'],
-  persistent_area: ['origin', 'shape', 'durationRounds', 'concentration', 'targetFilter', 'includeOwner', 'difficultTerrain', 'movableFeet', 'hooks', 'initialEffects'],
-  world_operations: ['operations'],
-  teleport: ['subject', 'maximumDistanceFeet', 'destination'],
-  forced_movement: ['direction', 'origin', 'distanceFeet', 'save'],
-  movement_mode: ['grants', 'difficultTerrainImmunity', 'magicalSpeedReductionImmunity', 'durationRounds', 'concentration', 'expiresAt'],
-  movement_region: ['region', 'difficultTerrain', 'entry', 'damage'],
-  speed_modification: ['modification', 'durationRounds', 'concentration', 'expiresAt'],
-  attack_damage: ['attackKind', 'damageType', 'dice', 'rider'],
-  attack_then_save_damage: ['attackKind', 'attackDamageType', 'attackDice', 'saveAbility', 'saveDamageType', 'saveDice', 'onSaveSuccess', 'burstShape', 'burstRadiusFeet'],
-  attack_damage_over_time: ['attackKind', 'damageType', 'initialDice', 'missDamage', 'laterDice', 'laterTiming'],
-  hit_point_maximum_increase: ['baseAmount', 'additionalPerSlot'],
-  save_damage: ['ability', 'onSuccess', 'damageType', 'dice', 'riderOnFailure', 'pushFeetOnFailure'],
-  save_multi_damage: ['ability', 'onSuccess', 'terms', 'effect'],
-  save_damage_over_time: ['ability', 'onSuccess', 'damageType', 'initialDice', 'laterDice', 'laterTiming'],
-  save_damage_and_effect: ['ability', 'onSuccess', 'damageType', 'dice', 'effect'],
-  healing: ['dice', 'addSpellcastingModifier'],
-  fixed_healing: ['baseAmount', 'additionalPerSlot', 'removesConditions'],
-  temporary_hit_points: ['dice'],
-  effect: ['effect'],
-  save_effect: ['ability', 'rollMode', 'effect'],
-  save_push: ['ability', 'pushFeetOnFailure', 'effect'],
-  remove_condition: ['conditions'],
-  remove_condition_and_effect: ['condition', 'effect'],
-  save_branch_effect: ['ability', 'successEffect', 'failureEffect'],
-  attack_rays: ['baseRays', 'additionalPerSlot', 'damageType', 'dice'],
-  attack_beams: ['attackKind', 'baseBeams', 'additionalBeamLevels', 'damageType', 'dice'],
-  summoned_weapon_attack: ['damageType', 'dice', 'addSpellcastingModifier', 'attackReachFeet', 'moveFeetPerBonusAction', 'effect'],
-  reaction_save_cancel: ['ability'],
-  dispel_magic: ['baseAutomaticLevel', 'checkDcBase'],
-  revive: ['hitPoints', 'maximumDeathAgeRounds'],
-  remove_curse: [],
-  lifedrain_attack: ['damageType', 'dice', 'healingDivisor', 'effect'],
-  magic_missiles: ['baseDarts', 'additionalPerSlot', 'damageType', 'dice'],
-  stabilize: [],
-  weapon_attack_augmentation: ['timing', 'extraDamage'],
-  utility: ['effect', 'concentration', 'durationRounds'],
-} as const satisfies Readonly<Record<SpellOperation['kind'], readonly string[]>>;
-
-const operationOptionalFields = {
-  composition: ['order'],
-  save_effect: ['excludeCaster', 'willingTargetSkipsSave'],
-  reaction_save_cancel: ['trigger'],
-  weapon_attack_augmentation: ['attackAbility', 'damageAbility', 'damageTypeChoice', 'consumeOnHit', 'concentration', 'durationRounds', 'followUp'],
-  utility: ['durationRoundsPerSlot', 'becomesPermanentAtSlot', 'losesConcentrationAtSlot', 'stateful'],
-} as const satisfies Partial<Readonly<Record<SpellOperation['kind'], readonly string[]>>>;
-
+/*
+ * Every operation kind is dispatched to a concrete value schema in
+ * content-pack-operation-schema.ts. Keep object inspection here only for
+ * typed diagnostic classification before the record schema runs.
+ */
 function objectRecord(value: unknown): Readonly<Record<string, unknown>> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Readonly<Record<string, unknown>>
@@ -207,553 +160,7 @@ function operationKind(value: unknown): string | null {
   return operation !== null && typeof operation.kind === 'string' ? operation.kind : null;
 }
 
-const persistentAreaScaledDiceSchema = operationDiceSchema;
-
-const persistentAreaShapeSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('sphere'), radius: positiveInteger.max(100_000) }),
-  z.strictObject({ kind: z.literal('cube'), size: positiveInteger.max(100_000) }),
-  z.strictObject({ kind: z.literal('cylinder'), radius: positiveInteger.max(100_000), height: positiveInteger.max(100_000) }),
-  z.strictObject({
-    kind: z.literal('line'), length: positiveInteger.max(100_000), width: positiveInteger.max(100_000),
-    direction: z.strictObject({ x: z.number().finite(), y: z.number().finite() }),
-  }),
-  z.strictObject({ kind: z.literal('emanation'), radius: nonNegativeInteger.max(100_000) }),
-]);
-
-const persistentAreaLifetimeSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('while_inside') }),
-  z.strictObject({ kind: z.literal('area_duration') }),
-  z.strictObject({ kind: z.literal('fixed_rounds'), rounds: positiveInteger.max(1_000_000), boundary: z.enum(['start', 'end']) }),
-  z.strictObject({ kind: z.literal('save_ends'), boundary: z.enum(['start', 'end']) }),
-]);
-
-const persistentAreaAppliedPayloadSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('condition'), condition: z.enum(conditionNames.filter((name) => name !== 'Exhaustion')) }),
-  z.strictObject({ kind: z.literal('skill_modifier'), skill: z.literal('stealth'), amount: safeInteger.min(-30).max(30) }),
-  z.strictObject({ kind: z.literal('armor_class_modifier'), amount: safeInteger.min(-30).max(30) }),
-  z.strictObject({ kind: z.literal('movement_modifier'), speedDeltaFeet: safeInteger.min(-1_000).max(1_000) }),
-]);
-
-const persistentAreaSpellPayloadSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('damage'), damageType: z.enum(damageTypes), dice: persistentAreaScaledDiceSchema }),
-  z.strictObject({ kind: z.literal('effect'), payload: persistentAreaAppliedPayloadSchema, lifetime: persistentAreaLifetimeSchema }),
-]);
-
-const persistentAreaSpellEffectSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('automatic'), payload: persistentAreaSpellPayloadSchema }),
-  z.strictObject({
-    kind: z.literal('save_gated'), ability: z.enum(abilities), rollMode: z.enum(['normal', 'advantage', 'disadvantage']),
-    onSuccess: z.enum(['none', 'half']), payload: persistentAreaSpellPayloadSchema,
-  }),
-]).superRefine((effect, context) => {
-  if (effect.kind === 'automatic' && effect.payload.kind === 'effect' && effect.payload.lifetime.kind === 'save_ends') {
-    context.addIssue({ code: 'custom', message: 'A save-ends area payload requires a save gate.' });
-  }
-  if (effect.kind === 'save_gated' && effect.onSuccess === 'half' && effect.payload.kind !== 'damage') {
-    context.addIssue({ code: 'custom', message: 'Only persistent-area damage can be halved.' });
-  }
-});
-
-const persistentAreaOperationSchema = z.strictObject({
-  kind: z.literal('persistent_area'),
-  origin: z.enum(['selected_when_cast', 'anchored_to_caster']),
-  shape: persistentAreaShapeSchema.nullable(),
-  durationRounds: positiveInteger.max(1_000_000),
-  concentration: z.boolean(),
-  targetFilter: z.enum(['all', 'allies', 'enemies', 'selected']),
-  includeOwner: z.boolean(),
-  difficultTerrain: z.boolean(),
-  movableFeet: positiveInteger.max(100_000).nullable(),
-  hooks: z.array(z.strictObject({
-    hook: z.enum(['on_enter', 'on_start_of_turn_inside', 'on_end_of_turn_inside', 'on_exit']),
-    frequency: z.enum(['once_per_turn', 'every_trigger']),
-    effect: persistentAreaSpellEffectSchema,
-  })).max(16),
-  initialEffects: z.array(z.strictObject({ excludeOwner: z.boolean(), effect: persistentAreaSpellEffectSchema })).max(16),
-}).superRefine((operation, context) => {
-  if ((operation.origin === 'selected_when_cast') !== (operation.shape === null)) {
-    context.addIssue({ code: 'custom', message: 'Selected areas use the cast template; anchored areas declare their shape.' });
-  }
-  if (operation.origin === 'anchored_to_caster' && operation.movableFeet !== null) {
-    context.addIssue({ code: 'custom', message: 'An anchored area cannot also move independently.' });
-  }
-});
-
-const worldObjectDamageResponseSchema = z.strictObject({
-  type: z.enum(damageTypes),
-  response: z.enum(['normal', 'resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune']),
-});
-
-const worldObjectTemplateSchema = z.strictObject({
-  name: trimmedText,
-  kind: z.enum(['barrier', 'cover', 'door', 'hazard', 'light-source', 'summoned-terrain', 'generic']),
-  durability: z.discriminatedUnion('kind', [
-    z.strictObject({
-      kind: z.literal('hit_points'),
-      hitPoints: positiveInteger.max(1_000_000),
-      maximumHitPoints: positiveInteger.max(1_000_000),
-    }),
-    z.strictObject({ kind: z.literal('indestructible') }),
-  ]),
-  armorClass: nonNegativeInteger.max(100),
-  damageResponses: z.array(worldObjectDamageResponseSchema).max(damageTypes.length),
-  blocking: z.strictObject({
-    movement: z.boolean(),
-    lineOfSight: z.boolean(),
-    cover: z.enum(['none', 'half', 'three_quarters', 'total']),
-  }),
-}).superRefine((object, context) => {
-  if (object.durability.kind === 'hit_points' && object.durability.hitPoints > object.durability.maximumHitPoints) {
-    context.addIssue({ code: 'custom', path: ['durability', 'hitPoints'], message: 'Object Hit Points cannot exceed its maximum.' });
-  }
-  if (new Set(object.damageResponses.map((response) => response.type)).size !== object.damageResponses.length) {
-    context.addIssue({ code: 'custom', path: ['damageResponses'], message: 'Object damage responses must be unique.' });
-  }
-});
-
-const worldOperationSpellSchema = z.strictObject({
-  kind: z.literal('world_operations'),
-  operations: z.array(z.discriminatedUnion('kind', [
-    z.strictObject({
-      kind: z.literal('create_object'),
-      placement: z.enum(['caster_cell', 'area_origin']),
-      footprintOffsets: z.array(z.strictObject({ column: safeInteger, row: safeInteger })).min(1).max(400),
-      object: worldObjectTemplateSchema,
-    }),
-    z.strictObject({
-      kind: z.literal('transform_terrain'),
-      regionId: identifier,
-      difficultTerrain: z.boolean(),
-    }),
-    z.strictObject({
-      kind: z.literal('set_light_level'),
-      regionId: identifier,
-      level: z.enum(['bright', 'dim', 'darkness']),
-    }),
-    z.strictObject({
-      kind: z.literal('remove_objects'),
-      reason: z.enum(['destroyed', 'dismissed']),
-    }),
-    z.strictObject({
-      kind: z.literal('modify_objects'),
-      changes: z.strictObject({
-        name: trimmedText.optional(),
-        kind: z.enum(['barrier', 'cover', 'door', 'hazard', 'light-source', 'summoned-terrain', 'generic']).optional(),
-        durability: worldObjectTemplateSchema.shape.durability.optional(),
-        armorClass: nonNegativeInteger.max(100).optional(),
-        damageResponses: z.array(worldObjectDamageResponseSchema).max(damageTypes.length).optional(),
-        blocking: worldObjectTemplateSchema.shape.blocking.optional(),
-      }),
-    }),
-    z.strictObject({
-      kind: z.literal('damage_objects'),
-      damage: z.strictObject({
-        terms: z.array(z.strictObject({
-          type: z.enum(damageTypes),
-          dice: z.strictObject({
-            count: nonNegativeInteger.max(100),
-            sides: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(10), z.literal(12), z.literal(20)]),
-            modifier: safeInteger.min(-100_000).max(100_000),
-          }),
-        })).min(1).max(20),
-        critical: z.boolean(),
-        responses: z.tuple([]),
-      }),
-    }),
-  ])).min(1).max(32),
-}).superRefine((operation, context) => {
-  for (const [index, entry] of operation.operations.entries()) {
-    if (entry.kind !== 'create_object') continue;
-    const keys = entry.footprintOffsets.map((cell) => `${String(cell.column)},${String(cell.row)}`);
-    if (new Set(keys).size !== keys.length || !keys.includes('0,0')) {
-      context.addIssue({
-        code: 'custom', path: ['operations', index, 'footprintOffsets'],
-        message: 'Object footprint offsets must be unique and include the placement cell.',
-      });
-    }
-  }
-  for (const [index, entry] of operation.operations.entries()) {
-    if (entry.kind === 'modify_objects' && Object.keys(entry.changes).length === 0) {
-      context.addIssue({
-        code: 'custom', path: ['operations', index, 'changes'],
-        message: 'Object modifications cannot be empty.',
-      });
-    }
-  }
-});
-
-const damageOperationSchema = damageOperationSpecSchema.extend({
-  kind: z.literal('damage_operation'),
-});
-
-const conditionLifecycleDurationSchema = z.discriminatedUnion('kind', [
-  z.strictObject({
-    kind: z.literal('fixed_rounds'), rounds: positiveInteger.max(1_000_000),
-    expiresAt: z.enum(['target_start', 'target_end']),
-  }),
-  z.strictObject({ kind: z.literal('concentration') }),
-  z.strictObject({
-    kind: z.literal('fixed_rounds_or_concentration'), rounds: positiveInteger.max(1_000_000),
-    expiresAt: z.enum(['target_start', 'target_end']),
-  }),
-]);
-
-const conditionLifecycleOperationSchema = z.strictObject({
-  kind: z.literal('condition_lifecycle'),
-  condition: z.enum(conditionNames.filter((name) => name !== 'Exhaustion')),
-  immunity: z.union([z.null(), z.strictObject({ condition: z.enum(conditionNames) })]),
-  initialSave: z.union([z.null(), z.strictObject({
-    ability: z.enum(abilities), rollMode: z.enum(['normal', 'advantage', 'disadvantage']),
-    applyOn: z.literal('failure'),
-  })]),
-  repeatedSave: z.union([z.null(), z.strictObject({
-    hook: z.enum(['target_start', 'target_end']), ability: z.enum(abilities),
-    rollMode: z.enum(['normal', 'advantage', 'disadvantage']),
-    onSuccess: z.enum(['remove_target', 'end_effect']),
-  })]),
-  damageBreak: z.union([z.null(), z.strictObject({
-    sources: z.enum(['any', 'effect_source_or_allies']), minimumDamage: z.literal(1),
-  })]),
-  duration: conditionLifecycleDurationSchema,
-  stacking: z.discriminatedUnion('kind', [
-    z.strictObject({ kind: z.literal('coexist') }),
-    z.strictObject({ kind: z.literal('replace'), sources: z.enum(['same_source', 'any_source']) }),
-    z.strictObject({ kind: z.literal('extend_duration'), sources: z.enum(['same_source', 'any_source']) }),
-  ]),
-}).superRefine((operation, context) => {
-  if (operation.stacking.kind === 'extend_duration' && operation.duration.kind !== 'fixed_rounds') {
-    context.addIssue({ code: 'custom', path: ['stacking'], message: 'Only a fixed-round effect can extend an existing duration.' });
-  }
-});
-
-const modifierDieSchema = z.strictObject({
-  count: positiveInteger.max(100),
-  sides: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(10), z.literal(12), z.literal(20)]),
-});
-
-const modifierSkillChoiceSchema = z.union([
-  z.enum(skills),
-  z.strictObject({
-    kind: z.literal('chosen_when_cast'),
-    options: z.array(z.enum(skills)).min(1).max(skills.length)
-      .refine((options) => new Set(options).size === options.length),
-  }),
-]);
-
-const modifierDamageTypeChoiceSchema = z.union([
-  z.enum(damageTypes),
-  z.strictObject({
-    kind: z.literal('chosen_when_cast'),
-    options: z.array(z.enum(damageTypes)).min(1).max(damageTypes.length)
-      .refine((options) => new Set(options).size === options.length),
-  }),
-]);
-
-const rollDiceModifierOperationSchema = z.discriminatedUnion('application', [
-  z.strictObject({
-    kind: z.literal('roll_dice_modifier'), application: z.literal('every_qualifying_roll'),
-    tests: z.array(z.enum(['attack_roll', 'saving_throw'])).min(1).max(2)
-      .refine((tests) => new Set(tests).size === tests.length),
-    die: modifierDieSchema, sign: z.union([z.literal(1), z.literal(-1)]),
-    duration: conditionLifecycleDurationSchema,
-  }),
-  z.strictObject({
-    kind: z.literal('roll_dice_modifier'), application: z.literal('chosen_skill_checks'),
-    skill: modifierSkillChoiceSchema, die: modifierDieSchema,
-    sign: z.union([z.literal(1), z.literal(-1)]), duration: conditionLifecycleDurationSchema,
-  }),
-]);
-
-const damageDiceReductionOperationSchema = z.strictObject({
-  kind: z.literal('damage_dice_reduction'), damageType: modifierDamageTypeChoiceSchema,
-  die: z.strictObject({ count: z.literal(1), sides: z.literal(4) }),
-  uses: z.literal('once_per_turn'), duration: conditionLifecycleDurationSchema,
-});
-
-const rollModeModifierOperationSchema = z.discriminatedUnion('roll', [
-  z.strictObject({
-    kind: z.literal('roll_mode_modifier'), roll: z.literal('attack_roll'),
-    mode: z.enum(['advantage', 'disadvantage']),
-    scope: z.discriminatedUnion('kind', [
-      z.strictObject({ kind: z.literal('target_rolls') }),
-      z.strictObject({ kind: z.literal('attacks_against_target') }),
-    ]),
-    duration: conditionLifecycleDurationSchema,
-  }),
-  z.strictObject({
-    kind: z.literal('roll_mode_modifier'), roll: z.literal('saving_throw'),
-    mode: z.enum(['advantage', 'disadvantage']), scope: z.strictObject({ kind: z.literal('target_rolls') }),
-    duration: conditionLifecycleDurationSchema,
-  }),
-  z.strictObject({
-    kind: z.literal('roll_mode_modifier'), roll: z.literal('ability_check'),
-    mode: z.enum(['advantage', 'disadvantage']), scope: z.strictObject({ kind: z.literal('target_rolls') }),
-    duration: conditionLifecycleDurationSchema,
-  }),
-]);
-
-const armorClassModifierOperationSchema = z.strictObject({
-  kind: z.literal('armor_class_modifier'),
-  modification: z.discriminatedUnion('kind', [
-    z.strictObject({ kind: z.literal('bonus'), amount: safeInteger.min(-30).max(30) }),
-    z.strictObject({ kind: z.literal('floor'), minimum: nonNegativeInteger.max(100) }),
-  ]),
-  duration: conditionLifecycleDurationSchema,
-});
-
-const damageResponseModifierOperationSchema = z.strictObject({
-  kind: z.literal('damage_response_modifier'), damageType: modifierDamageTypeChoiceSchema,
-  response: z.enum(['resistant', 'vulnerable']), duration: conditionLifecycleDurationSchema,
-});
-
-const targetedDefenseModifierOperationSchema = z.strictObject({
-  kind: z.literal('targeted_defense_modifier'), against: z.literal('selected_attacker'),
-  armorClassBonus: safeInteger.min(1).max(30), duration: conditionLifecycleDurationSchema,
-});
-
-const armedWeaponHitRiderSchema = z.strictObject({
-  kind: z.literal('armed_weapon_hit_rider'),
-  ...armedWeaponHitRiderShape,
-}).superRefine((operation, context) => {
-  if (operation.damage !== null && (
-    operation.damage.scaling.kind !== 'none' ||
-    operation.damage.thresholdRider !== null
-  )) {
-    context.addIssue({ code: 'custom', message: 'Armed weapon-hit damage cannot defer target scaling or a threshold rider.' });
-  }
-});
-
-const gridCellSchema = z.strictObject({ column: nonNegativeInteger, row: nonNegativeInteger });
-const movementDurationShape = {
-  durationRounds: positiveInteger.max(1_000_000),
-  concentration: z.boolean(),
-  expiresAt: z.enum(['source_start', 'source_end', 'target_start', 'target_end']),
-} as const;
-const speedChangeSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('set'), speedFeet: nonNegativeInteger.max(100_000) }),
-  z.strictObject({ kind: z.literal('increase'), feet: positiveInteger.max(100_000) }),
-  z.strictObject({
-    kind: z.literal('reduce'),
-    reduction: z.discriminatedUnion('kind', [
-      z.strictObject({ kind: z.literal('feet'), feet: positiveInteger.max(100_000) }),
-      z.strictObject({ kind: z.literal('multiplier'), multiplier: z.number().finite().min(0).max(1) }),
-    ]),
-  }),
-]);
-const movementModeGrantSchema = z.strictObject({
-  mode: z.enum(['flying', 'climbing', 'swimming']),
-  speed: z.discriminatedUnion('kind', [
-    z.strictObject({ kind: z.literal('fixed'), feet: positiveInteger.max(100_000) }),
-    z.strictObject({ kind: z.literal('walking_speed') }),
-  ]),
-});
-const movementDamageSchema = z.strictObject({
-  damageType: z.enum(damageTypes),
-  dice: z.strictObject({
-    count: positiveInteger.max(100), sides: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(10), z.literal(12), z.literal(20)]),
-    modifier: safeInteger.min(-1_000_000).max(1_000_000),
-  }),
-  unitFeet: z.literal(5),
-  partialUnit: z.literal('completed_units_only'),
-});
-const teleportOperationSchema = z.strictObject({
-  kind: z.literal('teleport'), subject: z.enum(['caster', 'targets']),
-  maximumDistanceFeet: nonNegativeInteger.max(100_000),
-  destination: z.strictObject({
-    requireUnoccupied: z.literal(true), requireOccupiable: z.literal(true), requireLineOfSight: z.boolean(),
-  }),
-});
-const forcedMovementOperationSchema = z.strictObject({
-  kind: z.literal('forced_movement'), direction: z.enum(['away', 'toward']),
-  origin: z.enum(['caster', 'selected_point']), distanceFeet: positiveInteger.max(100_000),
-  save: z.union([z.null(), z.strictObject({
-    ability: z.enum(abilities), rollMode: z.enum(['normal', 'advantage', 'disadvantage']), moveOn: z.literal('failure'),
-  })]),
-});
-const movementModeOperationSchema = z.strictObject({
-  kind: z.literal('movement_mode'), grants: z.array(movementModeGrantSchema).min(1).max(3),
-  difficultTerrainImmunity: z.boolean(), magicalSpeedReductionImmunity: z.boolean(),
-  ...movementDurationShape,
-});
-const movementRegionOperationSchema = z.strictObject({
-  kind: z.literal('movement_region'),
-  region: z.strictObject({ id: identifier, cells: z.array(gridCellSchema).min(1).max(10_000) }),
-  difficultTerrain: z.boolean(), entry: z.enum(['allowed', 'blocked']), damage: movementDamageSchema.nullable(),
-});
-const speedModificationOperationSchema = z.strictObject({
-  kind: z.literal('speed_modification'), modification: speedChangeSchema, ...movementDurationShape,
-});
-
-function hasOnlyKeys(record: Readonly<Record<string, unknown>>, keys: readonly string[]): boolean {
-  const allowed = new Set(keys);
-  return Object.keys(record).every((key) => allowed.has(key));
-}
-
-function validCasterChoiceOperation(operation: Readonly<Record<string, unknown>>): boolean {
-  if (!hasOnlyKeys(operation, ['kind', 'modes']) || !Array.isArray(operation.modes) || operation.modes.length === 0) {
-    return false;
-  }
-  const modes = operation.modes.map(objectRecord);
-  if (modes.some((mode) => mode === null)) return false;
-  const keys: string[] = [];
-  for (const mode of modes) {
-    if (
-      mode === null ||
-      !hasOnlyKeys(mode, ['mode', 'operation']) ||
-      typeof mode.mode !== 'string' ||
-      !identifier.safeParse(mode.mode).success ||
-      !structurallyValidOperation(mode.operation)
-    ) return false;
-    keys.push(mode.mode);
-  }
-  return new Set(keys).size === keys.length;
-}
-
-function validRandomBranchOperation(operation: Readonly<Record<string, unknown>>): boolean {
-  if (
-    !hasOnlyKeys(operation, ['kind', 'dieSides', 'branches']) ||
-    ![4, 6, 8, 10, 12, 20].includes(operation.dieSides as number) ||
-    !Array.isArray(operation.branches) ||
-    operation.branches.length === 0
-  ) return false;
-  const covered = new Set<number>();
-  for (const value of operation.branches) {
-    const branch = objectRecord(value);
-    if (
-      branch === null ||
-      !hasOnlyKeys(branch, ['minimum', 'maximum', 'operation']) ||
-      !Number.isSafeInteger(branch.minimum) ||
-      !Number.isSafeInteger(branch.maximum) ||
-      (branch.minimum as number) < 1 ||
-      (branch.maximum as number) > (operation.dieSides as number) ||
-      (branch.minimum as number) > (branch.maximum as number) ||
-      !structurallyValidOperation(branch.operation)
-    ) return false;
-    for (let face = branch.minimum as number; face <= (branch.maximum as number); face += 1) {
-      if (covered.has(face)) return false;
-      covered.add(face);
-    }
-  }
-  return covered.size === operation.dieSides;
-}
-
-function validTargetBranchOperation(operation: Readonly<Record<string, unknown>>): boolean {
-  if (
-    !hasOnlyKeys(operation, ['kind', 'branches', 'otherwise']) ||
-    !Array.isArray(operation.branches) ||
-    operation.branches.length === 0 ||
-    !(operation.otherwise === null || structurallyValidOperation(operation.otherwise))
-  ) return false;
-  const creatureTypes = new Set<string>();
-  for (const value of operation.branches) {
-    const branch = objectRecord(value);
-    const predicate = objectRecord(branch?.predicate);
-    if (
-      branch === null ||
-      !hasOnlyKeys(branch, ['predicate', 'operation']) ||
-      predicate === null ||
-      !structurallyValidOperation(branch.operation)
-    ) return false;
-    if (
-      predicate.kind !== 'creature_type' ||
-      !hasOnlyKeys(predicate, ['kind', 'creatureType']) ||
-      typeof predicate.creatureType !== 'string' ||
-      !trimmedText.safeParse(predicate.creatureType).success ||
-      creatureTypes.has(predicate.creatureType)
-    ) return false;
-    creatureTypes.add(predicate.creatureType);
-  }
-  return true;
-}
-
-function validReevaluatedBranchOperation(operation: Readonly<Record<string, unknown>>): boolean {
-  return hasOnlyKeys(operation, ['kind', 'hook', 'durationRounds', 'operation']) &&
-    (operation.hook === 'target_start' || operation.hook === 'target_end') &&
-    Number.isSafeInteger(operation.durationRounds) &&
-    (operation.durationRounds as number) >= 1 &&
-    structurallyValidOperation(operation.operation);
-}
-
-function validCompositionTargetResolution(value: unknown): boolean {
-  const resolution = objectRecord(value);
-  if (resolution === null || (resolution.kind !== 'inherit' && resolution.kind !== 're_resolve')) return false;
-  if (resolution.kind === 'inherit') return hasOnlyKeys(resolution, ['kind']);
-  if (!hasOnlyKeys(resolution, ['kind', 'selector'])) return false;
-  const selector = objectRecord(resolution.selector);
-  if (selector === null || typeof selector.kind !== 'string') return false;
-  return (selector.kind === 'caster' || selector.kind === 'enclosing_area') &&
-    hasOnlyKeys(selector, ['kind']);
-}
-
-function validCompositionOperation(operation: Readonly<Record<string, unknown>>): boolean {
-  const explicit = operation.ordering === 'explicit';
-  if (
-    (operation.ordering !== 'declaration_order' && !explicit) ||
-    !hasOnlyKeys(operation, explicit
-      ? ['kind', 'onRefusal', 'steps', 'ordering', 'order']
-      : ['kind', 'onRefusal', 'steps', 'ordering']) ||
-    (operation.onRefusal !== 'abort' && operation.onRefusal !== 'continue') ||
-    !Array.isArray(operation.steps) ||
-    operation.steps.length !== 2
-  ) return false;
-  const steps = operation.steps;
-  for (const value of steps) {
-    const step = objectRecord(value);
-    if (
-      step === null ||
-      !hasOnlyKeys(step, ['targetResolution', 'operation']) ||
-      !validCompositionTargetResolution(step.targetResolution) ||
-      operationKind(step.operation) === 'composition' ||
-      !structurallyValidOperation(step.operation)
-    ) return false;
-  }
-  if (!explicit) return true;
-  if (!Array.isArray(operation.order) || operation.order.length !== 2) return false;
-  return (operation.order[0] === 0 && operation.order[1] === 1) ||
-    (operation.order[0] === 1 && operation.order[1] === 0);
-}
-
-function structurallyValidOperation(value: unknown): value is SpellOperation {
-  const operation = objectRecord(value);
-  const kind = operationKind(value);
-  if (
-    operation === null ||
-    kind === null ||
-    !SPELL_OPERATION_KINDS.includes(kind as SpellOperation['kind'])
-  ) return false;
-  const typedKind = kind as SpellOperation['kind'];
-  if (typedKind === 'composition') return validCompositionOperation(operation);
-  if (typedKind === 'caster_choice') return validCasterChoiceOperation(operation);
-  if (typedKind === 'random_branch') return validRandomBranchOperation(operation);
-  if (typedKind === 'target_branch') return validTargetBranchOperation(operation);
-  if (typedKind === 'reevaluated_branch') return validReevaluatedBranchOperation(operation);
-  if (typedKind === 'condition_lifecycle') return conditionLifecycleOperationSchema.safeParse(value).success;
-  if (typedKind === 'roll_dice_modifier') return rollDiceModifierOperationSchema.safeParse(value).success;
-  if (typedKind === 'damage_dice_reduction') return damageDiceReductionOperationSchema.safeParse(value).success;
-  if (typedKind === 'roll_mode_modifier') return rollModeModifierOperationSchema.safeParse(value).success;
-  if (typedKind === 'armor_class_modifier') return armorClassModifierOperationSchema.safeParse(value).success;
-  if (typedKind === 'damage_response_modifier') return damageResponseModifierOperationSchema.safeParse(value).success;
-  if (typedKind === 'targeted_defense_modifier') return targetedDefenseModifierOperationSchema.safeParse(value).success;
-  if (typedKind === 'persistent_area') return persistentAreaOperationSchema.safeParse(value).success;
-  if (typedKind === 'world_operations') return worldOperationSpellSchema.safeParse(value).success;
-  if (typedKind === 'damage_operation') return damageOperationSchema.safeParse(value).success;
-  if (typedKind === 'armed_weapon_hit_rider') return armedWeaponHitRiderSchema.safeParse(value).success;
-  if (typedKind === 'teleport') return teleportOperationSchema.safeParse(value).success;
-  if (typedKind === 'forced_movement') return forcedMovementOperationSchema.safeParse(value).success;
-  if (typedKind === 'movement_mode') return movementModeOperationSchema.safeParse(value).success;
-  if (typedKind === 'movement_region') return movementRegionOperationSchema.safeParse(value).success;
-  if (typedKind === 'speed_modification') return speedModificationOperationSchema.safeParse(value).success;
-  const required = operationRequiredFields[typedKind];
-  if (required.some((field) => !Object.hasOwn(operation, field))) return false;
-  const allowed = new Set<string>([
-    'kind',
-    ...required,
-    ...(operationOptionalFields[typedKind as keyof typeof operationOptionalFields] ?? []),
-  ]);
-  return Object.keys(operation).every((field) => allowed.has(field));
-}
-
-const operationSchema = z.custom<SpellOperation>(structurallyValidOperation);
+const operationSchema = contentPackOperationSchema;
 
 const spellSchema = z.strictObject({
   ...recordIdentityShape,
@@ -768,6 +175,7 @@ const spellSchema = z.strictObject({
   targeting: targetingSchema,
   operation: operationSchema,
 });
+const publishedSpellSchema = spellSchema.extend({ operation: contentPackOperationJsonSchema });
 
 const resourceSchema = externalPartyPackResourceSchema;
 const featureSchema = z.strictObject({
@@ -786,7 +194,7 @@ const originGrantSchema = z.strictObject({
     amount: safeInteger.min(-30).max(30),
   })).max(abilities.length),
   skills: z.array(z.enum(skills)).max(skills.length),
-  speedFeet: nonNegativeInteger.max(1_000),
+  speedFeet: nonNegativeInteger.max(MAX_IMPORTED_SPEED_FEET),
   senses: z.array(senseSchema).max(4),
 });
 const speciesSchema = z.strictObject({ ...recordIdentityShape, grants: originGrantSchema });
@@ -800,18 +208,93 @@ const subclassSchema = z.strictObject({
   })).min(1).max(20),
 });
 
-const monsterActionSchema = z.custom<MonsterAction>((value) => {
-  const action = objectRecord(value);
-  if (action === null || typeof action.kind !== 'string') return false;
-  if (!['attack', 'multiattack', 'saving_throw', 'spellcasting'].includes(action.kind)) return false;
-  if (typeof action.id !== 'string' || action.id.length === 0) return false;
-  if (action.kind !== 'attack') return true;
-  return typeof action.name === 'string' &&
-    typeof action.attackBonus === 'number' &&
-    objectRecord(action.delivery) !== null &&
-    Array.isArray(action.damage) &&
-    Array.isArray(action.onHit);
+const monsterDiceSchema = z.strictObject({
+  count: positiveInteger.max(MAX_IMPORTED_DICE_COUNT),
+  sides: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(10), z.literal(12), z.literal(20)]),
+  modifier: safeInteger.min(-1_000_000).max(1_000_000),
 });
+const monsterDamageTriggerSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('always') }),
+  z.strictObject({ kind: z.literal('attack_roll_advantage') }),
+  z.strictObject({
+    kind: z.literal('charge'),
+    minimumStraightFeet: positiveInteger.max(MAX_IMPORTED_DISTANCE_FEET),
+    maximumTargetSize: z.enum(creatureSizes),
+  }),
+]);
+const monsterDamageTermSchema = z.strictObject({
+  average: nonNegativeInteger.max(1_000_000),
+  dice: monsterDiceSchema,
+  type: z.enum(damageTypes),
+  trigger: monsterDamageTriggerSchema,
+});
+const decodedDistanceSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('present'), value: positiveInteger.max(MAX_IMPORTED_DISTANCE_FEET) }),
+  z.strictObject({ kind: z.literal('absent'), note: trimmedText }),
+]);
+const monsterDeliverySchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('melee'), reachFeet: positiveInteger.max(MAX_IMPORTED_DISTANCE_FEET) }),
+  z.strictObject({ kind: z.literal('ranged'), rangeFeet: positiveInteger.max(MAX_IMPORTED_DISTANCE_FEET), longRangeFeet: decodedDistanceSchema }),
+  z.strictObject({ kind: z.literal('melee_or_ranged'), reachFeet: positiveInteger.max(MAX_IMPORTED_DISTANCE_FEET), rangeFeet: positiveInteger.max(MAX_IMPORTED_DISTANCE_FEET), longRangeFeet: positiveInteger.max(MAX_IMPORTED_DISTANCE_FEET) }),
+]);
+const monsterSavingThrowSchema = z.strictObject({
+  ability: z.enum(abilities),
+  dc: positiveInteger.max(100),
+});
+const monsterEffectTargetSchema = z.strictObject({
+  maximumSize: z.enum(creatureSizes).nullable(),
+  excludedKinds: z.array(z.enum(['Undead', 'Elf'])).max(2),
+});
+const monsterOnHitEffectSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('condition'),
+    condition: z.enum(['Frightened', 'Grappled', 'Paralyzed', 'Prone']),
+    trigger: monsterDamageTriggerSchema,
+    target: monsterEffectTargetSchema,
+    savingThrow: monsterSavingThrowSchema.nullable(),
+    escapeDc: positiveInteger.max(100).nullable(),
+    duration: z.enum(['until_escape', 'until_end_of_target_next_turn', 'until_start_of_monster_next_turn']).nullable(),
+  }),
+  z.strictObject({ kind: z.literal('hit_point_maximum_reduction'), amount: z.literal('damage_taken') }),
+  z.strictObject({ kind: z.literal('raises_as_zombie'), targetKind: z.literal('Humanoid'), delayHours: z.literal(24), controllerLimit: z.literal(12), preventedBy: z.tuple([z.literal('restored_to_life'), z.literal('body_destroyed')]) }),
+]);
+const decodedCombatNumberSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('present'), value: safeInteger.min(-100).max(100) }),
+  z.strictObject({ kind: z.literal('absent'), note: trimmedText }),
+]);
+const monsterSpellReferenceSchema = z.strictObject({
+  id: recordIdentifier,
+  availability: z.enum(['at_will', '1_per_day', '3_per_day']),
+  manifestStatus: z.enum(['implemented', 'pending']),
+});
+const monsterActionSchema: z.ZodType<MonsterAction> = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('attack'), id: trimmedText, name: trimmedText,
+    attackBonus: safeInteger.min(-100).max(100), delivery: monsterDeliverySchema,
+    damage: z.array(monsterDamageTermSchema).min(1).max(20),
+    attackRollAdvantage: z.union([z.null(), z.strictObject({ kind: z.literal('target_grappled_by_attacker') })]),
+    onHit: z.array(monsterOnHitEffectSchema).max(20),
+  }),
+  z.strictObject({
+    kind: z.literal('multiattack'), id: trimmedText,
+    count: positiveInteger.max(MAX_IMPORTED_DICE_COUNT),
+    actionIds: z.array(trimmedText).min(1).max(MAX_IMPORTED_DICE_COUNT),
+    combination: z.enum(['any', 'fixed', 'one_attack_may_be_replaced']),
+  }),
+  z.strictObject({
+    kind: z.literal('saving_throw'), id: trimmedText, name: trimmedText,
+    savingThrow: monsterSavingThrowSchema,
+    target: monsterEffectTargetSchema.extend({ rangeFeet: positiveInteger.max(MAX_IMPORTED_DISTANCE_FEET) }),
+    failure: z.strictObject({ damage: z.array(monsterDamageTermSchema).max(20), effects: z.array(monsterOnHitEffectSchema).max(20) }),
+    success: z.strictObject({ kind: z.literal('none') }),
+  }),
+  z.strictObject({
+    kind: z.literal('spellcasting'), id: trimmedText,
+    actionEconomy: z.enum(['action', 'bonus_action']), ability: z.enum(abilities),
+    saveDc: decodedCombatNumberSchema, spellAttackBonus: decodedCombatNumberSchema,
+    spells: z.array(monsterSpellReferenceSchema).min(1).max(100),
+  }),
+]);
 
 const savingThrowBonusesShape = Object.fromEntries(
   abilities.map((ability) => [ability, safeInteger.min(-30).max(30)]),
@@ -822,7 +305,7 @@ const monsterSchema = z.strictObject({
     creatureType: trimmedText.optional(),
     armorClass: positiveInteger.max(100),
     hitPointMaximum: positiveInteger.max(1_000_000),
-    speedFeet: nonNegativeInteger.max(1_000),
+    speedFeet: nonNegativeInteger.max(MAX_IMPORTED_SPEED_FEET),
     initiativeBonus: safeInteger.min(-30).max(30),
     savingThrowBonuses: z.strictObject(savingThrowBonusesShape),
     attacksPerAction: positiveInteger.max(100).optional(),
@@ -841,12 +324,18 @@ export const contentPackV1Schema = z.strictObject({
   schemaVersion: z.literal(CONTENT_PACK_SCHEMA_VERSION),
   packId: identifier,
   provenance: provenanceSchema,
+  namespaces: namespaceDeclarationSchema,
   spells: z.array(spellSchema).max(10_000),
   features: z.array(featureSchema).max(10_000),
   species: z.array(speciesSchema).max(10_000),
   backgrounds: z.array(backgroundSchema).max(10_000),
   subclasses: z.array(subclassSchema).max(10_000),
   monsters: z.array(monsterSchema).max(10_000),
+});
+
+/** Serialization-only twin used to generate the public JSON Schema without Zod transform erasure. */
+export const publishedContentPackV1Schema = contentPackV1Schema.extend({
+  spells: z.array(publishedSpellSchema).max(10_000),
 });
 
 export type ContentPackV1 = z.infer<typeof contentPackV1Schema>;
@@ -913,6 +402,7 @@ export interface LoadedContentMonster {
 export interface LoadedContentPack {
   readonly pack: ContentPackV1;
   readonly provenance: ContentPackProvenance;
+  readonly diagnostics: readonly ContentPackRecordDiagnostic[];
   readonly spells: readonly LoadedContentSpell[];
   readonly features: readonly LoadedContentFeature[];
   readonly species: readonly LoadedContentOrigin[];
@@ -920,6 +410,24 @@ export interface LoadedContentPack {
   readonly subclasses: readonly LoadedContentSubclass[];
   readonly monsters: readonly LoadedContentMonster[];
 }
+
+export type ContentPackRecordSurface = 'spells' | 'features' | 'species' | 'backgrounds' | 'subclasses' | 'monsters';
+
+export type ContentPackRecordDiagnostic = {
+  readonly kind: 'content_pack_record_rejection';
+  readonly surface: ContentPackRecordSurface;
+  readonly index: number;
+  readonly recordId: string;
+  readonly path: readonly PropertyKey[];
+  readonly operationKind?: string;
+} & (
+  | { readonly reason: 'malformed_record' }
+  | { readonly reason: 'unknown_operation_kind'; readonly unknownOperationKind: string }
+  | { readonly reason: 'nested_composition' }
+  | { readonly reason: 'unknown_effect_variant'; readonly effectKind: string }
+  | { readonly reason: 'undeclared_namespace'; readonly namespace: string }
+  | { readonly reason: 'missing_feature_reference'; readonly featureId: string }
+);
 
 export type ContentPackRefusal =
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'invalid_json' }
@@ -934,6 +442,19 @@ export type ContentPackRefusal =
 export type ContentPackLoadResult =
   | { readonly status: 'loaded'; readonly content: LoadedContentPack }
   | { readonly status: 'refused'; readonly refusal: ContentPackRefusal };
+
+const contentPackEnvelopeSchema = z.strictObject({
+  schemaVersion: z.literal(CONTENT_PACK_SCHEMA_VERSION),
+  packId: identifier,
+  provenance: provenanceSchema,
+  namespaces: namespaceDeclarationSchema,
+  spells: z.array(z.unknown()).max(10_000),
+  features: z.array(z.unknown()).max(10_000),
+  species: z.array(z.unknown()).max(10_000),
+  backgrounds: z.array(z.unknown()).max(10_000),
+  subclasses: z.array(z.unknown()).max(10_000),
+  monsters: z.array(z.unknown()).max(10_000),
+});
 
 export function importedContentId(sourceId: string, recordId: string): string {
   return `${sourceId}:${recordId}`;
@@ -1150,37 +671,176 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
   if (!Object.hasOwn(root, 'provenance')) {
     return { status: 'refused', refusal: { kind: 'content_pack_refusal', reason: 'missing_provenance' } };
   }
-  const unknownOperation = firstUnknownOperation(root);
-  if (unknownOperation !== null) {
-    return {
-      status: 'refused',
-      refusal: { kind: 'content_pack_refusal', reason: 'unknown_operation_kind', operationKind: unknownOperation },
-    };
-  }
-  if (hasNestedComposition(root)) {
-    return {
-      status: 'refused', refusal: { kind: 'content_pack_refusal', reason: 'nested_composition' },
-    };
-  }
-  const unknownEffect = firstUnknownEffect(root);
-  if (unknownEffect !== null) {
-    return {
-      status: 'refused',
-      refusal: { kind: 'content_pack_refusal', reason: 'unknown_effect_variant', effectKind: unknownEffect },
-    };
-  }
-  const parsed = contentPackV1Schema.safeParse(value);
-  if (!parsed.success) {
+  const envelope = contentPackEnvelopeSchema.safeParse(value);
+  if (!envelope.success) {
     return {
       status: 'refused',
       refusal: {
         kind: 'content_pack_refusal',
         reason: 'malformed_record',
-        path: parsed.error.issues[0]?.path ?? [],
+        path: envelope.error.issues[0]?.path ?? [],
       },
     };
   }
-  const ids = allRecords(parsed.data).map((entry) => importedContentId(entry.sourceId, entry.recordId));
+
+  const diagnostics: ContentPackRecordDiagnostic[] = [];
+  const declaredNamespaces = new Set(envelope.data.namespaces);
+  const rawRecordId = (record: unknown): string => {
+    const id = objectRecord(record)?.recordId;
+    return typeof id === 'string' ? id : '<unknown>';
+  };
+  const namespaceDiagnostic = (
+    surface: ContentPackRecordSurface,
+    index: number,
+    sourceId: string,
+    recordId: string,
+  ): ContentPackRecordDiagnostic | null => declaredNamespaces.has(sourceId) ? null : {
+    kind: 'content_pack_record_rejection',
+    reason: 'undeclared_namespace',
+    surface,
+    index,
+    recordId,
+    namespace: sourceId,
+    path: [surface, index, 'sourceId'],
+  };
+  const malformedDiagnostic = (
+    surface: ContentPackRecordSurface,
+    index: number,
+    record: unknown,
+    path: readonly PropertyKey[],
+  ): ContentPackRecordDiagnostic => {
+    const operation = objectRecord(objectRecord(record)?.operation);
+    const kind = operationKind(operation);
+    return {
+      kind: 'content_pack_record_rejection',
+      reason: 'malformed_record',
+      surface,
+      index,
+      recordId: rawRecordId(record),
+      ...(kind === null ? {} : { operationKind: kind }),
+      path: [surface, index, ...path],
+    };
+  };
+
+  const spells: ContentPackV1['spells'][number][] = [];
+  for (const [index, record] of envelope.data.spells.entries()) {
+    const diagnosticRoot = { spells: [record] };
+    const unknownOperation = firstUnknownOperation(diagnosticRoot);
+    const operation = objectRecord(objectRecord(record)?.operation);
+    const kind = operationKind(operation);
+    if (unknownOperation !== null) {
+      diagnostics.push({
+        kind: 'content_pack_record_rejection', reason: 'unknown_operation_kind',
+        surface: 'spells', index, recordId: rawRecordId(record),
+        operationKind: unknownOperation, unknownOperationKind: unknownOperation,
+        path: ['spells', index, 'operation', 'kind'],
+      });
+      continue;
+    }
+    if (hasNestedComposition(diagnosticRoot)) {
+      diagnostics.push({
+        kind: 'content_pack_record_rejection', reason: 'nested_composition',
+        surface: 'spells', index, recordId: rawRecordId(record),
+        ...(kind === null ? {} : { operationKind: kind }),
+        path: ['spells', index, 'operation'],
+      });
+      continue;
+    }
+    const parsed = spellSchema.safeParse(record);
+    if (!parsed.success) {
+      diagnostics.push(malformedDiagnostic('spells', index, record, parsed.error.issues[0]?.path ?? []));
+      continue;
+    }
+    const namespace = namespaceDiagnostic('spells', index, parsed.data.sourceId, parsed.data.recordId);
+    if (namespace !== null) diagnostics.push(namespace);
+    else spells.push(parsed.data);
+  }
+
+  const features: ContentPackV1['features'][number][] = [];
+  for (const [index, record] of envelope.data.features.entries()) {
+    const unknownEffect = firstUnknownEffect({ features: [record] });
+    if (unknownEffect !== null) {
+      diagnostics.push({
+        kind: 'content_pack_record_rejection', reason: 'unknown_effect_variant',
+        surface: 'features', index, recordId: rawRecordId(record), effectKind: unknownEffect,
+        path: ['features', index, 'effects', 'kind'],
+      });
+      continue;
+    }
+    const parsed = featureSchema.safeParse(record);
+    if (!parsed.success) {
+      diagnostics.push(malformedDiagnostic('features', index, record, parsed.error.issues[0]?.path ?? []));
+      continue;
+    }
+    const namespace = namespaceDiagnostic('features', index, parsed.data.sourceId, parsed.data.recordId);
+    if (namespace !== null) diagnostics.push(namespace);
+    else features.push(parsed.data);
+  }
+
+  const species: ContentPackV1['species'][number][] = [];
+  for (const [index, record] of envelope.data.species.entries()) {
+    const parsed = speciesSchema.safeParse(record);
+    if (!parsed.success) diagnostics.push(malformedDiagnostic('species', index, record, parsed.error.issues[0]?.path ?? []));
+    else {
+      const namespace = namespaceDiagnostic('species', index, parsed.data.sourceId, parsed.data.recordId);
+      if (namespace !== null) diagnostics.push(namespace);
+      else species.push(parsed.data);
+    }
+  }
+  const backgrounds: ContentPackV1['backgrounds'][number][] = [];
+  for (const [index, record] of envelope.data.backgrounds.entries()) {
+    const parsed = backgroundSchema.safeParse(record);
+    if (!parsed.success) diagnostics.push(malformedDiagnostic('backgrounds', index, record, parsed.error.issues[0]?.path ?? []));
+    else {
+      const namespace = namespaceDiagnostic('backgrounds', index, parsed.data.sourceId, parsed.data.recordId);
+      if (namespace !== null) diagnostics.push(namespace);
+      else backgrounds.push(parsed.data);
+    }
+  }
+  const subclassesBeforeReferences: ContentPackV1['subclasses'][number][] = [];
+  for (const [index, record] of envelope.data.subclasses.entries()) {
+    const parsed = subclassSchema.safeParse(record);
+    if (!parsed.success) diagnostics.push(malformedDiagnostic('subclasses', index, record, parsed.error.issues[0]?.path ?? []));
+    else {
+      const namespace = namespaceDiagnostic('subclasses', index, parsed.data.sourceId, parsed.data.recordId);
+      if (namespace !== null) diagnostics.push(namespace);
+      else subclassesBeforeReferences.push(parsed.data);
+    }
+  }
+  const monsters: ContentPackV1['monsters'][number][] = [];
+  for (const [index, record] of envelope.data.monsters.entries()) {
+    const parsed = monsterSchema.safeParse(record);
+    if (!parsed.success) diagnostics.push(malformedDiagnostic('monsters', index, record, parsed.error.issues[0]?.path ?? []));
+    else {
+      const namespace = namespaceDiagnostic('monsters', index, parsed.data.sourceId, parsed.data.recordId);
+      if (namespace !== null) diagnostics.push(namespace);
+      else monsters.push(parsed.data);
+    }
+  }
+
+  const featureIds = new Set(features.map((feature) => importedContentId(feature.sourceId, feature.recordId)));
+  const subclasses: ContentPackV1['subclasses'][number][] = [];
+  for (const subclass of subclassesBeforeReferences) {
+    const missingFeature = subclass.featureSets.flatMap((set) => set.featureIds)
+      .map((id) => id.includes(':') ? id : importedContentId(subclass.sourceId, id))
+      .find((id) => !featureIds.has(id));
+    if (missingFeature === undefined) subclasses.push(subclass);
+    else diagnostics.push({
+      kind: 'content_pack_record_rejection', reason: 'missing_feature_reference',
+      surface: 'subclasses', index: envelope.data.subclasses.findIndex((record) => rawRecordId(record) === subclass.recordId),
+      recordId: subclass.recordId, featureId: missingFeature,
+      path: ['subclasses', 'featureSets', missingFeature],
+    });
+  }
+
+  const pack: ContentPackV1 = {
+    schemaVersion: CONTENT_PACK_SCHEMA_VERSION,
+    packId: envelope.data.packId,
+    provenance: envelope.data.provenance,
+    namespaces: envelope.data.namespaces,
+    spells, features, species, backgrounds, subclasses, monsters,
+  };
+  const ids = allRecords(pack).map((entry) => importedContentId(entry.sourceId, entry.recordId));
   const seen = new Set<string>();
   const existingSrdIds = srdIds();
   const collision = ids.find((id) => seen.has(id) || existingSrdIds.has(id) || (seen.add(id), false));
@@ -1191,9 +851,7 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
     };
   }
   try {
-    const featureIds = new Set(parsed.data.features.map((feature) =>
-      importedContentId(feature.sourceId, feature.recordId)));
-    const subclasses = parsed.data.subclasses.map((subclass) => ({
+    const loadedSubclasses = pack.subclasses.map((subclass) => ({
       id: importedContentId(subclass.sourceId, subclass.recordId),
       sourceId: subclass.sourceId,
       recordId: subclass.recordId,
@@ -1204,38 +862,30 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
         featureIds: set.featureIds.map((id) => id.includes(':') ? id : importedContentId(subclass.sourceId, id)),
       })),
     }));
-    const missingFeature = subclasses.flatMap((subclass) => subclass.featureSets)
-      .flatMap((set) => set.featureIds)
-      .find((id) => !featureIds.has(id));
-    if (missingFeature !== undefined) {
-      return {
-        status: 'refused',
-        refusal: { kind: 'content_pack_refusal', reason: 'malformed_record', path: ['subclasses', 'featureSets', missingFeature] },
-      };
-    }
     return {
       status: 'loaded',
       content: {
-        pack: parsed.data,
-        provenance: parsed.data.provenance,
-        spells: parsed.data.spells.map((spell) => loadSpell(spell, parsed.data.provenance)),
-        features: parsed.data.features.map(loadFeature),
-        species: parsed.data.species.map((species) => ({
+        pack,
+        provenance: pack.provenance,
+        diagnostics,
+        spells: pack.spells.map((spell) => loadSpell(spell, pack.provenance)),
+        features: pack.features.map(loadFeature),
+        species: pack.species.map((species) => ({
           id: importedContentId(species.sourceId, species.recordId),
           sourceId: species.sourceId,
           recordId: species.recordId,
           name: species.name,
           grants: species.grants,
         })),
-        backgrounds: parsed.data.backgrounds.map((background) => ({
+        backgrounds: pack.backgrounds.map((background) => ({
           id: importedContentId(background.sourceId, background.recordId),
           sourceId: background.sourceId,
           recordId: background.recordId,
           name: background.name,
           grants: background.grants,
         })),
-        subclasses,
-        monsters: parsed.data.monsters.map(loadMonster),
+        subclasses: loadedSubclasses,
+        monsters: pack.monsters.map(loadMonster),
       },
     };
   } catch {

@@ -344,6 +344,7 @@ export function buildContentPackDocuments(input: ContentPackBuildInput): Content
       sourceKind: 'user_import',
       importedAt: input.importedAt,
     },
+    namespaces: [...new Set(spells.map((spell) => spell.sourceId))].sort(),
     spells,
     features: [],
     species: [],

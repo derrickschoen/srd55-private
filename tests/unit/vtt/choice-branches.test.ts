@@ -145,9 +145,13 @@ describe('CAP-IMP-007 imported choice and branch operations', () => {
         { minimum: 3, maximum: 4, operation: fixedDamage(4) },
       ],
     };
-    expect(loadContentPack(fixture)).toMatchObject({
-      status: 'refused', refusal: { reason: 'malformed_record', path: ['spells', 0, 'operation'] },
-    });
+    const gap = loadContentPack(fixture);
+    expect(gap.status).toBe('loaded');
+    if (gap.status !== 'loaded') throw new Error('Gap fixture was refused wholesale.');
+    expect(gap.content.diagnostics).toContainEqual(expect.objectContaining({
+      reason: 'malformed_record', operationKind: 'random_branch',
+      path: ['spells', 0, 'operation', 'branches'],
+    }));
     fixture.spells[0]!.operation = {
       kind: 'random_branch', dieSides: 4,
       branches: [
@@ -155,9 +159,13 @@ describe('CAP-IMP-007 imported choice and branch operations', () => {
         { minimum: 3, maximum: 4, operation: fixedDamage(4) },
       ],
     };
-    expect(loadContentPack(fixture)).toMatchObject({
-      status: 'refused', refusal: { reason: 'malformed_record', path: ['spells', 0, 'operation'] },
-    });
+    const overlap = loadContentPack(fixture);
+    expect(overlap.status).toBe('loaded');
+    if (overlap.status !== 'loaded') throw new Error('Overlap fixture was refused wholesale.');
+    expect(overlap.content.diagnostics).toContainEqual(expect.objectContaining({
+      reason: 'malformed_record', operationKind: 'random_branch',
+      path: ['spells', 0, 'operation', 'branches', 1],
+    }));
   });
 
   it('random_branch_low_face_boundary: selects the first range at face 1', () => {

@@ -373,7 +373,7 @@ describe('CAP-IMP-010 imported condition and control lifecycle', () => {
         effect: {
           kind: 'automatic', payload: {
             kind: 'damage', damageType: damageType('Force'),
-            dice: { baseCount: 0, sides: 4, modifier: 1, perSlotCount: 0, perSlotModifier: 0, cantripUpgrade: false },
+            dice: { baseCount: 1, sides: 4, modifier: 0, perSlotCount: 0, perSlotModifier: 0, cantripUpgrade: false },
           },
         },
       }],
@@ -493,7 +493,7 @@ describe('CAP-IMP-010 imported condition and control lifecycle', () => {
         effect: {
           kind: 'automatic', payload: {
             kind: 'damage', damageType: damageType('Force'),
-            dice: { baseCount: 0, sides: 4, modifier: 1, perSlotCount: 0, perSlotModifier: 0, cantripUpgrade: false },
+            dice: { baseCount: 1, sides: 4, modifier: 0, perSlotCount: 0, perSlotModifier: 0, cantripUpgrade: false },
           },
         },
       }],
@@ -570,12 +570,18 @@ describe('CAP-IMP-010 imported condition and control lifecycle', () => {
     fixture.spells[0]!.operation = lifecycle({ duration: { kind: 'fixed_rounds', rounds: 1, expiresAt: 'target_end' } });
     expect(loadContentPack(fixture).status).toBe('loaded');
     fixture.spells[0]!.operation = lifecycle({ duration: { kind: 'fixed_rounds', rounds: 0, expiresAt: 'target_end' } });
-    expect(loadContentPack(fixture)).toMatchObject({ status: 'refused', refusal: { reason: 'malformed_record' } });
+    const zero = loadContentPack(fixture);
+    expect(zero.status).toBe('loaded');
+    if (zero.status !== 'loaded') throw new Error('Zero-round record refused the pack.');
+    expect(zero.content.diagnostics).toContainEqual(expect.objectContaining({ reason: 'malformed_record' }));
     fixture.spells[0]!.operation = {
       kind: 'condition_lifecycle', condition: 'Frightened', immunity: null, initialSave: null,
       repeatedSave: null, damageBreak: null, duration: { kind: 'concentration' },
       stacking: { kind: 'extend_duration', sources: 'same_source' },
     };
-    expect(loadContentPack(fixture)).toMatchObject({ status: 'refused', refusal: { reason: 'malformed_record' } });
+    const extension = loadContentPack(fixture);
+    expect(extension.status).toBe('loaded');
+    if (extension.status !== 'loaded') throw new Error('Invalid extension record refused the pack.');
+    expect(extension.content.diagnostics).toContainEqual(expect.objectContaining({ reason: 'malformed_record' }));
   });
 });

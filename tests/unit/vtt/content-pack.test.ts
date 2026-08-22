@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import type { CombatantProfile } from '../../../src/combat/combatant';
 import { combatToken } from '../../../src/combat/combatant';
@@ -20,12 +21,17 @@ import {
   importedContentId,
   importedMonsterAttackCommand,
   importedMonsterProfile,
+  publishedContentPackV1Schema,
   loadContentPack,
   loadContentPackBytes,
   type ContentPackLoadResult,
   type LoadedContentPack,
 } from '../../../src/content/content-pack';
-import { FEATURE_EFFECT_KINDS } from '../../../src/vtt/party-pack';
+import {
+  MAX_IMPORTED_DICE_COUNT,
+  MAX_IMPORTED_SPEED_FEET,
+  operationSchemas,
+} from '../../../src/content/content-pack-operation-schema';
 import {
   EncounterSessionJournal,
   MemoryBrowserSessionStore,
@@ -52,6 +58,22 @@ function fixture(): unknown {
 function loaded(result: ContentPackLoadResult = loadContentPack(fixture())): LoadedContentPack {
   if (result.status !== 'loaded') throw new Error(`Fixture was refused: ${result.refusal.reason}`);
   return result.content;
+}
+
+function addHealthySpell(candidate: { spells: Array<{ recordId: string; name: string }> }): void {
+  const source = fixture() as { spells: Array<{ recordId: string; name: string }> };
+  const healthy = source.spells[0];
+  if (healthy === undefined) throw new Error('Fixture spell is missing.');
+  candidate.spells.push({ ...healthy, recordId: 'healthy-control', name: 'Healthy Control' });
+}
+
+function rejectedRecord(
+  result: ContentPackLoadResult,
+  reason: LoadedContentPack['diagnostics'][number]['reason'],
+): LoadedContentPack {
+  const content = loaded(result);
+  expect(content.diagnostics).toContainEqual(expect.objectContaining({ reason }));
+  return content;
 }
 
 function withImportedFeature(
@@ -95,7 +117,166 @@ function importedSpellCommand(
   };
 }
 
+function expectHealthyControlExecutes(content: LoadedContentPack): void {
+  const caster = playerProfile('healthy-control-caster', { initiativeBonus: 20, spellSlots: [{ level: 1, maximum: 1 }] });
+  const target = monsterProfile('healthy-control-target', { initiativeBonus: -20, hitPoints: 20 });
+  let state = createEncounter({
+    bounds: { columns: 8, rows: 2 }, combatants: [caster, target],
+    tokens: [placedToken(caster, 0), placedToken(target, 4)], contentPacks: [content],
+  });
+  state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+  const command = { ...importedSpellCommand(caster, target), spellId: 'greenforge:healthy-control' };
+  const cast = reduceEncounter(state, command, () => 0.5);
+  expect(cast.events).toContainEqual(expect.objectContaining({ type: 'spell_cast', spellId: 'greenforge:healthy-control' }));
+  expect(cast.state.combatants.find(({ profile }) => profile.id === target.id)?.hitPoints).toBe(16);
+}
+
 describe('content-pack v1', () => {
+  it('fallback_resurrected: every closed operation kind has an explicit schema and no key-presence fallback', () => {
+    expect(Object.keys(operationSchemas)).toEqual([...SPELL_OPERATION_KINDS]);
+    for (const kind of SPELL_OPERATION_KINDS) {
+      expect(operationSchemas[kind]).toBeDefined();
+    }
+    const candidate = fixture() as { spells: Array<{ operation: unknown }> };
+    candidate.spells[0]!.operation = {
+      kind: 'attack_damage', attackKind: 'ranged', damageType: 'Thunder', dice: null, rider: null,
+    };
+    const content = loaded(loadContentPack(candidate));
+    expect(content.spells).toEqual([]);
+    expect(content.diagnostics).toContainEqual(expect.objectContaining({
+      reason: 'malformed_record', operationKind: 'attack_damage',
+      path: ['spells', 0, 'operation', 'dice'],
+    }));
+  });
+
+  it('record_rejection_kills_pack: attack damage null dice and invalid conditions reject only their records and execute the healthy record', () => {
+    const candidate = fixture() as {
+      spells: Array<{ recordId: string; name: string; operation: unknown }>;
+    };
+    candidate.spells[0]!.operation = {
+      kind: 'attack_damage', attackKind: 'ranged', damageType: 'Thunder', dice: null, rider: null,
+    };
+    addHealthySpell(candidate);
+    candidate.spells.push({
+      ...(candidate.spells[1] ?? candidate.spells[0]!),
+      recordId: 'invalid-condition', name: 'Invalid Condition',
+      operation: {
+        kind: 'condition_lifecycle', condition: 'Dreambound', immunity: null,
+        initialSave: null, repeatedSave: null, damageBreak: null,
+        duration: { kind: 'fixed_rounds', rounds: 1, expiresAt: 'target_end' },
+        stacking: { kind: 'coexist' },
+      },
+    });
+
+    const content = loaded(loadContentPack(candidate));
+    expect(content.diagnostics).toEqual([
+      expect.objectContaining({
+        reason: 'malformed_record', recordId: 'prism-pebble', operationKind: 'attack_damage',
+        path: ['spells', 0, 'operation', 'dice'],
+      }),
+      expect.objectContaining({
+        reason: 'malformed_record', recordId: 'invalid-condition', operationKind: 'condition_lifecycle',
+        path: ['spells', 2, 'operation', 'condition'],
+      }),
+    ]);
+    expect(content.spells.map(({ recordId }) => recordId)).toEqual(['healthy-control']);
+    expectHealthyControlExecutes(content);
+  });
+
+  it.each([
+    ['minimum below', 0, false],
+    ['minimum at', 1, true],
+    ['maximum at', MAX_IMPORTED_DICE_COUNT, true],
+    ['maximum above', MAX_IMPORTED_DICE_COUNT + 1, false],
+  ] as const)('imported dice count boundary: %s', (_label, baseCount, accepted) => {
+    const candidate = fixture() as {
+      spells: Array<{ recordId: string; name: string; operation: { dice: { baseCount: number } } }>;
+    };
+    candidate.spells[0]!.operation.dice.baseCount = baseCount;
+    addHealthySpell(candidate);
+    const content = loaded(loadContentPack(candidate));
+    expect(content.spells.some(({ recordId }) => recordId === 'prism-pebble')).toBe(accepted);
+    expect(content.diagnostics.some(({ recordId }) => recordId === 'prism-pebble')).toBe(!accepted);
+    expect(content.spells.some(({ recordId }) => recordId === 'healthy-control')).toBe(true);
+  });
+
+  it('monster action damage null rejects the monster record while a healthy monster imports and executes', () => {
+    const candidate = fixture() as {
+      monsters: Array<{ recordId: string; name: string; actions: Array<{ damage: unknown[] }> }>;
+    };
+    const healthy = structuredClone(candidate.monsters[0]);
+    if (healthy === undefined) throw new Error('Fixture monster is missing.');
+    healthy.recordId = 'healthy-monster';
+    healthy.name = 'Healthy Monster';
+    candidate.monsters.push(healthy);
+    candidate.monsters[0]!.actions[0]!.damage = [null];
+    const content = loaded(loadContentPack(candidate));
+    expect(content.diagnostics).toContainEqual(expect.objectContaining({
+      reason: 'malformed_record', recordId: 'brassleaf-mote',
+      path: ['monsters', 0, 'actions', 0, 'damage', 0],
+    }));
+    expect(content.monsters.map(({ recordId }) => recordId)).toEqual(['healthy-monster']);
+    const monster = content.monsters[0];
+    if (monster === undefined) throw new Error('Healthy monster did not import.');
+    const enemy = importedMonsterProfile(monster, {
+      combatantId: 'combatant:healthy-monster', tokenId: 'token:healthy-monster',
+    });
+    const target = playerProfile('healthy-monster-target', { initiativeBonus: -20, hitPoints: 20 });
+    let state = createEncounter({
+      bounds: { columns: 4, rows: 2 }, combatants: [enemy, target],
+      tokens: [combatToken(enemy, { column: 0, row: 0 }), placedToken(target, 1)],
+      contentPacks: [content],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = reduceEncounter(
+      state,
+      importedMonsterAttackCommand(monster, 'attack:brassleaf-tap', enemy.id, target.id),
+      () => 0.5,
+    ).state;
+    expect(state.combatants.find(({ profile }) => profile.id === target.id)?.hitPoints).toBe(15);
+  });
+
+  it('namespace_not_enforced: an undeclared source namespace rejects only that record and executes the declared healthy record', () => {
+    const candidate = fixture() as {
+      spells: Array<{ sourceId: string; recordId: string; name: string }>;
+    };
+    candidate.spells[0]!.sourceId = 'outside';
+    candidate.spells[0]!.recordId = 'outside-record';
+    addHealthySpell(candidate);
+    const content = loaded(loadContentPack(candidate));
+    expect(content.diagnostics).toContainEqual(expect.objectContaining({
+      reason: 'undeclared_namespace', recordId: 'outside-record', namespace: 'outside',
+      path: ['spells', 0, 'sourceId'],
+    }));
+    expect(content.spells.map(({ recordId }) => recordId)).toEqual(['healthy-control']);
+    expectHealthyControlExecutes(content);
+  });
+
+  it('speed_bound_bypassed: speed at the import cap reaches movement state and one over rejects only that monster', () => {
+    const atCap = fixture() as { monsters: Array<{ statblock: { speedFeet: number } }> };
+    atCap.monsters[0]!.statblock.speedFeet = MAX_IMPORTED_SPEED_FEET;
+    const capContent = loaded(loadContentPack(atCap));
+    const cappedMonster = capContent.monsters[0];
+    if (cappedMonster === undefined) throw new Error('Monster at speed cap did not import.');
+    const cappedProfile = importedMonsterProfile(cappedMonster, { combatantId: 'combatant:capped', tokenId: 'token:capped' });
+    expect(cappedProfile.rules.speed).toBe(MAX_IMPORTED_SPEED_FEET);
+
+    const over = fixture() as {
+      monsters: Array<{ recordId: string; name: string; statblock: { speedFeet: number } }>;
+    };
+    const healthy = structuredClone(over.monsters[0]);
+    if (healthy === undefined) throw new Error('Fixture monster is missing.');
+    healthy.recordId = 'healthy-monster';
+    healthy.name = 'Healthy Monster';
+    over.monsters.push(healthy);
+    over.monsters[0]!.statblock.speedFeet = MAX_IMPORTED_SPEED_FEET + 1;
+    const overContent = loaded(loadContentPack(over));
+    expect(overContent.diagnostics).toContainEqual(expect.objectContaining({
+      reason: 'malformed_record', recordId: 'brassleaf-mote',
+      path: ['monsters', 0, 'statblock', 'speedFeet'],
+    }));
+    expect(overContent.monsters.map(({ recordId }) => recordId)).toEqual(['healthy-monster']);
+  });
   it('refuses malformed additional-damage and armed-rider operation shapes', () => {
     const damage = fixture() as { spells: Array<{ operation: unknown }> };
     damage.spells[0]!.operation = {
@@ -111,9 +292,13 @@ describe('content-pack v1', () => {
       }],
       timing: { kind: 'immediate' },
     };
-    expect(loadContentPack(damage)).toMatchObject({
-      status: 'refused', refusal: { reason: 'malformed_record', path: ['spells', 0, 'operation'] },
+    addHealthySpell(damage as unknown as { spells: Array<{ recordId: string; name: string }> });
+    const damageContent = rejectedRecord(loadContentPack(damage), 'malformed_record');
+    expect(damageContent.diagnostics[0]).toMatchObject({
+      recordId: 'prism-pebble', operationKind: 'damage_operation',
+      path: ['spells', 0, 'operation', 'packets', 0, 'dice'],
     });
+    expect(damageContent.spells.map(({ recordId }) => recordId)).toEqual(['healthy-control']);
 
     const armed = fixture() as { spells: Array<{ operation: unknown }> };
     armed.spells[0]!.operation = {
@@ -124,9 +309,10 @@ describe('content-pack v1', () => {
         durationRounds: 1, expiresAt: 'target_end',
       },
     };
-    expect(loadContentPack(armed)).toMatchObject({
-      status: 'refused', refusal: { reason: 'malformed_record', path: ['spells', 0, 'operation'] },
-    });
+    addHealthySpell(armed as unknown as { spells: Array<{ recordId: string; name: string }> });
+    const armedContent = rejectedRecord(loadContentPack(armed), 'malformed_record');
+    expect(armedContent.diagnostics[0]).toMatchObject({ recordId: 'prism-pebble', operationKind: 'armed_weapon_hit_rider' });
+    expect(armedContent.spells.map(({ recordId }) => recordId)).toEqual(['healthy-control']);
   });
 
   it('loads a typed persistent-area spell operation and refuses malformed nested area specs', () => {
@@ -154,9 +340,12 @@ describe('content-pack v1', () => {
       spells: Array<{ operation: { hooks: Array<{ effect: { payload: { lifetime?: unknown } } }> } }>;
     };
     delete malformed.spells[0]!.operation.hooks[0]!.effect.payload.lifetime;
-    expect(loadContentPack(malformed)).toMatchObject({
-      status: 'refused', refusal: { reason: 'malformed_record', path: ['spells', 0, 'operation'] },
-    });
+    addHealthySpell(malformed as unknown as { spells: Array<{ recordId: string; name: string }> });
+    const malformedContent = rejectedRecord(loadContentPack(malformed), 'malformed_record');
+    expect(malformedContent.diagnostics[0]?.path).toEqual([
+      'spells', 0, 'operation', 'hooks', 0, 'effect', 'payload', 'lifetime',
+    ]);
+    expect(malformedContent.spells.map(({ recordId }) => recordId)).toEqual(['healthy-control']);
   });
 
   it('loads typed spell world operations and refuses malformed object durability', () => {
@@ -200,9 +389,12 @@ describe('content-pack v1', () => {
     const durability = malformed.spells[0]!.operation.operations[0]!.object?.durability;
     if (durability === undefined) throw new Error('Malformed fixture has no durability.');
     durability.hitPoints = durability.maximumHitPoints + 1;
-    expect(loadContentPack(malformed)).toMatchObject({
-      status: 'refused', refusal: { reason: 'malformed_record', path: ['spells', 0, 'operation'] },
-    });
+    addHealthySpell(malformed as unknown as { spells: Array<{ recordId: string; name: string }> });
+    const malformedContent = rejectedRecord(loadContentPack(malformed), 'malformed_record');
+    expect(malformedContent.diagnostics[0]?.path).toEqual([
+      'spells', 0, 'operation', 'operations', 0, 'object', 'durability', 'hitPoints',
+    ]);
+    expect(malformedContent.spells.map(({ recordId }) => recordId)).toEqual(['healthy-control']);
   });
 
   it('loads original homebrew examples for every executable content kind with surfaced provenance', () => {
@@ -312,8 +504,10 @@ describe('content-pack v1', () => {
 
   it('refuses an id collision with an existing namespaced SRD id', () => {
     const candidate = fixture() as {
+      namespaces: string[];
       spells: Array<{ sourceId: string; recordId: string }>;
     };
+    candidate.namespaces.push('srd');
     candidate.spells[0] = { ...candidate.spells[0]!, sourceId: 'srd', recordId: 'cure-wounds' };
     expect(loadContentPack(candidate)).toEqual({
       status: 'refused',
@@ -328,27 +522,24 @@ describe('content-pack v1', () => {
   it('unknown_operation_coerced refuses rather than mapping an unknown operation to a default', () => {
     const candidate = fixture() as { spells: Array<{ operation: { kind: string } }> };
     candidate.spells[0]!.operation.kind = 'wishful_default';
-    expect(loadContentPack(candidate)).toEqual({
-      status: 'refused',
-      refusal: {
-        kind: 'content_pack_refusal',
-        reason: 'unknown_operation_kind',
-        operationKind: 'wishful_default',
-      },
+    addHealthySpell(candidate as unknown as { spells: Array<{ recordId: string; name: string }> });
+    const content = rejectedRecord(loadContentPack(candidate), 'unknown_operation_kind');
+    expect(content.diagnostics[0]).toMatchObject({
+      recordId: 'prism-pebble', operationKind: 'wishful_default',
+      unknownOperationKind: 'wishful_default', path: ['spells', 0, 'operation', 'kind'],
     });
+    expect(content.spells.map(({ recordId }) => recordId)).toEqual(['healthy-control']);
   });
 
   it('refuses an unknown party-pack effect variant without dropping it', () => {
     const candidate = fixture() as { features: Array<{ effects: Array<{ kind: string }> }> };
     candidate.features[0]!.effects[0]!.kind = 'untyped_glimmer';
-    expect(loadContentPack(candidate)).toEqual({
-      status: 'refused',
-      refusal: {
-        kind: 'content_pack_refusal',
-        reason: 'unknown_effect_variant',
-        effectKind: 'untyped_glimmer',
-      },
+    const content = rejectedRecord(loadContentPack(candidate), 'unknown_effect_variant');
+    expect(content.diagnostics[0]).toMatchObject({
+      recordId: 'mossglass-edge', effectKind: 'untyped_glimmer',
+      path: ['features', 0, 'effects', 'kind'],
     });
+    expect(content.spells.map(({ recordId }) => recordId)).toEqual(['prism-pebble']);
   });
 
   it('provenance_optional refuses a pack whose provenance block is absent', () => {
@@ -369,10 +560,9 @@ describe('content-pack v1', () => {
     });
     const malformed = fixture() as { spells: Array<{ name?: string }> };
     delete malformed.spells[0]!.name;
-    expect(loadContentPack(malformed)).toEqual({
-      status: 'refused',
-      refusal: expect.objectContaining({ reason: 'malformed_record' }),
-    });
+    const malformedContent = rejectedRecord(loadContentPack(malformed), 'malformed_record');
+    expect(malformedContent.diagnostics[0]).toMatchObject({ recordId: 'prism-pebble', path: ['spells', 0, 'name'] });
+    expect(malformedContent.features.map(({ recordId }) => recordId)).toEqual(['mossglass-edge']);
     expect(loadContentPackBytes('{')).toEqual({
       status: 'refused',
       refusal: { kind: 'content_pack_refusal', reason: 'invalid_json' },
@@ -460,22 +650,12 @@ describe('content-pack v1', () => {
     expect(bytes).toContain('damage_operation');
   });
 
-  it('pins schema operation/effect inventories bidirectionally to the runtime unions', () => {
-    const schema = JSON.parse(readFileSync('docs/specs/content-pack.schema.json', 'utf8')) as {
-      $defs: {
-        spellOperation: { properties: { kind: { enum: string[] } }; oneOf: Array<{ $ref: string }> };
-        featureEffect: { properties: { kind: { enum: string[] } }; oneOf: Array<{ $ref: string }> };
-      };
-    };
-    const schemaOperationKinds = schema.$defs.spellOperation.properties.kind.enum;
-    const operationRefs = schema.$defs.spellOperation.oneOf.map(({ $ref }) =>
-      $ref.slice('#/$defs/operation-'.length));
-    const schemaEffectKinds = schema.$defs.featureEffect.properties.kind.enum;
-    const effectRefs = schema.$defs.featureEffect.oneOf.map(({ $ref }) =>
-      $ref.slice('#/$defs/feature-'.length));
-    expect(schemaOperationKinds).toEqual([...SPELL_OPERATION_KINDS]);
-    expect(operationRefs).toEqual([...SPELL_OPERATION_KINDS]);
-    expect(schemaEffectKinds).toEqual([...FEATURE_EFFECT_KINDS]);
-    expect(effectRefs).toEqual([...FEATURE_EFFECT_KINDS]);
+  it('keeps the published JSON schema generated byte-for-value from the runtime Zod contract', () => {
+    const published = JSON.parse(readFileSync('docs/specs/content-pack.schema.json', 'utf8')) as unknown;
+    const generated = z.toJSONSchema(publishedContentPackV1Schema, {
+      target: 'draft-2020-12',
+      unrepresentable: 'any',
+    });
+    expect(published).toEqual(generated);
   });
 });

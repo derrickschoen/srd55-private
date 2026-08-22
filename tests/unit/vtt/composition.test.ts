@@ -183,9 +183,13 @@ describe('D335 imported pairwise operation composition', () => {
       { kind: 'composition', ordering: 'explicit', onRefusal: 'abort', steps: pair, order: [0, 2] },
     ];
     for (const [index, operation] of invalid.entries()) {
-      expect(loadContentPack(fixtureWithSpells([{ id: `invalid-${String(index)}`, operation }]))).toMatchObject({
-        status: 'refused', refusal: { reason: 'malformed_record' },
-      });
+      const result = loadContentPack(fixtureWithSpells([{ id: `invalid-${String(index)}`, operation }]));
+      expect(result.status).toBe('loaded');
+      if (result.status !== 'loaded') throw new Error('Invalid composition refused the pack wholesale.');
+      expect(result.content.diagnostics).toContainEqual(expect.objectContaining({
+        reason: 'malformed_record', recordId: `invalid-${String(index)}`, operationKind: 'composition',
+      }));
+      expect(result.content.spells).toEqual([]);
     }
   });
 
@@ -363,14 +367,21 @@ describe('D335 imported pairwise operation composition', () => {
         { targetResolution: inherited, operation: fixedDamage(3) },
       ],
     };
-    expect(loadContentPack(fixtureWithSpells([{ id: 'nested', operation: nested }]))).toEqual({
-      status: 'refused',
-      refusal: { kind: 'content_pack_refusal', reason: 'nested_composition' },
-    });
+    const result = loadContentPack(fixtureWithSpells([
+      { id: 'nested', operation: nested },
+      { id: 'healthy-control', operation: fixedDamage(1) },
+    ]));
+    expect(result.status).toBe('loaded');
+    if (result.status !== 'loaded') throw new Error('Nested composition pack was refused wholesale.');
+    expect(result.content.diagnostics).toContainEqual(expect.objectContaining({
+      reason: 'nested_composition', recordId: 'nested', operationKind: 'composition',
+      path: ['spells', 0, 'operation'],
+    }));
+    expect(result.content.spells.map(({ recordId }) => recordId)).toEqual(['healthy-control']);
   });
 
   it('nested_unknown_operation retains unknown-kind precedence over pair schema refusal', () => {
-    expect(loadContentPack(fixtureWithSpells([{
+    const result = loadContentPack(fixtureWithSpells([{
       id: 'unknown-inner',
       operation: {
         kind: 'composition', ordering: 'declaration_order', onRefusal: 'abort',
@@ -379,8 +390,13 @@ describe('D335 imported pairwise operation composition', () => {
           { targetResolution: inherited, operation: fixedDamage(1) },
         ],
       },
-    }]))).toMatchObject({
-      status: 'refused', refusal: { reason: 'unknown_operation_kind', operationKind: 'plausible_wrong_default' },
-    });
+    }, { id: 'healthy-control', operation: fixedDamage(1) }]));
+    expect(result.status).toBe('loaded');
+    if (result.status !== 'loaded') throw new Error('Unknown nested operation pack was refused wholesale.');
+    expect(result.content.diagnostics).toContainEqual(expect.objectContaining({
+      reason: 'unknown_operation_kind', recordId: 'unknown-inner',
+      operationKind: 'plausible_wrong_default',
+    }));
+    expect(result.content.spells.map(({ recordId }) => recordId)).toEqual(['healthy-control']);
   });
 });

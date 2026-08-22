@@ -53,8 +53,20 @@ function literalUnion(values: readonly string[]): string {
   return values.length === 0 ? 'never' : values.map((value) => JSON.stringify(value)).join(' | ');
 }
 
+/** Covers the 500-foot import cap plus one full Dash while keeping declaration size bounded. */
+export const MAX_TURN_PROGRAM_MOVEMENT_FEET = 1_000;
+
+export class TurnProgramMovementDomainError extends RangeError {
+  override readonly name = 'TurnProgramMovementDomainError' as const;
+
+  constructor(readonly movementBudgetFeet: number) {
+    super(`Turn-program movement budget ${String(movementBudgetFeet)} exceeds the typed maximum ${String(MAX_TURN_PROGRAM_MOVEMENT_FEET)}.`);
+  }
+}
+
 function numberUnion(maximum: number): string {
   if (!Number.isSafeInteger(maximum) || maximum < 0) return 'never';
+  if (maximum > MAX_TURN_PROGRAM_MOVEMENT_FEET) throw new TurnProgramMovementDomainError(maximum);
   return Array.from({ length: maximum + 1 }, (_, value) => String(value)).join(' | ');
 }
 
