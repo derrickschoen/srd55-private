@@ -1285,7 +1285,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'stoneskin', name: 'Stoneskin', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:7429', castingTime: 'action', components: material('diamond dust worth 100+ GP', true),
     targeting: { kind: 'single', rangeFeet: 5, willing: true },
-    operation: { kind: 'effect', effect: effect({ kind: 'damage_resistances', damageTypes: ['Bludgeoning', 'Piercing', 'Slashing'] }, { concentration: true, durationRounds: 600 }) },
+    operation: { kind: 'effect', effect: effect({ kind: 'damage_resistances', damageTypes: [damageType('Bludgeoning'), damageType('Piercing'), damageType('Slashing')] }, { concentration: true, durationRounds: 600 }) },
   },
   {
     id: 'vitriolic-sphere', name: 'Vitriolic Sphere', level: 4,

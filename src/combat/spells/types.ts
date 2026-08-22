@@ -1,4 +1,4 @@
-import type { Ability } from '../../domain/enums';
+import type { Ability, Skill } from '../../domain/enums';
 import type { ConditionName } from '../conditions';
 import type { DamageOperationPacket, DamageOperationSpec, OperationDice } from '../damage-operations';
 import type { EffectApplication, EffectPayload } from '../effects';
@@ -167,6 +167,80 @@ export type ConditionLifecycleOperation = ConditionLifecycleOperationBase & (
     }
 );
 
+export type ModifierDuration = ConditionLifecycleDuration;
+
+export type CastChoice<T> =
+  | T
+  | {
+      readonly kind: 'chosen_when_cast';
+      readonly options: readonly T[];
+    };
+
+export type RollDiceModifierOperation = {
+  readonly kind: 'roll_dice_modifier';
+  readonly die: { readonly count: number; readonly sides: 4 | 6 | 8 | 10 | 12 | 20 };
+  readonly sign: 1 | -1;
+  readonly duration: ModifierDuration;
+} & (
+  | {
+      /** Bless/Bane affect every attack roll and save (spell-descriptions.txt:670-681,824-837). */
+      readonly application: 'every_qualifying_roll';
+      readonly tests: readonly ('attack_roll' | 'saving_throw')[];
+    }
+  | {
+      /** Guidance chooses one skill when cast (spell-descriptions.txt:4000-4009). */
+      readonly application: 'chosen_skill_checks';
+      readonly skill: CastChoice<Skill>;
+    }
+);
+
+export interface DamageDiceReductionOperation {
+  /** Resistance reduces the chosen damage type by 1d4, at most once per turn (spell-descriptions.txt:6540-6552). */
+  readonly kind: 'damage_dice_reduction';
+  readonly damageType: CastChoice<DamageType>;
+  readonly die: { readonly count: 1; readonly sides: 4 };
+  readonly uses: 'once_per_turn';
+  readonly duration: ModifierDuration;
+}
+
+export type RollModeModifierOperation = {
+  readonly kind: 'roll_mode_modifier';
+  readonly mode: 'advantage' | 'disadvantage';
+  readonly duration: ModifierDuration;
+} & (
+  | {
+      readonly roll: 'attack_roll';
+      readonly scope: { readonly kind: 'target_rolls' } | { readonly kind: 'attacks_against_target' };
+    }
+  | {
+      readonly roll: 'saving_throw' | 'ability_check';
+      readonly scope: { readonly kind: 'target_rolls' };
+    }
+);
+
+export interface ArmorClassModifierOperation {
+  readonly kind: 'armor_class_modifier';
+  /** Shield is a bonus; Barkskin is a floor (spell-descriptions.txt:6937-6954,706-724). */
+  readonly modification:
+    | { readonly kind: 'bonus'; readonly amount: number }
+    | { readonly kind: 'floor'; readonly minimum: number };
+  readonly duration: ModifierDuration;
+}
+
+export interface DamageResponseModifierOperation {
+  readonly kind: 'damage_response_modifier';
+  readonly damageType: CastChoice<DamageType>;
+  readonly response: 'resistant' | 'vulnerable';
+  readonly duration: ModifierDuration;
+}
+
+export interface TargetedDefenseModifierOperation {
+  readonly kind: 'targeted_defense_modifier';
+  readonly against: 'selected_attacker';
+  readonly armorClassBonus: number;
+  readonly duration: ModifierDuration;
+}
+
 export type SpellOperation =
   /** Chromatic Orb chooses a damage type at cast time (spell-descriptions.txt:1087-1090). */
   | {
@@ -203,6 +277,12 @@ export type SpellOperation =
       readonly operation: SpellOperation;
     }
   | ConditionLifecycleOperation
+  | RollDiceModifierOperation
+  | DamageDiceReductionOperation
+  | RollModeModifierOperation
+  | ArmorClassModifierOperation
+  | DamageResponseModifierOperation
+  | TargetedDefenseModifierOperation
   | ({ readonly kind: 'damage_operation' } & DamageOperationSpec)
   | {
       readonly kind: 'armed_weapon_hit_rider';
@@ -619,6 +699,12 @@ export const SPELL_OPERATION_KINDS = [
   'target_branch',
   'reevaluated_branch',
   'condition_lifecycle',
+  'roll_dice_modifier',
+  'damage_dice_reduction',
+  'roll_mode_modifier',
+  'armor_class_modifier',
+  'damage_response_modifier',
+  'targeted_defense_modifier',
   'damage_operation',
   'armed_weapon_hit_rider',
   'persistent_area',
@@ -702,6 +788,8 @@ export interface SpellCastCommand {
     readonly damageModifier: number;
   };
   readonly selectedOption: string | null;
+  /** Required only by a targeted-defense operation cast against a selected attacker. */
+  readonly modifierSource?: CombatantId;
   readonly objectTargets?: readonly WorldObjectId[];
   /** A declared class/feat pool can replace slot spending for this cast. */
   readonly resourcePoolId?: LimitedResourcePoolId;

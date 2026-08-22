@@ -126,7 +126,7 @@ const externalWorldObjectSchema = z.strictObject({
   armorClass: integerSchema.min(0).max(100),
   damageResponses: z.array(z.strictObject({
     damageTypeId: z.enum(damageTypes),
-    response: z.enum(['normal', 'resistant', 'vulnerable', 'immune']),
+    response: z.enum(['normal', 'resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune']),
   })).max(damageTypes.length),
   blocking: z.strictObject({
     movement: z.boolean(),
@@ -705,7 +705,7 @@ const passiveSkillSchema = z.strictObject({
 
 const passiveDamageResponseSchema = z.strictObject({
   damageTypeId: z.enum(damageTypes),
-  response: z.enum(['resistant', 'vulnerable', 'immune']),
+  response: z.enum(['resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune']),
 });
 
 const optionalSaveModifierShape = Object.fromEntries(

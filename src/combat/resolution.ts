@@ -80,7 +80,7 @@ export interface SavingThrowResult {
   readonly total: number;
 }
 
-export type DamageResponse = 'normal' | 'resistant' | 'vulnerable' | 'immune';
+export type DamageResponse = 'normal' | 'resistant' | 'vulnerable' | 'resistant_and_vulnerable' | 'immune';
 
 export interface DamageTerm {
   readonly type: DamageType;
@@ -171,7 +171,7 @@ export function resolveSavingThrow(
     : { outcome: 'success', roll, total };
 }
 
-function applyDamageResponse(damage: number, response: DamageResponse): number {
+export function applyDamageResponse(damage: number, response: DamageResponse): number {
   switch (response) {
     case 'normal':
       return damage;
@@ -179,6 +179,8 @@ function applyDamageResponse(damage: number, response: DamageResponse): number {
       return Math.floor(damage / 2);
     case 'vulnerable':
       return damage * 2;
+    case 'resistant_and_vulnerable':
+      return Math.floor(damage / 2) * 2;
     case 'immune':
       return 0;
   }

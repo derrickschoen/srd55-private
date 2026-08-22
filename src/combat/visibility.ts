@@ -106,6 +106,8 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
       return event.order;
     case 'attack_resolved':
       return [event.actor, event.target];
+    case 'ability_check_resolved':
+      return [event.actor];
     case 'save_resolved':
       return [event.source, event.target];
     case 'damage_applied':

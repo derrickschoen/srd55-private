@@ -408,6 +408,12 @@
             "target_branch",
             "reevaluated_branch",
             "condition_lifecycle",
+            "roll_dice_modifier",
+            "damage_dice_reduction",
+            "roll_mode_modifier",
+            "armor_class_modifier",
+            "damage_response_modifier",
+            "targeted_defense_modifier",
             "damage_operation",
             "armed_weapon_hit_rider",
             "persistent_area",
@@ -464,6 +470,24 @@
         },
         {
           "$ref": "#/$defs/operation-condition_lifecycle"
+        },
+        {
+          "$ref": "#/$defs/operation-roll_dice_modifier"
+        },
+        {
+          "$ref": "#/$defs/operation-damage_dice_reduction"
+        },
+        {
+          "$ref": "#/$defs/operation-roll_mode_modifier"
+        },
+        {
+          "$ref": "#/$defs/operation-armor_class_modifier"
+        },
+        {
+          "$ref": "#/$defs/operation-damage_response_modifier"
+        },
+        {
+          "$ref": "#/$defs/operation-targeted_defense_modifier"
         },
         {
           "$ref": "#/$defs/operation-damage_operation"
@@ -1230,6 +1254,188 @@
             { "type": "object", "additionalProperties": false, "required": ["kind", "sources"], "properties": { "kind": { "const": "extend_duration" }, "sources": { "enum": ["same_source", "any_source"] } } }
           ]
         }
+      }
+    },
+    "modifierDuration": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "rounds", "expiresAt"],
+          "properties": {
+            "kind": { "const": "fixed_rounds" },
+            "rounds": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+            "expiresAt": { "enum": ["target_start", "target_end"] }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "concentration" } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "rounds", "expiresAt"],
+          "properties": {
+            "kind": { "const": "fixed_rounds_or_concentration" },
+            "rounds": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+            "expiresAt": { "enum": ["target_start", "target_end"] }
+          }
+        }
+      ]
+    },
+    "modifierDie": {
+      "type": "object", "additionalProperties": false,
+      "required": ["count", "sides"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "sides": { "enum": [4, 6, 8, 10, 12, 20] }
+      }
+    },
+    "modifierSkillChoice": {
+      "oneOf": [
+        { "enum": ["acrobatics", "animal_handling", "arcana", "athletics", "deception", "history", "insight", "intimidation", "investigation", "medicine", "nature", "perception", "performance", "persuasion", "religion", "sleight_of_hand", "stealth", "survival"] },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "options"],
+          "properties": {
+            "kind": { "const": "chosen_when_cast" },
+            "options": {
+              "type": "array", "minItems": 1, "maxItems": 18, "uniqueItems": true,
+              "items": { "enum": ["acrobatics", "animal_handling", "arcana", "athletics", "deception", "history", "insight", "intimidation", "investigation", "medicine", "nature", "perception", "performance", "persuasion", "religion", "sleight_of_hand", "stealth", "survival"] }
+            }
+          }
+        }
+      ]
+    },
+    "modifierDamageTypeChoice": {
+      "oneOf": [
+        { "enum": ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"] },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "options"],
+          "properties": {
+            "kind": { "const": "chosen_when_cast" },
+            "options": {
+              "type": "array", "minItems": 1, "maxItems": 13, "uniqueItems": true,
+              "items": { "enum": ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"] }
+            }
+          }
+        }
+      ]
+    },
+    "operation-roll_dice_modifier": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "application", "tests", "die", "sign", "duration"],
+          "properties": {
+            "kind": { "const": "roll_dice_modifier" },
+            "application": { "const": "every_qualifying_roll" },
+            "tests": { "type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": { "enum": ["attack_roll", "saving_throw"] } },
+            "die": { "$ref": "#/$defs/modifierDie" },
+            "sign": { "enum": [1, -1] },
+            "duration": { "$ref": "#/$defs/modifierDuration" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "application", "skill", "die", "sign", "duration"],
+          "properties": {
+            "kind": { "const": "roll_dice_modifier" },
+            "application": { "const": "chosen_skill_checks" },
+            "skill": { "$ref": "#/$defs/modifierSkillChoice" },
+            "die": { "$ref": "#/$defs/modifierDie" },
+            "sign": { "enum": [1, -1] },
+            "duration": { "$ref": "#/$defs/modifierDuration" }
+          }
+        }
+      ]
+    },
+    "operation-damage_dice_reduction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "damageType", "die", "uses", "duration"],
+      "properties": {
+        "kind": { "const": "damage_dice_reduction" },
+        "damageType": { "$ref": "#/$defs/modifierDamageTypeChoice" },
+        "die": {
+          "type": "object", "additionalProperties": false,
+          "required": ["count", "sides"],
+          "properties": { "count": { "const": 1 }, "sides": { "const": 4 } }
+        },
+        "uses": { "const": "once_per_turn" },
+        "duration": { "$ref": "#/$defs/modifierDuration" }
+      }
+    },
+    "operation-roll_mode_modifier": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "roll", "mode", "scope", "duration"],
+          "properties": {
+            "kind": { "const": "roll_mode_modifier" },
+            "roll": { "const": "attack_roll" },
+            "mode": { "enum": ["advantage", "disadvantage"] },
+            "scope": {
+              "type": "object", "additionalProperties": false, "required": ["kind"],
+              "properties": { "kind": { "enum": ["target_rolls", "attacks_against_target"] } }
+            },
+            "duration": { "$ref": "#/$defs/modifierDuration" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "roll", "mode", "scope", "duration"],
+          "properties": {
+            "kind": { "const": "roll_mode_modifier" },
+            "roll": { "enum": ["saving_throw", "ability_check"] },
+            "mode": { "enum": ["advantage", "disadvantage"] },
+            "scope": {
+              "type": "object", "additionalProperties": false, "required": ["kind"],
+              "properties": { "kind": { "const": "target_rolls" } }
+            },
+            "duration": { "$ref": "#/$defs/modifierDuration" }
+          }
+        }
+      ]
+    },
+    "operation-armor_class_modifier": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "modification", "duration"],
+      "properties": {
+        "kind": { "const": "armor_class_modifier" },
+        "modification": {
+          "oneOf": [
+            {
+              "type": "object", "additionalProperties": false, "required": ["kind", "amount"],
+              "properties": { "kind": { "const": "bonus" }, "amount": { "type": "integer", "minimum": -30, "maximum": 30 } }
+            },
+            {
+              "type": "object", "additionalProperties": false, "required": ["kind", "minimum"],
+              "properties": { "kind": { "const": "floor" }, "minimum": { "type": "integer", "minimum": 0, "maximum": 100 } }
+            }
+          ]
+        },
+        "duration": { "$ref": "#/$defs/modifierDuration" }
+      }
+    },
+    "operation-damage_response_modifier": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "damageType", "response", "duration"],
+      "properties": {
+        "kind": { "const": "damage_response_modifier" },
+        "damageType": { "$ref": "#/$defs/modifierDamageTypeChoice" },
+        "response": { "enum": ["resistant", "vulnerable"] },
+        "duration": { "$ref": "#/$defs/modifierDuration" }
+      }
+    },
+    "operation-targeted_defense_modifier": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "against", "armorClassBonus", "duration"],
+      "properties": {
+        "kind": { "const": "targeted_defense_modifier" },
+        "against": { "const": "selected_attacker" },
+        "armorClassBonus": { "type": "integer", "minimum": 1, "maximum": 30 },
+        "duration": { "$ref": "#/$defs/modifierDuration" }
       }
     },
     "operation-damage_operation": {

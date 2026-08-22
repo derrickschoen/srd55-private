@@ -1,4 +1,4 @@
-import type { Ability } from '../domain/enums';
+import { skills, type Ability, type Skill } from '../domain/enums';
 import { canonicalJson } from '../commands/canonical-json';
 import {
   importedSpellDefinition,
@@ -52,6 +52,7 @@ import {
 } from './persistent-areas';
 import { rollDice, rollDie, type Rng } from './random';
 import {
+  applyDamageResponse,
   resolveAttackRoll,
   resolveDamage,
   resolveSavingThrow,
@@ -63,7 +64,7 @@ import {
 } from './resolution';
 import { spellDefinition } from './spells/definitions';
 import { validateSpellSlotCapacities } from './spells/resources';
-import type { ConditionLifecycleOperation, EffectData, ScaledDice, SpellCastCommand, SpellDefinition, SpellOperation, SpellPersistentAreaEffectSpec } from './spells/types';
+import type { CastChoice, ConditionLifecycleOperation, EffectData, ModifierDuration, ScaledDice, SpellCastCommand, SpellDefinition, SpellOperation, SpellPersistentAreaEffectSpec } from './spells/types';
 import { affectedCells, creatureOccupiesAffectedCell, type AreaTemplate } from './templates';
 import {
   armorClass,
@@ -112,6 +113,7 @@ export interface TurnResources {
   readonly bonusAttacksRemaining?: number;
   readonly bonusAttackGrantEffectId?: EncounterEffectId | null;
   readonly usedDamageRiderEffectIds?: readonly EncounterEffectId[];
+  readonly usedDamageReductionEffectIds?: readonly EncounterEffectId[];
   readonly usedSpellDamageModifierEffectIds?: readonly EncounterEffectId[];
   readonly additionalLeveledSpellActionsRemaining?: 0 | 1;
   readonly reactionAvailable: boolean;
@@ -781,31 +783,57 @@ function ignoresDifficultTerrain(state: EncounterState, id: CombatantId): boolea
     ));
 }
 
-function effectiveArmorClass(state: EncounterState, id: CombatantId): ReturnType<typeof armorClass> {
+function effectiveArmorClass(
+  state: EncounterState,
+  id: CombatantId,
+  attacker: CombatantId,
+): ReturnType<typeof armorClass> {
   const base = combatant(state, id).profile.rules.armorClass;
-  const total = state.effects.reduce<number>((sum, effect) => {
-    if (!effect.targets.includes(id)) return sum;
-    if (effect.payload.kind === 'armor_class_modifier') return sum + effect.payload.amount;
-    if (effect.payload.kind === 'shield_defense') return sum + effect.payload.armorClassBonus;
-    return sum;
-  }, base);
-  return armorClass(total);
+  let bonus = 0;
+  let floor = 0;
+  for (const effect of state.effects) {
+    if (!effect.targets.includes(id)) continue;
+    if (effect.payload.kind === 'armor_class_modifier') {
+      if ('minimum' in effect.payload) floor = Math.max(floor, effect.payload.minimum);
+      else if (effect.payload.againstAttacker === undefined || effect.payload.againstAttacker === attacker) {
+        bonus += effect.payload.amount;
+      }
+    }
+    if (effect.payload.kind === 'shield_defense') bonus += effect.payload.armorClassBonus;
+  }
+  // Barkskin's floor evaluates the completed AC; it is not another additive bonus.
+  return armorClass(Math.max(base + bonus, floor));
 }
+
+/** Dice modifiers consume the encounter RNG before the d20, oldest effect first, then effect id. */
+export const ROLL_MODIFIER_ORDER = 'created_revision_then_effect_id_before_d20' as const;
 
 function effectDiceModifier(
   state: EncounterState,
   id: CombatantId,
-  test: 'attack_roll' | 'saving_throw',
+  test: 'attack_roll' | 'saving_throw' | 'ability_check',
   rng: Rng,
+  skill: string | null = null,
 ): number {
-  return state.effects.reduce((total, effect) => {
+  const effects = [...state.effects].sort((left, right) =>
+    left.createdRevision - right.createdRevision || String(left.id).localeCompare(String(right.id)));
+  return effects.reduce((total, effect) => {
     if (!effect.targets.includes(id)) return total;
     const payload = effect.payload;
-    if (payload.kind === 'd20_test_modifier' && payload.tests.includes(test)) {
+    if (test !== 'ability_check' && payload.kind === 'd20_test_modifier' && payload.tests.includes(test)) {
       return total + payload.sign * rollDice(rng, {
         count: payload.count,
         sides: dieSides(payload.sides),
         modifier: 0,
+      }).total;
+    }
+    if (
+      test === 'ability_check' &&
+      payload.kind === 'ability_check_modifier' &&
+      (payload.skill === undefined || payload.skill === skill)
+    ) {
+      return total + payload.sign * rollDice(rng, {
+        count: payload.count, sides: dieSides(payload.sides), modifier: 0,
       }).total;
     }
     if (
@@ -934,7 +962,7 @@ function coverAdjustedArmorClass(
     token(state, attacker).position,
     token(state, target).position,
   );
-  return armorClass(effectiveArmorClass(state, target) + coverArmorClassBonus(tier));
+  return armorClass(effectiveArmorClass(state, target, attacker) + coverArmorClassBonus(tier));
 }
 
 function attackRollMode(
@@ -961,6 +989,8 @@ function attackRollMode(
         appliesTo.kind === 'attacks_against_target') &&
         effect.targets.includes(command.target)) ||
       (appliesTo.kind === 'next_attack_by_target' &&
+        effect.targets.includes(command.actor)) ||
+      (appliesTo.kind === 'all_attacks_by_target' &&
         effect.targets.includes(command.actor)) ||
       (appliesTo.kind === 'attacks_by_target' &&
         effect.targets.includes(command.actor) &&
@@ -1108,6 +1138,13 @@ function saveRollMode(
   base: RollMode,
 ): RollMode {
   const modes: RollMode[] = [base];
+  for (const effect of state.effects) {
+    if (
+      effect.targets.includes(target) &&
+      effect.payload.kind === 'attack_roll_mode_modifier' &&
+      effect.payload.appliesTo.kind === 'saving_throws_by_target'
+    ) modes.push(effect.payload.mode);
+  }
   for (const clause of conditionMechanicalState(combatantConditions(state, target)).clauses) {
     if (
       clause.kind === 'roll_mode' &&
@@ -1121,42 +1158,133 @@ function saveRollMode(
   return combineRollModes(modes);
 }
 
+function abilityCheckRollMode(
+  state: EncounterState,
+  actor: CombatantId,
+  base: RollMode,
+): RollMode {
+  const modes: RollMode[] = [base];
+  for (const effect of state.effects) {
+    if (
+      effect.targets.includes(actor) &&
+      effect.payload.kind === 'attack_roll_mode_modifier' &&
+      effect.payload.appliesTo.kind === 'ability_checks_by_target'
+    ) modes.push(effect.payload.mode);
+  }
+  return combineRollModes(modes);
+}
+
 function targetDamageResponses(
   state: EncounterState,
+  source: CombatantId,
   target: CombatantId,
   request: DamageRequest,
 ): DamageRequest['responses'] {
   const subject = combatant(state, target);
-  const responseByType = new Map<DamageType, DamageResponse>();
+  const responseByType = new Map<DamageType, Set<DamageResponse>>();
+  const add = (type: DamageType, response: DamageResponse): void => {
+    const responses = responseByType.get(type) ?? new Set<DamageResponse>();
+    responses.add(response);
+    responseByType.set(type, responses);
+  };
   for (const entry of subject.profile.rules.damageResponses) {
-    responseByType.set(entry.type, entry.response);
+    add(entry.type, entry.response);
   }
   const resistsAll = conditionMechanicalState(
     combatantConditions(state, target),
   ).clauses.some((clause) => clause.kind === 'all_damage_response');
   if (resistsAll) {
-    for (const term of request.terms) {
-      const current = responseByType.get(term.type) ?? 'normal';
-      switch (current) {
-        case 'immune':
-        case 'resistant':
-          break;
-        case 'vulnerable':
-          responseByType.set(term.type, 'normal');
-          break;
-        case 'normal':
-          responseByType.set(term.type, 'resistant');
-          break;
-      }
-    }
+    for (const term of request.terms) add(term.type, 'resistant');
   }
-  return [...responseByType].map(([type, response]) => ({ type, response }));
+  for (const effect of state.effects) {
+    if (!effect.targets.includes(target) || effect.payload.kind !== 'damage_resistances') continue;
+    if (effect.payload.source !== undefined && effect.payload.source !== source) continue;
+    for (const type of effect.payload.damageTypes) add(type, effect.payload.response ?? 'resistant');
+  }
+  return [...responseByType].map(([type, responses]) => {
+    if (responses.has('immune')) return { type, response: 'immune' as const };
+    const resistant = responses.has('resistant') || responses.has('resistant_and_vulnerable');
+    const vulnerable = responses.has('vulnerable') || responses.has('resistant_and_vulnerable');
+    return {
+      type,
+      response: resistant && vulnerable
+        ? 'resistant_and_vulnerable' as const
+        : resistant ? 'resistant' as const : vulnerable ? 'vulnerable' as const : 'normal' as const,
+    };
+  });
 }
 
 interface ReductionContext {
   state: EncounterState;
   readonly rng: Rng;
   readonly events: EncounterEvent[];
+}
+
+function usedDamageReductionEffects(state: EncounterState): readonly EncounterEffectId[] {
+  return state.activeCombatant === null
+    ? []
+    : combatant(state, state.activeCombatant).turn.usedDamageReductionEffectIds ?? [];
+}
+
+function markDamageReductionUsed(context: ReductionContext, effectId: EncounterEffectId): void {
+  const active = context.state.activeCombatant;
+  if (active === null) return;
+  const subject = combatant(context.state, active);
+  context.state = replaceCombatant(context.state, {
+    ...subject,
+    turn: {
+      ...subject.turn,
+      usedDamageReductionEffectIds: [...(subject.turn.usedDamageReductionEffectIds ?? []), effectId],
+    },
+  });
+}
+
+/**
+ * All combatant damage paths converge here. SRD order is adjustments, then
+ * Resistance, then Vulnerability (docs/srd/full/srd-5.2.1.txt:1044-1072).
+ */
+function resolveTargetDamage(
+  context: ReductionContext,
+  source: CombatantId,
+  target: CombatantId,
+  request: DamageRequest,
+): ReturnType<typeof resolveDamage> {
+  const raw = resolveDamage({ ...request, responses: [] }, context.rng);
+  const adjusted = raw.terms.map((term) => term.beforeResponse);
+  const reductions = [...context.state.effects]
+    .filter((effect) =>
+      effect.targets.includes(target) &&
+      effect.payload.kind === 'damage_reduction' &&
+      !(usedDamageReductionEffects(context.state)).includes(effect.id))
+    .sort((left, right) =>
+      left.createdRevision - right.createdRevision || String(left.id).localeCompare(String(right.id)));
+  for (const effect of reductions) {
+    if (effect.payload.kind !== 'damage_reduction') continue;
+    const payload = effect.payload;
+    const matching = raw.terms
+      .map((term, index) => ({ term, index }))
+      .filter(({ term, index }) => term.type === payload.damageType && adjusted[index] !== 0);
+    if (matching.length === 0) continue;
+    let remaining = rollDice(context.rng, {
+      count: payload.count, sides: dieSides(payload.sides), modifier: 0,
+    }).total;
+    for (const { index } of matching) {
+      const reduction = Math.min(adjusted[index] ?? 0, remaining);
+      adjusted[index] = (adjusted[index] ?? 0) - reduction;
+      remaining -= reduction;
+      if (remaining === 0) break;
+    }
+    markDamageReductionUsed(context, effect.id);
+  }
+  const responses = new Map(
+    targetDamageResponses(context.state, source, target, request)
+      .map((entry) => [entry.type, entry.response] as const),
+  );
+  const terms = raw.terms.map((term, index) => ({
+    ...term,
+    afterResponse: applyDamageResponse(adjusted[index] ?? 0, responses.get(term.type) ?? 'normal'),
+  }));
+  return { terms, total: terms.reduce((sum, term) => sum + term.afterResponse, 0) };
 }
 
 type UnsequencedEvent<T> = T extends EncounterEvent
@@ -1238,10 +1366,7 @@ function restoreBanishedTargets(
     emit(context, { type: 'combatant_returned_to_board', combatant: target, effectId: effect.id, position });
     if (!applyReturnDamage) continue;
     const request = effect.payload.returnDamage;
-    const result = resolveDamage({
-      ...request,
-      responses: targetDamageResponses(context.state, target, request),
-    }, context.rng);
+    const result = resolveTargetDamage(context, effect.source, target, request);
     applyDamage(context, effect.source, target, result.total);
     concentrationCheck(context, target, result.total);
   }
@@ -1841,10 +1966,7 @@ function applyPersistentAreaEffect(
     ).outcome === 'success';
   }
   if (spec.payload.kind === 'damage') {
-    const result = resolveDamage({
-      ...spec.payload.damage,
-      responses: targetDamageResponses(context.state, target, spec.payload.damage),
-    }, context.rng);
+    const result = resolveTargetDamage(context, area.owner, target, spec.payload.damage);
     const amount = saveSucceeded
       ? spec.kind === 'save_gated' && spec.onSuccess === 'half' ? Math.floor(result.total / 2) : 0
       : result.total;
@@ -2027,7 +2149,7 @@ function processEnteredCell(context: ReductionContext, mover: CombatantId): void
       critical: false,
       responses: [],
     };
-    const result = resolveDamage({ ...request, responses: targetDamageResponses(context.state, mover, request) }, context.rng);
+    const result = resolveTargetDamage(context, region.source, mover, request);
     applyDamage(context, region.source, mover, result.total);
     concentrationCheck(context, mover, result.total);
   }
@@ -2179,10 +2301,7 @@ function processBoundary(
       effect.payload.kind === 'ensnaring_strike' &&
       boundary === effect.payload.timing
     ) {
-      const result = resolveDamage({
-        ...effect.payload.damage,
-        responses: targetDamageResponses(context.state, subjectId, effect.payload.damage),
-      }, context.rng);
+      const result = resolveTargetDamage(context, effect.source, subjectId, effect.payload.damage);
       applyDamage(context, effect.source, subjectId, result.total);
       concentrationCheck(context, subjectId, result.total);
     }
@@ -2192,13 +2311,7 @@ function processBoundary(
       effect.payload.kind === 'ongoing_damage' &&
       effectBoundaryMatches(subjectId, boundary, effect.payload.timing)
     ) {
-      const result = resolveDamage(
-        {
-          ...effect.payload.damage,
-          responses: targetDamageResponses(context.state, subjectId, effect.payload.damage),
-        },
-        context.rng,
-      );
+      const result = resolveTargetDamage(context, effect.source, subjectId, effect.payload.damage);
       applyDamage(context, effect.source, subjectId, result.total);
       concentrationCheck(context, subjectId, result.total);
     }
@@ -3251,9 +3364,9 @@ function processAttack(
       ...command.damage,
       terms,
       critical: attack.outcome === 'critical' || criticalWithin,
-      responses: targetDamageResponses(context.state, command.target, { ...command.damage, terms }),
+      responses: [],
     };
-    damageResult = resolveDamage(request, context.rng);
+    damageResult = resolveTargetDamage(context, command.actor, command.target, request);
     applyDamage(
       context,
       command.actor,
@@ -4071,7 +4184,8 @@ function resolveSpellAttack(
     const appliesTo = effect.payload.appliesTo;
     return ((appliesTo.kind === 'next_attack_against_target' ||
       appliesTo.kind === 'attacks_against_target') && effect.targets.includes(target)) ||
-      (appliesTo.kind === 'next_attack_by_target' && effect.targets.includes(command.actor));
+      ((appliesTo.kind === 'next_attack_by_target' || appliesTo.kind === 'all_attacks_by_target') &&
+        effect.targets.includes(command.actor));
   });
   const attack = resolveAttackRoll({
     attackBonus: command.attackBonus + effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
@@ -4095,11 +4209,8 @@ function resolveSpellAttack(
       critical: attack.outcome === 'critical',
       responses: [],
     };
-    const request: DamageRequest = {
-      ...baseRequest,
-      responses: targetDamageResponses(context.state, target, baseRequest),
-    };
-    result = resolveDamage(request, context.rng);
+    const request: DamageRequest = baseRequest;
+    result = resolveTargetDamage(context, command.actor, target, request);
     applyDamage(context, command.actor, target, result.total, request.critical);
     concentrationCheck(context, target, result.total);
     if (rider !== null) applySpellEffect(context, definition, command, rider, [target]);
@@ -4120,6 +4231,32 @@ function selectedSpellDamageType(
   const selected = damageType(command.selectedOption);
   if (!configured.includes(selected)) {
     throw new EncounterRuleError(`${definition.name} does not allow ${command.selectedOption} damage.`);
+  }
+  return selected;
+}
+
+function selectedModifierSkill(
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  configured: CastChoice<Skill>,
+): Skill {
+  if (typeof configured === 'string') return configured;
+  const selected = skills.find((skill) => skill === command.selectedOption);
+  if (selected === undefined || !configured.options.includes(selected)) {
+    throw new EncounterRuleError(`${definition.name} requires one of its declared skill choices.`);
+  }
+  return selected;
+}
+
+function selectedModifierDamageType(
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  configured: CastChoice<DamageType>,
+): DamageType {
+  if (typeof configured === 'string') return configured;
+  const selected = configured.options.find((candidate) => candidate === command.selectedOption);
+  if (selected === undefined) {
+    throw new EncounterRuleError(`${definition.name} requires one of its declared damage-type choices.`);
   }
   return selected;
 }
@@ -4149,10 +4286,7 @@ function applySpellDamageAmount(
     critical: false,
     responses: [],
   };
-  const adjusted = resolveDamage({
-    ...baseRequest,
-    responses: targetDamageResponses(context.state, target, baseRequest),
-  }, context.rng).total;
+  const adjusted = resolveTargetDamage(context, source, target, baseRequest).total;
   applyDamage(context, source, target, adjusted);
   concentrationCheck(context, target, adjusted);
 }
@@ -4226,13 +4360,7 @@ function preparedDamageOperationInstances(
         critical: false,
         responses: [],
       };
-      return {
-        damage: {
-          ...baseRequest,
-          responses: targetDamageResponses(state, target, baseRequest),
-        },
-        thresholdRider: packet.thresholdRider,
-      };
+      return { damage: baseRequest, thresholdRider: packet.thresholdRider };
     }),
   ).flat();
 }
@@ -4284,7 +4412,7 @@ function resolvePreparedDamageOperation(
     null,
   ).outcome === 'success';
   for (const [index, instance] of instances.entries()) {
-    const result = resolveDamage(instance.damage, context.rng);
+    const result = resolveTargetDamage(context, source, target, instance.damage);
     const amount = saveSucceeded
       ? delivery.kind === 'save' && delivery.onSuccess === 'half'
         ? Math.floor(result.total / 2)
@@ -4401,6 +4529,20 @@ function lifecycleDuration(
       source,
     },
     remaining: operation.duration.rounds,
+  };
+}
+
+function modifierEffectData(
+  payload: EffectPayload,
+  duration: ModifierDuration,
+): EffectData {
+  return {
+    payload,
+    target: 'targets',
+    concentration: duration.kind !== 'fixed_rounds',
+    durationRounds: duration.kind === 'concentration' ? null : duration.rounds,
+    expiresAt: duration.kind === 'concentration' ? 'target_end' : duration.expiresAt,
+    stacking: 'coexist',
   };
 }
 
@@ -4641,6 +4783,76 @@ function executeSpellOperation(
     case 'condition_lifecycle':
       applyConditionLifecycleOperation(context, definition, command, targets, operation);
       return;
+    case 'roll_dice_modifier': {
+      const payload: EffectPayload = operation.application === 'chosen_skill_checks'
+        ? {
+            kind: 'ability_check_modifier', count: operation.die.count, sides: operation.die.sides,
+            sign: operation.sign,
+            skill: selectedModifierSkill(definition, command, operation.skill),
+            application: operation.application,
+          }
+        : operation.tests.length === 2
+          ? {
+              kind: 'd20_test_modifier', tests: operation.tests, count: operation.die.count,
+              sides: operation.die.sides, sign: operation.sign, application: operation.application,
+            }
+          : operation.tests[0] === 'attack_roll'
+            ? {
+                kind: 'attack_roll_modifier', count: operation.die.count, sides: operation.die.sides,
+                sign: operation.sign, application: operation.application,
+              }
+            : {
+                kind: 'saving_throw_modifier', count: operation.die.count, sides: operation.die.sides,
+                sign: operation.sign, application: operation.application,
+              };
+      applySpellEffect(context, definition, command, modifierEffectData(payload, operation.duration), targets);
+      return;
+    }
+    case 'damage_dice_reduction':
+      applySpellEffect(context, definition, command, modifierEffectData({
+        kind: 'damage_reduction', damageType: selectedModifierDamageType(definition, command, operation.damageType),
+        count: operation.die.count, sides: operation.die.sides, oncePerTurn: true,
+      }, operation.duration), targets);
+      return;
+    case 'roll_mode_modifier': {
+      const appliesTo = operation.roll === 'attack_roll'
+        ? operation.scope.kind === 'attacks_against_target'
+          ? { kind: 'attacks_against_target' as const }
+          : { kind: 'all_attacks_by_target' as const }
+        : operation.roll === 'saving_throw'
+          ? { kind: 'saving_throws_by_target' as const }
+          : { kind: 'ability_checks_by_target' as const };
+      applySpellEffect(context, definition, command, modifierEffectData({
+        kind: 'attack_roll_mode_modifier', mode: operation.mode, appliesTo,
+      }, operation.duration), targets);
+      return;
+    }
+    case 'armor_class_modifier':
+      applySpellEffect(context, definition, command, modifierEffectData(
+        operation.modification.kind === 'bonus'
+          ? { kind: 'armor_class_modifier', amount: operation.modification.amount }
+          : { kind: 'armor_class_modifier', minimum: operation.modification.minimum },
+        operation.duration,
+      ), targets);
+      return;
+    case 'damage_response_modifier':
+      applySpellEffect(context, definition, command, modifierEffectData({
+        kind: 'damage_resistances',
+        damageTypes: [selectedModifierDamageType(definition, command, operation.damageType)],
+        response: operation.response,
+      }, operation.duration), targets);
+      return;
+    case 'targeted_defense_modifier': {
+      if (command.modifierSource === undefined) {
+        throw new EncounterRuleError(`${definition.name} requires a selected attacker for its targeted defense.`);
+      }
+      combatant(context.state, command.modifierSource);
+      applySpellEffect(context, definition, command, modifierEffectData({
+        kind: 'armor_class_modifier', amount: operation.armorClassBonus,
+        againstAttacker: command.modifierSource,
+      }, operation.duration), targets);
+      return;
+    }
     case 'damage_operation':
       applyDamageOperation(
         context,
@@ -5016,11 +5228,12 @@ function executeSpellOperation(
       }, context.rng);
       for (const target of burstTargets) {
         const save = resolveTargetSave(context, command.actor, target, operation.saveAbility, command.saveDc, 'normal', null);
-        const amount = save.outcome === 'failure'
+        const rawAmount = save.outcome === 'failure'
           ? rolled.total
           : operation.onSaveSuccess === 'half' ? Math.floor(rolled.total / 2) : 0;
-        applyDamage(context, command.actor, target, amount);
-        concentrationCheck(context, target, amount);
+        applySpellDamageAmount(
+          context, command.actor, target, operation.saveDamageType, operation.saveDice.sides, rawAmount,
+        );
       }
       return;
     }
@@ -5037,9 +5250,10 @@ function executeSpellOperation(
       );
       if (attack.outcome === 'miss') {
         const rolled = rollDice(context.rng, scaledSpellDamageExpression(context, definition, operation.initialDice, command));
-        const amount = Math.floor(rolled.total / 2);
-        applyDamage(context, command.actor, target, amount);
-        concentrationCheck(context, target, amount);
+        applySpellDamageAmount(
+          context, command.actor, target, operation.damageType, operation.initialDice.sides,
+          Math.floor(rolled.total / 2),
+        );
         return;
       }
       applySpellEffect(context, definition, command, {
@@ -5302,10 +5516,7 @@ function executeSpellOperation(
           critical: false,
           responses: [],
         };
-        const result = resolveDamage({
-          ...baseRequest,
-          responses: targetDamageResponses(context.state, target, baseRequest),
-        }, context.rng);
+        const result = resolveTargetDamage(context, command.actor, target, baseRequest);
         applyDamage(context, command.actor, target, result.total);
         concentrationCheck(context, target, result.total);
       }
@@ -5324,12 +5535,11 @@ function executeSpellOperation(
         }
         const target = targets[0] as CombatantId;
         const advantageEffects = context.state.effects.filter((effect) => {
-          if (
-            !effect.targets.includes(target) ||
-            effect.payload.kind !== 'attack_roll_mode_modifier'
-          ) return false;
-          return effect.payload.appliesTo.kind === 'next_attack_against_target' ||
-            effect.payload.appliesTo.kind === 'attacks_against_target';
+          if (effect.payload.kind !== 'attack_roll_mode_modifier') return false;
+          const appliesTo = effect.payload.appliesTo;
+          return (effect.targets.includes(target) &&
+            (appliesTo.kind === 'next_attack_against_target' || appliesTo.kind === 'attacks_against_target')) ||
+            (effect.targets.includes(command.actor) && appliesTo.kind === 'all_attacks_by_target');
         });
         const attack = resolveAttackRoll({
           attackBonus: command.attackBonus +
@@ -5349,7 +5559,7 @@ function executeSpellOperation(
           const weaponDamageType = command.selectedOption === 'Radiant'
             ? operation.extraDamage.type
             : command.weaponAttack.damageType;
-          result = resolveDamage({
+          result = resolveTargetDamage(context, command.actor, target, {
             terms: [
               {
                 type: weaponDamageType,
@@ -5366,7 +5576,7 @@ function executeSpellOperation(
             ],
             critical: attack.outcome === 'critical',
             responses: [],
-          }, context.rng);
+          });
           applyDamage(context, command.actor, target, result.total, attack.outcome === 'critical');
         }
         emit(context, { type: 'attack_resolved', actor: command.actor, target, attack, damage: result });
@@ -5977,13 +6187,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         command.rollMode,
         null,
       );
-      const damage = resolveDamage(
-        {
-          ...command.damage,
-          responses: targetDamageResponses(context.state, command.target, command.damage),
-        },
-        context.rng,
-      );
+      const damage = resolveTargetDamage(context, command.actor, command.target, command.damage);
       const amount =
         save.outcome === 'failure'
           ? damage.total
@@ -5992,6 +6196,28 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
             : 0;
       applyDamage(context, command.actor, command.target, amount);
       concentrationCheck(context, command.target, amount);
+      return;
+    }
+    case 'roll_ability_check': {
+      assertActiveActor(context, command.actor);
+      spendCost(context, command.actor, command.cost, 'Ability check');
+      if (!Number.isFinite(command.bonus)) throw new EncounterRuleError('Ability check bonus must be finite.');
+      const modifier = effectDiceModifier(
+        context.state, command.actor, 'ability_check', context.rng, command.skill,
+      );
+      const roll = rollD20(context.rng, abilityCheckRollMode(context.state, command.actor, command.rollMode));
+      const total = roll.chosen + command.bonus +
+        exhaustionPenalty(combatantConditions(context.state, command.actor)) +
+        modifier;
+      const check = {
+        outcome: total < difficultyClass(command.dc) ? 'failure' as const : 'success' as const,
+        roll,
+        total,
+      };
+      emit(context, {
+        type: 'ability_check_resolved', actor: command.actor,
+        ability: command.ability, skill: command.skill, check,
+      });
       return;
     }
     case 'dash': {

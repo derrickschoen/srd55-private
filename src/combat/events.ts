@@ -1,4 +1,4 @@
-import type { Ability } from '../domain/enums';
+import type { Ability, Skill } from '../domain/enums';
 import type { GridCell } from './grid';
 import type {
   AttackRollResult,
@@ -104,6 +104,16 @@ export type EncounterCommand =
       readonly rollMode: RollMode;
       readonly damage: DamageRequest;
       readonly onSuccess: 'none' | 'half';
+      readonly cost: ActionCost;
+    }
+  | {
+      readonly type: 'roll_ability_check';
+      readonly actor: CombatantId;
+      readonly ability: Ability;
+      readonly skill: Skill | null;
+      readonly bonus: number;
+      readonly dc: number;
+      readonly rollMode: RollMode;
       readonly cost: ActionCost;
     }
   | {
@@ -301,6 +311,17 @@ export type EncounterEvent =
       readonly ability: Ability;
       readonly save: SavingThrowResult;
       readonly effectId: EncounterEffectId | null;
+    })
+  | (SequencedEvent & {
+      readonly type: 'ability_check_resolved';
+      readonly actor: CombatantId;
+      readonly ability: Ability;
+      readonly skill: Skill | null;
+      readonly check: {
+        readonly outcome: 'failure' | 'success';
+        readonly roll: import('./resolution').D20Roll;
+        readonly total: number;
+      };
     })
   | (SequencedEvent & {
       readonly type: 'damage_applied';

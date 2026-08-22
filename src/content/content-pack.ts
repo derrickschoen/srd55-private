@@ -141,6 +141,12 @@ const operationRequiredFields = {
   target_branch: ['branches', 'otherwise'],
   reevaluated_branch: ['hook', 'durationRounds', 'operation'],
   condition_lifecycle: ['condition', 'immunity', 'initialSave', 'repeatedSave', 'damageBreak', 'duration', 'stacking'],
+  roll_dice_modifier: ['die', 'sign', 'duration'],
+  damage_dice_reduction: ['damageType', 'die', 'uses', 'duration'],
+  roll_mode_modifier: ['mode', 'duration'],
+  armor_class_modifier: ['modification', 'duration'],
+  damage_response_modifier: ['damageType', 'response', 'duration'],
+  targeted_defense_modifier: ['against', 'armorClassBonus', 'duration'],
   damage_operation: ['delivery', 'instancesPerTarget', 'packets', 'timing'],
   armed_weapon_hit_rider: ['damage', 'durationRounds', 'concentration', 'persistence', 'saveGatedRider'],
   persistent_area: ['origin', 'shape', 'durationRounds', 'concentration', 'targetFilter', 'includeOwner', 'difficultTerrain', 'movableFeet', 'hooks', 'initialEffects'],
@@ -273,7 +279,7 @@ const persistentAreaOperationSchema = z.strictObject({
 
 const worldObjectDamageResponseSchema = z.strictObject({
   type: z.enum(damageTypes),
-  response: z.enum(['normal', 'resistant', 'vulnerable', 'immune']),
+  response: z.enum(['normal', 'resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune']),
 });
 
 const worldObjectTemplateSchema = z.strictObject({
@@ -416,6 +422,91 @@ const conditionLifecycleOperationSchema = z.strictObject({
   if (operation.stacking.kind === 'extend_duration' && operation.duration.kind !== 'fixed_rounds') {
     context.addIssue({ code: 'custom', path: ['stacking'], message: 'Only a fixed-round effect can extend an existing duration.' });
   }
+});
+
+const modifierDieSchema = z.strictObject({
+  count: positiveInteger.max(100),
+  sides: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(10), z.literal(12), z.literal(20)]),
+});
+
+const modifierSkillChoiceSchema = z.union([
+  z.enum(skills),
+  z.strictObject({
+    kind: z.literal('chosen_when_cast'),
+    options: z.array(z.enum(skills)).min(1).max(skills.length)
+      .refine((options) => new Set(options).size === options.length),
+  }),
+]);
+
+const modifierDamageTypeChoiceSchema = z.union([
+  z.enum(damageTypes),
+  z.strictObject({
+    kind: z.literal('chosen_when_cast'),
+    options: z.array(z.enum(damageTypes)).min(1).max(damageTypes.length)
+      .refine((options) => new Set(options).size === options.length),
+  }),
+]);
+
+const rollDiceModifierOperationSchema = z.discriminatedUnion('application', [
+  z.strictObject({
+    kind: z.literal('roll_dice_modifier'), application: z.literal('every_qualifying_roll'),
+    tests: z.array(z.enum(['attack_roll', 'saving_throw'])).min(1).max(2)
+      .refine((tests) => new Set(tests).size === tests.length),
+    die: modifierDieSchema, sign: z.union([z.literal(1), z.literal(-1)]),
+    duration: conditionLifecycleDurationSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('roll_dice_modifier'), application: z.literal('chosen_skill_checks'),
+    skill: modifierSkillChoiceSchema, die: modifierDieSchema,
+    sign: z.union([z.literal(1), z.literal(-1)]), duration: conditionLifecycleDurationSchema,
+  }),
+]);
+
+const damageDiceReductionOperationSchema = z.strictObject({
+  kind: z.literal('damage_dice_reduction'), damageType: modifierDamageTypeChoiceSchema,
+  die: z.strictObject({ count: z.literal(1), sides: z.literal(4) }),
+  uses: z.literal('once_per_turn'), duration: conditionLifecycleDurationSchema,
+});
+
+const rollModeModifierOperationSchema = z.discriminatedUnion('roll', [
+  z.strictObject({
+    kind: z.literal('roll_mode_modifier'), roll: z.literal('attack_roll'),
+    mode: z.enum(['advantage', 'disadvantage']),
+    scope: z.discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('target_rolls') }),
+      z.strictObject({ kind: z.literal('attacks_against_target') }),
+    ]),
+    duration: conditionLifecycleDurationSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('roll_mode_modifier'), roll: z.literal('saving_throw'),
+    mode: z.enum(['advantage', 'disadvantage']), scope: z.strictObject({ kind: z.literal('target_rolls') }),
+    duration: conditionLifecycleDurationSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('roll_mode_modifier'), roll: z.literal('ability_check'),
+    mode: z.enum(['advantage', 'disadvantage']), scope: z.strictObject({ kind: z.literal('target_rolls') }),
+    duration: conditionLifecycleDurationSchema,
+  }),
+]);
+
+const armorClassModifierOperationSchema = z.strictObject({
+  kind: z.literal('armor_class_modifier'),
+  modification: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('bonus'), amount: safeInteger.min(-30).max(30) }),
+    z.strictObject({ kind: z.literal('floor'), minimum: nonNegativeInteger.max(100) }),
+  ]),
+  duration: conditionLifecycleDurationSchema,
+});
+
+const damageResponseModifierOperationSchema = z.strictObject({
+  kind: z.literal('damage_response_modifier'), damageType: modifierDamageTypeChoiceSchema,
+  response: z.enum(['resistant', 'vulnerable']), duration: conditionLifecycleDurationSchema,
+});
+
+const targetedDefenseModifierOperationSchema = z.strictObject({
+  kind: z.literal('targeted_defense_modifier'), against: z.literal('selected_attacker'),
+  armorClassBonus: safeInteger.min(1).max(30), duration: conditionLifecycleDurationSchema,
 });
 
 const armedWeaponHitRiderSchema = z.strictObject({
@@ -595,6 +686,12 @@ function structurallyValidOperation(value: unknown): value is SpellOperation {
   if (typedKind === 'target_branch') return validTargetBranchOperation(operation);
   if (typedKind === 'reevaluated_branch') return validReevaluatedBranchOperation(operation);
   if (typedKind === 'condition_lifecycle') return conditionLifecycleOperationSchema.safeParse(value).success;
+  if (typedKind === 'roll_dice_modifier') return rollDiceModifierOperationSchema.safeParse(value).success;
+  if (typedKind === 'damage_dice_reduction') return damageDiceReductionOperationSchema.safeParse(value).success;
+  if (typedKind === 'roll_mode_modifier') return rollModeModifierOperationSchema.safeParse(value).success;
+  if (typedKind === 'armor_class_modifier') return armorClassModifierOperationSchema.safeParse(value).success;
+  if (typedKind === 'damage_response_modifier') return damageResponseModifierOperationSchema.safeParse(value).success;
+  if (typedKind === 'targeted_defense_modifier') return targetedDefenseModifierOperationSchema.safeParse(value).success;
   if (typedKind === 'persistent_area') return persistentAreaOperationSchema.safeParse(value).success;
   if (typedKind === 'world_operations') return worldOperationSpellSchema.safeParse(value).success;
   if (typedKind === 'damage_operation') return damageOperationSchema.safeParse(value).success;
@@ -690,7 +787,7 @@ const monsterSchema = z.strictObject({
     reachFeet: nonNegativeInteger.max(1_000).optional(),
     damageResponses: z.array(z.strictObject({
       type: z.enum(damageTypes),
-      response: z.enum(['normal', 'resistant', 'vulnerable', 'immune']),
+      response: z.enum(['normal', 'resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune']),
     })).max(damageTypes.length).optional(),
     conditionImmunities: z.array(trimmedText).max(100).optional(),
     usesDeathSaves: z.boolean().optional(),

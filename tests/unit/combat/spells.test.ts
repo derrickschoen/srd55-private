@@ -656,7 +656,14 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
     case 'target_branch':
     case 'reevaluated_branch':
     case 'condition_lifecycle':
+    case 'roll_mode_modifier':
+    case 'armor_class_modifier':
+    case 'damage_response_modifier':
+    case 'targeted_defense_modifier':
       return null;
+    case 'roll_dice_modifier':
+    case 'damage_dice_reduction':
+      return [operation.die.count, operation.die.sides];
     case 'damage_operation': {
       const packet = operation.packets[0];
       return packet === undefined ? null : [packet.dice.baseCount, packet.dice.sides];
@@ -737,6 +744,12 @@ function operationPerSlot(definition: SpellDefinition): number {
     case 'target_branch':
     case 'reevaluated_branch':
     case 'condition_lifecycle':
+    case 'roll_dice_modifier':
+    case 'damage_dice_reduction':
+    case 'roll_mode_modifier':
+    case 'armor_class_modifier':
+    case 'damage_response_modifier':
+    case 'targeted_defense_modifier':
       return 0;
     case 'damage_operation':
       return operation.packets[0]?.dice.perSlotCount ?? 0;

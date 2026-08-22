@@ -41,6 +41,7 @@ const E05_TYPECHECK_INSTRUMENTATION_LEDGER_PATH = 'docs/audits/2026-08-22-e05-ty
 const ENVELOPE_NORMALIZATION_LEDGER_PATH = 'docs/audits/2026-08-22-envelope-normalization-mutation-ledger.md';
 const CHOICE_BRANCH_LEDGER_PATH = 'docs/audits/2026-08-22-choice-branch-mutation-ledger.md';
 const CONDITION_LIFECYCLE_LEDGER_PATH = 'docs/audits/2026-08-22-condition-lifecycle-mutation-ledger.md';
+const ROLL_DEFENSE_LEDGER_PATH = 'docs/audits/2026-08-22-roll-defense-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -509,5 +510,39 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(14);
     expect(ledger).toContain('Each production mutation below was applied alone');
     expect(ledger).toContain('Tests  17 passed (17)');
+  });
+
+  it('ROLL-DEFENSE-MUTATION-LEDGER pins all required controls and numeric-boundary mutants', () => {
+    const ledger = readFileSync(ROLL_DEFENSE_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/roll-defense-modifiers.test.ts', 'utf8');
+    const mutations = [
+      'advantage_stacks',
+      'advantage_disadvantage_no_cancel',
+      'resistance_skips_region_damage',
+      'ac_floor_stacks_with_bonus',
+      'targeted_modifier_applies_to_all',
+      'exact_ac_misses',
+      'bonus_die_low_face_skipped',
+      'bonus_die_high_face_skipped',
+      'resistance_rounds_up_odd',
+      'modifier_final_round_dropped',
+      'modifier_expires_one_round_late',
+    ];
+    const killingTests = [
+      'advantage_sources: duplicate sources stay at two dice, one disadvantage cancels them, and Faerie-Fire scope does not affect another target',
+      'resistance_vulnerability_region: resistance halves odd and even movement-region damage while vulnerability remains observably different',
+      'ac_floor_bonus_boundary: exact AC hits, one below misses, and a Barkskin floor does not add to a Shield-style bonus',
+      'targeted_modifier_scope: a selected-attacker AC defense blocks that attacker but not a non-targeted source, unlike a blanket bonus',
+      'roll_dice_faces_and_order: Bless/Bane use the lowest and highest faces in stable pre-d20 order, while Guidance is skill-selected',
+      'modifier_duration_first_and_final_round: a two-round AC bonus protects the first and final rounds, then expires',
+    ];
+    for (const mutation of mutations) expect(ledger).toContain(`\`${mutation}\``);
+    for (const testName of killingTests) {
+      expect(ledger).toContain(`\`${testName}\``);
+      expect(tests).toContain(testName);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(11);
+    expect(ledger).toContain('Every production mutation below was applied alone');
+    expect(ledger).toContain('Tests  7 passed (7)');
   });
 });

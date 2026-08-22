@@ -275,6 +275,15 @@ export type EffectPayload =
   | {
       readonly kind: 'armor_class_modifier';
       readonly amount: number;
+      readonly minimum?: never;
+      /** Present only for a defense against one selected attacker. */
+      readonly againstAttacker?: CombatantId;
+    }
+  | {
+      readonly kind: 'armor_class_modifier';
+      readonly minimum: number;
+      readonly amount?: never;
+      readonly againstAttacker?: never;
     }
   | {
       readonly kind: 'hit_point_maximum_modifier';
@@ -286,6 +295,7 @@ export type EffectPayload =
       readonly sides: number;
       readonly sign: 1 | -1;
       readonly skill?: string;
+      readonly application?: 'every_qualifying_roll' | 'chosen_skill_checks';
     }
   | {
       readonly kind: 'skill_modifier';
@@ -298,6 +308,7 @@ export type EffectPayload =
       readonly count: number;
       readonly sides: number;
       readonly sign: 1 | -1;
+      readonly application?: 'every_qualifying_roll';
     }
   | {
       readonly kind: 'movement_modifier';
@@ -1162,7 +1173,11 @@ export type EffectPayload =
     }
   | {
       readonly kind: 'damage_resistances';
-      readonly damageTypes: readonly ('Bludgeoning' | 'Piercing' | 'Slashing')[];
+      readonly damageTypes: readonly DamageType[];
+      /** Omitted on legacy Stoneskin payloads, where resistant is the sourced meaning. */
+      readonly response?: 'resistant' | 'vulnerable';
+      /** When present, only damage from this combatant receives the response. */
+      readonly source?: CombatantId;
     }
   | {
       readonly kind: 'wall_of_fire';
@@ -1197,6 +1212,9 @@ export type EffectPayload =
         | { readonly kind: 'next_attack_against_target' }
         | { readonly kind: 'next_attack_by_target' }
         | { readonly kind: 'attacks_against_target' }
+        | { readonly kind: 'all_attacks_by_target' }
+        | { readonly kind: 'saving_throws_by_target' }
+        | { readonly kind: 'ability_checks_by_target' }
         | {
             readonly kind: 'attacks_by_target';
             readonly attackIds: readonly string[];

@@ -72,6 +72,8 @@ function actionLabel(action: EncounterCommand): string {
       return 'Roll initiative';
     case 'force_save':
       return 'Force save';
+    case 'roll_ability_check':
+      return 'Ability check';
     case 'dash':
       return 'Dash';
     case 'disengage':
