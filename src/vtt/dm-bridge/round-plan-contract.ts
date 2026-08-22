@@ -41,11 +41,12 @@ export type TargetSelector =
   | { readonly kind: 'nearest_enemy' };
 
 export type PlanAction =
-  | { readonly kind: 'attack'; readonly target: TargetSelector }
+  | { readonly kind: 'attack'; readonly target: TargetSelector; readonly attackId?: string | undefined }
   | { readonly kind: 'bonus_attack'; readonly target: TargetSelector }
   | { readonly kind: 'force_save'; readonly target: TargetSelector }
-  | { readonly kind: 'move_toward'; readonly target: TargetSelector }
-  | { readonly kind: 'retreat_toward'; readonly destination: GridCell }
+  | { readonly kind: 'cast_spell'; readonly spellId: string; readonly target: TargetSelector | null }
+  | { readonly kind: 'move_toward'; readonly target: TargetSelector; readonly maximumFeet?: number | undefined }
+  | { readonly kind: 'retreat_toward'; readonly destination: GridCell; readonly maximumFeet?: number | undefined }
   | {
       readonly kind: 'use_action';
       readonly action: 'dash' | 'disengage' | 'dodge' | 'action_surge' | 'end_turn';
@@ -162,11 +163,12 @@ const targetSelectorSchema: z.ZodType<TargetSelector> = z.discriminatedUnion('ki
 ]);
 
 const planActionSchema: z.ZodType<PlanAction> = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('attack'), target: targetSelectorSchema }),
+  z.strictObject({ kind: z.literal('attack'), target: targetSelectorSchema, attackId: trimmedString.optional() }),
   z.strictObject({ kind: z.literal('bonus_attack'), target: targetSelectorSchema }),
   z.strictObject({ kind: z.literal('force_save'), target: targetSelectorSchema }),
-  z.strictObject({ kind: z.literal('move_toward'), target: targetSelectorSchema }),
-  z.strictObject({ kind: z.literal('retreat_toward'), destination: gridCellSchema }),
+  z.strictObject({ kind: z.literal('cast_spell'), spellId: trimmedString, target: targetSelectorSchema.nullable() }),
+  z.strictObject({ kind: z.literal('move_toward'), target: targetSelectorSchema, maximumFeet: nonNegativeNumber.optional() }),
+  z.strictObject({ kind: z.literal('retreat_toward'), destination: gridCellSchema, maximumFeet: nonNegativeNumber.optional() }),
   z.strictObject({
     kind: z.literal('use_action'),
     action: z.enum(['dash', 'disengage', 'dodge', 'action_surge', 'end_turn']),

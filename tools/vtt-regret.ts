@@ -4,7 +4,7 @@ import { canonicalJson } from '../src/commands/canonical-json';
 import {
   decodeExperimentTableRecord,
   VTT_EXPERIMENT_SCHEMA_VERSION,
-  type ExperimentTableRecordV2,
+  type ExperimentTableRecordV3,
 } from '../src/vtt/experiment-telemetry';
 import {
   aggregateTables,
@@ -39,7 +39,7 @@ function parseArgs(args: readonly string[]): CliConfig {
   return { runDirectory, outDirectory };
 }
 
-async function readCurrentTable(path: string): Promise<ExperimentTableRecordV2> {
+async function readCurrentTable(path: string): Promise<ExperimentTableRecordV3> {
   const value: unknown = JSON.parse(await readFile(path, 'utf8'));
   const table = decodeExperimentTableRecord(value);
   if (table.schemaVersion !== VTT_EXPERIMENT_SCHEMA_VERSION) {

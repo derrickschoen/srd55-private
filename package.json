@@ -21,6 +21,7 @@
     "vtt:replay": "vite-node tools/vtt-replay.ts --",
     "vtt:soak": "vite-node tools/vtt-soak.ts --",
     "vtt:experiment": "vite-node tools/vtt-experiment.ts --",
+    "vtt:regret": "vite-node tools/vtt-regret.ts --",
     "test:all": "npm run test && npm run build && npm run test:browser",
     "scrape": "vite-node tools/scrape/cli.ts --",
     "db:schema": "vite-node scripts/build-schema.ts",

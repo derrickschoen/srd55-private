@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ControllerRequest } from '../../../src/combat/controllers';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
-import { damageType, dieSides } from '../../../src/combat/values';
+import { damageType, dieSides, feet } from '../../../src/combat/values';
 import {
   codexSessionId,
   encounterSessionId,
@@ -23,6 +23,12 @@ import {
   JS_TURN_PROGRAM_CANONICAL_EXAMPLE,
   JS_TURN_PROGRAM_GRAMMAR,
 } from '../../../src/vtt/dm-bridge/js-turn-program';
+import {
+  JsTurnProgramTypeError,
+  generateTurnProgramDeclarations,
+  typeCheckJsTurnProgram,
+  type TurnProgramTypeCheckTelemetry,
+} from '../../../src/vtt/dm-bridge/turn-program-types';
 import {
   ReplayTranscriptRecorder,
   decodeReplayBundle,
@@ -53,11 +59,32 @@ function fixture() {
   });
   const state: EncounterState = {
     ...base,
+    combatants: base.combatants.map((combatant) => combatant.profile.id === monster.id
+      ? {
+          ...combatant,
+          turn: {
+            ...combatant.turn,
+            movement: { speed: feet(30), spent: feet(0), remaining: feet(30) },
+          },
+        }
+      : combatant),
     revision: 4,
     round: 1,
     activeCombatant: monster.id,
   };
   return { monster, player, state };
+}
+
+function castSpell(
+  actor: CombatantId,
+  target: CombatantId,
+  spellId = 'frost-spark',
+): Extract<EncounterCommand, { readonly type: 'cast_spell' }> {
+  return {
+    type: 'cast_spell', actor, spellId, slotLevel: 1, castAsRitual: false,
+    casterLevel: 3, attackBonus: 5, saveDc: 13, spellcastingModifier: 3,
+    targets: [target], area: null, weaponAttack: null, selectedOption: null,
+  };
 }
 
 function attack(actor: CombatantId, target: CombatantId): Extract<EncounterCommand, { readonly type: 'attack' }> {
@@ -106,6 +133,20 @@ function controllerRequest(
   };
 }
 
+function decisionProjection(
+  state: EncounterState,
+  actor: CombatantId,
+  actions: readonly EncounterCommand[],
+) {
+  const pendingRequest = controllerRequest(state, actor, actions);
+  return projectDmBoard({
+    state,
+    coordinator: { ...IDLE, pendingRequest },
+    controllers: [],
+    history: [],
+  });
+}
+
 function requestedMonsterIds(request: DmBridgeRequest): readonly CombatantId[] {
   return request.kind === 'round_plan_request'
     ? request.livingMonsterIds
@@ -140,6 +181,123 @@ class FakeJsExchange implements DmBridgeExchange {
 }
 
 describe('JS round-plan protocol and replay integration', () => {
+  it('dts_widens_to_string is killed by actor-visible literal unions and unavailable combatant diagnostics', () => {
+    const f = fixture();
+    const projection = decisionProjection(f.state, f.monster.id, [
+      { ...attack(f.monster.id, f.player.id), attackId: 'claw' },
+      { type: 'end_turn', actor: f.monster.id },
+    ]);
+    const declaration = generateTurnProgramDeclarations(projection, f.monster.id);
+    const result = typeCheckJsTurnProgram("emit(attack('combatant:not-present'));", declaration.source);
+
+    expect(declaration.source).toContain(
+      `type CombatantId = "${String(f.monster.id)}" | "${String(f.player.id)}";`,
+    );
+    expect(declaration.source).not.toContain('type CombatantId = string');
+    expect(result.passed).toBe(false);
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 2345, line: 1 }));
+  });
+
+  it('a spell absent from reducer-enumerated legal casts fails with a compiler diagnostic', () => {
+    const f = fixture();
+    const projection = decisionProjection(f.state, f.monster.id, [
+      castSpell(f.monster.id, f.player.id),
+      { type: 'end_turn', actor: f.monster.id },
+    ]);
+    const declaration = generateTurnProgramDeclarations(projection, f.monster.id);
+    const result = typeCheckJsTurnProgram(
+      `emit(castSpell('unprepared-spell', '${String(f.player.id)}'));`,
+      declaration.source,
+    );
+
+    expect(declaration.spellIds).toEqual(['frost-spark']);
+    expect(result.passed).toBe(false);
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 2345 }));
+  });
+
+  it('movement above the branded decision-time budget fails to compile', () => {
+    const f = fixture();
+    const projection = decisionProjection(f.state, f.monster.id, [
+      { type: 'end_turn', actor: f.monster.id },
+    ]);
+    const declaration = generateTurnProgramDeclarations(projection, f.monster.id);
+    const result = typeCheckJsTurnProgram(
+      `emit(move('${String(f.player.id)}', 31));`,
+      declaration.source,
+    );
+
+    expect(declaration.movementBudgetFeet).toBe(30);
+    expect(declaration.source).toContain('type MovementBudgetFeet = 30;');
+    expect(result.passed).toBe(false);
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 2345 }));
+  });
+
+  it('dts_ordering_nondeterministic is killed by byte-identical declarations with stable unions', () => {
+    const f = fixture();
+    const actions = [
+      castSpell(f.monster.id, f.player.id, 'zeta-spell'),
+      castSpell(f.monster.id, f.player.id, 'alpha-spell'),
+      { ...attack(f.monster.id, f.player.id), attackId: 'zeta-attack' },
+      { ...attack(f.monster.id, f.player.id), attackId: 'alpha-attack' },
+    ] satisfies readonly EncounterCommand[];
+    const projection = decisionProjection(f.state, f.monster.id, actions);
+    const first = generateTurnProgramDeclarations(projection, f.monster.id);
+    const second = generateTurnProgramDeclarations(structuredClone(projection), f.monster.id);
+
+    expect(second.source).toBe(first.source);
+    expect(first.spellIds).toEqual(['alpha-spell', 'zeta-spell']);
+    expect(first.attackIds).toEqual(['alpha-attack', 'zeta-attack']);
+  });
+
+  it('reuses the compiler host/library snapshot within the turn-loop latency budget', () => {
+    const f = fixture();
+    const projection = decisionProjection(f.state, f.monster.id, [
+      { ...attack(f.monster.id, f.player.id), attackId: 'claw' },
+      { type: 'end_turn', actor: f.monster.id },
+    ]);
+    const declaration = generateTurnProgramDeclarations(projection, f.monster.id);
+    const source = `emit(attack('claw', '${String(f.player.id)}'));`;
+    typeCheckJsTurnProgram(source, declaration.source);
+    const durations = Array.from({ length: 21 }, () =>
+      typeCheckJsTurnProgram(source, declaration.source).durationMs).sort((left, right) => left - right);
+    const median = durations[10];
+
+    if (median === undefined) throw new Error('Synthetic type-check sample is empty.');
+    console.info(`[typed-js] synthetic warm median type-check ${median.toFixed(2)}ms`);
+    expect(median).toBeLessThan(25);
+  });
+
+  it('typecheck_result_ignored is killed by refusal before interpretation with verbatim correction diagnostics and telemetry', async () => {
+    const f = fixture();
+    const telemetry: TurnProgramTypeCheckTelemetry[] = [];
+    const exchange = new FakeJsExchange(`emit(move('${String(f.player.id)}', 31));`);
+    const session = new DmRoundPlanSession(
+      exchange,
+      undefined,
+      undefined,
+      'js_program',
+      { now: () => 7, onTypeCheckTelemetry: (entry) => telemetry.push(entry) },
+    );
+    let caught: unknown;
+    try {
+      await session.startRound(context(f.state), new AbortController().signal);
+    } catch (error: unknown) {
+      caught = error;
+    }
+    const cause = caught instanceof Error ? caught.cause : undefined;
+
+    expect(cause).toBeInstanceOf(JsTurnProgramTypeError);
+    if (!(cause instanceof JsTurnProgramTypeError)) throw new Error('Expected typed refusal cause.');
+    expect(cause.diagnostics).toContainEqual(expect.objectContaining({ code: 2345, line: 1 }));
+    expect(cause.message).toContain('TS2345 at 1:');
+    expect(exchange.requests[1]).toMatchObject({ validatorError: cause.message });
+    expect(telemetry).toHaveLength(3);
+    expect(telemetry.every((entry) =>
+      !entry.passed && entry.diagnosticCodes.includes(2345) && entry.durationMs === 0)).toBe(true);
+    expect(session.typeCheckTelemetry()).toEqual(telemetry);
+    expect(session.jsProgramArtifact(1, f.monster.id)).toBeNull();
+  });
+
   it('derives the js_program prompt contract from the interpreter grammar module', () => {
     expect(ROUND_PLAN_JS_REPLY_CONTRACT).toEqual({
       surface: 'js_program',
@@ -182,6 +340,7 @@ describe('JS round-plan protocol and replay integration', () => {
           { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
         ],
       },
+      typeCheck: { passed: true, diagnosticCodes: [] },
     });
 
     const recorder = new ReplayTranscriptRecorder();

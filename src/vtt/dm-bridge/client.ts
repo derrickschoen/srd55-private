@@ -71,6 +71,8 @@ export class LocalhostDmBridgeClient implements DmBridgeExchange, MirrorSink {
   readonly #projectionSender = new ProjectionTransferSender();
   #projectionTelemetry: ProjectionTransportTelemetry = {
     bytesSent: 0,
+    snapshotBytes: 0,
+    deltaBytes: 0,
     fullSnapshots: 0,
     deltaSnapshots: 0,
     reconstructionFailures: 0,
@@ -94,14 +96,27 @@ export class LocalhostDmBridgeClient implements DmBridgeExchange, MirrorSink {
       const send = async (forceFull: boolean): Promise<BridgeFetchResponse> => {
         const wireRequest = this.projectionTransport === 'revision_delta'
           ? this.#projectionSender.encode(request, forceFull)
-          : request;
+          : this.projectionTransport === 'verified_full'
+            ? this.#projectionSender.encode(request, true)
+            : this.projectionTransport === 'compact_lossless'
+              ? forceFull
+                ? this.#projectionSender.encode(request, true)
+                : this.#projectionSender.encodeCompact(request)
+              : request;
         const body = JSON.stringify(wireRequest);
-        if (this.projectionTransport === 'revision_delta') {
+        if (this.projectionTransport !== 'full') {
           const transfer = 'projectionTransfer' in wireRequest ? wireRequest.projectionTransfer : null;
           this.#projectionTelemetry = {
             ...this.#projectionTelemetry,
             bytesSent: this.#projectionTelemetry.bytesSent + new TextEncoder().encode(body).length,
-            fullSnapshots: this.#projectionTelemetry.fullSnapshots + (transfer?.kind === 'full_projection' ? 1 : 0),
+            snapshotBytes: this.#projectionTelemetry.snapshotBytes +
+              (transfer?.kind === 'full_projection' || transfer?.kind === 'compact_projection'
+                ? new TextEncoder().encode(body).length
+                : 0),
+            deltaBytes: this.#projectionTelemetry.deltaBytes +
+              (transfer?.kind === 'projection_delta' ? new TextEncoder().encode(body).length : 0),
+            fullSnapshots: this.#projectionTelemetry.fullSnapshots +
+              (transfer?.kind === 'full_projection' || transfer?.kind === 'compact_projection' ? 1 : 0),
             deltaSnapshots: this.#projectionTelemetry.deltaSnapshots + (transfer?.kind === 'projection_delta' ? 1 : 0),
           };
         }
@@ -116,7 +131,7 @@ export class LocalhostDmBridgeClient implements DmBridgeExchange, MirrorSink {
       if (!response.ok) throw new Error(`DM bridge exchange failed with HTTP ${response.status}.`);
       let body = await response.json();
       if (
-        this.projectionTransport === 'revision_delta' &&
+        this.projectionTransport !== 'full' &&
         typeof body === 'object' && body !== null && !Array.isArray(body) &&
         'kind' in body && body.kind === 'full_projection_required'
       ) {

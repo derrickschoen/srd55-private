@@ -5,6 +5,7 @@ import type {
   DecisionProgram,
   StandingConditionalRider,
 } from './round-plan-contract';
+import type { TurnProgramTypeCheckTelemetry } from './turn-program-types';
 import {
   TURN_PROGRAM_LIBRARY_DOC,
   expandTurnProgramLibraryCall,
@@ -28,8 +29,9 @@ apiArrayCall::= ("alliesWithin" | "enemiesWithin") "(" expression ")"
 Only const declarations, braced if/else, for-of over alliesWithin/enemiesWithin,
 and calls to the documented API are accepted. Programs emit one plan with emit(...).
 API: nearestEnemy(), lowestHp([combatants]), alliesWithin(feet), enemiesWithin(feet),
-hpPercent(combatant), distanceTo(combatant), attack(combatant), bonusAttack(combatant), forceSave(combatant),
-move(combatant), retreat(column,row), dash(), disengage(), dodge(), endTurn(),
+hpPercent(combatant), distanceTo(combatant), attack(combatant), attack(attackId,combatant),
+bonusAttack(combatant), forceSave(combatant), castSpell(spellId[,combatant]),
+move(combatant[,feet]), retreat(column,row[,feet]), dash(), disengage(), dodge(), endTurn(),
 actionSurge(), priority(program,...), emit(program). attack(combatant, riderOnCrit(action)) attaches
 a fixed conditional follow-up. Cell selectors are strict {column, row} objects.
 No ambient JavaScript objects are available.
@@ -519,6 +521,7 @@ export interface JsTurnProgramLimits {
   readonly stepBudget?: number;
   readonly timeBudgetMs?: number;
   readonly now?: () => number;
+  readonly onTypeCheckTelemetry?: (telemetry: TurnProgramTypeCheckTelemetry) => void;
 }
 
 export interface JsTurnProgramExecution {
@@ -748,9 +751,12 @@ class Interpreter {
       case 'attack': return this.#attack(args);
       case 'bonusAttack': return this.#targetAction(expression.callee, args, 'bonus_attack');
       case 'forceSave': return this.#targetAction(expression.callee, args, 'force_save');
-      case 'move': return this.#targetAction(expression.callee, args, 'move_toward');
+      case 'castSpell': return this.#castSpell(args);
+      case 'move': return this.#move(args);
       case 'retreat': {
-        this.#arity(expression.callee, args, 2);
+        if (args.length !== 2 && args.length !== 3) {
+          throw new JsTurnProgramRuntimeError(`retreat expects 2 or 3 arguments; received ${String(args.length)}.`);
+        }
         return this.#programValue({
           kind: 'action',
           action: {
@@ -759,6 +765,7 @@ class Interpreter {
               column: this.#number(args[0], 'retreat column'),
               row: this.#number(args[1], 'retreat row'),
             },
+            ...(args.length === 3 ? { maximumFeet: this.#movementFeet(args[2], 'retreat') } : {}),
           },
         });
       }
@@ -829,8 +836,13 @@ class Interpreter {
   }
 
   #subject(value: RuntimeValue | undefined, api: string): DmVisibleCombatant {
-    if (!this.#combatantReference(value)) throw new JsTurnProgramRuntimeError(`${api} requires a combatant reference.`);
-    const subject = this.state.combatants.find((candidate) => candidate.id === value.id);
+    const id = typeof value === 'string'
+      ? value as CombatantId
+      : this.#combatantReference(value)
+        ? value.id
+        : null;
+    if (id === null) throw new JsTurnProgramRuntimeError(`${api} requires a combatant reference.`);
+    const subject = this.state.combatants.find((candidate) => candidate.id === id);
     if (subject === undefined) throw new JsTurnProgramRuntimeError(`${api} received a combatant outside the projection.`);
     return subject;
   }
@@ -893,17 +905,59 @@ class Interpreter {
   }
 
   #attack(args: readonly RuntimeValue[]): DecisionProgramValue {
-    if (args.length !== 1 && args.length !== 2) {
-      throw new JsTurnProgramRuntimeError(`attack expects 1 or 2 arguments; received ${String(args.length)}.`);
+    if (args.length < 1 || args.length > 3) {
+      throw new JsTurnProgramRuntimeError(`attack expects 1 to 3 arguments; received ${String(args.length)}.`);
     }
-    const subject = this.#subject(args[0], 'attack');
+    const first = args[0];
+    const hasAttackId = typeof first === 'string';
+    const attackId = typeof first === 'string' ? first : undefined;
+    const targetIndex = hasAttackId ? 1 : 0;
+    const riderIndex = targetIndex + 1;
+    if (args[targetIndex] === undefined) throw new JsTurnProgramRuntimeError('attack requires a target.');
+    const subject = this.#subject(args[targetIndex], 'attack');
     const action = {
       kind: 'attack' as const,
       target: { kind: 'combatant' as const, combatantId: subject.id },
+      ...(attackId === undefined ? {} : { attackId }),
     };
-    return args.length === 1
+    return args[riderIndex] === undefined
       ? this.#programValue({ kind: 'action', action })
-      : this.#programValue({ kind: 'action', action, riders: [this.#rider(args[1], 'attack')] });
+      : this.#programValue({ kind: 'action', action, riders: [this.#rider(args[riderIndex], 'attack')] });
+  }
+
+  #castSpell(args: readonly RuntimeValue[]): DecisionProgramValue {
+    if (args.length !== 1 && args.length !== 2) {
+      throw new JsTurnProgramRuntimeError(`castSpell expects 1 or 2 arguments; received ${String(args.length)}.`);
+    }
+    const spellId = args[0];
+    if (typeof spellId !== 'string') throw new JsTurnProgramRuntimeError('castSpell requires a spell id.');
+    const target = args.length === 1
+      ? null
+      : { kind: 'combatant' as const, combatantId: this.#subject(args[1], 'castSpell').id };
+    return this.#programValue({ kind: 'action', action: { kind: 'cast_spell', spellId, target } });
+  }
+
+  #move(args: readonly RuntimeValue[]): DecisionProgramValue {
+    if (args.length !== 1 && args.length !== 2) {
+      throw new JsTurnProgramRuntimeError(`move expects 1 or 2 arguments; received ${String(args.length)}.`);
+    }
+    const target = this.#subject(args[0], 'move');
+    return this.#programValue({
+      kind: 'action',
+      action: {
+        kind: 'move_toward',
+        target: { kind: 'combatant', combatantId: target.id },
+        ...(args.length === 2 ? { maximumFeet: this.#movementFeet(args[1], 'move') } : {}),
+      },
+    });
+  }
+
+  #movementFeet(value: RuntimeValue | undefined, api: string): number {
+    const feet = this.#number(value, `${api} feet`);
+    if (!Number.isSafeInteger(feet) || feet < 0) {
+      throw new JsTurnProgramRuntimeError(`${api} feet must be a non-negative safe integer.`);
+    }
+    return feet;
   }
 
   #targetAction(

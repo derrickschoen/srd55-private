@@ -10,6 +10,7 @@ import type { EncounterCommand } from '../src/combat/events';
 import { mulberry32 } from '../src/combat/random';
 import { encounterSessionId, type EncounterSessionId } from '../src/combat/values';
 import { LocalhostDmBridgeClient, type BridgeFetch } from '../src/vtt/dm-bridge/client';
+import type { ProjectionTransportMode } from '../src/vtt/dm-bridge/projection-transport';
 import {
   DEFAULT_DM_MODEL,
   DEFAULT_DM_REASONING_EFFORT,
@@ -43,7 +44,7 @@ import {
   VTT_EXPERIMENT_SCHEMA_VERSION,
   type ExperimentCallRecord,
   type ExperimentTableRecord,
-  type ExperimentTableRecordV2,
+  type ExperimentTableRecordV3,
   type PromptComponentTelemetry,
   type RolloutInputCapture,
 } from '../src/vtt/experiment-telemetry';
@@ -54,8 +55,12 @@ import {
 } from '../src/vtt/generated-encounter-fixtures';
 import { TEST_APPROVED_FIRST_SKIRMISH_FIXTURE } from '../src/vtt/test-approved-first-skirmish';
 
-export type ExperimentId = 'E01' | 'E02' | 'E03';
-export type ExperimentArmId = E01PromptVariant | E02PromptVariant | E03PromptVariant;
+export type ExperimentId = 'E01' | 'E02' | 'E03' | 'E04';
+export type E04ProjectionArmId =
+  | 'full-projection-history'
+  | 'compact-lossless-decision-view'
+  | 'initial-snapshot-revision-deltas';
+export type ExperimentArmId = E01PromptVariant | E02PromptVariant | E03PromptVariant | E04ProjectionArmId;
 
 export interface ExperimentArmDefinition {
   readonly id: ExperimentArmId;
@@ -78,15 +83,21 @@ export interface E03ExperimentArmDefinition extends ExperimentArmDefinition {
   readonly exampleCount: 3;
 }
 
+export interface E04ExperimentArmDefinition extends ExperimentArmDefinition {
+  readonly id: E04ProjectionArmId;
+  readonly projectionMode: Exclude<ProjectionTransportMode, 'full'>;
+}
+
 export interface ExperimentDefinition {
   readonly id: ExperimentId;
   readonly version: '1';
   readonly hypothesis: string;
-  readonly arms: readonly ExperimentArmDefinition[] | readonly E02ExperimentArmDefinition[] | readonly E03ExperimentArmDefinition[];
-  readonly seedCount: 24;
+  readonly arms: readonly ExperimentArmDefinition[];
+  readonly seedCount: 24 | 30;
   readonly replicates: 2;
   readonly rounds: 5;
   readonly enemyCount: 4;
+  readonly earlyStopping: boolean;
 }
 
 const E02_ZERO_EXAMPLE_BLOCK = 'No worked examples are included.';
@@ -237,6 +248,7 @@ export const EXPERIMENT_REGISTRY = Object.freeze({
     replicates: 2,
     rounds: 5,
     enemyCount: 4,
+    earlyStopping: false,
   }),
   E02: Object.freeze({
     id: 'E02',
@@ -256,6 +268,7 @@ export const EXPERIMENT_REGISTRY = Object.freeze({
     replicates: 2,
     rounds: 5,
     enemyCount: 4,
+    earlyStopping: false,
   }),
   E03: Object.freeze({
     id: 'E03',
@@ -270,6 +283,34 @@ export const EXPERIMENT_REGISTRY = Object.freeze({
     replicates: 2,
     rounds: 5,
     enemyCount: 4,
+    earlyStopping: false,
+  }),
+  E04: Object.freeze({
+    id: 'E04',
+    version: '1',
+    hypothesis: 'Projection and history size dominate input cost.',
+    arms: Object.freeze([
+      {
+        id: 'full-projection-history',
+        description: 'Send the full projection and history on every decision.',
+        projectionMode: 'verified_full',
+      },
+      {
+        id: 'compact-lossless-decision-view',
+        description: 'Send a compact lossless decision view and reconstruct the full projection.',
+        projectionMode: 'compact_lossless',
+      },
+      {
+        id: 'initial-snapshot-revision-deltas',
+        description: 'Send one full snapshot followed by revision-addressed deltas.',
+        projectionMode: 'revision_delta',
+      },
+    ] satisfies readonly E04ExperimentArmDefinition[]),
+    seedCount: 30,
+    replicates: 2,
+    rounds: 5,
+    enemyCount: 4,
+    earlyStopping: true,
   }),
 } satisfies Record<ExperimentId, ExperimentDefinition>);
 
@@ -297,8 +338,9 @@ export function e01Seed(seedIndex: number): number {
 }
 
 export function experimentSeed(id: ExperimentId, seedIndex: number): number {
-  if (!Number.isSafeInteger(seedIndex) || seedIndex < 0 || seedIndex >= 24) {
-    throw new RangeError(`${id} seed index must be from 0 through 23.`);
+  const seedCount = EXPERIMENT_REGISTRY[id].seedCount;
+  if (!Number.isSafeInteger(seedIndex) || seedIndex < 0 || seedIndex >= seedCount) {
+    throw new RangeError(`${id} seed index must be from 0 through ${String(seedCount - 1)}.`);
   }
   return Number.parseInt(sha256(`D320:${id}:v1:paired-seed:${String(seedIndex)}`).slice(0, 8), 16) >>> 0;
 }
@@ -336,7 +378,7 @@ export function buildExperimentSchedule(id: ExperimentId): readonly ExperimentSc
         schedule.push({
           experimentId: id,
           armId,
-          ...(id === 'E02' || id === 'E03' ? { fixtureId: experimentFixtureId(id) } : {}),
+          ...(id === 'E01' ? {} : { fixtureId: experimentFixtureId(id) }),
           seed,
           replicate,
           batchId: replicate === 1 ? 'batch-1' : 'batch-2',
@@ -386,6 +428,14 @@ export interface ExperimentPreregistration {
   readonly candidateTurnK: number;
   readonly exclusions: readonly string[];
   readonly infrastructureRerunRule: string;
+  readonly earlyStopRule: {
+    readonly enabled: boolean;
+    readonly metric: 'completedRoundsPerHour';
+    readonly method: 'paired_bootstrap';
+    readonly confidence: 0.99;
+    readonly minimumTableFraction: 0.5;
+    readonly preregisteredTableCeiling: number;
+  };
   readonly analysisCodeDigest: string;
   readonly digest: string;
 }
@@ -402,6 +452,12 @@ function isE03ArmDefinition(
   return arm.id === 'two-sentence-imperative' ||
     arm.id === 'current-instructions' ||
     arm.id === 'validation-failure-explainer';
+}
+
+function isE04ArmDefinition(
+  arm: ExperimentArmDefinition,
+): arm is E04ExperimentArmDefinition {
+  return 'projectionMode' in arm;
 }
 
 function isE01PromptVariant(value: ExperimentArmId): value is E01PromptVariant {
@@ -426,6 +482,14 @@ function e03ArmDefinition(armId: ExperimentArmId): E03ExperimentArmDefinition {
   return arm;
 }
 
+function e04ArmDefinition(armId: ExperimentArmId): E04ExperimentArmDefinition {
+  const arm = EXPERIMENT_REGISTRY.E04.arms.find((candidate) => candidate.id === armId);
+  if (arm === undefined || !isE04ArmDefinition(arm)) {
+    throw new TypeError(`E04 arm ${armId} is not registered.`);
+  }
+  return arm;
+}
+
 function replyContract(
   experimentId: ExperimentId,
   armId: ExperimentArmId,
@@ -439,12 +503,22 @@ function replyContract(
     const arm = e02ArmDefinition(armId);
     return e02RoundPlanReplyContract(arm.id, arm.workedExamples);
   }
-  const arm = e03ArmDefinition(armId);
-  return e03RoundPlanReplyContract(arm.id, arm.instructions, arm.workedExamples);
+  if (experimentId === 'E03') {
+    const arm = e03ArmDefinition(armId);
+    return e03RoundPlanReplyContract(arm.id, arm.instructions, arm.workedExamples);
+  }
+  e04ArmDefinition(armId);
+  return e03RoundPlanReplyContract(
+    'current-instructions',
+    E02_SHARED_INSTRUCTIONS,
+    E03_SHARED_WORKED_EXAMPLES,
+  );
 }
 
 function promptHash(id: ExperimentId, armId: ExperimentArmId): string {
   return sha256(canonicalJson([
+    id,
+    armId,
     replyContract(id, armId, 0),
     replyContract(id, armId, 1),
   ]));
@@ -479,17 +553,29 @@ export function preregisterExperiment(config: VttExperimentConfig): ExperimentPr
       ? ['latencyMs', 'tokenCounts', 'correctionRate', 'reconsultRate', 'round5HpDifferential']
       : definition.id === 'E02'
         ? ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'correctionRate', 'reconsultRate', 'targetSanity']
-        : ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'correctionRate', 'dryProgramRate', 'reconsultRate', 'round5HpDifferential'],
+        : definition.id === 'E03'
+          ? ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'correctionRate', 'dryProgramRate', 'reconsultRate', 'round5HpDifferential']
+          : ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'cacheRatio', 'correctionRate', 'staleReferenceRate', 'reconsultRate', 'bytesSent', 'reconstructionFailures'],
     noninferiorityMargins: definition.id === 'E01'
       ? { normalizedTacticalRegret: 0.02, correctionPercentagePoints: 2 }
       : definition.id === 'E02'
         ? { normalizedTacticalRegret: 0.02, minimumFirstPassValidity: 0.99 }
-        : { normalizedTacticalRegret: 0.02, minimumMedianLatencyImprovement: 0.10 },
+        : definition.id === 'E03'
+          ? { normalizedTacticalRegret: 0.02, minimumMedianLatencyImprovement: 0.10 }
+          : { normalizedTacticalRegret: 0.02, maximumReconstructionMismatches: 0 },
     timeouts: { requestMs: config.requestTimeoutMs, tableMs: config.tableTimeoutMs },
     candidateTurnK: config.candidateTurnK,
     exclusions: [],
     infrastructureRerunRule: 'Only an infrastructure-classified failure may rerun, once, under identical manifest bytes.',
-    analysisCodeDigest: sha256(`${definition.id}-analysis-v1:linear-interpolated-quartiles:aborts-retained`),
+    earlyStopRule: {
+      enabled: definition.earlyStopping,
+      metric: 'completedRoundsPerHour' as const,
+      method: 'paired_bootstrap' as const,
+      confidence: 0.99 as const,
+      minimumTableFraction: 0.5 as const,
+      preregisteredTableCeiling: definition.seedCount * definition.replicates * definition.arms.length,
+    },
+    analysisCodeDigest: sha256(`${definition.id}-analysis-v2:linear-interpolated-quartiles:aborts-retained:paired-bootstrap-99-after-half`),
   };
   return { ...withoutDigest, digest: sha256(canonicalJson(withoutDigest)) };
 }
@@ -701,6 +787,7 @@ class RecordingExperimentExchange implements DmBridgeExchange {
     const started = Date.now();
     const startedAt = new Date(started).toISOString();
     const beforeTelemetry = this.telemetry.length;
+    const beforeProjectionTelemetry = this.delegate.projectionTransportTelemetry();
     let reply: unknown = null;
     let exchangeError: unknown = null;
     try {
@@ -709,6 +796,11 @@ class RecordingExperimentExchange implements DmBridgeExchange {
       exchangeError = error;
     }
     const finished = Date.now();
+    const afterProjectionTelemetry = this.delegate.projectionTransportTelemetry();
+    const transportBytes = afterProjectionTelemetry.bytesSent - beforeProjectionTelemetry.bytesSent;
+    const snapshotBytes = afterProjectionTelemetry.snapshotBytes - beforeProjectionTelemetry.snapshotBytes;
+    const deltaBytes = afterProjectionTelemetry.deltaBytes - beforeProjectionTelemetry.deltaBytes;
+    const reconstructionFailures = afterProjectionTelemetry.reconstructionFailures - beforeProjectionTelemetry.reconstructionFailures;
     const fleet = this.telemetry[beforeTelemetry] ?? null;
     let decoded: DecodedRoundPlanReply | null = null;
     let validationError: unknown = null;
@@ -768,7 +860,11 @@ class RecordingExperimentExchange implements DmBridgeExchange {
           instructions,
           this.entry.experimentId === 'E01'
             ? 'e01-terse-v1'
-            : this.entry.experimentId === 'E02' ? 'e02-shared-v1' : `e03-${this.entry.armId}-v1`,
+            : this.entry.experimentId === 'E02'
+              ? 'e02-shared-v1'
+              : this.entry.experimentId === 'E03'
+                ? `e03-${this.entry.armId}-v1`
+                : 'e03-current-instructions-winner-v1',
         ),
         schemaGrammar: component(schemaGrammar, contract.contractId),
         examples: component(
@@ -777,19 +873,25 @@ class RecordingExperimentExchange implements DmBridgeExchange {
         ),
         skills: component('', null),
         library: component('', null),
-        projection: component(projection, 'dm-full-v1'),
+        projection: component(projection, this.entry.experimentId === 'E04' ? `e04-${this.entry.armId}-v1` : 'dm-full-v1'),
         history: component(history, 'revision-history-v1'),
       },
       contractId: contract.contractId,
       fullStateHash: stateHash,
       transmittedViewHash: sha256(projection),
-      snapshotBytes: new TextEncoder().encode(projection).length,
-      deltaBytes: 0,
+      snapshotBytes: this.entry.experimentId === 'E04'
+        ? snapshotBytes
+        : new TextEncoder().encode(projection).length,
+      deltaBytes: this.entry.experimentId === 'E04' ? deltaBytes : 0,
+      bytesSent: this.entry.experimentId === 'E04'
+        ? transportBytes
+        : new TextEncoder().encode(JSON.stringify(wire)).length,
+      reconstructionFailureCount: reconstructionFailures,
       historySentCount: wire.history.length,
       historyOmittedCount: 0,
       cacheAgeMs: null,
       cacheRatio: fleet === null || fleet.tokenCounts === null || fleet.tokenCounts.input === 0 ? null : fleet.tokenCounts.cachedInput / fleet.tokenCounts.input,
-      reconstructionMatched: true,
+      reconstructionMatched: reconstructionFailures === 0,
       referencedCombatantIds: wire.projection.encounter.combatants.map((subject) => subject.id),
       referencedResourceIds: [],
       outputBytes: new TextEncoder().encode(source).length,
@@ -895,7 +997,7 @@ export async function runE01Table(
   entry: ExperimentScheduleEntry,
   config: VttExperimentConfig,
   preregistration: ExperimentPreregistration,
-): Promise<ExperimentTableRecordV2> {
+): Promise<ExperimentTableRecordV3> {
   const wallStarted = Date.now();
   const bridge = launchBridge(config, entry);
   const abort = new AbortController();
@@ -909,7 +1011,16 @@ export async function runE01Table(
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const endpoint = await bridge.endpoint;
-    const client = new LocalhostDmBridgeClient(endpoint, timeoutFetch(config.requestTimeoutMs), () => undefined, (value) => telemetry.push(value));
+    const projectionTransport = entry.experimentId === 'E04'
+      ? e04ArmDefinition(entry.armId).projectionMode
+      : 'full';
+    const client = new LocalhostDmBridgeClient(
+      endpoint,
+      timeoutFetch(config.requestTimeoutMs),
+      () => undefined,
+      (value) => telemetry.push(value),
+      projectionTransport,
+    );
     const encounterId: EncounterSessionId = encounterSessionId(`encounter:experiment:${entry.experimentId}:${String(entry.tableIndex)}:${String(entry.seed)}`);
     const model = { model: config.model, reasoningEffort: config.reasoningEffort };
     const sessionId = await client.createSession(encounterId, abort.signal, model);
@@ -1086,10 +1197,16 @@ export async function runE01Table(
       : entry.experimentId === 'E02' ? e02ArmDefinition(entry.armId).exampleCount : 3,
     instructionVersion: entry.experimentId === 'E01'
       ? 'e01-terse-v1'
-      : entry.experimentId === 'E02' ? 'e02-shared-v1' : `e03-${entry.armId}-v1`,
+      : entry.experimentId === 'E02'
+        ? 'e02-shared-v1'
+        : entry.experimentId === 'E03'
+          ? `e03-${entry.armId}-v1`
+          : 'e03-current-instructions-winner-v1',
     skillSetVersion: 'none-v1',
     planSurface: 'json_ast',
-    projectionMode: 'full',
+    projectionMode: entry.experimentId === 'E04'
+      ? e04ArmDefinition(entry.armId).projectionMode
+      : 'full',
     libraryVersion: 'none-v1',
     correctionBudget: 2,
     pricingVersion: 'unpriced-v1',
@@ -1163,6 +1280,145 @@ export async function runE01Table(
 
 export const runE02Table = runE01Table;
 export const runE03Table = runE01Table;
+export const runE04Table = runE01Table;
+
+export interface EarlyStopDecision {
+  readonly shouldStop: boolean;
+  readonly leaderArmId: string | null;
+  readonly completedTables: number;
+  readonly minimumTables: number;
+  readonly confidence: 0.99;
+  readonly method: 'paired_bootstrap' | 'two_proportion';
+  readonly reason: string;
+}
+
+function completedPairIds(
+  records: readonly ExperimentTableRecord[],
+  armIds: readonly string[],
+): readonly string[] {
+  const required = new Set(armIds);
+  const pairs = new Map<string, Set<string>>();
+  for (const record of records) {
+    const arms = pairs.get(record.pairId) ?? new Set<string>();
+    arms.add(record.armId);
+    pairs.set(record.pairId, arms);
+  }
+  return [...pairs]
+    .filter(([, arms]) => arms.size === required.size && [...required].every((arm) => arms.has(arm)))
+    .map(([pairId]) => pairId)
+    .sort();
+}
+
+function pairedBootstrapLowerBound(
+  differences: readonly number[],
+  confidence: number,
+): number {
+  if (differences.length === 0) return Number.NEGATIVE_INFINITY;
+  const rng = mulberry32(Number.parseInt(sha256(canonicalJson(differences)).slice(0, 8), 16));
+  const means: number[] = [];
+  for (let replicate = 0; replicate < 10_000; replicate += 1) {
+    let sum = 0;
+    for (let index = 0; index < differences.length; index += 1) {
+      const selected = differences[Math.floor(rng() * differences.length)];
+      if (selected === undefined) throw new Error('Bootstrap sample escaped its paired differences.');
+      sum += selected;
+    }
+    means.push(sum / differences.length);
+  }
+  means.sort((left, right) => left - right);
+  const lowerIndex = Math.floor(((1 - confidence) / 2) * (means.length - 1));
+  const lower = means[lowerIndex];
+  if (lower === undefined) throw new Error('Bootstrap confidence bound is missing.');
+  return lower;
+}
+
+function twoProportionLowerBound(
+  leaderSuccesses: number,
+  leaderCount: number,
+  competitorSuccesses: number,
+  competitorCount: number,
+): number {
+  if (leaderCount === 0 || competitorCount === 0) return Number.NEGATIVE_INFINITY;
+  const leader = leaderSuccesses / leaderCount;
+  const competitor = competitorSuccesses / competitorCount;
+  const standardError = Math.sqrt(
+    leader * (1 - leader) / leaderCount +
+    competitor * (1 - competitor) / competitorCount,
+  );
+  return leader - competitor - 2.575_829_303_548_900_4 * standardError;
+}
+
+export function evaluateEarlyStop(
+  records: readonly ExperimentTableRecord[],
+  options: {
+    readonly armIds: readonly string[];
+    readonly preregisteredTableCeiling: number;
+    readonly method: 'paired_bootstrap' | 'two_proportion';
+  },
+): EarlyStopDecision {
+  const confidence = 0.99 as const;
+  const pairIds = completedPairIds(records, options.armIds);
+  const pairSet = new Set(pairIds);
+  const pairedRecords = records.filter((record) => pairSet.has(record.pairId));
+  const completedTables = pairedRecords.length;
+  const minimumTables = Math.ceil(options.preregisteredTableCeiling / 2);
+  const pending = (reason: string, leaderArmId: string | null = null): EarlyStopDecision => ({
+    shouldStop: false,
+    leaderArmId,
+    completedTables,
+    minimumTables,
+    confidence,
+    method: options.method,
+    reason,
+  });
+  if (completedTables < minimumTables) return pending('minimum_table_fraction_not_reached');
+  if (options.armIds.length < 2) return pending('fewer_than_two_arms');
+  const scored = options.armIds.map((armId) => {
+    const armRecords = pairedRecords.filter((record) => record.armId === armId);
+    const value = options.method === 'paired_bootstrap'
+      ? armRecords.reduce((sum, record) => sum + record.completedRoundsPerHour, 0) / armRecords.length
+      : armRecords.filter((record) => record.status === 'completed').length / armRecords.length;
+    return { armId, value };
+  }).sort((left, right) => right.value - left.value || left.armId.localeCompare(right.armId));
+  const leader = scored[0];
+  if (leader === undefined) return pending('no_arm_observations');
+  if (scored[1]?.value === leader.value) {
+    return pending('leader_not_clear_at_99_percent', leader.armId);
+  }
+  for (const competitor of scored.slice(1)) {
+    let lowerBound: number;
+    if (options.method === 'paired_bootstrap') {
+      const differences = pairIds.map((pairId) => {
+        const leaderRecord = pairedRecords.find((record) => record.pairId === pairId && record.armId === leader.armId);
+        const competitorRecord = pairedRecords.find((record) => record.pairId === pairId && record.armId === competitor.armId);
+        if (leaderRecord === undefined || competitorRecord === undefined) {
+          throw new Error(`Completed pair ${pairId} is missing an arm record.`);
+        }
+        return leaderRecord.completedRoundsPerHour - competitorRecord.completedRoundsPerHour;
+      });
+      lowerBound = pairedBootstrapLowerBound(differences, confidence);
+    } else {
+      const leaderRecords = pairedRecords.filter((record) => record.armId === leader.armId);
+      const competitorRecords = pairedRecords.filter((record) => record.armId === competitor.armId);
+      lowerBound = twoProportionLowerBound(
+        leaderRecords.filter((record) => record.status === 'completed').length,
+        leaderRecords.length,
+        competitorRecords.filter((record) => record.status === 'completed').length,
+        competitorRecords.length,
+      );
+    }
+    if (lowerBound <= 0) return pending('leader_not_clear_at_99_percent', leader.armId);
+  }
+  return {
+    shouldStop: true,
+    leaderArmId: leader.armId,
+    completedTables,
+    minimumTables,
+    confidence,
+    method: options.method,
+    reason: `leader_${leader.armId}_clear_at_99_percent_after_${String(completedTables)}_tables`,
+  };
+}
 
 export interface VttExperimentRuntime {
   readonly runTable?: (
@@ -1178,6 +1434,8 @@ export interface ExperimentReport {
   readonly experimentVersion: '1';
   readonly preregistrationDigest: string;
   readonly tableCount: number;
+  readonly preregisteredTableCeiling: number;
+  readonly stoppingReason: string;
   readonly aggregates: ReturnType<typeof aggregateExperimentRecords>;
 }
 
@@ -1187,11 +1445,13 @@ function markdownReport(report: ExperimentReport): string {
     '',
     `Pre-registration: \`${report.preregistrationDigest}\``,
     '',
-    '| Arm | Tables | Completed | Aborted | Completion | Wall median (IQR) ms | Latency median (IQR) ms | Correction rate | Input / cached / output / reasoning tokens |',
-    '|---|---:|---:|---:|---:|---:|---:|---:|---:|',
+    `Stopping reason: ${report.stoppingReason}`,
+    '',
+    '| Arm | Tables | Completed | Aborted | Completion | Wall median (IQR) ms | Latency median (IQR) ms | Correction rate | Input / cached / output / reasoning tokens | Bytes sent | Reconstruction failures |',
+    '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
   ];
   for (const arm of report.aggregates) {
-    lines.push(`| ${arm.armId} | ${String(arm.tableCount)} | ${String(arm.completedCount)} | ${String(arm.abortedCount)} | ${(arm.completionRate * 100).toFixed(1)}% | ${arm.totalWallMs.median?.toFixed(1) ?? 'n/a'} (${arm.totalWallMs.iqr?.toFixed(1) ?? 'n/a'}) | ${arm.latencyMs.median?.toFixed(1) ?? 'n/a'} (${arm.latencyMs.iqr?.toFixed(1) ?? 'n/a'}) | ${(arm.correctionRate * 100).toFixed(2)}% | ${String(arm.tokenTotals.input)} / ${String(arm.tokenTotals.cachedInput)} / ${String(arm.tokenTotals.output)} / ${String(arm.tokenTotals.reasoning)} |`);
+    lines.push(`| ${arm.armId} | ${String(arm.tableCount)} | ${String(arm.completedCount)} | ${String(arm.abortedCount)} | ${(arm.completionRate * 100).toFixed(1)}% | ${arm.totalWallMs.median?.toFixed(1) ?? 'n/a'} (${arm.totalWallMs.iqr?.toFixed(1) ?? 'n/a'}) | ${arm.latencyMs.median?.toFixed(1) ?? 'n/a'} (${arm.latencyMs.iqr?.toFixed(1) ?? 'n/a'}) | ${(arm.correctionRate * 100).toFixed(2)}% | ${String(arm.tokenTotals.input)} / ${String(arm.tokenTotals.cachedInput)} / ${String(arm.tokenTotals.output)} / ${String(arm.tokenTotals.reasoning)} | ${String(arm.bytesSent)} | ${String(arm.reconstructionFailures)} |`);
   }
   return `${lines.join('\n')}\n`;
 }
@@ -1207,7 +1467,8 @@ export async function runVttExperiment(
   await writeFile(`${config.outDirectory}/preregistration.json`, canonicalJson(preregistration), { encoding: 'utf8', flag: 'wx' });
   const records: ExperimentTableRecord[] = [];
   const execute = runtime.runTable ?? runE01Table;
-  for (const entry of preregistration.runOrder) {
+  let earlyStop: EarlyStopDecision | null = null;
+  for (const [scheduleIndex, entry] of preregistration.runOrder.entries()) {
     const record = decodeExperimentTableRecord(await execute(entry, config, preregistration));
     if (
       record.experimentId !== entry.experimentId || record.armId !== entry.armId ||
@@ -1223,6 +1484,19 @@ export async function runVttExperiment(
       canonicalJson(record),
       { encoding: 'utf8', flag: 'wx' },
     );
+    const nextEntry = preregistration.runOrder[scheduleIndex + 1];
+    const pairedSeedBlockCompleted = nextEntry === undefined || nextEntry.pairId !== entry.pairId;
+    if (preregistration.earlyStopRule.enabled && pairedSeedBlockCompleted) {
+      const decision = evaluateEarlyStop(records, {
+        armIds: preregistration.arms.map((arm) => arm.id),
+        preregisteredTableCeiling: preregistration.earlyStopRule.preregisteredTableCeiling,
+        method: preregistration.earlyStopRule.method,
+      });
+      if (decision.shouldStop) {
+        earlyStop = decision;
+        break;
+      }
+    }
   }
   const report: ExperimentReport = {
     schemaVersion: 1,
@@ -1230,6 +1504,8 @@ export async function runVttExperiment(
     experimentVersion: EXPERIMENT_REGISTRY[config.experimentId].version,
     preregistrationDigest: preregistration.digest,
     tableCount: records.length,
+    preregisteredTableCeiling: preregistration.earlyStopRule.preregisteredTableCeiling,
+    stoppingReason: earlyStop?.reason ?? 'preregistered_table_ceiling_reached',
     aggregates: aggregateExperimentRecords(records),
   };
   await writeFile(`${config.outDirectory}/report.json`, canonicalJson(report), { encoding: 'utf8', flag: 'wx' });
@@ -1286,8 +1562,8 @@ export function decodeVttExperimentArguments(argv: readonly string[]): VttExperi
   ]);
   for (const name of values.keys()) if (!allowed.has(name)) throw new TypeError(`Unknown option --${name}.`);
   const experiment = optionText(values, 'experiment');
-  if (experiment !== 'E01' && experiment !== 'E02' && experiment !== 'E03') {
-    throw new TypeError('--experiment must name a registered experiment (E01, E02, or E03).');
+  if (experiment !== 'E01' && experiment !== 'E02' && experiment !== 'E03' && experiment !== 'E04') {
+    throw new TypeError('--experiment must name a registered experiment (E01, E02, E03, or E04).');
   }
   const effort = optionText(values, 'effort', DEFAULT_DM_REASONING_EFFORT);
   if (effort !== 'low' && effort !== 'medium' && effort !== 'high' && effort !== 'xhigh') {

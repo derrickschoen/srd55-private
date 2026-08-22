@@ -129,6 +129,20 @@ function endpointDistance(
   return endpoint === undefined ? Number.POSITIVE_INFINITY : gridDistance(endpoint, destination);
 }
 
+function pathDistance(
+  origin: { readonly column: number; readonly row: number },
+  command: EncounterCommand,
+): number {
+  if (command.type !== 'move') return Number.POSITIVE_INFINITY;
+  let previous = origin;
+  let distance = 0;
+  for (const cell of command.path) {
+    distance += gridDistance(previous, cell);
+    previous = cell;
+  }
+  return distance;
+}
+
 function commandActor(command: EncounterCommand): CombatantId | null {
   return 'actor' in command ? command.actor : null;
 }
@@ -140,13 +154,25 @@ function selectPlanAction(
   legal: readonly EncounterCommand[],
 ): EncounterCommand | null {
   const actorLegal = legal.filter((command) => commandActor(command) === actor);
+  const acting = visibleSubject(state, actor);
   switch (action.kind) {
-    case 'attack':
+    case 'attack': {
+      const target = selectedTarget(action.target, actor, state);
+      return target === null
+        ? null
+        : actorLegal.find((command) => command.type === 'attack' && command.target === target &&
+          (action.attackId === undefined || command.attackId === action.attackId)) ?? null;
+    }
     case 'force_save': {
       const target = selectedTarget(action.target, actor, state);
       return target === null
         ? null
-        : actorLegal.find((command) => command.type === action.kind && command.target === target) ?? null;
+        : actorLegal.find((command) => command.type === 'force_save' && command.target === target) ?? null;
+    }
+    case 'cast_spell': {
+      const target = action.target === null ? null : selectedTarget(action.target, actor, state);
+      return actorLegal.find((command) => command.type === 'cast_spell' && command.spellId === action.spellId &&
+        (target === null || command.targets.includes(target))) ?? null;
     }
     case 'bonus_attack': {
       const target = selectedTarget(action.target, actor, state);
@@ -162,12 +188,14 @@ function selectPlanAction(
       if (target === null) return null;
       const destination = visibleSubject(state, target).position;
       return actorLegal
-        .filter((command) => command.type === 'move')
+        .filter((command) => command.type === 'move' &&
+          (action.maximumFeet === undefined || pathDistance(acting.position, command) <= action.maximumFeet))
         .sort((left, right) => endpointDistance(left, destination) - endpointDistance(right, destination))[0] ?? null;
     }
     case 'retreat_toward':
       return actorLegal
-        .filter((command) => command.type === 'move')
+        .filter((command) => command.type === 'move' &&
+          (action.maximumFeet === undefined || pathDistance(acting.position, command) <= action.maximumFeet))
         .sort((left, right) => endpointDistance(left, action.destination) - endpointDistance(right, action.destination))[0] ?? null;
     case 'use_action':
       return actorLegal.find((command) =>

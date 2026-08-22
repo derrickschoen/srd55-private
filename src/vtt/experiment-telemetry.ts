@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { decisionProgramSchema } from './dm-bridge/round-plan-contract';
 
-export const VTT_EXPERIMENT_SCHEMA_VERSION = 2 as const;
+export const VTT_EXPERIMENT_SCHEMA_VERSION = 3 as const;
 export const VTT_EXPERIMENT_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 const text = z.string().min(1);
@@ -57,6 +57,8 @@ export const experimentCallRecordSchema = z.strictObject({
   transmittedViewHash: digest,
   snapshotBytes: nonNegativeInteger,
   deltaBytes: nonNegativeInteger,
+  bytesSent: nonNegativeInteger,
+  reconstructionFailureCount: nonNegativeInteger,
   historySentCount: nonNegativeInteger,
   historyOmittedCount: nonNegativeInteger,
   cacheAgeMs: nullableNonNegative,
@@ -132,6 +134,11 @@ export const experimentCallRecordSchema = z.strictObject({
   parsedOrCompiled: z.unknown().nullable(),
   expandedLibraryForm: z.unknown().nullable(),
   replayProof: z.unknown().nullable(),
+});
+
+const experimentCallRecordV2Schema = experimentCallRecordSchema.omit({
+  bytesSent: true,
+  reconstructionFailureCount: true,
 });
 
 export const rolloutInputCaptureV1Schema = z.strictObject({
@@ -275,18 +282,26 @@ const experimentTableRecordShape = {
   totalWallMs: nonNegative,
   idleWaitMs: nonNegative,
   estimatedTableCostUsd: nullableNonNegative,
-  calls: z.array(experimentCallRecordSchema),
 } satisfies z.ZodRawShape;
 
 export const experimentTableRecordV1Schema = z.strictObject({
   schemaVersion: z.literal(1),
   ...experimentTableRecordShape,
+  calls: z.array(experimentCallRecordV2Schema),
   quality: experimentQualityBlockV1Schema,
+});
+
+export const experimentTableRecordV2Schema = z.strictObject({
+  schemaVersion: z.literal(2),
+  ...experimentTableRecordShape,
+  calls: z.array(experimentCallRecordV2Schema),
+  quality: experimentQualityBlockSchema,
 });
 
 export const experimentTableRecordSchema = z.strictObject({
   schemaVersion: z.literal(VTT_EXPERIMENT_SCHEMA_VERSION),
   ...experimentTableRecordShape,
+  calls: z.array(experimentCallRecordSchema),
   quality: experimentQualityBlockSchema,
 });
 
@@ -295,8 +310,9 @@ export type ExperimentCallRecord = z.infer<typeof experimentCallRecordSchema>;
 export type RolloutInputCapture = z.infer<typeof rolloutInputCaptureSchema>;
 export type ExperimentQualityBlock = z.infer<typeof experimentQualityBlockSchema>;
 export type ExperimentTableRecordV1 = z.infer<typeof experimentTableRecordV1Schema>;
-export type ExperimentTableRecordV2 = z.infer<typeof experimentTableRecordSchema>;
-export type ExperimentTableRecord = ExperimentTableRecordV1 | ExperimentTableRecordV2;
+export type ExperimentTableRecordV2 = z.infer<typeof experimentTableRecordV2Schema>;
+export type ExperimentTableRecordV3 = z.infer<typeof experimentTableRecordSchema>;
+export type ExperimentTableRecord = ExperimentTableRecordV1 | ExperimentTableRecordV2 | ExperimentTableRecordV3;
 
 export function decodeExperimentTableRecord(value: unknown): ExperimentTableRecord {
   if (typeof value !== 'object' || value === null || !('schemaVersion' in value)) {
@@ -314,7 +330,9 @@ export function decodeExperimentTableRecord(value: unknown): ExperimentTableReco
   switch (version) {
     case 1:
       return experimentTableRecordV1Schema.parse(value);
-    case VTT_EXPERIMENT_SCHEMA_VERSION:
+    case 2:
+      return experimentTableRecordV2Schema.parse(value);
+    case 3:
       return experimentTableRecordSchema.parse(value);
   }
   throw new Error('Experiment table schema-version dispatch is incomplete.');
@@ -337,6 +355,8 @@ export interface ExperimentArmAggregate {
   readonly completedRoundsPerHour: DistributionSummary;
   readonly latencyMs: DistributionSummary;
   readonly correctionRate: number;
+  readonly bytesSent: number;
+  readonly reconstructionFailures: number;
   readonly tokenTotals: {
     readonly input: number;
     readonly cachedInput: number;
@@ -389,6 +409,22 @@ export function aggregateExperimentRecords(
       correctionRate: dmCalls === 0
         ? 0
         : tables.reduce((sum, record) => sum + record.correctionCount, 0) / dmCalls,
+      bytesSent: calls.reduce(
+        (sum, call) => {
+          const value: unknown = 'bytesSent' in call ? call.bytesSent : 0;
+          return sum + (typeof value === 'number' ? value : 0);
+        },
+        0,
+      ),
+      reconstructionFailures: calls.reduce(
+        (sum, call) => {
+          const value: unknown = 'reconstructionFailureCount' in call
+            ? call.reconstructionFailureCount
+            : 0;
+          return sum + (typeof value === 'number' ? value : 0);
+        },
+        0,
+      ),
       tokenTotals: {
         input: calls.reduce((sum, call) => sum + call.inputTokens, 0),
         cachedInput: calls.reduce((sum, call) => sum + call.cachedInputTokens, 0),
