@@ -466,6 +466,8 @@ describe('the output layout', () => {
       layout.tier1Path,
       layout.tier2Path,
       layout.reportPath,
+      layout.contentPackPath,
+      layout.contentPackReportPath,
     ]) {
       expect(path.startsWith('/somewhere/scraped')).toBe(true);
       expect(isScrapedFilename(path)).toBe(true);
