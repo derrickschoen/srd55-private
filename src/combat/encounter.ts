@@ -50,7 +50,7 @@ import {
   type PersistentAreaHook,
   type PersistentAreaInput,
 } from './persistent-areas';
-import { rollDice, rollDie, type Rng } from './random';
+import { rollDice, rollDie, transactionalRng, type Rng, type TransactionalRng } from './random';
 import {
   applyDamageResponse,
   resolveAttackRoll,
@@ -1216,7 +1216,7 @@ function targetDamageResponses(
 
 interface ReductionContext {
   state: EncounterState;
-  readonly rng: Rng;
+  readonly rng: TransactionalRng;
   readonly events: EncounterEvent[];
 }
 
@@ -4401,7 +4401,7 @@ function resolvePreparedDamageOperation(
   saveDc: number,
   instances: readonly { readonly damage: DamageRequest; readonly thresholdRider: ThresholdDamageRider | null }[],
   identity: string,
-): void {
+): SpellOperationOutcome {
   const saveSucceeded = delivery.kind === 'save' && resolveTargetSave(
     context,
     source,
@@ -4411,6 +4411,7 @@ function resolvePreparedDamageOperation(
     delivery.rollMode,
     null,
   ).outcome === 'success';
+  let dealtDamage = false;
   for (const [index, instance] of instances.entries()) {
     const result = resolveTargetDamage(context, source, target, instance.damage);
     const amount = saveSucceeded
@@ -4418,10 +4419,12 @@ function resolvePreparedDamageOperation(
         ? Math.floor(result.total / 2)
         : 0
       : result.total;
+    if (amount > 0) dealtDamage = true;
     applyDamage(context, source, target, amount);
     concentrationCheck(context, target, amount);
     applyThresholdDamageRider(context, source, target, instance.thresholdRider, amount, `${identity}:${String(index)}`);
   }
+  return delivery.kind === 'save' || dealtDamage ? 'applied' : 'no_op';
 }
 
 function applyDamageOperation(
@@ -4432,12 +4435,13 @@ function applyDamageOperation(
   saveDc: number,
   identity: string,
   cast: DamageScalingContext,
-): void {
+): SpellOperationOutcome {
   if (targets.length === 0) throw new EncounterRuleError('A damage operation requires at least one target.');
   const resolveNow = operation.timing.kind === 'immediate' || operation.timing.initial === 'immediate';
+  const immediateOutcomes: SpellOperationOutcome[] = [];
   if (resolveNow) {
     for (const target of targets) {
-      resolvePreparedDamageOperation(
+      immediateOutcomes.push(resolvePreparedDamageOperation(
         context,
         source,
         target,
@@ -4445,10 +4449,10 @@ function applyDamageOperation(
         saveDc,
         preparedDamageOperationInstances(context.state, target, operation, cast),
         `${identity}:immediate:${String(target)}`,
-      );
+      ));
     }
   }
-  if (operation.timing.kind !== 'recurring') return;
+  if (operation.timing.kind !== 'recurring') return combinedSpellOperationOutcome(immediateOutcomes);
   if (operation.timing.concentration) endConcentration(context, source, 'concentration_replaced');
   const created: EncounterEffectId[] = [];
   for (const target of targets) {
@@ -4490,6 +4494,7 @@ function applyDamageOperation(
         : effect),
     };
   }
+  return 'applied';
 }
 
 /**
@@ -4598,11 +4603,13 @@ function applyConditionLifecycleOperation(
   command: SpellCastCommand,
   targets: readonly CombatantId[],
   operation: ConditionLifecycleOperation,
-): void {
+): SpellOperationOutcome {
   const concentration = operation.duration.kind === 'concentration' ||
     operation.duration.kind === 'fixed_rounds_or_concentration';
   if (concentration) endConcentration(context, command.actor, 'concentration_replaced');
   const created: EncounterEffectId[] = [];
+  let refusedTargets = 0;
+  let appliedTargets = 0;
   for (const target of targets) {
     const conditionImmunities = combatant(context.state, target).profile.rules.conditionImmunities;
     const blockingImmunity = conditionImmunities.includes(operation.condition)
@@ -4615,6 +4622,7 @@ function applyConditionLifecycleOperation(
         type: 'condition_application_refused', source: command.actor, target,
         condition: operation.condition, immunity: blockingImmunity,
       });
+      refusedTargets += 1;
       continue;
     }
     if (
@@ -4623,7 +4631,12 @@ function applyConditionLifecycleOperation(
         context, command.actor, target, operation.initialSave.ability,
         command.saveDc, operation.initialSave.rollMode, null,
       ).outcome !== operation.initialSave.applyOn
-    ) continue;
+    ) {
+      appliedTargets += 1;
+      continue;
+    }
+
+    appliedTargets += 1;
 
     const identity = effectStackingIdentity(`condition-lifecycle:${definition.id}:${operation.condition}:${String(target)}`);
     if (extendLifecycleDuration(context, command.actor, identity, operation)) continue;
@@ -4661,6 +4674,8 @@ function applyConditionLifecycleOperation(
         : effect),
     };
   }
+  if (appliedTargets > 0) return 'applied';
+  return refusedTargets > 0 ? 'refused' : 'no_op';
 }
 
 function resolvedPersistentAreaSpellEffect(
@@ -4709,9 +4724,11 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
   executeSpellOperation(context, definition, command, targets, definition.operation);
 }
 
-function compositionSemanticState(state: EncounterState): string {
-  const { eventLog: _eventLog, nextEventSequence: _nextEventSequence, ...semanticState } = state;
-  return canonicalJson(semanticState);
+export type SpellOperationOutcome = 'applied' | 'refused' | 'no_op';
+
+function combinedSpellOperationOutcome(outcomes: readonly SpellOperationOutcome[]): SpellOperationOutcome {
+  if (outcomes.includes('refused')) return 'refused';
+  return outcomes.includes('applied') ? 'applied' : 'no_op';
 }
 
 function compositionTargets(
@@ -4731,14 +4748,13 @@ function compositionTargets(
 }
 
 function compositionOrder(operation: Extract<SpellOperation, { readonly kind: 'composition' }>): readonly number[] {
-  if (operation.ordering === 'declaration_order') return operation.steps.map((_step, index) => index);
-  const expected = operation.steps.map((_step, index) => index);
-  if (
-    operation.order.length !== expected.length ||
-    new Set(operation.order).size !== expected.length ||
-    operation.order.some((index) => !Number.isSafeInteger(index) || index < 0 || index >= expected.length)
-  ) throw new EncounterRuleError('A composition explicit order must be a zero-based permutation of its steps.');
+  if (operation.ordering === 'declaration_order') return [0, 1];
   return operation.order;
+}
+
+interface CompositionStepResolution {
+  readonly outcome: SpellOperationOutcome;
+  readonly refusalReason: 'operation_refused' | 'encounter_rule_refusal' | null;
 }
 
 function executeCompositionStep(
@@ -4747,23 +4763,25 @@ function executeCompositionStep(
   command: SpellCastCommand,
   inheritedTargets: readonly CombatantId[],
   step: CompositionStep,
-): 'applied' | 'operation_refused' | 'encounter_rule_refusal' {
+): CompositionStepResolution {
   const stateBefore = context.state;
   const eventCountBefore = context.events.length;
-  const semanticBefore = compositionSemanticState(stateBefore);
+  const rngCheckpoint = context.rng.checkpoint();
   try {
     const targets = compositionTargets(context, definition, command, inheritedTargets, step.targetResolution);
-    executeSpellOperation(context, definition, { ...command, targets }, targets, step.operation);
+    const outcome = executeSpellOperation(context, definition, { ...command, targets }, targets, step.operation);
+    if (outcome !== 'refused') return { outcome, refusalReason: null };
   } catch (error) {
     if (!(error instanceof EncounterRuleError)) throw error;
     context.state = stateBefore;
     context.events.splice(eventCountBefore);
-    return 'encounter_rule_refusal';
+    context.rng.restoreCheckpoint(rngCheckpoint);
+    return { outcome: 'refused', refusalReason: 'encounter_rule_refusal' };
   }
-  if (compositionSemanticState(context.state) !== semanticBefore) return 'applied';
   context.state = stateBefore;
   context.events.splice(eventCountBefore);
-  return 'operation_refused';
+  context.rng.restoreCheckpoint(rngCheckpoint);
+  return { outcome: 'refused', refusalReason: 'operation_refused' };
 }
 
 function executeSpellOperation(
@@ -4772,35 +4790,45 @@ function executeSpellOperation(
   command: SpellCastCommand,
   targets: readonly CombatantId[],
   operation: SpellOperation,
-): void {
+): SpellOperationOutcome {
   switch (operation.kind) {
     case 'composition': {
       const compositionState = context.state;
       const compositionEventCount = context.events.length;
+      const compositionRngCheckpoint = context.rng.checkpoint();
+      const outcomes: SpellOperationOutcome[] = [];
       for (const stepIndex of compositionOrder(operation)) {
         const step = operation.steps[stepIndex];
         if (step === undefined) throw new EncounterRuleError('A composition order referenced a missing step.');
-        const outcome = executeCompositionStep(context, definition, command, targets, step);
-        if (outcome === 'applied') continue;
+        const resolution = executeCompositionStep(context, definition, command, targets, step);
+        outcomes.push(resolution.outcome);
+        if (resolution.outcome !== 'refused') {
+          emit(context, {
+            type: 'composition_step_resolved', caster: command.actor, spellId: definition.id,
+            stepIndex, outcome: resolution.outcome, propagation: operation.onRefusal,
+          });
+          continue;
+        }
         if (operation.onRefusal === 'abort') {
           context.state = compositionState;
           context.events.splice(compositionEventCount);
+          context.rng.restoreCheckpoint(compositionRngCheckpoint);
         }
         emit(context, {
-          type: 'composition_step_refused', caster: command.actor, spellId: definition.id,
-          stepIndex, propagation: operation.onRefusal, reason: outcome,
+          type: 'composition_step_resolved', caster: command.actor, spellId: definition.id,
+          stepIndex, outcome: 'refused', propagation: operation.onRefusal,
+          reason: resolution.refusalReason as 'operation_refused' | 'encounter_rule_refusal',
         });
-        if (operation.onRefusal === 'abort') return;
+        if (operation.onRefusal === 'abort') return 'refused';
       }
-      return;
+      return combinedSpellOperationOutcome(outcomes);
     }
     case 'caster_choice': {
       const mode = operation.modes.find((candidate) => candidate.mode === command.selectedOption);
       if (mode === undefined) {
         throw new EncounterRuleError(`${definition.name} requires one of its declared caster modes.`);
       }
-      executeSpellOperation(context, definition, command, targets, mode.operation);
-      return;
+      return executeSpellOperation(context, definition, command, targets, mode.operation);
     }
     case 'random_branch': {
       const covered = new Set<number>();
@@ -4821,16 +4849,18 @@ function executeSpellOperation(
         throw new EncounterRuleError(`${definition.name} has a gap in its random-branch table.`);
       }
       const subjects = targets.length === 0 ? [command.actor] : targets;
+      const outcomes: SpellOperationOutcome[] = [];
       for (const target of subjects) {
         const rolled = rollDie(context.rng, dieSides(operation.dieSides));
         const branch = operation.branches.find((candidate) =>
           rolled >= candidate.minimum && rolled <= candidate.maximum);
         if (branch === undefined) throw new EncounterRuleError(`${definition.name} has no branch for roll ${String(rolled)}.`);
-        executeSpellOperation(context, definition, { ...command, targets: [target] }, [target], branch.operation);
+        outcomes.push(executeSpellOperation(context, definition, { ...command, targets: [target] }, [target], branch.operation));
       }
-      return;
+      return combinedSpellOperationOutcome(outcomes);
     }
-    case 'target_branch':
+    case 'target_branch': {
+      const outcomes: SpellOperationOutcome[] = [];
       for (const target of targets) {
         const subject = combatant(context.state, target);
         const branch = operation.branches.find((candidate) => {
@@ -4841,10 +4871,11 @@ function executeSpellOperation(
         });
         const selected = branch?.operation ?? operation.otherwise;
         if (selected !== null) {
-          executeSpellOperation(context, definition, { ...command, targets: [target] }, [target], selected);
+          outcomes.push(executeSpellOperation(context, definition, { ...command, targets: [target] }, [target], selected));
         }
       }
-      return;
+      return combinedSpellOperationOutcome(outcomes);
+    }
     case 'reevaluated_branch': {
       const current = context.state.reevaluatedBranches ?? [];
       let sequence = current.reduce((maximum, candidate) => Math.max(maximum, candidate.sequence), 0) + 1;
@@ -4855,11 +4886,10 @@ function executeSpellOperation(
         operation: structuredClone(operation.operation),
       }));
       context.state = { ...context.state, reevaluatedBranches: [...current, ...scheduled] };
-      return;
+      return scheduled.length === 0 ? 'no_op' : 'applied';
     }
     case 'condition_lifecycle':
-      applyConditionLifecycleOperation(context, definition, command, targets, operation);
-      return;
+      return applyConditionLifecycleOperation(context, definition, command, targets, operation);
     case 'roll_dice_modifier': {
       const payload: EffectPayload = operation.application === 'chosen_skill_checks'
         ? {
@@ -4883,14 +4913,14 @@ function executeSpellOperation(
                 sign: operation.sign, application: operation.application,
               };
       applySpellEffect(context, definition, command, modifierEffectData(payload, operation.duration), targets);
-      return;
+      return 'applied';
     }
     case 'damage_dice_reduction':
       applySpellEffect(context, definition, command, modifierEffectData({
         kind: 'damage_reduction', damageType: selectedModifierDamageType(definition, command, operation.damageType),
         count: operation.die.count, sides: operation.die.sides, oncePerTurn: true,
       }, operation.duration), targets);
-      return;
+      return 'applied';
     case 'roll_mode_modifier': {
       const appliesTo = operation.roll === 'attack_roll'
         ? operation.scope.kind === 'attacks_against_target'
@@ -4902,7 +4932,7 @@ function executeSpellOperation(
       applySpellEffect(context, definition, command, modifierEffectData({
         kind: 'attack_roll_mode_modifier', mode: operation.mode, appliesTo,
       }, operation.duration), targets);
-      return;
+      return 'applied';
     }
     case 'armor_class_modifier':
       applySpellEffect(context, definition, command, modifierEffectData(
@@ -4911,14 +4941,14 @@ function executeSpellOperation(
           : { kind: 'armor_class_modifier', minimum: operation.modification.minimum },
         operation.duration,
       ), targets);
-      return;
+      return 'applied';
     case 'damage_response_modifier':
       applySpellEffect(context, definition, command, modifierEffectData({
         kind: 'damage_resistances',
         damageTypes: [selectedModifierDamageType(definition, command, operation.damageType)],
         response: operation.response,
       }, operation.duration), targets);
-      return;
+      return 'applied';
     case 'targeted_defense_modifier': {
       if (command.modifierSource === undefined) {
         throw new EncounterRuleError(`${definition.name} requires a selected attacker for its targeted defense.`);
@@ -4928,10 +4958,10 @@ function executeSpellOperation(
         kind: 'armor_class_modifier', amount: operation.armorClassBonus,
         againstAttacker: command.modifierSource,
       }, operation.duration), targets);
-      return;
+      return 'applied';
     }
     case 'damage_operation':
-      applyDamageOperation(
+      return applyDamageOperation(
         context,
         command.actor,
         targets,
@@ -4940,7 +4970,6 @@ function executeSpellOperation(
         `spell:${definition.id}:${String(context.state.revision)}`,
         { definition, command },
       );
-      return;
     case 'armed_weapon_hit_rider': {
       const packet = operation.damage;
       if (packet !== null && (packet.scaling.kind !== 'none' || packet.thresholdRider !== null)) {
@@ -4986,7 +5015,7 @@ function executeSpellOperation(
         durationRounds: operation.durationRounds,
         expiresAt: 'source_start',
       }, [command.actor]);
-      return;
+      return 'applied';
     }
     case 'persistent_area': {
       const selected = [...new Set([
@@ -5038,7 +5067,7 @@ function executeSpellOperation(
           );
         }
       }
-      return;
+      return 'applied';
     }
     case 'world_operations': {
       const areaCells = (): readonly GridCell[] => {
@@ -5138,7 +5167,7 @@ function executeSpellOperation(
           }
         }
       }
-      return;
+      return 'applied';
     }
     case 'teleport': {
       const destination = command.spatialPoint;
@@ -5167,7 +5196,7 @@ function executeSpellOperation(
       reevaluatePersistentAreaMembership(context);
       const movement = combatant(context.state, mover).turn.movement;
       emit(context, { type: 'movement_completed', combatant: mover, path: [{ ...destination }], spent: feet(0), remaining: movement.remaining });
-      return;
+      return 'applied';
     }
     case 'forced_movement': {
       const origin = operation.origin === 'caster'
@@ -5183,7 +5212,7 @@ function executeSpellOperation(
         }
         forceMove(context, origin, command.actor, target, operation.distanceFeet, operation.direction);
       }
-      return;
+      return 'applied';
     }
     case 'movement_mode': {
       const before = new Map(targets.map((target) => [target, effectiveSpeed(context.state, target)] as const));
@@ -5212,7 +5241,7 @@ function executeSpellOperation(
           },
         });
       }
-      return;
+      return 'applied';
     }
     case 'movement_region': {
       assertEnvironmentRegion(context.state.bounds, operation.region);
@@ -5233,7 +5262,7 @@ function executeSpellOperation(
             : difficultTerrainRegions,
         },
       };
-      return;
+      return 'applied';
     }
     case 'speed_modification': {
       const before = new Map(targets.map((target) => [target, effectiveSpeed(context.state, target)] as const));
@@ -5261,7 +5290,7 @@ function executeSpellOperation(
           },
         });
       }
-      return;
+      return 'applied';
     }
     case 'attack_damage':
       for (const target of targets) {
@@ -5275,7 +5304,7 @@ function executeSpellOperation(
           operation.rider,
         );
       }
-      return;
+      return 'applied';
     case 'attack_then_save_damage': {
       const primary = targets[0] as CombatantId;
       const burstTargets = placedAreaTargets(
@@ -5312,7 +5341,7 @@ function executeSpellOperation(
           context, command.actor, target, operation.saveDamageType, operation.saveDice.sides, rawAmount,
         );
       }
-      return;
+      return 'applied';
     }
     case 'attack_damage_over_time': {
       const target = targets[0] as CombatantId;
@@ -5331,7 +5360,7 @@ function executeSpellOperation(
           context, command.actor, target, operation.damageType, operation.initialDice.sides,
           Math.floor(rolled.total / 2),
         );
-        return;
+        return 'applied';
       }
       applySpellEffect(context, definition, command, {
         payload: {
@@ -5348,7 +5377,7 @@ function executeSpellOperation(
         durationRounds: 1,
         expiresAt: 'target_end',
       }, [target]);
-      return;
+      return 'applied';
     }
     case 'hit_point_maximum_increase': {
       const slotDelta = (command.slotLevel as number) - definition.level;
@@ -5361,7 +5390,7 @@ function executeSpellOperation(
         const subject = combatant(context.state, target);
         context.state = replaceCombatant(context.state, { ...subject, hitPoints: subject.hitPoints + amount });
       }
-      return;
+      return 'applied';
     }
     case 'save_damage': {
       const roll = resolveDamage({
@@ -5382,7 +5411,7 @@ function executeSpellOperation(
           forceMove(context, token(context.state, command.actor).position, command.actor, target, operation.pushFeetOnFailure, 'away');
         }
       }
-      return;
+      return 'applied';
     }
     case 'save_multi_damage': {
       const rolled = operation.terms.map((term) => ({
@@ -5404,7 +5433,7 @@ function executeSpellOperation(
         }
       }
       if (operation.effect !== null) applySpellEffect(context, definition, command, operation.effect, [command.actor]);
-      return;
+      return 'applied';
     }
     case 'save_damage_over_time': {
       const initial = resolveDamage({
@@ -5431,7 +5460,7 @@ function executeSpellOperation(
           }, [target]);
         }
       }
-      return;
+      return 'applied';
     }
     case 'save_damage_and_effect': {
       const rolled = resolveDamage({
@@ -5447,13 +5476,13 @@ function executeSpellOperation(
         applySpellDamageAmount(context, command.actor, target, operation.damageType, operation.dice.sides, amount);
       }
       applySpellEffect(context, definition, command, operation.effect, [command.actor]);
-      return;
+      return 'applied';
     }
     case 'healing': {
       const rolled = rollDice(context.rng, scaledDiceExpression(definition, operation.dice, command));
       const amount = rolled.total + (operation.addSpellcastingModifier ? command.spellcastingModifier : 0);
       for (const target of targets) applyHealing(context, command.actor, target, Math.max(0, amount));
-      return;
+      return 'applied';
     }
     case 'fixed_healing': {
       const amount = operation.baseAmount + operation.additionalPerSlot *
@@ -5462,16 +5491,16 @@ function executeSpellOperation(
         applyHealing(context, command.actor, target, amount);
         removeSpellConditions(context, target, operation.removesConditions);
       }
-      return;
+      return 'applied';
     }
     case 'temporary_hit_points': {
       const rolled = rollDice(context.rng, scaledDiceExpression(definition, operation.dice, command));
       grantTemporaryHitPoints(context, command.actor, rolled.total);
-      return;
+      return 'applied';
     }
     case 'effect':
       applySpellEffect(context, definition, command, operation.effect, targets);
-      return;
+      return 'applied';
     case 'save_effect': {
       const eligible = operation.excludeCaster
         ? targets.filter((target) => target !== command.actor)
@@ -5481,7 +5510,7 @@ function executeSpellOperation(
         : eligible.filter((target) =>
           resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, operation.rollMode, null).outcome === 'failure');
       applySpellEffect(context, definition, command, operation.effect, failed);
-      return;
+      return 'applied';
     }
     case 'save_push': {
       for (const target of targets) {
@@ -5491,7 +5520,7 @@ function executeSpellOperation(
         }
       }
       applySpellEffect(context, definition, command, operation.effect, targets);
-      return;
+      return 'applied';
     }
     case 'remove_condition': {
       const selected = command.selectedOption;
@@ -5499,12 +5528,12 @@ function executeSpellOperation(
         throw new EncounterRuleError(`${definition.name} requires a removable condition selection.`);
       }
       for (const target of targets) removeSpellConditions(context, target, [selected]);
-      return;
+      return 'applied';
     }
     case 'remove_condition_and_effect':
       for (const target of targets) removeSpellConditions(context, target, [operation.condition]);
       applySpellEffect(context, definition, command, operation.effect, targets);
-      return;
+      return 'applied';
     case 'save_branch_effect':
       for (const target of targets) {
         const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
@@ -5516,12 +5545,12 @@ function executeSpellOperation(
           [target],
         );
       }
-      return;
+      return 'applied';
     case 'reaction_save_cancel':
       for (const target of targets) {
         resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
       }
-      return;
+      return 'applied';
     case 'dispel_magic': {
       const automaticLevel = Math.max(operation.baseAutomaticLevel, command.slotLevel as number);
       const matching = context.state.effects.filter((candidate) => {
@@ -5534,13 +5563,13 @@ function executeSpellOperation(
         return affected !== null && affected.level <= automaticLevel;
       });
       endEffects(context, new Set(matching.map((candidate) => candidate.id)), 'dispelled');
-      return;
+      return 'applied';
     }
     case 'remove_curse': {
       const matching = context.state.effects.filter((candidate) =>
         candidate.targets.some((target) => targets.includes(target)) && candidate.payload.kind === 'bestow_curse');
       endEffects(context, new Set(matching.map((candidate) => candidate.id)), 'dispelled');
-      return;
+      return 'applied';
     }
     case 'revive':
       for (const target of targets) {
@@ -5550,7 +5579,7 @@ function executeSpellOperation(
           ...subject, life: 'living', hitPoints: operation.hitPoints, deathSaves: null,
         });
       }
-      return;
+      return 'applied';
     case 'lifedrain_attack': {
       const target = targets[0] as CombatantId;
       const before = combatant(context.state, target).hitPoints;
@@ -5560,18 +5589,18 @@ function executeSpellOperation(
         applyHealing(context, command.actor, command.actor, Math.floor(dealt / operation.healingDivisor));
       }
       applySpellEffect(context, definition, command, operation.effect, [command.actor]);
-      return;
+      return 'applied';
     }
     case 'attack_rays':
       for (const target of targets) {
         resolveSpellAttack(context, definition, command, target, operation.dice, operation.damageType, null);
       }
-      return;
+      return 'applied';
     case 'attack_beams':
       for (const target of targets) {
         resolveSpellAttack(context, definition, command, target, operation.dice, operation.damageType, null);
       }
-      return;
+      return 'applied';
     case 'summoned_weapon_attack': {
       const target = targets[0] as CombatantId;
       const diceWithModifier = {
@@ -5580,7 +5609,7 @@ function executeSpellOperation(
       };
       resolveSpellAttack(context, definition, command, target, diceWithModifier, operation.damageType, null);
       applySpellEffect(context, definition, command, operation.effect, [command.actor]);
-      return;
+      return 'applied';
     }
     case 'magic_missiles':
       for (const target of targets) {
@@ -5597,12 +5626,12 @@ function executeSpellOperation(
         applyDamage(context, command.actor, target, result.total);
         concentrationCheck(context, target, result.total);
       }
-      return;
+      return 'applied';
     case 'stabilize': {
       const target = combatant(context.state, targets[0] as CombatantId);
       if (target.hitPoints !== 0 || target.life === 'dead') throw new EncounterRuleError('Spare the Dying requires a living creature at 0 Hit Points.');
       context.state = replaceCombatant(context.state, { ...target, life: 'stable', deathSaves: null });
-      return;
+      return 'applied';
     }
     case 'weapon_attack_augmentation': {
       if (operation.timing === 'during_cast') {
@@ -5657,7 +5686,7 @@ function executeSpellOperation(
           applyDamage(context, command.actor, target, result.total, attack.outcome === 'critical');
         }
         emit(context, { type: 'attack_resolved', actor: command.actor, target, attack, damage: result });
-        return;
+        return 'applied';
       }
       const damage: DamageRequest = {
         terms: operation.extraDamage === null
@@ -5716,7 +5745,7 @@ function executeSpellOperation(
         durationRounds: operation.durationRounds,
         expiresAt: 'source_start',
       }, [command.actor]);
-      return;
+      return 'applied';
     }
     case 'utility':
       emit(context, {
@@ -5743,7 +5772,7 @@ function executeSpellOperation(
           expiresAt: 'source_start',
         }, [command.actor]);
       }
-      return;
+      return 'applied';
   }
 }
 
@@ -6545,7 +6574,7 @@ export function reduceEncounter(
 ): EncounterReduction {
   const context: ReductionContext = {
     state: { ...state, revision: state.revision + 1 },
-    rng,
+    rng: transactionalRng(rng),
     events: [],
   };
   processCommand(context, command);

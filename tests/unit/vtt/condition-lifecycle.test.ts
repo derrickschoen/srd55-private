@@ -12,7 +12,7 @@ import {
 import type { EncounterEvent } from '../../../src/combat/events';
 import type { EffectApplication } from '../../../src/combat/effects';
 import { mulberry32, type Rng } from '../../../src/combat/random';
-import type { ConditionLifecycleOperation, SpellCastCommand, SpellOperation } from '../../../src/combat/spells/types';
+import type { ConditionLifecycleOperation, NonCompositionSpellOperation, SpellCastCommand, SpellOperation } from '../../../src/combat/spells/types';
 import { damageType, effectStackingIdentity, feet } from '../../../src/combat/values';
 import { loadContentPack, type LoadedContentPack } from '../../../src/content/content-pack';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
@@ -64,7 +64,7 @@ function lifecycle(
   return { ...common, duration, stacking };
 }
 
-function fixedDamage(amount: number): SpellOperation {
+function fixedDamage(amount: number): NonCompositionSpellOperation {
   return {
     kind: 'damage_operation', delivery: { kind: 'automatic' }, instancesPerTarget: 1,
     packets: [{
@@ -76,7 +76,7 @@ function fixedDamage(amount: number): SpellOperation {
   };
 }
 
-function movementRegion(id: string, modifier: number): SpellOperation {
+function movementRegion(id: string, modifier: number): NonCompositionSpellOperation {
   return {
     kind: 'movement_region',
     region: { id, cells: [{ column: 3, row: 0 }] },
@@ -364,7 +364,7 @@ describe('CAP-IMP-010 imported condition and control lifecycle', () => {
 
   it('fixed_or_concentration: same-tick concentration loss precedes fixed expiry and records its cause', () => {
     // Concentration durations end when concentration ends; the fixed maximum remains a separate bound (spell-descriptions.txt:1355-1363).
-    const area: SpellOperation = {
+    const area: NonCompositionSpellOperation = {
       kind: 'persistent_area', origin: 'anchored_to_caster', shape: { kind: 'emanation', radius: feet(10) },
       durationRounds: 10, concentration: false, targetFilter: 'selected', includeOwner: false,
       difficultTerrain: false, movableFeet: null,
@@ -484,7 +484,7 @@ describe('CAP-IMP-010 imported condition and control lifecycle', () => {
   });
 
   it('same_hook_order: damage-break precedes re-evaluated branches, then repeat saves, then duration expiry', () => {
-    const area: SpellOperation = {
+    const area: NonCompositionSpellOperation = {
       kind: 'persistent_area', origin: 'anchored_to_caster', shape: { kind: 'emanation', radius: feet(40) },
       durationRounds: 10, concentration: false, targetFilter: 'selected', includeOwner: false,
       difficultTerrain: false, movableFeet: null,

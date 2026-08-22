@@ -13,7 +13,6 @@ import type { MonsterAction, MonsterStatblock, MonsterStatblockInput, SenseKind 
 import { monsterStatblock } from '../combat/statblock';
 import { SPELL_MANIFEST } from '../combat/spells/manifest';
 import {
-  MAX_COMPOSITION_DEPTH,
   SPELL_OPERATION_KINDS,
   type SpellDefinition,
   type SpellOperation,
@@ -695,7 +694,7 @@ function validCompositionOperation(operation: Readonly<Record<string, unknown>>)
       : ['kind', 'onRefusal', 'steps', 'ordering']) ||
     (operation.onRefusal !== 'abort' && operation.onRefusal !== 'continue') ||
     !Array.isArray(operation.steps) ||
-    operation.steps.length < 1
+    operation.steps.length !== 2
   ) return false;
   const steps = operation.steps;
   for (const value of steps) {
@@ -704,14 +703,14 @@ function validCompositionOperation(operation: Readonly<Record<string, unknown>>)
       step === null ||
       !hasOnlyKeys(step, ['targetResolution', 'operation']) ||
       !validCompositionTargetResolution(step.targetResolution) ||
+      operationKind(step.operation) === 'composition' ||
       !structurallyValidOperation(step.operation)
     ) return false;
   }
   if (!explicit) return true;
-  if (!Array.isArray(operation.order) || operation.order.length !== steps.length) return false;
-  const indices = operation.order;
-  return indices.every((index) => Number.isSafeInteger(index) && (index as number) >= 0 &&
-    (index as number) < steps.length) && new Set(indices).size === steps.length;
+  if (!Array.isArray(operation.order) || operation.order.length !== 2) return false;
+  return (operation.order[0] === 0 && operation.order[1] === 1) ||
+    (operation.order[0] === 1 && operation.order[1] === 0);
 }
 
 function structurallyValidOperation(value: unknown): value is SpellOperation {
@@ -927,12 +926,7 @@ export type ContentPackRefusal =
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'version_mismatch'; readonly receivedVersion: unknown }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'missing_provenance' }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'unknown_operation_kind'; readonly operationKind: string }
-  | {
-      readonly kind: 'content_pack_refusal';
-      readonly reason: 'composition_depth_exceeded';
-      readonly maximumDepth: typeof MAX_COMPOSITION_DEPTH;
-      readonly receivedDepth: number;
-    }
+  | { readonly kind: 'content_pack_refusal'; readonly reason: 'nested_composition' }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'unknown_effect_variant'; readonly effectKind: string }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'malformed_record'; readonly path: readonly PropertyKey[] }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'id_collision'; readonly id: string };
@@ -1108,23 +1102,21 @@ function firstUnknownOperation(value: Readonly<Record<string, unknown>>): string
   return null;
 }
 
-function maximumCompositionDepth(value: Readonly<Record<string, unknown>>): number {
-  if (!Array.isArray(value.spells)) return 0;
-  let maximum = 0;
-  const pending: Array<{ readonly value: unknown; readonly depth: number }> = value.spells.flatMap((spellValue) => {
+function hasNestedComposition(value: Readonly<Record<string, unknown>>): boolean {
+  if (!Array.isArray(value.spells)) return false;
+  const pending: Array<{ readonly value: unknown; readonly root: boolean }> = value.spells.flatMap((spellValue) => {
     const spell = objectRecord(spellValue);
-    return spell === null ? [] : [{ value: spell.operation, depth: 0 }];
+    return spell === null ? [] : [{ value: spell.operation, root: true }];
   });
   while (pending.length > 0) {
     const frame = pending.pop();
     if (frame === undefined) break;
     const operation = objectRecord(frame.value);
     if (operation === null) continue;
-    const depth = operation.kind === 'composition' ? frame.depth + 1 : frame.depth;
-    maximum = Math.max(maximum, depth);
-    for (const nested of nestedOperationValues(operation)) pending.push({ value: nested, depth });
+    if (!frame.root && operation.kind === 'composition') return true;
+    for (const nested of nestedOperationValues(operation)) pending.push({ value: nested, root: false });
   }
-  return maximum;
+  return false;
 }
 
 function firstUnknownEffect(value: Readonly<Record<string, unknown>>): string | null {
@@ -1165,14 +1157,9 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
       refusal: { kind: 'content_pack_refusal', reason: 'unknown_operation_kind', operationKind: unknownOperation },
     };
   }
-  const compositionDepth = maximumCompositionDepth(root);
-  if (compositionDepth > MAX_COMPOSITION_DEPTH) {
+  if (hasNestedComposition(root)) {
     return {
-      status: 'refused',
-      refusal: {
-        kind: 'content_pack_refusal', reason: 'composition_depth_exceeded',
-        maximumDepth: MAX_COMPOSITION_DEPTH, receivedDepth: compositionDepth,
-      },
+      status: 'refused', refusal: { kind: 'content_pack_refusal', reason: 'nested_composition' },
     };
   }
   const unknownEffect = firstUnknownEffect(root);

@@ -13,6 +13,31 @@ export interface SerializableRngState {
 
 export interface SerializableRng extends Rng {
   snapshot(): SerializableRngState;
+  restore(snapshot: SerializableRngState): void;
+}
+
+export interface TransactionalRng extends Rng {
+  checkpoint(): RngCheckpoint;
+  restoreCheckpoint(checkpoint: RngCheckpoint): void;
+}
+
+export interface RngCheckpoint {
+  restore(): void;
+}
+
+function assertCompatibleSnapshot(
+  snapshot: SerializableRngState,
+  identity: Pick<SerializableRngState, 'initialSeed' | 'streamId'>,
+): void {
+  if (
+    snapshot.algorithm !== 'mulberry32-v1' ||
+    !Number.isSafeInteger(snapshot.initialSeed) ||
+    !Number.isSafeInteger(snapshot.state) ||
+    !Number.isSafeInteger(snapshot.draws) ||
+    snapshot.draws < 0 ||
+    snapshot.initialSeed !== identity.initialSeed ||
+    snapshot.streamId !== identity.streamId
+  ) throw new TypeError('Malformed or incompatible serializable RNG state.');
 }
 
 function createMulberry32(state: SerializableRngState): SerializableRng {
@@ -34,6 +59,11 @@ function createMulberry32(state: SerializableRngState): SerializableRng {
         draws,
         streamId: state.streamId,
       }),
+      restore: (snapshot: SerializableRngState): void => {
+        assertCompatibleSnapshot(snapshot, state);
+        current = snapshot.state >>> 0;
+        draws = snapshot.draws;
+      },
     },
   );
 }
@@ -62,6 +92,55 @@ export function restoreMulberry32(state: SerializableRngState): SerializableRng 
     throw new TypeError('Malformed serializable RNG state.');
   }
   return createMulberry32(state);
+}
+
+const transactionalAdapters = new WeakMap<Rng, TransactionalRng>();
+
+function isSerializableRng(rng: Rng): rng is SerializableRng {
+  const candidate = rng as Partial<SerializableRng>;
+  return typeof candidate.snapshot === 'function' && typeof candidate.restore === 'function';
+}
+
+/** Gives every reducer RNG a restorable cursor without changing its call shape. */
+export function transactionalRng(rng: Rng): TransactionalRng {
+  const existing = transactionalAdapters.get(rng);
+  if (existing !== undefined) return existing;
+  if (isSerializableRng(rng)) {
+    const adapted = Object.assign(rng, {
+      checkpoint: (): RngCheckpoint => {
+        const snapshot = rng.snapshot();
+        return { restore: (): void => rng.restore(snapshot) };
+      },
+      restoreCheckpoint: (checkpoint: RngCheckpoint): void => checkpoint.restore(),
+    });
+    transactionalAdapters.set(rng, adapted);
+    return adapted;
+  }
+  const history: number[] = [];
+  let cursor = 0;
+  const adapted: TransactionalRng = Object.assign(
+    (): number => {
+      const replayed = history[cursor];
+      if (replayed !== undefined) {
+        cursor += 1;
+        return replayed;
+      }
+      const drawn = rng();
+      history.push(drawn);
+      cursor += 1;
+      return drawn;
+    },
+    {
+      checkpoint: (): RngCheckpoint => {
+        const savedCursor = cursor;
+        return { restore: (): void => { cursor = savedCursor; } };
+      },
+      restoreCheckpoint: (checkpoint: RngCheckpoint): void => checkpoint.restore(),
+    },
+  );
+  transactionalAdapters.set(rng, adapted);
+  transactionalAdapters.set(adapted, adapted);
+  return adapted;
 }
 
 export function rollDie(rng: Rng, sides: DieSides): number {
