@@ -7,6 +7,27 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D332 — OWNER: E05 retargeted to typed-vs-untyped; residue handed over; scraper waits (2026-08-21)
+
+Round-8 answers. Question 1 (set-cover step 4) was answered "I need context
+and details" and is NOT ruled on here — it stays open, with the detail
+supplied and the decision deferred to the owner's next word.
+
+1. **E05 becomes typed JS vs untyped JS, two arms.** The JSON-AST arm is
+   dropped. Owner chose this over the three-arm version that would have
+   preserved the original JS-vs-AST comparison. Consequence accepted and
+   recorded: we will never learn what the AST surface would have cost, and
+   D320's E05 as preregistered is superseded. What we do learn is whether
+   the compiler check actually lowers the correction rate rather than being
+   assumed to.
+2. **Fixture residue: hand over the 35, skip the Fable and Opus passes.**
+   D327's three-model collaboration is closed early by owner choice. The
+   remaining set goes to the owner as-is.
+3. **Scraper extraction to a standalone public tool waits until after the
+   six set-cover steps** (D330 tail). Rationale accepted: the content-pack
+   vocabulary is still changing every increment, so extracting now means
+   re-extracting.
+
 ## D331 — OWNER: JS surface with TYPED guarantees (2026-08-21)
 
 Owner: "I would like js. Look into how Claude code workflows work. Typed
