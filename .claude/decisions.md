@@ -7,6 +7,16 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D341 — OWNER: namespaces are MANIFEST-DECLARED (2026-08-22)
+
+Ruled after full context (round-14 Q1 held open in D340). A content pack
+declares the namespaces it mints in its manifest, next to provenance.
+Import rejects any record whose sourceId is outside the declaration —
+per-record, load-the-rest, per D339.1. Aggregator packs remain legal but
+explicit; the claim is visible before import; the scraper fills the field
+automatically. Cross-pack collision refusal stays as the second guard.
+Enters wave 1's scope (it is import-validation work).
+
 ## D340 — OWNER: equipment carries stowed items with SRD interaction economy; clause-digest approvals; E05B closed (2026-08-22)
 
 Round-14 answers plus the pre-registered E05B closure.
