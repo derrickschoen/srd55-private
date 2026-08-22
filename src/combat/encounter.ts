@@ -13,6 +13,12 @@ import {
   type ExhaustionLevel,
 } from './conditions';
 import type { CombatantProfile, CombatToken } from './combatant';
+import type {
+  DamageOperationPacket,
+  DamageOperationSpec,
+  OperationDice,
+  ThresholdDamageRider,
+} from './damage-operations';
 import { isAttackFormSubstitutionPayload, isTypedCombatFeaturePayload } from './effects';
 import type {
   CombatFeatureEffect,
@@ -431,6 +437,7 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'd20_test_modifier':
     case 'damage_reduction':
     case 'damage_rider':
+    case 'recurring_damage_operation':
     case 'bonus_action_attack_grant':
     case 'extra_attack_count_override':
     case 'action_surge':
@@ -1881,6 +1888,22 @@ function processBoundary(
       concentrationCheck(context, subjectId, result.total);
     }
 
+    if (
+      effect.targets.includes(subjectId) &&
+      effect.payload.kind === 'recurring_damage_operation' &&
+      effectBoundaryMatches(subjectId, boundary, effect.payload.timing)
+    ) {
+      resolvePreparedDamageOperation(
+        context,
+        effect.source,
+        subjectId,
+        effect.payload.delivery,
+        effect.payload.saveDc,
+        effect.payload.instances,
+        String(effect.stackingIdentity),
+      );
+    }
+
     const current = context.state.effects.find((candidate) => candidate.id === effectId);
     if (
       current !== undefined &&
@@ -1976,6 +1999,15 @@ function validateEffectApplication(
   ) {
     throw new EncounterRuleError(
       'Ongoing-damage timing requires a target and source locator.',
+    );
+  }
+  if (
+    effect.payload.kind === 'recurring_damage_operation' &&
+    (!effect.targets.includes(effect.payload.timing.combatant) ||
+      effect.payload.timing.source.trim().length === 0)
+  ) {
+    throw new EncounterRuleError(
+      'Recurring-damage timing requires a target and source locator.',
     );
   }
 }
@@ -2158,18 +2190,34 @@ function cloneEffectApplication(
           ...(application.payload.followUp === undefined
             ? {}
             : {
-                followUp: {
-                  ...application.payload.followUp,
-                  damage: {
-                    ...application.payload.followUp.damage,
-                    terms: application.payload.followUp.damage.terms.map((term) => ({
-                      ...term,
-                      dice: { ...term.dice },
-                    })),
-                    responses: application.payload.followUp.damage.responses.map((response) => ({ ...response })),
-                  },
-                },
+                followUp: application.payload.followUp.kind === 'save_then_condition'
+                  ? { ...application.payload.followUp }
+                  : {
+                      ...application.payload.followUp,
+                      damage: {
+                        ...application.payload.followUp.damage,
+                        terms: application.payload.followUp.damage.terms.map((term) => ({
+                          ...term,
+                          dice: { ...term.dice },
+                        })),
+                        responses: application.payload.followUp.damage.responses.map((response) => ({ ...response })),
+                      },
+                    },
               }),
+        };
+      case 'recurring_damage_operation':
+        return {
+          ...application.payload,
+          timing: { ...application.payload.timing },
+          delivery: { ...application.payload.delivery },
+          instances: application.payload.instances.map((instance) => ({
+            thresholdRider: instance.thresholdRider === null ? null : { ...instance.thresholdRider },
+            damage: {
+              ...instance.damage,
+              terms: instance.damage.terms.map((term) => ({ ...term, dice: { ...term.dice } })),
+              responses: instance.damage.responses.map((response) => ({ ...response })),
+            },
+          })),
         };
       case 'ensnaring_strike':
         return {
@@ -2428,20 +2476,23 @@ function applyWeaponHitRiderFollowUp(
   if (rider.payload.kind !== 'damage_rider' || rider.payload.followUp === undefined) return;
   if (combatant(context.state, target).life === 'dead') return;
   const followUp = rider.payload.followUp;
+  const followUpIdentity = effectStackingIdentity(
+    `${String(rider.stackingIdentity)}:follow-up:${String(target)}`,
+  );
   switch (followUp.kind) {
     case 'ongoing_damage_save_ends':
       applyEffect(context, rider.source, {
         targets: [target],
         duration: {
           kind: 'turn_boundaries',
-          timing: { combatant: target, boundary: followUp.timing, source: String(rider.stackingIdentity) },
+          timing: { combatant: target, boundary: followUp.timing, source: String(followUpIdentity) },
           remaining: followUp.durationRounds,
         },
         concentration: rider.concentrationOwner !== null,
-        stackingIdentity: rider.stackingIdentity,
+        stackingIdentity: followUpIdentity,
         stacking: 'replace_same_source',
         repeatedSave: {
-          timing: { combatant: target, boundary: followUp.timing, source: String(rider.stackingIdentity) },
+          timing: { combatant: target, boundary: followUp.timing, source: String(followUpIdentity) },
           ability: followUp.saveAbility,
           dc: followUp.saveDc,
           rollMode: 'normal',
@@ -2450,7 +2501,7 @@ function applyWeaponHitRiderFollowUp(
         payload: {
           kind: 'ongoing_damage',
           damage: followUp.damage,
-          timing: { combatant: target, boundary: followUp.timing, source: String(rider.stackingIdentity) },
+          timing: { combatant: target, boundary: followUp.timing, source: String(followUpIdentity) },
         },
       });
       return;
@@ -2469,11 +2520,11 @@ function applyWeaponHitRiderFollowUp(
         targets: [target],
         duration: {
           kind: 'turn_boundaries',
-          timing: { combatant: target, boundary: followUp.timing, source: String(rider.stackingIdentity) },
+          timing: { combatant: target, boundary: followUp.timing, source: String(followUpIdentity) },
           remaining: followUp.durationRounds,
         },
         concentration: rider.concentrationOwner !== null,
-        stackingIdentity: rider.stackingIdentity,
+        stackingIdentity: followUpIdentity,
         stacking: 'replace_same_source',
         repeatedSave: null,
         payload: {
@@ -2485,6 +2536,37 @@ function applyWeaponHitRiderFollowUp(
           escapeCheckSkill: 'Athletics',
         },
       });
+      return;
+    }
+    case 'save_then_condition': {
+      const save = resolveTargetSave(
+        context,
+        rider.source,
+        target,
+        followUp.saveAbility,
+        followUp.saveDc,
+        followUp.rollMode,
+        rider.id,
+      );
+      if (save.outcome === 'success') return;
+      applyEffect(context, rider.source, {
+        targets: [target],
+        duration: {
+          kind: 'turn_boundaries',
+          timing: {
+            combatant: target,
+            boundary: followUp.expiresAt === 'target_start' ? 'start' : 'end',
+            source: String(followUpIdentity),
+          },
+          remaining: followUp.durationRounds,
+        },
+        concentration: rider.concentrationOwner !== null,
+        stackingIdentity: followUpIdentity,
+        stacking: 'replace_same_source',
+        repeatedSave: null,
+        payload: { kind: 'condition', condition: followUp.condition },
+      });
+      return;
     }
   }
 }
@@ -2851,8 +2933,10 @@ function processAttack(
     concentrationCheck(context, command.target, damageResult.total);
     if (maneuver !== null) applyManeuverCondition(context, command.actor, command.target, maneuver);
     for (const rider of triggeredRiders) {
-      if (rider.encounterEffect === null || rider.payload.consumeOnHit !== true) continue;
-      endEffects(context, new Set([rider.encounterEffect.id]), 'trigger_consumed');
+      if (rider.encounterEffect === null) continue;
+      if (rider.payload.consumeOnHit === true) {
+        endEffects(context, new Set([rider.encounterEffect.id]), 'trigger_consumed');
+      }
       applyWeaponHitRiderFollowUp(context, rider.encounterEffect, command.target);
     }
     applySaveGatedBanishments(context, command.actor, command.target);
@@ -2890,7 +2974,7 @@ function scaledDiceExpression(
   definition: SpellDefinition,
   scaling: ScaledDice,
   command: SpellCastCommand,
-): { readonly count: number; readonly sides: ReturnType<typeof dieSides>; readonly modifier: number } {
+): DiceExpression {
   const slotDelta = definition.level === 0
     ? 0
     : (command.slotLevel as number) - definition.level;
@@ -2901,6 +2985,9 @@ function scaledDiceExpression(
     count: scaling.baseCount + scaling.perSlotCount * slotDelta + cantripDelta,
     sides: dieSides(scaling.sides),
     modifier: scaling.modifier + scaling.perSlotModifier * slotDelta,
+    ...(scaling.minimumTotal === undefined ? {} : { minimumTotal: scaling.minimumTotal }),
+    ...(scaling.maximumTotal === undefined ? {} : { maximumTotal: scaling.maximumTotal }),
+    ...(scaling.rerollBelow === undefined ? {} : { rerollBelow: scaling.rerollBelow }),
   };
 }
 
@@ -3258,6 +3345,8 @@ function resolvedSpellEffectPayload(
     ? 0
     : (command.slotLevel as number) - definition.level;
   switch (payload.kind) {
+    case 'recurring_damage_operation':
+      return payload;
     case 'damage_reduction':
       return payload.damageType === 'chosen_when_cast'
         ? { ...payload, damageType: command.selectedOption ?? 'Acid' }
@@ -3716,6 +3805,213 @@ function applySpellDamageAmount(
   concentrationCheck(context, target, adjusted);
 }
 
+interface DamageScalingContext {
+  readonly definition: SpellDefinition | null;
+  readonly command: SpellCastCommand | null;
+}
+
+function operationDiceExpression(
+  state: EncounterState,
+  target: CombatantId,
+  dice: OperationDice,
+  scaling: DamageOperationPacket['scaling'],
+  cast: DamageScalingContext,
+): DiceExpression {
+  const slotDelta = cast.definition === null || cast.command === null || cast.definition.level === 0
+    ? 0
+    : (cast.command.slotLevel as number) - cast.definition.level;
+  const cantripDelta = dice.cantripUpgrade && cast.command !== null
+    ? cantripUpgradeCount(cast.command.casterLevel)
+    : 0;
+  const subject = combatant(state, target);
+  const additionalDice = (() => {
+    switch (scaling.kind) {
+      case 'none': return 0;
+      case 'target_size': {
+        const size = subject.profile.rules.sizeCategory;
+        if (size === undefined) {
+          throw new EncounterRuleError(`Damage scaling requires a known size for ${target}.`);
+        }
+        return scaling.additionalDiceBySize[size];
+      }
+      case 'target_missing_hit_points':
+        return Math.min(
+          scaling.maximumAdditionalDice,
+          Math.floor(
+            (effectiveHitPointMaximum(state, target) - subject.hitPoints) /
+            scaling.hitPointsPerAdditionalDie,
+          ),
+        );
+    }
+  })();
+  return {
+    count: dice.baseCount + dice.perSlotCount * slotDelta + cantripDelta + additionalDice,
+    sides: dieSides(dice.sides),
+    modifier: dice.modifier + dice.perSlotModifier * slotDelta,
+    ...(dice.minimumTotal === undefined ? {} : { minimumTotal: dice.minimumTotal }),
+    ...(dice.maximumTotal === undefined ? {} : { maximumTotal: dice.maximumTotal }),
+    ...(dice.rerollBelow === undefined ? {} : { rerollBelow: dice.rerollBelow }),
+  };
+}
+
+function operationDamageType(packet: DamageOperationPacket): DamageType {
+  return packet.damageType.kind === 'fixed'
+    ? packet.damageType.damageType
+    : packet.damageType.to;
+}
+
+function preparedDamageOperationInstances(
+  state: EncounterState,
+  target: CombatantId,
+  operation: DamageOperationSpec,
+  cast: DamageScalingContext,
+): readonly { readonly damage: DamageRequest; readonly thresholdRider: ThresholdDamageRider | null }[] {
+  return Array.from({ length: operation.instancesPerTarget }, () =>
+    operation.packets.map((packet) => {
+      const type = operationDamageType(packet);
+      const baseRequest: DamageRequest = {
+        terms: [{ type, dice: operationDiceExpression(state, target, packet.dice, packet.scaling, cast) }],
+        critical: false,
+        responses: [],
+      };
+      return {
+        damage: {
+          ...baseRequest,
+          responses: targetDamageResponses(state, target, baseRequest),
+        },
+        thresholdRider: packet.thresholdRider,
+      };
+    }),
+  ).flat();
+}
+
+function applyThresholdDamageRider(
+  context: ReductionContext,
+  source: CombatantId,
+  target: CombatantId,
+  rider: ThresholdDamageRider | null,
+  damage: number,
+  identity: string,
+): void {
+  if (rider === null || damage < rider.minimumDamage || combatant(context.state, target).life === 'dead') return;
+  applyEffect(context, source, {
+    targets: [target],
+    duration: {
+      kind: 'turn_boundaries',
+      timing: {
+        combatant: target,
+        boundary: rider.expiresAt === 'target_start' ? 'start' : 'end',
+        source: identity,
+      },
+      remaining: rider.durationRounds,
+    },
+    concentration: false,
+    stackingIdentity: effectStackingIdentity(identity),
+    stacking: 'replace_same_source',
+    repeatedSave: null,
+    payload: { kind: 'condition', condition: rider.condition },
+  });
+}
+
+function resolvePreparedDamageOperation(
+  context: ReductionContext,
+  source: CombatantId,
+  target: CombatantId,
+  delivery: DamageOperationSpec['delivery'],
+  saveDc: number,
+  instances: readonly { readonly damage: DamageRequest; readonly thresholdRider: ThresholdDamageRider | null }[],
+  identity: string,
+): void {
+  const saveSucceeded = delivery.kind === 'save' && resolveTargetSave(
+    context,
+    source,
+    target,
+    delivery.ability,
+    saveDc,
+    delivery.rollMode,
+    null,
+  ).outcome === 'success';
+  for (const [index, instance] of instances.entries()) {
+    const result = resolveDamage(instance.damage, context.rng);
+    const amount = saveSucceeded
+      ? delivery.kind === 'save' && delivery.onSuccess === 'half'
+        ? Math.floor(result.total / 2)
+        : 0
+      : result.total;
+    applyDamage(context, source, target, amount);
+    concentrationCheck(context, target, amount);
+    applyThresholdDamageRider(context, source, target, instance.thresholdRider, amount, `${identity}:${String(index)}`);
+  }
+}
+
+function applyDamageOperation(
+  context: ReductionContext,
+  source: CombatantId,
+  targets: readonly CombatantId[],
+  operation: DamageOperationSpec,
+  saveDc: number,
+  identity: string,
+  cast: DamageScalingContext,
+): void {
+  if (targets.length === 0) throw new EncounterRuleError('A damage operation requires at least one target.');
+  const resolveNow = operation.timing.kind === 'immediate' || operation.timing.initial === 'immediate';
+  if (resolveNow) {
+    for (const target of targets) {
+      resolvePreparedDamageOperation(
+        context,
+        source,
+        target,
+        operation.delivery,
+        saveDc,
+        preparedDamageOperationInstances(context.state, target, operation, cast),
+        `${identity}:immediate:${String(target)}`,
+      );
+    }
+  }
+  if (operation.timing.kind !== 'recurring') return;
+  if (operation.timing.concentration) endConcentration(context, source, 'concentration_replaced');
+  const created: EncounterEffectId[] = [];
+  for (const target of targets) {
+    const before = context.state.nextEffectSequence;
+    applyEffect(context, source, {
+      targets: [target],
+      duration: {
+        kind: 'turn_boundaries',
+        timing: {
+          combatant: target,
+          boundary: operation.timing.tick === 'target_start' ? 'start' : 'end',
+          source: identity,
+        },
+        remaining: operation.timing.durationRounds,
+      },
+      concentration: false,
+      stackingIdentity: effectStackingIdentity(`${identity}:${String(target)}`),
+      stacking: 'replace_same_source',
+      repeatedSave: null,
+      payload: {
+        kind: 'recurring_damage_operation',
+        instances: preparedDamageOperationInstances(context.state, target, operation, cast),
+        delivery: operation.delivery,
+        saveDc,
+        timing: {
+          combatant: target,
+          boundary: operation.timing.tick === 'target_start' ? 'start' : 'end',
+          source: identity,
+        },
+      },
+    });
+    created.push(encounterEffectId(`effect:${String(before)}`));
+  }
+  if (operation.timing.concentration) {
+    context.state = {
+      ...context.state,
+      effects: context.state.effects.map((effect) => created.includes(effect.id)
+        ? { ...effect, concentrationOwner: source }
+        : effect),
+    };
+  }
+}
+
 function resolvedPersistentAreaSpellEffect(
   definition: SpellDefinition,
   command: SpellCastCommand,
@@ -3761,6 +4057,64 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
 
   const operation = definition.operation;
   switch (operation.kind) {
+    case 'damage_operation':
+      applyDamageOperation(
+        context,
+        command.actor,
+        targets,
+        operation,
+        command.saveDc,
+        `spell:${definition.id}:${String(context.state.revision)}`,
+        { definition, command },
+      );
+      return;
+    case 'armed_weapon_hit_rider': {
+      const packet = operation.damage;
+      if (packet !== null && (packet.scaling.kind !== 'none' || packet.thresholdRider !== null)) {
+        throw new EncounterRuleError('An armed weapon-hit rider cannot defer target scaling or a damage-threshold rider.');
+      }
+      const damage: DamageRequest = {
+        terms: packet === null
+          ? []
+          : [{
+              type: operationDamageType(packet),
+              dice: operationDiceExpression(
+                context.state,
+                command.actor,
+                packet.dice,
+                packet.scaling,
+                { definition, command },
+              ),
+            }],
+        critical: false,
+        responses: [],
+      };
+      const followUp = operation.saveGatedRider === null
+        ? undefined
+        : {
+            kind: 'save_then_condition' as const,
+            saveAbility: operation.saveGatedRider.ability,
+            saveDc: command.saveDc,
+            rollMode: operation.saveGatedRider.rollMode,
+            condition: operation.saveGatedRider.condition,
+            expiresAt: operation.saveGatedRider.expiresAt,
+            durationRounds: operation.saveGatedRider.durationRounds,
+          };
+      applySpellEffect(context, definition, command, {
+        payload: {
+          kind: 'damage_rider',
+          damage,
+          appliesTo: 'weapon_attack_by_target',
+          consumeOnHit: operation.persistence === 'consume_on_hit',
+          ...(followUp === undefined ? {} : { followUp }),
+        },
+        target: 'self',
+        concentration: operation.concentration,
+        durationRounds: operation.durationRounds,
+        expiresAt: 'source_start',
+      }, [command.actor]);
+      return;
+    }
     case 'persistent_area': {
       const selected = [...new Set([
         ...(operation.includeOwner ? [command.actor] : []),
@@ -4751,6 +5105,63 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
           ...refreshed.turn,
           additionalLeveledSpellActionsRemaining: effect.payload.additionalLeveledSpellActions,
         },
+      });
+      return;
+    }
+    case 'activate_damage_operation': {
+      assertActiveActor(context, command.actor);
+      const effect = featureEffect(context.state, command.actor, command.effectId);
+      if (effect.payload.kind !== 'damage_operation') {
+        throw new EncounterRuleError(`Effect ${effect.id} is not a damage operation.`);
+      }
+      if (effect.trigger !== 'action' && effect.trigger !== 'bonus_action') {
+        throw new EncounterRuleError(`Effect ${effect.id} has no activatable damage cost.`);
+      }
+      spendCost(context, command.actor, effect.trigger, `Effect ${effect.id}`);
+      if (effect.resourcePoolId !== null) {
+        spendLimitedResource(context, command.actor, effect.resourcePoolId, `Effect ${effect.id}`);
+      }
+      applyDamageOperation(
+        context,
+        command.actor,
+        command.targets,
+        effect.payload,
+        effect.payload.saveDc,
+        `feature:${String(effect.id)}:${String(context.state.revision)}`,
+        { definition: null, command: null },
+      );
+      return;
+    }
+    case 'arm_weapon_hit_rider': {
+      assertActiveActor(context, command.actor);
+      const effect = featureEffect(context.state, command.actor, command.effectId);
+      if (
+        effect.payload.kind !== 'damage_rider' ||
+        effect.payload.arming === undefined ||
+        (effect.trigger !== 'action' && effect.trigger !== 'bonus_action')
+      ) {
+        throw new EncounterRuleError(`Effect ${effect.id} is not an armed weapon-hit rider.`);
+      }
+      spendCost(context, command.actor, effect.trigger, `Effect ${effect.id}`);
+      if (effect.resourcePoolId !== null) {
+        spendLimitedResource(context, command.actor, effect.resourcePoolId, `Effect ${effect.id}`);
+      }
+      applyEffect(context, command.actor, {
+        targets: [command.actor],
+        duration: {
+          kind: 'turn_boundaries',
+          timing: {
+            combatant: command.actor,
+            boundary: 'start',
+            source: `feature:${String(effect.id)}`,
+          },
+          remaining: effect.payload.arming.durationRounds,
+        },
+        concentration: effect.payload.arming.concentration,
+        stackingIdentity: effectStackingIdentity(`feature:${String(effect.id)}`),
+        stacking: 'replace_same_source',
+        repeatedSave: null,
+        payload: effect.payload,
       });
       return;
     }

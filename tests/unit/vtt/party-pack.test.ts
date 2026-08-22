@@ -1,8 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { canonicalJson } from '../../../src/commands/canonical-json';
 import { combatToken } from '../../../src/combat/combatant';
+import type { PersistedCoordinatorState } from '../../../src/combat/coordinator';
 import { combatantConditions, createEncounter, reduceEncounter } from '../../../src/combat/encounter';
-import { encounterEffectId } from '../../../src/combat/values';
+import { mulberry32 } from '../../../src/combat/random';
+import {
+  codexSessionId,
+  encounterBranchId,
+  encounterEffectId,
+  encounterSessionId,
+} from '../../../src/combat/values';
 import {
   externalPartyPackSchema,
   loadExternalPartyPack,
@@ -14,6 +22,13 @@ import {
   type ExternalPartyPackV1,
   type ExternalPartyPackV2,
 } from '../../../src/vtt/party-pack';
+import {
+  EncounterSessionJournal,
+  MemoryBrowserSessionStore,
+  MemoryMirrorSink,
+  exportSavedSession,
+  importSavedSession,
+} from '../../../src/vtt/session-persistence';
 import { monsterProfile, placedToken } from '../combat/fixtures';
 
 function jsonObject(value: unknown, path: string): Record<string, unknown> {
@@ -64,6 +79,7 @@ function memberBase(index: number): Omit<ExternalPartyPackV2['members'][number],
     },
     armorClass: 15 + index,
     hitPointMaximum: 30 + index,
+    sizeCategory: 'Medium',
     walkingSpeedFeet: 30,
     initiativeBonus: 2,
     savingThrowBonuses: {
@@ -134,11 +150,14 @@ function v1Pack(): ExternalPartyPackV1 {
     schemaVersion: 1,
     partyId: 'party:legacy-soak-fixture',
     allowPartial: false,
-    members: Array.from({ length: 3 }, (_value, index) => ({
-      ...memberBase(index + 1),
-      spellSlots: index % 2 === 0 ? [{ level: 1, maximum: 4 }] : [],
-      spellSelections: index % 2 === 0 ? ['magic-missile'] : [],
-    })),
+    members: Array.from({ length: 3 }, (_value, index) => {
+      const { sizeCategory: _sizeCategory, ...base } = memberBase(index + 1);
+      return {
+        ...base,
+        spellSlots: index % 2 === 0 ? [{ level: 1, maximum: 4 }] : [],
+        spellSelections: index % 2 === 0 ? ['magic-missile'] : [],
+      };
+    }),
   }) as ExternalPartyPackV1;
 }
 
@@ -238,7 +257,113 @@ function sequenceRng(values: readonly number[], fallback = 0): () => number {
   return () => values[index++] ?? fallback;
 }
 
+const REPLAY_COORDINATOR: PersistedCoordinatorState = {
+  requestSequence: 1,
+  pendingRequest: null,
+  pendingCommand: null,
+  continuation: { kind: 'idle' },
+  pause: null,
+};
+
 describe('external party-pack boundary', () => {
+  it('declares executable damage operations and armed weapon-hit riders in party-pack v2', () => {
+    const operationDice = {
+      baseCount: 1, sides: 4 as const, modifier: 0,
+      perSlotCount: 0, perSlotModifier: 0, cantripUpgrade: false,
+      rerollBelow: { threshold: 2, maximumRerollsPerDie: 1 as const },
+    };
+    const operationPacket = {
+      damageType: { kind: 'conversion' as const, from: 'Fire' as const, to: 'Cold' as const },
+      dice: operationDice,
+      scaling: { kind: 'target_missing_hit_points' as const, hitPointsPerAdditionalDie: 10, maximumAdditionalDice: 2 },
+      thresholdRider: null,
+    };
+    const candidate = typedShapePack([
+      {
+        effectId: 'effect:homebrew-damage-operation', kind: 'damage_operation', trigger: 'action', saveDc: 14,
+        delivery: { kind: 'save', ability: 'dexterity', rollMode: 'normal', onSuccess: 'half' },
+        instancesPerTarget: 2, packets: [operationPacket], timing: { kind: 'immediate' },
+      },
+      {
+        effectId: 'effect:homebrew-armed-rider', kind: 'armed_weapon_hit_rider', trigger: 'bonus_action', saveDc: 14,
+        damage: { ...operationPacket, scaling: { kind: 'none' }, thresholdRider: null },
+        durationRounds: 2, concentration: false, persistence: 'consume_on_hit',
+        saveGatedRider: {
+          ability: 'wisdom', rollMode: 'normal', condition: 'Frightened',
+          durationRounds: 1, expiresAt: 'target_end',
+        },
+      },
+    ]);
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Additional damage shapes were refused.');
+    const caster = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!;
+    const damageCommand = loadedPartyEffectCommand(
+      caster,
+      'effect:homebrew-damage-operation',
+      [target.profile.id],
+    );
+    expect(damageCommand).toMatchObject({ type: 'activate_damage_operation', targets: [target.profile.id] });
+    expect(loadedPartyEffectCommand(caster, 'effect:homebrew-armed-rider', [])).toEqual({
+      type: 'arm_weapon_hit_rider', actor: caster.profile.id,
+      effectId: 'effect:homebrew-armed-rider',
+    });
+
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [caster.profile, target.profile],
+      tokens: [
+        combatToken(caster.profile, { column: 0, row: 0 }),
+        combatToken(target.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const resolved = reduceEncounter(state, damageCommand, sequenceRng([0, 0.75, 0.5]));
+    expect(resolved.events.filter((event) => event.type === 'damage_applied').map((event) => event.amount)).toEqual([4, 3]);
+
+    const replayRng = mulberry32(0x213);
+    const replayInitial = state;
+    const sourceStore = new MemoryBrowserSessionStore();
+    const journal = EncounterSessionJournal.create({
+      sessionId: encounterSessionId('session:party-damage-operation'),
+      branchId: encounterBranchId('branch:party-damage-operation'),
+      encounterState: replayInitial,
+      coordinatorState: REPLAY_COORDINATOR,
+      controllers: [],
+      codexSessionId: codexSessionId('codex:party-damage-operation'),
+      rng: replayRng,
+      store: sourceStore,
+      mirror: new MemoryMirrorSink(),
+    });
+    const replayReduction = reduceEncounter(replayInitial, damageCommand, journal.rng());
+    journal.record({
+      transition: { kind: 'reducer_applied', command: damageCommand, events: replayReduction.events },
+      encounterState: replayReduction.state,
+      coordinatorState: REPLAY_COORDINATOR,
+      controllers: [],
+    });
+    const replayBytes = exportSavedSession(sourceStore, encounterSessionId('session:party-damage-operation'));
+    const restoredStore = new MemoryBrowserSessionStore();
+    importSavedSession(restoredStore, replayBytes);
+    const restored = EncounterSessionJournal.resume(
+      encounterSessionId('session:party-damage-operation'),
+      restoredStore,
+      new MemoryMirrorSink(),
+    );
+    expect(canonicalJson(restored.encounterState)).toBe(canonicalJson(replayReduction.state));
+    expect(replayBytes).toContain('damage_operation');
+    expect(replayBytes).toContain('"arming":{"concentration":false,"durationRounds":2}');
+
+    const malformed = structuredClone(candidate) as {
+      members: Array<{ effects?: Array<{ dice?: { rerollBelow?: { threshold: number } }; packets?: Array<{ dice: { rerollBelow?: { threshold: number } } }> }> }>;
+    };
+    malformed.members[0]!.effects![0]!.packets![0]!.dice.rerollBelow!.threshold = 5;
+    expect(loadExternalPartyPack(malformed)).toMatchObject({
+      status: 'refused', refusal: { reason: 'gaps_not_allowed' },
+    });
+  });
+
   it('loads the v2 persistent-area effect vocabulary and refuses malformed hook payloads', () => {
     const candidate = structuredClone(pack());
     candidate.members[0]!.effects = [{

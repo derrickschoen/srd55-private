@@ -651,6 +651,14 @@ function definitionRange(definition: SpellDefinition): number {
 function operationDice(definition: SpellDefinition): readonly [number, number] | null {
   const operation = definition.operation;
   switch (operation.kind) {
+    case 'damage_operation': {
+      const packet = operation.packets[0];
+      return packet === undefined ? null : [packet.dice.baseCount, packet.dice.sides];
+    }
+    case 'armed_weapon_hit_rider':
+      return operation.damage === null
+        ? null
+        : [operation.damage.dice.baseCount, operation.damage.dice.sides];
     case 'persistent_area': {
       const damage = [...operation.hooks.map((hook) => hook.effect), ...operation.initialEffects.map((initial) => initial.effect)]
         .find((spec) => spec.payload.kind === 'damage');
@@ -704,6 +712,10 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
 function operationPerSlot(definition: SpellDefinition): number {
   const operation = definition.operation;
   switch (operation.kind) {
+    case 'damage_operation':
+      return operation.packets[0]?.dice.perSlotCount ?? 0;
+    case 'armed_weapon_hit_rider':
+      return operation.damage?.dice.perSlotCount ?? 0;
     case 'persistent_area': {
       const damage = [...operation.hooks.map((hook) => hook.effect), ...operation.initialEffects.map((initial) => initial.effect)]
         .find((spec) => spec.payload.kind === 'damage');

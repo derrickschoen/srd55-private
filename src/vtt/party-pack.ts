@@ -3,6 +3,10 @@ import type { CombatantProfile } from '../combat/combatant';
 import type { TurnLegalActions } from '../combat/coordinator';
 import { conditionNames, type ConditionName } from '../combat/conditions';
 import {
+  armedWeaponHitRiderShape,
+  damageOperationSpecSchema,
+} from '../combat/damage-operation-schema';
+import {
   damageRiderGates,
   isAttackFormSubstitutionPayload,
   isTypedCombatFeaturePayload,
@@ -28,7 +32,7 @@ import {
   type DieSides,
   type EncounterEffectId,
 } from '../combat/values';
-import { abilities, damageTypes, skills, type Ability, type Skill } from '../domain/enums';
+import { abilities, creatureSizes, damageTypes, skills, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import { SRD_CLASS_NAMES } from '../rules/class-traits-srd';
 import {
   createGapReport,
@@ -154,6 +158,8 @@ const nonExhaustionConditionNames = conditionNames.filter(
 );
 
 export const FEATURE_EFFECT_KINDS = [
+  'damage_operation',
+  'armed_weapon_hit_rider',
   'damage_rider',
   'once_per_turn_damage_rider',
   'slot_spend_damage_rider',
@@ -231,6 +237,20 @@ const persistentAreaDurationSchema = z.discriminatedUnion('kind', [
 ]);
 
 const featureEffectSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('damage_operation'),
+    trigger: z.enum(['action', 'bonus_action']),
+    saveDc: integerSchema.min(1).max(50),
+    ...damageOperationSpecSchema.shape,
+  }),
+  z.strictObject({
+    ...featureEffectBaseShape,
+    kind: z.literal('armed_weapon_hit_rider'),
+    trigger: z.enum(['action', 'bonus_action']),
+    saveDc: integerSchema.min(1).max(50),
+    ...armedWeaponHitRiderShape,
+  }),
   z.strictObject({
     ...featureEffectBaseShape,
     kind: z.literal('damage_rider'),
@@ -451,6 +471,25 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     hooks: z.array(persistentAreaHookSchema).max(16),
   }),
 ]).superRefine((effect, context) => {
+  if (effect.kind === 'damage_operation') {
+    for (const packet of effect.packets) {
+      if (packet.dice.perSlotCount !== 0 || packet.dice.perSlotModifier !== 0 || packet.dice.cantripUpgrade) {
+        context.addIssue({ code: 'custom', message: 'Feature damage cannot use spell-slot or cantrip scaling.' });
+      }
+    }
+  }
+  if (effect.kind === 'armed_weapon_hit_rider' && effect.damage !== null) {
+    if (effect.damage.scaling.kind !== 'none' || effect.damage.thresholdRider !== null) {
+      context.addIssue({ code: 'custom', message: 'Armed weapon-hit damage cannot defer target scaling or a threshold rider.' });
+    }
+    if (
+      effect.damage.dice.perSlotCount !== 0 ||
+      effect.damage.dice.perSlotModifier !== 0 ||
+      effect.damage.dice.cantripUpgrade
+    ) {
+      context.addIssue({ code: 'custom', message: 'Feature rider damage cannot use spell-slot or cantrip scaling.' });
+    }
+  }
   if (
     'trigger' in effect &&
     effect.trigger === 'always_on' &&
@@ -640,10 +679,14 @@ const legacySpellcastingInputSchema = z.strictObject({
   spellSlots: z.array(v2SpellSlotSchema).max(9),
 });
 
-const v2MemberCoreSchema = z.strictObject(memberBaseShape);
+const v2MemberCoreSchema = z.strictObject({
+  ...memberBaseShape,
+  sizeCategory: z.enum(creatureSizes),
+});
 
 const v2MemberSchema = z.strictObject({
   ...memberBaseShape,
+  sizeCategory: z.enum(creatureSizes),
   ...memberSharedShape,
   spellcasting: z.union([
     legacySpellcastingSchema,
@@ -841,6 +884,7 @@ const V1_MEMBER_FIELDS = new Set([
 ]);
 const V2_MEMBER_FIELDS = new Set([
   ...SHARED_MEMBER_FIELDS,
+  'sizeCategory',
   'spellcasting',
   'sharedSpellSlots',
   'pactSpellSlots',
@@ -983,6 +1027,18 @@ function parsedV1Core(
       [...prefix, 'spellSlots'],
       gaps,
     ),
+  };
+}
+
+function parsedV2Core(
+  value: Readonly<Record<string, unknown>>,
+  partyEntry: string,
+  memberIndex: number,
+  gaps: GapReport[],
+): unknown {
+  return {
+    ...parsedBase(value, partyEntry, memberIndex, gaps) as Readonly<Record<string, unknown>>,
+    sizeCategory: value.sizeCategory,
   };
 }
 
@@ -1145,6 +1201,86 @@ export function loadedFeatureEffect(
       : limitedResourcePoolId(effect.resourcePoolId),
   } as const;
   switch (effect.kind) {
+    case 'damage_operation':
+      return {
+        ...common,
+        payload: {
+          kind: 'damage_operation',
+          saveDc: effect.saveDc,
+          delivery: effect.delivery,
+          instancesPerTarget: effect.instancesPerTarget,
+          packets: effect.packets.map((packet) => ({
+            damageType: packet.damageType.kind === 'fixed'
+              ? { kind: 'fixed', damageType: damageType(packet.damageType.damageType) }
+              : {
+                  kind: 'conversion',
+                  from: damageType(packet.damageType.from),
+                  to: damageType(packet.damageType.to),
+                },
+            dice: {
+              baseCount: packet.dice.baseCount,
+              sides: packet.dice.sides,
+              modifier: packet.dice.modifier,
+              perSlotCount: packet.dice.perSlotCount,
+              perSlotModifier: packet.dice.perSlotModifier,
+              cantripUpgrade: packet.dice.cantripUpgrade,
+              ...(packet.dice.minimumTotal === undefined ? {} : { minimumTotal: packet.dice.minimumTotal }),
+              ...(packet.dice.maximumTotal === undefined ? {} : { maximumTotal: packet.dice.maximumTotal }),
+              ...(packet.dice.rerollBelow === undefined ? {} : { rerollBelow: packet.dice.rerollBelow }),
+            },
+            scaling: packet.scaling,
+            thresholdRider: packet.thresholdRider,
+          })),
+          timing: effect.timing,
+        },
+      };
+    case 'armed_weapon_hit_rider': {
+      const packet = effect.damage;
+      const selectedType = packet === null
+        ? null
+        : packet.damageType.kind === 'fixed'
+          ? damageType(packet.damageType.damageType)
+          : damageType(packet.damageType.to);
+      return {
+        ...common,
+        payload: {
+          kind: 'damage_rider',
+          damage: {
+            terms: packet === null || selectedType === null
+              ? []
+              : [{
+                  type: selectedType,
+                  dice: {
+                    count: packet.dice.baseCount,
+                    sides: dieSides(packet.dice.sides),
+                    modifier: packet.dice.modifier,
+                    ...(packet.dice.minimumTotal === undefined ? {} : { minimumTotal: packet.dice.minimumTotal }),
+                    ...(packet.dice.maximumTotal === undefined ? {} : { maximumTotal: packet.dice.maximumTotal }),
+                    ...(packet.dice.rerollBelow === undefined ? {} : { rerollBelow: packet.dice.rerollBelow }),
+                  },
+                }],
+            critical: false,
+            responses: [],
+          },
+          appliesTo: 'weapon_attack_by_target',
+          consumeOnHit: effect.persistence === 'consume_on_hit',
+          arming: { durationRounds: effect.durationRounds, concentration: effect.concentration },
+          ...(effect.saveGatedRider === null
+            ? {}
+            : {
+                followUp: {
+                  kind: 'save_then_condition' as const,
+                  saveAbility: effect.saveGatedRider.ability,
+                  saveDc: effect.saveDc,
+                  rollMode: effect.saveGatedRider.rollMode,
+                  condition: effect.saveGatedRider.condition,
+                  expiresAt: effect.saveGatedRider.expiresAt,
+                  durationRounds: effect.saveGatedRider.durationRounds,
+                },
+              }),
+        },
+      };
+    }
     case 'damage_rider':
       return {
         ...common,
@@ -1407,15 +1543,22 @@ function v2MemberExtensions(member: ExternalPartyPackMember): {
   readonly effects: readonly ExternalPartyPackEffect[];
   readonly resources: readonly ExternalPartyPackResource[];
   readonly passives: z.infer<typeof passivesSchema> | null;
+  readonly sizeCategory: KnownCreatureSize | null;
 } {
   if (!Object.hasOwn(member, 'effects') && !Object.hasOwn(member, 'resources') && !Object.hasOwn(member, 'passives')) {
-    return { effects: [], resources: [], passives: null };
+    return {
+      effects: [], resources: [], passives: null,
+      sizeCategory: Object.hasOwn(member, 'sizeCategory')
+        ? (member as ExternalPartyPackV2Member).sizeCategory
+        : null,
+    };
   }
   const v2Member = member as ExternalPartyPackV2Member;
   return {
     effects: v2Member.effects ?? [],
     resources: v2Member.resources ?? [],
     passives: v2Member.passives ?? null,
+    sizeCategory: v2Member.sizeCategory,
   };
 }
 
@@ -1460,6 +1603,7 @@ function loadedMember(
         })),
         conditionImmunities: [...(passive?.conditionImmunities ?? [])],
         usesDeathSaves: true,
+        ...(extensions.sizeCategory === null ? {} : { sizeCategory: extensions.sizeCategory }),
         spellSlots: spellSlots.map((capacity) => ({
           level: capacity.level,
           maximum: capacity.maximum,
@@ -1797,7 +1941,14 @@ export function loadedPartyEffectCommand(
   member: LoadedPartyMember,
   effectId: string,
   targets: readonly Extract<EncounterCommand, { readonly type: 'apply_effect' }>['effect']['targets'][number][],
-): Extract<EncounterCommand, { readonly type: 'apply_effect' | 'grant_temporary_hit_points' | 'create_persistent_area' }> {
+): Extract<EncounterCommand, {
+  readonly type:
+    | 'apply_effect'
+    | 'grant_temporary_hit_points'
+    | 'create_persistent_area'
+    | 'activate_damage_operation'
+    | 'arm_weapon_hit_rider';
+}> {
   const effect = member.effects.find((candidate) => candidate.id === effectId);
   if (effect === undefined) throw new PartyFeatureEffectError('effect_not_referenced');
   if (
@@ -1812,6 +1963,18 @@ export function loadedPartyEffectCommand(
   const resource = effect.resourcePoolId === null
     ? {}
     : { resourcePoolId: effect.resourcePoolId };
+  if (effect.payload.kind === 'damage_operation') {
+    return {
+      type: 'activate_damage_operation',
+      actor: member.profile.id,
+      effectId: effect.id,
+      targets,
+    };
+  }
+  if (effect.payload.kind === 'damage_rider' && effect.payload.arming !== undefined) {
+    if (targets.length !== 0) throw new RangeError('Arming a weapon-hit rider does not select a target.');
+    return { type: 'arm_weapon_hit_rider', actor: member.profile.id, effectId: effect.id };
+  }
   if (effect.payload.kind === 'persistent_area') {
     if (effect.payload.area.origin !== 'self') {
       throw new RangeError('A selected persistent area requires an explicit board placement command.');
@@ -2037,7 +2200,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     }
     const core = header.data.schemaVersion === 1
       ? v1MemberCoreSchema.safeParse(parsedV1Core(memberInput, entry, index, gaps))
-      : v2MemberCoreSchema.safeParse(parsedBase(memberInput, entry, index, gaps));
+      : v2MemberCoreSchema.safeParse(parsedV2Core(memberInput, entry, index, gaps));
     if (!core.success) {
       gaps.push(...core.error.issues.map((issue) => issueGap(entry, ['members', index, ...issue.path])));
       continue;

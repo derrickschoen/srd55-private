@@ -119,6 +119,17 @@ export type EncounterCommand =
       readonly effectId: EncounterEffectId;
     }
   | {
+      readonly type: 'activate_damage_operation';
+      readonly actor: CombatantId;
+      readonly effectId: EncounterEffectId;
+      readonly targets: readonly CombatantId[];
+    }
+  | {
+      readonly type: 'arm_weapon_hit_rider';
+      readonly actor: CombatantId;
+      readonly effectId: EncounterEffectId;
+    }
+  | {
       readonly type: 'heal';
       readonly actor: CombatantId;
       readonly target: CombatantId;

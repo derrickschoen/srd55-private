@@ -1,4 +1,5 @@
 import type { Ability } from '../../domain/enums';
+import type { DamageOperationPacket, DamageOperationSpec, OperationDice } from '../damage-operations';
 import type { EffectApplication, EffectPayload } from '../effects';
 import type {
   PersistentAreaAppliedPayload,
@@ -22,14 +23,7 @@ export interface SpellComponentsData {
   };
 }
 
-export interface ScaledDice {
-  readonly baseCount: number;
-  readonly sides: number;
-  readonly modifier: number;
-  readonly perSlotCount: number;
-  readonly perSlotModifier: number;
-  readonly cantripUpgrade: boolean;
-}
+export interface ScaledDice extends OperationDice {}
 
 export type SpellTargeting =
   | { readonly kind: 'self' }
@@ -114,6 +108,21 @@ export type SpellPersistentAreaEffectSpec =
     };
 
 export type SpellOperation =
+  | ({ readonly kind: 'damage_operation' } & DamageOperationSpec)
+  | {
+      readonly kind: 'armed_weapon_hit_rider';
+      readonly damage: DamageOperationPacket | null;
+      readonly durationRounds: number;
+      readonly concentration: boolean;
+      readonly persistence: 'consume_on_hit' | 'duration';
+      readonly saveGatedRider: null | {
+        readonly ability: Ability;
+        readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
+        readonly condition: Exclude<import('../conditions').ConditionName, 'Exhaustion'>;
+        readonly durationRounds: number;
+        readonly expiresAt: 'target_start' | 'target_end';
+      };
+    }
   | {
       readonly kind: 'persistent_area';
       readonly origin: 'selected_when_cast' | 'anchored_to_caster';
@@ -422,6 +431,8 @@ export type SpellOperation =
 
 /** Runtime inventory for serializers of the closed operation union above. */
 export const SPELL_OPERATION_KINDS = [
+  'damage_operation',
+  'armed_weapon_hit_rider',
   'persistent_area',
   'attack_damage',
   'attack_then_save_damage',

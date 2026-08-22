@@ -1,4 +1,4 @@
-import { abilities, type Ability, type Skill } from '../domain/enums';
+import { abilities, creatureSizes, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import type { CharacterSheet } from '../queries/character-sheet-builder';
 import type { CombatFeatureEffect } from './effects';
 import type { GridCell } from './grid';
@@ -41,6 +41,8 @@ export interface CombatRulesProfile {
   }[];
   readonly conditionImmunities: readonly string[];
   readonly usesDeathSaves: boolean;
+  /** Absence means the source did not establish a mechanical size category. */
+  readonly sizeCategory?: KnownCreatureSize;
   /** Reducer-owned expendable spell slots; absent levels are unavailable. */
   readonly spellSlots: readonly SpellSlotCapacity[];
   /** Reducer-owned class/feat pools; spell slots remain a separate resource type. */
@@ -200,6 +202,11 @@ export function monsterCombatantProfile(
       damageResponses: statblock.damageResponses,
       conditionImmunities: statblock.conditionImmunities,
       usesDeathSaves: statblock.usesDeathSaves,
+      ...(statblock.sourceDetails.classification.kind === 'present' &&
+        statblock.sourceDetails.classification.value.sizes.length === 1 &&
+        creatureSizes.includes(statblock.sourceDetails.classification.value.sizes[0] as KnownCreatureSize)
+          ? { sizeCategory: statblock.sourceDetails.classification.value.sizes[0] as KnownCreatureSize }
+          : {}),
       spellSlots: [],
     },
   };

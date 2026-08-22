@@ -32,6 +32,9 @@
     }
   },
   "$defs": {
+    "damageType": {
+      "enum": ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"]
+    },
     "abilityScores": {
       "type": "object",
       "additionalProperties": false,
@@ -199,6 +202,8 @@
       "properties": {
         "kind": {
           "enum": [
+            "damage_operation",
+            "armed_weapon_hit_rider",
             "damage_rider",
             "once_per_turn_damage_rider",
             "slot_spend_damage_rider",
@@ -231,6 +236,8 @@
         }
       },
       "oneOf": [
+        { "$ref": "#/$defs/damageOperationEffect" },
+        { "$ref": "#/$defs/armedWeaponHitRiderEffect" },
         { "$ref": "#/$defs/damageRiderEffect" },
         { "$ref": "#/$defs/oncePerTurnDamageRiderEffect" },
         { "$ref": "#/$defs/slotSpendDamageRiderEffect" },
@@ -260,6 +267,82 @@
         { "$ref": "#/$defs/elementalFuryEffect" },
         { "$ref": "#/$defs/persistentAreaEffect" }
       ]
+    },
+    "operationDice": {
+      "type": "object", "additionalProperties": false,
+      "required": ["baseCount", "sides", "modifier", "perSlotCount", "perSlotModifier", "cantripUpgrade"],
+      "properties": {
+        "baseCount": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "sides": { "type": "integer", "minimum": 2, "maximum": 100 },
+        "modifier": { "type": "integer", "minimum": -100000, "maximum": 100000 },
+        "perSlotCount": { "const": 0 },
+        "perSlotModifier": { "const": 0 },
+        "cantripUpgrade": { "const": false },
+        "minimumTotal": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "maximumTotal": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "rerollBelow": {
+          "type": "object", "additionalProperties": false,
+          "required": ["threshold", "maximumRerollsPerDie"],
+          "properties": {
+            "threshold": { "type": "integer", "minimum": 2, "maximum": 100 },
+            "maximumRerollsPerDie": { "const": 1 }
+          }
+        }
+      }
+    },
+    "damageOperationPacket": {
+      "type": "object", "additionalProperties": false,
+      "required": ["damageType", "dice", "scaling", "thresholdRider"],
+      "properties": {
+        "damageType": {
+          "oneOf": [
+            { "type": "object", "additionalProperties": false, "required": ["kind", "damageType"], "properties": { "kind": { "const": "fixed" }, "damageType": { "$ref": "#/$defs/damageType" } } },
+            { "type": "object", "additionalProperties": false, "required": ["kind", "from", "to"], "properties": { "kind": { "const": "conversion" }, "from": { "$ref": "#/$defs/damageType" }, "to": { "$ref": "#/$defs/damageType" } } }
+          ]
+        },
+        "dice": { "$ref": "#/$defs/operationDice" },
+        "scaling": {
+          "oneOf": [
+            { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "none" } } },
+            { "type": "object", "additionalProperties": false, "required": ["kind", "additionalDiceBySize"], "properties": { "kind": { "const": "target_size" }, "additionalDiceBySize": { "type": "object", "additionalProperties": false, "required": ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"], "properties": { "Tiny": { "type": "integer", "minimum": 0 }, "Small": { "type": "integer", "minimum": 0 }, "Medium": { "type": "integer", "minimum": 0 }, "Large": { "type": "integer", "minimum": 0 }, "Huge": { "type": "integer", "minimum": 0 }, "Gargantuan": { "type": "integer", "minimum": 0 } } } } },
+            { "type": "object", "additionalProperties": false, "required": ["kind", "hitPointsPerAdditionalDie", "maximumAdditionalDice"], "properties": { "kind": { "const": "target_missing_hit_points" }, "hitPointsPerAdditionalDie": { "type": "integer", "minimum": 1 }, "maximumAdditionalDice": { "type": "integer", "minimum": 0, "maximum": 100 } } }
+          ]
+        },
+        "thresholdRider": {
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "damageOperationEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "saveDc", "delivery", "instancesPerTarget", "packets", "timing"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "damage_operation" },
+        "trigger": { "enum": ["action", "bonus_action"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "saveDc": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "delivery": { "type": "object" },
+        "instancesPerTarget": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "packets": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/damageOperationPacket" } },
+        "timing": { "type": "object" }
+      }
+    },
+    "armedWeaponHitRiderEffect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effectId", "kind", "trigger", "saveDc", "damage", "durationRounds", "concentration", "persistence", "saveGatedRider"],
+      "properties": {
+        "effectId": { "type": "string", "pattern": "^effect:[a-z0-9][a-z0-9:-]{0,119}$" },
+        "kind": { "const": "armed_weapon_hit_rider" },
+        "trigger": { "enum": ["action", "bonus_action"] },
+        "resourcePoolId": { "type": "string", "pattern": "^resource:[a-z0-9][a-z0-9-]{0,79}$" },
+        "saveDc": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "damage": { "oneOf": [{ "$ref": "#/$defs/damageOperationPacket" }, { "type": "null" }] },
+        "durationRounds": { "type": "integer", "minimum": 1 },
+        "concentration": { "type": "boolean" },
+        "persistence": { "enum": ["consume_on_hit", "duration"] },
+        "saveGatedRider": { "type": ["object", "null"] }
+      }
     },
     "damageRiderEffect": {
       "type": "object", "additionalProperties": false,
@@ -720,7 +803,7 @@
           "then": { "required": ["sharedSpellSlots"] }
         }
       ],
-      "required": ["combatantId", "tokenId", "characterId", "classes", "abilities", "armorClass", "hitPointMaximum", "walkingSpeedFeet", "initiativeBonus", "savingThrowBonuses", "attacksPerAction", "attacks", "startingConditions"],
+      "required": ["combatantId", "tokenId", "characterId", "classes", "abilities", "armorClass", "hitPointMaximum", "sizeCategory", "walkingSpeedFeet", "initiativeBonus", "savingThrowBonuses", "attacksPerAction", "attacks", "startingConditions"],
       "properties": {
         "combatantId": { "type": "string", "pattern": "^combatant:[a-z0-9][a-z0-9-]{0,79}$" },
         "tokenId": { "type": "string", "pattern": "^token:[a-z0-9][a-z0-9-]{0,79}$" },
@@ -729,6 +812,7 @@
         "abilities": { "$ref": "#/$defs/abilityScores" },
         "armorClass": { "type": "integer", "minimum": 1, "maximum": 50 },
         "hitPointMaximum": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "sizeCategory": { "enum": ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"] },
         "walkingSpeedFeet": { "type": "integer", "minimum": 0, "maximum": 1000 },
         "initiativeBonus": { "type": "integer", "minimum": -30, "maximum": 30 },
         "savingThrowBonuses": { "$ref": "#/$defs/saveBonuses" },
