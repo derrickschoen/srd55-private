@@ -1,4 +1,4 @@
-import type { ExperimentTableRecordV5 } from '../experiment-telemetry';
+import type { ExperimentTableRecordV6 } from '../experiment-telemetry';
 import {
   evaluateCapture,
   REGRET_ORACLE_VERSION,
@@ -66,7 +66,7 @@ export function aggregateDecisions(
 
 export async function evaluateTable(
   sourceFile: string,
-  table: ExperimentTableRecordV5,
+  table: ExperimentTableRecordV6,
   onDecision?: (completed: number, total: number) => void,
 ): Promise<TableRegretReport> {
   const decisions: CaptureRegretResult[] = [];
