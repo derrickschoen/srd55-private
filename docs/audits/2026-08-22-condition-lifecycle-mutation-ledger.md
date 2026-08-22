@@ -29,3 +29,40 @@ Boundary evidence:
 
 All source mutations were restored. The final full-gate counts are recorded in
 the supervising task handoff rather than copied into this pre-gate ledger.
+
+## Round 2 — supervisor-found
+
+The supervisor deleted the cross-keyed-immunity branch and the original gate
+remained green (`Test Files 37 passed (37)`, `Tests 1719 passed (1719)`). The
+existing immunity test used `Frightened` for both the applied condition and the
+immunity key, so the surviving first branch masked the deletion.
+
+The audit found the same distinguishing-input gap in every requested branch
+family, so coverage was added rather than credited to the earlier tests:
+
+- `repeatedSave.onSuccess`: the earlier test distinguished event names on a
+  single-target effect, where removing the only target and ending the effect
+  leave equivalent state. The new multi-target test proves that
+  `remove_target` preserves the other target while `end_effect` removes both.
+- `damageBreak.sources`: the earlier restrictive-scope test used outsider
+  damage, but the `any` test used movement-region damage in a separate setup.
+  The new comparison sends the same non-source, non-ally damage through both
+  scopes and proves opposite outcomes.
+- stacking `sources`: replacement previously compared `coexist` with
+  `any_source`, and duration extension covered only a repeated same-source
+  casting. New comparisons vary different casters across `same_source` and
+  `any_source` for both replacement and duration extension.
+
+Each production mutation below was applied alone, killed by its named test,
+and restored before the next mutation. Every focused mutant command exited 1.
+
+| Mutation | Temporary production change | Named killing test | Mutant result |
+|---|---|---|---|
+| `cross_keyed_immunity_branch_deleted` | Applied the supervisor's exact mutation: deleted the second `blockingImmunity` branch, leaving `: null`. | `cross_keyed_immunity: applied-condition, keyed-immunity, and unblocked targets emit distinct outcomes` | exit 1 |
+| `repeat_save_end_effect_as_remove_target` | Made the `end_effect` success branch unreachable, so both variants removed only the saving target. | `repeat_save_success_scope: remove-target preserves a second target while end-effect removes both` | exit 1 |
+| `damage_any_scope_as_restrictive` | Made the `sources === 'any'` branch return false for outsider damage. | `damage_source_scope_comparison: outsider damage breaks any-source but not source-or-allies` | exit 1 |
+| `replace_any_source_as_same_source` | Mapped every replace operation to `replace_same_source`. | `stacking_source_scope: different sources coexist for same-source and replace for any-source` | exit 1 |
+| `extend_any_source_as_same_source` | Removed the `any_source` alternative when finding an effect to extend. | `extend_duration_source_scope: different sources coexist for same-source and extend for any-source` | exit 1 |
+
+All round-2 source mutations were restored. The focused lifecycle suite then
+reported `Tests  17 passed (17)` before the final gates.

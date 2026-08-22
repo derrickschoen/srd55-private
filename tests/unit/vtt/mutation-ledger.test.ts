@@ -482,6 +482,11 @@ describe('phase-2 mutation ledger manifest', () => {
       'repeat_save_on_success_persists',
       'duration_off_by_one',
       'stacking_silently_replaces',
+      'cross_keyed_immunity_branch_deleted',
+      'repeat_save_end_effect_as_remove_target',
+      'damage_any_scope_as_restrictive',
+      'replace_any_source_as_same_source',
+      'extend_any_source_as_same_source',
     ];
     const killingTests = [
       'save_dc_boundary: a result exactly at the DC refuses application while one below applies it',
@@ -490,14 +495,19 @@ describe('phase-2 mutation ledger manifest', () => {
       'immunity_reported_as_save: an immune target emits a refusal without drawing or reporting a save',
       'duration_off_by_one: exactly one round expires on its first declared boundary',
       'stacking_silently_replaces: imported coexist and replace policies differ across sources',
+      'cross_keyed_immunity: applied-condition, keyed-immunity, and unblocked targets emit distinct outcomes',
+      'repeat_save_success_scope: remove-target preserves a second target while end-effect removes both',
+      'damage_source_scope_comparison: outsider damage breaks any-source but not source-or-allies',
+      'stacking_source_scope: different sources coexist for same-source and replace for any-source',
+      'extend_duration_source_scope: different sources coexist for same-source and extend for any-source',
     ];
     for (const mutation of mutations) expect(ledger).toContain(`\`${mutation}\``);
     for (const testName of killingTests) {
       expect(ledger).toContain(`\`${testName}\``);
       expect(tests).toContain(testName);
     }
-    expect(ledger.match(/exit 1/gu)).toHaveLength(9);
+    expect(ledger.match(/exit 1/gu)).toHaveLength(14);
     expect(ledger).toContain('Each production mutation below was applied alone');
-    expect(ledger).toContain('Tests  12 passed (12)');
+    expect(ledger).toContain('Tests  17 passed (17)');
   });
 });

@@ -10,9 +10,10 @@ import {
   type EncounterState,
 } from '../../../src/combat/encounter';
 import type { EncounterEvent } from '../../../src/combat/events';
+import type { EffectApplication } from '../../../src/combat/effects';
 import { mulberry32, type Rng } from '../../../src/combat/random';
 import type { ConditionLifecycleOperation, SpellCastCommand, SpellOperation } from '../../../src/combat/spells/types';
-import { damageType, feet } from '../../../src/combat/values';
+import { damageType, effectStackingIdentity, feet } from '../../../src/combat/values';
 import { loadContentPack, type LoadedContentPack } from '../../../src/content/content-pack';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
@@ -161,6 +162,43 @@ describe('CAP-IMP-010 imported condition and control lifecycle', () => {
     expect(conditionEffects(result.state)).toHaveLength(0);
   });
 
+  it('cross_keyed_immunity: applied-condition, keyed-immunity, and unblocked targets emit distinct outcomes', () => {
+    // Sleep applies Unconscious but keys automatic refusal to Exhaustion immunity (spell-descriptions.txt:7111-7118).
+    const pack = packWithSpells([{
+      id: 'sleep-cross-keyed-control',
+      operation: lifecycle({ condition: 'Unconscious', immunity: { condition: 'Exhaustion' } }),
+    }]);
+    const caster = playerProfile('cross-keyed-caster', { initiativeBonus: 20 });
+    const keyedImmune = monsterProfile('cross-keyed-exhaustion-immune', {
+      initiativeBonus: -20, conditionImmunities: ['Exhaustion'],
+    });
+    const appliedImmune = monsterProfile('cross-keyed-unconscious-immune', {
+      initiativeBonus: -20, conditionImmunities: ['Unconscious'],
+    });
+    const unblocked = monsterProfile('cross-keyed-unblocked', { initiativeBonus: -20 });
+
+    const keyed = cast(started(pack, [caster, keyedImmune]), caster, keyedImmune, 'sleep-cross-keyed-control');
+    expect(keyed.events).toContainEqual(expect.objectContaining({
+      type: 'condition_application_refused', target: keyedImmune.id,
+      condition: 'Unconscious', immunity: 'Exhaustion',
+    }));
+    expect(keyed.events.some((event) => event.type === 'effect_applied')).toBe(false);
+
+    const applied = cast(started(pack, [caster, appliedImmune]), caster, appliedImmune, 'sleep-cross-keyed-control');
+    expect(applied.events).toContainEqual(expect.objectContaining({
+      type: 'condition_application_refused', target: appliedImmune.id,
+      condition: 'Unconscious', immunity: 'Unconscious',
+    }));
+    expect(applied.events.some((event) => event.type === 'effect_applied')).toBe(false);
+
+    const allowed = cast(started(pack, [caster, unblocked]), caster, unblocked, 'sleep-cross-keyed-control');
+    expect(allowed.events).toContainEqual(expect.objectContaining({
+      type: 'effect_applied', source: caster.id, targets: [unblocked.id],
+    }));
+    expect(allowed.events.some((event) => event.type === 'condition_application_refused')).toBe(false);
+    expect(conditionEffects(allowed.state)).toHaveLength(1);
+  });
+
   it('repeat_save_on_success_persists: repeats on the first and final round and honors both success scopes', () => {
     // End-of-turn/remove-target: spell-descriptions.txt:867-873.
     // Start-of-turn/end-effect distinction: spell-descriptions.txt:1474-1486,6418-6426.
@@ -189,6 +227,51 @@ describe('CAP-IMP-010 imported condition and control lifecycle', () => {
     const wholeEffect = run('end_effect');
     expect(wholeEffect.events).toContainEqual(expect.objectContaining({ type: 'effect_ended', reason: 'save_succeeded' }));
     expect(wholeEffect.events.some((event) => event.type === 'effect_target_removed')).toBe(false);
+  });
+
+  it('repeat_save_success_scope: remove-target preserves a second target while end-effect removes both', () => {
+    // A successful repeated save can remove one target or end the whole spell (spell-descriptions.txt:1474-1486,6418-6426).
+    const run = (onSuccess: 'remove_target' | 'end_effect') => {
+      const source = playerProfile(`multi-save-source-${onSuccess}`, { initiativeBonus: 30 });
+      const savingTarget = monsterProfile(`multi-save-saving-${onSuccess}`, {
+        initiativeBonus: 20, constitutionSaveBonus: 0,
+      });
+      const otherTarget = monsterProfile(`multi-save-other-${onSuccess}`, { initiativeBonus: -20 });
+      const state = started(packWithSpells([]), [source, savingTarget, otherTarget]);
+      const effect: EffectApplication = {
+        targets: [savingTarget.id, otherTarget.id],
+        duration: { kind: 'permanent' }, concentration: false,
+        stackingIdentity: effectStackingIdentity(`multi-save:${onSuccess}`), stacking: 'coexist',
+        repeatedSave: {
+          timing: { combatant: savingTarget.id, boundary: 'start', source: 'spell-descriptions.txt:1474-1486,6418-6426' },
+          ability: 'constitution', dc: 10, rollMode: 'normal', onSuccess,
+        },
+        payload: { kind: 'condition', condition: 'Blinded' },
+      };
+      const applied = reduceEncounter(state, {
+        type: 'apply_effect', actor: source.id, effect, cost: 'none',
+      }, face(1));
+      return {
+        result: endTurn(applied.state, source, face(10)),
+        savingTarget,
+        otherTarget,
+      };
+    };
+
+    const targetScoped = run('remove_target');
+    expect(targetScoped.result.events).toContainEqual(expect.objectContaining({
+      type: 'effect_target_removed', target: targetScoped.savingTarget.id, reason: 'save_succeeded',
+    }));
+    expect(targetScoped.result.events.some((event) => event.type === 'effect_ended')).toBe(false);
+    expect(targetScoped.result.state.effects).toHaveLength(1);
+    expect(targetScoped.result.state.effects[0]?.targets).toEqual([targetScoped.otherTarget.id]);
+
+    const wholeEffect = run('end_effect');
+    expect(wholeEffect.result.events).toContainEqual(expect.objectContaining({
+      type: 'effect_ended', reason: 'save_succeeded',
+    }));
+    expect(wholeEffect.result.events.some((event) => event.type === 'effect_target_removed')).toBe(false);
+    expect(wholeEffect.result.state.effects).toHaveLength(0);
   });
 
   it('damage_break_ignores_region: movement-region damage at exactly zero preserves and exactly one breaks the effect', () => {
@@ -238,6 +321,30 @@ describe('CAP-IMP-010 imported condition and control lifecycle', () => {
     const sourceDamage = cast(state, controller, target, 'one-damage');
     expect(sourceDamage.events).toContainEqual(expect.objectContaining({ type: 'effect_ended', reason: 'damage_taken' }));
     expect(conditionEffects(sourceDamage.state)).toHaveLength(0);
+  });
+
+  it('damage_source_scope_comparison: outsider damage breaks any-source but not source-or-allies', () => {
+    // Damage from any source and damage from only the caster or allies are distinct rules (spell-descriptions.txt:7111-7116,150-159).
+    const run = (sources: 'any' | 'effect_source_or_allies') => {
+      const pack = packWithSpells([
+        { id: `damage-scope-${sources}`, operation: lifecycle({ damageBreak: { sources, minimumDamage: 1 } }) },
+        { id: 'outsider-damage', operation: fixedDamage(1) },
+      ]);
+      const controller = monsterProfile(`damage-scope-controller-${sources}`, { initiativeBonus: 30 });
+      const outsider = playerProfile(`damage-scope-outsider-${sources}`, { initiativeBonus: 20 });
+      const target = playerProfile(`damage-scope-target-${sources}`, { initiativeBonus: -20, hitPoints: 20 });
+      let state = cast(started(pack, [controller, outsider, target]), controller, target, `damage-scope-${sources}`).state;
+      state = endTurn(state, controller).state;
+      return cast(state, outsider, target, 'outsider-damage');
+    };
+
+    const anySource = run('any');
+    expect(anySource.events).toContainEqual(expect.objectContaining({ type: 'effect_ended', reason: 'damage_taken' }));
+    expect(conditionEffects(anySource.state)).toHaveLength(0);
+
+    const sourceOrAllies = run('effect_source_or_allies');
+    expect(sourceOrAllies.events.some((event) => event.type === 'effect_ended' && event.reason === 'damage_taken')).toBe(false);
+    expect(conditionEffects(sourceOrAllies.state)).toHaveLength(1);
   });
 
   it('duration_off_by_one: exactly one round expires on its first declared boundary', () => {
@@ -310,6 +417,30 @@ describe('CAP-IMP-010 imported condition and control lifecycle', () => {
     expect(replaced.events).toContainEqual(expect.objectContaining({ type: 'effect_ended', reason: 'stacking_replaced' }));
   });
 
+  it('stacking_source_scope: different sources coexist for same-source and replace for any-source', () => {
+    const run = (sources: 'same_source' | 'any_source') => {
+      const pack = packWithSpells([{
+        id: `stack-scope-${sources}`,
+        operation: lifecycle({ stacking: { kind: 'replace', sources } }),
+      }]);
+      const first = playerProfile(`stack-scope-first-${sources}`, { initiativeBonus: 30 });
+      const second = playerProfile(`stack-scope-second-${sources}`, { initiativeBonus: 20 });
+      const target = monsterProfile(`stack-scope-target-${sources}`, { initiativeBonus: -20 });
+      let state = cast(started(pack, [first, second, target]), first, target, `stack-scope-${sources}`).state;
+      state = endTurn(state, first).state;
+      return cast(state, second, target, `stack-scope-${sources}`);
+    };
+
+    const sameSource = run('same_source');
+    expect(sameSource.events.some((event) => event.type === 'effect_ended' && event.reason === 'stacking_replaced')).toBe(false);
+    expect(conditionEffects(sameSource.state)).toHaveLength(2);
+
+    const anySource = run('any_source');
+    expect(anySource.events).toContainEqual(expect.objectContaining({ type: 'effect_ended', reason: 'stacking_replaced' }));
+    expect(conditionEffects(anySource.state)).toHaveLength(1);
+    expect(conditionEffects(anySource.state)[0]?.source).toContain('stack-scope-second-any_source');
+  });
+
   it('extend_duration_policy: a second same-source application extends instead of replacing', () => {
     const pack = packWithSpells([{
       id: 'extend-control',
@@ -324,6 +455,32 @@ describe('CAP-IMP-010 imported condition and control lifecycle', () => {
     expect(conditionEffects(extended.state)).toHaveLength(1);
     expect(conditionEffects(extended.state)[0]?.duration).toMatchObject({ remaining: 3 });
     expect(extended.events).toContainEqual(expect.objectContaining({ type: 'effect_duration_extended', addedRounds: 2, remaining: 3 }));
+  });
+
+  it('extend_duration_source_scope: different sources coexist for same-source and extend for any-source', () => {
+    const run = (sources: 'same_source' | 'any_source') => {
+      const pack = packWithSpells([{
+        id: `extend-scope-${sources}`,
+        operation: lifecycle({ stacking: { kind: 'extend_duration', sources } }),
+      }]);
+      const first = playerProfile(`extend-scope-first-${sources}`, { initiativeBonus: 30 });
+      const second = playerProfile(`extend-scope-second-${sources}`, { initiativeBonus: 20 });
+      const target = monsterProfile(`extend-scope-target-${sources}`, { initiativeBonus: -20 });
+      let state = cast(started(pack, [first, second, target]), first, target, `extend-scope-${sources}`).state;
+      state = endTurn(state, first).state;
+      return cast(state, second, target, `extend-scope-${sources}`);
+    };
+
+    const sameSource = run('same_source');
+    expect(sameSource.events.some((event) => event.type === 'effect_duration_extended')).toBe(false);
+    expect(conditionEffects(sameSource.state)).toHaveLength(2);
+
+    const anySource = run('any_source');
+    expect(anySource.events).toContainEqual(expect.objectContaining({
+      type: 'effect_duration_extended', addedRounds: 2, remaining: 4,
+    }));
+    expect(conditionEffects(anySource.state)).toHaveLength(1);
+    expect(conditionEffects(anySource.state)[0]?.source).toContain('extend-scope-first-any_source');
   });
 
   it('same_hook_order: damage-break precedes re-evaluated branches, then repeat saves, then duration expiry', () => {
