@@ -7,6 +7,46 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D333 — OWNER: general composition, scraper in parallel, E05 rerun, engine before board (2026-08-22)
+
+Round-9 answers, given after the 24-hour summary. The supervisor recommended a
+different option on all four and was overruled on all four; the recommendations
+are recorded here so the trade the owner accepted is legible later.
+
+1. **Next engine increment is GENERAL composition (151 records), not pairwise
+   (89).** Supervisor recommended pairwise as the bounded primitive. Owner took
+   the whole true-composition residue in one increment. Consequence accepted:
+   arbitrary nesting makes the type-system work substantially larger, and the
+   failure mode is a plausible-wrong-execution rather than a compile error, so
+   the increment must be pinned by tests that distinguish nesting depth and
+   evaluation order — not merely by "it executed".
+
+2. **Scraper starts NOW as a parallel lane.** Supervisor recommended deferring
+   it one increment on the grounds that distribution moves nobody until there
+   is more to distribute. Owner wants it in flight. D332's "scraper waits until
+   after the six set-cover steps" is satisfied and superseded by this.
+
+3. **E05 is rerun with HARDER programs.** Supervisor recommended closing the
+   line — the checker rejected 0 of ~300 and the instrumentation round proved
+   that zero was real rather than vacuous. Owner's reading is that the null may
+   be an artifact of programs too easy to get wrong. The rerun therefore is not
+   a repeat: it only means anything if the program difficulty is raised by a
+   declared, preregistered mechanism, and if the checker still fires zero times
+   on harder programs that is a stronger negative result than the first.
+
+4. **Engine depth continues; the board waits.** Supervisor recommended wiring
+   draft-1 playability to the movement the engine already has, on the grounds
+   that D312 orders movement first and nothing is demonstrable yet. Owner keeps
+   engine depth ahead of playable surface. D312's forward thread is unchanged;
+   what changes is that "keep the VTT moving" is satisfied by engine increments
+   for now, and the screen-shared board is explicitly deferred.
+
+MACHINE-LOAD NOTE (supervisor, not a ruling): answers 1-3 add three lanes while
+the srd-subclasses survivor lane is still running. Gates on this box have
+returned false timeout failures under concurrent codex load. Nothing is scaled
+down; the dispatches are sequenced so no gate runs against a saturated machine,
+and E05 starts only once srd-subclasses clears.
+
 ## D332 — OWNER: E05 retargeted to typed-vs-untyped; residue handed over; scraper waits (2026-08-21)
 
 Round-8 answers. Question 1 (set-cover step 4) was answered "I need context
