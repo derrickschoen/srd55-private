@@ -7,6 +7,43 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D334 — OWNER: audit rulings — semi-trusted packs, shared sessions, engine-core bar, additive-then-delete (2026-08-22)
+
+Rulings on the four questions from the three-model audit
+(docs/audits/2026-08-22-three-model-app-audit.md):
+
+1. **Content packs are SEMI-TRUSTED: user-authored, not hostile.** Validation
+   is for diagnostics — malformed packs are rejected at load with good
+   errors; the engine does not defend against deliberate attack. Consequence
+   accepted and recorded: crashes or pathological types from a truly
+   malicious pack remain possible; adequate while packs do not travel
+   between users. Wave 1 sizes to this: real schemas for the five
+   unvalidated operation kinds (values, not key presence), schema/code drift
+   closed by generation or conformance test, a bounded SpeedFeet — but no
+   adversarial corpus or execution limits.
+
+2. **Saved sessions WILL BE SHARED — harden them.** The stronger option,
+   chosen over the recommended local-only documentation. decodeRevision gets
+   a closed-union decode of transition kinds and session integrity must not
+   be recomputable by the file's writer. Joins wave 1.
+
+3. **The D280 bar is enforced SCOPED TO THE ENGINE CORE.** One command, real
+   threshold, declared scope = enforced scope, extended as tails clear.
+   This is a D280 re-scope by ruling: "whole-src/ zero-unexplained" remains
+   the v1 aspiration, but the enforced gate covers the engine core first.
+
+4. **Waves 3-4 proceed ADDITIVE-THEN-DELETE.** Typed operation-outcome
+   channel and the conditions rule surface land beside the legacy paths;
+   old paths are deleted in their own commits with the wave-2 bar watching.
+   Temporary duplication accepted with a hard delete commitment — the
+   duplication itself is a standing finding until the delete commits land.
+
+Context pinned by the audit, binding on the waves: composition's
+state-delta refusal heuristic corrupts valid casts (measured hp 20->20
+where 17 is correct) and abort does not roll back RNG position; the
+composition increment stays on wt/vtt unreleased until the wave-3 outcome
+channel replaces the heuristic.
+
 ## D333 — OWNER: general composition, scraper in parallel, E05 rerun, engine before board (2026-08-22)
 
 Round-9 answers, given after the 24-hour summary. The supervisor recommended a
