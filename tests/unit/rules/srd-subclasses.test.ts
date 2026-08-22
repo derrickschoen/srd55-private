@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   parseSrdSubclasses,
   SPELL_TABLE_ACTIVATION_LEVELS,
@@ -430,6 +430,29 @@ function parserFailure(source: string): {
   return { error_name: caught.name, message: caught.message };
 }
 
+const EXTRACT_BODY_MARKER = '--- Extracted catalog lines follow. ---\n';
+const EXTRACT_BODY_START = SOURCE.indexOf(EXTRACT_BODY_MARKER);
+const REQUIRED_PREAMBLE = SOURCE.slice(
+  0,
+  EXTRACT_BODY_START + EXTRACT_BODY_MARKER.length,
+);
+
+function syntheticCatalog(lines: readonly string[]): string {
+  return `${REQUIRED_PREAMBLE}${lines.join('\n')}`;
+}
+
+function srdParserError(source: string): SrdSubclassesError {
+  try {
+    parseSrdSubclasses(source);
+  } catch (error) {
+    if (error instanceof SrdSubclassesError) {
+      return error;
+    }
+    throw error;
+  }
+  return expect.fail('Expected the SRD subclass parser to reject the source.');
+}
+
 function withoutChampion(): string {
   const champion = sourceSection(
     '\f     Fighter Subclass: Champion',
@@ -840,6 +863,343 @@ describe('SRD subclass manifest', () => {
 });
 
 describe('SRD subclass parser rejections', () => {
+  it('normalizes boundary whitespace, mixed whitespace, and the empty body', () => {
+    const whitespaceVariant = ` \t\n${SOURCE}`
+      .replace(
+        'This work includes material',
+        'This\t  \n work   includes material',
+      )
+      .replace(EXTRACT_BODY_MARKER, ` \t\n${EXTRACT_BODY_MARKER}`)
+      .replace(
+        '   Level 3: Frenzy',
+        '\t  Level\t  3: \t Frenzy \t',
+      );
+
+    expect(parseSrdSubclasses(whitespaceVariant).by_class.Barbarian.features[0])
+      .toMatchObject({ class_level: 3, name: 'Frenzy' });
+
+    const emptyBody = srdParserError(syntheticCatalog([]));
+    expect(emptyBody).toBeInstanceOf(SrdSubclassesError);
+    expect(emptyBody.message).toContain('no subclass sections');
+  });
+
+  it('does not normalize a shifted word boundary in the required preamble', () => {
+    const error = srdParserError(
+      SOURCE.replace('This work includes', 'Thisw ork includes'),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('attribution and extract provenance preamble');
+  });
+
+  it('rejects a blank line inside the catalog body', () => {
+    const error = srdParserError(
+      SOURCE.replace('   Level 3: Frenzy\n', '   Level 3: Frenzy\n\n'),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('blank or prose line');
+  });
+
+  it('does not remove form feeds embedded inside a catalog line', () => {
+    const error = srdParserError(
+      SOURCE.replace('Barbarian Subclass:', 'Bar\fbarian Subclass:'),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('Bar barian Subclass');
+  });
+
+  it('requires subclass-heading matches to consume the complete line', () => {
+    const error = srdParserError(
+      SOURCE.replace('Barbarian Subclass:', 'Barbarian Subclass:!'),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('Barbarian Subclass:!');
+  });
+
+  it('exercises subclass-name accumulation at all three boundaries', () => {
+    expect(manifest().by_class.Fighter.subclass_name).toBe('Champion');
+
+    const severalLines = parseSrdSubclasses(
+      SOURCE.replace(
+        '   Path of the Berserker\n',
+        '   Path\n   of\n   the\n   Berserker\n',
+      ),
+    );
+    expect(severalLines.by_class.Barbarian.subclass_name).toBe(
+      'Path of the Berserker',
+    );
+
+    const incomplete = srdParserError(syntheticCatalog([
+      'Barbarian Subclass:',
+      'Path',
+      'of',
+    ]));
+    expect(incomplete).toBeInstanceOf(SrdSubclassesError);
+    expect(incomplete.message).toContain('Barbarian subclass name');
+    expect(incomplete.message).toContain('"Path of"');
+  });
+
+  it('keeps a non-prefix subclass-name fragment out of the accumulation', () => {
+    const error = srdParserError(syntheticCatalog([
+      'Barbarian Subclass:',
+      'Berserker',
+    ]));
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('Barbarian subclass name');
+    expect(error.message).toContain('is ""');
+  });
+
+  it('requires feature-heading matches to start at the line boundary', () => {
+    const error = srdParserError(
+      SOURCE.replace('   Level 3: Frenzy', '   prose Level 3: Frenzy'),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('Barbarian');
+    expect(error.message).toContain('prose Level 3: Frenzy');
+  });
+
+  it('accepts a nonempty feature name that resembles mutation sentinel prose', () => {
+    expect(
+      parseSrdSubclasses(
+        SOURCE.replace('Level 3: Frenzy', 'Level 3: Stryker was here!'),
+      ).by_class.Barbarian.features[0]?.name,
+    ).toBe('Stryker was here!');
+  });
+
+  it('requires spell-row matches to start at the line boundary', () => {
+    const error = srdParserError(
+      SOURCE.replace(
+        '         5       Mass Healing Word, Revivify',
+        '         prose 5 Mass Healing Word, Revivify',
+      ),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('Cleric');
+    expect(error.message).toContain('prose 5 Mass Healing Word, Revivify');
+  });
+
+  it('tracks continuation rows until the first line without a trailing comma', () => {
+    const continuedTwice = SOURCE
+      .replace(
+        '                    Shield of Faith\n',
+        '                    Shield of Faith,\n                    Aid\n',
+      )
+      .replace('         5          Aid, Zone of Truth', '         5          Zone of Truth');
+
+    expect(
+      spellTuples(
+        unconditionalTable(parseSrdSubclasses(continuedTwice), 'oath_of_devotion'),
+      ).slice(0, 4),
+    ).toEqual([
+      [3, 'Protection from Evil and Good', '2024:protection-from-evil-and-good'],
+      [3, 'Shield of Faith', '2024:shield-of-faith'],
+      [3, 'Aid', '2024:aid'],
+      [5, 'Zone of Truth', '2024:zone-of-truth'],
+    ]);
+  });
+
+  it('refuses a feature boundary before a pending row continuation', () => {
+    const interrupted = SOURCE
+      .replace(
+        '         3          Protection from Evil and Good,\n                    Shield of Faith\n',
+        '         3          Protection from Evil and Good,\nLevel 3: Sacred Weapon\n                    Shield of Faith\n',
+      )
+      .replace('Level 3: Sacred Weapon\nLevel 7: Aura of Devotion', 'Level 7: Aura of Devotion');
+    const error = srdParserError(interrupted);
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('Paladin');
+    expect(error.message).toContain('incomplete row');
+  });
+
+  it('tags an open continuation at end of input with its class', () => {
+    const error = srdParserError(syntheticCatalog([
+      'Paladin Subclass: Oath of Devotion',
+      'Oath of Devotion Spells',
+      'Paladin Level Spells',
+      '3 Protection from Evil and Good,',
+    ]));
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('Paladin');
+    expect(error.message).toContain('incomplete row');
+  });
+
+  it('rejects a physical table header after exactly one row', () => {
+    const error = srdParserError(syntheticCatalog([
+      'Cleric Subclass: Life Domain',
+      'Life Domain Spells',
+      'Cleric Prepared Spells',
+      'Level',
+      '3 Aid',
+      'Level',
+    ]));
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('life_domain');
+    expect(error.message).toContain('"Level"');
+  });
+
+  it('rejects a Circle land title outside the Druid section', () => {
+    const error = srdParserError(
+      SOURCE.replace('     Level 3: Hunter’s Lore', '     Arid Land'),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('Arid Land');
+    expect(error.message).toContain('outside the Druid section');
+  });
+
+  it('tags a repeated Circle level with its table, level, and land', () => {
+    const error = srdParserError(
+      SOURCE.replace(
+        '            5          Stinking Cloud',
+        '            3          Stinking Cloud',
+      ),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('circle_of_the_land');
+    expect(error.message).toContain('level 3');
+    expect(error.message).toContain('Tropical Land');
+  });
+
+  it('tags a repeated unconditional level without inventing a land', () => {
+    const error = srdParserError(
+      SOURCE.replace(
+        '         5       Mass Healing Word, Revivify',
+        '         3       Mass Healing Word, Revivify',
+      ),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('life_domain repeats level 3.');
+  });
+
+  it('tags a missing spell table with the expected table catalog', () => {
+    const table = sourceSection(
+      '   Life Domain Spells\n',
+      '   Level 3: Preserve Life',
+    );
+    const error = srdParserError(SOURCE.replace(table, ''));
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('five spell tables');
+    expect(error.message).toContain('circle_of_the_land');
+    expect(error.message).not.toContain('life_domain,');
+  });
+
+  it('tags a missing final spell table without relying on order mismatch', () => {
+    const fiend = sourceSection(
+      '    Fiend Spells\n',
+      '   Level 6: Dark One’s Own Luck',
+    );
+    const error = srdParserError(SOURCE.replace(fiend, ''));
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('five spell tables');
+    expect(error.message).toContain('draconic_sorcery');
+    expect(error.message).not.toContain('fiend_patron');
+  });
+
+  it('tags a rowless table with malformed final headers by table name', () => {
+    const table = sourceSection(
+      '   Life Domain Spells\n',
+      '   Level 3: Preserve Life',
+    );
+    const error = srdParserError(
+      SOURCE.replace(table, '   Life Domain Spells\n   Sorcerer\n   Level\n'),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('life_domain');
+    expect(error.message).toContain('physical table headers');
+  });
+
+  it('tags a rowless table whose final header count is short', () => {
+    const table = sourceSection(
+      '   Life Domain Spells\n',
+      '   Level 3: Preserve Life',
+    );
+    const error = srdParserError(
+      SOURCE.replace(
+        table,
+        '   Life Domain Spells\n   Cleric Prepared Spells\n',
+      ),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('life_domain');
+    expect(error.message).toContain('physical table headers');
+  });
+
+  it('tags a missing Circle physical table before the land-count guard', () => {
+    const tropical = sourceSection(
+      '     Tropical Land',
+      '  Level 3: Land’s Aid',
+    );
+    const error = srdParserError(SOURCE.replace(tropical, ''));
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('circle_of_the_land');
+    expect(error.message).toContain('physical table headers');
+  });
+
+  it('tags one malformed Circle physical header among valid tables', () => {
+    const tropical = sourceSection(
+      '     Tropical Land',
+      '  Level 3: Land’s Aid',
+    );
+    const error = srdParserError(
+      SOURCE.replace(
+        tropical,
+        '     Tropical Land\n       Sorcerer\n',
+      ),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('circle_of_the_land');
+    expect(error.message).toContain('physical table headers');
+  });
+
+  it.each([
+    ['missing separator', 'malformed-key'],
+    ['empty key part', '2024:'],
+  ])('tags a %s spell content key with the spell and offending key', (_, malformedKey) => {
+    const originalGet = Map.prototype.get;
+    const getSpy = vi.spyOn(Map.prototype, 'get').mockImplementation(function (
+      this: Map<unknown, unknown>,
+      key: unknown,
+    ): unknown {
+      return key === 'Aid' ? malformedKey : originalGet.call(this, key);
+    });
+
+    try {
+      const error = srdParserError(SOURCE);
+      expect(error).toBeInstanceOf(SrdSubclassesError);
+      expect(error.message).toContain('Aid');
+      expect(error.message).toContain(malformedKey);
+    } finally {
+      getSpy.mockRestore();
+    }
+  });
+
+  it('tags a missing deferred feature with its class and feature', () => {
+    const error = srdParserError(
+      SOURCE.replace('Level 6: Magical Discoveries', 'Level 6: Arcane Discoveries'),
+    );
+
+    expect(error).toBeInstanceOf(SrdSubclassesError);
+    expect(error.message).toContain('Bard');
+    expect(error.message).toContain('Magical Discoveries');
+  });
+
   it.each([
     {
       stage: 'truncated-section',
