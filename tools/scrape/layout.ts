@@ -24,6 +24,9 @@ export interface ScrapeLayout {
   /** Tier 2: body text, passed as `textDocuments`. Never merged into Tier 1. */
   readonly tier2Path: string;
   readonly reportPath: string;
+  /** Directly importable content-pack v1 output from `build --format content-pack`. */
+  readonly contentPackPath: string;
+  readonly contentPackReportPath: string;
 }
 
 export function scrapeLayout(
@@ -39,5 +42,10 @@ export function scrapeLayout(
     tier1Path: join(outDir, stampScrapedFilename(`${slice}.tier1.json`)),
     tier2Path: join(outDir, stampScrapedFilename(`${slice}.tier2.json`)),
     reportPath: join(outDir, stampScrapedFilename(`${slice}.report.json`)),
+    contentPackPath: join(outDir, stampScrapedFilename(`${slice}.content-pack-v1.json`)),
+    contentPackReportPath: join(
+      outDir,
+      stampScrapedFilename(`${slice}.content-pack-v1.report.json`),
+    ),
   };
 }
