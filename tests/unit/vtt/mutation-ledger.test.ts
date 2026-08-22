@@ -42,6 +42,7 @@ const ENVELOPE_NORMALIZATION_LEDGER_PATH = 'docs/audits/2026-08-22-envelope-norm
 const CHOICE_BRANCH_LEDGER_PATH = 'docs/audits/2026-08-22-choice-branch-mutation-ledger.md';
 const CONDITION_LIFECYCLE_LEDGER_PATH = 'docs/audits/2026-08-22-condition-lifecycle-mutation-ledger.md';
 const ROLL_DEFENSE_LEDGER_PATH = 'docs/audits/2026-08-22-roll-defense-mutation-ledger.md';
+const COMPOSITION_LEDGER_PATH = 'docs/audits/2026-08-22-composition-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -544,5 +545,36 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(11);
     expect(ledger).toContain('Every production mutation below was applied alone');
     expect(ledger).toContain('Tests  7 passed (7)');
+  });
+
+  it('COMPOSITION-MUTATION-LEDGER pins required controls and every new numeric boundary', () => {
+    const ledger = readFileSync(COMPOSITION_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/composition.test.ts', 'utf8');
+    const mutations = [
+      'composition_order_ignored',
+      'inner_refusal_swallowed',
+      'state_not_visible_between_steps',
+      'depth_limit_off_by_one',
+      'targets_not_reresolved',
+      'zero_suboperation_accepted',
+      'explicit_order_negative_index_accepted',
+      'explicit_order_past_end_accepted',
+      'depth_limit_rejects_exact_maximum',
+    ];
+    const killingTests = [
+      'composition_order_ignored and state_not_visible_between_steps: explicit opposite orders produce six versus three damage',
+      'inner_refusal_swallowed: the same immune step atomically aborts or continues according to the pack',
+      'depth_limit_off_by_one: depth four loads and depth five has a typed import refusal',
+      'targets_not_reresolved: inherited and caster re-resolution damage observably different target sets',
+      'composition_boundaries: one step and explicit index zero load while zero steps and index negative one refuse',
+    ];
+    for (const mutation of mutations) expect(ledger).toContain(`\`${mutation}\``);
+    for (const testName of killingTests) {
+      expect(ledger).toContain(`\`${testName}\``);
+      expect(tests).toContain(testName);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(9);
+    expect(ledger).toContain('Each production mutation below was applied alone');
+    expect(ledger).toContain('Tests  18 passed (18)');
   });
 });

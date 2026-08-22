@@ -99,6 +99,7 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'spell_cast':
       return [event.caster, ...event.targets];
     case 'spell_utility_resolved':
+    case 'composition_step_refused':
       return [event.caster];
     case 'reaction_declined':
       return [event.combatant, event.mover];

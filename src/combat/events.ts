@@ -405,6 +405,14 @@ export type EncounterEvent =
       readonly immunity: import('./conditions').ConditionName;
     })
   | (SequencedEvent & {
+      readonly type: 'composition_step_refused';
+      readonly caster: CombatantId;
+      readonly spellId: string;
+      readonly stepIndex: number;
+      readonly propagation: 'abort' | 'continue';
+      readonly reason: 'operation_refused' | 'encounter_rule_refusal';
+    })
+  | (SequencedEvent & {
       readonly type: 'effect_target_removed';
       readonly effectId: EncounterEffectId;
       readonly target: CombatantId;

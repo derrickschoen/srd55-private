@@ -241,7 +241,75 @@ export interface TargetedDefenseModifierOperation {
   readonly duration: ModifierDuration;
 }
 
+export type CompositionTargetResolution =
+  | { readonly kind: 'inherit' }
+  | {
+      readonly kind: 're_resolve';
+      readonly selector:
+        | { readonly kind: 'caster' }
+        | { readonly kind: 'enclosing_area' };
+    };
+
+export interface CompositionStep {
+  readonly targetResolution: CompositionTargetResolution;
+  readonly operation: SpellOperation;
+}
+
+type CompositionOperationBase = {
+  readonly kind: 'composition';
+  readonly onRefusal: 'abort' | 'continue';
+  readonly steps: readonly [CompositionStep, ...CompositionStep[]];
+};
+
+export type CompositionOperation = CompositionOperationBase & (
+  | { readonly ordering: 'declaration_order' }
+  | {
+      readonly ordering: 'explicit';
+      /** Zero-based indices forming an exact permutation of `steps`. */
+      readonly order: readonly number[];
+    }
+);
+
+/**
+ * The SRD gives local sequences such as damage followed by a save
+ * (spell-descriptions.txt:6747-6751), but it declares no general ordering for
+ * an imported operation list. Packs therefore choose declaration order or an
+ * explicit zero-based permutation; neither is an implicit engine default.
+ */
+export const COMPOSITION_EVALUATION_ORDER = 'declared_ordering' as const;
+
+/**
+ * The SRD gives spell-specific success/failure arms such as Thunderwave
+ * (spell-descriptions.txt:7874-7886), but no general nested-operation refusal
+ * rule. Every composition must declare whether a refused step aborts the
+ * composition atomically or is rolled back and followed by the next step.
+ */
+export const COMPOSITION_REFUSAL_PROPAGATION = Object.freeze(['abort', 'continue'] as const);
+
+/**
+ * The SRD is silent on a generic composition snapshot. The engine's declared
+ * rule is live visibility: each step observes all state produced by earlier
+ * successful steps in the composition.
+ */
+export const COMPOSITION_STATE_VISIBILITY = 'live_prior_step_state' as const;
+
+/**
+ * SRD effects sometimes retain one creature set (spell-descriptions.txt:7589-7599)
+ * and sometimes address creatures and objects separately
+ * (spell-descriptions.txt:7874-7889). Each step therefore declares inheritance
+ * or a re-resolution selector; the engine never guesses from operation kind.
+ */
+export const COMPOSITION_TARGET_RESOLUTION = Object.freeze(['inherit', 're_resolve'] as const);
+
+/**
+ * The SRD has no content-serialization recursion limit. Four nested
+ * compositions cover the measured residue; deeper untrusted packs are refused
+ * during import before reducer recursion begins.
+ */
+export const MAX_COMPOSITION_DEPTH = 4 as const;
+
 export type SpellOperation =
+  | CompositionOperation
   /** Chromatic Orb chooses a damage type at cast time (spell-descriptions.txt:1087-1090). */
   | {
       readonly kind: 'caster_choice';
@@ -694,6 +762,7 @@ export type SpellOperation =
 
 /** Runtime inventory for serializers of the closed operation union above. */
 export const SPELL_OPERATION_KINDS = [
+  'composition',
   'caster_choice',
   'random_branch',
   'target_branch',

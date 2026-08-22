@@ -651,6 +651,7 @@ function definitionRange(definition: SpellDefinition): number {
 function operationDice(definition: SpellDefinition): readonly [number, number] | null {
   const operation = definition.operation;
   switch (operation.kind) {
+    case 'composition':
     case 'caster_choice':
     case 'random_branch':
     case 'target_branch':
@@ -739,6 +740,7 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
 function operationPerSlot(definition: SpellDefinition): number {
   const operation = definition.operation;
   switch (operation.kind) {
+    case 'composition':
     case 'caster_choice':
     case 'random_branch':
     case 'target_branch':
@@ -1325,6 +1327,7 @@ describe('every implemented cantrip and level-1 spell executes through the encou
         break;
     }
     switch (definition.operation.kind) {
+      case 'composition':
       case 'caster_choice':
       case 'random_branch':
       case 'target_branch':
