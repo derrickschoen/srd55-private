@@ -1,4 +1,5 @@
 import type { Ability } from '../../domain/enums';
+import type { ConditionName } from '../conditions';
 import type { DamageOperationPacket, DamageOperationSpec, OperationDice } from '../damage-operations';
 import type { EffectApplication, EffectPayload } from '../effects';
 import type {
@@ -110,6 +111,62 @@ export type SpellPersistentAreaEffectSpec =
         | { readonly kind: 'effect'; readonly payload: PersistentAreaAppliedPayload; readonly lifetime: PersistentAreaEffectLifetime };
     };
 
+export type ConditionLifecycleDuration =
+  | {
+      readonly kind: 'fixed_rounds';
+      readonly rounds: number;
+      readonly expiresAt: 'target_start' | 'target_end';
+    }
+  | { readonly kind: 'concentration' }
+  | {
+      readonly kind: 'fixed_rounds_or_concentration';
+      readonly rounds: number;
+      readonly expiresAt: 'target_start' | 'target_end';
+    };
+
+export type ConditionLifecycleStacking =
+  | { readonly kind: 'coexist' }
+  | { readonly kind: 'replace'; readonly sources: 'same_source' | 'any_source' }
+  | { readonly kind: 'extend_duration'; readonly sources: 'same_source' | 'any_source' };
+
+interface ConditionLifecycleOperationBase {
+  readonly kind: 'condition_lifecycle';
+  readonly condition: Exclude<ConditionName, 'Exhaustion'>;
+  readonly immunity: null | {
+    /** Sleep keys its refusal to Exhaustion immunity rather than its applied condition (spell-descriptions.txt:7111-7118). */
+    readonly condition: ConditionName;
+  };
+  readonly initialSave: null | {
+    readonly ability: Ability;
+    readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
+    readonly applyOn: 'failure';
+  };
+  readonly repeatedSave: null | {
+    /** Start/end variants occur at spell-descriptions.txt:1474-1486 and 867-873. */
+    readonly hook: 'target_start' | 'target_end';
+    readonly ability: Ability;
+    readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
+    /** Conjure Elemental removes one restraint; Ray of Enfeeblement ends the spell (spell-descriptions.txt:1474-1486,6418-6426). */
+    readonly onSuccess: 'remove_target' | 'end_effect';
+  };
+  readonly damageBreak: null | {
+    /** Any damage: spell-descriptions.txt:2838-2840,5550-5554. Source/allies only: spell-descriptions.txt:150-159,1034-1041. */
+    readonly sources: 'any' | 'effect_source_or_allies';
+    readonly minimumDamage: 1;
+  };
+}
+
+export type ConditionLifecycleOperation = ConditionLifecycleOperationBase & (
+  | {
+      readonly duration: Extract<ConditionLifecycleDuration, { readonly kind: 'fixed_rounds' }>;
+      readonly stacking: ConditionLifecycleStacking;
+    }
+  | {
+      readonly duration: Exclude<ConditionLifecycleDuration, { readonly kind: 'fixed_rounds' }>;
+      readonly stacking: Exclude<ConditionLifecycleStacking, { readonly kind: 'extend_duration' }>;
+    }
+);
+
 export type SpellOperation =
   /** Chromatic Orb chooses a damage type at cast time (spell-descriptions.txt:1087-1090). */
   | {
@@ -145,6 +202,7 @@ export type SpellOperation =
       readonly durationRounds: number;
       readonly operation: SpellOperation;
     }
+  | ConditionLifecycleOperation
   | ({ readonly kind: 'damage_operation' } & DamageOperationSpec)
   | {
       readonly kind: 'armed_weapon_hit_rider';
@@ -560,6 +618,7 @@ export const SPELL_OPERATION_KINDS = [
   'random_branch',
   'target_branch',
   'reevaluated_branch',
+  'condition_lifecycle',
   'damage_operation',
   'armed_weapon_hit_rider',
   'persistent_area',

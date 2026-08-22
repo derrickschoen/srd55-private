@@ -113,10 +113,13 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
       return [event.source, event.target];
     case 'effect_applied':
       return [event.source, ...event.targets];
+    case 'condition_application_refused':
+      return [event.source, event.target];
     case 'effect_target_removed':
       return [event.target];
     case 'effect_ended':
     case 'effect_clock_ticked':
+    case 'effect_duration_extended':
     case 'persistent_area_ended':
     case 'world_object_created':
     case 'world_object_modified':
@@ -141,7 +144,11 @@ function playerEvents(
 ): readonly PlayerVisibleEncounterEvent[] {
   return events.flatMap((event): readonly PlayerVisibleEncounterEvent[] => {
     if ('visibility' in event && event.visibility === 'dm_only') return [];
-    if (event.type === 'effect_ended' || event.type === 'effect_clock_ticked') {
+    if (
+      event.type === 'effect_ended' ||
+      event.type === 'effect_clock_ticked' ||
+      event.type === 'effect_duration_extended'
+    ) {
       return [];
     }
     if (event.type === 'initiative_ordered') {

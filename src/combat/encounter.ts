@@ -63,7 +63,7 @@ import {
 } from './resolution';
 import { spellDefinition } from './spells/definitions';
 import { validateSpellSlotCapacities } from './spells/resources';
-import type { EffectData, ScaledDice, SpellCastCommand, SpellDefinition, SpellOperation, SpellPersistentAreaEffectSpec } from './spells/types';
+import type { ConditionLifecycleOperation, EffectData, ScaledDice, SpellCastCommand, SpellDefinition, SpellOperation, SpellPersistentAreaEffectSpec } from './spells/types';
 import { affectedCells, creatureOccupiesAffectedCell, type AreaTemplate } from './templates';
 import {
   armorClass,
@@ -1355,7 +1355,37 @@ function applyDamage(
     lifeState: life,
     massiveDamage,
   });
+  breakEffectsOnDamage(context, source, target, amount);
   if (life !== 'living') endConcentration(context, target, 'concentration_broken');
+}
+
+function damageSourceMatchesEffect(
+  state: EncounterState,
+  effect: EncounterEffect,
+  damageSource: CombatantId,
+): boolean {
+  if (effect.damageBreak?.sources === 'any') return true;
+  return combatant(state, damageSource).profile.kind === combatant(state, effect.source).profile.kind;
+}
+
+function breakEffectsOnDamage(
+  context: ReductionContext,
+  source: CombatantId,
+  target: CombatantId,
+  damage: number,
+): void {
+  if (damage < 1) return;
+  const ids = new Set(
+    context.state.effects
+      .filter((effect) =>
+        effect.targets.includes(target) &&
+        effect.damageBreak !== undefined &&
+        effect.damageBreak !== null &&
+        damage >= effect.damageBreak.minimumDamage &&
+        damageSourceMatchesEffect(context.state, effect, source))
+      .map((effect) => effect.id),
+  );
+  endEffects(context, ids, 'damage_taken');
 }
 
 function resolveDeathSave(context: ReductionContext, id: CombatantId): void {
@@ -2207,7 +2237,11 @@ function processBoundary(
         current.id,
       );
       if (save.outcome === 'success') {
-        removeEffectTarget(context, current.id, subjectId, 'save_succeeded');
+        if (current.repeatedSave.onSuccess === 'end_effect') {
+          endEffects(context, new Set([current.id]), 'save_succeeded');
+        } else {
+          removeEffectTarget(context, current.id, subjectId, 'save_succeeded');
+        }
       }
     }
 
@@ -2547,6 +2581,9 @@ function cloneEffectApplication(
     targets: [...application.targets],
     duration,
     repeatedSave,
+    damageBreak: application.damageBreak === undefined || application.damageBreak === null
+      ? application.damageBreak ?? null
+      : { ...application.damageBreak },
     payload,
   };
 }
@@ -2585,6 +2622,7 @@ function applyEffect(
     stackingIdentity: owned.stackingIdentity,
     stacking: owned.stacking,
     repeatedSave: owned.repeatedSave,
+    damageBreak: owned.damageBreak ?? null,
     payload: owned.payload,
     ...(owned.areaSource === undefined ? {} : { areaSource: owned.areaSource }),
     ...(owned.areaMembershipBound === undefined ? {} : { areaMembershipBound: true }),
@@ -4326,6 +4364,163 @@ function applyDamageOperation(
   }
 }
 
+/**
+ * Equal-potency repeat castings use the most recent effect. Bundled SRD 5.2.1:
+ * docs/srd/full/srd-5.2.1.txt:6462-6469. Imported operations still declare
+ * their policy; this constant is the named SRD choice available to packs.
+ */
+export const CONDITION_LIFECYCLE_EQUAL_POTENCY_STACKING_RULE = Object.freeze({
+  kind: 'replace' as const,
+  sources: 'any_source' as const,
+});
+
+/**
+ * One shared processBoundary scheduler is reused for area hooks, step-4
+ * re-evaluated branches, repeated saves, and duration clocks. Damage lifecycle
+ * consequences run synchronously immediately after their damage event.
+ */
+export const CONDITION_LIFECYCLE_HOOK_ORDER = Object.freeze([
+  'persistent_area_hooks_and_damage_lifecycle',
+  'reevaluated_branches_and_damage_lifecycle',
+  'effect_payloads_and_damage_lifecycle',
+  'repeat_saves',
+  'duration_expiry',
+] as const);
+
+function lifecycleDuration(
+  operation: ConditionLifecycleOperation,
+  target: CombatantId,
+  source: string,
+): EffectApplication['duration'] {
+  if (operation.duration.kind === 'concentration') return { kind: 'permanent' };
+  return {
+    kind: 'turn_boundaries',
+    timing: {
+      combatant: target,
+      boundary: operation.duration.expiresAt === 'target_start' ? 'start' : 'end',
+      source,
+    },
+    remaining: operation.duration.rounds,
+  };
+}
+
+function lifecycleStacking(
+  operation: ConditionLifecycleOperation,
+): EffectApplication['stacking'] {
+  switch (operation.stacking.kind) {
+    case 'coexist':
+      return 'coexist';
+    case 'replace':
+      return operation.stacking.sources === 'any_source' ? 'replace_any_source' : 'replace_same_source';
+    case 'extend_duration':
+      return 'coexist';
+  }
+}
+
+function extendLifecycleDuration(
+  context: ReductionContext,
+  source: CombatantId,
+  identity: ReturnType<typeof effectStackingIdentity>,
+  operation: ConditionLifecycleOperation,
+): boolean {
+  if (operation.stacking.kind !== 'extend_duration') return false;
+  if (operation.duration.kind !== 'fixed_rounds') {
+    throw new EncounterRuleError('Only a fixed-round condition lifecycle can extend duration.');
+  }
+  const stackingSources = operation.stacking.sources;
+  const existing = context.state.effects.find((effect) =>
+    effect.stackingIdentity === identity &&
+    (stackingSources === 'any_source' || effect.source === source));
+  if (existing === undefined) return false;
+  if (existing.duration.kind !== 'turn_boundaries') {
+    throw new EncounterRuleError('A condition lifecycle cannot extend a permanent effect.');
+  }
+  const remaining = existing.duration.remaining + operation.duration.rounds;
+  context.state = {
+    ...context.state,
+    effects: context.state.effects.map((effect) =>
+      effect.id === existing.id
+        ? { ...effect, duration: { ...effect.duration, remaining } }
+        : effect),
+  };
+  emit(context, {
+    type: 'effect_duration_extended', effectId: existing.id,
+    addedRounds: operation.duration.rounds, remaining,
+  });
+  return true;
+}
+
+function applyConditionLifecycleOperation(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  targets: readonly CombatantId[],
+  operation: ConditionLifecycleOperation,
+): void {
+  const concentration = operation.duration.kind === 'concentration' ||
+    operation.duration.kind === 'fixed_rounds_or_concentration';
+  if (concentration) endConcentration(context, command.actor, 'concentration_replaced');
+  const created: EncounterEffectId[] = [];
+  for (const target of targets) {
+    const conditionImmunities = combatant(context.state, target).profile.rules.conditionImmunities;
+    const blockingImmunity = conditionImmunities.includes(operation.condition)
+      ? operation.condition
+      : operation.immunity !== null && conditionImmunities.includes(operation.immunity.condition)
+        ? operation.immunity.condition
+        : null;
+    if (blockingImmunity !== null) {
+      emit(context, {
+        type: 'condition_application_refused', source: command.actor, target,
+        condition: operation.condition, immunity: blockingImmunity,
+      });
+      continue;
+    }
+    if (
+      operation.initialSave !== null &&
+      resolveTargetSave(
+        context, command.actor, target, operation.initialSave.ability,
+        command.saveDc, operation.initialSave.rollMode, null,
+      ).outcome !== operation.initialSave.applyOn
+    ) continue;
+
+    const identity = effectStackingIdentity(`condition-lifecycle:${definition.id}:${operation.condition}:${String(target)}`);
+    if (extendLifecycleDuration(context, command.actor, identity, operation)) continue;
+    const sequence = context.state.nextEffectSequence;
+    applyEffect(context, command.actor, {
+      targets: [target],
+      duration: lifecycleDuration(operation, target, definition.source),
+      concentration: false,
+      stackingIdentity: identity,
+      stacking: lifecycleStacking(operation),
+      repeatedSave: operation.repeatedSave === null
+        ? null
+        : {
+            timing: {
+              combatant: target,
+              boundary: operation.repeatedSave.hook === 'target_start' ? 'start' : 'end',
+              source: definition.source,
+            },
+            ability: operation.repeatedSave.ability,
+            dc: command.saveDc,
+            rollMode: operation.repeatedSave.rollMode,
+            onSuccess: operation.repeatedSave.onSuccess,
+          },
+      damageBreak: operation.damageBreak,
+      payload: { kind: 'condition', condition: operation.condition },
+    });
+    const id = encounterEffectId(`effect:${String(sequence)}`);
+    if (context.state.effects.some((effect) => effect.id === id)) created.push(id);
+  }
+  if (concentration && created.length > 0) {
+    context.state = {
+      ...context.state,
+      effects: context.state.effects.map((effect) => created.includes(effect.id)
+        ? { ...effect, concentrationOwner: command.actor }
+        : effect),
+    };
+  }
+}
+
 function resolvedPersistentAreaSpellEffect(
   definition: SpellDefinition,
   command: SpellCastCommand,
@@ -4443,6 +4638,9 @@ function executeSpellOperation(
       context.state = { ...context.state, reevaluatedBranches: [...current, ...scheduled] };
       return;
     }
+    case 'condition_lifecycle':
+      applyConditionLifecycleOperation(context, definition, command, targets, operation);
+      return;
     case 'damage_operation':
       applyDamageOperation(
         context,

@@ -655,6 +655,7 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
     case 'random_branch':
     case 'target_branch':
     case 'reevaluated_branch':
+    case 'condition_lifecycle':
       return null;
     case 'damage_operation': {
       const packet = operation.packets[0];
@@ -735,6 +736,7 @@ function operationPerSlot(definition: SpellDefinition): number {
     case 'random_branch':
     case 'target_branch':
     case 'reevaluated_branch':
+    case 'condition_lifecycle':
       return 0;
     case 'damage_operation':
       return operation.packets[0]?.dice.perSlotCount ?? 0;
@@ -1314,6 +1316,7 @@ describe('every implemented cantrip and level-1 spell executes through the encou
       case 'random_branch':
       case 'target_branch':
       case 'reevaluated_branch':
+      case 'condition_lifecycle':
         expect(result.events.some((event) => event.type === 'spell_cast')).toBe(true);
         break;
       case 'attack_damage':

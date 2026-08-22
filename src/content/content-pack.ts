@@ -140,6 +140,7 @@ const operationRequiredFields = {
   random_branch: ['dieSides', 'branches'],
   target_branch: ['branches', 'otherwise'],
   reevaluated_branch: ['hook', 'durationRounds', 'operation'],
+  condition_lifecycle: ['condition', 'immunity', 'initialSave', 'repeatedSave', 'damageBreak', 'duration', 'stacking'],
   damage_operation: ['delivery', 'instancesPerTarget', 'packets', 'timing'],
   armed_weapon_hit_rider: ['damage', 'durationRounds', 'concentration', 'persistence', 'saveGatedRider'],
   persistent_area: ['origin', 'shape', 'durationRounds', 'concentration', 'targetFilter', 'includeOwner', 'difficultTerrain', 'movableFeet', 'hooks', 'initialEffects'],
@@ -377,6 +378,46 @@ const damageOperationSchema = damageOperationSpecSchema.extend({
   kind: z.literal('damage_operation'),
 });
 
+const conditionLifecycleDurationSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('fixed_rounds'), rounds: positiveInteger.max(1_000_000),
+    expiresAt: z.enum(['target_start', 'target_end']),
+  }),
+  z.strictObject({ kind: z.literal('concentration') }),
+  z.strictObject({
+    kind: z.literal('fixed_rounds_or_concentration'), rounds: positiveInteger.max(1_000_000),
+    expiresAt: z.enum(['target_start', 'target_end']),
+  }),
+]);
+
+const conditionLifecycleOperationSchema = z.strictObject({
+  kind: z.literal('condition_lifecycle'),
+  condition: z.enum(conditionNames.filter((name) => name !== 'Exhaustion')),
+  immunity: z.union([z.null(), z.strictObject({ condition: z.enum(conditionNames) })]),
+  initialSave: z.union([z.null(), z.strictObject({
+    ability: z.enum(abilities), rollMode: z.enum(['normal', 'advantage', 'disadvantage']),
+    applyOn: z.literal('failure'),
+  })]),
+  repeatedSave: z.union([z.null(), z.strictObject({
+    hook: z.enum(['target_start', 'target_end']), ability: z.enum(abilities),
+    rollMode: z.enum(['normal', 'advantage', 'disadvantage']),
+    onSuccess: z.enum(['remove_target', 'end_effect']),
+  })]),
+  damageBreak: z.union([z.null(), z.strictObject({
+    sources: z.enum(['any', 'effect_source_or_allies']), minimumDamage: z.literal(1),
+  })]),
+  duration: conditionLifecycleDurationSchema,
+  stacking: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('coexist') }),
+    z.strictObject({ kind: z.literal('replace'), sources: z.enum(['same_source', 'any_source']) }),
+    z.strictObject({ kind: z.literal('extend_duration'), sources: z.enum(['same_source', 'any_source']) }),
+  ]),
+}).superRefine((operation, context) => {
+  if (operation.stacking.kind === 'extend_duration' && operation.duration.kind !== 'fixed_rounds') {
+    context.addIssue({ code: 'custom', path: ['stacking'], message: 'Only a fixed-round effect can extend an existing duration.' });
+  }
+});
+
 const armedWeaponHitRiderSchema = z.strictObject({
   kind: z.literal('armed_weapon_hit_rider'),
   ...armedWeaponHitRiderShape,
@@ -553,6 +594,7 @@ function structurallyValidOperation(value: unknown): value is SpellOperation {
   if (typedKind === 'random_branch') return validRandomBranchOperation(operation);
   if (typedKind === 'target_branch') return validTargetBranchOperation(operation);
   if (typedKind === 'reevaluated_branch') return validReevaluatedBranchOperation(operation);
+  if (typedKind === 'condition_lifecycle') return conditionLifecycleOperationSchema.safeParse(value).success;
   if (typedKind === 'persistent_area') return persistentAreaOperationSchema.safeParse(value).success;
   if (typedKind === 'world_operations') return worldOperationSpellSchema.safeParse(value).success;
   if (typedKind === 'damage_operation') return damageOperationSchema.safeParse(value).success;

@@ -207,7 +207,12 @@ export interface RepeatedSaveTiming {
   readonly ability: Ability;
   readonly dc: number;
   readonly rollMode: RollMode;
-  readonly onSuccess: 'remove_target';
+  readonly onSuccess: 'remove_target' | 'end_effect';
+}
+
+export interface DamageBreakTiming {
+  readonly sources: 'any' | 'effect_source_or_allies';
+  readonly minimumDamage: 1;
 }
 
 export type WeaponHitRiderFollowUp =
@@ -1235,6 +1240,7 @@ export interface EffectApplication {
   readonly stackingIdentity: EffectStackingIdentity;
   readonly stacking: 'coexist' | 'replace_same_source' | 'replace_any_source';
   readonly repeatedSave: RepeatedSaveTiming | null;
+  readonly damageBreak?: DamageBreakTiming | null;
   readonly payload: EffectPayload;
   /** Present only for an effect materialized by persistent-area membership. */
   readonly areaSource?: PersistentAreaId;
@@ -1252,6 +1258,7 @@ export interface EncounterEffect {
   readonly stackingIdentity: EffectStackingIdentity;
   readonly stacking: EffectApplication['stacking'];
   readonly repeatedSave: RepeatedSaveTiming | null;
+  readonly damageBreak?: DamageBreakTiming | null;
   readonly payload: EffectPayload;
   readonly areaSource?: PersistentAreaId;
   readonly areaMembershipBound?: true;

@@ -407,6 +407,7 @@
             "random_branch",
             "target_branch",
             "reevaluated_branch",
+            "condition_lifecycle",
             "damage_operation",
             "armed_weapon_hit_rider",
             "persistent_area",
@@ -460,6 +461,9 @@
         },
         {
           "$ref": "#/$defs/operation-reevaluated_branch"
+        },
+        {
+          "$ref": "#/$defs/operation-condition_lifecycle"
         },
         {
           "$ref": "#/$defs/operation-damage_operation"
@@ -1149,6 +1153,83 @@
         "hook": { "enum": ["target_start", "target_end"] },
         "durationRounds": { "type": "integer", "minimum": 1 },
         "operation": { "$ref": "#/$defs/spellOperation" }
+      }
+    },
+    "operation-condition_lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "condition", "immunity", "initialSave", "repeatedSave", "damageBreak", "duration", "stacking"],
+      "properties": {
+        "kind": { "const": "condition_lifecycle" },
+        "condition": { "enum": ["Blinded", "Charmed", "Deafened", "Frightened", "Grappled", "Incapacitated", "Invisible", "Paralyzed", "Petrified", "Poisoned", "Prone", "Restrained", "Stunned", "Unconscious"] },
+        "immunity": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false, "required": ["condition"],
+              "properties": { "condition": { "enum": ["Blinded", "Charmed", "Deafened", "Exhaustion", "Frightened", "Grappled", "Incapacitated", "Invisible", "Paralyzed", "Petrified", "Poisoned", "Prone", "Restrained", "Stunned", "Unconscious"] } }
+            }
+          ]
+        },
+        "initialSave": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false, "required": ["ability", "rollMode", "applyOn"],
+              "properties": {
+                "ability": { "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] },
+                "rollMode": { "enum": ["normal", "advantage", "disadvantage"] },
+                "applyOn": { "const": "failure" }
+              }
+            }
+          ]
+        },
+        "repeatedSave": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false, "required": ["hook", "ability", "rollMode", "onSuccess"],
+              "properties": {
+                "hook": { "enum": ["target_start", "target_end"] },
+                "ability": { "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] },
+                "rollMode": { "enum": ["normal", "advantage", "disadvantage"] },
+                "onSuccess": { "enum": ["remove_target", "end_effect"] }
+              }
+            }
+          ]
+        },
+        "damageBreak": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false, "required": ["sources", "minimumDamage"],
+              "properties": {
+                "sources": { "enum": ["any", "effect_source_or_allies"] },
+                "minimumDamage": { "const": 1 }
+              }
+            }
+          ]
+        },
+        "duration": {
+          "oneOf": [
+            {
+              "type": "object", "additionalProperties": false, "required": ["kind", "rounds", "expiresAt"],
+              "properties": { "kind": { "const": "fixed_rounds" }, "rounds": { "type": "integer", "minimum": 1, "maximum": 1000000 }, "expiresAt": { "enum": ["target_start", "target_end"] } }
+            },
+            { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "concentration" } } },
+            {
+              "type": "object", "additionalProperties": false, "required": ["kind", "rounds", "expiresAt"],
+              "properties": { "kind": { "const": "fixed_rounds_or_concentration" }, "rounds": { "type": "integer", "minimum": 1, "maximum": 1000000 }, "expiresAt": { "enum": ["target_start", "target_end"] } }
+            }
+          ]
+        },
+        "stacking": {
+          "oneOf": [
+            { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "coexist" } } },
+            { "type": "object", "additionalProperties": false, "required": ["kind", "sources"], "properties": { "kind": { "const": "replace" }, "sources": { "enum": ["same_source", "any_source"] } } },
+            { "type": "object", "additionalProperties": false, "required": ["kind", "sources"], "properties": { "kind": { "const": "extend_duration" }, "sources": { "enum": ["same_source", "any_source"] } } }
+          ]
+        }
       }
     },
     "operation-damage_operation": {

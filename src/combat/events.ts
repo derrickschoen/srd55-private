@@ -377,6 +377,13 @@ export type EncounterEvent =
       readonly targets: readonly CombatantId[];
     })
   | (SequencedEvent & {
+      readonly type: 'condition_application_refused';
+      readonly source: CombatantId;
+      readonly target: CombatantId;
+      readonly condition: Exclude<import('./conditions').ConditionName, 'Exhaustion'>;
+      readonly immunity: import('./conditions').ConditionName;
+    })
+  | (SequencedEvent & {
       readonly type: 'effect_target_removed';
       readonly effectId: EncounterEffectId;
       readonly target: CombatantId;
@@ -393,7 +400,15 @@ export type EncounterEvent =
         | 'no_targets'
         | 'dispelled'
         | 'stacking_replaced'
+        | 'save_succeeded'
+        | 'damage_taken'
         | 'trigger_consumed';
+    })
+  | (SequencedEvent & {
+      readonly type: 'effect_duration_extended';
+      readonly effectId: EncounterEffectId;
+      readonly addedRounds: number;
+      readonly remaining: number;
     })
   | (SequencedEvent & {
       readonly type: 'effect_clock_ticked';

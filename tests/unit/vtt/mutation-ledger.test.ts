@@ -40,6 +40,7 @@ const E05_TYPED_UNTYPED_LEDGER_PATH = 'docs/audits/2026-08-21-e05-typed-vs-untyp
 const E05_TYPECHECK_INSTRUMENTATION_LEDGER_PATH = 'docs/audits/2026-08-22-e05-typecheck-instrumentation-mutation-ledger.md';
 const ENVELOPE_NORMALIZATION_LEDGER_PATH = 'docs/audits/2026-08-22-envelope-normalization-mutation-ledger.md';
 const CHOICE_BRANCH_LEDGER_PATH = 'docs/audits/2026-08-22-choice-branch-mutation-ledger.md';
+const CONDITION_LIFECYCLE_LEDGER_PATH = 'docs/audits/2026-08-22-condition-lifecycle-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -466,5 +467,37 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(11);
     expect(ledger).toContain('Each production mutation below was applied alone, killed by its named test, and restored');
     expect(ledger).toContain('Tests  8 passed (8)');
+  });
+
+  it('CONDITION-LIFECYCLE-MUTATION-LEDGER pins all required controls and boundary mutants', () => {
+    const ledger = readFileSync(CONDITION_LIFECYCLE_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/condition-lifecycle.test.ts', 'utf8');
+    const mutations = [
+      'save_dc_equal_fails',
+      'repeat_save_first_round_delayed',
+      'repeat_save_final_round_dropped',
+      'damage_break_threshold_two',
+      'immunity_reported_as_save',
+      'damage_break_ignores_region',
+      'repeat_save_on_success_persists',
+      'duration_off_by_one',
+      'stacking_silently_replaces',
+    ];
+    const killingTests = [
+      'save_dc_boundary: a result exactly at the DC refuses application while one below applies it',
+      'repeat_save_on_success_persists: repeats on the first and final round and honors both success scopes',
+      'damage_break_ignores_region: movement-region damage at exactly zero preserves and exactly one breaks the effect',
+      'immunity_reported_as_save: an immune target emits a refusal without drawing or reporting a save',
+      'duration_off_by_one: exactly one round expires on its first declared boundary',
+      'stacking_silently_replaces: imported coexist and replace policies differ across sources',
+    ];
+    for (const mutation of mutations) expect(ledger).toContain(`\`${mutation}\``);
+    for (const testName of killingTests) {
+      expect(ledger).toContain(`\`${testName}\``);
+      expect(tests).toContain(testName);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(9);
+    expect(ledger).toContain('Each production mutation below was applied alone');
+    expect(ledger).toContain('Tests  12 passed (12)');
   });
 });
