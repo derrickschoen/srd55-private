@@ -6,6 +6,7 @@
     "sourceKind": "homebrew",
     "importedAt": "2026-08-21T12:00:00Z"
   },
+  "namespaces": ["greenforge"],
   "spells": [
     {
       "sourceId": "greenforge",

@@ -26,7 +26,8 @@
     "scrape": "vite-node tools/scrape/cli.ts --",
     "db:schema": "vite-node scripts/build-schema.ts",
     "db:migrations": "vitest run --configLoader runner tests/unit/db/migrations.test.ts",
-    "db:contracts": "vite-node scripts/build-row-contracts.ts"
+    "db:contracts": "vite-node scripts/build-row-contracts.ts",
+    "schema:content-pack": "vite-node tools/generate-content-pack-schema.ts"
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "3.53.0-build1",

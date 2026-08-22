@@ -44,6 +44,7 @@ const CHOICE_BRANCH_LEDGER_PATH = 'docs/audits/2026-08-22-choice-branch-mutation
 const CONDITION_LIFECYCLE_LEDGER_PATH = 'docs/audits/2026-08-22-condition-lifecycle-mutation-ledger.md';
 const ROLL_DEFENSE_LEDGER_PATH = 'docs/audits/2026-08-22-roll-defense-mutation-ledger.md';
 const PAIRWISE_COMPOSITION_LEDGER_PATH = 'docs/audits/2026-08-22-pairwise-composition-mutation-ledger.md';
+const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -59,6 +60,22 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('WAVE-ONE-MUTATION-LEDGER pins all five restored controls to their named killing tests', () => {
+    const waveOne = readFileSync(WAVE_ONE_LEDGER_PATH, 'utf8');
+    const controls = [
+      ['fallback_resurrected', 'tests/unit/vtt/content-pack.test.ts'],
+      ['record_rejection_kills_pack', 'tests/unit/vtt/content-pack.test.ts'],
+      ['fingerprint_not_checked', 'tests/unit/vtt/session-persistence.test.ts'],
+      ['namespace_not_enforced', 'tests/unit/vtt/content-pack.test.ts'],
+      ['speed_bound_bypassed', 'tests/unit/vtt/content-pack.test.ts'],
+    ] as const;
+    for (const [control, testFile] of controls) {
+      expect(waveOne).toContain(`\`${control}\``);
+      expect(waveOne).not.toContain(`| \`${control}\` | Pending execution`);
+      expect(readFileSync(testFile, 'utf8')).toContain(`${control}:`);
+    }
+  });
+
   it('MUTATION-LEDGER-MANIFEST pins every plan mutation 1-66 to a present named killing test', () => {
     const manifest = ledger();
     const plan = readFileSync(PLAN_PATH, 'utf8');

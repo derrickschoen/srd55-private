@@ -147,6 +147,7 @@ describe('scraper content-pack emission', () => {
       ].sort((left, right) => left.url.localeCompare(right.url)),
     });
     expect(loadContentPackBytes(output.packBytes).status).toBe('loaded');
+    expect(output.pack.namespaces).toEqual(['scraped.wikidot']);
     expect(output.packBytes).toContain(SCRAPE_SENTINEL);
   });
 

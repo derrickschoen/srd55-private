@@ -28,6 +28,8 @@ import {
 } from '../../../src/vtt/dm-bridge/js-turn-program';
 import {
   JsTurnProgramTypeError,
+  MAX_TURN_PROGRAM_MOVEMENT_FEET,
+  TurnProgramMovementDomainError,
   generateTurnProgramDeclarations,
   typeCheckJsTurnProgram,
   type TurnProgramTypeCheckTelemetry,
@@ -418,6 +420,25 @@ describe('JS round-plan protocol and replay integration', () => {
     expect(declaration.source).toContain('type MovementBudgetFeet = 30;');
     expect(result.passed).toBe(false);
     expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 2345 }));
+  });
+
+  it('numberUnion defensive boundary emits the cap and throws a typed error one foot over', () => {
+    const f = fixture();
+    const projection = decisionProjection(f.state, f.monster.id, [{ type: 'end_turn', actor: f.monster.id }]);
+    const mutable = projection as unknown as {
+      encounter: { combatants: Array<{ id: CombatantId; turn: { movement: { remaining: number } } }> };
+    };
+    const actor = mutable.encounter.combatants.find((combatant) => combatant.id === f.monster.id);
+    if (actor === undefined) throw new Error('Typed declaration actor is missing.');
+    actor.turn.movement.remaining = MAX_TURN_PROGRAM_MOVEMENT_FEET;
+    const atCap = generateTurnProgramDeclarations(projection, f.monster.id);
+    expect(atCap.source).toContain(`type MovementBudgetFeet = ${String(MAX_TURN_PROGRAM_MOVEMENT_FEET)};`);
+    expect(atCap.source).toContain(` | ${String(MAX_TURN_PROGRAM_MOVEMENT_FEET)}) &`);
+
+    actor.turn.movement.remaining = MAX_TURN_PROGRAM_MOVEMENT_FEET + 1;
+    expect(() => generateTurnProgramDeclarations(projection, f.monster.id)).toThrowError(
+      new TurnProgramMovementDomainError(MAX_TURN_PROGRAM_MOVEMENT_FEET + 1),
+    );
   });
 
   it('dts_ordering_nondeterministic is killed by byte-identical declarations with stable unions', () => {
