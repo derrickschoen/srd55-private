@@ -313,13 +313,21 @@ export function deriveBranchRng(
     config: _config,
     persistentAreas,
     nextPersistentAreaSequence,
+    worldObjects,
+    nextWorldObjectSequence,
+    environment,
     ...baseMechanicalState
   } = target.encounterState;
   // Empty additive state is mechanically neutral and does not perturb branch
   // streams; once an area exists, both its state and allocator are authoritative.
-  const mechanicalState = persistentAreas.length === 0 && nextPersistentAreaSequence === 1
+  const areaNeutralState = persistentAreas.length === 0 && nextPersistentAreaSequence === 1
     ? baseMechanicalState
     : { ...baseMechanicalState, persistentAreas, nextPersistentAreaSequence };
+  const worldStateIsNeutral = worldObjects.length === 0 && nextWorldObjectSequence === 1 &&
+    environment.lightRegions.length === 0 && environment.difficultTerrainRegions.length === 0;
+  const mechanicalState = worldStateIsNeutral
+    ? areaNeutralState
+    : { ...areaNeutralState, worldObjects, nextWorldObjectSequence, environment };
   const digest = sha256(canonicalJson({
     encounterState: mechanicalState,
     parentRngState: target.rngState,

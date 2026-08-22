@@ -19,6 +19,7 @@ import {
   loadedPartyEffectCommand,
   loadedPartySpellCastCommand,
   loadedPartyTurnLegalActions,
+  loadedPartyWorldOperationCommand,
   type ExternalPartyPackV1,
   type ExternalPartyPackV2,
 } from '../../../src/vtt/party-pack';
@@ -266,6 +267,49 @@ const REPLAY_COORDINATOR: PersistedCoordinatorState = {
 };
 
 describe('external party-pack boundary', () => {
+  it('loads executable party-pack v2 world operations and refuses malformed nested specs', () => {
+    const candidate = structuredClone(pack());
+    candidate.members[0]!.worldOperations = [{
+      operationId: 'world:raise-wall', cost: 'action',
+      operation: {
+        kind: 'create_object',
+        object: {
+          objectId: 'object:greenforge-wall', name: 'Greenforge Wall', kind: 'barrier',
+          position: { column: 1, row: 1 }, footprint: [{ column: 1, row: 1 }],
+          durability: { kind: 'hit_points', hitPoints: 8, maximumHitPoints: 8 },
+          armorClass: 12,
+          damageResponses: [{ damageTypeId: 'Fire', response: 'vulnerable' }],
+          blocking: { movement: true, lineOfSight: true, cover: 'total' },
+        },
+      },
+    }, {
+      operationId: 'world:dim-room', cost: 'none',
+      operation: {
+        kind: 'set_light_level', level: 'dim',
+        region: { id: 'greenforge-room', cells: [{ column: 2, row: 1 }] },
+      },
+    }];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Party world operations were refused.');
+    expect(loadedPartyWorldOperationCommand(
+      loaded.party.members[0]!, 'world:raise-wall',
+    )).toMatchObject({
+      type: 'world_operation', cost: 'action',
+      operation: { kind: 'create_object', object: { id: 'object:greenforge-wall', armorClass: 12 } },
+    });
+
+    const malformed = structuredClone(candidate) as unknown as {
+      members: Array<{ worldOperations?: Array<{ operation: { object?: { durability?: { hitPoints: number; maximumHitPoints: number } } } }> }>;
+    };
+    const durability = malformed.members[0]?.worldOperations?.[0]?.operation.object?.durability;
+    if (durability === undefined) throw new Error('Malformed party fixture has no durability.');
+    durability.hitPoints = durability.maximumHitPoints + 1;
+    expect(loadExternalPartyPack(malformed)).toMatchObject({
+      status: 'refused', refusal: { reason: 'gaps_not_allowed' },
+    });
+  });
+
   it('declares executable damage operations and armed weapon-hit riders in party-pack v2', () => {
     const operationDice = {
       baseCount: 1, sides: 4 as const, modifier: 0,

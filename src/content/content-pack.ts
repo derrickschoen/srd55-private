@@ -139,6 +139,7 @@ const operationRequiredFields = {
   damage_operation: ['delivery', 'instancesPerTarget', 'packets', 'timing'],
   armed_weapon_hit_rider: ['damage', 'durationRounds', 'concentration', 'persistence', 'saveGatedRider'],
   persistent_area: ['origin', 'shape', 'durationRounds', 'concentration', 'targetFilter', 'includeOwner', 'difficultTerrain', 'movableFeet', 'hooks', 'initialEffects'],
+  world_operations: ['operations'],
   attack_damage: ['attackKind', 'damageType', 'dice', 'rider'],
   attack_then_save_damage: ['attackKind', 'attackDamageType', 'attackDice', 'saveAbility', 'saveDamageType', 'saveDice', 'onSaveSuccess', 'burstShape', 'burstRadiusFeet'],
   attack_damage_over_time: ['attackKind', 'damageType', 'initialDice', 'missDamage', 'laterDice', 'laterTiming'],
@@ -260,6 +261,109 @@ const persistentAreaOperationSchema = z.strictObject({
   }
 });
 
+const worldObjectDamageResponseSchema = z.strictObject({
+  type: z.enum(damageTypes),
+  response: z.enum(['normal', 'resistant', 'vulnerable', 'immune']),
+});
+
+const worldObjectTemplateSchema = z.strictObject({
+  name: trimmedText,
+  kind: z.enum(['barrier', 'cover', 'door', 'hazard', 'light-source', 'summoned-terrain', 'generic']),
+  durability: z.discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('hit_points'),
+      hitPoints: positiveInteger.max(1_000_000),
+      maximumHitPoints: positiveInteger.max(1_000_000),
+    }),
+    z.strictObject({ kind: z.literal('indestructible') }),
+  ]),
+  armorClass: nonNegativeInteger.max(100),
+  damageResponses: z.array(worldObjectDamageResponseSchema).max(damageTypes.length),
+  blocking: z.strictObject({
+    movement: z.boolean(),
+    lineOfSight: z.boolean(),
+    cover: z.enum(['none', 'half', 'three_quarters', 'total']),
+  }),
+}).superRefine((object, context) => {
+  if (object.durability.kind === 'hit_points' && object.durability.hitPoints > object.durability.maximumHitPoints) {
+    context.addIssue({ code: 'custom', path: ['durability', 'hitPoints'], message: 'Object Hit Points cannot exceed its maximum.' });
+  }
+  if (new Set(object.damageResponses.map((response) => response.type)).size !== object.damageResponses.length) {
+    context.addIssue({ code: 'custom', path: ['damageResponses'], message: 'Object damage responses must be unique.' });
+  }
+});
+
+const worldOperationSpellSchema = z.strictObject({
+  kind: z.literal('world_operations'),
+  operations: z.array(z.discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('create_object'),
+      placement: z.enum(['caster_cell', 'area_origin']),
+      footprintOffsets: z.array(z.strictObject({ column: safeInteger, row: safeInteger })).min(1).max(400),
+      object: worldObjectTemplateSchema,
+    }),
+    z.strictObject({
+      kind: z.literal('transform_terrain'),
+      regionId: identifier,
+      difficultTerrain: z.boolean(),
+    }),
+    z.strictObject({
+      kind: z.literal('set_light_level'),
+      regionId: identifier,
+      level: z.enum(['bright', 'dim', 'darkness']),
+    }),
+    z.strictObject({
+      kind: z.literal('remove_objects'),
+      reason: z.enum(['destroyed', 'dismissed']),
+    }),
+    z.strictObject({
+      kind: z.literal('modify_objects'),
+      changes: z.strictObject({
+        name: trimmedText.optional(),
+        kind: z.enum(['barrier', 'cover', 'door', 'hazard', 'light-source', 'summoned-terrain', 'generic']).optional(),
+        durability: worldObjectTemplateSchema.shape.durability.optional(),
+        armorClass: nonNegativeInteger.max(100).optional(),
+        damageResponses: z.array(worldObjectDamageResponseSchema).max(damageTypes.length).optional(),
+        blocking: worldObjectTemplateSchema.shape.blocking.optional(),
+      }),
+    }),
+    z.strictObject({
+      kind: z.literal('damage_objects'),
+      damage: z.strictObject({
+        terms: z.array(z.strictObject({
+          type: z.enum(damageTypes),
+          dice: z.strictObject({
+            count: nonNegativeInteger.max(100),
+            sides: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(10), z.literal(12), z.literal(20)]),
+            modifier: safeInteger.min(-100_000).max(100_000),
+          }),
+        })).min(1).max(20),
+        critical: z.boolean(),
+        responses: z.tuple([]),
+      }),
+    }),
+  ])).min(1).max(32),
+}).superRefine((operation, context) => {
+  for (const [index, entry] of operation.operations.entries()) {
+    if (entry.kind !== 'create_object') continue;
+    const keys = entry.footprintOffsets.map((cell) => `${String(cell.column)},${String(cell.row)}`);
+    if (new Set(keys).size !== keys.length || !keys.includes('0,0')) {
+      context.addIssue({
+        code: 'custom', path: ['operations', index, 'footprintOffsets'],
+        message: 'Object footprint offsets must be unique and include the placement cell.',
+      });
+    }
+  }
+  for (const [index, entry] of operation.operations.entries()) {
+    if (entry.kind === 'modify_objects' && Object.keys(entry.changes).length === 0) {
+      context.addIssue({
+        code: 'custom', path: ['operations', index, 'changes'],
+        message: 'Object modifications cannot be empty.',
+      });
+    }
+  }
+});
+
 const damageOperationSchema = damageOperationSpecSchema.extend({
   kind: z.literal('damage_operation'),
 });
@@ -286,6 +390,7 @@ function structurallyValidOperation(value: unknown): value is SpellOperation {
   ) return false;
   const typedKind = kind as SpellOperation['kind'];
   if (typedKind === 'persistent_area') return persistentAreaOperationSchema.safeParse(value).success;
+  if (typedKind === 'world_operations') return worldOperationSpellSchema.safeParse(value).success;
   if (typedKind === 'damage_operation') return damageOperationSchema.safeParse(value).success;
   if (typedKind === 'armed_weapon_hit_rider') return armedWeaponHitRiderSchema.safeParse(value).success;
   const required = operationRequiredFields[typedKind];

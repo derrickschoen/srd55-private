@@ -666,6 +666,13 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
         ? [damage.payload.dice.baseCount, damage.payload.dice.sides]
         : null;
     }
+    case 'world_operations': {
+      const damage = operation.operations
+        .find((candidate) => candidate.kind === 'damage_objects');
+      if (damage?.kind !== 'damage_objects') return null;
+      const term = damage.damage.terms[0];
+      return term === undefined ? null : [term.dice.count, term.dice.sides];
+    }
     case 'attack_damage':
     case 'save_damage':
     case 'healing':
@@ -721,6 +728,9 @@ function operationPerSlot(definition: SpellDefinition): number {
         .find((spec) => spec.payload.kind === 'damage');
       return damage?.payload.kind === 'damage' ? damage.payload.dice.perSlotCount : 0;
     }
+    case 'world_operations':
+      // World-operation damage uses a concrete DamageRequest and never scales by slot.
+      return 0;
     case 'attack_damage':
     case 'save_damage':
     case 'healing':

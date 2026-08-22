@@ -28,10 +28,12 @@ import {
   feet,
   limitedResourcePoolId,
   tokenId,
+  worldObjectId,
   type DamageType,
   type DieSides,
   type EncounterEffectId,
 } from '../combat/values';
+import type { WorldOperation } from '../combat/world-objects';
 import { abilities, creatureSizes, damageTypes, skills, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import { SRD_CLASS_NAMES } from '../rules/class-traits-srd';
 import {
@@ -49,6 +51,7 @@ const tokenIdSchema = z.string().regex(/^token:[a-z0-9][a-z0-9-]{0,79}$/u);
 const effectIdSchema = z.string().regex(/^effect:[a-z0-9][a-z0-9:-]{0,119}$/u);
 const attackIdSchema = z.string().regex(/^attack:[a-z0-9][a-z0-9-]{0,79}$/u);
 const resourcePoolIdSchema = z.string().regex(/^resource:[a-z0-9][a-z0-9-]{0,79}$/u);
+const worldObjectIdSchema = z.string().regex(/^object:[a-z0-9][a-z0-9:-]{0,119}$/u);
 const integerSchema = z.number().int().safe();
 const modifierSchema = integerSchema.min(-30).max(30);
 const classLevelSchema = integerSchema.min(1).max(20);
@@ -99,6 +102,116 @@ const attackSchema = z.strictObject({
     sides: dieSidesSchema,
     modifier: modifierSchema,
   })).min(1).max(20),
+});
+
+const gridCellSchema = z.strictObject({
+  column: integerSchema.min(0).max(100_000),
+  row: integerSchema.min(0).max(100_000),
+});
+
+const externalWorldObjectSchema = z.strictObject({
+  objectId: worldObjectIdSchema,
+  name: z.string().trim().min(1).max(1_000),
+  kind: z.enum(['barrier', 'cover', 'door', 'hazard', 'light-source', 'summoned-terrain', 'generic']),
+  position: gridCellSchema,
+  footprint: z.array(gridCellSchema).min(1).max(400),
+  durability: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('indestructible') }),
+    z.strictObject({
+      kind: z.literal('hit_points'),
+      hitPoints: integerSchema.min(1).max(1_000_000),
+      maximumHitPoints: integerSchema.min(1).max(1_000_000),
+    }),
+  ]),
+  armorClass: integerSchema.min(0).max(100),
+  damageResponses: z.array(z.strictObject({
+    damageTypeId: z.enum(damageTypes),
+    response: z.enum(['normal', 'resistant', 'vulnerable', 'immune']),
+  })).max(damageTypes.length),
+  blocking: z.strictObject({
+    movement: z.boolean(),
+    lineOfSight: z.boolean(),
+    cover: z.enum(['none', 'half', 'three_quarters', 'total']),
+  }),
+}).superRefine((object, context) => {
+  if (object.durability.kind === 'hit_points' && object.durability.hitPoints > object.durability.maximumHitPoints) {
+    context.addIssue({ code: 'custom', path: ['durability', 'hitPoints'], message: 'Object Hit Points cannot exceed its maximum.' });
+  }
+});
+
+const externalDamageRequestSchema = z.strictObject({
+  terms: z.array(z.strictObject({
+    damageTypeId: z.enum(damageTypes),
+    count: integerSchema.min(0).max(100),
+    sides: dieSidesSchema,
+    modifier: modifierSchema,
+  })).min(1).max(20),
+  critical: z.boolean(),
+});
+
+const externalWorldOperationSchema = z.strictObject({
+  operationId: z.string().regex(/^world:[a-z0-9][a-z0-9-]{0,79}$/u),
+  cost: z.enum(['action', 'bonus_action', 'reaction', 'none']),
+  operation: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('create_object'), object: externalWorldObjectSchema }),
+    z.strictObject({
+      kind: z.literal('modify_object'), objectId: worldObjectIdSchema,
+      changes: z.strictObject({
+        name: z.string().trim().min(1).max(1_000).optional(),
+        kind: z.enum(['barrier', 'cover', 'door', 'hazard', 'light-source', 'summoned-terrain', 'generic']).optional(),
+        position: gridCellSchema.optional(),
+        footprint: z.array(gridCellSchema).min(1).max(400).optional(),
+        durability: externalWorldObjectSchema.shape.durability.optional(),
+        armorClass: integerSchema.min(0).max(100).optional(),
+        damageResponses: externalWorldObjectSchema.shape.damageResponses.optional(),
+        blocking: externalWorldObjectSchema.shape.blocking.optional(),
+      }),
+    }),
+    z.strictObject({
+      kind: z.literal('remove_object'), objectId: worldObjectIdSchema,
+      reason: z.enum(['destroyed', 'dismissed']),
+    }),
+    z.strictObject({
+      kind: z.literal('damage_object'), objectId: worldObjectIdSchema,
+      delivery: z.discriminatedUnion('kind', [
+        z.strictObject({ kind: z.literal('area_effect') }),
+        z.strictObject({
+          kind: z.literal('attack'), attackBonus: modifierSchema,
+          criticalFloor: integerSchema.min(2).max(20),
+          rollMode: z.enum(['normal', 'advantage', 'disadvantage']),
+        }),
+      ]),
+      damage: externalDamageRequestSchema,
+    }),
+    z.strictObject({
+      kind: z.literal('transform_terrain'),
+      region: z.strictObject({ id: z.string().trim().min(1).max(200), cells: z.array(gridCellSchema).min(1).max(10_000) }),
+      difficultTerrain: z.boolean(),
+    }),
+    z.strictObject({
+      kind: z.literal('set_light_level'),
+      region: z.strictObject({ id: z.string().trim().min(1).max(200), cells: z.array(gridCellSchema).min(1).max(10_000) }),
+      level: z.enum(['bright', 'dim', 'darkness']),
+    }),
+  ]),
+}).superRefine((entry, context) => {
+  const operation = entry.operation;
+  if (operation.kind === 'create_object') {
+    const footprintKeys = operation.object.footprint.map((cell) => `${String(cell.column)},${String(cell.row)}`);
+    const positionKey = `${String(operation.object.position.column)},${String(operation.object.position.row)}`;
+    if (new Set(footprintKeys).size !== footprintKeys.length || !footprintKeys.includes(positionKey)) {
+      context.addIssue({ code: 'custom', path: ['operation', 'object', 'footprint'], message: 'Object footprint must be unique and include position.' });
+    }
+  }
+  if (operation.kind === 'modify_object' && Object.keys(operation.changes).length === 0) {
+    context.addIssue({ code: 'custom', path: ['operation', 'changes'], message: 'Object modifications cannot be empty.' });
+  }
+  if (operation.kind === 'transform_terrain' || operation.kind === 'set_light_level') {
+    const keys = operation.region.cells.map((cell) => `${String(cell.column)},${String(cell.row)}`);
+    if (new Set(keys).size !== keys.length) {
+      context.addIssue({ code: 'custom', path: ['operation', 'region', 'cells'], message: 'Environment cells must be unique.' });
+    }
+  }
 });
 
 const spellSlotSchema = z.strictObject({
@@ -697,6 +810,7 @@ const v2MemberSchema = z.strictObject({
   effects: z.array(externalPartyPackFeatureEffectSchema).max(100).optional(),
   resources: z.array(externalPartyPackResourceSchema).max(100).optional(),
   passives: passivesSchema.optional(),
+  worldOperations: z.array(externalWorldOperationSchema).max(100).optional(),
 }).superRefine((member, context) => {
   if (Array.isArray(member.spellcasting) && member.sharedSpellSlots === undefined) {
     context.addIssue({
@@ -744,6 +858,7 @@ export type ExternalPartyPackMember = ExternalPartyPack['members'][number];
 export type ExternalPartyPackAttack = z.infer<typeof attackSchema>;
 export type ExternalPartyPackEffect = z.infer<typeof externalPartyPackFeatureEffectSchema>;
 export type ExternalPartyPackResource = z.infer<typeof externalPartyPackResourceSchema>;
+export type ExternalWorldOperation = z.infer<typeof externalWorldOperationSchema>;
 export type PartySource = z.infer<typeof partySourceSchema>;
 
 export interface LoadedPartyAttack {
@@ -800,6 +915,11 @@ export interface LoadedPartyMember {
   }[];
   readonly startingConditions: readonly LoadedPartyCondition[];
   readonly effects: readonly CombatFeatureEffect[];
+  readonly worldOperations: readonly {
+    readonly operationId: string;
+    readonly cost: Extract<EncounterCommand, { readonly type: 'world_operation' }>['cost'];
+    readonly operation: WorldOperation;
+  }[];
 }
 
 export interface LoadedExternalPartyPack {
@@ -891,6 +1011,7 @@ const V2_MEMBER_FIELDS = new Set([
   'effects',
   'resources',
   'passives',
+  'worldOperations',
 ]);
 const CLASS_FIELDS = new Set(['classId', 'level']);
 const ABILITY_FIELDS = new Set<string>(abilities);
@@ -1138,6 +1259,76 @@ function loadedAttack(attack: ExternalPartyPackAttack): LoadedPartyAttack {
       modifier: term.modifier,
     })),
   };
+}
+
+function loadedExternalWorldObject(
+  object: z.infer<typeof externalWorldObjectSchema>,
+): Extract<WorldOperation, { readonly kind: 'create_object' }>['object'] {
+  return {
+    id: worldObjectId(object.objectId),
+    name: object.name,
+    kind: object.kind,
+    position: object.position,
+    footprint: object.footprint,
+    durability: object.durability,
+    armorClass: armorClass(object.armorClass),
+    damageResponses: object.damageResponses.map((response) => ({
+      type: damageType(response.damageTypeId),
+      response: response.response,
+    })),
+    blocking: object.blocking,
+  };
+}
+
+function loadedWorldOperation(operation: ExternalWorldOperation['operation']): WorldOperation {
+  switch (operation.kind) {
+    case 'create_object':
+      return { kind: 'create_object', object: loadedExternalWorldObject(operation.object) };
+    case 'modify_object':
+      return {
+        kind: 'modify_object',
+        objectId: worldObjectId(operation.objectId),
+        changes: {
+          ...(operation.changes.name === undefined ? {} : { name: operation.changes.name }),
+          ...(operation.changes.kind === undefined ? {} : { kind: operation.changes.kind }),
+          ...(operation.changes.position === undefined ? {} : { position: operation.changes.position }),
+          ...(operation.changes.footprint === undefined ? {} : { footprint: operation.changes.footprint }),
+          ...(operation.changes.durability === undefined ? {} : { durability: operation.changes.durability }),
+          ...(operation.changes.armorClass === undefined ? {} : { armorClass: armorClass(operation.changes.armorClass) }),
+          ...(operation.changes.damageResponses === undefined ? {} : {
+            damageResponses: operation.changes.damageResponses.map((response) => ({
+              type: damageType(response.damageTypeId), response: response.response,
+            })),
+          }),
+          ...(operation.changes.blocking === undefined ? {} : { blocking: operation.changes.blocking }),
+        },
+      };
+    case 'remove_object':
+      return {
+        kind: 'remove_object', objectId: worldObjectId(operation.objectId), reason: operation.reason,
+      };
+    case 'damage_object':
+      return {
+        kind: 'damage_object',
+        objectId: worldObjectId(operation.objectId),
+        delivery: operation.delivery,
+        damage: {
+          terms: operation.damage.terms.map((term) => ({
+            type: damageType(term.damageTypeId),
+            dice: { count: term.count, sides: dieSides(term.sides), modifier: term.modifier },
+          })),
+          critical: operation.damage.critical,
+          responses: [],
+        },
+      };
+    case 'transform_terrain':
+      return {
+        kind: 'transform_terrain', region: operation.region,
+        difficultTerrain: operation.difficultTerrain,
+      };
+    case 'set_light_level':
+      return { kind: 'set_light_level', region: operation.region, level: operation.level };
+  }
 }
 
 type ExternalPersistentAreaEffect = Extract<ExternalPartyPackEffect, { readonly kind: 'persistent_area' }>;
@@ -1544,10 +1735,17 @@ function v2MemberExtensions(member: ExternalPartyPackMember): {
   readonly resources: readonly ExternalPartyPackResource[];
   readonly passives: z.infer<typeof passivesSchema> | null;
   readonly sizeCategory: KnownCreatureSize | null;
+  readonly worldOperations: readonly ExternalWorldOperation[];
 } {
-  if (!Object.hasOwn(member, 'effects') && !Object.hasOwn(member, 'resources') && !Object.hasOwn(member, 'passives')) {
+  if (
+    !Object.hasOwn(member, 'effects') &&
+    !Object.hasOwn(member, 'resources') &&
+    !Object.hasOwn(member, 'passives') &&
+    !Object.hasOwn(member, 'worldOperations')
+  ) {
     return {
       effects: [], resources: [], passives: null,
+      worldOperations: [],
       sizeCategory: Object.hasOwn(member, 'sizeCategory')
         ? (member as ExternalPartyPackV2Member).sizeCategory
         : null,
@@ -1558,6 +1756,7 @@ function v2MemberExtensions(member: ExternalPartyPackMember): {
     effects: v2Member.effects ?? [],
     resources: v2Member.resources ?? [],
     passives: v2Member.passives ?? null,
+    worldOperations: v2Member.worldOperations ?? [],
     sizeCategory: v2Member.sizeCategory,
   };
 }
@@ -1633,6 +1832,11 @@ function loadedMember(
       condition: condition.conditionId,
     })),
     effects,
+    worldOperations: extensions.worldOperations.map((entry) => ({
+      operationId: entry.operationId,
+      cost: entry.cost,
+      operation: loadedWorldOperation(entry.operation),
+    })),
   };
 }
 
@@ -1937,6 +2141,20 @@ export function loadedPartyTurnLegalActions(
 }
 
 /** Activates an action-economy feature through existing effect/temp-HP commands. */
+export function loadedPartyWorldOperationCommand(
+  member: LoadedPartyMember,
+  operationId: string,
+): Extract<EncounterCommand, { readonly type: 'world_operation' }> {
+  const declared = member.worldOperations.find((entry) => entry.operationId === operationId);
+  if (declared === undefined) throw new RangeError(`The party member does not declare ${operationId}.`);
+  return {
+    type: 'world_operation',
+    actor: member.profile.id,
+    cost: declared.cost,
+    operation: structuredClone(declared.operation),
+  };
+}
+
 export function loadedPartyEffectCommand(
   member: LoadedPartyMember,
   effectId: string,
@@ -2577,7 +2795,37 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     let effects: ExternalPartyPackEffect[] = [];
     const resources: ExternalPartyPackResource[] = [];
     let passives: z.infer<typeof passivesSchema> | undefined;
+    const worldOperations: ExternalWorldOperation[] = [];
     if (header.data.schemaVersion === 2) {
+      const worldOperationsInput = Object.hasOwn(memberInput, 'worldOperations')
+        ? memberInput.worldOperations
+        : [];
+      if (!Array.isArray(worldOperationsInput)) {
+        gaps.push(issueGap(entry, ['members', index, 'worldOperations']));
+      } else if (worldOperationsInput.length > 100) {
+        gaps.push(issueGap(entry, ['members', index, 'worldOperations'], 'value_not_in_engine_vocabulary'));
+      } else {
+        for (const [operationIndex, operationValue] of worldOperationsInput.entries()) {
+          const parsed = externalWorldOperationSchema.safeParse(operationValue);
+          if (!parsed.success) {
+            gaps.push(...parsed.error.issues.map((issue) => issueGap(
+              entry,
+              ['members', index, 'worldOperations', operationIndex, ...issue.path],
+              issue.code === 'unrecognized_keys'
+                ? 'field_not_in_engine_vocabulary'
+                : 'value_not_in_engine_vocabulary',
+            )));
+          } else if (worldOperations.some((operation) => operation.operationId === parsed.data.operationId)) {
+            gaps.push(issueGap(
+              entry,
+              ['members', index, 'worldOperations', operationIndex, 'operationId'],
+              'value_not_in_engine_vocabulary',
+            ));
+          } else {
+            worldOperations.push(parsed.data);
+          }
+        }
+      }
       const effectsInput = Object.hasOwn(memberInput, 'effects')
         ? memberInput.effects
         : [];
@@ -2811,6 +3059,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           ...(Object.hasOwn(memberInput, 'effects') ? { effects } : {}),
           ...(Object.hasOwn(memberInput, 'resources') ? { resources } : {}),
           ...(passives === undefined ? {} : { passives }),
+          ...(Object.hasOwn(memberInput, 'worldOperations') ? { worldOperations } : {}),
           ...(parsedSpellcasting.length === 0
             ? {}
             : {

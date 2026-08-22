@@ -4,11 +4,12 @@ import type { EffectPayload } from './effects';
 import type { GridCell } from './grid';
 import type { DamageRequest, RollMode } from './resolution';
 import { affectedCells, creatureOccupiesAffectedCell, feetPoint, type AreaTemplate, type Direction, type FeetPoint } from './templates';
-import { feet, type CombatantId, type Feet, type PersistentAreaId } from './values';
+import { feet, type CombatantId, type Feet, type PersistentAreaId, type WorldObjectId } from './values';
 
 export type PersistentAreaOrigin =
   | { readonly kind: 'fixed'; readonly point: FeetPoint }
-  | { readonly kind: 'anchored'; readonly combatant: CombatantId };
+  | { readonly kind: 'anchored'; readonly combatant: CombatantId }
+  | { readonly kind: 'anchored_to_object'; readonly object: WorldObjectId };
 
 export type PersistentAreaShape =
   | { readonly kind: 'sphere'; readonly radius: Feet }
@@ -149,7 +150,7 @@ function occupiesOriginCell(
   cell: GridCell,
   anchorCell: GridCell | null,
 ): boolean {
-  if (area.origin.kind === 'anchored') {
+  if (area.origin.kind !== 'fixed') {
     return anchorCell !== null && cell.column === anchorCell.column && cell.row === anchorCell.row;
   }
   return cell.column === Math.floor(area.origin.point.x / 5) &&

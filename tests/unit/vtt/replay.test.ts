@@ -18,7 +18,7 @@ import { reduceEncounter } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { feetPoint } from '../../../src/combat/templates';
-import { codexSessionId, encounterBranchId, encounterSessionId, feet } from '../../../src/combat/values';
+import { armorClass, codexSessionId, encounterBranchId, encounterSessionId, feet, worldObjectId } from '../../../src/combat/values';
 import { recordScriptedReferenceSkirmish } from '../../../src/vtt/scripted-skirmish';
 import { TEST_APPROVED_FIRST_SKIRMISH_FIXTURE } from '../../../src/vtt/test-approved-first-skirmish';
 import { runVttReplayCommand } from '../../../tools/vtt-replay';
@@ -77,6 +77,61 @@ function expectDivergence(
 }
 
 describe('increment 10 deterministic replay and playable exit', () => {
+  it('replays world-object creation byte-exactly', () => {
+    const store = new MemoryBrowserSessionStore();
+    const mirror = new MemoryMirrorSink();
+    const sessionId = encounterSessionId('encounter:world-object-replay');
+    const rng = mulberry32(0x330_139);
+    const coordinatorState = {
+      requestSequence: 1, pendingRequest: null, pendingCommand: null,
+      continuation: { kind: 'idle' as const }, pause: null,
+    };
+    let state = encounterStateFromApprovedFixture(TEST_APPROVED_FIRST_SKIRMISH_FIXTURE);
+    const occupied = new Set([
+      ...state.tokens.map((token) => `${String(token.position.column)},${String(token.position.row)}`),
+      ...state.blockedCells.map((cell) => `${String(cell.column)},${String(cell.row)}`),
+    ]);
+    const position = Array.from({ length: state.bounds.rows }, (_value, row) =>
+      Array.from({ length: state.bounds.columns }, (_columnValue, column) => ({ column, row })))
+      .flat()
+      .find((cell) => !occupied.has(`${String(cell.column)},${String(cell.row)}`));
+    if (position === undefined) throw new Error('Replay fixture has no free world-object cell.');
+    const journal = EncounterSessionJournal.create({
+      sessionId, branchId: encounterBranchId('branch:world-object-replay'), encounterState: state,
+      coordinatorState, controllers: [], codexSessionId: codexSessionId('codex:world-object-replay'),
+      rng, store, mirror,
+    });
+    const command: EncounterCommand = {
+      type: 'world_operation', actor: null, cost: 'none',
+      operation: {
+        kind: 'create_object',
+        object: {
+          id: worldObjectId('object:replay-wall'), name: 'Homebrew Replay Wall', kind: 'barrier',
+          position, footprint: [position], durability: { kind: 'indestructible' },
+          armorClass: armorClass(15), damageResponses: [],
+          blocking: { movement: true, lineOfSight: true, cover: 'total' },
+        },
+      },
+    };
+    const reduction = reduceEncounter(state, command, journal.rng());
+    state = reduction.state;
+    journal.record({
+      transition: { kind: 'reducer_applied', command, events: reduction.events },
+      encounterState: state, coordinatorState, controllers: [],
+    });
+    const bundle = createReplayBundle({
+      fixture: TEST_APPROVED_FIRST_SKIRMISH_FIXTURE, revisions: store.revisions(sessionId), transcripts: [],
+      build: { buildId: 'world-object-test', commit: 'test' }, protocolVersions: ['world-object:1'],
+      licensingVersions: ['SRD-5.2.1-CC-BY-4.0'], gapReports: [],
+    });
+    const bytes = exportReplayBundle(bundle);
+    const decoded = decodeReplayBundle(bytes);
+    expect(exportReplayBundle(decoded)).toBe(bytes);
+    expect(replayBundle(decoded, TEST_APPROVED_FIRST_SKIRMISH_FIXTURE).finalStateHash).toBe(
+      bundle.revisions.at(-1)?.stateHash,
+    );
+  });
+
   it('replays two overlapping persistent areas byte-exactly in stable creation order', () => {
     const store = new MemoryBrowserSessionStore();
     const mirror = new MemoryMirrorSink();
