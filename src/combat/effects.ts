@@ -1,4 +1,5 @@
 import type { Ability } from '../domain/enums';
+import type { DamageOperationDelivery, DamageOperationSpec, ThresholdDamageRider } from './damage-operations';
 import type { ConditionName, ExhaustionLevel } from './conditions';
 import type { DamageRequest, RollMode } from './resolution';
 import type { AreaTemplate } from './templates';
@@ -97,6 +98,10 @@ export interface RecklessAttackPayload {
 
 /** Feature-only mechanics interpreted directly by attack/spell action reducers. */
 export type TypedCombatFeaturePayload =
+  | ({
+      readonly kind: 'damage_operation';
+      readonly saveDc: number;
+    } & DamageOperationSpec)
   | {
       readonly kind: 'save_gated_banishment_on_hit';
       readonly saveAbility: Ability;
@@ -170,7 +175,8 @@ export function isAttackFormSubstitutionPayload(
 export function isTypedCombatFeaturePayload(
   payload: CombatFeatureEffect['payload'],
 ): payload is TypedCombatFeaturePayload {
-  return payload.kind === 'save_gated_banishment_on_hit' ||
+  return payload.kind === 'damage_operation' ||
+    payload.kind === 'save_gated_banishment_on_hit' ||
     payload.kind === 'spell_damage_ability_modifier' ||
     payload.kind === 'timed_spellcasting_mode' ||
     payload.kind === 'resource_die_maneuver' ||
@@ -221,6 +227,15 @@ export type WeaponHitRiderFollowUp =
       readonly damage: DamageRequest;
       readonly timing: Extract<TurnBoundary, 'start'>;
       readonly durationRounds: number;
+    }
+  | {
+      readonly kind: 'save_then_condition';
+      readonly saveAbility: Ability;
+      readonly saveDc: number;
+      readonly rollMode: RollMode;
+      readonly condition: Exclude<ConditionName, 'Exhaustion'>;
+      readonly expiresAt: 'target_start' | 'target_end';
+      readonly durationRounds: number;
     };
 
 export type EffectPayload =
@@ -235,6 +250,16 @@ export type EffectPayload =
   | {
       readonly kind: 'ongoing_damage';
       readonly damage: DamageRequest;
+      readonly timing: SourcedTurnBoundary;
+    }
+  | {
+      readonly kind: 'recurring_damage_operation';
+      readonly instances: readonly {
+        readonly damage: DamageRequest;
+        readonly thresholdRider: ThresholdDamageRider | null;
+      }[];
+      readonly delivery: DamageOperationDelivery;
+      readonly saveDc: number;
       readonly timing: SourcedTurnBoundary;
     }
   | {
@@ -280,6 +305,11 @@ export type EffectPayload =
       readonly gating?: DamageRiderGating;
       readonly consumeOnHit?: boolean;
       readonly followUp?: WeaponHitRiderFollowUp;
+      /** Present only on a party/content feature which must first be armed. */
+      readonly arming?: {
+        readonly durationRounds: number;
+        readonly concentration: boolean;
+      };
     }
   | {
       readonly kind: 'ensnaring_strike';

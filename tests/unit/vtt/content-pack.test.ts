@@ -96,6 +96,39 @@ function importedSpellCommand(
 }
 
 describe('content-pack v1', () => {
+  it('refuses malformed additional-damage and armed-rider operation shapes', () => {
+    const damage = fixture() as { spells: Array<{ operation: unknown }> };
+    damage.spells[0]!.operation = {
+      kind: 'damage_operation', delivery: { kind: 'automatic' }, instancesPerTarget: 1,
+      packets: [{
+        damageType: { kind: 'fixed', damageType: 'Cold' },
+        dice: {
+          baseCount: 1, sides: 6, modifier: 0, perSlotCount: 0,
+          perSlotModifier: 0, cantripUpgrade: false,
+          rerollBelow: { threshold: 7, maximumRerollsPerDie: 1 },
+        },
+        scaling: { kind: 'none' }, thresholdRider: null,
+      }],
+      timing: { kind: 'immediate' },
+    };
+    expect(loadContentPack(damage)).toMatchObject({
+      status: 'refused', refusal: { reason: 'malformed_record', path: ['spells', 0, 'operation'] },
+    });
+
+    const armed = fixture() as { spells: Array<{ operation: unknown }> };
+    armed.spells[0]!.operation = {
+      kind: 'armed_weapon_hit_rider', damage: null, durationRounds: 1,
+      concentration: false, persistence: 'consume_on_hit',
+      saveGatedRider: {
+        ability: 'wisdom', rollMode: 'normal', condition: 'not-a-condition',
+        durationRounds: 1, expiresAt: 'target_end',
+      },
+    };
+    expect(loadContentPack(armed)).toMatchObject({
+      status: 'refused', refusal: { reason: 'malformed_record', path: ['spells', 0, 'operation'] },
+    });
+  });
+
   it('loads a typed persistent-area spell operation and refuses malformed nested area specs', () => {
     const operation = {
       kind: 'persistent_area', origin: 'anchored_to_caster',
@@ -317,7 +350,25 @@ describe('content-pack v1', () => {
   });
 
   it('imported_content_missing_from_replay reconstructs imported records byte-exactly', () => {
-    const content = loaded();
+    const replayCandidate = fixture() as { spells: Array<{ operation: unknown }> };
+    replayCandidate.spells[0]!.operation = {
+      kind: 'damage_operation',
+      delivery: { kind: 'automatic' },
+      instancesPerTarget: 2,
+      packets: [{
+        damageType: { kind: 'conversion', from: 'Thunder', to: 'Force' },
+        dice: {
+          baseCount: 1, sides: 4, modifier: 0, perSlotCount: 0,
+          perSlotModifier: 0, cantripUpgrade: false,
+          minimumTotal: 2, maximumTotal: 4,
+          rerollBelow: { threshold: 2, maximumRerollsPerDie: 1 },
+        },
+        scaling: { kind: 'target_missing_hit_points', hitPointsPerAdditionalDie: 10, maximumAdditionalDice: 2 },
+        thresholdRider: null,
+      }],
+      timing: { kind: 'immediate' },
+    };
+    const content = loaded(loadContentPack(replayCandidate));
     const caster = playerProfile('replay-import-caster', { initiativeBonus: 20, spellSlots: [{ level: 1, maximum: 1 }] });
     const target = monsterProfile('replay-import-target', { initiativeBonus: -20, hitPoints: 20 });
     const rng = mulberry32(0x330);
@@ -360,6 +411,7 @@ describe('content-pack v1', () => {
       canonicalJson(content.pack),
     );
     expect(bytes).toContain('greenforge:prism-pebble');
+    expect(bytes).toContain('damage_operation');
   });
 
   it('pins schema operation/effect inventories bidirectionally to the runtime unions', () => {

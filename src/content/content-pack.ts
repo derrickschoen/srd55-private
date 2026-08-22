@@ -3,6 +3,11 @@ import type { CombatantProfile } from '../combat/combatant';
 import { monsterCombatantProfile } from '../combat/combatant';
 import type { CombatFeatureEffect } from '../combat/effects';
 import { conditionNames } from '../combat/conditions';
+import {
+  armedWeaponHitRiderShape,
+  damageOperationSpecSchema,
+  operationDiceSchema,
+} from '../combat/damage-operation-schema';
 import type { EncounterCommand } from '../combat/events';
 import type { MonsterAction, MonsterStatblock, MonsterStatblockInput, SenseKind } from '../combat/statblock';
 import { monsterStatblock } from '../combat/statblock';
@@ -131,6 +136,8 @@ const targetingSchema = z.discriminatedUnion('kind', [
 ]);
 
 const operationRequiredFields = {
+  damage_operation: ['delivery', 'instancesPerTarget', 'packets', 'timing'],
+  armed_weapon_hit_rider: ['damage', 'durationRounds', 'concentration', 'persistence', 'saveGatedRider'],
   persistent_area: ['origin', 'shape', 'durationRounds', 'concentration', 'targetFilter', 'includeOwner', 'difficultTerrain', 'movableFeet', 'hooks', 'initialEffects'],
   attack_damage: ['attackKind', 'damageType', 'dice', 'rider'],
   attack_then_save_damage: ['attackKind', 'attackDamageType', 'attackDice', 'saveAbility', 'saveDamageType', 'saveDice', 'onSaveSuccess', 'burstShape', 'burstRadiusFeet'],
@@ -181,14 +188,7 @@ function operationKind(value: unknown): string | null {
   return operation !== null && typeof operation.kind === 'string' ? operation.kind : null;
 }
 
-const persistentAreaScaledDiceSchema = z.strictObject({
-  baseCount: nonNegativeInteger.max(100),
-  sides: positiveInteger.max(100),
-  modifier: safeInteger.min(-100_000).max(100_000),
-  perSlotCount: nonNegativeInteger.max(100),
-  perSlotModifier: safeInteger.min(-100_000).max(100_000),
-  cantripUpgrade: z.boolean(),
-});
+const persistentAreaScaledDiceSchema = operationDiceSchema;
 
 const persistentAreaShapeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('sphere'), radius: positiveInteger.max(100_000) }),
@@ -260,6 +260,22 @@ const persistentAreaOperationSchema = z.strictObject({
   }
 });
 
+const damageOperationSchema = damageOperationSpecSchema.extend({
+  kind: z.literal('damage_operation'),
+});
+
+const armedWeaponHitRiderSchema = z.strictObject({
+  kind: z.literal('armed_weapon_hit_rider'),
+  ...armedWeaponHitRiderShape,
+}).superRefine((operation, context) => {
+  if (operation.damage !== null && (
+    operation.damage.scaling.kind !== 'none' ||
+    operation.damage.thresholdRider !== null
+  )) {
+    context.addIssue({ code: 'custom', message: 'Armed weapon-hit damage cannot defer target scaling or a threshold rider.' });
+  }
+});
+
 function structurallyValidOperation(value: unknown): value is SpellOperation {
   const operation = objectRecord(value);
   const kind = operationKind(value);
@@ -270,6 +286,8 @@ function structurallyValidOperation(value: unknown): value is SpellOperation {
   ) return false;
   const typedKind = kind as SpellOperation['kind'];
   if (typedKind === 'persistent_area') return persistentAreaOperationSchema.safeParse(value).success;
+  if (typedKind === 'damage_operation') return damageOperationSchema.safeParse(value).success;
+  if (typedKind === 'armed_weapon_hit_rider') return armedWeaponHitRiderSchema.safeParse(value).success;
   const required = operationRequiredFields[typedKind];
   if (required.some((field) => !Object.hasOwn(operation, field))) return false;
   const allowed = new Set<string>([
