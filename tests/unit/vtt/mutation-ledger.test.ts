@@ -38,6 +38,7 @@ const SPATIAL_MOVEMENT_LEDGER_PATH = 'docs/audits/2026-08-21-spatial-movement-mu
 const E04_CONTEXT_LEDGER_PATH = 'docs/audits/2026-08-21-e04-context-compression-early-stop-mutation-ledger.md';
 const E05_TYPED_UNTYPED_LEDGER_PATH = 'docs/audits/2026-08-21-e05-typed-vs-untyped-mutation-ledger.md';
 const E05_TYPECHECK_INSTRUMENTATION_LEDGER_PATH = 'docs/audits/2026-08-22-e05-typecheck-instrumentation-mutation-ledger.md';
+const E05B_DIFFICULTY_LEDGER_PATH = 'docs/audits/2026-08-22-e05b-difficulty-mutation-ledger.md';
 const ENVELOPE_NORMALIZATION_LEDGER_PATH = 'docs/audits/2026-08-22-envelope-normalization-mutation-ledger.md';
 const CHOICE_BRANCH_LEDGER_PATH = 'docs/audits/2026-08-22-choice-branch-mutation-ledger.md';
 const CONDITION_LIFECYCLE_LEDGER_PATH = 'docs/audits/2026-08-22-condition-lifecycle-mutation-ledger.md';
@@ -417,6 +418,21 @@ describe('phase-2 mutation ledger manifest', () => {
     }
     expect(ledger.match(/exit 1/gu)).toHaveLength(3);
     expect(ledger).toContain('Each production mutation was applied alone, killed by its named test, and restored');
+  });
+
+  it('E05B-DIFFICULTY-MUTATION-LEDGER pins all restored controls and numeric boundary probes', () => {
+    const ledger = readFileSync(E05B_DIFFICULTY_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/experiment-orchestrator.test.ts', 'utf8');
+    for (const name of [
+      'difficulty_not_in_digest',
+      'arms_differ_beyond_typecheck',
+      'manipulation_check_constant',
+    ]) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(tests).toContain(name);
+    }
+    expect(ledger.match(/Vitest verdict: 1 failed and 50 skipped/gu)).toHaveLength(6);
+    expect(ledger).toContain('Each mutation was applied alone, proved present by an exact source read, killed by its named test, restored');
   });
 
   it('ENVELOPE-NORMALIZATION-MUTATION-LEDGER pins all three restored controls', () => {

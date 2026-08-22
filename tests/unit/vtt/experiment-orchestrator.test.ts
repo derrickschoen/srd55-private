@@ -16,12 +16,20 @@ import {
   decisionCorrectionMetrics,
   experimentCallRecordSchema,
   type ExperimentTableRecord,
-  type ExperimentTableRecordV5,
+  type ExperimentTableRecordV6,
 } from '../../../src/vtt/experiment-telemetry';
 import {
   buildExperimentSchedule,
+  assertE05bDifficultyParameters,
   decodeVttExperimentArguments,
+  e05bDifficultyDigest,
+  E05_BASELINE_DIFFICULTY_PARAMETERS,
+  E05B_DIFFICULTY_PARAMETERS,
+  E05B_MONSTER_COUNT,
+  E05B_MOVEMENT_BUDGET_FEET,
+  E05B_SPELLS_PER_CASTER,
   evaluateEarlyStop,
+  experimentDifficultyDomains,
   EXPERIMENT_REGISTRY,
   E03_TACTICAL_ADVICE_FORBIDDEN_PHRASES,
   e05TypeCheckMode,
@@ -31,6 +39,7 @@ import {
   runE03Table,
   runE04Table,
   runE05Table,
+  runE05BTable,
   runVttExperiment,
   seededArmOrder,
   type VttExperimentConfig,
@@ -38,14 +47,15 @@ import {
 
 const FAKE_CODEX = 'tests/fixtures/fake-codex-dm.mjs';
 let directory = '';
-let liveRecord: ExperimentTableRecordV5;
-let repeatedRecord: ExperimentTableRecordV5;
-let e02Record: ExperimentTableRecordV5;
-let e03Record: ExperimentTableRecordV5;
-let e04Records: readonly ExperimentTableRecordV5[];
-let e05Records: readonly ExperimentTableRecordV5[];
+let liveRecord: ExperimentTableRecordV6;
+let repeatedRecord: ExperimentTableRecordV6;
+let e02Record: ExperimentTableRecordV6;
+let e03Record: ExperimentTableRecordV6;
+let e04Records: readonly ExperimentTableRecordV6[];
+let e05Records: readonly ExperimentTableRecordV6[];
+let e05bRecords: readonly ExperimentTableRecordV6[];
 
-function config(outDirectory: string, experimentId: 'E01' | 'E02' | 'E03' | 'E04' | 'E05' = 'E01'): VttExperimentConfig {
+function config(outDirectory: string, experimentId: 'E01' | 'E02' | 'E03' | 'E04' | 'E05' | 'E05B' = 'E01'): VttExperimentConfig {
   return {
     experimentId,
     outDirectory,
@@ -63,9 +73,10 @@ function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function legacyV1Record(record: ExperimentTableRecordV5): unknown {
+function legacyV1Record(record: ExperimentTableRecordV6): unknown {
+  const { difficultyDomains: _difficultyDomains, ...legacyRecord } = structuredClone(record);
   return {
-    ...structuredClone(record),
+    ...legacyRecord,
     schemaVersion: 1,
     calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, envelopeNormalizationRule: _envelopeNormalizationRule, typeCheckProgramCounts: _typeCheckProgramCounts, ...call }) => call),
     quality: {
@@ -83,28 +94,36 @@ function legacyV1Record(record: ExperimentTableRecordV5): unknown {
   };
 }
 
-function legacyV2Record(record: ExperimentTableRecordV5): unknown {
+function legacyV2Record(record: ExperimentTableRecordV6): unknown {
+  const { difficultyDomains: _difficultyDomains, ...legacyRecord } = structuredClone(record);
   return {
-    ...structuredClone(record),
+    ...legacyRecord,
     schemaVersion: 2,
     calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, envelopeNormalizationRule: _envelopeNormalizationRule, typeCheckProgramCounts: _typeCheckProgramCounts, ...call }) => call),
   };
 }
 
-function legacyV3Record(record: ExperimentTableRecordV5): unknown {
+function legacyV3Record(record: ExperimentTableRecordV6): unknown {
+  const { difficultyDomains: _difficultyDomains, ...legacyRecord } = structuredClone(record);
   return {
-    ...structuredClone(record),
+    ...legacyRecord,
     schemaVersion: 3,
     calls: record.calls.map(({ typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, envelopeNormalizationRule: _envelopeNormalizationRule, typeCheckProgramCounts: _typeCheckProgramCounts, ...call }) => call),
   };
 }
 
-function legacyV4Record(record: ExperimentTableRecordV5): unknown {
+function legacyV4Record(record: ExperimentTableRecordV6): unknown {
+  const { difficultyDomains: _difficultyDomains, ...legacyRecord } = structuredClone(record);
   return {
-    ...structuredClone(record),
+    ...legacyRecord,
     schemaVersion: 4,
     calls: record.calls.map(({ envelopeNormalizationRule: _envelopeNormalizationRule, typeCheckProgramCounts: _typeCheckProgramCounts, ...call }) => call),
   };
+}
+
+function legacyV5Record(record: ExperimentTableRecordV6): unknown {
+  const { difficultyDomains: _difficultyDomains, ...legacyRecord } = structuredClone(record);
+  return { ...legacyRecord, schemaVersion: 5 };
 }
 
 beforeAll(async () => {
@@ -149,6 +168,13 @@ beforeAll(async () => {
   e05Records = [];
   for (const entry of e05Schedule) {
     e05Records = [...e05Records, await runE05Table(entry, e05Execution, e05Preregistration)];
+  }
+  const e05bExecution = config(join(directory, 'e05b'), 'E05B');
+  const e05bSchedule = buildExperimentSchedule('E05B').slice(0, 2);
+  const e05bPreregistration = preregisterExperiment(e05bExecution);
+  e05bRecords = [];
+  for (const entry of e05bSchedule) {
+    e05bRecords = [...e05bRecords, await runE05BTable(entry, e05bExecution, e05bPreregistration)];
   }
 }, 30_000);
 
@@ -206,10 +232,10 @@ describe('E02 worked-example experiment registration', () => {
     }
   });
 
-  it('emits capture v5 on a synthetic no-LLM E02 table', () => {
+  it('emits capture v6 on a synthetic no-LLM E02 table', () => {
     expect(() => decodeExperimentTableRecord(e02Record)).not.toThrow();
     expect(e02Record).toMatchObject({
-      schemaVersion: 5,
+      schemaVersion: 6,
       experimentId: 'E02',
       schemaVariant: 'compact-grammar-v1',
       status: 'completed',
@@ -319,10 +345,10 @@ describe('E03 instruction-length experiment registration', () => {
     expect(first.promptComponentHashes).not.toEqual(e02.promptComponentHashes);
   });
 
-  it('emits capture v5 on a synthetic no-LLM E03 table', () => {
+  it('emits capture v6 on a synthetic no-LLM E03 table', () => {
     expect(() => decodeExperimentTableRecord(e03Record)).not.toThrow();
     expect(e03Record).toMatchObject({
-      schemaVersion: 5,
+      schemaVersion: 6,
       experimentId: 'E03',
       schemaVariant: 'compact-grammar-v1',
       exampleCount: 3,
@@ -605,8 +631,8 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
     const previousMode = process.env.FAKE_CODEX_MODE;
     const previousStateFile = process.env.FAKE_CODEX_STATE_FILE;
     process.env.FAKE_CODEX_MODE = 'js_type_error_once';
-    let typed: ExperimentTableRecordV5;
-    let untyped: ExperimentTableRecordV5;
+    let typed: ExperimentTableRecordV6;
+    let untyped: ExperimentTableRecordV6;
     try {
       const typedExecution = config(join(directory, 'e05-js-type-error-typed'), 'E05');
       process.env.FAKE_CODEX_STATE_FILE = join(directory, 'e05-js-type-error-typed-state');
@@ -656,7 +682,7 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
     const previousStateFile = process.env.FAKE_CODEX_STATE_FILE;
     process.env.FAKE_CODEX_MODE = 'js_schema_error_once';
     process.env.FAKE_CODEX_STATE_FILE = stateFile;
-    let record: ExperimentTableRecordV5;
+    let record: ExperimentTableRecordV6;
     try {
       record = await runE05Table(entry, execution, preregisterExperiment(execution));
     } finally {
@@ -701,7 +727,7 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
     const previousStateFile = process.env.FAKE_CODEX_STATE_FILE;
     process.env.FAKE_CODEX_MODE = 'js_alias_once';
     process.env.FAKE_CODEX_STATE_FILE = stateFile;
-    let record: ExperimentTableRecordV5;
+    let record: ExperimentTableRecordV6;
     try {
       record = await runE05Table(entry, execution, preregisterExperiment(execution));
     } finally {
@@ -825,6 +851,160 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
   });
 });
 
+describe('E05B preregistered harder-program rerun', () => {
+  it('registers the declared check-targeted difficulty parameters on E05B without changing E05', () => {
+    expect(EXPERIMENT_REGISTRY.E05B.difficultyParameters).toEqual(E05B_DIFFICULTY_PARAMETERS);
+    expect(E05B_DIFFICULTY_PARAMETERS).toEqual({
+      monsterCount: 5,
+      movementBudgetFeet: 5,
+      spellPool: [
+        'acid-splash',
+        'chill-touch',
+        'eldritch-blast',
+        'fire-bolt',
+        'ray-of-frost',
+        'sacred-flame',
+      ],
+      spellsPerCaster: 2,
+    });
+    expect(EXPERIMENT_REGISTRY.E05).not.toHaveProperty('difficultyParameters');
+    expect(EXPERIMENT_REGISTRY.E05.enemyCount).toBe(4);
+  });
+
+  it('pins both sides of every E05B numeric difficulty boundary', () => {
+    expect(E05_BASELINE_DIFFICULTY_PARAMETERS.monsterCount).toBe(4);
+    expect(E05B_MONSTER_COUNT).toBe(5);
+    expect(() => assertE05bDifficultyParameters({
+      ...E05B_DIFFICULTY_PARAMETERS,
+      monsterCount: E05_BASELINE_DIFFICULTY_PARAMETERS.monsterCount,
+    })).toThrow(/at least 5/u);
+    expect(() => assertE05bDifficultyParameters(E05B_DIFFICULTY_PARAMETERS)).not.toThrow();
+
+    expect(E05B_MOVEMENT_BUDGET_FEET).toBe(5);
+    expect(() => assertE05bDifficultyParameters({
+      ...E05B_DIFFICULTY_PARAMETERS,
+      movementBudgetFeet: E05B_MOVEMENT_BUDGET_FEET - 1,
+    })).toThrow(/from 5/u);
+    expect(() => assertE05bDifficultyParameters({
+      ...E05B_DIFFICULTY_PARAMETERS,
+      movementBudgetFeet: E05B_MOVEMENT_BUDGET_FEET + 1,
+    })).not.toThrow();
+    expect(() => assertE05bDifficultyParameters({
+      ...E05B_DIFFICULTY_PARAMETERS,
+      movementBudgetFeet: E05_BASELINE_DIFFICULTY_PARAMETERS.movementBudgetFeet,
+    })).toThrow(/through 29/u);
+
+    expect(E05B_SPELLS_PER_CASTER).toBe(2);
+    expect(() => assertE05bDifficultyParameters({
+      ...E05B_DIFFICULTY_PARAMETERS,
+      spellsPerCaster: E05B_SPELLS_PER_CASTER - 1,
+    })).toThrow(/at least 2/u);
+    expect(() => assertE05bDifficultyParameters({
+      ...E05B_DIFFICULTY_PARAMETERS,
+      spellsPerCaster: E05B_SPELLS_PER_CASTER + 1,
+    })).not.toThrow();
+  });
+
+  it('difficulty_not_in_digest: changing one difficulty parameter changes the full preregistration digest inputs', () => {
+    const preregistration = preregisterExperiment(config('/tmp/e05b-digest', 'E05B'));
+    expect(preregistration.difficultyParameters).toEqual(E05B_DIFFICULTY_PARAMETERS);
+    expect(preregistration.difficultyParametersDigest).toBe(
+      '90ecad5377e7ce3e77fd7727858067a7f3a8fc3ed12a15ab8288e3345b14137a',
+    );
+    const changed = {
+      ...E05B_DIFFICULTY_PARAMETERS,
+      monsterCount: E05B_DIFFICULTY_PARAMETERS.monsterCount + 1,
+    };
+    expect(e05bDifficultyDigest(changed)).not.toBe(preregistration.difficultyParametersDigest);
+    const { digest: _registeredDigest, ...registeredInputs } = preregistration;
+    const changedInputs = {
+      ...registeredInputs,
+      difficultyParameters: changed,
+      difficultyParametersDigest: e05bDifficultyDigest(changed),
+    };
+    expect(digest(canonicalJson(changedInputs))).not.toBe(preregistration.digest);
+  });
+
+  it('preregisters paired D328.2 stopping, instrumentation metrics, and the 120-table ceiling', () => {
+    const preregistration = preregisterExperiment(config('/tmp/e05b-preregistered', 'E05B'));
+    expect(preregistration).toMatchObject({
+      programVersion: 'D333.3-v1',
+      experimentId: 'E05B',
+      primaryMetrics: ['correctionRate'],
+      tertiaryMetrics: ['typeCheckUniqueCatchRate', 'typeCheckUniqueDiagnosticCodesAndExamplePrograms'],
+      earlyStopRule: {
+        enabled: true,
+        metric: 'correctionRate',
+        method: 'paired_bootstrap',
+        confidence: 0.99,
+        minimumTableFraction: 0.5,
+        preregisteredTableCeiling: 120,
+      },
+    });
+    expect(preregistration.seedList).toHaveLength(30);
+    expect(new Set(Object.values(preregistration.promptComponentHashes)).size).toBe(1);
+  });
+
+  it('arms_differ_beyond_typecheck: paired arms share seeds and all encounter-generation parameters', () => {
+    const schedule = buildExperimentSchedule('E05B');
+    expect(schedule).toHaveLength(120);
+    expect(EXPERIMENT_REGISTRY.E05B.arms.map((arm) => Object.keys(arm).sort())).toEqual([
+      ['description', 'id', 'typeCheckMode'],
+      ['description', 'id', 'typeCheckMode'],
+    ]);
+    for (let index = 0; index < schedule.length; index += 2) {
+      const pair = schedule.slice(index, index + 2);
+      expect(new Set(pair.map((entry) => entry.pairId)).size).toBe(1);
+      expect(new Set(pair.map((entry) => entry.seed)).size).toBe(1);
+      expect(new Set(pair.map((entry) => entry.armId))).toEqual(new Set(['typed-js', 'untyped-js']));
+    }
+    expect(e05bRecords).toHaveLength(2);
+    expect(e05bRecords[0]?.fixtureDigest).toBe(e05bRecords[1]?.fixtureDigest);
+    expect(e05bRecords[0]?.difficultyDomains).toEqual(e05bRecords[1]?.difficultyDomains);
+    expect(e05bRecords[0]?.calls[0]?.fullStateHash).toBe(e05bRecords[1]?.calls[0]?.fullStateHash);
+  });
+
+  it('manipulation_check_constant: E05B captures strictly more ids, tighter movement, and broader partitioned spell domains than E05', () => {
+    const baseline = experimentDifficultyDomains('E05');
+    const harder = experimentDifficultyDomains('E05B');
+    expect(baseline.combatantIdCount).toBe(7);
+    expect(harder.combatantIdCount).toBe(8);
+    expect(harder.combatantIdCount).toBeGreaterThan(baseline.combatantIdCount);
+    expect(new Set(baseline.casterDomains.map((domain) => domain.movementBudgetFeet))).toEqual(new Set([30]));
+    expect(new Set(harder.casterDomains.map((domain) => domain.movementBudgetFeet))).toEqual(new Set([5]));
+    expect(Math.max(...harder.casterDomains.map((domain) => domain.movementBudgetFeet)))
+      .toBeLessThan(Math.min(...baseline.casterDomains.map((domain) => domain.movementBudgetFeet)));
+    expect(new Set(baseline.casterDomains.map((domain) => domain.spellIdCount))).toEqual(new Set([0]));
+    expect(new Set(harder.casterDomains.map((domain) => domain.spellIdCount))).toEqual(new Set([2]));
+    expect(E05B_DIFFICULTY_PARAMETERS.spellPool.length).toBeGreaterThan(E05B_SPELLS_PER_CASTER);
+    expect(e05bRecords.every((record) => canonicalJson(record.difficultyDomains) === canonicalJson(harder))).toBe(true);
+  });
+
+  it('captures checked passed failed counts from the first E05B fake-model pair and null for untyped', () => {
+    const typed = e05bRecords.find((record) => record.armId === 'typed-js');
+    const untyped = e05bRecords.find((record) => record.armId === 'untyped-js');
+    if (typed === undefined || untyped === undefined) throw new Error('E05B fake-model pair is incomplete.');
+    expect(typed.schemaVersion).toBe(6);
+    expect(typed.calls).toHaveLength(5);
+    expect(typed.calls.every((call) => call.typeCheckProgramCounts?.checkedProgramCount === 5)).toBe(true);
+    expect(aggregateExperimentRecords([typed])[0]?.typeCheckProgramCounts).toEqual({
+      checkedProgramCount: 25,
+      passedProgramCount: 25,
+      failedProgramCount: 0,
+    });
+    expect(untyped.calls.every((call) => call.typeCheckProgramCounts === null)).toBe(true);
+    expect(aggregateExperimentRecords([untyped])[0]?.typeCheckProgramCounts).toBeNull();
+  });
+
+  it('accepts E05B on the experiment CLI', () => {
+    expect(decodeVttExperimentArguments([
+      '--experiment', 'E05B',
+      '--out', '/tmp/e05b',
+      '--skip-regret',
+    ])).toMatchObject({ experimentId: 'E05B', skipRegret: true });
+  });
+});
+
 describe('E01 experiment registry and orchestration', () => {
   it('arms_unpaired: every paired seed batch has all three arms adjacent', () => {
     const schedule = buildExperimentSchedule('E01');
@@ -866,7 +1046,7 @@ describe('E01 experiment registry and orchestration', () => {
     expect(liveRecord.calls.every((call) => call.fullStateHash.length === 64)).toBe(true);
     expect(liveRecord.quality.regretStatus).toBe('deferred');
     expect(liveRecord.quality.rolloutInputCaptures).toHaveLength(5);
-    expect(liveRecord.schemaVersion).toBe(5);
+    expect(liveRecord.schemaVersion).toBe(6);
     expect(liveRecord.quality.rolloutInputCaptures.every((capture) =>
       capture.selectedAction.length === 4 &&
       capture.candidateTurnK === 64 &&
@@ -918,25 +1098,28 @@ describe('E01 experiment registry and orchestration', () => {
       .toEqual(liveRecord.quality.rolloutInputCaptures.map((capture) => capture.candidateTurns));
   });
 
-  it('v1_unreadable: the version-window reader loads legacy v1/v2/v3/v4 and current v5 tables', () => {
+  it('v1_unreadable: the version-window reader loads legacy v1/v2/v3/v4/v5 and current v6 tables', () => {
     const legacy = decodeExperimentTableRecord(legacyV1Record(liveRecord));
     const previous = decodeExperimentTableRecord(legacyV2Record(liveRecord));
     const prior = decodeExperimentTableRecord(legacyV3Record(liveRecord));
     const v4 = decodeExperimentTableRecord(legacyV4Record(liveRecord));
+    const v5 = decodeExperimentTableRecord(legacyV5Record(liveRecord));
     const current = decodeExperimentTableRecord(structuredClone(liveRecord));
     expect(legacy.schemaVersion).toBe(1);
     expect(previous.schemaVersion).toBe(2);
     expect(prior.schemaVersion).toBe(3);
     expect(v4.schemaVersion).toBe(4);
-    expect(current.schemaVersion).toBe(5);
+    expect(v5.schemaVersion).toBe(5);
+    expect(current.schemaVersion).toBe(6);
     expect(legacy.quality.rolloutInputCaptures).toHaveLength(5);
     expect(previous.quality.rolloutInputCaptures).toHaveLength(5);
     expect(prior.quality.rolloutInputCaptures).toHaveLength(5);
     expect(v4.quality.rolloutInputCaptures).toHaveLength(5);
+    expect(v5.quality.rolloutInputCaptures).toHaveLength(5);
     expect(current.quality.rolloutInputCaptures).toHaveLength(5);
   });
 
-  it('keeps representative inline v5 table captures below the sidecar threshold', () => {
+  it('keeps representative inline v6 table captures below the sidecar threshold', () => {
     const legacyBytes = Buffer.byteLength(canonicalJson(legacyV1Record(liveRecord)));
     const currentBytes = Buffer.byteLength(canonicalJson(liveRecord));
     expect(currentBytes).toBeGreaterThan(legacyBytes);

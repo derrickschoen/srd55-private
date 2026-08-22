@@ -46,6 +46,13 @@ export interface DmBoardProjection {
   readonly encounter: DmVisibleEncounterState;
   readonly coordinator: PersistedCoordinatorState;
   readonly pendingRequest: ControllerRequest | null;
+  /** Optional batch-planning action domains, populated when one request plans for several actors. */
+  readonly turnProgramLegalActions?: readonly {
+    readonly actorId: CombatantId;
+    readonly combatantIds: readonly CombatantId[];
+    readonly actions: readonly EncounterCommand[];
+    readonly movementBudgetFeet: number;
+  }[];
   readonly controllers: readonly ControllerIdentity[];
   readonly history: readonly SessionHistoryEntry[];
   readonly adjudicatedTargets: readonly CombatantId[];

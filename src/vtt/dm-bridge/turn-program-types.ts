@@ -63,6 +63,8 @@ function actionsForActor(
   projection: DmBoardProjection,
   actorId: CombatantId,
 ): readonly EncounterCommand[] {
+  const batch = projection.turnProgramLegalActions?.find((entry) => entry.actorId === actorId);
+  if (batch !== undefined) return batch.actions;
   const pending = projection.pendingRequest;
   return pending?.actorId === actorId ? pending.legalActions.actions : [];
 }
@@ -71,6 +73,8 @@ function visibleCombatantIds(
   projection: DmBoardProjection,
   actorId: CombatantId,
 ): readonly string[] {
+  const batch = projection.turnProgramLegalActions?.find((entry) => entry.actorId === actorId);
+  if (batch !== undefined) return uniqueSorted(batch.combatantIds);
   const pending = projection.pendingRequest;
   const combatants = pending?.actorId === actorId
     ? pending.visibleState.combatants
@@ -79,6 +83,8 @@ function visibleCombatantIds(
 }
 
 function movementBudget(projection: DmBoardProjection, actorId: CombatantId): number {
+  const batch = projection.turnProgramLegalActions?.find((entry) => entry.actorId === actorId);
+  if (batch !== undefined) return batch.movementBudgetFeet;
   const actor = projection.encounter.combatants.find((combatant) => combatant.id === actorId);
   if (actor !== undefined) return actor.turn.movement.remaining;
   const start = projection.encounter.combatants.find((combatant) => combatant.id === actorId)?.position;

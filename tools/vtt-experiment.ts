@@ -8,7 +8,7 @@ import { TurnCoordinator } from '../src/combat/coordinator';
 import { createEncounter, reduceEncounter, type EncounterState } from '../src/combat/encounter';
 import type { EncounterCommand } from '../src/combat/events';
 import { mulberry32 } from '../src/combat/random';
-import { encounterSessionId, type EncounterSessionId } from '../src/combat/values';
+import { encounterSessionId, feet, type CombatantId, type EncounterSessionId } from '../src/combat/values';
 import { LocalhostDmBridgeClient, type BridgeFetch } from '../src/vtt/dm-bridge/client';
 import type { ProjectionTransportMode } from '../src/vtt/dm-bridge/projection-transport';
 import {
@@ -38,6 +38,7 @@ import {
   type RoundPlanRequest,
 } from '../src/vtt/dm-bridge/contracts';
 import { DmRoundPlanController, DmRoundPlanSession } from '../src/vtt/dm-bridge/decision-program';
+import { generateTurnProgramDeclarations } from '../src/vtt/dm-bridge/turn-program-types';
 import { projectDmBoard } from '../src/vtt/encounter-projections';
 import {
   aggregateExperimentRecords,
@@ -47,7 +48,7 @@ import {
   VTT_EXPERIMENT_SCHEMA_VERSION,
   type ExperimentCallRecord,
   type ExperimentTableRecord,
-  type ExperimentTableRecordV5,
+  type ExperimentTableRecordV6,
   type PromptComponentTelemetry,
   type RolloutInputCapture,
 } from '../src/vtt/experiment-telemetry';
@@ -58,7 +59,7 @@ import {
 } from '../src/vtt/generated-encounter-fixtures';
 import { TEST_APPROVED_FIRST_SKIRMISH_FIXTURE } from '../src/vtt/test-approved-first-skirmish';
 
-export type ExperimentId = 'E01' | 'E02' | 'E03' | 'E04' | 'E05';
+export type ExperimentId = 'E01' | 'E02' | 'E03' | 'E04' | 'E05' | 'E05B';
 export type E04ProjectionArmId =
   | 'full-projection-history'
   | 'compact-lossless-decision-view'
@@ -97,6 +98,22 @@ export interface E05ExperimentArmDefinition extends ExperimentArmDefinition {
   readonly typeCheckMode: 'typed' | 'untyped';
 }
 
+export interface E05EncounterGenerationParameters {
+  readonly monsterCount: number;
+  readonly movementBudgetFeet: number;
+  readonly spellPool: readonly string[];
+  readonly spellsPerCaster: number;
+}
+
+export interface ExperimentDifficultyDomains {
+  readonly combatantIdCount: number;
+  readonly casterDomains: readonly {
+    readonly combatantId: string;
+    readonly spellIdCount: number;
+    readonly movementBudgetFeet: number;
+  }[];
+}
+
 export interface ExperimentDefinition {
   readonly id: ExperimentId;
   readonly version: '1';
@@ -105,9 +122,45 @@ export interface ExperimentDefinition {
   readonly seedCount: 24 | 30;
   readonly replicates: 2;
   readonly rounds: 5;
-  readonly enemyCount: 4;
+  readonly enemyCount: 4 | 5;
   readonly earlyStopping: boolean;
+  readonly difficultyParameters?: E05EncounterGenerationParameters;
 }
+
+export const E05_BASELINE_DIFFICULTY_PARAMETERS = Object.freeze({
+  monsterCount: 4,
+  movementBudgetFeet: 30,
+  spellPool: Object.freeze([]),
+  spellsPerCaster: 0,
+} satisfies E05EncounterGenerationParameters);
+
+/** Five monsters enlarge the combatant-id union and the exact-monster-set coordination surface. */
+export const E05B_MONSTER_COUNT = 5;
+/** Five feet makes an explicit over-budget movement value easier to produce. */
+export const E05B_MOVEMENT_BUDGET_FEET = 5;
+/** Two spells per caster create actor-specific spell-id unions that can be confused with adjacent casters' lists. */
+export const E05B_SPELLS_PER_CASTER = 2;
+/** Six encounter-visible spell ids keep each two-spell caster list broad but partitioned from tempting alternatives. */
+export const E05B_SPELL_POOL = Object.freeze([
+  'acid-splash',
+  'chill-touch',
+  'eldritch-blast',
+  'fire-bolt',
+  'ray-of-frost',
+  'sacred-flame',
+] as const);
+
+export const E05B_DIFFICULTY_PARAMETERS = Object.freeze({
+  monsterCount: E05B_MONSTER_COUNT,
+  movementBudgetFeet: E05B_MOVEMENT_BUDGET_FEET,
+  spellPool: E05B_SPELL_POOL,
+  spellsPerCaster: E05B_SPELLS_PER_CASTER,
+} satisfies E05EncounterGenerationParameters);
+
+const E05B_MINIMUM_MONSTER_COUNT = E05_BASELINE_DIFFICULTY_PARAMETERS.monsterCount + 1;
+const E05B_MINIMUM_MOVEMENT_BUDGET_FEET = 5;
+const E05B_MINIMUM_SPELLS_PER_CASTER = E05_BASELINE_DIFFICULTY_PARAMETERS.spellsPerCaster + 2;
+const E05B_DIFFICULTY_REGISTRATION_DIGEST = '90ecad5377e7ce3e77fd7727858067a7f3a8fc3ed12a15ab8288e3345b14137a';
 
 const E02_ZERO_EXAMPLE_BLOCK = 'No worked examples are included.';
 
@@ -343,6 +396,29 @@ export const EXPERIMENT_REGISTRY = Object.freeze({
     enemyCount: 4,
     earlyStopping: true,
   }),
+  E05B: Object.freeze({
+    id: 'E05B',
+    version: '1',
+    hypothesis: 'Compile-time checking lowers correction rate when checkable identifier, spell, movement, and coordination domains are deliberately harder.',
+    arms: Object.freeze([
+      {
+        id: 'typed-js',
+        description: 'Interpret restricted JS only after the per-encounter ambient declaration type check passes.',
+        typeCheckMode: 'typed',
+      },
+      {
+        id: 'untyped-js',
+        description: 'Interpret the same restricted JS directly, with refusals only from the interpreter and strict plan validator.',
+        typeCheckMode: 'untyped',
+      },
+    ] satisfies readonly E05ExperimentArmDefinition[]),
+    seedCount: 30,
+    replicates: 2,
+    rounds: 5,
+    enemyCount: E05B_MONSTER_COUNT,
+    earlyStopping: true,
+    difficultyParameters: E05B_DIFFICULTY_PARAMETERS,
+  }),
 } satisfies Record<ExperimentId, ExperimentDefinition>);
 
 export interface ExperimentScheduleEntry {
@@ -361,6 +437,37 @@ function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+export function e05bDifficultyDigest(
+  parameters: E05EncounterGenerationParameters,
+): string {
+  return sha256(canonicalJson(parameters));
+}
+
+export function assertE05bDifficultyParameters(
+  parameters: E05EncounterGenerationParameters,
+): void {
+  if (!Number.isSafeInteger(parameters.monsterCount) || parameters.monsterCount < E05B_MINIMUM_MONSTER_COUNT) {
+    throw new RangeError(`E05B monster count must be at least ${String(E05B_MINIMUM_MONSTER_COUNT)}.`);
+  }
+  if (!Number.isSafeInteger(parameters.movementBudgetFeet) ||
+    parameters.movementBudgetFeet < E05B_MINIMUM_MOVEMENT_BUDGET_FEET ||
+    parameters.movementBudgetFeet >= E05_BASELINE_DIFFICULTY_PARAMETERS.movementBudgetFeet) {
+    throw new RangeError(`E05B movement budget must be from ${String(E05B_MINIMUM_MOVEMENT_BUDGET_FEET)} through ${String(E05_BASELINE_DIFFICULTY_PARAMETERS.movementBudgetFeet - 1)} feet.`);
+  }
+  if (!Number.isSafeInteger(parameters.spellsPerCaster) ||
+    parameters.spellsPerCaster < E05B_MINIMUM_SPELLS_PER_CASTER ||
+    parameters.spellsPerCaster >= parameters.spellPool.length) {
+    throw new RangeError(`E05B spells per caster must be at least ${String(E05B_MINIMUM_SPELLS_PER_CASTER)} and smaller than the spell pool.`);
+  }
+  if (parameters.monsterCount > 6) {
+    throw new RangeError('E05B monster count exceeds the six approved fixture monsters.');
+  }
+  if (new Set(parameters.spellPool).size !== parameters.spellPool.length ||
+    parameters.spellPool.some((spellId) => spellId.trim().length === 0)) {
+    throw new TypeError('E05B spell pool must contain distinct, non-empty ids.');
+  }
+}
+
 export function e01Seed(seedIndex: number): number {
   if (!Number.isSafeInteger(seedIndex) || seedIndex < 0 || seedIndex >= 24) {
     throw new RangeError('E01 seed index must be from 0 through 23.');
@@ -377,7 +484,9 @@ export function experimentSeed(id: ExperimentId, seedIndex: number): number {
 }
 
 function experimentFixtureId(id: ExperimentId): string {
-  return `experiment-fixture:${id}:approved-first-skirmish-first-four-monsters:v1`;
+  return id === 'E05B'
+    ? 'experiment-fixture:E05B:approved-first-skirmish-first-five-monsters:v1'
+    : `experiment-fixture:${id}:approved-first-skirmish-first-four-monsters:v1`;
 }
 
 export function seededArmOrder(
@@ -438,7 +547,7 @@ export interface VttExperimentConfig {
 
 export interface ExperimentPreregistration {
   readonly schemaVersion: 1;
-  readonly programVersion: 'D320-v1' | 'D332.1-v1';
+  readonly programVersion: 'D320-v1' | 'D332.1-v1' | 'D333.3-v1';
   readonly experimentId: ExperimentId;
   readonly experimentVersion: '1';
   readonly hypothesis: string;
@@ -458,6 +567,8 @@ export interface ExperimentPreregistration {
   readonly noninferiorityMargins: Readonly<Record<string, number>>;
   readonly timeouts: { readonly requestMs: number; readonly tableMs: number };
   readonly candidateTurnK: number;
+  readonly difficultyParameters?: E05EncounterGenerationParameters;
+  readonly difficultyParametersDigest?: string;
   readonly exclusions: readonly string[];
   readonly infrastructureRerunRule: string;
   readonly earlyStopRule: {
@@ -528,16 +639,23 @@ function e04ArmDefinition(armId: ExperimentArmId): E04ExperimentArmDefinition {
   return arm;
 }
 
-function e05ArmDefinition(armId: ExperimentArmId): E05ExperimentArmDefinition {
-  const arm = EXPERIMENT_REGISTRY.E05.arms.find((candidate) => candidate.id === armId);
+function isJsProgramExperiment(id: ExperimentId): id is 'E05' | 'E05B' {
+  return id === 'E05' || id === 'E05B';
+}
+
+function e05ArmDefinition(
+  experimentId: 'E05' | 'E05B',
+  armId: ExperimentArmId,
+): E05ExperimentArmDefinition {
+  const arm = EXPERIMENT_REGISTRY[experimentId].arms.find((candidate) => candidate.id === armId);
   if (arm === undefined || !isE05ArmDefinition(arm)) {
-    throw new TypeError(`E05 arm ${armId} is not registered.`);
+    throw new TypeError(`${experimentId} arm ${armId} is not registered.`);
   }
   return arm;
 }
 
 export function e05TypeCheckMode(armId: E05ProgramArmId): 'typed' | 'untyped' {
-  return e05ArmDefinition(armId).typeCheckMode;
+  return e05ArmDefinition('E05', armId).typeCheckMode;
 }
 
 function replyContract(
@@ -558,8 +676,8 @@ function replyContract(
     return e03RoundPlanReplyContract(arm.id, arm.instructions, arm.workedExamples);
   }
   if (experimentId === 'E04') e04ArmDefinition(armId);
-  else e05ArmDefinition(armId);
-  if (experimentId === 'E05') return ROUND_PLAN_JS_REPLY_CONTRACT;
+  else if (isJsProgramExperiment(experimentId)) e05ArmDefinition(experimentId, armId);
+  if (isJsProgramExperiment(experimentId)) return ROUND_PLAN_JS_REPLY_CONTRACT;
   return e03RoundPlanReplyContract(
     'current-instructions',
     E02_SHARED_INSTRUCTIONS,
@@ -570,7 +688,7 @@ function replyContract(
 function promptHash(id: ExperimentId, armId: ExperimentArmId): string {
   return sha256(canonicalJson([
     id,
-    ...(id === 'E05' ? [] : [armId]),
+    ...(isJsProgramExperiment(id) ? [] : [armId]),
     replyContract(id, armId, 0),
     replyContract(id, armId, 1),
   ]));
@@ -578,9 +696,17 @@ function promptHash(id: ExperimentId, armId: ExperimentArmId): string {
 
 export function preregisterExperiment(config: VttExperimentConfig): ExperimentPreregistration {
   const definition = EXPERIMENT_REGISTRY[config.experimentId];
+  if (definition.id === 'E05B') {
+    assertE05bDifficultyParameters(definition.difficultyParameters);
+    if (e05bDifficultyDigest(definition.difficultyParameters) !== E05B_DIFFICULTY_REGISTRATION_DIGEST) {
+      throw new Error('E05B difficulty parameters differ from the preregistered difficulty digest.');
+    }
+  }
   const withoutDigest = {
     schemaVersion: 1 as const,
-    programVersion: definition.id === 'E05' ? 'D332.1-v1' as const : 'D320-v1' as const,
+    programVersion: definition.id === 'E05B'
+      ? 'D333.3-v1' as const
+      : definition.id === 'E05' ? 'D332.1-v1' as const : 'D320-v1' as const,
     experimentId: definition.id,
     experimentVersion: definition.version,
     hypothesis: definition.hypothesis,
@@ -594,16 +720,16 @@ export function preregisterExperiment(config: VttExperimentConfig): ExperimentPr
     promptComponentHashes: Object.fromEntries(
       definition.arms.map((arm) => [arm.id, promptHash(definition.id, arm.id)]),
     ),
-    controllerConfiguration: `${definition.id === 'E05' ? 'dm-full-model-js-program' : 'dm-full-model-round-plan'};pc-algorithm;fresh-session-per-table;candidate-turn-k=${String(config.candidateTurnK)};temperature=unchanged;retry-budget=2`,
+    controllerConfiguration: `${isJsProgramExperiment(definition.id) ? 'dm-full-model-js-program' : 'dm-full-model-round-plan'};pc-algorithm;fresh-session-per-table;candidate-turn-k=${String(config.candidateTurnK)};temperature=unchanged;retry-budget=2`,
     initiativeConfiguration: 'shared_enemy;deterministic-within-side-order',
-    primaryMetrics: definition.id === 'E05'
+    primaryMetrics: isJsProgramExperiment(definition.id)
       ? ['correctionRate']
       : definition.id === 'E01'
       ? ['completedRoundsPerHour', 'normalizedTacticalRegret']
       : definition.id === 'E02'
         ? ['completedRoundsPerHour', 'normalizedTacticalRegret', 'firstPassValidity']
         : ['completedRoundsPerHour', 'normalizedTacticalRegret'],
-    secondaryMetrics: definition.id === 'E05'
+    secondaryMetrics: isJsProgramExperiment(definition.id)
       ? ['firstPassValidity', 'meanCorrectionRoundsPerDecision', 'wallClockMsPerCompletedRound', 'tokenTotals', 'completionRate']
       : definition.id === 'E01'
       ? ['latencyMs', 'tokenCounts', 'correctionRate', 'reconsultRate', 'round5HpDifferential']
@@ -612,10 +738,10 @@ export function preregisterExperiment(config: VttExperimentConfig): ExperimentPr
         : definition.id === 'E03'
           ? ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'correctionRate', 'dryProgramRate', 'reconsultRate', 'round5HpDifferential']
           : ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'cacheRatio', 'correctionRate', 'staleReferenceRate', 'reconsultRate', 'bytesSent', 'reconstructionFailures'],
-    tertiaryMetrics: definition.id === 'E05'
+    tertiaryMetrics: isJsProgramExperiment(definition.id)
       ? ['typeCheckUniqueCatchRate', 'typeCheckUniqueDiagnosticCodesAndExamplePrograms']
       : [],
-    noninferiorityMargins: definition.id === 'E05'
+    noninferiorityMargins: isJsProgramExperiment(definition.id)
       ? {}
       : definition.id === 'E01'
       ? { normalizedTacticalRegret: 0.02, correctionPercentagePoints: 2 }
@@ -626,11 +752,17 @@ export function preregisterExperiment(config: VttExperimentConfig): ExperimentPr
           : { normalizedTacticalRegret: 0.02, maximumReconstructionMismatches: 0 },
     timeouts: { requestMs: config.requestTimeoutMs, tableMs: config.tableTimeoutMs },
     candidateTurnK: config.candidateTurnK,
+    ...(definition.id === 'E05B'
+      ? {
+          difficultyParameters: definition.difficultyParameters,
+          difficultyParametersDigest: e05bDifficultyDigest(definition.difficultyParameters),
+        }
+      : {}),
     exclusions: [],
     infrastructureRerunRule: 'Only an infrastructure-classified failure may rerun, once, under identical manifest bytes.',
     earlyStopRule: {
       enabled: definition.earlyStopping,
-      metric: definition.id === 'E05' ? 'correctionRate' as const : 'completedRoundsPerHour' as const,
+      metric: isJsProgramExperiment(definition.id) ? 'correctionRate' as const : 'completedRoundsPerHour' as const,
       method: 'paired_bootstrap' as const,
       confidence: 0.99 as const,
       minimumTableFraction: 0.5 as const,
@@ -639,6 +771,27 @@ export function preregisterExperiment(config: VttExperimentConfig): ExperimentPr
     analysisCodeDigest: sha256(`${definition.id}-analysis-v3:decision-point-corrections:linear-interpolated-quartiles:aborts-retained:paired-bootstrap-99-after-half`),
   };
   return { ...withoutDigest, digest: sha256(canonicalJson(withoutDigest)) };
+}
+
+function assertPreregistrationIntegrity(
+  entry: ExperimentScheduleEntry,
+  preregistration: ExperimentPreregistration,
+): void {
+  const { digest, ...inputs } = preregistration;
+  if (sha256(canonicalJson(inputs)) !== digest) {
+    throw new Error('Experiment preregistration digest does not match its inputs.');
+  }
+  if (entry.experimentId !== preregistration.experimentId) {
+    throw new Error('Scheduled experiment does not match its preregistration.');
+  }
+  if (entry.experimentId === 'E05B') {
+    const current = difficultyParametersForExperiment('E05B');
+    if (preregistration.difficultyParameters === undefined ||
+      preregistration.difficultyParametersDigest !== E05B_DIFFICULTY_REGISTRATION_DIGEST ||
+      canonicalJson(preregistration.difficultyParameters) !== canonicalJson(current)) {
+      throw new Error('E05B run parameters do not match the preregistered difficulty mechanism.');
+    }
+  }
 }
 
 interface RunningBridge {
@@ -820,6 +973,7 @@ interface DecisionCaptureContext {
 class RecordingExperimentExchange implements DmBridgeExchange {
   readonly calls: ExperimentCallRecord[] = [];
   readonly decisionCaptureContexts = new Map<string, DecisionCaptureContext>();
+  difficultyDomains: ExperimentDifficultyDomains | null = null;
   #callIndex = 0;
 
   constructor(
@@ -865,6 +1019,19 @@ class RecordingExperimentExchange implements DmBridgeExchange {
     const actorIds = wire.kind === 'monster_reconsult_request'
       ? [wire.monsterId]
       : wire.kind === 'round_plan_request' ? [...wire.livingMonsterIds] : [...wire.requestedMonsterIds];
+    if (this.entry.experimentId === 'E05B' && this.difficultyDomains === null && wire.kind === 'round_plan_request') {
+      const declarations = actorIds.map((actorId) => generateTurnProgramDeclarations(wire.projection, actorId));
+      const combatantCounts = new Set(declarations.map((declaration) => declaration.combatantIds.length));
+      if (combatantCounts.size !== 1) throw new Error('E05B combatant-id domains differ between casters.');
+      this.difficultyDomains = {
+        combatantIdCount: declarations[0]?.combatantIds.length ?? 0,
+        casterDomains: declarations.map((declaration) => ({
+          combatantId: declaration.actorId,
+          spellIdCount: declaration.spellIds.length,
+          movementBudgetFeet: declaration.movementBudgetFeet,
+        })),
+      };
+    }
     const candidateController = new AlgorithmController();
     const candidateTurns = actorIds.map((monsterId) => ({
       monsterId,
@@ -893,8 +1060,8 @@ class RecordingExperimentExchange implements DmBridgeExchange {
     let decoded: DecodedRoundPlanReply | null = null;
     let validationError: unknown = null;
     const typeCheckUniqueCatchObservations: ExperimentCallRecord['typeCheckUniqueCatchObservations'][number][] = [];
-    const typeCheckMode = this.entry.experimentId === 'E05'
-      ? e05ArmDefinition(this.entry.armId).typeCheckMode
+    const typeCheckMode = isJsProgramExperiment(this.entry.experimentId)
+      ? e05ArmDefinition(this.entry.experimentId, this.entry.armId).typeCheckMode
       : 'typed';
     if (exchangeError === null) {
       try {
@@ -967,7 +1134,7 @@ class RecordingExperimentExchange implements DmBridgeExchange {
               ? 'e02-shared-v1'
               : this.entry.experimentId === 'E03'
                 ? `e03-${this.entry.armId}-v1`
-                : this.entry.experimentId === 'E05'
+                : isJsProgramExperiment(this.entry.experimentId)
                   ? 'e05-shared-js-instructions-v1'
                   : 'e03-current-instructions-winner-v1',
         ),
@@ -1068,7 +1235,7 @@ class RecordingExperimentExchange implements DmBridgeExchange {
       parsedOrCompiled: decoded?.plan ?? null,
       expandedLibraryForm: null,
       replayProof: null,
-      typeCheckProgramCounts: this.entry.experimentId === 'E05' && typeCheckMode === 'untyped'
+      typeCheckProgramCounts: isJsProgramExperiment(this.entry.experimentId) && typeCheckMode === 'untyped'
         ? null
         : {
             checkedProgramCount: 0,
@@ -1093,10 +1260,46 @@ class RecordingExperimentExchange implements DmBridgeExchange {
   }
 }
 
-function fourEnemyState() {
+function validateEncounterGenerationParameters(
+  parameters: E05EncounterGenerationParameters,
+): void {
+  if (!Number.isSafeInteger(parameters.monsterCount) || parameters.monsterCount < 1 || parameters.monsterCount > 6) {
+    throw new RangeError('Experiment monster count must be from 1 through 6.');
+  }
+  if (!Number.isSafeInteger(parameters.movementBudgetFeet) || parameters.movementBudgetFeet < 0) {
+    throw new RangeError('Experiment movement budget must be a non-negative integer.');
+  }
+  if (!Number.isSafeInteger(parameters.spellsPerCaster) ||
+    parameters.spellsPerCaster < 0 || parameters.spellsPerCaster > parameters.spellPool.length) {
+    throw new RangeError('Experiment spells per caster must fit inside the spell pool.');
+  }
+}
+
+function difficultyParametersForExperiment(
+  experimentId: ExperimentId,
+): E05EncounterGenerationParameters {
+  if (experimentId !== 'E05B') return E05_BASELINE_DIFFICULTY_PARAMETERS;
+  const parameters = EXPERIMENT_REGISTRY.E05B.difficultyParameters;
+  if (parameters === undefined) throw new Error('E05B has no registered difficulty parameters.');
+  return parameters;
+}
+
+export function generateE05Encounter(
+  parameters: E05EncounterGenerationParameters,
+): EncounterState {
+  validateEncounterGenerationParameters(parameters);
   const source = encounterStateFromApprovedFixture(TEST_APPROVED_FIRST_SKIRMISH_FIXTURE);
   const players = source.combatants.filter((subject) => subject.profile.kind === 'player_character');
-  const monsters = source.combatants.filter((subject) => subject.profile.kind === 'monster').slice(0, 4);
+  const monsters = source.combatants
+    .filter((subject) => subject.profile.kind === 'monster')
+    .slice(0, parameters.monsterCount)
+    .map((subject) => ({
+      ...subject,
+      profile: {
+        ...subject.profile,
+        rules: { ...subject.profile.rules, speed: feet(parameters.movementBudgetFeet) },
+      },
+    }));
   const selected = [...players, ...monsters];
   const ids = new Set(selected.map((subject) => subject.profile.id));
   return createEncounter({
@@ -1110,11 +1313,76 @@ function fourEnemyState() {
   });
 }
 
+function casterSpellIds(
+  monsterIndex: number,
+  parameters: E05EncounterGenerationParameters,
+): readonly string[] {
+  if (parameters.spellsPerCaster === 0) return [];
+  const start = monsterIndex * parameters.spellsPerCaster % parameters.spellPool.length;
+  return Array.from({ length: parameters.spellsPerCaster }, (_value, offset) => {
+    const spellId = parameters.spellPool[(start + offset) % parameters.spellPool.length];
+    if (spellId === undefined) throw new Error('Experiment spell partition escaped its pool.');
+    return spellId;
+  });
+}
+
+function experimentTurnLegalActions(
+  parameters: E05EncounterGenerationParameters,
+  state: EncounterState,
+  actor: CombatantId,
+): { readonly actions: readonly EncounterCommand[] } {
+  const monsters = state.combatants.filter((subject) => subject.profile.kind === 'monster');
+  const monsterIndex = monsters.findIndex((subject) => subject.profile.id === actor);
+  if (monsterIndex === -1) return approvedFixtureTurnLegalActions(state, actor);
+  const target = state.combatants.find((subject) => subject.profile.kind === 'player_character' && subject.life === 'living');
+  const spells: EncounterCommand[] = casterSpellIds(monsterIndex, parameters).map((spellId) => ({
+    type: 'cast_spell',
+    actor,
+    spellId,
+    slotLevel: null,
+    castAsRitual: false,
+    casterLevel: 7,
+    attackBonus: 7,
+    saveDc: 15,
+    spellcastingModifier: 4,
+    targets: target === undefined ? [] : [target.profile.id],
+    area: null,
+    weaponAttack: null,
+    selectedOption: null,
+  }));
+  return { actions: [...spells, { type: 'end_turn', actor }] };
+}
+
+export function captureEncounterDifficultyDomains(
+  state: EncounterState,
+  parameters: E05EncounterGenerationParameters,
+): ExperimentDifficultyDomains {
+  const casterDomains = state.combatants
+    .filter((subject) => subject.profile.kind === 'monster')
+    .map((subject) => {
+      const actions = experimentTurnLegalActions(parameters, state, subject.profile.id).actions;
+      return {
+        combatantId: subject.profile.id,
+        spellIdCount: new Set(actions.flatMap((action) => action.type === 'cast_spell' ? [action.spellId] : [])).size,
+        movementBudgetFeet: parameters.movementBudgetFeet,
+      };
+    });
+  return { combatantIdCount: state.combatants.length, casterDomains };
+}
+
+export function experimentDifficultyDomains(
+  experimentId: 'E05' | 'E05B',
+): ExperimentDifficultyDomains {
+  const parameters = difficultyParametersForExperiment(experimentId);
+  return captureEncounterDifficultyDomains(generateE05Encounter(parameters), parameters);
+}
+
 export async function runE01Table(
   entry: ExperimentScheduleEntry,
   config: VttExperimentConfig,
   preregistration: ExperimentPreregistration,
-): Promise<ExperimentTableRecordV5> {
+): Promise<ExperimentTableRecordV6> {
+  assertPreregistrationIntegrity(entry, preregistration);
   const wallStarted = Date.now();
   const bridge = launchBridge(config, entry);
   const abort = new AbortController();
@@ -1158,30 +1426,49 @@ export async function runE01Table(
       recordingExchange,
       model,
       undefined,
-      entry.experimentId === 'E05' ? 'js_program' : 'json_ast',
-      entry.experimentId === 'E05'
+      isJsProgramExperiment(entry.experimentId) ? 'js_program' : 'json_ast',
+      isJsProgramExperiment(entry.experimentId)
         ? {
-            typeCheckMode: e05ArmDefinition(entry.armId).typeCheckMode,
+            typeCheckMode: e05ArmDefinition(entry.experimentId, entry.armId).typeCheckMode,
             onTypeCheckTelemetry: (typeCheck) => recordingExchange.recordTypeCheckResult(typeCheck.passed),
           }
         : {},
     );
-    const state = fourEnemyState();
+    const generationParameters = difficultyParametersForExperiment(entry.experimentId);
+    const state = generateE05Encounter(generationParameters);
     let registry: ControllerRegistry;
     const controllerFor = (id: (typeof state.combatants)[number]): Controller => id.profile.kind === 'monster'
       ? new DmRoundPlanController(session, () => {
           if (coordinator === null) throw new Error('Experiment coordinator is not initialized.');
+          const encounterState = coordinator.state();
+          const projection = projectDmBoard({
+            state: encounterState,
+            coordinator: coordinator.coordinatorState(),
+            controllers: registry.identities(),
+            history: [],
+          });
           return {
             encounterId,
             codexSessionId: sessionId,
-            projection: projectDmBoard({
-              state: coordinator.state(),
-              coordinator: coordinator.coordinatorState(),
-              controllers: registry.identities(),
-              history: [],
-            }),
+            projection: entry.experimentId === 'E05B'
+              ? {
+                  ...projection,
+                  turnProgramLegalActions: encounterState.combatants
+                    .filter((subject) => subject.profile.kind === 'monster' && subject.life === 'living')
+                    .map((subject) => ({
+                      actorId: subject.profile.id,
+                      combatantIds: encounterState.combatants.map((combatant) => combatant.profile.id),
+                      movementBudgetFeet: generationParameters.movementBudgetFeet,
+                      actions: experimentTurnLegalActions(
+                        generationParameters,
+                        encounterState,
+                        subject.profile.id,
+                      ).actions,
+                    })),
+                }
+              : projection,
             history: [],
-            initiativeMode: coordinator.state().config.initiativeMode,
+            initiativeMode: encounterState.config.initiativeMode,
           };
         })
       : new AlgorithmController();
@@ -1191,7 +1478,11 @@ export async function runE01Table(
       controllerId: `${subject.profile.id}:${subject.profile.kind === 'monster' ? 'experiment-dm' : 'experiment-algorithm'}`,
     })));
     coordinator = new TurnCoordinator(state, registry, mulberry32(entry.seed), {
-      turnLegalActions: approvedFixtureTurnLegalActions,
+      turnLegalActions: (encounterState, actor) => experimentTurnLegalActions(
+        generationParameters,
+        encounterState,
+        actor,
+      ),
       persistence: {
         record: ({ transition, encounterState }) => {
           if (transition.kind === 'controller_response_received') {
@@ -1235,7 +1526,9 @@ export async function runE01Table(
   }
   const calls = recording?.calls ?? [];
   const finalStateHash = sha256(canonicalJson(coordinator?.state() ?? null));
-  let replayState = fourEnemyState();
+  const generationParameters = difficultyParametersForExperiment(entry.experimentId);
+  const initialState = generateE05Encounter(generationParameters);
+  let replayState = initialState;
   const replayRng = mulberry32(entry.seed);
   for (const command of replayCommands) replayState = reduceEncounter(replayState, command, replayRng).state;
   const replayProofPassed = coordinator !== null && canonicalJson(replayState) === canonicalJson(coordinator.state());
@@ -1285,8 +1578,8 @@ export async function runE01Table(
   const state = coordinator?.state();
   const monsterHp = state?.combatants.filter((subject) => subject.profile.kind === 'monster').reduce((sum, subject) => sum + subject.hitPoints, 0) ?? 0;
   const playerHp = state?.combatants.filter((subject) => subject.profile.kind === 'player_character').reduce((sum, subject) => sum + subject.hitPoints, 0) ?? 0;
-  const fixtureDigest = sha256(canonicalJson(fourEnemyState()));
-  const partyDigest = sha256(canonicalJson(fourEnemyState().combatants.filter((subject) => subject.profile.kind === 'player_character').map((subject) => subject.profile)));
+  const fixtureDigest = sha256(canonicalJson(initialState));
+  const partyDigest = sha256(canonicalJson(initialState.combatants.filter((subject) => subject.profile.kind === 'player_character').map((subject) => subject.profile)));
   const record = decodeExperimentTableRecord({
     schemaVersion: VTT_EXPERIMENT_SCHEMA_VERSION,
     programVersion: preregistration.programVersion,
@@ -1302,12 +1595,19 @@ export async function runE01Table(
     randomizedArmOrdinal: entry.randomizedArmOrdinal,
     fixtureId: entry.fixtureId ?? experimentFixtureId(entry.experimentId),
     fixtureDigest,
-    matchupFamily: 'approved-first-skirmish-first-four',
-    enemyCountStratum: 4,
+    matchupFamily: entry.experimentId === 'E05B'
+      ? 'approved-first-skirmish-first-five'
+      : 'approved-first-skirmish-first-four',
+    enemyCountStratum: generationParameters.monsterCount,
     partySource: 'reference',
     partyDigest,
     configurationManifestDigest: sha256(canonicalJson({
-      armId: entry.armId,
+      ...(entry.experimentId === 'E05B'
+        ? {
+            typeCheckMode: e05ArmDefinition('E05B', entry.armId).typeCheckMode,
+            difficultyParameters: generationParameters,
+          }
+        : { armId: entry.armId }),
       model: config.model,
       effort: config.reasoningEffort,
       rounds: 5,
@@ -1320,7 +1620,7 @@ export async function runE01Table(
     initiativeMode: 'shared_enemy',
     initiativeOrder: state?.initiative.map((initiative) => initiative.combatant) ?? [],
     promptVariant: entry.armId,
-    schemaVariant: entry.experimentId === 'E05'
+    schemaVariant: isJsProgramExperiment(entry.experimentId)
       ? 'restricted-js-v1'
       : entry.experimentId === 'E01' ? 'round-plan-json-ast-v1' : 'compact-grammar-v1',
     exampleCount: entry.experimentId === 'E01'
@@ -1332,11 +1632,11 @@ export async function runE01Table(
         ? 'e02-shared-v1'
         : entry.experimentId === 'E03'
           ? `e03-${entry.armId}-v1`
-          : entry.experimentId === 'E05'
-            ? 'e05-shared-js-instructions-v1'
+          : isJsProgramExperiment(entry.experimentId)
+            ? `${entry.experimentId.toLowerCase()}-shared-js-instructions-v1`
             : 'e03-current-instructions-winner-v1',
     skillSetVersion: 'none-v1',
-    planSurface: entry.experimentId === 'E05' ? 'js_program' : 'json_ast',
+    planSurface: isJsProgramExperiment(entry.experimentId) ? 'js_program' : 'json_ast',
     projectionMode: entry.experimentId === 'E04'
       ? e04ArmDefinition(entry.armId).projectionMode
       : 'full',
@@ -1374,6 +1674,11 @@ export async function runE01Table(
     totalWallMs: wallMs,
     idleWaitMs: 0,
     estimatedTableCostUsd: null,
+    difficultyDomains: isJsProgramExperiment(entry.experimentId)
+      ? entry.experimentId === 'E05B'
+        ? recording?.difficultyDomains ?? captureEncounterDifficultyDomains(initialState, generationParameters)
+        : captureEncounterDifficultyDomains(initialState, generationParameters)
+      : null,
     calls: finalizedCalls,
     quality: {
       rolloutOracleVersion: null,
@@ -1415,6 +1720,7 @@ export const runE02Table = runE01Table;
 export const runE03Table = runE01Table;
 export const runE04Table = runE01Table;
 export const runE05Table = runE01Table;
+export const runE05BTable = runE01Table;
 
 export interface EarlyStopDecision {
   readonly shouldStop: boolean;
@@ -1599,7 +1905,7 @@ function markdownReport(report: ExperimentReport): string {
   for (const arm of report.aggregates) {
     lines.push(`| ${arm.armId} | ${String(arm.tableCount)} | ${String(arm.completedCount)} | ${String(arm.abortedCount)} | ${(arm.completionRate * 100).toFixed(1)}% | ${arm.totalWallMs.median?.toFixed(1) ?? 'n/a'} (${arm.totalWallMs.iqr?.toFixed(1) ?? 'n/a'}) | ${arm.wallClockMsPerCompletedRound?.toFixed(1) ?? 'n/a'} | ${arm.latencyMs.median?.toFixed(1) ?? 'n/a'} (${arm.latencyMs.iqr?.toFixed(1) ?? 'n/a'}) | ${(arm.correctionRate * 100).toFixed(2)}% | ${(arm.firstPassValidity * 100).toFixed(2)}% | ${arm.meanCorrectionRoundsPerDecision.toFixed(3)} | ${String(arm.tokenTotals.input)} / ${String(arm.tokenTotals.cachedInput)} / ${String(arm.tokenTotals.output)} / ${String(arm.tokenTotals.reasoning)} | ${String(arm.bytesSent)} | ${String(arm.reconstructionFailures)} |`);
   }
-  if (report.experimentId === 'E05') {
+  if (isJsProgramExperiment(report.experimentId)) {
     lines.push('', '## Type-check instrumentation', '');
     const typed = report.aggregates.find((arm) => arm.armId === 'typed-js');
     const untyped = report.aggregates.find((arm) => arm.armId === 'untyped-js');
@@ -1723,8 +2029,8 @@ export function decodeVttExperimentArguments(argv: readonly string[]): VttExperi
   ]);
   for (const name of values.keys()) if (!allowed.has(name)) throw new TypeError(`Unknown option --${name}.`);
   const experiment = optionText(values, 'experiment');
-  if (experiment !== 'E01' && experiment !== 'E02' && experiment !== 'E03' && experiment !== 'E04' && experiment !== 'E05') {
-    throw new TypeError('--experiment must name a registered experiment (E01, E02, E03, E04, or E05).');
+  if (experiment !== 'E01' && experiment !== 'E02' && experiment !== 'E03' && experiment !== 'E04' && experiment !== 'E05' && experiment !== 'E05B') {
+    throw new TypeError('--experiment must name a registered experiment (E01, E02, E03, E04, E05, or E05B).');
   }
   const effort = optionText(values, 'effort', DEFAULT_DM_REASONING_EFFORT);
   if (effort !== 'low' && effort !== 'medium' && effort !== 'high' && effort !== 'xhigh') {
