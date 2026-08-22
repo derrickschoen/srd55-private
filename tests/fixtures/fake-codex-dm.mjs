@@ -61,7 +61,8 @@ if (isResume && process.env.FAKE_CODEX_MODE === 'hang') {
           })),
         };
     if (
-      process.env.FAKE_CODEX_MODE === 'malformed_once' &&
+      (process.env.FAKE_CODEX_MODE === 'malformed_once' ||
+        process.env.FAKE_CODEX_MODE === 'js_schema_error_once') &&
       process.env.FAKE_CODEX_STATE_FILE !== undefined
     ) {
       let alreadyMalformed = false;
@@ -73,10 +74,12 @@ if (isResume && process.env.FAKE_CODEX_MODE === 'hang') {
       }
       if (!alreadyMalformed) {
         await writeFile(process.env.FAKE_CODEX_STATE_FILE, 'malformed', 'utf8');
-        reply = {
-          ...reply,
-          commands: [{ type: 'end_turn', actor: monsterIds[0] }],
-        };
+        reply = process.env.FAKE_CODEX_MODE === 'js_schema_error_once' && request.surface === 'js_program'
+          ? { ...reply, unexpectedTelemetryProbe: true }
+          : {
+              ...reply,
+              commands: [{ type: 'end_turn', actor: monsterIds[0] }],
+            };
       }
     }
     process.stdout.write(`${JSON.stringify({

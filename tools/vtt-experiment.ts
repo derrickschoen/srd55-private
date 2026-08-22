@@ -754,6 +754,21 @@ function validatorCategory(error: unknown): string {
   return 'structural_validation';
 }
 
+function nonEmptyText(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized === undefined || normalized.length === 0 ? null : normalized;
+}
+
+function errorText(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return nonEmptyText(message) ?? fallback;
+}
+
+function failedRoundPlanSchemaPath(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+  return nonEmptyText(/^round plan(\S+)/u.exec(error.message)?.[1]);
+}
+
 function programMetrics(decoded: DecodedRoundPlanReply | null): {
   readonly nodes: number | null;
   readonly depth: number | null;
@@ -981,14 +996,14 @@ class RecordingExperimentExchange implements DmBridgeExchange {
       validationResult: exchangeError !== null ? 'not_run' : validationError === null ? 'valid' : 'invalid',
       validatorErrorCategory: validationError === null ? null : validatorCategory(validationError),
       compileErrorCategory: null,
-      failedSchemaPath: validationError instanceof Error ? /^round plan([^ ]*)/u.exec(validationError.message)?.[1] ?? null : null,
+      failedSchemaPath: failedRoundPlanSchemaPath(validationError),
       correctionAttempt: wire.correctionAttempt,
       correctionBudget: 2,
       correctionOfCallId: parentCallId,
       reconsultReason: wire.kind === 'monster_reconsult_request' ? wire.invalidation : null,
       invalidationEvent: wire.kind === 'monster_reconsult_request' ? wire.invalidation : null,
       abortCategory: exchangeError === null ? null : 'bridge_exchange',
-      abortReason: exchangeError === null ? null : exchangeError instanceof Error ? exchangeError.message : String(exchangeError),
+      abortReason: exchangeError === null ? null : errorText(exchangeError, 'Unknown bridge exchange failure.'),
       sourceChars: source.length,
       sourceBytes: new TextEncoder().encode(source).length,
       sourceTokenEstimate: Math.ceil(new TextEncoder().encode(source).length / 4),
@@ -1039,7 +1054,10 @@ class RecordingExperimentExchange implements DmBridgeExchange {
       parsedOrCompiled: decoded?.plan ?? null,
       expandedLibraryForm: null,
       replayProof: null,
-      typeCheckUniqueCatchObservations,
+      typeCheckUniqueCatchObservations: typeCheckUniqueCatchObservations.map((observation) => ({
+        ...observation,
+        runtimeError: nonEmptyText(observation.runtimeError),
+      })),
     };
     this.calls.push(call);
     this.decisionCaptureContexts.set(logicalCallId, {
@@ -1185,7 +1203,7 @@ export async function runE01Table(
     });
     await Promise.race([operation, deadline]);
   } catch (error: unknown) {
-    abortReason = error instanceof Error ? error.message : String(error);
+    abortReason = errorText(error, 'Unknown experiment table failure.');
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     await bridge.stop();

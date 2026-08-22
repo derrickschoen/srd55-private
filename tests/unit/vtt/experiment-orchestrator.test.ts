@@ -14,6 +14,7 @@ import {
   computeTacticalRegretFromCaptures,
   decodeExperimentTableRecord,
   decisionCorrectionMetrics,
+  experimentCallRecordSchema,
   type ExperimentTableRecord,
   type ExperimentTableRecordV4,
 } from '../../../src/vtt/experiment-telemetry';
@@ -558,6 +559,51 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
       examples: call.promptComponents.examples.digest,
     })));
     expect(promptDigests[1]).toEqual(promptDigests[0]);
+  });
+
+  it('empty_schema_path_reintroduced: records a root-path failure from the real E05 JS decoder as null or non-empty', async () => {
+    const execution = config(join(directory, 'e05-js-schema-error'), 'E05');
+    const entry = buildExperimentSchedule('E05').find((candidate) => candidate.armId === 'typed-js');
+    if (entry === undefined) throw new Error('E05 typed schedule is empty.');
+    const stateFile = join(directory, 'e05-js-schema-error-state');
+    const previousMode = process.env.FAKE_CODEX_MODE;
+    const previousStateFile = process.env.FAKE_CODEX_STATE_FILE;
+    process.env.FAKE_CODEX_MODE = 'js_schema_error_once';
+    process.env.FAKE_CODEX_STATE_FILE = stateFile;
+    let record: ExperimentTableRecordV4;
+    try {
+      record = await runE05Table(entry, execution, preregisterExperiment(execution));
+    } finally {
+      if (previousMode === undefined) delete process.env.FAKE_CODEX_MODE;
+      else process.env.FAKE_CODEX_MODE = previousMode;
+      if (previousStateFile === undefined) delete process.env.FAKE_CODEX_STATE_FILE;
+      else process.env.FAKE_CODEX_STATE_FILE = previousStateFile;
+    }
+    const invalidCalls = record.calls.filter((call) => call.validationResult === 'invalid');
+    expect(record.status).toBe('completed');
+    expect(invalidCalls).toHaveLength(1);
+    expect(invalidCalls[0]).toMatchObject({
+      phase: 'initial_plan',
+      validatorErrorCategory: 'unrecognized_key',
+      failedSchemaPath: null,
+    });
+    expect(record.calls.every((call) =>
+      call.failedSchemaPath === null || call.failedSchemaPath.length > 0,
+    )).toBe(true);
+    expect(record.calls.some((call) => call.phase === 'correction' && call.validationResult === 'valid')).toBe(true);
+  });
+
+  it('schema_loosened_instead: rejects an empty failed schema path while accepting null', () => {
+    const call = e05Records[0]?.calls[0];
+    if (call === undefined) throw new Error('E05 fake table has no decision call.');
+    expect(experimentCallRecordSchema.safeParse({ ...call, failedSchemaPath: null }).success).toBe(true);
+    const empty = experimentCallRecordSchema.safeParse({ ...call, failedSchemaPath: '' });
+    expect(empty.success).toBe(false);
+    if (empty.success) throw new Error('Experiment call schema accepted an empty failed schema path.');
+    expect(empty.error.issues).toContainEqual(expect.objectContaining({
+      code: 'too_small',
+      path: ['failedSchemaPath'],
+    }));
   });
 
   it('correction_undercount: counts a first-reply failure as one corrected decision and one correction round', () => {

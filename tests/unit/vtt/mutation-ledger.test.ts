@@ -383,15 +383,22 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger).toContain('Each mutation was applied alone, killed by its named test, and restored');
   });
 
-  it('E05-TYPED-UNTYPED-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {
+  it('E05-TYPED-UNTYPED-MUTATION-LEDGER pins all five restored controls to named killing tests', () => {
     const ledger = readFileSync(E05_TYPED_UNTYPED_LEDGER_PATH, 'utf8');
     const bridgeTests = readFileSync('tests/unit/bridge/js-round-plan-integration.test.ts', 'utf8');
     const experimentTests = readFileSync('tests/unit/vtt/experiment-orchestrator.test.ts', 'utf8');
-    for (const name of ['arms_share_typecheck', 'shadow_run_leaks', 'correction_undercount']) {
+    for (const name of [
+      'arms_share_typecheck',
+      'shadow_run_leaks',
+      'correction_undercount',
+      'empty_schema_path_reintroduced',
+      'schema_loosened_instead',
+    ]) {
       expect(ledger).toContain(`\`${name}\``);
       expect(`${bridgeTests}\n${experimentTests}`).toContain(name);
     }
-    expect(ledger.match(/exit 1/gu)).toHaveLength(3);
+    expect(ledger.match(/exit 1/gu)).toHaveLength(5);
     expect(ledger).toContain('Each production mutation was applied alone, killed by its named test, and restored');
+    expect(ledger).toContain('Each round-2 production mutation was applied alone');
   });
 });
