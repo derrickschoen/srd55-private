@@ -7,6 +7,28 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D331 — OWNER: JS surface with TYPED guarantees (2026-08-21)
+
+Owner: "I would like js. Look into how Claude code workflows work. Typed
+guarantees would be even better."
+
+1. **JS is the intended DM/PC surface** (confirms D320.5). E05 runs, but
+   the JS arm is upgraded before it runs: not a stringly-typed DSL — a
+   TYPE-CHECKED one.
+2. **Typed guarantees**: the engine emits a per-encounter ambient
+   declaration (.d.ts) whose types are narrowed to the ACTUAL state —
+   combatant ids, available spell ids, prepared slots, legal action
+   kinds are literal unions, not `string`. The model's program is
+   type-checked in-process (TypeScript 5.9 compiler API is already a
+   dependency) BEFORE interpretation. A program naming a monster that
+   is not in the encounter, or casting a spell the caster lacks, fails
+   to compile — the project's core principle applied to model output.
+3. **Claude Code workflow architecture is the reference model** for the
+   split: deterministic control flow in code, model calls at the leaves,
+   schema-forced structured returns with automatic retry, declared
+   phases. This is the same shape as E06's steering split (algorithm
+   handles basics, model steers) and should inform it.
+
 ## D330 — OWNER: the scraper is a DISTRIBUTION mechanism; private repo is the user test environment (2026-08-21)
 
 Owner ruling, verbatim intent: "Keep the mechanics from the copyrighted
