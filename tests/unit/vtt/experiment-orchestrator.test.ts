@@ -13,8 +13,9 @@ import {
   aggregateExperimentRecords,
   computeTacticalRegretFromCaptures,
   decodeExperimentTableRecord,
+  decisionCorrectionMetrics,
   type ExperimentTableRecord,
-  type ExperimentTableRecordV3,
+  type ExperimentTableRecordV4,
 } from '../../../src/vtt/experiment-telemetry';
 import {
   buildExperimentSchedule,
@@ -22,11 +23,13 @@ import {
   evaluateEarlyStop,
   EXPERIMENT_REGISTRY,
   E03_TACTICAL_ADVICE_FORBIDDEN_PHRASES,
+  e05TypeCheckMode,
   preregisterExperiment,
   runE01Table,
   runE02Table,
   runE03Table,
   runE04Table,
+  runE05Table,
   runVttExperiment,
   seededArmOrder,
   type VttExperimentConfig,
@@ -34,13 +37,14 @@ import {
 
 const FAKE_CODEX = 'tests/fixtures/fake-codex-dm.mjs';
 let directory = '';
-let liveRecord: ExperimentTableRecordV3;
-let repeatedRecord: ExperimentTableRecordV3;
-let e02Record: ExperimentTableRecordV3;
-let e03Record: ExperimentTableRecordV3;
-let e04Records: readonly ExperimentTableRecordV3[];
+let liveRecord: ExperimentTableRecordV4;
+let repeatedRecord: ExperimentTableRecordV4;
+let e02Record: ExperimentTableRecordV4;
+let e03Record: ExperimentTableRecordV4;
+let e04Records: readonly ExperimentTableRecordV4[];
+let e05Records: readonly ExperimentTableRecordV4[];
 
-function config(outDirectory: string, experimentId: 'E01' | 'E02' | 'E03' | 'E04' = 'E01'): VttExperimentConfig {
+function config(outDirectory: string, experimentId: 'E01' | 'E02' | 'E03' | 'E04' | 'E05' = 'E01'): VttExperimentConfig {
   return {
     experimentId,
     outDirectory,
@@ -58,11 +62,11 @@ function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function legacyV1Record(record: ExperimentTableRecordV3): unknown {
+function legacyV1Record(record: ExperimentTableRecordV4): unknown {
   return {
     ...structuredClone(record),
     schemaVersion: 1,
-    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, ...call }) => call),
+    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, ...call }) => call),
     quality: {
       ...structuredClone(record.quality),
       rolloutInputCaptures: record.quality.rolloutInputCaptures.map((capture) => {
@@ -78,11 +82,19 @@ function legacyV1Record(record: ExperimentTableRecordV3): unknown {
   };
 }
 
-function legacyV2Record(record: ExperimentTableRecordV3): unknown {
+function legacyV2Record(record: ExperimentTableRecordV4): unknown {
   return {
     ...structuredClone(record),
     schemaVersion: 2,
-    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, ...call }) => call),
+    calls: record.calls.map(({ bytesSent: _bytesSent, reconstructionFailureCount: _reconstructionFailureCount, typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, ...call }) => call),
+  };
+}
+
+function legacyV3Record(record: ExperimentTableRecordV4): unknown {
+  return {
+    ...structuredClone(record),
+    schemaVersion: 3,
+    calls: record.calls.map(({ typeCheckUniqueCatchObservations: _typeCheckUniqueCatchObservations, ...call }) => call),
   };
 }
 
@@ -121,6 +133,13 @@ beforeAll(async () => {
   e04Records = [];
   for (const entry of e04Schedule) {
     e04Records = [...e04Records, await runE04Table(entry, e04Execution, e04Preregistration)];
+  }
+  const e05Execution = config(join(directory, 'e05'), 'E05');
+  const e05Schedule = buildExperimentSchedule('E05').slice(0, 2);
+  const e05Preregistration = preregisterExperiment(e05Execution);
+  e05Records = [];
+  for (const entry of e05Schedule) {
+    e05Records = [...e05Records, await runE05Table(entry, e05Execution, e05Preregistration)];
   }
 }, 30_000);
 
@@ -178,10 +197,10 @@ describe('E02 worked-example experiment registration', () => {
     }
   });
 
-  it('emits capture v3 on a synthetic no-LLM E02 table', () => {
+  it('emits capture v4 on a synthetic no-LLM E02 table', () => {
     expect(() => decodeExperimentTableRecord(e02Record)).not.toThrow();
     expect(e02Record).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       experimentId: 'E02',
       schemaVariant: 'compact-grammar-v1',
       status: 'completed',
@@ -291,10 +310,10 @@ describe('E03 instruction-length experiment registration', () => {
     expect(first.promptComponentHashes).not.toEqual(e02.promptComponentHashes);
   });
 
-  it('emits capture v3 on a synthetic no-LLM E03 table', () => {
+  it('emits capture v4 on a synthetic no-LLM E03 table', () => {
     expect(() => decodeExperimentTableRecord(e03Record)).not.toThrow();
     expect(e03Record).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       experimentId: 'E03',
       schemaVariant: 'compact-grammar-v1',
       exampleCount: 3,
@@ -471,6 +490,178 @@ describe('E04 state/context compression registration', () => {
   });
 });
 
+describe('E05 typed versus untyped restricted-JS registration', () => {
+  it('registers exactly two mechanism-only arms with 60 paired tables per arm', () => {
+    expect(EXPERIMENT_REGISTRY.E05.arms.map((arm) => [arm.id, arm.typeCheckMode])).toEqual([
+      ['typed-js', 'typed'],
+      ['untyped-js', 'untyped'],
+    ]);
+    expect(e05TypeCheckMode('typed-js')).toBe('typed');
+    expect(e05TypeCheckMode('untyped-js')).toBe('untyped');
+    const first = buildExperimentSchedule('E05');
+    const repeated = buildExperimentSchedule('E05');
+    expect(first).toEqual(repeated);
+    expect(first).toHaveLength(120);
+    expect(first.filter((entry) => entry.armId === 'typed-js')).toHaveLength(60);
+    expect(first.filter((entry) => entry.armId === 'untyped-js')).toHaveLength(60);
+    for (let index = 0; index < first.length; index += 2) {
+      const pair = first.slice(index, index + 2);
+      expect(new Set(pair.map((entry) => entry.pairId)).size).toBe(1);
+      expect(new Set(pair.map((entry) => entry.seed)).size).toBe(1);
+      expect(new Set(pair.map((entry) => entry.armId))).toEqual(new Set(['typed-js', 'untyped-js']));
+    }
+  });
+
+  it('preregisters D332.1 metrics, identical prompt components, and the D328.2 stopping rule', () => {
+    const first = preregisterExperiment(config('/tmp/e05-first', 'E05'));
+    const repeated = preregisterExperiment(config('/tmp/e05-repeated', 'E05'));
+    expect(first.digest).toBe(repeated.digest);
+    expect(first.digest).toBe('d07cf89f8dcd0a4054bbcc3ca8e98b251dac50a75006fdf2db0fc4c221d3ef8c');
+    expect(first).toMatchObject({
+      programVersion: 'D332.1-v1',
+      experimentId: 'E05',
+      primaryMetrics: ['correctionRate'],
+      secondaryMetrics: [
+        'firstPassValidity',
+        'meanCorrectionRoundsPerDecision',
+        'wallClockMsPerCompletedRound',
+        'tokenTotals',
+        'completionRate',
+      ],
+      tertiaryMetrics: ['typeCheckUniqueCatchRate', 'typeCheckUniqueDiagnosticCodesAndExamplePrograms'],
+      earlyStopRule: {
+        enabled: true,
+        metric: 'correctionRate',
+        method: 'paired_bootstrap',
+        confidence: 0.99,
+        minimumTableFraction: 0.5,
+        preregisteredTableCeiling: 120,
+      },
+    });
+    expect(first.seedList).toHaveLength(30);
+    expect(new Set(Object.values(first.promptComponentHashes)).size).toBe(1);
+  });
+
+  it('arms_share_typecheck: the table runner selects JS for both arms and compilation only for typed-js', () => {
+    expect(e05Records).toHaveLength(2);
+    expect(new Set(e05Records.map((record) => record.armId))).toEqual(new Set(['typed-js', 'untyped-js']));
+    expect(e05Records.every((record) =>
+      record.planSurface === 'js_program' &&
+      record.schemaVariant === 'restricted-js-v1' &&
+      record.exampleCount === 1 &&
+      record.status === 'completed' &&
+      record.calls.every((call) => call.typeCheckUniqueCatchObservations.length === 0),
+    )).toBe(true);
+    const promptDigests = e05Records.map((record) => record.calls.map((call) => ({
+      instructions: call.promptComponents.instructions.digest,
+      grammar: call.promptComponents.schemaGrammar.digest,
+      examples: call.promptComponents.examples.digest,
+    })));
+    expect(promptDigests[1]).toEqual(promptDigests[0]);
+  });
+
+  it('correction_undercount: counts a first-reply failure as one corrected decision and one correction round', () => {
+    const root = structuredClone(e05Records[0]?.calls[0]);
+    if (root === undefined) throw new Error('E05 fake table has no decision call.');
+    const correction = {
+      ...structuredClone(root),
+      logicalCallId: `${root.logicalCallId}:correction`,
+      parentCallId: root.logicalCallId,
+      phase: 'correction' as const,
+    };
+    expect(decisionCorrectionMetrics([root, correction])).toEqual({
+      decisionPointCount: 1,
+      correctedDecisionPointCount: 1,
+      correctionRoundCount: 1,
+      correctionRate: 1,
+      firstPassValidity: 0,
+      meanCorrectionRoundsPerDecision: 1,
+    });
+  });
+
+  it('applies 99% correction-rate stopping only at a completed paired block after 60 tables', () => {
+    const typedSource = e05Records.find((record) => record.armId === 'typed-js');
+    const untypedSource = e05Records.find((record) => record.armId === 'untyped-js');
+    if (typedSource === undefined || untypedSource === undefined) throw new Error('E05 fake arms are incomplete.');
+    const records: ExperimentTableRecord[] = [];
+    for (let pair = 0; pair < 30; pair += 1) {
+      const typed = structuredClone(typedSource);
+      const untyped = structuredClone(untypedSource);
+      const root = untyped.calls[0];
+      if (root === undefined) throw new Error('E05 untyped fake table has no decision call.');
+      untyped.calls.push({
+        ...structuredClone(root),
+        logicalCallId: `${root.logicalCallId}:synthetic:${String(pair)}`,
+        parentCallId: root.logicalCallId,
+        phase: 'correction',
+      });
+      records.push(
+        decodeExperimentTableRecord({ ...typed, pairId: `e05-pair:${String(pair)}`, tableIndex: pair * 2 }),
+        decodeExperimentTableRecord({ ...untyped, pairId: `e05-pair:${String(pair)}`, tableIndex: pair * 2 + 1 }),
+      );
+    }
+    const options = {
+      armIds: ['typed-js', 'untyped-js'],
+      preregisteredTableCeiling: 120,
+      method: 'paired_bootstrap' as const,
+      metric: 'correctionRate' as const,
+    };
+    expect(evaluateEarlyStop(records.slice(0, 58), options)).toMatchObject({
+      shouldStop: false,
+      completedTables: 58,
+      minimumTables: 60,
+      reason: 'minimum_table_fraction_not_reached',
+    });
+    expect(evaluateEarlyStop(records, options)).toMatchObject({
+      shouldStop: true,
+      leaderArmId: 'typed-js',
+      completedTables: 60,
+      minimumTables: 60,
+      confidence: 0.99,
+    });
+  });
+
+  it('reports typed-only unique catch rate with ranked diagnostic codes and example programs', () => {
+    const typed = structuredClone(e05Records.find((record) => record.armId === 'typed-js'));
+    if (typed === undefined || typed.calls[0] === undefined) throw new Error('E05 typed fake table is incomplete.');
+    typed.calls[0].typeCheckUniqueCatchObservations = [{
+      monsterId: typed.calls[0].actorIds[0] ?? 'combatant:synthetic',
+      source: 'emit(move(nearestEnemy(), 31));',
+      sourceHash: digest('emit(move(nearestEnemy(), 31));'),
+      diagnosticCodes: [2345],
+      outcome: 'caughtOnlyByTypeCheck',
+      runtimeError: null,
+    }, {
+      monsterId: typed.calls[0].actorIds[0] ?? 'combatant:synthetic',
+      source: 'emit(attack());',
+      sourceHash: digest('emit(attack());'),
+      diagnosticCodes: [2554],
+      outcome: 'caughtByBoth',
+      runtimeError: 'attack requires a target.',
+    }];
+    const aggregate = aggregateExperimentRecords([typed])[0];
+    expect(aggregate?.typeCheckUniqueCatch).toEqual({
+      rejectedProgramCount: 2,
+      caughtByBothCount: 1,
+      caughtOnlyByTypeCheckCount: 1,
+      rate: 0.5,
+      topUniqueDiagnosticCodes: [{
+        code: 2345,
+        count: 1,
+        exampleProgram: 'emit(move(nearestEnemy(), 31));',
+      }],
+    });
+  });
+
+  it('accepts E05 on the experiment CLI', () => {
+    expect(decodeVttExperimentArguments([
+      '--experiment', 'E05',
+      '--out', '/tmp/e05',
+      '--skip-regret',
+    ])).toMatchObject({ experimentId: 'E05', skipRegret: true });
+  });
+});
+
 describe('E01 experiment registry and orchestration', () => {
   it('arms_unpaired: every paired seed batch has all three arms adjacent', () => {
     const schedule = buildExperimentSchedule('E01');
@@ -512,7 +703,7 @@ describe('E01 experiment registry and orchestration', () => {
     expect(liveRecord.calls.every((call) => call.fullStateHash.length === 64)).toBe(true);
     expect(liveRecord.quality.regretStatus).toBe('deferred');
     expect(liveRecord.quality.rolloutInputCaptures).toHaveLength(5);
-    expect(liveRecord.schemaVersion).toBe(3);
+    expect(liveRecord.schemaVersion).toBe(4);
     expect(liveRecord.quality.rolloutInputCaptures.every((capture) =>
       capture.selectedAction.length === 4 &&
       capture.candidateTurnK === 64 &&
@@ -564,19 +755,22 @@ describe('E01 experiment registry and orchestration', () => {
       .toEqual(liveRecord.quality.rolloutInputCaptures.map((capture) => capture.candidateTurns));
   });
 
-  it('v1_unreadable: the version-window reader loads legacy v1/v2 and current v3 tables', () => {
+  it('v1_unreadable: the version-window reader loads legacy v1/v2/v3 and current v4 tables', () => {
     const legacy = decodeExperimentTableRecord(legacyV1Record(liveRecord));
     const previous = decodeExperimentTableRecord(legacyV2Record(liveRecord));
+    const prior = decodeExperimentTableRecord(legacyV3Record(liveRecord));
     const current = decodeExperimentTableRecord(structuredClone(liveRecord));
     expect(legacy.schemaVersion).toBe(1);
     expect(previous.schemaVersion).toBe(2);
-    expect(current.schemaVersion).toBe(3);
+    expect(prior.schemaVersion).toBe(3);
+    expect(current.schemaVersion).toBe(4);
     expect(legacy.quality.rolloutInputCaptures).toHaveLength(5);
     expect(previous.quality.rolloutInputCaptures).toHaveLength(5);
+    expect(prior.quality.rolloutInputCaptures).toHaveLength(5);
     expect(current.quality.rolloutInputCaptures).toHaveLength(5);
   });
 
-  it('keeps representative inline v3 table captures below the sidecar threshold', () => {
+  it('keeps representative inline v4 table captures below the sidecar threshold', () => {
     const legacyBytes = Buffer.byteLength(canonicalJson(legacyV1Record(liveRecord)));
     const currentBytes = Buffer.byteLength(canonicalJson(liveRecord));
     expect(currentBytes).toBeGreaterThan(legacyBytes);

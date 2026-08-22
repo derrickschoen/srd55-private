@@ -43,6 +43,7 @@ import {
 } from './round-plan-contract';
 import {
   interpretJsTurnProgram,
+  type TypeCheckUniqueCatchObservation,
   type JsTurnProgramExecution,
   type JsTurnProgramLimits,
 } from './js-turn-program';
@@ -50,7 +51,7 @@ import {
   JsTurnProgramTypeError,
   generateTurnProgramDeclarations,
   typeCheckJsTurnProgram,
-  type TurnProgramAmbientDeclaration,
+  type TurnProgramAmbientApiDescription,
   type TurnProgramTypeCheckTelemetry,
 } from './turn-program-types';
 
@@ -170,7 +171,7 @@ export interface RoundPlanRequest {
   readonly surface: RoundPlanSurface;
   readonly replyContract: RoundPlanReplyContract;
   readonly correctionAttempt: 0;
-  readonly ambientDeclarations?: readonly TurnProgramAmbientDeclaration[];
+  readonly ambientApiDescriptions?: readonly TurnProgramAmbientApiDescription[];
 }
 
 export interface MonsterReconsultRequest {
@@ -190,7 +191,7 @@ export interface MonsterReconsultRequest {
   readonly surface: RoundPlanSurface;
   readonly replyContract: RoundPlanReplyContract;
   readonly correctionAttempt: 0;
-  readonly ambientDeclarations?: readonly TurnProgramAmbientDeclaration[];
+  readonly ambientApiDescriptions?: readonly TurnProgramAmbientApiDescription[];
 }
 
 export interface RoundPlanCorrectionRequest {
@@ -210,7 +211,7 @@ export interface RoundPlanCorrectionRequest {
   readonly surface: RoundPlanSurface;
   readonly replyContract: RoundPlanReplyContract;
   readonly correctionAttempt: 1 | 2;
-  readonly ambientDeclarations?: readonly TurnProgramAmbientDeclaration[];
+  readonly ambientApiDescriptions?: readonly TurnProgramAmbientApiDescription[];
 }
 
 export type SteeringConsultReason =
@@ -407,13 +408,49 @@ export function decodeSteeringReply(
 
 export interface JsProgramArtifact extends JsTurnProgramExecution {
   readonly monsterId: CombatantId;
-  readonly ambientDeclarations: string;
-  readonly typeCheck: TurnProgramTypeCheckTelemetry;
+  readonly ambientDeclarations: string | null;
+  readonly typeCheck: TurnProgramTypeCheckTelemetry | null;
 }
 
 export interface DecodedRoundPlanReply {
   readonly plan: RoundPlan;
   readonly jsPrograms: readonly JsProgramArtifact[];
+}
+
+type ShadowInterpreter = typeof interpretJsTurnProgram;
+
+/**
+ * Classifies a typed refusal on a disposable clone. The function has no
+ * reducer, exchange, or transcript capability, so the observation cannot
+ * become encounter authority.
+ */
+export function observeTypeCheckUniqueCatch(
+  source: string,
+  state: DmVisibleEncounterState,
+  monsterId: CombatantId,
+  diagnosticCodes: readonly number[],
+  limits: JsTurnProgramLimits = {},
+  shadowInterpreter: ShadowInterpreter = interpretJsTurnProgram,
+): TypeCheckUniqueCatchObservation {
+  const shadowState = structuredClone(state);
+  try {
+    shadowInterpreter(source, shadowState, monsterId, limits);
+    return {
+      monsterId,
+      source,
+      diagnosticCodes: [...diagnosticCodes],
+      outcome: 'caughtOnlyByTypeCheck',
+      runtimeError: null,
+    };
+  } catch (error: unknown) {
+    return {
+      monsterId,
+      source,
+      diagnosticCodes: [...diagnosticCodes],
+      outcome: 'caughtByBoth',
+      runtimeError: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function expectedMonsterIds(
@@ -461,15 +498,27 @@ export function decodeRoundPlanReply(
   const input = decodeJsRoundPlanSourceStructure(value);
   validateJsEnvelope(input, request);
   const jsPrograms = input.monsters.map((entry): JsProgramArtifact => {
-    const declarations = request.ambientDeclarations?.find(
-      (candidate) => candidate.actorId === entry.monsterId,
-    ) ?? generateTurnProgramDeclarations(request.projection, entry.monsterId);
-    const typeCheck = typeCheckJsTurnProgram(entry.source, declarations.source, limits.now);
-    limits.onTypeCheckTelemetry?.(typeCheck);
-    if (!typeCheck.passed) throw new JsTurnProgramTypeError(typeCheck.diagnostics);
+    const typed = limits.typeCheckMode !== 'untyped';
+    const declarations = typed
+      ? generateTurnProgramDeclarations(request.projection, entry.monsterId)
+      : null;
+    const typeCheck = declarations === null
+      ? null
+      : typeCheckJsTurnProgram(entry.source, declarations.source, limits.now);
+    if (typeCheck !== null) limits.onTypeCheckTelemetry?.(typeCheck);
+    if (typeCheck !== null && !typeCheck.passed) {
+      limits.onTypeCheckUniqueCatch?.(observeTypeCheckUniqueCatch(
+        entry.source,
+        request.projection.encounter,
+        entry.monsterId,
+        typeCheck.diagnosticCodes,
+        limits,
+      ));
+      throw new JsTurnProgramTypeError(typeCheck.diagnostics);
+    }
     return {
       monsterId: entry.monsterId,
-      ambientDeclarations: declarations.source,
+      ambientDeclarations: declarations?.source ?? null,
       typeCheck,
       ...interpretJsTurnProgram(entry.source, request.projection.encounter, entry.monsterId, limits),
     };

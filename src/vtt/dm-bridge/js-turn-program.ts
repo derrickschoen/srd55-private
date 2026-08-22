@@ -522,6 +522,16 @@ export interface JsTurnProgramLimits {
   readonly timeBudgetMs?: number;
   readonly now?: () => number;
   readonly onTypeCheckTelemetry?: (telemetry: TurnProgramTypeCheckTelemetry) => void;
+  readonly typeCheckMode?: 'typed' | 'untyped';
+  readonly onTypeCheckUniqueCatch?: (observation: TypeCheckUniqueCatchObservation) => void;
+}
+
+export interface TypeCheckUniqueCatchObservation {
+  readonly monsterId: CombatantId;
+  readonly source: string;
+  readonly diagnosticCodes: readonly number[];
+  readonly outcome: 'caughtByBoth' | 'caughtOnlyByTypeCheck';
+  readonly runtimeError: string | null;
 }
 
 export interface JsTurnProgramExecution {

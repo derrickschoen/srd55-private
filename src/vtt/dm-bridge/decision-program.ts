@@ -31,7 +31,7 @@ import {
 } from './contracts';
 import type { JsTurnProgramLimits } from './js-turn-program';
 import {
-  generateTurnProgramDeclarations,
+  describeTurnProgramAmbientApi,
   type TurnProgramTypeCheckTelemetry,
 } from './turn-program-types';
 import { canonicalJson } from '../../commands/canonical-json';
@@ -297,9 +297,9 @@ export class DmRoundPlanSession {
           surface: request.surface,
           replyContract: roundPlanReplyContract(request.surface),
           correctionAttempt: nextAttempt === 1 ? 1 : 2,
-          ...(current.ambientDeclarations === undefined
+          ...(current.ambientApiDescriptions === undefined
             ? {}
-            : { ambientDeclarations: current.ambientDeclarations }),
+            : { ambientApiDescriptions: current.ambientApiDescriptions }),
         };
         current = correction;
       }
@@ -396,8 +396,8 @@ export class DmRoundPlanSession {
       correctionAttempt: 0,
       ...(this.surface === 'js_program'
         ? {
-            ambientDeclarations: (perCombatant ? [actor] : livingMonsterIds).map((monsterId) =>
-              generateTurnProgramDeclarations(context.projection, monsterId)),
+            ambientApiDescriptions: (perCombatant ? [actor] : livingMonsterIds).map((monsterId) =>
+              describeTurnProgramAmbientApi(context.projection, monsterId)),
           }
         : {}),
     };
@@ -460,7 +460,7 @@ export class DmRoundPlanSession {
         replyContract: roundPlanReplyContract(this.surface),
         correctionAttempt: 0 as const,
         ...(this.surface === 'js_program'
-          ? { ambientDeclarations: [generateTurnProgramDeclarations(context.projection, request.actorId)] }
+          ? { ambientApiDescriptions: [describeTurnProgramAmbientApi(context.projection, request.actorId)] }
           : {}),
       };
       const replacement = await this.#validatedExchange(reconsult, signal);

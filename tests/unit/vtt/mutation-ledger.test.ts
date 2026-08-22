@@ -36,6 +36,7 @@ const SPELL_BATCH_TWO_LEDGER_PATH = 'docs/audits/2026-08-21-vtt-spell-batch-2-mu
 const TYPED_JS_LEDGER_PATH = 'docs/audits/2026-08-21-typed-js-turn-program-mutation-ledger.md';
 const SPATIAL_MOVEMENT_LEDGER_PATH = 'docs/audits/2026-08-21-spatial-movement-mutation-ledger.md';
 const E04_CONTEXT_LEDGER_PATH = 'docs/audits/2026-08-21-e04-context-compression-early-stop-mutation-ledger.md';
+const E05_TYPED_UNTYPED_LEDGER_PATH = 'docs/audits/2026-08-21-e05-typed-vs-untyped-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
 function ledger(): MutationLedger {
@@ -380,5 +381,17 @@ describe('phase-2 mutation ledger manifest', () => {
       expect(`${projectionTests}\n${experimentTests}`).toContain(name);
     }
     expect(ledger).toContain('Each mutation was applied alone, killed by its named test, and restored');
+  });
+
+  it('E05-TYPED-UNTYPED-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {
+    const ledger = readFileSync(E05_TYPED_UNTYPED_LEDGER_PATH, 'utf8');
+    const bridgeTests = readFileSync('tests/unit/bridge/js-round-plan-integration.test.ts', 'utf8');
+    const experimentTests = readFileSync('tests/unit/vtt/experiment-orchestrator.test.ts', 'utf8');
+    for (const name of ['arms_share_typecheck', 'shadow_run_leaks', 'correction_undercount']) {
+      expect(ledger).toContain(`\`${name}\``);
+      expect(`${bridgeTests}\n${experimentTests}`).toContain(name);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(3);
+    expect(ledger).toContain('Each production mutation was applied alone, killed by its named test, and restored');
   });
 });

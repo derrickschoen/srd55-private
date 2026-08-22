@@ -20,6 +20,7 @@ import {
   e02RoundPlanReplyContract,
   e03RoundPlanReplyContract,
   E02_SHARED_INSTRUCTIONS,
+  ROUND_PLAN_JS_REPLY_CONTRACT,
   type DecodedRoundPlanReply,
   type DmBridgeExchange,
   type DmBridgeModelConfig,
@@ -30,6 +31,7 @@ import {
   type E02PromptVariant,
   type E03CompactRoundPlanReplyContract,
   type E03PromptVariant,
+  type JsProgramRoundPlanReplyContract,
   type MonsterRoundProgram,
   type RoundPlan,
   type RoundPlanCorrectionRequest,
@@ -41,10 +43,11 @@ import {
   aggregateExperimentRecords,
   computeTacticalRegretFromCaptures,
   decodeExperimentTableRecord,
+  decisionCorrectionMetrics,
   VTT_EXPERIMENT_SCHEMA_VERSION,
   type ExperimentCallRecord,
   type ExperimentTableRecord,
-  type ExperimentTableRecordV3,
+  type ExperimentTableRecordV4,
   type PromptComponentTelemetry,
   type RolloutInputCapture,
 } from '../src/vtt/experiment-telemetry';
@@ -55,12 +58,13 @@ import {
 } from '../src/vtt/generated-encounter-fixtures';
 import { TEST_APPROVED_FIRST_SKIRMISH_FIXTURE } from '../src/vtt/test-approved-first-skirmish';
 
-export type ExperimentId = 'E01' | 'E02' | 'E03' | 'E04';
+export type ExperimentId = 'E01' | 'E02' | 'E03' | 'E04' | 'E05';
 export type E04ProjectionArmId =
   | 'full-projection-history'
   | 'compact-lossless-decision-view'
   | 'initial-snapshot-revision-deltas';
-export type ExperimentArmId = E01PromptVariant | E02PromptVariant | E03PromptVariant | E04ProjectionArmId;
+export type E05ProgramArmId = 'typed-js' | 'untyped-js';
+export type ExperimentArmId = E01PromptVariant | E02PromptVariant | E03PromptVariant | E04ProjectionArmId | E05ProgramArmId;
 
 export interface ExperimentArmDefinition {
   readonly id: ExperimentArmId;
@@ -86,6 +90,11 @@ export interface E03ExperimentArmDefinition extends ExperimentArmDefinition {
 export interface E04ExperimentArmDefinition extends ExperimentArmDefinition {
   readonly id: E04ProjectionArmId;
   readonly projectionMode: Exclude<ProjectionTransportMode, 'full'>;
+}
+
+export interface E05ExperimentArmDefinition extends ExperimentArmDefinition {
+  readonly id: E05ProgramArmId;
+  readonly typeCheckMode: 'typed' | 'untyped';
 }
 
 export interface ExperimentDefinition {
@@ -312,6 +321,28 @@ export const EXPERIMENT_REGISTRY = Object.freeze({
     enemyCount: 4,
     earlyStopping: true,
   }),
+  E05: Object.freeze({
+    id: 'E05',
+    version: '1',
+    hypothesis: 'Compile-time checking lowers the correction rate for otherwise identical restricted-JS programs.',
+    arms: Object.freeze([
+      {
+        id: 'typed-js',
+        description: 'Interpret restricted JS only after the per-encounter ambient declaration type check passes.',
+        typeCheckMode: 'typed',
+      },
+      {
+        id: 'untyped-js',
+        description: 'Interpret the same restricted JS directly, with refusals only from the interpreter and strict plan validator.',
+        typeCheckMode: 'untyped',
+      },
+    ] satisfies readonly E05ExperimentArmDefinition[]),
+    seedCount: 30,
+    replicates: 2,
+    rounds: 5,
+    enemyCount: 4,
+    earlyStopping: true,
+  }),
 } satisfies Record<ExperimentId, ExperimentDefinition>);
 
 export interface ExperimentScheduleEntry {
@@ -407,7 +438,7 @@ export interface VttExperimentConfig {
 
 export interface ExperimentPreregistration {
   readonly schemaVersion: 1;
-  readonly programVersion: 'D320-v1';
+  readonly programVersion: 'D320-v1' | 'D332.1-v1';
   readonly experimentId: ExperimentId;
   readonly experimentVersion: '1';
   readonly hypothesis: string;
@@ -423,6 +454,7 @@ export interface ExperimentPreregistration {
   readonly initiativeConfiguration: string;
   readonly primaryMetrics: readonly string[];
   readonly secondaryMetrics: readonly string[];
+  readonly tertiaryMetrics: readonly string[];
   readonly noninferiorityMargins: Readonly<Record<string, number>>;
   readonly timeouts: { readonly requestMs: number; readonly tableMs: number };
   readonly candidateTurnK: number;
@@ -430,7 +462,7 @@ export interface ExperimentPreregistration {
   readonly infrastructureRerunRule: string;
   readonly earlyStopRule: {
     readonly enabled: boolean;
-    readonly metric: 'completedRoundsPerHour';
+    readonly metric: 'completedRoundsPerHour' | 'correctionRate';
     readonly method: 'paired_bootstrap';
     readonly confidence: 0.99;
     readonly minimumTableFraction: 0.5;
@@ -458,6 +490,12 @@ function isE04ArmDefinition(
   arm: ExperimentArmDefinition,
 ): arm is E04ExperimentArmDefinition {
   return 'projectionMode' in arm;
+}
+
+function isE05ArmDefinition(
+  arm: ExperimentArmDefinition,
+): arm is E05ExperimentArmDefinition {
+  return 'typeCheckMode' in arm;
 }
 
 function isE01PromptVariant(value: ExperimentArmId): value is E01PromptVariant {
@@ -490,11 +528,23 @@ function e04ArmDefinition(armId: ExperimentArmId): E04ExperimentArmDefinition {
   return arm;
 }
 
+function e05ArmDefinition(armId: ExperimentArmId): E05ExperimentArmDefinition {
+  const arm = EXPERIMENT_REGISTRY.E05.arms.find((candidate) => candidate.id === armId);
+  if (arm === undefined || !isE05ArmDefinition(arm)) {
+    throw new TypeError(`E05 arm ${armId} is not registered.`);
+  }
+  return arm;
+}
+
+export function e05TypeCheckMode(armId: E05ProgramArmId): 'typed' | 'untyped' {
+  return e05ArmDefinition(armId).typeCheckMode;
+}
+
 function replyContract(
   experimentId: ExperimentId,
   armId: ExperimentArmId,
   callIndex: number,
-): E01RoundPlanReplyContract | E02CompactRoundPlanReplyContract | E03CompactRoundPlanReplyContract {
+): E01RoundPlanReplyContract | E02CompactRoundPlanReplyContract | E03CompactRoundPlanReplyContract | JsProgramRoundPlanReplyContract {
   if (experimentId === 'E01') {
     if (!isE01PromptVariant(armId)) throw new TypeError(`E01 arm ${armId} is not registered.`);
     return e01RoundPlanReplyContract(armId, callIndex);
@@ -507,7 +557,9 @@ function replyContract(
     const arm = e03ArmDefinition(armId);
     return e03RoundPlanReplyContract(arm.id, arm.instructions, arm.workedExamples);
   }
-  e04ArmDefinition(armId);
+  if (experimentId === 'E04') e04ArmDefinition(armId);
+  else e05ArmDefinition(armId);
+  if (experimentId === 'E05') return ROUND_PLAN_JS_REPLY_CONTRACT;
   return e03RoundPlanReplyContract(
     'current-instructions',
     E02_SHARED_INSTRUCTIONS,
@@ -518,7 +570,7 @@ function replyContract(
 function promptHash(id: ExperimentId, armId: ExperimentArmId): string {
   return sha256(canonicalJson([
     id,
-    armId,
+    ...(id === 'E05' ? [] : [armId]),
     replyContract(id, armId, 0),
     replyContract(id, armId, 1),
   ]));
@@ -528,7 +580,7 @@ export function preregisterExperiment(config: VttExperimentConfig): ExperimentPr
   const definition = EXPERIMENT_REGISTRY[config.experimentId];
   const withoutDigest = {
     schemaVersion: 1 as const,
-    programVersion: 'D320-v1' as const,
+    programVersion: definition.id === 'E05' ? 'D332.1-v1' as const : 'D320-v1' as const,
     experimentId: definition.id,
     experimentVersion: definition.version,
     hypothesis: definition.hypothesis,
@@ -542,21 +594,30 @@ export function preregisterExperiment(config: VttExperimentConfig): ExperimentPr
     promptComponentHashes: Object.fromEntries(
       definition.arms.map((arm) => [arm.id, promptHash(definition.id, arm.id)]),
     ),
-    controllerConfiguration: `dm-full-model-round-plan;pc-algorithm;fresh-session-per-table;candidate-turn-k=${String(config.candidateTurnK)}`,
+    controllerConfiguration: `${definition.id === 'E05' ? 'dm-full-model-js-program' : 'dm-full-model-round-plan'};pc-algorithm;fresh-session-per-table;candidate-turn-k=${String(config.candidateTurnK)};temperature=unchanged;retry-budget=2`,
     initiativeConfiguration: 'shared_enemy;deterministic-within-side-order',
-    primaryMetrics: definition.id === 'E01'
+    primaryMetrics: definition.id === 'E05'
+      ? ['correctionRate']
+      : definition.id === 'E01'
       ? ['completedRoundsPerHour', 'normalizedTacticalRegret']
       : definition.id === 'E02'
         ? ['completedRoundsPerHour', 'normalizedTacticalRegret', 'firstPassValidity']
         : ['completedRoundsPerHour', 'normalizedTacticalRegret'],
-    secondaryMetrics: definition.id === 'E01'
+    secondaryMetrics: definition.id === 'E05'
+      ? ['firstPassValidity', 'meanCorrectionRoundsPerDecision', 'wallClockMsPerCompletedRound', 'tokenTotals', 'completionRate']
+      : definition.id === 'E01'
       ? ['latencyMs', 'tokenCounts', 'correctionRate', 'reconsultRate', 'round5HpDifferential']
       : definition.id === 'E02'
         ? ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'correctionRate', 'reconsultRate', 'targetSanity']
         : definition.id === 'E03'
           ? ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'correctionRate', 'dryProgramRate', 'reconsultRate', 'round5HpDifferential']
           : ['latencyMs', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'cacheRatio', 'correctionRate', 'staleReferenceRate', 'reconsultRate', 'bytesSent', 'reconstructionFailures'],
-    noninferiorityMargins: definition.id === 'E01'
+    tertiaryMetrics: definition.id === 'E05'
+      ? ['typeCheckUniqueCatchRate', 'typeCheckUniqueDiagnosticCodesAndExamplePrograms']
+      : [],
+    noninferiorityMargins: definition.id === 'E05'
+      ? {}
+      : definition.id === 'E01'
       ? { normalizedTacticalRegret: 0.02, correctionPercentagePoints: 2 }
       : definition.id === 'E02'
         ? { normalizedTacticalRegret: 0.02, minimumFirstPassValidity: 0.99 }
@@ -569,13 +630,13 @@ export function preregisterExperiment(config: VttExperimentConfig): ExperimentPr
     infrastructureRerunRule: 'Only an infrastructure-classified failure may rerun, once, under identical manifest bytes.',
     earlyStopRule: {
       enabled: definition.earlyStopping,
-      metric: 'completedRoundsPerHour' as const,
+      metric: definition.id === 'E05' ? 'correctionRate' as const : 'completedRoundsPerHour' as const,
       method: 'paired_bootstrap' as const,
       confidence: 0.99 as const,
       minimumTableFraction: 0.5 as const,
       preregisteredTableCeiling: definition.seedCount * definition.replicates * definition.arms.length,
     },
-    analysisCodeDigest: sha256(`${definition.id}-analysis-v2:linear-interpolated-quartiles:aborts-retained:paired-bootstrap-99-after-half`),
+    analysisCodeDigest: sha256(`${definition.id}-analysis-v3:decision-point-corrections:linear-interpolated-quartiles:aborts-retained:paired-bootstrap-99-after-half`),
   };
   return { ...withoutDigest, digest: sha256(canonicalJson(withoutDigest)) };
 }
@@ -804,9 +865,19 @@ class RecordingExperimentExchange implements DmBridgeExchange {
     const fleet = this.telemetry[beforeTelemetry] ?? null;
     let decoded: DecodedRoundPlanReply | null = null;
     let validationError: unknown = null;
+    const typeCheckUniqueCatchObservations: ExperimentCallRecord['typeCheckUniqueCatchObservations'][number][] = [];
     if (exchangeError === null) {
       try {
-        decoded = decodeRoundPlanReply(reply, wire);
+        decoded = decodeRoundPlanReply(reply, wire, {
+          typeCheckMode: this.entry.experimentId === 'E05'
+            ? e05ArmDefinition(this.entry.armId).typeCheckMode
+            : 'typed',
+          onTypeCheckUniqueCatch: (observation) => typeCheckUniqueCatchObservations.push({
+            ...observation,
+            diagnosticCodes: [...observation.diagnosticCodes],
+            sourceHash: sha256(observation.source),
+          }),
+        });
       } catch (error: unknown) {
         validationError = error;
       }
@@ -814,16 +885,20 @@ class RecordingExperimentExchange implements DmBridgeExchange {
     const source = canonicalJson(reply);
     const projection = canonicalJson(wire.projection);
     const history = canonicalJson(wire.history);
-    const schemaGrammar = contract.delivery === 'full'
-      ? canonicalJson(contract.jsonSchema)
-      : contract.delivery === 'compact' ? contract.grammar : contract.contractId;
+    const schemaGrammar = 'delivery' in contract
+      ? contract.delivery === 'full'
+        ? canonicalJson(contract.jsonSchema)
+        : contract.delivery === 'compact' ? contract.grammar : contract.contractId
+      : 'grammar' in contract ? contract.grammar : '';
     const instructions = 'instructions' in contract
       ? contract.instructions
       : E02_SHARED_INSTRUCTIONS;
     const example = 'workedExamples' in contract
       ? exampleBlock(contract.workedExamples)
-      : contract.delivery === 'full' || contract.delivery === 'compact'
-        ? canonicalJson(contract.canonicalExample)
+      : 'canonicalExample' in contract
+        ? typeof contract.canonicalExample === 'string'
+          ? contract.canonicalExample
+          : canonicalJson(contract.canonicalExample)
         : '';
     const metrics = programMetrics(decoded);
     const legalActions = wire.projection.pendingRequest?.legalActions ?? [];
@@ -864,9 +939,11 @@ class RecordingExperimentExchange implements DmBridgeExchange {
               ? 'e02-shared-v1'
               : this.entry.experimentId === 'E03'
                 ? `e03-${this.entry.armId}-v1`
-                : 'e03-current-instructions-winner-v1',
+                : this.entry.experimentId === 'E05'
+                  ? 'e05-shared-js-instructions-v1'
+                  : 'e03-current-instructions-winner-v1',
         ),
-        schemaGrammar: component(schemaGrammar, contract.contractId),
+        schemaGrammar: component(schemaGrammar, 'contractId' in contract ? contract.contractId : 'round-plan-js:v1'),
         examples: component(
           example,
           this.entry.experimentId === 'E01' ? 'round-plan-canonical-v1' : this.entry.experimentId === 'E02' ? 'e02-worked-examples-v1' : 'e03-three-worked-examples-v1',
@@ -876,7 +953,7 @@ class RecordingExperimentExchange implements DmBridgeExchange {
         projection: component(projection, this.entry.experimentId === 'E04' ? `e04-${this.entry.armId}-v1` : 'dm-full-v1'),
         history: component(history, 'revision-history-v1'),
       },
-      contractId: contract.contractId,
+      contractId: 'contractId' in contract ? contract.contractId : 'round-plan-js:v1',
       fullStateHash: stateHash,
       transmittedViewHash: sha256(projection),
       snapshotBytes: this.entry.experimentId === 'E04'
@@ -962,6 +1039,7 @@ class RecordingExperimentExchange implements DmBridgeExchange {
       parsedOrCompiled: decoded?.plan ?? null,
       expandedLibraryForm: null,
       replayProof: null,
+      typeCheckUniqueCatchObservations,
     };
     this.calls.push(call);
     this.decisionCaptureContexts.set(logicalCallId, {
@@ -997,7 +1075,7 @@ export async function runE01Table(
   entry: ExperimentScheduleEntry,
   config: VttExperimentConfig,
   preregistration: ExperimentPreregistration,
-): Promise<ExperimentTableRecordV3> {
+): Promise<ExperimentTableRecordV4> {
   const wallStarted = Date.now();
   const bridge = launchBridge(config, entry);
   const abort = new AbortController();
@@ -1036,7 +1114,15 @@ export async function runE01Table(
       },
       config.candidateTurnK,
     );
-    const session = new DmRoundPlanSession(recording, model);
+    const session = new DmRoundPlanSession(
+      recording,
+      model,
+      undefined,
+      entry.experimentId === 'E05' ? 'js_program' : 'json_ast',
+      entry.experimentId === 'E05'
+        ? { typeCheckMode: e05ArmDefinition(entry.armId).typeCheckMode }
+        : {},
+    );
     const state = fourEnemyState();
     let registry: ControllerRegistry;
     const controllerFor = (id: (typeof state.combatants)[number]): Controller => id.profile.kind === 'monster'
@@ -1191,19 +1277,23 @@ export async function runE01Table(
     initiativeMode: 'shared_enemy',
     initiativeOrder: state?.initiative.map((initiative) => initiative.combatant) ?? [],
     promptVariant: entry.armId,
-    schemaVariant: entry.experimentId === 'E01' ? 'round-plan-json-ast-v1' : 'compact-grammar-v1',
+    schemaVariant: entry.experimentId === 'E05'
+      ? 'restricted-js-v1'
+      : entry.experimentId === 'E01' ? 'round-plan-json-ast-v1' : 'compact-grammar-v1',
     exampleCount: entry.experimentId === 'E01'
       ? 1
-      : entry.experimentId === 'E02' ? e02ArmDefinition(entry.armId).exampleCount : 3,
+      : entry.experimentId === 'E02' ? e02ArmDefinition(entry.armId).exampleCount : entry.experimentId === 'E05' ? 1 : 3,
     instructionVersion: entry.experimentId === 'E01'
       ? 'e01-terse-v1'
       : entry.experimentId === 'E02'
         ? 'e02-shared-v1'
         : entry.experimentId === 'E03'
           ? `e03-${entry.armId}-v1`
-          : 'e03-current-instructions-winner-v1',
+          : entry.experimentId === 'E05'
+            ? 'e05-shared-js-instructions-v1'
+            : 'e03-current-instructions-winner-v1',
     skillSetVersion: 'none-v1',
-    planSurface: 'json_ast',
+    planSurface: entry.experimentId === 'E05' ? 'js_program' : 'json_ast',
     projectionMode: entry.experimentId === 'E04'
       ? e04ArmDefinition(entry.armId).projectionMode
       : 'full',
@@ -1281,6 +1371,7 @@ export async function runE01Table(
 export const runE02Table = runE01Table;
 export const runE03Table = runE01Table;
 export const runE04Table = runE01Table;
+export const runE05Table = runE01Table;
 
 export interface EarlyStopDecision {
   readonly shouldStop: boolean;
@@ -1354,6 +1445,7 @@ export function evaluateEarlyStop(
     readonly armIds: readonly string[];
     readonly preregisteredTableCeiling: number;
     readonly method: 'paired_bootstrap' | 'two_proportion';
+    readonly metric?: 'completedRoundsPerHour' | 'correctionRate';
   },
 ): EarlyStopDecision {
   const confidence = 0.99 as const;
@@ -1376,10 +1468,18 @@ export function evaluateEarlyStop(
   const scored = options.armIds.map((armId) => {
     const armRecords = pairedRecords.filter((record) => record.armId === armId);
     const value = options.method === 'paired_bootstrap'
-      ? armRecords.reduce((sum, record) => sum + record.completedRoundsPerHour, 0) / armRecords.length
+      ? armRecords.reduce((sum, record) => sum + (
+          options.metric === 'correctionRate'
+            ? decisionCorrectionMetrics(record.calls).correctionRate
+            : record.completedRoundsPerHour
+        ), 0) / armRecords.length
       : armRecords.filter((record) => record.status === 'completed').length / armRecords.length;
     return { armId, value };
-  }).sort((left, right) => right.value - left.value || left.armId.localeCompare(right.armId));
+  }).sort((left, right) => (
+    options.metric === 'correctionRate' && options.method === 'paired_bootstrap'
+      ? left.value - right.value
+      : right.value - left.value
+  ) || left.armId.localeCompare(right.armId));
   const leader = scored[0];
   if (leader === undefined) return pending('no_arm_observations');
   if (scored[1]?.value === leader.value) {
@@ -1394,7 +1494,10 @@ export function evaluateEarlyStop(
         if (leaderRecord === undefined || competitorRecord === undefined) {
           throw new Error(`Completed pair ${pairId} is missing an arm record.`);
         }
-        return leaderRecord.completedRoundsPerHour - competitorRecord.completedRoundsPerHour;
+        return options.metric === 'correctionRate'
+          ? decisionCorrectionMetrics(competitorRecord.calls).correctionRate -
+            decisionCorrectionMetrics(leaderRecord.calls).correctionRate
+          : leaderRecord.completedRoundsPerHour - competitorRecord.completedRoundsPerHour;
       });
       lowerBound = pairedBootstrapLowerBound(differences, confidence);
     } else {
@@ -1447,11 +1550,21 @@ function markdownReport(report: ExperimentReport): string {
     '',
     `Stopping reason: ${report.stoppingReason}`,
     '',
-    '| Arm | Tables | Completed | Aborted | Completion | Wall median (IQR) ms | Latency median (IQR) ms | Correction rate | Input / cached / output / reasoning tokens | Bytes sent | Reconstruction failures |',
-    '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
+    '| Arm | Tables | Completed | Aborted | Completion | Wall median (IQR) ms | Wall / completed round ms | Latency median (IQR) ms | Correction rate | First-pass validity | Mean correction rounds / decision | Input / cached / output / reasoning tokens | Bytes sent | Reconstruction failures |',
+    '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
   ];
   for (const arm of report.aggregates) {
-    lines.push(`| ${arm.armId} | ${String(arm.tableCount)} | ${String(arm.completedCount)} | ${String(arm.abortedCount)} | ${(arm.completionRate * 100).toFixed(1)}% | ${arm.totalWallMs.median?.toFixed(1) ?? 'n/a'} (${arm.totalWallMs.iqr?.toFixed(1) ?? 'n/a'}) | ${arm.latencyMs.median?.toFixed(1) ?? 'n/a'} (${arm.latencyMs.iqr?.toFixed(1) ?? 'n/a'}) | ${(arm.correctionRate * 100).toFixed(2)}% | ${String(arm.tokenTotals.input)} / ${String(arm.tokenTotals.cachedInput)} / ${String(arm.tokenTotals.output)} / ${String(arm.tokenTotals.reasoning)} | ${String(arm.bytesSent)} | ${String(arm.reconstructionFailures)} |`);
+    lines.push(`| ${arm.armId} | ${String(arm.tableCount)} | ${String(arm.completedCount)} | ${String(arm.abortedCount)} | ${(arm.completionRate * 100).toFixed(1)}% | ${arm.totalWallMs.median?.toFixed(1) ?? 'n/a'} (${arm.totalWallMs.iqr?.toFixed(1) ?? 'n/a'}) | ${arm.wallClockMsPerCompletedRound?.toFixed(1) ?? 'n/a'} | ${arm.latencyMs.median?.toFixed(1) ?? 'n/a'} (${arm.latencyMs.iqr?.toFixed(1) ?? 'n/a'}) | ${(arm.correctionRate * 100).toFixed(2)}% | ${(arm.firstPassValidity * 100).toFixed(2)}% | ${arm.meanCorrectionRoundsPerDecision.toFixed(3)} | ${String(arm.tokenTotals.input)} / ${String(arm.tokenTotals.cachedInput)} / ${String(arm.tokenTotals.output)} / ${String(arm.tokenTotals.reasoning)} | ${String(arm.bytesSent)} | ${String(arm.reconstructionFailures)} |`);
+  }
+  if (report.experimentId === 'E05') {
+    lines.push('', '## Type-check unique catches', '');
+    const typed = report.aggregates.find((arm) => arm.armId === 'typed-js');
+    lines.push(`Typed rejected programs: ${String(typed?.typeCheckUniqueCatch.rejectedProgramCount ?? 0)}`);
+    lines.push(`Caught only by type check: ${String(typed?.typeCheckUniqueCatch.caughtOnlyByTypeCheckCount ?? 0)}`);
+    lines.push(`Unique catch rate: ${typed?.typeCheckUniqueCatch.rate === null || typed === undefined ? 'n/a' : `${(typed.typeCheckUniqueCatch.rate * 100).toFixed(2)}%`}`);
+    for (const diagnostic of typed?.typeCheckUniqueCatch.topUniqueDiagnosticCodes ?? []) {
+      lines.push('', `- TS${String(diagnostic.code)} (${String(diagnostic.count)}): \`${diagnostic.exampleProgram.replaceAll('`', '\\`')}\``);
+    }
   }
   return `${lines.join('\n')}\n`;
 }
@@ -1491,6 +1604,7 @@ export async function runVttExperiment(
         armIds: preregistration.arms.map((arm) => arm.id),
         preregisteredTableCeiling: preregistration.earlyStopRule.preregisteredTableCeiling,
         method: preregistration.earlyStopRule.method,
+        metric: preregistration.earlyStopRule.metric,
       });
       if (decision.shouldStop) {
         earlyStop = decision;
@@ -1562,8 +1676,8 @@ export function decodeVttExperimentArguments(argv: readonly string[]): VttExperi
   ]);
   for (const name of values.keys()) if (!allowed.has(name)) throw new TypeError(`Unknown option --${name}.`);
   const experiment = optionText(values, 'experiment');
-  if (experiment !== 'E01' && experiment !== 'E02' && experiment !== 'E03' && experiment !== 'E04') {
-    throw new TypeError('--experiment must name a registered experiment (E01, E02, E03, or E04).');
+  if (experiment !== 'E01' && experiment !== 'E02' && experiment !== 'E03' && experiment !== 'E04' && experiment !== 'E05') {
+    throw new TypeError('--experiment must name a registered experiment (E01, E02, E03, E04, or E05).');
   }
   const effort = optionText(values, 'effort', DEFAULT_DM_REASONING_EFFORT);
   if (effort !== 'low' && effort !== 'medium' && effort !== 'high' && effort !== 'xhigh') {

@@ -38,18 +38,28 @@ if (isResume && process.env.FAKE_CODEX_MODE === 'hang') {
     process.stderr.write('Scripted soak requires AlgorithmController on every PC.\n');
     process.exitCode = 9;
   } else {
-    let reply = {
-      kind: 'round_plan',
-      protocolVersion: request.protocolVersion,
-      encounterId: request.encounterId,
-      requestId: request.requestId,
-      expectedRevision: request.expectedRevision,
-      round: request.round,
-      monsters: monsterIds.map((monsterId) => ({
-        monsterId,
-        program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
-      })),
-    };
+    let reply = request.surface === 'js_program'
+      ? {
+          kind: 'js_round_plan',
+          protocolVersion: request.protocolVersion,
+          encounterId: request.encounterId,
+          requestId: request.requestId,
+          expectedRevision: request.expectedRevision,
+          round: request.round,
+          monsters: monsterIds.map((monsterId) => ({ monsterId, source: 'emit(endTurn());' })),
+        }
+      : {
+          kind: 'round_plan',
+          protocolVersion: request.protocolVersion,
+          encounterId: request.encounterId,
+          requestId: request.requestId,
+          expectedRevision: request.expectedRevision,
+          round: request.round,
+          monsters: monsterIds.map((monsterId) => ({
+            monsterId,
+            program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+          })),
+        };
     if (
       process.env.FAKE_CODEX_MODE === 'malformed_once' &&
       process.env.FAKE_CODEX_STATE_FILE !== undefined

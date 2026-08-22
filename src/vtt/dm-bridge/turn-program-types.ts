@@ -105,18 +105,50 @@ export interface TurnProgramAmbientDeclaration {
   readonly source: string;
 }
 
+export interface TurnProgramAmbientApiDescription {
+  readonly actorId: CombatantId;
+  readonly description: string;
+}
+
+function turnProgramAmbientFacts(
+  projection: DmBoardProjection,
+  actorId: CombatantId,
+): Omit<TurnProgramAmbientDeclaration, 'source'> {
+  const actions = actionsForActor(projection, actorId);
+  return {
+    actorId,
+    combatantIds: visibleCombatantIds(projection, actorId),
+    spellIds: uniqueSorted(actions.flatMap((command) =>
+      command.type === 'cast_spell' ? [command.spellId] : [])),
+    attackIds: uniqueSorted(actions.flatMap((command) =>
+      command.type === 'attack' && command.attackId !== undefined ? [command.attackId] : [])),
+    movementBudgetFeet: movementBudget(projection, actorId),
+  };
+}
+
+/** Describes the dynamic ambient facts without emitting TypeScript declarations. */
+export function describeTurnProgramAmbientApi(
+  projection: DmBoardProjection,
+  actorId: CombatantId,
+): TurnProgramAmbientApiDescription {
+  const facts = turnProgramAmbientFacts(projection, actorId);
+  return {
+    actorId,
+    description: [
+      `For actor ${actorId}, the restricted-JS API can reference these visible combatant IDs: ${facts.combatantIds.join(', ') || 'none'}.`,
+      `The currently legal spell IDs are: ${facts.spellIds.join(', ') || 'none'}.`,
+      `The currently legal named attack IDs are: ${facts.attackIds.join(', ') || 'none'}.`,
+      `An explicit move or retreat distance may be an integer from 0 through ${String(facts.movementBudgetFeet)} feet.`,
+    ].join(' '),
+  };
+}
+
 /** Generates the complete ambient API for one actor from its decision-time DM projection. */
 export function generateTurnProgramDeclarations(
   projection: DmBoardProjection,
   actorId: CombatantId,
 ): TurnProgramAmbientDeclaration {
-  const actions = actionsForActor(projection, actorId);
-  const combatantIds = visibleCombatantIds(projection, actorId);
-  const spellIds = uniqueSorted(actions.flatMap((command) =>
-    command.type === 'cast_spell' ? [command.spellId] : []));
-  const attackIds = uniqueSorted(actions.flatMap((command) =>
-    command.type === 'attack' && command.attackId !== undefined ? [command.attackId] : []));
-  const movementBudgetFeet = movementBudget(projection, actorId);
+  const { combatantIds, spellIds, attackIds, movementBudgetFeet } = turnProgramAmbientFacts(projection, actorId);
   const source = `declare const movementFeetBrand: unique symbol;
 type CombatantId = ${literalUnion(combatantIds)};
 type SpellId = ${literalUnion(spellIds)};

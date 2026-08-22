@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { decisionProgramSchema } from './dm-bridge/round-plan-contract';
 
-export const VTT_EXPERIMENT_SCHEMA_VERSION = 3 as const;
+export const VTT_EXPERIMENT_SCHEMA_VERSION = 4 as const;
 export const VTT_EXPERIMENT_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 const text = z.string().min(1);
@@ -18,7 +18,7 @@ export const promptComponentTelemetrySchema = z.strictObject({
   estimatedTokens: nonNegativeInteger,
 });
 
-export const experimentCallRecordSchema = z.strictObject({
+const experimentCallRecordV3Schema = z.strictObject({
   logicalCallId: text,
   parentCallId: nullableText,
   transcriptId: text,
@@ -136,7 +136,20 @@ export const experimentCallRecordSchema = z.strictObject({
   replayProof: z.unknown().nullable(),
 });
 
-const experimentCallRecordV2Schema = experimentCallRecordSchema.omit({
+export const typeCheckUniqueCatchObservationSchema = z.strictObject({
+  monsterId: text,
+  source: text,
+  sourceHash: digest,
+  diagnosticCodes: z.array(nonNegativeInteger),
+  outcome: z.enum(['caughtByBoth', 'caughtOnlyByTypeCheck']),
+  runtimeError: nullableText,
+});
+
+export const experimentCallRecordSchema = experimentCallRecordV3Schema.extend({
+  typeCheckUniqueCatchObservations: z.array(typeCheckUniqueCatchObservationSchema),
+});
+
+const experimentCallRecordV2Schema = experimentCallRecordV3Schema.omit({
   bytesSent: true,
   reconstructionFailureCount: true,
 });
@@ -298,6 +311,13 @@ export const experimentTableRecordV2Schema = z.strictObject({
   quality: experimentQualityBlockSchema,
 });
 
+export const experimentTableRecordV3Schema = z.strictObject({
+  schemaVersion: z.literal(3),
+  ...experimentTableRecordShape,
+  calls: z.array(experimentCallRecordV3Schema),
+  quality: experimentQualityBlockSchema,
+});
+
 export const experimentTableRecordSchema = z.strictObject({
   schemaVersion: z.literal(VTT_EXPERIMENT_SCHEMA_VERSION),
   ...experimentTableRecordShape,
@@ -311,8 +331,9 @@ export type RolloutInputCapture = z.infer<typeof rolloutInputCaptureSchema>;
 export type ExperimentQualityBlock = z.infer<typeof experimentQualityBlockSchema>;
 export type ExperimentTableRecordV1 = z.infer<typeof experimentTableRecordV1Schema>;
 export type ExperimentTableRecordV2 = z.infer<typeof experimentTableRecordV2Schema>;
-export type ExperimentTableRecordV3 = z.infer<typeof experimentTableRecordSchema>;
-export type ExperimentTableRecord = ExperimentTableRecordV1 | ExperimentTableRecordV2 | ExperimentTableRecordV3;
+export type ExperimentTableRecordV3 = z.infer<typeof experimentTableRecordV3Schema>;
+export type ExperimentTableRecordV4 = z.infer<typeof experimentTableRecordSchema>;
+export type ExperimentTableRecord = ExperimentTableRecordV1 | ExperimentTableRecordV2 | ExperimentTableRecordV3 | ExperimentTableRecordV4;
 
 export function decodeExperimentTableRecord(value: unknown): ExperimentTableRecord {
   if (typeof value !== 'object' || value === null || !('schemaVersion' in value)) {
@@ -333,6 +354,8 @@ export function decodeExperimentTableRecord(value: unknown): ExperimentTableReco
     case 2:
       return experimentTableRecordV2Schema.parse(value);
     case 3:
+      return experimentTableRecordV3Schema.parse(value);
+    case 4:
       return experimentTableRecordSchema.parse(value);
   }
   throw new Error('Experiment table schema-version dispatch is incomplete.');
@@ -355,6 +378,9 @@ export interface ExperimentArmAggregate {
   readonly completedRoundsPerHour: DistributionSummary;
   readonly latencyMs: DistributionSummary;
   readonly correctionRate: number;
+  readonly firstPassValidity: number;
+  readonly meanCorrectionRoundsPerDecision: number;
+  readonly wallClockMsPerCompletedRound: number | null;
   readonly bytesSent: number;
   readonly reconstructionFailures: number;
   readonly tokenTotals: {
@@ -362,6 +388,46 @@ export interface ExperimentArmAggregate {
     readonly cachedInput: number;
     readonly output: number;
     readonly reasoning: number;
+  };
+  readonly typeCheckUniqueCatch: {
+    readonly rejectedProgramCount: number;
+    readonly caughtByBothCount: number;
+    readonly caughtOnlyByTypeCheckCount: number;
+    readonly rate: number | null;
+    readonly topUniqueDiagnosticCodes: readonly {
+      readonly code: number;
+      readonly count: number;
+      readonly exampleProgram: string;
+    }[];
+  };
+}
+
+export interface DecisionCorrectionMetrics {
+  readonly decisionPointCount: number;
+  readonly correctedDecisionPointCount: number;
+  readonly correctionRoundCount: number;
+  readonly correctionRate: number;
+  readonly firstPassValidity: number;
+  readonly meanCorrectionRoundsPerDecision: number;
+}
+
+export function decisionCorrectionMetrics(
+  calls: readonly Pick<ExperimentCallRecord, 'logicalCallId' | 'parentCallId' | 'phase'>[],
+): DecisionCorrectionMetrics {
+  const decisionPoints = calls.filter((call) => call.phase === 'initial_plan' || call.phase === 'reconsult');
+  const correctedRoots = new Set(calls
+    .filter((call) => call.phase === 'correction' && call.parentCallId !== null)
+    .map((call) => call.parentCallId));
+  const correctedDecisionPointCount = decisionPoints.filter((call) => correctedRoots.has(call.logicalCallId)).length;
+  const correctionRoundCount = calls.filter((call) => call.phase === 'correction').length;
+  const decisionPointCount = decisionPoints.length;
+  return {
+    decisionPointCount,
+    correctedDecisionPointCount,
+    correctionRoundCount,
+    correctionRate: decisionPointCount === 0 ? 0 : correctedDecisionPointCount / decisionPointCount,
+    firstPassValidity: decisionPointCount === 0 ? 0 : (decisionPointCount - correctedDecisionPointCount) / decisionPointCount,
+    meanCorrectionRoundsPerDecision: decisionPointCount === 0 ? 0 : correctionRoundCount / decisionPointCount,
   };
 }
 
@@ -396,7 +462,23 @@ export function aggregateExperimentRecords(
     const tables = records.filter((record) => record.armId === armId);
     const calls = tables.flatMap((record) => record.calls);
     const completedCount = tables.filter((record) => record.status === 'completed').length;
-    const dmCalls = tables.reduce((sum, record) => sum + record.dmCalls, 0);
+    const corrections = decisionCorrectionMetrics(calls);
+    const completedRounds = tables.reduce((sum, record) => sum + record.completedRounds, 0);
+    const uniqueCatchObservations = calls.flatMap((call) =>
+      'typeCheckUniqueCatchObservations' in call
+        ? typeCheckUniqueCatchObservationSchema.array().parse(call.typeCheckUniqueCatchObservations)
+        : []);
+    const caughtOnly = uniqueCatchObservations.filter((observation) => observation.outcome === 'caughtOnlyByTypeCheck');
+    const diagnosticCounts = new Map<number, { count: number; exampleProgram: string }>();
+    for (const observation of caughtOnly) {
+      for (const code of new Set(observation.diagnosticCodes)) {
+        const current = diagnosticCounts.get(code);
+        diagnosticCounts.set(code, {
+          count: (current?.count ?? 0) + 1,
+          exampleProgram: current?.exampleProgram ?? observation.source,
+        });
+      }
+    }
     return {
       armId,
       tableCount: tables.length,
@@ -406,9 +488,12 @@ export function aggregateExperimentRecords(
       totalWallMs: distribution(tables.map((record) => record.totalWallMs)),
       completedRoundsPerHour: distribution(tables.map((record) => record.completedRoundsPerHour)),
       latencyMs: distribution(calls.map((call) => call.latencyMs)),
-      correctionRate: dmCalls === 0
-        ? 0
-        : tables.reduce((sum, record) => sum + record.correctionCount, 0) / dmCalls,
+      correctionRate: corrections.correctionRate,
+      firstPassValidity: corrections.firstPassValidity,
+      meanCorrectionRoundsPerDecision: corrections.meanCorrectionRoundsPerDecision,
+      wallClockMsPerCompletedRound: completedRounds === 0
+        ? null
+        : tables.reduce((sum, record) => sum + record.totalWallMs, 0) / completedRounds,
       bytesSent: calls.reduce(
         (sum, call) => {
           const value: unknown = 'bytesSent' in call ? call.bytesSent : 0;
@@ -430,6 +515,16 @@ export function aggregateExperimentRecords(
         cachedInput: calls.reduce((sum, call) => sum + call.cachedInputTokens, 0),
         output: calls.reduce((sum, call) => sum + call.outputTokens, 0),
         reasoning: calls.reduce((sum, call) => sum + call.reasoningTokens, 0),
+      },
+      typeCheckUniqueCatch: {
+        rejectedProgramCount: uniqueCatchObservations.length,
+        caughtByBothCount: uniqueCatchObservations.length - caughtOnly.length,
+        caughtOnlyByTypeCheckCount: caughtOnly.length,
+        rate: uniqueCatchObservations.length === 0 ? null : caughtOnly.length / uniqueCatchObservations.length,
+        topUniqueDiagnosticCodes: [...diagnosticCounts]
+          .map(([code, value]) => ({ code, ...value }))
+          .sort((left, right) => right.count - left.count || left.code - right.code)
+          .slice(0, 5),
       },
     };
   });

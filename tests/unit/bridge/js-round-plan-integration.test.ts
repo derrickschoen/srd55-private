@@ -16,6 +16,7 @@ import {
 import {
   DM_BRIDGE_PROTOCOL_VERSION,
   ROUND_PLAN_JS_REPLY_CONTRACT,
+  observeTypeCheckUniqueCatch,
   type DmBridgeExchange,
   type DmBridgeRequest,
 } from '../../../src/vtt/dm-bridge/contracts';
@@ -296,6 +297,76 @@ describe('JS round-plan protocol and replay integration', () => {
       !entry.passed && entry.diagnosticCodes.includes(2345) && entry.durationMs === 0)).toBe(true);
     expect(session.typeCheckTelemetry()).toEqual(telemetry);
     expect(session.jsProgramArtifact(1, f.monster.id)).toBeNull();
+  });
+
+  it('arms_share_typecheck: untyped JS bypasses compilation while preserving byte-identical model requests', async () => {
+    const f = fixture();
+    const source = 'emit(move(nearestEnemy(), 31));';
+    const typedExchange = new FakeJsExchange(source);
+    const untypedExchange = new FakeJsExchange(source);
+    const typed = new DmRoundPlanSession(
+      typedExchange,
+      undefined,
+      undefined,
+      'js_program',
+      { typeCheckMode: 'typed' },
+    );
+    const untyped = new DmRoundPlanSession(
+      untypedExchange,
+      undefined,
+      undefined,
+      'js_program',
+      { typeCheckMode: 'untyped' },
+    );
+
+    await expect(typed.startRound(context(f.state), new AbortController().signal)).rejects.toThrow(
+      /JS turn-program type check failed/u,
+    );
+    await expect(untyped.startRound(context(f.state), new AbortController().signal)).resolves.toMatchObject({
+      monsters: [{ program: { kind: 'action', action: { kind: 'move_toward', maximumFeet: 31 } } }],
+    });
+
+    expect(typedExchange.requests[0]).toEqual(untypedExchange.requests[0]);
+    expect(typedExchange.requests[0]).not.toHaveProperty('ambientDeclarations');
+    expect(typed.typeCheckTelemetry()).toHaveLength(3);
+    expect(untyped.typeCheckTelemetry()).toEqual([]);
+    expect(untyped.jsProgramArtifact(1, f.monster.id)).toMatchObject({
+      ambientDeclarations: null,
+      typeCheck: null,
+    });
+  });
+
+  it('shadow_run_leaks: classifies on a disposable state without adding model exchanges or touching encounter state', () => {
+    const f = fixture();
+    const before = structuredClone(f.state);
+    const projection = context(f.state).projection.encounter;
+    const projectionBefore = structuredClone(projection);
+    const observation = observeTypeCheckUniqueCatch(
+      'emit(endTurn());',
+      projection,
+      f.monster.id,
+      [2345],
+      {},
+      (source, shadowState) => {
+        Object.defineProperty(shadowState, 'round', { value: 99, configurable: true });
+        return {
+          source,
+          emittedDecisionProgram: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+          steps: 1,
+        };
+      },
+    );
+    const caughtByBoth = observeTypeCheckUniqueCatch(
+      'emit(attack());',
+      projection,
+      f.monster.id,
+      [2554],
+    );
+
+    expect(observation).toMatchObject({ outcome: 'caughtOnlyByTypeCheck', runtimeError: null });
+    expect(caughtByBoth).toMatchObject({ outcome: 'caughtByBoth' });
+    expect(f.state).toEqual(before);
+    expect(projection).toEqual(projectionBefore);
   });
 
   it('derives the js_program prompt contract from the interpreter grammar module', () => {
