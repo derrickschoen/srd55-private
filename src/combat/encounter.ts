@@ -64,7 +64,7 @@ import {
 } from './resolution';
 import { spellDefinition } from './spells/definitions';
 import { validateSpellSlotCapacities } from './spells/resources';
-import type { CastChoice, ConditionLifecycleOperation, EffectData, ModifierDuration, ScaledDice, SpellCastCommand, SpellDefinition, SpellOperation, SpellPersistentAreaEffectSpec } from './spells/types';
+import type { CastChoice, CompositionStep, ConditionLifecycleOperation, EffectData, ModifierDuration, ScaledDice, SpellCastCommand, SpellDefinition, SpellOperation, SpellPersistentAreaEffectSpec } from './spells/types';
 import { affectedCells, creatureOccupiesAffectedCell, type AreaTemplate } from './templates';
 import {
   armorClass,
@@ -4709,6 +4709,63 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
   executeSpellOperation(context, definition, command, targets, definition.operation);
 }
 
+function compositionSemanticState(state: EncounterState): string {
+  const { eventLog: _eventLog, nextEventSequence: _nextEventSequence, ...semanticState } = state;
+  return canonicalJson(semanticState);
+}
+
+function compositionTargets(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  inherited: readonly CombatantId[],
+  resolution: CompositionStep['targetResolution'],
+): readonly CombatantId[] {
+  if (resolution.kind === 'inherit') return inherited;
+  switch (resolution.selector.kind) {
+    case 'caster':
+      return [command.actor];
+    case 'enclosing_area':
+      return areaTargets(context.state, definition, command);
+  }
+}
+
+function compositionOrder(operation: Extract<SpellOperation, { readonly kind: 'composition' }>): readonly number[] {
+  if (operation.ordering === 'declaration_order') return operation.steps.map((_step, index) => index);
+  const expected = operation.steps.map((_step, index) => index);
+  if (
+    operation.order.length !== expected.length ||
+    new Set(operation.order).size !== expected.length ||
+    operation.order.some((index) => !Number.isSafeInteger(index) || index < 0 || index >= expected.length)
+  ) throw new EncounterRuleError('A composition explicit order must be a zero-based permutation of its steps.');
+  return operation.order;
+}
+
+function executeCompositionStep(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  inheritedTargets: readonly CombatantId[],
+  step: CompositionStep,
+): 'applied' | 'operation_refused' | 'encounter_rule_refusal' {
+  const stateBefore = context.state;
+  const eventCountBefore = context.events.length;
+  const semanticBefore = compositionSemanticState(stateBefore);
+  try {
+    const targets = compositionTargets(context, definition, command, inheritedTargets, step.targetResolution);
+    executeSpellOperation(context, definition, { ...command, targets }, targets, step.operation);
+  } catch (error) {
+    if (!(error instanceof EncounterRuleError)) throw error;
+    context.state = stateBefore;
+    context.events.splice(eventCountBefore);
+    return 'encounter_rule_refusal';
+  }
+  if (compositionSemanticState(context.state) !== semanticBefore) return 'applied';
+  context.state = stateBefore;
+  context.events.splice(eventCountBefore);
+  return 'operation_refused';
+}
+
 function executeSpellOperation(
   context: ReductionContext,
   definition: SpellDefinition,
@@ -4717,6 +4774,26 @@ function executeSpellOperation(
   operation: SpellOperation,
 ): void {
   switch (operation.kind) {
+    case 'composition': {
+      const compositionState = context.state;
+      const compositionEventCount = context.events.length;
+      for (const stepIndex of compositionOrder(operation)) {
+        const step = operation.steps[stepIndex];
+        if (step === undefined) throw new EncounterRuleError('A composition order referenced a missing step.');
+        const outcome = executeCompositionStep(context, definition, command, targets, step);
+        if (outcome === 'applied') continue;
+        if (operation.onRefusal === 'abort') {
+          context.state = compositionState;
+          context.events.splice(compositionEventCount);
+        }
+        emit(context, {
+          type: 'composition_step_refused', caster: command.actor, spellId: definition.id,
+          stepIndex, propagation: operation.onRefusal, reason: outcome,
+        });
+        if (operation.onRefusal === 'abort') return;
+      }
+      return;
+    }
     case 'caster_choice': {
       const mode = operation.modes.find((candidate) => candidate.mode === command.selectedOption);
       if (mode === undefined) {

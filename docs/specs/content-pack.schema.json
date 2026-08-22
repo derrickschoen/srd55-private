@@ -403,6 +403,7 @@
       "properties": {
         "kind": {
           "enum": [
+            "composition",
             "caster_choice",
             "random_branch",
             "target_branch",
@@ -456,6 +457,9 @@
         }
       },
       "oneOf": [
+        {
+          "$ref": "#/$defs/operation-composition"
+        },
         {
           "$ref": "#/$defs/operation-caster_choice"
         },
@@ -1099,6 +1103,70 @@
         },
         "thresholdRider": { "type": ["object", "null"] }
       }
+    },
+    "operation-composition": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "onRefusal", "steps", "ordering"],
+          "properties": {
+            "kind": { "const": "composition" },
+            "onRefusal": { "enum": ["abort", "continue"] },
+            "ordering": { "const": "declaration_order" },
+            "steps": { "$ref": "#/$defs/compositionSteps" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "onRefusal", "steps", "ordering", "order"],
+          "properties": {
+            "kind": { "const": "composition" },
+            "onRefusal": { "enum": ["abort", "continue"] },
+            "ordering": { "const": "explicit" },
+            "order": {
+              "type": "array", "minItems": 1,
+              "items": { "type": "integer", "minimum": 0 }
+            },
+            "steps": { "$ref": "#/$defs/compositionSteps" }
+          }
+        }
+      ]
+    },
+    "compositionSteps": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["targetResolution", "operation"],
+        "properties": {
+          "targetResolution": { "$ref": "#/$defs/compositionTargetResolution" },
+          "operation": { "$ref": "#/$defs/spellOperation" }
+        }
+      }
+    },
+    "compositionTargetResolution": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "inherit" } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "selector"],
+          "properties": {
+            "kind": { "const": "re_resolve" },
+            "selector": {
+              "oneOf": [
+                {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["kind"],
+                  "properties": { "kind": { "enum": ["caster", "enclosing_area"] } }
+                }
+              ]
+            }
+          }
+        }
+      ]
     },
     "operation-caster_choice": {
       "type": "object", "additionalProperties": false,

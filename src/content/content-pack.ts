@@ -13,6 +13,7 @@ import type { MonsterAction, MonsterStatblock, MonsterStatblockInput, SenseKind 
 import { monsterStatblock } from '../combat/statblock';
 import { SPELL_MANIFEST } from '../combat/spells/manifest';
 import {
+  MAX_COMPOSITION_DEPTH,
   SPELL_OPERATION_KINDS,
   type SpellDefinition,
   type SpellOperation,
@@ -136,6 +137,7 @@ const targetingSchema = z.discriminatedUnion('kind', [
 ]);
 
 const operationRequiredFields = {
+  composition: ['onRefusal', 'steps', 'ordering'],
   caster_choice: ['modes'],
   random_branch: ['dieSides', 'branches'],
   target_branch: ['branches', 'otherwise'],
@@ -188,6 +190,7 @@ const operationRequiredFields = {
 } as const satisfies Readonly<Record<SpellOperation['kind'], readonly string[]>>;
 
 const operationOptionalFields = {
+  composition: ['order'],
   save_effect: ['excludeCaster', 'willingTargetSkipsSave'],
   reaction_save_cancel: ['trigger'],
   weapon_attack_augmentation: ['attackAbility', 'damageAbility', 'damageTypeChoice', 'consumeOnHit', 'concentration', 'durationRounds', 'followUp'],
@@ -672,6 +675,45 @@ function validReevaluatedBranchOperation(operation: Readonly<Record<string, unkn
     structurallyValidOperation(operation.operation);
 }
 
+function validCompositionTargetResolution(value: unknown): boolean {
+  const resolution = objectRecord(value);
+  if (resolution === null || (resolution.kind !== 'inherit' && resolution.kind !== 're_resolve')) return false;
+  if (resolution.kind === 'inherit') return hasOnlyKeys(resolution, ['kind']);
+  if (!hasOnlyKeys(resolution, ['kind', 'selector'])) return false;
+  const selector = objectRecord(resolution.selector);
+  if (selector === null || typeof selector.kind !== 'string') return false;
+  return (selector.kind === 'caster' || selector.kind === 'enclosing_area') &&
+    hasOnlyKeys(selector, ['kind']);
+}
+
+function validCompositionOperation(operation: Readonly<Record<string, unknown>>): boolean {
+  const explicit = operation.ordering === 'explicit';
+  if (
+    (operation.ordering !== 'declaration_order' && !explicit) ||
+    !hasOnlyKeys(operation, explicit
+      ? ['kind', 'onRefusal', 'steps', 'ordering', 'order']
+      : ['kind', 'onRefusal', 'steps', 'ordering']) ||
+    (operation.onRefusal !== 'abort' && operation.onRefusal !== 'continue') ||
+    !Array.isArray(operation.steps) ||
+    operation.steps.length < 1
+  ) return false;
+  const steps = operation.steps;
+  for (const value of steps) {
+    const step = objectRecord(value);
+    if (
+      step === null ||
+      !hasOnlyKeys(step, ['targetResolution', 'operation']) ||
+      !validCompositionTargetResolution(step.targetResolution) ||
+      !structurallyValidOperation(step.operation)
+    ) return false;
+  }
+  if (!explicit) return true;
+  if (!Array.isArray(operation.order) || operation.order.length !== steps.length) return false;
+  const indices = operation.order;
+  return indices.every((index) => Number.isSafeInteger(index) && (index as number) >= 0 &&
+    (index as number) < steps.length) && new Set(indices).size === steps.length;
+}
+
 function structurallyValidOperation(value: unknown): value is SpellOperation {
   const operation = objectRecord(value);
   const kind = operationKind(value);
@@ -681,6 +723,7 @@ function structurallyValidOperation(value: unknown): value is SpellOperation {
     !SPELL_OPERATION_KINDS.includes(kind as SpellOperation['kind'])
   ) return false;
   const typedKind = kind as SpellOperation['kind'];
+  if (typedKind === 'composition') return validCompositionOperation(operation);
   if (typedKind === 'caster_choice') return validCasterChoiceOperation(operation);
   if (typedKind === 'random_branch') return validRandomBranchOperation(operation);
   if (typedKind === 'target_branch') return validTargetBranchOperation(operation);
@@ -884,6 +927,12 @@ export type ContentPackRefusal =
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'version_mismatch'; readonly receivedVersion: unknown }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'missing_provenance' }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'unknown_operation_kind'; readonly operationKind: string }
+  | {
+      readonly kind: 'content_pack_refusal';
+      readonly reason: 'composition_depth_exceeded';
+      readonly maximumDepth: typeof MAX_COMPOSITION_DEPTH;
+      readonly receivedDepth: number;
+    }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'unknown_effect_variant'; readonly effectKind: string }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'malformed_record'; readonly path: readonly PropertyKey[] }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'id_collision'; readonly id: string };
@@ -1013,14 +1062,69 @@ function allRecords(pack: ContentPackV1): readonly { readonly sourceId: string; 
   ];
 }
 
+function nestedOperationValues(operation: Readonly<Record<string, unknown>>): readonly unknown[] {
+  if (operation.kind === 'composition' && Array.isArray(operation.steps)) {
+    return operation.steps.flatMap((value) => {
+      const step = objectRecord(value);
+      return step === null ? [] : [step.operation];
+    });
+  }
+  if (operation.kind === 'caster_choice' && Array.isArray(operation.modes)) {
+    return operation.modes.flatMap((value) => {
+      const mode = objectRecord(value);
+      return mode === null ? [] : [mode.operation];
+    });
+  }
+  if (operation.kind === 'random_branch' && Array.isArray(operation.branches)) {
+    return operation.branches.flatMap((value) => {
+      const branch = objectRecord(value);
+      return branch === null ? [] : [branch.operation];
+    });
+  }
+  if (operation.kind === 'target_branch' && Array.isArray(operation.branches)) {
+    return [
+      ...operation.branches.flatMap((value) => {
+        const branch = objectRecord(value);
+        return branch === null ? [] : [branch.operation];
+      }),
+      ...(operation.otherwise === null || operation.otherwise === undefined ? [] : [operation.otherwise]),
+    ];
+  }
+  return operation.kind === 'reevaluated_branch' ? [operation.operation] : [];
+}
+
 function firstUnknownOperation(value: Readonly<Record<string, unknown>>): string | null {
   if (!Array.isArray(value.spells)) return null;
   for (const spellValue of value.spells) {
     const spell = objectRecord(spellValue);
-    const kind = operationKind(spell?.operation);
-    if (kind !== null && !SPELL_OPERATION_KINDS.includes(kind as SpellOperation['kind'])) return kind;
+    const pending: unknown[] = [spell?.operation];
+    while (pending.length > 0) {
+      const candidate = objectRecord(pending.pop());
+      const kind = operationKind(candidate);
+      if (kind !== null && !SPELL_OPERATION_KINDS.includes(kind as SpellOperation['kind'])) return kind;
+      if (candidate !== null) pending.push(...nestedOperationValues(candidate));
+    }
   }
   return null;
+}
+
+function maximumCompositionDepth(value: Readonly<Record<string, unknown>>): number {
+  if (!Array.isArray(value.spells)) return 0;
+  let maximum = 0;
+  const pending: Array<{ readonly value: unknown; readonly depth: number }> = value.spells.flatMap((spellValue) => {
+    const spell = objectRecord(spellValue);
+    return spell === null ? [] : [{ value: spell.operation, depth: 0 }];
+  });
+  while (pending.length > 0) {
+    const frame = pending.pop();
+    if (frame === undefined) break;
+    const operation = objectRecord(frame.value);
+    if (operation === null) continue;
+    const depth = operation.kind === 'composition' ? frame.depth + 1 : frame.depth;
+    maximum = Math.max(maximum, depth);
+    for (const nested of nestedOperationValues(operation)) pending.push({ value: nested, depth });
+  }
+  return maximum;
 }
 
 function firstUnknownEffect(value: Readonly<Record<string, unknown>>): string | null {
@@ -1059,6 +1163,16 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
     return {
       status: 'refused',
       refusal: { kind: 'content_pack_refusal', reason: 'unknown_operation_kind', operationKind: unknownOperation },
+    };
+  }
+  const compositionDepth = maximumCompositionDepth(root);
+  if (compositionDepth > MAX_COMPOSITION_DEPTH) {
+    return {
+      status: 'refused',
+      refusal: {
+        kind: 'content_pack_refusal', reason: 'composition_depth_exceeded',
+        maximumDepth: MAX_COMPOSITION_DEPTH, receivedDepth: compositionDepth,
+      },
     };
   }
   const unknownEffect = firstUnknownEffect(root);
