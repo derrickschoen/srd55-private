@@ -404,14 +404,14 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger).toContain('Each round-2 production mutation was applied alone');
   });
 
-  it('E05-TYPECHECK-INSTRUMENTATION-MUTATION-LEDGER pins both restored controls to named killing tests', () => {
+  it('E05-TYPECHECK-INSTRUMENTATION-MUTATION-LEDGER pins restored controls to named killing tests', () => {
     const ledger = readFileSync(E05_TYPECHECK_INSTRUMENTATION_LEDGER_PATH, 'utf8');
     const tests = readFileSync('tests/unit/vtt/experiment-orchestrator.test.ts', 'utf8');
-    for (const name of ['untyped_reports_zero_not_null', 'run_count_counts_failures_only']) {
+    for (const name of ['untyped_reports_zero_not_null', 'run_count_counts_failures_only', 'failed_result_recorded_as_pass']) {
       expect(ledger).toContain(`\`${name}\``);
       expect(tests).toContain(name);
     }
-    expect(ledger.match(/exit 1/gu)).toHaveLength(2);
+    expect(ledger.match(/exit 1/gu)).toHaveLength(3);
     expect(ledger).toContain('Each production mutation was applied alone, killed by its named test, and restored');
   });
 

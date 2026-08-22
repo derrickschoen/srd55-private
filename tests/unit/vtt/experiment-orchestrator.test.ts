@@ -596,6 +596,57 @@ describe('E05 typed versus untyped restricted-JS registration', () => {
     expect(untyped.calls.every((call) => call.typeCheckProgramCounts === null)).toBe(true);
   });
 
+  it('failed_result_recorded_as_pass: a real ambient rejection increments typed failures and unique catches while untyped stays null', async () => {
+    const schedule = buildExperimentSchedule('E05');
+    const typedEntry = schedule.find((candidate) => candidate.armId === 'typed-js');
+    const untypedEntry = schedule.find((candidate) => candidate.armId === 'untyped-js');
+    if (typedEntry === undefined || untypedEntry === undefined) throw new Error('E05 fake-model pair is incomplete.');
+
+    const previousMode = process.env.FAKE_CODEX_MODE;
+    const previousStateFile = process.env.FAKE_CODEX_STATE_FILE;
+    process.env.FAKE_CODEX_MODE = 'js_type_error_once';
+    let typed: ExperimentTableRecordV5;
+    let untyped: ExperimentTableRecordV5;
+    try {
+      const typedExecution = config(join(directory, 'e05-js-type-error-typed'), 'E05');
+      process.env.FAKE_CODEX_STATE_FILE = join(directory, 'e05-js-type-error-typed-state');
+      typed = await runE05Table(typedEntry, typedExecution, preregisterExperiment(typedExecution));
+
+      const untypedExecution = config(join(directory, 'e05-js-type-error-untyped'), 'E05');
+      process.env.FAKE_CODEX_STATE_FILE = join(directory, 'e05-js-type-error-untyped-state');
+      untyped = await runE05Table(untypedEntry, untypedExecution, preregisterExperiment(untypedExecution));
+    } finally {
+      if (previousMode === undefined) delete process.env.FAKE_CODEX_MODE;
+      else process.env.FAKE_CODEX_MODE = previousMode;
+      if (previousStateFile === undefined) delete process.env.FAKE_CODEX_STATE_FILE;
+      else process.env.FAKE_CODEX_STATE_FILE = previousStateFile;
+    }
+
+    expect(typed.status).toBe('completed');
+    const typedCounts = aggregateExperimentRecords([typed])[0]?.typeCheckProgramCounts;
+    if (typedCounts === null || typedCounts === undefined) throw new Error('E05 typed counts are missing.');
+    expect(typedCounts.checkedProgramCount).toBeGreaterThan(typedCounts.failedProgramCount);
+    expect(typedCounts.failedProgramCount).toBeGreaterThan(0);
+    expect(typedCounts.checkedProgramCount).toBe(
+      typedCounts.passedProgramCount + typedCounts.failedProgramCount,
+    );
+    console.info(
+      `[e05-typecheck-failure] checked/passed/failed ${String(typedCounts.checkedProgramCount)}/${String(typedCounts.passedProgramCount)}/${String(typedCounts.failedProgramCount)}`,
+    );
+
+    const observations = typed.calls.flatMap((call) => call.typeCheckUniqueCatchObservations);
+    expect(observations).toContainEqual(expect.objectContaining({
+      source: "emit(move('combatant:not-in-encounter'));",
+      diagnosticCodes: expect.arrayContaining([2345]),
+      outcome: 'caughtByBoth',
+      runtimeError: expect.stringContaining('outside the projection'),
+    }));
+
+    expect(untyped.status).toBe('completed');
+    expect(aggregateExperimentRecords([untyped])[0]?.typeCheckProgramCounts).toBeNull();
+    expect(untyped.calls.every((call) => call.typeCheckProgramCounts === null)).toBe(true);
+  });
+
   it('empty_schema_path_reintroduced: records a root-path failure from the real E05 JS decoder as null or non-empty', async () => {
     const execution = config(join(directory, 'e05-js-schema-error'), 'E05');
     const entry = buildExperimentSchedule('E05').find((candidate) => candidate.armId === 'typed-js');
