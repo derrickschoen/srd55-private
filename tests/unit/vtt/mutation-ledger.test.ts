@@ -76,7 +76,7 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
-  it('D361.1-D363.2-ADVDAY-MUTATION-LEDGER pins all five restored controls to named killing tests', () => {
+  it('D361.1-D363.2-ADVDAY-MUTATION-LEDGER pins all six restored controls to named killing tests', () => {
     const adventuringDayLedger = readFileSync(ADVDAY_LEDGER_PATH, 'utf8');
     const partyStateTests = readFileSync('tests/unit/vtt/party-session-state.test.ts', 'utf8');
     for (const control of [
@@ -85,13 +85,14 @@ describe('phase-2 mutation ledger manifest', () => {
       'hit_die_ignores_con',
       'dead_walks',
       'party_state_leaks',
+      'hit_die_minimum_dropped',
     ]) {
       expect(adventuringDayLedger).toContain(`\`${control}\``);
       expect(partyStateTests).toContain(control);
     }
-    expect(adventuringDayLedger.match(/`exit 1`/gu)).toHaveLength(5);
-    expect(adventuringDayLedger).toContain('Tests  8 passed (8)');
-    expect(adventuringDayLedger).toContain('All five mutations were restored.');
+    expect(adventuringDayLedger.match(/`exit 1`/gu)).toHaveLength(6);
+    expect(adventuringDayLedger).toContain('Tests  9 passed (9)');
+    expect(adventuringDayLedger).toContain('All six mutations were restored.');
   });
 
   it('D364-MONSTERS-MUTATION-LEDGER pins all five restored controls to their killing tests', () => {

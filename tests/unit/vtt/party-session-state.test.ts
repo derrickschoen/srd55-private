@@ -201,6 +201,32 @@ describe('adventuring-day party session state', () => {
     expect(rested.rolls.map((roll) => roll.healing)).toEqual([6, 6, 4, 4]);
   });
 
+  it('hit_die_minimum_dropped: a natural 1 with a negative Constitution modifier heals exactly 1 HP', () => {
+    const initial = createPartySessionState(loadedParty());
+    const damaged: PartySessionState = {
+      ...initial,
+      characters: initial.characters.map((entry) => entry.combatantId === combatantId('combatant:advday-2')
+        ? { ...entry, currentHitPoints: 5 }
+        : entry),
+    };
+    const before = character(damaged, 'combatant:advday-2').currentHitPoints;
+    const rested = takeShortRest(damaged, [{
+      combatantId: combatantId('combatant:advday-2'),
+      dice: [{ sides: 8, count: 1 }],
+    }], () => 0);
+    const after = character(rested.state, 'combatant:advday-2').currentHitPoints;
+
+    expect(rested.rolls).toEqual([{
+      combatantId: combatantId('combatant:advday-2'),
+      sides: 8,
+      face: 1,
+      constitutionModifier: -1,
+      healing: 1,
+    }]);
+    expect(after).toBe(before + 1);
+    expect(after).toBeGreaterThan(before);
+  });
+
   it('dead_walks: stabilized-at-zero and dead states both survive the next-room preload without resurrection', () => {
     const members = loadedParty();
     const initial = createPartySessionState(members);
@@ -210,7 +236,7 @@ describe('adventuring-day party session state', () => {
         ? { ...entry, currentHitPoints: 0, life: 'stable', deathSaves: null }
         : index === 1
           ? { ...entry, currentHitPoints: 0, life: 'dead', deathSaves: null }
-          : entry),
+          : { ...entry, currentHitPoints: 0, life: 'dying', deathSaves: { successes: 0, failures: 0 } }),
     };
     const afterRest = takeShortRest(statusParty, [
       { combatantId: combatantId('combatant:advday-1'), dice: [{ sides: 6, count: 0 }] },
@@ -221,6 +247,8 @@ describe('adventuring-day party session state', () => {
       .toMatchObject({ hitPoints: 0, life: 'stable', deathSaves: null });
     expect(room.state.combatants.find((entry) => entry.profile.id === combatantId('combatant:advday-2')))
       .toMatchObject({ hitPoints: 0, life: 'dead', deathSaves: null });
+    expect(room.state.combatants.find((entry) => entry.profile.id === combatantId('combatant:advday-3')))
+      .toMatchObject({ hitPoints: 0, life: 'dying', deathSaves: { successes: 0, failures: 0 } });
   });
 
   it('party_state_leaks: another PC spent-slot detail is absent from a non-owning PlayerView', () => {
@@ -264,7 +292,7 @@ describe('adventuring-day party session state', () => {
     }, state)).toThrow('complete party');
   });
 
-  it('carries changed equipment and consumable uses into the next room', () => {
+  it('carries changed equipment and an exhausted consumable into the next room', () => {
     const members = loadedParty();
     const roomOne = composeStoredCharacterEncounter(members);
     if (roomOne.partyState === null) throw new Error('Sourced party did not create session state.');
@@ -290,7 +318,7 @@ describe('adventuring-day party session state', () => {
         damageBreak: null,
         payload: {
           kind: 'consumable_healing_pool',
-          remainingUses: 4,
+          remainingUses: 0,
           healingPerUse: 1,
           activation: 'bonus_action',
           encounterExpiry: 'not_tracked_24_hours',
@@ -303,7 +331,7 @@ describe('adventuring-day party session state', () => {
       .toEqual(character(captured, wizardId).equipment);
     expect(roomTwo.state.effects).toContainEqual(expect.objectContaining({
       source: wizardId,
-      payload: expect.objectContaining({ kind: 'consumable_healing_pool', remainingUses: 4 }),
+      payload: expect.objectContaining({ kind: 'consumable_healing_pool', remainingUses: 0 }),
     }));
     expect(roomTwo.state.nextEffectSequence).toBe(2);
   });
