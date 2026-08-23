@@ -178,6 +178,7 @@ function sheet(changes: Partial<CharacterSheet> = {}): CharacterSheet {
   return {
     character_id: 7,
     name: HOSTILE_CHARACTER_NAME,
+    creature_classification: { type: 'Humanoid', size: 'Medium' },
     house_rules: [],
     total_level: 8,
     proficiency_bonus: {

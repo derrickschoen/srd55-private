@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { CombatantProfile } from '../combat/combatant';
 import type { TurnLegalActions } from '../combat/coordinator';
-import { combatantsAreAllies } from '../combat/encounter';
+import { combatantsAreAllies } from '../combat/allies';
 import { conditionNames, type ConditionName } from '../combat/conditions';
 import {
   armedWeaponHitRiderShape,

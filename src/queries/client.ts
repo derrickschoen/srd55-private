@@ -82,6 +82,7 @@ import {
 } from '../builder/level-up-wizard';
 import { decodeOutcome } from '../refusals/decode';
 import type { DecodedOutcome } from '../refusals/outcome';
+import type { StoredCharacterPartyPackExport } from '../vtt/stored-character-party-member';
 
 export interface QueriesClient extends CatalogClient {
   listCharacters(): Promise<CharacterSummary[]>;
@@ -114,6 +115,7 @@ export interface QueriesClient extends CatalogClient {
   ): Promise<Workspace>;
   buildReport(characterId: number): Promise<BuildReportResult>;
   sheet(characterId: number): Promise<CharacterSheet>;
+  partyPackMember(characterId: number): Promise<StoredCharacterPartyPackExport>;
   setPrintAppendixPreference(
     characterId: number,
     kind: PrintAppendixKind,
@@ -276,6 +278,11 @@ export function createQueriesClient(rpc: RpcClient): QueriesClient {
     sheet: (characterId: number) =>
       rpc.call<{ character_id: number }, CharacterSheet>(
         'queries.characters.sheet',
+        characterParams(characterId),
+      ),
+    partyPackMember: (characterId: number) =>
+      rpc.call<{ character_id: number }, StoredCharacterPartyPackExport>(
+        'queries.characters.partyPackMember',
         characterParams(characterId),
       ),
     setPrintAppendixPreference: (

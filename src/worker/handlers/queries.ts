@@ -39,6 +39,7 @@ import {
   PrintAppendixPreferenceQueries,
   type PrintAppendixKind,
 } from '../../queries/print-appendix-preferences';
+import { StoredCharacterPartyPackExporter } from '../../vtt/stored-character-party-member';
 
 interface CharacterParams {
   readonly character_id: number;
@@ -360,6 +361,14 @@ export const handlers: readonly RpcHandler[] = Object.freeze([
     isCharacterParams,
     (context, params) =>
       new CharacterSheetBuilder(context.db).build(params.character_id),
+  ),
+  defineRpcHandler(
+    'queries.characters.partyPackMember',
+    isCharacterParams,
+    (context, params) =>
+      new StoredCharacterPartyPackExporter(context.db).export(
+        params.character_id,
+      ),
   ),
   defineRpcHandler(
     'queries.characters.setPrintAppendixPreference',

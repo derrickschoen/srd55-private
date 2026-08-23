@@ -1,4 +1,5 @@
 import { canonicalJson } from '../commands/canonical-json';
+import type { AssetId } from '../assets/ids';
 import { starterArtDataUri } from '../assets/starter-art-resolver';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
@@ -22,6 +23,7 @@ import {
 } from './local-window-channel';
 import { LocalStorageBrowserSessionStore } from './local-session-store';
 import { REFERENCE_ENCOUNTER_ART } from './reference-encounter-art';
+import type { StoredCharacterEncounter } from './stored-character-encounter';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -117,10 +119,30 @@ function renderBoard(
   projection: EncounterBoardProjectionShape,
   preview: ReadonlySet<string> = new Set(),
 ): HTMLDivElement {
+  const pcFallback = REFERENCE_ENCOUNTER_ART.combatantTokens['combatant:fighter'];
+  const monsterFallback = REFERENCE_ENCOUNTER_ART.combatantTokens['combatant:training-brute'];
+  if (pcFallback === undefined || monsterFallback === undefined) {
+    throw new Error('Reference encounter token art is incomplete.');
+  }
+  const combatantTokens: Record<string, AssetId> = {};
+  for (const combatant of projection.combatants) {
+    combatantTokens[combatant.id] =
+      REFERENCE_ENCOUNTER_ART.combatantTokens[combatant.id] ??
+      (combatant.kind === 'player_character' ? pcFallback : monsterFallback);
+  }
+  const hasReferenceArt = projection.combatants.every(
+    (combatant) => REFERENCE_ENCOUNTER_ART.combatantTokens[combatant.id] !== undefined,
+  );
+  const art = hasReferenceArt
+    ? REFERENCE_ENCOUNTER_ART
+    : { ...REFERENCE_ENCOUNTER_ART, combatantTokens };
+  const models = hasReferenceArt
+    ? encounterBoardRenderModel(projection, REFERENCE_ENCOUNTER_ART)
+    : encounterBoardRenderModel(projection, art);
   const board = element('div', { className: 'encounter-board' });
   board.style.setProperty('--encounter-columns', String(projection.bounds.columns));
-  board.dataset.artPackage = REFERENCE_ENCOUNTER_ART.id;
-  for (const model of encounterBoardRenderModel(projection, REFERENCE_ENCOUNTER_ART)) {
+  board.dataset.artPackage = art.id;
+  for (const model of models) {
     const cell = element('div', { className: 'encounter-cell' });
     cell.dataset.cell = model.key;
     if (preview.has(model.key)) cell.dataset.preview = 'true';
@@ -488,8 +510,17 @@ class DmEncounterView {
   constructor(
     private readonly root: HTMLElement,
     private readonly sessionId: string,
+    encounter?: StoredCharacterEncounter,
   ) {
-    this.#host = new DmEncounterHost(sessionId, this.#store);
+    this.#host = new DmEncounterHost(sessionId, this.#store, encounter === undefined
+      ? {}
+      : {
+          initialState: encounter.state,
+          initialControllers: encounter.controllers,
+          playerIds: encounter.playerIds,
+          turnLegalActions: encounter.turnLegalActions,
+          reactionLegalActions: () => [],
+        });
     this.#channel = new BroadcastChannel(`srd55:vtt:${sessionId}`);
     this.#channel.addEventListener('message', this.#onMessage);
     this.#unsubscribe = this.#host.subscribe((snapshot) => {
@@ -770,10 +801,14 @@ export interface EncounterVttMount {
 
 export function mountEncounterVtt(
   root: HTMLElement,
-  options: { readonly view: 'player' | 'dm'; readonly sessionId: string },
+  options: {
+    readonly view: 'player' | 'dm';
+    readonly sessionId: string;
+    readonly encounter?: StoredCharacterEncounter;
+  },
 ): EncounterVttMount {
   const mounted = options.view === 'dm'
-    ? new DmEncounterView(root, options.sessionId)
+    ? new DmEncounterView(root, options.sessionId, options.encounter)
     : new PlayerEncounterView(root, options.sessionId);
   mounted.mount();
   return { close: () => mounted.close() };

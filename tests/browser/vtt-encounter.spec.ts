@@ -11,6 +11,74 @@ async function expectActive(page: Page, name: string): Promise<void> {
   await expect(page.locator('.encounter-token[data-active="true"]')).toHaveText(name);
 }
 
+async function resetHome(page: Page): Promise<void> {
+  await page.goto('/');
+  await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
+    timeout: 65_000,
+  });
+  await page.evaluate(() => window.staticApp.reset());
+  await page.reload();
+  await expect(page.locator('#status')).toHaveAttribute('data-ready', 'true', {
+    timeout: 65_000,
+  });
+}
+
+test('DM composes stored builder characters and each PC defaults to human control', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await resetHome(page);
+  const names = await page.evaluate(async () => {
+    const classes = await window.appRpc.call<
+      Record<string, never>,
+      readonly { readonly content_key: string; readonly name: string }[]
+    >('queries.characters.guidedClassOptions', {});
+    const fighter = classes.find((candidate) => candidate.name === 'Fighter');
+    if (fighter === undefined) throw new Error('Bundled Fighter is missing.');
+    const origins = await window.appRpc.call<
+      { readonly kind: 'species' },
+      readonly { readonly content_key: string; readonly name: string }[]
+    >('queries.characters.originOptions', { kind: 'species' });
+    const human = origins.find((candidate) => candidate.name === 'Human');
+    if (human === undefined) throw new Error('Bundled Human is missing.');
+    const createdNames = ['Stored Rowan', 'Stored Sable', 'Stored Tamsin'];
+    for (const name of createdNames) {
+      const character = await window.appRpc.call<
+        { readonly name: string; readonly class_content_key: string },
+        { readonly id: number }
+      >('queries.characters.createGuided', {
+        name,
+        class_content_key: fighter.content_key,
+      });
+      await window.appRpc.call('queries.characters.applyOrigin', {
+        character_id: character.id,
+        kind: 'species',
+        content_key: human.content_key,
+      });
+    }
+    return createdNames;
+  });
+
+  await page.goto('/vtt?compose=stored');
+  await expect(
+    page.getByRole('heading', { name: 'Build an encounter from stored characters' }),
+  ).toBeVisible({ timeout: 65_000 });
+  for (const name of names) {
+    await page.getByRole('checkbox', { name: new RegExp(`^${name} —`, 'u') }).check();
+  }
+  await expect(page.getByRole('button', { name: 'Start DM encounter' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Start DM encounter' }).click();
+
+  await expect(page.getByRole('heading', { name: 'DM controls' })).toBeVisible();
+  await expect(page.locator('.player-encounter')).toHaveCount(0);
+  for (const name of names) {
+    await expect(page.getByLabel(`${name} controller`)).toHaveValue('human');
+    await expect(
+      page.locator('.encounter-token[data-kind="player_character"]', { hasText: name }),
+    ).toBeVisible();
+  }
+});
+
 test('M38-PLAYER-NO-DM-CONTROLS and two local windows complete the resumable reference flow', async ({
   page,
 }) => {
