@@ -6,7 +6,7 @@ import type {
   SpellSlotState,
   TurnResources,
 } from './encounter';
-import { canCombatantSee } from './encounter';
+import { canCombatantSee, combatantSide } from './encounter';
 import type { EncounterEvent } from './events';
 import type { GridCell } from './grid';
 import type { CombatantId } from './values';
@@ -93,6 +93,8 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'turn_ended':
     case 'combatant_left_board':
     case 'combatant_returned_to_board':
+    case 'combatant_summoned':
+    case 'summoned_combatant_despawned':
     case 'object_interaction_spent':
     case 'item_dropped':
     case 'item_picked_up':
@@ -228,7 +230,7 @@ export function projectEncounter(
         return {
           id: subject.profile.id,
           name: subject.profile.name,
-          kind: subject.profile.kind,
+          kind: combatantSide(state, subject.profile.id),
           hitPoints: subject.hitPoints,
           life: subject.life,
           position: { ...token.position },
@@ -259,7 +261,7 @@ export function projectEncounter(
       return [{
         id: subject.profile.id,
         name: subject.profile.name,
-        kind: subject.profile.kind,
+        kind: combatantSide(state, subject.profile.id),
         ...(isViewer ? { hitPoints: subject.hitPoints } : {}),
         life: subject.life,
         position: { ...token.position },

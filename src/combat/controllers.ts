@@ -456,6 +456,27 @@ export class ControllerRegistry {
       .sort((left, right) => left.combatantId.localeCompare(right.combatantId));
   }
 
+  /** Assigns a newly summoned combatant to the summoner's exact controller seam. */
+  assignFrom(combatantId: CombatantId, source: CombatantId): void {
+    if (this.#entries.has(combatantId)) {
+      throw new Error(`Controller already assigned to ${combatantId}.`);
+    }
+    const sourceEntry = this.#entries.get(source);
+    if (sourceEntry === undefined) throw new Error(`No controller assigned to ${source}.`);
+    this.#entries.set(combatantId, {
+      controller: sourceEntry.controller,
+      generation: sourceEntry.generation,
+      controllerId: sourceEntry.controllerId,
+      kind: sourceEntry.kind,
+    });
+  }
+
+  remove(combatantId: CombatantId): void {
+    if (!this.#entries.delete(combatantId)) {
+      throw new Error(`No controller assigned to ${combatantId}.`);
+    }
+  }
+
   replace(
     combatantId: CombatantId,
     controller: Controller,

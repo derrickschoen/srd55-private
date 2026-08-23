@@ -201,6 +201,24 @@ function operationKind(value: unknown): string | null {
   return operation !== null && typeof operation.kind === 'string' ? operation.kind : null;
 }
 
+function summonedMonsterIds(value: unknown): readonly string[] {
+  if (Array.isArray(value)) return value.flatMap(summonedMonsterIds);
+  const record = objectRecord(value);
+  if (record === null) return [];
+  if (record.kind === 'summon') {
+    return typeof record.monsterId === 'string' ? [record.monsterId] : [];
+  }
+  return Object.values(record).flatMap(summonedMonsterIds);
+}
+
+function containsOnKillSpawn(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsOnKillSpawn);
+  const record = objectRecord(value);
+  if (record === null) return false;
+  if (record.kind === 'on_kill_spawn' || record.kind === 'spawn_on_kill') return true;
+  return Object.values(record).some(containsOnKillSpawn);
+}
+
 const operationSchema = contentPackOperationSchema;
 
 const spellSchema = z.strictObject({
@@ -492,6 +510,8 @@ export type ContentPackRecordDiagnostic = {
   | { readonly reason: 'unknown_effect_variant'; readonly effectKind: string }
   | { readonly reason: 'undeclared_namespace'; readonly namespace: string }
   | { readonly reason: 'missing_feature_reference'; readonly featureId: string }
+  | { readonly reason: 'missing_monster_reference'; readonly monsterId: string }
+  | { readonly reason: 'on-kill-spawn-not-modelled' }
   | { readonly reason: 'tremorsense-not-modelled' }
   | { readonly reason: 'devilsight-not-modelled' }
   | { readonly reason: 'ethereal-plane-semantics-not-modelled' }
@@ -850,6 +870,15 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
     const unknownOperation = firstUnknownOperation(diagnosticRoot);
     const operation = objectRecord(objectRecord(record)?.operation);
     const kind = operationKind(operation);
+    if (containsOnKillSpawn(operation)) {
+      diagnostics.push({
+        kind: 'content_pack_record_rejection', reason: 'on-kill-spawn-not-modelled',
+        surface: 'spells', index, recordId: rawRecordId(record),
+        ...(kind === null ? {} : { operationKind: kind }),
+        path: ['spells', index, 'operation'],
+      });
+      continue;
+    }
     if (hasEtherealPlaneSemantics(operation)) {
       diagnostics.push({
         kind: 'content_pack_record_rejection', reason: 'ethereal-plane-semantics-not-modelled',
@@ -986,6 +1015,26 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
     }
   }
 
+  const loadedMonsterIds = new Set(
+    monsters.map((monster) => importedContentId(monster.sourceId, monster.recordId)),
+  );
+  const resolvedSpells = spells.filter((spell) => {
+    const missing = summonedMonsterIds(spell.operation)
+      .map((monsterId) => importedContentId(spell.sourceId, monsterId))
+      .find((monsterId) => !loadedMonsterIds.has(monsterId));
+    if (missing === undefined) return true;
+    diagnostics.push({
+      kind: 'content_pack_record_rejection', reason: 'missing_monster_reference',
+      surface: 'spells',
+      index: envelope.data.spells.findIndex((record) => rawRecordId(record) === spell.recordId),
+      recordId: spell.recordId,
+      operationKind: spell.operation.kind,
+      monsterId: missing,
+      path: ['spells', 'operation', 'monsterId'],
+    });
+    return false;
+  });
+
   const featureIds = new Set(features.map((feature) => importedContentId(feature.sourceId, feature.recordId)));
   const subclasses: ContentPackV1['subclasses'][number][] = [];
   for (const subclass of subclassesBeforeReferences) {
@@ -1006,7 +1055,7 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
     packId: envelope.data.packId,
     provenance: envelope.data.provenance,
     namespaces: envelope.data.namespaces,
-    spells, features, items, species, backgrounds, subclasses, monsters,
+    spells: resolvedSpells, features, items, species, backgrounds, subclasses, monsters,
   };
   const ids = allRecords(pack).map((entry) => importedContentId(entry.sourceId, entry.recordId));
   const seen = new Set<string>();

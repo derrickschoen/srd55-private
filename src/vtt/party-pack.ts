@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { CombatantProfile } from '../combat/combatant';
 import type { TurnLegalActions } from '../combat/coordinator';
+import { combatantsAreAllies } from '../combat/encounter';
 import { conditionNames, type ConditionName } from '../combat/conditions';
 import {
   armedWeaponHitRiderShape,
@@ -2026,7 +2027,7 @@ export function loadedPartyTurnLegalActions(
       return { actions: [{ type: 'end_turn', actor }] };
     }
     const targets = state.combatants.filter((candidate) =>
-      candidate.profile.kind !== acting.profile.kind &&
+      !combatantsAreAllies(state, candidate.profile.id, actor) &&
       candidate.life !== 'dead' &&
       state.tokens.some((token) => token.combatantId === candidate.profile.id));
     const smites = member.effects.filter((effect) =>
