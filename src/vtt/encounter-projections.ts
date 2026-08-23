@@ -15,6 +15,10 @@ import {
 } from '../combat/visibility';
 import type { CombatantId } from '../combat/values';
 import type { SessionHistoryEntry } from './session-persistence';
+import {
+  projectEncounterBoard,
+  type DmEncounterBoardModel,
+} from './encounter-board';
 
 export interface ProjectedControllerRequest {
   readonly kind: 'turn' | 'reaction';
@@ -44,8 +48,11 @@ export interface PlayerBoardProjection {
 export interface DmBoardProjection {
   readonly audience: 'dm';
   readonly encounter: DmVisibleEncounterState;
+  readonly board: DmEncounterBoardModel;
   readonly coordinator: PersistedCoordinatorState;
   readonly pendingRequest: ControllerRequest | null;
+  /** Exact legal commands exposed to the DM only when the pending actor uses a human controller. */
+  readonly humanCommandActions: readonly EncounterCommand[];
   /** Optional batch-planning action domains, populated when one request plans for several actors. */
   readonly turnProgramLegalActions?: readonly {
     readonly actorId: CombatantId;
@@ -151,14 +158,23 @@ export function projectDmBoard(input: {
   readonly controllers: readonly ControllerIdentity[];
   readonly history: readonly SessionHistoryEntry[];
 }): DmBoardProjection {
+  const targets = adjudicatedTargets(input.state, input.coordinator.pause);
+  const pending = input.coordinator.pendingRequest;
+  const pendingController = pending === null
+    ? undefined
+    : input.controllers.find((identity) => identity.combatantId === pending.actorId);
   return {
     audience: 'dm',
     encounter: projectEncounter(input.state, { kind: 'dm' }),
+    board: projectEncounterBoard(input.state, input.coordinator.pendingRequest, targets),
     coordinator: input.coordinator,
     pendingRequest: input.coordinator.pendingRequest,
+    humanCommandActions: pendingController?.kind === 'human'
+      ? pending?.legalActions.actions ?? []
+      : [],
     controllers: input.controllers,
     history: input.history,
-    adjudicatedTargets: adjudicatedTargets(input.state, input.coordinator.pause),
+    adjudicatedTargets: targets,
   };
 }
 
