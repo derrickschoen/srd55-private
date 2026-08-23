@@ -662,9 +662,9 @@ test('the library control accepts v1 and both JSON controls reject the other kin
 test('whole-library download restores authored and imported content into a fresh profile', async ({
   page,
 }) => {
-  // Measured alone with one worker on PLAYWRIGHT_PORT=5030: Playwright logged
-  // `1 passed (30.1s)`. 30.1s × 1.5 = 45.15s, rounded up to 45.2s.
-  test.setTimeout(45_200);
+  // Measured at 39–44s in warm full-suite runs; 60s leaves 16s of headroom
+  // above the observed maximum without masking a genuinely stalled spec.
+  test.setTimeout(60_000);
   await page.goto('/');
   await ready(page);
   await page.evaluate(() => window.staticApp.reset());

@@ -59,6 +59,7 @@ const FORMS_LEDGER_PATH = 'docs/audits/2026-08-23-forms-mutation-ledger.md';
 const PCBRIDGE_LEDGER_PATH = 'docs/audits/2026-08-23-pcbridge-mutation-ledger.md';
 const VIEW_SEAMS_LEDGER_PATH = 'docs/audits/2026-08-23-seams-mutation-ledger.md';
 const MONSTERS_LEDGER_PATH = 'docs/audits/2026-08-23-monsters-mutation-ledger.md';
+const ADVDAY_LEDGER_PATH = 'docs/audits/2026-08-24-advday-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -75,6 +76,25 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D361.1-D363.2-ADVDAY-MUTATION-LEDGER pins all six restored controls to named killing tests', () => {
+    const adventuringDayLedger = readFileSync(ADVDAY_LEDGER_PATH, 'utf8');
+    const partyStateTests = readFileSync('tests/unit/vtt/party-session-state.test.ts', 'utf8');
+    for (const control of [
+      'resources_reset_between_rooms',
+      'short_rest_restores_long_slots',
+      'hit_die_ignores_con',
+      'dead_walks',
+      'party_state_leaks',
+      'hit_die_minimum_dropped',
+    ]) {
+      expect(adventuringDayLedger).toContain(`\`${control}\``);
+      expect(partyStateTests).toContain(control);
+    }
+    expect(adventuringDayLedger.match(/`exit 1`/gu)).toHaveLength(6);
+    expect(adventuringDayLedger).toContain('Tests  9 passed (9)');
+    expect(adventuringDayLedger).toContain('All six mutations were restored.');
+  });
+
   it('D364-MONSTERS-MUTATION-LEDGER pins all five restored controls to their killing tests', () => {
     const monstersLedger = readFileSync(MONSTERS_LEDGER_PATH, 'utf8');
     const rosterTests = readFileSync('tests/unit/combat/statblocks.test.ts', 'utf8');

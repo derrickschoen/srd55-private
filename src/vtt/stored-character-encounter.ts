@@ -13,8 +13,17 @@ import {
   type LoadedPartyMember,
 } from './party-pack';
 import { referenceEncounterSetup } from './reference-encounter';
+import {
+  createPartySessionState,
+  preloadPartySessionState,
+  type PartySessionState,
+} from './party-session-state';
 
 export interface StoredCharacterEncounter {
+  readonly rulesEdition: '2024';
+  readonly partyState: PartySessionState | null;
+  readonly members: readonly LoadedPartyMember[];
+  readonly displayNames: ReadonlyMap<number, string>;
   readonly state: EncounterState;
   readonly playerIds: readonly CombatantId[];
   readonly controllers: readonly ControllerIdentity[];
@@ -78,6 +87,7 @@ export function storedPartyControllerIdentities(
 export function composeStoredCharacterEncounter(
   members: readonly LoadedPartyMember[],
   displayNames: ReadonlyMap<number, string> = new Map(),
+  partyState?: PartySessionState,
 ): StoredCharacterEncounter {
   if (members.length < 3 || members.length > 5) {
     throw new RangeError('A stored-character encounter requires three to five selected characters.');
@@ -99,7 +109,7 @@ export function composeStoredCharacterEncounter(
     { column: 2, row: 4 },
     { column: 4, row: 3 },
   ];
-  const state = createEncounter({
+  const freshState = createEncounter({
     bounds: { columns: 10, rows: 7 },
     combatants,
     tokens: combatants.map((profile, index) => ({
@@ -111,6 +121,14 @@ export function composeStoredCharacterEncounter(
     foggedCells: [{ column: 8, row: 1 }, { column: 8, row: 2 }],
     dmNotes: ['Stored characters selected by the DM.'],
   });
+  const canonicalPartyState = partyState ?? (
+    members.every((member) => member.hitDice.length > 0)
+      ? createPartySessionState(members)
+      : null
+  );
+  const state = canonicalPartyState === null
+    ? freshState
+    : preloadPartySessionState(freshState, canonicalPartyState);
   const memberActions = loadedPartyTurnLegalActions(members);
   const turnLegalActions: TurnLegalActions = (current, actor) => {
     const member = members.find((candidate) => candidate.profile.id === actor);
@@ -125,6 +143,10 @@ export function composeStoredCharacterEncounter(
   };
   const playerIds = playerProfiles.map((profile) => profile.id);
   return {
+    rulesEdition: '2024',
+    partyState: canonicalPartyState,
+    members,
+    displayNames,
     state,
     playerIds,
     controllers: storedPartyControllerIdentities(state.combatants),

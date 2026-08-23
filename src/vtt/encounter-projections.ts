@@ -21,6 +21,13 @@ import {
   projectEncounterBoard,
   type DmEncounterBoardModel,
 } from './encounter-board';
+import {
+  projectDmPartySession,
+  projectPlayerPartySession,
+  type DmPartySessionView,
+  type PartySessionState,
+  type PlayerPartySessionView,
+} from './party-session-state';
 
 export interface ProjectedControllerRequest {
   readonly kind: 'turn' | 'reaction';
@@ -45,6 +52,7 @@ export interface PlayerBoardProjection {
   readonly events: readonly PlayerVisibleEncounterEvent[];
   readonly adjudicatedTargets: readonly CombatantId[];
   readonly authorityStatus: 'connected' | 'hard_paused';
+  readonly partySession: PlayerPartySessionView | null;
 }
 
 export interface DmBoardProjection {
@@ -65,6 +73,7 @@ export interface DmBoardProjection {
   readonly controllers: readonly ControllerIdentity[];
   readonly history: readonly SessionHistoryEntry[];
   readonly adjudicatedTargets: readonly CombatantId[];
+  readonly partySession: DmPartySessionView | null;
 }
 
 function projectedRequest(
@@ -97,6 +106,7 @@ function adjudicatedTargets(
 export function projectPlayerBoard(
   view: PlayerView,
   coordinator: PersistedCoordinatorState,
+  partyState: PartySessionState | null = null,
 ): PlayerBoardProjection {
   const ownerIds = new Set(view.ownedCombatants.map((subject) => subject.id));
   const owned = new Map(view.ownedCombatants.map((subject) => [subject.id, subject] as const));
@@ -133,6 +143,9 @@ export function projectPlayerBoard(
             : [])
       : [],
     authorityStatus: 'connected',
+    partySession: partyState === null
+      ? null
+      : projectPlayerPartySession(partyState, [...ownerIds]),
   };
 }
 
@@ -141,6 +154,7 @@ export function projectDmBoard(input: {
   readonly coordinator: PersistedCoordinatorState;
   readonly controllers: readonly ControllerIdentity[];
   readonly history: readonly SessionHistoryEntry[];
+  readonly partyState?: PartySessionState | null;
 }): DmBoardProjection {
   const targets = adjudicatedTargets(input.view.state.eventLog, input.coordinator.pause);
   const pending = input.coordinator.pendingRequest;
@@ -159,6 +173,9 @@ export function projectDmBoard(input: {
     controllers: input.controllers,
     history: input.history,
     adjudicatedTargets: targets,
+    partySession: input.partyState === undefined || input.partyState === null
+      ? null
+      : projectDmPartySession(input.partyState),
   };
 }
 

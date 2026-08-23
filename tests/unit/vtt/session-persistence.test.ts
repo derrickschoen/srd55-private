@@ -788,11 +788,11 @@ describe('event-sourced encounter persistence', () => {
          ORDER BY revision`,
       );
       expect(rows).toEqual([
-        { revision: 1, schema_version: 2 },
-        { revision: 2, schema_version: 2 },
-        { revision: 3, schema_version: 2 },
-        { revision: 4, schema_version: 2 },
-        { revision: 5, schema_version: 2 },
+        { revision: 1, schema_version: 3 },
+        { revision: 2, schema_version: 3 },
+        { revision: 3, schema_version: 3 },
+        { revision: 4, schema_version: 3 },
+        { revision: 5, schema_version: 3 },
       ]);
       expect(
         EncounterSessionJournal.resume(

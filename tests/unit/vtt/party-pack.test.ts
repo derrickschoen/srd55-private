@@ -1238,7 +1238,7 @@ describe('external party-pack boundary', () => {
     });
   });
 
-  it('refuses pact-slot need with the typed unmodelled-boundary reason', () => {
+  it('loads Pact Magic as a distinct short-rest spell-slot pool', () => {
     const candidate = structuredClone(pack());
     candidate.members[0]!.pactSpellSlots = [{
       level: 2,
@@ -1246,13 +1246,18 @@ describe('external party-pack boundary', () => {
       recharge: 'short_rest',
     }];
 
-    expect(loadExternalPartyPack(candidate)).toMatchObject({
-      status: 'refused',
-      refusal: { reason: 'pact_slots_unmodelled' },
-      gaps: [{
-        featurePath: 'members.0.pactSpellSlots',
-        engineRefusalReason: 'capability_not_implemented',
-      }],
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Valid Pact Magic pool was refused.');
+    expect(loaded.party.members[0]?.pactSpellSlots).toEqual([{
+      level: 2,
+      maximum: 2,
+      recharge: 'short_rest',
+    }]);
+    expect(loaded.party.members[0]?.profile.rules.spellSlots).toContainEqual({
+      level: 2,
+      maximum: 2,
+      recharge: 'short_rest',
     });
   });
 

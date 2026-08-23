@@ -516,6 +516,9 @@ class DmEncounterView {
       ? {}
       : {
           initialState: encounter.state,
+          ...(encounter.partyState === null ? {} : { initialPartyState: encounter.partyState }),
+          partyMembers: encounter.members,
+          partyDisplayNames: encounter.displayNames,
           initialControllers: encounter.controllers,
           playerIds: encounter.playerIds,
           turnLegalActions: encounter.turnLegalActions,
@@ -612,6 +615,14 @@ class DmEncounterView {
     });
     status.dataset.pause = projection.coordinator.pause?.kind ?? 'none';
     this.#shell.append(status);
+    if (projection.partySession !== null) {
+      const adventuringDay = element('p', {
+        text: `Adventuring day — room ${String(projection.partySession.state.room)} of 4 · 2024 rules`,
+      });
+      adventuringDay.className = 'adventuring-day-status';
+      adventuringDay.dataset.room = String(projection.partySession.state.room);
+      this.#shell.append(adventuringDay);
+    }
 
     const controls = element('div', { className: 'encounter-controls dm-controls' });
     const interrupt = element('button', { text: 'Interrupt' });
@@ -624,7 +635,69 @@ class DmEncounterView {
     undo.type = 'button';
     undo.addEventListener('click', () => void this.#host.undoLast());
     controls.append(interrupt, resume, undo);
+    if (projection.partySession !== null && projection.partySession.state.room < 4) {
+      const nextRoom = element('button', { text: 'End room and enter next room' });
+      nextRoom.type = 'button';
+      nextRoom.addEventListener('click', () => {
+        void this.#host.finishRoom(null).catch((error: unknown) => {
+          this.#channelError = error instanceof Error ? error.message : 'Room transition failed.';
+          this.#render();
+        });
+      });
+      controls.append(nextRoom);
+    }
     this.#shell.append(controls);
+
+    if (projection.partySession !== null && projection.partySession.state.room < 4) {
+      const rest = element('form', { className: 'dm-short-rest' });
+      rest.append(element('h2', { text: 'Short Rest before next room' }));
+      const requested: Array<{
+        readonly combatantId: CombatantId;
+        readonly sides: 6 | 8 | 10 | 12;
+        readonly input: HTMLInputElement;
+      }> = [];
+      for (const character of projection.partySession.state.characters) {
+        const name = projection.encounter.combatants.find(
+          (candidate) => candidate.id === character.combatantId,
+        )?.name ?? character.combatantId;
+        for (const pool of character.hitDice) {
+          const label = element('label');
+          label.append(document.createTextNode(
+            `${name}: spend d${String(pool.sides)} Hit Point Dice (${String(pool.remaining)} remaining)`,
+          ));
+          const input = element('input');
+          input.type = 'number';
+          input.min = '0';
+          input.max = String(pool.remaining);
+          input.value = '0';
+          input.disabled = character.currentHitPoints < 1 || character.life !== 'living';
+          input.setAttribute('aria-label', `${name} d${String(pool.sides)} Hit Point Dice to spend`);
+          label.append(input);
+          rest.append(label);
+          requested.push({ combatantId: character.combatantId, sides: pool.sides, input });
+        }
+      }
+      const finishRest = element('button', { text: 'Take Short Rest and enter next room' });
+      finishRest.type = 'submit';
+      rest.append(finishRest);
+      rest.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const byCombatant = new Map<CombatantId, Array<{ readonly sides: 6 | 8 | 10 | 12; readonly count: number }>>();
+        for (const request of requested) {
+          const dice = byCombatant.get(request.combatantId) ?? [];
+          dice.push({ sides: request.sides, count: Number(request.input.value) });
+          byCombatant.set(request.combatantId, dice);
+        }
+        void this.#host.finishRoom([...byCombatant].map(([combatantId, dice]) => ({
+          combatantId,
+          dice,
+        }))).catch((error: unknown) => {
+          this.#channelError = error instanceof Error ? error.message : 'Short Rest failed.';
+          this.#render();
+        });
+      });
+      this.#shell.append(rest);
+    }
 
     const projectedFog = projection.encounter.dmOnly.foggedCells;
     if (canonicalJson(projectedFog) !== canonicalJson(projection.board.foggedCells)) {

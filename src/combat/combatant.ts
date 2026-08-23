@@ -65,6 +65,8 @@ export type SpellSlotLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 export interface SpellSlotCapacity {
   readonly level: SpellSlotLevel;
   readonly maximum: number;
+  /** Omitted for ordinary Spellcasting slots; Pact Magic is the short-rest pool. */
+  readonly recharge?: 'short_rest';
 }
 
 export type CombatantProfile =

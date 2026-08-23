@@ -46,6 +46,10 @@ import type {
   DmBridgeModelConfig,
 } from './dm-bridge/contracts';
 import type { SteeringCoordinatorMode, SteeringTelemetry } from './dm-bridge/steering';
+import type { PartySessionState } from './party-session-state';
+import type { ShortRestHitDieSpend } from './party-session-state';
+import type { LoadedPartyMember } from './party-pack';
+import { composeStoredCharacterEncounter } from './stored-character-encounter';
 import {
   projectDmBoard,
   projectPlayerBoard,
@@ -171,12 +175,17 @@ export class DmEncounterHost {
   readonly #playerIds: readonly CombatantId[];
   readonly #turnLegalActions: TurnLegalActions;
   readonly #reactionLegalActions: ReactionLegalActions;
+  readonly #partyMembers: readonly LoadedPartyMember[] | null;
+  readonly #partyDisplayNames: ReadonlyMap<number, string>;
 
   constructor(
     sessionKey: string,
     store: BrowserSessionStore,
     options: {
       readonly initialState?: EncounterState;
+      readonly initialPartyState?: PartySessionState;
+      readonly partyMembers?: readonly LoadedPartyMember[];
+      readonly partyDisplayNames?: ReadonlyMap<number, string>;
       readonly initialControllers?: readonly ControllerIdentity[];
       readonly playerIds?: readonly CombatantId[];
       readonly turnLegalActions?: TurnLegalActions;
@@ -195,6 +204,8 @@ export class DmEncounterHost {
     this.#playerIds = options.playerIds ?? REFERENCE_PLAYER_IDS;
     this.#turnLegalActions = options.turnLegalActions ?? referenceTurnLegalActions;
     this.#reactionLegalActions = options.reactionLegalActions ?? referenceReactionLegalActions;
+    this.#partyMembers = options.partyMembers ?? null;
+    this.#partyDisplayNames = options.partyDisplayNames ?? new Map();
     if (options.bridge !== undefined) {
       this.#mirror.connect(options.bridge);
       this.#roundPlanSession = new DmRoundPlanSession(
@@ -228,6 +239,7 @@ export class DmEncounterHost {
         sessionId: this.sessionId,
         branchId: encounterBranchId('branch:reference-main'),
         encounterState: state,
+        ...(options.initialPartyState === undefined ? {} : { partyState: options.initialPartyState }),
         coordinatorState: INITIAL_COORDINATOR_STATE,
         controllers: this.#registry.identities(),
         codexSessionId: options.codexSessionId ?? codexSessionId('codex:increment-6-local'),
@@ -238,6 +250,7 @@ export class DmEncounterHost {
       this.#coordinator = this.#coordinatorFor({
         journal: this.#journal,
         encounterState: state,
+        partyState: options.initialPartyState ?? null,
         coordinatorState: INITIAL_COORDINATOR_STATE,
         controllers: identities,
         codexSessionId: options.codexSessionId ?? codexSessionId('codex:increment-6-local'),
@@ -288,6 +301,7 @@ export class DmEncounterHost {
         ownedCombatantIds: this.#playerIds,
       }),
       coordinator,
+      this.#journal.partyState(),
     );
     return {
       dm: projectDmBoard({
@@ -295,6 +309,7 @@ export class DmEncounterHost {
         coordinator,
         controllers: this.#registry.identities(),
         history,
+        partyState: this.#journal.partyState(),
       }),
       player: this.#closed ? { ...player, authorityStatus: 'hard_paused' } : player,
     };
@@ -426,6 +441,42 @@ export class DmEncounterHost {
     this.#humans = built.humans;
     this.#rng = resumed.rng;
     this.#coordinator = this.#coordinatorFor(resumed);
+    this.#publish();
+    void this.#pumpCoordinator();
+  }
+
+  async finishRoom(shortRestSpends: readonly ShortRestHitDieSpend[] | null): Promise<void> {
+    if (this.#partyMembers === null || this.#journal.partyState() === null) {
+      throw new Error('This encounter is not part of a stored-character adventuring day.');
+    }
+    this.#coordinator.interrupt();
+    await this.#pump;
+    let partyState = this.#journal.capturePartyState();
+    if (shortRestSpends !== null) {
+      partyState = this.#journal.takeShortRest(shortRestSpends).state;
+    }
+    const encounter = composeStoredCharacterEncounter(
+      this.#partyMembers,
+      this.#partyDisplayNames,
+      partyState,
+    );
+    partyState = this.#journal.composeNextRoom({
+      encounterState: encounter.state,
+      coordinatorState: INITIAL_COORDINATOR_STATE,
+      controllers: encounter.controllers,
+    });
+    const built = registryFromIdentities(encounter.controllers);
+    this.#registry = built.registry;
+    this.#humans = built.humans;
+    this.#coordinator = this.#coordinatorFor({
+      journal: this.#journal,
+      encounterState: encounter.state,
+      partyState,
+      coordinatorState: INITIAL_COORDINATOR_STATE,
+      controllers: encounter.controllers,
+      codexSessionId: this.#journal.codexSessionId(),
+      rng: this.#rng,
+    });
     this.#publish();
     void this.#pumpCoordinator();
   }

@@ -23,13 +23,31 @@ import {
 } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import type { DatabaseContext } from '../db/database';
+import {
+  capturePartySessionState,
+  decodePartySessionState,
+  enterNextRoom,
+  takeShortRest,
+  type PartySessionState,
+  type ShortRestHitDieRoll,
+  type ShortRestHitDieSpend,
+  type ShortRestResult,
+} from './party-session-state';
 
-export const VTT_SESSION_SCHEMA_VERSION = 2 as const;
+export const VTT_SESSION_SCHEMA_VERSION = 3 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export type SessionTransition =
   | { readonly kind: 'session_started' }
   | DurableCoordinatorTransition
+  | { readonly kind: 'party_state_captured'; readonly room: number }
+  | {
+      readonly kind: 'short_rest_completed';
+      readonly room: number;
+      readonly spends: readonly ShortRestHitDieSpend[];
+      readonly rolls: readonly ShortRestHitDieRoll[];
+    }
+  | { readonly kind: 'room_composed'; readonly room: number }
   | {
       readonly kind: 'head_moved';
       readonly operation: 'undo' | 'redo';
@@ -39,6 +57,9 @@ export type SessionTransition =
 
 export const SESSION_TRANSITION_KINDS = [
   'session_started',
+  'party_state_captured',
+  'short_rest_completed',
+  'room_composed',
   'head_moved',
   'controller_request_issued',
   'controller_response_received',
@@ -83,6 +104,7 @@ interface SessionRevisionBody {
   readonly branchId: EncounterBranchId;
   readonly transition: SessionTransition;
   readonly encounterState: EncounterState;
+  readonly partyState: PartySessionState | null;
   readonly rngState: SerializableRngState;
   readonly coordinatorState: PersistedCoordinatorState;
   readonly controllers: readonly ControllerIdentity[];
@@ -295,6 +317,33 @@ function validPause(value: unknown): boolean {
     : value.kind === 'adjudicated' && hasExactlyKeys(value, ['kind', 'eventSequence']) && Number.isSafeInteger(value.eventSequence);
 }
 
+function validRoom(value: unknown): boolean {
+  return value === 1 || value === 2 || value === 3 || value === 4;
+}
+
+function validShortRestSpends(value: unknown): value is readonly ShortRestHitDieSpend[] {
+  return Array.isArray(value) && value.every((spend) =>
+    isRecord(spend) && hasExactlyKeys(spend, ['combatantId', 'dice']) &&
+    typeof spend.combatantId === 'string' && Array.isArray(spend.dice) &&
+    spend.dice.every((die) =>
+      isRecord(die) && hasExactlyKeys(die, ['sides', 'count']) &&
+      (die.sides === 6 || die.sides === 8 || die.sides === 10 || die.sides === 12) &&
+      Number.isSafeInteger(die.count) && typeof die.count === 'number' && die.count >= 0));
+}
+
+function validShortRestRolls(value: unknown): value is readonly ShortRestHitDieRoll[] {
+  return Array.isArray(value) && value.every((roll) =>
+    isRecord(roll) && hasExactlyKeys(
+      roll,
+      ['combatantId', 'sides', 'face', 'constitutionModifier', 'healing'],
+    ) &&
+    typeof roll.combatantId === 'string' &&
+    (roll.sides === 6 || roll.sides === 8 || roll.sides === 10 || roll.sides === 12) &&
+    Number.isSafeInteger(roll.face) && typeof roll.face === 'number' && roll.face >= 1 && roll.face <= roll.sides &&
+    Number.isSafeInteger(roll.constitutionModifier) && typeof roll.constitutionModifier === 'number' &&
+    Number.isSafeInteger(roll.healing) && typeof roll.healing === 'number' && roll.healing >= 1);
+}
+
 function decodeTransition(value: unknown): SessionTransition {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     throw new TypeError('Malformed VTT session transition.');
@@ -305,6 +354,20 @@ function decodeTransition(value: unknown): SessionTransition {
   switch (value.kind as SessionTransition['kind']) {
     case 'session_started':
       if (hasExactlyKeys(value, ['kind'])) return { kind: 'session_started' };
+      break;
+    case 'party_state_captured':
+    case 'room_composed':
+      if (hasExactlyKeys(value, ['kind', 'room']) && validRoom(value.room)) {
+        return value as unknown as SessionTransition;
+      }
+      break;
+    case 'short_rest_completed':
+      if (
+        hasExactlyKeys(value, ['kind', 'room', 'spends', 'rolls']) &&
+        validRoom(value.room) &&
+        validShortRestSpends(value.spends) &&
+        validShortRestRolls(value.rolls)
+      ) return value as unknown as SessionTransition;
       break;
     case 'head_moved':
       if (
@@ -358,6 +421,7 @@ function decodeRevision(value: unknown): SessionRevision {
     !isRecord(value.transition) ||
     !isRecord(value.encounterState) ||
     !isEncounterConfig(value.encounterState.config) ||
+    !(value.partyState === null || isRecord(value.partyState)) ||
     !isRecord(value.rngState) ||
     !isRecord(value.coordinatorState) ||
     !Array.isArray(value.controllers) ||
@@ -367,7 +431,10 @@ function decodeRevision(value: unknown): SessionRevision {
     throw new TypeError('Malformed VTT session revision.');
   }
   const transition = decodeTransition(value.transition);
-  const revision = { ...value, transition } as unknown as SessionRevision;
+  const partyState = value.partyState === null
+    ? null
+    : decodePartySessionState(value.partyState);
+  const revision = { ...value, transition, partyState } as unknown as SessionRevision;
   const { checksum: _checksum, ...body } = revision;
   if (revisionChecksum(body) !== revision.checksum) {
     throw new Error('VTT session revision checksum mismatch.');
@@ -431,6 +498,45 @@ function requireCanonicalEqual(
   }
 }
 
+function requireEncounterMatchesParty(
+  encounter: EncounterState,
+  party: PartySessionState,
+): void {
+  const playerCharacters = encounter.combatants.filter(
+    (subject) => subject.profile.kind === 'player_character',
+  );
+  if (playerCharacters.length !== party.characters.length) {
+    throw new Error('Composed room does not contain the persisted party.');
+  }
+  for (const persisted of party.characters) {
+    const subject = playerCharacters.find((candidate) => candidate.profile.id === persisted.combatantId);
+    if (subject === undefined) throw new Error('Composed room omitted a persisted party character.');
+    requireCanonicalEqual(subject.hitPoints, persisted.currentHitPoints, 'preloaded party Hit Points');
+    requireCanonicalEqual(subject.life, persisted.life, 'preloaded party life state');
+    requireCanonicalEqual(subject.deathSaves, persisted.deathSaves, 'preloaded party death state');
+    requireCanonicalEqual(
+      subject.spellSlots.map((slot) => ({
+        level: slot.level,
+        maximum: slot.maximum,
+        remaining: slot.remaining,
+        recharge: slot.recharge ?? 'long_rest',
+      })),
+      persisted.spellSlots.map((slot) => ({
+        level: slot.level,
+        maximum: slot.maximum,
+        remaining: slot.remaining,
+        recharge: slot.recharge,
+      })),
+      'preloaded party spell slots',
+    );
+    requireCanonicalEqual(
+      subject.limitedResources ?? [],
+      persisted.limitedResources,
+      'preloaded party limited resources',
+    );
+  }
+}
+
 /**
  * Rebuilds and verifies every revision against its declared parent. The full
  * state held on a revision is a checked recovery cache: reducer transitions
@@ -460,6 +566,44 @@ export function replaySessionRevisions(
           throw new Error('session_started may only be the first revision.');
         }
         break;
+      case 'party_state_captured': {
+        if (parent === null || parent === undefined || parent.partyState === null) {
+          throw new Error('Party capture requires an existing party session state.');
+        }
+        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'party-capture encounter state');
+        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'party-capture coordinator state');
+        requireCanonicalEqual(revision.rngState, parent.rngState, 'party-capture RNG state');
+        requireCanonicalEqual(
+          revision.partyState,
+          capturePartySessionState(parent.partyState, parent.encounterState),
+          'captured party state',
+        );
+        break;
+      }
+      case 'short_rest_completed': {
+        if (parent === null || parent === undefined || parent.partyState === null) {
+          throw new Error('A Short Rest requires an existing party session state.');
+        }
+        const restRng = restoreMulberry32(parent.rngState);
+        const rested = takeShortRest(parent.partyState, transition.spends, restRng);
+        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'Short Rest encounter state');
+        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'Short Rest coordinator state');
+        requireCanonicalEqual(revision.partyState, rested.state, 'Short Rest party state');
+        requireCanonicalEqual(transition.rolls, rested.rolls, 'Short Rest rolls');
+        requireCanonicalEqual(revision.rngState, restRng.snapshot(), 'Short Rest RNG state');
+        break;
+      }
+      case 'room_composed': {
+        if (parent === null || parent === undefined || parent.partyState === null) {
+          throw new Error('Room composition requires an existing party session state.');
+        }
+        const advanced = enterNextRoom(parent.partyState);
+        requireCanonicalEqual(revision.partyState, advanced, 'advanced room party state');
+        requireCanonicalEqual(revision.rngState, parent.rngState, 'room-composition RNG state');
+        if (transition.room !== advanced.room) throw new Error('Room transition ordinal disagrees with party state.');
+        requireEncounterMatchesParty(revision.encounterState, advanced);
+        break;
+      }
       case 'head_moved': {
         if (parent === null || parent === undefined) {
           throw new Error('A head move requires a target parent.');
@@ -474,6 +618,7 @@ export function replaySessionRevisions(
           parent.coordinatorState,
           'head-move coordinator state',
         );
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'head-move party state');
         const expected = deriveBranchRng(parent, revision.branchId).snapshot();
         requireCanonicalEqual(revision.rngState, expected, 'head-move RNG state');
         break;
@@ -499,6 +644,7 @@ export function replaySessionRevisions(
           'reducer events',
         );
         requireCanonicalEqual(revision.rngState, replayRng.snapshot(), 'reducer RNG state');
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'reducer party state');
         break;
       }
       case 'controller_request_issued':
@@ -522,6 +668,7 @@ export function replaySessionRevisions(
           parent.rngState,
           'coordinator RNG state',
         );
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'coordinator party state');
         break;
     }
     byRevision.set(revision.revision, revision);
@@ -532,6 +679,7 @@ export function replaySessionRevisions(
 export interface SessionResume {
   readonly journal: EncounterSessionJournal;
   readonly encounterState: EncounterState;
+  readonly partyState: PartySessionState | null;
   readonly coordinatorState: PersistedCoordinatorState;
   readonly controllers: readonly ControllerIdentity[];
   readonly codexSessionId: CodexSessionId;
@@ -554,6 +702,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     readonly sessionId: EncounterSessionId;
     readonly branchId: EncounterBranchId;
     readonly encounterState: EncounterState;
+    readonly partyState?: PartySessionState;
     readonly coordinatorState: PersistedCoordinatorState;
     readonly controllers: readonly ControllerIdentity[];
     readonly codexSessionId: CodexSessionId;
@@ -575,6 +724,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       branchId: input.branchId,
       transition: { kind: 'session_started' },
       encounterState: input.encounterState,
+      partyState: input.partyState ?? null,
       coordinatorState: input.coordinatorState,
       controllers: input.controllers,
       codexSessionId: input.codexSessionId,
@@ -593,6 +743,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     return {
       journal: new EncounterSessionJournal(sessionId, store, mirror, rng),
       encounterState: latest.encounterState,
+      partyState: latest.partyState,
       coordinatorState: latest.coordinatorState,
       controllers: latest.controllers,
       codexSessionId: latest.codexSessionId,
@@ -608,6 +759,10 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     return this.#latest().codexSessionId;
   }
 
+  partyState(): PartySessionState | null {
+    return structuredClone(this.#latest().partyState);
+  }
+
   record(input: {
     readonly transition: DurableCoordinatorTransition;
     readonly encounterState: EncounterState;
@@ -620,6 +775,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       branchId: latest.branchId,
       transition: input.transition,
       encounterState: input.encounterState,
+      partyState: latest.partyState,
       coordinatorState: input.coordinatorState,
       controllers: input.controllers,
       codexSessionId: latest.codexSessionId,
@@ -648,6 +804,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
         targetRevision,
       },
       encounterState: target.encounterState,
+      partyState: target.partyState,
       coordinatorState: target.coordinatorState,
       controllers: target.controllers,
       codexSessionId: target.codexSessionId,
@@ -655,6 +812,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     return {
       journal: this,
       encounterState: appended.encounterState,
+      partyState: appended.partyState,
       coordinatorState: appended.coordinatorState,
       controllers: appended.controllers,
       codexSessionId: appended.codexSessionId,
@@ -664,6 +822,67 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
 
   history(): readonly SessionHistoryEntry[] {
     return sessionHistory(this.store.revisions(this.sessionId));
+  }
+
+  capturePartyState(): PartySessionState {
+    const latest = this.#latest();
+    if (latest.partyState === null) throw new Error('Encounter session has no party state to capture.');
+    const partyState = capturePartySessionState(latest.partyState, latest.encounterState);
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: { kind: 'party_state_captured', room: partyState.room },
+      encounterState: latest.encounterState,
+      partyState,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      codexSessionId: latest.codexSessionId,
+    });
+    return partyState;
+  }
+
+  takeShortRest(spends: readonly ShortRestHitDieSpend[]): ShortRestResult {
+    const latest = this.#latest();
+    if (latest.partyState === null) throw new Error('Encounter session has no party state to rest.');
+    const rested = takeShortRest(latest.partyState, spends, this.#rng);
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: {
+        kind: 'short_rest_completed',
+        room: rested.state.room,
+        spends: structuredClone(spends),
+        rolls: rested.rolls,
+      },
+      encounterState: latest.encounterState,
+      partyState: rested.state,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      codexSessionId: latest.codexSessionId,
+    });
+    return rested;
+  }
+
+  composeNextRoom(input: {
+    readonly encounterState: EncounterState;
+    readonly coordinatorState: PersistedCoordinatorState;
+    readonly controllers: readonly ControllerIdentity[];
+  }): PartySessionState {
+    const latest = this.#latest();
+    if (latest.partyState === null) throw new Error('Encounter session has no party state to advance.');
+    const partyState = enterNextRoom(latest.partyState);
+    requireEncounterMatchesParty(input.encounterState, partyState);
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: { kind: 'room_composed', room: partyState.room },
+      encounterState: input.encounterState,
+      partyState,
+      coordinatorState: input.coordinatorState,
+      controllers: input.controllers,
+      codexSessionId: latest.codexSessionId,
+    });
+    return partyState;
   }
 
   #latest(): SessionRevision {
@@ -677,6 +896,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     readonly branchId: EncounterBranchId;
     readonly transition: SessionTransition;
     readonly encounterState: EncounterState;
+    readonly partyState: PartySessionState | null;
     readonly coordinatorState: PersistedCoordinatorState;
     readonly controllers: readonly ControllerIdentity[];
     readonly codexSessionId: CodexSessionId;
@@ -691,6 +911,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       branchId: input.branchId,
       transition: input.transition,
       encounterState: input.encounterState,
+      partyState: input.partyState,
       rngState: this.#rng.snapshot(),
       coordinatorState: input.coordinatorState,
       controllers: input.controllers,
@@ -741,7 +962,7 @@ export function sessionHistory(
 interface SavedSessionBundleV1 {
   readonly schemaVersion: 1;
   readonly sessionId: EncounterSessionId;
-  readonly revisions: readonly SessionRevision[];
+  readonly revisions: readonly Readonly<Record<string, unknown>>[];
 }
 
 interface SavedSessionBundleV2Body {
@@ -769,6 +990,7 @@ export interface VttSessionMigration {
 }
 
 const V1_TO_V2_SOURCE = 'vtt-session-v1-to-v2:add-format-and-sha-fingerprint=vtt-session-revisions';
+const V2_TO_V3_SOURCE = 'vtt-session-v2-to-v3:add-party-session-state-null-and-rehash-revisions';
 
 export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
   Object.freeze([
@@ -783,6 +1005,36 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
           ...bundle,
           format: 'vtt-session-revisions' as const,
           schemaVersion: 2 as const,
+        };
+        return { ...body, fingerprint: sha256(canonicalJson(body)) };
+      },
+    }),
+    Object.freeze({
+      id: 'vtt_session_v2_to_v3',
+      from: 2,
+      to: 3,
+      source: V2_TO_V3_SOURCE,
+      checksum: '0a6dd026931de184063de3aa5173901c1876fb8ef8f89ac340de241511e5303a',
+      migrate: (bundle: Readonly<Record<string, unknown>>) => {
+        if (!Array.isArray(bundle.revisions)) {
+          throw new TypeError('VTT session v2 revisions are malformed.');
+        }
+        const revisions = bundle.revisions.map((revision) => {
+          if (!isRecord(revision)) throw new TypeError('VTT session v2 revision is malformed.');
+          const { checksum: _oldChecksum, ...oldBody } = revision;
+          const body = {
+            ...oldBody,
+            schemaVersion: 3 as const,
+            partyState: null,
+          };
+          return { ...body, checksum: sha256(canonicalJson(body)) };
+        });
+        const { fingerprint: _oldFingerprint, ...oldBundle } = bundle;
+        const body = {
+          ...oldBundle,
+          format: 'vtt-session-revisions' as const,
+          schemaVersion: 3 as const,
+          revisions,
         };
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
@@ -886,10 +1138,15 @@ export function exportSavedSessionV1ForMigrationTest(
   store: BrowserSessionStore,
   sessionId: EncounterSessionId,
 ): string {
+  const revisions = store.revisions(sessionId).map((revision) => {
+    const { checksum: _checksum, partyState: _partyState, ...currentBody } = revision;
+    const body = { ...currentBody, schemaVersion: 2 as const };
+    return { ...body, checksum: sha256(canonicalJson(body)) };
+  });
   const bundle: SavedSessionBundleV1 = {
     schemaVersion: 1,
     sessionId,
-    revisions: store.revisions(sessionId),
+    revisions,
   };
   return canonicalJson(bundle);
 }

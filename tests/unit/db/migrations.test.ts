@@ -287,6 +287,15 @@ const SCHEMA_BEFORE_VTT_SESSION_REVISIONS = DATABASE_MIGRATIONS
   .join('\n');
 const VTT_SESSION_REVISIONS_MIGRATION =
   DATABASE_MIGRATIONS[VTT_SESSION_REVISIONS_INDEX]!;
+const VTT_SESSION_PARTY_STATE_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0053_vtt_session_party_state',
+);
+const SCHEMA_BEFORE_VTT_SESSION_PARTY_STATE = DATABASE_MIGRATIONS
+  .slice(0, VTT_SESSION_PARTY_STATE_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const VTT_SESSION_PARTY_STATE_MIGRATION =
+  DATABASE_MIGRATIONS[VTT_SESSION_PARTY_STATE_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -3840,6 +3849,48 @@ describe('database migration chain', () => {
       ]);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         VTT_SESSION_REVISIONS_MIGRATION.resultSchemaChecksum,
+      );
+      const beforePartyState = new sqlite3.oo1.DB(':memory:', 'c');
+      try {
+        beforePartyState.exec(SCHEMA_BEFORE_VTT_SESSION_PARTY_STATE);
+        expect(databaseSchemaSignature(db)).toBe(databaseSchemaSignature(beforePartyState));
+      } finally {
+        beforePartyState.close();
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0053 admits party-session revision schema three without losing prior revisions', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_VTT_SESSION_PARTY_STATE);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES ('session:migration-survivor', 1, 2, '{"state":"kept"}', '${'ab'.repeat(32)}')
+      `);
+
+      db.exec(VTT_SESSION_PARTY_STATE_MIGRATION.sql);
+
+      expect(db.selectObjects(
+        `SELECT session_id, revision, schema_version, payload_json, payload_checksum
+         FROM vtt_session_revisions`,
+      )).toEqual([{
+        session_id: 'session:migration-survivor',
+        revision: 1,
+        schema_version: 2,
+        payload_json: '{"state":"kept"}',
+        payload_checksum: 'ab'.repeat(32),
+      }]);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES ('session:party-state', 1, 3, '{"partyState":null}', '${'cd'.repeat(32)}')
+      `);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        VTT_SESSION_PARTY_STATE_MIGRATION.resultSchemaChecksum,
       );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {
