@@ -22,7 +22,7 @@ import type { GridCell } from './grid';
 import { planMovement, type MovementWorld } from './movement';
 import type { Rng } from './random';
 import { feet, type CombatantId } from './values';
-import { projectEncounter } from './visibility';
+import { projectPlayerView } from './visibility';
 
 export type TurnLegalActions = (
   state: EncounterState,
@@ -381,8 +381,8 @@ export class TurnCoordinator {
           requestId: this.#nextRequestId(kind, actor),
           encounterRevision: this.#state.revision,
           actorId: actor,
-          visibleState: projectEncounter(this.#state, {
-            kind: 'player' as const,
+          visibleState: projectPlayerView(this.#state, {
+            seatId: String(actor),
             combatantId: actor,
           }),
           legalActions,

@@ -9,6 +9,7 @@ import { TurnCoordinator } from '../src/combat/coordinator';
 import { createEncounter, reduceEncounter, type EncounterState } from '../src/combat/encounter';
 import type { EncounterCommand } from '../src/combat/events';
 import { mulberry32 } from '../src/combat/random';
+import { projectDmView } from '../src/combat/visibility';
 import { encounterSessionId, feet, type CombatantId, type EncounterSessionId } from '../src/combat/values';
 import { LocalhostDmBridgeClient, type BridgeFetch } from '../src/vtt/dm-bridge/client';
 import type { ProjectionTransportMode } from '../src/vtt/dm-bridge/projection-transport';
@@ -1471,7 +1472,7 @@ export async function runE01Table(
           if (coordinator === null) throw new Error('Experiment coordinator is not initialized.');
           const encounterState = coordinator.state();
           const projection = projectDmBoard({
-            state: encounterState,
+            view: projectDmView(encounterState),
             coordinator: coordinator.coordinatorState(),
             controllers: registry.identities(),
             history: [],

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { STARTER_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
-import { projectEncounter } from '../../../src/combat/visibility';
+import { dmVisibleEncounter, projectDmView, projectPlayerView } from '../../../src/combat/visibility';
 import { encounterBoardRenderModel } from '../../../src/vtt/encounter-board';
 import {
   TEST_APPROVED_FIRST_SKIRMISH_ART,
@@ -323,9 +323,9 @@ describe('increment 9 generated and approved encounter fixtures', () => {
 
   it('renders the approved package through both encounter projections', () => {
     const state = encounterStateFromApprovedFixture(TEST_APPROVED_FIRST_SKIRMISH_FIXTURE);
-    const dm = projectEncounter(state, { kind: 'dm' });
-    const player = projectEncounter(state, {
-      kind: 'player',
+    const dm = dmVisibleEncounter(projectDmView(state));
+    const player = projectPlayerView(state, {
+      seatId: 'seat:reference-fighter',
       combatantId: REFERENCE_FIGHTER_ID,
     });
     const dmCells = encounterBoardRenderModel({

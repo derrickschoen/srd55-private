@@ -10,7 +10,10 @@ import { affectedCells, feetPoint, type AreaTemplate } from '../combat/templates
 import { feet, type CombatantId } from '../combat/values';
 import type { EncounterEffectId, ObjectTargetId, PersistentAreaId, WorldObjectId } from '../combat/values';
 import type { WorldObjectBlocking, WorldObjectKind } from '../combat/world-objects';
+import type { DmView } from '../combat/visibility';
 import type { EncounterArtPackage } from './encounter-package';
+
+type DmEncounterState = DmView['state'];
 
 export interface EncounterBoardCombatant {
   readonly id: CombatantId;
@@ -198,7 +201,7 @@ function allCells(bounds: EncounterState['bounds']): readonly GridCell[] {
   return cells;
 }
 
-function combatantName(state: EncounterState, id: CombatantId): string {
+function combatantName(state: DmEncounterState, id: CombatantId): string {
   return state.combatants.find((entry) => entry.profile.id === id)?.profile.name ?? String(id);
 }
 
@@ -208,7 +211,7 @@ function effectOrigin(template: AreaTemplate): GridCell {
 }
 
 function radiusCells(
-  state: EncounterState,
+  state: DmEncounterState,
   origin: GridCell,
   radiusFeet: number,
 ): readonly GridCell[] {
@@ -224,7 +227,7 @@ function radiusCells(
   ).filter((cell) => isCellInside(state.bounds, cell));
 }
 
-function projectedLightOverlays(state: EncounterState): readonly EncounterBoardLightOverlay[] {
+function projectedLightOverlays(state: DmEncounterState): readonly EncounterBoardLightOverlay[] {
   return state.effects.flatMap((effect): readonly EncounterBoardLightOverlay[] => {
     if (effect.payload.kind !== 'daylight_area' || effect.payload.placement === 'selected_when_cast') {
       return [];
@@ -249,7 +252,7 @@ function projectedLightOverlays(state: EncounterState): readonly EncounterBoardL
   });
 }
 
-function projectedAreas(state: EncounterState): readonly EncounterBoardArea[] {
+function projectedAreas(state: DmEncounterState): readonly EncounterBoardArea[] {
   const cells = allCells(state.bounds);
   const tokens = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
   const objects = new Map(state.worldObjects.map((object) => [object.id, object.position] as const));
@@ -285,7 +288,7 @@ function projectedAreas(state: EncounterState): readonly EncounterBoardArea[] {
 }
 
 function boundTargets(
-  state: EncounterState,
+  state: DmEncounterState,
   payload: Extract<EffectPayload, { readonly kind: 'sustained_effect' }>,
 ): readonly EncounterBoardBoundTarget[] {
   const combatants = payload.boundCombatants.flatMap(
@@ -313,7 +316,7 @@ function boundTargets(
 }
 
 function projectedSustainedEffects(
-  state: EncounterState,
+  state: DmEncounterState,
   pendingRequest: ControllerRequest | null,
 ): readonly EncounterBoardSustainedEffect[] {
   return state.effects.flatMap((effect): readonly EncounterBoardSustainedEffect[] => {
@@ -404,10 +407,11 @@ function projectedLog(events: readonly EncounterEvent[]): readonly EncounterBoar
 }
 
 export function projectEncounterBoard(
-  state: EncounterState,
+  view: DmView,
   pendingRequest: ControllerRequest | null = null,
   adjudicatedTargets: readonly CombatantId[] = [],
 ): DmEncounterBoardModel {
+  const state = view.state;
   const positions = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
   const combatants = state.combatants.flatMap((subject) => {
     const position = positions.get(subject.profile.id);

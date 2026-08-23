@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { ControllerRequest } from '../../../src/combat/controllers';
 import type { EncounterCommand } from '../../../src/combat/events';
+import { projectDmView } from '../../../src/combat/visibility';
 import { damageType, dieSides, codexSessionId, encounterEffectId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { DmRoundPlanSession } from '../../../src/vtt/dm-bridge/decision-program';
@@ -51,7 +52,7 @@ function fixture(round = 2) {
 }
 
 function board(state: EncounterState) {
-  return projectDmBoard({ state, coordinator: IDLE, controllers: [], history: [] });
+  return projectDmBoard({ view: projectDmView(state), coordinator: IDLE, controllers: [], history: [] });
 }
 
 function context(state: EncounterState) {

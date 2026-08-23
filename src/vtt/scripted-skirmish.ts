@@ -21,7 +21,7 @@ import {
   feet,
   type CombatantId,
 } from '../combat/values';
-import { projectEncounter } from '../combat/visibility';
+import { dmVisibleEncounter, projectDmView, projectPlayerView } from '../combat/visibility';
 import {
   EncounterSessionJournal,
   MemoryBrowserSessionStore,
@@ -255,15 +255,14 @@ export function recordScriptedReferenceSkirmish(
     const requestId = `${sessionId}:decision:${decisionSequence}`;
     decisionSequence += 1;
     const identity = controllerIdentity(actor, kind);
-    const viewer = kind === 'human'
-      ? { kind: 'player' as const, combatantId: actor }
-      : { kind: 'dm' as const };
     const request: ControllerRequest = {
       kind: 'turn',
       requestId,
       encounterRevision: state.revision,
       actorId: actor,
-      visibleState: projectEncounter(state, viewer),
+      visibleState: kind === 'human'
+        ? projectPlayerView(state, { seatId: String(actor), combatantId: actor })
+        : dmVisibleEncounter(projectDmView(state)),
       legalActions: { actions: [command] },
     };
     const requestRecord = recorder.record({
@@ -352,7 +351,7 @@ export function recordScriptedReferenceSkirmish(
       controller: dm,
       requestId: null,
       requestLink: link,
-      payload: { projection: projectEncounter(state, { kind: 'dm' }), fakeExchange: true },
+      payload: { projection: dmVisibleEncounter(projectDmView(state)), fakeExchange: true },
       fleet: AGENT_FLEET,
     });
     recorder.record({

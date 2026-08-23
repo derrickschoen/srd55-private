@@ -15,6 +15,7 @@ import {
   type InitiativeMode,
 } from '../src/combat/encounter';
 import { mulberry32 } from '../src/combat/random';
+import { projectDmView } from '../src/combat/visibility';
 import {
   encounterSessionId,
   type CodexSessionId,
@@ -187,7 +188,7 @@ function tableCoordinator(
         encounterId: dm.encounterId,
         codexSessionId: dm.codexSessionId,
         projection: projectDmBoard({
-          state: coordinator.state(),
+          view: projectDmView(coordinator.state()),
           coordinator: coordinator.coordinatorState(),
           controllers: registry.identities(),
           history: [],

@@ -23,7 +23,7 @@ import {
   type CombatantId,
   type EncounterEffectId,
 } from '../../../src/combat/values';
-import { projectEncounter } from '../../../src/combat/visibility';
+import { projectDmView, projectPlayerView } from '../../../src/combat/visibility';
 import { loadContentPack, type LoadedContentPack } from '../../../src/content/content-pack';
 import { encounterBoardRenderModel, projectEncounterBoard } from '../../../src/vtt/encounter-board';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
@@ -212,7 +212,7 @@ describe('D344.3 DM encounter board projection', () => {
       consequence: { kind: 'hit_point_delta', amount: -10 },
     }, () => 0).state;
 
-    const projected = projectEncounterBoard(state);
+    const projected = projectEncounterBoard(projectDmView(state));
     const rendered = encounterBoardRenderModel(projected, REFERENCE_ENCOUNTER_ART);
     const token = rendered.flatMap((cell) => cell.tokens).find((entry) => entry.id === downed.id);
 
@@ -234,7 +234,7 @@ describe('D344.3 DM encounter board projection', () => {
       consequence: { kind: 'hit_point_delta', amount: -20 },
     }, () => 0).state;
 
-    const projection = projectEncounterBoard(state);
+    const projection = projectEncounterBoard(projectDmView(state));
     expect(projection.combatants.find((entry) => entry.id === dead.id)).toEqual(expect.objectContaining({
       life: 'dead', position: { column: 4, row: 2 },
     }));
@@ -251,7 +251,7 @@ describe('D344.3 DM encounter board projection', () => {
       type: 'adjudicate', target: corpse.id, subject: 'edge', reasoning: 'fixture',
       consequence: { kind: 'hit_point_delta', amount: -1 },
     }, () => 0).state;
-    const projected = projectEncounterBoard(state).combatants.filter((entry) => entry.life === 'dead');
+    const projected = projectEncounterBoard(projectDmView(state)).combatants.filter((entry) => entry.life === 'dead');
     expect(projected.map((entry) => entry.position)).toEqual([{ column: 2, row: 1 }]);
     expect(projected.some((entry) => entry.position.column === 3 || entry.position.row === 2)).toBe(false);
   });
@@ -277,14 +277,14 @@ describe('D344.3 DM encounter board projection', () => {
     moved = reduceEncounter(moved, {
       type: 'move', actor: mover.id, path: [{ column: 1, row: 0 }], cause: 'voluntary',
     }, () => 0).state;
-    expect(projectEncounterBoard(moved).combatants.find((entry) => entry.id === mover.id)?.position)
+    expect(projectEncounterBoard(projectDmView(moved)).combatants.find((entry) => entry.id === mover.id)?.position)
       .toEqual({ column: 1, row: 0 });
 
     let teleported = started([mover, target], [{ column: 0, row: 0 }, { column: 8, row: 0 }], { pack: spatialPack });
     teleported = reduceEncounter(teleported, castCommand(
       mover, 'greenforge:board-step', [], { spatialPoint: { column: 6, row: 0 } },
     ), () => 0).state;
-    expect(projectEncounterBoard(teleported).combatants.find((entry) => entry.id === mover.id)?.position)
+    expect(projectEncounterBoard(projectDmView(teleported)).combatants.find((entry) => entry.id === mover.id)?.position)
       .toEqual({ column: 6, row: 0 });
 
     let forced = started([mover, target], [{ column: 0, row: 0 }, { column: 1, row: 0 }], { pack: spatialPack });
@@ -293,7 +293,7 @@ describe('D344.3 DM encounter board projection', () => {
       castCommand(mover, 'greenforge:board-wave', [target.id]),
       () => 0,
     ).state;
-    expect(projectEncounterBoard(forced).combatants.find((entry) => entry.id === target.id)?.position)
+    expect(projectEncounterBoard(projectDmView(forced)).combatants.find((entry) => entry.id === target.id)?.position)
       .toEqual({ column: 3, row: 0 });
   });
 
@@ -330,7 +330,7 @@ describe('D344.3 DM encounter board projection', () => {
       area: { shape: 'sphere', template: { origin: feetPoint(0, 0), radius: feet(60) } },
     }), () => 0).state;
 
-    const projection = projectEncounterBoard(state);
+    const projection = projectEncounterBoard(projectDmView(state));
     expect(projection.worldObjects.map((object) => ({
       name: object.name, lightClass: object.lightClass, blocking: object.blocking,
     }))).toEqual([
@@ -365,7 +365,7 @@ describe('D344.3 DM encounter board projection', () => {
       slotLevel: 3,
       area: { shape: 'sphere', template: { origin: feetPoint(0, 0), radius: feet(60) } },
     }), () => 0).state;
-    const light = projectEncounterBoard(state).lightOverlays[0];
+    const light = projectEncounterBoard(projectDmView(state)).lightOverlays[0];
     expect(light?.brightCells).toContainEqual({ column: 12, row: 0 });
     expect(light?.dimCells).toContainEqual({ column: 24, row: 0 });
     expect(light?.brightCells).not.toContainEqual({ column: -1, row: 0 });
@@ -398,7 +398,7 @@ describe('D344.3 DM encounter board projection', () => {
     }, () => 0).state;
     state = reduceEncounter(state, castCommand(owner, 'greenforge:thorn-lane', []), () => 0).state;
 
-    expect(projectEncounterBoard(state).areas).toEqual([
+    expect(projectEncounterBoard(projectDmView(state)).areas).toEqual([
       expect.objectContaining({
         kind: 'persistent', owner: owner.id, ownerName: 'area-owner',
         shape: { kind: 'sphere', radius: 10 },
@@ -434,10 +434,10 @@ describe('D344.3 DM encounter board projection', () => {
     const request: ControllerRequest = {
       kind: 'turn', requestId: 'turn:activate', encounterRevision: state.revision,
       actorId: caster.id,
-      visibleState: projectEncounter(state, { kind: 'player', combatantId: caster.id }),
+      visibleState: projectPlayerView(state, { seatId: String(caster.id), combatantId: caster.id }),
       legalActions: { actions: [activation] },
     };
-    const before = projectEncounterBoard(state, request);
+    const before = projectEncounterBoard(projectDmView(state), request);
     expect(before.sustainedEffects.map((effect) => ({
       spellId: effect.spellId,
       binding: effect.targetBinding,
@@ -459,7 +459,7 @@ describe('D344.3 DM encounter board projection', () => {
     })]);
 
     state = reduceEncounter(state, activation, () => 0).state;
-    expect(projectEncounterBoard(state).log).toContainEqual(expect.objectContaining({
+    expect(projectEncounterBoard(projectDmView(state)).log).toContainEqual(expect.objectContaining({
       kind: 'sustained_activation', effectId, spellId: 'greenforge:bound-glow',
     }));
   });
@@ -503,7 +503,7 @@ describe('D344.3 DM encounter board projection', () => {
       castCommand(caster, 'greenforge:two-branch-wave', [failure.id, success.id]),
       () => 0,
     ).state;
-    const saveRolls = projectEncounterBoard(state).log.filter(
+    const saveRolls = projectEncounterBoard(projectDmView(state)).log.filter(
       (entry) => entry.kind === 'roll' && entry.rollKind === 'save',
     );
     expect(saveRolls).toHaveLength(2);
@@ -525,7 +525,7 @@ describe('D344.3 DM encounter board projection', () => {
       castCommand(caster, 'greenforge:refusal-pair', [immune.id]),
       () => 0,
     ).state;
-    expect(projectEncounterBoard(refusalState).log).toContainEqual(expect.objectContaining({
+    expect(projectEncounterBoard(projectDmView(refusalState)).log).toContainEqual(expect.objectContaining({
       kind: 'composition_refusal', reason: 'operation_refused', propagation: 'continue',
     }));
   });
@@ -558,11 +558,11 @@ describe('D344.3 DM encounter board projection', () => {
     const request: ControllerRequest = {
       kind: 'turn', requestId: 'turn:human-board', encounterRevision: state.revision,
       actorId: actor.id,
-      visibleState: projectEncounter(state, { kind: 'player', combatantId: actor.id }),
+      visibleState: projectPlayerView(state, { seatId: String(actor.id), combatantId: actor.id }),
       legalActions: { actions: commands },
     };
     const human = projectDmBoard({
-      state,
+      view: projectDmView(state),
       coordinator: { ...IDLE, pendingRequest: request },
       controllers: [{
         combatantId: actor.id, controllerId: 'controller:human-board', kind: 'human', generation: 0,
@@ -578,7 +578,7 @@ describe('D344.3 DM encounter board projection', () => {
     expect(human.board.highlightedCombatant).toBe(actor.id);
 
     const algorithm = projectDmBoard({
-      state,
+      view: projectDmView(state),
       coordinator: { ...IDLE, pendingRequest: request },
       controllers: [{
         combatantId: actor.id, controllerId: 'controller:algorithm-board', kind: 'algorithm', generation: 0,

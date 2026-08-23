@@ -4,12 +4,14 @@ import type {
   CoordinatorPause,
   PersistedCoordinatorState,
 } from '../combat/coordinator';
-import type { EncounterState, TurnResources } from '../combat/encounter';
+import type { TurnResources } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
 import type { GridCell } from '../combat/grid';
 import {
-  projectEncounter,
+  dmVisibleEncounter,
+  type DmView,
   type DmVisibleEncounterState,
+  type PlayerView,
   type PlayerVisibleCombatant,
   type PlayerVisibleEncounterEvent,
 } from '../combat/visibility';
@@ -33,7 +35,7 @@ export interface PlayerBoardProjection {
   readonly audience: 'player';
   readonly revision: number;
   readonly round: number;
-  readonly bounds: EncounterState['bounds'];
+  readonly bounds: PlayerView['bounds'];
   readonly blockedCells: readonly GridCell[];
   readonly activeCombatant: CombatantId | null;
   readonly highlightedCombatant: CombatantId | null;
@@ -65,10 +67,6 @@ export interface DmBoardProjection {
   readonly adjudicatedTargets: readonly CombatantId[];
 }
 
-function cellKey(cell: GridCell): string {
-  return `${cell.column},${cell.row}`;
-}
-
 function projectedRequest(
   request: ControllerRequest | null,
   playerIds: ReadonlySet<CombatantId>,
@@ -85,11 +83,11 @@ function projectedRequest(
 }
 
 function adjudicatedTargets(
-  state: EncounterState,
+  events: readonly import('../combat/events').EncounterEvent[],
   pause: CoordinatorPause | null,
 ): readonly CombatantId[] {
   if (pause?.kind !== 'adjudicated') return [];
-  const event = state.eventLog.find(
+  const event = events.find(
     (candidate) =>
       candidate.sequence === pause.eventSequence && candidate.type === 'adjudicated',
   );
@@ -97,76 +95,62 @@ function adjudicatedTargets(
 }
 
 export function projectPlayerBoard(
-  state: EncounterState,
+  view: PlayerView,
   coordinator: PersistedCoordinatorState,
-  playerIds: readonly CombatantId[],
 ): PlayerBoardProjection {
-  const ownerIds = new Set(playerIds);
-  const playerCells = new Set(
-    state.tokens
-      .filter((token) => ownerIds.has(token.combatantId))
-      .map((token) => cellKey(token.position)),
-  );
-  const ownerVisibleState: EncounterState = {
-    ...state,
-    foggedCells: state.foggedCells.filter((cell) => !playerCells.has(cellKey(cell))),
-  };
-  const viewerId = playerIds.find((id) => id === state.activeCombatant) ?? playerIds[0];
-  if (viewerId === undefined) throw new Error('Player board requires at least one player PC.');
-  const visible = projectEncounter(ownerVisibleState, {
-    kind: 'player',
-    combatantId: viewerId,
-  });
-  const hitPoints = new Map(
-    state.combatants
-      .filter((subject) => ownerIds.has(subject.profile.id))
-      .map((subject) => [subject.profile.id, subject.hitPoints] as const),
-  );
-  const combatants = visible.combatants.map((subject) =>
+  const ownerIds = new Set(view.ownedCombatants.map((subject) => subject.id));
+  const owned = new Map(view.ownedCombatants.map((subject) => [subject.id, subject] as const));
+  const combatants = view.combatants.map((subject) =>
     ownerIds.has(subject.id)
       ? {
           ...subject,
-          hitPoints: hitPoints.get(subject.id) ?? (() => {
+          hitPoints: owned.get(subject.id)?.hitPoints ?? (() => {
             throw new Error(`Player projection is missing owned Hit Points for ${subject.id}.`);
           })(),
         }
       : subject,
   );
-  const activePc = state.combatants.find(
-    (subject) => subject.profile.id === state.activeCombatant && ownerIds.has(subject.profile.id),
-  );
+  const activePc = view.ownedCombatants.find((subject) => subject.id === view.activeCombatant);
+  const adjudicatedSequence = coordinator.pause?.kind === 'adjudicated'
+    ? coordinator.pause.eventSequence
+    : null;
   return {
     audience: 'player',
-    revision: state.revision,
-    round: state.round,
-    bounds: visible.bounds,
-    blockedCells: visible.blockedCells,
-    activeCombatant: visible.activeCombatant,
-    highlightedCombatant: visible.activeCombatant,
+    revision: view.revision,
+    round: view.round,
+    bounds: view.bounds,
+    blockedCells: view.blockedCells,
+    activeCombatant: view.activeCombatant,
+    highlightedCombatant: view.activeCombatant,
     combatants,
     activePcResources: activePc?.turn ?? null,
     pendingRequest: projectedRequest(coordinator.pendingRequest, ownerIds),
-    events: visible.recentEvents,
-    adjudicatedTargets: adjudicatedTargets(state, coordinator.pause),
+    events: view.recentEvents,
+    adjudicatedTargets: adjudicatedSequence !== null
+      ? view.recentEvents.flatMap((event) =>
+          event.sequence === adjudicatedSequence && event.type === 'adjudicated'
+            ? [event.target]
+            : [])
+      : [],
     authorityStatus: 'connected',
   };
 }
 
 export function projectDmBoard(input: {
-  readonly state: EncounterState;
+  readonly view: DmView;
   readonly coordinator: PersistedCoordinatorState;
   readonly controllers: readonly ControllerIdentity[];
   readonly history: readonly SessionHistoryEntry[];
 }): DmBoardProjection {
-  const targets = adjudicatedTargets(input.state, input.coordinator.pause);
+  const targets = adjudicatedTargets(input.view.state.eventLog, input.coordinator.pause);
   const pending = input.coordinator.pendingRequest;
   const pendingController = pending === null
     ? undefined
     : input.controllers.find((identity) => identity.combatantId === pending.actorId);
   return {
     audience: 'dm',
-    encounter: projectEncounter(input.state, { kind: 'dm' }),
-    board: projectEncounterBoard(input.state, input.coordinator.pendingRequest, targets),
+    encounter: dmVisibleEncounter(input.view),
+    board: projectEncounterBoard(input.view, input.coordinator.pendingRequest, targets),
     coordinator: input.coordinator,
     pendingRequest: input.coordinator.pendingRequest,
     humanCommandActions: pendingController?.kind === 'human'
