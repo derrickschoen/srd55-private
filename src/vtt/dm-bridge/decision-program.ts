@@ -32,8 +32,10 @@ import {
 import type { JsTurnProgramLimits } from './js-turn-program';
 import {
   describeTurnProgramAmbientApi,
-  type TurnProgramTypeCheckTelemetry,
-} from './turn-program-types';
+} from './turn-program-declarations';
+import type {
+  TurnProgramTypeCheckTelemetry,
+} from './turn-program-type-contract';
 import { canonicalJson } from '../../commands/canonical-json';
 import {
   E06_TRIGGER_POLICY,

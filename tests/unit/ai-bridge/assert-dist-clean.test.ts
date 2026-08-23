@@ -272,6 +272,18 @@ describe('the dist guard FAILS on every way the bridge could leak', () => {
     });
   }
 
+  it('guard_scope_narrowed rejects child_process in the encounter-app chunk', async () => {
+    const run = await scan(
+      distWith({
+        'assets/index.js': CLEAN,
+        'assets/encounter-app-probe.js': 'require("child_process")',
+      }),
+    );
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain('child_process');
+    expect(run.stderr).toContain('assets/encounter-app-probe.js');
+  });
+
   it('rejects the token meta tag the plugin injects into HTML', async () => {
     // A regression test, not a hypothetical. The scan previously forbade only
     // `x-ai-bridge-token`, which is NOT a substring of the meta tag below, so

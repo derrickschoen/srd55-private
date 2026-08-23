@@ -5,7 +5,10 @@ import type {
   DecisionProgram,
   StandingConditionalRider,
 } from './round-plan-contract';
-import type { TurnProgramTypeCheckTelemetry } from './turn-program-types';
+import type {
+  TurnProgramTypeChecker,
+  TurnProgramTypeCheckTelemetry,
+} from './turn-program-type-contract';
 import {
   TURN_PROGRAM_LIBRARY_DOC,
   expandTurnProgramLibraryCall,
@@ -523,6 +526,7 @@ export interface JsTurnProgramLimits {
   readonly now?: () => number;
   readonly onTypeCheckTelemetry?: (telemetry: TurnProgramTypeCheckTelemetry) => void;
   readonly typeCheckMode?: 'typed' | 'untyped';
+  readonly typeChecker?: TurnProgramTypeChecker;
   readonly onTypeCheckUniqueCatch?: (observation: TypeCheckUniqueCatchObservation) => void;
 }
 
