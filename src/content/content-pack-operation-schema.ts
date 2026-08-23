@@ -89,10 +89,10 @@ const EFFECT_PAYLOAD_KINDS = [
   'tiny_hut', 'trap_detection', 'truth_zone', 'universal_language', 'unseen_servant',
   'vampiric_touch', 'wall_of_fire', 'warding_bond', 'water_breathing', 'water_walk',
   'web_area',
-] as const satisfies readonly EffectPayload['kind'][];
+] as const satisfies readonly Exclude<EffectPayload, { readonly kind: 'sustained_effect' }>['kind'][];
 
 type MissingEffectPayloadKind = Exclude<
-  EffectPayload['kind'],
+  Exclude<EffectPayload, { readonly kind: 'sustained_effect' }>['kind'],
   (typeof EFFECT_PAYLOAD_KINDS)[number]
 >;
 const effectPayloadInventoryIsComplete: MissingEffectPayloadKind extends never ? true : never = true;
@@ -300,6 +300,7 @@ const worldOperationsOperationSchema = z.strictObject({
       damageResponses: z.array(worldObjectDamageResponseSchema).max(damageTypes.length).optional(),
       blocking: worldObjectBlockingSchema.optional(),
     }).refine((changes) => Object.keys(changes).length > 0, { message: 'Object modifications cannot be empty.' }) }),
+    z.strictObject({ kind: z.literal('move_owned_object'), maximumDistanceFeet: importedPositiveDistance }),
     z.strictObject({ kind: z.literal('damage_objects'), damage: worldDamageRequestSchema }),
   ])).min(1).max(32),
 }).superRefine((operation, context) => {
@@ -409,6 +410,35 @@ const targetBranchOperationSchema = z.strictObject({
 });
 const reevaluatedBranchOperationSchema = z.strictObject({ kind: z.literal('reevaluated_branch'), hook: z.enum(['target_start', 'target_end']), durationRounds: importedRounds, operation: z.lazy(() => nonCompositionOperationSchema) });
 
+const sustainedTargetingSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('self') }),
+  z.strictObject({ kind: z.literal('single'), rangeFeet: importedDistance, willing: z.boolean(), allowDead: z.literal(true).optional(), rangeByCasterLevel: z.array(z.strictObject({ minimumLevel: positiveInteger.max(20), rangeFeet: importedDistance })).optional() }),
+  z.strictObject({ kind: z.literal('multiple'), rangeFeet: importedDistance, baseMaximum: positiveInteger.max(MAX_IMPORTED_DICE_COUNT), additionalPerSlot: nonNegativeInteger.max(MAX_IMPORTED_DICE_COUNT), willing: z.boolean().optional() }),
+  z.strictObject({ kind: z.literal('area'), rangeFeet: importedDistance, shape: z.enum(['cone', 'cube', 'cylinder', 'emanation', 'line', 'sphere']), baseSizeFeet: importedDistance, sizePerSlotFeet: importedDistance, secondarySizeFeet: importedDistance.optional(), surface: z.literal('ground_square').optional() }),
+  z.strictObject({ kind: z.literal('area_selected'), rangeFeet: importedDistance, shape: z.enum(['cone', 'cube', 'cylinder', 'emanation', 'line', 'sphere']), baseSizeFeet: importedDistance, sizePerSlotFeet: importedDistance, secondarySizeFeet: importedDistance.optional(), baseMaximum: positiveInteger.max(MAX_IMPORTED_DICE_COUNT), additionalPerSlot: nonNegativeInteger.max(MAX_IMPORTED_DICE_COUNT) }),
+  z.strictObject({ kind: z.literal('all_in_range'), rangeFeet: importedDistance }),
+  z.strictObject({ kind: z.literal('remote'), range: z.literal('unlimited') }),
+  z.strictObject({ kind: z.literal('utility'), rangeFeet: importedDistance }),
+]);
+const sustainedActionSchema = z.discriminatedUnion('phrasing', [
+  z.strictObject({ phrasing: z.literal('explicit'), actionType: z.enum(['magic_action', 'bonus_action', 'reaction']) }),
+  z.strictObject({ phrasing: z.literal('vague_action_on_later_turn'), actionType: z.literal('magic_action') }),
+]);
+const sustainedEffectOperationSchema = z.strictObject({
+  kind: z.literal('sustained_effect'),
+  establishment: z.lazy(() => nonCompositionOperationSchema).nullable(),
+  lifecycle: z.strictObject({ concentration: z.boolean(), durationRounds: importedRounds.nullable(), expiresAt: z.enum(['source_start', 'source_end']) }),
+  targetBinding: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('reselect') }),
+    z.strictObject({ kind: z.literal('bound'), to: z.enum(['cast_combatant_targets', 'cast_object_targets', 'created_world_objects']) }),
+  ]),
+  activation: z.strictObject({
+    action: sustainedActionSchema,
+    targeting: sustainedTargetingSchema,
+    operation: z.lazy(() => nonCompositionOperationSchema),
+  }),
+});
+
 const nonCompositionSchemas = {
   caster_choice: casterChoiceOperationSchema,
   random_branch: randomBranchOperationSchema,
@@ -421,6 +451,7 @@ const nonCompositionSchemas = {
   armor_class_modifier: armorClassModifierOperationSchema,
   damage_response_modifier: damageResponseModifierOperationSchema,
   targeted_defense_modifier: targetedDefenseModifierOperationSchema,
+  sustained_effect: sustainedEffectOperationSchema,
   damage_operation: importedDamageOperationSchema,
   armed_weapon_hit_rider: armedWeaponHitRiderSchema,
   persistent_area: persistentAreaOperationSchema,

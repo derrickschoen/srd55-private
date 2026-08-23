@@ -10,6 +10,7 @@ import type {
 import type { EffectApplication, EffectPayload, TurnBoundary } from './effects';
 import type { PersistentAreaInput, PersistentAreaOrigin } from './persistent-areas';
 import type { SpellCastCommand } from './spells/types';
+import type { AreaTemplate } from './templates';
 import type { CombatantId, EncounterEffectId, Feet, LimitedResourcePoolId, PersistentAreaId, WorldObjectId } from './values';
 import type { LightLevel, WorldObject, WorldOperation } from './world-objects';
 
@@ -18,6 +19,17 @@ export type ActionCost = 'action' | 'bonus_action' | 'reaction' | 'none';
 export type EncounterCommand =
   | { readonly type: 'roll_initiative' }
   | SpellCastCommand
+  | {
+      readonly type: 'activate_sustained_effect';
+      readonly actor: CombatantId;
+      readonly effectId: EncounterEffectId;
+      readonly targets: readonly CombatantId[];
+      readonly objectTargets: readonly WorldObjectId[];
+      readonly ownedObjectTargets: readonly WorldObjectId[];
+      readonly area: AreaTemplate | null;
+      readonly spatialPoint?: GridCell;
+      readonly selectedOption: string | null;
+    }
   | {
       readonly type: 'adjudicate';
       readonly target: CombatantId;
@@ -453,6 +465,15 @@ export type EncounterEvent =
       readonly spellId: string;
       readonly slotLevel: number | null;
       readonly targets: readonly CombatantId[];
+    })
+  | (SequencedEvent & {
+      readonly type: 'sustained_effect_activated';
+      readonly caster: CombatantId;
+      readonly effectId: EncounterEffectId;
+      readonly spellId: string;
+      readonly targets: readonly CombatantId[];
+      readonly objectTargets: readonly WorldObjectId[];
+      readonly ownedObjectTargets: readonly WorldObjectId[];
     })
   | (SequencedEvent & {
       readonly type: 'spell_slot_spent';

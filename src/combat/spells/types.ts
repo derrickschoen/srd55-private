@@ -301,6 +301,33 @@ export const COMPOSITION_STATE_VISIBILITY = 'live_prior_step_state' as const;
  */
 export const COMPOSITION_TARGET_RESOLUTION = Object.freeze(['inherit', 're_resolve'] as const);
 
+export type SustainedEffectActionDeclaration =
+  | {
+      readonly phrasing: 'explicit';
+      readonly actionType: 'magic_action' | 'bonus_action' | 'reaction';
+    }
+  | {
+      readonly phrasing: 'vague_action_on_later_turn';
+      readonly actionType: 'magic_action';
+    };
+
+/**
+ * D343.2 converter contract: named action types survive conversion; vague
+ * later-turn Action wording is declared as the 2024 Magic action. The reducer
+ * never supplies an action type that a content pack omitted.
+ */
+export const SUSTAINED_ACTION_NORMALIZATION = Object.freeze({
+  explicit: 'preserve_declared_action_type',
+  vague_action_on_later_turn: 'magic_action',
+} as const);
+
+export type SustainedEffectTargetBinding =
+  | { readonly kind: 'reselect' }
+  | {
+      readonly kind: 'bound';
+      readonly to: 'cast_combatant_targets' | 'cast_object_targets' | 'created_world_objects';
+    };
+
 export type SpellOperation = CompositionOperation | NonCompositionSpellOperation;
 
 export type NonCompositionSpellOperation =
@@ -345,6 +372,23 @@ export type NonCompositionSpellOperation =
   | ArmorClassModifierOperation
   | DamageResponseModifierOperation
   | TargetedDefenseModifierOperation
+  | {
+      readonly kind: 'sustained_effect';
+      /** The ordinary cast-time operation, if any, resolves before the effect is established. */
+      readonly establishment: NonCompositionSpellOperation | null;
+      readonly lifecycle: {
+        readonly concentration: boolean;
+        readonly durationRounds: number | null;
+        readonly expiresAt: 'source_start' | 'source_end';
+      };
+      readonly targetBinding: SustainedEffectTargetBinding;
+      readonly activation: {
+        readonly action: SustainedEffectActionDeclaration;
+        readonly targeting: SpellTargeting;
+        /** Executed with the existing spell-operation interpreter on activation. */
+        readonly operation: NonCompositionSpellOperation;
+      };
+    }
   | ({ readonly kind: 'damage_operation' } & DamageOperationSpec)
   | {
       readonly kind: 'armed_weapon_hit_rider';
@@ -407,6 +451,11 @@ export type NonCompositionSpellOperation =
         | {
             readonly kind: 'modify_objects';
             readonly changes: WorldObjectChanges;
+          }
+        | {
+            /** Activation-time destination is supplied by the sustained-effect command. */
+            readonly kind: 'move_owned_object';
+            readonly maximumDistanceFeet: number;
           }
         | {
             readonly kind: 'damage_objects';
@@ -768,6 +817,7 @@ export const SPELL_OPERATION_KINDS = [
   'armor_class_modifier',
   'damage_response_modifier',
   'targeted_defense_modifier',
+  'sustained_effect',
   'damage_operation',
   'armed_weapon_hit_rider',
   'persistent_area',
@@ -854,6 +904,8 @@ export interface SpellCastCommand {
   /** Required only by a targeted-defense operation cast against a selected attacker. */
   readonly modifierSource?: CombatantId;
   readonly objectTargets?: readonly WorldObjectId[];
+  /** Objects created and owned by a sustained effect, distinct from its activation targets. */
+  readonly ownedObjectTargets?: readonly WorldObjectId[];
   /** A declared class/feat pool can replace slot spending for this cast. */
   readonly resourcePoolId?: LimitedResourcePoolId;
 }

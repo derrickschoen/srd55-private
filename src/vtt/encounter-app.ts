@@ -52,6 +52,8 @@ function actionLabel(action: EncounterCommand): string {
       return 'Change world';
     case 'activate_damage_operation':
       return 'Use damage feature';
+    case 'activate_sustained_effect':
+      return 'Activate sustained spell';
     case 'arm_weapon_hit_rider':
       return 'Arm weapon rider';
     case 'attack':
