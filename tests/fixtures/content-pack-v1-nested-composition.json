@@ -1,0 +1,238 @@
+{
+  "schemaVersion": 1,
+  "packId": "nested-composition-shapes",
+  "provenance": {
+    "sourceName": "Measured nested composition shapes",
+    "sourceKind": "homebrew",
+    "importedAt": "2026-08-23T12:00:00Z"
+  },
+  "namespaces": ["greenforge"],
+  "spells": [
+    {
+      "sourceId": "greenforge",
+      "recordId": "cloudkill-class-depth-3",
+      "name": "Measured damage movement world-state triplet",
+      "level": 0,
+      "school": { "kind": "other", "name": "Fixturecraft" },
+      "castingTime": "action",
+      "range": { "kind": "feet", "feet": 30 },
+      "components": { "verbal": true, "somatic": true, "material": null },
+      "duration": { "kind": "instantaneous" },
+      "concentration": false,
+      "targeting": { "kind": "single", "rangeFeet": 30, "willing": true },
+      "operation": {
+        "kind": "composition",
+        "ordering": "declaration_order",
+        "onRefusal": "abort",
+        "steps": [
+          {
+            "targetResolution": { "kind": "inherit" },
+            "operation": {
+              "kind": "damage_operation",
+              "delivery": { "kind": "automatic" },
+              "instancesPerTarget": 1,
+              "packets": [{
+                "damageType": { "kind": "fixed", "damageType": "Force" },
+                "dice": { "baseCount": 0, "sides": 4, "modifier": 2, "perSlotCount": 0, "perSlotModifier": 0, "cantripUpgrade": false },
+                "scaling": { "kind": "none" },
+                "thresholdRider": null
+              }],
+              "timing": { "kind": "immediate" }
+            }
+          },
+          {
+            "targetResolution": { "kind": "inherit" },
+            "operation": {
+              "kind": "composition",
+              "ordering": "declaration_order",
+              "onRefusal": "abort",
+              "steps": [
+                {
+                  "targetResolution": { "kind": "inherit" },
+                  "operation": {
+                    "kind": "speed_modification",
+                    "modification": { "kind": "increase", "feet": 5 },
+                    "durationRounds": 2,
+                    "concentration": false,
+                    "expiresAt": "target_end"
+                  }
+                },
+                {
+                  "targetResolution": { "kind": "inherit" },
+                  "operation": {
+                    "kind": "composition",
+                    "ordering": "declaration_order",
+                    "onRefusal": "abort",
+                    "steps": [
+                      {
+                        "targetResolution": { "kind": "inherit" },
+                        "operation": {
+                          "kind": "world_operations",
+                          "operations": [{
+                            "kind": "create_object",
+                            "placement": "caster_cell",
+                            "footprintOffsets": [{ "column": 0, "row": 0 }],
+                            "object": {
+                              "name": "Measured area marker",
+                              "kind": "generic",
+                              "durability": { "kind": "indestructible" },
+                              "armorClass": 10,
+                              "damageResponses": [],
+                              "blocking": { "movement": false, "lineOfSight": false, "cover": "none" }
+                            }
+                          }]
+                        }
+                      },
+                      {
+                        "targetResolution": { "kind": "inherit" },
+                        "operation": {
+                          "kind": "damage_operation",
+                          "delivery": { "kind": "automatic" },
+                          "instancesPerTarget": 1,
+                          "packets": [{
+                            "damageType": { "kind": "fixed", "damageType": "Force" },
+                            "dice": { "baseCount": 0, "sides": 4, "modifier": 1, "perSlotCount": 0, "perSlotModifier": 0, "cantripUpgrade": false },
+                            "scaling": { "kind": "none" },
+                            "thresholdRider": null
+                          }],
+                          "timing": { "kind": "immediate" }
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "sourceId": "greenforge",
+      "recordId": "illusory-dragon-class-depth-4",
+      "name": "Measured depth-four multi-effect shape",
+      "level": 0,
+      "school": { "kind": "other", "name": "Fixturecraft" },
+      "castingTime": "action",
+      "range": { "kind": "feet", "feet": 30 },
+      "components": { "verbal": true, "somatic": true, "material": null },
+      "duration": { "kind": "instantaneous" },
+      "concentration": false,
+      "targeting": { "kind": "single", "rangeFeet": 30, "willing": true },
+      "operation": {
+        "kind": "composition",
+        "ordering": "declaration_order",
+        "onRefusal": "abort",
+        "steps": [
+          {
+            "targetResolution": { "kind": "inherit" },
+            "operation": {
+              "kind": "damage_operation",
+              "delivery": { "kind": "automatic" },
+              "instancesPerTarget": 1,
+              "packets": [{
+                "damageType": { "kind": "fixed", "damageType": "Force" },
+                "dice": { "baseCount": 0, "sides": 4, "modifier": 1, "perSlotCount": 0, "perSlotModifier": 0, "cantripUpgrade": false },
+                "scaling": { "kind": "none" },
+                "thresholdRider": null
+              }],
+              "timing": { "kind": "immediate" }
+            }
+          },
+          {
+            "targetResolution": { "kind": "inherit" },
+            "operation": {
+              "kind": "composition",
+              "ordering": "declaration_order",
+              "onRefusal": "abort",
+              "steps": [
+                {
+                  "targetResolution": { "kind": "inherit" },
+                  "operation": {
+                    "kind": "condition_lifecycle",
+                    "condition": "Frightened",
+                    "immunity": null,
+                    "initialSave": null,
+                    "repeatedSave": null,
+                    "damageBreak": null,
+                    "duration": { "kind": "fixed_rounds", "rounds": 2, "expiresAt": "target_end" },
+                    "stacking": { "kind": "coexist" }
+                  }
+                },
+                {
+                  "targetResolution": { "kind": "inherit" },
+                  "operation": {
+                    "kind": "composition",
+                    "ordering": "declaration_order",
+                    "onRefusal": "abort",
+                    "steps": [
+                      {
+                        "targetResolution": { "kind": "inherit" },
+                        "operation": {
+                          "kind": "world_operations",
+                          "operations": [{
+                            "kind": "create_object",
+                            "placement": "caster_cell",
+                            "footprintOffsets": [{ "column": 0, "row": 0 }],
+                            "object": {
+                              "name": "Measured illusion marker",
+                              "kind": "generic",
+                              "durability": { "kind": "indestructible" },
+                              "armorClass": 10,
+                              "damageResponses": [],
+                              "blocking": { "movement": false, "lineOfSight": false, "cover": "none" }
+                            }
+                          }]
+                        }
+                      },
+                      {
+                        "targetResolution": { "kind": "inherit" },
+                        "operation": {
+                          "kind": "composition",
+                          "ordering": "declaration_order",
+                          "onRefusal": "abort",
+                          "steps": [
+                            {
+                              "targetResolution": { "kind": "inherit" },
+                              "operation": {
+                                "kind": "speed_modification",
+                                "modification": { "kind": "increase", "feet": 5 },
+                                "durationRounds": 2,
+                                "concentration": false,
+                                "expiresAt": "target_end"
+                              }
+                            },
+                            {
+                              "targetResolution": { "kind": "inherit" },
+                              "operation": {
+                                "kind": "damage_operation",
+                                "delivery": { "kind": "automatic" },
+                                "instancesPerTarget": 1,
+                                "packets": [{
+                                  "damageType": { "kind": "fixed", "damageType": "Force" },
+                                  "dice": { "baseCount": 0, "sides": 4, "modifier": 1, "perSlotCount": 0, "perSlotModifier": 0, "cantripUpgrade": false },
+                                  "scaling": { "kind": "none" },
+                                  "thresholdRider": null
+                                }],
+                                "timing": { "kind": "immediate" }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "features": [],
+  "species": [],
+  "backgrounds": [],
+  "subclasses": [],
+  "monsters": []
+}

@@ -7,6 +7,8 @@ import {
 } from '../combat/damage-operation-schema';
 import type {
   BranchSpellOperation,
+  CompositionOperation,
+  CompositionStep,
   NonCompositionSpellOperation,
   SpellOperation,
 } from '../combat/spells/types';
@@ -379,6 +381,7 @@ type BranchOperationSchema = z.ZodType<BranchSpellOperation>;
 
 let nonCompositionOperationSchema: NonCompositionOperationSchema;
 let branchOperationSchema: BranchOperationSchema;
+let spellOperationSchema: OperationSchema;
 
 function forwardIssues(schema: z.ZodType, value: unknown, context: z.core.$RefinementCtx<unknown>): void {
   const result = schema.safeParse(value);
@@ -531,8 +534,11 @@ const compositionTargetResolutionSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('inherit') }),
   z.strictObject({ kind: z.literal('re_resolve'), selector: z.discriminatedUnion('kind', [z.strictObject({ kind: z.literal('caster') }), z.strictObject({ kind: z.literal('enclosing_area') })]) }),
 ]);
-const compositionStepSchema = z.strictObject({ targetResolution: compositionTargetResolutionSchema, operation: nonCompositionOperationSchema });
-const compositionOperationSchema = z.discriminatedUnion('ordering', [
+const compositionStepSchema: z.ZodType<CompositionStep> = z.strictObject({
+  targetResolution: compositionTargetResolutionSchema,
+  operation: z.lazy(() => spellOperationSchema),
+});
+const compositionOperationSchema: z.ZodType<CompositionOperation> = z.discriminatedUnion('ordering', [
   z.strictObject({ kind: z.literal('composition'), onRefusal: z.enum(['abort', 'continue']), steps: z.tuple([compositionStepSchema, compositionStepSchema]), ordering: z.literal('declaration_order') }),
   z.strictObject({ kind: z.literal('composition'), onRefusal: z.enum(['abort', 'continue']), steps: z.tuple([compositionStepSchema, compositionStepSchema]), ordering: z.literal('explicit'), order: z.union([z.tuple([z.literal(0), z.literal(1)]), z.tuple([z.literal(1), z.literal(0)])]) }),
 ]);
@@ -543,12 +549,14 @@ export const operationSchemas = {
   ...nonCompositionSchemas,
 } as const satisfies Readonly<Record<SpellOperation['kind'], z.ZodType>>;
 
-export const contentPackOperationJsonSchema = z.union([
+spellOperationSchema = z.union([
   operationSchemas.composition,
   operationSchemas.shared_outcome,
   operationSchemas.caster_choice,
   ...Object.values(operationSchemas).slice(3),
-]);
+]).transform((value) => value as SpellOperation);
+
+export const contentPackOperationJsonSchema = spellOperationSchema;
 
 export const contentPackOperationSchema: OperationSchema = z.unknown().superRefine((value, context) => {
   const kind = operationKind(value);

@@ -250,9 +250,17 @@ export type CompositionTargetResolution =
         | { readonly kind: 'enclosing_area' };
     };
 
+/** D347 accepts four nested pairwise composition nodes and refuses the fifth. */
+export const MAX_COMPOSITION_DEPTH = 4;
+
 export interface CompositionStep {
   readonly targetResolution: CompositionTargetResolution;
-  readonly operation: NonCompositionSpellOperation;
+  /**
+   * Recursive only through composition steps. Shared-outcome branches retain
+   * their narrower BranchSpellOperation type below, so neither composition nor
+   * another shared outcome can inhabit a branch.
+   */
+  readonly operation: SpellOperation;
 }
 
 type CompositionOperationBase = {
@@ -285,6 +293,16 @@ export const COMPOSITION_EVALUATION_ORDER = 'declared_ordering' as const;
  * composition atomically or is rolled back and followed by the next step.
  */
 export const COMPOSITION_REFUSAL_PROPAGATION = Object.freeze(['abort', 'continue'] as const);
+
+/**
+ * A continued nested refusal is handled at that composition boundary: an
+ * applied sibling makes the composition applied. An aborted refusal remains
+ * refused and is therefore visible to the parent step's onRefusal policy.
+ */
+export const NESTED_COMPOSITION_OUTCOME_PROPAGATION = Object.freeze({
+  continuedRefusalWithAppliedStep: 'applied',
+  abortedRefusal: 'refused',
+} as const);
 
 /**
  * The SRD is silent on a generic composition snapshot. The engine's declared
