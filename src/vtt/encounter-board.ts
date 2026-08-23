@@ -8,7 +8,7 @@ import { isCellInside } from '../combat/grid';
 import { persistentAreaContains } from '../combat/persistent-areas';
 import { affectedCells, feetPoint, type AreaTemplate } from '../combat/templates';
 import { feet, type CombatantId } from '../combat/values';
-import type { EncounterEffectId, PersistentAreaId, WorldObjectId } from '../combat/values';
+import type { EncounterEffectId, ObjectTargetId, PersistentAreaId, WorldObjectId } from '../combat/values';
 import type { WorldObjectBlocking, WorldObjectKind } from '../combat/world-objects';
 import type { EncounterArtPackage } from './encounter-package';
 
@@ -79,7 +79,7 @@ export interface EncounterBoardLightOverlay {
 
 export interface EncounterBoardBoundTarget {
   readonly kind: 'combatant' | 'object' | 'owned_object';
-  readonly id: CombatantId | WorldObjectId;
+  readonly id: CombatantId | ObjectTargetId;
   readonly name: string;
   readonly position: GridCell;
 }
@@ -99,7 +99,7 @@ export interface EncounterBoardTargetLine {
   readonly effectId: EncounterEffectId;
   readonly from: GridCell;
   readonly to: GridCell;
-  readonly target: CombatantId | WorldObjectId;
+  readonly target: CombatantId | ObjectTargetId;
 }
 
 export interface EncounterBoardInitiativeEntry extends InitiativeEntry {

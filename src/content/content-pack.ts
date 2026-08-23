@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { CombatantProfile } from '../combat/combatant';
+import type { EquipmentItemDefinition } from '../combat/equipment';
 import { monsterCombatantProfile } from '../combat/combatant';
 import type { CombatFeatureEffect } from '../combat/effects';
 import { conditionNames } from '../combat/conditions';
@@ -18,6 +19,7 @@ import {
   damageType,
   dieSides,
   encounterEffectId,
+  itemId,
   limitedResourcePoolId,
   type CombatantId,
 } from '../combat/values';
@@ -184,6 +186,18 @@ const featureSchema = z.strictObject({
   effects: z.array(externalPartyPackFeatureEffectSchema).min(1).max(100),
   resources: z.array(resourceSchema).max(100),
 });
+const itemMaterialSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('known'), name: z.literal('metal') }),
+  z.strictObject({ kind: z.literal('other'), name: trimmedText }),
+]);
+const itemSchema = z.strictObject({
+  ...recordIdentityShape,
+  materials: z.array(itemMaterialSchema).min(1).max(20),
+  equip: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('held'), handCapacity: z.union([z.literal(1), z.literal(2)]), droppable: z.literal(true) }),
+    z.strictObject({ kind: z.literal('worn'), droppable: z.literal(false) }),
+  ]),
+});
 
 const senseSchema = z.strictObject({
   kind: z.enum(['blindsight', 'darkvision', 'tremorsense', 'truesight'] satisfies readonly SenseKind[]),
@@ -328,6 +342,7 @@ export const contentPackV1Schema = z.strictObject({
   namespaces: namespaceDeclarationSchema,
   spells: z.array(spellSchema).max(10_000),
   features: z.array(featureSchema).max(10_000),
+  items: z.array(itemSchema).max(10_000),
   species: z.array(speciesSchema).max(10_000),
   backgrounds: z.array(backgroundSchema).max(10_000),
   subclasses: z.array(subclassSchema).max(10_000),
@@ -406,13 +421,14 @@ export interface LoadedContentPack {
   readonly diagnostics: readonly ContentPackRecordDiagnostic[];
   readonly spells: readonly LoadedContentSpell[];
   readonly features: readonly LoadedContentFeature[];
+  readonly items: readonly EquipmentItemDefinition[];
   readonly species: readonly LoadedContentOrigin[];
   readonly backgrounds: readonly LoadedContentOrigin[];
   readonly subclasses: readonly LoadedContentSubclass[];
   readonly monsters: readonly LoadedContentMonster[];
 }
 
-export type ContentPackRecordSurface = 'spells' | 'features' | 'species' | 'backgrounds' | 'subclasses' | 'monsters';
+export type ContentPackRecordSurface = 'spells' | 'features' | 'items' | 'species' | 'backgrounds' | 'subclasses' | 'monsters';
 
 export type ContentPackRecordDiagnostic = {
   readonly kind: 'content_pack_record_rejection';
@@ -460,6 +476,7 @@ const contentPackEnvelopeSchema = z.strictObject({
   namespaces: namespaceDeclarationSchema,
   spells: z.array(z.unknown()).max(10_000),
   features: z.array(z.unknown()).max(10_000),
+  items: z.array(z.unknown()).max(10_000),
   species: z.array(z.unknown()).max(10_000),
   backgrounds: z.array(z.unknown()).max(10_000),
   subclasses: z.array(z.unknown()).max(10_000),
@@ -580,6 +597,7 @@ function allRecords(pack: ContentPackV1): readonly { readonly sourceId: string; 
   return [
     ...pack.spells,
     ...pack.features,
+    ...pack.items,
     ...pack.species,
     ...pack.backgrounds,
     ...pack.subclasses,
@@ -794,6 +812,17 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
     else features.push(parsed.data);
   }
 
+  const items: ContentPackV1['items'][number][] = [];
+  for (const [index, record] of envelope.data.items.entries()) {
+    const parsed = itemSchema.safeParse(record);
+    if (!parsed.success) diagnostics.push(malformedDiagnostic('items', index, record, parsed.error.issues[0]?.path ?? []));
+    else {
+      const namespace = namespaceDiagnostic('items', index, parsed.data.sourceId, parsed.data.recordId);
+      if (namespace !== null) diagnostics.push(namespace);
+      else items.push(parsed.data);
+    }
+  }
+
   const species: ContentPackV1['species'][number][] = [];
   for (const [index, record] of envelope.data.species.entries()) {
     const parsed = speciesSchema.safeParse(record);
@@ -855,7 +884,7 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
     packId: envelope.data.packId,
     provenance: envelope.data.provenance,
     namespaces: envelope.data.namespaces,
-    spells, features, species, backgrounds, subclasses, monsters,
+    spells, features, items, species, backgrounds, subclasses, monsters,
   };
   const ids = allRecords(pack).map((entry) => importedContentId(entry.sourceId, entry.recordId));
   const seen = new Set<string>();
@@ -887,6 +916,14 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
         diagnostics,
         spells: pack.spells.map((spell) => loadSpell(spell, pack.provenance)),
         features: pack.features.map(loadFeature),
+        items: pack.items.map((item): EquipmentItemDefinition => ({
+          id: itemId(importedContentId(item.sourceId, item.recordId)),
+          sourceId: item.sourceId,
+          recordId: item.recordId,
+          name: item.name,
+          materials: item.materials,
+          equip: item.equip,
+        })),
         species: pack.species.map((species) => ({
           id: importedContentId(species.sourceId, species.recordId),
           sourceId: species.sourceId,
