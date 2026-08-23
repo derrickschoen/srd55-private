@@ -116,6 +116,12 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
       return [event.caster, event.target];
     case 'reaction_declined':
       return [event.combatant, event.mover];
+    case 'reaction_offered':
+    case 'reaction_refused':
+    case 'reaction_resolved':
+      return [event.combatant];
+    case 'spell_cast_intercepted':
+      return [event.caster, event.reactor];
     case 'initiative_ordered':
       return event.order;
     case 'attack_resolved':

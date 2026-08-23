@@ -11,11 +11,13 @@ import type {
   CompositionStep,
   DeclaredFormStatOverride,
   NonCompositionSpellOperation,
+  ReactionOperation,
   SpellOperation,
 } from '../combat/spells/types';
 import {
   FORM_REPLACEMENT_EQUIPMENT_DISPOSITIONS,
   FORM_REPLACEMENT_RETAINED_STATISTICS,
+  REACTION_DAMAGE_TYPES,
 } from '../combat/spells/types';
 import { abilities, damageTypes, skills } from '../domain/enums';
 
@@ -720,17 +722,42 @@ const compositionOperationSchema: z.ZodType<CompositionOperation> = z.discrimina
   z.strictObject({ kind: z.literal('composition'), onRefusal: z.enum(['abort', 'continue']), steps: z.tuple([compositionStepSchema, compositionStepSchema]), ordering: z.literal('explicit'), order: z.union([z.tuple([z.literal(0), z.literal(1)]), z.tuple([z.literal(1), z.literal(0)])]) }),
 ]);
 
+const reactionTriggerSchema: z.ZodType<ReactionOperation['trigger']> = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('damaged_by_creature'), rangeFeet: importedDistance, requiresSight: z.boolean(),
+  }),
+  z.strictObject({ kind: z.literal('hit_by_attack') }),
+  z.strictObject({
+    kind: z.literal('taking_damage_of_type'),
+    damageTypes: z.array(z.enum(REACTION_DAMAGE_TYPES)).min(1).max(REACTION_DAMAGE_TYPES.length),
+  }).superRefine((trigger, context) => {
+    if (new Set(trigger.damageTypes).size !== trigger.damageTypes.length) {
+      context.addIssue({ code: 'custom', path: ['damageTypes'], message: 'Reaction damage types must be unique.' });
+    }
+  }),
+  z.strictObject({
+    kind: z.literal('creature_casts_spell'), rangeFeet: importedDistance,
+    requiresSight: z.boolean(), components: z.literal('verbal_somatic_or_material'),
+  }),
+]);
+const reactionOperationSchema: z.ZodType<ReactionOperation> = z.strictObject({
+  kind: z.literal('reaction'), trigger: reactionTriggerSchema,
+  response: z.lazy(() => branchOperationSchema),
+});
+
 export const operationSchemas = {
   composition: compositionOperationSchema,
   shared_outcome: sharedOutcomeOperationSchema,
+  reaction: reactionOperationSchema,
   ...nonCompositionSchemas,
 } as const satisfies Readonly<Record<SpellOperation['kind'], z.ZodType>>;
 
 spellOperationSchema = z.union([
   operationSchemas.composition,
   operationSchemas.shared_outcome,
+  operationSchemas.reaction,
   operationSchemas.caster_choice,
-  ...Object.values(operationSchemas).slice(3),
+  ...Object.values(operationSchemas).slice(4),
 ]).transform((value) => value as SpellOperation);
 
 export const contentPackOperationJsonSchema = spellOperationSchema;

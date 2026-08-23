@@ -392,6 +392,32 @@ export type EncounterEvent =
       readonly mover: CombatantId;
     })
   | (SequencedEvent & {
+      readonly type: 'reaction_offered';
+      readonly combatant: CombatantId;
+      readonly spellId: string;
+      readonly trigger: import('./spells/types').ReactionTrigger['kind'];
+      readonly availability: 'available' | 'reaction_spent' | 'incapacitated' | 'slot_unavailable';
+    })
+  | (SequencedEvent & {
+      readonly type: 'reaction_refused';
+      readonly combatant: CombatantId;
+      readonly spellId: string;
+      readonly reason: 'reaction_spent' | 'incapacitated' | 'slot_unavailable';
+    })
+  | (SequencedEvent & {
+      readonly type: 'reaction_resolved';
+      readonly combatant: CombatantId;
+      readonly spellId: string;
+      readonly trigger: import('./spells/types').ReactionTrigger['kind'];
+    })
+  | (SequencedEvent & {
+      readonly type: 'spell_cast_intercepted';
+      readonly caster: CombatantId;
+      readonly spellId: string;
+      readonly reactor: CombatantId;
+      readonly reactionSpellId: string;
+    })
+  | (SequencedEvent & {
       readonly type: 'healing_applied';
       readonly source: CombatantId;
       readonly target: CombatantId;

@@ -52,6 +52,7 @@ const EQUIPMENT_LEDGER_PATH = 'docs/audits/2026-08-23-equipment-mutation-ledger.
 const SEQ_BINDING_LEDGER_PATH = 'docs/audits/2026-08-23-seq-binding-mutation-ledger.md';
 const SENSES_LEDGER_PATH = 'docs/audits/2026-08-23-senses-mutation-ledger.md';
 const TARGET_SELECTION_LEDGER_PATH = 'docs/audits/2026-08-23-target-sel-mutation-ledger.md';
+const REACTIONS_LEDGER_PATH = 'docs/audits/2026-08-23-reactions-mutation-ledger.md';
 const SUMMONS_LEDGER_PATH = 'docs/audits/2026-08-23-summons-mutation-ledger.md';
 const FORMS_LEDGER_PATH = 'docs/audits/2026-08-23-forms-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
@@ -803,6 +804,31 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(5);
     expect(ledger).toContain('Tests  6 passed (6)');
     expect(ledger).toContain('All four mutations and the independent boundary mutation were restored.');
+  });
+
+  it('D348.1-REACTIONS-MUTATION-LEDGER pins the unified pool and interception controls', () => {
+    const reactionsLedger = readFileSync(REACTIONS_LEDGER_PATH, 'utf8');
+    const reactionsTests = readFileSync('tests/unit/vtt/reactions.test.ts', 'utf8');
+    const controls = [
+      'second_reaction_same_round',
+      'shield_not_retroactive',
+      'trigger_kind_ignored',
+      'opportunity_attack_separate_pool',
+    ];
+    const killingTests = [
+      'second_reaction_same_round: the unified pool refuses the second response and restores at turn start',
+      'shield_not_retroactive and shield_boundary_exact_tie_hits_one_above_misses: retroactive AC includes the triggering attack',
+      'trigger_kind_ignored and trigger_kind_discrimination: a Fire damage declaration does not fire on Cold',
+      'opportunity_attack_separate_pool and opportunity_attack_shared_pool: an OA blocks a later pack reaction in the same round',
+    ];
+    for (const control of controls) expect(reactionsLedger).toContain(`\`${control}\``);
+    for (const testName of killingTests) {
+      expect(reactionsLedger).toContain(`\`${testName}\``);
+      expect(reactionsTests).toContain(testName);
+    }
+    expect(reactionsLedger.match(/exit 1/gu)).toHaveLength(5);
+    expect(reactionsLedger).toContain('Tests  7 passed (7)');
+    expect(reactionsLedger).toContain('All four mutations and the independent boundary mutation were restored.');
   });
 
   it('D348.1-TARGET-SELECTION-BINDING pins all four required controls and the restored boundary kill', () => {

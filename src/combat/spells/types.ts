@@ -288,6 +288,32 @@ export interface TargetedDefenseModifierOperation {
   readonly duration: ModifierDuration;
 }
 
+export const REACTION_DAMAGE_TYPES = ['Acid', 'Cold', 'Fire', 'Lightning', 'Thunder'] as const;
+export type ReactionDamageType = (typeof REACTION_DAMAGE_TYPES)[number];
+
+/**
+ * Closed interception windows established by the imported exemplars. Reactions
+ * are immediate after their trigger unless their declaration names the
+ * triggering roll/damage pipeline itself (srd-5.2.1.txt:600-617).
+ */
+export type ReactionTrigger =
+  | { readonly kind: 'damaged_by_creature'; readonly rangeFeet: number; readonly requiresSight: boolean }
+  | { readonly kind: 'hit_by_attack' }
+  | { readonly kind: 'taking_damage_of_type'; readonly damageTypes: readonly ReactionDamageType[] }
+  | {
+      readonly kind: 'creature_casts_spell';
+      readonly rangeFeet: number;
+      readonly requiresSight: boolean;
+      readonly components: 'verbal_somatic_or_material';
+    };
+
+export interface ReactionOperation {
+  readonly kind: 'reaction';
+  readonly trigger: ReactionTrigger;
+  /** A reaction response uses the already-landed, non-recursive operation vocabulary. */
+  readonly response: BranchSpellOperation;
+}
+
 export type CompositionTargetResolution =
   | { readonly kind: 'inherit' }
   | {
@@ -434,7 +460,7 @@ export type SharedOutcomeOperation =
 
 export type NonCompositionSpellOperation = BranchSpellOperation;
 
-export type SpellOperation = CompositionOperation | SharedOutcomeOperation | NonCompositionSpellOperation;
+export type SpellOperation = CompositionOperation | SharedOutcomeOperation | ReactionOperation | NonCompositionSpellOperation;
 
 /**
  * Polymorph retains these identity/continuity facts while replacing the rest of
@@ -1063,6 +1089,7 @@ export type BranchSpellOperation =
 export const SPELL_OPERATION_KINDS = [
   'composition',
   'shared_outcome',
+  'reaction',
   'caster_choice',
   'random_branch',
   'target_branch',
