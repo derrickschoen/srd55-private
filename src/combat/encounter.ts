@@ -1,6 +1,7 @@
 import { skills, type Ability, type Skill } from '../domain/enums';
 import { canonicalJson } from '../commands/canonical-json';
 import {
+  importedMonsterProfile,
   importedSpellDefinition,
   type LoadedContentPack,
 } from '../content/content-pack';
@@ -94,6 +95,7 @@ import type {
 import { affectedCells, creatureOccupiesAffectedCell, type AreaTemplate } from './templates';
 import {
   armorClass,
+  combatantId,
   damageType,
   difficultyClass,
   dieSides,
@@ -101,6 +103,7 @@ import {
   effectStackingIdentity,
   feet,
   persistentAreaId,
+  tokenId,
   worldObjectId,
   type CombatantId,
   type DamageType,
@@ -628,6 +631,30 @@ function combatant(state: EncounterState, id: CombatantId): EncounterCombatantSt
   return found;
 }
 
+/** Summons inherit the summoner's side while retaining their monster statblock profile. */
+export function combatantSide(
+  state: EncounterState,
+  id: CombatantId,
+): CombatantProfile['kind'] {
+  let current = id;
+  const visited = new Set<CombatantId>();
+  for (;;) {
+    if (visited.has(current)) throw new EncounterRuleError('Summon ownership cannot contain a cycle.');
+    visited.add(current);
+    const owner = state.effects.find((effect) => effect.ownedCombatants?.includes(current) === true)?.source;
+    if (owner === undefined) return combatant(state, current).profile.kind;
+    current = owner;
+  }
+}
+
+export function combatantsAreAllies(
+  state: EncounterState,
+  left: CombatantId,
+  right: CombatantId,
+): boolean {
+  return combatantSide(state, left) === combatantSide(state, right);
+}
+
 function token(state: EncounterState, id: CombatantId): CombatToken {
   const found = state.tokens.find((candidate) => candidate.combatantId === id);
   if (found === undefined) throw new EncounterRuleError(`Combatant ${id} has no token.`);
@@ -722,6 +749,7 @@ function addEquippedItem(
 
 function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[] {
   switch (effect.payload.kind) {
+    case 'summon_lifecycle':
     case 'ability_check_modifier':
     case 'skill_modifier':
     case 'armor_class_modifier':
@@ -1605,6 +1633,50 @@ function emit(
   };
 }
 
+function despawnOwnedCombatants(
+  context: ReductionContext,
+  effect: EncounterEffect,
+): void {
+  const owned = effect.ownedCombatants ?? [];
+  if (owned.length === 0) return;
+  const ids = new Set(owned);
+  for (const id of owned) {
+    emit(context, {
+      type: 'summoned_combatant_despawned',
+      combatant: id,
+      summoner: effect.source,
+      effectId: effect.id,
+    });
+  }
+  const priorInitiative = context.state.initiative;
+  const priorIndex = context.state.activeInitiativeIndex;
+  const removedBeforeActive = priorIndex === null
+    ? 0
+    : priorInitiative.slice(0, priorIndex).filter((entry) => ids.has(entry.combatant)).length;
+  const activeRemoved = context.state.activeCombatant !== null && ids.has(context.state.activeCombatant);
+  const initiative = priorInitiative.filter((entry) => !ids.has(entry.combatant));
+  const shiftedIndex = priorIndex === null
+    ? null
+    : Math.max(0, Math.min(initiative.length - 1, priorIndex - removedBeforeActive));
+  const replacementActive = activeRemoved && shiftedIndex !== null
+    ? initiative[shiftedIndex]?.combatant ?? null
+    : context.state.activeCombatant;
+  context.state = {
+    ...context.state,
+    combatants: context.state.combatants.filter((entry) => !ids.has(entry.profile.id)),
+    tokens: context.state.tokens.filter((entry) => !ids.has(entry.combatantId)),
+    absentTokens: (context.state.absentTokens ?? []).filter((entry) => !ids.has(entry.combatantId)),
+    initiative,
+    activeInitiativeIndex: initiative.length === 0 ? null : shiftedIndex,
+    activeCombatant: initiative.length === 0 ? null : replacementActive,
+    effects: context.state.effects.filter((candidate) => !ids.has(candidate.source)),
+    persistentAreas: context.state.persistentAreas.filter((area) => !ids.has(area.owner)),
+    ...(context.state.equipment === undefined
+      ? {}
+      : { equipment: context.state.equipment.filter((entry) => !ids.has(entry.combatant)) }),
+  };
+}
+
 function endEffects(
   context: ReductionContext,
   ids: ReadonlySet<EncounterEffectId>,
@@ -1616,6 +1688,7 @@ function endEffects(
     if (effect.payload.kind === 'temporary_banishment') {
       restoreBanishedTargets(context, effect, reason === 'duration_expired');
     }
+    despawnOwnedCombatants(context, effect);
     emit(context, { type: 'effect_ended', effectId: effect.id, reason });
   }
   context.state = {
@@ -1788,7 +1861,7 @@ function damageSourceMatchesEffect(
   damageSource: CombatantId,
 ): boolean {
   if (effect.damageBreak?.sources === 'any') return true;
-  return combatant(state, damageSource).profile.kind === combatant(state, effect.source).profile.kind;
+  return combatantsAreAllies(state, damageSource, effect.source);
 }
 
 function breakEffectsOnDamage(
@@ -2290,8 +2363,8 @@ function areaTargetEligible(state: EncounterState, area: PersistentArea, target:
   switch (area.targetFilter.kind) {
     case 'all': return true;
     case 'selected': return area.targetFilter.combatants.includes(target);
-    case 'allies': return combatant(state, target).profile.kind === combatant(state, area.owner).profile.kind;
-    case 'enemies': return combatant(state, target).profile.kind !== combatant(state, area.owner).profile.kind;
+    case 'allies': return combatantsAreAllies(state, target, area.owner);
+    case 'enemies': return !combatantsAreAllies(state, target, area.owner);
   }
 }
 
@@ -2580,7 +2653,7 @@ function processMove(
     .filter(
       (candidate) =>
         candidate.life === 'living' &&
-        candidate.profile.kind !== subject.profile.kind &&
+        !combatantsAreAllies(context.state, candidate.profile.id, command.actor) &&
         candidate.profile.id !== command.actor,
     )
     .map((candidate) => ({
@@ -3024,6 +3097,7 @@ function cloneEffectApplication(
         };
   const payload = (() => {
     switch (application.payload.kind) {
+      case 'summon_lifecycle':
       case 'condition':
       case 'exhaustion':
       case 'ability_check_modifier':
@@ -3262,6 +3336,9 @@ function cloneEffectApplication(
   return {
     ...application,
     targets: [...application.targets],
+    ...(application.ownedCombatants === undefined
+      ? {}
+      : { ownedCombatants: [...application.ownedCombatants] }),
     duration,
     repeatedSave,
     damageBreak: application.damageBreak === undefined || application.damageBreak === null
@@ -3275,7 +3352,7 @@ function applyEffect(
   context: ReductionContext,
   source: CombatantId,
   application: EffectApplication,
-): void {
+): EncounterEffectId {
   validateEffectApplication(context.state, application);
   const owned = cloneEffectApplication(application);
   if (owned.concentration) {
@@ -3307,6 +3384,9 @@ function applyEffect(
     repeatedSave: owned.repeatedSave,
     damageBreak: owned.damageBreak ?? null,
     payload: owned.payload,
+    ...(owned.ownedCombatants === undefined
+      ? {}
+      : { ownedCombatants: [...owned.ownedCombatants] }),
     ...(owned.areaSource === undefined ? {} : { areaSource: owned.areaSource }),
     ...(owned.areaMembershipBound === undefined ? {} : { areaMembershipBound: true }),
   };
@@ -3382,6 +3462,7 @@ function applyEffect(
       endConcentration(context, target, 'concentration_broken');
     }
   }
+  return id;
 }
 
 function startTurn(context: ReductionContext, id: CombatantId, round: number): void {
@@ -3429,10 +3510,9 @@ function hasAdjacentAlly(
   actor: CombatantId,
   target: CombatantId,
 ): boolean {
-  const acting = combatant(state, actor);
   return state.combatants.some((candidate) =>
     candidate.profile.id !== actor &&
-    candidate.profile.kind === acting.profile.kind &&
+    combatantsAreAllies(state, candidate.profile.id, actor) &&
     candidate.life === 'living' &&
     gridDistance(token(state, candidate.profile.id).position, token(state, target).position) <= 5);
 }
@@ -4423,13 +4503,26 @@ function validateTargetDestinations(
   command: SpellCastCommand,
 ): void {
   const destinations = command.targetDestinations ?? [];
+  validatePerSubjectDestinationCount(definition, command.targets.length, destinations.length);
   if (
-    destinations.length !== command.targets.length ||
     destinations.some((entry, index) => entry.target !== command.targets[index])
   ) {
     throw new TargetSelectionRuleError(
       'each_target_own_destination',
       `${definition.name} violates each_target_own_destination: each selected target needs its own ordered destination.`,
+    );
+  }
+}
+
+function validatePerSubjectDestinationCount(
+  definition: SpellDefinition,
+  subjectCount: number,
+  destinationCount: number,
+): void {
+  if (destinationCount !== subjectCount) {
+    throw new TargetSelectionRuleError(
+      'each_target_own_destination',
+      `${definition.name} violates each_target_own_destination: each subject needs its own ordered destination.`,
     );
   }
 }
@@ -4491,6 +4584,8 @@ function resolvedSpellEffectPayload(
     ? 0
     : (command.slotLevel as number) - definition.level;
   switch (payload.kind) {
+    case 'summon_lifecycle':
+      return payload;
     case 'recurring_damage_operation':
       return payload;
     case 'damage_reduction':
@@ -5742,6 +5837,159 @@ function executeSharedOutcome(
   return targets.length === 0 ? 'no_op' : combinedSpellOperationOutcome(outcomes) === 'refused' ? 'refused' : 'applied';
 }
 
+/**
+ * SRD Giant Insect shares the caster's Initiative count and acts immediately
+ * after them: docs/srd/source/spell-descriptions.txt:3714-3716.
+ */
+export const SUMMON_INITIATIVE_RULE = 'summoner_count_immediately_after' as const;
+export const MAX_SUMMONED_COMBATANTS_PER_CAST = 100;
+
+function summonCount(
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  operation: Extract<BranchSpellOperation, { readonly kind: 'summon' }>,
+): number {
+  return scaledTargetCount(definition, command, operation.count);
+}
+
+function summonMonster(
+  state: EncounterState,
+  definition: SpellDefinition,
+  monsterId: string,
+): LoadedContentPack['monsters'][number] {
+  for (const pack of state.contentPacks ?? []) {
+    const spell = pack.spells.find((candidate) => candidate.id === definition.id);
+    if (spell === undefined) continue;
+    const monster = pack.monsters.find((candidate) =>
+      candidate.sourceId === spell.sourceId && candidate.recordId === monsterId);
+    if (monster !== undefined) return monster;
+  }
+  throw new EncounterRuleError(
+    `${definition.name} references monster ${monsterId}, which is absent from its content pack.`,
+  );
+}
+
+function validateSummonDestinations(
+  state: EncounterState,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  count: number,
+  rangeFeet: number,
+): readonly GridCell[] {
+  const destinations = command.summonDestinations ?? [];
+  if (count > MAX_SUMMONED_COMBATANTS_PER_CAST) {
+    throw new TargetSelectionRuleError(
+      'slot_scaled_count',
+      `${definition.name} exceeds the ${String(MAX_SUMMONED_COMBATANTS_PER_CAST)}-creature summon boundary.`,
+    );
+  }
+  validatePerSubjectDestinationCount(definition, count, destinations.length);
+  const keys = destinations.map(cellKey);
+  if (new Set(keys).size !== keys.length) {
+    throw new TargetSelectionRuleError(
+      'each_target_own_destination',
+      `${definition.name} summon destinations must be unique.`,
+    );
+  }
+  const casterPosition = token(state, command.actor).position;
+  for (const destination of destinations) {
+    if (!isCellInside(state.bounds, destination) || movementBlocked(state, destination)) {
+      throw new EncounterRuleError(`${definition.name} summon destination is not an occupiable cell.`);
+    }
+    if (state.tokens.some((placed) => cellKey(placed.position) === cellKey(destination))) {
+      throw new EncounterRuleError(`${definition.name} summon destination must be unoccupied.`);
+    }
+    if (gridDistance(casterPosition, destination) > rangeFeet) {
+      throw new EncounterRuleError(`${definition.name} summon destination is out of range.`);
+    }
+  }
+  return destinations.map((destination) => ({ ...destination }));
+}
+
+function resolveSummon(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  operation: Extract<BranchSpellOperation, { readonly kind: 'summon' }>,
+): void {
+  const count = summonCount(definition, command, operation);
+  const destinations = validateSummonDestinations(
+    context.state, definition, command, count, operation.placementRangeFeet,
+  );
+  const monster = summonMonster(context.state, definition, operation.monsterId);
+  const effectSequence = context.state.nextEffectSequence;
+  const profiles = destinations.map((_destination, index) => importedMonsterProfile(monster, {
+    combatantId: `summon:${String(effectSequence)}:${String(index + 1)}:${monster.recordId}`,
+    tokenId: `summon-token:${String(effectSequence)}:${String(index + 1)}:${monster.recordId}`,
+  }));
+  const summonIds = profiles.map((profile) => profile.id);
+  const summonedStates: EncounterCombatantState[] = profiles.map((profile) => ({
+    profile,
+    hitPoints: profile.rules.hitPointMaximum,
+    life: 'living',
+    deathSaves: null,
+    turn: EMPTY_TURN,
+    temporaryHitPoints: 0,
+    spellSlots: [],
+  }));
+  const tokens = profiles.map((profile, index): CombatToken => ({
+    id: tokenId(`summon-token:${String(effectSequence)}:${String(index + 1)}:${monster.recordId}`),
+    combatantId: combatantId(`summon:${String(effectSequence)}:${String(index + 1)}:${monster.recordId}`),
+    position: { ...(destinations[index] as GridCell) },
+  }));
+  context.state = {
+    ...context.state,
+    combatants: [...context.state.combatants, ...summonedStates],
+    tokens: [...context.state.tokens, ...tokens],
+    ...(context.state.equipment === undefined
+      ? {}
+      : { equipment: [
+          ...context.state.equipment,
+          ...summonIds.map((combatant): CombatantEquipment => ({
+            combatant, hands: { kind: 'empty' }, worn: [], carried: [],
+          })),
+        ] }),
+  };
+  const effectId = applyEffect(context, command.actor, {
+    targets: [command.actor],
+    duration: {
+      kind: 'turn_boundaries',
+      timing: {
+        combatant: command.actor,
+        boundary: operation.lifecycle.expiresAt === 'source_start' ? 'start' : 'end',
+        source: definition.source,
+      },
+      remaining: operation.lifecycle.durationRounds,
+    },
+    concentration: operation.lifecycle.concentration,
+    stackingIdentity: effectStackingIdentity(`spell:${definition.id}:summon:${String(effectSequence)}`),
+    stacking: 'coexist',
+    repeatedSave: null,
+    payload: { kind: 'summon_lifecycle', monsterId: monster.id },
+    ownedCombatants: summonIds,
+  });
+  const summonerIndex = context.state.initiative.findIndex((entry) => entry.combatant === command.actor);
+  const summonerEntry = context.state.initiative[summonerIndex];
+  if (summonerIndex < 0 || summonerEntry === undefined) {
+    throw new EncounterRuleError(`${definition.name} requires active initiative before summoning.`);
+  }
+  const summonEntries = summonIds.map((combatant) => ({ ...summonerEntry, combatant }));
+  context.state = {
+    ...context.state,
+    initiative: [
+      ...context.state.initiative.slice(0, summonerIndex + 1),
+      ...summonEntries,
+      ...context.state.initiative.slice(summonerIndex + 1),
+    ],
+  };
+  for (const [index, profile] of profiles.entries()) {
+    emit(context, {
+      type: 'combatant_summoned', combatant: profile.id, summoner: command.actor,
+      effectId, position: { ...(destinations[index] as GridCell) },
+    });
+  }
+}
+
 function executeSpellOperation(
   context: ReductionContext,
   definition: SpellDefinition,
@@ -5785,6 +6033,9 @@ function executeSpellOperation(
     }
     case 'shared_outcome':
       return executeSharedOutcome(context, definition, command, targets, operation);
+    case 'summon':
+      resolveSummon(context, definition, command, operation);
+      return 'applied';
     case 'caster_choice': {
       const mode = operation.modes.find((candidate) => candidate.mode === command.selectedOption);
       if (mode === undefined) {

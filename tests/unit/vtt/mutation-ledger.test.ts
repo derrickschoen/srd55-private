@@ -52,6 +52,7 @@ const EQUIPMENT_LEDGER_PATH = 'docs/audits/2026-08-23-equipment-mutation-ledger.
 const SEQ_BINDING_LEDGER_PATH = 'docs/audits/2026-08-23-seq-binding-mutation-ledger.md';
 const SENSES_LEDGER_PATH = 'docs/audits/2026-08-23-senses-mutation-ledger.md';
 const TARGET_SELECTION_LEDGER_PATH = 'docs/audits/2026-08-23-target-sel-mutation-ledger.md';
+const SUMMONS_LEDGER_PATH = 'docs/audits/2026-08-23-summons-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -68,6 +69,24 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D348.1-SUMMONS-MUTATION-LEDGER pins all four controls and both boundary kills', () => {
+    const summonsLedger = readFileSync(SUMMONS_LEDGER_PATH, 'utf8');
+    const summonsTests = readFileSync('tests/unit/vtt/summons.test.ts', 'utf8');
+    for (const name of [
+      'summon_import_count_boundary',
+      'summon_count_boundary_and_placement_edge',
+      'summon_survives_effect_end',
+      'despawn_leaves_corpse',
+      'summon_skips_initiative',
+      'unknown_monster_id_summons',
+    ]) {
+      expect(summonsLedger).toContain(`\`${name}\``);
+      expect(summonsTests).toContain(name);
+    }
+    expect(summonsLedger.match(/exit 1/gu)).toHaveLength(6);
+    expect(summonsLedger).toContain('All six mutations were restored.');
+  });
+
   it('D344.3-BOARD-MUTATION-LEDGER pins all required controls and both boundary kills to restored named tests', () => {
     const boardLedger = readFileSync(BOARD_LEDGER_PATH, 'utf8');
     const boardTests = readFileSync('tests/unit/vtt/encounter-board-projection.test.ts', 'utf8');

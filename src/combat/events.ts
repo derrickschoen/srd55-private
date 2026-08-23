@@ -415,6 +415,19 @@ export type EncounterEvent =
       readonly position: GridCell;
     })
   | (SequencedEvent & {
+      readonly type: 'combatant_summoned';
+      readonly combatant: CombatantId;
+      readonly summoner: CombatantId;
+      readonly effectId: EncounterEffectId;
+      readonly position: GridCell;
+    })
+  | (SequencedEvent & {
+      readonly type: 'summoned_combatant_despawned';
+      readonly combatant: CombatantId;
+      readonly summoner: CombatantId;
+      readonly effectId: EncounterEffectId;
+    })
+  | (SequencedEvent & {
       readonly type: 'limited_resource_spent';
       readonly combatant: CombatantId;
       readonly resourcePoolId: LimitedResourcePoolId;

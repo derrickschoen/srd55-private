@@ -247,6 +247,11 @@ export type WeaponHitRiderFollowUp =
 
 export type EffectPayload =
   | {
+      /** Marker payload for the effect whose ownedCombatants are temporary summons. */
+      readonly kind: 'summon_lifecycle';
+      readonly monsterId: string;
+    }
+  | {
       /** D343 activation state; its operation remains in the retained spell definition. */
       readonly kind: 'sustained_effect';
       readonly spellId: string;
@@ -1289,6 +1294,8 @@ export interface EffectApplication {
   readonly repeatedSave: RepeatedSaveTiming | null;
   readonly damageBreak?: DamageBreakTiming | null;
   readonly payload: EffectPayload;
+  /** Temporary combatants whose board lifetime is owned by this effect. */
+  readonly ownedCombatants?: readonly CombatantId[];
   /** Present only for an effect materialized by persistent-area membership. */
   readonly areaSource?: PersistentAreaId;
   readonly areaMembershipBound?: true;
@@ -1307,6 +1314,7 @@ export interface EncounterEffect {
   readonly repeatedSave: RepeatedSaveTiming | null;
   readonly damageBreak?: DamageBreakTiming | null;
   readonly payload: EffectPayload;
+  readonly ownedCombatants?: readonly CombatantId[];
   readonly areaSource?: PersistentAreaId;
   readonly areaMembershipBound?: true;
 }

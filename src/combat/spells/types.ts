@@ -557,6 +557,29 @@ export type BranchSpellOperation =
       /** D348.1 deepens D343 with one mutually exclusive continuation shape. */
       readonly sequence: SustainedEffectSequence;
     }
+  | {
+      /**
+       * Creates ordinary combatants from a pack monster record. Giant Insect
+       * establishes the placement and initiative model at
+       * docs/srd/source/spell-descriptions.txt:3708-3716.
+       */
+      readonly kind: 'summon';
+      readonly monsterId: string;
+      readonly count:
+        | { readonly kind: 'fixed'; readonly count: number }
+        | {
+            readonly kind: 'slot_scaled';
+            readonly base: number;
+            readonly additionalPerSlot: number;
+            readonly limit: 'exact';
+          };
+      readonly placementRangeFeet: number;
+      readonly lifecycle: {
+        readonly concentration: boolean;
+        readonly durationRounds: number;
+        readonly expiresAt: 'source_start' | 'source_end';
+      };
+    }
   | ({ readonly kind: 'damage_operation' } & DamageOperationSpec)
   | {
       readonly kind: 'armed_weapon_hit_rider';
@@ -999,6 +1022,7 @@ export const SPELL_OPERATION_KINDS = [
   'targeted_defense_modifier',
   'heat_metal',
   'sustained_effect',
+  'summon',
   'damage_operation',
   'armed_weapon_hit_rider',
   'persistent_area',
@@ -1079,6 +1103,8 @@ export interface SpellCastCommand {
     readonly target: CombatantId;
     readonly destination: GridCell;
   }[];
+  /** Ordered, controller-chosen cells for each creature created by a summon operation. */
+  readonly summonDestinations?: readonly GridCell[];
   readonly weaponAttack: null | {
     readonly attackBonus: number;
     readonly damageType: DamageType;

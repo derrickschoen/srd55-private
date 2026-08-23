@@ -663,6 +663,7 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
     case 'damage_response_modifier':
     case 'targeted_defense_modifier':
     case 'sustained_effect':
+    case 'summon':
       return null;
     case 'heat_metal':
       return [operation.dice.baseCount, operation.dice.sides];
@@ -758,6 +759,7 @@ function operationPerSlot(definition: SpellDefinition): number {
     case 'damage_response_modifier':
     case 'targeted_defense_modifier':
     case 'sustained_effect':
+    case 'summon':
       return 0;
     case 'heat_metal':
       return operation.dice.perSlotCount;
