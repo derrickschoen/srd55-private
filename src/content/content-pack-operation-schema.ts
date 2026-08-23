@@ -61,6 +61,7 @@ export const importedOperationDiceSchema = z.strictObject({
 });
 
 const EFFECT_PAYLOAD_KINDS = [
+  'summon_lifecycle',
   'ability_check_advantage', 'ability_check_modifier', 'action_surge', 'alarm_ward',
   'appearance_illusion', 'arcane_eye', 'arcane_lock', 'armor_class_modifier',
   'attack_roll_modifier', 'attack_roll_mode_modifier', 'attacks_against_target_roll_mode',
@@ -507,6 +508,31 @@ const sustainedEffectOperationSchema = z.strictObject({
   }
 });
 
+/** Imported summon counts share the existing 100-instance content boundary. */
+export const MAX_IMPORTED_SUMMON_COUNT = 100;
+const summonOperationSchema = z.strictObject({
+  kind: z.literal('summon'),
+  monsterId: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,95}$/u),
+  count: z.discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('fixed'),
+      count: positiveInteger.max(MAX_IMPORTED_SUMMON_COUNT),
+    }),
+    z.strictObject({
+      kind: z.literal('slot_scaled'),
+      base: positiveInteger.max(MAX_IMPORTED_SUMMON_COUNT),
+      additionalPerSlot: positiveInteger.max(MAX_IMPORTED_SUMMON_COUNT),
+      limit: z.literal('exact'),
+    }),
+  ]),
+  placementRangeFeet: importedDistance,
+  lifecycle: z.strictObject({
+    concentration: z.boolean(),
+    durationRounds: importedRounds,
+    expiresAt: z.enum(['source_start', 'source_end']),
+  }),
+});
+
 const nonCompositionSchemas = {
   caster_choice: casterChoiceOperationSchema,
   random_branch: randomBranchOperationSchema,
@@ -521,6 +547,7 @@ const nonCompositionSchemas = {
   targeted_defense_modifier: targetedDefenseModifierOperationSchema,
   heat_metal: heatMetalOperationSchema,
   sustained_effect: sustainedEffectOperationSchema,
+  summon: summonOperationSchema,
   damage_operation: importedDamageOperationSchema,
   armed_weapon_hit_rider: armedWeaponHitRiderSchema,
   persistent_area: persistentAreaOperationSchema,

@@ -10,6 +10,7 @@ import {
   type StandingReactionPolicy,
 } from './controllers';
 import {
+  combatantsAreAllies,
   EncounterRuleError,
   reduceEncounter,
   type EncounterReduction,
@@ -171,7 +172,7 @@ function coordinatedMovementSteps(
     .filter(
       (candidate) =>
         candidate.life === 'living' &&
-        candidate.profile.kind !== actor.profile.kind &&
+        !combatantsAreAllies(state, candidate.profile.id, command.actor) &&
         candidate.turn.reactionAvailable,
     )
     .map((candidate) => {
@@ -427,6 +428,13 @@ export class TurnCoordinator {
   ): EncounterReduction {
     const reduction = reduceEncounter(this.#state, command, this.rng);
     this.#state = reduction.state;
+    for (const event of reduction.events) {
+      if (event.type === 'combatant_summoned') {
+        this.registry.assignFrom(event.combatant, event.summoner);
+      } else if (event.type === 'summoned_combatant_despawned') {
+        this.registry.remove(event.combatant);
+      }
+    }
     this.#pendingCommand = null;
     this.#continuation = continuation;
     this.#record({
