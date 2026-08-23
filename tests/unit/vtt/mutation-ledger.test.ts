@@ -53,6 +53,7 @@ const SEQ_BINDING_LEDGER_PATH = 'docs/audits/2026-08-23-seq-binding-mutation-led
 const SENSES_LEDGER_PATH = 'docs/audits/2026-08-23-senses-mutation-ledger.md';
 const TARGET_SELECTION_LEDGER_PATH = 'docs/audits/2026-08-23-target-sel-mutation-ledger.md';
 const SUMMONS_LEDGER_PATH = 'docs/audits/2026-08-23-summons-mutation-ledger.md';
+const FORMS_LEDGER_PATH = 'docs/audits/2026-08-23-forms-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -69,6 +70,33 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D348.1-FORMS-MUTATION-LEDGER pins all four restored controls and the boundary kill', () => {
+    const formsLedger = readFileSync(FORMS_LEDGER_PATH, 'utf8');
+    const formsTests = readFileSync('tests/unit/vtt/forms.test.ts', 'utf8');
+    const controls = [
+      'carryover_lost',
+      'revert_keeps_form_stats',
+      'original_hp_touched_in_form',
+      'unknown_form_id_transforms',
+    ];
+    const killingTests = [
+      'carryover_lost and carryover_boundary_exact_vs_one_over: exactly the remaining form HP reverts without original damage; one over carries exactly one',
+      'original_hp_touched_in_form and revert_keeps_form_stats: partial form damage drains only the form pool and effect-end reversion differs from zero-HP reversion',
+      'unknown_form_id_transforms: rejects only the missing-id form record and loads the rest of the pack',
+    ];
+    for (const control of controls) {
+      expect(formsLedger).toContain(`\`${control}\``);
+      expect(formsTests).toContain(control);
+    }
+    for (const testName of killingTests) {
+      expect(formsLedger).toContain(`\`${testName}\``);
+      expect(formsTests).toContain(testName);
+    }
+    expect(formsLedger.match(/exit 1/gu)).toHaveLength(5);
+    expect(formsLedger).toContain('Tests  8 passed (8)');
+    expect(formsLedger).toContain('All four required controls and the independent boundary mutation were restored.');
+  });
+
   it('D348.1-SUMMONS-MUTATION-LEDGER pins all four controls and both boundary kills', () => {
     const summonsLedger = readFileSync(SUMMONS_LEDGER_PATH, 'utf8');
     const summonsTests = readFileSync('tests/unit/vtt/summons.test.ts', 'utf8');

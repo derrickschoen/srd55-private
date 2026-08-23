@@ -112,6 +112,8 @@ export type EncounterCommand =
       readonly attackerCanSeeTarget: boolean;
       readonly targetCanSeeAttacker: boolean;
       readonly damage: DamageRequest;
+      /** Required while a form replacement limits attacks to its statblock. */
+      readonly attackId?: string;
     }
   | {
       readonly type: 'decline_reaction';
@@ -218,7 +220,7 @@ export type EncounterEvent =
       readonly combatant: CombatantId;
       readonly item: ItemId;
       readonly position: GridCell;
-      readonly cause: 'interaction' | 'forced';
+      readonly cause: 'interaction' | 'forced' | 'form_replacement';
     })
   | (SequencedEvent & {
       readonly type: 'item_picked_up' | 'item_equipped' | 'item_stowed';
@@ -495,7 +497,8 @@ export type EncounterEvent =
         | 'stacking_replaced'
         | 'save_succeeded'
         | 'damage_taken'
-        | 'trigger_consumed';
+        | 'trigger_consumed'
+        | 'form_hit_points_depleted';
     })
   | (SequencedEvent & {
       readonly type: 'effect_duration_extended';
