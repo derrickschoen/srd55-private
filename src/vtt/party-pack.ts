@@ -1802,6 +1802,7 @@ function loadedMember(
         })),
         conditionImmunities: [...(passive?.conditionImmunities ?? [])],
         usesDeathSaves: true,
+        senses: [{ kind: 'normal_sight' }],
         ...(extensions.sizeCategory === null ? {} : { sizeCategory: extensions.sizeCategory }),
         spellSlots: spellSlots.map((capacity) => ({
           level: capacity.level,

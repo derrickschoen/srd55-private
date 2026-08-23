@@ -4917,31 +4917,38 @@
                 "maximum": 500
               },
               "senses": {
-                "maxItems": 4,
+                "minItems": 1,
+                "maxItems": 3,
                 "type": "array",
                 "items": {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "blindsight",
-                        "darkvision",
-                        "tremorsense",
-                        "truesight"
-                      ]
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string", "const": "normal_sight" }
+                      },
+                      "required": ["kind"],
+                      "additionalProperties": false
                     },
-                    "rangeFeet": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 100000
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string", "const": "blindsight" },
+                        "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                      },
+                      "required": ["kind", "rangeFeet"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string", "const": "truesight" },
+                        "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                      },
+                      "required": ["kind", "rangeFeet"],
+                      "additionalProperties": false
                     }
-                  },
-                  "required": [
-                    "kind",
-                    "rangeFeet"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               }
             },
@@ -5048,31 +5055,38 @@
                 "maximum": 500
               },
               "senses": {
-                "maxItems": 4,
+                "minItems": 1,
+                "maxItems": 3,
                 "type": "array",
                 "items": {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "blindsight",
-                        "darkvision",
-                        "tremorsense",
-                        "truesight"
-                      ]
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string", "const": "normal_sight" }
+                      },
+                      "required": ["kind"],
+                      "additionalProperties": false
                     },
-                    "rangeFeet": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 100000
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string", "const": "blindsight" },
+                        "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                      },
+                      "required": ["kind", "rangeFeet"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string", "const": "truesight" },
+                        "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                      },
+                      "required": ["kind", "rangeFeet"],
+                      "additionalProperties": false
                     }
-                  },
-                  "required": [
-                    "kind",
-                    "rangeFeet"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               }
             },
@@ -5313,6 +5327,41 @@
               },
               "usesDeathSaves": {
                 "type": "boolean"
+              },
+              "senses": {
+                "minItems": 1,
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string", "const": "normal_sight" }
+                      },
+                      "required": ["kind"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string", "const": "blindsight" },
+                        "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                      },
+                      "required": ["kind", "rangeFeet"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": { "type": "string", "const": "truesight" },
+                        "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                      },
+                      "required": ["kind", "rangeFeet"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
               }
             },
             "required": [
@@ -5320,7 +5369,8 @@
               "hitPointMaximum",
               "speedFeet",
               "initiativeBonus",
-              "savingThrowBonuses"
+              "savingThrowBonuses",
+              "senses"
             ],
             "additionalProperties": false
           },

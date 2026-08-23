@@ -60,10 +60,16 @@ export interface LightRegion extends EnvironmentRegion {
   readonly level: LightLevel;
 }
 
+export interface ObscurementRegion extends EnvironmentRegion {
+  readonly obscurement: 'heavy' | 'magical_darkness';
+}
+
 export interface EncounterEnvironment {
   /** Later entries take precedence when light regions overlap. */
   readonly lightRegions: readonly LightRegion[];
   readonly difficultTerrainRegions: readonly EnvironmentRegion[];
+  /** Subject-cell visibility regions; ray-intersection geometry is deliberately absent. */
+  readonly obscurementRegions: readonly ObscurementRegion[];
   /** Imported movement hazards. Region ids are the stable execution tie-breaker. */
   readonly movementRegions?: readonly MovementRegion[];
 }
@@ -83,6 +89,7 @@ export interface MovementRegion extends EnvironmentRegion {
 export const EMPTY_ENCOUNTER_ENVIRONMENT: EncounterEnvironment = Object.freeze({
   lightRegions: Object.freeze([]),
   difficultTerrainRegions: Object.freeze([]),
+  obscurementRegions: Object.freeze([]),
   movementRegions: Object.freeze([]),
 });
 
@@ -125,6 +132,11 @@ export type WorldOperation =
       readonly kind: 'set_light_level';
       readonly region: EnvironmentRegion;
       readonly level: LightLevel;
+    }
+  | {
+      readonly kind: 'set_obscurement';
+      readonly region: EnvironmentRegion;
+      readonly obscurement: 'heavy' | 'magical_darkness' | null;
     };
 
 export interface WorldOperationRequest {
@@ -195,6 +207,18 @@ export function environmentLightAt(
     if (region?.cells.some((candidate) => cellKey(candidate) === key)) return region.level;
   }
   return 'bright';
+}
+
+export function environmentObscurementAt(
+  environment: EncounterEnvironment,
+  cell: GridCell,
+): ObscurementRegion['obscurement'] | null {
+  const key = cellKey(cell);
+  for (let index = environment.obscurementRegions.length - 1; index >= 0; index -= 1) {
+    const region = environment.obscurementRegions[index];
+    if (region?.cells.some((candidate) => cellKey(candidate) === key)) return region.obscurement;
+  }
+  return null;
 }
 
 export function isEnvironmentDifficultTerrain(
