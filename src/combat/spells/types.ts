@@ -1,4 +1,4 @@
-import type { Ability, Skill } from '../../domain/enums';
+import type { Ability, DamageType as DomainDamageType, Skill } from '../../domain/enums';
 import type { ConditionName } from '../conditions';
 import type { DamageOperationPacket, DamageOperationSpec, OperationDice } from '../damage-operations';
 import type { EffectApplication, EffectPayload } from '../effects';
@@ -13,6 +13,7 @@ import type { DamageRequest } from '../resolution';
 import type { CombatantId, DamageType, LimitedResourcePoolId, ObjectTargetId, WorldObjectId } from '../values';
 import type { GridCell } from '../grid';
 import type { LightLevel, WorldObjectChanges, WorldObjectInput } from '../world-objects';
+import type { CombatSense, MonsterAction } from '../statblock';
 
 export type SpellLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 export type SpellCastingTime = 'action' | 'bonus_action' | 'reaction' | 'minute' | 'ten_minutes' | 'hour';
@@ -435,6 +436,37 @@ export type NonCompositionSpellOperation = BranchSpellOperation;
 
 export type SpellOperation = CompositionOperation | SharedOutcomeOperation | NonCompositionSpellOperation;
 
+/**
+ * Polymorph retains these identity/continuity facts while replacing the rest of
+ * the target's game statistics (docs/srd/source/spell-descriptions.txt:5952-5963).
+ */
+export const FORM_REPLACEMENT_RETAINED_STATISTICS = [
+  'alignment', 'personality', 'creature_type', 'hit_points', 'hit_point_dice',
+] as const;
+
+export const FORM_REPLACEMENT_EQUIPMENT_DISPOSITIONS = [
+  'merged_into_form', 'dropped_at_origin',
+] as const;
+
+export interface DeclaredFormStatOverride {
+  readonly id: string;
+  readonly name: string;
+  readonly armorClass: number;
+  readonly hitPointMaximum: number;
+  readonly speedFeet: number;
+  readonly initiativeBonus: number;
+  readonly savingThrowBonuses: Readonly<Record<Ability, number>>;
+  readonly attacksPerAction: number;
+  readonly reachFeet: number;
+  readonly damageResponses: readonly {
+    readonly type: DomainDamageType;
+    readonly response: 'normal' | 'resistant' | 'vulnerable' | 'resistant_and_vulnerable' | 'immune';
+  }[];
+  readonly conditionImmunities: readonly string[];
+  readonly senses: readonly CombatSense[];
+  readonly actions: readonly MonsterAction[];
+}
+
 export type SustainedEffectSequence =
   | {
       /** D343's explicit later-turn activation, with its action gate preserved. */
@@ -574,6 +606,28 @@ export type BranchSpellOperation =
             readonly limit: 'exact';
           };
       readonly placementRangeFeet: number;
+      readonly lifecycle: {
+        readonly concentration: boolean;
+        readonly durationRounds: number;
+        readonly expiresAt: 'source_start' | 'source_end';
+      };
+    }
+  | {
+      /**
+       * Reversible statblock replacement with a distinct form-HP pool. The
+       * retained-stat list is closed so imported packs cannot silently replace
+       * original HP or identity facts. Polymorph's form pool and end conditions:
+       * docs/srd/source/spell-descriptions.txt:5952-5967.
+       */
+      readonly kind: 'form_replacement';
+      readonly form:
+        | { readonly kind: 'pack_monster'; readonly monsterId: string }
+        | { readonly kind: 'stat_override'; readonly stats: DeclaredFormStatOverride };
+      readonly retainedStatistics: typeof FORM_REPLACEMENT_RETAINED_STATISTICS;
+      readonly hitPoints: 'temporary_form_pool';
+      readonly equipmentDisposition: (typeof FORM_REPLACEMENT_EQUIPMENT_DISPOSITIONS)[number];
+      readonly actionAccess: 'form_statblock_only';
+      readonly spellcasting: 'prohibited';
       readonly lifecycle: {
         readonly concentration: boolean;
         readonly durationRounds: number;
@@ -1023,6 +1077,7 @@ export const SPELL_OPERATION_KINDS = [
   'heat_metal',
   'sustained_effect',
   'summon',
+  'form_replacement',
   'damage_operation',
   'armed_weapon_hit_rider',
   'persistent_area',

@@ -9,8 +9,13 @@ import type {
   BranchSpellOperation,
   CompositionOperation,
   CompositionStep,
+  DeclaredFormStatOverride,
   NonCompositionSpellOperation,
   SpellOperation,
+} from '../combat/spells/types';
+import {
+  FORM_REPLACEMENT_EQUIPMENT_DISPOSITIONS,
+  FORM_REPLACEMENT_RETAINED_STATISTICS,
 } from '../combat/spells/types';
 import { abilities, damageTypes, skills } from '../domain/enums';
 
@@ -533,6 +538,90 @@ const summonOperationSchema = z.strictObject({
   }),
 });
 
+const formIdentifier = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,95}$/u);
+const formSenseSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('normal_sight') }),
+  z.strictObject({ kind: z.literal('blindsight'), rangeFeet: importedPositiveDistance }),
+  z.strictObject({ kind: z.literal('truesight'), rangeFeet: importedPositiveDistance }),
+]);
+const formAttackSchema = z.strictObject({
+  kind: z.literal('attack'),
+  id: formIdentifier,
+  name: z.string().trim().min(1).max(1_000),
+  attackBonus: safeInteger.min(-100).max(100),
+  delivery: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('melee'), reachFeet: importedPositiveDistance }),
+    z.strictObject({
+      kind: z.literal('ranged'), rangeFeet: importedPositiveDistance,
+      longRangeFeet: z.discriminatedUnion('kind', [
+        z.strictObject({ kind: z.literal('present'), value: importedPositiveDistance }),
+        z.strictObject({ kind: z.literal('absent'), note: z.string().trim().min(1).max(1_000) }),
+      ]),
+    }),
+    z.strictObject({
+      kind: z.literal('melee_or_ranged'), reachFeet: importedPositiveDistance,
+      rangeFeet: importedPositiveDistance, longRangeFeet: importedPositiveDistance,
+    }),
+  ]),
+  damage: z.array(z.strictObject({
+    average: boundedNonNegative,
+    dice: z.strictObject({
+      count: positiveInteger.max(MAX_IMPORTED_DICE_COUNT), sides: importedDieSides,
+      modifier: safeInteger.min(-MAX_IMPORTED_SCALAR).max(MAX_IMPORTED_SCALAR),
+    }),
+    type: z.enum(damageTypes),
+    trigger: z.strictObject({ kind: z.literal('always') }),
+  })).min(1).max(20),
+  attackRollAdvantage: z.null(),
+  onHit: z.tuple([]),
+});
+const formSavingThrowBonuses = Object.fromEntries(
+  abilities.map((ability) => [ability, safeInteger.min(-30).max(30)]),
+) as Record<(typeof abilities)[number], z.ZodNumber>;
+const declaredFormStatOverrideSchema: z.ZodType<DeclaredFormStatOverride> = z.strictObject({
+  id: formIdentifier,
+  name: z.string().trim().min(1).max(1_000),
+  armorClass: positiveInteger.max(100),
+  hitPointMaximum: positiveInteger.max(MAX_IMPORTED_SCALAR),
+  speedFeet: importedSpeed,
+  initiativeBonus: safeInteger.min(-30).max(30),
+  savingThrowBonuses: z.strictObject(formSavingThrowBonuses),
+  attacksPerAction: positiveInteger.max(100),
+  reachFeet: importedDistance,
+  damageResponses: z.array(z.strictObject({
+    type: z.enum(damageTypes),
+    response: z.enum(['normal', 'resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune']),
+  })).max(damageTypes.length),
+  conditionImmunities: z.array(z.string().trim().min(1).max(1_000)).max(100),
+  senses: z.array(formSenseSchema).min(1).max(3)
+    .refine((senses) => new Set(senses.map(({ kind }) => kind)).size === senses.length, {
+      message: 'Form senses must use unique kinds.',
+    }),
+  actions: z.array(formAttackSchema).min(1).max(100),
+});
+const formReplacementCommon = {
+  retainedStatistics: z.tuple(FORM_REPLACEMENT_RETAINED_STATISTICS.map((value) => z.literal(value)) as [
+    z.ZodLiteral<'alignment'>, z.ZodLiteral<'personality'>, z.ZodLiteral<'creature_type'>,
+    z.ZodLiteral<'hit_points'>, z.ZodLiteral<'hit_point_dice'>,
+  ]),
+  hitPoints: z.literal('temporary_form_pool'),
+  equipmentDisposition: z.enum(FORM_REPLACEMENT_EQUIPMENT_DISPOSITIONS),
+  actionAccess: z.literal('form_statblock_only'),
+  spellcasting: z.literal('prohibited'),
+  lifecycle: z.strictObject({
+    concentration: z.boolean(), durationRounds: importedRounds,
+    expiresAt: z.enum(['source_start', 'source_end']),
+  }),
+} as const;
+const formReplacementOperationSchema = z.strictObject({
+  kind: z.literal('form_replacement'),
+  form: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('pack_monster'), monsterId: formIdentifier }),
+    z.strictObject({ kind: z.literal('stat_override'), stats: declaredFormStatOverrideSchema }),
+  ]),
+  ...formReplacementCommon,
+});
+
 const nonCompositionSchemas = {
   caster_choice: casterChoiceOperationSchema,
   random_branch: randomBranchOperationSchema,
@@ -548,6 +637,7 @@ const nonCompositionSchemas = {
   heat_metal: heatMetalOperationSchema,
   sustained_effect: sustainedEffectOperationSchema,
   summon: summonOperationSchema,
+  form_replacement: formReplacementOperationSchema,
   damage_operation: importedDamageOperationSchema,
   armed_weapon_hit_rider: armedWeaponHitRiderSchema,
   persistent_area: persistentAreaOperationSchema,
