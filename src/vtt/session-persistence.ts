@@ -412,8 +412,16 @@ export function deriveBranchRng(
     worldObjects,
     nextWorldObjectSequence,
     environment,
-    ...baseMechanicalState
+    combatants,
+    ...stateWithoutCombatants
   } = target.encounterState;
+  const normalizedCombatants = combatants.map((entry) => {
+    const senses = entry.profile.rules.senses;
+    if (senses.length !== 1 || senses[0]?.kind !== 'normal_sight') return entry;
+    const { senses: _defaultNormalSight, ...rules } = entry.profile.rules;
+    return { ...entry, profile: { ...entry.profile, rules } };
+  });
+  const baseMechanicalState = { ...stateWithoutCombatants, combatants: normalizedCombatants };
   // Empty additive state is mechanically neutral and does not perturb branch
   // streams; once an area exists, both its state and allocator are authoritative.
   const areaNeutralState = persistentAreas.length === 0 && nextPersistentAreaSequence === 1

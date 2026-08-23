@@ -51,6 +51,7 @@ function profile(
       damageResponses: [],
       conditionImmunities: [],
       usesDeathSaves: kind === 'player_character',
+      senses: [{ kind: 'normal_sight' }],
       spellSlots: options.spellSlots ?? [],
     },
   } as const;

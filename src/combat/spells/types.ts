@@ -567,6 +567,12 @@ export type BranchSpellOperation =
             readonly level: LightLevel;
           }
         | {
+            readonly kind: 'set_obscurement';
+            readonly regionId: string;
+            readonly obscurement: 'heavy' | 'magical_darkness' | null;
+            readonly geometry: 'subject_cell';
+          }
+        | {
             readonly kind: 'remove_objects';
             readonly reason: 'destroyed' | 'dismissed';
           }

@@ -64,7 +64,7 @@
         "abilityScoreIncreases": [{ "ability": "dexterity", "amount": 1 }],
         "skills": ["acrobatics"],
         "speedFeet": 35,
-        "senses": [{ "kind": "darkvision", "rangeFeet": 45 }]
+        "senses": [{ "kind": "normal_sight" }]
       }
     }
   ],
@@ -77,7 +77,7 @@
         "abilityScoreIncreases": [{ "ability": "wisdom", "amount": 1 }],
         "skills": ["investigation", "survival"],
         "speedFeet": 30,
-        "senses": []
+        "senses": [{ "kind": "normal_sight" }]
       }
     }
   ],
@@ -114,7 +114,8 @@
         "reachFeet": 5,
         "damageResponses": [],
         "conditionImmunities": [],
-        "usesDeathSaves": false
+        "usesDeathSaves": false,
+        "senses": [{ "kind": "normal_sight" }]
       },
       "actions": [
         {

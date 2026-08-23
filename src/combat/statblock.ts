@@ -26,6 +26,9 @@ import {
 export type ChallengeRating = '1/8' | '1/4' | '1/2' | 1 | 2 | 3;
 export type MovementKind = 'walk' | 'burrow' | 'climb' | 'fly' | 'swim';
 export type SenseKind = 'blindsight' | 'darkvision' | 'tremorsense' | 'truesight';
+export type CombatSense =
+  | { readonly kind: 'normal_sight' }
+  | { readonly kind: 'blindsight' | 'truesight'; readonly rangeFeet: number };
 
 export interface SourceSpan {
   readonly path: 'docs/srd/full/srd-5.2.1.txt';
@@ -267,6 +270,7 @@ export interface MonsterStatblockInput {
   readonly damageResponses?: readonly { readonly type: string; readonly response: DamageResponse }[];
   readonly conditionImmunities?: readonly string[];
   readonly usesDeathSaves?: boolean;
+  readonly senses?: readonly CombatSense[];
   readonly sourceDetails?: MonsterSourceDetailsInput;
 }
 
@@ -283,6 +287,7 @@ export interface MonsterStatblock {
   readonly damageResponses: readonly { readonly type: DamageType; readonly response: DamageResponse }[];
   readonly conditionImmunities: readonly string[];
   readonly usesDeathSaves: boolean;
+  readonly senses: readonly CombatSense[];
   readonly sourceDetails: MonsterSourceDetails;
 }
 
@@ -492,6 +497,29 @@ export function monsterStatblock(input: MonsterStatblockInput): MonsterStatblock
   if (checkedArmorClass < 1) throw new RangeError('Monster Armor Class must be positive.');
   const hitPointMaximum = positiveInteger(input.hitPointMaximum, 'Monster Hit Point maximum');
   const sourceDetails = validateSourceDetails(input.sourceDetails, input.speedFeet);
+  const declaredSenses = input.senses ?? [
+    { kind: 'normal_sight' as const },
+    ...(sourceDetails.senses.kind === 'present'
+      ? sourceDetails.senses.value.flatMap((sense): readonly CombatSense[] => {
+          switch (sense.kind) {
+            case 'blindsight':
+            case 'truesight': return [{ kind: sense.kind, rangeFeet: sense.rangeFeet }];
+            case 'darkvision':
+            case 'tremorsense': return [];
+          }
+        })
+      : []),
+  ];
+  const senses = declaredSenses.map((sense): CombatSense => {
+    switch (sense.kind) {
+      case 'normal_sight': return sense;
+      case 'blindsight':
+      case 'truesight': return { ...sense, rangeFeet: positiveInteger(sense.rangeFeet, `${sense.kind} range`) };
+    }
+  });
+  if (new Set(senses.map(({ kind }) => kind)).size !== senses.length) {
+    throw new RangeError('Combat senses must use unique kinds.');
+  }
   if (sourceDetails.hitPointDice.kind === 'present') {
     const dice = sourceDetails.hitPointDice.value;
     const sourcedAverage = Math.floor(dice.count * (dice.sides + 1) / 2) + dice.modifier;
@@ -523,7 +551,7 @@ export function monsterStatblock(input: MonsterStatblockInput): MonsterStatblock
     id: statblockId(input.id), name: nonEmptyText(input.name, 'Monster name'), armorClass: checkedArmorClass,
     hitPointMaximum, speed: feet(input.speedFeet), initiativeBonus: finiteInteger(input.initiativeBonus, 'Monster Initiative bonus'),
     savingThrowBonuses, attacksPerAction: positiveInteger(input.attacksPerAction ?? 1, 'Attacks per action'), reach: feet(input.reachFeet ?? 5),
-    damageResponses, conditionImmunities, usesDeathSaves: input.usesDeathSaves ?? false,
+    damageResponses, conditionImmunities, usesDeathSaves: input.usesDeathSaves ?? false, senses,
     sourceDetails,
   };
 }

@@ -320,6 +320,7 @@ const worldOperationsOperationSchema = z.strictObject({
     z.strictObject({ kind: z.literal('create_object'), placement: z.enum(['caster_cell', 'area_origin']), footprintOffsets: z.array(z.strictObject({ column: safeInteger, row: safeInteger })).min(1).max(400), object: worldObjectTemplateSchema }),
     z.strictObject({ kind: z.literal('transform_terrain'), regionId: z.string().min(1).max(64), difficultTerrain: z.boolean() }),
     z.strictObject({ kind: z.literal('set_light_level'), regionId: z.string().min(1).max(64), level: z.enum(['bright', 'dim', 'darkness']) }),
+    z.strictObject({ kind: z.literal('set_obscurement'), regionId: z.string().min(1).max(64), obscurement: z.enum(['heavy', 'magical_darkness']).nullable(), geometry: z.enum(['subject_cell', 'ray_intersection']) }),
     z.strictObject({ kind: z.literal('remove_objects'), reason: z.enum(['destroyed', 'dismissed']) }),
     z.strictObject({ kind: z.literal('modify_objects'), changes: z.strictObject({
       name: z.string().min(1).max(1_000).optional(),
