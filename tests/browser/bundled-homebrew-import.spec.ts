@@ -72,9 +72,9 @@ async function importBundledHomebrew(
     name: 'Import with these choices',
     exact: true,
   }).click();
-  // The bundled install commits one identity per catalog revision (11 as of
-  // barbedCourtV5) inside the browser; under a shared CPU that legitimately
-  // exceeds the default 5s expect window. The asserted text is unchanged.
+  // The bundled install commits every catalog entry, including the nine
+  // D296/D298 UI-hidden mechanics fixtures, inside the browser; under a shared
+  // CPU that legitimately exceeds the default 5s expect window.
   await expect(page.locator('.transfer-status')).toHaveText(expectedSummary, {
     timeout: 30_000,
   });
@@ -101,7 +101,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
 
   await importBundledHomebrew(
     page,
-    'Bundled homebrew imported: 3 added to your library, 0 matched existing.',
+    'Bundled homebrew imported: 12 added to your library, 0 matched existing.',
   );
 
   await page.getByRole('link', { name: 'Homebrew library', exact: true }).click();
@@ -294,7 +294,7 @@ test('imports bundled homebrew through publish, applies derived third-caster slo
   await globalReady(page);
   await importBundledHomebrew(
     page,
-    'Bundled homebrew imported: 0 added to your library, 3 matched existing.',
+    'Bundled homebrew imported: 0 added to your library, 12 matched existing.',
   );
 
   await page.getByRole('link', { name: 'Homebrew library', exact: true }).click();
@@ -338,7 +338,7 @@ test('Veteran v3 sheet values and the v2-to-v3 replacement review are visible', 
   await globalReady(page);
   await importBundledHomebrew(
     page,
-    'Bundled homebrew imported: 3 added to your library, 0 matched existing.',
+    'Bundled homebrew imported: 12 added to your library, 0 matched existing.',
   );
 
   const characters = await page.evaluate(async () => {
