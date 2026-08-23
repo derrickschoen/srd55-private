@@ -77,6 +77,16 @@ test('DM composes stored builder characters and each PC defaults to human contro
       page.locator('.encounter-token[data-kind="player_character"]', { hasText: name }),
     ).toBeVisible();
   }
+  await expect(page.locator('.adventuring-day-status')).toHaveText(
+    'Adventuring day — room 1 of 4 · 2024 rules',
+  );
+  await expect(page.getByRole('heading', { name: 'Short Rest before next room' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Take Short Rest and enter next room' })).toBeVisible();
+  await page.getByRole('button', { name: 'End room and enter next room' }).click();
+  await expect(page.locator('.adventuring-day-status')).toHaveAttribute('data-room', '2');
+  for (const name of names) {
+    await expect(page.getByLabel(`${name} controller`)).toHaveValue('human');
+  }
 });
 
 test('M38-PLAYER-NO-DM-CONTROLS and two local windows complete the resumable reference flow', async ({

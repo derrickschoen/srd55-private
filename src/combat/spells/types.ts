@@ -1226,6 +1226,8 @@ export interface SpellCastCommand {
   readonly actor: CombatantId;
   readonly spellId: string;
   readonly slotLevel: number | null;
+  /** Present when this cast expends Pact Magic rather than ordinary Spellcasting. */
+  readonly slotRecharge?: 'short_rest';
   readonly castAsRitual: boolean;
   readonly casterLevel: number;
   readonly attackBonus: number;

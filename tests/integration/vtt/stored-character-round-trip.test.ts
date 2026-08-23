@@ -9,6 +9,10 @@ import {
   loadExternalPartyPack,
 } from '../../../src/vtt/party-pack';
 import { composeStoredCharacterEncounter } from '../../../src/vtt/stored-character-encounter';
+import {
+  capturePartySessionState,
+  enterNextRoom,
+} from '../../../src/vtt/party-session-state';
 import type { StoredCharacterPartyPackExport } from '../../../src/vtt/stored-character-party-member';
 import { handlers as guidedHandlers } from '../../../src/worker/handlers/guided';
 import { handlers as queryHandlers } from '../../../src/worker/handlers/queries';
@@ -365,5 +369,33 @@ describe('stored character authoring-to-encounter round trip', () => {
     expect(cast.state.combatants.find(
       (subject) => subject.profile.id === wizardMember.profile.id,
     )?.spellSlots).toContainEqual({ level: 1, maximum: 2, remaining: 1 });
+    const damaged = reduceEncounter(cast.state, {
+      type: 'adjudicate',
+      target: wizardMember.profile.id,
+      subject: 'integration:room-one-damage',
+      reasoning: 'Room one damage must carry into room two.',
+      consequence: { kind: 'hit_point_delta', amount: -5 },
+    }, () => 0.5).state;
+    if (composed.partyState === null) {
+      throw new Error('RPC-authored stored characters did not create party session state.');
+    }
+    const captured = capturePartySessionState(composed.partyState, damaged);
+    const roomTwo = composeStoredCharacterEncounter(
+      loaded.party.members,
+      names,
+      enterNextRoom(captured),
+    );
+    const roomTwoWizard = roomTwo.state.combatants.find(
+      (subject) => subject.profile.id === wizardMember.profile.id,
+    );
+    expect(roomTwoWizard?.hitPoints).toBe(
+      wizardMember.profile.rules.hitPointMaximum - 5,
+    );
+    expect(roomTwoWizard?.spellSlots).toContainEqual({
+      level: 1,
+      maximum: 2,
+      remaining: 1,
+    });
+    expect(roomTwo.partyState).toMatchObject({ rulesEdition: '2024', room: 2 });
   });
 });

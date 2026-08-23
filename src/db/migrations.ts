@@ -53,6 +53,7 @@ import spellVersionsActiveLevelNameIndex from '../../drizzle/0049_spell_versions
 import relationshipIndexes from '../../drizzle/0050_relationship_indexes.sql?raw';
 import fingerprintContentKeyIndex from '../../drizzle/0051_fingerprint_content_key_index.sql?raw';
 import vttSessionRevisions from '../../drizzle/0052_vtt_session_revisions.sql?raw';
+import vttSessionPartyState from '../../drizzle/0053_vtt_session_party_state.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -588,6 +589,12 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
       'd7b97d832265c0674ed8a69919c757956fb7d764b2bb80677c31cf8f947f6e5a',
     resultSchemaChecksum:
       '7f077932131554b2d79e4df635453cc3e2f63611d804d780e396d01cdcaa767a',
+  }),
+  Object.freeze({
+    id: '0053_vtt_session_party_state',
+    sql: vttSessionPartyState,
+    checksum: '32be057d1743bdc961772547d716008b6b5fd55d43478c8ec1209a5ae3783304',
+    resultSchemaChecksum: 'f5bd0240a06158851b5c06b4c7e800406bfcd95ec844363ee3c7ff59f4de8845',
   }),
 ]);
 

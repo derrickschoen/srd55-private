@@ -1298,7 +1298,7 @@ const vttSessionRevision =
     insert(db, 'vtt_session_revisions', {
       session_id: uid('vtt-session'),
       revision: 1,
-      schema_version: 2,
+      schema_version: 3,
       payload_json: '{"state":"persisted"}',
       payload_checksum: 'ab'.repeat(32),
       ...values,
@@ -1657,11 +1657,12 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     constraint: 'vtt_session_revisions_schema_version_check',
     rejects: [
       ['schema version zero', vttSessionRevision({ schema_version: 0 })],
-      ['schema version three', vttSessionRevision({ schema_version: 3 })],
+      ['schema version four', vttSessionRevision({ schema_version: 4 })],
     ],
     accepts: [
       ['schema version one', vttSessionRevision({ schema_version: 1 })],
       ['schema version two', vttSessionRevision({ schema_version: 2 })],
+      ['schema version three', vttSessionRevision({ schema_version: 3 })],
     ],
   },
   {

@@ -757,6 +757,27 @@ export function replayBundle(
         ).snapshot();
         break;
       }
+      case 'party_state_captured':
+        if (parent === null || parent === undefined) {
+          throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'existing party-state parent', revision.parentRevision);
+        }
+        expectedState = parent.state;
+        expectedRng = parent.rng;
+        break;
+      case 'short_rest_completed':
+        if (parent === null || parent === undefined) {
+          throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'existing Short Rest parent', revision.parentRevision);
+        }
+        expectedState = parent.state;
+        expectedRng = revision.rngState;
+        break;
+      case 'room_composed':
+        if (parent === null || parent === undefined) {
+          throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'existing room parent', revision.parentRevision);
+        }
+        expectedState = revision.encounterState;
+        expectedRng = parent.rng;
+        break;
       case 'reducer_applied': {
         if (parent === null || parent === undefined) {
           throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'existing reducer parent', revision.parentRevision);

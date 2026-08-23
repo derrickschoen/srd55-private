@@ -195,6 +195,8 @@ export interface SpellSlotState {
   readonly level: number;
   readonly maximum: number;
   readonly remaining: number;
+  /** Omitted for ordinary long-rest slots so existing encounter records stay canonical. */
+  readonly recharge?: 'short_rest';
 }
 
 export interface LimitedResourceState {
@@ -3832,7 +3834,8 @@ function spendRiderSpellSlot(
   effectId: EncounterEffectId,
 ): void {
   const subject = combatant(context.state, actor);
-  const slot = subject.spellSlots.find((candidate) => candidate.level === slotLevel);
+  const slot = subject.spellSlots.find((candidate) =>
+    candidate.level === slotLevel && (candidate.recharge ?? 'long_rest') === 'long_rest');
   if (slot === undefined || slot.remaining < 1) {
     throw new EncounterRuleError(`Combatant ${actor} has no level-${String(slotLevel)} spell slot remaining.`);
   }
@@ -3840,7 +3843,9 @@ function spendRiderSpellSlot(
   context.state = replaceCombatant(context.state, {
     ...subject,
     spellSlots: subject.spellSlots.map((candidate) =>
-      candidate.level === slotLevel ? { ...candidate, remaining } : candidate),
+      candidate.level === slotLevel && (candidate.recharge ?? 'long_rest') === 'long_rest'
+        ? { ...candidate, remaining }
+        : candidate),
   });
   emit(context, { type: 'spell_slot_spent', combatant: actor, slotLevel, remaining });
   const refreshed = combatant(context.state, actor);
@@ -4577,7 +4582,9 @@ function spendSpellSlot(
     return;
   }
   const subject = combatant(context.state, command.actor);
-  const slot = subject.spellSlots.find((candidate) => candidate.level === command.slotLevel);
+  const slot = subject.spellSlots.find((candidate) =>
+    candidate.level === command.slotLevel &&
+    (candidate.recharge ?? 'long_rest') === (command.slotRecharge ?? 'long_rest'));
   if (slot === undefined || slot.remaining < 1) {
     throw new EncounterRuleError(`Combatant ${command.actor} has no level-${command.slotLevel} spell slot remaining.`);
   }
@@ -4585,7 +4592,10 @@ function spendSpellSlot(
   context.state = replaceCombatant(context.state, {
     ...subject,
     spellSlots: subject.spellSlots.map((candidate) =>
-      candidate.level === command.slotLevel ? { ...candidate, remaining } : candidate,
+      candidate.level === command.slotLevel &&
+      (candidate.recharge ?? 'long_rest') === (command.slotRecharge ?? 'long_rest')
+        ? { ...candidate, remaining }
+        : candidate,
     ),
   });
   emit(context, {
@@ -6144,7 +6154,8 @@ function offerReaction(
     selected.definition.level > 0 &&
     (command.slotLevel === null || command.slotLevel < selected.definition.level ||
       !combatant(context.state, command.actor).spellSlots.some(
-        (slot) => slot.level === command.slotLevel && slot.remaining > 0,
+        (slot) => slot.level === command.slotLevel && slot.remaining > 0 &&
+          (slot.recharge ?? 'long_rest') === (command.slotRecharge ?? 'long_rest'),
       ))
   ) {
     emit(context, {

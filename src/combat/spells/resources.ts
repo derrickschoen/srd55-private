@@ -29,13 +29,14 @@ export function referencePartySpellSlots(
 export function validateSpellSlotCapacities(
   capacities: readonly SpellSlotCapacity[],
 ): readonly SpellSlotCapacity[] {
-  const levels = new Set<SpellSlotLevel>();
+  const pools = new Set<string>();
   return capacities.map((capacity) => {
-    if (levels.has(capacity.level)) throw new RangeError('Spell slot levels must be unique.');
+    const pool = `${String(capacity.level)}:${capacity.recharge ?? 'long_rest'}`;
+    if (pools.has(pool)) throw new RangeError('Spell slot level and recharge pools must be unique.');
     if (!Number.isSafeInteger(capacity.maximum) || capacity.maximum < 1) {
       throw new RangeError('Spell slot maximum must be a positive safe integer.');
     }
-    levels.add(capacity.level);
+    pools.add(pool);
     return { ...capacity };
   });
 }

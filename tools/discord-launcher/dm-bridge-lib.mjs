@@ -87,6 +87,7 @@ export class ProjectionReconstructor {
         controllers: structuredClone(array(view.controllers, 'compact projection controllers')),
         history: structuredClone(array(request.history, 'request.history')),
         adjudicatedTargets: structuredClone(array(view.adjudicatedTargets, 'compact projection adjudicated targets')),
+        partySession: structuredClone(view.partySession),
       };
     } else if (transfer.kind === 'projection_delta') {
       const previous = this.snapshots.get(request.encounterId);

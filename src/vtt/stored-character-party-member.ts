@@ -33,6 +33,9 @@ type PartyPackSpellcastingSource = PartyPackSpellcastingSources[number];
 type PartyPackSpellSlotLevel = NonNullable<
   ExternalPartyPackV2Member['sharedSpellSlots']
 >[number]['level'];
+type PartyPackPactSlot = NonNullable<
+  ExternalPartyPackV2Member['pactSpellSlots']
+>[number];
 
 export interface StoredCharacterPartyPackRefusal {
   readonly kind: 'stored_character_party_pack_refusal';
@@ -187,10 +190,14 @@ function attacks(
   return { status: 'exported', attacks: exported };
 }
 
-function sharedSpellSlots(
+function spellSlotPools(
   resources: CharacterSheet['resources'],
 ):
-  | { readonly status: 'exported'; readonly slots: NonNullable<ExternalPartyPackV2Member['sharedSpellSlots']> }
+  | {
+      readonly status: 'exported';
+      readonly shared: NonNullable<ExternalPartyPackV2Member['sharedSpellSlots']>;
+      readonly pact: NonNullable<ExternalPartyPackV2Member['pactSpellSlots']>;
+    }
   | { readonly status: 'refused'; readonly field: string; readonly detail: string } {
   const absentProgression = resources.find(
     (resource): resource is Extract<SheetResourceMaximum, { readonly status: 'absent' }> =>
@@ -203,17 +210,7 @@ function sharedSpellSlots(
       detail: absentProgression.detail,
     };
   }
-  const pact = resources.find(
-    (resource) => resource.status === 'computed' && resource.kind === 'pact_slot',
-  );
-  if (pact !== undefined) {
-    return {
-      status: 'refused',
-      field: 'pactSpellSlots',
-      detail: 'The current party-pack importer refuses Pact Magic slot pools.',
-    };
-  }
-  const slots = resources.flatMap((resource) => {
+  const shared = resources.flatMap((resource) => {
     if (
       resource.status !== 'computed' ||
       resource.kind !== 'spell_slot' ||
@@ -226,7 +223,21 @@ function sharedSpellSlots(
       recharge: 'long_rest' as const,
     }];
   });
-  return { status: 'exported', slots };
+  const pact: PartyPackPactSlot[] = resources.flatMap((resource) => {
+    if (
+      resource.status !== 'computed' ||
+      resource.kind !== 'pact_slot' ||
+      resource.spell_level === null ||
+      resource.spell_level < 1 ||
+      resource.spell_level > 9
+    ) return [];
+    return [{
+      level: resource.spell_level as PartyPackSpellSlotLevel,
+      count: resource.maximum,
+      recharge: 'short_rest' as const,
+    }];
+  });
+  return { status: 'exported', shared, pact };
 }
 
 function spellcasting(
@@ -307,6 +318,7 @@ export function projectStoredCharacterPartyPackMember(
     return refused('classes.totalLevel', 'The total character level is outside 1..20.');
   }
   const classes: ExternalPartyPackMember['classes'][number][] = [];
+  const hitDiceBySides = new Map<6 | 8 | 10 | 12, number>();
   for (const [index, heldClass] of sheet.classes.entries()) {
     const classId = SRD_CLASS_NAMES.find((name) => name === heldClass.class_name);
     if (classId === undefined) {
@@ -315,7 +327,17 @@ export function projectStoredCharacterPartyPackMember(
         `${heldClass.class_name} is not in the party-pack class vocabulary.`,
       );
     }
+    if (heldClass.hit_die === null) {
+      return refused(
+        `classes.${String(index)}.hitDie`,
+        `${heldClass.class_name} has no sourced Hit Point Die.`,
+      );
+    }
     classes.push({ classId, level: heldClass.level });
+    hitDiceBySides.set(
+      heldClass.hit_die,
+      (hitDiceBySides.get(heldClass.hit_die) ?? 0) + heldClass.level,
+    );
   }
   if (sheet.hit_point_maximum.value === null) {
     return refused('hitPointMaximum', 'The sheet Hit Point maximum is undetermined.');
@@ -349,7 +371,7 @@ export function projectStoredCharacterPartyPackMember(
   if (exportedAttacks.status === 'refused') {
     return refused(exportedAttacks.field, exportedAttacks.detail);
   }
-  const exportedSlots = sharedSpellSlots(sheet.resources);
+  const exportedSlots = spellSlotPools(sheet.resources);
   if (exportedSlots.status === 'refused') {
     return refused(exportedSlots.field, exportedSlots.detail);
   }
@@ -359,7 +381,7 @@ export function projectStoredCharacterPartyPackMember(
   }
   if (
     exportedSpellcasting.sources.length === 0 &&
-    exportedSlots.slots.length > 0
+    exportedSlots.shared.length + exportedSlots.pact.length > 0
   ) {
     return refused(
       'spellcasting.sources',
@@ -386,13 +408,17 @@ export function projectStoredCharacterPartyPackMember(
     savingThrowBonuses,
     attacksPerAction: sheet.attacks_per_action.count,
     sizeCategory: size,
+    hitDice: [...hitDiceBySides]
+      .sort(([left], [right]) => left - right)
+      .map(([sides, maximum]) => ({ sides, maximum })),
     attacks: exportedAttacks.attacks,
     startingConditions: [],
     ...(exportedSpellcasting.sources.length === 0
       ? {}
       : {
           spellcasting: exportedSpellcasting.sources,
-          sharedSpellSlots: exportedSlots.slots,
+          sharedSpellSlots: exportedSlots.shared,
+          ...(exportedSlots.pact.length === 0 ? {} : { pactSpellSlots: exportedSlots.pact }),
         }),
     ...(passiveArmorClassBonus === 0 && damageResponses.length === 0
       ? {}

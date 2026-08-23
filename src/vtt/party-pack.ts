@@ -36,6 +36,7 @@ import {
 } from '../combat/values';
 import type { WorldOperation } from '../combat/world-objects';
 import { abilities, creatureSizes, damageTypes, skills, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
+import { hitDieSizes, type HitDieSize } from '../domain/enums';
 import { SRD_CLASS_NAMES } from '../rules/class-traits-srd';
 import {
   createGapReport,
@@ -230,6 +231,11 @@ const pactSpellSlotSchema = z.strictObject({
   level: spellSlotLevelSchema,
   count: integerSchema.min(1).max(99),
   recharge: z.literal('short_rest'),
+});
+
+const hitDicePoolSchema = z.strictObject({
+  sides: z.union(hitDieSizes.map((sides) => z.literal(sides))),
+  maximum: integerSchema.min(1).max(20),
 });
 
 const resourceSpellUseSchema = z.strictObject({
@@ -796,11 +802,13 @@ const legacySpellcastingInputSchema = z.strictObject({
 const v2MemberCoreSchema = z.strictObject({
   ...memberBaseShape,
   sizeCategory: z.enum(creatureSizes),
+  hitDice: z.array(hitDicePoolSchema).min(1).max(12).optional(),
 });
 
 const v2MemberSchema = z.strictObject({
   ...memberBaseShape,
   sizeCategory: z.enum(creatureSizes),
+  hitDice: z.array(hitDicePoolSchema).min(1).max(12).optional(),
   ...memberSharedShape,
   spellcasting: z.union([
     legacySpellcastingSchema,
@@ -914,6 +922,15 @@ export interface LoadedPartyMember {
     readonly maximum: number;
     readonly recharge: 'long_rest';
   }[];
+  readonly pactSpellSlots: readonly {
+    readonly level: z.infer<typeof spellSlotLevelSchema>;
+    readonly maximum: number;
+    readonly recharge: 'short_rest';
+  }[];
+  readonly hitDice: readonly {
+    readonly sides: HitDieSize;
+    readonly maximum: number;
+  }[];
   readonly startingConditions: readonly LoadedPartyCondition[];
   readonly effects: readonly CombatFeatureEffect[];
   readonly worldOperations: readonly {
@@ -933,7 +950,6 @@ export type PartyPackRefusalReason =
   | 'invalid_structure'
   | 'unknown_spell_id'
   | 'too_many_spellcasting_sources'
-  | 'pact_slots_unmodelled'
   | 'unsupported_effect_shape'
   | 'gaps_not_allowed'
   | 'no_mappable_members';
@@ -1006,6 +1022,7 @@ const V1_MEMBER_FIELDS = new Set([
 const V2_MEMBER_FIELDS = new Set([
   ...SHARED_MEMBER_FIELDS,
   'sizeCategory',
+  'hitDice',
   'spellcasting',
   'sharedSpellSlots',
   'pactSpellSlots',
@@ -1018,6 +1035,7 @@ const CLASS_FIELDS = new Set(['classId', 'level']);
 const ABILITY_FIELDS = new Set<string>(abilities);
 const SPELL_SLOT_FIELDS = new Set(['level', 'maximum']);
 const V2_SPELL_SLOT_FIELDS = new Set(['level', 'count', 'recharge']);
+const HIT_DICE_FIELDS = new Set(['sides', 'maximum']);
 const SPELLCASTING_SOURCE_FIELDS = new Set([
   'ability',
   'spellSaveDc',
@@ -1161,6 +1179,17 @@ function parsedV2Core(
   return {
     ...parsedBase(value, partyEntry, memberIndex, gaps) as Readonly<Record<string, unknown>>,
     sizeCategory: value.sizeCategory,
+    ...(Object.hasOwn(value, 'hitDice')
+      ? {
+          hitDice: sanitizedArrayRecords(
+            value.hitDice,
+            HIT_DICE_FIELDS,
+            partyEntry,
+            ['members', memberIndex, 'hitDice'],
+            gaps,
+          ),
+        }
+      : {}),
   };
 }
 
@@ -1766,6 +1795,7 @@ function loadedMember(
   member: ExternalPartyPackMember,
   spells: readonly SpellManifestRow[],
   spellSlots: readonly { readonly level: z.infer<typeof spellSlotLevelSchema>; readonly maximum: number }[],
+  pactSpellSlots: readonly { readonly level: z.infer<typeof spellSlotLevelSchema>; readonly maximum: number }[],
   spellcasting: readonly LoadedPartySpellcastingSource[],
 ): LoadedPartyMember {
   const extensions = v2MemberExtensions(member);
@@ -1805,10 +1835,17 @@ function loadedMember(
         usesDeathSaves: true,
         senses: [{ kind: 'normal_sight' }],
         ...(extensions.sizeCategory === null ? {} : { sizeCategory: extensions.sizeCategory }),
-        spellSlots: spellSlots.map((capacity) => ({
-          level: capacity.level,
-          maximum: capacity.maximum,
-        })),
+        spellSlots: [
+          ...spellSlots.map((capacity) => ({
+            level: capacity.level,
+            maximum: capacity.maximum,
+          })),
+          ...pactSpellSlots.map((capacity) => ({
+            level: capacity.level,
+            maximum: capacity.maximum,
+            recharge: 'short_rest' as const,
+          })),
+        ],
         ...(Object.hasOwn(member, 'resources')
           ? {
               limitedResources: extensions.resources.map((pool) => ({
@@ -1829,6 +1866,13 @@ function loadedMember(
       ...capacity,
       recharge: 'long_rest',
     })),
+    pactSpellSlots: pactSpellSlots.map((capacity) => ({
+      ...capacity,
+      recharge: 'short_rest',
+    })),
+    hitDice: Object.hasOwn(member, 'hitDice')
+      ? (member as ExternalPartyPackV2Member).hitDice ?? []
+      : [],
     startingConditions: member.startingConditions.map((condition) => ({
       effectId: encounterEffectId(condition.effectId),
       condition: condition.conditionId,
@@ -2259,6 +2303,7 @@ export type LoadedPartySpellCastDetails = Omit<Pick<
   | 'area'
   | 'weaponAttack'
   | 'selectedOption'
+  | 'slotRecharge'
 >, 'weaponAttack'> & {
   readonly weaponAttack: null | {
     readonly attackId: string;
@@ -2324,6 +2369,10 @@ export function loadedPartySpellCastCommand(
     saveDc: castingRoute.grant?.spellSaveDc ?? spellcasting.spellSaveDc,
     spellcastingModifier: castingRoute.grant?.spellcastingModifier ?? spellcasting.spellcastingModifier,
     slotLevel: details.slotLevel,
+    ...(details.slotLevel !== null && (details.slotRecharge === 'short_rest' ||
+      (member.pactSpellSlots.length > 0 && member.sharedSpellSlots.length === 0))
+      ? { slotRecharge: 'short_rest' as const }
+      : {}),
     castAsRitual: details.castAsRitual,
     targets: details.targets,
     area: details.area,
@@ -2386,12 +2435,15 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
   const gaps: GapReport[] = [...rootGaps];
   let unknownSpellId = false;
   let tooManySpellcastingSources = false;
-  let pactSlotsNeeded = false;
   let unsupportedEffectShape: string | null = null;
   const mapped: Array<{
     readonly member: ExternalPartyPackMember;
     readonly spells: readonly SpellManifestRow[];
     readonly spellSlots: readonly {
+      readonly level: z.infer<typeof spellSlotLevelSchema>;
+      readonly maximum: number;
+    }[];
+    readonly pactSpellSlots: readonly {
       readonly level: z.infer<typeof spellSlotLevelSchema>;
       readonly maximum: number;
     }[];
@@ -2410,14 +2462,6 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
       : entryFallback;
     const memberFields = header.data.schemaVersion === 1 ? V1_MEMBER_FIELDS : V2_MEMBER_FIELDS;
     gaps.push(...unexpectedFieldGaps(memberInput, memberFields, entry, ['members', index]));
-    if (header.data.schemaVersion === 2 && Object.hasOwn(memberInput, 'pactSpellSlots')) {
-      pactSlotsNeeded = true;
-      gaps.push(issueGap(
-        entry,
-        ['members', index, 'pactSpellSlots'],
-        'capability_not_implemented',
-      ));
-    }
     const core = header.data.schemaVersion === 1
       ? v1MemberCoreSchema.safeParse(parsedV1Core(memberInput, entry, index, gaps))
       : v2MemberCoreSchema.safeParse(parsedV2Core(memberInput, entry, index, gaps));
@@ -2450,6 +2494,35 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
       ));
       return false;
     });
+    const parsedPactSlots = header.data.schemaVersion === 2 && Object.hasOwn(memberInput, 'pactSpellSlots')
+      ? z.array(pactSpellSlotSchema).max(9).safeParse(sanitizedArrayRecords(
+          memberInput.pactSpellSlots,
+          V2_SPELL_SLOT_FIELDS,
+          entry,
+          ['members', index, 'pactSpellSlots'],
+          gaps,
+        ))
+      : { success: true as const, data: [] };
+    if (!parsedPactSlots.success) {
+      gaps.push(...parsedPactSlots.error.issues.map((issue) => issueGap(
+        entry,
+        ['members', index, 'pactSpellSlots', ...issue.path],
+        issue.code === 'unrecognized_keys'
+          ? 'field_not_in_engine_vocabulary'
+          : 'value_not_in_engine_vocabulary',
+      )));
+      continue;
+    }
+    const pactSpellSlots = parsedPactSlots.data.filter((capacity, capacityIndex, capacities) => {
+      const first = capacities.findIndex((candidate) => candidate.level === capacity.level);
+      if (first === capacityIndex) return true;
+      gaps.push(issueGap(
+        entry,
+        ['members', index, 'pactSpellSlots', capacityIndex, 'level'],
+        'value_not_in_engine_vocabulary',
+      ));
+      return false;
+    }).map((capacity) => ({ level: capacity.level, maximum: capacity.count }));
 
     const attacksInput = Array.isArray(memberInput.attacks) ? memberInput.attacks : [];
     if (!Array.isArray(memberInput.attacks)) gaps.push(issueGap(entry, ['members', index, 'attacks']));
@@ -3062,6 +3135,15 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           ...(Object.hasOwn(memberInput, 'resources') ? { resources } : {}),
           ...(passives === undefined ? {} : { passives }),
           ...(Object.hasOwn(memberInput, 'worldOperations') ? { worldOperations } : {}),
+          ...(Object.hasOwn(memberInput, 'pactSpellSlots')
+            ? {
+                pactSpellSlots: pactSpellSlots.map((capacity) => ({
+                  level: capacity.level,
+                  count: capacity.maximum,
+                  recharge: 'short_rest' as const,
+                })),
+              }
+            : {}),
           ...(parsedSpellcasting.length === 0
             ? {}
             : {
@@ -3077,6 +3159,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
       member: reconstructed,
       spells,
       spellSlots,
+      pactSpellSlots,
       spellcasting: loadedSpellcasting,
     });
   }
@@ -3095,7 +3178,6 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
   const allGaps = deduplicateGapReports(gaps);
   if (unknownSpellId) return refusal('unknown_spell_id', allGaps);
   if (tooManySpellcastingSources) return refusal('too_many_spellcasting_sources', allGaps);
-  if (pactSlotsNeeded) return refusal('pact_slots_unmodelled', allGaps);
   if (unsupportedEffectShape !== null) {
     return refusal('unsupported_effect_shape', allGaps, unsupportedEffectShape);
   }
@@ -3120,8 +3202,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     status: 'loaded',
     party: {
       pack,
-      members: mapped.map(({ member, spells, spellSlots: slots, spellcasting }) =>
-        loadedMember(member, spells, slots, spellcasting)),
+      members: mapped.map(({ member, spells, spellSlots: slots, pactSpellSlots, spellcasting }) =>
+        loadedMember(member, spells, slots, pactSpellSlots, spellcasting)),
     },
     gaps: allGaps,
   };

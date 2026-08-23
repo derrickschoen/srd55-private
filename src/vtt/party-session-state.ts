@@ -1,0 +1,648 @@
+import type { CombatantEquipment } from '../combat/equipment';
+import type {
+  DeathSaveState,
+  EncounterState,
+  LifeState,
+} from '../combat/encounter';
+import type { CombatantId, EncounterEffectId, LimitedResourcePoolId } from '../combat/values';
+import {
+  combatantId,
+  effectStackingIdentity,
+  encounterEffectId,
+  itemId,
+  limitedResourcePoolId,
+} from '../combat/values';
+import { hitDieSizes, type HitDieSize } from '../domain/enums';
+import type { LoadedPartyMember } from './party-pack';
+
+export const PARTY_SESSION_SCHEMA_VERSION = 1 as const;
+export const ADVENTURING_DAY_ROOM_COUNT = 4 as const;
+
+export type AdventuringDayRoom = 1 | 2 | 3 | 4;
+export type PartySessionViewClassification = 'dm_only' | 'player_visible' | 'per_seat';
+
+export interface PartyHitDiceState {
+  readonly sides: HitDieSize;
+  readonly maximum: number;
+  readonly remaining: number;
+}
+
+export interface PartySpellSlotState {
+  readonly pool: 'shared' | 'pact_magic';
+  readonly level: number;
+  readonly maximum: number;
+  readonly remaining: number;
+  readonly recharge: 'long_rest' | 'short_rest';
+}
+
+export interface PartyLimitedResourceState {
+  readonly id: LimitedResourcePoolId;
+  readonly maximum: number;
+  readonly remaining: number;
+  readonly recharge: 'long_rest' | 'short_rest';
+}
+
+export interface PartyConsumableState {
+  readonly effectId: EncounterEffectId;
+  readonly remainingUses: number;
+}
+
+export interface PartyCharacterSessionState {
+  readonly characterId: number;
+  readonly combatantId: CombatantId;
+  readonly currentHitPoints: number;
+  readonly hitPointMaximum: number;
+  readonly constitutionModifier: number;
+  readonly life: LifeState;
+  readonly deathSaves: DeathSaveState | null;
+  readonly spellSlots: readonly PartySpellSlotState[];
+  readonly limitedResources: readonly PartyLimitedResourceState[];
+  readonly hitDice: readonly PartyHitDiceState[];
+  readonly consumables: readonly PartyConsumableState[];
+  readonly equipment: CombatantEquipment | null;
+}
+
+export interface PartySessionState {
+  readonly schemaVersion: typeof PARTY_SESSION_SCHEMA_VERSION;
+  readonly rulesEdition: '2024';
+  readonly room: AdventuringDayRoom;
+  readonly characters: readonly PartyCharacterSessionState[];
+}
+
+export const PARTY_SESSION_VIEW_CLASSIFICATION = {
+  schemaVersion: 'player_visible',
+  rulesEdition: 'player_visible',
+  room: 'player_visible',
+  characters: 'per_seat',
+} as const satisfies Readonly<Record<keyof PartySessionState, PartySessionViewClassification>>;
+
+export const PARTY_CHARACTER_VIEW_CLASSIFICATION = {
+  characterId: 'dm_only',
+  combatantId: 'player_visible',
+  currentHitPoints: 'per_seat',
+  hitPointMaximum: 'per_seat',
+  constitutionModifier: 'per_seat',
+  life: 'player_visible',
+  deathSaves: 'dm_only',
+  spellSlots: 'per_seat',
+  limitedResources: 'per_seat',
+  hitDice: 'per_seat',
+  consumables: 'per_seat',
+  equipment: 'per_seat',
+} as const satisfies Readonly<Record<keyof PartyCharacterSessionState, PartySessionViewClassification>>;
+
+export interface DmPartySessionView {
+  readonly audience: 'dm';
+  readonly state: PartySessionState;
+}
+
+export interface PlayerVisiblePartyMemberSummary {
+  readonly combatantId: CombatantId;
+  readonly life: LifeState;
+}
+
+export interface PlayerOwnedPartyMember extends PlayerVisiblePartyMemberSummary {
+  readonly currentHitPoints: number;
+  readonly hitPointMaximum: number;
+  readonly constitutionModifier: number;
+  readonly spellSlots: readonly PartySpellSlotState[];
+  readonly limitedResources: readonly PartyLimitedResourceState[];
+  readonly hitDice: readonly PartyHitDiceState[];
+  readonly consumables: readonly PartyConsumableState[];
+  readonly equipment: CombatantEquipment | null;
+}
+
+export interface PlayerPartySessionView {
+  readonly audience: 'player';
+  readonly rulesEdition: '2024';
+  readonly room: AdventuringDayRoom;
+  readonly characters: readonly PlayerVisiblePartyMemberSummary[];
+  readonly ownedCharacters: readonly PlayerOwnedPartyMember[];
+}
+
+export interface ShortRestHitDieSpend {
+  readonly combatantId: CombatantId;
+  readonly dice: readonly {
+    readonly sides: HitDieSize;
+    readonly count: number;
+  }[];
+}
+
+export interface ShortRestHitDieRoll {
+  readonly combatantId: CombatantId;
+  readonly sides: HitDieSize;
+  readonly face: number;
+  readonly constitutionModifier: number;
+  readonly healing: number;
+}
+
+export interface ShortRestResult {
+  readonly state: PartySessionState;
+  readonly rolls: readonly ShortRestHitDieRoll[];
+}
+
+function abilityModifier(score: number): number {
+  return Math.floor((score - 10) / 2);
+}
+
+function sortedHitDice(member: LoadedPartyMember): readonly PartyHitDiceState[] {
+  const bySides = new Map<HitDieSize, number>();
+  for (const pool of member.hitDice) {
+    bySides.set(pool.sides, (bySides.get(pool.sides) ?? 0) + pool.maximum);
+  }
+  return [...bySides].sort(([left], [right]) => left - right).map(([sides, maximum]) => ({
+    sides,
+    maximum,
+    remaining: maximum,
+  }));
+}
+
+function initialSpellSlots(member: LoadedPartyMember): readonly PartySpellSlotState[] {
+  return [
+    ...member.sharedSpellSlots.map((slot) => ({
+      pool: 'shared' as const,
+      level: slot.level,
+      maximum: slot.maximum,
+      remaining: slot.maximum,
+      recharge: 'long_rest' as const,
+    })),
+    ...member.pactSpellSlots.map((slot) => ({
+      pool: 'pact_magic' as const,
+      level: slot.level,
+      maximum: slot.maximum,
+      remaining: slot.maximum,
+      recharge: 'short_rest' as const,
+    })),
+  ].sort((left, right) => left.level - right.level || left.pool.localeCompare(right.pool));
+}
+
+export function createPartySessionState(
+  members: readonly LoadedPartyMember[],
+): PartySessionState {
+  if (members.length < 3 || members.length > 5) {
+    throw new RangeError('An adventuring-day party requires three to five characters.');
+  }
+  const characters = members.map((member): PartyCharacterSessionState => {
+    if (member.hitDice.length === 0) {
+      throw new Error(`Character ${String(member.profile.characterId)} has no sourced Hit Point Dice.`);
+    }
+    return {
+      characterId: member.profile.characterId,
+      combatantId: member.profile.id,
+      currentHitPoints: member.profile.rules.hitPointMaximum,
+      hitPointMaximum: member.profile.rules.hitPointMaximum,
+      constitutionModifier: abilityModifier(member.source.abilities.constitution),
+      life: 'living',
+      deathSaves: null,
+      spellSlots: initialSpellSlots(member),
+      limitedResources: (member.profile.rules.limitedResources ?? []).map((resource) => ({
+        ...resource,
+        remaining: resource.maximum,
+      })),
+      hitDice: sortedHitDice(member),
+      consumables: [],
+      equipment: null,
+    };
+  });
+  if (new Set(characters.map((character) => character.characterId)).size !== characters.length) {
+    throw new Error('An adventuring-day party cannot contain a character twice.');
+  }
+  return {
+    schemaVersion: PARTY_SESSION_SCHEMA_VERSION,
+    rulesEdition: '2024',
+    room: 1,
+    characters,
+  };
+}
+
+function encounterSpellSlots(
+  subject: EncounterState['combatants'][number],
+  previous: PartyCharacterSessionState,
+): readonly PartySpellSlotState[] {
+  return previous.spellSlots.map((pool) => {
+    const candidates = subject.spellSlots.filter(
+      (slot) => slot.level === pool.level &&
+        (slot.recharge ?? 'long_rest') === pool.recharge,
+    );
+    if (candidates.length !== 1) {
+      throw new Error(`Encounter slot pool does not match ${pool.pool} level ${String(pool.level)}.`);
+    }
+    const candidate = candidates[0];
+    if (candidate === undefined) throw new Error('Encounter slot pool disappeared.');
+    return { ...pool, maximum: candidate.maximum, remaining: candidate.remaining };
+  });
+}
+
+export function capturePartySessionState(
+  previous: PartySessionState,
+  encounter: EncounterState,
+): PartySessionState {
+  const characters = previous.characters.map((persisted): PartyCharacterSessionState => {
+    const subject = encounter.combatants.find(
+      (candidate) => candidate.profile.id === persisted.combatantId,
+    );
+    if (subject === undefined || subject.profile.kind !== 'player_character') {
+      throw new Error(`Encounter no longer contains party character ${persisted.combatantId}.`);
+    }
+    const equipment = encounter.equipment?.find(
+      (entry) => entry.combatant === persisted.combatantId,
+    ) ?? null;
+    const consumables = encounter.effects.flatMap((effect): readonly PartyConsumableState[] =>
+      effect.source === persisted.combatantId && effect.payload.kind === 'consumable_healing_pool'
+        ? [{ effectId: effect.id, remainingUses: effect.payload.remainingUses }]
+        : []);
+    return {
+      ...persisted,
+      currentHitPoints: subject.hitPoints,
+      hitPointMaximum: subject.profile.rules.hitPointMaximum,
+      life: subject.life,
+      deathSaves: structuredClone(subject.deathSaves),
+      spellSlots: encounterSpellSlots(subject, persisted),
+      limitedResources: (subject.limitedResources ?? []).map((resource) => ({ ...resource })),
+      consumables,
+      equipment: equipment === null ? null : structuredClone(equipment),
+    };
+  });
+  return { ...previous, characters };
+}
+
+export function preloadPartySessionState(
+  encounter: EncounterState,
+  party: PartySessionState,
+): EncounterState {
+  const partyById = new Map(party.characters.map((character) => [character.combatantId, character] as const));
+  const combatants = encounter.combatants.map((subject) => {
+    if (subject.profile.kind !== 'player_character') return subject;
+    const persisted = partyById.get(subject.profile.id);
+    if (persisted === undefined) {
+      throw new Error(`Composed room contains non-party character ${subject.profile.id}.`);
+    }
+    return {
+      ...subject,
+      hitPoints: persisted.currentHitPoints,
+      life: persisted.life,
+      deathSaves: structuredClone(persisted.deathSaves),
+      spellSlots: persisted.spellSlots.map((slot) => ({
+        level: slot.level,
+        maximum: slot.maximum,
+        remaining: slot.remaining,
+        ...(slot.recharge === 'short_rest' ? { recharge: 'short_rest' as const } : {}),
+      })),
+      ...(subject.profile.rules.limitedResources === undefined
+        ? {}
+        : { limitedResources: persisted.limitedResources.map((resource) => ({ ...resource })) }),
+    };
+  });
+  if (combatants.filter((subject) => subject.profile.kind === 'player_character').length !== party.characters.length) {
+    throw new Error('Composed room does not contain the complete party.');
+  }
+  const retainedNonPartyEquipment = (encounter.equipment ?? []).filter(
+    (entry) => !partyById.has(entry.combatant),
+  );
+  const partyEquipment = party.characters.flatMap((character) =>
+    character.equipment === null ? [] : [structuredClone(character.equipment)]);
+  let nextEffectSequence = encounter.nextEffectSequence;
+  const partyConsumables = party.characters.flatMap((character) =>
+    character.consumables.map((consumable) => {
+      const id = encounterEffectId(`effect:${String(nextEffectSequence)}`);
+      nextEffectSequence += 1;
+      return {
+        id,
+        source: character.combatantId,
+        targets: [character.combatantId],
+        createdRevision: encounter.revision,
+        duration: { kind: 'permanent' as const },
+        concentrationOwner: null,
+        stackingIdentity: effectStackingIdentity('spell:goodberry'),
+        stacking: 'coexist' as const,
+        repeatedSave: null,
+        damageBreak: null,
+        payload: {
+          kind: 'consumable_healing_pool' as const,
+          remainingUses: consumable.remainingUses,
+          healingPerUse: 1 as const,
+          activation: 'bonus_action' as const,
+          encounterExpiry: 'not_tracked_24_hours' as const,
+        },
+      };
+    }));
+  return {
+    ...encounter,
+    combatants,
+    effects: [...encounter.effects, ...partyConsumables],
+    nextEffectSequence,
+    ...((encounter.equipment === undefined && partyEquipment.length === 0)
+      ? {}
+      : { equipment: [...retainedNonPartyEquipment, ...partyEquipment] }),
+  };
+}
+
+function advanceRoom(room: AdventuringDayRoom): AdventuringDayRoom {
+  switch (room) {
+    case 1: return 2;
+    case 2: return 3;
+    case 3: return 4;
+    case 4: throw new Error('The four-room adventuring day is complete.');
+  }
+}
+
+export function enterNextRoom(state: PartySessionState): PartySessionState {
+  return { ...state, room: advanceRoom(state.room) };
+}
+
+export function takeShortRest(
+  state: PartySessionState,
+  spends: readonly ShortRestHitDieSpend[],
+  rng: () => number,
+): ShortRestResult {
+  // 2024 SRD Short Rest: the creature needs at least 1 HP, each spent Hit
+  // Point Die heals its roll + Constitution modifier (minimum 1), and another
+  // die may be chosen after each roll: docs/srd/full/srd-5.2.1.txt:12035-12055.
+  // Declared Short Rest features recharge as their descriptions specify:
+  // docs/srd/full/srd-5.2.1.txt:12055-12057. Pact Magic explicitly restores
+  // every expended Pact slot: docs/srd/full/srd-5.2.1.txt:4290-4295.
+  const duplicate = spends.find(
+    (spend, index) => spends.findIndex((candidate) => candidate.combatantId === spend.combatantId) !== index,
+  );
+  if (duplicate !== undefined) throw new Error(`Duplicate Short Rest spend for ${duplicate.combatantId}.`);
+  const unknown = spends.find((spend) =>
+    !state.characters.some((character) => character.combatantId === spend.combatantId));
+  if (unknown !== undefined) throw new Error(`Short Rest names non-party character ${unknown.combatantId}.`);
+  const rolls: ShortRestHitDieRoll[] = [];
+  const characters = state.characters.map((character): PartyCharacterSessionState => {
+    const spend = spends.find((candidate) => candidate.combatantId === character.combatantId);
+    const requestedBySides = new Map<HitDieSize, number>();
+    for (const request of spend?.dice ?? []) {
+      if (!Number.isSafeInteger(request.count) || request.count < 0) {
+        throw new RangeError('A Short Rest Hit Point Die count must be a nonnegative safe integer.');
+      }
+      if (requestedBySides.has(request.sides)) {
+        throw new Error(`Short Rest repeats the d${String(request.sides)} pool.`);
+      }
+      requestedBySides.set(request.sides, request.count);
+    }
+    if (character.currentHitPoints < 1 || character.life !== 'living') {
+      if ([...requestedBySides.values()].some((count) => count > 0)) {
+        throw new Error(`${character.combatantId} must have at least 1 Hit Point to start a Short Rest.`);
+      }
+      return character;
+    }
+    let currentHitPoints = character.currentHitPoints;
+    const hitDice = character.hitDice.map((pool) => {
+      const count = requestedBySides.get(pool.sides) ?? 0;
+      if (count > pool.remaining) {
+        throw new RangeError(`${character.combatantId} has only ${String(pool.remaining)}d${String(pool.sides)} remaining.`);
+      }
+      for (let index = 0; index < count; index += 1) {
+        const random = rng();
+        if (!Number.isFinite(random) || random < 0 || random >= 1) {
+          throw new RangeError('Short Rest RNG must return a finite value in [0, 1).');
+        }
+        const face = Math.floor(random * pool.sides) + 1;
+        const healing = Math.max(1, face + character.constitutionModifier);
+        currentHitPoints = Math.min(character.hitPointMaximum, currentHitPoints + healing);
+        rolls.push({
+          combatantId: character.combatantId,
+          sides: pool.sides,
+          face,
+          constitutionModifier: character.constitutionModifier,
+          healing,
+        });
+      }
+      return { ...pool, remaining: pool.remaining - count };
+    });
+    for (const sides of requestedBySides.keys()) {
+      if (!character.hitDice.some((pool) => pool.sides === sides)) {
+        throw new Error(`${character.combatantId} has no d${String(sides)} Hit Point Dice.`);
+      }
+    }
+    return {
+      ...character,
+      currentHitPoints,
+      hitDice,
+      spellSlots: character.spellSlots.map((slot) =>
+        slot.recharge === 'short_rest' ? { ...slot, remaining: slot.maximum } : slot),
+      limitedResources: character.limitedResources.map((resource) =>
+        resource.recharge === 'short_rest' ? { ...resource, remaining: resource.maximum } : resource),
+    };
+  });
+  return { state: { ...state, characters }, rolls };
+}
+
+export function projectDmPartySession(state: PartySessionState): DmPartySessionView {
+  return { audience: 'dm', state: structuredClone(state) };
+}
+
+export function projectPlayerPartySession(
+  state: PartySessionState,
+  ownedCombatantIds: readonly CombatantId[],
+): PlayerPartySessionView {
+  const owned = new Set(ownedCombatantIds);
+  return {
+    audience: 'player',
+    rulesEdition: state.rulesEdition,
+    room: state.room,
+    characters: state.characters.map((character) => ({
+      combatantId: character.combatantId,
+      life: character.life,
+    })),
+    ownedCharacters: state.characters.filter((character) => owned.has(character.combatantId)).map((character) => ({
+      combatantId: character.combatantId,
+      life: character.life,
+      currentHitPoints: character.currentHitPoints,
+      hitPointMaximum: character.hitPointMaximum,
+      constitutionModifier: character.constitutionModifier,
+      spellSlots: structuredClone(character.spellSlots),
+      limitedResources: structuredClone(character.limitedResources),
+      hitDice: structuredClone(character.hitDice),
+      consumables: structuredClone(character.consumables),
+      equipment: structuredClone(character.equipment),
+    })),
+  };
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function exactKeys(value: Readonly<Record<string, unknown>>, keys: readonly string[]): boolean {
+  const expected = new Set(keys);
+  return Object.keys(value).length === expected.size && Object.keys(value).every((key) => expected.has(key));
+}
+
+function safeNonnegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && typeof value === 'number' && value >= 0;
+}
+
+function decodeDeathSaves(value: unknown, life: LifeState): DeathSaveState | null {
+  if (life !== 'dying') {
+    if (value !== null) throw new TypeError('Only a dying party character may have Death Saves.');
+    return null;
+  }
+  if (!isRecord(value) || !exactKeys(value, ['successes', 'failures']) ||
+    !safeNonnegativeInteger(value.successes) || value.successes > 2 ||
+    !safeNonnegativeInteger(value.failures) || value.failures > 2) {
+    throw new TypeError('Party character Death Saves are malformed.');
+  }
+  return { successes: value.successes, failures: value.failures };
+}
+
+function decodeEquipment(value: unknown, combatant: CombatantId): CombatantEquipment | null {
+  if (value === null) return null;
+  if (!isRecord(value) || !exactKeys(value, ['combatant', 'hands', 'worn', 'carried']) ||
+    value.combatant !== combatant || !isRecord(value.hands) ||
+    !Array.isArray(value.worn) || !value.worn.every((entry) => typeof entry === 'string') ||
+    !Array.isArray(value.carried) || !value.carried.every((entry) => typeof entry === 'string')) {
+    throw new TypeError('Party character equipment is malformed.');
+  }
+  const hands = (() => {
+    switch (value.hands.kind) {
+      case 'empty':
+        if (!exactKeys(value.hands, ['kind'])) break;
+        return { kind: 'empty' as const };
+      case 'one_handed':
+        if (!exactKeys(value.hands, ['kind', 'items']) || !Array.isArray(value.hands.items) ||
+          (value.hands.items.length !== 1 && value.hands.items.length !== 2) ||
+          !value.hands.items.every((entry) => typeof entry === 'string')) break;
+        return {
+          kind: 'one_handed' as const,
+          items: value.hands.items.map(itemId) as unknown as
+            readonly [ReturnType<typeof itemId>] | readonly [ReturnType<typeof itemId>, ReturnType<typeof itemId>],
+        };
+      case 'two_handed':
+        if (!exactKeys(value.hands, ['kind', 'item']) || typeof value.hands.item !== 'string') break;
+        return { kind: 'two_handed' as const, item: itemId(value.hands.item) };
+    }
+    throw new TypeError('Party character hand equipment is malformed.');
+  })();
+  const worn = value.worn.map(itemId);
+  const carried = value.carried.map(itemId);
+  const all = [...(hands.kind === 'empty' ? [] : hands.kind === 'two_handed' ? [hands.item] : hands.items), ...worn, ...carried];
+  if (new Set(all).size !== all.length) {
+    throw new TypeError('Party character equipment item placements must be unique.');
+  }
+  return { combatant, hands, worn, carried };
+}
+
+function decodeHitDice(value: unknown): readonly PartyHitDiceState[] {
+  if (!Array.isArray(value)) throw new TypeError('Party Hit Point Dice must be an array.');
+  const pools = value.map((entry) => {
+    if (!isRecord(entry) || !exactKeys(entry, ['sides', 'maximum', 'remaining']) ||
+      typeof entry.sides !== 'number' || !hitDieSizes.includes(entry.sides as HitDieSize) ||
+      !safeNonnegativeInteger(entry.maximum) || entry.maximum < 1 ||
+      !safeNonnegativeInteger(entry.remaining) || entry.remaining > entry.maximum) {
+      throw new TypeError('Party Hit Point Dice are malformed.');
+    }
+    return entry as unknown as PartyHitDiceState;
+  });
+  if (new Set(pools.map((pool) => pool.sides)).size !== pools.length) {
+    throw new TypeError('Party Hit Point Die sizes must be unique.');
+  }
+  return pools;
+}
+
+function decodePartyCharacter(value: unknown): PartyCharacterSessionState {
+  const keys = [
+    'characterId', 'combatantId', 'currentHitPoints', 'hitPointMaximum',
+    'constitutionModifier', 'life', 'deathSaves', 'spellSlots',
+    'limitedResources', 'hitDice', 'consumables', 'equipment',
+  ] as const;
+  if (!isRecord(value) || !exactKeys(value, keys) ||
+    !Number.isSafeInteger(value.characterId) || typeof value.characterId !== 'number' || value.characterId < 1 ||
+    typeof value.combatantId !== 'string' || !safeNonnegativeInteger(value.currentHitPoints) ||
+    !safeNonnegativeInteger(value.hitPointMaximum) || value.hitPointMaximum < 1 || value.currentHitPoints > value.hitPointMaximum ||
+    !Number.isSafeInteger(value.constitutionModifier) || typeof value.constitutionModifier !== 'number' ||
+    !['living', 'dying', 'stable', 'dead'].includes(String(value.life)) ||
+    !(value.deathSaves === null || isRecord(value.deathSaves)) ||
+    !Array.isArray(value.spellSlots) || !Array.isArray(value.limitedResources) ||
+    !Array.isArray(value.consumables) || !(value.equipment === null || isRecord(value.equipment))) {
+    throw new TypeError('Party character session state is malformed.');
+  }
+  const combatant = combatantId(value.combatantId);
+  const life = value.life as LifeState;
+  if ((life === 'living') !== (value.currentHitPoints > 0)) {
+    throw new TypeError('Party character life state does not match its Hit Points.');
+  }
+  const spellSlots = value.spellSlots.map((slot) => {
+    if (!isRecord(slot) || !exactKeys(slot, ['pool', 'level', 'maximum', 'remaining', 'recharge']) ||
+      (slot.pool !== 'shared' && slot.pool !== 'pact_magic') ||
+      !Number.isSafeInteger(slot.level) || typeof slot.level !== 'number' || slot.level < 1 || slot.level > 9 ||
+      !safeNonnegativeInteger(slot.maximum) || slot.maximum < 1 ||
+      !safeNonnegativeInteger(slot.remaining) || slot.remaining > slot.maximum ||
+      (slot.recharge !== 'long_rest' && slot.recharge !== 'short_rest') ||
+      (slot.pool === 'shared' ? slot.recharge !== 'long_rest' : slot.recharge !== 'short_rest')) {
+      throw new TypeError('Party spell-slot state is malformed.');
+    }
+    return slot as unknown as PartySpellSlotState;
+  });
+  if (new Set(spellSlots.map((slot) => `${slot.pool}:${String(slot.level)}`)).size !== spellSlots.length) {
+    throw new TypeError('Party spell-slot pools must be unique.');
+  }
+  const limitedResources = value.limitedResources.map((resource): PartyLimitedResourceState => {
+    if (!isRecord(resource) || !exactKeys(resource, ['id', 'maximum', 'remaining', 'recharge']) ||
+      typeof resource.id !== 'string' || !safeNonnegativeInteger(resource.maximum) || resource.maximum < 1 ||
+      !safeNonnegativeInteger(resource.remaining) || resource.remaining > resource.maximum ||
+      (resource.recharge !== 'long_rest' && resource.recharge !== 'short_rest')) {
+      throw new TypeError('Party limited-resource state is malformed.');
+    }
+    return {
+      id: limitedResourcePoolId(resource.id),
+      maximum: resource.maximum,
+      remaining: resource.remaining,
+      recharge: resource.recharge as 'long_rest' | 'short_rest',
+    };
+  });
+  if (new Set(limitedResources.map((resource) => resource.id)).size !== limitedResources.length) {
+    throw new TypeError('Party limited-resource pools must be unique.');
+  }
+  const consumables = value.consumables.map((consumable) => {
+    if (!isRecord(consumable) || !exactKeys(consumable, ['effectId', 'remainingUses']) ||
+      typeof consumable.effectId !== 'string' || !safeNonnegativeInteger(consumable.remainingUses)) {
+      throw new TypeError('Party consumable state is malformed.');
+    }
+    return { effectId: encounterEffectId(consumable.effectId), remainingUses: consumable.remainingUses };
+  });
+  if (new Set(consumables.map((consumable) => consumable.effectId)).size !== consumables.length) {
+    throw new TypeError('Party consumable effects must be unique.');
+  }
+  return {
+    characterId: value.characterId,
+    combatantId: combatant,
+    currentHitPoints: value.currentHitPoints,
+    hitPointMaximum: value.hitPointMaximum,
+    constitutionModifier: value.constitutionModifier,
+    life,
+    deathSaves: decodeDeathSaves(value.deathSaves, life),
+    spellSlots,
+    limitedResources,
+    hitDice: decodeHitDice(value.hitDice),
+    consumables,
+    equipment: decodeEquipment(value.equipment, combatant),
+  };
+}
+
+export function decodePartySessionState(value: unknown): PartySessionState {
+  if (
+    !isRecord(value) ||
+    !exactKeys(value, ['schemaVersion', 'rulesEdition', 'room', 'characters']) ||
+    value.schemaVersion !== PARTY_SESSION_SCHEMA_VERSION ||
+    value.rulesEdition !== '2024' ||
+    !([1, 2, 3, 4] as const).includes(Number(value.room) as AdventuringDayRoom) ||
+    !Array.isArray(value.characters) ||
+    value.characters.length < 3 ||
+    value.characters.length > 5
+  ) {
+    throw new TypeError('Party session state is malformed.');
+  }
+  const characters = value.characters.map(decodePartyCharacter);
+  if (new Set(characters.map((character) => character.combatantId)).size !== characters.length ||
+    new Set(characters.map((character) => character.characterId)).size !== characters.length) {
+    throw new TypeError('Party session character identities must be unique.');
+  }
+  return {
+    schemaVersion: PARTY_SESSION_SCHEMA_VERSION,
+    rulesEdition: '2024',
+    room: value.room as AdventuringDayRoom,
+    characters,
+  };
+}
