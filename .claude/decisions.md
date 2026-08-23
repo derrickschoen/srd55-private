@@ -7,6 +7,23 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D346 — OWNER: R-param ruling shape authorized; binding waits for the mapper; pending-11 next (2026-08-22)
+
+1. **R-param authorized, unrestricted**: the owner may supply a concrete
+   parameter value the record's text omits. Recorded as data with
+   provenance and clause digest like every ruling; drafts always arrive
+   with the proposed value and the SRD basis where one exists; emitted
+   packs mark these values as owner homebrew. Consequence stated at ruling
+   time: unlike scope-outs, R-param INVENTS mechanics.
+
+2. **Binding-determination (117) is NOT added to the curation queue** —
+   chosen over the pattern-first recommendation. Those records stay
+   refused until the converter's textual determination deepens; no
+   binding rulings are drafted.
+
+3. **The curation-pending 11 come as the next approval batch**, with the
+   supervisor's R5 digest re-bind riding along.
+
 ## D345 — OWNER: re-derive the classifier before any further lever (2026-08-22)
 
 Chosen over the recommended shared-outcome lane, with three misses on the
