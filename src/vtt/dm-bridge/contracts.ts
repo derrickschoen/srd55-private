@@ -48,12 +48,12 @@ import {
   type JsTurnProgramLimits,
 } from './js-turn-program';
 import {
-  JsTurnProgramTypeError,
-  generateTurnProgramDeclarations,
-  typeCheckJsTurnProgram,
   type TurnProgramAmbientApiDescription,
+} from './turn-program-declarations';
+import {
+  JsTurnProgramTypeError,
   type TurnProgramTypeCheckTelemetry,
-} from './turn-program-types';
+} from './turn-program-type-contract';
 import {
   normalizeRoundPlanEnvelope,
   type RoundPlanEnvelopeNormalizationRule,
@@ -519,12 +519,14 @@ export function decodeRoundPlanReply(
   validateJsEnvelope(input, request);
   const jsPrograms = input.monsters.map((entry): JsProgramArtifact => {
     const typed = limits.typeCheckMode !== 'untyped';
-    const declarations = typed
-      ? generateTurnProgramDeclarations(request.projection, entry.monsterId)
+    if (typed && limits.typeChecker === undefined) {
+      throw new TypeError('Typed JS turn-program decoding requires a node-side type checker.');
+    }
+    const checked = typed
+      ? limits.typeChecker?.(entry.source, request.projection, entry.monsterId, limits.now) ?? null
       : null;
-    const typeCheck = declarations === null
-      ? null
-      : typeCheckJsTurnProgram(entry.source, declarations.source, limits.now);
+    const declarations = checked?.declarations ?? null;
+    const typeCheck = checked?.result ?? null;
     if (typeCheck !== null) limits.onTypeCheckTelemetry?.(typeCheck);
     if (typeCheck !== null && !typeCheck.passed) {
       limits.onTypeCheckUniqueCatch?.(observeTypeCheckUniqueCatch(
