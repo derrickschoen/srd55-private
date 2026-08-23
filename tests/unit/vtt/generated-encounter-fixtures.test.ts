@@ -169,7 +169,7 @@ describe('increment 9 generated and approved encounter fixtures', () => {
     const maximumMonsterXp = Math.max(...STARTER_MONSTER_ROSTER.map(rosterXp));
     const maximumEncounterXp = maximumMonsterXp * ENCOUNTER_MONSTER_COUNT_RANGE.maximum;
     expect(maximumEncounterXp).toBeGreaterThan(highBand.lowerExclusive!);
-    expect(maximumEncounterXp).toBeLessThanOrEqual(highBand.upperInclusive);
+    expect(maximumEncounterXp).toBeGreaterThan(highBand.upperInclusive);
 
     const highRequest = {
       ...TEST_APPROVED_FIRST_SKIRMISH_REQUEST,

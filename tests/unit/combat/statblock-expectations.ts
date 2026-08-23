@@ -114,6 +114,14 @@ export const EXPECTED_STATBLOCK_VALUES = {
     armorClass: 11, hitPoints: { average: 13, dice: '2d8+4' }, speeds: ['walk:40'], scores: [13, 11, 14, 2, 9, 5], modifiers: [1, 0, 2, -4, -1, -3],
     attackBonuses: { gore: 3 }, damageDice: { gore: ['4:1d6+1:Piercing:always', '3:1d6+0:Piercing:charge:20:Medium'] }, saveDcs: [], traits: [{ kind: 'bloodied_fury', grantsAdvantageOn: ['attack_rolls'] }],
   },
+  'statblock:blood-hawk': {
+    armorClass: 12, hitPoints: { average: 7, dice: '2d6+0' }, speeds: ['walk:10', 'fly:60'], scores: [6, 14, 10, 3, 14, 5], modifiers: [-2, 2, 0, -4, 2, -3],
+    attackBonuses: { beak: 4 }, damageDice: { beak: ['4:1d4+2:Piercing:always', '6:1d8+2:Piercing:replaces_base_when_target_bloodied'] }, saveDcs: [], traits: [{ kind: 'pack_tactics', allyDistanceFeet: 5, blockedByCondition: 'Incapacitated', appliesTo: 'attack_rolls' }],
+  },
+  'statblock:camel': {
+    armorClass: 10, hitPoints: { average: 17, dice: '2d10+6' }, speeds: ['walk:50'], scores: [15, 8, 17, 2, 11, 5], modifiers: [2, -1, 3, -4, 0, -3],
+    attackBonuses: { bite: 4 }, damageDice: { bite: ['4:1d4+2:Bludgeoning:always'] }, saveDcs: [], traits: [],
+  },
   'statblock:wolf': {
     armorClass: 12, hitPoints: { average: 11, dice: '2d8+2' }, speeds: ['walk:40'], scores: [14, 15, 12, 3, 12, 6], modifiers: [2, 2, 1, -4, 1, -2],
     attackBonuses: { bite: 4 }, damageDice: { bite: ['5:1d6+2:Piercing:always'] }, saveDcs: [], traits: [{ kind: 'pack_tactics', allyDistanceFeet: 5, blockedByCondition: 'Incapacitated', appliesTo: 'attack_rolls' }],
@@ -121,6 +129,10 @@ export const EXPECTED_STATBLOCK_VALUES = {
   'statblock:black-bear': {
     armorClass: 11, hitPoints: { average: 19, dice: '3d8+6' }, speeds: ['walk:30', 'climb:30', 'swim:30'], scores: [15, 12, 14, 2, 12, 7], modifiers: [2, 1, 2, -4, 1, -2],
     attackBonuses: { rend: 4 }, damageDice: { rend: ['5:1d6+2:Slashing:always'] }, saveDcs: [], traits: [],
+  },
+  'statblock:crocodile': {
+    armorClass: 12, hitPoints: { average: 13, dice: '2d10+2' }, speeds: ['walk:20', 'swim:30'], scores: [15, 10, 13, 2, 10, 5], modifiers: [2, 0, 1, -4, 0, -3],
+    attackBonuses: { bite: 4 }, damageDice: { bite: ['6:1d8+2:Piercing:always'] }, saveDcs: [], traits: [{ kind: 'hold_breath', minutes: 60 }],
   },
   'statblock:brown-bear': {
     armorClass: 11, hitPoints: { average: 22, dice: '3d10+6' }, speeds: ['walk:40', 'climb:30'], scores: [17, 12, 15, 2, 13, 7], modifiers: [3, 1, 2, -4, 1, -2],
@@ -138,6 +150,10 @@ export const EXPECTED_STATBLOCK_VALUES = {
     armorClass: 13, hitPoints: { average: 30, dice: '4d10+8' }, speeds: ['walk:40'], scores: [17, 16, 14, 3, 12, 8], modifiers: [3, 3, 2, -4, 1, -1],
     attackBonuses: { rend: 5 }, damageDice: { rend: ['10:2d6+3:Slashing:always'] }, saveDcs: [], traits: [],
   },
+  'statblock:giant-spider': {
+    armorClass: 14, hitPoints: { average: 26, dice: '4d10+4' }, speeds: ['walk:30', 'climb:30'], scores: [14, 16, 12, 2, 11, 4], modifiers: [2, 3, 1, -4, 0, -3],
+    attackBonuses: { bite: 5 }, damageDice: { bite: ['7:1d8+3:Piercing:always', '7:2d6+0:Poison:always'] }, saveDcs: [13], traits: [{ kind: 'spider_climb' }, { kind: 'web_walker' }],
+  },
   'statblock:polar-bear': {
     armorClass: 12, hitPoints: { average: 42, dice: '5d10+15' }, speeds: ['walk:40', 'swim:40'], scores: [20, 14, 16, 2, 13, 7], modifiers: [5, 2, 3, -4, 1, -2],
     attackBonuses: { rend: 7 }, damageDice: { rend: ['9:1d8+5:Slashing:always'] }, saveDcs: [], traits: [],
@@ -146,8 +162,32 @@ export const EXPECTED_STATBLOCK_VALUES = {
     armorClass: 13, hitPoints: { average: 52, dice: '7d10+14' }, speeds: ['walk:40'], scores: [18, 17, 15, 3, 12, 8], modifiers: [4, 3, 2, -4, 1, -1],
     attackBonuses: { rend: 6 }, damageDice: { rend: ['11:2d6+4:Slashing:always'] }, saveDcs: [], traits: [{ kind: 'running_leap', runningStartFeet: 10, longJumpFeet: 25 }],
   },
+  'statblock:giant-constrictor-snake': {
+    armorClass: 12, hitPoints: { average: 60, dice: '8d12+8' }, speeds: ['walk:30', 'swim:30'], scores: [19, 14, 12, 1, 10, 3], modifiers: [4, 2, 1, -5, 0, -4],
+    attackBonuses: { bite: 6 }, damageDice: { bite: ['11:2d6+4:Piercing:always'] }, saveDcs: [14], traits: [],
+  },
   'statblock:giant-scorpion': {
     armorClass: 15, hitPoints: { average: 52, dice: '7d10+14' }, speeds: ['walk:40'], scores: [16, 13, 15, 1, 9, 3], modifiers: [3, 1, 2, -5, -1, -4],
     attackBonuses: { claw: 5, sting: 5 }, damageDice: { claw: ['6:1d6+3:Bludgeoning:always'], sting: ['7:1d8+3:Piercing:always', '11:2d10+0:Poison:always'] }, saveDcs: [], traits: [],
+  },
+  'statblock:killer-whale': {
+    armorClass: 12, hitPoints: { average: 90, dice: '12d12+12' }, speeds: ['walk:5', 'swim:60'], scores: [19, 14, 13, 3, 12, 7], modifiers: [4, 2, 1, -4, 1, -2],
+    attackBonuses: { bite: 6 }, damageDice: { bite: ['21:5d6+4:Piercing:always'] }, saveDcs: [], traits: [{ kind: 'hold_breath', minutes: 30 }],
+  },
+  'statblock:archelon': {
+    armorClass: 17, hitPoints: { average: 90, dice: '12d12+12' }, speeds: ['walk:20', 'swim:80'], scores: [18, 16, 13, 4, 14, 6], modifiers: [4, 3, 1, -3, 2, -2],
+    attackBonuses: { bite: 6 }, damageDice: { bite: ['14:3d6+4:Piercing:always'] }, saveDcs: [], traits: [{ kind: 'amphibious' }],
+  },
+  'statblock:elephant': {
+    armorClass: 12, hitPoints: { average: 76, dice: '8d12+24' }, speeds: ['walk:40'], scores: [22, 9, 17, 3, 11, 6], modifiers: [6, -1, 3, -4, 0, -2],
+    attackBonuses: { gore: 8 }, damageDice: { gore: ['15:2d8+6:Piercing:always'] }, saveDcs: [16], traits: [],
+  },
+  'statblock:giant-crocodile': {
+    armorClass: 14, hitPoints: { average: 85, dice: '9d12+27' }, speeds: ['walk:30', 'swim:50'], scores: [21, 9, 17, 2, 10, 7], modifiers: [5, -1, 3, -4, 0, -2],
+    attackBonuses: { bite: 8, tail: 8 }, damageDice: { bite: ['21:3d10+5:Piercing:always'], tail: ['18:3d8+5:Bludgeoning:always'] }, saveDcs: [], traits: [{ kind: 'hold_breath', minutes: 60 }],
+  },
+  'statblock:giant-shark': {
+    armorClass: 13, hitPoints: { average: 92, dice: '8d12+40' }, speeds: ['walk:5', 'swim:60'], scores: [23, 11, 21, 1, 10, 5], modifiers: [6, 0, 5, -5, 0, -3],
+    attackBonuses: { bite: 9 }, damageDice: { bite: ['22:3d10+6:Piercing:always'] }, saveDcs: [], traits: [{ kind: 'water_breathing', onlyUnderwater: true }],
   },
 } as const;

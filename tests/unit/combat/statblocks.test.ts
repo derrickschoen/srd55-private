@@ -44,6 +44,7 @@ function triggerText(trigger: import('../../../src/combat/statblock').MonsterDam
   switch (trigger.kind) {
     case 'always': return 'always';
     case 'attack_roll_advantage': return 'attack_roll_advantage';
+    case 'replaces_base_when_target_bloodied': return 'replaces_base_when_target_bloodied';
     case 'charge': return `charge:${trigger.minimumStraightFeet}:${trigger.maximumTargetSize}`;
   }
 }
@@ -95,11 +96,30 @@ describe('bundled SRD starter monster statblocks', () => {
       goblinoid_warband: { count: 8, includesQuarter: true, includesThree: true },
       undead_crypt: { count: 9, includesQuarter: true, includesThree: true },
       mercenary_company: { count: 10, includesQuarter: true, includesThree: true },
-      wild_beasts: { count: 10, includesQuarter: true, includesThree: true },
+      wild_beasts: { count: 20, includesQuarter: true, includesThree: true },
     };
     for (const [family, familyExpected] of Object.entries(expected)) {
       const rows = STARTER_MONSTER_ROSTER.filter((row) => row.family === family);
       expect({ count: rows.length, includesQuarter: rows.some((row) => row.challengeRating === '1/4'), includesThree: rows.some((row) => row.challengeRating === 3) }).toEqual(familyExpected);
+    }
+  });
+
+  it('cr_ladder_gap: keeps every required beast CR step complete with two distinct SRD statblocks', () => {
+    const beasts = STARTER_MONSTER_ROSTER.filter((row) => row.family === 'wild_beasts');
+    expect(Object.fromEntries((['1/8', '1/4', '1/2', 1, 2, 3, 4, 5] as const).map((challengeRating) => [
+      String(challengeRating), beasts.filter((row) => row.challengeRating === challengeRating).length,
+    ]))).toEqual({ '1': 5, '2': 3, '3': 2, '4': 2, '5': 2, '1/8': 2, '1/4': 2, '1/2': 2 });
+  });
+
+  it('citation_span_drifted: verifies each decoded AC, HP, walking speed, name, and CR against its cited lines', () => {
+    const sourceLines = readFileSync('docs/srd/full/srd-5.2.1.txt', 'utf8').split('\n');
+    for (const row of STARTER_MONSTER_ROSTER) {
+      const citedText = row.source.map(({ lineStart, lineEnd }) => sourceLines.slice(lineStart - 1, lineEnd).join(' ')).join(' ');
+      expect(citedText, `${row.name} name`).toContain(row.name);
+      expect(citedText, `${row.name} CR`).toContain(`CR ${row.challengeRating}`);
+      expect(citedText, `${row.name} AC`).toContain(`AC ${row.statblock.armorClass}`);
+      expect(citedText, `${row.name} HP`).toContain(`HP ${row.statblock.hitPointMaximum}`);
+      expect(citedText, `${row.name} Speed`).toContain(`Speed ${row.statblock.speed} ft.`);
     }
   });
 

@@ -113,13 +113,13 @@ export const meleeOrRanged = (
 ): MonsterAttackAction => attack(id, name, attackBonus, { kind: 'melee_or_ranged', reachFeet, rangeFeet, longRangeFeet }, terms, onHit);
 
 export const conditionOnHit = (
-  condition: 'Frightened' | 'Grappled' | 'Paralyzed' | 'Prone',
+  condition: 'Frightened' | 'Grappled' | 'Paralyzed' | 'Poisoned' | 'Prone' | 'Restrained',
   maximumSize: CreatureSize | null,
   options: {
     readonly excludedKinds?: readonly ('Undead' | 'Elf')[];
     readonly save?: { readonly ability: Ability; readonly dc: number } | null;
     readonly escapeDc?: number | null;
-    readonly duration?: 'until_escape' | 'until_end_of_target_next_turn' | 'until_start_of_monster_next_turn' | null;
+    readonly duration?: 'until_escape' | 'until_end_of_monster_next_turn' | 'until_end_of_target_next_turn' | 'until_start_of_monster_next_turn' | null;
     readonly trigger?: MonsterDamageTerm['trigger'];
   } = {},
 ): MonsterOnHitEffect => ({

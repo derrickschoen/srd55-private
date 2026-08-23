@@ -58,6 +58,7 @@ const SUMMONS_LEDGER_PATH = 'docs/audits/2026-08-23-summons-mutation-ledger.md';
 const FORMS_LEDGER_PATH = 'docs/audits/2026-08-23-forms-mutation-ledger.md';
 const PCBRIDGE_LEDGER_PATH = 'docs/audits/2026-08-23-pcbridge-mutation-ledger.md';
 const VIEW_SEAMS_LEDGER_PATH = 'docs/audits/2026-08-23-seams-mutation-ledger.md';
+const MONSTERS_LEDGER_PATH = 'docs/audits/2026-08-23-monsters-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -74,6 +75,25 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D364-MONSTERS-MUTATION-LEDGER pins all five restored controls to their killing tests', () => {
+    const monstersLedger = readFileSync(MONSTERS_LEDGER_PATH, 'utf8');
+    const rosterTests = readFileSync('tests/unit/combat/statblocks.test.ts', 'utf8');
+    const companionTests = readFileSync('tests/unit/combat/companion-statblocks.test.ts', 'utf8');
+    for (const control of [
+      'citation_span_drifted',
+      'mapping_defaults',
+      'scaling_frozen',
+      'caster_stats_ignored',
+      'cr_ladder_gap',
+    ]) {
+      expect(monstersLedger).toContain(`\`${control}\``);
+      expect(`${rosterTests}\n${companionTests}`).toContain(`${control}:`);
+    }
+    expect(monstersLedger.match(/`exit 1`/gu)).toHaveLength(5);
+    expect(monstersLedger).toContain('Tests  63 passed (63)');
+    expect(monstersLedger).toContain('All five mutations were restored');
+  });
+
   it('D359-VIEW-SEAMS-MUTATION-LEDGER pins all four restored controls to their killing checks', () => {
     const seamsLedger = readFileSync(VIEW_SEAMS_LEDGER_PATH, 'utf8');
     const visibilityTests = readFileSync('tests/unit/combat/visibility.test.ts', 'utf8');
