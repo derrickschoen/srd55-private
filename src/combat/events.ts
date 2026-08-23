@@ -1,4 +1,5 @@
 import type { Ability, Skill } from '../domain/enums';
+import type { ObjectInteractionMode } from './equipment';
 import type { GridCell } from './grid';
 import type {
   AttackRollResult,
@@ -11,7 +12,7 @@ import type { EffectApplication, EffectPayload, TurnBoundary } from './effects';
 import type { PersistentAreaInput, PersistentAreaOrigin } from './persistent-areas';
 import type { SpellCastCommand } from './spells/types';
 import type { AreaTemplate } from './templates';
-import type { CombatantId, EncounterEffectId, Feet, LimitedResourcePoolId, PersistentAreaId, WorldObjectId } from './values';
+import type { CombatantId, EncounterEffectId, Feet, ItemId, LimitedResourcePoolId, ObjectTargetId, PersistentAreaId, WorldObjectId } from './values';
 import type { LightLevel, WorldObject, WorldOperation } from './world-objects';
 
 export type ActionCost = 'action' | 'bonus_action' | 'reaction' | 'none';
@@ -24,11 +25,17 @@ export type EncounterCommand =
       readonly actor: CombatantId;
       readonly effectId: EncounterEffectId;
       readonly targets: readonly CombatantId[];
-      readonly objectTargets: readonly WorldObjectId[];
+      readonly objectTargets: readonly ObjectTargetId[];
       readonly ownedObjectTargets: readonly WorldObjectId[];
       readonly area: AreaTemplate | null;
       readonly spatialPoint?: GridCell;
       readonly selectedOption: string | null;
+    }
+  | {
+      readonly type: 'drop_item' | 'pickup_item' | 'equip_item' | 'stow_item';
+      readonly actor: CombatantId;
+      readonly item: ItemId;
+      readonly interaction: ObjectInteractionMode;
     }
   | {
       readonly type: 'adjudicate';
@@ -196,6 +203,24 @@ interface SequencedEvent {
 }
 
 export type EncounterEvent =
+  | (SequencedEvent & {
+      readonly type: 'object_interaction_spent';
+      readonly combatant: CombatantId;
+      readonly mode: ObjectInteractionMode;
+      readonly purpose: 'drop' | 'pickup' | 'equip' | 'stow';
+    })
+  | (SequencedEvent & {
+      readonly type: 'item_dropped';
+      readonly combatant: CombatantId;
+      readonly item: ItemId;
+      readonly position: GridCell;
+      readonly cause: 'interaction' | 'forced';
+    })
+  | (SequencedEvent & {
+      readonly type: 'item_picked_up' | 'item_equipped' | 'item_stowed';
+      readonly combatant: CombatantId;
+      readonly item: ItemId;
+    })
   | (SequencedEvent & {
       readonly type: 'adjudicated';
       readonly target: CombatantId;
@@ -480,7 +505,7 @@ export type EncounterEvent =
       readonly effectId: EncounterEffectId;
       readonly spellId: string;
       readonly targets: readonly CombatantId[];
-      readonly objectTargets: readonly WorldObjectId[];
+      readonly objectTargets: readonly ObjectTargetId[];
       readonly ownedObjectTargets: readonly WorldObjectId[];
     })
   | (SequencedEvent & {

@@ -10,7 +10,7 @@ import type {
 } from '../persistent-areas';
 import type { AreaTemplate } from '../templates';
 import type { DamageRequest } from '../resolution';
-import type { CombatantId, DamageType, LimitedResourcePoolId, WorldObjectId } from '../values';
+import type { CombatantId, DamageType, LimitedResourcePoolId, ObjectTargetId, WorldObjectId } from '../values';
 import type { GridCell } from '../grid';
 import type { LightLevel, WorldObjectChanges, WorldObjectInput } from '../world-objects';
 
@@ -431,6 +431,17 @@ export type BranchSpellOperation =
   | ArmorClassModifierOperation
   | DamageResponseModifierOperation
   | TargetedDefenseModifierOperation
+  | {
+      readonly kind: 'heat_metal';
+      readonly requiredMaterial: 'metal';
+      readonly damageType: DamageType;
+      readonly dice: ScaledDice;
+      readonly failedSave: {
+        readonly ability: 'constitution';
+        readonly rollMode: 'normal';
+        readonly cannotDrop: readonly [RollModeModifierOperation, RollModeModifierOperation];
+      };
+    }
   | {
       readonly kind: 'sustained_effect';
       /** The ordinary cast-time operation, if any, resolves before the effect is established. */
@@ -877,6 +888,7 @@ export const SPELL_OPERATION_KINDS = [
   'armor_class_modifier',
   'damage_response_modifier',
   'targeted_defense_modifier',
+  'heat_metal',
   'sustained_effect',
   'damage_operation',
   'armed_weapon_hit_rider',
@@ -963,7 +975,7 @@ export interface SpellCastCommand {
   readonly selectedOption: string | null;
   /** Required only by a targeted-defense operation cast against a selected attacker. */
   readonly modifierSource?: CombatantId;
-  readonly objectTargets?: readonly WorldObjectId[];
+  readonly objectTargets?: readonly ObjectTargetId[];
   /** Objects created and owned by a sustained effect, distinct from its activation targets. */
   readonly ownedObjectTargets?: readonly WorldObjectId[];
   /** A declared class/feat pool can replace slot spending for this cast. */

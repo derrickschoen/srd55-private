@@ -11,6 +11,7 @@ import type {
   EffectStackingIdentity,
   EncounterEffectId,
   LimitedResourcePoolId,
+  ObjectTargetId,
   PersistentAreaId,
   WorldObjectId,
 } from './values';
@@ -252,7 +253,7 @@ export type EffectPayload =
       readonly establishedRound: number;
       readonly targetBinding: 'reselect' | 'bound_combatants' | 'bound_objects' | 'bound_owned_objects';
       readonly boundCombatants: readonly CombatantId[];
-      readonly boundObjects: readonly WorldObjectId[];
+      readonly boundObjects: readonly ObjectTargetId[];
       readonly ownedObjects: readonly WorldObjectId[];
       readonly slotLevel: number | null;
       readonly casterLevel: number;

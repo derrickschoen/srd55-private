@@ -664,6 +664,8 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
     case 'targeted_defense_modifier':
     case 'sustained_effect':
       return null;
+    case 'heat_metal':
+      return [operation.dice.baseCount, operation.dice.sides];
     case 'roll_dice_modifier':
     case 'damage_dice_reduction':
       return [operation.die.count, operation.die.sides];
@@ -757,6 +759,8 @@ function operationPerSlot(definition: SpellDefinition): number {
     case 'targeted_defense_modifier':
     case 'sustained_effect':
       return 0;
+    case 'heat_metal':
+      return operation.dice.perSlotCount;
     case 'damage_operation':
       return operation.packets[0]?.dice.perSlotCount ?? 0;
     case 'armed_weapon_hit_rider':

@@ -11,6 +11,8 @@ export type StatblockId = Brand<string, 'StatblockId'>;
 export type EncounterEffectId = Brand<string, 'EncounterEffectId'>;
 export type PersistentAreaId = Brand<string, 'PersistentAreaId'>;
 export type WorldObjectId = Brand<string, 'WorldObjectId'>;
+export type ItemId = Brand<string, 'ItemId'>;
+export type ObjectTargetId = WorldObjectId | ItemId;
 export type EffectStackingIdentity = Brand<string, 'EffectStackingIdentity'>;
 export type LimitedResourcePoolId = Brand<string, 'LimitedResourcePoolId'>;
 export type EncounterSessionId = Brand<string, 'EncounterSessionId'>;
@@ -86,6 +88,9 @@ export const persistentAreaId = (value: string): PersistentAreaId =>
 
 export const worldObjectId = (value: string): WorldObjectId =>
   identity<WorldObjectId>(value, 'WorldObjectId');
+
+export const itemId = (value: string): ItemId =>
+  identity<ItemId>(value, 'ItemId');
 
 export const effectStackingIdentity = (
   value: string,

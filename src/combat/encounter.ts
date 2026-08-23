@@ -13,6 +13,16 @@ import {
   type ExhaustionLevel,
 } from './conditions';
 import type { CombatantProfile, CombatToken } from './combatant';
+import {
+  FREE_OBJECT_INTERACTIONS_PER_TURN,
+  type CombatantEquipment,
+  type EquipmentItemDefinition,
+  type EquipmentRefusalCode,
+  type GroundItem,
+  type HandEquipment,
+  type ItemPhysicalContact,
+  type ObjectInteractionMode,
+} from './equipment';
 import type {
   DamageOperationPacket,
   DamageOperationSpec,
@@ -93,6 +103,7 @@ import {
   type CombatantId,
   type DamageType,
   type EncounterEffectId,
+  type ItemId,
   type LimitedResourcePoolId,
   type PersistentAreaId,
   type WorldObjectId,
@@ -134,6 +145,7 @@ export interface TurnResources {
   readonly movement: TurnMovement;
   readonly disengaging: boolean;
   readonly dodging: boolean;
+  readonly objectInteractionsUsed?: 0 | 1;
 }
 
 export interface EncounterCombatantState {
@@ -227,6 +239,9 @@ export interface EncounterState {
   readonly eventLog: readonly EncounterEvent[];
   /** Exact imported records plus their reducer-ready projections. */
   readonly contentPacks?: readonly LoadedContentPack[];
+  readonly equipment?: readonly CombatantEquipment[];
+  readonly groundItems?: readonly GroundItem[];
+  readonly itemContacts?: readonly ItemPhysicalContact[];
 }
 
 interface ReevaluatedSpellBranch {
@@ -250,6 +265,9 @@ export interface EncounterSetup {
   readonly combatants: readonly CombatantProfile[];
   readonly tokens: readonly CombatToken[];
   readonly contentPacks?: readonly LoadedContentPack[];
+  readonly equipment?: readonly CombatantEquipment[];
+  readonly groundItems?: readonly GroundItem[];
+  readonly itemContacts?: readonly ItemPhysicalContact[];
 }
 
 export interface EncounterReduction {
@@ -258,9 +276,17 @@ export interface EncounterReduction {
 }
 
 export class EncounterRuleError extends Error {
-  override readonly name = 'EncounterRuleError' as const;
+  override readonly name: string = 'EncounterRuleError';
 
   constructor(readonly reason: string) {
+    super(reason);
+  }
+}
+
+export class EquipmentRuleError extends EncounterRuleError {
+  override readonly name = 'EquipmentRuleError' as const;
+
+  constructor(readonly code: EquipmentRefusalCode, reason: string) {
     super(reason);
   }
 }
@@ -296,6 +322,80 @@ function assertUnique<T>(values: readonly T[], label: string): void {
   if (new Set(values).size !== values.length) {
     throw new EncounterRuleError(`${label} must be unique.`);
   }
+}
+
+function heldItems(hands: HandEquipment): readonly ItemId[] {
+  switch (hands.kind) {
+    case 'empty': return [];
+    case 'one_handed': return hands.items;
+    case 'two_handed': return [hands.item];
+  }
+}
+
+function itemRegistry(packs: readonly LoadedContentPack[] | undefined): readonly EquipmentItemDefinition[] {
+  return (packs ?? []).flatMap((pack) => pack.items);
+}
+
+function setupItemDefinition(
+  registry: readonly EquipmentItemDefinition[],
+  id: ItemId,
+): EquipmentItemDefinition {
+  const definition = registry.find((candidate) => candidate.id === id);
+  if (definition === undefined) throw new EquipmentRuleError('unknown_item', `Unknown item ${id}.`);
+  return definition;
+}
+
+function normalizedEquipment(setup: EncounterSetup): readonly CombatantEquipment[] {
+  const supplied = setup.equipment ?? [];
+  assertUnique(supplied.map((entry) => entry.combatant), 'Equipment combatants');
+  const registry = itemRegistry(setup.contentPacks);
+  const combatantIds = new Set(setup.combatants.map((profile) => profile.id));
+  if (supplied.some((entry) => !combatantIds.has(entry.combatant))) {
+    throw new EncounterRuleError('Equipment cannot name an unknown combatant.');
+  }
+  const result = setup.combatants.map((profile): CombatantEquipment => {
+    const entry = supplied.find((candidate) => candidate.combatant === profile.id) ?? {
+      combatant: profile.id, hands: { kind: 'empty' as const }, worn: [], carried: [],
+    };
+    const handItems = heldItems(entry.hands);
+    assertUnique(handItems, `Held item ids for ${profile.id}`);
+    assertUnique(entry.worn, `Worn item ids for ${profile.id}`);
+    assertUnique(entry.carried, `Carried item ids for ${profile.id}`);
+    for (const id of handItems) {
+      const definition = setupItemDefinition(registry, id);
+      if (
+        definition.equip.kind !== 'held' ||
+        (entry.hands.kind === 'two_handed' && definition.equip.handCapacity !== 2) ||
+        (entry.hands.kind === 'one_handed' && definition.equip.handCapacity !== 1)
+      ) {
+        throw new EquipmentRuleError('equip_location_mismatch', `Item ${id} does not match its declared hand state.`);
+      }
+    }
+    for (const id of entry.worn) {
+      if (setupItemDefinition(registry, id).equip.kind !== 'worn') {
+        throw new EquipmentRuleError('equip_location_mismatch', `Item ${id} is not wearable.`);
+      }
+    }
+    for (const id of entry.carried) setupItemDefinition(registry, id);
+    return {
+      combatant: entry.combatant,
+      hands: structuredClone(entry.hands),
+      worn: [...entry.worn].sort((left, right) => String(left).localeCompare(String(right))),
+      carried: [...entry.carried].sort((left, right) => String(left).localeCompare(String(right))),
+    };
+  });
+  const groundItems = setup.groundItems ?? [];
+  for (const ground of groundItems) {
+    setupItemDefinition(registry, ground.item);
+    if (!isCellInside(setup.bounds, ground.position)) {
+      throw new EncounterRuleError(`Ground item ${ground.item} is outside the encounter grid.`);
+    }
+  }
+  assertUnique([
+    ...result.flatMap((entry) => [...heldItems(entry.hands), ...entry.worn, ...entry.carried]),
+    ...groundItems.map((ground) => ground.item),
+  ], 'Placed item ids');
+  return result;
 }
 
 /** Establishes the one-profile/one-token invariant before any event can run. */
@@ -390,6 +490,14 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     }
   }
 
+  const equipment = normalizedEquipment(setup);
+  const contacts = setup.itemContacts ?? [];
+  assertUnique(contacts.map((contact) => `${String(contact.item)}:${String(contact.combatant)}`), 'Item contacts');
+  for (const contact of contacts) {
+    setupItemDefinition(itemRegistry(setup.contentPacks), contact.item);
+    if (!profileIds.has(contact.combatant)) throw new EncounterRuleError('Item contact names an unknown combatant.');
+  }
+
   for (const profile of setup.combatants) {
     const limitedResources = profile.rules.limitedResources ?? [];
     assertUnique(limitedResources.map((pool) => pool.id), `Resource pool ids for ${profile.id}`);
@@ -477,6 +585,13 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     ...(setup.contentPacks === undefined
       ? {}
       : { contentPacks: structuredClone(setup.contentPacks) }),
+    ...(setup.equipment === undefined && setup.groundItems === undefined && setup.itemContacts === undefined
+      ? {}
+      : {
+          equipment,
+          groundItems: structuredClone(setup.groundItems ?? []),
+          itemContacts: structuredClone(contacts),
+        }),
   };
 }
 
@@ -506,6 +621,76 @@ function replaceCombatant(
       candidate.profile.id === replacement.profile.id ? replacement : candidate,
     ),
   };
+}
+
+function combatantEquipment(state: EncounterState, id: CombatantId): CombatantEquipment {
+  const found = state.equipment?.find((candidate) => candidate.combatant === id);
+  if (found === undefined) throw new EncounterRuleError(`Combatant ${id} has no equipment state.`);
+  return found;
+}
+
+function replaceEquipment(state: EncounterState, replacement: CombatantEquipment): EncounterState {
+  return {
+    ...state,
+    equipment: (state.equipment ?? []).map((candidate) =>
+      candidate.combatant === replacement.combatant ? replacement : candidate),
+  };
+}
+
+function encounterItem(state: EncounterState, id: ItemId): EquipmentItemDefinition {
+  const definition = itemRegistry(state.contentPacks).find((candidate) => candidate.id === id);
+  if (definition === undefined) throw new EquipmentRuleError('unknown_item', `Unknown item ${id}.`);
+  return definition;
+}
+
+function removeEquippedItem(equipment: CombatantEquipment, id: ItemId): CombatantEquipment | null {
+  if (equipment.worn.includes(id)) {
+    return { ...equipment, worn: equipment.worn.filter((candidate) => candidate !== id) };
+  }
+  switch (equipment.hands.kind) {
+    case 'empty': return null;
+    case 'two_handed':
+      return equipment.hands.item === id ? { ...equipment, hands: { kind: 'empty' } } : null;
+    case 'one_handed': {
+      if (!equipment.hands.items.includes(id)) return null;
+      const remaining = equipment.hands.items.filter((candidate) => candidate !== id);
+      return remaining.length === 0
+        ? { ...equipment, hands: { kind: 'empty' } }
+        : { ...equipment, hands: { kind: 'one_handed', items: [remaining[0] as ItemId] } };
+    }
+  }
+}
+
+function addEquippedItem(
+  equipment: CombatantEquipment,
+  definition: EquipmentItemDefinition,
+): CombatantEquipment {
+  if (definition.equip.kind === 'worn') {
+    return {
+      ...equipment,
+      worn: [...equipment.worn, definition.id].sort((left, right) => String(left).localeCompare(String(right))),
+    };
+  }
+  if (definition.equip.handCapacity === 2) {
+    if (equipment.hands.kind !== 'empty') {
+      throw new EquipmentRuleError('hand_capacity_exceeded', `Item ${definition.id} requires both free hands.`);
+    }
+    return { ...equipment, hands: { kind: 'two_handed', item: definition.id } };
+  }
+  switch (equipment.hands.kind) {
+    case 'empty':
+      return { ...equipment, hands: { kind: 'one_handed', items: [definition.id] } };
+    case 'two_handed':
+      throw new EquipmentRuleError('hand_capacity_exceeded', `Both hands are occupied by ${equipment.hands.item}.`);
+    case 'one_handed': {
+      if (equipment.hands.items.length === 2) {
+        throw new EquipmentRuleError('hand_capacity_exceeded', 'Both hand-capacity units are occupied.');
+      }
+      const items = [equipment.hands.items[0], definition.id]
+        .sort((left, right) => String(left).localeCompare(String(right))) as [ItemId, ItemId];
+      return { ...equipment, hands: { kind: 'one_handed', items } };
+    }
+  }
 }
 
 function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[] {
@@ -1732,6 +1917,120 @@ function spendCost(
   }
 }
 
+function spendObjectInteraction(
+  context: ReductionContext,
+  actor: CombatantId,
+  mode: ObjectInteractionMode,
+  purpose: 'drop' | 'pickup' | 'equip' | 'stow',
+): void {
+  assertActiveActor(context, actor);
+  assertCanUseActions(context, actor);
+  const subject = combatant(context.state, actor);
+  if (mode === 'free') {
+    if ((subject.turn.objectInteractionsUsed ?? 1) >= FREE_OBJECT_INTERACTIONS_PER_TURN) {
+      throw new EquipmentRuleError(
+        'free_interaction_spent',
+        `Combatant ${actor} has already used its free object interaction.`,
+      );
+    }
+    context.state = replaceCombatant(context.state, {
+      ...subject,
+      turn: { ...subject.turn, objectInteractionsUsed: 1 },
+    });
+  } else {
+    if (subject.turn.action.kind !== 'available') {
+      throw new EquipmentRuleError('utilize_action_unavailable', `Combatant ${actor} has no action available for Utilize.`);
+    }
+    spendAction(context, actor, `Utilize: ${purpose} item`);
+  }
+  emit(context, { type: 'object_interaction_spent', combatant: actor, mode, purpose });
+}
+
+function forcedDropItem(context: ReductionContext, actor: CombatantId, id: ItemId): void {
+  const equipment = combatantEquipment(context.state, actor);
+  const definition = encounterItem(context.state, id);
+  const removed = removeEquippedItem(equipment, id);
+  if (removed === null) throw new EquipmentRuleError('item_not_equipped', `Item ${id} is not equipped by ${actor}.`);
+  if (!heldItems(equipment.hands).includes(id) || definition.equip.droppable !== true) {
+    throw new EquipmentRuleError('cannot_drop', `Item ${id} cannot be dropped while equipped.`);
+  }
+  const position = { ...token(context.state, actor).position };
+  context.state = {
+    ...replaceEquipment(context.state, removed),
+    groundItems: [...(context.state.groundItems ?? []), { item: id, position }],
+    itemContacts: (context.state.itemContacts ?? []).filter((contact) => contact.item !== id || contact.combatant !== actor),
+  };
+  emit(context, { type: 'item_dropped', combatant: actor, item: id, position, cause: 'forced' });
+}
+
+function processEquipmentCommand(
+  context: ReductionContext,
+  command: Extract<EncounterCommand, { readonly type: 'drop_item' | 'pickup_item' | 'equip_item' | 'stow_item' }>,
+): void {
+  const definition = encounterItem(context.state, command.item);
+  const equipment = combatantEquipment(context.state, command.actor);
+  switch (command.type) {
+    case 'drop_item': {
+      const removed = removeEquippedItem(equipment, command.item);
+      if (removed === null) throw new EquipmentRuleError('item_not_equipped', `Item ${command.item} is not equipped.`);
+      if (!heldItems(equipment.hands).includes(command.item) || definition.equip.droppable !== true) {
+        throw new EquipmentRuleError('cannot_drop', `Item ${command.item} cannot be dropped while equipped.`);
+      }
+      spendObjectInteraction(context, command.actor, command.interaction, 'drop');
+      const position = { ...token(context.state, command.actor).position };
+      context.state = {
+        ...replaceEquipment(context.state, removed),
+        groundItems: [...(context.state.groundItems ?? []), { item: command.item, position }],
+        itemContacts: (context.state.itemContacts ?? []).filter((contact) =>
+          contact.item !== command.item || contact.combatant !== command.actor),
+      };
+      emit(context, { type: 'item_dropped', combatant: command.actor, item: command.item, position, cause: 'interaction' });
+      return;
+    }
+    case 'pickup_item': {
+      const ground = context.state.groundItems?.find((candidate) => candidate.item === command.item);
+      if (ground === undefined) throw new EquipmentRuleError('item_not_on_ground', `Item ${command.item} is not on the board.`);
+      if (cellKey(ground.position) !== cellKey(token(context.state, command.actor).position)) {
+        throw new EquipmentRuleError('item_not_at_actor_cell', `Item ${command.item} is not at ${command.actor}'s cell.`);
+      }
+      spendObjectInteraction(context, command.actor, command.interaction, 'pickup');
+      context.state = replaceEquipment({
+        ...context.state,
+        groundItems: (context.state.groundItems ?? []).filter((candidate) => candidate.item !== command.item),
+      }, {
+        ...equipment,
+        carried: [...equipment.carried, command.item].sort((left, right) => String(left).localeCompare(String(right))),
+      });
+      emit(context, { type: 'item_picked_up', combatant: command.actor, item: command.item });
+      return;
+    }
+    case 'equip_item': {
+      if (!equipment.carried.includes(command.item)) {
+        throw new EquipmentRuleError('item_not_carried', `Item ${command.item} is not carried by ${command.actor}.`);
+      }
+      const equipped = addEquippedItem(equipment, definition);
+      spendObjectInteraction(context, command.actor, command.interaction, 'equip');
+      context.state = replaceEquipment(context.state, {
+        ...equipped,
+        carried: equipment.carried.filter((candidate) => candidate !== command.item),
+      });
+      emit(context, { type: 'item_equipped', combatant: command.actor, item: command.item });
+      return;
+    }
+    case 'stow_item': {
+      const removed = removeEquippedItem(equipment, command.item);
+      if (removed === null) throw new EquipmentRuleError('item_not_equipped', `Item ${command.item} is not equipped.`);
+      spendObjectInteraction(context, command.actor, command.interaction, 'stow');
+      context.state = replaceEquipment(context.state, {
+        ...removed,
+        carried: [...removed.carried, command.item].sort((left, right) => String(left).localeCompare(String(right))),
+      });
+      emit(context, { type: 'item_stowed', combatant: command.actor, item: command.item });
+      return;
+    }
+  }
+}
+
 function spendLimitedResource(
   context: ReductionContext,
   actor: CombatantId,
@@ -2868,6 +3167,7 @@ function startTurn(context: ReductionContext, id: CombatantId, round: number): v
       movement: startTurnMovement(speed),
       disengaging: false,
       dodging: false,
+      ...(context.state.equipment === undefined ? {} : { objectInteractionsUsed: incapacitated ? 1 as const : 0 as const }),
     },
   });
   emit(context, { type: 'turn_started', combatant: id, round });
@@ -2883,6 +3183,7 @@ function startTurn(context: ReductionContext, id: CombatantId, round: number): v
         movement: startTurnMovement(feet(effectiveSpeed(context.state, id))),
         disengaging: false,
         dodging: false,
+        ...(context.state.equipment === undefined ? {} : { objectInteractionsUsed: 0 as const }),
       },
     });
   }
@@ -4598,6 +4899,113 @@ function modifierEffectData(
   };
 }
 
+type EquippedItemContact = {
+  readonly combatant: CombatantId;
+  readonly relationship: 'held' | 'worn' | 'carried' | 'other';
+};
+
+function itemContacts(state: EncounterState, id: ItemId): readonly EquippedItemContact[] {
+  const contacts = new Map<CombatantId, EquippedItemContact['relationship']>();
+  for (const equipment of state.equipment ?? []) {
+    if (heldItems(equipment.hands).includes(id)) contacts.set(equipment.combatant, 'held');
+    else if (equipment.worn.includes(id)) contacts.set(equipment.combatant, 'worn');
+    else if (equipment.carried.includes(id)) contacts.set(equipment.combatant, 'carried');
+  }
+  for (const contact of state.itemContacts ?? []) {
+    if (contact.item === id && !contacts.has(contact.combatant)) contacts.set(contact.combatant, 'other');
+  }
+  const ground = state.groundItems?.find((candidate) => candidate.item === id);
+  if (ground !== undefined) {
+    for (const placed of state.tokens) {
+      if (cellKey(placed.position) === cellKey(ground.position) && !contacts.has(placed.combatantId)) {
+        contacts.set(placed.combatantId, 'other');
+      }
+    }
+  }
+  return [...contacts.entries()]
+    .sort(([left], [right]) => String(left).localeCompare(String(right)))
+    .map(([combatant, relationship]) => ({ combatant, relationship }));
+}
+
+function itemPosition(state: EncounterState, id: ItemId): GridCell {
+  const ground = state.groundItems?.find((candidate) => candidate.item === id);
+  if (ground !== undefined) return ground.position;
+  const possessor = state.equipment?.find((equipment) =>
+    heldItems(equipment.hands).includes(id) || equipment.worn.includes(id) || equipment.carried.includes(id));
+  if (possessor === undefined) throw new EquipmentRuleError('unknown_item', `Item ${id} is not present in the encounter.`);
+  return token(state, possessor.combatant).position;
+}
+
+function heatMetalRange(definition: SpellDefinition): number {
+  switch (definition.targeting.kind) {
+    case 'single':
+    case 'utility': return definition.targeting.rangeFeet;
+    case 'self':
+    case 'multiple':
+    case 'area':
+    case 'area_selected':
+    case 'all_in_range':
+    case 'remote':
+      throw new EncounterRuleError(`${definition.name} has incompatible item targeting.`);
+  }
+}
+
+function executeHeatMetal(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  operation: Extract<BranchSpellOperation, { readonly kind: 'heat_metal' }>,
+): SpellOperationOutcome {
+  const selected = command.objectTargets ?? [];
+  if (selected.length !== 1) throw new EncounterRuleError(`${definition.name} requires exactly one item target.`);
+  const id = selected[0] as ItemId;
+  const item = encounterItem(context.state, id);
+  if (!item.materials.some((material) => material.kind === 'known' && material.name === operation.requiredMaterial)) {
+    throw new EquipmentRuleError('material_mismatch', `${definition.name} requires a metal item.`);
+  }
+  const casterPosition = token(context.state, command.actor).position;
+  const position = itemPosition(context.state, id);
+  if (
+    gridDistance(casterPosition, position) > heatMetalRange(definition) ||
+    !hasLineOfSight(context.state, casterPosition, position)
+  ) throw new EncounterRuleError(`${definition.name} item target is out of range or not visible.`);
+
+  const contacts = itemContacts(context.state, id);
+  const rolled = resolveDamage({
+    terms: [{ type: operation.damageType, dice: scaledSpellDamageExpression(context, definition, operation.dice, command) }],
+    critical: false,
+    responses: [],
+  }, context.rng);
+  const damaged: EquippedItemContact[] = [];
+  for (const contact of contacts) {
+    const request: DamageRequest = {
+      terms: [{ type: operation.damageType, dice: { count: 0, sides: dieSides(operation.dice.sides), modifier: rolled.total } }],
+      critical: false,
+      responses: [],
+    };
+    const adjusted = resolveTargetDamage(context, command.actor, contact.combatant, request).total;
+    applyDamage(context, command.actor, contact.combatant, adjusted);
+    concentrationCheck(context, contact.combatant, adjusted);
+    if (adjusted > 0) damaged.push(contact);
+  }
+  for (const contact of damaged) {
+    if (contact.relationship !== 'held' && contact.relationship !== 'worn') continue;
+    const save = resolveTargetSave(
+      context, command.actor, contact.combatant,
+      operation.failedSave.ability, command.saveDc, operation.failedSave.rollMode, null,
+    );
+    if (save.outcome !== 'failure') continue;
+    if (contact.relationship === 'held') {
+      forcedDropItem(context, contact.combatant, id);
+      continue;
+    }
+    for (const cannotDropOperation of operation.failedSave.cannotDrop) {
+      executeSpellOperation(context, definition, { ...command, targets: [contact.combatant] }, [contact.combatant], cannotDropOperation);
+    }
+  }
+  return contacts.length === 0 ? 'no_op' : 'applied';
+}
+
 function lifecycleStacking(
   operation: ConditionLifecycleOperation,
 ): EffectApplication['stacking'] {
@@ -5138,6 +5546,8 @@ function executeSpellOperation(
       }, operation.duration), targets);
       return 'applied';
     }
+    case 'heat_metal':
+      return executeHeatMetal(context, definition, command, operation);
     case 'sustained_effect': {
       if (operation.establishment?.kind === 'sustained_effect' || operation.activation.operation.kind === 'sustained_effect') {
         throw new EncounterRuleError(`${definition.name} cannot nest a sustained effect.`);
@@ -5181,7 +5591,7 @@ function executeSpellOperation(
               remaining: operation.lifecycle.durationRounds,
             },
         concentration: operation.lifecycle.concentration,
-        stackingIdentity: effectStackingIdentity(`spell:${definition.id}`),
+        stackingIdentity: effectStackingIdentity(`sustained:${definition.id}`),
         stacking: 'replace_same_source',
         repeatedSave: null,
         payload: {
@@ -5384,7 +5794,7 @@ function executeSpellOperation(
             }
             for (const objectId of objectTargets) {
               processWorldOperation(context, command.actor, {
-                kind: 'remove_object', objectId, reason: declared.reason,
+                kind: 'remove_object', objectId: objectId as WorldObjectId, reason: declared.reason,
               });
             }
             break;
@@ -5396,7 +5806,7 @@ function executeSpellOperation(
             }
             for (const objectId of objectTargets) {
               processWorldOperation(context, command.actor, {
-                kind: 'modify_object', objectId, changes: structuredClone(declared.changes),
+                kind: 'modify_object', objectId: objectId as WorldObjectId, changes: structuredClone(declared.changes),
               });
             }
             break;
@@ -5440,7 +5850,7 @@ function executeSpellOperation(
             }
             for (const objectId of objectTargets) {
               processWorldOperation(context, command.actor, {
-                kind: 'damage_object', objectId, delivery: { kind: 'area_effect' },
+                kind: 'damage_object', objectId: objectId as WorldObjectId, delivery: { kind: 'area_effect' },
                 damage: structuredClone(declared.damage),
               });
             }
@@ -6459,6 +6869,12 @@ function processSustainedEffectActivation(
 
 function processCommand(context: ReductionContext, command: EncounterCommand): void {
   switch (command.type) {
+    case 'drop_item':
+    case 'pickup_item':
+    case 'equip_item':
+    case 'stow_item':
+      processEquipmentCommand(context, command);
+      return;
     case 'adjudicate': {
       if (command.reasoning.trim().length === 0) {
         throw new EncounterRuleError('An adjudication requires DM reasoning.');

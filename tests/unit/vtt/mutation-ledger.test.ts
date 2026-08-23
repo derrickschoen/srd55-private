@@ -48,6 +48,7 @@ const NESTED_COMPOSITION_LEDGER_PATH = 'docs/audits/2026-08-23-nested-compositio
 const SHARED_OUTCOME_LEDGER_PATH = 'docs/audits/2026-08-23-shared-outcome-mutation-ledger.md';
 const BOARD_LEDGER_PATH = 'docs/audits/2026-08-23-board-mutation-ledger.md';
 const SEQUENCING_LEDGER_PATH = 'docs/audits/2026-08-22-sequencing-mutation-ledger.md';
+const EQUIPMENT_LEDGER_PATH = 'docs/audits/2026-08-23-equipment-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -716,5 +717,32 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(5);
     expect(ledger).toContain('Each production mutation below was applied alone');
     expect(ledger).toContain('Tests  9 passed (9)');
+  });
+
+  it('EQUIPMENT-MUTATION-LEDGER pins forced drop, board persistence, interaction, capacity, and contact controls', () => {
+    const ledger = readFileSync(EQUIPMENT_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/equipment.test.ts', 'utf8');
+    const mutations = [
+      'worn_armor_drops',
+      'dropped_item_vanishes',
+      'second_interaction_free',
+      'two_handed_in_one_hand',
+      'contact_damage_holder_only',
+      'one_free_hand_refused',
+    ];
+    const killingTests = [
+      'worn_armor_drops: failed Heat Metal save drops a held sword but retained worn armor receives attack and ability-check Disadvantage',
+      'dropped_item_vanishes and contact_damage_holder_only: cast drops onto the holder cell; pickup, re-equip, and later Bonus Action re-trigger damage every contact and drop it again',
+      'second_interaction_free: exactly one free interaction succeeds, a second free interaction is typed-refused, and Utilize pays the action',
+      'two_handed_in_one_hand: hand capacity succeeds with exactly one free unit, then refuses a two-handed item when both units are full',
+    ];
+    for (const mutation of mutations) expect(ledger).toContain(`\`${mutation}\``);
+    for (const testName of killingTests) {
+      expect(ledger).toContain(`\`${testName}\``);
+      expect(tests).toContain(testName);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(6);
+    expect(ledger).toContain('Each production mutation below was applied alone');
+    expect(ledger).toContain('Tests  6 passed (6)');
   });
 });

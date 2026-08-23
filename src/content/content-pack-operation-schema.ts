@@ -219,6 +219,28 @@ const targetedDefenseModifierOperationSchema = z.strictObject({
   kind: z.literal('targeted_defense_modifier'), against: z.literal('selected_attacker'),
   armorClassBonus: positiveInteger.max(30), duration: modifierDuration,
 });
+const heatMetalOperationSchema = z.strictObject({
+  kind: z.literal('heat_metal'),
+  requiredMaterial: z.literal('metal'),
+  damageType: z.literal('Fire'),
+  dice: importedOperationDiceSchema,
+  failedSave: z.strictObject({
+    ability: z.literal('constitution'),
+    rollMode: z.literal('normal'),
+    cannotDrop: z.tuple([
+      z.strictObject({
+        kind: z.literal('roll_mode_modifier'), roll: z.literal('attack_roll'),
+        mode: z.literal('disadvantage'), scope: z.strictObject({ kind: z.literal('target_rolls') }),
+        duration: z.strictObject({ kind: z.literal('fixed_rounds'), rounds: z.literal(1), expiresAt: z.literal('target_start') }),
+      }),
+      z.strictObject({
+        kind: z.literal('roll_mode_modifier'), roll: z.literal('ability_check'),
+        mode: z.literal('disadvantage'), scope: z.strictObject({ kind: z.literal('target_rolls') }),
+        duration: z.strictObject({ kind: z.literal('fixed_rounds'), rounds: z.literal(1), expiresAt: z.literal('target_start') }),
+      }),
+    ]),
+  }),
+});
 
 const importedDamageOperationSchema = damageOperationSpecSchema.extend({ kind: z.literal('damage_operation') });
 const armedWeaponHitRiderSchema = z.strictObject({ kind: z.literal('armed_weapon_hit_rider'), ...armedWeaponHitRiderShape });
@@ -460,6 +482,7 @@ const nonCompositionSchemas = {
   armor_class_modifier: armorClassModifierOperationSchema,
   damage_response_modifier: damageResponseModifierOperationSchema,
   targeted_defense_modifier: targetedDefenseModifierOperationSchema,
+  heat_metal: heatMetalOperationSchema,
   sustained_effect: sustainedEffectOperationSchema,
   damage_operation: importedDamageOperationSchema,
   armed_weapon_hit_rider: armedWeaponHitRiderSchema,
