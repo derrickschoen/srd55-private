@@ -29,6 +29,46 @@ export interface SpellComponentsData {
 
 export interface ScaledDice extends OperationDice {}
 
+export type ExactTargetCountRule =
+  | { readonly kind: 'fixed'; readonly count: number }
+  | {
+      readonly kind: 'slot_scaled';
+      readonly base: number;
+      readonly additionalPerSlot: number;
+      readonly limit: 'exact';
+    };
+
+export type TargetCountRule =
+  | ExactTargetCountRule
+  | { readonly kind: 'up_to'; readonly maximum: number }
+  | {
+      readonly kind: 'slot_scaled';
+      readonly base: number;
+      readonly additionalPerSlot: number;
+      readonly limit: 'up_to';
+    };
+
+export type TargetGeometryRule =
+  | { readonly kind: 'secondaries_within_primary'; readonly distanceFeet: number }
+  | { readonly kind: 'pair_within'; readonly distanceFeet: number }
+  | { readonly kind: 'all_within_each_other'; readonly distanceFeet: number };
+
+export type TargetSelectionRule =
+  | {
+      readonly kind: 'targets';
+      readonly count: TargetCountRule;
+      readonly geometry: readonly TargetGeometryRule[];
+      readonly uniqueness: 'unique' | 'repeatable';
+      readonly destinations: 'none' | 'each_target';
+    }
+  | {
+      readonly kind: 'projectile_allocation';
+      readonly projectiles: ExactTargetCountRule;
+      readonly geometry: readonly TargetGeometryRule[];
+      readonly uniqueness: 'unique' | 'repeatable';
+      readonly resolution: 'per_projectile';
+    };
+
 export type SpellTargeting =
   | { readonly kind: 'self' }
   | {
@@ -47,6 +87,12 @@ export type SpellTargeting =
       readonly baseMaximum: number;
       readonly additionalPerSlot: number;
       readonly willing?: boolean;
+    }
+  | {
+      readonly kind: 'selected';
+      readonly rangeFeet: number;
+      readonly willing?: boolean;
+      readonly selection: TargetSelectionRule;
     }
   | {
       readonly kind: 'area';
@@ -1028,6 +1074,11 @@ export interface SpellCastCommand {
   readonly area: AreaTemplate | null;
   /** Chosen destination for teleportation, or selected origin for forced movement. */
   readonly spatialPoint?: GridCell;
+  /** Controller-owned destinations for a selection rule that routes each target independently. */
+  readonly targetDestinations?: readonly {
+    readonly target: CombatantId;
+    readonly destination: GridCell;
+  }[];
   readonly weaponAttack: null | {
     readonly attackBonus: number;
     readonly damageType: DamageType;
