@@ -73,7 +73,7 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
-  it('D352.1-PCBRIDGE-MUTATION-LEDGER pins all four restored bridge controls', () => {
+  it('D352.1-PCBRIDGE-MUTATION-LEDGER pins all five restored bridge controls', () => {
     const ledger = readFileSync(PCBRIDGE_LEDGER_PATH, 'utf8');
     const exporterTests = readFileSync(
       'tests/integration/vtt/stored-character-party-member.test.ts',
@@ -88,13 +88,14 @@ describe('phase-2 mutation ledger manifest', () => {
       'multiclass_level_miscount',
       'refusal_defaulted',
       'controller_not_dm',
+      'negative_modifier_flipped',
     ]) {
       expect(ledger).toContain(`\`${control}\``);
       expect(`${exporterTests}\n${roundTripTests}`).toContain(`${control}:`);
     }
-    expect(ledger.match(/exit 1/gu)).toHaveLength(4);
-    expect(ledger).toContain('Tests  5 passed (5)');
-    expect(ledger).toContain('All four mutations were restored.');
+    expect(ledger.match(/exit 1/gu)).toHaveLength(5);
+    expect(ledger).toContain('Tests  6 passed (6)');
+    expect(ledger).toContain('All five mutations were restored.');
   });
 
   it('D348.1-FORMS-MUTATION-LEDGER pins all four restored controls and the boundary kill', () => {

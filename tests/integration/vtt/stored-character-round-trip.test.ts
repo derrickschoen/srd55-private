@@ -68,6 +68,85 @@ describe('stored character authoring-to-encounter round trip', () => {
     harness = null;
   });
 
+  it('negative_modifier_flipped: RPC-authored export preserves negative saving-throw, initiative, attack, and damage modifiers', async () => {
+    harness = await createSeededRpcHarness([
+      ...guidedHandlers,
+      ...queryHandlers,
+    ]);
+    const origins = await result<
+      { readonly kind: 'species' },
+      readonly { readonly content_key: string; readonly name: string }[]
+    >(harness, 'queries.characters.originOptions', { kind: 'species' });
+    const human = origins.find((candidate) => candidate.name === 'Human');
+    if (human === undefined) throw new Error('Bundled Human is missing.');
+
+    const fighter = await createGuided(
+      harness,
+      'RPC Negative Modifiers Fighter',
+      'Fighter',
+      human.content_key,
+    );
+    const allocated = await result<
+      Readonly<Record<string, unknown>>,
+      Outcome<GuidedAllocateAbilitiesResult>
+    >(harness, 'queries.characters.allocateAbilities', {
+      character_id: fighter.id,
+      method: 'manual',
+      scores: {
+        strength: 1,
+        dexterity: 1,
+        constitution: 1,
+        intelligence: 1,
+        wisdom: 1,
+        charisma: 1,
+      },
+      operation_uuid: crypto.randomUUID(),
+      expected_revision: 0,
+    });
+    expect(allocated.kind).toBe('ok');
+
+    const equipment = await result<
+      { readonly character_id: number },
+      {
+        readonly class_package: {
+          readonly content_key: string;
+          readonly offered: readonly { readonly option: 'a' | 'b' | 'c' }[];
+        };
+      }
+    >(harness, 'queries.characters.equipmentStep', { character_id: fighter.id });
+    const equipmentOption = equipment.class_package.offered[0];
+    if (equipmentOption === undefined) throw new Error('Fighter equipment package is missing.');
+    await result(harness, 'queries.characters.applyEquipment', {
+      character_id: fighter.id,
+      kind: 'class',
+      content_key: equipment.class_package.content_key,
+      option: equipmentOption.option,
+    });
+
+    const exported = await result<
+      { readonly character_id: number },
+      StoredCharacterPartyPackExport
+    >(harness, 'queries.characters.partyPackMember', {
+      character_id: fighter.id,
+    });
+    expect(exported.status).toBe('exported');
+    if (exported.status !== 'exported') {
+      throw new Error(`${exported.refusal.field}: ${exported.refusal.detail}`);
+    }
+
+    expect(exported.member.savingThrowBonuses).toEqual({
+      strength: -3,
+      dexterity: -5,
+      constitution: -3,
+      intelligence: -5,
+      wisdom: -5,
+      charisma: -5,
+    });
+    expect(exported.member.initiativeBonus).toBe(-5);
+    expect(exported.member.attacks[0]?.attackBonus).toBe(-3);
+    expect(exported.member.attacks[0]?.damage[0]?.modifier).toBe(-5);
+  });
+
   it('controller_not_dm: authors through RPC, exports, moves and attacks, then spends an imported spell slot', async () => {
     harness = await createSeededRpcHarness([
       ...guidedHandlers,
