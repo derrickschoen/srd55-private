@@ -18,6 +18,7 @@ import {
   FORM_REPLACEMENT_EQUIPMENT_DISPOSITIONS,
   FORM_REPLACEMENT_RETAINED_STATISTICS,
   REACTION_DAMAGE_TYPES,
+  rollDefenseModifierScopes,
 } from '../combat/spells/types';
 import { abilities, damageTypes, skills } from '../domain/enums';
 
@@ -96,7 +97,7 @@ const EFFECT_PAYLOAD_KINDS = [
   'opportunity_attacks_disabled', 'phantasmal_killer', 'phantom_steed', 'poison_protection',
   'polymorph', 'private_sanctum', 'ray_enfeeblement', 'recurring_damage_operation', 'resilient_sphere',
   'rope_trick', 'sanctuary', 'saving_throw_modifier', 'secret_chest', 'see_invisibility',
-  'sending', 'shield_defense', 'silence_area', 'size_alteration', 'skill_modifier',
+  'sending', 'shield_defense', 'silence_area', 'size_alteration', 'skill_modifier', 'roll_defense_modifier',
   'sleep_sequence', 'sleet_storm_area', 'slow', 'speak_with_dead', 'spider_climb',
   'spirit_guardians_area', 'spiritual_weapon', 'stinking_cloud_area', 'stone_shape',
   'summoned_familiar', 'summoned_undead', 'teleport', 'temporary_banishment',
@@ -222,6 +223,56 @@ const armorClassModifierOperationSchema = z.strictObject({
 const damageResponseModifierOperationSchema = z.strictObject({
   kind: z.literal('damage_response_modifier'), damageType: damageTypeChoiceSchema,
   response: z.enum(['resistant', 'vulnerable']), duration: modifierDuration,
+});
+const rollDefenseEligibilitySchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('effect_targets') }),
+  z.strictObject({ kind: z.literal('source_against_effect_targets') }),
+  z.strictObject({ kind: z.literal('effect_targets_against_creatures_other_than_source') }),
+  z.strictObject({
+    kind: z.literal('allies_within_aura'),
+    radiusFeet: importedPositiveDistance,
+    savingThrowCause: z.enum(['any', 'spell_or_magical_effect']),
+  }),
+]);
+const rollDefenseEventTriggerSchema = z.strictObject({
+  kind: z.literal('event_trigger'),
+  hook: z.literal('effect_target_moves'),
+  flatAdjustment: safeInteger.min(-30).max(30),
+  duration: z.strictObject({
+    kind: z.literal('fixed_rounds'), rounds: z.literal(1), expiresAt: z.literal('target_start'),
+  }),
+});
+const rollDefenseModifierOperationSchema = z.strictObject({
+  kind: z.literal('roll_defense_modifier'),
+  scopes: z.array(z.enum(rollDefenseModifierScopes)).min(1).max(rollDefenseModifierScopes.length)
+    .refine((scopes) => new Set(scopes).size === scopes.length, { message: 'Modifier scopes must be unique.' }),
+  eligibility: rollDefenseEligibilitySchema,
+  duration: modifierDuration,
+  consumption: z.enum(['duration', 'first_qualifying_roll', 'chosen_qualifying_roll']),
+  successfulSaveDamage: z.literal('none_instead_of_half').optional(),
+  eventTrigger: rollDefenseEventTriggerSchema.optional(),
+  modifier: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('flat'), amount: safeInteger.min(-30).max(30) }),
+    z.strictObject({
+      kind: z.literal('die_rider'), count: positiveInteger.max(MAX_IMPORTED_DICE_COUNT),
+      sides: importedDieSides, sign: z.union([z.literal(1), z.literal(-1)]),
+    }),
+    z.strictObject({ kind: z.literal('roll_mode'), mode: z.enum(['advantage', 'disadvantage']) }),
+  ]),
+}).superRefine((operation, context) => {
+  if (operation.modifier.kind !== 'flat' && operation.scopes.includes('armor_class')) {
+    context.addIssue({ code: 'custom', path: ['scopes'], message: 'Only a flat modifier can change Armor Class.' });
+  }
+  if (operation.scopes.includes('armor_class') && operation.consumption !== 'duration') {
+    context.addIssue({ code: 'custom', path: ['consumption'], message: 'Armor Class modifiers persist for their duration.' });
+  }
+  if (operation.eventTrigger !== undefined &&
+      (operation.modifier.kind !== 'flat' || !operation.scopes.includes('armor_class'))) {
+    context.addIssue({ code: 'custom', path: ['eventTrigger'], message: 'A movement event adjustment requires a flat Armor Class modifier.' });
+  }
+  if (operation.successfulSaveDamage !== undefined && !operation.scopes.includes('saving_throws')) {
+    context.addIssue({ code: 'custom', path: ['successfulSaveDamage'], message: 'A successful-save defense requires saving-throw scope.' });
+  }
 });
 const targetedDefenseModifierOperationSchema = z.strictObject({
   kind: z.literal('targeted_defense_modifier'), against: z.literal('selected_attacker'),
@@ -635,6 +686,7 @@ const nonCompositionSchemas = {
   roll_mode_modifier: rollModeModifierOperationSchema,
   armor_class_modifier: armorClassModifierOperationSchema,
   damage_response_modifier: damageResponseModifierOperationSchema,
+  roll_defense_modifier: rollDefenseModifierOperationSchema,
   targeted_defense_modifier: targetedDefenseModifierOperationSchema,
   heat_metal: heatMetalOperationSchema,
   sustained_effect: sustainedEffectOperationSchema,

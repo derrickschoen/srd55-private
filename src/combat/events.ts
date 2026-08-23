@@ -101,6 +101,8 @@ export type EncounterCommand =
         readonly effectId: EncounterEffectId;
         readonly slotLevel: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
       }[];
+      /** Explicitly chooses one-shot-by-choice roll modifiers such as a one-shot-by-choice rider. */
+      readonly rollModifierEffectIds?: readonly EncounterEffectId[];
     }
   | {
       readonly type: 'opportunity_attack';
@@ -114,6 +116,7 @@ export type EncounterCommand =
       readonly damage: DamageRequest;
       /** Required while a form replacement limits attacks to its statblock. */
       readonly attackId?: string;
+      readonly rollModifierEffectIds?: readonly EncounterEffectId[];
     }
   | {
       readonly type: 'decline_reaction';
@@ -130,6 +133,7 @@ export type EncounterCommand =
       readonly damage: DamageRequest;
       readonly onSuccess: 'none' | 'half';
       readonly cost: ActionCost;
+      readonly rollModifierEffectIds?: readonly EncounterEffectId[];
     }
   | {
       readonly type: 'roll_ability_check';
@@ -140,6 +144,7 @@ export type EncounterCommand =
       readonly dc: number;
       readonly rollMode: RollMode;
       readonly cost: ActionCost;
+      readonly rollModifierEffectIds?: readonly EncounterEffectId[];
     }
   | {
       readonly type: 'dash' | 'disengage' | 'dodge';

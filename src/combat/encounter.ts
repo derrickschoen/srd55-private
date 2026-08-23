@@ -837,6 +837,7 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'ability_check_modifier':
     case 'skill_modifier':
     case 'armor_class_modifier':
+    case 'roll_defense_modifier':
     case 'attack_roll_modifier':
     case 'attack_roll_mode_modifier':
     case 'faerie_fire':
@@ -1152,6 +1153,12 @@ function effectiveArmorClass(
         bonus += effect.payload.amount;
       }
     }
+    if (
+      isRollDefenseEffect(effect) &&
+      effect.payload.scopes.includes('armor_class') &&
+      effect.payload.modifier.kind === 'flat' &&
+      rollDefenseEligibilityMatches(state, effect, id, attacker, 'other')
+    ) bonus += effect.payload.modifier.amount;
     if (effect.payload.kind === 'shield_defense') bonus += effect.payload.armorClassBonus;
   }
   // Barkskin's floor evaluates the completed AC; it is not another additive bonus.
@@ -1160,6 +1167,127 @@ function effectiveArmorClass(
 
 /** Dice modifiers consume the encounter RNG before the d20, oldest effect first, then effect id. */
 export const ROLL_MODIFIER_ORDER = 'created_revision_then_effect_id_before_d20' as const;
+
+type RollDefenseEffect = EncounterEffect & {
+  readonly payload: Extract<EffectPayload, { readonly kind: 'roll_defense_modifier' }>;
+};
+
+function isRollDefenseEffect(effect: EncounterEffect): effect is RollDefenseEffect {
+  return effect.payload.kind === 'roll_defense_modifier';
+}
+
+type RollCause = 'spell_or_magical_effect' | 'other';
+
+function rollDefenseEligibilityMatches(
+  state: EncounterState,
+  effect: RollDefenseEffect,
+  eligibleCombatant: CombatantId,
+  opposingCombatant: CombatantId | null,
+  cause: RollCause,
+): boolean {
+  switch (effect.payload.eligibility.kind) {
+    case 'effect_targets':
+      return effect.targets.includes(eligibleCombatant);
+    case 'source_against_effect_targets':
+      return eligibleCombatant === effect.source &&
+        opposingCombatant !== null && effect.targets.includes(opposingCombatant);
+    case 'effect_targets_against_creatures_other_than_source':
+      return effect.targets.includes(eligibleCombatant) &&
+        opposingCombatant !== null && opposingCombatant !== effect.source;
+    case 'allies_within_aura':
+      return (effect.payload.eligibility.savingThrowCause === 'any' || cause === 'spell_or_magical_effect') &&
+        combatantsAreAllies(state, eligibleCombatant, effect.source) &&
+        isCombatantOnBoard(state, eligibleCombatant) &&
+        isCombatantOnBoard(state, effect.source) &&
+        gridDistance(token(state, eligibleCombatant).position, token(state, effect.source).position) <=
+          effect.payload.eligibility.radiusFeet;
+  }
+}
+
+function qualifyingRollDefenseEffects(
+  state: EncounterState,
+  scope: Exclude<Extract<EffectPayload, { readonly kind: 'roll_defense_modifier' }>['scopes'][number], 'armor_class'>,
+  eligibleCombatant: CombatantId,
+  opposingCombatant: CombatantId | null,
+  cause: RollCause,
+  selectedEffectIds: readonly EncounterEffectId[] = [],
+): readonly RollDefenseEffect[] {
+  const selected = new Set(selectedEffectIds);
+  return [...state.effects]
+    .filter((effect): effect is RollDefenseEffect =>
+      isRollDefenseEffect(effect) &&
+      effect.payload.scopes.includes(scope) &&
+      (effect.payload.consumption !== 'chosen_qualifying_roll' || selected.has(effect.id)) &&
+      rollDefenseEligibilityMatches(state, effect, eligibleCombatant, opposingCombatant, cause))
+    .sort((left, right) =>
+      left.createdRevision - right.createdRevision || String(left.id).localeCompare(String(right.id)));
+}
+
+function rollDefenseTotalModifier(
+  context: ReductionContext,
+  scope: 'attack_rolls_made' | 'saving_throws' | 'ability_checks',
+  eligibleCombatant: CombatantId,
+  opposingCombatant: CombatantId | null,
+  cause: RollCause,
+  selectedEffectIds: readonly EncounterEffectId[] = [],
+): number {
+  const consumed = new Set<EncounterEffectId>();
+  const total = qualifyingRollDefenseEffects(
+    context.state, scope, eligibleCombatant, opposingCombatant, cause, selectedEffectIds,
+  ).reduce((sum, effect) => {
+    const modifier = effect.payload.modifier;
+    if (modifier.kind === 'roll_mode') return sum;
+    if (effect.payload.consumption !== 'duration') consumed.add(effect.id);
+    if (modifier.kind === 'flat') return sum + modifier.amount;
+    return sum + modifier.sign * rollDice(context.rng, {
+      count: modifier.count, sides: dieSides(modifier.sides), modifier: 0,
+    }).total;
+  }, 0);
+  endEffects(context, consumed, 'trigger_consumed');
+  return total;
+}
+
+function rollDefenseModes(
+  state: EncounterState,
+  scope: 'attack_rolls_made' | 'attack_rolls_against' | 'saving_throws' | 'ability_checks',
+  eligibleCombatant: CombatantId,
+  opposingCombatant: CombatantId | null,
+  cause: RollCause,
+  selectedEffectIds: readonly EncounterEffectId[] = [],
+): { readonly modes: readonly RollMode[]; readonly consumed: ReadonlySet<EncounterEffectId> } {
+  const consumed = new Set<EncounterEffectId>();
+  const modes = qualifyingRollDefenseEffects(
+    state, scope, eligibleCombatant, opposingCombatant, cause, selectedEffectIds,
+  ).flatMap((effect) => {
+    if (effect.payload.modifier.kind !== 'roll_mode') return [];
+    if (effect.payload.consumption !== 'duration') consumed.add(effect.id);
+    return [effect.payload.modifier.mode];
+  });
+  return { modes, consumed };
+}
+
+function successfulSaveNegatesHalfDamage(
+  state: EncounterState,
+  target: CombatantId,
+  source: CombatantId,
+  cause: RollCause,
+): boolean {
+  return qualifyingRollDefenseEffects(
+    state, 'saving_throws', target, source, cause,
+  ).some((effect) => effect.payload.successfulSaveDamage === 'none_instead_of_half');
+}
+
+function successfulSaveDamage(
+  state: EncounterState,
+  source: CombatantId,
+  target: CombatantId,
+  amount: number,
+  onSuccess: 'half' | 'none',
+  cause: RollCause,
+): number {
+  if (onSuccess === 'none' || successfulSaveNegatesHalfDamage(state, target, source, cause)) return 0;
+  return Math.floor(amount / 2);
+}
 
 function effectDiceModifier(
   state: EncounterState,
@@ -2082,8 +2210,13 @@ function resolveTargetSave(
   dc: number,
   mode: RollMode,
   effectId: EncounterEffectId | null,
+  cause: RollCause = 'spell_or_magical_effect',
+  selectedEffectIds: readonly EncounterEffectId[] = [],
 ): ReturnType<typeof resolveSavingThrow> {
   const subject = combatant(context.state, target);
+  const modifierModes = rollDefenseModes(
+    context.state, 'saving_throws', target, source, cause, selectedEffectIds,
+  );
   const save = automaticSaveFailure(context.state, target, ability)
     ? {
         outcome: 'failure' as const,
@@ -2095,12 +2228,18 @@ function resolveTargetSave(
           bonus:
             subject.profile.rules.savingThrowBonuses[ability] +
             exhaustionPenalty(combatantConditions(context.state, target)) +
-            effectDiceModifier(context.state, target, 'saving_throw', context.rng),
+            effectDiceModifier(context.state, target, 'saving_throw', context.rng) +
+            rollDefenseTotalModifier(
+              context, 'saving_throws', target, source, cause, selectedEffectIds,
+            ),
           dc: difficultyClass(dc),
-          rollMode: saveRollMode(context.state, target, ability, mode),
+          rollMode: combineRollModes([
+            saveRollMode(context.state, target, ability, mode), ...modifierModes.modes,
+          ]),
         },
         context.rng,
       );
+  endEffects(context, modifierModes.consumed, 'trigger_consumed');
   emit(context, { type: 'save_resolved', source, target, ability, save, effectId });
   return save;
 }
@@ -2120,6 +2259,7 @@ function concentrationCheck(
     Math.min(30, Math.max(10, Math.floor(damage / 2))),
     'normal',
     null,
+    'other',
   );
   if (result.outcome === 'failure') endConcentration(context, target, 'concentration_broken');
 }
@@ -2845,6 +2985,53 @@ function processMove(
     spent,
     remaining: movement.remaining,
   });
+  triggerRollDefenseMovementEvents(context, command.actor);
+}
+
+/** Reuses the event-trigger lifecycle: movement materializes a one-boundary flat adjustment. */
+function triggerRollDefenseMovementEvents(
+  context: ReductionContext,
+  mover: CombatantId,
+): void {
+  const triggers = context.state.effects.filter((effect): effect is RollDefenseEffect =>
+    effect.payload.kind === 'roll_defense_modifier' &&
+    effect.targets.includes(mover) &&
+    effect.payload.eventTrigger?.hook === 'effect_target_moves');
+  for (const parent of triggers) {
+    const eventTrigger = parent.payload.eventTrigger;
+    if (eventTrigger === undefined) continue;
+    const childId = applyEffect(context, parent.source, {
+      targets: [mover],
+      duration: {
+        kind: 'turn_boundaries',
+        timing: {
+          combatant: mover,
+          boundary: 'start',
+          source: 'roll_defense_modifier.event_trigger.effect_target_moves',
+        },
+        remaining: eventTrigger.duration.rounds,
+      },
+      concentration: false,
+      stackingIdentity: effectStackingIdentity(`roll-defense-event:${String(parent.id)}:${String(mover)}`),
+      stacking: 'replace_any_source',
+      repeatedSave: null,
+      payload: {
+        kind: 'roll_defense_modifier',
+        scopes: [...parent.payload.scopes],
+        eligibility: { kind: 'effect_targets' },
+        consumption: 'duration',
+        modifier: { kind: 'flat', amount: eventTrigger.flatAdjustment },
+      },
+    });
+    if (parent.concentrationOwner !== null) {
+      context.state = {
+        ...context.state,
+        effects: context.state.effects.map((effect) => effect.id === childId
+          ? { ...effect, concentrationOwner: parent.concentrationOwner }
+          : effect),
+      };
+    }
+  }
 }
 
 function effectBoundaryMatches(
@@ -3240,6 +3427,7 @@ function cloneEffectApplication(
       case 'ability_check_modifier':
       case 'skill_modifier':
       case 'armor_class_modifier':
+      case 'roll_defense_modifier':
       case 'attack_roll_modifier':
       case 'attack_roll_mode_modifier':
       case 'faerie_fire':
@@ -4018,18 +4206,33 @@ function processAttack(
   ) {
     throw new EncounterRuleError('The target has Total Cover or is outside line of sight.');
   }
+  const madeModes = rollDefenseModes(
+    context.state, 'attack_rolls_made', command.actor, command.target, 'other',
+    command.rollModifierEffectIds,
+  );
+  const againstModes = rollDefenseModes(
+    context.state, 'attack_rolls_against', command.target, command.actor, 'other',
+    command.rollModifierEffectIds,
+  );
   let attack = resolveAttackRoll(
     {
       attackBonus:
         command.attackBonus +
         exhaustionPenalty(combatantConditions(context.state, command.actor)) +
-        effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
+        effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng) +
+        rollDefenseTotalModifier(
+          context, 'attack_rolls_made', command.actor, command.target, 'other',
+          command.rollModifierEffectIds,
+        ),
       targetArmorClass: coverAdjustedArmorClass(context.state, command.actor, command.target),
-      rollMode: attackRollMode(context.state, command),
+      rollMode: combineRollModes([
+        attackRollMode(context.state, command), ...madeModes.modes, ...againstModes.modes,
+      ]),
       criticalFloor: command.criticalFloor,
     },
     context.rng,
   );
+  endEffects(context, new Set([...madeModes.consumed, ...againstModes.consumed]), 'trigger_consumed');
   const consumedAdvantage = new Set(
     context.state.effects
       .filter((effect) =>
@@ -4869,6 +5072,7 @@ function resolvedSpellEffectPayload(
     case 'ongoing_damage':
     case 'temporary_banishment':
     case 'armor_class_modifier':
+    case 'roll_defense_modifier':
     case 'hit_point_maximum_modifier':
     case 'attack_roll_modifier':
     case 'saving_throw_modifier':
@@ -5015,7 +5219,16 @@ function effectApplication(
           remaining: durationRounds,
         },
     concentration: durationTier?.concentration ?? data.concentration,
-    stackingIdentity: effectStackingIdentity(`spell:${definition.id}`),
+    stackingIdentity: effectStackingIdentity(data.payload.kind === 'roll_defense_modifier'
+      ? `spell:${definition.id}:roll-defense:${data.payload.scopes.join('+')}:` +
+        `${data.payload.modifier.kind}:` +
+        `${data.payload.modifier.kind === 'roll_mode'
+          ? data.payload.modifier.mode
+          : data.payload.modifier.kind === 'flat'
+            ? String(data.payload.modifier.amount)
+            : `${String(data.payload.modifier.sign)}d${String(data.payload.modifier.sides)}`}:` +
+        `${data.payload.eligibility.kind}`
+      : `spell:${definition.id}`),
     stacking: data.stacking ?? 'replace_same_source',
     repeatedSave: data.repeatedSave === undefined
       ? null
@@ -5162,10 +5375,22 @@ function rollSpellAttack(
   const visibilityMode: RollMode = canCombatantSee(context.state, command.actor, target)
     ? 'normal'
     : 'disadvantage';
+  const madeModes = rollDefenseModes(
+    context.state, 'attack_rolls_made', command.actor, target, 'spell_or_magical_effect',
+    command.rollModifierEffectIds,
+  );
+  const againstModes = rollDefenseModes(
+    context.state, 'attack_rolls_against', target, command.actor, 'spell_or_magical_effect',
+    command.rollModifierEffectIds,
+  );
   const attack = resolveAttackRoll({
-    attackBonus: command.attackBonus + effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
+    attackBonus: command.attackBonus + effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng) +
+      rollDefenseTotalModifier(
+        context, 'attack_rolls_made', command.actor, target, 'spell_or_magical_effect',
+        command.rollModifierEffectIds,
+      ),
     targetArmorClass: coverAdjustedArmorClass(context.state, command.actor, target),
-    rollMode: combineRollModes([visibilityMode, ...rollModeEffects.map((effect) =>
+    rollMode: combineRollModes([visibilityMode, ...madeModes.modes, ...againstModes.modes, ...rollModeEffects.map((effect) =>
       effect.payload.kind === 'faerie_fire'
         ? effect.payload.attackModeAgainstTarget
         : effect.payload.kind === 'attack_roll_mode_modifier' ||
@@ -5174,6 +5399,7 @@ function rollSpellAttack(
           : 'normal')]),
     criticalFloor: 20,
   }, context.rng);
+  endEffects(context, new Set([...madeModes.consumed, ...againstModes.consumed]), 'trigger_consumed');
   endEffects(context, new Set(rollModeEffects.flatMap((effect) =>
     effect.payload.kind === 'attack_roll_mode_modifier' &&
     (effect.payload.appliesTo.kind === 'next_attack_against_target' ||
@@ -5406,8 +5632,11 @@ function resolvePreparedDamageOperation(
   for (const [index, instance] of instances.entries()) {
     const result = resolveTargetDamage(context, source, target, instance.damage);
     const amount = saveSucceeded
-      ? delivery.kind === 'save' && delivery.onSuccess === 'half'
-        ? Math.floor(result.total / 2)
+      ? delivery.kind === 'save'
+        ? successfulSaveDamage(
+            context.state, source, target, result.total, delivery.onSuccess,
+            'spell_or_magical_effect',
+          )
         : 0
       : result.total;
     if (amount > 0) dealtDamage = true;
@@ -6659,6 +6888,27 @@ function executeSpellOperation(
         response: operation.response,
       }, operation.duration), targets);
       return 'applied';
+    case 'roll_defense_modifier': {
+      const payload: Extract<EffectPayload, { readonly kind: 'roll_defense_modifier' }> = {
+        kind: 'roll_defense_modifier',
+        scopes: [...operation.scopes],
+        eligibility: structuredClone(operation.eligibility),
+        consumption: operation.consumption,
+        modifier: structuredClone(operation.modifier),
+        ...(operation.successfulSaveDamage === undefined
+          ? {}
+          : { successfulSaveDamage: operation.successfulSaveDamage }),
+        ...(operation.eventTrigger === undefined
+          ? {}
+          : { eventTrigger: structuredClone(operation.eventTrigger) }),
+      };
+      applySpellEffect(context, definition, command, {
+        ...modifierEffectData(payload, operation.duration),
+        // The combining-magical-effects rule keys on spell identity, not caster identity.
+        stacking: 'replace_any_source',
+      }, targets);
+      return 'applied';
+    }
     case 'targeted_defense_modifier': {
       if (command.modifierSource === undefined) {
         throw new EncounterRuleError(`${definition.name} requires a selected attacker for its targeted defense.`);
@@ -7246,7 +7496,10 @@ function executeSpellOperation(
         const save = resolveTargetSave(context, command.actor, target, operation.saveAbility, command.saveDc, 'normal', null);
         const rawAmount = save.outcome === 'failure'
           ? rolled.total
-          : operation.onSaveSuccess === 'half' ? Math.floor(rolled.total / 2) : 0;
+          : successfulSaveDamage(
+              context.state, command.actor, target, rolled.total, operation.onSaveSuccess,
+              'spell_or_magical_effect',
+            );
         applySpellDamageAmount(
           context, command.actor, target, operation.saveDamageType, operation.saveDice.sides, rawAmount,
         );
@@ -7312,7 +7565,10 @@ function executeSpellOperation(
         const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
         const rawAmount = save.outcome === 'failure'
           ? roll.total
-          : operation.onSuccess === 'half' ? Math.floor(roll.total / 2) : 0;
+          : successfulSaveDamage(
+              context.state, command.actor, target, roll.total, operation.onSuccess,
+              'spell_or_magical_effect',
+            );
         applySpellDamageAmount(context, command.actor, target, operation.damageType, operation.dice.sides, rawAmount);
         if (save.outcome === 'failure' && operation.riderOnFailure !== null) {
           applySpellEffect(context, definition, command, operation.riderOnFailure, [target]);
@@ -7338,7 +7594,10 @@ function executeSpellOperation(
         for (const term of rolled) {
           const amount = save.outcome === 'failure'
             ? term.total
-            : operation.onSuccess === 'half' ? Math.floor(term.total / 2) : 0;
+            : successfulSaveDamage(
+                context.state, command.actor, target, term.total, operation.onSuccess,
+                'spell_or_magical_effect',
+              );
           applySpellDamageAmount(context, command.actor, target, term.type, term.sides, amount);
         }
       }
@@ -7353,7 +7612,12 @@ function executeSpellOperation(
       }, context.rng);
       for (const target of targets) {
         const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
-        const amount = save.outcome === 'failure' ? initial.total : Math.floor(initial.total / 2);
+        const amount = save.outcome === 'failure'
+          ? initial.total
+          : successfulSaveDamage(
+              context.state, command.actor, target, initial.total, 'half',
+              'spell_or_magical_effect',
+            );
         applySpellDamageAmount(context, command.actor, target, operation.damageType, operation.initialDice.sides, amount);
         if (save.outcome === 'failure') {
           applySpellEffect(context, definition, command, {
@@ -7382,7 +7646,10 @@ function executeSpellOperation(
         const save = resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, 'normal', null);
         const amount = save.outcome === 'failure'
           ? rolled.total
-          : operation.onSuccess === 'half' ? Math.floor(rolled.total / 2) : 0;
+          : successfulSaveDamage(
+              context.state, command.actor, target, rolled.total, operation.onSuccess,
+              'spell_or_magical_effect',
+            );
         applySpellDamageAmount(context, command.actor, target, operation.damageType, operation.dice.sides, amount);
       }
       applySpellEffect(context, definition, command, operation.effect, [command.actor]);
@@ -8336,6 +8603,8 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         command.dc,
         command.rollMode,
         null,
+        'other',
+        command.rollModifierEffectIds,
       );
       const damage = resolveTargetDamage(context, command.actor, command.target, command.damage);
       const amount =
@@ -8354,8 +8623,16 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       if (!Number.isFinite(command.bonus)) throw new EncounterRuleError('Ability check bonus must be finite.');
       const modifier = effectDiceModifier(
         context.state, command.actor, 'ability_check', context.rng, command.skill,
+      ) + rollDefenseTotalModifier(
+        context, 'ability_checks', command.actor, null, 'other', command.rollModifierEffectIds,
       );
-      const roll = rollD20(context.rng, abilityCheckRollMode(context.state, command.actor, command.rollMode));
+      const modifierModes = rollDefenseModes(
+        context.state, 'ability_checks', command.actor, null, 'other', command.rollModifierEffectIds,
+      );
+      const roll = rollD20(context.rng, combineRollModes([
+        abilityCheckRollMode(context.state, command.actor, command.rollMode), ...modifierModes.modes,
+      ]));
+      endEffects(context, modifierModes.consumed, 'trigger_consumed');
       const total = roll.chosen + command.bonus +
         exhaustionPenalty(combatantConditions(context.state, command.actor)) +
         modifier;
