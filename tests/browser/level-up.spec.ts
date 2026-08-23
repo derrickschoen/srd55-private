@@ -1007,13 +1007,10 @@ test('W-BROWSER-LU2-ROLLBACK a UI draft refused at its locator restores every da
   await page.locator('[data-level-up-confirm]').click();
 
   const alert = page.getByRole('alert');
-  await expect(alert).toContainText('subchoice_kind: spell');
-  await expect(alert).toContainText('index: 2');
-  await expect(alert).toContainText('issue: locator_not_found');
-  await expect(alert).toContainText(
+  await expect(alert).toHaveText(
     // Spellbook acquisitions are deliberately planned before preparations, so
     // the mutated last subchoice is prepared ordinal 5 rather than book 8.
-    'locator: source=selected_class, rule_key=ui-induced-missing-rule, ordinal=5',
+    'Level-up spell choice 2 was refused (locator_not_found) at selected_class/ui-induced-missing-rule/5.',
   );
   await expect(page.locator('.level-up-route')).toHaveAttribute('aria-busy', 'false');
   expect(await databaseDigest(page)).toBe(before);
@@ -1052,7 +1049,9 @@ test('W-STALE external edit after Preview keeps the draft and requires explicit 
   });
 
   await page.locator('[data-level-up-confirm]').click();
-  await expect(page.getByRole('alert')).toContainText('changed elsewhere');
+  await expect(page.getByRole('alert')).toHaveText(
+    'This character changed from revision 1 to 2. Reload before trying again.',
+  );
   await expect(page.locator('[data-level-up-confirm]')).toHaveCount(0);
   const reload = page.getByRole('button', { name: 'Reload level-up state' });
   await expect(reload).toBeVisible();

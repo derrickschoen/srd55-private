@@ -319,6 +319,7 @@ test('builds Mutt printable sources with complete facts and only the mechanicall
     catalog_layer: 'external',
     level: { status: 'known', value: 1 },
     marker: 'prepared',
+    selection_count: 1,
     reference: {
       edition: '2024',
       school: 'Enchantment',
