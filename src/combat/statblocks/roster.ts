@@ -1,9 +1,9 @@
 import type { ChallengeRating, MonsterStatblock, SourceSpan } from '../statblock';
 import {
-  BANDIT, BANDIT_CAPTAIN, BERSERKER, BLACK_BEAR, BOAR, BROWN_BEAR, BUGBEAR_STALKER, BUGBEAR_WARRIOR,
-  DIRE_WOLF, GHAST, GHOUL, GIANT_SCORPION, GOBLIN_BOSS, GOBLIN_MINION, GOBLIN_WARRIOR, GUARD,
+  ARCHELON, BANDIT, BANDIT_CAPTAIN, BERSERKER, BLACK_BEAR, BLOOD_HAWK, BOAR, BROWN_BEAR, BUGBEAR_STALKER, BUGBEAR_WARRIOR,
+  CAMEL, CROCODILE, DIRE_WOLF, ELEPHANT, GHAST, GHOUL, GIANT_CONSTRICTOR_SNAKE, GIANT_CROCODILE, GIANT_SCORPION, GIANT_SHARK, GIANT_SPIDER, GOBLIN_BOSS, GOBLIN_MINION, GOBLIN_WARRIOR, GUARD,
   HOBGOBLIN_CAPTAIN, HOBGOBLIN_WARRIOR, KNIGHT, LION, MINOTAUR_SKELETON, OGRE, OGRE_ZOMBIE,
-  POLAR_BEAR, PRIEST, PRIEST_ACOLYTE, SABER_TOOTHED_TIGER, SCOUT, SKELETON, SPECTER, SPY, TIGER,
+  KILLER_WHALE, POLAR_BEAR, PRIEST, PRIEST_ACOLYTE, SABER_TOOTHED_TIGER, SCOUT, SKELETON, SPECTER, SPY, TIGER,
   TOUGH, WARHORSE_SKELETON, WIGHT, WOLF, ZOMBIE,
 } from './monsters';
 
@@ -52,14 +52,24 @@ export const STARTER_MONSTER_ROSTER = [
   { id: 'statblock:priest', name: 'Priest', family: 'mercenary_company', challengeRating: 2, source: [{ path: SRD_PATH, lineStart: 20704, lineEnd: 20716 }, { path: SRD_PATH, lineStart: 20742, lineEnd: 20766 }], selectionNote: null, statblock: PRIEST },
   { id: 'statblock:knight', name: 'Knight', family: 'mercenary_company', challengeRating: 3, source: [{ path: SRD_PATH, lineStart: 19755, lineEnd: 19779 }, { path: SRD_PATH, lineStart: 19802, lineEnd: 19809 }], selectionNote: null, statblock: KNIGHT },
 
+  { id: 'statblock:blood-hawk', name: 'Blood Hawk', family: 'wild_beasts', challengeRating: '1/8', source: [{ path: SRD_PATH, lineStart: 22750, lineEnd: 22780 }], selectionNote: null, statblock: BLOOD_HAWK },
+  { id: 'statblock:camel', name: 'Camel', family: 'wild_beasts', challengeRating: '1/8', source: [{ path: SRD_PATH, lineStart: 22775, lineEnd: 22793 }], selectionNote: null, statblock: CAMEL },
   { id: 'statblock:boar', name: 'Boar', family: 'wild_beasts', challengeRating: '1/4', source: [{ path: SRD_PATH, lineStart: 22782, lineEnd: 22809 }], selectionNote: null, statblock: BOAR },
   { id: 'statblock:wolf', name: 'Wolf', family: 'wild_beasts', challengeRating: '1/4', source: [{ path: SRD_PATH, lineStart: 24033, lineEnd: 24059 }], selectionNote: null, statblock: WOLF },
   { id: 'statblock:black-bear', name: 'Black Bear', family: 'wild_beasts', challengeRating: '1/2', source: [{ path: SRD_PATH, lineStart: 22727, lineEnd: 22748 }], selectionNote: null, statblock: BLACK_BEAR },
+  { id: 'statblock:crocodile', name: 'Crocodile', family: 'wild_beasts', challengeRating: '1/2', source: [{ path: SRD_PATH, lineStart: 22872, lineEnd: 22899 }], selectionNote: null, statblock: CROCODILE },
   { id: 'statblock:brown-bear', name: 'Brown Bear', family: 'wild_beasts', challengeRating: 1, source: [{ path: SRD_PATH, lineStart: 22768, lineEnd: 22771 }, { path: SRD_PATH, lineStart: 22811, lineEnd: 22833 }], selectionNote: null, statblock: BROWN_BEAR },
   { id: 'statblock:dire-wolf', name: 'Dire Wolf', family: 'wild_beasts', challengeRating: 1, source: [{ path: SRD_PATH, lineStart: 22865, lineEnd: 22891 }], selectionNote: null, statblock: DIRE_WOLF },
   { id: 'statblock:lion', name: 'Lion', family: 'wild_beasts', challengeRating: 1, source: [{ path: SRD_PATH, lineStart: 23518, lineEnd: 23556 }], selectionNote: null, statblock: LION },
   { id: 'statblock:tiger', name: 'Tiger', family: 'wild_beasts', challengeRating: 1, source: [{ path: SRD_PATH, lineStart: 23968, lineEnd: 23994 }], selectionNote: null, statblock: TIGER },
+  { id: 'statblock:giant-spider', name: 'Giant Spider', family: 'wild_beasts', challengeRating: 1, source: [{ path: SRD_PATH, lineStart: 23313, lineEnd: 23350 }], selectionNote: null, statblock: GIANT_SPIDER },
   { id: 'statblock:polar-bear', name: 'Polar Bear', family: 'wild_beasts', challengeRating: 2, source: [{ path: SRD_PATH, lineStart: 23676, lineEnd: 23696 }], selectionNote: null, statblock: POLAR_BEAR },
   { id: 'statblock:saber-toothed-tiger', name: 'Saber-Toothed Tiger', family: 'wild_beasts', challengeRating: 2, source: [{ path: SRD_PATH, lineStart: 23754, lineEnd: 23787 }], selectionNote: null, statblock: SABER_TOOTHED_TIGER },
+  { id: 'statblock:giant-constrictor-snake', name: 'Giant Constrictor Snake', family: 'wild_beasts', challengeRating: 2, source: [{ path: SRD_PATH, lineStart: 23066, lineEnd: 23094 }], selectionNote: null, statblock: GIANT_CONSTRICTOR_SNAKE },
   { id: 'statblock:giant-scorpion', name: 'Giant Scorpion', family: 'wild_beasts', challengeRating: 3, source: [{ path: SRD_PATH, lineStart: 23287, lineEnd: 23312 }], selectionNote: null, statblock: GIANT_SCORPION },
+  { id: 'statblock:killer-whale', name: 'Killer Whale', family: 'wild_beasts', challengeRating: 3, source: [{ path: SRD_PATH, lineStart: 23491, lineEnd: 23515 }], selectionNote: null, statblock: KILLER_WHALE },
+  { id: 'statblock:archelon', name: 'Archelon', family: 'wild_beasts', challengeRating: 4, source: [{ path: SRD_PATH, lineStart: 22686, lineEnd: 22720 }], selectionNote: null, statblock: ARCHELON },
+  { id: 'statblock:elephant', name: 'Elephant', family: 'wild_beasts', challengeRating: 4, source: [{ path: SRD_PATH, lineStart: 22948, lineEnd: 22978 }], selectionNote: null, statblock: ELEPHANT },
+  { id: 'statblock:giant-crocodile', name: 'Giant Crocodile', family: 'wild_beasts', challengeRating: 5, source: [{ path: SRD_PATH, lineStart: 23060, lineEnd: 23094 }], selectionNote: null, statblock: GIANT_CROCODILE },
+  { id: 'statblock:giant-shark', name: 'Giant Shark', family: 'wild_beasts', challengeRating: 5, source: [{ path: SRD_PATH, lineStart: 23285, lineEnd: 23310 }], selectionNote: null, statblock: GIANT_SHARK },
 ] as const satisfies readonly StarterMonsterRosterRow[];

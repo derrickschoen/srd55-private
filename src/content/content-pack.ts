@@ -14,7 +14,7 @@ import {
   type SpellDefinition,
   type SpellOperation,
 } from '../combat/spells/types';
-import { STARTER_MONSTER_ROSTER } from '../combat/statblocks/roster';
+import { BUNDLED_MONSTER_REGISTRY } from '../combat/statblocks/companions';
 import {
   damageType,
   dieSides,
@@ -683,7 +683,7 @@ function loadMonster(monster: ContentPackV1['monsters'][number]): LoadedContentM
 function srdIds(): ReadonlySet<string> {
   return new Set([
     ...SPELL_MANIFEST.map((spell) => `srd:${spell.id}`),
-    ...STARTER_MONSTER_ROSTER.map((monster) => `srd:${monster.id.slice('statblock:'.length)}`),
+    ...BUNDLED_MONSTER_REGISTRY.map((monster) => `srd:${monster.id.slice('statblock:'.length)}`),
   ]);
 }
 

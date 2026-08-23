@@ -23,7 +23,7 @@ import {
   type StatblockId,
 } from './values';
 
-export type ChallengeRating = '1/8' | '1/4' | '1/2' | 1 | 2 | 3;
+export type ChallengeRating = '1/8' | '1/4' | '1/2' | 1 | 2 | 3 | 4 | 5;
 export type MovementKind = 'walk' | 'burrow' | 'climb' | 'fly' | 'swim';
 export type SenseKind = 'blindsight' | 'darkvision' | 'tremorsense' | 'truesight';
 export type CombatSense =
@@ -80,14 +80,15 @@ export interface MonsterClassification {
 }
 
 export interface MonsterChallenge {
-  readonly rating: ChallengeRating;
-  readonly experiencePoints: 25 | 50 | 100 | 200 | 450 | 700;
-  readonly proficiencyBonus: 2;
+  readonly rating: ChallengeRating | 'none';
+  readonly experiencePoints: 0 | 25 | 50 | 100 | 200 | 450 | 700 | 1_100 | 1_800;
+  readonly proficiencyBonus: 2 | 3 | 'caster';
 }
 
 export type MonsterDamageTrigger =
   | { readonly kind: 'always' }
   | { readonly kind: 'attack_roll_advantage' }
+  | { readonly kind: 'replaces_base_when_target_bloodied' }
   | { readonly kind: 'charge'; readonly minimumStraightFeet: number; readonly maximumTargetSize: CreatureSize };
 
 export interface MonsterDamageTerm {
@@ -110,7 +111,7 @@ export interface MonsterAttackAction {
   readonly delivery: MonsterAttackDelivery;
   readonly damage: readonly MonsterDamageTerm[];
   readonly attackRollAdvantage: null | {
-    readonly kind: 'target_grappled_by_attacker';
+    readonly kind: 'target_grappled_by_attacker' | 'target_not_full_hit_points';
   };
   readonly onHit: readonly MonsterOnHitEffect[];
 }
@@ -127,13 +128,14 @@ export interface MonsterEffectTarget {
 
 export type MonsterEffectDuration =
   | 'until_escape'
+  | 'until_end_of_monster_next_turn'
   | 'until_end_of_target_next_turn'
   | 'until_start_of_monster_next_turn';
 
 export type MonsterOnHitEffect =
   | {
     readonly kind: 'condition';
-    readonly condition: 'Frightened' | 'Grappled' | 'Paralyzed' | 'Prone';
+    readonly condition: 'Frightened' | 'Grappled' | 'Paralyzed' | 'Poisoned' | 'Prone' | 'Restrained';
     readonly trigger: MonsterDamageTrigger;
     readonly target: MonsterEffectTarget;
     readonly savingThrow: MonsterSavingThrow | null;
@@ -141,6 +143,7 @@ export type MonsterOnHitEffect =
     readonly duration: MonsterEffectDuration | null;
   }
   | { readonly kind: 'hit_point_maximum_reduction'; readonly amount: 'damage_taken' }
+  | { readonly kind: 'speed_reduction'; readonly feet: 0; readonly duration: 'until_start_of_monster_next_turn' }
   | { readonly kind: 'raises_as_zombie'; readonly targetKind: 'Humanoid'; readonly delayHours: 24; readonly controllerLimit: 12; readonly preventedBy: readonly ['restored_to_life', 'body_destroyed'] };
 
 export interface MonsterMultiattackAction {
@@ -161,7 +164,7 @@ export interface MonsterSavingThrowAction {
     readonly damage: readonly MonsterDamageTerm[];
     readonly effects: readonly MonsterOnHitEffect[];
   };
-  readonly success: { readonly kind: 'none' };
+  readonly success: { readonly kind: 'none' } | { readonly kind: 'half_damage' };
 }
 
 export interface MonsterSpellReference {
@@ -192,11 +195,19 @@ export type MonsterTrait =
   | { readonly kind: 'incorporeal_movement'; readonly difficultTerrain: true; readonly endingInObjectDamage: MonsterDamageTerm }
   | { readonly kind: 'running_leap'; readonly runningStartFeet: number; readonly longJumpFeet: number }
   | { readonly kind: 'stench'; readonly emanationFeet: number; readonly savingThrow: MonsterSavingThrow; readonly condition: 'Poisoned'; readonly duration: 'until_start_of_monster_next_turn'; readonly successImmunityHours: 24 }
-  | { readonly kind: 'sunlight_sensitivity'; readonly disadvantageOn: readonly ['ability_checks', 'attack_rolls'] };
+  | { readonly kind: 'sunlight_sensitivity'; readonly disadvantageOn: readonly ['ability_checks', 'attack_rolls'] }
+  | { readonly kind: 'amphibious' }
+  | { readonly kind: 'hold_breath'; readonly minutes: number }
+  | { readonly kind: 'water_breathing'; readonly onlyUnderwater: true }
+  | { readonly kind: 'spider_climb' }
+  | { readonly kind: 'web_walker' }
+  | { readonly kind: 'life_bond'; readonly rangeFeet: 5; readonly spellMinimumLevel: 1 };
 
 export type MonsterBonusAction =
   | { readonly kind: 'nimble_escape'; readonly actions: readonly ['Disengage', 'Hide'] }
   | { readonly kind: 'cunning_action'; readonly actions: readonly ['Dash', 'Disengage', 'Hide'] }
+  | { readonly kind: 'teleport'; readonly distanceFeet: number; readonly includesRider: true }
+  | { readonly kind: 'healing'; readonly rangeFeet: number; readonly average: number; readonly dice: MonsterDice }
   | MonsterSavingThrowAction
   | MonsterSpellcastingAction;
 
@@ -221,7 +232,7 @@ export interface MonsterSourceDetailsInput {
   readonly source: readonly SourceSpan[];
   readonly classification: MonsterClassification;
   readonly challenge: MonsterChallenge;
-  readonly hitPointDice: MonsterDice;
+  readonly hitPointDice: MonsterDice | DecodedField<MonsterDice>;
   readonly movement: readonly MonsterMovementSpeed[];
   readonly abilities: Readonly<Record<Ability, MonsterAbilityLine>>;
   readonly skills: DecodedField<readonly MonsterSkill[]>;
@@ -262,6 +273,8 @@ export interface MonsterStatblockInput {
   readonly name: string;
   readonly armorClass: number;
   readonly hitPointMaximum: number;
+  /** Summoned blocks can list Hit Dice while defining maximum HP by a separate spell-level formula. */
+  readonly hitPointMaximumIsFormula?: true;
   readonly speedFeet: number;
   readonly initiativeBonus: number;
   readonly savingThrowBonuses: Readonly<Record<Ability, number>>;
@@ -361,6 +374,7 @@ function validateEffect(effect: MonsterOnHitEffect, label: string): MonsterOnHit
       if (effect.escapeDc !== null) positiveInteger(effect.escapeDc, `${label} escape DC`);
       return effect;
     case 'hit_point_maximum_reduction':
+    case 'speed_reduction':
       return effect;
     case 'raises_as_zombie':
       return effect;
@@ -417,6 +431,14 @@ function validateAction<T extends MonsterAction | MonsterBonusAction>(action: T)
       return action;
     case 'cunning_action':
       return action;
+    case 'teleport':
+      positiveInteger(action.distanceFeet, 'Teleport distance');
+      return action;
+    case 'healing':
+      positiveInteger(action.rangeFeet, 'Healing range');
+      nonNegativeInteger(action.average, 'Healing average');
+      validateDice(action.dice, 'Healing');
+      return action;
   }
 }
 
@@ -440,12 +462,20 @@ function validateSourceDetails(input: MonsterSourceDetailsInput | undefined, spe
   creatureType(input.classification.type);
   nonEmptyText(input.classification.alignment, 'Alignment');
   const experienceByChallenge: Readonly<Record<ChallengeRating, MonsterChallenge['experiencePoints']>> = {
-    '1/8': 25, '1/4': 50, '1/2': 100, 1: 200, 2: 450, 3: 700,
+    '1/8': 25, '1/4': 50, '1/2': 100, 1: 200, 2: 450, 3: 700, 4: 1_100, 5: 1_800,
   };
-  if (input.challenge.experiencePoints !== experienceByChallenge[input.challenge.rating]) {
+  if (input.challenge.rating === 'none') {
+    if (input.challenge.experiencePoints !== 0 || input.challenge.proficiencyBonus !== 'caster') {
+      throw new RangeError('Unrated summoned monsters must use XP 0 and the caster proficiency bonus.');
+    }
+  } else if (input.challenge.experiencePoints !== experienceByChallenge[input.challenge.rating]) {
     throw new RangeError('Monster XP must match its Challenge Rating.');
+  } else if (input.challenge.proficiencyBonus !== (input.challenge.rating === 5 ? 3 : 2)) {
+    throw new RangeError('Monster proficiency bonus must match its Challenge Rating.');
   }
-  validateDice(input.hitPointDice, 'Hit Point dice');
+  const decodedHitPointDice = 'kind' in input.hitPointDice
+    ? validateDecoded(input.hitPointDice, 'Hit Point dice', (dice) => validateDice(dice, 'Hit Point dice'))
+    : present(validateDice(input.hitPointDice, 'Hit Point dice'));
   const walk = input.movement.find(({ kind }) => kind === 'walk');
   if (walk === undefined || walk.feet !== speedFeet) throw new RangeError('Detailed walking speed must match combat walking speed.');
   input.movement.forEach((movement) => nonNegativeInteger(movement.feet, `${movement.kind} speed`));
@@ -468,7 +498,7 @@ function validateSourceDetails(input: MonsterSourceDetailsInput | undefined, spe
     : present(input.conditionImmunities.value.map(conditionType));
   return {
     source: present(input.source), classification: present(input.classification), challenge: present(input.challenge),
-    hitPointDice: present(input.hitPointDice), movement: present(input.movement), abilities: present(input.abilities),
+    hitPointDice: decodedHitPointDice, movement: present(input.movement), abilities: present(input.abilities),
     skills: validateDecoded(input.skills, 'Skills', (skills) => skills.map((skill) => ({ name: nonEmptyText(skill.name, 'Skill name'), bonus: finiteInteger(skill.bonus, `${skill.name} bonus`) }))),
     gear: validateDecoded(input.gear, 'Gear', (gear) => gear.map((item) => nonEmptyText(item, 'Gear item'))),
     senses: validateDecoded(input.senses, 'Senses', (senses) => senses.map((sense) => ({ ...sense, rangeFeet: positiveInteger(sense.rangeFeet, `${sense.kind} range`) }))),
@@ -520,7 +550,7 @@ export function monsterStatblock(input: MonsterStatblockInput): MonsterStatblock
   if (new Set(senses.map(({ kind }) => kind)).size !== senses.length) {
     throw new RangeError('Combat senses must use unique kinds.');
   }
-  if (sourceDetails.hitPointDice.kind === 'present') {
+  if (sourceDetails.hitPointDice.kind === 'present' && input.hitPointMaximumIsFormula !== true) {
     const dice = sourceDetails.hitPointDice.value;
     const sourcedAverage = Math.floor(dice.count * (dice.sides + 1) / 2) + dice.modifier;
     if (sourcedAverage !== hitPointMaximum) throw new RangeError('Hit Point dice must produce the listed average.');
