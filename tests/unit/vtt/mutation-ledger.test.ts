@@ -44,6 +44,7 @@ const CHOICE_BRANCH_LEDGER_PATH = 'docs/audits/2026-08-22-choice-branch-mutation
 const CONDITION_LIFECYCLE_LEDGER_PATH = 'docs/audits/2026-08-22-condition-lifecycle-mutation-ledger.md';
 const ROLL_DEFENSE_LEDGER_PATH = 'docs/audits/2026-08-22-roll-defense-mutation-ledger.md';
 const PAIRWISE_COMPOSITION_LEDGER_PATH = 'docs/audits/2026-08-22-pairwise-composition-mutation-ledger.md';
+const NESTED_COMPOSITION_LEDGER_PATH = 'docs/audits/2026-08-23-nested-composition-mutation-ledger.md';
 const SHARED_OUTCOME_LEDGER_PATH = 'docs/audits/2026-08-23-shared-outcome-mutation-ledger.md';
 const BOARD_LEDGER_PATH = 'docs/audits/2026-08-23-board-mutation-ledger.md';
 const SEQUENCING_LEDGER_PATH = 'docs/audits/2026-08-22-sequencing-mutation-ledger.md';
@@ -621,7 +622,6 @@ describe('phase-2 mutation ledger manifest', () => {
       'save_success_treated_as_refusal: successful initial save is applied and preserves prior damage under abort',
       'abort_leaks_rng: an aborted rolled pair restores the seeded stream before every subsequent draw',
       'outcome_inferred_from_delta: no_op and refused remain observably distinct while continue reaches slot two',
-      'nested_composition_accepted: imported nesting has a typed refusal before schema parsing',
       'refusal_propagation_ignored: the same refused second slot atomically aborts or continues according to the pack',
       'composition_order_ignored and state_not_visible_between_steps: opposite orders deal six versus three damage',
       'targets_not_reresolved: inherited and caster selectors damage observably different target sets',
@@ -635,6 +635,33 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(12);
     expect(ledger).toContain('Every production mutation below was applied alone');
     expect(ledger).toContain('Tests  46 passed (46)');
+  });
+
+  it('D347-NESTED-COMPOSITION-MUTATION-LEDGER pins depth, scoped rollback, RNG, outcome, and branch controls', () => {
+    const ledger = readFileSync(NESTED_COMPOSITION_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/composition.test.ts', 'utf8');
+    const mutations = [
+      'depth_limit_off_by_one',
+      'depth_limit_rejects_exact_maximum',
+      'subtree_abort_escapes',
+      'nested_rng_leak',
+      'outcome_not_propagated',
+      'shared_outcome_nesting_accepted',
+    ];
+    const killingTests = [
+      'depth_limit_off_by_one: depth four loads and depth five has a typed import refusal',
+      'subtree_abort_escapes, nested_rng_leak, and outcome_not_propagated: depth-three abort is subtree-scoped under continue and whole-tree-scoped under abort',
+      'shared_outcome_nesting_accepted: shared outcome is a composition step but composition remains refused inside its branch',
+    ];
+    for (const mutation of mutations) expect(ledger).toContain(`\`${mutation}\``);
+    for (const testName of killingTests) {
+      expect(ledger).toContain(`\`${testName}\``);
+      expect(tests).toContain(testName);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(6);
+    expect(ledger).toContain('Every production mutation below was applied alone');
+    expect(ledger).toContain('Tests  50 passed (50)');
+    expect(ledger).toContain('All six mutations were restored.');
   });
 
   it('SHARED-OUTCOME-MUTATION-LEDGER pins synchronized branches and both numeric boundaries', () => {

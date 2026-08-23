@@ -4778,6 +4778,11 @@ function combinedSpellOperationOutcome(outcomes: readonly SpellOperationOutcome[
   return outcomes.includes('applied') ? 'applied' : 'no_op';
 }
 
+function continuedCompositionOutcome(outcomes: readonly SpellOperationOutcome[]): SpellOperationOutcome {
+  if (outcomes.includes('applied')) return 'applied';
+  return outcomes.includes('refused') ? 'refused' : 'no_op';
+}
+
 function compositionTargets(
   context: ReductionContext,
   definition: SpellDefinition,
@@ -4990,7 +4995,9 @@ function executeSpellOperation(
         });
         if (operation.onRefusal === 'abort') return 'refused';
       }
-      return combinedSpellOperationOutcome(outcomes);
+      return operation.onRefusal === 'continue'
+        ? continuedCompositionOutcome(outcomes)
+        : combinedSpellOperationOutcome(outcomes);
     }
     case 'shared_outcome':
       return executeSharedOutcome(context, definition, command, targets, operation);

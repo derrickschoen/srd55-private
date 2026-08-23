@@ -8,6 +8,7 @@ import type { MonsterAction, MonsterStatblock, MonsterStatblockInput, SenseKind 
 import { monsterStatblock } from '../combat/statblock';
 import { SPELL_MANIFEST } from '../combat/spells/manifest';
 import {
+  MAX_COMPOSITION_DEPTH,
   SPELL_OPERATION_KINDS,
   type SpellDefinition,
   type SpellOperation,
@@ -423,7 +424,11 @@ export type ContentPackRecordDiagnostic = {
 } & (
   | { readonly reason: 'malformed_record' }
   | { readonly reason: 'unknown_operation_kind'; readonly unknownOperationKind: string }
-  | { readonly reason: 'nested_composition' }
+  | {
+      readonly reason: 'composition_depth_exceeded';
+      readonly depthFound: number;
+      readonly maximumDepth: typeof MAX_COMPOSITION_DEPTH;
+    }
   | { readonly reason: 'unknown_effect_variant'; readonly effectKind: string }
   | { readonly reason: 'undeclared_namespace'; readonly namespace: string }
   | { readonly reason: 'missing_feature_reference'; readonly featureId: string }
@@ -434,7 +439,12 @@ export type ContentPackRefusal =
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'version_mismatch'; readonly receivedVersion: unknown }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'missing_provenance' }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'unknown_operation_kind'; readonly operationKind: string }
-  | { readonly kind: 'content_pack_refusal'; readonly reason: 'nested_composition' }
+  | {
+      readonly kind: 'content_pack_refusal';
+      readonly reason: 'composition_depth_exceeded';
+      readonly depthFound: number;
+      readonly maximumDepth: typeof MAX_COMPOSITION_DEPTH;
+    }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'unknown_effect_variant'; readonly effectKind: string }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'malformed_record'; readonly path: readonly PropertyKey[] }
   | { readonly kind: 'content_pack_refusal'; readonly reason: 'id_collision'; readonly id: string };
@@ -634,21 +644,15 @@ function firstUnknownOperation(value: Readonly<Record<string, unknown>>): string
   return null;
 }
 
-function hasNestedComposition(value: Readonly<Record<string, unknown>>): boolean {
-  if (!Array.isArray(value.spells)) return false;
-  const pending: Array<{ readonly value: unknown; readonly root: boolean }> = value.spells.flatMap((spellValue) => {
-    const spell = objectRecord(spellValue);
-    return spell === null ? [] : [{ value: spell.operation, root: true }];
-  });
-  while (pending.length > 0) {
-    const frame = pending.pop();
-    if (frame === undefined) break;
-    const operation = objectRecord(frame.value);
-    if (operation === null) continue;
-    if (!frame.root && operation.kind === 'composition') return true;
-    for (const nested of nestedOperationValues(operation)) pending.push({ value: nested, root: false });
+function compositionDepth(value: unknown): number {
+  const operation = objectRecord(value);
+  if (operation?.kind !== 'composition' || !Array.isArray(operation.steps)) return 0;
+  let deepestChild = 0;
+  for (const stepValue of operation.steps) {
+    const step = objectRecord(stepValue);
+    deepestChild = Math.max(deepestChild, compositionDepth(step?.operation));
   }
-  return false;
+  return 1 + deepestChild;
 }
 
 function firstUnknownEffect(value: Readonly<Record<string, unknown>>): string | null {
@@ -748,10 +752,12 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
       });
       continue;
     }
-    if (hasNestedComposition(diagnosticRoot)) {
+    const depthFound = compositionDepth(operation);
+    if (depthFound > MAX_COMPOSITION_DEPTH) {
       diagnostics.push({
-        kind: 'content_pack_record_rejection', reason: 'nested_composition',
+        kind: 'content_pack_record_rejection', reason: 'composition_depth_exceeded',
         surface: 'spells', index, recordId: rawRecordId(record),
+        depthFound, maximumDepth: MAX_COMPOSITION_DEPTH,
         ...(kind === null ? {} : { operationKind: kind }),
         path: ['spells', index, 'operation'],
       });
