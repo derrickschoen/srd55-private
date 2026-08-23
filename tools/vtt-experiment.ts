@@ -39,7 +39,10 @@ import {
   type RoundPlanRequest,
 } from '../src/vtt/dm-bridge/contracts';
 import { DmRoundPlanController, DmRoundPlanSession } from '../src/vtt/dm-bridge/decision-program';
-import { generateTurnProgramDeclarations } from '../src/vtt/dm-bridge/turn-program-types';
+import {
+  checkTurnProgramTypes,
+  generateTurnProgramDeclarations,
+} from '../src/vtt/dm-bridge/turn-program-types';
 import { projectDmBoard } from '../src/vtt/encounter-projections';
 import {
   aggregateExperimentRecords,
@@ -1091,6 +1094,7 @@ class RecordingExperimentExchange implements DmBridgeExchange {
       try {
         decoded = decodeRoundPlanReply(reply, wire, {
           typeCheckMode,
+          typeChecker: checkTurnProgramTypes,
           onTypeCheckUniqueCatch: (observation) => typeCheckUniqueCatchObservations.push({
             ...observation,
             diagnosticCodes: [...observation.diagnosticCodes],
@@ -1454,6 +1458,7 @@ export async function runE01Table(
       isJsProgramExperiment(entry.experimentId)
         ? {
             typeCheckMode: e05ArmDefinition(entry.experimentId, entry.armId).typeCheckMode,
+            typeChecker: checkTurnProgramTypes,
             onTypeCheckTelemetry: (typeCheck) => recordingExchange.recordTypeCheckResult(typeCheck.passed),
           }
         : {},
