@@ -45,6 +45,7 @@ const CONDITION_LIFECYCLE_LEDGER_PATH = 'docs/audits/2026-08-22-condition-lifecy
 const ROLL_DEFENSE_LEDGER_PATH = 'docs/audits/2026-08-22-roll-defense-mutation-ledger.md';
 const PAIRWISE_COMPOSITION_LEDGER_PATH = 'docs/audits/2026-08-22-pairwise-composition-mutation-ledger.md';
 const SHARED_OUTCOME_LEDGER_PATH = 'docs/audits/2026-08-23-shared-outcome-mutation-ledger.md';
+const BOARD_LEDGER_PATH = 'docs/audits/2026-08-23-board-mutation-ledger.md';
 const SEQUENCING_LEDGER_PATH = 'docs/audits/2026-08-22-sequencing-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
@@ -62,6 +63,23 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D344.3-BOARD-MUTATION-LEDGER pins all required controls and both boundary kills to restored named tests', () => {
+    const boardLedger = readFileSync(BOARD_LEDGER_PATH, 'utf8');
+    const boardTests = readFileSync('tests/unit/vtt/encounter-board-projection.test.ts', 'utf8');
+    for (const name of [
+      'corpse_token_removed',
+      'branch_events_collapsed',
+      'light_radius_unlabeled',
+      'boundary_corpse_edge_included',
+      'boundary_light_radius_clipped',
+    ]) {
+      expect(boardLedger).toContain(`\`${name}\``);
+      expect(boardTests).toContain(`${name}:`);
+    }
+    expect(boardLedger.match(/exit 1/gu)).toHaveLength(5);
+    expect(boardLedger).toContain('All five mutations were restored.');
+  });
+
   it('WAVE-ONE-MUTATION-LEDGER pins all five restored controls to their named killing tests', () => {
     const waveOne = readFileSync(WAVE_ONE_LEDGER_PATH, 'utf8');
     const controls = [

@@ -34,8 +34,10 @@ export type ProjectionTransfer =
       readonly stateHash: string;
       readonly view: {
         readonly encounter: DmBoardProjection['encounter'];
+        readonly board: DmBoardProjection['board'];
         readonly coordinator: Omit<DmBoardProjection['coordinator'], 'pendingRequest'>;
         readonly pendingRequest: DmBoardProjection['pendingRequest'];
+        readonly humanCommandActions: DmBoardProjection['humanCommandActions'];
         readonly controllers: DmBoardProjection['controllers'];
         readonly adjudicatedTargets: DmBoardProjection['adjudicatedTargets'];
       };
@@ -163,8 +165,10 @@ export class ProjectionTransferSender {
       stateHash: projectionHash(request.projection),
       view: {
         encounter: structuredClone(projection.encounter),
+        board: structuredClone(projection.board),
         coordinator: structuredClone(coordinator),
         pendingRequest: structuredClone(projection.pendingRequest),
+        humanCommandActions: structuredClone(projection.humanCommandActions),
         controllers: structuredClone(projection.controllers),
         adjudicatedTargets: structuredClone(projection.adjudicatedTargets),
       },
@@ -198,11 +202,13 @@ export class ProjectionTransferReceiver {
       projection = {
         audience: 'dm',
         encounter: structuredClone(transfer.view.encounter),
+        board: structuredClone(transfer.view.board),
         coordinator: {
           ...structuredClone(transfer.view.coordinator),
           pendingRequest: structuredClone(transfer.view.pendingRequest),
         },
         pendingRequest: structuredClone(transfer.view.pendingRequest),
+        humanCommandActions: structuredClone(transfer.view.humanCommandActions),
         controllers: structuredClone(transfer.view.controllers),
         history: structuredClone(request.history),
         adjudicatedTargets: structuredClone(transfer.view.adjudicatedTargets),

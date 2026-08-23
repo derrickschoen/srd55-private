@@ -128,6 +128,46 @@ function renderBoard(
       image.dataset.assetId = layer.assetId;
       cell.append(image);
     }
+    for (const light of model.lightOverlays) {
+      const overlay = element('div', { className: `encounter-light encounter-light-${light.level}` });
+      overlay.dataset.lightId = light.overlay.id;
+      overlay.dataset.presentation = light.overlay.presentation;
+      overlay.setAttribute('aria-label', light.overlay.label);
+      if (
+        model.column === light.overlay.origin.column &&
+        model.row === light.overlay.origin.row
+      ) {
+        overlay.append(element('span', { className: 'encounter-light-label', text: light.overlay.label }));
+      }
+      cell.append(overlay);
+    }
+    for (const area of model.areas) {
+      const overlay = element('div', { className: `encounter-area encounter-area-${area.kind}` });
+      overlay.dataset.areaId = area.id;
+      overlay.dataset.ownerId = area.owner;
+      overlay.dataset.shape = area.shape.kind;
+      overlay.title = `${area.kind === 'persistent' ? 'Persistent area' : 'Movement region'} — owner: ${area.ownerName}`;
+      cell.append(overlay);
+    }
+    for (const object of model.worldObjects) {
+      const placed = element('div', { className: 'encounter-world-object' });
+      placed.dataset.objectId = object.id;
+      placed.dataset.kind = object.kind;
+      placed.dataset.blocksMovement = String(object.blocking.movement);
+      placed.dataset.blocksLineOfSight = String(object.blocking.lineOfSight);
+      placed.dataset.cover = object.blocking.cover;
+      placed.dataset.lightClass = object.lightClass;
+      if (
+        model.column === object.position.column &&
+        model.row === object.position.row
+      ) {
+        placed.append(element('span', {
+          className: 'encounter-world-object-label',
+          text: `${object.name} — movement ${object.blocking.movement ? 'blocked' : 'open'}; sight ${object.blocking.lineOfSight ? 'blocked' : 'open'}; cover ${object.blocking.cover}`,
+        }));
+      }
+      cell.append(placed);
+    }
     if (model.token !== null) {
       const token = element('div', { className: 'encounter-token' });
       token.dataset.combatantId = model.token.id;
@@ -135,6 +175,8 @@ function renderBoard(
       token.dataset.adjudicated = String(model.token.adjudicatedAssetId !== null);
       token.dataset.kind = model.token.kind;
       token.dataset.assetId = model.token.assetId;
+      token.dataset.life = model.token.life;
+      token.dataset.marker = model.token.marker;
       const sprite = element('img', { className: 'encounter-token-sprite' });
       sprite.alt = '';
       sprite.setAttribute('aria-hidden', 'true');
@@ -153,9 +195,46 @@ function renderBoard(
         token.append(overlay);
       }
       token.append(element('span', { className: 'encounter-token-label', text: model.token.name }));
+      for (const effect of projection.sustainedEffects ?? []) {
+        if (effect.owner !== model.token.id) continue;
+        const badge = element('span', { className: 'encounter-sustained-badge', text: effect.badge });
+        badge.dataset.effectId = effect.effectId;
+        badge.dataset.binding = effect.targetBinding;
+        badge.dataset.activationAvailable = String(effect.activationAvailable);
+        token.append(badge);
+      }
       cell.append(token);
     }
+    for (const extra of model.tokens.slice(1)) {
+      const marker = element('div', { className: 'encounter-token encounter-token-stacked' });
+      marker.dataset.combatantId = extra.id;
+      marker.dataset.life = extra.life;
+      marker.dataset.marker = extra.marker;
+      marker.append(element('span', {
+        className: 'encounter-token-label',
+        text: extra.marker === 'corpse' ? `† ${extra.name}` : extra.name,
+      }));
+      cell.append(marker);
+    }
     board.append(cell);
+  }
+  const lines = projection.targetLines ?? [];
+  if (lines.length > 0) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.classList.add('encounter-target-lines');
+    svg.setAttribute('viewBox', `0 0 ${String(projection.bounds.columns)} ${String(projection.bounds.rows)}`);
+    svg.setAttribute('aria-label', 'Bound sustained-effect targets');
+    for (const connection of lines) {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', String(connection.from.column + 0.5));
+      line.setAttribute('y1', String(connection.from.row + 0.5));
+      line.setAttribute('x2', String(connection.to.column + 0.5));
+      line.setAttribute('y2', String(connection.to.row + 0.5));
+      line.dataset.effectId = connection.effectId;
+      line.dataset.targetId = connection.target;
+      svg.append(line);
+    }
+    board.append(svg);
   }
   return board;
 }
@@ -512,14 +591,24 @@ class DmEncounterView {
     controls.append(interrupt, resume, undo);
     this.#shell.append(controls);
 
-    const playerShape = {
-      bounds: projection.encounter.bounds,
-      combatants: projection.encounter.combatants,
-      highlightedCombatant: projection.encounter.activeCombatant,
-      adjudicatedTargets: projection.adjudicatedTargets,
-      foggedCells: projection.encounter.dmOnly.foggedCells,
-    };
-    this.#shell.append(renderBoard(playerShape));
+    const projectedFog = projection.encounter.dmOnly.foggedCells;
+    if (canonicalJson(projectedFog) !== canonicalJson(projection.board.foggedCells)) {
+      throw new Error('DM board fog diverged from the encounter projection.');
+    }
+    this.#shell.append(renderBoard(projection.board));
+
+    const initiative = element('section', { className: 'dm-initiative' });
+    initiative.append(element('h2', { text: `Initiative — round ${String(projection.board.round)}` }));
+    const initiativeList = element('ol');
+    for (const entry of projection.board.initiative) {
+      const item = element('li', { text: `${entry.name}: ${String(entry.total)}` });
+      item.dataset.combatantId = entry.combatant;
+      item.dataset.active = String(entry.active);
+      item.dataset.life = entry.life;
+      initiativeList.append(item);
+    }
+    initiative.append(initiativeList);
+    this.#shell.append(initiative);
 
     const pending = element('section', { className: 'dm-pending-request' });
     pending.append(element('h2', { text: 'Pending request' }));
@@ -532,8 +621,8 @@ class DmEncounterView {
       pending.append(element('p', {
         text: `${projection.pendingRequest.kind}: ${actor?.name ?? projection.pendingRequest.actorId}`,
       }));
-      if (actor?.kind === 'monster') {
-        for (const action of projection.pendingRequest.legalActions.actions) {
+      if (projection.humanCommandActions.length > 0) {
+        for (const action of projection.humanCommandActions) {
           const button = element('button', { text: actionLabel(action) });
           button.type = 'button';
           button.addEventListener('click', () => this.#submitDm(action));
@@ -615,6 +704,24 @@ class DmEncounterView {
       hidden.append(item);
     }
     this.#shell.append(hidden);
+
+    const dice = element('ol', { className: 'encounter-dice-log' });
+    for (const entry of projection.board.log) {
+      let text: string;
+      if (entry.kind === 'roll') {
+        const branch = entry.branches.map((value) => `${value.target}: ${value.label}`).join('; ');
+        text = `${entry.rollKind}: ${entry.faces.join('/')} → ${String(entry.total)} (${entry.outcome})${branch.length === 0 ? '' : ` — branch ${branch}`}`;
+      } else if (entry.kind === 'sustained_activation') {
+        text = `Sustained activation: ${entry.spellId} (${entry.effectId})`;
+      } else {
+        text = `Composition refused: ${entry.reason}; ${entry.propagation}`;
+      }
+      const item = element('li', { text });
+      item.dataset.outcomeKind = entry.kind;
+      item.dataset.sequence = String(entry.sequence);
+      dice.append(item);
+    }
+    this.#shell.append(dice);
 
     const details = element('details');
     details.append(element('summary', { text: 'Full revision history' }));
