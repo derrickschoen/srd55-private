@@ -8,10 +8,13 @@ import {
   COMPOSITION_REFUSAL_PROPAGATION,
   COMPOSITION_STATE_VISIBILITY,
   COMPOSITION_TARGET_RESOLUTION,
+  MAX_COMPOSITION_DEPTH,
+  NESTED_COMPOSITION_OUTCOME_PROPAGATION,
   type CompositionOperation,
   type CompositionStep,
   type ConditionLifecycleOperation,
   type NonCompositionSpellOperation,
+  type SharedOutcomeOperation,
   type SpellOperation,
 } from '../../../src/combat/spells/types';
 import { armorClass, damageType } from '../../../src/combat/values';
@@ -49,8 +52,14 @@ function packWithSpells(specs: readonly SpellSpec[]): LoadedContentPack {
   return loaded.content;
 }
 
+function packFromFixture(path: string): LoadedContentPack {
+  const loaded = loadContentPack(JSON.parse(readFileSync(path, 'utf8')) as unknown);
+  if (loaded.status !== 'loaded') throw new Error(`Nested fixture refused: ${loaded.refusal.reason}`);
+  return loaded.content;
+}
+
 function step(
-  operation: NonCompositionSpellOperation,
+  operation: SpellOperation,
   targetResolution: CompositionStep['targetResolution'] = inherited,
 ): CompositionStep {
   return { targetResolution, operation };
@@ -69,6 +78,11 @@ function explicitComposition(
   onRefusal: CompositionOperation['onRefusal'] = 'abort',
 ): CompositionOperation {
   return { kind: 'composition', ordering: 'explicit', order, onRefusal, steps };
+}
+
+function nestedComposition(depth: number): CompositionOperation {
+  if (depth === 1) return composition([step(fixedDamage(1)), step(fixedDamage(0))]);
+  return composition([step(fixedDamage(0)), step(nestedComposition(depth - 1))]);
 }
 
 function fixedDamage(amount: number, diceCount = 0): NonCompositionSpellOperation {
@@ -163,12 +177,16 @@ function effectKinds(state: EncounterState): readonly string[] {
   return state.effects.map((effect) => effect.payload.kind);
 }
 
-describe('D335 imported pairwise operation composition', () => {
+describe('D347 nested imported pairwise operation composition', () => {
   it('pairwise_semantics_constants retain every applicable declared non-SRD operator decision', () => {
     expect(COMPOSITION_EVALUATION_ORDER).toBe('declared_ordering');
     expect(COMPOSITION_REFUSAL_PROPAGATION).toEqual(['abort', 'continue']);
     expect(COMPOSITION_STATE_VISIBILITY).toBe('live_prior_step_state');
     expect(COMPOSITION_TARGET_RESOLUTION).toEqual(['inherit', 're_resolve']);
+    expect(MAX_COMPOSITION_DEPTH).toBe(4);
+    expect(NESTED_COMPOSITION_OUTCOME_PROPAGATION).toEqual({
+      continuedRefusalWithAppliedStep: 'applied', abortedRefusal: 'refused',
+    });
   });
 
   it('pairwise_boundaries: exactly two steps and both permutations load while one, three, negative one, and index two refuse', () => {
@@ -358,26 +376,116 @@ describe('D335 imported pairwise operation composition', () => {
     expect([hitPoints(resolvedResult.state, caster), hitPoints(resolvedResult.state, target)]).toEqual([18, 17]);
   });
 
-  it('nested_composition_accepted: imported nesting has a typed refusal before schema parsing', () => {
-    const inner = composition([step(fixedDamage(1)), step(fixedDamage(2))]);
-    const nested = {
-      kind: 'composition', ordering: 'declaration_order', onRefusal: 'abort',
-      steps: [
-        { targetResolution: inherited, operation: inner },
-        { targetResolution: inherited, operation: fixedDamage(3) },
-      ],
-    };
+  it('depth_limit_off_by_one: depth four loads and depth five has a typed import refusal', () => {
     const result = loadContentPack(fixtureWithSpells([
-      { id: 'nested', operation: nested },
+      { id: 'depth-four', operation: nestedComposition(4) },
+      { id: 'depth-five', operation: nestedComposition(5) },
       { id: 'healthy-control', operation: fixedDamage(1) },
     ]));
     expect(result.status).toBe('loaded');
-    if (result.status !== 'loaded') throw new Error('Nested composition pack was refused wholesale.');
+    if (result.status !== 'loaded') throw new Error('Depth-boundary pack was refused wholesale.');
     expect(result.content.diagnostics).toContainEqual(expect.objectContaining({
-      reason: 'nested_composition', recordId: 'nested', operationKind: 'composition',
-      path: ['spells', 0, 'operation'],
+      reason: 'composition_depth_exceeded', recordId: 'depth-five', operationKind: 'composition',
+      depthFound: 5, maximumDepth: 4,
+      path: ['spells', 1, 'operation'],
     }));
-    expect(result.content.spells.map(({ recordId }) => recordId)).toEqual(['healthy-control']);
+    expect(result.content.spells.map(({ recordId }) => recordId)).toEqual(['depth-four', 'healthy-control']);
+  });
+
+  it('measured depth-three and depth-four pack fixtures execute their complete nested shapes', () => {
+    // Cloudkill has persistent fog/world state, damage, and movement.
+    // docs/srd/source/spell-descriptions.txt:1177-1191.
+    const pack = packFromFixture('tests/fixtures/content-pack-v1-nested-composition.json');
+    expect(pack.diagnostics).toEqual([]);
+    expect(pack.spells.map(({ recordId }) => recordId)).toEqual([
+      'cloudkill-class-depth-3', 'illusory-dragon-class-depth-4',
+    ]);
+    const caster = playerProfile('fixture-caster', { initiativeBonus: 20 });
+    const target = monsterProfile('fixture-target', { initiativeBonus: -20, hitPoints: 20 });
+    const depthThree = cast(started(pack, [caster, target]), caster, target, 'cloudkill-class-depth-3');
+    expect(hitPoints(depthThree.state, target)).toBe(17);
+    expect(effectKinds(depthThree.state)).toContain('movement_modifier');
+    expect(depthThree.state.worldObjects).toHaveLength(1);
+    const depthFour = cast(started(pack, [caster, target]), caster, target, 'illusory-dragon-class-depth-4');
+    expect(hitPoints(depthFour.state, target)).toBe(18);
+    expect(effectKinds(depthFour.state)).toEqual(expect.arrayContaining(['condition', 'movement_modifier']));
+    expect(depthFour.state.worldObjects).toHaveLength(1);
+  });
+
+  it('subtree_abort_escapes, nested_rng_leak, and outcome_not_propagated: depth-three abort is subtree-scoped under continue and whole-tree-scoped under abort', () => {
+    const depthThreeAbort = composition([step(fixedDamage(0, 1)), step(condition())], 'abort');
+    const depthTwoAbort = composition([step(worldObject()), step(depthThreeAbort)], 'abort');
+    const pack = packWithSpells([
+      { id: 'subtree-continue', operation: composition([step(fixedDamage(3)), step(depthTwoAbort)], 'continue') },
+      { id: 'whole-tree-abort', operation: composition([step(fixedDamage(3)), step(depthTwoAbort)], 'abort') },
+    ]);
+    const caster = playerProfile('nested-atomic-caster', { initiativeBonus: 20 });
+    const target = monsterProfile('nested-atomic-target', {
+      initiativeBonus: -20, hitPoints: 20, conditionImmunities: ['Frightened'],
+    });
+    const continuedRng = mulberry32(0xd347);
+    const abortedRng = mulberry32(0xd347);
+    const baselineRng = mulberry32(0xd347);
+    const continued = cast(
+      started(pack, [caster, target], continuedRng), caster, target, 'subtree-continue', continuedRng,
+    );
+    const aborted = cast(
+      started(pack, [caster, target], abortedRng), caster, target, 'whole-tree-abort', abortedRng,
+    );
+    started(pack, [caster, target], baselineRng);
+    expect(hitPoints(continued.state, target)).toBe(17);
+    expect(hitPoints(aborted.state, target)).toBe(20);
+    expect(continued.state.worldObjects).toEqual([]);
+    expect(aborted.state.worldObjects).toEqual([]);
+    expect(continued.events.filter((event) => event.type === 'damage_applied').map((event) => event.amount)).toEqual([3]);
+    expect(aborted.events.filter((event) => event.type === 'damage_applied')).toEqual([]);
+    expect(continuedRng.snapshot()).toEqual(baselineRng.snapshot());
+    expect(abortedRng.snapshot()).toEqual(baselineRng.snapshot());
+  });
+
+  it('nested onRefusal continue and abort differ observably at the same depth', () => {
+    const refusedPair = [step(fixedDamage(2)), step(condition())] as const;
+    const pack = packWithSpells([
+      {
+        id: 'nested-continue',
+        operation: composition([step(fixedDamage(1)), step(composition(refusedPair, 'continue'))], 'continue'),
+      },
+      {
+        id: 'nested-abort',
+        operation: composition([step(fixedDamage(1)), step(composition(refusedPair, 'abort'))], 'continue'),
+      },
+    ]);
+    const caster = playerProfile('nested-refusal-caster', { initiativeBonus: 20 });
+    const target = monsterProfile('nested-refusal-target', {
+      initiativeBonus: -20, hitPoints: 20, conditionImmunities: ['Frightened'],
+    });
+    const continued = cast(started(pack, [caster, target]), caster, target, 'nested-continue');
+    const aborted = cast(started(pack, [caster, target]), caster, target, 'nested-abort');
+    expect(hitPoints(continued.state, target)).toBe(17);
+    expect(hitPoints(aborted.state, target)).toBe(19);
+    expect(continued.events.filter((event) => event.type === 'composition_step_resolved').at(-1))
+      .toEqual(expect.objectContaining({ outcome: 'applied', propagation: 'continue' }));
+    expect(aborted.events.filter((event) => event.type === 'composition_step_resolved').at(-1))
+      .toEqual(expect.objectContaining({ outcome: 'refused', propagation: 'continue' }));
+  });
+
+  it('shared_outcome_nesting_accepted: shared outcome is a composition step but composition remains refused inside its branch', () => {
+    const shared: SharedOutcomeOperation = {
+      kind: 'shared_outcome', delivery: { kind: 'attack', attackKind: 'ranged' },
+      onHit: [fixedDamage(1)], onMiss: [],
+    };
+    const invalidBranch = { ...shared, onHit: [composition([step(fixedDamage(1)), step(fixedDamage(2))])] };
+    const result = loadContentPack(fixtureWithSpells([
+      { id: 'composed-shared', operation: composition([step(shared), step(fixedDamage(1))]) },
+      { id: 'invalid-shared-branch', operation: invalidBranch },
+      { id: 'healthy-shared', operation: shared },
+    ]));
+    expect(result.status).toBe('loaded');
+    if (result.status !== 'loaded') throw new Error('Shared-outcome boundary pack was refused wholesale.');
+    expect(result.content.diagnostics).toContainEqual(expect.objectContaining({
+      reason: 'malformed_record', recordId: 'invalid-shared-branch', operationKind: 'shared_outcome',
+    }));
+    expect(result.content.spells.map(({ recordId }) => recordId)).toEqual(['composed-shared', 'healthy-shared']);
   });
 
   it('nested_unknown_operation retains unknown-kind precedence over pair schema refusal', () => {
