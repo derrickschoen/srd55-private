@@ -729,13 +729,23 @@ test('whole-library download restores authored and imported content into a fresh
     exact: true,
   }).click();
   await expect(page.locator('.transfer-status')).toHaveText(
-    'Bundled homebrew imported: 3 added to your library, 0 matched existing.',
+    'Bundled homebrew imported: 12 added to your library, 0 matched existing.',
+    { timeout: 30_000 },
   );
 
   const expectedManifest = [
     { kind: 'species', name: HOSTILE_LIBRARY_SPECIES_NAME },
+    { kind: 'subclass', name: 'Anchor Point' },
+    { kind: 'subclass', name: 'Circle of the Broken Tooth' },
+    { kind: 'subclass', name: 'Cold Open' },
+    { kind: 'subclass', name: 'College of the Cutting Chorus' },
+    { kind: 'subclass', name: 'Cutting Momentum' },
+    { kind: 'subclass', name: 'Discipline of the Broken Tempo' },
+    { kind: 'subclass', name: 'Oath of the Long Grudge' },
+    { kind: 'subclass', name: 'Patient Volley' },
     { kind: 'subclass', name: 'Spell Student' },
     { kind: 'subclass', name: 'Spell Student (Bundled revision 2)' },
+    { kind: 'subclass', name: 'Vanward Conclave' },
     { kind: 'subclass', name: 'Veteran' },
     { kind: 'subclass', name: 'Veteran (Bundled revision 2)' },
     { kind: 'subclass', name: 'Veteran (Bundled revision 3)' },
@@ -906,7 +916,7 @@ test('whole-library download restores authored and imported content into a fresh
   );
   await confirmLibraryReview(page);
   await expect(page.locator('.transfer-status')).toHaveText(
-    'Library imported: 11 added to your library, 0 matched existing.',
+    'Library imported: 20 added to your library, 0 matched existing.',
   );
 
   const restored = await page.evaluate((speciesName) => {

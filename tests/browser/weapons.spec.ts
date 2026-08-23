@@ -5,6 +5,7 @@ import {
   installAnnouncementRecorder,
 } from './fixtures/announcements';
 import { expect, test } from './fixtures/parallel-test';
+import type { Outcome } from '../../src/refusals/outcome';
 
 /**
  * The weapons panel, driven the way a browser AI extension would drive it:
@@ -128,18 +129,28 @@ async function levelClassTo(
         }
         return level;
       };
-      const execute = async (command: Record<string, unknown>) => {
+      const execute = async (
+        command: Record<string, unknown>,
+      ): Promise<Outcome<unknown>> => {
         const characters = await window.staticApp.inspectRows('characters', {
           id: 1,
         });
-        await window.appRpc.call('commands.execute', {
-          character_id: 1,
-          operation_uuid: crypto.randomUUID(),
-          expected_revision: Number(
-            (characters[0] as { revision?: unknown })?.revision,
-          ),
-          command,
-        });
+        return window.appRpc.call<
+          {
+            readonly character_id: number;
+            readonly operation_uuid: string;
+            readonly expected_revision: number;
+            readonly command: Record<string, unknown>;
+          },
+          Outcome<unknown>
+        >('commands.execute', {
+            character_id: 1,
+            operation_uuid: crypto.randomUUID(),
+            expected_revision: Number(
+              (characters[0] as { revision?: unknown })?.revision,
+            ),
+            command,
+          });
       };
       for (let level = await currentLevel(); level < targetLevel; level += 1) {
         const command = {
@@ -147,24 +158,29 @@ async function levelClassTo(
           class_definition_id: classId,
           target_level: level + 1,
         };
-        try {
-          await execute(command);
-        } catch (error) {
-          if (
-            !(error instanceof Error) ||
-            !error.message.includes('requires a feat choice')
-          ) {
-            throw error;
-          }
-          await execute({
-            ...command,
-            feat_choice: {
-              kind: 'feat',
-              feat_content_key: '2024:feat:ability-score-improvement',
-              config: {},
-              ability_increases: [{ ability, amount: 2 }],
-            },
-          });
+        const outcome = await execute(command);
+        if (outcome.kind === 'ok') continue;
+        if (
+          outcome.refusal.kind !== 'level_up_refused' ||
+          outcome.refusal.reason !== 'ability_increase_required'
+        ) {
+          throw new Error(
+            `Level ${String(level + 1)} was refused: ${JSON.stringify(outcome.refusal)}`,
+          );
+        }
+        const retry = await execute({
+          ...command,
+          feat_choice: {
+            kind: 'feat',
+            feat_content_key: '2024:feat:ability-score-improvement',
+            config: {},
+            ability_increases: [{ ability, amount: 2 }],
+          },
+        });
+        if (retry.kind !== 'ok') {
+          throw new Error(
+            `Level ${String(level + 1)} with its required increase was refused: ${JSON.stringify(retry.refusal)}`,
+          );
         }
       }
     },
