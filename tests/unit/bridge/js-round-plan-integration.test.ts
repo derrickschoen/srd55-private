@@ -27,6 +27,7 @@ import {
   JS_TURN_PROGRAM_GRAMMAR,
 } from '../../../src/vtt/dm-bridge/js-turn-program';
 import {
+  checkTurnProgramTypes,
   JsTurnProgramTypeError,
   MAX_TURN_PROGRAM_MOVEMENT_FEET,
   TurnProgramMovementDomainError,
@@ -485,7 +486,11 @@ describe('JS round-plan protocol and replay integration', () => {
       undefined,
       undefined,
       'js_program',
-      { now: () => 7, onTypeCheckTelemetry: (entry) => telemetry.push(entry) },
+      {
+        now: () => 7,
+        typeChecker: checkTurnProgramTypes,
+        onTypeCheckTelemetry: (entry) => telemetry.push(entry),
+      },
     );
     let caught: unknown;
     try {
@@ -517,7 +522,7 @@ describe('JS round-plan protocol and replay integration', () => {
       undefined,
       undefined,
       'js_program',
-      { typeCheckMode: 'typed' },
+      { typeCheckMode: 'typed', typeChecker: checkTurnProgramTypes },
     );
     const untyped = new DmRoundPlanSession(
       untypedExchange,
@@ -593,7 +598,9 @@ describe('JS round-plan protocol and replay integration', () => {
     const f = fixture();
     const source = 'const target = nearestEnemy(); emit(focusFire(target));';
     const exchange = new FakeJsExchange(source);
-    const session = new DmRoundPlanSession(exchange, undefined, undefined, 'js_program');
+    const session = new DmRoundPlanSession(exchange, undefined, undefined, 'js_program', {
+      typeChecker: checkTurnProgramTypes,
+    });
     const legalAttack = attack(f.monster.id, f.player.id);
 
     const decision = await session.choose(
@@ -672,7 +679,9 @@ describe('JS round-plan protocol and replay integration', () => {
   it('interpreter_bypasses_validation rejects an emitted action through DecisionProgram validation', async () => {
     const f = fixture();
     const exchange = new FakeJsExchange('emit(retreat(-1, 0));');
-    const session = new DmRoundPlanSession(exchange, undefined, undefined, 'js_program');
+    const session = new DmRoundPlanSession(exchange, undefined, undefined, 'js_program', {
+      typeChecker: checkTurnProgramTypes,
+    });
 
     await expect(session.startRound(context(f.state), new AbortController().signal)).rejects.toThrow(
       'round plan.monsters[0].program.action.destination.column',
@@ -684,7 +693,9 @@ describe('JS round-plan protocol and replay integration', () => {
     const f = fixture();
     const source = 'const target = nearestEnemy(); emit(attack(target, riderOnCrit(endTurn())));';
     const exchange = new FakeJsExchange(source);
-    const session = new DmRoundPlanSession(exchange, undefined, undefined, 'js_program');
+    const session = new DmRoundPlanSession(exchange, undefined, undefined, 'js_program', {
+      typeChecker: checkTurnProgramTypes,
+    });
 
     await expect(session.choose(
       controllerRequest(f.state, f.monster.id, [{ type: 'end_turn', actor: f.monster.id }]),
@@ -697,7 +708,13 @@ describe('JS round-plan protocol and replay integration', () => {
   it('js_source_missing_from_replay keeps both source and validated output in the authoritative transcript', async () => {
     const f = fixture();
     const source = 'emit(endTurn());';
-    const session = new DmRoundPlanSession(new FakeJsExchange(source), undefined, undefined, 'js_program');
+    const session = new DmRoundPlanSession(
+      new FakeJsExchange(source),
+      undefined,
+      undefined,
+      'js_program',
+      { typeChecker: checkTurnProgramTypes },
+    );
     await session.startRound(context(f.state), new AbortController().signal);
     const artifact = session.jsProgramArtifact(1, f.monster.id);
     expect(artifact).toMatchObject({
