@@ -38,6 +38,10 @@ function element<K extends keyof HTMLElementTagNameMap>(
 
 function actionLabel(action: EncounterCommand): string {
   switch (action.type) {
+    case 'drop_item': return 'Drop item';
+    case 'pickup_item': return 'Pick up item';
+    case 'equip_item': return 'Equip item';
+    case 'stow_item': return 'Stow item';
     case 'move': {
       const destination = action.path.at(-1);
       return destination === undefined

@@ -346,6 +346,7 @@ export function buildContentPackDocuments(input: ContentPackBuildInput): Content
     },
     namespaces: [...new Set(spells.map((spell) => spell.sourceId))].sort(),
     spells,
+    items: [],
     features: [],
     species: [],
     backgrounds: [],
