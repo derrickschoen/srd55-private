@@ -7,6 +7,27 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D343 — OWNER: sequencing lever next; vague reuse normalizes to Magic action; per-record target binding (2026-08-22)
+
+Lever round after the curation sprint's repricing (sequencing pool ~119 =
+67 measured + 52 codex-classified).
+
+1. **The sequencing lever takes the next engine lane** — cast-now-use-later
+   effects (Produce Flame, Mage Hand, Call Lightning, Heat Metal's
+   re-trigger family).
+
+2. **Reuse action type: vague phrasings normalize to the 2024 Magic
+   action** ("as an action on a later turn" -> Magic action, a deliberate
+   2014 rewrite, consequence accepted). Records whose text EXPLICITLY
+   names a different type (Heat Metal's Bonus Action, reaction
+   re-triggers) keep their stated type — clarified after the supervisor
+   flagged the collision with D338-addendum requirement 5, which stands
+   unchanged.
+
+3. **Target binding on reuse is an EXPLICIT PER-RECORD POLICY**
+   (bound | reselect) taken from each record's text; the converter
+   refuses records whose text does not determine it.
+
 ## D342 — OWNER: curation sprint before any engine lever (2026-08-22)
 
 Lever-round ruling with the curated measurement in hand (executable 142,
