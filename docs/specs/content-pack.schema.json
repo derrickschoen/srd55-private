@@ -1030,6 +1030,90 @@
                 ]
               },
               {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": { "type": "string", "const": "shared_outcome" },
+                      "delivery": {
+                        "type": "object",
+                        "properties": {
+                          "kind": { "type": "string", "const": "attack" },
+                          "attackKind": { "type": "string", "enum": ["melee", "ranged"] }
+                        },
+                        "required": ["kind", "attackKind"],
+                        "additionalProperties": false
+                      },
+                      "onHit": {
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": { "$ref": "#/$defs/__schema0" }
+                      },
+                      "onMiss": {
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": { "$ref": "#/$defs/__schema0" }
+                      }
+                    },
+                    "required": ["kind", "delivery", "onHit", "onMiss"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": { "type": "string", "const": "shared_outcome" },
+                      "delivery": {
+                        "type": "object",
+                        "properties": {
+                          "kind": { "type": "string", "const": "save" },
+                          "ability": {
+                            "type": "string",
+                            "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]
+                          },
+                          "rollMode": { "type": "string", "enum": ["normal", "advantage", "disadvantage"] }
+                        },
+                        "required": ["kind", "ability", "rollMode"],
+                        "additionalProperties": false
+                      },
+                      "onFailure": {
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": { "$ref": "#/$defs/__schema0" }
+                      },
+                      "onSuccess": {
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            { "$ref": "#/$defs/__schema0" },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": { "type": "string", "const": "shared_outcome_damage_reference" },
+                                "source": {
+                                  "type": "object",
+                                  "properties": {
+                                    "branch": { "type": "string", "const": "failure" },
+                                    "operationIndex": { "type": "integer", "minimum": 0, "maximum": 31 }
+                                  },
+                                  "required": ["branch", "operationIndex"],
+                                  "additionalProperties": false
+                                },
+                                "transform": { "type": "string", "const": "half_round_down" }
+                              },
+                              "required": ["kind", "source", "transform"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "required": ["kind", "delivery", "onFailure", "onSuccess"],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              {
                 "type": "object",
                 "properties": {
                   "kind": {
@@ -1430,6 +1514,8 @@
                           "expiresAt": {
                             "type": "string",
                             "enum": [
+                              "source_start",
+                              "source_end",
                               "target_start",
                               "target_end"
                             ]
@@ -1470,6 +1556,8 @@
                           "expiresAt": {
                             "type": "string",
                             "enum": [
+                              "source_start",
+                              "source_end",
                               "target_start",
                               "target_end"
                             ]
@@ -1653,6 +1741,8 @@
                               "expiresAt": {
                                 "type": "string",
                                 "enum": [
+                                  "source_start",
+                                  "source_end",
                                   "target_start",
                                   "target_end"
                                 ]
@@ -1693,6 +1783,8 @@
                               "expiresAt": {
                                 "type": "string",
                                 "enum": [
+                                  "source_start",
+                                  "source_end",
                                   "target_start",
                                   "target_end"
                                 ]
@@ -1870,6 +1962,8 @@
                               "expiresAt": {
                                 "type": "string",
                                 "enum": [
+                                  "source_start",
+                                  "source_end",
                                   "target_start",
                                   "target_end"
                                 ]
@@ -1910,6 +2004,8 @@
                               "expiresAt": {
                                 "type": "string",
                                 "enum": [
+                                  "source_start",
+                                  "source_end",
                                   "target_start",
                                   "target_end"
                                 ]
@@ -2042,6 +2138,8 @@
                           "expiresAt": {
                             "type": "string",
                             "enum": [
+                              "source_start",
+                              "source_end",
                               "target_start",
                               "target_end"
                             ]
@@ -2082,6 +2180,8 @@
                           "expiresAt": {
                             "type": "string",
                             "enum": [
+                              "source_start",
+                              "source_end",
                               "target_start",
                               "target_end"
                             ]
@@ -2173,6 +2273,8 @@
                               "expiresAt": {
                                 "type": "string",
                                 "enum": [
+                                  "source_start",
+                                  "source_end",
                                   "target_start",
                                   "target_end"
                                 ]
@@ -2213,6 +2315,8 @@
                               "expiresAt": {
                                 "type": "string",
                                 "enum": [
+                                  "source_start",
+                                  "source_end",
                                   "target_start",
                                   "target_end"
                                 ]
@@ -2285,6 +2389,8 @@
                               "expiresAt": {
                                 "type": "string",
                                 "enum": [
+                                  "source_start",
+                                  "source_end",
                                   "target_start",
                                   "target_end"
                                 ]
@@ -2325,6 +2431,8 @@
                               "expiresAt": {
                                 "type": "string",
                                 "enum": [
+                                  "source_start",
+                                  "source_end",
                                   "target_start",
                                   "target_end"
                                 ]
@@ -2397,6 +2505,8 @@
                               "expiresAt": {
                                 "type": "string",
                                 "enum": [
+                                  "source_start",
+                                  "source_end",
                                   "target_start",
                                   "target_end"
                                 ]
@@ -2437,6 +2547,8 @@
                               "expiresAt": {
                                 "type": "string",
                                 "enum": [
+                                  "source_start",
+                                  "source_end",
                                   "target_start",
                                   "target_end"
                                 ]
@@ -2529,6 +2641,8 @@
                           "expiresAt": {
                             "type": "string",
                             "enum": [
+                              "source_start",
+                              "source_end",
                               "target_start",
                               "target_end"
                             ]
@@ -2569,6 +2683,8 @@
                           "expiresAt": {
                             "type": "string",
                             "enum": [
+                              "source_start",
+                              "source_end",
                               "target_start",
                               "target_end"
                             ]
@@ -2681,6 +2797,8 @@
                           "expiresAt": {
                             "type": "string",
                             "enum": [
+                              "source_start",
+                              "source_end",
                               "target_start",
                               "target_end"
                             ]
@@ -2721,6 +2839,8 @@
                           "expiresAt": {
                             "type": "string",
                             "enum": [
+                              "source_start",
+                              "source_end",
                               "target_start",
                               "target_end"
                             ]
@@ -2777,6 +2897,8 @@
                           "expiresAt": {
                             "type": "string",
                             "enum": [
+                              "source_start",
+                              "source_end",
                               "target_start",
                               "target_end"
                             ]
@@ -2817,6 +2939,8 @@
                           "expiresAt": {
                             "type": "string",
                             "enum": [
+                              "source_start",
+                              "source_end",
                               "target_start",
                               "target_end"
                             ]
@@ -20410,6 +20534,8 @@
                     "expiresAt": {
                       "type": "string",
                       "enum": [
+                        "source_start",
+                        "source_end",
                         "target_start",
                         "target_end"
                       ]
@@ -20450,6 +20576,8 @@
                     "expiresAt": {
                       "type": "string",
                       "enum": [
+                        "source_start",
+                        "source_end",
                         "target_start",
                         "target_end"
                       ]
@@ -20633,6 +20761,8 @@
                         "expiresAt": {
                           "type": "string",
                           "enum": [
+                            "source_start",
+                            "source_end",
                             "target_start",
                             "target_end"
                           ]
@@ -20673,6 +20803,8 @@
                         "expiresAt": {
                           "type": "string",
                           "enum": [
+                            "source_start",
+                            "source_end",
                             "target_start",
                             "target_end"
                           ]
@@ -20850,6 +20982,8 @@
                         "expiresAt": {
                           "type": "string",
                           "enum": [
+                            "source_start",
+                            "source_end",
                             "target_start",
                             "target_end"
                           ]
@@ -20890,6 +21024,8 @@
                         "expiresAt": {
                           "type": "string",
                           "enum": [
+                            "source_start",
+                            "source_end",
                             "target_start",
                             "target_end"
                           ]
@@ -21022,6 +21158,8 @@
                     "expiresAt": {
                       "type": "string",
                       "enum": [
+                        "source_start",
+                        "source_end",
                         "target_start",
                         "target_end"
                       ]
@@ -21062,6 +21200,8 @@
                     "expiresAt": {
                       "type": "string",
                       "enum": [
+                        "source_start",
+                        "source_end",
                         "target_start",
                         "target_end"
                       ]
@@ -21153,6 +21293,8 @@
                         "expiresAt": {
                           "type": "string",
                           "enum": [
+                            "source_start",
+                            "source_end",
                             "target_start",
                             "target_end"
                           ]
@@ -21193,6 +21335,8 @@
                         "expiresAt": {
                           "type": "string",
                           "enum": [
+                            "source_start",
+                            "source_end",
                             "target_start",
                             "target_end"
                           ]
@@ -21265,6 +21409,8 @@
                         "expiresAt": {
                           "type": "string",
                           "enum": [
+                            "source_start",
+                            "source_end",
                             "target_start",
                             "target_end"
                           ]
@@ -21305,6 +21451,8 @@
                         "expiresAt": {
                           "type": "string",
                           "enum": [
+                            "source_start",
+                            "source_end",
                             "target_start",
                             "target_end"
                           ]
@@ -21377,6 +21525,8 @@
                         "expiresAt": {
                           "type": "string",
                           "enum": [
+                            "source_start",
+                            "source_end",
                             "target_start",
                             "target_end"
                           ]
@@ -21417,6 +21567,8 @@
                         "expiresAt": {
                           "type": "string",
                           "enum": [
+                            "source_start",
+                            "source_end",
                             "target_start",
                             "target_end"
                           ]
@@ -21509,6 +21661,8 @@
                     "expiresAt": {
                       "type": "string",
                       "enum": [
+                        "source_start",
+                        "source_end",
                         "target_start",
                         "target_end"
                       ]
@@ -21549,6 +21703,8 @@
                     "expiresAt": {
                       "type": "string",
                       "enum": [
+                        "source_start",
+                        "source_end",
                         "target_start",
                         "target_end"
                       ]
@@ -21661,6 +21817,8 @@
                     "expiresAt": {
                       "type": "string",
                       "enum": [
+                        "source_start",
+                        "source_end",
                         "target_start",
                         "target_end"
                       ]
@@ -21701,6 +21859,8 @@
                     "expiresAt": {
                       "type": "string",
                       "enum": [
+                        "source_start",
+                        "source_end",
                         "target_start",
                         "target_end"
                       ]
@@ -21757,6 +21917,8 @@
                     "expiresAt": {
                       "type": "string",
                       "enum": [
+                        "source_start",
+                        "source_end",
                         "target_start",
                         "target_end"
                       ]
@@ -21797,6 +21959,8 @@
                     "expiresAt": {
                       "type": "string",
                       "enum": [
+                        "source_start",
+                        "source_end",
                         "target_start",
                         "target_end"
                       ]

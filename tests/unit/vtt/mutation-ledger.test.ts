@@ -44,6 +44,7 @@ const CHOICE_BRANCH_LEDGER_PATH = 'docs/audits/2026-08-22-choice-branch-mutation
 const CONDITION_LIFECYCLE_LEDGER_PATH = 'docs/audits/2026-08-22-condition-lifecycle-mutation-ledger.md';
 const ROLL_DEFENSE_LEDGER_PATH = 'docs/audits/2026-08-22-roll-defense-mutation-ledger.md';
 const PAIRWISE_COMPOSITION_LEDGER_PATH = 'docs/audits/2026-08-22-pairwise-composition-mutation-ledger.md';
+const SHARED_OUTCOME_LEDGER_PATH = 'docs/audits/2026-08-23-shared-outcome-mutation-ledger.md';
 const SEQUENCING_LEDGER_PATH = 'docs/audits/2026-08-22-sequencing-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
@@ -616,6 +617,34 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(12);
     expect(ledger).toContain('Every production mutation below was applied alone');
     expect(ledger).toContain('Tests  46 passed (46)');
+  });
+
+  it('SHARED-OUTCOME-MUTATION-LEDGER pins synchronized branches and both numeric boundaries', () => {
+    const ledger = readFileSync(SHARED_OUTCOME_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/shared-outcome.test.ts', 'utf8');
+    const mutations = [
+      'branches_roll_separately',
+      'branch_leaks',
+      'one_roll_per_cast_violated',
+      'nested_shared_outcome_accepted',
+      'exact_dc_treated_as_failure',
+      'half_damage_rounds_up_odd',
+    ];
+    const killingTests = [
+      'branches_roll_separately: successful half damage uses one referenced odd roll and consumes no replacement roll',
+      'branch_leaks: two area targets take divergent branches and successful Thunderwave neither pushes nor takes full damage',
+      'one_roll_per_cast_violated: damage and push share one save while branch dice follow it in declaration order',
+      'nested_shared_outcome_accepted: import rejects shared_outcome anywhere inside a branch and retains a healthy record',
+      'shared_outcome_boundaries: DC-1 fails, exact DC succeeds, and odd/even totals halve down',
+    ];
+    for (const mutation of mutations) expect(ledger).toContain(`\`${mutation}\``);
+    for (const testName of killingTests) {
+      expect(ledger).toContain(`\`${testName}\``);
+      expect(tests).toContain(testName);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(6);
+    expect(ledger).toContain('Each production mutation below was applied alone');
+    expect(ledger).toContain('Tests  8 passed (8)');
   });
 
   it('SUSTAINED-SEQUENCING-MUTATION-LEDGER pins all D343 controls and the duration off-by-one', () => {

@@ -64,7 +64,21 @@ import {
 } from './resolution';
 import { spellDefinition } from './spells/definitions';
 import { validateSpellSlotCapacities } from './spells/resources';
-import type { CastChoice, CompositionStep, ConditionLifecycleOperation, EffectData, ModifierDuration, ScaledDice, SpellCastCommand, SpellDefinition, SpellOperation, SpellPersistentAreaEffectSpec } from './spells/types';
+import type {
+  BranchSpellOperation,
+  CastChoice,
+  CompositionStep,
+  ConditionLifecycleOperation,
+  EffectData,
+  ModifierDuration,
+  ScaledDice,
+  SharedOutcomeDamageReferenceOperation,
+  SharedOutcomeOperation,
+  SpellCastCommand,
+  SpellDefinition,
+  SpellOperation,
+  SpellPersistentAreaEffectSpec,
+} from './spells/types';
 import { affectedCells, creatureOccupiesAffectedCell, type AreaTemplate } from './templates';
 import {
   armorClass,
@@ -4186,14 +4200,10 @@ function forceMove(
   void source;
 }
 
-function resolveSpellAttack(
+function rollSpellAttack(
   context: ReductionContext,
-  definition: SpellDefinition,
   command: SpellCastCommand,
   target: CombatantId,
-  damage: ScaledDice,
-  spellDamageType: DamageType,
-  rider: EffectData | null,
 ): ReturnType<typeof resolveAttackRoll> {
   const actorPosition = token(context.state, command.actor).position;
   const targetPosition = token(context.state, target).position;
@@ -4225,6 +4235,19 @@ function resolveSpellAttack(
       effect.payload.appliesTo.kind === 'next_attack_by_target')
       ? [effect.id]
       : [])), 'duration_expired');
+  return attack;
+}
+
+function resolveSpellAttack(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  target: CombatantId,
+  damage: ScaledDice,
+  spellDamageType: DamageType,
+  rider: EffectData | null,
+): ReturnType<typeof resolveAttackRoll> {
+  const attack = rollSpellAttack(context, command, target);
   let result: ReturnType<typeof resolveDamage> | null = null;
   if (attack.outcome !== 'miss') {
     const baseRequest: DamageRequest = {
@@ -4545,6 +4568,7 @@ export const CONDITION_LIFECYCLE_HOOK_ORDER = Object.freeze([
 
 function lifecycleDuration(
   operation: ConditionLifecycleOperation,
+  sourceCombatant: CombatantId,
   target: CombatantId,
   source: string,
 ): EffectApplication['duration'] {
@@ -4552,8 +4576,8 @@ function lifecycleDuration(
   return {
     kind: 'turn_boundaries',
     timing: {
-      combatant: target,
-      boundary: operation.duration.expiresAt === 'target_start' ? 'start' : 'end',
+      combatant: operation.duration.expiresAt.startsWith('source_') ? sourceCombatant : target,
+      boundary: operation.duration.expiresAt.endsWith('_start') ? 'start' : 'end',
       source,
     },
     remaining: operation.duration.rounds,
@@ -4666,7 +4690,7 @@ function applyConditionLifecycleOperation(
     const sequence = context.state.nextEffectSequence;
     applyEffect(context, command.actor, {
       targets: [target],
-      duration: lifecycleDuration(operation, target, definition.source),
+      duration: lifecycleDuration(operation, command.actor, target, definition.source),
       concentration: false,
       stackingIdentity: identity,
       stacking: lifecycleStacking(operation),
@@ -4807,6 +4831,128 @@ function executeCompositionStep(
   return { outcome: 'refused', refusalReason: 'operation_refused' };
 }
 
+function sharedOutcomeDamageAmount(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  target: CombatantId,
+  operation: Extract<BranchSpellOperation, { readonly kind: 'damage_operation' }>,
+  critical: boolean,
+  transform: 'full' | SharedOutcomeDamageReferenceOperation['transform'],
+): SpellOperationOutcome {
+  const instance = preparedDamageOperationInstances(
+    context.state,
+    target,
+    operation,
+    { definition, command },
+  )[0];
+  const packet = operation.packets[0];
+  if (
+    instance === undefined ||
+    packet === undefined ||
+    operation.delivery.kind !== 'automatic' ||
+    operation.timing.kind !== 'immediate' ||
+    operation.instancesPerTarget !== 1 ||
+    operation.packets.length !== 1 ||
+    packet.thresholdRider !== null
+  ) {
+    throw new EncounterRuleError('A shared outcome damage reference requires one immediate automatic damage packet without a threshold rider.');
+  }
+  const rolled = resolveDamage({ ...instance.damage, critical, responses: [] }, context.rng);
+  const rawAmount = transform === 'half_round_down' ? Math.floor(rolled.total / 2) : rolled.total;
+  applySpellDamageAmount(
+    context,
+    command.actor,
+    target,
+    operationDamageType(packet),
+    packet.dice.sides,
+    rawAmount,
+  );
+  return rawAmount === 0 ? 'no_op' : 'applied';
+}
+
+function executeSharedOutcomeBranch(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  target: CombatantId,
+  branch: readonly (BranchSpellOperation | SharedOutcomeDamageReferenceOperation)[],
+  failureBranch: readonly BranchSpellOperation[],
+  critical: boolean,
+): SpellOperationOutcome {
+  const outcomes: SpellOperationOutcome[] = [];
+  for (const operation of branch) {
+    if (operation.kind === 'shared_outcome_damage_reference') {
+      const referenced = failureBranch[operation.source.operationIndex];
+      if (referenced?.kind !== 'damage_operation') {
+        throw new EncounterRuleError('A shared outcome damage reference did not identify failure-branch damage.');
+      }
+      outcomes.push(sharedOutcomeDamageAmount(
+        context, definition, command, target, referenced, false, operation.transform,
+      ));
+      continue;
+    }
+    if (
+      critical &&
+      operation.kind === 'damage_operation' &&
+      operation.delivery.kind === 'automatic' &&
+      operation.timing.kind === 'immediate' &&
+      operation.instancesPerTarget === 1 &&
+      operation.packets.length === 1 &&
+      operation.packets[0]?.thresholdRider === null
+    ) {
+      outcomes.push(sharedOutcomeDamageAmount(
+        context, definition, command, target, operation, critical, 'full',
+      ));
+      continue;
+    }
+    outcomes.push(executeSpellOperation(
+      context, definition, { ...command, targets: [target] }, [target], operation,
+    ));
+  }
+  return combinedSpellOperationOutcome(outcomes);
+}
+
+function executeSharedOutcome(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  targets: readonly CombatantId[],
+  operation: SharedOutcomeOperation,
+): SpellOperationOutcome {
+  const outcomes: SpellOperationOutcome[] = [];
+  for (const target of targets) {
+    if ('onHit' in operation) {
+      const attack = rollSpellAttack(context, command, target);
+      emit(context, { type: 'attack_resolved', actor: command.actor, target, attack, damage: null });
+      const branch = attack.outcome === 'miss' ? 'miss' : 'hit';
+      emit(context, {
+        type: 'shared_outcome_resolved', caster: command.actor, spellId: definition.id,
+        target, delivery: 'attack', branch,
+      });
+      const selected = branch === 'hit' ? operation.onHit : operation.onMiss;
+      outcomes.push(executeSharedOutcomeBranch(
+        context, definition, command, target, selected, [], attack.outcome === 'critical',
+      ));
+      continue;
+    }
+    const save = resolveTargetSave(
+      context, command.actor, target, operation.delivery.ability,
+      command.saveDc, operation.delivery.rollMode, null,
+    );
+    const branch = save.outcome === 'failure' ? 'failure' : 'success';
+    emit(context, {
+      type: 'shared_outcome_resolved', caster: command.actor, spellId: definition.id,
+      target, delivery: 'save', branch,
+    });
+    const selected = branch === 'failure' ? operation.onFailure : operation.onSuccess;
+    outcomes.push(executeSharedOutcomeBranch(
+      context, definition, command, target, selected, operation.onFailure, false,
+    ));
+  }
+  return targets.length === 0 ? 'no_op' : combinedSpellOperationOutcome(outcomes) === 'refused' ? 'refused' : 'applied';
+}
+
 function executeSpellOperation(
   context: ReductionContext,
   definition: SpellDefinition,
@@ -4846,6 +4992,8 @@ function executeSpellOperation(
       }
       return combinedSpellOperationOutcome(outcomes);
     }
+    case 'shared_outcome':
+      return executeSharedOutcome(context, definition, command, targets, operation);
     case 'caster_choice': {
       const mode = operation.modes.find((candidate) => candidate.mode === command.selectedOption);
       if (mode === undefined) {

@@ -5,7 +5,11 @@ import {
   armedWeaponHitRiderShape,
   damageOperationSpecSchema,
 } from '../combat/damage-operation-schema';
-import type { NonCompositionSpellOperation, SpellOperation } from '../combat/spells/types';
+import type {
+  BranchSpellOperation,
+  NonCompositionSpellOperation,
+  SpellOperation,
+} from '../combat/spells/types';
 import { abilities, damageTypes, skills } from '../domain/enums';
 
 export const MAX_IMPORTED_DICE_COUNT = 100;
@@ -132,9 +136,9 @@ const effectDataSchema = z.strictObject({
 });
 
 const conditionLifecycleDurationSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('fixed_rounds'), rounds: importedRounds, expiresAt: z.enum(['target_start', 'target_end']) }),
+  z.strictObject({ kind: z.literal('fixed_rounds'), rounds: importedRounds, expiresAt: z.enum(['source_start', 'source_end', 'target_start', 'target_end']) }),
   z.strictObject({ kind: z.literal('concentration') }),
-  z.strictObject({ kind: z.literal('fixed_rounds_or_concentration'), rounds: importedRounds, expiresAt: z.enum(['target_start', 'target_end']) }),
+  z.strictObject({ kind: z.literal('fixed_rounds_or_concentration'), rounds: importedRounds, expiresAt: z.enum(['source_start', 'source_end', 'target_start', 'target_end']) }),
 ]);
 
 const conditionLifecycleOperationSchema = z.strictObject({
@@ -371,8 +375,10 @@ const basicSchemas = {
 
 type OperationSchema = z.ZodType<SpellOperation>;
 type NonCompositionOperationSchema = z.ZodType<NonCompositionSpellOperation>;
+type BranchOperationSchema = z.ZodType<BranchSpellOperation>;
 
 let nonCompositionOperationSchema: NonCompositionOperationSchema;
+let branchOperationSchema: BranchOperationSchema;
 
 function forwardIssues(schema: z.ZodType, value: unknown, context: z.core.$RefinementCtx<unknown>): void {
   const result = schema.safeParse(value);
@@ -384,11 +390,11 @@ function forwardIssues(schema: z.ZodType, value: unknown, context: z.core.$Refin
 
 const casterChoiceOperationSchema = z.strictObject({
   kind: z.literal('caster_choice'),
-  modes: z.array(z.strictObject({ mode: z.string().regex(/^[a-z][a-z0-9._-]{0,63}$/u), operation: z.lazy(() => nonCompositionOperationSchema) })).min(1).max(100),
+  modes: z.array(z.strictObject({ mode: z.string().regex(/^[a-z][a-z0-9._-]{0,63}$/u), operation: z.lazy(() => branchOperationSchema) })).min(1).max(100),
 });
 const randomBranchOperationSchema = z.strictObject({
   kind: z.literal('random_branch'), dieSides: importedDieSides,
-  branches: z.array(z.strictObject({ minimum: positiveInteger.max(20), maximum: positiveInteger.max(20), operation: z.lazy(() => nonCompositionOperationSchema) })).min(1).max(20),
+  branches: z.array(z.strictObject({ minimum: positiveInteger.max(20), maximum: positiveInteger.max(20), operation: z.lazy(() => branchOperationSchema) })).min(1).max(20),
 }).superRefine((operation, context) => {
   const faces = new Set<number>();
   for (const [index, branch] of operation.branches.entries()) {
@@ -405,10 +411,10 @@ const randomBranchOperationSchema = z.strictObject({
 });
 const targetBranchOperationSchema = z.strictObject({
   kind: z.literal('target_branch'),
-  branches: z.array(z.strictObject({ predicate: z.strictObject({ kind: z.literal('creature_type'), creatureType: z.string().min(1).max(1_000) }), operation: z.lazy(() => nonCompositionOperationSchema) })).min(1).max(100),
-  otherwise: z.lazy(() => nonCompositionOperationSchema).nullable(),
+  branches: z.array(z.strictObject({ predicate: z.strictObject({ kind: z.literal('creature_type'), creatureType: z.string().min(1).max(1_000) }), operation: z.lazy(() => branchOperationSchema) })).min(1).max(100),
+  otherwise: z.lazy(() => branchOperationSchema).nullable(),
 });
-const reevaluatedBranchOperationSchema = z.strictObject({ kind: z.literal('reevaluated_branch'), hook: z.enum(['target_start', 'target_end']), durationRounds: importedRounds, operation: z.lazy(() => nonCompositionOperationSchema) });
+const reevaluatedBranchOperationSchema = z.strictObject({ kind: z.literal('reevaluated_branch'), hook: z.enum(['target_start', 'target_end']), durationRounds: importedRounds, operation: z.lazy(() => branchOperationSchema) });
 
 const sustainedTargetingSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('self') }),
@@ -426,7 +432,7 @@ const sustainedActionSchema = z.discriminatedUnion('phrasing', [
 ]);
 const sustainedEffectOperationSchema = z.strictObject({
   kind: z.literal('sustained_effect'),
-  establishment: z.lazy(() => nonCompositionOperationSchema).nullable(),
+  establishment: z.lazy(() => branchOperationSchema).nullable(),
   lifecycle: z.strictObject({ concentration: z.boolean(), durationRounds: importedRounds.nullable(), expiresAt: z.enum(['source_start', 'source_end']) }),
   targetBinding: z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('reselect') }),
@@ -435,7 +441,7 @@ const sustainedEffectOperationSchema = z.strictObject({
   activation: z.strictObject({
     action: sustainedActionSchema,
     targeting: sustainedTargetingSchema,
-    operation: z.lazy(() => nonCompositionOperationSchema),
+    operation: z.lazy(() => branchOperationSchema),
   }),
 });
 
@@ -462,7 +468,7 @@ const nonCompositionSchemas = {
   movement_region: movementRegionOperationSchema,
   speed_modification: speedModificationOperationSchema,
   ...basicSchemas,
-} as const satisfies Readonly<Record<NonCompositionSpellOperation['kind'], z.ZodType>>;
+} as const satisfies Readonly<Record<BranchSpellOperation['kind'], z.ZodType>>;
 
 function operationKind(value: unknown): string | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
@@ -470,11 +476,56 @@ function operationKind(value: unknown): string | null {
   return typeof kind === 'string' ? kind : null;
 }
 
-nonCompositionOperationSchema = z.union([
+branchOperationSchema = z.union([
   nonCompositionSchemas.caster_choice,
   nonCompositionSchemas.random_branch,
   ...Object.values(nonCompositionSchemas).slice(2),
-]) as unknown as NonCompositionOperationSchema;
+]) as unknown as BranchOperationSchema;
+
+const sharedOutcomeDamageReferenceSchema = z.strictObject({
+  kind: z.literal('shared_outcome_damage_reference'),
+  source: z.strictObject({ branch: z.literal('failure'), operationIndex: nonNegativeInteger.max(31) }),
+  transform: z.literal('half_round_down'),
+});
+const sharedOutcomeAttackSchema = z.strictObject({
+  kind: z.literal('shared_outcome'),
+  delivery: z.strictObject({ kind: z.literal('attack'), attackKind: z.enum(['melee', 'ranged']) }),
+  onHit: z.array(z.lazy(() => branchOperationSchema)).max(32),
+  onMiss: z.array(z.lazy(() => branchOperationSchema)).max(32),
+});
+const sharedOutcomeSaveSchema = z.strictObject({
+  kind: z.literal('shared_outcome'),
+  delivery: z.strictObject({
+    kind: z.literal('save'), ability: z.enum(abilities),
+    rollMode: z.enum(['normal', 'advantage', 'disadvantage']),
+  }),
+  onFailure: z.array(z.lazy(() => branchOperationSchema)).max(32),
+  onSuccess: z.array(z.union([
+    z.lazy(() => branchOperationSchema),
+    sharedOutcomeDamageReferenceSchema,
+  ])).max(32),
+}).superRefine((operation, context) => {
+  for (const [index, branchOperation] of operation.onSuccess.entries()) {
+    if (branchOperation.kind !== 'shared_outcome_damage_reference') continue;
+    const referenced = operation.onFailure[branchOperation.source.operationIndex];
+    if (
+      referenced?.kind !== 'damage_operation' ||
+      referenced.delivery.kind !== 'automatic' ||
+      referenced.timing.kind !== 'immediate' ||
+      referenced.instancesPerTarget !== 1 ||
+      referenced.packets.length !== 1 ||
+      referenced.packets[0]?.thresholdRider !== null
+    ) {
+      context.addIssue({
+        code: 'custom', path: ['onSuccess', index, 'source', 'operationIndex'],
+        message: 'A shared damage reference must identify one immediate automatic single-packet failure damage operation without a threshold rider.',
+      });
+    }
+  }
+});
+const sharedOutcomeOperationSchema = z.union([sharedOutcomeAttackSchema, sharedOutcomeSaveSchema]);
+
+nonCompositionOperationSchema = branchOperationSchema as NonCompositionOperationSchema;
 
 const compositionTargetResolutionSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('inherit') }),
@@ -488,13 +539,15 @@ const compositionOperationSchema = z.discriminatedUnion('ordering', [
 
 export const operationSchemas = {
   composition: compositionOperationSchema,
+  shared_outcome: sharedOutcomeOperationSchema,
   ...nonCompositionSchemas,
 } as const satisfies Readonly<Record<SpellOperation['kind'], z.ZodType>>;
 
 export const contentPackOperationJsonSchema = z.union([
   operationSchemas.composition,
+  operationSchemas.shared_outcome,
   operationSchemas.caster_choice,
-  ...Object.values(operationSchemas).slice(2),
+  ...Object.values(operationSchemas).slice(3),
 ]);
 
 export const contentPackOperationSchema: OperationSchema = z.unknown().superRefine((value, context) => {

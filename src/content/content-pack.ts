@@ -605,6 +605,13 @@ function nestedOperationValues(operation: Readonly<Record<string, unknown>>): re
       ...(operation.otherwise === null || operation.otherwise === undefined ? [] : [operation.otherwise]),
     ];
   }
+  if (operation.kind === 'shared_outcome') {
+    const branchKeys = operation.delivery !== null && typeof operation.delivery === 'object' &&
+      Reflect.get(operation.delivery, 'kind') === 'attack'
+      ? ['onHit', 'onMiss'] as const
+      : ['onFailure', 'onSuccess'] as const;
+    return branchKeys.flatMap((key) => Array.isArray(operation[key]) ? operation[key] : []);
+  }
   return operation.kind === 'reevaluated_branch' ? [operation.operation] : [];
 }
 
@@ -616,7 +623,11 @@ function firstUnknownOperation(value: Readonly<Record<string, unknown>>): string
     while (pending.length > 0) {
       const candidate = objectRecord(pending.pop());
       const kind = operationKind(candidate);
-      if (kind !== null && !SPELL_OPERATION_KINDS.includes(kind as SpellOperation['kind'])) return kind;
+      if (
+        kind !== null &&
+        kind !== 'shared_outcome_damage_reference' &&
+        !SPELL_OPERATION_KINDS.includes(kind as SpellOperation['kind'])
+      ) return kind;
       if (candidate !== null) pending.push(...nestedOperationValues(candidate));
     }
   }
