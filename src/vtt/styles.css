@@ -28,6 +28,7 @@
   border: 2px solid #78839d;
   touch-action: none;
   user-select: none;
+  position: relative;
 }
 
 .encounter-cell {
@@ -85,6 +86,96 @@
   border: 0;
   background: transparent;
   text-align: center;
+}
+
+.encounter-token[data-life='dying'] {
+  filter: saturate(0.45);
+  outline: 2px dashed #ffb45b;
+}
+
+.encounter-token[data-marker='corpse'] {
+  filter: grayscale(1);
+  opacity: 0.7;
+  transform: rotate(90deg) scale(0.78);
+}
+
+.encounter-token-stacked {
+  z-index: 6;
+  inset: 1.8rem 0.08rem 0.08rem;
+  transform: none;
+}
+
+.encounter-area,
+.encounter-light,
+.encounter-world-object {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.encounter-area {
+  z-index: 3;
+  border: 2px dashed rgb(122 213 255 / 72%);
+  background: rgb(51 123 173 / 22%);
+}
+
+.encounter-area-movement_region {
+  border-color: rgb(255 132 106 / 76%);
+  background: rgb(173 65 51 / 22%);
+}
+
+.encounter-light { z-index: 2; }
+.encounter-light-bright { background: rgb(255 244 158 / 30%); }
+.encounter-light-dim { background: rgb(193 183 124 / 16%); }
+
+.encounter-light-label,
+.encounter-world-object-label,
+.encounter-sustained-badge {
+  position: absolute;
+  z-index: 9;
+  width: max-content;
+  max-width: 15rem;
+  padding: 0.12rem 0.24rem;
+  border: 1px solid #98a8cc;
+  background: rgb(17 19 26 / 92%);
+  color: #f4f0df;
+  font: 600 0.58rem/1.2 system-ui, sans-serif;
+  white-space: normal;
+}
+
+.encounter-world-object {
+  z-index: 4;
+  box-shadow: inset 0 0 0 3px rgb(180 133 72 / 80%);
+}
+
+.encounter-world-object[data-light-class='light-source'] {
+  box-shadow: inset 0 0 0 3px #f3da72;
+}
+
+.encounter-sustained-badge {
+  top: -0.35rem;
+  left: 1.7rem;
+}
+
+.encounter-target-lines {
+  position: absolute;
+  z-index: 7;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.encounter-target-lines line {
+  stroke: #d5a6ff;
+  stroke-width: 0.08;
+  stroke-dasharray: 0.16 0.1;
+}
+
+.dm-initiative li[data-active='true'] {
+  color: #ffe78e;
+  font-weight: 700;
 }
 
 .encounter-token-sprite,

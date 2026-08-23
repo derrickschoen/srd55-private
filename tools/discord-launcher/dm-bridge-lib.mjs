@@ -80,8 +80,10 @@ export class ProjectionReconstructor {
       projection = {
         audience: 'dm',
         encounter: structuredClone(object(view.encounter, 'compact projection encounter')),
+        board: structuredClone(object(view.board, 'compact projection board')),
         coordinator: { ...structuredClone(coordinator), pendingRequest: structuredClone(view.pendingRequest) },
         pendingRequest: structuredClone(view.pendingRequest),
+        humanCommandActions: structuredClone(array(view.humanCommandActions, 'compact projection human commands')),
         controllers: structuredClone(array(view.controllers, 'compact projection controllers')),
         history: structuredClone(array(request.history, 'request.history')),
         adjudicatedTargets: structuredClone(array(view.adjudicatedTargets, 'compact projection adjudicated targets')),
