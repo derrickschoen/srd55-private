@@ -329,6 +329,7 @@ const worldOperationsOperationSchema = z.strictObject({
       blocking: worldObjectBlockingSchema.optional(),
     }).refine((changes) => Object.keys(changes).length > 0, { message: 'Object modifications cannot be empty.' }) }),
     z.strictObject({ kind: z.literal('move_owned_object'), maximumDistanceFeet: importedPositiveDistance }),
+    z.strictObject({ kind: z.literal('move_owned_object_group'), maximumDistanceFeet: importedPositiveDistance }),
     z.strictObject({ kind: z.literal('damage_objects'), damage: worldDamageRequestSchema }),
   ])).min(1).max(32),
 }).superRefine((operation, context) => {
@@ -459,15 +460,50 @@ const sustainedEffectOperationSchema = z.strictObject({
   kind: z.literal('sustained_effect'),
   establishment: z.lazy(() => branchOperationSchema).nullable(),
   lifecycle: z.strictObject({ concentration: z.boolean(), durationRounds: importedRounds.nullable(), expiresAt: z.enum(['source_start', 'source_end']) }),
-  targetBinding: z.discriminatedUnion('kind', [
-    z.strictObject({ kind: z.literal('reselect') }),
-    z.strictObject({ kind: z.literal('bound'), to: z.enum(['cast_combatant_targets', 'cast_object_targets', 'created_world_objects']) }),
+  sequence: z.discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('activation'),
+      targetBinding: z.discriminatedUnion('kind', [
+        z.strictObject({ kind: z.literal('reselect') }),
+        z.strictObject({ kind: z.literal('bound'), to: z.enum(['cast_combatant_targets', 'cast_object_targets', 'created_world_objects']) }),
+      ]),
+      action: sustainedActionSchema,
+      targeting: sustainedTargetingSchema,
+      operation: z.lazy(() => branchOperationSchema),
+    }),
+    z.strictObject({
+      kind: z.literal('automatic_tick'), boundary: z.enum(['source_start', 'source_end']),
+      ticks: importedRounds, operation: z.lazy(() => branchOperationSchema),
+    }),
+    z.strictObject({
+      kind: z.literal('event_trigger'),
+      hook: z.enum(['on_enter', 'on_start_of_turn_inside', 'on_end_of_turn_inside']),
+      frequency: z.enum(['once_per_turn', 'every_trigger']),
+      operation: z.lazy(() => branchOperationSchema),
+    }),
+    z.strictObject({
+      kind: z.literal('delayed_one_shot'), boundary: z.enum(['source_start', 'source_end']),
+      delayRounds: importedRounds, operation: z.lazy(() => branchOperationSchema),
+    }),
+    z.strictObject({
+      kind: z.literal('instance_group_activation'), instanceCount: positiveInteger.max(32),
+      action: sustainedActionSchema, targeting: sustainedTargetingSchema,
+      operation: z.lazy(() => branchOperationSchema),
+    }),
   ]),
-  activation: z.strictObject({
-    action: sustainedActionSchema,
-    targeting: sustainedTargetingSchema,
-    operation: z.lazy(() => branchOperationSchema),
-  }),
+}).superRefine((effect, context) => {
+  if (effect.sequence.kind === 'automatic_tick' && effect.lifecycle.durationRounds !== effect.sequence.ticks) {
+    context.addIssue({ code: 'custom', path: ['lifecycle', 'durationRounds'], message: 'Automatic tick duration must equal its declared tick count.' });
+  }
+  if (effect.sequence.kind === 'delayed_one_shot' && effect.lifecycle.durationRounds !== null) {
+    context.addIssue({ code: 'custom', path: ['lifecycle', 'durationRounds'], message: 'A delayed one-shot owns its timer and cannot also declare a duration clock.' });
+  }
+  if (effect.sequence.kind === 'event_trigger' && effect.establishment?.kind !== 'persistent_area') {
+    context.addIssue({ code: 'custom', path: ['establishment'], message: 'An event trigger must establish its owned persistent area.' });
+  }
+  if (effect.sequence.kind === 'instance_group_activation' && effect.establishment?.kind !== 'world_operations') {
+    context.addIssue({ code: 'custom', path: ['establishment'], message: 'An instance group must establish its owned world objects.' });
+  }
 });
 
 const nonCompositionSchemas = {

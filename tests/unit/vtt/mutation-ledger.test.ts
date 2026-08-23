@@ -49,6 +49,7 @@ const SHARED_OUTCOME_LEDGER_PATH = 'docs/audits/2026-08-23-shared-outcome-mutati
 const BOARD_LEDGER_PATH = 'docs/audits/2026-08-23-board-mutation-ledger.md';
 const SEQUENCING_LEDGER_PATH = 'docs/audits/2026-08-22-sequencing-mutation-ledger.md';
 const EQUIPMENT_LEDGER_PATH = 'docs/audits/2026-08-23-equipment-mutation-ledger.md';
+const SEQ_BINDING_LEDGER_PATH = 'docs/audits/2026-08-23-seq-binding-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -717,6 +718,24 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(5);
     expect(ledger).toContain('Each production mutation below was applied alone');
     expect(ledger).toContain('Tests  9 passed (9)');
+  });
+
+  it('D348.1-SEQ-BINDING-MUTATION-LEDGER pins all four restored sequenced-effect controls', () => {
+    const ledger = readFileSync(SEQ_BINDING_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/sequenced-effects.test.ts', 'utf8');
+    const controls = [
+      'auto_tick_needs_activation',
+      'event_trigger_fires_on_any_event',
+      'delayed_oneshot_repeats',
+      'instance_group_splits',
+    ];
+    for (const control of controls) {
+      expect(ledger).toContain(`\`${control}\``);
+      expect(tests).toContain(`${control}:`);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(4);
+    expect(ledger).toContain('Tests  5 passed (5)');
+    expect(ledger).toContain('All four mutations were restored.');
   });
 
   it('EQUIPMENT-MUTATION-LEDGER pins forced drop, board persistence, interaction, capacity, and contact controls', () => {

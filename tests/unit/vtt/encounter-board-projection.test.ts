@@ -156,8 +156,8 @@ const sustainedBound: SpellOperation = {
   kind: 'sustained_effect',
   establishment: null,
   lifecycle: { concentration: false, durationRounds: 10, expiresAt: 'source_start' },
-  targetBinding: { kind: 'bound', to: 'cast_combatant_targets' },
-  activation: {
+  sequence: {
+    kind: 'activation', targetBinding: { kind: 'bound', to: 'cast_combatant_targets' },
     action: { phrasing: 'explicit', actionType: 'magic_action' },
     targeting: { kind: 'single', rangeFeet: 60, willing: false },
     operation: damage(1),
@@ -168,8 +168,8 @@ const sustainedReselect: SpellOperation = {
   kind: 'sustained_effect',
   establishment: null,
   lifecycle: { concentration: false, durationRounds: 10, expiresAt: 'source_start' },
-  targetBinding: { kind: 'reselect' },
-  activation: {
+  sequence: {
+    kind: 'activation', targetBinding: { kind: 'reselect' },
     action: { phrasing: 'explicit', actionType: 'magic_action' },
     targeting: { kind: 'single', rangeFeet: 60, willing: false },
     operation: damage(1),
