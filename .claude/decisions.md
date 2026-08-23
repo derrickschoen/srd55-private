@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D350 — OWNER: Wish duplicates any spell of level 8 or lower (2026-08-23)
+
+Curation-round directive (R19 exception): Wish's basic use becomes a real
+engine mechanic per the 2024 text — a duplication operation whose
+parameter space is the loaded spell registry (SRD + imported packs):
+select any available spell of level <= 8 and execute it with no
+component/requirement constraints, per "The spell simply takes effect."
+The free-form alternative effects and the post-Wish stress rule remain
+table-adjudicated (R5 split). Applies to both editions' records with the
+2024 text as semantics reference. Queued as an engine increment after the
+D348.1 tail (forms, reactions).
+
 ## D349 — OWNER: three fork choices CONFIRMED with revisit triggers; curation session now (2026-08-23)
 
 Morning rulings on the overnight run.
