@@ -7,6 +7,26 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D349 — OWNER: three fork choices CONFIRMED with revisit triggers; curation session now (2026-08-23)
+
+Morning rulings on the overnight run.
+
+1. **Fork choices #7 (sight-only senses), #8 (subject-cell obscurement),
+   #6 (one outer upcast target set) are CONFIRMED**, with revisit triggers
+   recorded (owner asked for triggers; these are the supervisor's proposed
+   ones, standing unless the owner amends): #7 revisits when the measured
+   residue attributes 10+ records to tremorsense/devilsight/ethereal, or
+   when a monster pack the owner wants to run needs them; #8 revisits when
+   a record the owner rules playable needs ray-intersection obscurement or
+   the board gains area-vision rendering; #6 revisits on the first record
+   whose text scales different operations' targets differently that the
+   owner wants emitted.
+
+2. **Direction: CURATION SESSION NOW.** The supervisor brings
+   highest-precedent pattern batches from the relabeled 344 in rounds of
+   four while the D348.1 tail (forms 16, reactions 14) continues in
+   background lanes.
+
 ## D348 — OWNER: run all levers sequentially without waiting; collaborative curation drafting overnight (2026-08-23)
 
 Given before sleeping.
