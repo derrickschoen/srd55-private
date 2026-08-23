@@ -251,15 +251,27 @@ export type EffectPayload =
       readonly kind: 'sustained_effect';
       readonly spellId: string;
       readonly establishedRound: number;
+      readonly sequenceKind:
+        | 'activation'
+        | 'automatic_tick'
+        | 'event_trigger'
+        | 'delayed_one_shot'
+        | 'instance_group_activation';
       readonly targetBinding: 'reselect' | 'bound_combatants' | 'bound_objects' | 'bound_owned_objects';
       readonly boundCombatants: readonly CombatantId[];
       readonly boundObjects: readonly ObjectTargetId[];
       readonly ownedObjects: readonly WorldObjectId[];
+      readonly ownedAreas: readonly PersistentAreaId[];
+      readonly consumedEventTurnKeys: readonly string[];
+      /** Present only for delayed_one_shot; decremented on its declared source boundary. */
+      readonly delayedRoundsRemaining: number | null;
       readonly slotLevel: number | null;
       readonly casterLevel: number;
       readonly attackBonus: number;
       readonly saveDc: number;
       readonly spellcastingModifier: number;
+      readonly area: AreaTemplate | null;
+      readonly selectedOption: string | null;
     }
   | {
       readonly kind: 'condition';

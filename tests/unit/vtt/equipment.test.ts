@@ -74,8 +74,8 @@ function fixture(): Readonly<Record<string, unknown>> {
       operation: {
         kind: 'sustained_effect', establishment: HEAT_METAL_STEP,
         lifecycle: { concentration: true, durationRounds: 10, expiresAt: 'source_start' },
-        targetBinding: { kind: 'bound', to: 'cast_object_targets' },
-        activation: {
+        sequence: {
+          kind: 'activation', targetBinding: { kind: 'bound', to: 'cast_object_targets' },
           action: { phrasing: 'explicit', actionType: 'bonus_action' },
           targeting: { kind: 'utility', rangeFeet: 60 }, operation: HEAT_METAL_STEP,
         },
