@@ -88,6 +88,8 @@ import type {
   SpellDefinition,
   SpellOperation,
   SpellPersistentAreaEffectSpec,
+  TargetCountRule,
+  TargetGeometryRule,
 } from './spells/types';
 import { affectedCells, creatureOccupiesAffectedCell, type AreaTemplate } from './templates';
 import {
@@ -281,6 +283,26 @@ export class EncounterRuleError extends Error {
   override readonly name: string = 'EncounterRuleError';
 
   constructor(readonly reason: string) {
+    super(reason);
+  }
+}
+
+export type TargetSelectionRefusalRule =
+  | 'fixed_count'
+  | 'up_to_count'
+  | 'slot_scaled_count'
+  | 'projectile_allocation_count'
+  | 'secondary_range_from_primary'
+  | 'pair_range'
+  | 'all_targets_range'
+  | 'unique_targets'
+  | 'each_target_own_destination';
+
+/** The controller chooses; the reducer reports exactly which declared selection rule rejected it. */
+export class TargetSelectionRuleError extends EncounterRuleError {
+  override readonly name = 'TargetSelectionRuleError' as const;
+
+  constructor(readonly rule: TargetSelectionRefusalRule, reason: string) {
     super(reason);
   }
 }
@@ -4277,6 +4299,13 @@ function selectedSpellTargets(
       for (const target of command.targets) validateTargetRange(state, command.actor, target, targeting.rangeFeet);
       return command.targets;
     }
+    case 'selected': {
+      validateDeclaredTargetSelection(state, definition, command);
+      for (const target of command.targets) {
+        validateTargetRange(state, command.actor, target, targeting.rangeFeet);
+      }
+      return command.targets;
+    }
     case 'area':
       if (command.targets.length !== 0) throw new EncounterRuleError('Area spell targets come from its exact template.');
       return areaTargets(state, definition, command);
@@ -4306,6 +4335,129 @@ function selectedSpellTargets(
     case 'utility':
       if (command.targets.length !== 0) throw new EncounterRuleError('This utility spell does not target a combatant.');
       return [command.actor];
+  }
+}
+
+function scaledTargetCount(
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  rule: TargetCountRule,
+): number {
+  if (rule.kind === 'fixed') return rule.count;
+  if (rule.kind === 'up_to') return rule.maximum;
+  const slotLevel = command.slotLevel;
+  if (slotLevel === null) {
+    throw new TargetSelectionRuleError('slot_scaled_count', `${definition.name} slot-scaled selection requires a spell slot.`);
+  }
+  return rule.base + rule.additionalPerSlot * (slotLevel - definition.level);
+}
+
+function validateTargetCount(
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  rule: TargetCountRule,
+): void {
+  const maximum = scaledTargetCount(definition, command, rule);
+  const selected = command.targets.length;
+  if (rule.kind === 'fixed' && selected !== maximum) {
+    throw new TargetSelectionRuleError('fixed_count', `${definition.name} violates fixed_count: select exactly ${String(maximum)} targets.`);
+  }
+  if (rule.kind === 'up_to' && (selected < 1 || selected > maximum)) {
+    throw new TargetSelectionRuleError('up_to_count', `${definition.name} violates up_to_count: select from 1 through ${String(maximum)} targets.`);
+  }
+  if (rule.kind === 'slot_scaled') {
+    const legal = rule.limit === 'exact' ? selected === maximum : selected >= 1 && selected <= maximum;
+    if (!legal) {
+      throw new TargetSelectionRuleError(
+        'slot_scaled_count',
+        `${definition.name} violates slot_scaled_count: select ${rule.limit === 'exact' ? 'exactly' : 'up to'} ${String(maximum)} targets.`,
+      );
+    }
+  }
+}
+
+function targetDistance(state: EncounterState, left: CombatantId, right: CombatantId): number {
+  return gridDistance(token(state, left).position, token(state, right).position);
+}
+
+function validateTargetGeometry(
+  state: EncounterState,
+  definition: SpellDefinition,
+  targets: readonly CombatantId[],
+  rule: TargetGeometryRule,
+): void {
+  switch (rule.kind) {
+    case 'secondaries_within_primary': {
+      const primary = targets[0];
+      if (primary !== undefined && targets.slice(1).some((target) => targetDistance(state, primary, target) > rule.distanceFeet)) {
+        throw new TargetSelectionRuleError(
+          'secondary_range_from_primary',
+          `${definition.name} violates secondary_range_from_primary: every secondary must be within ${String(rule.distanceFeet)} feet of the primary.`,
+        );
+      }
+      return;
+    }
+    case 'pair_within':
+      if (targets.length === 2 && targetDistance(state, targets[0] as CombatantId, targets[1] as CombatantId) > rule.distanceFeet) {
+        throw new TargetSelectionRuleError(
+          'pair_range',
+          `${definition.name} violates pair_range: the pair must be within ${String(rule.distanceFeet)} feet.`,
+        );
+      }
+      return;
+    case 'all_within_each_other':
+      for (const [index, left] of targets.entries()) {
+        if (targets.slice(index + 1).some((right) => targetDistance(state, left, right) > rule.distanceFeet)) {
+          throw new TargetSelectionRuleError(
+            'all_targets_range',
+            `${definition.name} violates all_targets_range: every pair must be within ${String(rule.distanceFeet)} feet.`,
+          );
+        }
+      }
+      return;
+  }
+}
+
+function validateTargetDestinations(
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+): void {
+  const destinations = command.targetDestinations ?? [];
+  if (
+    destinations.length !== command.targets.length ||
+    destinations.some((entry, index) => entry.target !== command.targets[index])
+  ) {
+    throw new TargetSelectionRuleError(
+      'each_target_own_destination',
+      `${definition.name} violates each_target_own_destination: each selected target needs its own ordered destination.`,
+    );
+  }
+}
+
+function validateDeclaredTargetSelection(
+  state: EncounterState,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+): void {
+  if (definition.targeting.kind !== 'selected') return;
+  const selection = definition.targeting.selection;
+  if (selection.kind === 'targets') {
+    validateTargetCount(definition, command, selection.count);
+  } else {
+    const expected = scaledTargetCount(definition, command, selection.projectiles);
+    if (command.targets.length !== expected) {
+      throw new TargetSelectionRuleError(
+        'projectile_allocation_count',
+        `${definition.name} violates projectile_allocation_count: allocate exactly ${String(expected)} projectiles.`,
+      );
+    }
+  }
+  if (selection.uniqueness === 'unique' && new Set(command.targets).size !== command.targets.length) {
+    throw new TargetSelectionRuleError('unique_targets', `${definition.name} violates unique_targets: each target can be selected at most once.`);
+  }
+  for (const geometry of selection.geometry) validateTargetGeometry(state, definition, command.targets, geometry);
+  if (selection.kind === 'targets' && selection.destinations === 'each_target') {
+    validateTargetDestinations(definition, command);
   }
 }
 
@@ -5165,6 +5317,7 @@ function heatMetalRange(definition: SpellDefinition): number {
     case 'utility': return definition.targeting.rangeFeet;
     case 'self':
     case 'multiple':
+    case 'selected':
     case 'area':
     case 'area_selected':
     case 'all_in_range':
@@ -6171,32 +6324,40 @@ function executeSpellOperation(
       return 'applied';
     }
     case 'teleport': {
-      const destination = command.spatialPoint;
-      if (destination === undefined) throw new EncounterRuleError(`${definition.name} requires a teleport destination.`);
       const movers = operation.subject === 'caster' ? [command.actor] : targets;
-      if (movers.length !== 1) throw new EncounterRuleError(`${definition.name} teleports exactly one creature to one cell.`);
-      const mover = movers[0] as CombatantId;
       const casterPosition = token(context.state, command.actor).position;
-      const occupied = context.state.tokens.some((placed) =>
-        placed.combatantId !== mover && combatant(context.state, placed.combatantId).life !== 'dead' &&
-        cellKey(placed.position) === cellKey(destination));
-      if (
-        !isCellInside(context.state.bounds, destination) ||
-        gridDistance(casterPosition, destination) > operation.maximumDistanceFeet ||
-        movementBlocked(context.state, destination) ||
-        occupied ||
-        (operation.destination.requireLineOfSight && !hasLineOfSight(context.state, casterPosition, destination))
-      ) throw new EncounterRuleError(`${definition.name} requires an unoccupied, occupiable destination satisfying its declared constraint.`);
-      context.state = {
-        ...context.state,
-        tokens: context.state.tokens.map((placed) => placed.combatantId === mover
-          ? { ...placed, position: { ...destination } }
-          : placed),
-      };
+      const declaredDestinations = command.targetDestinations;
+      const destinations = declaredDestinations === undefined
+        ? command.spatialPoint === undefined ? [] : movers.map((mover) => ({ target: mover, destination: command.spatialPoint as GridCell }))
+        : declaredDestinations;
+      if (destinations.length !== movers.length) throw new EncounterRuleError(`${definition.name} requires one destination per teleported creature.`);
+      for (const [index, mover] of movers.entries()) {
+        const declared = destinations[index];
+        if (declared === undefined || declared.target !== mover) {
+          throw new TargetSelectionRuleError('each_target_own_destination', `${definition.name} violates each_target_own_destination.`);
+        }
+        const destination = declared.destination;
+        const occupied = context.state.tokens.some((placed) =>
+          placed.combatantId !== mover && combatant(context.state, placed.combatantId).life !== 'dead' &&
+          cellKey(placed.position) === cellKey(destination));
+        if (
+          !isCellInside(context.state.bounds, destination) ||
+          gridDistance(casterPosition, destination) > operation.maximumDistanceFeet ||
+          movementBlocked(context.state, destination) ||
+          occupied ||
+          (operation.destination.requireLineOfSight && !hasLineOfSight(context.state, casterPosition, destination))
+        ) throw new EncounterRuleError(`${definition.name} requires an unoccupied, occupiable destination satisfying its declared constraint.`);
+        context.state = {
+          ...context.state,
+          tokens: context.state.tokens.map((placed) => placed.combatantId === mover
+            ? { ...placed, position: { ...destination } }
+            : placed),
+        };
+        const movement = combatant(context.state, mover).turn.movement;
+        emit(context, { type: 'movement_completed', combatant: mover, path: [{ ...destination }], spent: feet(0), remaining: movement.remaining });
+      }
       // Teleport has no intervening cells; only final area membership changes.
       reevaluatePersistentAreaMembership(context);
-      const movement = combatant(context.state, mover).turn.movement;
-      emit(context, { type: 'movement_completed', combatant: mover, path: [{ ...destination }], spent: feet(0), remaining: movement.remaining });
       return 'applied';
     }
     case 'forced_movement': {

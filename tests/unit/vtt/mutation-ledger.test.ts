@@ -51,6 +51,7 @@ const SEQUENCING_LEDGER_PATH = 'docs/audits/2026-08-22-sequencing-mutation-ledge
 const EQUIPMENT_LEDGER_PATH = 'docs/audits/2026-08-23-equipment-mutation-ledger.md';
 const SEQ_BINDING_LEDGER_PATH = 'docs/audits/2026-08-23-seq-binding-mutation-ledger.md';
 const SENSES_LEDGER_PATH = 'docs/audits/2026-08-23-senses-mutation-ledger.md';
+const TARGET_SELECTION_LEDGER_PATH = 'docs/audits/2026-08-23-target-sel-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -755,6 +756,33 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(5);
     expect(ledger).toContain('Tests  6 passed (6)');
     expect(ledger).toContain('All four mutations and the independent boundary mutation were restored.');
+  });
+
+  it('D348.1-TARGET-SELECTION-BINDING pins all four required controls and the restored boundary kill', () => {
+    const ledger = readFileSync(TARGET_SELECTION_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/target-selection.test.ts', 'utf8');
+    const controls = [
+      'secondary_range_unchecked',
+      'allocation_count_drifts',
+      'uniqueness_ignored',
+      'upcast_scales_inner_sets',
+      'pair_boundary_excludes_exact',
+    ];
+    const killingTests = [
+      'secondary_range_unchecked: Chain Lightning accepts a secondary exactly 30 feet from the primary and refuses one 35 feet away',
+      'allocation_count_drifts and distinguishing_allocation_vs_up_to: Magic Missile allocates exactly 3+slot darts and resolves doubled targets per dart',
+      'uniqueness_ignored: unique and repeatable declarations distinguish the same doubled target',
+      'upcast_scales_inner_sets: one slot-scaled outer target set is inherited by both sibling operations',
+      'acid_pair_boundary: one target and a pair exactly 5 feet apart are legal, while a pair 10 feet apart refuses',
+    ];
+    for (const control of controls) expect(ledger).toContain(`\`${control}\``);
+    for (const testName of killingTests) {
+      expect(ledger).toContain(`\`${testName}\``);
+      expect(tests).toContain(testName);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(5);
+    expect(ledger).toContain('Tests  9 passed (9)');
+    expect(ledger).toContain('All five mutations were restored.');
   });
 
   it('EQUIPMENT-MUTATION-LEDGER pins forced drop, board persistence, interaction, capacity, and contact controls', () => {
