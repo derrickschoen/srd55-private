@@ -389,6 +389,63 @@ export type NonCompositionSpellOperation = BranchSpellOperation;
 
 export type SpellOperation = CompositionOperation | SharedOutcomeOperation | NonCompositionSpellOperation;
 
+export type SustainedEffectSequence =
+  | {
+      /** D343's explicit later-turn activation, with its action gate preserved. */
+      readonly kind: 'activation';
+      readonly targetBinding: SustainedEffectTargetBinding;
+      readonly action: SustainedEffectActionDeclaration;
+      readonly targeting: SpellTargeting;
+      readonly operation: BranchSpellOperation;
+    }
+  | {
+      /**
+       * Runs at each declared source-turn boundary without spending an action.
+       * Faithful Hound acts at each source-turn start:
+       * docs/srd/source/spell-descriptions.txt:2924-2927.
+       */
+      readonly kind: 'automatic_tick';
+      readonly boundary: 'source_start' | 'source_end';
+      readonly ticks: number;
+      readonly operation: BranchSpellOperation;
+    }
+  | {
+      /**
+       * Runs for the creature that caused a declared hook on the owned area.
+       * Entry/end hooks: docs/srd/source/spell-descriptions.txt:5608-5611.
+       * Entry/start hooks: docs/srd/source/spell-descriptions.txt:1472-1474.
+       */
+      readonly kind: 'event_trigger';
+      readonly hook: Extract<PersistentAreaHook,
+        'on_enter' | 'on_start_of_turn_inside' | 'on_end_of_turn_inside'>;
+      readonly frequency: 'once_per_turn' | 'every_trigger';
+      readonly operation: BranchSpellOperation;
+    }
+  | {
+      /**
+       * Counts source-turn boundaries, resolves once, and consumes the effect.
+       * The public timer is the judgment-free subset of later one-shot effects;
+       * Delayed Blast Fireball's end-trigger is at
+       * docs/srd/source/spell-descriptions.txt:2014-2021.
+       */
+      readonly kind: 'delayed_one_shot';
+      readonly boundary: 'source_start' | 'source_end';
+      readonly delayRounds: number;
+      readonly operation: BranchSpellOperation;
+    }
+  | {
+      /**
+       * One activation owns and operates the complete declared instance set.
+       * Dancing Lights creates four lights and moves "the lights" together:
+       * docs/srd/source/spell-descriptions.txt:1916-1925.
+       */
+      readonly kind: 'instance_group_activation';
+      readonly instanceCount: number;
+      readonly action: SustainedEffectActionDeclaration;
+      readonly targeting: SpellTargeting;
+      readonly operation: BranchSpellOperation;
+    };
+
 export type BranchSpellOperation =
   /** Chromatic Orb chooses a damage type at cast time (spell-descriptions.txt:1087-1090). */
   {
@@ -451,13 +508,8 @@ export type BranchSpellOperation =
         readonly durationRounds: number | null;
         readonly expiresAt: 'source_start' | 'source_end';
       };
-      readonly targetBinding: SustainedEffectTargetBinding;
-      readonly activation: {
-        readonly action: SustainedEffectActionDeclaration;
-        readonly targeting: SpellTargeting;
-        /** Executed with the existing spell-operation interpreter on activation. */
-        readonly operation: BranchSpellOperation;
-      };
+      /** D348.1 deepens D343 with one mutually exclusive continuation shape. */
+      readonly sequence: SustainedEffectSequence;
     }
   | ({ readonly kind: 'damage_operation' } & DamageOperationSpec)
   | {
@@ -525,6 +577,11 @@ export type BranchSpellOperation =
         | {
             /** Activation-time destination is supplied by the sustained-effect command. */
             readonly kind: 'move_owned_object';
+            readonly maximumDistanceFeet: number;
+          }
+        | {
+            /** Every owned instance supplies a destination in the same activation. */
+            readonly kind: 'move_owned_object_group';
             readonly maximumDistanceFeet: number;
           }
         | {
@@ -978,6 +1035,11 @@ export interface SpellCastCommand {
   readonly objectTargets?: readonly ObjectTargetId[];
   /** Objects created and owned by a sustained effect, distinct from its activation targets. */
   readonly ownedObjectTargets?: readonly WorldObjectId[];
+  /** Complete per-instance destinations for an instance-group activation. */
+  readonly ownedObjectDestinations?: readonly {
+    readonly objectId: WorldObjectId;
+    readonly destination: GridCell;
+  }[];
   /** A declared class/feat pool can replace slot spending for this cast. */
   readonly resourcePoolId?: LimitedResourcePoolId;
 }

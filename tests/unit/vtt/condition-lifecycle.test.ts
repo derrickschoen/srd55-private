@@ -533,9 +533,9 @@ describe('CAP-IMP-010 imported condition and control lifecycle', () => {
     expect(branchDamage).toBeLessThan(repeatSave);
     expect(repeatSave).toBeLessThan(expiry);
     expect(CONDITION_LIFECYCLE_HOOK_ORDER).toEqual([
-      'persistent_area_hooks_and_damage_lifecycle',
+      'persistent_area_hooks_then_owned_area_event_bindings_and_damage_lifecycle',
       'reevaluated_branches_and_damage_lifecycle',
-      'effect_payloads_and_damage_lifecycle',
+      'creation_ordered_effect_payloads_including_automatic_ticks_and_delayed_one_shots',
       'repeat_saves',
       'duration_expiry',
     ]);

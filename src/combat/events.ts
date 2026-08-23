@@ -9,7 +9,7 @@ import type {
   SavingThrowResult,
 } from './resolution';
 import type { EffectApplication, EffectPayload, TurnBoundary } from './effects';
-import type { PersistentAreaInput, PersistentAreaOrigin } from './persistent-areas';
+import type { PersistentAreaHook, PersistentAreaInput, PersistentAreaOrigin } from './persistent-areas';
 import type { SpellCastCommand } from './spells/types';
 import type { AreaTemplate } from './templates';
 import type { CombatantId, EncounterEffectId, Feet, ItemId, LimitedResourcePoolId, ObjectTargetId, PersistentAreaId, WorldObjectId } from './values';
@@ -27,6 +27,10 @@ export type EncounterCommand =
       readonly targets: readonly CombatantId[];
       readonly objectTargets: readonly ObjectTargetId[];
       readonly ownedObjectTargets: readonly WorldObjectId[];
+      readonly ownedObjectDestinations?: readonly {
+        readonly objectId: WorldObjectId;
+        readonly destination: GridCell;
+      }[];
       readonly area: AreaTemplate | null;
       readonly spatialPoint?: GridCell;
       readonly selectedOption: string | null;
@@ -507,6 +511,15 @@ export type EncounterEvent =
       readonly targets: readonly CombatantId[];
       readonly objectTargets: readonly ObjectTargetId[];
       readonly ownedObjectTargets: readonly WorldObjectId[];
+    })
+  | (SequencedEvent & {
+      readonly type: 'sustained_effect_triggered';
+      readonly caster: CombatantId;
+      readonly effectId: EncounterEffectId;
+      readonly spellId: string;
+      readonly sequenceKind: 'automatic_tick' | 'event_trigger' | 'delayed_one_shot';
+      readonly trigger: 'source_start' | 'source_end' | PersistentAreaHook;
+      readonly targets: readonly CombatantId[];
     })
   | (SequencedEvent & {
       readonly type: 'spell_slot_spent';

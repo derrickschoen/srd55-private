@@ -105,6 +105,7 @@ import {
   type EncounterEffectId,
   type ItemId,
   type LimitedResourcePoolId,
+  type ObjectTargetId,
   type PersistentAreaId,
   type WorldObjectId,
 } from './values';
@@ -296,6 +297,7 @@ export type SustainedActivationRefusalCode =
   | 'effect_ended'
   | 'wrong_owner'
   | 'activation_not_yet_available'
+  | 'activation_not_declared'
   | 'bound_target_mismatch';
 
 /** Runtime identities make bound-target misuse a typed refusal rather than a representable success. */
@@ -2355,6 +2357,7 @@ function triggerPersistentAreaHook(
     emit(context, { type: 'persistent_area_triggered', areaId, hook, target });
     applyPersistentAreaEffect(context, refreshed, hook, target, spec.effect, index);
   }
+  triggerSustainedAreaHook(context, areaId, hook, target);
 }
 
 /**
@@ -2582,6 +2585,109 @@ function removeEffectTarget(
   }
 }
 
+type SustainedEncounterEffect = EncounterEffect & {
+  readonly payload: Extract<EffectPayload, { readonly kind: 'sustained_effect' }>;
+};
+
+type SustainedSpellDefinition = SpellDefinition & {
+  readonly operation: Extract<BranchSpellOperation, { readonly kind: 'sustained_effect' }>;
+};
+
+function isSustainedEncounterEffect(effect: EncounterEffect): effect is SustainedEncounterEffect {
+  return effect.payload.kind === 'sustained_effect';
+}
+
+function sustainedSpellCommand(
+  effect: SustainedEncounterEffect,
+  targets: readonly CombatantId[],
+): SpellCastCommand {
+  return {
+    type: 'cast_spell', actor: effect.source, spellId: effect.payload.spellId,
+    slotLevel: effect.payload.slotLevel, castAsRitual: false,
+    casterLevel: effect.payload.casterLevel, attackBonus: effect.payload.attackBonus,
+    saveDc: effect.payload.saveDc, spellcastingModifier: effect.payload.spellcastingModifier,
+    targets, area: effect.payload.area === null ? null : structuredClone(effect.payload.area),
+    weaponAttack: null, selectedOption: effect.payload.selectedOption,
+    objectTargets: effect.payload.boundObjects,
+    ownedObjectTargets: effect.payload.ownedObjects,
+  };
+}
+
+function sustainedDefinitionForEffect(
+  state: EncounterState,
+  effect: SustainedEncounterEffect,
+): SustainedSpellDefinition {
+  const definition = spellDefinition(effect.payload.spellId) ??
+    importedSpellDefinition(state.contentPacks, effect.payload.spellId);
+  if (definition === null || definition.operation.kind !== 'sustained_effect') {
+    throw new EncounterRuleError(`Sustained spell ${effect.payload.spellId} is not implemented.`);
+  }
+  return definition as SustainedSpellDefinition;
+}
+
+function resolveSustainedSequence(
+  context: ReductionContext,
+  effect: SustainedEncounterEffect,
+  sequenceKind: 'automatic_tick' | 'event_trigger' | 'delayed_one_shot',
+  trigger: 'source_start' | 'source_end' | PersistentAreaHook,
+  targets: readonly CombatantId[],
+  operation: BranchSpellOperation,
+): void {
+  const definition = sustainedDefinitionForEffect(context.state, effect);
+  emit(context, {
+    type: 'sustained_effect_triggered', caster: effect.source, effectId: effect.id,
+    spellId: definition.id, sequenceKind, trigger, targets,
+  });
+  executeSpellOperation(
+    context,
+    definition,
+    sustainedSpellCommand(effect, targets),
+    targets,
+    operation,
+  );
+}
+
+function triggerSustainedAreaHook(
+  context: ReductionContext,
+  areaId: PersistentAreaId,
+  hook: PersistentAreaHook,
+  target: CombatantId,
+): void {
+  const snapshots = context.state.effects.filter((effect): effect is SustainedEncounterEffect =>
+    isSustainedEncounterEffect(effect) && effect.payload.ownedAreas.includes(areaId));
+  for (const snapshot of snapshots) {
+    const effect = context.state.effects.find((candidate) => candidate.id === snapshot.id);
+    if (effect === undefined || !isSustainedEncounterEffect(effect)) continue;
+    const definition = sustainedDefinitionForEffect(context.state, effect);
+    const sequence = definition.operation.sequence;
+    switch (sequence.kind) {
+      case 'activation':
+      case 'automatic_tick':
+      case 'delayed_one_shot':
+      case 'instance_group_activation':
+        continue;
+      case 'event_trigger': {
+        if (sequence.hook !== hook) continue;
+        if (sequence.frequency === 'once_per_turn') {
+          const turn = areaTurnIdentity(context.state);
+          const key = `${turn}:${String(target)}`;
+          const currentKeys = effect.payload.consumedEventTurnKeys
+            .filter((candidate) => candidate.startsWith(`${turn}:`));
+          if (currentKeys.includes(key)) continue;
+          context.state = {
+            ...context.state,
+            effects: context.state.effects.map((candidate) => candidate.id === effect.id && candidate.payload.kind === 'sustained_effect'
+              ? { ...candidate, payload: { ...candidate.payload, consumedEventTurnKeys: [...currentKeys, key].sort() } }
+              : candidate),
+          };
+        }
+        resolveSustainedSequence(context, effect, 'event_trigger', hook, [target], sequence.operation);
+        break;
+      }
+    }
+  }
+}
+
 function processBoundary(
   context: ReductionContext,
   subjectId: CombatantId,
@@ -2623,6 +2729,50 @@ function processBoundary(
   for (const effectId of effectIds) {
     const effect = context.state.effects.find((candidate) => candidate.id === effectId);
     if (effect === undefined) continue;
+
+    if (isSustainedEncounterEffect(effect)) {
+      const definition = sustainedDefinitionForEffect(context.state, effect);
+      const sequence = definition.operation.sequence;
+      const sourceBoundary = effect.source === subjectId &&
+        (sequence.kind === 'automatic_tick' || sequence.kind === 'delayed_one_shot') &&
+        (sequence.boundary === 'source_start' ? boundary === 'start' : boundary === 'end');
+      switch (sequence.kind) {
+        case 'activation':
+        case 'event_trigger':
+        case 'instance_group_activation':
+          break;
+        case 'automatic_tick':
+          if (sourceBoundary) {
+            resolveSustainedSequence(
+              context, effect, 'automatic_tick', sequence.boundary,
+              effect.payload.boundCombatants, sequence.operation,
+            );
+          }
+          break;
+        case 'delayed_one_shot':
+          if (sourceBoundary) {
+            const remaining = effect.payload.delayedRoundsRemaining;
+            if (remaining === null || remaining < 1) {
+              throw new EncounterRuleError(`${definition.name} has an invalid delayed one-shot clock.`);
+            }
+            const next = remaining - 1;
+            context.state = {
+              ...context.state,
+              effects: context.state.effects.map((candidate) => candidate.id === effect.id && candidate.payload.kind === 'sustained_effect'
+                ? { ...candidate, payload: { ...candidate.payload, delayedRoundsRemaining: next } }
+                : candidate),
+            };
+            if (next === 0) {
+              resolveSustainedSequence(
+                context, effect, 'delayed_one_shot', sequence.boundary,
+                effect.payload.boundCombatants, sequence.operation,
+              );
+              endEffects(context, new Set([effect.id]), 'trigger_consumed');
+            }
+          }
+          break;
+      }
+    }
 
     if (
       effect.targets.includes(subjectId) &&
@@ -2936,6 +3086,9 @@ function cloneEffectApplication(
           boundCombatants: [...application.payload.boundCombatants],
           boundObjects: [...application.payload.boundObjects],
           ownedObjects: [...application.payload.ownedObjects],
+          ownedAreas: [...application.payload.ownedAreas],
+          consumedEventTurnKeys: [...application.payload.consumedEventTurnKeys],
+          area: application.payload.area === null ? null : structuredClone(application.payload.area),
         };
       case 'commanded_action':
         return { ...application.payload, options: [...application.payload.options] };
@@ -4860,9 +5013,9 @@ export const CONDITION_LIFECYCLE_EQUAL_POTENCY_STACKING_RULE = Object.freeze({
  * consequences run synchronously immediately after their damage event.
  */
 export const CONDITION_LIFECYCLE_HOOK_ORDER = Object.freeze([
-  'persistent_area_hooks_and_damage_lifecycle',
+  'persistent_area_hooks_then_owned_area_event_bindings_and_damage_lifecycle',
   'reevaluated_branches_and_damage_lifecycle',
-  'effect_payloads_and_damage_lifecycle',
+  'creation_ordered_effect_payloads_including_automatic_ticks_and_delayed_one_shots',
   'repeat_saves',
   'duration_expiry',
 ] as const);
@@ -5549,37 +5702,70 @@ function executeSpellOperation(
     case 'heat_metal':
       return executeHeatMetal(context, definition, command, operation);
     case 'sustained_effect': {
-      if (operation.establishment?.kind === 'sustained_effect' || operation.activation.operation.kind === 'sustained_effect') {
+      if (operation.establishment?.kind === 'sustained_effect' || operation.sequence.operation.kind === 'sustained_effect') {
         throw new EncounterRuleError(`${definition.name} cannot nest a sustained effect.`);
       }
       const objectIdsBefore = new Set(context.state.worldObjects.map((object) => object.id));
+      const areaIdsBefore = new Set(context.state.persistentAreas.map((area) => area.id));
       if (operation.establishment !== null) {
         executeSpellOperation(context, definition, command, targets, operation.establishment);
       }
       const createdObjects = context.state.worldObjects
         .filter((object) => !objectIdsBefore.has(object.id))
         .map((object) => object.id);
-      const boundCombatants = operation.targetBinding.kind === 'bound' &&
-        operation.targetBinding.to === 'cast_combatant_targets'
-        ? targets
-        : [];
-      const boundObjects = operation.targetBinding.kind === 'bound'
-        ? operation.targetBinding.to === 'cast_object_targets'
-          ? command.objectTargets ?? []
-          : operation.targetBinding.to === 'created_world_objects'
-            ? createdObjects
-            : []
-        : [];
-      if (
-        operation.targetBinding.kind === 'bound' &&
-        ((operation.targetBinding.to === 'cast_combatant_targets' && boundCombatants.length === 0) ||
-          (operation.targetBinding.to !== 'cast_combatant_targets' && boundObjects.length === 0))
-      ) {
-        throw new EncounterRuleError(`${definition.name} did not establish its declared bound target.`);
+      const createdAreas = context.state.persistentAreas
+        .filter((area) => !areaIdsBefore.has(area.id))
+        .map((area) => area.id);
+      let targetBinding: Extract<EffectPayload, { readonly kind: 'sustained_effect' }>['targetBinding'];
+      let boundCombatants: readonly CombatantId[] = [];
+      let boundObjects: readonly ObjectTargetId[] = [];
+      switch (operation.sequence.kind) {
+        case 'activation':
+          targetBinding = operation.sequence.targetBinding.kind === 'reselect'
+            ? 'reselect'
+            : operation.sequence.targetBinding.to === 'cast_combatant_targets'
+              ? 'bound_combatants'
+              : operation.sequence.targetBinding.to === 'cast_object_targets'
+                ? 'bound_objects'
+                : 'bound_owned_objects';
+          boundCombatants = targetBinding === 'bound_combatants' ? targets : [];
+          boundObjects = targetBinding === 'bound_objects' ? command.objectTargets ?? [] : [];
+          if (
+            (targetBinding === 'bound_combatants' && boundCombatants.length === 0) ||
+            (targetBinding === 'bound_objects' && boundObjects.length === 0) ||
+            (targetBinding === 'bound_owned_objects' && createdObjects.length === 0)
+          ) throw new EncounterRuleError(`${definition.name} did not establish its declared bound target.`);
+          break;
+        case 'automatic_tick':
+          if (targets.length === 0) throw new EncounterRuleError(`${definition.name} automatic ticks require cast targets.`);
+          if (operation.lifecycle.durationRounds !== operation.sequence.ticks) {
+            throw new EncounterRuleError(`${definition.name} automatic tick duration must equal its tick count.`);
+          }
+          targetBinding = 'bound_combatants';
+          boundCombatants = targets;
+          break;
+        case 'event_trigger':
+          if (createdAreas.length !== 1) throw new EncounterRuleError(`${definition.name} must establish exactly one event-owned area.`);
+          targetBinding = 'reselect';
+          break;
+        case 'delayed_one_shot':
+          if (targets.length === 0) throw new EncounterRuleError(`${definition.name} delayed one-shot requires cast targets.`);
+          if (operation.lifecycle.durationRounds !== null) {
+            throw new EncounterRuleError(`${definition.name} delayed one-shot cannot also declare a duration clock.`);
+          }
+          targetBinding = 'bound_combatants';
+          boundCombatants = targets;
+          break;
+        case 'instance_group_activation':
+          if (createdObjects.length !== operation.sequence.instanceCount) {
+            throw new EncounterRuleError(`${definition.name} must establish exactly ${String(operation.sequence.instanceCount)} owned instances.`);
+          }
+          targetBinding = 'bound_owned_objects';
+          break;
       }
       applyEffect(context, command.actor, {
         targets: [command.actor],
-        duration: operation.lifecycle.durationRounds === null
+        duration: operation.sequence.kind === 'delayed_one_shot' || operation.lifecycle.durationRounds === null
           ? { kind: 'permanent' }
           : {
               kind: 'turn_boundaries',
@@ -5598,23 +5784,23 @@ function executeSpellOperation(
           kind: 'sustained_effect',
           spellId: definition.id,
           establishedRound: context.state.round,
-          targetBinding: operation.targetBinding.kind === 'reselect'
-            ? 'reselect'
-            : operation.targetBinding.to === 'cast_combatant_targets'
-              ? 'bound_combatants'
-              : operation.targetBinding.to === 'cast_object_targets'
-                ? 'bound_objects'
-                : 'bound_owned_objects',
+          sequenceKind: operation.sequence.kind,
+          targetBinding,
           boundCombatants: [...boundCombatants],
-          boundObjects: operation.targetBinding.kind === 'bound' && operation.targetBinding.to === 'cast_object_targets'
-            ? [...boundObjects]
-            : [],
+          boundObjects: [...boundObjects],
           ownedObjects: [...createdObjects],
+          ownedAreas: [...createdAreas],
+          consumedEventTurnKeys: [],
+          delayedRoundsRemaining: operation.sequence.kind === 'delayed_one_shot'
+            ? operation.sequence.delayRounds
+            : null,
           slotLevel: command.slotLevel,
           casterLevel: command.casterLevel,
           attackBonus: command.attackBonus,
           saveDc: command.saveDc,
           spellcastingModifier: command.spellcastingModifier,
+          area: command.area === null ? null : structuredClone(command.area),
+          selectedOption: command.selectedOption,
         },
       });
       return 'applied';
@@ -5812,7 +5998,10 @@ function executeSpellOperation(
             break;
           }
           case 'move_owned_object': {
-            if (definition.operation.kind !== 'sustained_effect') {
+            if (
+              definition.operation.kind !== 'sustained_effect' ||
+              definition.operation.sequence.kind !== 'activation'
+            ) {
               throw new EncounterRuleError('Owned world-object movement is only available to a sustained effect activation.');
             }
             const objectTargets = command.ownedObjectTargets ?? [];
@@ -5841,6 +6030,50 @@ function executeSpellOperation(
                 })),
               },
             });
+            break;
+          }
+          case 'move_owned_object_group': {
+            if (
+              definition.operation.kind !== 'sustained_effect' ||
+              definition.operation.sequence.kind !== 'instance_group_activation'
+            ) {
+              throw new EncounterRuleError('Owned world-object group movement is only available to a sustained effect activation.');
+            }
+            const objectTargets = command.ownedObjectTargets ?? [];
+            const destinations = command.ownedObjectDestinations ?? [];
+            if (
+              destinations.length !== objectTargets.length ||
+              !sameIdentitySet(destinations.map((entry) => entry.objectId), objectTargets)
+            ) {
+              throw new EncounterRuleError(`${definition.name} requires one destination for every owned instance.`);
+            }
+            const moves = [...destinations]
+              .sort((left, right) => String(left.objectId).localeCompare(String(right.objectId)))
+              .map((entry) => {
+                const existing = worldObject(context.state, entry.objectId);
+                if (
+                  !isCellInside(context.state.bounds, entry.destination) ||
+                  gridDistance(existing.position, entry.destination) > declared.maximumDistanceFeet
+                ) {
+                  throw new EncounterRuleError(`${definition.name} group destination is outside its declared movement range.`);
+                }
+                const columnDelta = entry.destination.column - existing.position.column;
+                const rowDelta = entry.destination.row - existing.position.row;
+                return {
+                  objectId: entry.objectId,
+                  destination: entry.destination,
+                  footprint: existing.footprint.map((cell) => ({
+                    column: cell.column + columnDelta,
+                    row: cell.row + rowDelta,
+                  })),
+                };
+              });
+            for (const move of moves) {
+              processWorldOperation(context, command.actor, {
+                kind: 'modify_object', objectId: move.objectId,
+                changes: { position: { ...move.destination }, footprint: move.footprint },
+              });
+            }
             break;
           }
           case 'damage_objects': {
@@ -6793,30 +7026,38 @@ function processSustainedEffectActivation(
   if (effect.source !== command.actor) {
     throw new SustainedActivationRuleError('wrong_owner', `Sustained effect ${command.effectId} belongs to ${effect.source}.`);
   }
+  const definition = spellDefinition(effect.payload.spellId) ??
+    importedSpellDefinition(context.state.contentPacks, effect.payload.spellId);
+  if (definition === null || definition.operation.kind !== 'sustained_effect') {
+    throw new SustainedActivationRuleError('effect_not_sustained', `Spell ${effect.payload.spellId} has no sustained declaration.`);
+  }
+  const sequence = definition.operation.sequence;
+  if (sequence.kind !== 'activation' && sequence.kind !== 'instance_group_activation') {
+    throw new SustainedActivationRuleError(
+      'activation_not_declared',
+      `Sustained effect ${command.effectId} advances without an activation command.`,
+    );
+  }
   if (context.state.round <= effect.payload.establishedRound) {
     throw new SustainedActivationRuleError(
       'activation_not_yet_available',
       `Sustained effect ${command.effectId} is available only on a later turn.`,
     );
   }
-  if (
-    (effect.payload.targetBinding === 'bound_combatants' &&
-      !sameIdentitySet(command.targets, effect.payload.boundCombatants)) ||
-    (effect.payload.targetBinding === 'bound_objects' &&
-      !sameIdentitySet(command.objectTargets, effect.payload.boundObjects)) ||
-    (effect.payload.targetBinding === 'bound_owned_objects' &&
-      !sameIdentitySet(command.ownedObjectTargets, effect.payload.ownedObjects)) ||
-    !sameIdentitySet(command.ownedObjectTargets, effect.payload.ownedObjects)
-  ) {
+  const boundTargetMismatch = sequence.kind === 'instance_group_activation'
+    ? !sameIdentitySet(command.ownedObjectTargets, effect.payload.ownedObjects)
+    : (effect.payload.targetBinding === 'bound_combatants' &&
+        !sameIdentitySet(command.targets, effect.payload.boundCombatants)) ||
+      (effect.payload.targetBinding === 'bound_objects' &&
+        !sameIdentitySet(command.objectTargets, effect.payload.boundObjects)) ||
+      (effect.payload.targetBinding === 'bound_owned_objects' &&
+        !sameIdentitySet(command.ownedObjectTargets, effect.payload.ownedObjects)) ||
+      !sameIdentitySet(command.ownedObjectTargets, effect.payload.ownedObjects);
+  if (boundTargetMismatch) {
     throw new SustainedActivationRuleError(
       'bound_target_mismatch',
       `Sustained effect ${command.effectId} must use its bound target set.`,
     );
-  }
-  const definition = spellDefinition(effect.payload.spellId) ??
-    importedSpellDefinition(context.state.contentPacks, effect.payload.spellId);
-  if (definition === null || definition.operation.kind !== 'sustained_effect') {
-    throw new SustainedActivationRuleError('effect_not_sustained', `Spell ${effect.payload.spellId} has no sustained declaration.`);
   }
   const activationCommand: SpellCastCommand = {
     type: 'cast_spell',
@@ -6835,13 +7076,16 @@ function processSustainedEffectActivation(
     selectedOption: command.selectedOption,
     objectTargets: command.objectTargets,
     ownedObjectTargets: command.ownedObjectTargets,
+    ...(command.ownedObjectDestinations === undefined
+      ? {}
+      : { ownedObjectDestinations: command.ownedObjectDestinations }),
   };
   const activationDefinition: SpellDefinition = {
     ...definition,
-    targeting: definition.operation.activation.targeting,
+    targeting: sequence.targeting,
   };
   const targets = selectedSpellTargets(context.state, activationDefinition, activationCommand);
-  const actionType = definition.operation.activation.action.actionType;
+  const actionType = sequence.action.actionType;
   if (actionType !== 'reaction') assertActiveActor(context, command.actor);
   spendCost(
     context,
@@ -6854,7 +7098,7 @@ function processSustainedEffectActivation(
     definition,
     activationCommand,
     targets,
-    definition.operation.activation.operation,
+    sequence.operation,
   );
   emit(context, {
     type: 'sustained_effect_activated',

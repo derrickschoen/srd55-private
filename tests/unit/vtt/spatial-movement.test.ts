@@ -4,7 +4,7 @@ import { EncounterRuleError, createEncounter, reduceEncounter, type EncounterSta
 import type { EncounterCommand, EncounterEvent } from '../../../src/combat/events';
 import type { SpellOperation } from '../../../src/combat/spells/types';
 import { damageType, feet } from '../../../src/combat/values';
-import type { AreaTemplate } from '../../../src/combat/templates';
+import { feetPoint, type AreaTemplate } from '../../../src/combat/templates';
 import { loadContentPack, type LoadedContentPack } from '../../../src/content/content-pack';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
@@ -68,6 +68,18 @@ function position(state: EncounterState, id: ReturnType<typeof playerProfile>['i
   return placed.position;
 }
 
+function adjudicatePosition(
+  state: EncounterState,
+  target: ReturnType<typeof playerProfile>,
+  to: { readonly column: number; readonly row: number },
+): ReturnType<typeof reduceEncounter> {
+  return reduceEncounter(state, {
+    type: 'adjudicate', target: target.id, subject: 'persistent-area test relocation',
+    reasoning: 'Exercise multiple area-entry hooks without advancing the active turn.',
+    consequence: { kind: 'relocate', to },
+  }, () => 0);
+}
+
 function movementRegion(
   id: string,
   cells: readonly { readonly column: number; readonly row: number }[],
@@ -100,6 +112,53 @@ const persistentHook: SpellOperation = {
 };
 
 describe('CAP-IMP-009 imported spatial movement operations', () => {
+  it('persistent_area_once_per_turn_is_scoped_per_target_same_turn: two targets each fire once while repeat entry is suppressed', () => {
+    const pack = packWithSpells([{
+      id: 'per-target-hook-field',
+      targeting: { kind: 'area', rangeFeet: 60, shape: 'sphere', baseSizeFeet: 3, sizePerSlotFeet: 0 },
+      operation: {
+        kind: 'persistent_area', origin: 'selected_when_cast', shape: null,
+        durationRounds: 3, concentration: false, targetFilter: 'all', includeOwner: false,
+        difficultTerrain: false, movableFeet: null,
+        hooks: [{
+          hook: 'on_enter', frequency: 'once_per_turn',
+          effect: {
+            kind: 'automatic', payload: {
+              kind: 'damage', damageType: damageType('Piercing'),
+              dice: { baseCount: 1, sides: 4, modifier: 0, perSlotCount: 0, perSlotModifier: 0, cantripUpgrade: false },
+            },
+          },
+        }],
+        initialEffects: [],
+      },
+    }]);
+    const caster = playerProfile('per-target-area-caster', {
+      initiativeBonus: 20, spellSlots: [{ level: 1, maximum: 1 }],
+    });
+    const first = monsterProfile('per-target-area-first', { initiativeBonus: -10, hitPoints: 20 });
+    const second = monsterProfile('per-target-area-second', { initiativeBonus: -20, hitPoints: 20 });
+    let state = initiative(createEncounter({
+      bounds: { columns: 16, rows: 3 }, combatants: [caster, first, second],
+      tokens: [placedToken(caster, 10), placedToken(first, 0), placedToken(second, 0, 2)],
+      contentPacks: [pack],
+    }));
+    state = cast(state, command(caster, 'per-target-hook-field', [], {
+      area: { shape: 'sphere', template: { origin: feetPoint(15, 5), radius: feet(3) } },
+    })).state;
+
+    state = adjudicatePosition(state, first, { column: 2, row: 1 }).state;
+    expect(state.combatants.find(({ profile }) => profile.id === first.id)?.hitPoints).toBe(19);
+    state = adjudicatePosition(state, first, { column: 1, row: 1 }).state;
+    state = adjudicatePosition(state, second, { column: 2, row: 1 }).state;
+    expect(state.combatants.find(({ profile }) => profile.id === second.id)?.hitPoints).toBe(19);
+    state = adjudicatePosition(state, second, { column: 1, row: 2 }).state;
+    const repeated = adjudicatePosition(state, first, { column: 2, row: 1 });
+
+    expect(repeated.state.combatants.find(({ profile }) => profile.id === first.id)?.hitPoints).toBe(19);
+    expect(repeated.state.combatants.find(({ profile }) => profile.id === second.id)?.hitPoints).toBe(19);
+    expect(repeated.events.filter((event) => event.type === 'damage_applied')).toEqual([]);
+  });
+
   it('teleport_range_boundary: accepts a destination exactly at maximumDistanceFeet and refuses one grid step beyond', () => {
     const pack = packWithSpells([{
       id: 'silver-skip',

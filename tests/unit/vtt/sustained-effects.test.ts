@@ -170,8 +170,9 @@ function fixtureWithSpells(specs: readonly SustainedSpec[]): unknown {
           durationRounds: spec.durationRounds,
           expiresAt: 'source_start',
         },
-        targetBinding: spec.binding,
-        activation: {
+        sequence: {
+          kind: 'activation',
+          targetBinding: spec.binding,
           action: spec.action,
           targeting: spec.activationTargeting,
           operation: spec.activation,
@@ -302,9 +303,9 @@ describe('D343 imported sustained-effect sequencing', () => {
     });
     const produce = content.spells.find((spell) => spell.recordId === PRODUCE_FLAME.id)?.definition.operation;
     const heat = content.spells.find((spell) => spell.recordId === HEAT_METAL.id)?.definition.operation;
-    expect(produce?.kind === 'sustained_effect' ? produce.activation.action : null)
+    expect(produce?.kind === 'sustained_effect' && produce.sequence.kind === 'activation' ? produce.sequence.action : null)
       .toEqual({ phrasing: 'vague_action_on_later_turn', actionType: 'magic_action' });
-    expect(heat?.kind === 'sustained_effect' ? heat.activation.action : null)
+    expect(heat?.kind === 'sustained_effect' && heat.sequence.kind === 'activation' ? heat.sequence.action : null)
       .toEqual({ phrasing: 'explicit', actionType: 'bonus_action' });
   });
 
