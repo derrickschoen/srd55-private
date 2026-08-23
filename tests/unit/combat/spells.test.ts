@@ -661,6 +661,7 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
     case 'armor_class_modifier':
     case 'damage_response_modifier':
     case 'targeted_defense_modifier':
+    case 'sustained_effect':
       return null;
     case 'roll_dice_modifier':
     case 'damage_dice_reduction':
@@ -752,6 +753,7 @@ function operationPerSlot(definition: SpellDefinition): number {
     case 'armor_class_modifier':
     case 'damage_response_modifier':
     case 'targeted_defense_modifier':
+    case 'sustained_effect':
       return 0;
     case 'damage_operation':
       return operation.packets[0]?.dice.perSlotCount ?? 0;

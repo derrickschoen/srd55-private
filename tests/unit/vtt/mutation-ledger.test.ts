@@ -44,6 +44,7 @@ const CHOICE_BRANCH_LEDGER_PATH = 'docs/audits/2026-08-22-choice-branch-mutation
 const CONDITION_LIFECYCLE_LEDGER_PATH = 'docs/audits/2026-08-22-condition-lifecycle-mutation-ledger.md';
 const ROLL_DEFENSE_LEDGER_PATH = 'docs/audits/2026-08-22-roll-defense-mutation-ledger.md';
 const PAIRWISE_COMPOSITION_LEDGER_PATH = 'docs/audits/2026-08-22-pairwise-composition-mutation-ledger.md';
+const SEQUENCING_LEDGER_PATH = 'docs/audits/2026-08-22-sequencing-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -615,5 +616,31 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(12);
     expect(ledger).toContain('Every production mutation below was applied alone');
     expect(ledger).toContain('Tests  46 passed (46)');
+  });
+
+  it('SUSTAINED-SEQUENCING-MUTATION-LEDGER pins all D343 controls and the duration off-by-one', () => {
+    const ledger = readFileSync(SEQUENCING_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/sustained-effects.test.ts', 'utf8');
+    const mutations = [
+      'bound_effect_retargets',
+      'activation_free',
+      'effect_end_leaves_activation',
+      'explicit_action_type_normalized',
+      'sustained_duration_off_by_one',
+    ];
+    const killingTests = [
+      'bound_effect_retargets and explicit_action_type_normalized: Heat Metal keeps its original object, rejects a different object with a typed code, and spends only its Bonus Action',
+      'activation_free: an available Magic action activates, but an exactly-spent action refuses without dealing damage',
+      'effect_end_leaves_activation: ending concentration removes the ordinary lifecycle effect and refuses its pending activation',
+      'produce-flame shape and sustained_duration_off_by_one: same-turn and post-expiry activation refuse, while first and final later rounds retarget and spend Magic actions',
+    ];
+    for (const mutation of mutations) expect(ledger).toContain(`\`${mutation}\``);
+    for (const testName of killingTests) {
+      expect(ledger).toContain(`\`${testName}\``);
+      expect(tests).toContain(testName);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(5);
+    expect(ledger).toContain('Each production mutation below was applied alone');
+    expect(ledger).toContain('Tests  9 passed (9)');
   });
 });

@@ -12,6 +12,7 @@ import type {
   EncounterEffectId,
   LimitedResourcePoolId,
   PersistentAreaId,
+  WorldObjectId,
 } from './values';
 
 export const featureEffectTriggers = [
@@ -244,6 +245,21 @@ export type WeaponHitRiderFollowUp =
     };
 
 export type EffectPayload =
+  | {
+      /** D343 activation state; its operation remains in the retained spell definition. */
+      readonly kind: 'sustained_effect';
+      readonly spellId: string;
+      readonly establishedRound: number;
+      readonly targetBinding: 'reselect' | 'bound_combatants' | 'bound_objects' | 'bound_owned_objects';
+      readonly boundCombatants: readonly CombatantId[];
+      readonly boundObjects: readonly WorldObjectId[];
+      readonly ownedObjects: readonly WorldObjectId[];
+      readonly slotLevel: number | null;
+      readonly casterLevel: number;
+      readonly attackBonus: number;
+      readonly saveDc: number;
+      readonly spellcastingModifier: number;
+    }
   | {
       readonly kind: 'condition';
       readonly condition: Exclude<ConditionName, 'Exhaustion'>;

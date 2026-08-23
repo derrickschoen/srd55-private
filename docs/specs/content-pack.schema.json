@@ -2843,6 +2843,432 @@
               {
                 "type": "object",
                 "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "sustained_effect"
+                  },
+                  "establishment": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/__schema0"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "lifecycle": {
+                    "type": "object",
+                    "properties": {
+                      "concentration": {
+                        "type": "boolean"
+                      },
+                      "durationRounds": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 1000000
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "expiresAt": {
+                        "type": "string",
+                        "enum": [
+                          "source_start",
+                          "source_end"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "concentration",
+                      "durationRounds",
+                      "expiresAt"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "targetBinding": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "reselect"
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "bound"
+                          },
+                          "to": {
+                            "type": "string",
+                            "enum": [
+                              "cast_combatant_targets",
+                              "cast_object_targets",
+                              "created_world_objects"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "to"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "activation": {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "phrasing": {
+                                "type": "string",
+                                "const": "explicit"
+                              },
+                              "actionType": {
+                                "type": "string",
+                                "enum": [
+                                  "magic_action",
+                                  "bonus_action",
+                                  "reaction"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "phrasing",
+                              "actionType"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "phrasing": {
+                                "type": "string",
+                                "const": "vague_action_on_later_turn"
+                              },
+                              "actionType": {
+                                "type": "string",
+                                "const": "magic_action"
+                              }
+                            },
+                            "required": [
+                              "phrasing",
+                              "actionType"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "targeting": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "self"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "single"
+                              },
+                              "rangeFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "willing": {
+                                "type": "boolean"
+                              },
+                              "allowDead": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "rangeByCasterLevel": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "minimumLevel": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 20
+                                    },
+                                    "rangeFeet": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 100000
+                                    }
+                                  },
+                                  "required": [
+                                    "minimumLevel",
+                                    "rangeFeet"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "rangeFeet",
+                              "willing"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "multiple"
+                              },
+                              "rangeFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "baseMaximum": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100
+                              },
+                              "additionalPerSlot": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "willing": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "rangeFeet",
+                              "baseMaximum",
+                              "additionalPerSlot"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "area"
+                              },
+                              "rangeFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "shape": {
+                                "type": "string",
+                                "enum": [
+                                  "cone",
+                                  "cube",
+                                  "cylinder",
+                                  "emanation",
+                                  "line",
+                                  "sphere"
+                                ]
+                              },
+                              "baseSizeFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "sizePerSlotFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "secondarySizeFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "surface": {
+                                "type": "string",
+                                "const": "ground_square"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "rangeFeet",
+                              "shape",
+                              "baseSizeFeet",
+                              "sizePerSlotFeet"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "area_selected"
+                              },
+                              "rangeFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "shape": {
+                                "type": "string",
+                                "enum": [
+                                  "cone",
+                                  "cube",
+                                  "cylinder",
+                                  "emanation",
+                                  "line",
+                                  "sphere"
+                                ]
+                              },
+                              "baseSizeFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "sizePerSlotFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "secondarySizeFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "baseMaximum": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100
+                              },
+                              "additionalPerSlot": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "rangeFeet",
+                              "shape",
+                              "baseSizeFeet",
+                              "sizePerSlotFeet",
+                              "baseMaximum",
+                              "additionalPerSlot"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "all_in_range"
+                              },
+                              "rangeFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "rangeFeet"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "remote"
+                              },
+                              "range": {
+                                "type": "string",
+                                "const": "unlimited"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "range"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "utility"
+                              },
+                              "rangeFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "rangeFeet"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "operation": {
+                        "$ref": "#/$defs/__schema0"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "targeting",
+                      "operation"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "establishment",
+                  "lifecycle",
+                  "targetBinding",
+                  "activation"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
                   "delivery": {
                     "oneOf": [
                       {
@@ -5832,6 +6258,25 @@
                           "required": [
                             "kind",
                             "changes"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "move_owned_object"
+                            },
+                            "maximumDistanceFeet": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 100000
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "maximumDistanceFeet"
                           ],
                           "additionalProperties": false
                         },
@@ -21378,6 +21823,432 @@
         {
           "type": "object",
           "properties": {
+            "kind": {
+              "type": "string",
+              "const": "sustained_effect"
+            },
+            "establishment": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/__schema0"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "type": "object",
+              "properties": {
+                "concentration": {
+                  "type": "boolean"
+                },
+                "durationRounds": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1000000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "enum": [
+                    "source_start",
+                    "source_end"
+                  ]
+                }
+              },
+              "required": [
+                "concentration",
+                "durationRounds",
+                "expiresAt"
+              ],
+              "additionalProperties": false
+            },
+            "targetBinding": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "reselect"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "bound"
+                    },
+                    "to": {
+                      "type": "string",
+                      "enum": [
+                        "cast_combatant_targets",
+                        "cast_object_targets",
+                        "created_world_objects"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "to"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "activation": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "phrasing": {
+                          "type": "string",
+                          "const": "explicit"
+                        },
+                        "actionType": {
+                          "type": "string",
+                          "enum": [
+                            "magic_action",
+                            "bonus_action",
+                            "reaction"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "phrasing",
+                        "actionType"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "phrasing": {
+                          "type": "string",
+                          "const": "vague_action_on_later_turn"
+                        },
+                        "actionType": {
+                          "type": "string",
+                          "const": "magic_action"
+                        }
+                      },
+                      "required": [
+                        "phrasing",
+                        "actionType"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "targeting": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "self"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "single"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "willing": {
+                          "type": "boolean"
+                        },
+                        "allowDead": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "rangeByCasterLevel": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "minimumLevel": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 20
+                              },
+                              "rangeFeet": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              }
+                            },
+                            "required": [
+                              "minimumLevel",
+                              "rangeFeet"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rangeFeet",
+                        "willing"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "multiple"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "baseMaximum": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100
+                        },
+                        "additionalPerSlot": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100
+                        },
+                        "willing": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rangeFeet",
+                        "baseMaximum",
+                        "additionalPerSlot"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "area"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "shape": {
+                          "type": "string",
+                          "enum": [
+                            "cone",
+                            "cube",
+                            "cylinder",
+                            "emanation",
+                            "line",
+                            "sphere"
+                          ]
+                        },
+                        "baseSizeFeet": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "sizePerSlotFeet": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "secondarySizeFeet": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "surface": {
+                          "type": "string",
+                          "const": "ground_square"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rangeFeet",
+                        "shape",
+                        "baseSizeFeet",
+                        "sizePerSlotFeet"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "area_selected"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "shape": {
+                          "type": "string",
+                          "enum": [
+                            "cone",
+                            "cube",
+                            "cylinder",
+                            "emanation",
+                            "line",
+                            "sphere"
+                          ]
+                        },
+                        "baseSizeFeet": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "sizePerSlotFeet": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "secondarySizeFeet": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "baseMaximum": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100
+                        },
+                        "additionalPerSlot": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rangeFeet",
+                        "shape",
+                        "baseSizeFeet",
+                        "sizePerSlotFeet",
+                        "baseMaximum",
+                        "additionalPerSlot"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "all_in_range"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "remote"
+                        },
+                        "range": {
+                          "type": "string",
+                          "const": "unlimited"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "range"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "utility"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "operation": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": [
+                "action",
+                "targeting",
+                "operation"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "kind",
+            "establishment",
+            "lifecycle",
+            "targetBinding",
+            "activation"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
             "delivery": {
               "oneOf": [
                 {
@@ -24367,6 +25238,25 @@
                     "required": [
                       "kind",
                       "changes"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "move_owned_object"
+                      },
+                      "maximumDistanceFeet": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100000
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "maximumDistanceFeet"
                     ],
                     "additionalProperties": false
                   },
