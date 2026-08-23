@@ -115,13 +115,13 @@ export type ConditionLifecycleDuration =
   | {
       readonly kind: 'fixed_rounds';
       readonly rounds: number;
-      readonly expiresAt: 'target_start' | 'target_end';
+      readonly expiresAt: 'source_start' | 'source_end' | 'target_start' | 'target_end';
     }
   | { readonly kind: 'concentration' }
   | {
       readonly kind: 'fixed_rounds_or_concentration';
       readonly rounds: number;
-      readonly expiresAt: 'target_start' | 'target_end';
+      readonly expiresAt: 'source_start' | 'source_end' | 'target_start' | 'target_end';
     };
 
 export type ConditionLifecycleStacking =
@@ -328,15 +328,56 @@ export type SustainedEffectTargetBinding =
       readonly to: 'cast_combatant_targets' | 'cast_object_targets' | 'created_world_objects';
     };
 
-export type SpellOperation = CompositionOperation | NonCompositionSpellOperation;
+export type SharedOutcomeDelivery =
+  | { readonly kind: 'attack'; readonly attackKind: 'melee' | 'ranged' }
+  | {
+      readonly kind: 'save';
+      readonly ability: Ability;
+      readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
+    };
 
-export type NonCompositionSpellOperation =
+/**
+ * A branch-only reference to the raw total rolled by one immediate automatic
+ * damage operation in the failure branch. The referenced dice are rolled once
+ * at this node, then the existing round-down halving rule is applied.
+ */
+export interface SharedOutcomeDamageReferenceOperation {
+  readonly kind: 'shared_outcome_damage_reference';
+  readonly source: {
+    readonly branch: 'failure';
+    readonly operationIndex: number;
+  };
+  readonly transform: 'half_round_down';
+}
+
+/** Branch nodes cannot contain shared_outcome, even through another branch wrapper. */
+export type SharedOutcomeBranchOperation = BranchSpellOperation | SharedOutcomeDamageReferenceOperation;
+
+export type SharedOutcomeOperation =
+  | {
+      readonly kind: 'shared_outcome';
+      readonly delivery: Extract<SharedOutcomeDelivery, { readonly kind: 'attack' }>;
+      readonly onHit: readonly BranchSpellOperation[];
+      readonly onMiss: readonly BranchSpellOperation[];
+    }
+  | {
+      readonly kind: 'shared_outcome';
+      readonly delivery: Extract<SharedOutcomeDelivery, { readonly kind: 'save' }>;
+      readonly onFailure: readonly BranchSpellOperation[];
+      readonly onSuccess: readonly SharedOutcomeBranchOperation[];
+    };
+
+export type NonCompositionSpellOperation = BranchSpellOperation;
+
+export type SpellOperation = CompositionOperation | SharedOutcomeOperation | NonCompositionSpellOperation;
+
+export type BranchSpellOperation =
   /** Chromatic Orb chooses a damage type at cast time (spell-descriptions.txt:1087-1090). */
   {
       readonly kind: 'caster_choice';
       readonly modes: readonly {
         readonly mode: string;
-        readonly operation: NonCompositionSpellOperation;
+        readonly operation: BranchSpellOperation;
       }[];
     }
   | {
@@ -346,7 +387,7 @@ export type NonCompositionSpellOperation =
       readonly branches: readonly {
         readonly minimum: number;
         readonly maximum: number;
-        readonly operation: NonCompositionSpellOperation;
+        readonly operation: BranchSpellOperation;
       }[];
     }
   | {
@@ -354,16 +395,16 @@ export type NonCompositionSpellOperation =
       readonly kind: 'target_branch';
       readonly branches: readonly {
         readonly predicate: { readonly kind: 'creature_type'; readonly creatureType: string };
-        readonly operation: NonCompositionSpellOperation;
+        readonly operation: BranchSpellOperation;
       }[];
-      readonly otherwise: NonCompositionSpellOperation | null;
+      readonly otherwise: BranchSpellOperation | null;
     }
   | {
       /** Confusion rolls anew at each target turn start (spell-descriptions.txt:1369-1375). */
       readonly kind: 'reevaluated_branch';
       readonly hook: 'target_start' | 'target_end';
       readonly durationRounds: number;
-      readonly operation: NonCompositionSpellOperation;
+      readonly operation: BranchSpellOperation;
     }
   | ConditionLifecycleOperation
   | RollDiceModifierOperation
@@ -375,7 +416,7 @@ export type NonCompositionSpellOperation =
   | {
       readonly kind: 'sustained_effect';
       /** The ordinary cast-time operation, if any, resolves before the effect is established. */
-      readonly establishment: NonCompositionSpellOperation | null;
+      readonly establishment: BranchSpellOperation | null;
       readonly lifecycle: {
         readonly concentration: boolean;
         readonly durationRounds: number | null;
@@ -386,7 +427,7 @@ export type NonCompositionSpellOperation =
         readonly action: SustainedEffectActionDeclaration;
         readonly targeting: SpellTargeting;
         /** Executed with the existing spell-operation interpreter on activation. */
-        readonly operation: NonCompositionSpellOperation;
+        readonly operation: BranchSpellOperation;
       };
     }
   | ({ readonly kind: 'damage_operation' } & DamageOperationSpec)
@@ -806,6 +847,7 @@ export type NonCompositionSpellOperation =
 /** Runtime inventory for serializers of the closed operation union above. */
 export const SPELL_OPERATION_KINDS = [
   'composition',
+  'shared_outcome',
   'caster_choice',
   'random_branch',
   'target_branch',

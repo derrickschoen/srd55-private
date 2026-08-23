@@ -427,6 +427,14 @@ export type EncounterEvent =
       | { readonly outcome: 'refused'; readonly reason: 'operation_refused' | 'encounter_rule_refusal' }
     ))
   | (SequencedEvent & {
+      readonly type: 'shared_outcome_resolved';
+      readonly caster: CombatantId;
+      readonly spellId: string;
+      readonly target: CombatantId;
+      readonly delivery: 'attack' | 'save';
+      readonly branch: 'hit' | 'miss' | 'failure' | 'success';
+    })
+  | (SequencedEvent & {
       readonly type: 'effect_target_removed';
       readonly effectId: EncounterEffectId;
       readonly target: CombatantId;
