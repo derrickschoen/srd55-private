@@ -7,6 +7,29 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D344 — OWNER: lever-with-data, branch-tree success arms, board after shared-outcome, wt/vtt merges to main per-lever (2026-08-22)
+
+Round answers plus the sequencing measurement.
+
+1. **No pre-registered lever rule — decide with the data.** The data
+   arrived the same tick: sequencing's ~119 codex-classified pool measured
+   **7 executable** (142 -> 152 total with R10-R13; residue 672/824).
+   Third and largest classification-vs-measurement miss; the lever round
+   proceeds with measured numbers and the re-derive question on the table.
+
+2. **Shared-outcome success semantics: SYNCHRONIZED BRANCH TREE** —
+   explicit failure-branch and success-branch operation lists sharing one
+   roll, chosen over the per-consequence recommendation. Heaviest
+   converter mapping accepted; the shape is maximally explicit and the
+   branch lists reuse the existing operation vocabulary.
+
+3. **The board increment fires AFTER the shared-outcome lever lands** —
+   fixed trigger, wiring accumulated mechanics into the DM view.
+
+4. **wt/vtt merges to main NOW, then at every post-lever gate boundary**
+   (standing rule, mirroring wt/simcore's). The first merge reconciles
+   the attack-profiles dual test files.
+
 ## D343 — OWNER: sequencing lever next; vague reuse normalizes to Magic action; per-record target binding (2026-08-22)
 
 Lever round after the curation sprint's repricing (sequencing pool ~119 =
