@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D345 — OWNER: re-derive the classifier before any further lever (2026-08-22)
+
+Chosen over the recommended shared-outcome lane, with three misses on the
+record (pairwise 89->1, sequencing 119->7, and the original set-cover
+554->134): codex-classified pools are not planning numbers. Before the next
+engine lever, a round replaces regex/judgement classification with
+MEASUREMENT-BACKED classification: the converter ATTEMPTS emission for every
+residue record against the current engine surface and records the specific
+refusal point, so every bucket count is the count of records that actually
+failed for that reason. Future lever rounds use only these attempted-emission
+numbers. Shared-outcome (measured 36) remains next-in-queue after the
+re-derivation, with D344.2's branch-tree semantics standing; D344.3's board
+trigger is unchanged (fires after shared-outcome lands).
+
 ## D344 — OWNER: lever-with-data, branch-tree success arms, board after shared-outcome, wt/vtt merges to main per-lever (2026-08-22)
 
 Round answers plus the sequencing measurement.
