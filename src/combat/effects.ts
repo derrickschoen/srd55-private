@@ -1,12 +1,190 @@
 import type { Ability } from '../domain/enums';
+import type { DamageOperationDelivery, DamageOperationSpec, ThresholdDamageRider } from './damage-operations';
 import type { ConditionName, ExhaustionLevel } from './conditions';
 import type { DamageRequest, RollMode } from './resolution';
 import type { AreaTemplate } from './templates';
+import type { PersistentAreaInput } from './persistent-areas';
 import type {
   CombatantId,
+  DamageType,
+  DieSides,
   EffectStackingIdentity,
   EncounterEffectId,
+  LimitedResourcePoolId,
+  PersistentAreaId,
+  WorldObjectId,
 } from './values';
+
+export const featureEffectTriggers = [
+  'always_on',
+  'action',
+  'bonus_action',
+  'reaction',
+  'on_hit',
+  'on_crit',
+  'on_save_fail',
+] as const;
+
+export type FeatureEffectTrigger = (typeof featureEffectTriggers)[number];
+
+export const damageRiderGates = [
+  'advantage_on_attack',
+  'ally_adjacent_to_target',
+  'first_hit_this_turn',
+  'crit_confirmed',
+  'slot_spent',
+] as const;
+
+export type DamageRiderGate = (typeof damageRiderGates)[number];
+
+export type DamageRiderGating =
+  | { readonly kind: 'unconditional' }
+  | {
+      readonly kind: 'once_per_turn';
+      readonly oncePerTurnGate: Extract<DamageRiderGate, 'first_hit_this_turn'>;
+      readonly qualifyingGates: readonly Extract<
+        DamageRiderGate,
+        'advantage_on_attack' | 'ally_adjacent_to_target'
+      >[];
+    }
+  | {
+      readonly kind: 'slot_spend';
+      readonly spendGate: Extract<DamageRiderGate, 'slot_spent'>;
+      readonly criticalGate: Extract<DamageRiderGate, 'crit_confirmed'>;
+      readonly baseCount: number;
+      readonly countPerSlotLevel: number;
+    }
+  | {
+      readonly kind: 'first_hit_this_turn';
+      readonly gate: Extract<DamageRiderGate, 'first_hit_this_turn'>;
+    };
+
+/** Always-on party-pack effects that rewrite one declared attack in place. */
+export type AttackFormSubstitutionPayload =
+  | {
+      readonly kind: 'attack_ability_substitution';
+      readonly attackId: string;
+      readonly damageTermIndex: number;
+      readonly replacesAbility: Ability;
+      readonly spellcastingAbility: Ability;
+    }
+  | {
+      readonly kind: 'attack_damage_die_override';
+      readonly attackId: string;
+      readonly damageTermIndex: number;
+      readonly levels: readonly {
+        readonly minimumLevel: number;
+        readonly count: number;
+        readonly sides: 4 | 6 | 8 | 10 | 12 | 20;
+      }[];
+    }
+  | {
+      readonly kind: 'attack_reach_range_override';
+      readonly attackId: string;
+      readonly reachFeet?: number;
+      readonly rangeFeet?: number;
+    }
+  | {
+      readonly kind: 'attack_damage_type_choice';
+      readonly attackId: string;
+      readonly damageTermIndex: number;
+      readonly options: readonly DamageType[];
+    };
+
+/** A first-attack choice whose two Advantage clocks are materialized by the reducer. */
+export interface RecklessAttackPayload {
+  readonly kind: 'reckless_attack_mode';
+  readonly strengthBasedMeleeAttackIds: readonly string[];
+}
+
+/** Feature-only mechanics interpreted directly by attack/spell action reducers. */
+export type TypedCombatFeaturePayload =
+  | ({
+      readonly kind: 'damage_operation';
+      readonly saveDc: number;
+    } & DamageOperationSpec)
+  | {
+      readonly kind: 'save_gated_banishment_on_hit';
+      readonly saveAbility: Ability;
+      readonly saveDc: number;
+      readonly rollMode: Extract<RollMode, 'normal'>;
+      readonly returnAt: 'source_next_turn_start';
+      readonly returnDamage: DamageRequest;
+      readonly returnPlacement: 'previous_or_nearest_unoccupied';
+    }
+  | {
+      readonly kind: 'spell_damage_ability_modifier';
+      readonly spellId: string;
+      readonly application: 'one_damage_roll_per_turn';
+    }
+  | {
+      readonly kind: 'timed_spellcasting_mode';
+      readonly additionalLeveledSpellActions: 1;
+      readonly duration: 'this_turn';
+    }
+  | {
+      readonly kind: 'resource_die_maneuver';
+      readonly dieSides: DieSides;
+      readonly damageType: 'attack_primary';
+      readonly condition: Exclude<ConditionName, 'Exhaustion'>;
+      readonly conditionDuration: 'until_end_of_target_next_turn';
+    }
+  | {
+      readonly kind: 'exploding_spell_damage_die';
+      readonly spellId: string;
+      readonly triggerFace: 'maximum';
+      /** The bound is part of the mechanic: each original die can add at most one die. */
+      readonly maximumExplosionsPerDie: 1;
+    }
+  | {
+      readonly kind: 'elemental_fury';
+      readonly attackIds: readonly string[];
+      readonly damageTypes: readonly DamageType[];
+      readonly selectedDamageType: DamageType;
+      readonly amount: number;
+      readonly gate: 'first_hit_this_turn';
+    }
+  | {
+      readonly kind: 'persistent_area';
+      readonly area: Omit<PersistentAreaInput, 'owner' | 'origin'> & {
+        readonly origin: 'self' | 'selected';
+      };
+    };
+
+/** Reducer-ready class/feat effect retained on a combatant profile. */
+export type CombatFeatureEffect = {
+  readonly id: EncounterEffectId;
+  readonly trigger: FeatureEffectTrigger;
+  readonly resourcePoolId: LimitedResourcePoolId | null;
+} & (
+  | { readonly payload: EffectPayload }
+  | { readonly payload: AttackFormSubstitutionPayload }
+  | { readonly payload: RecklessAttackPayload }
+  | { readonly payload: TypedCombatFeaturePayload }
+  | { readonly payload: { readonly kind: 'temporary_hit_points'; readonly amount: number } }
+);
+
+export function isAttackFormSubstitutionPayload(
+  payload: CombatFeatureEffect['payload'],
+): payload is AttackFormSubstitutionPayload {
+  return payload.kind === 'attack_ability_substitution' ||
+    payload.kind === 'attack_damage_die_override' ||
+    payload.kind === 'attack_reach_range_override' ||
+    payload.kind === 'attack_damage_type_choice';
+}
+
+export function isTypedCombatFeaturePayload(
+  payload: CombatFeatureEffect['payload'],
+): payload is TypedCombatFeaturePayload {
+  return payload.kind === 'damage_operation' ||
+    payload.kind === 'save_gated_banishment_on_hit' ||
+    payload.kind === 'spell_damage_ability_modifier' ||
+    payload.kind === 'timed_spellcasting_mode' ||
+    payload.kind === 'resource_die_maneuver' ||
+    payload.kind === 'exploding_spell_damage_die' ||
+    payload.kind === 'elemental_fury' ||
+    payload.kind === 'persistent_area';
+}
 
 export type TurnBoundary = 'start' | 'end';
 
@@ -30,10 +208,58 @@ export interface RepeatedSaveTiming {
   readonly ability: Ability;
   readonly dc: number;
   readonly rollMode: RollMode;
-  readonly onSuccess: 'remove_target';
+  readonly onSuccess: 'remove_target' | 'end_effect';
 }
 
+export interface DamageBreakTiming {
+  readonly sources: 'any' | 'effect_source_or_allies';
+  readonly minimumDamage: 1;
+}
+
+export type WeaponHitRiderFollowUp =
+  | {
+      readonly kind: 'ongoing_damage_save_ends';
+      readonly damage: DamageRequest;
+      readonly saveAbility: Ability;
+      readonly saveDc: number;
+      readonly timing: Extract<TurnBoundary, 'start'>;
+      readonly durationRounds: number;
+    }
+  | {
+      readonly kind: 'save_then_restrain';
+      readonly saveAbility: Ability;
+      readonly saveDc: number;
+      readonly rollMode: Extract<RollMode, 'normal'>;
+      readonly damage: DamageRequest;
+      readonly timing: Extract<TurnBoundary, 'start'>;
+      readonly durationRounds: number;
+    }
+  | {
+      readonly kind: 'save_then_condition';
+      readonly saveAbility: Ability;
+      readonly saveDc: number;
+      readonly rollMode: RollMode;
+      readonly condition: Exclude<ConditionName, 'Exhaustion'>;
+      readonly expiresAt: 'target_start' | 'target_end';
+      readonly durationRounds: number;
+    };
+
 export type EffectPayload =
+  | {
+      /** D343 activation state; its operation remains in the retained spell definition. */
+      readonly kind: 'sustained_effect';
+      readonly spellId: string;
+      readonly establishedRound: number;
+      readonly targetBinding: 'reselect' | 'bound_combatants' | 'bound_objects' | 'bound_owned_objects';
+      readonly boundCombatants: readonly CombatantId[];
+      readonly boundObjects: readonly WorldObjectId[];
+      readonly ownedObjects: readonly WorldObjectId[];
+      readonly slotLevel: number | null;
+      readonly casterLevel: number;
+      readonly attackBonus: number;
+      readonly saveDc: number;
+      readonly spellcastingModifier: number;
+    }
   | {
       readonly kind: 'condition';
       readonly condition: Exclude<ConditionName, 'Exhaustion'>;
@@ -48,8 +274,32 @@ export type EffectPayload =
       readonly timing: SourcedTurnBoundary;
     }
   | {
+      readonly kind: 'recurring_damage_operation';
+      readonly instances: readonly {
+        readonly damage: DamageRequest;
+        readonly thresholdRider: ThresholdDamageRider | null;
+      }[];
+      readonly delivery: DamageOperationDelivery;
+      readonly saveDc: number;
+      readonly timing: SourcedTurnBoundary;
+    }
+  | {
+      readonly kind: 'temporary_banishment';
+      readonly returnDamage: DamageRequest;
+      readonly returnPlacement: 'previous_or_nearest_unoccupied';
+    }
+  | {
       readonly kind: 'armor_class_modifier';
       readonly amount: number;
+      readonly minimum?: never;
+      /** Present only for a defense against one selected attacker. */
+      readonly againstAttacker?: CombatantId;
+    }
+  | {
+      readonly kind: 'armor_class_modifier';
+      readonly minimum: number;
+      readonly amount?: never;
+      readonly againstAttacker?: never;
     }
   | {
       readonly kind: 'hit_point_maximum_modifier';
@@ -61,6 +311,12 @@ export type EffectPayload =
       readonly sides: number;
       readonly sign: 1 | -1;
       readonly skill?: string;
+      readonly application?: 'every_qualifying_roll' | 'chosen_skill_checks';
+    }
+  | {
+      readonly kind: 'skill_modifier';
+      readonly skill: 'stealth';
+      readonly amount: number;
     }
   | {
       readonly kind: 'd20_test_modifier';
@@ -68,15 +324,57 @@ export type EffectPayload =
       readonly count: number;
       readonly sides: number;
       readonly sign: 1 | -1;
+      readonly application?: 'every_qualifying_roll';
     }
   | {
       readonly kind: 'movement_modifier';
       readonly speedDeltaFeet: number;
     }
   | {
+      readonly kind: 'movement_modifier';
+      readonly speedChange: 
+        | { readonly kind: 'set'; readonly speedFeet: number }
+        | { readonly kind: 'increase'; readonly feet: number }
+        | { readonly kind: 'reduce'; readonly reduction: { readonly kind: 'feet'; readonly feet: number } | { readonly kind: 'multiplier'; readonly multiplier: number } };
+      readonly modeGrants: readonly {
+        readonly mode: 'flying' | 'climbing' | 'swimming';
+        readonly speed: { readonly kind: 'fixed'; readonly feet: number } | { readonly kind: 'walking_speed' };
+      }[];
+      readonly difficultTerrainImmunity: boolean;
+      readonly magicalSpeedReductionImmunity: boolean;
+    }
+  | {
       readonly kind: 'damage_rider';
       readonly damage: DamageRequest;
       readonly appliesTo: 'next_attack_against_target' | 'weapon_attack_by_target';
+      readonly gating?: DamageRiderGating;
+      readonly consumeOnHit?: boolean;
+      readonly followUp?: WeaponHitRiderFollowUp;
+      /** Present only on a party/content feature which must first be armed. */
+      readonly arming?: {
+        readonly durationRounds: number;
+        readonly concentration: boolean;
+      };
+    }
+  | {
+      readonly kind: 'ensnaring_strike';
+      readonly condition: 'Restrained';
+      readonly damage: DamageRequest;
+      readonly timing: Extract<TurnBoundary, 'start'>;
+      readonly escapeCheckAbility: Extract<Ability, 'strength'>;
+      readonly escapeCheckSkill: 'Athletics';
+    }
+  | {
+      readonly kind: 'bonus_action_attack_grant';
+      readonly attackCount: number;
+    }
+  | {
+      readonly kind: 'extra_attack_count_override';
+      readonly attackCount: number;
+    }
+  | {
+      readonly kind: 'action_surge';
+      readonly perShortRest: true;
     }
   | {
       readonly kind: 'cannot_regain_hit_points' | 'opportunity_attacks_disabled';
@@ -891,7 +1189,11 @@ export type EffectPayload =
     }
   | {
       readonly kind: 'damage_resistances';
-      readonly damageTypes: readonly ('Bludgeoning' | 'Piercing' | 'Slashing')[];
+      readonly damageTypes: readonly DamageType[];
+      /** Omitted on legacy Stoneskin payloads, where resistant is the sourced meaning. */
+      readonly response?: 'resistant' | 'vulnerable';
+      /** When present, only damage from this combatant receives the response. */
+      readonly source?: CombatantId;
     }
   | {
       readonly kind: 'wall_of_fire';
@@ -922,7 +1224,30 @@ export type EffectPayload =
   | {
       readonly kind: 'attack_roll_mode_modifier';
       readonly mode: 'advantage' | 'disadvantage';
-      readonly appliesTo: 'next_attack_against_target';
+      readonly appliesTo:
+        | { readonly kind: 'next_attack_against_target' }
+        | { readonly kind: 'next_attack_by_target' }
+        | { readonly kind: 'attacks_against_target' }
+        | { readonly kind: 'all_attacks_by_target' }
+        | { readonly kind: 'saving_throws_by_target' }
+        | { readonly kind: 'ability_checks_by_target' }
+        | {
+            readonly kind: 'attacks_by_target';
+            readonly attackIds: readonly string[];
+          };
+    }
+  | {
+      readonly kind: 'faerie_fire';
+      readonly attackModeAgainstTarget: 'advantage';
+      readonly preventsInvisibleConditionBenefit: true;
+      readonly dimLightFeet: 10;
+    }
+  | {
+      readonly kind: 'consumable_healing_pool';
+      readonly remainingUses: number;
+      readonly healingPerUse: 1;
+      readonly activation: 'bonus_action';
+      readonly encounterExpiry: 'not_tracked_24_hours';
     }
   | {
       readonly kind: 'creature_type_protection';
@@ -949,7 +1274,11 @@ export interface EffectApplication {
   readonly stackingIdentity: EffectStackingIdentity;
   readonly stacking: 'coexist' | 'replace_same_source' | 'replace_any_source';
   readonly repeatedSave: RepeatedSaveTiming | null;
+  readonly damageBreak?: DamageBreakTiming | null;
   readonly payload: EffectPayload;
+  /** Present only for an effect materialized by persistent-area membership. */
+  readonly areaSource?: PersistentAreaId;
+  readonly areaMembershipBound?: true;
 }
 
 /** Read-only state; creation, ticking, target removal, and expiry live in the reducer. */
@@ -963,5 +1292,8 @@ export interface EncounterEffect {
   readonly stackingIdentity: EffectStackingIdentity;
   readonly stacking: EffectApplication['stacking'];
   readonly repeatedSave: RepeatedSaveTiming | null;
+  readonly damageBreak?: DamageBreakTiming | null;
   readonly payload: EffectPayload;
+  readonly areaSource?: PersistentAreaId;
+  readonly areaMembershipBound?: true;
 }

@@ -81,6 +81,7 @@ const LEVEL_TWO_MECHANICS_PINS: readonly LevelTwoMechanicsPin[] = [
   { id: 'mind-spike', source: 'spell-descriptions.txt:5398', targeting: { kind: 'single', rangeFeet: 120, willing: false }, operation: { kind: 'save_damage', ability: 'wisdom', onSuccess: 'half', damageType: damageType('Psychic'), dice: dice(3, 8, { perSlotCount: 1 }), riderOnFailure: effect({ kind: 'location_tracking', samePlaneOnly: true, negatesHiddenAndInvisibleBenefits: true }, { concentration: true, durationRounds: 600 }), pushFeetOnFailure: 0 } },
   { id: 'mirror-image', source: 'spell-descriptions.txt:5481', targeting: { kind: 'self' }, operation: { kind: 'effect', effect: effect({ kind: 'mirror_images', duplicates: 3, interceptionDieSides: 6, interceptionMinimum: 3 }, { target: 'self', durationRounds: 10 }) } },
   { id: 'misty-step', source: 'spell-descriptions.txt:5523', targeting: { kind: 'self' }, operation: { kind: 'utility', effect: { kind: 'teleport', maximumDistanceFeet: 30, requiresVisibleUnoccupiedSpace: true }, concentration: false, durationRounds: null } },
+  { id: 'moonbeam', source: 'spell-descriptions.txt:5582', targeting: { kind: 'area', rangeFeet: 120, shape: 'cylinder', baseSizeFeet: 5, sizePerSlotFeet: 0, secondarySizeFeet: 40 }, operation: { kind: 'persistent_area', origin: 'selected_when_cast', shape: null, durationRounds: 10, concentration: true, targetFilter: 'all', includeOwner: false, difficultTerrain: false, movableFeet: 60, hooks: (['on_enter', 'on_end_of_turn_inside'] as const).map((hook) => ({ hook, frequency: 'once_per_turn' as const, effect: { kind: 'save_gated' as const, ability: 'constitution' as const, rollMode: 'normal' as const, onSuccess: 'half' as const, payload: { kind: 'damage' as const, damageType: damageType('Radiant'), dice: dice(2, 10, { perSlotCount: 1 }) } } })), initialEffects: [] } },
   { id: 'prayer-of-healing', source: 'spell-descriptions.txt:6014', targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 5, additionalPerSlot: 0 }, operation: { kind: 'healing', dice: dice(2, 8, { perSlotCount: 1 }), addSpellcastingModifier: false } },
   { id: 'protection-from-poison', source: 'spell-descriptions.txt:6359', targeting: { kind: 'single', rangeFeet: 5, willing: false }, operation: { kind: 'remove_condition_and_effect', condition: 'Poisoned', effect: effect({ kind: 'poison_protection', saveMode: 'advantage', resistanceType: 'Poison' }, { durationRounds: 600 }) } },
   { id: 'ray-of-enfeeblement', source: 'spell-descriptions.txt:6407', targeting: { kind: 'single', rangeFeet: 60, willing: false }, operation: { kind: 'save_branch_effect', ability: 'constitution', successEffect: effect({ kind: 'ray_enfeeblement', branch: 'success', damagePenaltyCount: 0, damagePenaltySides: 8 }, { concentration: true, durationRounds: 1, expiresAt: 'source_start' }), failureEffect: effect({ kind: 'ray_enfeeblement', branch: 'failure', damagePenaltyCount: 1, damagePenaltySides: 8 }, { concentration: true, durationRounds: 10, expiresAt: 'target_end', repeatedSave: { ability: 'constitution', rollMode: 'normal', timing: 'target_end' } }) } },
@@ -95,6 +96,7 @@ const LEVEL_TWO_MECHANICS_PINS: readonly LevelTwoMechanicsPin[] = [
   { id: 'warding-bond', source: 'spell-descriptions.txt:8388', targeting: { kind: 'single', rangeFeet: 5, willing: true }, operation: { kind: 'effect', effect: effect({ kind: 'warding_bond', maximumDistanceFeet: 60, armorClassBonus: 1, savingThrowBonus: 1, resistanceToAllDamage: true, mirrorsDamageToSource: true }, { durationRounds: 600 }) } },
   { id: 'web', source: 'spell-descriptions.txt:8453', targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0 }, operation: { kind: 'effect', effect: effect({ kind: 'web_area', placement: 'selected_when_cast', cubeFeet: 20, flatDepthFeet: 5, fireDamageCount: 2, fireDamageSides: 4 }, { target: 'self', concentration: true, durationRounds: 600 }) } },
   { id: 'zone-of-truth', source: 'spell-descriptions.txt:8699', targeting: { kind: 'area', rangeFeet: 60, shape: 'sphere', baseSizeFeet: 15, sizePerSlotFeet: 0 }, operation: { kind: 'effect', effect: effect({ kind: 'truth_zone', placement: 'selected_when_cast', radiusFeet: 15, saveAbility: 'charisma' }, { target: 'self', durationRounds: 100 }) } },
+  { id: 'pass-without-trace', source: 'spell-descriptions.txt:5688', targeting: { kind: 'all_in_range', rangeFeet: 30 }, operation: { kind: 'persistent_area', origin: 'anchored_to_caster', shape: { kind: 'emanation', radius: feet(30) }, durationRounds: 600, concentration: true, targetFilter: 'selected', includeOwner: true, difficultTerrain: false, movableFeet: null, hooks: [{ hook: 'on_enter', frequency: 'every_trigger', effect: { kind: 'automatic', payload: { kind: 'effect', payload: { kind: 'skill_modifier', skill: 'stealth', amount: 10 }, lifetime: { kind: 'while_inside' } } } }], initialEffects: [] } },
 ];
 
 interface LevelTwoComponentPin {
@@ -140,6 +142,7 @@ const LEVEL_TWO_COMPONENT_PINS: readonly LevelTwoComponentPin[] = [
   { id: 'mind-spike', castingTime: 'action', components: 'S', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:5398' },
   { id: 'mirror-image', castingTime: 'action', components: 'VS', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:5481' },
   { id: 'misty-step', castingTime: 'bonus_action', components: 'V', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:5523' },
+  { id: 'moonbeam', castingTime: 'action', components: 'VSM', material: 'a moonseed leaf', consumed: false, ritual: false, source: 'spell-descriptions.txt:5582' },
   { id: 'prayer-of-healing', castingTime: 'ten_minutes', components: 'V', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:6014' },
   { id: 'protection-from-poison', castingTime: 'action', components: 'VS', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:6359' },
   { id: 'ray-of-enfeeblement', castingTime: 'action', components: 'VS', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:6407' },
@@ -154,12 +157,13 @@ const LEVEL_TWO_COMPONENT_PINS: readonly LevelTwoComponentPin[] = [
   { id: 'warding-bond', castingTime: 'action', components: 'VSM', material: 'a pair of platinum rings worth 50+ GP each, which you and the target must wear for the duration', consumed: false, ritual: false, source: 'spell-descriptions.txt:8388' },
   { id: 'web', castingTime: 'action', components: 'VSM', material: 'a bit of spiderweb', consumed: false, ritual: false, source: 'spell-descriptions.txt:8453' },
   { id: 'zone-of-truth', castingTime: 'action', components: 'VS', material: null, consumed: false, ritual: false, source: 'spell-descriptions.txt:8699' },
+  { id: 'pass-without-trace', castingTime: 'action', components: 'VSM', material: 'ashes from burned mistletoe', consumed: false, ritual: false, source: 'spell-descriptions.txt:5688' },
 ];
 
 describe('level-2 spell mechanics pins', () => {
   it('has one exact independent pin for every implemented level-2 definition', () => {
     const implemented = IMPLEMENTED_SPELL_DEFINITIONS.filter((definition) => definition.level === 2);
-    expect(LEVEL_TWO_MECHANICS_PINS).toHaveLength(45);
+    expect(LEVEL_TWO_MECHANICS_PINS).toHaveLength(47);
     expect(LEVEL_TWO_MECHANICS_PINS.map((pin) => pin.id).sort()).toEqual(
       implemented.map((definition) => definition.id).sort(),
     );
@@ -223,7 +227,7 @@ describe('level-2 spell mechanics pins', () => {
       ? [target.id]
       : definition.targeting.kind === 'multiple'
         ? Array.from({ length: projectileCount }, () => target.id)
-        : [];
+        : definition.targeting.kind === 'all_in_range' ? [target.id] : [];
     const command: SpellCastCommand = {
       type: 'cast_spell', actor: caster.id, spellId: definition.id, slotLevel: 2,
       castAsRitual: false, casterLevel: 7, attackBonus: 100, saveDc: 100,
@@ -272,6 +276,7 @@ function levelTwoArea(definition: SpellDefinition): SpellCastCommand['area'] {
     case 'cone':
       return { shape: 'cone', template: { origin: feetPoint(5, 5), direction: { x: 1, y: 0 }, length: feet(size), includeOrigin: false } };
     case 'cylinder':
+      return { shape: 'cylinder', template: { origin: feetPoint(10, 10), radius: feet(size), height: feet(definition.targeting.secondarySizeFeet ?? 40) } };
     case 'emanation':
       throw new Error(`No level-2 spell uses a ${definition.targeting.shape} template.`);
   }

@@ -13,6 +13,31 @@ export interface SerializableRngState {
 
 export interface SerializableRng extends Rng {
   snapshot(): SerializableRngState;
+  restore(snapshot: SerializableRngState): void;
+}
+
+export interface TransactionalRng extends Rng {
+  checkpoint(): RngCheckpoint;
+  restoreCheckpoint(checkpoint: RngCheckpoint): void;
+}
+
+export interface RngCheckpoint {
+  restore(): void;
+}
+
+function assertCompatibleSnapshot(
+  snapshot: SerializableRngState,
+  identity: Pick<SerializableRngState, 'initialSeed' | 'streamId'>,
+): void {
+  if (
+    snapshot.algorithm !== 'mulberry32-v1' ||
+    !Number.isSafeInteger(snapshot.initialSeed) ||
+    !Number.isSafeInteger(snapshot.state) ||
+    !Number.isSafeInteger(snapshot.draws) ||
+    snapshot.draws < 0 ||
+    snapshot.initialSeed !== identity.initialSeed ||
+    snapshot.streamId !== identity.streamId
+  ) throw new TypeError('Malformed or incompatible serializable RNG state.');
 }
 
 function createMulberry32(state: SerializableRngState): SerializableRng {
@@ -34,6 +59,11 @@ function createMulberry32(state: SerializableRngState): SerializableRng {
         draws,
         streamId: state.streamId,
       }),
+      restore: (snapshot: SerializableRngState): void => {
+        assertCompatibleSnapshot(snapshot, state);
+        current = snapshot.state >>> 0;
+        draws = snapshot.draws;
+      },
     },
   );
 }
@@ -64,6 +94,55 @@ export function restoreMulberry32(state: SerializableRngState): SerializableRng 
   return createMulberry32(state);
 }
 
+const transactionalAdapters = new WeakMap<Rng, TransactionalRng>();
+
+function isSerializableRng(rng: Rng): rng is SerializableRng {
+  const candidate = rng as Partial<SerializableRng>;
+  return typeof candidate.snapshot === 'function' && typeof candidate.restore === 'function';
+}
+
+/** Gives every reducer RNG a restorable cursor without changing its call shape. */
+export function transactionalRng(rng: Rng): TransactionalRng {
+  const existing = transactionalAdapters.get(rng);
+  if (existing !== undefined) return existing;
+  if (isSerializableRng(rng)) {
+    const adapted = Object.assign(rng, {
+      checkpoint: (): RngCheckpoint => {
+        const snapshot = rng.snapshot();
+        return { restore: (): void => rng.restore(snapshot) };
+      },
+      restoreCheckpoint: (checkpoint: RngCheckpoint): void => checkpoint.restore(),
+    });
+    transactionalAdapters.set(rng, adapted);
+    return adapted;
+  }
+  const history: number[] = [];
+  let cursor = 0;
+  const adapted: TransactionalRng = Object.assign(
+    (): number => {
+      const replayed = history[cursor];
+      if (replayed !== undefined) {
+        cursor += 1;
+        return replayed;
+      }
+      const drawn = rng();
+      history.push(drawn);
+      cursor += 1;
+      return drawn;
+    },
+    {
+      checkpoint: (): RngCheckpoint => {
+        const savedCursor = cursor;
+        return { restore: (): void => { cursor = savedCursor; } };
+      },
+      restoreCheckpoint: (checkpoint: RngCheckpoint): void => checkpoint.restore(),
+    },
+  );
+  transactionalAdapters.set(rng, adapted);
+  transactionalAdapters.set(adapted, adapted);
+  return adapted;
+}
+
 export function rollDie(rng: Rng, sides: DieSides): number {
   return Math.floor(rng() * sides) + 1;
 }
@@ -75,14 +154,69 @@ export function rollDice(rng: Rng, expression: DiceExpression): DiceRollTrace {
   if (!Number.isFinite(expression.modifier)) {
     throw new RangeError('Dice modifier must be finite.');
   }
+  if (
+    expression.minimumTotal !== undefined &&
+    (!Number.isSafeInteger(expression.minimumTotal) || expression.minimumTotal < 0)
+  ) {
+    throw new RangeError('Minimum dice total must be a non-negative safe integer.');
+  }
+  if (
+    expression.maximumTotal !== undefined &&
+    (!Number.isSafeInteger(expression.maximumTotal) || expression.maximumTotal < 0)
+  ) {
+    throw new RangeError('Maximum dice total must be a non-negative safe integer.');
+  }
+  if (
+    expression.minimumTotal !== undefined &&
+    expression.maximumTotal !== undefined &&
+    expression.minimumTotal > expression.maximumTotal
+  ) {
+    throw new RangeError('Minimum dice total cannot exceed maximum dice total.');
+  }
+  if (
+    expression.rerollBelow !== undefined &&
+    (!Number.isSafeInteger(expression.rerollBelow.threshold) ||
+      expression.rerollBelow.threshold < 2 ||
+      expression.rerollBelow.threshold > expression.sides ||
+      expression.rerollBelow.maximumRerollsPerDie !== 1)
+  ) {
+    throw new RangeError('Reroll threshold must be from 2 through the die size and apply once per die.');
+  }
 
   const faces: number[] = [];
+  const rerolls: Array<{ readonly dieIndex: number; readonly discarded: number; readonly replacement: number }> = [];
+  const explosionFaces: number[] = [];
   for (let index = 0; index < expression.count; index += 1) {
-    faces.push(rollDie(rng, expression.sides));
+    const first = rollDie(rng, expression.sides);
+    const face = expression.rerollBelow !== undefined && first < expression.rerollBelow.threshold
+      ? (() => {
+          const replacement = rollDie(rng, expression.sides);
+          rerolls.push({ dieIndex: index, discarded: first, replacement });
+          return replacement;
+        })()
+      : first;
+    faces.push(face);
+    if (
+      expression.explosion?.triggerFace === 'maximum' &&
+      expression.explosion.maximumExplosionsPerDie === 1 &&
+      face === expression.sides
+    ) {
+      const explosion = rollDie(rng, expression.sides);
+      faces.push(explosion);
+      explosionFaces.push(explosion);
+    }
   }
   return {
     expression,
     faces,
-    total: faces.reduce((sum, face) => sum + face, expression.modifier),
+    ...(rerolls.length === 0 ? {} : { rerolls }),
+    ...(explosionFaces.length === 0 ? {} : { explosionFaces }),
+    total: Math.min(
+      expression.maximumTotal ?? Number.POSITIVE_INFINITY,
+      Math.max(
+        expression.minimumTotal ?? Number.NEGATIVE_INFINITY,
+        faces.reduce((sum, face) => sum + face, expression.modifier),
+      ),
+    ),
   };
 }

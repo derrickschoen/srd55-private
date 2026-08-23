@@ -38,20 +38,33 @@ if (isResume && process.env.FAKE_CODEX_MODE === 'hang') {
     process.stderr.write('Scripted soak requires AlgorithmController on every PC.\n');
     process.exitCode = 9;
   } else {
-    let reply = {
-      kind: 'round_plan',
-      protocolVersion: request.protocolVersion,
-      encounterId: request.encounterId,
-      requestId: request.requestId,
-      expectedRevision: request.expectedRevision,
-      round: request.round,
-      monsters: monsterIds.map((monsterId) => ({
-        monsterId,
-        program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
-      })),
-    };
+    let reply = request.surface === 'js_program'
+      ? {
+          kind: 'js_round_plan',
+          protocolVersion: request.protocolVersion,
+          encounterId: request.encounterId,
+          requestId: request.requestId,
+          expectedRevision: request.expectedRevision,
+          round: request.round,
+          monsters: monsterIds.map((monsterId) => ({ monsterId, source: 'emit(endTurn());' })),
+        }
+      : {
+          kind: 'round_plan',
+          protocolVersion: request.protocolVersion,
+          encounterId: request.encounterId,
+          requestId: request.requestId,
+          expectedRevision: request.expectedRevision,
+          round: request.round,
+          monsters: monsterIds.map((monsterId) => ({
+            monsterId,
+            program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+          })),
+        };
     if (
-      process.env.FAKE_CODEX_MODE === 'malformed_once' &&
+      (process.env.FAKE_CODEX_MODE === 'malformed_once' ||
+        process.env.FAKE_CODEX_MODE === 'js_schema_error_once' ||
+        process.env.FAKE_CODEX_MODE === 'js_alias_once' ||
+        process.env.FAKE_CODEX_MODE === 'js_type_error_once') &&
       process.env.FAKE_CODEX_STATE_FILE !== undefined
     ) {
       let alreadyMalformed = false;
@@ -63,10 +76,25 @@ if (isResume && process.env.FAKE_CODEX_MODE === 'hang') {
       }
       if (!alreadyMalformed) {
         await writeFile(process.env.FAKE_CODEX_STATE_FILE, 'malformed', 'utf8');
-        reply = {
-          ...reply,
-          commands: [{ type: 'end_turn', actor: monsterIds[0] }],
-        };
+        reply = process.env.FAKE_CODEX_MODE === 'js_type_error_once' && request.surface === 'js_program'
+          ? {
+              ...reply,
+              monsters: monsterIds.map((monsterId) => ({
+                monsterId,
+                source: "emit(move('combatant:not-in-encounter'));",
+              })),
+            }
+          : process.env.FAKE_CODEX_MODE === 'js_alias_once' && request.surface === 'js_program'
+          ? {
+              kind: 'round_plan',
+              plans: monsterIds.map((monsterId) => ({ actorId: monsterId, program: 'emit(endTurn());' })),
+            }
+          : process.env.FAKE_CODEX_MODE === 'js_schema_error_once' && request.surface === 'js_program'
+          ? { ...reply, unexpectedTelemetryProbe: true }
+          : {
+              ...reply,
+              commands: [{ type: 'end_turn', actor: monsterIds[0] }],
+            };
       }
     }
     process.stdout.write(`${JSON.stringify({

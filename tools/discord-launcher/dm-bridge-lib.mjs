@@ -8,6 +8,20 @@ function object(value, label) {
   return value;
 }
 
+function array(value, label) {
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
+  return value;
+}
+
+function workedExampleInstructions(value) {
+  const examples = array(value, 'request.replyContract.workedExamples');
+  if (examples.length === 0) return ['No worked examples are included.'];
+  return examples.flatMap((example, index) => [
+    `Worked example ${String(index + 1)}:`,
+    JSON.stringify(object(example, `request.replyContract.workedExamples[${String(index)}]`)),
+  ]);
+}
+
 function requestSessionId(request) {
   const sessionId = object(request, 'request').codexSessionId;
   if (typeof sessionId !== 'string' || sessionId.length === 0) throw new TypeError('request.codexSessionId is required');
@@ -22,6 +36,94 @@ function canonical(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+}
+
+function projectionHash(projection) {
+  return createHash('sha256').update(canonical(projection)).digest('hex');
+}
+
+function applyProjectionOperation(root, operation) {
+  const input = object(operation, 'projection delta operation');
+  if (!Array.isArray(input.path) || input.path.length === 0 || !input.path.every((entry) => typeof entry === 'string')) {
+    throw new TypeError('projection delta operation path is malformed');
+  }
+  let parent = root;
+  for (const segment of input.path.slice(0, -1)) parent = object(parent[segment], 'projection delta path');
+  const leaf = input.path.at(-1);
+  if (input.kind === 'set') parent[leaf] = structuredClone(input.value);
+  else if (input.kind === 'delete') delete parent[leaf];
+  else throw new TypeError('projection delta operation kind is unsupported');
+}
+
+export class ProjectionReconstructor {
+  constructor() {
+    this.snapshots = new Map();
+    this.failures = 0;
+  }
+
+  reconstruct(value) {
+    const request = object(value, 'request');
+    if (!('projectionTransfer' in request)) return { kind: 'reconstructed', request };
+    const transfer = object(request.projectionTransfer, 'request.projectionTransfer');
+    if (typeof request.encounterId !== 'string' || !Number.isSafeInteger(transfer.revision)) {
+      throw new TypeError('projection transfer identity is malformed');
+    }
+    if (request.expectedRevision !== transfer.revision) {
+      throw new TypeError('projection transfer revision disagrees with the bridge request');
+    }
+    let projection;
+    if (transfer.kind === 'full_projection') {
+      projection = structuredClone(object(transfer.projection, 'full projection'));
+    } else if (transfer.kind === 'compact_projection') {
+      const view = object(transfer.view, 'compact projection view');
+      const coordinator = object(view.coordinator, 'compact projection coordinator');
+      projection = {
+        audience: 'dm',
+        encounter: structuredClone(object(view.encounter, 'compact projection encounter')),
+        coordinator: { ...structuredClone(coordinator), pendingRequest: structuredClone(view.pendingRequest) },
+        pendingRequest: structuredClone(view.pendingRequest),
+        controllers: structuredClone(array(view.controllers, 'compact projection controllers')),
+        history: structuredClone(array(request.history, 'request.history')),
+        adjudicatedTargets: structuredClone(array(view.adjudicatedTargets, 'compact projection adjudicated targets')),
+      };
+    } else if (transfer.kind === 'projection_delta') {
+      const previous = this.snapshots.get(request.encounterId);
+      if (
+        previous === undefined ||
+        previous.revision !== transfer.baseRevision ||
+        previous.hash !== transfer.baseHash ||
+        !Array.isArray(transfer.operations)
+      ) {
+        this.failures += 1;
+        return { kind: 'full_projection_required', encounterId: request.encounterId, expectedRevision: transfer.revision };
+      }
+      projection = structuredClone(previous.projection);
+      for (const operation of transfer.operations) applyProjectionOperation(projection, operation);
+    } else {
+      throw new TypeError('projection transfer kind is unsupported');
+    }
+    const actualHash = projectionHash(projection);
+    if (
+      typeof transfer.stateHash !== 'string' ||
+      actualHash !== transfer.stateHash ||
+      object(projection.encounter, 'projection.encounter').revision !== transfer.revision
+    ) {
+      this.failures += 1;
+      return { kind: 'full_projection_required', encounterId: request.encounterId, expectedRevision: transfer.revision };
+    }
+    this.snapshots.set(request.encounterId, {
+      revision: transfer.revision,
+      hash: transfer.stateHash,
+      projection: structuredClone(projection),
+    });
+    const reconstructed = { ...request, projection };
+    delete reconstructed.projectionTransfer;
+    return { kind: 'reconstructed', request: reconstructed };
+  }
+
+  telemetry() {
+    return { reconstructionFailures: this.failures };
+  }
 }
 
 export class FileRevisionMirror {
@@ -274,10 +376,11 @@ function fleetTelemetry(request, latencyMs, tokenCounts) {
 function roundPlanPrompt(request) {
   const input = object(request, 'request');
   const contract = object(input.replyContract, 'request.replyContract');
-  object(contract.jsonSchema, 'request.replyContract.jsonSchema');
-  object(contract.canonicalExample, 'request.replyContract.canonicalExample');
-  if (contract.schemaVersion !== 1 || contract.maximumCorrectionAttempts !== 2) {
-    throw new TypeError('request.replyContract version or correction bound is unsupported');
+  if (contract.schemaVersion !== 1) {
+    throw new TypeError('request.replyContract version is unsupported');
+  }
+  if ('maximumCorrectionAttempts' in contract && contract.maximumCorrectionAttempts !== 2) {
+    throw new TypeError('request.replyContract correction bound is unsupported');
   }
   let correction = 'This is the initial reply for this request.';
   if (input.kind === 'round_plan_correction_request') {
@@ -286,16 +389,57 @@ function roundPlanPrompt(request) {
     }
     correction = `The previous reply failed strict validation with exactly this error: ${input.validatorError}`;
   }
+  const sharedInstructions = typeof contract.instructions === 'string'
+    ? contract.instructions
+    : 'You are the DM decision engine. Return exactly one JSON object and no markdown.';
+  const contractInstructions = contract.delivery === 'reference'
+    ? [
+        `Use the strict JSON reply contract already established in this session as ${String(contract.contractId)}.`,
+        'Return only a JSON object accepted by that unchanged contract.',
+      ]
+    : contract.delivery === 'compact'
+      ? [
+          `Contract ${String(contract.contractId)} compact JSON grammar:`,
+          String(contract.grammar),
+          ...('workedExamples' in contract
+            ? workedExampleInstructions(contract.workedExamples)
+            : [
+                'Canonical valid example:',
+                JSON.stringify(object(contract.canonicalExample, 'request.replyContract.canonicalExample')),
+              ]),
+          'The production strict validator remains authoritative.',
+        ]
+      : 'jsonSchema' in contract
+        ? [
+        'The reply MUST validate against this exact JSON Schema:',
+        JSON.stringify(object(contract.jsonSchema, 'request.replyContract.jsonSchema')),
+        ...('canonicalExample' in contract
+          ? [
+              'Canonical valid example (replace envelope ids/revision/round and requested monster ids with this request values):',
+              JSON.stringify(object(contract.canonicalExample, 'request.replyContract.canonicalExample')),
+            ]
+          : []),
+        'No other fields are permitted at the envelope or at any nested object level.',
+          ...(typeof contract.contractId === 'string'
+            ? [`Remember this unchanged contract as ${contract.contractId} for later requests in this session.`]
+            : []),
+        ]
+        : [
+            'The reply MUST use this restricted program grammar:',
+            String(contract.grammar),
+            ...('workedExamples' in contract
+              ? workedExampleInstructions(contract.workedExamples)
+              : ['Canonical valid example:', String(contract.canonicalExample)]),
+          ];
+  const requestPayload = 'workedExamples' in contract
+    ? Object.fromEntries(Object.entries(input).filter(([key]) => key !== 'replyContract'))
+    : input;
   return [
-    'You are the DM decision engine. Return exactly one JSON object and no markdown.',
-    'The reply MUST validate against this exact JSON Schema:',
-    JSON.stringify(contract.jsonSchema),
-    'Canonical valid example (replace envelope ids/revision/round and requested monster ids with this request values):',
-    JSON.stringify(contract.canonicalExample),
-    'No other fields are permitted at the envelope or at any nested object level.',
+    sharedInstructions,
+    ...contractInstructions,
     correction,
     'Request:',
-    JSON.stringify(input),
+    JSON.stringify(requestPayload),
   ].join('\n');
 }
 
@@ -410,6 +554,7 @@ export const dmBridgeLibInternals = {
   parseCodexJsonLines,
   parseCodexThreadId,
   parseCodexUsage,
+  projectionHash,
   requestSessionId,
   roundPlanPrompt,
   runCodexProcess,

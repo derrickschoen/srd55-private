@@ -2,6 +2,9 @@ import type { EncounterCommand } from './events';
 import { gridDistance } from './grid';
 import type { CombatantId } from './values';
 import type { VisibleEncounterState } from './visibility';
+import type { DmVisibleEncounterState } from './visibility';
+import type { DecisionProgram } from '../vtt/dm-bridge/round-plan-contract';
+import { canonicalJson } from '../commands/canonical-json';
 
 export interface LegalActionSummary {
   readonly actions: readonly EncounterCommand[];
@@ -148,6 +151,88 @@ function algorithmRank(
 }
 
 export class AlgorithmController implements Controller {
+  /**
+   * Enumerates the primitive turn programs considered by the algorithm controller.
+   * Candidates are ranked by descending heuristic score, then by canonical JSON.
+   * The canonical-JSON tie-break is the stable sort key captured by experiments,
+   * so enumeration is independent of source-array or engine sort stability.
+   */
+  enumerateTurnPrograms(
+    state: DmVisibleEncounterState,
+    actorId: CombatantId,
+    limit = 64,
+  ): readonly AlgorithmTurnCandidate[] {
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new RangeError('Algorithm turn candidate limit must be a positive integer.');
+    }
+    const actor = state.combatants.find((candidate) => candidate.id === actorId);
+    if (actor === undefined || actor.kind !== 'monster' || actor.life !== 'living') {
+      throw new TypeError('Algorithm turn candidates require a living monster in the DM projection.');
+    }
+    const enemies = state.combatants
+      .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
+      .sort((left, right) => {
+        const distance = gridDistance(actor.position, left.position) - gridDistance(actor.position, right.position);
+        return distance || left.id.localeCompare(right.id);
+      });
+    const nearest = enemies[0];
+    const candidates: { readonly program: DecisionProgram; readonly score: number }[] = [];
+    for (const enemy of enemies) {
+      const distance = gridDistance(actor.position, enemy.position);
+      candidates.push({
+        program: {
+          kind: 'action',
+          action: { kind: 'attack', target: { kind: 'combatant', combatantId: enemy.id } },
+        },
+        score: 100 - distance,
+      });
+      candidates.push({
+        program: {
+          kind: 'action',
+          action: { kind: 'force_save', target: { kind: 'combatant', combatantId: enemy.id } },
+        },
+        score: 96 - distance,
+      });
+    }
+    if (nearest !== undefined) {
+      candidates.push({
+        program: {
+          kind: 'action',
+          action: { kind: 'move_toward', target: { kind: 'combatant', combatantId: nearest.id } },
+        },
+        score: 50 - gridDistance(actor.position, nearest.position),
+      });
+    }
+    candidates.push(
+      { program: { kind: 'action', action: { kind: 'use_action', action: 'dodge' } }, score: 20 },
+      { program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } }, score: 0 },
+    );
+    return candidates
+      .map((candidate) => ({
+        ...candidate,
+        stableSortKey: canonicalJson(candidate.program),
+      }))
+      .sort((left, right) =>
+        right.score - left.score || left.stableSortKey.localeCompare(right.stableSortKey))
+      .slice(0, limit);
+  }
+
+  proposeRoundProgram(
+    state: DmVisibleEncounterState,
+    actorId: CombatantId,
+  ): AlgorithmRoundProposal {
+    const ranked = this.enumerateTurnPrograms(state, actorId, 20);
+    const top = ranked[0]?.score ?? 0;
+    const second = ranked[1]?.score ?? top;
+    return {
+      program: {
+        kind: 'priority',
+        choices: ranked.map((candidate) => candidate.program),
+      },
+      topActionGapPercent: top === 0 ? 0 : Math.abs(top - second) * 100 / Math.abs(top),
+    };
+  }
+
   async choose(
     request: ControllerRequest,
     signal: AbortSignal,
@@ -171,6 +256,17 @@ export class AlgorithmController implements Controller {
       action,
     };
   }
+}
+
+export interface AlgorithmRoundProposal {
+  readonly program: DecisionProgram;
+  readonly topActionGapPercent: number;
+}
+
+export interface AlgorithmTurnCandidate {
+  readonly program: DecisionProgram;
+  readonly score: number;
+  readonly stableSortKey: string;
 }
 
 export interface AgentControllerRequest {
@@ -209,6 +305,7 @@ const COMMAND_TYPES: ReadonlySet<EncounterCommand['type']> = new Set([
   'dodge',
   'spend_bonus_action',
   'spend_reaction',
+  'activate_action_surge',
   'heal',
   'apply_effect',
   'end_concentration',

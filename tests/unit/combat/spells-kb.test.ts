@@ -41,10 +41,10 @@ function hasNamedSpellHeader(
 }
 
 describe('spell knowledge-base completeness', () => {
-  it('has exactly one source-cited KB entry for every implemented cantrip and level-1/2 spell', () => {
-    expect(SPELL_KB_ENTRIES).toHaveLength(175);
-    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.ruleId)).size).toBe(175);
-    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.spellId)).size).toBe(175);
+  it('has exactly one source-cited KB entry for every implemented manifest spell', () => {
+    expect(SPELL_KB_ENTRIES).toHaveLength(188);
+    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.ruleId)).size).toBe(188);
+    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.spellId)).size).toBe(188);
     expect(SPELL_KB_ENTRIES.map((entry) => entry.spellId).sort()).toEqual(
       IMPLEMENTED_SPELL_DEFINITIONS.map((definition) => definition.id).sort(),
     );
@@ -69,7 +69,7 @@ describe('spell knowledge-base completeness', () => {
 
   it.each(SPELL_MANIFEST)('$id class-list locators name the exact spell row', (row) => {
     for (const membership of row.memberships) {
-      const matched = /^(docs\/srd\/source\/(?:cleric|wizard)-spell-list\.txt):(\d+)$/u.exec(membership.source);
+      const matched = /^(docs\/srd\/source\/(?:bard|cleric|druid|paladin|ranger|sorcerer|warlock|wizard)-spell-list\.txt):(\d+)$/u.exec(membership.source);
       if (matched === null) throw new Error(`Invalid class-list locator: ${membership.source}`);
       const path = matched[1];
       const line = matched[2];
@@ -93,5 +93,90 @@ describe('spell knowledge-base completeness', () => {
     const entry = SPELL_KB_ENTRIES.find((candidate) => candidate.spellId === 'sending');
     expect(entry?.rulingGuidance).toContain('a creature you met or one described by someone who met it');
     expect(entry?.rulingGuidance).not.toContain('named');
+  });
+
+  it('Eldritch Blast KB fields cite the exact bundled SRD lines', () => {
+    const entry = SPELL_KB_ENTRIES.find((candidate) => candidate.spellId === 'eldritch-blast');
+    expect(entry?.fieldCitations).toEqual({
+      identity: 'docs/srd/source/spell-descriptions.txt:2608-2609',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:2611',
+      components: 'docs/srd/source/spell-descriptions.txt:2615',
+      targeting: 'docs/srd/source/spell-descriptions.txt:2613-2626',
+      operation: 'docs/srd/source/spell-descriptions.txt:2619-2626',
+    });
+    for (const locator of Object.values(entry?.fieldCitations ?? {})) {
+      const [start, end] = locatorBounds(locator);
+      expect(SPELL_DESCRIPTION_LINES.slice(start - 1, end).join(' ').trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it.each(['divine-favor', 'ensnaring-strike', 'searing-smite', 'heal', 'moonbeam'] as const)(
+    '%s carries complete non-empty field-level SRD citations',
+    (spellId) => {
+      const entry = SPELL_KB_ENTRIES.find((candidate) => candidate.spellId === spellId);
+      expect(entry?.fieldCitations).toBeDefined();
+      expect(Object.keys(entry?.fieldCitations ?? {}).sort()).toEqual([
+        'castingTime', 'components', 'identity', 'operation', 'targeting',
+      ]);
+      for (const locator of Object.values(entry?.fieldCitations ?? {})) {
+        const [start, end] = locatorBounds(locator);
+        expect(SPELL_DESCRIPTION_LINES.slice(start - 1, end).join(' ').trim().length).toBeGreaterThan(0);
+      }
+    },
+  );
+
+  it.each([
+    'hold-monster',
+    'faerie-fire',
+    'vicious-mockery',
+    'pass-without-trace',
+    'entangle',
+    'dissonant-whispers',
+    'goodberry',
+  ] as const)('%s spell-batch-2 fields cite complete non-empty SRD spans', (spellId) => {
+    const entry = SPELL_KB_ENTRIES.find((candidate) => candidate.spellId === spellId);
+    expect(Object.keys(entry?.fieldCitations ?? {}).sort()).toEqual([
+      'castingTime', 'components', 'identity', 'operation', 'targeting',
+    ]);
+    for (const locator of Object.values(entry?.fieldCitations ?? {})) {
+      const [start, end] = locatorBounds(locator);
+      expect(SPELL_DESCRIPTION_LINES.slice(start - 1, end).join(' ').trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it('records every known r9 engine residual as a closed typed limitation code', () => {
+    expect(SPELL_KB_ENTRIES.find((entry) => entry.spellId === 'ensnaring-strike')?.limitations?.map(
+      (limitation) => limitation.code,
+    )).toEqual([
+      'post_hit_cast_timing_prearmed',
+      'creature_size_save_mode_unavailable',
+      'effect_escape_action_unavailable',
+    ]);
+    expect(SPELL_KB_ENTRIES.find((entry) => entry.spellId === 'moonbeam')?.limitations?.map(
+      (limitation) => limitation.code,
+    )).toEqual([
+      'persistent_area_move_action_unavailable',
+      'persistent_area_entry_trigger_unavailable',
+      'shapechange_reversion_unavailable',
+    ]);
+  });
+
+  it('records every spell-batch-2 residual as a closed typed limitation code', () => {
+    const limitations = (spellId: string) => SPELL_KB_ENTRIES.find(
+      (entry) => entry.spellId === spellId,
+    )?.limitations?.map((limitation) => limitation.code) ?? [];
+    expect(limitations('hold-monster')).toEqual(['perception_target_filter_unavailable']);
+    expect(limitations('faerie-fire')).toEqual([]);
+    expect(limitations('vicious-mockery')).toEqual(['perception_target_filter_unavailable']);
+    expect(limitations('pass-without-trace')).toEqual([
+      'moving_aura_membership_unavailable', 'exploration_tracks_unavailable',
+    ]);
+    expect(limitations('entangle')).toEqual([
+      'persistent_area_terrain_unavailable', 'effect_escape_action_unavailable',
+    ]);
+    expect(limitations('dissonant-whispers')).toEqual(['forced_reaction_movement_unavailable']);
+    expect(limitations('goodberry')).toEqual([
+      'encounter_expiry_unavailable', 'exploration_nourishment_unavailable',
+    ]);
   });
 });

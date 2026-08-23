@@ -9,7 +9,11 @@ import {
   type Controller,
 } from '../src/combat/controllers';
 import { TurnCoordinator } from '../src/combat/coordinator';
-import { createEncounter } from '../src/combat/encounter';
+import {
+  createEncounter,
+  isInitiativeMode,
+  type InitiativeMode,
+} from '../src/combat/encounter';
 import { mulberry32 } from '../src/combat/random';
 import {
   encounterSessionId,
@@ -65,6 +69,7 @@ export interface VttSoakConfig {
   readonly dmEffort: DmBridgeModelConfig['reasoningEffort'];
   readonly requestTimeoutMs: number;
   readonly tableTimeoutMs: number;
+  readonly initiativeMode: InitiativeMode;
 }
 
 export type SoakBridgeLifecycleEvent =
@@ -102,6 +107,7 @@ export interface VttSoakSummary {
   readonly dmEffort: DmBridgeModelConfig['reasoningEffort'];
   readonly requestTimeoutMs: number;
   readonly tableTimeoutMs: number;
+  readonly initiativeMode: InitiativeMode;
   readonly tables: readonly VttSoakTableSummary[];
   readonly gapReports: readonly GapReport[];
 }
@@ -142,6 +148,7 @@ function tableCoordinator(
   source: SoakPartySource,
   externalParty: LoadedExternalPartyPack,
   seed: number,
+  initiativeMode: InitiativeMode,
   dm?: DmControllerBinding,
 ): TurnCoordinator {
   const reference = referenceEncounterSetup();
@@ -160,6 +167,7 @@ function tableCoordinator(
     { column: 4, row: 2 },
   ] as const;
   const state = createEncounter({
+    config: { initiativeMode },
     bounds: reference.bounds,
     blockedCells: reference.blockedCells,
     foggedCells: reference.foggedCells,
@@ -185,6 +193,7 @@ function tableCoordinator(
           history: [],
         }),
         history: [],
+        initiativeMode: coordinator.state().config.initiativeMode,
       };
     });
   };
@@ -409,7 +418,7 @@ async function runRealTable(
       reasoningEffort: config.dmEffort,
     };
     const sessionId = await client.createSession(encounterId, abort.signal, model);
-    coordinator = tableCoordinator(partySource, party, seed, {
+    coordinator = tableCoordinator(partySource, party, seed, config.initiativeMode, {
       exchange: client,
       encounterId,
       codexSessionId: sessionId,
@@ -446,6 +455,9 @@ export async function runVttSoak(
   if (config.packFile.trim().length === 0) throw new TypeError('packFile is required.');
   if (config.dmModel.trim().length === 0) throw new TypeError('dmModel is required.');
   validateEffort(config.dmEffort);
+  if (!isInitiativeMode(config.initiativeMode)) {
+    throw new TypeError('initiativeMode must be per_combatant, shared_enemy, or side_alternating.');
+  }
   positiveInteger(config.requestTimeoutMs, 'requestTimeoutMs', 3_600_000);
   positiveInteger(config.tableTimeoutMs, 'tableTimeoutMs', 86_400_000);
 
@@ -463,7 +475,12 @@ export async function runVttSoak(
     const partySource = partySourceForTable(tableIndex, config.packFile);
     const tableSeed = seedForTable(config.seed, tableIndex);
     const gaps = partySource === 'reference' ? [] : loadedPack.gaps;
-    let coordinator = tableCoordinator(partySource, loadedPack.party, tableSeed);
+    let coordinator = tableCoordinator(
+      partySource,
+      loadedPack.party,
+      tableSeed,
+      config.initiativeMode,
+    );
     let telemetry: readonly FleetTelemetry[] = [];
     let abortReason: string | null = null;
     if (config.bridge.mode === 'real') {
@@ -484,7 +501,11 @@ export async function runVttSoak(
     } else {
       await runCoordinatorToRoundBound(coordinator, config.rounds);
     }
-    const source = recordScriptedReferenceSkirmish(tableSeed).bundle;
+    const source = recordScriptedReferenceSkirmish(
+      tableSeed,
+      'engine:hit-points',
+      config.initiativeMode,
+    ).bundle;
     const bundle = boundedBundle(
       source,
       config.rounds,
@@ -527,6 +548,7 @@ export async function runVttSoak(
     dmEffort: config.dmEffort,
     requestTimeoutMs: config.requestTimeoutMs,
     tableTimeoutMs: config.tableTimeoutMs,
+    initiativeMode: config.initiativeMode,
     tables,
     gapReports: runGaps,
   };
@@ -575,6 +597,7 @@ export function decodeVttSoakArguments(argv: readonly string[]): VttSoakConfig {
     'dm-effort',
     'request-timeout-ms',
     'table-timeout-ms',
+    'initiative',
   ]);
   for (const name of options.keys()) {
     if (!allowed.has(name)) throw new TypeError(`Unknown option --${name}.`);
@@ -586,6 +609,10 @@ export function decodeVttSoakArguments(argv: readonly string[]): VttSoakConfig {
       ? { mode: 'real' }
       : (() => { throw new TypeError('--bridge must be fake or real.'); })();
   const dmEffort = validateEffort(options.get('dm-effort') ?? DEFAULT_DM_REASONING_EFFORT);
+  const initiativeMode = options.get('initiative') ?? 'shared_enemy';
+  if (!isInitiativeMode(initiativeMode)) {
+    throw new TypeError('--initiative must be per_combatant, shared_enemy, or side_alternating.');
+  }
   const config: VttSoakConfig = {
     tables: Number(required(options, 'tables')),
     seed: Number(required(options, 'seed')),
@@ -601,6 +628,7 @@ export function decodeVttSoakArguments(argv: readonly string[]): VttSoakConfig {
     tableTimeoutMs: Number(
       options.get('table-timeout-ms') ?? String(DEFAULT_SOAK_TABLE_TIMEOUT_MS),
     ),
+    initiativeMode,
   };
   positiveInteger(config.tables, 'tables', 1_000);
   positiveInteger(config.rounds, 'rounds', 100);

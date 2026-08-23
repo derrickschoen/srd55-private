@@ -7,7 +7,8 @@
  * convention, the same way the drizzle boundary is.
  *
  *   npx vite-node tools/scrape/cli.ts -- fetch --namespace spell
- *   npx vite-node tools/scrape/cli.ts -- build [--list bard] [--allow-partial]
+ *   npx vite-node tools/scrape/cli.ts -- build [--format catalog|content-pack]
+ *     [--list bard] [--allow-partial]
  *
  * `--list` is a BUILD flag, not a fetch one, and it makes the build partial: it
  * narrows which parsed pages are emitted, and an import is a full replacement,
@@ -21,6 +22,10 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { PageCache } from './cache';
 import { buildCatalogDocuments, BuildRefused, type BuildFailure, type BuiltPage } from './build-catalog';
+import {
+  buildContentPackDocuments,
+  ContentPackBuildRefused,
+} from './build-content-pack';
 import {
   buildFeatDocuments,
   FeatBuildRefused,
@@ -105,6 +110,7 @@ interface Options {
   readonly offline: boolean;
   readonly allowPartial: boolean;
   readonly limit: number | null;
+  readonly format: string;
 }
 
 function parseArgs(argv: readonly string[]): Options {
@@ -150,6 +156,7 @@ function parseArgs(argv: readonly string[]): Options {
     offline: flags.get('offline') === 'true',
     allowPartial: flags.get('allow-partial') === 'true',
     limit: flags.has('limit') ? number('limit', 0) : null,
+    format: flags.get('format') ?? 'catalog',
   };
 }
 
@@ -328,6 +335,50 @@ async function commandBuildSpells(options: Options): Promise<number> {
       record,
       description: parsed.value.description,
     });
+  }
+
+  if (options.format === 'content-pack') {
+    const dated = queue.items
+      .map((item) => item.lastmod === null ? Number.NaN : Date.parse(item.lastmod))
+      .filter((value) => Number.isFinite(value));
+    const importedAt = new Date(
+      dated.length === 0 ? 0 : Math.max(...dated),
+    ).toISOString();
+    let output;
+    try {
+      output = buildContentPackDocuments({
+        pages,
+        queue: queue.items,
+        parseFailures,
+        allowPartial: options.allowPartial,
+        importedAt,
+      });
+    } catch (error) {
+      if (error instanceof ContentPackBuildRefused) {
+        log(`content-pack build refused.\n${error.message}`);
+        return 1;
+      }
+      throw error;
+    }
+    await mkdir(layout.outDir, { recursive: true });
+    await writeFile(layout.contentPackPath, `${output.packBytes}\n`, 'utf8');
+    await writeFile(layout.contentPackReportPath, `${output.reportBytes}\n`, 'utf8');
+    log(
+      `wrote content pack: ${output.report.emitted} emitted, ` +
+        `${output.report.unemitted} unemitted from ${output.report.pagesSeen} page(s):`,
+    );
+    log(`  pack    ${layout.contentPackPath}`);
+    log(`  report  ${layout.contentPackReportPath}`);
+    for (const [reason, count] of Object.entries(output.report.unemittedByReason)) {
+      log(`  ${reason}: ${count}`);
+    }
+    for (const item of output.report.skippedQueueItems) {
+      log(
+        `  skipped queue item: ${item.state} ${item.url}` +
+          (item.reason === null ? '' : ` — ${item.reason}`),
+      );
+    }
+    return 0;
   }
 
   let output;
@@ -767,11 +818,23 @@ async function commandBuildSpecies(options: Options): Promise<number> {
 }
 
 async function commandBuild(options: Options): Promise<number> {
+  if (options.format !== 'catalog' && options.format !== 'content-pack') {
+    log(`build does not know format "${options.format}"; it knows catalog, content-pack.`);
+    return 1;
+  }
   if (!isBuildNamespace(options.namespace)) {
     log(
       `build does not know namespace "${options.namespace}"; it knows ` +
         `${BUILD_NAMESPACES.join(', ')}.`,
     );
+    return 1;
+  }
+  if (options.format === 'content-pack' && options.namespace !== 'spell') {
+    log('build --format content-pack currently maps only --namespace spell.');
+    return 1;
+  }
+  if (options.format === 'content-pack' && options.list !== null) {
+    log('--list is not supported by --format content-pack; build the complete parsed set.');
     return 1;
   }
   if (options.namespace === 'feat') {
@@ -794,7 +857,8 @@ function usage(): number {
       '',
       '  fetch --namespace spell|feat|subclass|species [--limit N] [--delay 1500]',
       '        [--max-age-days 30] [--offline]',
-      '  build --namespace spell [--list bard] [--allow-partial]',
+      '  build --namespace spell [--format catalog] [--list bard] [--allow-partial]',
+      '  build --namespace spell --format content-pack [--allow-partial]',
       '  build --namespace feat|subclass|species [--allow-partial]',
       '  bridge --namespace feat',
       '',
@@ -817,6 +881,10 @@ function usage(): number {
       'is a full replacement, so every spell it filters out would be deactivated.',
       'It therefore requires --allow-partial, exactly as an unfinished crawl does.',
       '--list has no meaning for --namespace feat, subclass or species.',
+      '--format content-pack writes an importable content-pack v1 file plus a',
+      'deterministic emission report. It supports the spell namespace only and',
+      'does not accept --list. Unfinished queue items refuse emission unless',
+      '--allow-partial is explicit; allowed omissions are enumerated by state.',
       '',
       'feat/subclass/species build output has no import path yet — see',
       'tools/scrape/build-feat-catalog.ts, build-subclass-catalog.ts and',

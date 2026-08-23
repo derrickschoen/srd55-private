@@ -9,7 +9,10 @@ export type CombatantId = Brand<string, 'CombatantId'>;
 export type TokenId = Brand<string, 'TokenId'>;
 export type StatblockId = Brand<string, 'StatblockId'>;
 export type EncounterEffectId = Brand<string, 'EncounterEffectId'>;
+export type PersistentAreaId = Brand<string, 'PersistentAreaId'>;
+export type WorldObjectId = Brand<string, 'WorldObjectId'>;
 export type EffectStackingIdentity = Brand<string, 'EffectStackingIdentity'>;
+export type LimitedResourcePoolId = Brand<string, 'LimitedResourcePoolId'>;
 export type EncounterSessionId = Brand<string, 'EncounterSessionId'>;
 export type EncounterBranchId = Brand<string, 'EncounterBranchId'>;
 export type CodexSessionId = Brand<string, 'CodexSessionId'>;
@@ -78,10 +81,19 @@ export const statblockId = (value: string): StatblockId =>
 export const encounterEffectId = (value: string): EncounterEffectId =>
   identity<EncounterEffectId>(value, 'EncounterEffectId');
 
+export const persistentAreaId = (value: string): PersistentAreaId =>
+  identity<PersistentAreaId>(value, 'PersistentAreaId');
+
+export const worldObjectId = (value: string): WorldObjectId =>
+  identity<WorldObjectId>(value, 'WorldObjectId');
+
 export const effectStackingIdentity = (
   value: string,
 ): EffectStackingIdentity =>
   identity<EffectStackingIdentity>(value, 'EffectStackingIdentity');
+
+export const limitedResourcePoolId = (value: string): LimitedResourcePoolId =>
+  identity<LimitedResourcePoolId>(value, 'LimitedResourcePoolId');
 
 export const encounterSessionId = (value: string): EncounterSessionId =>
   identity<EncounterSessionId>(value, 'EncounterSessionId');

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
+import { STARTER_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
 import { projectEncounter } from '../../../src/combat/visibility';
 import { encounterBoardRenderModel } from '../../../src/vtt/encounter-board';
 import {
@@ -13,6 +14,8 @@ import {
   MemoryApprovedEncounterFixtureStore,
   approvedFixtureSession,
   approveEncounterPackage,
+  buildEncounterGenerationPrompt,
+  ENCOUNTER_MONSTER_COUNT_RANGE,
   encounterStateFromApprovedFixture,
   generateEncounterCandidate,
   loadApprovedEncounterFixture,
@@ -20,6 +23,8 @@ import {
   persistApprovedEncounterFixture,
   projectApprovedFixtureForDm,
   projectApprovedFixtureForPlayer,
+  REFERENCE_ENCOUNTER_XP_BUDGETS,
+  referenceEncounterXpBand,
   regenerateEncounterSection,
   serializePlayerEncounterFixture,
   testApproverIdentity,
@@ -31,6 +36,12 @@ import { REFERENCE_FIGHTER_ID } from '../../../src/vtt/reference-encounter';
 
 function clonePackage(): typeof TEST_APPROVED_FIRST_SKIRMISH_PACKAGE {
   return structuredClone(TEST_APPROVED_FIRST_SKIRMISH_PACKAGE);
+}
+
+function rosterXp(row: (typeof STARTER_MONSTER_ROSTER)[number]): number {
+  const challenge = row.statblock.sourceDetails.challenge;
+  if (challenge.kind === 'absent') throw new Error(`Missing XP for ${row.id}`);
+  return challenge.value.experiencePoints;
 }
 
 describe('increment 9 generated and approved encounter fixtures', () => {
@@ -153,18 +164,70 @@ describe('increment 9 generated and approved encounter fixtures', () => {
     );
   });
 
-  it('returns unbuildable_difficulty instead of generating an impossible high request', async () => {
-    let calls = 0;
-    await expect(generateEncounterCandidate({
+  it('builds high from the enlarged roster and retains an explicit mathematically unbuildable path', async () => {
+    const highBand = referenceEncounterXpBand('high');
+    const maximumMonsterXp = Math.max(...STARTER_MONSTER_ROSTER.map(rosterXp));
+    const maximumEncounterXp = maximumMonsterXp * ENCOUNTER_MONSTER_COUNT_RANGE.maximum;
+    expect(maximumEncounterXp).toBeGreaterThan(highBand.lowerExclusive!);
+    expect(maximumEncounterXp).toBeLessThanOrEqual(highBand.upperInclusive);
+
+    const highRequest = {
       ...TEST_APPROVED_FIRST_SKIRMISH_REQUEST,
       difficulty: { rounds: 4, pressure: 'high' },
-    }, {
+    } as const;
+    const highPackage = clonePackage() as unknown as {
+      request: typeof highRequest;
+      generationPrompt: string;
+      roster: Array<{ statblockId: string }>;
+    };
+    highPackage.request = highRequest;
+    highPackage.generationPrompt = buildEncounterGenerationPrompt(highRequest);
+    for (const entry of highPackage.roster) entry.statblockId = 'statblock:giant-scorpion';
+
+    let calls = 0;
+    await expect(generateEncounterCandidate(highRequest, {
       generate: async () => {
         calls += 1;
-        return clonePackage();
+        return highPackage;
       },
-    })).rejects.toThrow('unbuildable_difficulty: high');
-    expect(calls).toBe(0);
+    })).resolves.toEqual(highPackage);
+    expect(calls).toBe(1);
+
+    const cappedRoster = STARTER_MONSTER_ROSTER.filter(
+      (row) => rosterXp(row) <= REFERENCE_ENCOUNTER_XP_BUDGETS.low / ENCOUNTER_MONSTER_COUNT_RANGE.maximum,
+    );
+    const cappedMaximumEncounterXp = Math.max(...cappedRoster.map(rosterXp))
+      * ENCOUNTER_MONSTER_COUNT_RANGE.maximum;
+    const pressures = ['low', 'moderate', 'high'] as const;
+    const unbuildablePressure = pressures.find((pressure) => {
+      const lower = referenceEncounterXpBand(pressure).lowerExclusive;
+      return lower !== null && cappedMaximumEncounterXp <= lower;
+    });
+    expect(unbuildablePressure).toBeDefined();
+    const unbuildableBand = referenceEncounterXpBand(unbuildablePressure!);
+    expect(cappedMaximumEncounterXp).toBeLessThanOrEqual(unbuildableBand.lowerExclusive!);
+
+    vi.resetModules();
+    vi.doMock('../../../src/combat/statblocks/roster', () => ({
+      STARTER_MONSTER_ROSTER: cappedRoster,
+    }));
+    try {
+      const constrainedModule = await import('../../../src/vtt/generated-encounter-fixtures');
+      let constrainedCalls = 0;
+      await expect(constrainedModule.generateEncounterCandidate({
+        ...TEST_APPROVED_FIRST_SKIRMISH_REQUEST,
+        difficulty: { rounds: 4, pressure: unbuildablePressure! },
+      }, {
+        generate: async () => {
+          constrainedCalls += 1;
+          return clonePackage();
+        },
+      })).rejects.toThrow(`unbuildable_difficulty: ${unbuildablePressure!}`);
+      expect(constrainedCalls).toBe(0);
+    } finally {
+      vi.doUnmock('../../../src/combat/statblocks/roster');
+      vi.resetModules();
+    }
   });
 
   it('M58-UNAPPROVED-PACKAGE-PERSISTED refuses candidate bytes before owner approval', () => {

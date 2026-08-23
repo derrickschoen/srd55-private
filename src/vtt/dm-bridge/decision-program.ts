@@ -1,6 +1,7 @@
 import type { ControllerDecision, ControllerRequest } from '../../combat/controllers';
 import type { Controller } from '../../combat/controllers';
 import type { EncounterCommand } from '../../combat/events';
+import type { InitiativeMode } from '../../combat/encounter';
 import { gridDistance } from '../../combat/grid';
 import type { DmVisibleCombatant, DmVisibleEncounterState } from '../../combat/visibility';
 import type { CombatantId, EncounterSessionId, CodexSessionId } from '../../combat/values';
@@ -10,21 +11,40 @@ import {
   DEFAULT_DM_MODEL_CONFIG,
   DM_BRIDGE_PROTOCOL_VERSION,
   MAX_ROUND_PLAN_CORRECTIONS,
-  ROUND_PLAN_REPLY_CONTRACT,
-  decodeRoundPlan,
+  decodeRoundPlanReply,
+  roundPlanReplyContract,
+  type DecodedRoundPlanReply,
   type DecisionProgram,
   type DmBridgeExchange,
   type DmBridgeModelConfig,
   type DmBridgeRequest,
+  type JsProgramArtifact,
   type MonsterReconsultRequest,
   type MonsterRoundProgram,
   type PlanAction,
   type RoundPlan,
   type RoundPlanCorrectionRequest,
   type RoundPlanRequest,
+  type RoundPlanSurface,
   type StatePredicate,
   type TargetSelector,
 } from './contracts';
+import type { JsTurnProgramLimits } from './js-turn-program';
+import {
+  describeTurnProgramAmbientApi,
+  type TurnProgramTypeCheckTelemetry,
+} from './turn-program-types';
+import { canonicalJson } from '../../commands/canonical-json';
+import {
+  E06_TRIGGER_POLICY,
+  buildAlgorithmRoundPlan,
+  resolveSteeringPlan,
+  steeringConsultReason,
+  steeringRequestContract,
+  steeringTriggerEvents,
+  type SteeringCoordinatorMode,
+  type SteeringTelemetry,
+} from './steering';
 
 export class StaleRoundPlanError extends Error {
   override readonly name = 'StaleRoundPlanError' as const;
@@ -101,6 +121,20 @@ function endpointDistance(
   return endpoint === undefined ? Number.POSITIVE_INFINITY : gridDistance(endpoint, destination);
 }
 
+function pathDistance(
+  origin: { readonly column: number; readonly row: number },
+  command: EncounterCommand,
+): number {
+  if (command.type !== 'move') return Number.POSITIVE_INFINITY;
+  let previous = origin;
+  let distance = 0;
+  for (const cell of command.path) {
+    distance += gridDistance(previous, cell);
+    previous = cell;
+  }
+  return distance;
+}
+
 function selectAction(
   action: PlanAction,
   actor: CombatantId,
@@ -108,13 +142,37 @@ function selectAction(
   legal: readonly EncounterCommand[],
 ): EncounterCommand | null {
   const actorLegal = legal.filter((command) => commandActor(command) === actor);
+  const acting = subject(state, actor);
   switch (action.kind) {
-    case 'attack':
+    case 'attack': {
+      const selectedTarget = targetId(action.target, actor, state);
+      if (selectedTarget === null) return null;
+      return actorLegal.find((command) =>
+        command.type === 'attack' && command.target === selectedTarget &&
+        (action.attackId === undefined || command.attackId === action.attackId),
+      ) ?? null;
+    }
     case 'force_save': {
       const selectedTarget = targetId(action.target, actor, state);
       if (selectedTarget === null) return null;
       return actorLegal.find((command) =>
-        command.type === action.kind && command.target === selectedTarget,
+        command.type === 'force_save' && command.target === selectedTarget,
+      ) ?? null;
+    }
+    case 'cast_spell': {
+      const selectedTarget = action.target === null ? null : targetId(action.target, actor, state);
+      return actorLegal.find((command) =>
+        command.type === 'cast_spell' && command.spellId === action.spellId &&
+        (selectedTarget === null || command.targets.includes(selectedTarget)),
+      ) ?? null;
+    }
+    case 'bonus_attack': {
+      const selectedTarget = targetId(action.target, actor, state);
+      if (selectedTarget === null) return null;
+      return actorLegal.find((command) =>
+        command.type === 'attack' &&
+        command.bonusActionGrantEffectId !== undefined &&
+        command.target === selectedTarget,
       ) ?? null;
     }
     case 'move_toward': {
@@ -122,15 +180,20 @@ function selectAction(
       if (selectedTarget === null) return null;
       const destination = subject(state, selectedTarget).position;
       return actorLegal
-        .filter((command) => command.type === 'move')
+        .filter((command) => command.type === 'move' &&
+          (action.maximumFeet === undefined || pathDistance(acting.position, command) <= action.maximumFeet))
         .sort((left, right) => endpointDistance(left, destination) - endpointDistance(right, destination))[0] ?? null;
     }
     case 'retreat_toward':
       return actorLegal
-        .filter((command) => command.type === 'move')
+        .filter((command) => command.type === 'move' &&
+          (action.maximumFeet === undefined || pathDistance(acting.position, command) <= action.maximumFeet))
         .sort((left, right) => endpointDistance(left, action.destination) - endpointDistance(right, action.destination))[0] ?? null;
     case 'use_action':
-      return actorLegal.find((command) => command.type === action.action) ?? null;
+      return actorLegal.find((command) =>
+        action.action === 'action_surge'
+          ? command.type === 'activate_action_surge'
+          : command.type === action.action) ?? null;
   }
 }
 
@@ -164,28 +227,45 @@ export interface RoundPlanContext {
   readonly codexSessionId: CodexSessionId;
   readonly projection: DmBoardProjection;
   readonly history: readonly SessionHistoryEntry[];
+  readonly initiativeMode: InitiativeMode;
 }
 
 export class DmRoundPlanSession {
-  readonly #plans = new Map<number, RoundPlan>();
-  readonly #initialRequests = new Map<number, Promise<RoundPlan>>();
+  readonly #plans = new Map<string, RoundPlan>();
+  readonly #jsPrograms = new Map<string, JsProgramArtifact>();
+  readonly #initialRequests = new Map<string, Promise<RoundPlan>>();
+  readonly #typeChecks: TurnProgramTypeCheckTelemetry[] = [];
+  readonly #jsLimits: JsTurnProgramLimits;
   #requestSequence = 1;
+  #previousSteeringProjection: DmVisibleEncounterState | null = null;
 
   constructor(
     private readonly exchange: DmBridgeExchange,
     private readonly model: DmBridgeModelConfig = DEFAULT_DM_MODEL_CONFIG,
     private readonly onCorrectionExhausted: (error: RoundPlanCorrectionExhaustedError) => void = () => undefined,
-  ) {}
+    private readonly surface: RoundPlanSurface = 'json_ast',
+    jsLimits: JsTurnProgramLimits = {},
+    private readonly steeringMode: SteeringCoordinatorMode = { kind: 'full_model' },
+    private readonly onSteeringTelemetry: (telemetry: SteeringTelemetry) => void = () => undefined,
+  ) {
+    this.#jsLimits = {
+      ...jsLimits,
+      onTypeCheckTelemetry: (telemetry) => {
+        this.#typeChecks.push(telemetry);
+        jsLimits.onTypeCheckTelemetry?.(telemetry);
+      },
+    };
+  }
 
   async #validatedExchange(
     request: RoundPlanRequest | MonsterReconsultRequest,
     signal: AbortSignal,
-  ): Promise<RoundPlan> {
+  ): Promise<DecodedRoundPlanReply> {
     let current: DmBridgeRequest = request;
     for (let correctionAttempt = 0; correctionAttempt <= MAX_ROUND_PLAN_CORRECTIONS; correctionAttempt += 1) {
       const reply = await this.exchange.exchange(current, signal);
       try {
-        return decodeRoundPlan(reply, current);
+        return decodeRoundPlanReply(reply, current, this.#jsLimits);
       } catch (error: unknown) {
         const validatorError = error instanceof Error ? error.message : String(error);
         if (correctionAttempt === MAX_ROUND_PLAN_CORRECTIONS) {
@@ -214,8 +294,12 @@ export class DmRoundPlanSession {
           history: request.history,
           requestedMonsterIds,
           validatorError,
-          replyContract: ROUND_PLAN_REPLY_CONTRACT,
+          surface: request.surface,
+          replyContract: roundPlanReplyContract(request.surface),
           correctionAttempt: nextAttempt === 1 ? 1 : 2,
+          ...(current.ambientApiDescriptions === undefined
+            ? {}
+            : { ambientApiDescriptions: current.ambientApiDescriptions }),
         };
         current = correction;
       }
@@ -223,12 +307,78 @@ export class DmRoundPlanSession {
     throw new Error('Round plan correction loop exceeded its static bound.');
   }
 
-  async startRound(context: RoundPlanContext, signal: AbortSignal): Promise<RoundPlan> {
+  async #startPlan(
+    context: RoundPlanContext,
+    signal: AbortSignal,
+    actor: CombatantId | null,
+  ): Promise<{ readonly key: string; readonly plan: RoundPlan }> {
     const projection = requireFullDmProjection(context.projection);
-    const existing = this.#plans.get(projection.round);
-    if (existing !== undefined) return existing;
-    const inFlight = this.#initialRequests.get(projection.round);
-    if (inFlight !== undefined) return inFlight;
+    const perCombatant = this.steeringMode.kind === 'full_model' && context.initiativeMode === 'per_combatant' && actor !== null;
+    const key = perCombatant
+      ? `${String(projection.round)}:${actor}`
+      : `${String(projection.round)}:enemy_block`;
+    const existing = this.#plans.get(key);
+    if (existing !== undefined) return { key, plan: existing };
+    const inFlight = this.#initialRequests.get(key);
+    if (inFlight !== undefined) return { key, plan: await inFlight };
+    const livingMonsterIds = projection.combatants
+      .filter((candidate) => candidate.kind === 'monster' && candidate.life === 'living')
+      .map((candidate) => candidate.id);
+    if (this.steeringMode.kind !== 'full_model') {
+      const requestId = this.#requestId(context.encounterId, projection.round, 'steering');
+      const proposed = buildAlgorithmRoundPlan({
+        encounterId: context.encounterId,
+        requestId,
+        state: projection,
+        livingMonsterIds,
+      });
+      const policy = this.steeringMode.kind === 'algorithm_triggered'
+        ? this.steeringMode.policy
+        : E06_TRIGGER_POLICY;
+      const reason = steeringConsultReason({
+        mode: this.steeringMode,
+        round: projection.round,
+        topActionGapPercent: proposed.topActionGapPercent,
+        events: steeringTriggerEvents(this.#previousSteeringProjection, projection, policy.retreatHitPointPercent),
+      });
+      this.#previousSteeringProjection = structuredClone(projection);
+      if (reason === null) {
+        const proposalSize = new TextEncoder().encode(canonicalJson(proposed.plan)).length;
+        this.onSteeringTelemetry({
+          proposalSize,
+          replyKind: 'not_consulted',
+          overrideCount: 0,
+          consultReason: null,
+        });
+        this.#plans.set(key, proposed.plan);
+        return { key, plan: proposed.plan };
+      }
+      const request = {
+        kind: 'steering_round_request' as const,
+        protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,
+        encounterId: context.encounterId,
+        requestId,
+        expectedRevision: projection.revision,
+        round: projection.round,
+        codexSessionId: context.codexSessionId,
+        model: this.model,
+        projection: context.projection,
+        history: context.history,
+        proposal: proposed.plan,
+        consultReason: reason,
+        replyContract: steeringRequestContract(),
+        correctionAttempt: 0 as const,
+      };
+      const pending = resolveSteeringPlan({ request, exchange: this.exchange, signal })
+        .then((resolved) => {
+          this.onSteeringTelemetry(resolved.telemetry);
+          this.#plans.set(key, resolved.plan);
+          return resolved.plan;
+        })
+        .finally(() => this.#initialRequests.delete(key));
+      this.#initialRequests.set(key, pending);
+      return { key, plan: await pending };
+    }
     const request: RoundPlanRequest = {
       kind: 'round_plan_request',
       protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,
@@ -240,20 +390,33 @@ export class DmRoundPlanSession {
       model: this.model,
       projection: context.projection,
       history: context.history,
-      livingMonsterIds: projection.combatants
-        .filter((candidate) => candidate.kind === 'monster' && candidate.life === 'living')
-        .map((candidate) => candidate.id),
-      replyContract: ROUND_PLAN_REPLY_CONTRACT,
+      livingMonsterIds: perCombatant ? [actor] : livingMonsterIds,
+      surface: this.surface,
+      replyContract: roundPlanReplyContract(this.surface),
       correctionAttempt: 0,
+      ...(this.surface === 'js_program'
+        ? {
+            ambientApiDescriptions: (perCombatant ? [actor] : livingMonsterIds).map((monsterId) =>
+              describeTurnProgramAmbientApi(context.projection, monsterId)),
+          }
+        : {}),
     };
     const pending = this.#validatedExchange(request, signal)
-      .then((plan) => {
-        this.#plans.set(plan.round, plan);
+      .then((decoded) => {
+        const plan = decoded.plan;
+        this.#plans.set(key, plan);
+        for (const artifact of decoded.jsPrograms) {
+          this.#jsPrograms.set(`${String(plan.round)}:${artifact.monsterId}`, artifact);
+        }
         return plan;
       })
-      .finally(() => this.#initialRequests.delete(projection.round));
-    this.#initialRequests.set(projection.round, pending);
-    return pending;
+      .finally(() => this.#initialRequests.delete(key));
+    this.#initialRequests.set(key, pending);
+    return { key, plan: await pending };
+  }
+
+  async startRound(context: RoundPlanContext, signal: AbortSignal): Promise<RoundPlan> {
+    return (await this.#startPlan(context, signal, null)).plan;
   }
 
   async choose(
@@ -269,7 +432,9 @@ export class DmRoundPlanSession {
     ) {
       throw new StaleRoundPlanError('Controller request is stale or is not based on the full DM projection.');
     }
-    let plan = await this.startRound(context, signal);
+    const started = await this.#startPlan(context, signal, request.actorId);
+    const planKey = started.key;
+    let plan = started.plan;
     if (plan.round !== state.round || plan.expectedRevision > state.revision) {
       throw new StaleRoundPlanError('Round plan is stale for the current encounter revision.');
     }
@@ -291,12 +456,20 @@ export class DmRoundPlanSession {
         monsterId: request.actorId,
         invalidation: 'Decision program has no legal expressible action in the current reducer action set.',
         scope: 'monster_remaining_round' as const,
-        replyContract: ROUND_PLAN_REPLY_CONTRACT,
+        surface: this.surface,
+        replyContract: roundPlanReplyContract(this.surface),
         correctionAttempt: 0 as const,
+        ...(this.surface === 'js_program'
+          ? { ambientApiDescriptions: [describeTurnProgramAmbientApi(context.projection, request.actorId)] }
+          : {}),
       };
       const replacement = await this.#validatedExchange(reconsult, signal);
-      monster = replacement.monsters[0];
+      monster = replacement.plan.monsters[0];
       if (monster === undefined) throw new RoundPlanDryError('Re-consult returned no monster program.');
+      const replacementArtifact = replacement.jsPrograms[0];
+      if (replacementArtifact !== undefined) {
+        this.#jsPrograms.set(`${String(state.round)}:${replacementArtifact.monsterId}`, replacementArtifact);
+      }
       plan = {
         ...plan,
         expectedRevision: state.revision,
@@ -304,7 +477,7 @@ export class DmRoundPlanSession {
           candidate.monsterId === monster!.monsterId ? monster! : candidate,
         ),
       };
-      this.#plans.set(state.round, plan);
+      this.#plans.set(planKey, plan);
       action = executeProgram(monster.program, request.actorId, state, request.legalActions.actions);
       if (action === null) throw new RoundPlanDryError('Re-consulted monster program is still dry.');
     }
@@ -316,7 +489,20 @@ export class DmRoundPlanSession {
   }
 
   program(round: number, monsterId: CombatantId): MonsterRoundProgram | null {
-    return this.#plans.get(round)?.monsters.find((candidate) => candidate.monsterId === monsterId) ?? null;
+    for (const [key, plan] of this.#plans) {
+      if (!key.startsWith(`${String(round)}:`)) continue;
+      const monster = plan.monsters.find((candidate) => candidate.monsterId === monsterId);
+      if (monster !== undefined) return monster;
+    }
+    return null;
+  }
+
+  jsProgramArtifact(round: number, monsterId: CombatantId): JsProgramArtifact | null {
+    return this.#jsPrograms.get(`${String(round)}:${monsterId}`) ?? null;
+  }
+
+  typeCheckTelemetry(): readonly TurnProgramTypeCheckTelemetry[] {
+    return [...this.#typeChecks];
   }
 
   #requestId(encounterId: EncounterSessionId, round: number, suffix: string): string {

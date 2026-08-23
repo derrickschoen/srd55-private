@@ -44,6 +44,18 @@ function actionLabel(action: EncounterCommand): string {
         ? 'Move'
         : `Move to ${destination.column},${destination.row}`;
     }
+    case 'create_persistent_area':
+      return 'Create persistent area';
+    case 'move_persistent_area':
+      return 'Move persistent area';
+    case 'world_operation':
+      return 'Change world';
+    case 'activate_damage_operation':
+      return 'Use damage feature';
+    case 'activate_sustained_effect':
+      return 'Activate sustained spell';
+    case 'arm_weapon_hit_rider':
+      return 'Arm weapon rider';
     case 'attack':
       return 'Attack';
     case 'opportunity_attack':
@@ -62,6 +74,8 @@ function actionLabel(action: EncounterCommand): string {
       return 'Roll initiative';
     case 'force_save':
       return 'Force save';
+    case 'roll_ability_check':
+      return 'Ability check';
     case 'dash':
       return 'Dash';
     case 'disengage':
@@ -72,10 +86,18 @@ function actionLabel(action: EncounterCommand): string {
       return action.purpose;
     case 'spend_reaction':
       return action.purpose;
+    case 'activate_action_surge':
+      return 'Action Surge';
+    case 'activate_timed_spellcasting_mode':
+      return 'Activate timed spellcasting';
     case 'heal':
       return 'Heal';
+    case 'consume_healing_pool':
+      return 'Consume healing resource';
     case 'apply_effect':
       return 'Apply effect';
+    case 'grant_temporary_hit_points':
+      return 'Grant temporary Hit Points';
     case 'end_concentration':
       return 'End concentration';
     case 'adjudicate':

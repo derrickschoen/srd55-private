@@ -7,6 +7,11 @@ import {
 } from '../statblock';
 import type { Ability } from '../../domain/enums';
 
+export * from './goblinoid-warband';
+export * from './mercenary-company';
+export * from './undead-crypt';
+export * from './wild-beasts';
+
 const SRD_PATH = 'docs/srd/full/srd-5.2.1.txt' as const;
 const present = <T>(value: T): DecodedField<T> => ({ kind: 'present', value });
 const notListed = <T>(field: string): DecodedField<T> => ({
@@ -42,7 +47,7 @@ const melee = (
   reachFeet = 5,
 ): MonsterAttackAction => ({
   kind: 'attack', id, name, attackBonus, delivery: { kind: 'melee', reachFeet },
-  damage: [{ average, dice: { count, sides, modifier }, type, trigger: 'always' }], onHit: null,
+  damage: [{ average, dice: { count, sides, modifier }, type, trigger: { kind: 'always' } }], attackRollAdvantage: null, onHit: [],
 });
 
 const ranged = (
@@ -58,7 +63,7 @@ const ranged = (
   longRangeFeet: DecodedField<number>,
 ): MonsterAttackAction => ({
   kind: 'attack', id, name, attackBonus, delivery: { kind: 'ranged', rangeFeet, longRangeFeet },
-  damage: [{ average, dice: { count, sides, modifier }, type, trigger: 'always' }], onHit: null,
+  damage: [{ average, dice: { count, sides, modifier }, type, trigger: { kind: 'always' } }], attackRollAdvantage: null, onHit: [],
 });
 
 const baseDetails = (
@@ -88,8 +93,8 @@ export const GOBLIN_WARRIOR = monsterStatblock({
     languages: present([{ kind: 'named', name: 'Common', canSpeak: true }, { kind: 'named', name: 'Goblin', canSpeak: true }]),
     damageResponses: notListed('damage vulnerabilities, resistances, or immunities'), conditionImmunities: notListed('condition immunities'), traits: notListed('traits'),
     actions: [
-      { ...goblinScimitar, damage: [...goblinScimitar.damage, { average: 2, dice: { count: 1, sides: 4, modifier: 0 }, type: 'Slashing', trigger: 'attack_roll_advantage' }] },
-      { ...goblinShortbow, damage: [...goblinShortbow.damage, { average: 2, dice: { count: 1, sides: 4, modifier: 0 }, type: 'Piercing', trigger: 'attack_roll_advantage' }] },
+      { ...goblinScimitar, damage: [...goblinScimitar.damage, { average: 2, dice: { count: 1, sides: 4, modifier: 0 }, type: 'Slashing', trigger: { kind: 'attack_roll_advantage' } }] },
+      { ...goblinShortbow, damage: [...goblinShortbow.damage, { average: 2, dice: { count: 1, sides: 4, modifier: 0 }, type: 'Piercing', trigger: { kind: 'attack_roll_advantage' } }] },
     ],
     bonusActions: present([{ kind: 'nimble_escape', actions: ['Disengage', 'Hide'] }]), reactions: notListed('reactions'),
   },
@@ -104,7 +109,7 @@ export const HOBGOBLIN_WARRIOR = monsterStatblock({
     skills: notListed('skills'), gear: present(['Half Plate Armor', 'Longbow', 'Longsword', 'Shield']), senses: present([{ kind: 'darkvision', rangeFeet: 60 }]), passivePerception: 10,
     languages: present([{ kind: 'named', name: 'Common', canSpeak: true }, { kind: 'named', name: 'Goblin', canSpeak: true }]), damageResponses: notListed('damage vulnerabilities, resistances, or immunities'), conditionImmunities: notListed('condition immunities'),
     traits: present([{ kind: 'pack_tactics', allyDistanceFeet: 5, blockedByCondition: 'Incapacitated', appliesTo: 'attack_rolls' }]),
-    actions: [melee('longsword', 'Longsword', 3, 12, 2, 10, 1, 'Slashing'), { ...ranged('longbow', 'Longbow', 3, 5, 1, 8, 1, 'Piercing', 150, present(600)), damage: [{ average: 5, dice: { count: 1, sides: 8, modifier: 1 }, type: 'Piercing', trigger: 'always' }, { average: 7, dice: { count: 3, sides: 4, modifier: 0 }, type: 'Poison', trigger: 'always' }] }],
+    actions: [melee('longsword', 'Longsword', 3, 12, 2, 10, 1, 'Slashing'), { ...ranged('longbow', 'Longbow', 3, 5, 1, 8, 1, 'Piercing', 150, present(600)), damage: [{ average: 5, dice: { count: 1, sides: 8, modifier: 1 }, type: 'Piercing', trigger: { kind: 'always' } }, { average: 7, dice: { count: 3, sides: 4, modifier: 0 }, type: 'Poison', trigger: { kind: 'always' } }] }],
     bonusActions: notListed('bonus actions'), reactions: notListed('reactions'),
   },
 });
@@ -117,7 +122,7 @@ export const BANDIT_CAPTAIN = monsterStatblock({
     ...baseDetails([{ path: SRD_PATH, lineStart: 17019, lineEnd: 17053 }], { sizes: ['Medium', 'Small'], type: 'Humanoid', subtype: null, alignment: 'Neutral' }, { rating: 2, experiencePoints: 450, proficiencyBonus: 2 }, { count: 8, sides: 8, modifier: 16 }, 30, banditAbilities),
     skills: present([{ name: 'Athletics', bonus: 4 }, { name: 'Deception', bonus: 4 }]), gear: present(['Pistol', 'Scimitar', 'Studded Leather Armor']), senses: present([]), passivePerception: 10,
     languages: present([{ kind: 'named', name: 'Common', canSpeak: true }, { kind: 'named', name: 'Thieves’ Cant', canSpeak: true }]), damageResponses: notListed('damage vulnerabilities, resistances, or immunities'), conditionImmunities: notListed('condition immunities'), traits: notListed('traits'),
-    actions: [{ kind: 'multiattack', id: 'multiattack', count: 2, attackIds: ['scimitar', 'pistol'], combination: 'any' }, melee('scimitar', 'Scimitar', 5, 6, 1, 6, 3, 'Slashing'), ranged('pistol', 'Pistol', 5, 8, 1, 10, 3, 'Piercing', 30, present(90))],
+    actions: [{ kind: 'multiattack', id: 'multiattack', count: 2, actionIds: ['scimitar', 'pistol'], combination: 'any' }, melee('scimitar', 'Scimitar', 5, 6, 1, 6, 3, 'Slashing'), ranged('pistol', 'Pistol', 5, 8, 1, 10, 3, 'Piercing', 30, present(90))],
     bonusActions: notListed('bonus actions'), reactions: present([{ kind: 'parry', trigger: 'hit_by_melee_attack', requiresHoldingWeapon: true, armorClassBonus: 2, appliesToTriggeringAttackOnly: true }]),
   },
 });
@@ -130,7 +135,7 @@ export const OGRE = monsterStatblock({
     ...baseDetails([{ path: SRD_PATH, lineStart: 20448, lineEnd: 20469 }], { sizes: ['Large'], type: 'Giant', subtype: null, alignment: 'Chaotic Evil' }, { rating: 2, experiencePoints: 450, proficiencyBonus: 2 }, { count: 8, sides: 10, modifier: 24 }, 40, ogreAbilities),
     skills: notListed('skills'), gear: present(['Greatclub', 'Javelins (3)']), senses: present([{ kind: 'darkvision', rangeFeet: 60 }]), passivePerception: 8,
     languages: present([{ kind: 'named', name: 'Common', canSpeak: true }, { kind: 'named', name: 'Giant', canSpeak: true }]), damageResponses: notListed('damage vulnerabilities, resistances, or immunities'), conditionImmunities: notListed('condition immunities'), traits: notListed('traits'),
-    actions: [melee('greatclub', 'Greatclub', 6, 13, 2, 8, 4, 'Bludgeoning'), { kind: 'attack', id: 'javelin', name: 'Javelin', attackBonus: 6, delivery: { kind: 'melee_or_ranged', reachFeet: 5, rangeFeet: 30, longRangeFeet: 120 }, damage: [{ average: 11, dice: { count: 2, sides: 6, modifier: 4 }, type: 'Piercing', trigger: 'always' }], onHit: null }],
+    actions: [melee('greatclub', 'Greatclub', 6, 13, 2, 8, 4, 'Bludgeoning'), { kind: 'attack', id: 'javelin', name: 'Javelin', attackBonus: 6, delivery: { kind: 'melee_or_ranged', reachFeet: 5, rangeFeet: 30, longRangeFeet: 120 }, damage: [{ average: 11, dice: { count: 2, sides: 6, modifier: 4 }, type: 'Piercing', trigger: { kind: 'always' } }], attackRollAdvantage: null, onHit: [] }],
     bonusActions: notListed('bonus actions'), reactions: notListed('reactions'),
   },
 });
@@ -156,7 +161,7 @@ export const PRIEST = monsterStatblock({
     ...baseDetails([{ path: SRD_PATH, lineStart: 20704, lineEnd: 20716 }, { path: SRD_PATH, lineStart: 20742, lineEnd: 20766 }], { sizes: ['Medium', 'Small'], type: 'Humanoid', subtype: 'Cleric', alignment: 'Neutral' }, { rating: 2, experiencePoints: 450, proficiencyBonus: 2 }, { count: 7, sides: 8, modifier: 7 }, 30, priestAbilities),
     skills: present([{ name: 'Medicine', bonus: 7 }, { name: 'Perception', bonus: 5 }, { name: 'Religion', bonus: 5 }]), gear: present(['Chain Shirt', 'Holy Symbol', 'Mace']), senses: present([]), passivePerception: 15,
     languages: present([{ kind: 'named', name: 'Common', canSpeak: true }, { kind: 'choice', count: 1, qualifier: 'other language', canSpeak: true }]), damageResponses: notListed('damage vulnerabilities, resistances, or immunities'), conditionImmunities: notListed('condition immunities'), traits: notListed('traits'),
-    actions: [{ kind: 'multiattack', id: 'multiattack', count: 2, attackIds: ['mace', 'radiant-flame'], combination: 'any' }, { ...melee('mace', 'Mace', 5, 6, 1, 6, 3, 'Bludgeoning'), damage: [{ average: 6, dice: { count: 1, sides: 6, modifier: 3 }, type: 'Bludgeoning', trigger: 'always' }, { average: 5, dice: { count: 2, sides: 4, modifier: 0 }, type: 'Radiant', trigger: 'always' }] }, ranged('radiant-flame', 'Radiant Flame', 5, 11, 2, 10, 0, 'Radiant', 60, notListed('a long range for Radiant Flame')), { kind: 'spellcasting', id: 'spellcasting', actionEconomy: 'action', ability: 'wisdom', saveDc: present(13), spellAttackBonus: notListed('a spell attack bonus for the Priest'), spells: [{ id: 'light', availability: 'at_will', manifestStatus: 'implemented' }, { id: 'thaumaturgy', availability: 'at_will', manifestStatus: 'implemented' }, { id: 'spirit-guardians', availability: '1_per_day', manifestStatus: 'implemented' }] }],
+    actions: [{ kind: 'multiattack', id: 'multiattack', count: 2, actionIds: ['mace', 'radiant-flame'], combination: 'any' }, { ...melee('mace', 'Mace', 5, 6, 1, 6, 3, 'Bludgeoning'), damage: [{ average: 6, dice: { count: 1, sides: 6, modifier: 3 }, type: 'Bludgeoning', trigger: { kind: 'always' } }, { average: 5, dice: { count: 2, sides: 4, modifier: 0 }, type: 'Radiant', trigger: { kind: 'always' } }] }, ranged('radiant-flame', 'Radiant Flame', 5, 11, 2, 10, 0, 'Radiant', 60, notListed('a long range for Radiant Flame')), { kind: 'spellcasting', id: 'spellcasting', actionEconomy: 'action', ability: 'wisdom', saveDc: present(13), spellAttackBonus: notListed('a spell attack bonus for the Priest'), spells: [{ id: 'light', availability: 'at_will', manifestStatus: 'implemented' }, { id: 'thaumaturgy', availability: 'at_will', manifestStatus: 'implemented' }, { id: 'spirit-guardians', availability: '1_per_day', manifestStatus: 'implemented' }] }],
     bonusActions: present([{ kind: 'spellcasting', id: 'divine-aid', actionEconomy: 'bonus_action', ability: 'wisdom', saveDc: present(13), spellAttackBonus: notListed('a Divine Aid spell attack bonus'), spells: [{ id: 'bless', availability: '3_per_day', manifestStatus: 'implemented' }, { id: 'dispel-magic', availability: '3_per_day', manifestStatus: 'implemented' }, { id: 'healing-word', availability: '3_per_day', manifestStatus: 'implemented' }, { id: 'lesser-restoration', availability: '3_per_day', manifestStatus: 'implemented' }] }]), reactions: notListed('reactions'),
   },
 });
@@ -193,6 +198,6 @@ export const WOLF = monsterStatblock({
     ...baseDetails([{ path: SRD_PATH, lineStart: 24033, lineEnd: 24059 }], { sizes: ['Medium'], type: 'Beast', subtype: null, alignment: 'Unaligned' }, { rating: '1/4', experiencePoints: 50, proficiencyBonus: 2 }, { count: 2, sides: 8, modifier: 2 }, 40, wolfAbilities),
     skills: present([{ name: 'Perception', bonus: 5 }, { name: 'Stealth', bonus: 4 }]), gear: notListed('gear'), senses: present([{ kind: 'darkvision', rangeFeet: 60 }]), passivePerception: 15,
     languages: present([]), damageResponses: notListed('damage vulnerabilities, resistances, or immunities'), conditionImmunities: notListed('condition immunities'), traits: present([{ kind: 'pack_tactics', allyDistanceFeet: 5, blockedByCondition: 'Incapacitated', appliesTo: 'attack_rolls' }]),
-    actions: [{ ...melee('bite', 'Bite', 4, 5, 1, 6, 2, 'Piercing'), onHit: { kind: 'condition', condition: 'Prone', maximumTargetSize: 'Medium', savingThrow: null } }], bonusActions: notListed('bonus actions'), reactions: notListed('reactions'),
+    actions: [{ ...melee('bite', 'Bite', 4, 5, 1, 6, 2, 'Piercing'), onHit: [{ kind: 'condition', condition: 'Prone', trigger: { kind: 'always' }, target: { maximumSize: 'Medium', excludedKinds: [] }, savingThrow: null, escapeDc: null, duration: null }] }], bonusActions: notListed('bonus actions'), reactions: notListed('reactions'),
   },
 });

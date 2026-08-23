@@ -10,6 +10,11 @@ import {
   modelFleetTelemetry,
   type FleetTelemetry,
 } from '../fleet-telemetry';
+import {
+  ProjectionTransferSender,
+  type ProjectionTransportMode,
+  type ProjectionTransportTelemetry,
+} from './projection-transport';
 
 export interface BridgeFetchResponse {
   readonly ok: boolean;
@@ -63,12 +68,22 @@ export class BridgeFailureGuard {
 
 export class LocalhostDmBridgeClient implements DmBridgeExchange, MirrorSink {
   #mirrorQueue: Promise<void> = Promise.resolve();
+  readonly #projectionSender = new ProjectionTransferSender();
+  #projectionTelemetry: ProjectionTransportTelemetry = {
+    bytesSent: 0,
+    snapshotBytes: 0,
+    deltaBytes: 0,
+    fullSnapshots: 0,
+    deltaSnapshots: 0,
+    reconstructionFailures: 0,
+  };
 
   constructor(
     private readonly baseUrl: string,
     private readonly fetch: BridgeFetch,
     private readonly onFailure: (error: unknown) => void,
     private readonly onTelemetry: (telemetry: FleetTelemetry) => void = () => undefined,
+    private readonly projectionTransport: ProjectionTransportMode = 'full',
   ) {
     const parsed = new URL(baseUrl);
     if (parsed.protocol !== 'http:' || (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost')) {
@@ -78,14 +93,62 @@ export class LocalhostDmBridgeClient implements DmBridgeExchange, MirrorSink {
 
   async exchange(request: DmBridgeRequest, signal: AbortSignal): Promise<unknown> {
     try {
-      const response = await this.fetch(`${this.baseUrl}/dm/exchange`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(request),
-        signal,
-      });
+      const send = async (forceFull: boolean): Promise<BridgeFetchResponse> => {
+        const wireRequest = this.projectionTransport === 'revision_delta'
+          ? this.#projectionSender.encode(request, forceFull)
+          : this.projectionTransport === 'verified_full'
+            ? this.#projectionSender.encode(request, true)
+            : this.projectionTransport === 'compact_lossless'
+              ? forceFull
+                ? this.#projectionSender.encode(request, true)
+                : this.#projectionSender.encodeCompact(request)
+              : request;
+        const body = JSON.stringify(wireRequest);
+        if (this.projectionTransport !== 'full') {
+          const transfer = 'projectionTransfer' in wireRequest ? wireRequest.projectionTransfer : null;
+          this.#projectionTelemetry = {
+            ...this.#projectionTelemetry,
+            bytesSent: this.#projectionTelemetry.bytesSent + new TextEncoder().encode(body).length,
+            snapshotBytes: this.#projectionTelemetry.snapshotBytes +
+              (transfer?.kind === 'full_projection' || transfer?.kind === 'compact_projection'
+                ? new TextEncoder().encode(body).length
+                : 0),
+            deltaBytes: this.#projectionTelemetry.deltaBytes +
+              (transfer?.kind === 'projection_delta' ? new TextEncoder().encode(body).length : 0),
+            fullSnapshots: this.#projectionTelemetry.fullSnapshots +
+              (transfer?.kind === 'full_projection' || transfer?.kind === 'compact_projection' ? 1 : 0),
+            deltaSnapshots: this.#projectionTelemetry.deltaSnapshots + (transfer?.kind === 'projection_delta' ? 1 : 0),
+          };
+        }
+        return this.fetch(`${this.baseUrl}/dm/exchange`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body,
+          signal,
+        });
+      };
+      let response = await send(false);
       if (!response.ok) throw new Error(`DM bridge exchange failed with HTTP ${response.status}.`);
-      const body = await response.json();
+      let body = await response.json();
+      if (
+        this.projectionTransport !== 'full' &&
+        typeof body === 'object' && body !== null && !Array.isArray(body) &&
+        'kind' in body && body.kind === 'full_projection_required'
+      ) {
+        if (
+          !('encounterId' in body) || body.encounterId !== request.encounterId ||
+          !('expectedRevision' in body) || body.expectedRevision !== request.expectedRevision
+        ) {
+          throw new TypeError('DM bridge full-projection request has stale identity.');
+        }
+        this.#projectionTelemetry = {
+          ...this.#projectionTelemetry,
+          reconstructionFailures: this.#projectionTelemetry.reconstructionFailures + 1,
+        };
+        response = await send(true);
+        if (!response.ok) throw new Error(`DM bridge exchange failed with HTTP ${response.status}.`);
+        body = await response.json();
+      }
       if (typeof body !== 'object' || body === null || Array.isArray(body) || !('reply' in body)) {
         throw new TypeError('DM bridge exchange response is malformed.');
       }
@@ -95,6 +158,10 @@ export class LocalhostDmBridgeClient implements DmBridgeExchange, MirrorSink {
       this.onFailure(error);
       throw error;
     }
+  }
+
+  projectionTransportTelemetry(): ProjectionTransportTelemetry {
+    return structuredClone(this.#projectionTelemetry);
   }
 
   async createSession(

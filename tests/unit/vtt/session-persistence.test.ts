@@ -29,9 +29,12 @@ import {
   MemoryBrowserSessionStore,
   MemoryMirrorSink,
   SqliteBrowserSessionStore,
+  SessionFingerprintMismatchError,
+  UnknownSessionTransitionKindError,
   exportSavedSession,
   exportSavedSessionV1ForMigrationTest,
   importSavedSession,
+  replaySessionRevisions,
   sessionHistory,
   validateVttSessionMigrationRegistry,
   type BrowserSessionStore,
@@ -157,6 +160,46 @@ class CountingController extends HumanController {
 }
 
 describe('event-sourced encounter persistence', () => {
+  it('unknown transition kind refuses the whole session file with a typed refusal naming the kind', () => {
+    const source = new MemoryBrowserSessionStore();
+    createJournal(source, new MemoryMirrorSink(), new ControllerRegistry([]));
+    const bytes = exportSavedSession(source, encounterSessionId('session:persistence-test'));
+    const document = JSON.parse(bytes) as {
+      revisions: Array<{ transition: { kind: string } }>;
+    };
+    document.revisions[0]!.transition.kind = 'transition_from_the_future';
+    const destination = new MemoryBrowserSessionStore();
+
+    expect(() => importSavedSession(destination, JSON.stringify(document))).toThrowError(
+      new UnknownSessionTransitionKindError('transition_from_the_future'),
+    );
+    expect(destination.revisions(encounterSessionId('session:persistence-test'))).toEqual([]);
+
+    const replayRevision = structuredClone(source.revisions(encounterSessionId('session:persistence-test'))[0]);
+    if (replayRevision === undefined) throw new Error('Replay transition fixture is missing.');
+    const forged = {
+      ...replayRevision,
+      transition: { kind: 'transition_from_the_future' },
+    } as unknown as SessionRevision;
+    expect(() => replaySessionRevisions([forged])).toThrowError(
+      new UnknownSessionTransitionKindError('transition_from_the_future'),
+    );
+  });
+
+  it('fingerprint_not_checked: one flipped bundle byte refuses the whole session file', () => {
+    const source = new MemoryBrowserSessionStore();
+    createJournal(source, new MemoryMirrorSink(), new ControllerRegistry([]));
+    const bytes = exportSavedSession(source, encounterSessionId('session:persistence-test'));
+    const document = JSON.parse(bytes) as { sessionId: string };
+    document.sessionId = `${document.sessionId.slice(0, -1)}u`;
+    const destination = new MemoryBrowserSessionStore();
+
+    expect(() => importSavedSession(destination, JSON.stringify(document))).toThrowError(
+      new SessionFingerprintMismatchError(),
+    );
+    expect(destination.revisions(encounterSessionId('session:persistence-test'))).toEqual([]);
+  });
+
   it('CRASH-PROBE-EVERY-REVISION restores state, RNG, ids, projections, and history byte-for-byte', async () => {
     const fixture = pair();
     const human = new HumanController();

@@ -131,6 +131,45 @@ test('bridge fleet telemetry decodes first-class usage fields from Codex JSON ev
   }).correctionAttempts, 2);
 });
 
+test('restricted-JS prompt retains three full-envelope examples and demonstrates batching', () => {
+  const workedExamples = [{
+    kind: 'js_round_plan',
+    protocolVersion: 2,
+    encounterId: 'encounter:example-batch',
+    requestId: 'request:example-batch',
+    expectedRevision: 7,
+    round: 2,
+    monsters: [
+      { monsterId: 'combatant:example-one', source: 'emit(endTurn());' },
+      { monsterId: 'combatant:example-two', source: 'emit(endTurn());' },
+    ],
+  }, {
+    kind: 'js_round_plan', protocolVersion: 2, encounterId: 'encounter:example-two',
+    requestId: 'request:example-two', expectedRevision: 7, round: 2,
+    monsters: [{ monsterId: 'combatant:example-three', source: 'emit(endTurn());' }],
+  }, {
+    kind: 'js_round_plan', protocolVersion: 2, encounterId: 'encounter:example-three',
+    requestId: 'request:example-three', expectedRevision: 7, round: 2,
+    monsters: [{ monsterId: 'combatant:example-four', source: 'emit(endTurn());' }],
+  }];
+  const prompt = dmBridgeLibInternals.roundPlanPrompt({
+    kind: 'round_plan_request',
+    livingMonsterIds: ['combatant:live-one', 'combatant:live-two'],
+    replyContract: {
+      surface: 'js_program',
+      schemaVersion: 1,
+      maximumCorrectionAttempts: 2,
+      grammar: 'program ::= statement*',
+      workedExamples,
+    },
+  });
+
+  assert.equal((prompt.match(/Worked example \d:/g) ?? []).length, 3);
+  assert.match(prompt, /"monsterId":"combatant:example-one"/);
+  assert.match(prompt, /"monsterId":"combatant:example-two"/);
+  assert.doesNotMatch(prompt.slice(prompt.indexOf('Request:')), /replyContract/);
+});
+
 test('file mirror appends, de-duplicates, and replays a contiguous revision stream', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dnd-dm-mirror-'));
   try {

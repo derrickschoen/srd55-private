@@ -1,5 +1,5 @@
 import type { EffectPayload } from '../effects';
-import { damageType } from '../values';
+import { damageType, feet } from '../values';
 import type {
   EffectData,
   ScaledDice,
@@ -58,6 +58,7 @@ function effect(
     readonly concentration?: boolean;
     readonly durationRounds?: number | null;
     readonly expiresAt?: EffectData['expiresAt'];
+    readonly stacking?: EffectData['stacking'];
     readonly repeatedSave?: EffectData['repeatedSave'];
     readonly durationRoundsPerSlot?: number;
     readonly slotDurationTiers?: EffectData['slotDurationTiers'];
@@ -69,6 +70,7 @@ function effect(
     concentration: options.concentration ?? false,
     durationRounds: options.durationRounds ?? 1,
     expiresAt: options.expiresAt ?? 'source_start',
+    ...(options.stacking === undefined ? {} : { stacking: options.stacking }),
     ...(options.repeatedSave === undefined ? {} : { repeatedSave: options.repeatedSave }),
     ...(options.durationRoundsPerSlot === undefined ? {} : { durationRoundsPerSlot: options.durationRoundsPerSlot }),
     ...(options.slotDurationTiers === undefined ? {} : { slotDurationTiers: options.slotDurationTiers }),
@@ -103,6 +105,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     castingTime: 'action', components: material('a bit of phosphorus'),
     targeting: { kind: 'utility', rangeFeet: 120 },
     operation: { kind: 'utility', effect: { kind: 'light_source', brightFeet: 0, dimFeet: 10, maximumLights: 4, moveFeetPerBonusAction: 60 }, concentration: true, durationRounds: 10 },
+  },
+  {
+    id: 'eldritch-blast', name: 'Eldritch Blast', level: 0,
+    source: 'docs/srd/source/spell-descriptions.txt:2608-2626',
+    castingTime: 'action', components: VS,
+    targeting: { kind: 'multiple', rangeFeet: 120, baseMaximum: 1, additionalPerSlot: 0 },
+    operation: { kind: 'attack_beams', attackKind: 'ranged', baseBeams: 1, additionalBeamLevels: [5, 11, 17], damageType: damageType('Force'), dice: dice(1, 10) },
   },
   {
     id: 'elementalism', name: 'Elementalism', level: 0,
@@ -218,10 +227,17 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
   },
   {
     id: 'true-strike', name: 'True Strike', level: 0,
-    source: 'docs/srd/source/spell-descriptions.txt:8079',
+    source: 'docs/srd/source/spell-descriptions.txt:8079-8094',
     castingTime: 'action', components: S_M_WEAPON,
     targeting: { kind: 'single', rangeFeet: 5, willing: false },
-    operation: { kind: 'weapon_attack', extraDamage: dice(0, 6, { cantripUpgrade: true }), extraDamageType: damageType('Radiant') },
+    operation: {
+      kind: 'weapon_attack_augmentation',
+      timing: 'during_cast',
+      attackAbility: 'spellcasting',
+      damageAbility: 'spellcasting',
+      damageTypeChoice: 'weapon_or_radiant',
+      extraDamage: { type: damageType('Radiant'), dice: dice(0, 6, { cantripUpgrade: true }) },
+    },
   },
   {
     id: 'bane', name: 'Bane', level: 1,
@@ -270,7 +286,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:4011',
     castingTime: 'action', components: VS,
     targeting: { kind: 'single', rangeFeet: 120, willing: false },
-    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Radiant'), dice: dice(4, 6, { perSlotCount: 1 }), rider: effect({ kind: 'attack_roll_mode_modifier', mode: 'advantage', appliesTo: 'next_attack_against_target' }, { durationRounds: 2, expiresAt: 'source_end' }) },
+    operation: { kind: 'attack_damage', attackKind: 'ranged', damageType: damageType('Radiant'), dice: dice(4, 6, { perSlotCount: 1 }), rider: effect({ kind: 'attack_roll_mode_modifier', mode: 'advantage', appliesTo: { kind: 'next_attack_against_target' } }, { durationRounds: 2, expiresAt: 'source_end' }) },
   },
   {
     id: 'healing-word', name: 'Healing Word', level: 1,
@@ -278,6 +294,20 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     castingTime: 'bonus_action', components: V,
     targeting: { kind: 'single', rangeFeet: 60, willing: false },
     operation: { kind: 'healing', dice: dice(2, 4, { perSlotCount: 2 }), addSpellcastingModifier: true },
+  },
+  {
+    id: 'divine-favor', name: 'Divine Favor', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:2333-2341',
+    castingTime: 'bonus_action', components: VS,
+    targeting: { kind: 'self' },
+    operation: { kind: 'weapon_attack_augmentation', timing: 'subsequent_weapon_hits', extraDamage: { type: damageType('Radiant'), dice: dice(1, 4) }, consumeOnHit: false, concentration: false, durationRounds: 10, followUp: null },
+  },
+  {
+    id: 'ensnaring-strike', name: 'Ensnaring Strike', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:2708-2728',
+    castingTime: 'bonus_action', components: V,
+    targeting: { kind: 'self' },
+    operation: { kind: 'weapon_attack_augmentation', timing: 'subsequent_weapon_hits', extraDamage: null, consumeOnHit: true, concentration: true, durationRounds: 10, followUp: { kind: 'save_then_restrain', saveAbility: 'strength', rollMode: 'normal', damageType: damageType('Piercing'), dice: dice(1, 6, { perSlotCount: 1 }), timing: 'target_start', durationRounds: 10 } },
   },
   {
     id: 'inflict-wounds', name: 'Inflict Wounds', level: 1,
@@ -299,6 +329,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     castingTime: 'reaction', components: VS,
     targeting: { kind: 'self' },
     operation: { kind: 'effect', effect: effect({ kind: 'shield_defense', armorClassBonus: 5, magicMissileImmune: true, trigger: 'hit_by_attack_or_targeted_by_magic_missile' }, { target: 'self', durationRounds: 1 }) },
+  },
+  {
+    id: 'searing-smite', name: 'Searing Smite', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:6738-6751',
+    castingTime: 'bonus_action', components: V,
+    targeting: { kind: 'self' },
+    operation: { kind: 'weapon_attack_augmentation', timing: 'subsequent_weapon_hits', extraDamage: { type: damageType('Fire'), dice: dice(1, 6, { perSlotCount: 1 }) }, consumeOnHit: true, concentration: false, durationRounds: 10, followUp: { kind: 'ongoing_damage_save_ends', damageType: damageType('Fire'), dice: dice(1, 6, { perSlotCount: 1 }), saveAbility: 'constitution', timing: 'target_start', durationRounds: 10 } },
   },
   {
     id: 'shield-of-faith', name: 'Shield of Faith', level: 1,
@@ -740,6 +777,28 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     castingTime: 'bonus_action', components: V,
     targeting: { kind: 'self' },
     operation: { kind: 'utility', effect: { kind: 'teleport', maximumDistanceFeet: 30, requiresVisibleUnoccupiedSpace: true }, concentration: false, durationRounds: null },
+  },
+  {
+    id: 'moonbeam', name: 'Moonbeam', level: 2,
+    source: 'docs/srd/source/spell-descriptions.txt:5582-5611',
+    castingTime: 'action', components: material('a moonseed leaf'),
+    targeting: { kind: 'area', rangeFeet: 120, shape: 'cylinder', baseSizeFeet: 5, sizePerSlotFeet: 0, secondarySizeFeet: 40 },
+    operation: {
+      kind: 'persistent_area', origin: 'selected_when_cast', shape: null,
+      durationRounds: 10, concentration: true, targetFilter: 'all', includeOwner: false,
+      difficultTerrain: false, movableFeet: 60, initialEffects: [],
+      hooks: (['on_enter', 'on_end_of_turn_inside'] as const).map((hook) => ({
+        hook,
+        frequency: 'once_per_turn' as const,
+        effect: {
+          kind: 'save_gated' as const,
+          ability: 'constitution' as const,
+          rollMode: 'normal' as const,
+          onSuccess: 'half' as const,
+          payload: { kind: 'damage' as const, damageType: damageType('Radiant'), dice: dice(2, 10, { perSlotCount: 1 }) },
+        },
+      })),
+    },
   },
   {
     id: 'prayer-of-healing', name: 'Prayer of Healing', level: 2,
@@ -1226,7 +1285,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'stoneskin', name: 'Stoneskin', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:7429', castingTime: 'action', components: material('diamond dust worth 100+ GP', true),
     targeting: { kind: 'single', rangeFeet: 5, willing: true },
-    operation: { kind: 'effect', effect: effect({ kind: 'damage_resistances', damageTypes: ['Bludgeoning', 'Piercing', 'Slashing'] }, { concentration: true, durationRounds: 600 }) },
+    operation: { kind: 'effect', effect: effect({ kind: 'damage_resistances', damageTypes: [damageType('Bludgeoning'), damageType('Piercing'), damageType('Slashing')] }, { concentration: true, durationRounds: 600 }) },
   },
   {
     id: 'vitriolic-sphere', name: 'Vitriolic Sphere', level: 4,
@@ -1239,6 +1298,91 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:8217', castingTime: 'action', components: material('a piece of charcoal'),
     targeting: { kind: 'area', rangeFeet: 120, shape: 'line', baseSizeFeet: 60, sizePerSlotFeet: 0, secondarySizeFeet: 1 },
     operation: { kind: 'save_damage_and_effect', ability: 'dexterity', onSuccess: 'half', damageType: damageType('Fire'), dice: dice(5, 8, { perSlotCount: 1 }), effect: effect({ kind: 'wall_of_fire', placement: 'selected_when_cast', maximumLengthFeet: 60, heightFeet: 20, thicknessFeet: 1, ringDiameterFeet: 20, damagingSideDistanceFeet: 10, damageCount: 5, damageSides: 8, damagePerSlotCount: 1, damageType: 'Fire', opaque: true, requiresSolidSurface: true }, { target: 'self', concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'vicious-mockery', name: 'Vicious Mockery', level: 0,
+    source: 'docs/srd/source/spell-descriptions.txt:8176-8195',
+    castingTime: 'action', components: V,
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'save_damage', ability: 'wisdom', onSuccess: 'none', damageType: damageType('Psychic'), dice: cantripDamage(1, 6), riderOnFailure: effect({ kind: 'attack_roll_mode_modifier', mode: 'disadvantage', appliesTo: { kind: 'next_attack_by_target' } }, { durationRounds: 1, expiresAt: 'target_end' }), pushFeetOnFailure: 0 },
+  },
+  {
+    id: 'faerie-fire', name: 'Faerie Fire', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:2887-2900',
+    castingTime: 'action', components: V,
+    targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0 },
+    operation: { kind: 'save_effect', ability: 'dexterity', rollMode: 'normal', effect: effect({ kind: 'faerie_fire', attackModeAgainstTarget: 'advantage', preventsInvisibleConditionBenefit: true, dimLightFeet: 10 }, { concentration: true, durationRounds: 10 }) },
+  },
+  {
+    id: 'entangle', name: 'Entangle', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:2729-2756',
+    castingTime: 'action', components: VS,
+    targeting: { kind: 'area', rangeFeet: 90, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0, surface: 'ground_square' },
+    operation: {
+      kind: 'persistent_area', origin: 'selected_when_cast', shape: null,
+      durationRounds: 10, concentration: true, targetFilter: 'all', includeOwner: false,
+      difficultTerrain: true, movableFeet: null, hooks: [],
+      initialEffects: [{
+        excludeOwner: true,
+        effect: {
+          kind: 'save_gated', ability: 'strength', rollMode: 'normal', onSuccess: 'none',
+          payload: {
+            kind: 'effect',
+            payload: { kind: 'condition', condition: 'Restrained' },
+            lifetime: { kind: 'area_duration' },
+          },
+        },
+      }],
+    },
+  },
+  {
+    id: 'dissonant-whispers', name: 'Dissonant Whispers', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:2289-2312',
+    castingTime: 'action', components: V,
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'save_damage', ability: 'wisdom', onSuccess: 'half', damageType: damageType('Psychic'), dice: dice(3, 6, { perSlotCount: 1 }), riderOnFailure: null, pushFeetOnFailure: 0 },
+  },
+  {
+    id: 'goodberry', name: 'Goodberry', level: 1,
+    source: 'docs/srd/source/spell-descriptions.txt:3870-3881',
+    castingTime: 'action', components: material('a sprig of mistletoe'),
+    targeting: { kind: 'self' },
+    operation: { kind: 'effect', effect: effect({ kind: 'consumable_healing_pool', remainingUses: 10, healingPerUse: 1, activation: 'bonus_action', encounterExpiry: 'not_tracked_24_hours' }, { target: 'self', durationRounds: null, stacking: 'coexist' }) },
+  },
+  {
+    id: 'pass-without-trace', name: 'Pass without Trace', level: 2,
+    source: 'docs/srd/source/spell-descriptions.txt:5688-5696',
+    castingTime: 'action', components: material('ashes from burned mistletoe'),
+    targeting: { kind: 'all_in_range', rangeFeet: 30 },
+    operation: {
+      kind: 'persistent_area', origin: 'anchored_to_caster', shape: { kind: 'emanation', radius: feet(30) },
+      durationRounds: 600, concentration: true, targetFilter: 'selected', includeOwner: true,
+      difficultTerrain: false, movableFeet: null, initialEffects: [],
+      hooks: [{
+        hook: 'on_enter', frequency: 'every_trigger',
+        effect: {
+          kind: 'automatic',
+          payload: {
+            kind: 'effect', payload: { kind: 'skill_modifier', skill: 'stealth', amount: 10 },
+            lifetime: { kind: 'while_inside' },
+          },
+        },
+      }],
+    },
+  },
+  {
+    id: 'hold-monster', name: 'Hold Monster', level: 5,
+    source: 'docs/srd/source/spell-descriptions.txt:4317-4341',
+    castingTime: 'action', components: material('a straight piece of iron'),
+    targeting: { kind: 'multiple', rangeFeet: 90, baseMaximum: 1, additionalPerSlot: 1 },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'condition', condition: 'Paralyzed' }, { concentration: true, durationRounds: 10, expiresAt: 'target_end', repeatedSave: { ability: 'wisdom', rollMode: 'normal', timing: 'target_end' } }) },
+  },
+  {
+    id: 'heal', name: 'Heal', level: 6,
+    source: 'docs/srd/source/spell-descriptions.txt:4158-4167',
+    castingTime: 'action', components: VS,
+    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    operation: { kind: 'fixed_healing', baseAmount: 70, additionalPerSlot: 10, removesConditions: ['Blinded', 'Deafened', 'Poisoned'] },
   },
 ] as const;
 

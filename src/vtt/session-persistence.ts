@@ -6,6 +6,7 @@ import type {
   PersistedCoordinatorState,
 } from '../combat/coordinator';
 import {
+  isEncounterConfig,
   reduceEncounter,
   type EncounterState,
 } from '../combat/encounter';
@@ -36,6 +37,43 @@ export type SessionTransition =
       readonly sourceRevision: number;
       readonly targetRevision: number;
     };
+
+export const SESSION_TRANSITION_KINDS = [
+  'session_started',
+  'head_moved',
+  'controller_request_issued',
+  'controller_response_received',
+  'controller_request_cancelled',
+  'controller_replaced',
+  'reaction_policy_resolved',
+  'reducer_applied',
+  'controller_response_refused',
+  'coordinator_paused',
+  'coordinator_resumed',
+] as const satisfies readonly SessionTransition['kind'][];
+
+type MissingSessionTransitionKind = Exclude<
+  SessionTransition['kind'],
+  (typeof SESSION_TRANSITION_KINDS)[number]
+>;
+const sessionTransitionKindInventoryIsComplete: MissingSessionTransitionKind extends never ? true : never = true;
+void sessionTransitionKindInventoryIsComplete;
+
+export class UnknownSessionTransitionKindError extends TypeError {
+  override readonly name = 'UnknownSessionTransitionKindError' as const;
+
+  constructor(readonly transitionKind: string) {
+    super(`Unknown VTT session transition kind ${transitionKind}.`);
+  }
+}
+
+export class SessionFingerprintMismatchError extends Error {
+  override readonly name = 'SessionFingerprintMismatchError' as const;
+
+  constructor() {
+    super('Saved VTT session fingerprint mismatch.');
+  }
+}
 
 export interface PersistedProjections {
   readonly dm: VisibleEncounterState;
@@ -270,6 +308,65 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function hasExactlyKeys(value: Readonly<Record<string, unknown>>, keys: readonly string[]): boolean {
+  const expected = new Set(keys);
+  return Object.keys(value).length === expected.size && Object.keys(value).every((key) => expected.has(key));
+}
+
+function validPause(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.kind !== 'string') return false;
+  return value.kind === 'interrupted'
+    ? hasExactlyKeys(value, ['kind'])
+    : value.kind === 'adjudicated' && hasExactlyKeys(value, ['kind', 'eventSequence']) && Number.isSafeInteger(value.eventSequence);
+}
+
+function decodeTransition(value: unknown): SessionTransition {
+  if (!isRecord(value) || typeof value.kind !== 'string') {
+    throw new TypeError('Malformed VTT session transition.');
+  }
+  if (!SESSION_TRANSITION_KINDS.includes(value.kind as SessionTransition['kind'])) {
+    throw new UnknownSessionTransitionKindError(value.kind);
+  }
+  switch (value.kind as SessionTransition['kind']) {
+    case 'session_started':
+      if (hasExactlyKeys(value, ['kind'])) return { kind: 'session_started' };
+      break;
+    case 'head_moved':
+      if (
+        hasExactlyKeys(value, ['kind', 'operation', 'sourceRevision', 'targetRevision']) &&
+        (value.operation === 'undo' || value.operation === 'redo') &&
+        Number.isSafeInteger(value.sourceRevision) && Number.isSafeInteger(value.targetRevision)
+      ) return value as unknown as Extract<SessionTransition, { readonly kind: 'head_moved' }>;
+      break;
+    case 'controller_request_issued':
+      if (hasExactlyKeys(value, ['kind', 'request']) && isRecord(value.request)) return value as unknown as SessionTransition;
+      break;
+    case 'controller_response_received':
+      if (hasExactlyKeys(value, ['kind', 'decision']) && isRecord(value.decision)) return value as unknown as SessionTransition;
+      break;
+    case 'controller_request_cancelled':
+      if (hasExactlyKeys(value, ['kind', 'request']) && isRecord(value.request)) return value as unknown as SessionTransition;
+      break;
+    case 'controller_replaced':
+      if (hasExactlyKeys(value, ['kind', 'combatantId']) && typeof value.combatantId === 'string') return value as unknown as SessionTransition;
+      break;
+    case 'reaction_policy_resolved':
+      if (hasExactlyKeys(value, ['kind', 'actor', 'decision', 'command']) && typeof value.actor === 'string' && (value.decision === 'use' || value.decision === 'decline') && isRecord(value.command)) return value as unknown as SessionTransition;
+      break;
+    case 'reducer_applied':
+      if (hasExactlyKeys(value, ['kind', 'command', 'events']) && isRecord(value.command) && Array.isArray(value.events)) return value as unknown as SessionTransition;
+      break;
+    case 'controller_response_refused':
+      if (hasExactlyKeys(value, ['kind', 'command', 'reason']) && isRecord(value.command) && typeof value.reason === 'string') return value as unknown as SessionTransition;
+      break;
+    case 'coordinator_paused':
+    case 'coordinator_resumed':
+      if (hasExactlyKeys(value, ['kind', 'pause']) && validPause(value.pause)) return value as unknown as SessionTransition;
+      break;
+  }
+  throw new TypeError(`Malformed VTT session transition ${value.kind}.`);
+}
+
 function decodeRevision(value: unknown): SessionRevision {
   if (
     !isRecord(value) ||
@@ -284,8 +381,8 @@ function decodeRevision(value: unknown): SessionRevision {
     ) ||
     typeof value.branchId !== 'string' ||
     !isRecord(value.transition) ||
-    typeof value.transition.kind !== 'string' ||
     !isRecord(value.encounterState) ||
+    !isEncounterConfig(value.encounterState.config) ||
     !isRecord(value.rngState) ||
     !isRecord(value.coordinatorState) ||
     !Array.isArray(value.controllers) ||
@@ -295,7 +392,8 @@ function decodeRevision(value: unknown): SessionRevision {
   ) {
     throw new TypeError('Malformed VTT session revision.');
   }
-  const revision = value as unknown as SessionRevision;
+  const transition = decodeTransition(value.transition);
+  const revision = { ...value, transition } as unknown as SessionRevision;
   const { checksum: _checksum, ...body } = revision;
   if (revisionChecksum(body) !== revision.checksum) {
     throw new Error('VTT session revision checksum mismatch.');
@@ -307,8 +405,27 @@ export function deriveBranchRng(
   target: SessionRevision,
   branchId: EncounterBranchId,
 ): SerializableRng {
+  const {
+    config: _config,
+    persistentAreas,
+    nextPersistentAreaSequence,
+    worldObjects,
+    nextWorldObjectSequence,
+    environment,
+    ...baseMechanicalState
+  } = target.encounterState;
+  // Empty additive state is mechanically neutral and does not perturb branch
+  // streams; once an area exists, both its state and allocator are authoritative.
+  const areaNeutralState = persistentAreas.length === 0 && nextPersistentAreaSequence === 1
+    ? baseMechanicalState
+    : { ...baseMechanicalState, persistentAreas, nextPersistentAreaSequence };
+  const worldStateIsNeutral = worldObjects.length === 0 && nextWorldObjectSequence === 1 &&
+    environment.lightRegions.length === 0 && environment.difficultTerrainRegions.length === 0;
+  const mechanicalState = worldStateIsNeutral
+    ? areaNeutralState
+    : { ...areaNeutralState, worldObjects, nextWorldObjectSequence, environment };
   const digest = sha256(canonicalJson({
-    encounterState: target.encounterState,
+    encounterState: mechanicalState,
     parentRngState: target.rngState,
     branchId,
   }));
@@ -342,19 +459,20 @@ export function replaySessionRevisions(
   revisions: readonly SessionRevision[],
 ): SessionRevision {
   const first = revisions[0];
-  if (first === undefined || first.transition.kind !== 'session_started') {
+  if (first === undefined || decodeTransition(first.transition).kind !== 'session_started') {
     throw new Error('Session stream must begin with session_started.');
   }
   verifyRevisionSequence(revisions, first.sessionId);
   const byRevision = new Map<number, SessionRevision>();
   for (const revision of revisions) {
+    const transition = decodeTransition(revision.transition);
     const parent = revision.parentRevision === null
       ? null
       : byRevision.get(revision.parentRevision);
     if (revision.parentRevision !== null && parent === undefined) {
       throw new Error('Session replay cannot find a declared parent.');
     }
-    switch (revision.transition.kind) {
+    switch (transition.kind) {
       case 'session_started':
         if (revision.revision !== 1 || parent !== null) {
           throw new Error('session_started may only be the first revision.');
@@ -385,7 +503,7 @@ export function replaySessionRevisions(
         const replayRng = restoreMulberry32(parent.rngState);
         const replayed = reduceEncounter(
           parent.encounterState,
-          revision.transition.command,
+          transition.command,
           replayRng,
         );
         requireCanonicalEqual(
@@ -394,7 +512,7 @@ export function replaySessionRevisions(
           'reducer state',
         );
         requireCanonicalEqual(
-          revision.transition.events,
+          transition.events,
           replayed.events,
           'reducer events',
         );
@@ -650,11 +768,19 @@ interface SavedSessionBundleV1 {
   readonly revisions: readonly SessionRevision[];
 }
 
-interface SavedSessionBundleV2 {
+interface SavedSessionBundleV2Body {
   readonly format: 'vtt-session-revisions';
   readonly schemaVersion: typeof VTT_SESSION_SCHEMA_VERSION;
   readonly sessionId: EncounterSessionId;
   readonly revisions: readonly SessionRevision[];
+}
+
+interface SavedSessionBundleV2 extends SavedSessionBundleV2Body {
+  readonly fingerprint: string;
+}
+
+function sessionFingerprint(body: SavedSessionBundleV2Body): string {
+  return sha256(canonicalJson(body));
 }
 
 export interface VttSessionMigration {
@@ -666,7 +792,7 @@ export interface VttSessionMigration {
   migrate(bundle: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>>;
 }
 
-const V1_TO_V2_SOURCE = 'vtt-session-v1-to-v2:add-format=vtt-session-revisions';
+const V1_TO_V2_SOURCE = 'vtt-session-v1-to-v2:add-format-and-sha-fingerprint=vtt-session-revisions';
 
 export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
   Object.freeze([
@@ -675,12 +801,15 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
       from: 1,
       to: 2,
       source: V1_TO_V2_SOURCE,
-      checksum: '0f87f419301393829f3e1bfa809959e52b72f582c00c795b0871948c36317951',
-      migrate: (bundle: Readonly<Record<string, unknown>>) => ({
-        ...bundle,
-        format: 'vtt-session-revisions',
-        schemaVersion: 2,
-      }),
+      checksum: '92795e05ddf2acdcd70e3540548adc7359a570517e51f1079738b4074500b111',
+      migrate: (bundle: Readonly<Record<string, unknown>>) => {
+        const body = {
+          ...bundle,
+          format: 'vtt-session-revisions' as const,
+          schemaVersion: 2 as const,
+        };
+        return { ...body, fingerprint: sha256(canonicalJson(body)) };
+      },
     }),
   ]);
 
@@ -731,16 +860,21 @@ function migrateSavedBundle(value: unknown): SavedSessionBundleV2 {
     migrated.format !== 'vtt-session-revisions' ||
     migrated.schemaVersion !== VTT_SESSION_SCHEMA_VERSION ||
     typeof migrated.sessionId !== 'string' ||
-    !Array.isArray(migrated.revisions)
+    !Array.isArray(migrated.revisions) ||
+    typeof migrated.fingerprint !== 'string'
   ) {
     throw new TypeError('Saved VTT session bundle is malformed.');
   }
-  return {
+  const body: SavedSessionBundleV2Body = {
     format: 'vtt-session-revisions',
     schemaVersion: VTT_SESSION_SCHEMA_VERSION,
     sessionId: migrated.sessionId as EncounterSessionId,
     revisions: migrated.revisions.map(decodeRevision),
   };
+  if (sessionFingerprint(body) !== migrated.fingerprint) {
+    throw new SessionFingerprintMismatchError();
+  }
+  return { ...body, fingerprint: migrated.fingerprint };
 }
 
 export function exportSavedSession(
@@ -750,13 +884,13 @@ export function exportSavedSession(
   const revisions = store.revisions(sessionId);
   if (revisions.length === 0) throw new Error('Encounter session does not exist.');
   replaySessionRevisions(revisions);
-  const bundle: SavedSessionBundleV2 = {
+  const body: SavedSessionBundleV2Body = {
     format: 'vtt-session-revisions',
     schemaVersion: VTT_SESSION_SCHEMA_VERSION,
     sessionId,
     revisions,
   };
-  return canonicalJson(bundle);
+  return canonicalJson({ ...body, fingerprint: sessionFingerprint(body) } satisfies SavedSessionBundleV2);
 }
 
 export function importSavedSession(

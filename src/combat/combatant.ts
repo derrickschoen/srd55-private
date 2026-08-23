@@ -1,5 +1,6 @@
-import { abilities, type Ability } from '../domain/enums';
+import { abilities, creatureSizes, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import type { CharacterSheet } from '../queries/character-sheet-builder';
+import type { CombatFeatureEffect } from './effects';
 import type { GridCell } from './grid';
 import type { DamageResponse } from './resolution';
 import type { MonsterStatblock } from './statblock';
@@ -13,6 +14,7 @@ import {
   type CombatantId,
   type DamageType,
   type Feet,
+  type LimitedResourcePoolId,
   type StatblockId,
   type TokenId,
 } from './values';
@@ -39,8 +41,22 @@ export interface CombatRulesProfile {
   }[];
   readonly conditionImmunities: readonly string[];
   readonly usesDeathSaves: boolean;
+  /** Absence means the source did not establish a mechanical size category. */
+  readonly sizeCategory?: KnownCreatureSize;
+  /** Known SRD creature types and homebrew passthrough values share this sourced field. */
+  readonly creatureType?: string;
   /** Reducer-owned expendable spell slots; absent levels are unavailable. */
   readonly spellSlots: readonly SpellSlotCapacity[];
+  /** Reducer-owned class/feat pools; spell slots remain a separate resource type. */
+  readonly limitedResources?: readonly LimitedResourceCapacity[];
+  readonly featureEffects?: readonly CombatFeatureEffect[];
+  readonly skillBonuses?: Readonly<Partial<Record<Skill, number>>>;
+}
+
+export interface LimitedResourceCapacity {
+  readonly id: LimitedResourcePoolId;
+  readonly maximum: number;
+  readonly recharge: 'short_rest' | 'long_rest';
 }
 
 export type SpellSlotLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
@@ -188,6 +204,11 @@ export function monsterCombatantProfile(
       damageResponses: statblock.damageResponses,
       conditionImmunities: statblock.conditionImmunities,
       usesDeathSaves: statblock.usesDeathSaves,
+      ...(statblock.sourceDetails.classification.kind === 'present' &&
+        statblock.sourceDetails.classification.value.sizes.length === 1 &&
+        creatureSizes.includes(statblock.sourceDetails.classification.value.sizes[0] as KnownCreatureSize)
+          ? { sizeCategory: statblock.sourceDetails.classification.value.sizes[0] as KnownCreatureSize }
+          : {}),
       spellSlots: [],
     },
   };

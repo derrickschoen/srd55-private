@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ControllerRequest } from '../../../src/combat/controllers';
-import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
+import {
+  createEncounter,
+  type EncounterState,
+  type InitiativeMode,
+} from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { damageType, dieSides } from '../../../src/combat/values';
 import { projectDmBoard, projectPlayerBoard } from '../../../src/vtt/encounter-projections';
@@ -22,6 +26,7 @@ import {
 import {
   codexSessionId,
   combatantId,
+  encounterEffectId,
   encounterSessionId,
   type CombatantId,
 } from '../../../src/combat/values';
@@ -71,6 +76,7 @@ function context(state: EncounterState) {
     codexSessionId: codexSessionId('codex:persisted-session-77'),
     projection: board(state),
     history: [],
+    initiativeMode: state.config.initiativeMode,
   };
 }
 
@@ -130,7 +136,9 @@ function malformedCommandsPlan(request: DmBridgeRequest): unknown {
     ? request.livingMonsterIds
     : request.kind === 'monster_reconsult_request'
       ? [request.monsterId]
-      : request.requestedMonsterIds;
+      : request.kind === 'round_plan_correction_request'
+        ? request.requestedMonsterIds
+        : request.proposal.monsters.map((entry) => entry.monsterId);
   return {
     kind: 'round_plan',
     protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,
@@ -158,6 +166,52 @@ class FakeExchange implements DmBridgeExchange {
 }
 
 describe('typed DM round decision programs', () => {
+  it.each([
+    ['per_combatant', 2, 1],
+    ['shared_enemy', 1, 2],
+    ['side_alternating', 1, 2],
+  ] as const)(
+    'issues correctly timed %s round-plan requests before enemy activations',
+    async (initiativeMode: InitiativeMode, expectedRequests, expectedBatchSize) => {
+      const f = fixture();
+      const firstState: EncounterState = {
+        ...f.state,
+        config: { initiativeMode },
+        activeCombatant: f.monsterA.id,
+      };
+      const secondState: EncounterState = {
+        ...firstState,
+        revision: firstState.revision + 1,
+        activeCombatant: f.monsterB.id,
+      };
+      const exchange = new FakeExchange((request) => {
+        if (request.kind !== 'round_plan_request') {
+          throw new Error('Timing fixture unexpectedly requested a correction or reconsult.');
+        }
+        return planFor(request, request.livingMonsterIds.map((monsterId) => ({
+          monsterId,
+          program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+        })));
+      });
+      const session = new DmRoundPlanSession(exchange);
+      await session.choose(
+        controllerRequest(firstState, f.monsterA.id, [{ type: 'end_turn', actor: f.monsterA.id }]),
+        context(firstState),
+        new AbortController().signal,
+      );
+      await session.choose(
+        controllerRequest(secondState, f.monsterB.id, [{ type: 'end_turn', actor: f.monsterB.id }]),
+        context(secondState),
+        new AbortController().signal,
+      );
+
+      expect(exchange.requests).toHaveLength(expectedRequests);
+      expect(exchange.requests.map((request) =>
+        request.kind === 'round_plan_request' ? request.livingMonsterIds.length : 0,
+      )).toEqual(Array.from({ length: expectedRequests }, () => expectedBatchSize));
+    },
+  );
+
   it('M43-ONE-INITIAL-ROUND-REQUEST resumes the persisted session and plans all living monsters once', async () => {
     const f = fixture();
     const exchange = new FakeExchange((request) => planFor(request, [f.monsterA, f.monsterB].map((monster) => ({
@@ -181,8 +235,10 @@ describe('typed DM round decision programs', () => {
     expect(JSON.stringify(exchange.requests[0])).toContain('hidden bridge tactic sentinel');
     expect(exchange.requests[0]).toMatchObject({
       protocolVersion: 2,
+      surface: 'json_ast',
       correctionAttempt: 0,
       replyContract: {
+        surface: 'json_ast',
         schemaVersion: 1,
         maximumCorrectionAttempts: 2,
         jsonSchema: { additionalProperties: false },
@@ -307,6 +363,53 @@ describe('typed DM round decision programs', () => {
     );
 
     expect(selected.action).toEqual(attack(f.monsterA.id, f.playerB.id));
+  });
+
+  it('selects an explicitly granted bonus_attack DecisionProgram from mixed legal attacks', async () => {
+    const f = fixture();
+    const bonus = {
+      ...attack(f.monsterA.id, f.playerA.id),
+      bonusActionGrantEffectId: encounterEffectId('effect:bridge-bonus-attack'),
+    };
+    const exchange = new FakeExchange((request) => planFor(request, [f.monsterA, f.monsterB].map((monster) => ({
+      monsterId: monster.id,
+      program: monster.id === f.monsterA.id
+        ? {
+            kind: 'action',
+            action: {
+              kind: 'bonus_attack',
+              target: { kind: 'combatant', combatantId: f.playerA.id },
+            },
+          }
+        : { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+    }))));
+    const selected = await new DmRoundPlanSession(exchange).choose(
+      controllerRequest(f.state, f.monsterA.id, [attack(f.monsterA.id, f.playerA.id), bonus]),
+      context(f.state),
+      new AbortController().signal,
+    );
+    expect(selected.action).toEqual(bonus);
+  });
+
+  it('selects an offered action_surge DecisionProgram action', async () => {
+    const f = fixture();
+    const surge = {
+      type: 'activate_action_surge' as const,
+      actor: f.monsterA.id,
+      effectId: encounterEffectId('effect:bridge-action-surge'),
+    };
+    const exchange = new FakeExchange((request) => planFor(request, [f.monsterA, f.monsterB].map((monster) => ({
+      monsterId: monster.id,
+      program: monster.id === f.monsterA.id
+        ? { kind: 'action', action: { kind: 'use_action', action: 'action_surge' } }
+        : { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+    }))));
+    const selected = await new DmRoundPlanSession(exchange).choose(
+      controllerRequest(f.state, f.monsterA.id, [{ type: 'end_turn', actor: f.monsterA.id }, surge]),
+      context(f.state),
+      new AbortController().signal,
+    );
+    expect(selected.action).toEqual(surge);
   });
 
   it('DSL-DRY-RECONSULT scopes an unexpressible invalidation to that monster remaining round in the same session', async () => {

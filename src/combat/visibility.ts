@@ -3,7 +3,10 @@ import type {
   DeathSaveState,
   EncounterState,
   LifeState,
+  SpellSlotState,
+  TurnResources,
 } from './encounter';
+import { canCombatantSee } from './encounter';
 import type { EncounterEvent } from './events';
 import type { GridCell } from './grid';
 import type { CombatantId } from './values';
@@ -27,6 +30,8 @@ export interface DmVisibleCombatant extends PlayerVisibleCombatant {
   readonly hitPoints: number;
   readonly rules: CombatRulesProfile;
   readonly deathSaves: DeathSaveState | null;
+  readonly turn: TurnResources;
+  readonly spellSlots: readonly SpellSlotState[];
 }
 
 export type PlayerVisibleEncounterEvent =
@@ -44,6 +49,8 @@ interface VisibleEncounterBase<Event> {
   readonly activeCombatant: CombatantId | null;
   readonly bounds: EncounterState['bounds'];
   readonly blockedCells: readonly GridCell[];
+  readonly worldObjects: EncounterState['worldObjects'];
+  readonly environment: EncounterState['environment'];
   readonly recentEvents: readonly Event[];
 }
 
@@ -78,14 +85,23 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'movement_completed':
     case 'death_save_resolved':
     case 'resource_spent':
+    case 'limited_resource_spent':
+    case 'healing_pool_consumed':
     case 'spell_slot_spent':
     case 'temporary_hit_points_changed':
     case 'stance_started':
     case 'turn_ended':
+    case 'combatant_left_board':
+    case 'combatant_returned_to_board':
       return [event.combatant];
+    case 'initiative_block_rolled':
+      return event.combatants;
     case 'spell_cast':
       return [event.caster, ...event.targets];
+    case 'sustained_effect_activated':
+      return [event.caster, ...event.targets];
     case 'spell_utility_resolved':
+    case 'composition_step_resolved':
       return [event.caster];
     case 'reaction_declined':
       return [event.combatant, event.mover];
@@ -93,6 +109,8 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
       return event.order;
     case 'attack_resolved':
       return [event.actor, event.target];
+    case 'ability_check_resolved':
+      return [event.actor];
     case 'save_resolved':
       return [event.source, event.target];
     case 'damage_applied':
@@ -100,11 +118,28 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
       return [event.source, event.target];
     case 'effect_applied':
       return [event.source, ...event.targets];
+    case 'condition_application_refused':
+      return [event.source, event.target];
     case 'effect_target_removed':
       return [event.target];
     case 'effect_ended':
     case 'effect_clock_ticked':
-      return [];
+    case 'effect_duration_extended':
+    case 'persistent_area_ended':
+    case 'world_object_created':
+    case 'world_object_modified':
+    case 'world_object_damaged':
+    case 'world_object_removed':
+    case 'environment_terrain_changed':
+    case 'environment_light_changed':
+      return 'actor' in event && event.actor !== null ? [event.actor] : [];
+    case 'persistent_area_created':
+    case 'persistent_area_moved':
+      return [event.owner];
+    case 'persistent_area_membership_changed':
+      return [...event.entered, ...event.exited];
+    case 'persistent_area_triggered':
+      return [event.target];
   }
 }
 
@@ -114,11 +149,21 @@ function playerEvents(
 ): readonly PlayerVisibleEncounterEvent[] {
   return events.flatMap((event): readonly PlayerVisibleEncounterEvent[] => {
     if ('visibility' in event && event.visibility === 'dm_only') return [];
-    if (event.type === 'effect_ended' || event.type === 'effect_clock_ticked') {
+    if (
+      event.type === 'effect_ended' ||
+      event.type === 'effect_clock_ticked' ||
+      event.type === 'effect_duration_extended'
+    ) {
       return [];
     }
     if (event.type === 'initiative_ordered') {
-      return [{ ...event, order: event.order.filter((id) => visibleIds.has(id)) }];
+      return [{
+        ...event,
+        order: event.order.filter((id) => visibleIds.has(id)),
+        slots: event.slots
+          .map((slot) => slot.filter((id) => visibleIds.has(id)))
+          .filter((slot) => slot.length > 0),
+      }];
     }
     if (event.type === 'adjudicated') {
       return visibleIds.has(event.target)
@@ -159,6 +204,8 @@ export function projectEncounter(
     round: state.round,
     activeCombatant: state.activeCombatant,
     bounds: { ...state.bounds },
+    worldObjects: structuredClone(state.worldObjects),
+    environment: structuredClone(state.environment),
   };
 
   if (viewer.kind === 'dm') {
@@ -179,6 +226,8 @@ export function projectEncounter(
           active: state.activeCombatant === subject.profile.id,
           rules: subject.profile.rules,
           deathSaves: subject.deathSaves,
+          turn: subject.turn,
+          spellSlots: subject.spellSlots,
         };
       }),
       recentEvents: [...state.eventLog],
@@ -194,7 +243,10 @@ export function projectEncounter(
       const token = tokensByCombatant.get(subject.profile.id);
       if (token === undefined) throw new Error('Encounter projection found no token.');
       const isViewer = subject.profile.id === viewer.combatantId;
-      if (!isViewer && fog.has(cellKey(token.position))) return [];
+      if (
+        !isViewer &&
+        (fog.has(cellKey(token.position)) || !canCombatantSee(state, viewer.combatantId, subject.profile.id))
+      ) return [];
       return [{
         id: subject.profile.id,
         name: subject.profile.name,

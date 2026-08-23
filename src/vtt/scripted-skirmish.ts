@@ -1,6 +1,10 @@
 import type { ControllerIdentity, ControllerRequest } from '../combat/controllers';
 import type { PersistedCoordinatorState } from '../combat/coordinator';
-import { reduceEncounter, type EncounterState } from '../combat/encounter';
+import {
+  reduceEncounter,
+  type EncounterState,
+  type InitiativeMode,
+} from '../combat/encounter';
 import type { EffectApplication } from '../combat/effects';
 import type { EncounterCommand } from '../combat/events';
 import type { GridCell } from '../combat/grid';
@@ -187,12 +191,16 @@ export interface ScriptedSkirmishGateResult {
 export function recordScriptedReferenceSkirmish(
   seed = 0x317010,
   adjudicationSubject = 'engine:hit-points',
+  initiativeMode: InitiativeMode = 'shared_enemy',
 ): ScriptedSkirmishGateResult {
   const store = new MemoryBrowserSessionStore();
   const mirror = new MemoryMirrorSink();
   const recorder = new ReplayTranscriptRecorder();
   const sessionId = encounterSessionId('encounter:increment-10-scripted-gate');
-  let state = encounterStateFromApprovedFixture(TEST_APPROVED_FIRST_SKIRMISH_FIXTURE);
+  let state = encounterStateFromApprovedFixture(
+    TEST_APPROVED_FIRST_SKIRMISH_FIXTURE,
+    { initiativeMode },
+  );
   let rng: SerializableRng = mulberry32(seed);
   const controllers = durableIdentities(state);
   let journal = EncounterSessionJournal.create({
@@ -213,7 +221,7 @@ export function recordScriptedReferenceSkirmish(
   let reactionResolved = false;
   let undoCompleted = false;
   let invalidationRecorded = false;
-  const plannedRounds = new Set<number>();
+  const plannedActivations = new Set<string>();
   const actedFeatures = new Set<string>();
 
   const systemReduction = (command: EncounterCommand): void => {
@@ -384,9 +392,12 @@ export function recordScriptedReferenceSkirmish(
     const controllerKind = activeState.profile.kind === 'player_character' ? 'human' : 'agent';
     const fleet = controllerKind === 'human' ? HUMAN_FLEET : AGENT_FLEET;
 
-    if (!plannedRounds.has(state.round)) {
+    const planKey = initiativeMode === 'per_combatant'
+      ? `${String(state.round)}:${active}`
+      : `${String(state.round)}:enemy_block`;
+    if (activeState.profile.kind === 'monster' && !plannedActivations.has(planKey)) {
       roundPlan(state.round, state.revision, 'initial');
-      plannedRounds.add(state.round);
+      plannedActivations.add(planKey);
     }
 
     if (state.round === 1 && active === combatantId('combatant:fighter') && !actedFeatures.has('movement')) {

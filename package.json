@@ -20,11 +20,14 @@
     "test:mutation": "node scripts/patch-stryker-vitest-runner.mjs && stryker run",
     "vtt:replay": "vite-node tools/vtt-replay.ts --",
     "vtt:soak": "vite-node tools/vtt-soak.ts --",
+    "vtt:experiment": "vite-node tools/vtt-experiment.ts --",
+    "vtt:regret": "vite-node tools/vtt-regret.ts --",
     "test:all": "npm run test && npm run build && npm run test:browser",
     "scrape": "vite-node tools/scrape/cli.ts --",
     "db:schema": "vite-node scripts/build-schema.ts",
     "db:migrations": "vitest run --configLoader runner tests/unit/db/migrations.test.ts",
-    "db:contracts": "vite-node scripts/build-row-contracts.ts"
+    "db:contracts": "vite-node scripts/build-row-contracts.ts",
+    "schema:content-pack": "vite-node tools/generate-content-pack-schema.ts"
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "3.53.0-build1",

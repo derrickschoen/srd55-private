@@ -17,10 +17,13 @@ import {
 } from '../combat/combatant';
 import {
   createEncounter,
+  DEFAULT_ENCOUNTER_CONFIG,
+  type EncounterConfig,
   type EncounterState,
 } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
 import { mulberry32, type SerializableRng } from '../combat/random';
+import type { ChallengeRating } from '../combat/statblock';
 import { STARTER_MONSTER_ROSTER } from '../combat/statblocks/roster';
 import {
   combatantId,
@@ -181,8 +184,9 @@ function cellKey(cell: GridCell): string {
   return `${String(cell.column)},${String(cell.row)}`;
 }
 
-function challengeNumber(value: '1/4' | '1/2' | 1 | 2 | 3): number {
+function challengeNumber(value: ChallengeRating): number {
   switch (value) {
+    case '1/8': return 0.125;
     case '1/4': return 0.25;
     case '1/2': return 0.5;
     case 1: return 1;
@@ -265,19 +269,36 @@ export const ENCOUNTER_CALIBRATION_RESIDUALS = [
   'TODO(sim-calibration: action economy and initiative)',
 ] as const;
 
-function pressureBand(pressure: EncounterDifficultyRequest['pressure']): {
+export const REFERENCE_ENCOUNTER_XP_BUDGETS = {
+  low: 2250,
+  moderate: 3900,
+  high: 5100,
+} as const;
+
+export const ENCOUNTER_MONSTER_COUNT_RANGE = {
+  minimum: 4,
+  maximum: 6,
+} as const;
+
+export function referenceEncounterXpBand(pressure: EncounterDifficultyRequest['pressure']): {
   readonly lowerExclusive: number | null;
   readonly upperInclusive: number;
 } {
   switch (pressure) {
-    case 'low': return { lowerExclusive: null, upperInclusive: 2250 };
-    case 'moderate': return { lowerExclusive: 2250, upperInclusive: 3900 };
-    case 'high': return { lowerExclusive: 3900, upperInclusive: 5100 };
+    case 'low': return { lowerExclusive: null, upperInclusive: REFERENCE_ENCOUNTER_XP_BUDGETS.low };
+    case 'moderate': return {
+      lowerExclusive: REFERENCE_ENCOUNTER_XP_BUDGETS.low,
+      upperInclusive: REFERENCE_ENCOUNTER_XP_BUDGETS.moderate,
+    };
+    case 'high': return {
+      lowerExclusive: REFERENCE_ENCOUNTER_XP_BUDGETS.moderate,
+      upperInclusive: REFERENCE_ENCOUNTER_XP_BUDGETS.high,
+    };
   }
 }
 
 function xpMatchesBand(xp: number, pressure: EncounterDifficultyRequest['pressure']): boolean {
-  const band = pressureBand(pressure);
+  const band = referenceEncounterXpBand(pressure);
   return xp <= band.upperInclusive && (band.lowerExclusive === null || xp > band.lowerExclusive);
 }
 
@@ -288,7 +309,10 @@ function requestIsBuildable(request: EncounterGenerationRequest): boolean {
     if (count === 0) return xpMatchesBand(total, request.difficulty.pressure);
     return xpValues.some((xp) => canFill(count - 1, total + xp));
   };
-  return [4, 5, 6].some((count) => canFill(count, 0));
+  return Array.from(
+    { length: ENCOUNTER_MONSTER_COUNT_RANGE.maximum - ENCOUNTER_MONSTER_COUNT_RANGE.minimum + 1 },
+    (_, index) => ENCOUNTER_MONSTER_COUNT_RANGE.minimum + index,
+  ).some((count) => canFill(count, 0));
 }
 
 export function decodeEncounterGenerationRequest(value: unknown): EncounterGenerationRequest {
@@ -304,7 +328,7 @@ export function decodeEncounterGenerationRequest(value: unknown): EncounterGener
 
 export function buildEncounterGenerationPrompt(requestValue: unknown): string {
   const request = decodeEncounterGenerationRequest(requestValue);
-  const band = pressureBand(request.difficulty.pressure);
+  const band = referenceEncounterXpBand(request.difficulty.pressure);
   return canonicalJson({
     protocol: 'encounter-generation-v1',
     party: { source: 'reference', count: 3, levels: [7, 7, 7] },
@@ -315,7 +339,7 @@ export function buildEncounterGenerationPrompt(requestValue: unknown): string {
     xpBand: band,
     lazyDeadlyLine: 10,
     constraints: {
-      monsterCount: { minimum: 4, maximum: 6 },
+      monsterCount: ENCOUNTER_MONSTER_COUNT_RANGE,
       roomCount: 1,
       completeSections: ['roster', 'layout', 'tactics'],
       mechanicsMustReferenceApprovedStatblocks: true,
@@ -441,8 +465,8 @@ function validatePackageMechanics(value: GeneratedEncounterPackage): EncounterDi
     deterministic: {
       partyCount: 3,
       partyLevels: [7, 7, 7],
-      budgets: { low: 2250, moderate: 3900, high: 5100 },
-      requestedBand: pressureBand(value.request.difficulty.pressure),
+      budgets: REFERENCE_ENCOUNTER_XP_BUDGETS,
+      requestedBand: referenceEncounterXpBand(value.request.difficulty.pressure),
       encounterXp,
       totalChallengeRating,
       lazyDeadlyLine: 10,
@@ -771,7 +795,10 @@ function encounterProfiles(encounterPackage: GeneratedEncounterPackage): readonl
   return [...referencePcs, ...monsters];
 }
 
-export function encounterStateFromApprovedFixture(fixtureValue: unknown): EncounterState {
+export function encounterStateFromApprovedFixture(
+  fixtureValue: unknown,
+  config: EncounterConfig = DEFAULT_ENCOUNTER_CONFIG,
+): EncounterState {
   const fixture = decodeApprovedEncounterFixture(fixtureValue);
   const encounterPackage = fixture.package;
   const profiles = encounterProfiles(encounterPackage);
@@ -782,6 +809,7 @@ export function encounterStateFromApprovedFixture(fixtureValue: unknown): Encoun
     return combatToken(profile, placement.cell);
   });
   return createEncounter({
+    config,
     bounds: {
       columns: encounterPackage.layout.map.columns,
       rows: encounterPackage.layout.map.rows,
@@ -801,7 +829,7 @@ export function encounterStateFromApprovedFixture(fixtureValue: unknown): Encoun
   });
 }
 
-const fixtureTurnActions: TurnLegalActions = (_state, actor) => ({
+export const approvedFixtureTurnLegalActions: TurnLegalActions = (_state, actor) => ({
   actions: [{ type: 'end_turn', actor }],
 });
 
@@ -824,7 +852,7 @@ export function approvedFixtureSession(
   return {
     fixtureId: fixture.fixtureId,
     coordinator: new TurnCoordinator(state, registry, rng, {
-      turnLegalActions: fixtureTurnActions,
+      turnLegalActions: approvedFixtureTurnLegalActions,
     }),
   };
 }

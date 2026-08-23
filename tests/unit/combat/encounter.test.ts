@@ -99,6 +99,25 @@ describe('encounter reducer authority and action economy', () => {
     expect(state.revision).toBe(1);
   });
 
+  it('advances initiative when an active combatant was killed by a reaction during its turn', () => {
+    const active = monsterProfile('reaction-casualty', { initiativeBonus: 10 });
+    const next = playerProfile('reaction-survivor', { initiativeBonus: 0 });
+    const started = start([active, next]);
+    const killed: EncounterState = {
+      ...started,
+      combatants: started.combatants.map((combatant) =>
+        combatant.profile.id === active.id
+          ? { ...combatant, hitPoints: 0, life: 'dead', deathSaves: null }
+          : combatant),
+    };
+
+    const advanced = reduceEncounter(killed, { type: 'end_turn', actor: active.id }, () => 0.5);
+
+    expect(advanced.state.activeCombatant).toBe(next.id);
+    expect(advanced.events.map((event) => event.type)).toContain('turn_ended');
+    expect(advanced.events.map((event) => event.type)).toContain('turn_started');
+  });
+
   it('splits movement around other choices through the shared movement kernel', () => {
     const pc = playerProfile('mover', { initiativeBonus: 10 });
     const monster = monsterProfile('far', { initiativeBonus: -10 });
@@ -145,6 +164,44 @@ describe('encounter reducer authority and action economy', () => {
       reactionAvailable: false,
       movement: { speed: 60, spent: 0, remaining: 60 },
     });
+  });
+
+  it('temp_hp_stacks_additively keeps the higher grant and replaces it only with a larger grant', () => {
+    const pc = playerProfile('temporary-hit-points', { initiativeBonus: 10, hitPoints: 20 });
+    const monster = monsterProfile('temporary-hit-points-attacker', { initiativeBonus: -10 });
+    let state = start([pc, monster]);
+    const grant = (amount: number) => {
+      const reduced = reduceEncounter(state, {
+        type: 'grant_temporary_hit_points',
+        actor: pc.id,
+        target: pc.id,
+        amount,
+        cost: 'none',
+      }, () => 0.5);
+      state = reduced.state;
+      return reduced;
+    };
+
+    grant(10);
+    const smaller = grant(4);
+    expect(stateOf(state, pc).temporaryHitPoints).toBe(10);
+    expect(smaller.events).toContainEqual(expect.objectContaining({
+      type: 'temporary_hit_points_changed',
+      before: 10,
+      after: 10,
+    }));
+
+    const larger = grant(12);
+    expect(stateOf(state, pc).temporaryHitPoints).toBe(12);
+    expect(larger.events).toContainEqual(expect.objectContaining({
+      type: 'temporary_hit_points_changed',
+      before: 10,
+      after: 12,
+    }));
+
+    state = reduceEncounter(state, { type: 'end_turn', actor: pc.id }, () => 0.5).state;
+    state = reduceEncounter(state, attack(monster, pc, 13), () => 0.5).state;
+    expect(stateOf(state, pc)).toMatchObject({ hitPoints: 19, temporaryHitPoints: 0 });
   });
 
   it('tracks a multiattack sequence across split movement and closes it at the profile limit', () => {

@@ -26,7 +26,7 @@
     { "mutation": 22, "name": "repeated_save_at_wrong_boundary", "testFile": "tests/unit/combat/effects.test.ts", "testName": "runs a sourced repeated save at the target turn %s boundary and not the other boundary" },
     { "mutation": 23, "name": "effect_expires_one_turn_late", "testFile": "tests/unit/combat/effects.test.ts", "testName": "expires exactly on its matching %s duration boundary, never one turn late" },
     { "mutation": 24, "name": "ordinary_monster_rolls_death_save", "testFile": "tests/unit/combat/combatant.test.ts", "testName": "validates monster statblocks and defaults ordinary monsters away from death saves" },
-    { "mutation": 25, "name": "level_appropriate_spell_marked_manual", "testFile": "tests/unit/combat/spells.test.ts", "testName": "closes increment 4 with exactly 175 implemented and zero pending rows" },
+    { "mutation": 25, "name": "level_appropriate_spell_marked_manual", "testFile": "tests/unit/combat/spells.test.ts", "testName": "closes the manifest with exactly 188 implemented and zero pending rows" },
     { "mutation": 26, "name": "higher_slot_uses_base_effect", "testFile": "tests/unit/combat/spells.test.ts", "testName": "higher-slot Cure Wounds expends that slot and uses its 4d8 scaled effect" },
     { "mutation": 27, "name": "sphere_center_forced_to_cell_center", "testFile": "tests/unit/combat/templates.test.ts", "testName": "mutation 27: sphere preserves an intersection center instead of forcing a cell center" },
     { "mutation": 28, "name": "tangent_square_excluded", "testFile": "tests/unit/combat/templates.test.ts", "testName": "mutation 28: exact tangencies are included while the next square is excluded for every shape" },

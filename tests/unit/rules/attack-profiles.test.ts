@@ -1758,3 +1758,556 @@ describe('nothing is stored', () => {
     expect(bonusFor(profileOf(moved, 'martial_arts'), 'dexterity')).toBe(7);
   });
 });
+
+describe('attack-profile mutation contracts', () => {
+  it('pins every proficiency verdict to its literal state and disclosure', () => {
+    // Type-level contract: WeaponProficiencyVerdict is a closed union, and
+    // ProfileProficiency must preserve the distinct assumption/disclosure for
+    // every arm even where two arms make the same numeric decision.
+    expect([
+      profileProficiency({ kind: 'proficient', via: ['Fighter'] }),
+      profileProficiency({ kind: 'not_proficient' }),
+      profileProficiency({ kind: 'category_not_stated' }),
+      profileProficiency({
+        kind: 'qualifier_not_evaluated',
+        via: ['Runeblade'],
+        qualifiers: ['inscribed with a rune'],
+      }),
+    ]).toEqual([
+      {
+        state: 'included',
+        reason:
+          'The Proficiency Bonus is included: a class this character has grants this weapon’s category. One class is enough — proficiency is a union across a character’s classes, and the Proficiencies section of the character sheet names which.',
+      },
+      {
+        state: 'withheld',
+        reason:
+          'The Proficiency Bonus is NOT included: no class this character has grants this weapon’s category. Carrying and using it is still allowed — nothing here refuses the weapon — and what is withheld is the bonus alone.',
+      },
+      {
+        state: 'included',
+        reason:
+          'No simple/martial category is recorded for this weapon, so whether this character is proficient cannot be checked. The Proficiency Bonus is included, which is an ASSUMPTION and not a fact about this character: set the category on the weapon to find out.',
+      },
+      {
+        state: 'withheld',
+        reason:
+          'A class of this character’s grants this weapon’s category only under a qualifier this application does not read, so the Proficiency Bonus is NOT included — the same assumption the Proficiencies section of the character sheet states. That section prints the qualifier verbatim; if the weapon does qualify, add the bonus at the table.',
+      },
+    ]);
+  });
+
+  it('pins the recorded and unknown weapon formula branches literally', () => {
+    // SRD sheet-math.txt:71-74 prints Strength for melee and Dexterity for
+    // ranged, each plus Proficiency Bonus unless a weapon property says
+    // otherwise. The stored attack-kind contract selects only the first option.
+    const abilityContract = (attackKind: 'melee' | 'ranged' | null) =>
+      profileOf(
+        build({
+          weapons: [{ ...LONGSWORD, attack_kind: attackKind }],
+          scores: scores({ strength: 14, dexterity: 16 }),
+          proficiencyBonus: 3,
+        }),
+        'normal',
+      ).abilities;
+
+    expect(abilityContract('melee')).toEqual({
+      state: 'recorded',
+      reason:
+        'This weapon records a melee attack, so Strength is shown first. The other ability remains available as a manual override because this application does not evaluate weapon-property rules.',
+      options: [
+        {
+          ability: 'strength',
+          attack_bonus: 5,
+          damage_modifier: 2,
+          reason: 'Melee attack bonus = Strength modifier + Proficiency Bonus.',
+        },
+        {
+          ability: 'dexterity',
+          attack_bonus: 6,
+          damage_modifier: 3,
+          reason: 'Ranged attack bonus = Dexterity modifier + Proficiency Bonus.',
+        },
+      ],
+    });
+    expect(abilityContract('ranged')).toEqual({
+      state: 'recorded',
+      reason:
+        'This weapon records a ranged attack, so Dexterity is shown first. The other ability remains available as a manual override because this application does not evaluate weapon-property rules.',
+      options: [
+        {
+          ability: 'dexterity',
+          attack_bonus: 6,
+          damage_modifier: 3,
+          reason: 'Ranged attack bonus = Dexterity modifier + Proficiency Bonus.',
+        },
+        {
+          ability: 'strength',
+          attack_bonus: 5,
+          damage_modifier: 2,
+          reason: 'Melee attack bonus = Strength modifier + Proficiency Bonus.',
+        },
+      ],
+    });
+    expect(abilityContract(null)).toEqual({
+      state: 'undecided',
+      reason:
+        'The printed formula is Strength for a melee attack and Dexterity for a ranged one, unless a weapon property says otherwise. This weapon does not record whether its attack is melee or ranged, and the property rules that would override the formula are not among this application’s sources, so both are shown.',
+      options: [
+        {
+          ability: 'strength',
+          attack_bonus: 5,
+          damage_modifier: 2,
+          reason: 'Melee attack bonus = Strength modifier + Proficiency Bonus.',
+        },
+        {
+          ability: 'dexterity',
+          attack_bonus: 6,
+          damage_modifier: 3,
+          reason: 'Ranged attack bonus = Dexterity modifier + Proficiency Bonus.',
+        },
+      ],
+    });
+  });
+
+  it('pins withheld proficiency to the attack number and complete option reason', () => {
+    // SRD sheet-math.txt:71-74 places Proficiency Bonus in the attack formula;
+    // damage still receives only the ability modifier. Strength 14 is +2.
+    const abilities = profileOf(
+      build({
+        weapons: [{
+          ...LONGSWORD,
+          attack_kind: 'melee',
+          proficiency: { kind: 'not_proficient' },
+        }],
+        scores: scores({ strength: 14, dexterity: 16 }),
+        proficiencyBonus: 3,
+      }),
+      'normal',
+    ).abilities;
+
+    expect(abilities.state === 'unavailable' ? null : abilities.options[0]).toEqual({
+      ability: 'strength',
+      attack_bonus: 2,
+      damage_modifier: 2,
+      reason:
+        'The printed melee formula is Strength modifier + Proficiency Bonus; this row is the Strength modifier alone. The Proficiency Bonus is NOT included: no class this character has grants this weapon’s category. Carrying and using it is still allowed — nothing here refuses the weapon — and what is withheld is the bonus alone.',
+    });
+  });
+
+  it('pins the complete True Strike profile at the level-11 boundary', () => {
+    // SRD weapon-attack-cantrips.txt:16-29: one attack, spellcasting ability,
+    // Radiant-or-weapon choice, and 2d6 extra Radiant damage at level 11.
+    const profile = profileOf(
+      build({
+        classes: [fighter(11)],
+        scores: scores({ intelligence: 18 }),
+        proficiencyBonus: 4,
+        cantrips: knows('true_strike', [
+          { source_name: 'Arcane scholar', spellcasting_ability: 'intelligence' },
+        ]),
+      }),
+      'true_strike',
+    );
+
+    expect(profile).toEqual({
+      kind: 'true_strike',
+      label: 'True Strike',
+      abilities: {
+        state: 'fixed',
+        options: [{
+          ability: 'intelligence',
+          attack_bonus: 8,
+          damage_modifier: 4,
+          reason:
+            'The attack uses your spellcasting ability for the attack and damage rolls instead of Strength or Dexterity (Arcane scholar).',
+        }],
+      },
+      damage: {
+        amount: { kind: 'dice', dice: '1d8' },
+        versatile_note: 'Versatile: 1d10 when wielded with two hands.',
+        damage_type: {
+          state: 'choice',
+          spell_type: 'Radiant',
+          weapon_type: 'Slashing',
+        },
+        extra: [{
+          dice: '2d6',
+          damage_type: 'Radiant',
+          note:
+            'Cantrip Upgrade: extra Radiant damage at levels 5, 11 and 17, read against your total character level of 11.',
+        }],
+      },
+      attacks_per_action: 1,
+      unresolved_attacks: [],
+      preconditions: [
+        'Requires a weapon you have proficiency with that is worth 1+ CP. The Proficiency Bonus is included: a class this character has grants this weapon’s category. One class is enough — proficiency is a union across a character’s classes, and the Proficiencies section of the character sheet names which. This application records no coin value, so it cannot check the second half at all.',
+      ],
+      notes: [
+        'Casting this takes your Action and gives one attack, where the Attack action would give 3.',
+      ],
+    });
+  });
+
+  it('pins the complete Shillelagh profile at the level-5 boundary', () => {
+    // SRD weapon-attack-cantrips.txt:33-54: Bonus Action, one minute, the
+    // spellcasting-ability-or-Strength choice, Force choice, and d10 at 5.
+    const row = build({
+      weapons: [],
+      classes: [druid(5)],
+      scores: scores({ strength: 14, wisdom: 16 }),
+      proficiencyBonus: 3,
+      cantrips: knows('shillelagh', [
+        { source_name: 'Druid', spellcasting_ability: 'wisdom' },
+      ]),
+    }).weapons[0];
+
+    expect(row).toEqual({
+      weapon_id: null,
+      weapon_name: 'Shillelagh (a Club or a Quarterstaff)',
+      derived: true,
+      profiles: [{
+        kind: 'shillelagh',
+        label: 'Shillelagh',
+        abilities: {
+          state: 'choice',
+          reason:
+            'You can use your spellcasting ability instead of Strength for the attack and damage rolls of melee attacks with that weapon.',
+          options: [
+            {
+              ability: 'wisdom',
+              attack_bonus: 6,
+              damage_modifier: 3,
+              reason:
+                'You can use your spellcasting ability instead of Strength for the attack and damage rolls of melee attacks with that weapon (Druid).',
+            },
+            {
+              ability: 'strength',
+              attack_bonus: 5,
+              damage_modifier: 2,
+              reason:
+                'Strength, which a melee weapon attack uses when the cantrip is not applied.',
+            },
+          ],
+        },
+        damage: {
+          amount: { kind: 'dice', dice: '1d10' },
+          versatile_note:
+            "The weapon's own damage die is replaced. The die changes at levels 5, 11 and 17, read against your total character level of 5.",
+          damage_type: {
+            state: 'choice',
+            spell_type: 'Force',
+            weapon_type: null,
+          },
+          extra: [],
+        },
+        attacks_per_action: 1,
+        unresolved_attacks: [],
+        preconditions: [
+          'Applies to a Club or a Quarterstaff you are holding, and to melee attacks with it. This row is derived: no weapon has been added to this character to produce it.',
+          'This row is derived rather than owned, so there is no weapon record to check a proficiency category against and the Proficiency Bonus is included. The Proficiencies section of the character sheet checks the weapons this character actually holds.',
+        ],
+        notes: [
+          'Cast as a Bonus Action and lasts 1 minute. It ends early if you cast it again or let go of the weapon; this application does not track that.',
+        ],
+      }],
+    });
+  });
+
+  it('pins the complete Martial Arts profile and its two preconditions', () => {
+    // SRD attack-class-features.txt:38-60: d8 at Monk 5, Dexterity instead of
+    // Strength, Monk-weapon categories, and the armor/Shield precondition.
+    const profile = profileOf(
+      build({
+        classes: [monk(5)],
+        scores: scores({ strength: 12, dexterity: 16 }),
+        proficiencyBonus: 3,
+      }),
+      'martial_arts',
+    );
+
+    expect(profile).toEqual({
+      kind: 'martial_arts',
+      label: 'Martial Arts (Monk)',
+      abilities: {
+        state: 'choice',
+        reason:
+          'You can use your Dexterity modifier instead of your Strength modifier for the attack and damage rolls of your Monk weapons.',
+        options: [
+          {
+            ability: 'dexterity',
+            attack_bonus: 6,
+            damage_modifier: 3,
+            reason: 'Dexterity, by Dexterous Attacks.',
+          },
+          {
+            ability: 'strength',
+            attack_bonus: 4,
+            damage_modifier: 1,
+            reason:
+              'Strength, which a melee weapon attack uses without the feature.',
+          },
+        ],
+      },
+      damage: {
+        amount: { kind: 'dice', dice: '1d8' },
+        versatile_note:
+          "You can roll this in place of the weapon's normal damage. It is the die for Monk level 5, not for your total character level.",
+        damage_type: { state: 'weapon', damage_type: 'Slashing' },
+        extra: [],
+      },
+      attacks_per_action: 2,
+      unresolved_attacks: [],
+      preconditions: [
+        'Monk weapons are Simple Melee weapons and Martial Melee weapons that have the Light property. This application does not record which group a weapon belongs to, so it cannot tell whether this one qualifies.',
+        'You must be unarmed or wielding only Monk weapons, and not wearing armor or wielding a Shield. This application does not record worn armor or a held Shield.',
+        'The Proficiency Bonus is included: a class this character has grants this weapon’s category. One class is enough — proficiency is a union across a character’s classes, and the Proficiencies section of the character sheet names which.',
+      ],
+      notes: [],
+    });
+  });
+
+  it('pins missing and ambiguous cantrip-source disclosures literally', () => {
+    // SRD multiclassing.txt:38-43 associates a prepared spell with its class's
+    // spellcasting ability. The type contract preserves null and disagreement.
+    const missing = build({
+      cantrips: knows('true_strike', [
+        { source_name: 'Magic Initiate', spellcasting_ability: null },
+      ]),
+    });
+    expect(profileOf(missing, 'true_strike').abilities).toEqual({
+      state: 'unavailable',
+      reason:
+        'No source of True Strike on this character has a spellcasting ability this application can resolve (Magic Initiate), so it cannot say what the attack and damage rolls use.',
+    });
+    expect(missing.warnings).toEqual([{
+      code: 'no_spellcasting_ability',
+      message:
+        'True Strike is known from Magic Initiate, which has no spellcasting ability recorded, so its attack and damage numbers cannot be derived.',
+    }]);
+
+    const ambiguous = build({
+      scores: scores({ intelligence: 16, charisma: 14 }),
+      cantrips: knows('true_strike', [
+        { source_name: 'Arcane scholar', spellcasting_ability: 'intelligence' },
+        { source_name: 'Magic Initiate', spellcasting_ability: 'charisma' },
+      ]),
+    });
+    expect(profileOf(ambiguous, 'true_strike').abilities).toEqual({
+      state: 'undecided',
+      reason:
+        'True Strike reaches this character from more than one source, and those sources use different spellcasting abilities. Which one applies depends on the source the spell was taken from, so every one is shown.',
+      options: [
+        {
+          ability: 'intelligence',
+          attack_bonus: 6,
+          damage_modifier: 3,
+          reason:
+            'The attack uses your spellcasting ability for the attack and damage rolls instead of Strength or Dexterity (Arcane scholar).',
+        },
+        {
+          ability: 'charisma',
+          attack_bonus: 5,
+          damage_modifier: 2,
+          reason:
+            'The attack uses your spellcasting ability for the attack and damage rolls instead of Strength or Dexterity (Magic Initiate).',
+        },
+      ],
+    });
+    expect(ambiguous.warnings).toEqual([{
+      code: 'ambiguous_spellcasting_ability',
+      message:
+        'True Strike is known from more than one source and those sources use different spellcasting abilities (Arcane scholar: intelligence; Magic Initiate: charisma). Every one is shown; this application does not pick.',
+    }]);
+  });
+
+  it('pins negative weapon bonuses and the complete unresolved-attack warning', () => {
+    // Type contract: signed effect notes retain a minus sign, while unresolved
+    // grants remain disclosures and never raise the mechanically resolved count.
+    const result = build({
+      classes: [{
+        class_name: 'Warlock',
+        level: 5,
+        extra_attack_grants: [{
+          source: 'feature',
+          source_name: 'Thirsting Blade',
+          class_level: 5,
+          attack_count: 2,
+          weapon_scope: 'one_bonded_weapon',
+          unresolved: ['The optional feature selection is not recorded.'],
+        }],
+      }],
+      effects: [{
+        id: 501,
+        effect_kind: 'weapon_attack_bonus',
+        amount: -2,
+        weapon_scope: 'any_weapon',
+        character_weapon_id: null,
+        label: 'Cursed edge',
+      }],
+    });
+
+    expect(profileOf(result, 'normal').notes).toEqual([
+      'Cursed edge: -2 to this profile’s attack bonus.',
+    ]);
+    expect(result.warnings).toEqual([{
+      code: 'unresolved_extra_attack',
+      message:
+        'Thirsting Blade (Warlock 5) would give 2 attacks on the Attack action, where 1 is shown. The optional feature selection is not recorded. Thirsting Blade applies to one bonded weapon only. This application does not record which of a character’s weapons that is, so the attack count has not been applied to any of them. Features that grant Extra Attack do not stack: the number is the largest of them, never the sum.',
+    }]);
+  });
+
+  it('pins empty and repeated null-ability source names', () => {
+    // Type contract: a known source list may be empty or contain multiple
+    // unresolved sources; neither shape is silently collapsed or reformatted.
+    const empty = build({ cantrips: knows('true_strike', []) });
+    expect(profileOf(empty, 'true_strike').abilities).toEqual({
+      state: 'unavailable',
+      reason:
+        'No source of True Strike on this character has a spellcasting ability this application can resolve (no source), so it cannot say what the attack and damage rolls use.',
+    });
+
+    const unresolved = build({
+      cantrips: knows('true_strike', [
+        { source_name: 'First source', spellcasting_ability: null },
+        { source_name: 'Second source', spellcasting_ability: null },
+      ]),
+    });
+    expect(profileOf(unresolved, 'true_strike').abilities).toEqual({
+      state: 'unavailable',
+      reason:
+        'No source of True Strike on this character has a spellcasting ability this application can resolve (First source, Second source), so it cannot say what the attack and damage rolls use.',
+    });
+    expect(unresolved.warnings).toEqual([{
+      code: 'no_spellcasting_ability',
+      message:
+        'True Strike is known from First source, Second source, which has no spellcasting ability recorded, so its attack and damage numbers cannot be derived.',
+    }]);
+  });
+
+  it('pins every sentence of an ambiguous Shillelagh choice', () => {
+    // SRD weapon-attack-cantrips.txt:39-49 grants Strength as a real choice;
+    // the source association contract separately preserves ability ambiguity.
+    const abilities = profileOf(build({
+      classes: [druid(5)],
+      cantrips: knows('shillelagh', [
+        { source_name: 'Druid', spellcasting_ability: 'wisdom' },
+        { source_name: 'Magic Initiate', spellcasting_ability: 'charisma' },
+      ]),
+    }), 'shillelagh').abilities;
+
+    expect(abilities.state === 'undecided' ? abilities.reason : null).toBe(
+      'Shillelagh reaches this character from more than one source, and those sources use different spellcasting abilities. Which one applies depends on the source the spell was taken from, so every one is shown. Strength is on this list for a different reason than the rest: the cantrip says you CAN use your spellcasting ability INSTEAD OF Strength, so Strength stays available whichever source applies. That is the rules granting a choice, not this application failing to resolve one.',
+    );
+  });
+
+  it('pins the complete attack-ability override profile', () => {
+    // EligibleWeaponEffect's closed attack_ability_override arm adds one
+    // labelled fixed profile while retaining its proficiency disclosure.
+    const profile = profileOf(build({
+      scores: scores({ charisma: 16 }),
+      effects: [{
+        id: 601,
+        effect_kind: 'attack_ability_override',
+        ability: 'charisma',
+        weapon_scope: 'any_weapon',
+        character_weapon_id: null,
+        label: 'Pact Shell Blade',
+      }],
+    }), 'attack_ability_override');
+
+    expect(profile).toEqual({
+      kind: 'attack_ability_override',
+      label: 'Pact Shell Blade',
+      abilities: {
+        state: 'fixed',
+        options: [{
+          ability: 'charisma',
+          attack_bonus: 6,
+          damage_modifier: 3,
+          reason:
+            'Pact Shell Blade uses charisma for this weapon’s attack and damage rolls.',
+        }],
+      },
+      damage: {
+        amount: { kind: 'dice', dice: '1d8' },
+        versatile_note: 'Versatile: 1d10 when wielded with two hands.',
+        damage_type: { state: 'weapon', damage_type: 'Slashing' },
+        extra: [],
+      },
+      attacks_per_action: 2,
+      unresolved_attacks: [],
+      preconditions: [
+        'The Proficiency Bonus is included: a class this character has grants this weapon’s category. One class is enough — proficiency is a union across a character’s classes, and the Proficiencies section of the character sheet names which.',
+      ],
+      notes: [],
+    });
+  });
+
+  it('formats zero as an explicitly signed weapon bonus', () => {
+    // Type contract: non-negative adjustments use the `+n` presentation arm;
+    // zero is the exact boundary between that arm and negative values.
+    const profile = profileOf(build({
+      effects: [{
+        id: 602,
+        effect_kind: 'weapon_damage_bonus',
+        amount: 0,
+        weapon_scope: 'any_weapon',
+        character_weapon_id: null,
+        label: 'Dormant edge',
+      }],
+    }), 'normal');
+    expect(profile.notes).toEqual([
+      'Dormant edge: +0 to this profile’s damage.',
+    ]);
+  });
+
+  it('pins the complete unrecognised-cantrip warning', () => {
+    // RecognisedAttackCantrips preserves the catalog mismatch as a structured
+    // warning and derives no spell profile from it.
+    const result = build({
+      cantrips: {
+        ...NO_CANTRIPS,
+        unrecognised: [{
+          cantrip: 'true_strike',
+          content_key: 'srd52:true-strike',
+          spell_name: 'True Strike',
+          source_name: 'Arcane scholar',
+          reason: 'its catalog identity is not recognised',
+        }],
+      },
+    });
+    expect(result.warnings).toEqual([{
+      code: 'unrecognised_cantrip',
+      message:
+        'Arcane scholar carries a spell named "True Strike" that looks like True Strike, but its catalog identity is not recognised. No attack profile has been derived from it.',
+    }]);
+  });
+
+  it('uses plural grammar when two resolved attacks are shown', () => {
+    // SRD attack-class-features.txt:120-131 says Extra Attack features do not
+    // stack. The warning compares an unresolved total of three to resolved two.
+    const result = build({
+      classes: [{
+        class_name: 'Fighter',
+        level: 11,
+        extra_attack_grants: [
+          classGrant('Fighter', 5, 2),
+          {
+            source: 'feature',
+            source_name: 'Unresolved third attack',
+            class_level: 11,
+            attack_count: 3,
+            weapon_scope: 'one_bonded_weapon',
+            unresolved: [],
+          },
+        ],
+      }],
+    });
+    expect(result.warnings).toEqual([{
+      code: 'unresolved_extra_attack',
+      message:
+        'Unresolved third attack (Fighter 11) would give 3 attacks on the Attack action, where 2 are shown. Unresolved third attack applies to one bonded weapon only. This application does not record which of a character’s weapons that is, so the attack count has not been applied to any of them. Features that grant Extra Attack do not stack: the number is the largest of them, never the sum.',
+    }]);
+  });
+});
