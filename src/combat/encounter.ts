@@ -82,6 +82,8 @@ import type {
   ConditionLifecycleOperation,
   EffectData,
   ModifierDuration,
+  ReactionOperation,
+  ReactionTrigger,
   ScaledDice,
   SharedOutcomeDamageReferenceOperation,
   SharedOutcomeOperation,
@@ -301,6 +303,60 @@ export interface EncounterSetup {
 export interface EncounterReduction {
   readonly state: EncounterState;
   readonly events: readonly EncounterEvent[];
+}
+
+export type ReactionTriggerEvent =
+  | {
+      readonly kind: 'hit_by_attack';
+      readonly attacker: CombatantId;
+      readonly target: CombatantId;
+      readonly attackTotal: number;
+    }
+  | {
+      readonly kind: 'damaged_by_creature';
+      readonly source: CombatantId;
+      readonly target: CombatantId;
+      readonly amount: number;
+    }
+  | {
+      readonly kind: 'taking_damage_of_type';
+      readonly source: CombatantId;
+      readonly target: CombatantId;
+      readonly damageTypes: readonly DamageType[];
+    }
+  | {
+      readonly kind: 'creature_casts_spell';
+      readonly caster: CombatantId;
+      readonly spellId: string;
+      readonly hasComponents: boolean;
+    };
+
+export type ReactionAvailability =
+  | 'available'
+  | 'reaction_spent'
+  | 'incapacitated'
+  | 'slot_unavailable';
+
+export interface ReactionOffer {
+  readonly reactor: CombatantId;
+  readonly spellId: string;
+  readonly trigger: ReactionTrigger['kind'];
+  readonly availability: ReactionAvailability;
+}
+
+export interface ReactionDecisionRequest {
+  readonly state: EncounterState;
+  readonly event: ReactionTriggerEvent;
+  readonly offers: readonly ReactionOffer[];
+}
+
+/** A synchronous seam for reducer-owned interception; coordinators may supply it. */
+export type ReactionDecisionHook = (
+  request: ReactionDecisionRequest,
+) => SpellCastCommand | null;
+
+export interface EncounterReductionOptions {
+  readonly reactionDecision?: ReactionDecisionHook;
 }
 
 export class EncounterRuleError extends Error {
@@ -1572,6 +1628,7 @@ interface ReductionContext {
   state: EncounterState;
   readonly rng: TransactionalRng;
   readonly events: EncounterEvent[];
+  readonly reactionDecision: ReactionDecisionHook | null;
 }
 
 function usedDamageReductionEffects(state: EncounterState): readonly EncounterEffectId[] {
@@ -1603,6 +1660,10 @@ function resolveTargetDamage(
   target: CombatantId,
   request: DamageRequest,
 ): ReturnType<typeof resolveDamage> {
+  offerReaction(context, {
+    kind: 'taking_damage_of_type', source, target,
+    damageTypes: [...new Set(request.terms.map((term) => term.type))],
+  });
   const raw = resolveDamage({ ...request, responses: [] }, context.rng);
   const adjusted = raw.terms.map((term) => term.beforeResponse);
   const reductions = [...context.state.effects]
@@ -1917,6 +1978,9 @@ function applyDamage(
     hitPointsAfter,
     lifeState: life,
     massiveDamage,
+  });
+  offerReaction(context, {
+    kind: 'damaged_by_creature', source, target, amount,
   });
   breakEffectsOnDamage(context, source, target, amount);
   if (life !== 'living') endConcentration(context, target, 'concentration_broken');
@@ -3954,7 +4018,7 @@ function processAttack(
   ) {
     throw new EncounterRuleError('The target has Total Cover or is outside line of sight.');
   }
-  const attack = resolveAttackRoll(
+  let attack = resolveAttackRoll(
     {
       attackBonus:
         command.attackBonus +
@@ -3977,6 +4041,20 @@ function processAttack(
       .map((effect) => effect.id),
   );
   endEffects(context, consumedAdvantage, 'duration_expired');
+  if (attack.outcome !== 'miss') {
+    offerReaction(context, {
+      kind: 'hit_by_attack', attacker: command.actor, target: command.target,
+      attackTotal: attack.total,
+    });
+    // Shield explicitly includes the triggering attack (spell-descriptions.txt:6937-6954).
+    // Equality remains a hit; only Armor Class above the already-rolled total reverses it.
+    if (
+      attack.outcome === 'hit' &&
+      coverAdjustedArmorClass(context.state, command.actor, command.target) > attack.total
+    ) {
+      attack = { ...attack, outcome: 'miss' };
+    }
+  }
   let damageResult: ReturnType<typeof resolveDamage> | null = null;
   if (attack.outcome !== 'miss') {
     const criticalWithin = conditionMechanicalState(
@@ -5734,6 +5812,173 @@ function resolvedPersistentAreaSpellEffect(
       };
 }
 
+function importedReactionDefinitions(
+  state: EncounterState,
+): readonly { readonly definition: SpellDefinition; readonly operation: ReactionOperation }[] {
+  return (state.contentPacks ?? []).flatMap((pack) => pack.spells.flatMap((spell) => {
+    const operation = spell.definition.operation;
+    return spell.definition.castingTime === 'reaction' && operation.kind === 'reaction'
+      ? [{ definition: spell.definition, operation }]
+      : [];
+  }));
+}
+
+function reactionEventTarget(event: ReactionTriggerEvent): CombatantId | null {
+  switch (event.kind) {
+    case 'hit_by_attack':
+    case 'damaged_by_creature':
+    case 'taking_damage_of_type':
+      return event.target;
+    case 'creature_casts_spell':
+      return null;
+  }
+}
+
+function reactionTriggerMatches(
+  state: EncounterState,
+  reactor: CombatantId,
+  declaration: ReactionTrigger,
+  event: ReactionTriggerEvent,
+): boolean {
+  if (declaration.kind !== event.kind) return false;
+  switch (declaration.kind) {
+    case 'hit_by_attack':
+      return event.kind === 'hit_by_attack' && event.target === reactor;
+    case 'damaged_by_creature':
+      return event.kind === 'damaged_by_creature' && event.target === reactor &&
+        gridDistance(token(state, reactor).position, token(state, event.source).position) <= declaration.rangeFeet &&
+        (!declaration.requiresSight || canCombatantSee(state, reactor, event.source));
+    case 'taking_damage_of_type':
+      return event.kind === 'taking_damage_of_type' && event.target === reactor &&
+        event.damageTypes.some((type) => declaration.damageTypes.some(
+          (declared) => declared === String(type),
+        ));
+    case 'creature_casts_spell':
+      return event.kind === 'creature_casts_spell' && event.caster !== reactor && event.hasComponents &&
+        gridDistance(token(state, reactor).position, token(state, event.caster).position) <= declaration.rangeFeet &&
+        (!declaration.requiresSight || canCombatantSee(state, reactor, event.caster));
+  }
+}
+
+function reactionAvailability(
+  state: EncounterState,
+  reactor: CombatantId,
+  definition: SpellDefinition,
+): ReactionAvailability {
+  const subject = combatant(state, reactor);
+  if (subject.life !== 'living' || isIncapacitated(combatantConditions(state, reactor))) {
+    return 'incapacitated';
+  }
+  if (!subject.turn.reactionAvailable) return 'reaction_spent';
+  if (definition.level > 0 && !subject.spellSlots.some(
+    (slot) => slot.level >= definition.level && slot.remaining > 0,
+  )) return 'slot_unavailable';
+  return 'available';
+}
+
+function reactionResponseTargets(event: ReactionTriggerEvent): readonly CombatantId[] {
+  switch (event.kind) {
+    case 'hit_by_attack': return [event.target];
+    case 'damaged_by_creature': return [event.source];
+    case 'taking_damage_of_type': return [event.target];
+    case 'creature_casts_spell': return [event.caster];
+  }
+}
+
+interface ReactionResolution {
+  readonly reactor: CombatantId;
+  readonly spellId: string;
+  readonly cancelledTrigger: boolean;
+}
+
+function offerReaction(
+  context: ReductionContext,
+  event: ReactionTriggerEvent,
+): ReactionResolution | null {
+  const fixedReactor = reactionEventTarget(event);
+  const possibleReactors = fixedReactor === null
+    ? context.state.combatants.map((subject) => subject.profile.id)
+    : [fixedReactor];
+  const candidates = possibleReactors.flatMap((reactor) =>
+    importedReactionDefinitions(context.state).flatMap(({ definition, operation }) =>
+      reactionTriggerMatches(context.state, reactor, operation.trigger, event)
+        ? [{ reactor, definition, operation }]
+        : []));
+  const offers = candidates.map(({ reactor, definition, operation }): ReactionOffer => ({
+    reactor, spellId: definition.id, trigger: operation.trigger.kind,
+    availability: reactionAvailability(context.state, reactor, definition),
+  }));
+  for (const offer of offers) {
+    emit(context, {
+      type: 'reaction_offered', combatant: offer.reactor, spellId: offer.spellId,
+      trigger: offer.trigger, availability: offer.availability,
+    });
+  }
+  if (offers.length === 0 || context.reactionDecision === null) return null;
+  const command = context.reactionDecision({ state: context.state, event, offers });
+  if (command === null) return null;
+  const selected = candidates.find(({ reactor, definition }) =>
+    reactor === command.actor && definition.id === command.spellId);
+  if (selected === undefined) {
+    throw new EncounterRuleError('The controller selected a Reaction that was not offered for this trigger.');
+  }
+  const availability = reactionAvailability(context.state, selected.reactor, selected.definition);
+  if (availability !== 'available') {
+    emit(context, {
+      type: 'reaction_refused', combatant: selected.reactor,
+      spellId: selected.definition.id, reason: availability,
+    });
+    return null;
+  }
+  const targets = reactionResponseTargets(event);
+  if (
+    command.castAsRitual ||
+    !sameIdentitySet(command.targets, targets) ||
+    (event.kind === 'hit_by_attack' && command.modifierSource !== event.attacker) ||
+    (event.kind !== 'hit_by_attack' && command.modifierSource !== undefined)
+  ) {
+    throw new EncounterRuleError('The controller altered the offered Reaction target or trigger binding.');
+  }
+  if (
+    selected.definition.level > 0 &&
+    (command.slotLevel === null || command.slotLevel < selected.definition.level ||
+      !combatant(context.state, command.actor).spellSlots.some(
+        (slot) => slot.level === command.slotLevel && slot.remaining > 0,
+      ))
+  ) {
+    emit(context, {
+      type: 'reaction_refused', combatant: selected.reactor,
+      spellId: selected.definition.id, reason: 'slot_unavailable',
+    });
+    return null;
+  }
+  spendSpellCastingCost(context, selected.definition, command);
+  spendSpellSlot(context, selected.definition, command);
+  emit(context, {
+    type: 'spell_cast', caster: command.actor, spellId: selected.definition.id,
+    slotLevel: command.slotLevel, targets,
+  });
+  let cancelledTrigger = false;
+  if (selected.operation.response.kind === 'reaction_save_cancel') {
+    const target = targets[0];
+    if (target === undefined) throw new EncounterRuleError('A cancelling Reaction requires one triggering caster.');
+    cancelledTrigger = resolveTargetSave(
+      context, command.actor, target, selected.operation.response.ability,
+      command.saveDc, 'normal', null,
+    ).outcome === 'failure';
+  } else {
+    executeSpellOperation(
+      context, selected.definition, { ...command, targets }, targets,
+      selected.operation.response,
+    );
+  }
+  emit(context, {
+    type: 'reaction_resolved', combatant: selected.reactor,
+    spellId: selected.definition.id, trigger: selected.operation.trigger.kind,
+  });
+  return { reactor: selected.reactor, spellId: selected.definition.id, cancelledTrigger };
+}
+
 function processSpellCast(context: ReductionContext, command: SpellCastCommand): void {
   if (combatant(context.state, command.actor).form?.spellcasting === 'prohibited') {
     throw new EncounterRuleError(`Combatant ${command.actor} cannot cast spells in its current form.`);
@@ -5741,8 +5986,22 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
   const definition = spellDefinition(command.spellId) ??
     importedSpellDefinition(context.state.contentPacks, command.spellId);
   if (definition === null) throw new EncounterRuleError(`Spell ${command.spellId} is not implemented.`);
+  if (definition.operation.kind === 'reaction') {
+    throw new EncounterRuleError(`${definition.name} can be cast only through its declared Reaction trigger.`);
+  }
   const targets = selectedSpellTargets(context.state, definition, command);
   spendSpellCastingCost(context, definition, command);
+  const interception = offerReaction(context, {
+    kind: 'creature_casts_spell', caster: command.actor, spellId: definition.id,
+    hasComponents: definition.components.verbal || definition.components.somatic || definition.components.material !== null,
+  });
+  if (interception?.cancelledTrigger === true) {
+    emit(context, {
+      type: 'spell_cast_intercepted', caster: command.actor, spellId: definition.id,
+      reactor: interception.reactor, reactionSpellId: interception.spellId,
+    });
+    return;
+  }
   spendSpellSlot(context, definition, command);
   emit(context, { type: 'spell_cast', caster: command.actor, spellId: definition.id, slotLevel: command.slotLevel, targets });
 
@@ -6232,6 +6491,8 @@ function executeSpellOperation(
   operation: SpellOperation,
 ): SpellOperationOutcome {
   switch (operation.kind) {
+    case 'reaction':
+      throw new EncounterRuleError(`${definition.name} requires an event interception window.`);
     case 'composition': {
       const compositionState = context.state;
       const compositionEventCount = context.events.length;
@@ -8354,11 +8615,13 @@ export function reduceEncounter(
   state: EncounterState,
   command: EncounterCommand,
   rng: Rng,
+  options: EncounterReductionOptions = {},
 ): EncounterReduction {
   const context: ReductionContext = {
     state: { ...state, revision: state.revision + 1 },
     rng: transactionalRng(rng),
     events: [],
+    reactionDecision: options.reactionDecision ?? null,
   };
   processCommand(context, command);
   return { state: context.state, events: context.events };
