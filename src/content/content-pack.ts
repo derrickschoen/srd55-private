@@ -43,6 +43,8 @@ import {
 } from './content-pack-operation-schema';
 
 export const CONTENT_PACK_SCHEMA_VERSION = 1 as const;
+export const TRUE_POLYMORPH_PERMANENCE_REFUSAL = 'true-polymorph-permanence-not-modelled' as const;
+export const OBJECT_TO_CREATURE_REFUSAL = 'object-to-creature-not-modelled' as const;
 
 const identifier = z.string().regex(/^[a-z][a-z0-9._-]{0,63}$/u);
 const recordIdentifier = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,95}$/u);
@@ -209,6 +211,26 @@ function summonedMonsterIds(value: unknown): readonly string[] {
     return typeof record.monsterId === 'string' ? [record.monsterId] : [];
   }
   return Object.values(record).flatMap(summonedMonsterIds);
+}
+
+function formMonsterIds(value: unknown): readonly string[] {
+  if (Array.isArray(value)) return value.flatMap(formMonsterIds);
+  const record = objectRecord(value);
+  if (record === null) return [];
+  if (record.kind === 'form_replacement') {
+    const form = objectRecord(record.form);
+    return form?.kind === 'pack_monster' && typeof form.monsterId === 'string'
+      ? [form.monsterId]
+      : [];
+  }
+  return Object.values(record).flatMap(formMonsterIds);
+}
+
+function containsOperationKind(value: unknown, expected: string): boolean {
+  if (Array.isArray(value)) return value.some((entry) => containsOperationKind(entry, expected));
+  const record = objectRecord(value);
+  return record !== null && (record.kind === expected || Object.values(record)
+    .some((entry) => containsOperationKind(entry, expected)));
 }
 
 function containsOnKillSpawn(value: unknown): boolean {
@@ -511,7 +533,10 @@ export type ContentPackRecordDiagnostic = {
   | { readonly reason: 'undeclared_namespace'; readonly namespace: string }
   | { readonly reason: 'missing_feature_reference'; readonly featureId: string }
   | { readonly reason: 'missing_monster_reference'; readonly monsterId: string }
+  | { readonly reason: 'missing_form_reference'; readonly monsterId: string }
   | { readonly reason: 'on-kill-spawn-not-modelled' }
+  | { readonly reason: typeof TRUE_POLYMORPH_PERMANENCE_REFUSAL }
+  | { readonly reason: typeof OBJECT_TO_CREATURE_REFUSAL }
   | { readonly reason: 'tremorsense-not-modelled' }
   | { readonly reason: 'devilsight-not-modelled' }
   | { readonly reason: 'ethereal-plane-semantics-not-modelled' }
@@ -879,6 +904,24 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
       });
       continue;
     }
+    if (containsOperationKind(operation, 'true_polymorph_permanence')) {
+      diagnostics.push({
+        kind: 'content_pack_record_rejection', reason: TRUE_POLYMORPH_PERMANENCE_REFUSAL,
+        surface: 'spells', index, recordId: rawRecordId(record),
+        ...(kind === null ? {} : { operationKind: kind }),
+        path: ['spells', index, 'operation'],
+      });
+      continue;
+    }
+    if (containsOperationKind(operation, 'object_to_creature_transformation')) {
+      diagnostics.push({
+        kind: 'content_pack_record_rejection', reason: OBJECT_TO_CREATURE_REFUSAL,
+        surface: 'spells', index, recordId: rawRecordId(record),
+        ...(kind === null ? {} : { operationKind: kind }),
+        path: ['spells', index, 'operation'],
+      });
+      continue;
+    }
     if (hasEtherealPlaneSemantics(operation)) {
       diagnostics.push({
         kind: 'content_pack_record_rejection', reason: 'ethereal-plane-semantics-not-modelled',
@@ -1019,18 +1062,33 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
     monsters.map((monster) => importedContentId(monster.sourceId, monster.recordId)),
   );
   const resolvedSpells = spells.filter((spell) => {
-    const missing = summonedMonsterIds(spell.operation)
+    const missingSummon = summonedMonsterIds(spell.operation)
       .map((monsterId) => importedContentId(spell.sourceId, monsterId))
       .find((monsterId) => !loadedMonsterIds.has(monsterId));
-    if (missing === undefined) return true;
+    if (missingSummon !== undefined) {
+      diagnostics.push({
+        kind: 'content_pack_record_rejection', reason: 'missing_monster_reference',
+        surface: 'spells',
+        index: envelope.data.spells.findIndex((record) => rawRecordId(record) === spell.recordId),
+        recordId: spell.recordId,
+        operationKind: spell.operation.kind,
+        monsterId: missingSummon,
+        path: ['spells', 'operation', 'monsterId'],
+      });
+      return false;
+    }
+    const missingForm = formMonsterIds(spell.operation)
+      .map((monsterId) => importedContentId(spell.sourceId, monsterId))
+      .find((monsterId) => !loadedMonsterIds.has(monsterId));
+    if (missingForm === undefined) return true;
     diagnostics.push({
-      kind: 'content_pack_record_rejection', reason: 'missing_monster_reference',
+      kind: 'content_pack_record_rejection', reason: 'missing_form_reference',
       surface: 'spells',
       index: envelope.data.spells.findIndex((record) => rawRecordId(record) === spell.recordId),
       recordId: spell.recordId,
       operationKind: spell.operation.kind,
-      monsterId: missing,
-      path: ['spells', 'operation', 'monsterId'],
+      monsterId: missingForm,
+      path: ['spells', 'operation', 'form', 'monsterId'],
     });
     return false;
   });

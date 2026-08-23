@@ -13,7 +13,7 @@ import {
   type AppliedCondition,
   type ExhaustionLevel,
 } from './conditions';
-import type { CombatantProfile, CombatToken } from './combatant';
+import type { CombatantProfile, CombatRulesProfile, CombatToken } from './combatant';
 import {
   FREE_OBJECT_INTERACTIONS_PER_TURN,
   type CombatantEquipment,
@@ -92,6 +92,8 @@ import type {
   TargetCountRule,
   TargetGeometryRule,
 } from './spells/types';
+import { FORM_REPLACEMENT_RETAINED_STATISTICS } from './spells/types';
+import type { MonsterAction } from './statblock';
 import { affectedCells, creatureOccupiesAffectedCell, type AreaTemplate } from './templates';
 import {
   armorClass,
@@ -162,8 +164,27 @@ export interface EncounterCombatantState {
   readonly deathSaves: DeathSaveState | null;
   readonly turn: TurnResources;
   readonly temporaryHitPoints: number;
+  /** Present only while a replacement form is active; omission preserves untouched state identity. */
+  readonly form?: FormReplacementState;
   readonly spellSlots: readonly SpellSlotState[];
   readonly limitedResources?: readonly LimitedResourceState[];
+}
+
+/**
+ * Reducer-owned reversible form state. Original HP remains on the combatant;
+ * form HP is a separate pool so neither can be mistaken for the other.
+ */
+export interface FormReplacementState {
+  readonly effectId: EncounterEffectId;
+  readonly formId: string;
+  readonly formName: string;
+  readonly hitPoints: number;
+  readonly hitPointMaximum: number;
+  readonly originalProfile: CombatantProfile;
+  readonly availableActions: readonly MonsterAction[];
+  readonly retainedStatistics: typeof FORM_REPLACEMENT_RETAINED_STATISTICS;
+  readonly equipmentDisposition: 'merged_into_form' | 'dropped_at_origin';
+  readonly spellcasting: 'prohibited';
 }
 
 export interface SpellSlotState {
@@ -663,6 +684,13 @@ function token(state: EncounterState, id: CombatantId): CombatToken {
 
 export function isCombatantOnBoard(state: EncounterState, id: CombatantId): boolean {
   return state.tokens.some((candidate) => candidate.combatantId === id);
+}
+
+export function availableFormActions(
+  state: EncounterState,
+  id: CombatantId,
+): readonly MonsterAction[] | null {
+  return combatant(state, id).form?.availableActions ?? null;
 }
 
 function replaceCombatant(
@@ -1688,6 +1716,14 @@ function endEffects(
     if (effect.payload.kind === 'temporary_banishment') {
       restoreBanishedTargets(context, effect, reason === 'duration_expired');
     }
+    context.state = {
+      ...context.state,
+      combatants: context.state.combatants.map((subject) => {
+        if (subject.form?.effectId !== effect.id) return subject;
+        const { form, ...withoutForm } = subject;
+        return { ...withoutForm, profile: form.originalProfile };
+      }),
+    };
     despawnOwnedCombatants(context, effect);
     emit(context, { type: 'effect_ended', effectId: effect.id, reason });
   }
@@ -1773,7 +1809,8 @@ const NATURAL_ONE_FAILURES = 2;
 const NATURAL_TWENTY_HIT_POINTS = 1;
 
 function effectiveHitPointMaximum(state: EncounterState, target: CombatantId): number {
-  const base = combatant(state, target).profile.rules.hitPointMaximum;
+  const subject = combatant(state, target);
+  const base = (subject.form?.originalProfile ?? subject.profile).rules.hitPointMaximum;
   return state.effects.reduce((maximum, candidate) =>
     candidate.targets.includes(target) && candidate.payload.kind === 'hit_point_maximum_modifier'
       ? maximum + candidate.payload.amount
@@ -1793,6 +1830,36 @@ function applyDamage(
   const before = combatant(context.state, target);
   const hitPointMaximum = effectiveHitPointMaximum(context.state, target);
   if (before.life === 'dead' || amount === 0) return;
+  if (before.form !== undefined) {
+    const absorbedByForm = Math.min(before.form.hitPoints, amount);
+    const formHitPoints = before.form.hitPoints - absorbedByForm;
+    context.state = replaceCombatant(context.state, {
+      ...before,
+      form: { ...before.form, hitPoints: formHitPoints },
+    });
+    if (formHitPoints > 0) {
+      emit(context, {
+        type: 'damage_applied', source, target, amount: 0,
+        hitPointsBefore: before.hitPoints, hitPointsAfter: before.hitPoints,
+        lifeState: before.life, massiveDamage: false,
+      });
+      breakEffectsOnDamage(context, source, target, amount);
+      return;
+    }
+    endEffects(context, new Set([before.form.effectId]), 'form_hit_points_depleted');
+    const carryover = amount - absorbedByForm;
+    if (carryover > 0) {
+      applyDamage(context, source, target, carryover, critical);
+    } else {
+      emit(context, {
+        type: 'damage_applied', source, target, amount: 0,
+        hitPointsBefore: before.hitPoints, hitPointsAfter: before.hitPoints,
+        lifeState: before.life, massiveDamage: false,
+      });
+      breakEffectsOnDamage(context, source, target, amount);
+    }
+    return;
+  }
   const absorbed = Math.min(before.temporaryHitPoints, amount);
   const hitPointDamage = amount - absorbed;
   const hitPointsAfter = Math.max(0, before.hitPoints - hitPointDamage);
@@ -2124,6 +2191,12 @@ function processEquipmentCommand(
   context: ReductionContext,
   command: Extract<EncounterCommand, { readonly type: 'drop_item' | 'pickup_item' | 'equip_item' | 'stow_item' }>,
 ): void {
+  if (combatant(context.state, command.actor).form?.equipmentDisposition === 'merged_into_form') {
+    throw new EquipmentRuleError(
+      'form_equipment_unavailable',
+      `Combatant ${command.actor}'s equipment is merged into its current form.`,
+    );
+  }
   const definition = encounterItem(context.state, command.item);
   const equipment = combatantEquipment(context.state, command.actor);
   switch (command.type) {
@@ -3789,6 +3862,29 @@ function processAttack(
     { readonly type: 'attack' | 'opportunity_attack' }
   >,
 ): void {
+  const activeForm = combatant(context.state, command.actor).form;
+  if (activeForm !== undefined) {
+    const action = activeForm.availableActions.find((candidate): candidate is Extract<MonsterAction, { readonly kind: 'attack' }> =>
+      candidate.kind === 'attack' && candidate.id === command.attackId);
+    if (action === undefined) {
+      throw new EncounterRuleError(`Combatant ${command.actor} must use an attack from form ${activeForm.formId}.`);
+    }
+    const declaredDamage = {
+      terms: action.damage.filter((term) => term.trigger.kind === 'always').map((term) => ({
+        type: damageType(term.type),
+        dice: { count: term.dice.count, sides: dieSides(term.dice.sides), modifier: term.dice.modifier },
+      })),
+      critical: false,
+      responses: [],
+    };
+    if (
+      command.attackBonus !== action.attackBonus ||
+      command.criticalFloor !== 20 ||
+      canonicalJson(command.damage) !== canonicalJson(declaredDamage)
+    ) {
+      throw new EncounterRuleError(`Combatant ${command.actor}'s form attack declaration was altered.`);
+    }
+  }
   if (!isCombatantOnBoard(context.state, command.actor)) {
     throw new EncounterRuleError(`Combatant ${command.actor} is absent from the board.`);
   }
@@ -5639,6 +5735,9 @@ function resolvedPersistentAreaSpellEffect(
 }
 
 function processSpellCast(context: ReductionContext, command: SpellCastCommand): void {
+  if (combatant(context.state, command.actor).form?.spellcasting === 'prohibited') {
+    throw new EncounterRuleError(`Combatant ${command.actor} cannot cast spells in its current form.`);
+  }
   const definition = spellDefinition(command.spellId) ??
     importedSpellDefinition(context.state.contentPacks, command.spellId);
   if (definition === null) throw new EncounterRuleError(`Spell ${command.spellId} is not implemented.`);
@@ -5869,6 +5968,141 @@ function summonMonster(
   );
 }
 
+function formReplacementRules(
+  original: CombatantProfile,
+  operation: Extract<BranchSpellOperation, { readonly kind: 'form_replacement' }>,
+  monster: LoadedContentPack['monsters'][number] | null,
+): { readonly formId: string; readonly formName: string; readonly rules: CombatRulesProfile; readonly actions: readonly MonsterAction[] } {
+  if (operation.form.kind === 'pack_monster') {
+    if (monster === null) throw new EncounterRuleError('A pack-monster form did not resolve its statblock.');
+    const projected = importedMonsterProfile(monster, {
+      combatantId: `form:${String(original.id)}`,
+      tokenId: `form:${String(original.tokenId)}`,
+    });
+    return {
+      formId: monster.id,
+      formName: monster.name,
+      rules: {
+        ...projected.rules,
+        ...(original.rules.creatureType === undefined ? {} : { creatureType: original.rules.creatureType }),
+        spellSlots: [],
+      },
+      actions: monster.actions,
+    };
+  }
+  const stats = operation.form.stats;
+  return {
+    formId: stats.id,
+    formName: stats.name,
+    rules: {
+      armorClass: armorClass(stats.armorClass),
+      hitPointMaximum: stats.hitPointMaximum,
+      speed: feet(stats.speedFeet),
+      initiativeBonus: stats.initiativeBonus,
+      savingThrowBonuses: { ...stats.savingThrowBonuses },
+      attacksPerAction: stats.attacksPerAction,
+      reach: feet(stats.reachFeet),
+      damageResponses: stats.damageResponses.map((entry) => ({
+        type: damageType(entry.type), response: entry.response,
+      })),
+      conditionImmunities: [...stats.conditionImmunities],
+      usesDeathSaves: false,
+      senses: structuredClone(stats.senses),
+      ...(original.rules.creatureType === undefined ? {} : { creatureType: original.rules.creatureType }),
+      spellSlots: [],
+    },
+    actions: stats.actions,
+  };
+}
+
+function dropEquipmentForForm(context: ReductionContext, target: CombatantId): void {
+  if (context.state.equipment === undefined) return;
+  const equipment = combatantEquipment(context.state, target);
+  const items = [...heldItems(equipment.hands), ...equipment.worn, ...equipment.carried];
+  if (items.length === 0) return;
+  const position = { ...token(context.state, target).position };
+  context.state = {
+    ...replaceEquipment(context.state, {
+      combatant: target, hands: { kind: 'empty' }, worn: [], carried: [],
+    }),
+    groundItems: [
+      ...(context.state.groundItems ?? []),
+      ...items.map((item) => ({ item, position: { ...position } })),
+    ],
+    itemContacts: (context.state.itemContacts ?? []).filter((contact) =>
+      contact.combatant !== target || !items.includes(contact.item)),
+  };
+  for (const item of items) {
+    emit(context, { type: 'item_dropped', combatant: target, item, position, cause: 'form_replacement' });
+  }
+}
+
+function resolveFormReplacement(
+  context: ReductionContext,
+  definition: SpellDefinition,
+  command: SpellCastCommand,
+  targets: readonly CombatantId[],
+  operation: Extract<BranchSpellOperation, { readonly kind: 'form_replacement' }>,
+): SpellOperationOutcome {
+  if (targets.length === 0) return 'no_op';
+  const existingForms = new Set(targets.flatMap((target) => {
+    const form = combatant(context.state, target).form;
+    return form === undefined ? [] : [form.effectId];
+  }));
+  endEffects(context, existingForms, 'stacking_replaced');
+  const monster = operation.form.kind === 'pack_monster'
+    ? summonMonster(context.state, definition, operation.form.monsterId)
+    : null;
+  const replacements = targets.map((target) => {
+    const subject = combatant(context.state, target);
+    return { target, subject, replacement: formReplacementRules(subject.profile, operation, monster) };
+  });
+  const effectId = applyEffect(context, command.actor, {
+    targets,
+    duration: {
+      kind: 'turn_boundaries',
+      timing: {
+        combatant: command.actor,
+        boundary: operation.lifecycle.expiresAt === 'source_start' ? 'start' : 'end',
+        source: definition.source,
+      },
+      remaining: operation.lifecycle.durationRounds,
+    },
+    concentration: operation.lifecycle.concentration,
+    stackingIdentity: effectStackingIdentity(`spell:${definition.id}:form-replacement`),
+    stacking: 'replace_any_source',
+    repeatedSave: null,
+    payload: {
+      kind: 'polymorph', formType: 'Beast', maximumChallengeRating: 'target_cr_or_level',
+      temporaryHitPoints: 'beast_hit_points', endsAtTemporaryHitPoints: 0,
+      canSpeak: false, canCastSpells: false,
+      gearMelds: operation.equipmentDisposition === 'merged_into_form',
+      retainedStatistics: FORM_REPLACEMENT_RETAINED_STATISTICS,
+    },
+  });
+  for (const { target, subject, replacement } of replacements) {
+    context.state = replaceCombatant(context.state, {
+      ...subject,
+      profile: { ...subject.profile, rules: replacement.rules },
+      temporaryHitPoints: 0,
+      form: {
+        effectId,
+        formId: replacement.formId,
+        formName: replacement.formName,
+        hitPoints: replacement.rules.hitPointMaximum,
+        hitPointMaximum: replacement.rules.hitPointMaximum,
+        originalProfile: subject.profile,
+        availableActions: structuredClone(replacement.actions),
+        retainedStatistics: FORM_REPLACEMENT_RETAINED_STATISTICS,
+        equipmentDisposition: operation.equipmentDisposition,
+        spellcasting: operation.spellcasting,
+      },
+    });
+    if (operation.equipmentDisposition === 'dropped_at_origin') dropEquipmentForForm(context, target);
+  }
+  return 'applied';
+}
+
 function validateSummonDestinations(
   state: EncounterState,
   definition: SpellDefinition,
@@ -6036,6 +6270,8 @@ function executeSpellOperation(
     case 'summon':
       resolveSummon(context, definition, command, operation);
       return 'applied';
+    case 'form_replacement':
+      return resolveFormReplacement(context, definition, command, targets, operation);
     case 'caster_choice': {
       const mode = operation.modes.find((candidate) => candidate.mode === command.selectedOption);
       if (mode === undefined) {

@@ -593,8 +593,8 @@
                             ]
                           },
                           "geometry": {
-                            "type": "array",
                             "maxItems": 3,
+                            "type": "array",
                             "items": {
                               "oneOf": [
                                 {
@@ -742,8 +742,8 @@
                             ]
                           },
                           "geometry": {
-                            "type": "array",
                             "maxItems": 3,
+                            "type": "array",
                             "items": {
                               "oneOf": [
                                 {
@@ -5300,27 +5300,52 @@
                     {
                       "type": "object",
                       "properties": {
-                        "kind": { "type": "string", "const": "normal_sight" }
+                        "kind": {
+                          "type": "string",
+                          "const": "normal_sight"
+                        }
                       },
-                      "required": ["kind"],
+                      "required": [
+                        "kind"
+                      ],
                       "additionalProperties": false
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "kind": { "type": "string", "const": "blindsight" },
-                        "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                        "kind": {
+                          "type": "string",
+                          "const": "blindsight"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
                       },
-                      "required": ["kind", "rangeFeet"],
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
                       "additionalProperties": false
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "kind": { "type": "string", "const": "truesight" },
-                        "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                        "kind": {
+                          "type": "string",
+                          "const": "truesight"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
                       },
-                      "required": ["kind", "rangeFeet"],
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
                       "additionalProperties": false
                     }
                   ]
@@ -5438,27 +5463,52 @@
                     {
                       "type": "object",
                       "properties": {
-                        "kind": { "type": "string", "const": "normal_sight" }
+                        "kind": {
+                          "type": "string",
+                          "const": "normal_sight"
+                        }
                       },
-                      "required": ["kind"],
+                      "required": [
+                        "kind"
+                      ],
                       "additionalProperties": false
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "kind": { "type": "string", "const": "blindsight" },
-                        "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                        "kind": {
+                          "type": "string",
+                          "const": "blindsight"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
                       },
-                      "required": ["kind", "rangeFeet"],
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
                       "additionalProperties": false
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "kind": { "type": "string", "const": "truesight" },
-                        "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                        "kind": {
+                          "type": "string",
+                          "const": "truesight"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
                       },
-                      "required": ["kind", "rangeFeet"],
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
                       "additionalProperties": false
                     }
                   ]
@@ -5712,27 +5762,52 @@
                     {
                       "type": "object",
                       "properties": {
-                        "kind": { "type": "string", "const": "normal_sight" }
+                        "kind": {
+                          "type": "string",
+                          "const": "normal_sight"
+                        }
                       },
-                      "required": ["kind"],
+                      "required": [
+                        "kind"
+                      ],
                       "additionalProperties": false
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "kind": { "type": "string", "const": "blindsight" },
-                        "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                        "kind": {
+                          "type": "string",
+                          "const": "blindsight"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
                       },
-                      "required": ["kind", "rangeFeet"],
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
                       "additionalProperties": false
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "kind": { "type": "string", "const": "truesight" },
-                        "rangeFeet": { "type": "integer", "minimum": 1, "maximum": 100000 }
+                        "kind": {
+                          "type": "string",
+                          "const": "truesight"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
                       },
-                      "required": ["kind", "rangeFeet"],
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
                       "additionalProperties": false
                     }
                   ]

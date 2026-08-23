@@ -63,6 +63,7 @@ export type EquipmentRefusalCode =
   | 'hand_capacity_exceeded'
   | 'equip_location_mismatch'
   | 'material_mismatch'
+  | 'form_equipment_unavailable'
   | 'cannot_drop'
   | 'free_interaction_spent'
   | 'utilize_action_unavailable';

@@ -1168,7 +1168,7 @@ export type EffectPayload =
       readonly endsAtTemporaryHitPoints: number;
       readonly canSpeak: false;
       readonly canCastSpells: false;
-      readonly gearMelds: true;
+      readonly gearMelds: boolean;
       readonly retainedStatistics: readonly ('alignment' | 'personality' | 'creature_type' | 'hit_points' | 'hit_point_dice')[];
     }
   | {
