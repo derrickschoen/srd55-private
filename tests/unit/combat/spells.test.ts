@@ -653,6 +653,7 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
   switch (operation.kind) {
     case 'composition':
     case 'shared_outcome':
+    case 'reaction':
     case 'caster_choice':
     case 'random_branch':
     case 'target_branch':
@@ -748,6 +749,7 @@ function operationPerSlot(definition: SpellDefinition): number {
   switch (operation.kind) {
     case 'composition':
     case 'shared_outcome':
+    case 'reaction':
     case 'caster_choice':
     case 'random_branch':
     case 'target_branch':

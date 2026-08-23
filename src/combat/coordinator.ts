@@ -14,6 +14,7 @@ import {
   EncounterRuleError,
   reduceEncounter,
   type EncounterReduction,
+  type ReactionDecisionHook,
   type EncounterState,
 } from './encounter';
 import type { EncounterCommand, EncounterEvent } from './events';
@@ -113,6 +114,8 @@ export interface CoordinatorOptions {
   readonly persistence?: CoordinatorPersistence;
   readonly resume?: PersistedCoordinatorState;
   readonly expectedControllers?: readonly ControllerIdentity[];
+  /** Synchronous event-interception seam; opportunity attacks keep the pending-request path above. */
+  readonly reactionDecision?: ReactionDecisionHook;
 }
 
 export type CoordinatorStep =
@@ -217,6 +220,7 @@ export class TurnCoordinator {
   readonly #turnLegalActions: TurnLegalActions;
   readonly #reactionLegalActions: ReactionLegalActions;
   readonly #persistence: CoordinatorPersistence | undefined;
+  readonly #reactionDecision: ReactionDecisionHook | undefined;
 
   constructor(
     initialState: EncounterState,
@@ -231,6 +235,7 @@ export class TurnCoordinator {
     this.#continuation = options.resume?.continuation ?? IDLE;
     this.#pause = options.resume?.pause ?? null;
     this.#persistence = options.persistence;
+    this.#reactionDecision = options.reactionDecision;
     this.#turnLegalActions =
       options.turnLegalActions ??
       ((_state, actor) => ({ actions: [{ type: 'end_turn', actor }] }));
@@ -426,7 +431,9 @@ export class TurnCoordinator {
     command: EncounterCommand,
     continuation: CoordinatorContinuation,
   ): EncounterReduction {
-    const reduction = reduceEncounter(this.#state, command, this.rng);
+    const reduction = reduceEncounter(this.#state, command, this.rng, {
+      ...(this.#reactionDecision === undefined ? {} : { reactionDecision: this.#reactionDecision }),
+    });
     this.#state = reduction.state;
     for (const event of reduction.events) {
       if (event.type === 'combatant_summoned') {
