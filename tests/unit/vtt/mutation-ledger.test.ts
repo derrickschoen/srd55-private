@@ -57,6 +57,7 @@ const REACTIONS_LEDGER_PATH = 'docs/audits/2026-08-23-reactions-mutation-ledger.
 const SUMMONS_LEDGER_PATH = 'docs/audits/2026-08-23-summons-mutation-ledger.md';
 const FORMS_LEDGER_PATH = 'docs/audits/2026-08-23-forms-mutation-ledger.md';
 const PCBRIDGE_LEDGER_PATH = 'docs/audits/2026-08-23-pcbridge-mutation-ledger.md';
+const VIEW_SEAMS_LEDGER_PATH = 'docs/audits/2026-08-23-seams-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -73,6 +74,31 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D359-VIEW-SEAMS-MUTATION-LEDGER pins all four restored controls to their killing checks', () => {
+    const seamsLedger = readFileSync(VIEW_SEAMS_LEDGER_PATH, 'utf8');
+    const visibilityTests = readFileSync('tests/unit/combat/visibility.test.ts', 'utf8');
+    const persistenceTests = readFileSync('tests/unit/vtt/session-persistence.test.ts', 'utf8');
+    for (const control of [
+      'fogged_cell_leaks',
+      'new_field_defaults_visible',
+      'seat_confusion',
+      'playerview_serialized',
+    ]) {
+      expect(seamsLedger).toContain(`\`${control}\``);
+    }
+    expect(visibilityTests).toContain(
+      'omits a fogged edge cell and its contents while retaining the adjacent visible boundary cell',
+    );
+    expect(visibilityTests).toContain(
+      'gates owned details per seat and produces distinguishing views over the same state',
+    );
+    expect(persistenceTests).toContain('PLAYERVIEW-NEVER-SERIALIZED');
+    expect(seamsLedger).toContain("Property 'mutationProbe' is missing");
+    expect(seamsLedger.match(/`exit 1`/gu)).toHaveLength(4);
+    expect(seamsLedger).toContain('Tests `17 passed (17)`');
+    expect(seamsLedger).toContain('All four mutations were restored.');
+  });
+
   it('D352.1-PCBRIDGE-MUTATION-LEDGER pins all five restored bridge controls', () => {
     const ledger = readFileSync(PCBRIDGE_LEDGER_PATH, 'utf8');
     const exporterTests = readFileSync(

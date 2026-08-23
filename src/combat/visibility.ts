@@ -11,19 +11,70 @@ import type { EncounterEvent } from './events';
 import type { GridCell } from './grid';
 import type { CombatantId } from './values';
 
-export type EncounterViewer =
-  | { readonly kind: 'dm' }
-  | { readonly kind: 'player'; readonly combatantId: CombatantId };
+export type EncounterViewClassification = 'dm_only' | 'player_visible' | 'per_seat';
+
+/** D359's exhaustive projection-decision inventory. */
+export const ENCOUNTER_VIEW_CLASSIFICATION = {
+  config: 'player_visible',
+  revision: 'player_visible',
+  nextEventSequence: 'dm_only',
+  nextEffectSequence: 'dm_only',
+  bounds: 'player_visible',
+  blockedCells: 'per_seat',
+  worldObjects: 'per_seat',
+  nextWorldObjectSequence: 'dm_only',
+  environment: 'dm_only',
+  foggedCells: 'dm_only',
+  dmNotes: 'dm_only',
+  combatants: 'per_seat',
+  tokens: 'per_seat',
+  absentTokens: 'dm_only',
+  initiative: 'per_seat',
+  activeCombatant: 'player_visible',
+  activeInitiativeIndex: 'dm_only',
+  round: 'player_visible',
+  effects: 'dm_only',
+  persistentAreas: 'dm_only',
+  nextPersistentAreaSequence: 'dm_only',
+  reevaluatedBranches: 'dm_only',
+  eventLog: 'per_seat',
+  contentPacks: 'dm_only',
+  equipment: 'dm_only',
+  groundItems: 'dm_only',
+  itemContacts: 'dm_only',
+} as const satisfies Readonly<Record<keyof EncounterState, EncounterViewClassification>>;
+
+type ProjectedCanonicalEncounterState = {
+  readonly [Field in keyof EncounterState]: EncounterState[Field];
+};
+
+/** Omniscient view seam. The wrapper prevents EncounterState from being passed as a view. */
+export interface DmView {
+  readonly audience: 'dm';
+  readonly state: ProjectedCanonicalEncounterState;
+}
+
+export interface PlayerSeatBinding {
+  readonly seatId: string;
+  /** The combatant whose current senses establish this seat's visibility. */
+  readonly combatantId: CombatantId;
+  /** Combatants controlled by this seat; defaults to the bound combatant. */
+  readonly ownedCombatantIds?: readonly CombatantId[];
+}
 
 export interface PlayerVisibleCombatant {
   readonly id: CombatantId;
   readonly name: string;
   readonly kind: 'player_character' | 'monster';
-  /** Exact Hit Points are present only for the viewing PC. */
-  readonly hitPoints?: number;
   readonly life: LifeState;
   readonly position: GridCell;
   readonly active: boolean;
+}
+
+export interface PlayerOwnedCombatant {
+  readonly id: CombatantId;
+  readonly hitPoints: number;
+  readonly turn: TurnResources;
 }
 
 export interface DmVisibleCombatant extends PlayerVisibleCombatant {
@@ -35,7 +86,9 @@ export interface DmVisibleCombatant extends PlayerVisibleCombatant {
 }
 
 export type PlayerVisibleEncounterEvent =
-  | Exclude<EncounterEvent, Extract<EncounterEvent, { readonly type: 'adjudicated' }>>
+  | Exclude<EncounterEvent,
+      { readonly type: 'adjudicated' } | { readonly visibility: 'dm_only' }
+    >
   | {
       readonly sequence: number;
       readonly type: 'adjudicated';
@@ -43,7 +96,25 @@ export type PlayerVisibleEncounterEvent =
       readonly consequence: Extract<EncounterEvent, { readonly type: 'adjudicated' }>['consequence'];
     };
 
-interface VisibleEncounterBase<Event> {
+export interface PlayerView {
+  readonly audience: 'player';
+  readonly seat: PlayerSeatBinding;
+  readonly revision: number;
+  readonly round: number;
+  readonly activeCombatant: CombatantId | null;
+  readonly bounds: EncounterState['bounds'];
+  /** Cells that exist for this seat. Fogged cells are absent, not flagged. */
+  readonly cells: readonly GridCell[];
+  readonly blockedCells: readonly GridCell[];
+  readonly worldObjects: EncounterState['worldObjects'];
+  readonly combatants: readonly PlayerVisibleCombatant[];
+  readonly ownedCombatants: readonly PlayerOwnedCombatant[];
+  readonly recentEvents: readonly PlayerVisibleEncounterEvent[];
+}
+
+/** Compact DM-facing summary used by controllers and bridge envelopes. */
+export interface DmVisibleEncounterState {
+  readonly viewer: 'dm';
   readonly revision: number;
   readonly round: number;
   readonly activeCombatant: CombatantId | null;
@@ -51,35 +122,34 @@ interface VisibleEncounterBase<Event> {
   readonly blockedCells: readonly GridCell[];
   readonly worldObjects: EncounterState['worldObjects'];
   readonly environment: EncounterState['environment'];
-  readonly recentEvents: readonly Event[];
-}
-
-export interface PlayerVisibleEncounterState extends VisibleEncounterBase<PlayerVisibleEncounterEvent> {
-  readonly viewer: 'player';
-  readonly combatants: readonly PlayerVisibleCombatant[];
-}
-
-export interface DmVisibleEncounterState extends VisibleEncounterBase<EncounterEvent> {
-  readonly viewer: 'dm';
   readonly combatants: readonly DmVisibleCombatant[];
+  readonly recentEvents: readonly EncounterEvent[];
   readonly dmOnly: {
     readonly foggedCells: readonly GridCell[];
     readonly notes: readonly string[];
   };
 }
 
-export type VisibleEncounterState =
-  | PlayerVisibleEncounterState
-  | DmVisibleEncounterState;
+export type PlayerVisibleEncounterState = PlayerView;
+export type VisibleEncounterState = PlayerView | DmVisibleEncounterState;
 
 function cellKey(cell: GridCell): string {
   return `${cell.column},${cell.row}`;
 }
 
+function allCells(bounds: EncounterState['bounds']): readonly GridCell[] {
+  const cells: GridCell[] = [];
+  for (let row = 0; row < bounds.rows; row += 1) {
+    for (let column = 0; column < bounds.columns; column += 1) {
+      cells.push({ column, row });
+    }
+  }
+  return cells;
+}
+
 function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
   switch (event.type) {
-    case 'adjudicated':
-      return [event.target];
+    case 'adjudicated': return [event.target];
     case 'initiative_rolled':
     case 'turn_started':
     case 'movement_completed':
@@ -99,46 +169,28 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'item_dropped':
     case 'item_picked_up':
     case 'item_equipped':
-    case 'item_stowed':
-      return [event.combatant];
-    case 'initiative_block_rolled':
-      return event.combatants;
+    case 'item_stowed': return [event.combatant];
+    case 'initiative_block_rolled': return event.combatants;
     case 'spell_cast':
-      return [event.caster, ...event.targets];
     case 'sustained_effect_activated':
-      return [event.caster, ...event.targets];
-    case 'sustained_effect_triggered':
-      return [event.caster, ...event.targets];
+    case 'sustained_effect_triggered': return [event.caster, ...event.targets];
     case 'spell_utility_resolved':
-    case 'composition_step_resolved':
-      return [event.caster];
-    case 'shared_outcome_resolved':
-      return [event.caster, event.target];
-    case 'reaction_declined':
-      return [event.combatant, event.mover];
+    case 'composition_step_resolved': return [event.caster];
+    case 'shared_outcome_resolved': return [event.caster, event.target];
+    case 'reaction_declined': return [event.combatant, event.mover];
     case 'reaction_offered':
     case 'reaction_refused':
-    case 'reaction_resolved':
-      return [event.combatant];
-    case 'spell_cast_intercepted':
-      return [event.caster, event.reactor];
-    case 'initiative_ordered':
-      return event.order;
-    case 'attack_resolved':
-      return [event.actor, event.target];
-    case 'ability_check_resolved':
-      return [event.actor];
-    case 'save_resolved':
-      return [event.source, event.target];
+    case 'reaction_resolved': return [event.combatant];
+    case 'spell_cast_intercepted': return [event.caster, event.reactor];
+    case 'initiative_ordered': return event.order;
+    case 'attack_resolved': return [event.actor, event.target];
+    case 'ability_check_resolved': return [event.actor];
+    case 'save_resolved': return [event.source, event.target];
     case 'damage_applied':
-    case 'healing_applied':
-      return [event.source, event.target];
-    case 'effect_applied':
-      return [event.source, ...event.targets];
-    case 'condition_application_refused':
-      return [event.source, event.target];
-    case 'effect_target_removed':
-      return [event.target];
+    case 'healing_applied': return [event.source, event.target];
+    case 'effect_applied': return [event.source, ...event.targets];
+    case 'condition_application_refused': return [event.source, event.target];
+    case 'effect_target_removed': return [event.target];
     case 'effect_ended':
     case 'effect_clock_ticked':
     case 'effect_duration_extended':
@@ -151,13 +203,16 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'environment_light_changed':
       return 'actor' in event && event.actor !== null ? [event.actor] : [];
     case 'persistent_area_created':
-    case 'persistent_area_moved':
-      return [event.owner];
-    case 'persistent_area_membership_changed':
-      return [...event.entered, ...event.exited];
-    case 'persistent_area_triggered':
-      return [event.target];
+    case 'persistent_area_moved': return [event.owner];
+    case 'persistent_area_membership_changed': return [...event.entered, ...event.exited];
+    case 'persistent_area_triggered': return [event.target];
   }
+}
+
+function isDmOnlyEvent(
+  event: EncounterEvent,
+): event is Extract<EncounterEvent, { readonly visibility: 'dm_only' }> {
+  return 'visibility' in event && event.visibility === 'dm_only';
 }
 
 function playerEvents(
@@ -165,14 +220,12 @@ function playerEvents(
   visibleIds: ReadonlySet<CombatantId>,
 ): readonly PlayerVisibleEncounterEvent[] {
   return events.flatMap((event): readonly PlayerVisibleEncounterEvent[] => {
-    if ('visibility' in event && event.visibility === 'dm_only') return [];
+    if (isDmOnlyEvent(event)) return [];
     if (
       event.type === 'effect_ended' ||
       event.type === 'effect_clock_ticked' ||
       event.type === 'effect_duration_extended'
-    ) {
-      return [];
-    }
+    ) return [];
     if (event.type === 'initiative_ordered') {
       return [{
         ...event,
@@ -184,109 +237,133 @@ function playerEvents(
     }
     if (event.type === 'adjudicated') {
       return visibleIds.has(event.target)
-        ? [{
-            sequence: event.sequence,
-            type: 'adjudicated',
-            target: event.target,
-            consequence: event.consequence,
-          }]
+        ? [{ sequence: event.sequence, type: 'adjudicated', target: event.target, consequence: event.consequence }]
         : [];
     }
     return eventCombatants(event).every((id) => visibleIds.has(id)) ? [event] : [];
   });
 }
 
-export function projectEncounter(
-  state: EncounterState,
-  viewer: { readonly kind: 'dm' },
-): DmVisibleEncounterState;
-export function projectEncounter(
-  state: EncounterState,
-  viewer: { readonly kind: 'player'; readonly combatantId: CombatantId },
-): PlayerVisibleEncounterState;
-export function projectEncounter(
-  state: EncounterState,
-  viewer: EncounterViewer,
-): VisibleEncounterState;
-export function projectEncounter(
-  state: EncounterState,
-  viewer: EncounterViewer,
-): VisibleEncounterState {
-  const tokensByCombatant = new Map(
-    state.tokens.map((token) => [token.combatantId, token] as const),
-  );
+/** The only canonical EncounterState -> DM projection function. */
+export function projectDmView(state: EncounterState): DmView {
+  return {
+    audience: 'dm',
+    state: {
+      config: structuredClone(state.config),
+      revision: state.revision,
+      nextEventSequence: state.nextEventSequence,
+      nextEffectSequence: state.nextEffectSequence,
+      bounds: structuredClone(state.bounds),
+      blockedCells: structuredClone(state.blockedCells),
+      worldObjects: structuredClone(state.worldObjects),
+      nextWorldObjectSequence: state.nextWorldObjectSequence,
+      environment: structuredClone(state.environment),
+      foggedCells: structuredClone(state.foggedCells),
+      dmNotes: [...state.dmNotes],
+      combatants: structuredClone(state.combatants),
+      tokens: structuredClone(state.tokens),
+      ...(state.absentTokens === undefined ? {} : { absentTokens: structuredClone(state.absentTokens) }),
+      initiative: structuredClone(state.initiative),
+      activeCombatant: state.activeCombatant,
+      activeInitiativeIndex: state.activeInitiativeIndex,
+      round: state.round,
+      effects: structuredClone(state.effects),
+      persistentAreas: structuredClone(state.persistentAreas),
+      nextPersistentAreaSequence: state.nextPersistentAreaSequence,
+      ...(state.reevaluatedBranches === undefined ? {} : { reevaluatedBranches: structuredClone(state.reevaluatedBranches) }),
+      eventLog: structuredClone(state.eventLog),
+      ...(state.contentPacks === undefined ? {} : { contentPacks: structuredClone(state.contentPacks) }),
+      ...(state.equipment === undefined ? {} : { equipment: structuredClone(state.equipment) }),
+      ...(state.groundItems === undefined ? {} : { groundItems: structuredClone(state.groundItems) }),
+      ...(state.itemContacts === undefined ? {} : { itemContacts: structuredClone(state.itemContacts) }),
+    },
+  };
+}
+
+/** The only canonical EncounterState -> player projection function. */
+export function projectPlayerView(state: EncounterState, binding: PlayerSeatBinding): PlayerView {
+  if (!state.combatants.some((subject) => subject.profile.id === binding.combatantId)) {
+    throw new Error(`Player seat ${binding.seatId} is bound to an unknown combatant.`);
+  }
+  const ownedIds = new Set(binding.ownedCombatantIds ?? [binding.combatantId]);
+  if (!ownedIds.has(binding.combatantId)) {
+    throw new Error(`Player seat ${binding.seatId} does not own its visibility combatant.`);
+  }
+  const tokensByCombatant = new Map(state.tokens.map((token) => [token.combatantId, token] as const));
   const fog = new Set(state.foggedCells.map(cellKey));
-  const base = {
+  const combatants = state.combatants.flatMap((subject): readonly PlayerVisibleCombatant[] => {
+    const token = tokensByCombatant.get(subject.profile.id);
+    if (token === undefined) throw new Error('Encounter projection found no token.');
+    const owned = ownedIds.has(subject.profile.id);
+    if (!owned && (fog.has(cellKey(token.position)) || !canCombatantSee(state, binding.combatantId, subject.profile.id))) return [];
+    return [{
+      id: subject.profile.id,
+      name: subject.profile.name,
+      kind: combatantSide(state, subject.profile.id),
+      life: subject.life,
+      position: { ...token.position },
+      active: state.activeCombatant === subject.profile.id,
+    }];
+  });
+  const visibleIds = new Set(combatants.map((subject) => subject.id));
+  return {
+    audience: 'player',
+    seat: {
+      seatId: binding.seatId,
+      combatantId: binding.combatantId,
+      ...(binding.ownedCombatantIds === undefined ? {} : { ownedCombatantIds: [...binding.ownedCombatantIds] }),
+    },
     revision: state.revision,
     round: state.round,
     activeCombatant: state.activeCombatant,
     bounds: { ...state.bounds },
+    cells: allCells(state.bounds).filter((cell) => !fog.has(cellKey(cell))),
+    blockedCells: state.blockedCells.filter((cell) => !fog.has(cellKey(cell))).map((cell) => ({ ...cell })),
+    worldObjects: state.worldObjects
+      .filter((object) => object.footprint.every((cell) => !fog.has(cellKey(cell))))
+      .map((object) => structuredClone(object)),
+    combatants,
+    ownedCombatants: state.combatants
+      .filter((subject) => ownedIds.has(subject.profile.id))
+      .map((subject) => ({ id: subject.profile.id, hitPoints: subject.hitPoints, turn: structuredClone(subject.turn) })),
+    recentEvents: playerEvents(state.eventLog, visibleIds),
+  };
+}
+
+/** Surface mapper; its input is already a DmView, never canonical state. */
+export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
+  const state = view.state;
+  const tokensByCombatant = new Map(state.tokens.map((token) => [token.combatantId, token] as const));
+  return {
+    viewer: 'dm',
+    revision: state.revision,
+    round: state.round,
+    activeCombatant: state.activeCombatant,
+    bounds: { ...state.bounds },
+    blockedCells: state.blockedCells.map((cell) => ({ ...cell })),
     worldObjects: structuredClone(state.worldObjects),
     environment: structuredClone(state.environment),
-  };
-
-  if (viewer.kind === 'dm') {
-    return {
-      ...base,
-      viewer: 'dm',
-      blockedCells: state.blockedCells.map((cell) => ({ ...cell })),
-      combatants: state.combatants.map((subject) => {
-        const token = tokensByCombatant.get(subject.profile.id);
-        if (token === undefined) throw new Error('Encounter projection found no token.');
-        return {
-          id: subject.profile.id,
-          name: subject.profile.name,
-          kind: combatantSide(state, subject.profile.id),
-          hitPoints: subject.hitPoints,
-          life: subject.life,
-          position: { ...token.position },
-          active: state.activeCombatant === subject.profile.id,
-          rules: subject.profile.rules,
-          deathSaves: subject.deathSaves,
-          turn: subject.turn,
-          spellSlots: subject.spellSlots,
-        };
-      }),
-      recentEvents: [...state.eventLog],
-      dmOnly: {
-        foggedCells: state.foggedCells.map((cell) => ({ ...cell })),
-        notes: [...state.dmNotes],
-      },
-    };
-  }
-
-  const combatants = state.combatants.flatMap(
-    (subject): readonly PlayerVisibleCombatant[] => {
+    combatants: state.combatants.map((subject) => {
       const token = tokensByCombatant.get(subject.profile.id);
       if (token === undefined) throw new Error('Encounter projection found no token.');
-      const isViewer = subject.profile.id === viewer.combatantId;
-      if (
-        !isViewer &&
-        (fog.has(cellKey(token.position)) || !canCombatantSee(state, viewer.combatantId, subject.profile.id))
-      ) return [];
-      return [{
+      return {
         id: subject.profile.id,
         name: subject.profile.name,
         kind: combatantSide(state, subject.profile.id),
-        ...(isViewer ? { hitPoints: subject.hitPoints } : {}),
+        hitPoints: subject.hitPoints,
         life: subject.life,
         position: { ...token.position },
         active: state.activeCombatant === subject.profile.id,
-      }];
+        rules: structuredClone(subject.profile.rules),
+        deathSaves: structuredClone(subject.deathSaves),
+        turn: structuredClone(subject.turn),
+        spellSlots: structuredClone(subject.spellSlots),
+      };
+    }),
+    recentEvents: structuredClone(state.eventLog),
+    dmOnly: {
+      foggedCells: state.foggedCells.map((cell) => ({ ...cell })),
+      notes: [...state.dmNotes],
     },
-  );
-  const visibleIds = new Set(combatants.map((subject) => subject.id));
-  return {
-    ...base,
-    viewer: 'player',
-    activeCombatant:
-      state.activeCombatant !== null && visibleIds.has(state.activeCombatant)
-        ? state.activeCombatant
-        : null,
-    blockedCells: state.blockedCells
-      .filter((cell) => !fog.has(cellKey(cell)))
-      .map((cell) => ({ ...cell })),
-    combatants,
-    recentEvents: playerEvents(state.eventLog, visibleIds),
   };
 }

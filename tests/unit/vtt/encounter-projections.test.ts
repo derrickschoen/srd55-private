@@ -4,7 +4,7 @@ import { createEncounter, reduceEncounter } from '../../../src/combat/encounter'
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { feetPoint } from '../../../src/combat/templates';
-import { projectEncounter } from '../../../src/combat/visibility';
+import { projectPlayerView } from '../../../src/combat/visibility';
 import { combatantId, feet } from '../../../src/combat/values';
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
 import {
@@ -28,6 +28,16 @@ const IDLE = {
   continuation: { kind: 'idle' as const },
   pause: null,
 };
+
+function partyView(state: ReturnType<typeof hiddenDeathSaveState>) {
+  const viewerId = REFERENCE_PLAYER_IDS.find((id) => id === state.activeCombatant) ?? REFERENCE_PLAYER_IDS[0];
+  if (viewerId === undefined) throw new Error('Reference party has no view binding.');
+  return projectPlayerView(state, {
+    seatId: 'seat:reference-party',
+    combatantId: viewerId,
+    ownedCombatantIds: REFERENCE_PLAYER_IDS,
+  });
+}
 
 function hiddenDeathSaveState() {
   const rng = mulberry32(61);
@@ -117,9 +127,8 @@ describe('increment 6 projection boundary', () => {
 
   it('M37-HIDDEN-ROLL-ABSENT serializes no hidden death-save result or DM facts', () => {
     const projection = projectPlayerBoard(
-      hiddenDeathSaveState(),
+      partyView(hiddenDeathSaveState()),
       IDLE,
-      REFERENCE_PLAYER_IDS,
     );
     const serialized = serializePlayerBoard(projection);
 
@@ -142,7 +151,7 @@ describe('increment 6 projection boundary', () => {
       rng,
     ).state;
 
-    const projection = projectPlayerBoard(state, IDLE, REFERENCE_PLAYER_IDS);
+    const projection = projectPlayerBoard(partyView(state), IDLE);
     expect(projection.activeCombatant).toBe(REFERENCE_CLERIC_ID);
     expect(projection.highlightedCombatant).toBe(REFERENCE_CLERIC_ID);
     expect(
@@ -152,9 +161,8 @@ describe('increment 6 projection boundary', () => {
 
   it('M41-ADJUDICATED-LABEL keeps the label and visible consequence but redacts reasoning', () => {
     const projection = projectPlayerBoard(
-      hiddenDeathSaveState(),
+      partyView(hiddenDeathSaveState()),
       IDLE,
-      REFERENCE_PLAYER_IDS,
     );
     const event = projection.events.find((candidate) => candidate.type === 'adjudicated');
 
@@ -168,9 +176,8 @@ describe('increment 6 projection boundary', () => {
 
   it('OWN-MONSTER-HP-BOUNDARY omits exact hostile HP while retaining owned PC HP', () => {
     const projection = projectPlayerBoard(
-      hiddenDeathSaveState(),
+      partyView(hiddenDeathSaveState()),
       IDLE,
-      REFERENCE_PLAYER_IDS,
     );
     const monster = projection.combatants.find((entry) => entry.id === REFERENCE_MONSTER_ID);
     const fighter = projection.combatants.find((entry) => entry.id === REFERENCE_FIGHTER_ID);
@@ -203,8 +210,8 @@ describe('increment 6 projection boundary', () => {
       requestId: 'turn:shatter',
       encounterRevision: 7,
       actorId: legal.actor,
-      visibleState: projectEncounter(createEncounter(referenceEncounterSetup()), {
-        kind: 'player',
+      visibleState: projectPlayerView(createEncounter(referenceEncounterSetup()), {
+        seatId: String(legal.actor),
         combatantId: legal.actor,
       }),
       legalActions: { actions: [legal] },

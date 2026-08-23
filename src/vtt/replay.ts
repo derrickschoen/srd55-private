@@ -6,6 +6,13 @@ import {
   type EncounterState,
 } from '../combat/encounter';
 import { restoreMulberry32, type SerializableRngState } from '../combat/random';
+import {
+  dmVisibleEncounter,
+  projectDmView,
+  projectPlayerView,
+  type DmVisibleEncounterState,
+  type PlayerView,
+} from '../combat/visibility';
 import { sha256 } from '../crypto/sha256';
 import {
   decodeApprovedEncounterFixture,
@@ -15,9 +22,7 @@ import {
 } from './generated-encounter-fixtures';
 import {
   deriveBranchRng,
-  projectPersistedProjections,
   sessionHistory,
-  type PersistedProjections,
   type SessionRevision,
 } from './session-persistence';
 import {
@@ -220,7 +225,30 @@ export class ReplayTranscriptRecorder {
   }
 }
 
-function hashProjections(projections: PersistedProjections): ReplayProjectionHashes {
+interface ReplayViews {
+  readonly dm: DmVisibleEncounterState;
+  readonly players: readonly {
+    readonly combatantId: string;
+    readonly projection: PlayerView;
+  }[];
+}
+
+function projectReplayViews(state: EncounterState): ReplayViews {
+  return {
+    dm: dmVisibleEncounter(projectDmView(state)),
+    players: state.combatants
+      .filter((subject) => subject.profile.kind === 'player_character')
+      .map((subject) => ({
+        combatantId: subject.profile.id,
+        projection: projectPlayerView(state, {
+          seatId: `seat:replay:${subject.profile.id}`,
+          combatantId: subject.profile.id,
+        }),
+      })),
+  };
+}
+
+function hashProjections(projections: ReplayViews): ReplayProjectionHashes {
   return {
     dm: sha256(canonicalJson(projections.dm)),
     players: projections.players.map((entry) => ({
@@ -240,7 +268,7 @@ function replayRevisionRecords(revisions: readonly SessionRevision[]): readonly 
       void: history[index]?.void ?? false,
       rng: { pre, post: revision.rngState },
       stateHash: sha256(canonicalJson(revision.encounterState)),
-      projectionHashes: hashProjections(revision.projections),
+      projectionHashes: hashProjections(projectReplayViews(revision.encounterState)),
     };
   });
 }
@@ -761,8 +789,7 @@ export function replayBundle(
     assertEqual('state', index, 'encounterState', expectedState, revision.encounterState);
     assertEqual('rng', index, 'rng.post', expectedRng, replayRecord.rng.post);
     assertEqual('rng', index, 'revision.rngState', expectedRng, revision.rngState);
-    const expectedProjections = projectPersistedProjections(expectedState);
-    assertEqual('projection', index, 'projections', expectedProjections, revision.projections);
+    const expectedProjections = projectReplayViews(expectedState);
     assertEqual(
       'state', index, 'stateHash',
       sha256(canonicalJson(expectedState)), replayRecord.stateHash,

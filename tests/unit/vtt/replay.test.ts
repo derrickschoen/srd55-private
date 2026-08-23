@@ -38,10 +38,6 @@ interface MutableReplayBundle {
     projectionHashes: { dm: string; players: Array<{ combatantId: string; hash: string }> };
     revision: {
       transition: { kind: string; events?: Array<{ type: string }> };
-      projections: {
-        dm: { revision: number };
-        players: Array<{ combatantId: string; projection: { revision: number } }>;
-      };
     };
   }>;
   transcripts: Array<{
@@ -376,7 +372,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
     );
   });
 
-  it('OWN-TOKEN-COUNTS-CANNOT-INFLUENCE-REDUCER keeps usage out of state and projections', () => {
+  it('OWN-TOKEN-COUNTS-CANNOT-INFLUENCE-REDUCER keeps usage out of state and view hashes', () => {
     const gate = recordScriptedReferenceSkirmish();
     const candidate = mutable(gate.bundle);
     const modeled = candidate.transcripts.find((entry) => entry.fleet.tokenCounts !== null);

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ControllerRequest } from '../../../src/combat/controllers';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
+import { projectDmView } from '../../../src/combat/visibility';
 import { damageType, dieSides, feet } from '../../../src/combat/values';
 import {
   codexSessionId,
@@ -118,7 +119,7 @@ function context(state: EncounterState) {
   return {
     encounterId: encounterSessionId('encounter:js-integration'),
     codexSessionId: codexSessionId('codex:fake-js-exchange'),
-    projection: projectDmBoard({ state, coordinator: IDLE, controllers: [], history: [] }),
+    projection: projectDmBoard({ view: projectDmView(state), coordinator: IDLE, controllers: [], history: [] }),
     history: [],
     initiativeMode: state.config.initiativeMode,
   };
@@ -146,7 +147,7 @@ function decisionProjection(
 ) {
   const pendingRequest = controllerRequest(state, actor, actions);
   return projectDmBoard({
-    state,
+    view: projectDmView(state),
     coordinator: { ...IDLE, pendingRequest },
     controllers: [],
     history: [],

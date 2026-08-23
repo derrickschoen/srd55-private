@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
-import { projectEncounter, type DmVisibleEncounterState } from '../../../src/combat/visibility';
+import { dmVisibleEncounter, projectDmView, type DmVisibleEncounterState } from '../../../src/combat/visibility';
 import { combatantId } from '../../../src/combat/values';
 import {
   JS_TURN_PROGRAM_CANONICAL_EXAMPLE,
@@ -27,7 +27,7 @@ function projection(): DmVisibleEncounterState {
     ],
   });
   const state: EncounterState = { ...base, activeCombatant: monsterA.id };
-  return projectEncounter(state, { kind: 'dm' });
+  return dmVisibleEncounter(projectDmView(state));
 }
 
 const ACTOR = combatantId('combatant:js-program-a');

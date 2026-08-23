@@ -15,7 +15,7 @@ import { createEncounter, reduceEncounter } from '../../../src/combat/encounter'
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { damageType, dieSides, type CombatantId } from '../../../src/combat/values';
-import { projectEncounter } from '../../../src/combat/visibility';
+import { projectPlayerView } from '../../../src/combat/visibility';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
 function startedPair() {
@@ -40,8 +40,8 @@ function endTurnRequest() {
     requestId: 'request:1',
     encounterRevision: fixture.state.revision,
     actorId: fixture.active.id,
-    visibleState: projectEncounter(fixture.state, {
-      kind: 'player',
+    visibleState: projectPlayerView(fixture.state, {
+      seatId: String(fixture.active.id),
       combatantId: fixture.active.id,
     }),
     legalActions: {

@@ -14,7 +14,11 @@ import { TurnCoordinator, type DurableCoordinatorTransition } from '../../combat
 import type { EncounterCommand } from '../../combat/events';
 import { gridDistance } from '../../combat/grid';
 import { mulberry32 } from '../../combat/random';
-import { projectEncounter, type DmVisibleEncounterState } from '../../combat/visibility';
+import {
+  dmVisibleEncounter,
+  projectDmView,
+  type DmVisibleEncounterState,
+} from '../../combat/visibility';
 import { combatantId, type CombatantId } from '../../combat/values';
 import { sha256 } from '../../crypto/sha256';
 import type { RolloutInputCapture } from '../experiment-telemetry';
@@ -258,7 +262,7 @@ class InitialRoundProgramController implements Controller {
   ) {}
 
   async choose(request: ControllerRequest, signal: AbortSignal): Promise<ControllerDecision> {
-    const state = projectEncounter(this.encounterState(), { kind: 'dm' });
+    const state = dmVisibleEncounter(projectDmView(this.encounterState()));
     const fixedRider = this.riders.active.get(this.actor);
     if (fixedRider !== undefined) {
       const command = selectPlanAction(fixedRider, this.actor, state, request.legalActions.actions);
@@ -470,7 +474,7 @@ function safeProduct(values: readonly number[], label: string): number {
 }
 
 function actualLegalCandidateCount(capture: RolloutInputCapture, state: EncounterState): number {
-  const projection = projectEncounter(state, { kind: 'dm' });
+  const projection = dmVisibleEncounter(projectDmView(state));
   const algorithm = new AlgorithmController();
   return safeProduct(capture.candidateTurns.map((turnSet) =>
     algorithm.enumerateTurnPrograms(projection, combatantId(turnSet.monsterId), Number.MAX_SAFE_INTEGER).length),

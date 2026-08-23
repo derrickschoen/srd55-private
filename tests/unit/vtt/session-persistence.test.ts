@@ -15,6 +15,7 @@ import {
   type PersistedCoordinatorState,
 } from '../../../src/combat/coordinator';
 import { createEncounter } from '../../../src/combat/encounter';
+import { projectPlayerView } from '../../../src/combat/visibility';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import {
@@ -113,7 +114,6 @@ function latestProof(
     encounterState: latest.encounterState,
     rngState: latest.rngState,
     coordinatorState: latest.coordinatorState,
-    projections: latest.projections,
     controllers: latest.controllers,
     codexSessionId: latest.codexSessionId,
     history: sessionHistory(revisions),
@@ -200,7 +200,7 @@ describe('event-sourced encounter persistence', () => {
     expect(destination.revisions(encounterSessionId('session:persistence-test'))).toEqual([]);
   });
 
-  it('CRASH-PROBE-EVERY-REVISION restores state, RNG, ids, projections, and history byte-for-byte', async () => {
+  it('CRASH-PROBE-EVERY-REVISION restores canonical state, RNG, ids, and history byte-for-byte', async () => {
     const fixture = pair();
     const human = new HumanController();
     const registry = new ControllerRegistry([
@@ -245,6 +245,23 @@ describe('event-sourced encounter persistence', () => {
     expect(mirror.revisions()).toEqual(revisions);
 
     expectEveryRevisionReloads(store);
+  });
+
+  it('PLAYERVIEW-NEVER-SERIALIZED persists canonical state without a player projection', () => {
+    const fixture = pair();
+    const store = new MemoryBrowserSessionStore();
+    createJournal(store, new MemoryMirrorSink(), new ControllerRegistry([]), fixture.state);
+    const playerView = projectPlayerView(fixture.state, {
+      seatId: 'seat:persistence-negative-control',
+      combatantId: fixture.player.id,
+    });
+    const bytes = exportSavedSession(store, encounterSessionId('session:persistence-test'));
+    const document = JSON.parse(bytes) as { revisions: Array<Record<string, unknown>> };
+
+    expect(canonicalJson(playerView)).toContain('seat:persistence-negative-control');
+    expect(bytes).not.toContain('seat:persistence-negative-control');
+    expect(bytes).not.toContain('"audience":"player"');
+    expect(document.revisions.every((revision) => !('projections' in revision))).toBe(true);
   });
 
   it('RESPONSE-CRASH-DOES-NOT-REPEAT applies a persisted accepted response without another side effect', async () => {

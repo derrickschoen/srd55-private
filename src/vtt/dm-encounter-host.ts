@@ -17,6 +17,7 @@ import {
   type EncounterState,
 } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
+import { projectDmView, projectPlayerView } from '../combat/visibility';
 import { mulberry32, type SerializableRng } from '../combat/random';
 import {
   codexSessionId,
@@ -277,14 +278,20 @@ export class DmEncounterHost {
   snapshot(): DmEncounterHostSnapshot {
     const coordinator = this.#coordinator.coordinatorState();
     const history = this.#journal.history();
+    const state = this.#coordinator.state();
+    const viewerId = this.#playerIds.find((id) => id === state.activeCombatant) ?? this.#playerIds[0];
+    if (viewerId === undefined) throw new Error('Player board requires at least one player PC.');
     const player = projectPlayerBoard(
-      this.#coordinator.state(),
+      projectPlayerView(state, {
+        seatId: 'seat:local-party',
+        combatantId: viewerId,
+        ownedCombatantIds: this.#playerIds,
+      }),
       coordinator,
-      this.#playerIds,
     );
     return {
       dm: projectDmBoard({
-        state: this.#coordinator.state(),
+        view: projectDmView(state),
         coordinator,
         controllers: this.#registry.identities(),
         history,

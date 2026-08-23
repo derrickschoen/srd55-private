@@ -21,7 +21,6 @@ import {
   type EncounterBranchId,
   type EncounterSessionId,
 } from '../combat/values';
-import { projectEncounter, type VisibleEncounterState } from '../combat/visibility';
 import { sha256 } from '../crypto/sha256';
 import type { DatabaseContext } from '../db/database';
 
@@ -75,14 +74,6 @@ export class SessionFingerprintMismatchError extends Error {
   }
 }
 
-export interface PersistedProjections {
-  readonly dm: VisibleEncounterState;
-  readonly players: readonly {
-    readonly combatantId: string;
-    readonly projection: VisibleEncounterState;
-  }[];
-}
-
 interface SessionRevisionBody {
   readonly schemaVersion: typeof VTT_SESSION_SCHEMA_VERSION;
   readonly sessionId: EncounterSessionId;
@@ -96,7 +87,6 @@ interface SessionRevisionBody {
   readonly coordinatorState: PersistedCoordinatorState;
   readonly controllers: readonly ControllerIdentity[];
   readonly codexSessionId: CodexSessionId;
-  readonly projections: PersistedProjections;
 }
 
 export interface SessionRevision extends SessionRevisionBody {
@@ -285,21 +275,6 @@ export class SqliteBrowserSessionStore implements BrowserSessionStore {
   }
 }
 
-export function projectPersistedProjections(state: EncounterState): PersistedProjections {
-  return {
-    dm: projectEncounter(state, { kind: 'dm' }),
-    players: state.combatants
-      .filter((subject) => subject.profile.kind === 'player_character')
-      .map((subject) => ({
-        combatantId: subject.profile.id,
-        projection: projectEncounter(state, {
-          kind: 'player',
-          combatantId: subject.profile.id,
-        }),
-      })),
-  };
-}
-
 function revisionChecksum(body: SessionRevisionBody): string {
   return sha256(canonicalJson(body));
 }
@@ -387,7 +362,6 @@ function decodeRevision(value: unknown): SessionRevision {
     !isRecord(value.coordinatorState) ||
     !Array.isArray(value.controllers) ||
     typeof value.codexSessionId !== 'string' ||
-    !isRecord(value.projections) ||
     typeof value.checksum !== 'string'
   ) {
     throw new TypeError('Malformed VTT session revision.');
@@ -550,11 +524,6 @@ export function replaySessionRevisions(
         );
         break;
     }
-    requireCanonicalEqual(
-      revision.projections,
-      projectPersistedProjections(revision.encounterState),
-      'projections',
-    );
     byRevision.set(revision.revision, revision);
   }
   return revisions.at(-1) ?? first;
@@ -726,7 +695,6 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       coordinatorState: input.coordinatorState,
       controllers: input.controllers,
       codexSessionId: input.codexSessionId,
-      projections: projectPersistedProjections(input.encounterState),
     };
     const persisted: SessionRevision = {
       ...body,

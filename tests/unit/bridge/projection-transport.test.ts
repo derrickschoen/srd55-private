@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { projectDmView } from '../../../src/combat/visibility';
 import { codexSessionId, encounterSessionId } from '../../../src/combat/values';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { LocalhostDmBridgeClient, type BridgeFetch } from '../../../src/vtt/dm-bridge/client';
@@ -36,7 +37,7 @@ function state(round: number, revision: number): EncounterState {
 
 function request(encounterState: EncounterState): RoundPlanRequest {
   const projection = projectDmBoard({
-    state: encounterState,
+    view: projectDmView(encounterState),
     coordinator: IDLE,
     controllers: [],
     history: [],

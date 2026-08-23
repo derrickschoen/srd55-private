@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEncounter } from '../../../src/combat/encounter';
-import { projectEncounter } from '../../../src/combat/visibility';
+import { dmVisibleEncounter, projectDmView } from '../../../src/combat/visibility';
 import {
   adjudicationCommand,
 } from '../../../src/vtt/dm-bridge/contracts';
@@ -85,7 +85,7 @@ describe('DM narration and adjudication contracts', () => {
 
   it('ADJUDICATION-ISOLATION returns only a proposal until converted to a reducer command', () => {
     const state = createEncounter(referenceEncounterSetup());
-    const projection = projectEncounter(state, { kind: 'dm' });
+    const projection = dmVisibleEncounter(projectDmView(state));
     const proposal = decodeAdjudicationProposal({
       kind: 'adjudication_proposal',
       target: REFERENCE_MONSTER_ID,

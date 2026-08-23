@@ -6,6 +6,7 @@ import {
   type InitiativeMode,
 } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
+import { projectDmView, projectPlayerView } from '../../../src/combat/visibility';
 import { damageType, dieSides } from '../../../src/combat/values';
 import { projectDmBoard, projectPlayerBoard } from '../../../src/vtt/encounter-projections';
 import {
@@ -67,7 +68,7 @@ function fixture() {
 }
 
 function board(state: EncounterState) {
-  return projectDmBoard({ state, coordinator: IDLE, controllers: [], history: [] });
+  return projectDmBoard({ view: projectDmView(state), coordinator: IDLE, controllers: [], history: [] });
 }
 
 function context(state: EncounterState) {
@@ -476,7 +477,10 @@ describe('typed DM round decision programs', () => {
 
   it('M46-DM-BRIDGE-REJECTS-PLAYER-PROJECTION requires full DM facts at runtime', async () => {
     const f = fixture();
-    const playerProjection = projectPlayerBoard(f.state, IDLE, [f.playerA.id]);
+    const playerProjection = projectPlayerBoard(
+      projectPlayerView(f.state, { seatId: 'seat:test-a', combatantId: f.playerA.id }),
+      IDLE,
+    );
     const malformed = { ...context(f.state), projection: playerProjection };
     const exchange = new FakeExchange(() => {
       throw new Error('exchange must not receive a filtered projection');
