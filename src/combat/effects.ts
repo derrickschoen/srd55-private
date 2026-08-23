@@ -320,6 +320,47 @@ export type EffectPayload =
       readonly againstAttacker?: never;
     }
   | {
+      /** D351's content-pack-declarable roll/defense lever. */
+      readonly kind: 'roll_defense_modifier';
+      readonly scopes: readonly (
+        | 'attack_rolls_made'
+        | 'attack_rolls_against'
+        | 'saving_throws'
+        | 'ability_checks'
+        | 'armor_class'
+      )[];
+      readonly eligibility:
+        | { readonly kind: 'effect_targets' }
+        | { readonly kind: 'source_against_effect_targets' }
+        | { readonly kind: 'effect_targets_against_creatures_other_than_source' }
+        | {
+            readonly kind: 'allies_within_aura';
+            readonly radiusFeet: number;
+            readonly savingThrowCause: 'any' | 'spell_or_magical_effect';
+          };
+      readonly consumption: 'duration' | 'first_qualifying_roll' | 'chosen_qualifying_roll';
+      readonly successfulSaveDamage?: 'none_instead_of_half';
+      readonly eventTrigger?: {
+        readonly kind: 'event_trigger';
+        readonly hook: 'effect_target_moves';
+        readonly flatAdjustment: number;
+        readonly duration: {
+          readonly kind: 'fixed_rounds';
+          readonly rounds: 1;
+          readonly expiresAt: 'target_start';
+        };
+      };
+      readonly modifier:
+        | { readonly kind: 'flat'; readonly amount: number }
+        | {
+            readonly kind: 'die_rider';
+            readonly count: number;
+            readonly sides: 4 | 6 | 8 | 10 | 12 | 20;
+            readonly sign: 1 | -1;
+          }
+        | { readonly kind: 'roll_mode'; readonly mode: 'advantage' | 'disadvantage' };
+    }
+  | {
       readonly kind: 'hit_point_maximum_modifier';
       readonly amount: number;
     }

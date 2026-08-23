@@ -662,6 +662,7 @@ function operationDice(definition: SpellDefinition): readonly [number, number] |
     case 'roll_mode_modifier':
     case 'armor_class_modifier':
     case 'damage_response_modifier':
+    case 'roll_defense_modifier':
     case 'targeted_defense_modifier':
     case 'sustained_effect':
     case 'summon':
@@ -760,6 +761,7 @@ function operationPerSlot(definition: SpellDefinition): number {
     case 'roll_mode_modifier':
     case 'armor_class_modifier':
     case 'damage_response_modifier':
+    case 'roll_defense_modifier':
     case 'targeted_defense_modifier':
     case 'sustained_effect':
     case 'summon':

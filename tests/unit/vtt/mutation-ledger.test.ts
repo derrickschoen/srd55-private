@@ -43,6 +43,7 @@ const ENVELOPE_NORMALIZATION_LEDGER_PATH = 'docs/audits/2026-08-22-envelope-norm
 const CHOICE_BRANCH_LEDGER_PATH = 'docs/audits/2026-08-22-choice-branch-mutation-ledger.md';
 const CONDITION_LIFECYCLE_LEDGER_PATH = 'docs/audits/2026-08-22-condition-lifecycle-mutation-ledger.md';
 const ROLL_DEFENSE_LEDGER_PATH = 'docs/audits/2026-08-22-roll-defense-mutation-ledger.md';
+const ROLLMOD_D351_LEDGER_PATH = 'docs/audits/2026-08-23-rollmod-mutation-ledger.md';
 const PAIRWISE_COMPOSITION_LEDGER_PATH = 'docs/audits/2026-08-22-pairwise-composition-mutation-ledger.md';
 const NESTED_COMPOSITION_LEDGER_PATH = 'docs/audits/2026-08-23-nested-composition-mutation-ledger.md';
 const SHARED_OUTCOME_LEDGER_PATH = 'docs/audits/2026-08-23-shared-outcome-mutation-ledger.md';
@@ -651,6 +652,38 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(11);
     expect(ledger).toContain('Every production mutation below was applied alone');
     expect(ledger).toContain('Tests  7 passed (7)');
+  });
+
+  it('D351-ROLLMOD-MUTATION-LEDGER pins every required control and the duration boundary kill', () => {
+    const ledger = readFileSync(ROLLMOD_D351_LEDGER_PATH, 'utf8');
+    const d351Tests = readFileSync('tests/unit/vtt/roll-modifiers-d351.test.ts', 'utf8');
+    const priorTests = readFileSync('tests/unit/vtt/roll-defense-modifiers.test.ts', 'utf8');
+    const mutations = [
+      'rider_precomputed',
+      'consumed_effect_lingers',
+      'aura_membership_stale',
+      'same_spell_stacks',
+      'penalty_sign_flip',
+      'modifier_expires_one_round_late',
+    ];
+    const d351KillingTests = [
+      'rider_precomputed: two qualifying rolls draw observably different d4 faces instead of reusing a cast-time value',
+      'guidance_consumed_on_first_use: the first distinguishing check gets d4, the second gets nothing, and the instance ends',
+      'moving_aura_roll_time_membership: exact 30 feet gets advantage and no half damage; after moving to 35 feet neither applies',
+      'concentration_drop_and_same_spell_refresh: concentration ends modifiers mid-duration and same-name castings never add 2d4',
+      'bane_save_negates_and_penalty_sign: success creates no modifier; failure subtracts d4 across the attack threshold',
+    ];
+    for (const mutation of mutations) expect(ledger).toContain(`\`${mutation}\``);
+    for (const testName of d351KillingTests) {
+      expect(ledger).toContain(`\`${testName}\``);
+      expect(d351Tests).toContain(testName);
+    }
+    const durationTest = 'modifier_duration_first_and_final_round: a two-round AC bonus protects the first and final rounds, then expires';
+    expect(ledger).toContain(`\`${durationTest}\``);
+    expect(priorTests).toContain(durationTest);
+    expect(ledger.match(/exit 1/gu)).toHaveLength(6);
+    expect(ledger).toContain('Tests  18 passed (18)');
+    expect(ledger).toContain('All five required controls and the independent duration-boundary mutation were restored.');
   });
 
   it('PAIRWISE-COMPOSITION-MUTATION-LEDGER pins required controls and every pairwise numeric boundary', () => {

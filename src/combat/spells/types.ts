@@ -10,7 +10,7 @@ import type {
 } from '../persistent-areas';
 import type { AreaTemplate } from '../templates';
 import type { DamageRequest } from '../resolution';
-import type { CombatantId, DamageType, LimitedResourcePoolId, ObjectTargetId, WorldObjectId } from '../values';
+import type { CombatantId, DamageType, EncounterEffectId, LimitedResourcePoolId, ObjectTargetId, WorldObjectId } from '../values';
 import type { GridCell } from '../grid';
 import type { LightLevel, WorldObjectChanges, WorldObjectInput } from '../world-objects';
 import type { CombatSense, MonsterAction } from '../statblock';
@@ -280,6 +280,59 @@ export interface DamageResponseModifierOperation {
   readonly response: 'resistant' | 'vulnerable';
   readonly duration: ModifierDuration;
 }
+
+export const rollDefenseModifierScopes = [
+  'attack_rolls_made',
+  'attack_rolls_against',
+  'saving_throws',
+  'ability_checks',
+  'armor_class',
+] as const;
+
+export type RollDefenseModifierScope = (typeof rollDefenseModifierScopes)[number];
+
+export type RollDefenseModifierEligibility =
+  | { readonly kind: 'effect_targets' }
+  | { readonly kind: 'source_against_effect_targets' }
+  | { readonly kind: 'effect_targets_against_creatures_other_than_source' }
+  | {
+      /** Membership follows the source and is evaluated from current token positions for every roll. */
+      readonly kind: 'allies_within_aura';
+      readonly radiusFeet: number;
+      readonly savingThrowCause: 'any' | 'spell_or_magical_effect';
+    };
+
+export type RollDefenseModifierOperation = {
+  readonly kind: 'roll_defense_modifier';
+  readonly scopes: readonly RollDefenseModifierScope[];
+  readonly eligibility: RollDefenseModifierEligibility;
+  readonly duration: ModifierDuration;
+  readonly consumption: 'duration' | 'first_qualifying_roll' | 'chosen_qualifying_roll';
+  /** The aura's additional successful-save defense (half damage on success becomes none); absent for ordinary modifiers. */
+  readonly successfulSaveDamage?: 'none_instead_of_half';
+  /** The movement-conditional flat adjustment reuses the event-trigger vocabulary to materialize a temporary flat adjustment. */
+  readonly eventTrigger?: {
+    readonly kind: 'event_trigger';
+    readonly hook: 'effect_target_moves';
+    readonly flatAdjustment: number;
+    readonly duration: {
+      readonly kind: 'fixed_rounds';
+      readonly rounds: 1;
+      readonly expiresAt: 'target_start';
+    };
+  };
+} & (
+  | { readonly modifier: { readonly kind: 'flat'; readonly amount: number } }
+  | {
+      readonly modifier: {
+        readonly kind: 'die_rider';
+        readonly count: number;
+        readonly sides: 4 | 6 | 8 | 10 | 12 | 20;
+        readonly sign: 1 | -1;
+      };
+    }
+  | { readonly modifier: { readonly kind: 'roll_mode'; readonly mode: 'advantage' | 'disadvantage' } }
+);
 
 export interface TargetedDefenseModifierOperation {
   readonly kind: 'targeted_defense_modifier';
@@ -591,6 +644,7 @@ export type BranchSpellOperation =
   | RollModeModifierOperation
   | ArmorClassModifierOperation
   | DamageResponseModifierOperation
+  | RollDefenseModifierOperation
   | TargetedDefenseModifierOperation
   | {
       readonly kind: 'heat_metal';
@@ -1100,6 +1154,7 @@ export const SPELL_OPERATION_KINDS = [
   'roll_mode_modifier',
   'armor_class_modifier',
   'damage_response_modifier',
+  'roll_defense_modifier',
   'targeted_defense_modifier',
   'heat_metal',
   'sustained_effect',
@@ -1197,6 +1252,8 @@ export interface SpellCastCommand {
   readonly selectedOption: string | null;
   /** Required only by a targeted-defense operation cast against a selected attacker. */
   readonly modifierSource?: CombatantId;
+  /** Explicitly chooses one-shot-by-choice modifiers for this spell attack. */
+  readonly rollModifierEffectIds?: readonly EncounterEffectId[];
   readonly objectTargets?: readonly ObjectTargetId[];
   /** Objects created and owned by a sustained effect, distinct from its activation targets. */
   readonly ownedObjectTargets?: readonly WorldObjectId[];
