@@ -103,6 +103,8 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'spell_utility_resolved':
     case 'composition_step_resolved':
       return [event.caster];
+    case 'shared_outcome_resolved':
+      return [event.caster, event.target];
     case 'reaction_declined':
       return [event.combatant, event.mover];
     case 'initiative_ordered':
