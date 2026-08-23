@@ -104,6 +104,40 @@ const componentsSchema = z.strictObject({
   ]),
 });
 
+const exactTargetCountSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('fixed'), count: positiveInteger.max(100) }),
+  z.strictObject({
+    kind: z.literal('slot_scaled'), base: positiveInteger.max(100),
+    additionalPerSlot: positiveInteger.max(100), limit: z.literal('exact'),
+  }),
+]);
+const targetCountSchema = z.union([
+  exactTargetCountSchema,
+  z.strictObject({ kind: z.literal('up_to'), maximum: positiveInteger.max(100) }),
+  z.strictObject({
+    kind: z.literal('slot_scaled'), base: positiveInteger.max(100),
+    additionalPerSlot: positiveInteger.max(100), limit: z.literal('up_to'),
+  }),
+]);
+const targetGeometrySchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('secondaries_within_primary'), distanceFeet: positiveInteger.max(100_000) }),
+  z.strictObject({ kind: z.literal('pair_within'), distanceFeet: positiveInteger.max(100_000) }),
+  z.strictObject({ kind: z.literal('all_within_each_other'), distanceFeet: positiveInteger.max(100_000) }),
+]);
+const targetSelectionSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('targets'), count: targetCountSchema,
+    geometry: z.array(targetGeometrySchema).max(3),
+    uniqueness: z.enum(['unique', 'repeatable']),
+    destinations: z.enum(['none', 'each_target']),
+  }),
+  z.strictObject({
+    kind: z.literal('projectile_allocation'), projectiles: exactTargetCountSchema,
+    geometry: z.array(targetGeometrySchema).max(3),
+    uniqueness: z.enum(['unique', 'repeatable']), resolution: z.literal('per_projectile'),
+  }),
+]);
+
 const targetingSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('self') }),
   z.strictObject({
@@ -122,6 +156,10 @@ const targetingSchema = z.discriminatedUnion('kind', [
     baseMaximum: positiveInteger,
     additionalPerSlot: nonNegativeInteger,
     willing: z.boolean().optional(),
+  }),
+  z.strictObject({
+    kind: z.literal('selected'), rangeFeet: nonNegativeInteger.max(100_000),
+    willing: z.boolean().optional(), selection: targetSelectionSchema,
   }),
   z.strictObject({
     kind: z.literal('area'),
