@@ -7,6 +7,23 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D347 — OWNER: composition depth re-opened — pairwise extends to nested composition (2026-08-23)
+
+Lever round with attempted-emission pricing (composition-arity 104 the
+largest pool). Ruling: EXTEND pairwise composition to allow a step to be a
+composition again, with a declared depth bound. This deliberately re-opens
+D335's contraction, and the ground has changed since: the typed
+per-operation outcome channel and RNG-atomic abort now exist, so the
+state-delta refusal heuristic that produced the measured hp-20-vs-17
+corruption is structurally gone. The D333-era hazard class is fixed at the
+type level, not patched.
+
+Bounds: depth limit as a named constant (measurement: 51 three-op + 11
+four-op records; depth 4 covers the known residue), import refusal past it
+with both sides pinned; shared_outcome branches remain non-nesting (their
+own rule, unchanged); every nested step reports through the outcome
+channel; abort unwinds RNG at every depth.
+
 ## D346 — OWNER: R-param ruling shape authorized; binding waits for the mapper; pending-11 next (2026-08-22)
 
 1. **R-param authorized, unrestricted**: the owner may supply a concrete
