@@ -5,7 +5,7 @@ import { monsterCombatantProfile } from '../combat/combatant';
 import type { CombatFeatureEffect } from '../combat/effects';
 import { conditionNames } from '../combat/conditions';
 import type { EncounterCommand } from '../combat/events';
-import type { MonsterAction, MonsterStatblock, MonsterStatblockInput, SenseKind } from '../combat/statblock';
+import type { CombatSense, MonsterAction, MonsterStatblock, MonsterStatblockInput } from '../combat/statblock';
 import { monsterStatblock } from '../combat/statblock';
 import { SPELL_MANIFEST } from '../combat/spells/manifest';
 import {
@@ -199,10 +199,15 @@ const itemSchema = z.strictObject({
   ]),
 });
 
-const senseSchema = z.strictObject({
-  kind: z.enum(['blindsight', 'darkvision', 'tremorsense', 'truesight'] satisfies readonly SenseKind[]),
-  rangeFeet: positiveInteger.max(100_000),
-});
+const combatSenseSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('normal_sight') }),
+  z.strictObject({ kind: z.literal('blindsight'), rangeFeet: positiveInteger.max(100_000) }),
+  z.strictObject({ kind: z.literal('truesight'), rangeFeet: positiveInteger.max(100_000) }),
+]);
+const combatSensesSchema = z.array(combatSenseSchema).min(1).max(3)
+  .refine((senses) => new Set(senses.map(({ kind }) => kind)).size === senses.length, {
+    message: 'Combat senses must use unique kinds.',
+  });
 const originGrantSchema = z.strictObject({
   abilityScoreIncreases: z.array(z.strictObject({
     ability: z.enum(abilities),
@@ -210,7 +215,7 @@ const originGrantSchema = z.strictObject({
   })).max(abilities.length),
   skills: z.array(z.enum(skills)).max(skills.length),
   speedFeet: nonNegativeInteger.max(MAX_IMPORTED_SPEED_FEET),
-  senses: z.array(senseSchema).max(4),
+  senses: combatSensesSchema,
 });
 const speciesSchema = z.strictObject({ ...recordIdentityShape, grants: originGrantSchema });
 const backgroundSchema = z.strictObject({ ...recordIdentityShape, grants: originGrantSchema });
@@ -331,6 +336,7 @@ const monsterSchema = z.strictObject({
     })).max(damageTypes.length).optional(),
     conditionImmunities: z.array(trimmedText).max(100).optional(),
     usesDeathSaves: z.boolean().optional(),
+    senses: combatSensesSchema,
   }),
   actions: z.array(monsterActionSchema).min(1).max(100),
 });
@@ -392,7 +398,7 @@ export interface LoadedContentOrigin {
     readonly abilityScoreIncreases: readonly { readonly ability: Ability; readonly amount: number }[];
     readonly skills: readonly Skill[];
     readonly speedFeet: number;
-    readonly senses: readonly { readonly kind: SenseKind; readonly rangeFeet: number }[];
+    readonly senses: readonly CombatSense[];
   };
 }
 
@@ -448,6 +454,10 @@ export type ContentPackRecordDiagnostic = {
   | { readonly reason: 'unknown_effect_variant'; readonly effectKind: string }
   | { readonly reason: 'undeclared_namespace'; readonly namespace: string }
   | { readonly reason: 'missing_feature_reference'; readonly featureId: string }
+  | { readonly reason: 'tremorsense-not-modelled' }
+  | { readonly reason: 'devilsight-not-modelled' }
+  | { readonly reason: 'ethereal-plane-semantics-not-modelled' }
+  | { readonly reason: 'obscurement-geometry-not-modelled' }
 );
 
 export type ContentPackRefusal =
@@ -574,6 +584,7 @@ function loadMonster(monster: ContentPackV1['monsters'][number]): LoadedContentM
     ...(monster.statblock.usesDeathSaves === undefined
       ? {}
       : { usesDeathSaves: monster.statblock.usesDeathSaves }),
+    senses: monster.statblock.senses,
   };
   return {
     id,
@@ -673,6 +684,46 @@ function compositionDepth(value: unknown): number {
   return 1 + deepestChild;
 }
 
+type SensesBoundaryRefusal =
+  | 'tremorsense-not-modelled'
+  | 'devilsight-not-modelled'
+  | 'ethereal-plane-semantics-not-modelled';
+
+function sensesBoundaryRefusal(record: unknown, surface: 'species' | 'backgrounds' | 'monsters'): SensesBoundaryRefusal | null {
+  const root = objectRecord(record);
+  const container = surface === 'monsters' ? objectRecord(root?.statblock) : objectRecord(root?.grants);
+  if (!Array.isArray(container?.senses)) return null;
+  for (const value of container.senses) {
+    const sense = objectRecord(value);
+    if (sense?.kind === 'tremorsense') return 'tremorsense-not-modelled';
+    if (sense?.kind === 'devilsight' || sense?.kind === 'devil_sight') return 'devilsight-not-modelled';
+    if (sense?.etherealPlane === true || sense?.seesEtherealPlane === true) {
+      return 'ethereal-plane-semantics-not-modelled';
+    }
+  }
+  return null;
+}
+
+function hasRayIntersectionObscurement(value: unknown): boolean {
+  const operation = objectRecord(value);
+  if (operation === null) return false;
+  if (operation.kind === 'world_operations' && Array.isArray(operation.operations)) {
+    if (operation.operations.some((entry) => {
+      const declared = objectRecord(entry);
+      return declared?.kind === 'set_obscurement' && declared.geometry === 'ray_intersection';
+    })) return true;
+  }
+  return nestedOperationValues(operation).some(hasRayIntersectionObscurement);
+}
+
+function hasEtherealPlaneSemantics(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasEtherealPlaneSemantics);
+  const record = objectRecord(value);
+  if (record === null) return false;
+  if (record.etherealPlane === true || record.seesEtherealPlane === true) return true;
+  return Object.values(record).some(hasEtherealPlaneSemantics);
+}
+
 function firstUnknownEffect(value: Readonly<Record<string, unknown>>): string | null {
   if (!Array.isArray(value.features)) return null;
   for (const featureValue of value.features) {
@@ -761,6 +812,24 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
     const unknownOperation = firstUnknownOperation(diagnosticRoot);
     const operation = objectRecord(objectRecord(record)?.operation);
     const kind = operationKind(operation);
+    if (hasEtherealPlaneSemantics(operation)) {
+      diagnostics.push({
+        kind: 'content_pack_record_rejection', reason: 'ethereal-plane-semantics-not-modelled',
+        surface: 'spells', index, recordId: rawRecordId(record),
+        ...(kind === null ? {} : { operationKind: kind }),
+        path: ['spells', index, 'operation'],
+      });
+      continue;
+    }
+    if (hasRayIntersectionObscurement(operation)) {
+      diagnostics.push({
+        kind: 'content_pack_record_rejection', reason: 'obscurement-geometry-not-modelled',
+        surface: 'spells', index, recordId: rawRecordId(record),
+        ...(kind === null ? {} : { operationKind: kind }),
+        path: ['spells', index, 'operation'],
+      });
+      continue;
+    }
     if (unknownOperation !== null) {
       diagnostics.push({
         kind: 'content_pack_record_rejection', reason: 'unknown_operation_kind',
@@ -825,6 +894,11 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
 
   const species: ContentPackV1['species'][number][] = [];
   for (const [index, record] of envelope.data.species.entries()) {
+    const sensesBoundary = sensesBoundaryRefusal(record, 'species');
+    if (sensesBoundary !== null) {
+      diagnostics.push({ kind: 'content_pack_record_rejection', reason: sensesBoundary, surface: 'species', index, recordId: rawRecordId(record), path: ['species', index, 'grants', 'senses'] });
+      continue;
+    }
     const parsed = speciesSchema.safeParse(record);
     if (!parsed.success) diagnostics.push(malformedDiagnostic('species', index, record, parsed.error.issues[0]?.path ?? []));
     else {
@@ -835,6 +909,11 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
   }
   const backgrounds: ContentPackV1['backgrounds'][number][] = [];
   for (const [index, record] of envelope.data.backgrounds.entries()) {
+    const sensesBoundary = sensesBoundaryRefusal(record, 'backgrounds');
+    if (sensesBoundary !== null) {
+      diagnostics.push({ kind: 'content_pack_record_rejection', reason: sensesBoundary, surface: 'backgrounds', index, recordId: rawRecordId(record), path: ['backgrounds', index, 'grants', 'senses'] });
+      continue;
+    }
     const parsed = backgroundSchema.safeParse(record);
     if (!parsed.success) diagnostics.push(malformedDiagnostic('backgrounds', index, record, parsed.error.issues[0]?.path ?? []));
     else {
@@ -855,6 +934,11 @@ export function loadContentPack(value: unknown): ContentPackLoadResult {
   }
   const monsters: ContentPackV1['monsters'][number][] = [];
   for (const [index, record] of envelope.data.monsters.entries()) {
+    const sensesBoundary = sensesBoundaryRefusal(record, 'monsters');
+    if (sensesBoundary !== null) {
+      diagnostics.push({ kind: 'content_pack_record_rejection', reason: sensesBoundary, surface: 'monsters', index, recordId: rawRecordId(record), path: ['monsters', index, 'statblock', 'senses'] });
+      continue;
+    }
     const parsed = monsterSchema.safeParse(record);
     if (!parsed.success) diagnostics.push(malformedDiagnostic('monsters', index, record, parsed.error.issues[0]?.path ?? []));
     else {

@@ -3,7 +3,7 @@ import type { CharacterSheet } from '../queries/character-sheet-builder';
 import type { CombatFeatureEffect } from './effects';
 import type { GridCell } from './grid';
 import type { DamageResponse } from './resolution';
-import type { MonsterStatblock } from './statblock';
+import type { CombatSense, MonsterStatblock } from './statblock';
 import {
   armorClass,
   combatantId,
@@ -41,6 +41,7 @@ export interface CombatRulesProfile {
   }[];
   readonly conditionImmunities: readonly string[];
   readonly usesDeathSaves: boolean;
+  readonly senses: readonly CombatSense[];
   /** Absence means the source did not establish a mechanical size category. */
   readonly sizeCategory?: KnownCreatureSize;
   /** Known SRD creature types and homebrew passthrough values share this sourced field. */
@@ -173,6 +174,7 @@ export function characterCombatantProfile(
       })),
       conditionImmunities: [],
       usesDeathSaves: true,
+      senses: [{ kind: 'normal_sight' }],
       spellSlots: identity.spellSlots ?? [],
     },
   };
@@ -204,6 +206,7 @@ export function monsterCombatantProfile(
       damageResponses: statblock.damageResponses,
       conditionImmunities: statblock.conditionImmunities,
       usesDeathSaves: statblock.usesDeathSaves,
+      senses: statblock.senses,
       ...(statblock.sourceDetails.classification.kind === 'present' &&
         statblock.sourceDetails.classification.value.sizes.length === 1 &&
         creatureSizes.includes(statblock.sourceDetails.classification.value.sizes[0] as KnownCreatureSize)

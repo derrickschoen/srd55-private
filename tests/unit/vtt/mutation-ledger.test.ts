@@ -50,6 +50,7 @@ const BOARD_LEDGER_PATH = 'docs/audits/2026-08-23-board-mutation-ledger.md';
 const SEQUENCING_LEDGER_PATH = 'docs/audits/2026-08-22-sequencing-mutation-ledger.md';
 const EQUIPMENT_LEDGER_PATH = 'docs/audits/2026-08-23-equipment-mutation-ledger.md';
 const SEQ_BINDING_LEDGER_PATH = 'docs/audits/2026-08-23-seq-binding-mutation-ledger.md';
+const SENSES_LEDGER_PATH = 'docs/audits/2026-08-23-senses-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -736,6 +737,24 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(ledger.match(/exit 1/gu)).toHaveLength(4);
     expect(ledger).toContain('Tests  5 passed (5)');
     expect(ledger).toContain('All four mutations were restored.');
+  });
+
+  it('D348.1-SENSES-MUTATION-LEDGER pins the four restored visibility controls', () => {
+    const ledger = readFileSync(SENSES_LEDGER_PATH, 'utf8');
+    const tests = readFileSync('tests/unit/vtt/senses.test.ts', 'utf8');
+    const controls = [
+      'blindsight_ignores_range',
+      'truesight_no_illusion_pierce',
+      'obscured_still_visible',
+      'invisible_condition_ignored',
+    ];
+    for (const control of controls) {
+      expect(ledger).toContain(`\`${control}\``);
+      expect(tests).toContain(`${control}`);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(5);
+    expect(ledger).toContain('Tests  6 passed (6)');
+    expect(ledger).toContain('All four mutations and the independent boundary mutation were restored.');
   });
 
   it('EQUIPMENT-MUTATION-LEDGER pins forced drop, board persistence, interaction, capacity, and contact controls', () => {

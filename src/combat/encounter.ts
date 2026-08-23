@@ -114,6 +114,7 @@ import {
   assertEnvironmentRegion,
   assertWorldObjectInput,
   environmentLightAt,
+  environmentObscurementAt,
   isEnvironmentDifficultTerrain,
   type CoverTier,
   type EncounterEnvironment,
@@ -473,9 +474,11 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   const environment = setup.environment ?? EMPTY_ENCOUNTER_ENVIRONMENT;
   assertUnique(environment.lightRegions.map((region) => region.id), 'Light region ids');
   assertUnique(environment.difficultTerrainRegions.map((region) => region.id), 'Difficult-terrain region ids');
+  assertUnique(environment.obscurementRegions.map((region) => region.id), 'Obscurement region ids');
   try {
     for (const region of environment.lightRegions) assertEnvironmentRegion(setup.bounds, region);
     for (const region of environment.difficultTerrainRegions) assertEnvironmentRegion(setup.bounds, region);
+    for (const region of environment.obscurementRegions) assertEnvironmentRegion(setup.bounds, region);
   } catch (error) {
     throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid environment region.');
   }
@@ -1155,8 +1158,48 @@ export function canCombatantSee(
 ): boolean {
   const from = token(state, observer).position;
   const to = token(state, subject).position;
-  return environmentLightAt(state.environment, to) !== 'darkness' &&
-    hasLineOfSight(state, from, to);
+  if (!hasLineOfSight(state, from, to)) return false;
+  const distance = gridDistance(from, to);
+  const senses = combatant(state, observer).profile.rules.senses;
+  const hasBlindsight = senses.some((sense) =>
+    sense.kind === 'blindsight' && distance <= sense.rangeFeet);
+  const hasTruesight = senses.some((sense) =>
+    sense.kind === 'truesight' && distance <= sense.rangeFeet);
+  if (hasBlindsight) return true;
+
+  const observerBlinded = combatantConditions(state, observer)
+    .some(({ name }) => name === 'Blinded');
+  if (observerBlinded) return false;
+  const subjectInvisible = combatantConditions(state, subject)
+    .some(({ name }) => name === 'Invisible');
+  if (subjectInvisible && !hasTruesight) return false;
+
+  const environmentObscurement = environmentObscurementAt(state.environment, to);
+  let heavyObscurement = environmentObscurement === 'heavy';
+  let magicalDarkness = environmentObscurement === 'magical_darkness';
+  for (const effect of state.effects) {
+    if (effect.payload.kind !== 'obscured_area' || effect.payload.placement === 'selected_when_cast') continue;
+    const cells = affectedCells(
+      { bounds: state.bounds, blockedCells: templateBlockedCells(state) },
+      effect.payload.placement,
+    );
+    if (!cells.some((cell) => cellKey(cell) === cellKey(to))) continue;
+    if (effect.payload.obscurement === 'heavy') heavyObscurement = true;
+    else magicalDarkness = true;
+  }
+  if (heavyObscurement) return false;
+  if (magicalDarkness && !hasTruesight) return false;
+  return environmentLightAt(state.environment, to) !== 'darkness' || hasTruesight;
+}
+
+function canCombatantPierceVisualIllusion(
+  state: EncounterState,
+  observer: CombatantId,
+  subject: CombatantId,
+): boolean {
+  const distance = gridDistance(token(state, observer).position, token(state, subject).position);
+  return combatant(state, observer).profile.rules.senses.some((sense) =>
+    (sense.kind === 'blindsight' || sense.kind === 'truesight') && distance <= sense.rangeFeet);
 }
 
 function coverArmorClassBonus(tier: CoverTier): number {
@@ -1198,6 +1241,13 @@ function attackRollMode(
       if (effect.targets.includes(command.target)) modes.push(effect.payload.attackModeAgainstTarget);
       continue;
     }
+    if (effect.payload.kind === 'attacks_against_target_roll_mode') {
+      if (
+        effect.targets.includes(command.target) &&
+        !canCombatantPierceVisualIllusion(state, command.actor, command.target)
+      ) modes.push(effect.payload.mode);
+      continue;
+    }
     if (effect.payload.kind !== 'attack_roll_mode_modifier') continue;
     const appliesTo = effect.payload.appliesTo;
     const applies =
@@ -1227,7 +1277,8 @@ function attackRollMode(
     if (
       clause.predicate === 'always' ||
       (clause.predicate === 'target_not_source' && clause.source !== command.target) ||
-      (clause.predicate === 'source_visible' && clause.source === command.target) ||
+      (clause.predicate === 'source_visible' && clause.source === command.target &&
+        canCombatantSee(state, command.actor, clause.source)) ||
       (clause.predicate === 'recipient_unseen' && !targetCanSeeAttacker)
     ) {
       modes.push(clause.mode);
@@ -1386,6 +1437,15 @@ function abilityCheckRollMode(
       effect.payload.kind === 'attack_roll_mode_modifier' &&
       effect.payload.appliesTo.kind === 'ability_checks_by_target'
     ) modes.push(effect.payload.mode);
+  }
+  for (const clause of conditionMechanicalState(combatantConditions(state, actor)).clauses) {
+    if (
+      clause.kind === 'roll_mode' &&
+      clause.roll === 'ability_check' &&
+      clause.predicate === 'source_visible' &&
+      clause.source !== undefined &&
+      canCombatantSee(state, actor, clause.source)
+    ) modes.push(clause.mode);
   }
   return combineRollModes(modes);
 }
@@ -4667,6 +4727,10 @@ function rollSpellAttack(
   ) throw new EncounterRuleError('The spell target has Total Cover or is outside line of sight.');
   const rollModeEffects = context.state.effects.filter((effect) => {
     if (effect.payload.kind === 'faerie_fire') return effect.targets.includes(target);
+    if (effect.payload.kind === 'attacks_against_target_roll_mode') {
+      return effect.targets.includes(target) &&
+        !canCombatantPierceVisualIllusion(context.state, command.actor, target);
+    }
     if (effect.payload.kind !== 'attack_roll_mode_modifier') return false;
     const appliesTo = effect.payload.appliesTo;
     return ((appliesTo.kind === 'next_attack_against_target' ||
@@ -4674,13 +4738,19 @@ function rollSpellAttack(
       ((appliesTo.kind === 'next_attack_by_target' || appliesTo.kind === 'all_attacks_by_target') &&
         effect.targets.includes(command.actor));
   });
+  const visibilityMode: RollMode = canCombatantSee(context.state, command.actor, target)
+    ? 'normal'
+    : 'disadvantage';
   const attack = resolveAttackRoll({
     attackBonus: command.attackBonus + effectDiceModifier(context.state, command.actor, 'attack_roll', context.rng),
     targetArmorClass: coverAdjustedArmorClass(context.state, command.actor, target),
-    rollMode: combineRollModes(['normal', ...rollModeEffects.map((effect) =>
+    rollMode: combineRollModes([visibilityMode, ...rollModeEffects.map((effect) =>
       effect.payload.kind === 'faerie_fire'
         ? effect.payload.attackModeAgainstTarget
-        : effect.payload.kind === 'attack_roll_mode_modifier' ? effect.payload.mode : 'normal')]),
+        : effect.payload.kind === 'attack_roll_mode_modifier' ||
+          effect.payload.kind === 'attacks_against_target_roll_mode'
+          ? effect.payload.mode
+          : 'normal')]),
     criticalFloor: 20,
   }, context.rng);
   endEffects(context, new Set(rollModeEffects.flatMap((effect) =>
@@ -5973,6 +6043,13 @@ function executeSpellOperation(
               level: declared.level,
             });
             break;
+          case 'set_obscurement':
+            processWorldOperation(context, command.actor, {
+              kind: 'set_obscurement',
+              region: { id: declared.regionId, cells: areaCells() },
+              obscurement: declared.obscurement,
+            });
+            break;
           case 'remove_objects': {
             const objectTargets = command.objectTargets ?? [];
             if (objectTargets.length === 0) {
@@ -7000,6 +7077,25 @@ function processWorldOperation(
         type: 'environment_light_changed', actor,
         regionId: operation.region.id, level: operation.level,
       });
+      return;
+    }
+    case 'set_obscurement': {
+      try {
+        assertEnvironmentRegion(context.state.bounds, operation.region);
+      } catch (error) {
+        throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid obscurement region.');
+      }
+      const retained = context.state.environment.obscurementRegions
+        .filter((region) => region.id !== operation.region.id);
+      context.state = {
+        ...context.state,
+        environment: {
+          ...context.state.environment,
+          obscurementRegions: operation.obscurement === null
+            ? retained
+            : [...retained, { ...structuredClone(operation.region), obscurement: operation.obscurement }],
+        },
+      };
       return;
     }
   }
