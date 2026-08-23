@@ -7,6 +7,28 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D348 — OWNER: run all levers sequentially without waiting; collaborative curation drafting overnight (2026-08-23)
+
+Given before sleeping.
+
+1. **All engine levers proceed one by one without owner rounds between
+   them**, in measured-ranking order: equipment (52), sequenced-effect-
+   binding (82), senses (31), target-selection-binding (32), then the tail
+   (summons 19, forms 15, reactions 13, check-floor 2) as far as the night
+   allows. Each lever gets the full pipeline: dispatch, harvest, four-part
+   gate, supervisor control, wt/vtt merge, per-lever main merge (D344.4),
+   measurement round. UNRULED FORKS (senses #7/#8 and any newly surfaced)
+   are decided by the SUPERVISOR choosing the register's most defensible
+   option, marked as supervisor-choice-pending-confirmation in the brief
+   and batched for the owner's return — never silently, never in this
+   file as if owner-ruled.
+
+2. **Curation: the three models (Fable, Opus, Sol) collaboratively DRAFT
+   dispositions for the 344-record judgement queue** — proposals with
+   quotes and R-shape mapping, cross-reviewed for consensus vs contested —
+   but NOTHING is approved or emitted: D338.1 per-record owner approval
+   stands; the drafted worksheet waits for the owner.
+
 ## D347 — OWNER: composition depth re-opened — pairwise extends to nested composition (2026-08-23)
 
 Lever round with attempted-emission pricing (composition-arity 104 the
