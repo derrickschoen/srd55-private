@@ -56,6 +56,7 @@ const TARGET_SELECTION_LEDGER_PATH = 'docs/audits/2026-08-23-target-sel-mutation
 const REACTIONS_LEDGER_PATH = 'docs/audits/2026-08-23-reactions-mutation-ledger.md';
 const SUMMONS_LEDGER_PATH = 'docs/audits/2026-08-23-summons-mutation-ledger.md';
 const FORMS_LEDGER_PATH = 'docs/audits/2026-08-23-forms-mutation-ledger.md';
+const PCBRIDGE_LEDGER_PATH = 'docs/audits/2026-08-23-pcbridge-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -72,6 +73,30 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D352.1-PCBRIDGE-MUTATION-LEDGER pins all four restored bridge controls', () => {
+    const ledger = readFileSync(PCBRIDGE_LEDGER_PATH, 'utf8');
+    const exporterTests = readFileSync(
+      'tests/integration/vtt/stored-character-party-member.test.ts',
+      'utf8',
+    );
+    const roundTripTests = readFileSync(
+      'tests/integration/vtt/stored-character-round-trip.test.ts',
+      'utf8',
+    );
+    for (const control of [
+      'exporter_drops_passive_ac',
+      'multiclass_level_miscount',
+      'refusal_defaulted',
+      'controller_not_dm',
+    ]) {
+      expect(ledger).toContain(`\`${control}\``);
+      expect(`${exporterTests}\n${roundTripTests}`).toContain(`${control}:`);
+    }
+    expect(ledger.match(/exit 1/gu)).toHaveLength(4);
+    expect(ledger).toContain('Tests  5 passed (5)');
+    expect(ledger).toContain('All four mutations were restored.');
+  });
+
   it('D348.1-FORMS-MUTATION-LEDGER pins all four restored controls and the boundary kill', () => {
     const formsLedger = readFileSync(FORMS_LEDGER_PATH, 'utf8');
     const formsTests = readFileSync('tests/unit/vtt/forms.test.ts', 'utf8');

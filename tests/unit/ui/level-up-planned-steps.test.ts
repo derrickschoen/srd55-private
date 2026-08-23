@@ -209,6 +209,7 @@ function sheet(level: number): CharacterSheet {
   return {
     character_id: 7,
     name: 'Planned Mage',
+    creature_classification: { type: 'Humanoid', size: 'Medium' },
     house_rules: [],
     total_level: level,
     proficiency_bonus: number('proficiency_bonus', 'Proficiency bonus', 2),

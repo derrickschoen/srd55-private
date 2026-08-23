@@ -1,5 +1,7 @@
 import {
   sqlBoolean,
+  sqlNullableCreatureSize,
+  sqlNullableCreatureType,
   sqlInteger,
   sqlNullableInteger,
   sqlNullableString,
@@ -15,6 +17,8 @@ import type {
   HitDieSize,
   Skill,
   WeaponProficiencyCategory,
+  CreatureSize,
+  CreatureType,
 } from '../domain/enums';
 import {
   abilities,
@@ -426,6 +430,11 @@ export interface CharacterFlavor {
 export interface CharacterSheet {
   readonly character_id: number;
   readonly name: string;
+  /** Stored lineage classification; null is preserved for incomplete/imported content. */
+  readonly creature_classification: {
+    readonly type: CreatureType | null;
+    readonly size: CreatureSize | null;
+  };
   /** Closed, character-owned rule departures; never user-authored prose. */
   readonly house_rules: readonly CharacterHouseRuleKey[];
   readonly total_level: number | null;
@@ -813,6 +822,16 @@ export class CharacterSheetBuilder {
 
   build(characterId: number): CharacterSheet {
     const character = this.#character(characterId);
+    const creatureClassification = this.db.one(
+      `SELECT creature_type, size
+       FROM character_species
+       WHERE character_id = ?`,
+      [characterId],
+      (row) => ({
+        type: sqlNullableCreatureType(row, 'creature_type'),
+        size: sqlNullableCreatureSize(row, 'size'),
+      }),
+    );
     const resolvedAbilities = resolveCharacterAbilities(
       this.db,
       characterId,
@@ -1073,6 +1092,10 @@ export class CharacterSheetBuilder {
     return {
       character_id: characterId,
       name: character.name,
+      creature_classification: creatureClassification ?? {
+        type: null,
+        size: null,
+      },
       house_rules:
         multiclassHouseRule.status === 'on'
           ? [MULTICLASS_PREREQUISITE_HOUSE_RULE_KEY]

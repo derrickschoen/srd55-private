@@ -1,5 +1,6 @@
 import { skills, type Ability, type Skill } from '../domain/enums';
 import { canonicalJson } from '../commands/canonical-json';
+import { combatantSide, combatantsAreAllies } from './allies';
 import {
   importedMonsterProfile,
   importedSpellDefinition,
@@ -14,6 +15,7 @@ import {
   type ExhaustionLevel,
 } from './conditions';
 import type { CombatantProfile, CombatRulesProfile, CombatToken } from './combatant';
+import { EncounterRuleError } from './encounter-rule-error';
 import {
   FREE_OBJECT_INTERACTIONS_PER_TURN,
   type CombatantEquipment,
@@ -359,13 +361,7 @@ export interface EncounterReductionOptions {
   readonly reactionDecision?: ReactionDecisionHook;
 }
 
-export class EncounterRuleError extends Error {
-  override readonly name: string = 'EncounterRuleError';
-
-  constructor(readonly reason: string) {
-    super(reason);
-  }
-}
+export { combatantSide, combatantsAreAllies, EncounterRuleError };
 
 export type TargetSelectionRefusalRule =
   | 'fixed_count'
@@ -706,30 +702,6 @@ function combatant(state: EncounterState, id: CombatantId): EncounterCombatantSt
   const found = state.combatants.find((candidate) => candidate.profile.id === id);
   if (found === undefined) throw new EncounterRuleError(`Unknown combatant ${id}.`);
   return found;
-}
-
-/** Summons inherit the summoner's side while retaining their monster statblock profile. */
-export function combatantSide(
-  state: EncounterState,
-  id: CombatantId,
-): CombatantProfile['kind'] {
-  let current = id;
-  const visited = new Set<CombatantId>();
-  for (;;) {
-    if (visited.has(current)) throw new EncounterRuleError('Summon ownership cannot contain a cycle.');
-    visited.add(current);
-    const owner = state.effects.find((effect) => effect.ownedCombatants?.includes(current) === true)?.source;
-    if (owner === undefined) return combatant(state, current).profile.kind;
-    current = owner;
-  }
-}
-
-export function combatantsAreAllies(
-  state: EncounterState,
-  left: CombatantId,
-  right: CombatantId,
-): boolean {
-  return combatantSide(state, left) === combatantSide(state, right);
 }
 
 function token(state: EncounterState, id: CombatantId): CombatToken {

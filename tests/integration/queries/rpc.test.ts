@@ -166,6 +166,7 @@ describe('typed query RPC integration', () => {
       'queries.characters.saveLevelUpProgress',
       'queries.savePoints.create',
       'queries.characters.sheet',
+      'queries.characters.partyPackMember',
       'queries.characters.setPrintAppendixPreference',
       'queries.reports.build',
       'queries.history.read',

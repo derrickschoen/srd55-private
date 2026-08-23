@@ -159,6 +159,9 @@ class VttApplication {
         text: 'A live grid, tokens, visual fog, and a shared dice log. The board exists only while a peer keeps this page open.',
       }),
     );
+    const compose = element('a', { text: 'Compose a rules encounter from stored characters' });
+    compose.href = '/vtt?compose=stored';
+    header.append(compose);
     this.#buildConnectionPanel();
     this.#buildWorkspace();
     this.#workspace.hidden = true;

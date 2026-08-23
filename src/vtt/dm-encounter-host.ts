@@ -9,6 +9,8 @@ import {
 import {
   TurnCoordinator,
   type PersistedCoordinatorState,
+  type ReactionLegalActions,
+  type TurnLegalActions,
 } from '../combat/coordinator';
 import {
   createEncounter,
@@ -165,12 +167,19 @@ export class DmEncounterHost {
   #roundPlanSession: DmRoundPlanSession | null = null;
   readonly #steeringMode: SteeringCoordinatorMode;
   readonly #onSteeringTelemetry: (telemetry: SteeringTelemetry) => void;
+  readonly #playerIds: readonly CombatantId[];
+  readonly #turnLegalActions: TurnLegalActions;
+  readonly #reactionLegalActions: ReactionLegalActions;
 
   constructor(
     sessionKey: string,
     store: BrowserSessionStore,
     options: {
       readonly initialState?: EncounterState;
+      readonly initialControllers?: readonly ControllerIdentity[];
+      readonly playerIds?: readonly CombatantId[];
+      readonly turnLegalActions?: TurnLegalActions;
+      readonly reactionLegalActions?: ReactionLegalActions;
       readonly bridge?: DmBridgeConnection;
       readonly dmModel?: DmBridgeModelConfig;
       readonly codexSessionId?: ReturnType<typeof codexSessionId>;
@@ -182,6 +191,9 @@ export class DmEncounterHost {
     this.#store = store;
     this.#steeringMode = options.steeringMode ?? { kind: 'full_model' };
     this.#onSteeringTelemetry = options.onSteeringTelemetry ?? (() => undefined);
+    this.#playerIds = options.playerIds ?? REFERENCE_PLAYER_IDS;
+    this.#turnLegalActions = options.turnLegalActions ?? referenceTurnLegalActions;
+    this.#reactionLegalActions = options.reactionLegalActions ?? referenceReactionLegalActions;
     if (options.bridge !== undefined) {
       this.#mirror.connect(options.bridge);
       this.#roundPlanSession = new DmRoundPlanSession(
@@ -203,12 +215,14 @@ export class DmEncounterHost {
     const existing = store.revisions(this.sessionId);
     if (existing.length === 0) {
       const setup = referenceEncounterSetup();
-      const identities = newIdentities(options.bridge === undefined ? 'human' : 'agent');
+      const state = options.initialState ?? createEncounter(setup);
+      const identities = options.initialControllers ?? newIdentities(
+        options.bridge === undefined ? 'human' : 'agent',
+      );
       const built = registryFromIdentities(identities, agentController);
       this.#registry = built.registry;
       this.#humans = built.humans;
       this.#rng = mulberry32(0x315006);
-      const state = options.initialState ?? createEncounter(setup);
       this.#journal = EncounterSessionJournal.create({
         sessionId: this.sessionId,
         branchId: encounterBranchId('branch:reference-main'),
@@ -245,8 +259,8 @@ export class DmEncounterHost {
       persistence: resume.journal,
       resume: resume.coordinatorState,
       expectedControllers: resume.controllers,
-      turnLegalActions: referenceTurnLegalActions,
-      reactionLegalActions: referenceReactionLegalActions,
+      turnLegalActions: this.#turnLegalActions,
+      reactionLegalActions: this.#reactionLegalActions,
     });
   }
 
@@ -266,7 +280,7 @@ export class DmEncounterHost {
     const player = projectPlayerBoard(
       this.#coordinator.state(),
       coordinator,
-      REFERENCE_PLAYER_IDS,
+      this.#playerIds,
     );
     return {
       dm: projectDmBoard({
