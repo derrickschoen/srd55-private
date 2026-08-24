@@ -34,10 +34,13 @@ const REEF_PROWLER = statblockId('statblock:homebrew-beast/reef-prowler');
 
 const LEVEL_TWO_FORMS = [WOLF, BOAR, BRUSH_BEAR, THREADLING] as const;
 const LEVEL_FOUR_FORMS = [WOLF, BOAR, BLACK_BEAR, CROCODILE, DIRE_WOLF, BRUSH_BEAR] as const;
+const LEVEL_EIGHT_FORMS = [
+  WOLF, BOAR, BLACK_BEAR, CROCODILE, DIRE_WOLF, BLOOD_HAWK, BRUSH_BEAR, RIDGE_RUNNER,
+] as const;
 
 function druidProfile(
   key: string,
-  level: 2 | 4 | 8,
+  level: 2 | 4 | 7 | 8,
   knownForms: readonly StatblockId[],
   hitPoints = 20,
 ): Extract<CombatantProfile, { readonly kind: 'player_character' }> {
@@ -50,7 +53,7 @@ function druidProfile(
 }
 
 function started(
-  level: 2 | 4 | 8 = 2,
+  level: 2 | 4 | 7 | 8 = 2,
   knownForms: readonly StatblockId[] = LEVEL_TWO_FORMS,
   hitPoints = 20,
 ) {
@@ -141,12 +144,19 @@ describe('2024 Wild Shape overlay', () => {
     }
   });
 
-  it('movement_gates_named: Fly has the cited level-8 gate', () => {
-    // Fly gate: docs/srd/full/srd-5.2.1.txt:2595-2611.
-    const flying = started(4, [WOLF, BOAR, BLACK_BEAR, BLOOD_HAWK, DIRE_WOLF, BRUSH_BEAR]);
+  it('movement_gates_named: refuses a Fly Speed form one level below the level-8 gate', () => {
+    // Fly gate: docs/srd/full/srd-5.2.1.txt:2598-2599,2604-2611.
+    const flying = started(7, [WOLF, BOAR, BLACK_BEAR, BLOOD_HAWK, DIRE_WOLF, BRUSH_BEAR]);
     expect(() => shape(flying.state, flying.druid, BLOOD_HAWK)).toThrowError(expect.objectContaining({
       code: 'fly_speed_gate', gate: { kind: 'fly_speed', minimumDruidLevel: 8 },
     }));
+  });
+
+  it('allows a CR-eligible Fly Speed form starting at level 8', () => {
+    // Fly permission boundary: docs/srd/full/srd-5.2.1.txt:2598-2599,2604-2611.
+    const flying = started(8, LEVEL_EIGHT_FORMS);
+    const result = shape(flying.state, flying.druid, BLOOD_HAWK);
+    expect(subject(result.state, flying.druid).wildShape?.formId).toBe(BLOOD_HAWK);
   });
 
   it('allows a CR-eligible swim-speed form at level 2', () => {
