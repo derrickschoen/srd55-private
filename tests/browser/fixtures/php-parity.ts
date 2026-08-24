@@ -448,10 +448,15 @@ export async function workspaceFixtureImage(
         : null;
     db.exec(
       `UPDATE characters
-       SET allow_legacy = 0, notes = NULL
+       SET allow_legacy = 0,
+           optional_feature_selections = '["2024:feature:parity-selection"]',
+           notes = NULL
        WHERE id = ?`,
       [fixture.characterId],
     );
+    // Migration 0054's root-column probe is deliberately non-empty: backup v8,
+    // a7-v17 snapshots, and share v21 must not make a dropped selection look
+    // like the truthful default empty list.
     // D86's portable/restorable column probe: a plain possession with no
     // effects, and a non-default quantity so a dropped/defaulted field is loud.
     db.exec(

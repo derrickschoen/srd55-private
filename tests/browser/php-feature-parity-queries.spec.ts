@@ -364,9 +364,16 @@ test('captures every restorable character table and reports exact state differen
   });
   expect(document).toMatchObject({
     format: 'dnd-multiclass-spells/character',
-    version: 7,
+    // Migration 0054 minted a7-v17, backup v8, and share v21 for the new
+    // optional-feature-selection field; this portable document uses backup v8.
+    version: 8,
     source_character_id: workspaceImage.ids.character,
-    character: { name: 'R40 Golden', revision: 0 },
+    character: {
+      name: 'R40 Golden',
+      revision: 0,
+      // Migration 0054: restorable root-state inventory must carry selections.
+      optional_feature_selections: '["2024:feature:parity-selection"]',
+    },
   });
   for (const table of [
     'character_class_levels',
