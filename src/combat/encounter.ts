@@ -2381,8 +2381,6 @@ function assumeWildShape(
         throw new WildShapeRuleError('challenge_rating_gate', gate, `Wild Shape form ${command.formId} exceeds the level-${String(feature.druidLevel)} Challenge Rating gate.`);
       case 'fly_speed':
         throw new WildShapeRuleError('fly_speed_gate', gate, `Wild Shape form ${command.formId} requires Druid level 8 for its Fly Speed.`);
-      case 'swim_speed':
-        throw new WildShapeRuleError('swim_speed_gate', gate, `Wild Shape form ${command.formId} requires Druid level 4 for its Swim Speed.`);
     }
   }
   if (subject.profile.rules.abilityScores === undefined) {

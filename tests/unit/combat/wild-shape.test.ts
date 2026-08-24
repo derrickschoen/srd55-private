@@ -141,17 +141,19 @@ describe('2024 Wild Shape overlay', () => {
     }
   });
 
-  it('movement_gates_named: Fly has the cited level-8 gate and the finalized fork names its level-4 Swim gate', () => {
+  it('movement_gates_named: Fly has the cited level-8 gate', () => {
     // Fly gate: docs/srd/full/srd-5.2.1.txt:2595-2611.
     const flying = started(4, [WOLF, BOAR, BLACK_BEAR, BLOOD_HAWK, DIRE_WOLF, BRUSH_BEAR]);
     expect(() => shape(flying.state, flying.druid, BLOOD_HAWK)).toThrowError(expect.objectContaining({
       code: 'fly_speed_gate', gate: { kind: 'fly_speed', minimumDruidLevel: 8 },
     }));
+  });
 
+  it('allows a CR-eligible swim-speed form at level 2', () => {
+    // The Beast Shapes table gates only Fly Speed: docs/srd/full/srd-5.2.1.txt:2604-2611.
     const swimming = started(2, [WOLF, BOAR, REEF_PROWLER, THREADLING]);
-    expect(() => shape(swimming.state, swimming.druid, REEF_PROWLER)).toThrowError(expect.objectContaining({
-      code: 'swim_speed_gate', gate: { kind: 'swim_speed', minimumDruidLevel: 4 },
-    }));
+    const result = shape(swimming.state, swimming.druid, REEF_PROWLER);
+    expect(subject(result.state, swimming.druid).wildShape?.formId).toBe(REEF_PROWLER);
   });
 
   it('unknown_form_allowed: refuses a bundled Beast that is not on the character sheet', () => {

@@ -15,8 +15,7 @@ export type WildShapeEquipmentDisposition =
 
 export type WildShapeGate =
   | { readonly kind: 'challenge_rating'; readonly maximum: '1/4' | '1/2' | 1; readonly actual: ChallengeRating }
-  | { readonly kind: 'fly_speed'; readonly minimumDruidLevel: 8 }
-  | { readonly kind: 'swim_speed'; readonly minimumDruidLevel: 4 };
+  | { readonly kind: 'fly_speed'; readonly minimumDruidLevel: 8 };
 
 /** The character-sheet-owned portion of the feature. */
 export interface WildShapeCharacterSheet {
@@ -82,7 +81,6 @@ export type WildShapeRefusalCode =
   | 'form_not_known'
   | 'challenge_rating_gate'
   | 'fly_speed_gate'
-  | 'swim_speed_gate'
   | 'not_wildshaped';
 
 export class WildShapeRuleError extends Error {
@@ -210,11 +208,6 @@ export function wildShapeGateFor(
     : [];
   if (level < 8 && movement.some((entry) => entry.kind === 'fly')) {
     return { kind: 'fly_speed', minimumDruidLevel: 8 };
-  }
-  // Project fork #17 retains the pre-2024 aquatic threshold. The 2024 Beast
-  // Shapes table has no Swim-Speed gate; this is deliberately not cited as SRD.
-  if (level < 4 && movement.some((entry) => entry.kind === 'swim')) {
-    return { kind: 'swim_speed', minimumDruidLevel: 4 };
   }
   return null;
 }
