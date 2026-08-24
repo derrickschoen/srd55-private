@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D375 — OWNER: parallelize lanes; defer full gates to batch-merge boundaries (2026-08-24)
+
+Owner directive, verbatim: "Parallelize as much as you can. Use separate
+worktrees and dbs. Try to minimize the use of the box lock and break tasks
+into smaller chunks. Try deferring testing to after multiple lanes have
+merged to remove the box lock bottleneck."
+
+Supervisor operationalization: multiple concurrent codex lanes, each in its
+own worktree (lane-wt/vtt3a, lane-wt/vtt3b, ...; private repo is its own
+slot); lane briefs gate on tsc + THEIR OWN test files only; the full vitest
+suite + browser suite run ONCE per batch, at the wt/vtt -> main merge
+boundary after several lanes land. Supersedes the one-lane-at-a-time
+practice; the quiet-machine rule now applies only to the batch gate itself.
+
 ## D374 — OWNER: post-detection queue approved minus elevation; forks 17/18 confirmed; mapper next (2026-08-24)
 
 1. **Queue approved, ELEVATION DROPPED**: detection engine -> detection UI
