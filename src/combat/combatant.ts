@@ -214,6 +214,9 @@ export function monsterCombatantProfile(
         creatureSizes.includes(statblock.sourceDetails.classification.value.sizes[0] as KnownCreatureSize)
           ? { sizeCategory: statblock.sourceDetails.classification.value.sizes[0] as KnownCreatureSize }
           : {}),
+      ...(statblock.sourceDetails.classification.kind === 'present'
+        ? { creatureType: statblock.sourceDetails.classification.value.type }
+        : {}),
       spellSlots: [],
     },
   };

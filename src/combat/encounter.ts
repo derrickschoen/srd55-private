@@ -1,4 +1,4 @@
-import { skills, type Ability, type Skill } from '../domain/enums';
+import { creatureSizes, skills, type Ability, type Skill } from '../domain/enums';
 import { canonicalJson } from '../commands/canonical-json';
 import { combatantSide, combatantsAreAllies } from './allies';
 import {
@@ -36,6 +36,7 @@ import { isAttackFormSubstitutionPayload, isTypedCombatFeaturePayload } from './
 import type {
   CombatFeatureEffect,
   EffectApplication,
+  EffectDurationClock,
   EffectPayload,
   EncounterEffect,
   TurnBoundary,
@@ -97,7 +98,13 @@ import type {
   TargetGeometryRule,
 } from './spells/types';
 import { FORM_REPLACEMENT_RETAINED_STATISTICS } from './spells/types';
-import type { MonsterAction } from './statblock';
+import type {
+  MonsterAction,
+  MonsterDamageTrigger,
+  MonsterEffectDuration,
+  MonsterOnHitEffect,
+} from './statblock';
+import { lookupBundledMonster } from './statblocks/companions';
 import { affectedCells, creatureOccupiesAffectedCell, type AreaTemplate } from './templates';
 import {
   armorClass,
@@ -1874,8 +1881,23 @@ function endEffects(
   reason: Extract<EncounterEvent, { readonly type: 'effect_ended' }>['reason'],
 ): void {
   if (ids.size === 0) return;
+  const ending = new Set(ids);
+  let foundDependent = true;
+  while (foundDependent) {
+    foundDependent = false;
+    for (const effect of context.state.effects) {
+      if (
+        effect.parentEffectId !== undefined &&
+        ending.has(effect.parentEffectId) &&
+        !ending.has(effect.id)
+      ) {
+        ending.add(effect.id);
+        foundDependent = true;
+      }
+    }
+  }
   for (const effect of context.state.effects) {
-    if (!ids.has(effect.id)) continue;
+    if (!ending.has(effect.id)) continue;
     if (effect.payload.kind === 'temporary_banishment') {
       restoreBanishedTargets(context, effect, reason === 'duration_expired');
     }
@@ -1892,7 +1914,7 @@ function endEffects(
   }
   context.state = {
     ...context.state,
-    effects: context.state.effects.filter((effect) => !ids.has(effect.id)),
+    effects: context.state.effects.filter((effect) => !ending.has(effect.id)),
   };
 }
 
@@ -2214,7 +2236,7 @@ function resolveTargetSave(
         context.rng,
       );
   endEffects(context, modifierModes.consumed, 'trigger_consumed');
-  emit(context, { type: 'save_resolved', source, target, ability, save, effectId });
+  emit(context, { type: 'save_resolved', source, target, ability, dc, save, effectId });
   return save;
 }
 
@@ -3035,6 +3057,11 @@ function removeEffectTarget(
         candidate.id === effectId ? { ...candidate, targets } : candidate,
       ),
     };
+    const dependents = context.state.effects.filter((candidate) =>
+      candidate.parentEffectId === effectId && candidate.targets.includes(target));
+    for (const dependent of dependents) {
+      removeEffectTarget(context, dependent.id, target, reason);
+    }
   }
 }
 
@@ -3355,6 +3382,16 @@ function validateEffectApplication(
       throw new EncounterRuleError('Repeated-save timing requires a source locator.');
     }
   }
+  if (effect.escapeCheck !== undefined) {
+    difficultyClass(effect.escapeCheck.dc);
+  }
+  if (effect.parentEffectId !== undefined) {
+    const parent = state.effects.find((candidate) => candidate.id === effect.parentEffectId);
+    if (parent === undefined) throw new EncounterRuleError('A dependent effect requires a live parent effect.');
+    if (effect.targets.some((target) => !parent.targets.includes(target))) {
+      throw new EncounterRuleError('A dependent effect target must belong to its parent effect.');
+    }
+  }
   if (
     effect.payload.kind === 'ongoing_damage' &&
     (!effect.targets.includes(effect.payload.timing.combatant) ||
@@ -3640,6 +3677,12 @@ function cloneEffectApplication(
       : { ownedCombatants: [...application.ownedCombatants] }),
     duration,
     repeatedSave,
+    ...(application.escapeCheck === undefined
+      ? {}
+      : { escapeCheck: { ...application.escapeCheck } }),
+    ...(application.parentEffectId === undefined
+      ? {}
+      : { parentEffectId: application.parentEffectId }),
     damageBreak: application.damageBreak === undefined || application.damageBreak === null
       ? application.damageBreak ?? null
       : { ...application.damageBreak },
@@ -3681,6 +3724,8 @@ function applyEffect(
     stackingIdentity: owned.stackingIdentity,
     stacking: owned.stacking,
     repeatedSave: owned.repeatedSave,
+    ...(owned.escapeCheck === undefined ? {} : { escapeCheck: owned.escapeCheck }),
+    ...(owned.parentEffectId === undefined ? {} : { parentEffectId: owned.parentEffectId }),
     damageBreak: owned.damageBreak ?? null,
     payload: owned.payload,
     ...(owned.ownedCombatants === undefined
@@ -4084,6 +4129,295 @@ function applySaveGatedBanishments(
   }
 }
 
+function monsterEffectDuration(
+  actor: CombatantId,
+  target: CombatantId,
+  duration: MonsterEffectDuration | null,
+  source: string,
+): EffectDurationClock {
+  switch (duration) {
+    case null:
+    case 'until_escape':
+      return { kind: 'permanent' };
+    case 'until_end_of_monster_next_turn':
+      return {
+        kind: 'turn_boundaries',
+        timing: { combatant: actor, boundary: 'end', source },
+        remaining: 1,
+      };
+    case 'until_end_of_target_next_turn':
+      return {
+        kind: 'turn_boundaries',
+        timing: { combatant: target, boundary: 'end', source },
+        remaining: 1,
+      };
+    case 'until_start_of_monster_next_turn':
+      return {
+        kind: 'turn_boundaries',
+        timing: { combatant: actor, boundary: 'start', source },
+        remaining: 1,
+      };
+  }
+}
+
+function monsterTriggerApplies(
+  context: ReductionContext,
+  target: CombatantId,
+  trigger: MonsterDamageTrigger,
+  attackRollMode: RollMode | null,
+): boolean {
+  switch (trigger.kind) {
+    case 'always':
+      return true;
+    case 'attack_roll_advantage':
+      if (attackRollMode === null) {
+        throw new EncounterRuleError('An attack-roll-advantage monster effect requires an attack roll.');
+      }
+      return attackRollMode === 'advantage';
+    case 'replaces_base_when_target_bloodied': {
+      const subject = combatant(context.state, target);
+      return subject.hitPoints < effectiveHitPointMaximum(context.state, target);
+    }
+    case 'charge':
+      throw new EncounterRuleError(
+        'A charge-triggered monster on-hit effect cannot execute until straight-line movement is reducer-owned.',
+      );
+  }
+}
+
+function monsterEffectTargetIsEligible(
+  context: ReductionContext,
+  target: CombatantId,
+  effect: Extract<MonsterOnHitEffect, { readonly kind: 'condition' }>,
+): boolean {
+  const rules = combatant(context.state, target).profile.rules;
+  if (effect.target.maximumSize !== null) {
+    if (rules.sizeCategory === undefined) {
+      throw new EncounterRuleError(`Monster on-hit size eligibility requires a known size for ${target}.`);
+    }
+    const targetIndex = creatureSizes.indexOf(rules.sizeCategory);
+    const maximumIndex = creatureSizes.findIndex((size) => size === effect.target.maximumSize);
+    if (maximumIndex < 0) {
+      throw new EncounterRuleError(`Monster on-hit maximum size ${effect.target.maximumSize} is not mechanically known.`);
+    }
+    if (targetIndex > maximumIndex) return false;
+  }
+  for (const excluded of effect.target.excludedKinds) {
+    switch (excluded) {
+      case 'Undead':
+        if (rules.creatureType === undefined) {
+          throw new EncounterRuleError(`Monster on-hit creature-type eligibility requires a known type for ${target}.`);
+        }
+        if (rules.creatureType === 'Undead') return false;
+        break;
+      case 'Elf':
+        if (rules.creatureType === 'Elf') return false;
+        if (rules.creatureType === undefined || rules.creatureType === 'Humanoid') {
+          throw new EncounterRuleError('The Elf monster-effect exclusion has no landed target discriminator.');
+        }
+        break;
+    }
+  }
+  return true;
+}
+
+function monsterDamageRequest(
+  effect: Extract<MonsterOnHitEffect, { readonly kind: 'condition_bound_ongoing_damage' }>,
+): DamageRequest {
+  return {
+    terms: [{
+      type: damageType(effect.damage.type),
+      dice: {
+        count: effect.damage.dice.count,
+        sides: dieSides(effect.damage.dice.sides),
+        modifier: effect.damage.dice.modifier,
+      },
+    }],
+    critical: false,
+    responses: [],
+  };
+}
+
+function applyMonsterOnHitEffects(
+  context: ReductionContext,
+  actor: CombatantId,
+  target: CombatantId,
+  actionId: string,
+  effects: readonly MonsterOnHitEffect[],
+  attackRollMode: RollMode | null,
+  damageTaken: number,
+): void {
+  for (const effect of effects) {
+    if (
+      effect.kind === 'condition_bound_ongoing_damage' &&
+      !effects.some((candidate) =>
+        candidate.kind === 'condition' && candidate.condition === effect.boundCondition)
+    ) {
+      throw new EncounterRuleError(
+        `Monster ongoing damage names ${effect.boundCondition} without declaring that condition on the action.`,
+      );
+    }
+  }
+
+  const conditionEffects = new Map<string, EncounterEffectId>();
+  const execute = (effect: MonsterOnHitEffect, index: number): void => {
+    const source = `monster:${actionId}:on-hit:${String(index)}`;
+    switch (effect.kind) {
+      case 'condition': {
+        if (!monsterTriggerApplies(context, target, effect.trigger, attackRollMode)) return;
+        if (!monsterEffectTargetIsEligible(context, target, effect)) return;
+        if (effect.savingThrow !== null) {
+          const save = resolveTargetSave(
+            context,
+            actor,
+            target,
+            effect.savingThrow.ability,
+            effect.savingThrow.dc,
+            'normal',
+            null,
+            'other',
+          );
+          if (save.outcome === 'success') return;
+        }
+        const id = applyEffect(context, actor, {
+          targets: [target],
+          duration: monsterEffectDuration(actor, target, effect.duration, source),
+          concentration: false,
+          stackingIdentity: effectStackingIdentity(`${source}:${effect.condition}`),
+          stacking: 'replace_same_source',
+          repeatedSave: null,
+          ...(effect.escapeDc === null
+            ? {}
+            : {
+                escapeCheck: {
+                  ability: 'strength' as const,
+                  skill: 'athletics' as const,
+                  dc: effect.escapeDc,
+                },
+              }),
+          payload: { kind: 'condition', condition: effect.condition },
+        });
+        if (context.state.effects.some((candidate) =>
+          candidate.id === id && candidate.targets.includes(target))) {
+          conditionEffects.set(effect.condition, id);
+        }
+        return;
+      }
+      case 'condition_bound_ongoing_damage': {
+        if (!monsterTriggerApplies(context, target, effect.damage.trigger, attackRollMode)) return;
+        const parentEffectId = conditionEffects.get(effect.boundCondition);
+        if (parentEffectId === undefined) return;
+        applyEffect(context, actor, {
+          targets: [target],
+          duration: { kind: 'permanent' },
+          concentration: false,
+          stackingIdentity: effectStackingIdentity(`${source}:${effect.boundCondition}:ongoing-damage`),
+          stacking: 'replace_same_source',
+          repeatedSave: null,
+          parentEffectId,
+          payload: {
+            kind: 'ongoing_damage',
+            damage: monsterDamageRequest(effect),
+            timing: { combatant: target, boundary: 'start', source },
+          },
+        });
+        return;
+      }
+      case 'hit_point_maximum_reduction':
+        if (damageTaken === 0) return;
+        applyEffect(context, actor, {
+          targets: [target],
+          duration: { kind: 'permanent' },
+          concentration: false,
+          stackingIdentity: effectStackingIdentity(`${source}:hit-point-maximum-reduction`),
+          stacking: 'coexist',
+          repeatedSave: null,
+          payload: { kind: 'hit_point_maximum_modifier', amount: -damageTaken },
+        });
+        return;
+      case 'speed_reduction':
+        applyEffect(context, actor, {
+          targets: [target],
+          duration: monsterEffectDuration(actor, target, effect.duration, source),
+          concentration: false,
+          stackingIdentity: effectStackingIdentity(`${source}:speed-reduction`),
+          stacking: 'replace_same_source',
+          repeatedSave: null,
+          payload: {
+            kind: 'movement_modifier',
+            speedChange: { kind: 'set', speedFeet: effect.feet },
+            modeGrants: [],
+            difficultTerrainImmunity: false,
+            magicalSpeedReductionImmunity: false,
+          },
+        });
+        return;
+      case 'raises_as_zombie':
+        throw new EncounterRuleError(
+          'The raises_as_zombie monster effect has no landed delayed out-of-combat lifecycle.',
+        );
+    }
+    const unhandled: never = effect;
+    throw new EncounterRuleError(`Declared monster effect ${String(unhandled)} was not executed.`);
+  };
+
+  effects.forEach((effect, index) => {
+    if (effect.kind === 'condition') execute(effect, index);
+  });
+  effects.forEach((effect, index) => {
+    if (effect.kind !== 'condition') execute(effect, index);
+  });
+}
+
+function declaredMonsterAction(
+  state: EncounterState,
+  actor: CombatantId,
+  actionId: string,
+): MonsterAction {
+  const subject = combatant(state, actor);
+  const formAction = subject.form?.availableActions.find((candidate) => candidate.id === actionId);
+  if (formAction !== undefined) return formAction;
+  if (subject.form !== undefined) {
+    throw new EncounterRuleError(`Combatant ${actor} must use an attack from form ${subject.form.formId}.`);
+  }
+  if (subject.profile.kind !== 'monster') {
+    throw new EncounterRuleError(`Combatant ${actor} has no monster action ${actionId}.`);
+  }
+  const statblockId = subject.profile.statblockId;
+  for (const pack of state.contentPacks ?? []) {
+    const imported = pack.monsters.find((monster) => monster.statblock.id === statblockId);
+    const action = imported?.actions.find((candidate) => candidate.id === actionId);
+    if (action !== undefined) return action;
+  }
+  const lookup = lookupBundledMonster(String(statblockId));
+  if (lookup.status === 'resolved' && lookup.entry.kind === 'static') {
+    const decoded = lookup.entry.statblock.sourceDetails.actions;
+    const action = decoded.kind === 'present'
+      ? decoded.value.find((candidate) => candidate.id === actionId)
+      : undefined;
+    if (action !== undefined) return action;
+  }
+  throw new EncounterRuleError(`Combatant ${actor} has no declared monster action ${actionId}.`);
+}
+
+function declaredMonsterDamage(
+  terms: Extract<MonsterAction, { readonly kind: 'attack' }>['damage'] |
+    Extract<MonsterAction, { readonly kind: 'saving_throw' }>['failure']['damage'],
+): DamageRequest {
+  return {
+    terms: terms.filter((term) => term.trigger.kind === 'always').map((term) => ({
+      type: damageType(term.type),
+      dice: {
+        count: term.dice.count,
+        sides: dieSides(term.dice.sides),
+        modifier: term.dice.modifier,
+      },
+    })),
+    critical: false,
+    responses: [],
+  };
+}
+
 function processAttack(
   context: ReductionContext,
   command: Extract<
@@ -4092,26 +4426,24 @@ function processAttack(
   >,
 ): void {
   const activeForm = combatant(context.state, command.actor).form;
-  if (activeForm !== undefined) {
-    const action = activeForm.availableActions.find((candidate): candidate is Extract<MonsterAction, { readonly kind: 'attack' }> =>
-      candidate.kind === 'attack' && candidate.id === command.attackId);
-    if (action === undefined) {
-      throw new EncounterRuleError(`Combatant ${command.actor} must use an attack from form ${activeForm.formId}.`);
+  if (activeForm !== undefined || command.monsterOnHit !== undefined) {
+    if (command.attackId === undefined) {
+      if (activeForm !== undefined) {
+        throw new EncounterRuleError(`Combatant ${command.actor} must use an attack from form ${activeForm.formId}.`);
+      }
+      throw new EncounterRuleError('A declared monster attack requires its action id.');
     }
-    const declaredDamage = {
-      terms: action.damage.filter((term) => term.trigger.kind === 'always').map((term) => ({
-        type: damageType(term.type),
-        dice: { count: term.dice.count, sides: dieSides(term.dice.sides), modifier: term.dice.modifier },
-      })),
-      critical: false,
-      responses: [],
-    };
+    const declared = declaredMonsterAction(context.state, command.actor, command.attackId);
+    if (declared.kind !== 'attack') {
+      throw new EncounterRuleError(`Monster action ${command.attackId} is not an attack.`);
+    }
     if (
-      command.attackBonus !== action.attackBonus ||
+      command.attackBonus !== declared.attackBonus ||
       command.criticalFloor !== 20 ||
-      canonicalJson(command.damage) !== canonicalJson(declaredDamage)
+      canonicalJson(command.damage) !== canonicalJson(declaredMonsterDamage(declared.damage)) ||
+      canonicalJson(command.monsterOnHit ?? []) !== canonicalJson(declared.onHit)
     ) {
-      throw new EncounterRuleError(`Combatant ${command.actor}'s form attack declaration was altered.`);
+      throw new EncounterRuleError(`Combatant ${command.actor}'s monster attack declaration was altered.`);
     }
   }
   if (!isCombatantOnBoard(context.state, command.actor)) {
@@ -4390,6 +4722,20 @@ function processAttack(
       applyWeaponHitRiderFollowUp(context, rider.encounterEffect, command.target);
     }
     applySaveGatedBanishments(context, command.actor, command.target);
+    if (command.monsterOnHit !== undefined) {
+      if (command.attackId === undefined) {
+        throw new EncounterRuleError('A monster on-hit declaration requires its attack id.');
+      }
+      applyMonsterOnHitEffects(
+        context,
+        command.actor,
+        command.target,
+        command.attackId,
+        command.monsterOnHit,
+        attack.roll.mode,
+        damageResult.total,
+      );
+    }
   }
   emit(context, {
     type: 'attack_resolved',
@@ -8576,6 +8922,22 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       return;
     }
     case 'force_save': {
+      if (command.monsterFailureEffects !== undefined) {
+        if (command.monsterActionId === undefined) {
+          throw new EncounterRuleError('Declared monster failure effects require their action id.');
+        }
+        const declared = declaredMonsterAction(context.state, command.actor, command.monsterActionId);
+        if (
+          declared.kind !== 'saving_throw' ||
+          command.ability !== declared.savingThrow.ability ||
+          command.dc !== declared.savingThrow.dc ||
+          command.onSuccess !== (declared.success.kind === 'half_damage' ? 'half' : 'none') ||
+          canonicalJson(command.damage) !== canonicalJson(declaredMonsterDamage(declared.failure.damage)) ||
+          canonicalJson(command.monsterFailureEffects) !== canonicalJson(declared.failure.effects)
+        ) {
+          throw new EncounterRuleError(`Combatant ${command.actor}'s monster save declaration was altered.`);
+        }
+      }
       assertActiveActor(context, command.actor);
       spendCost(context, command.actor, command.cost, 'Force saving throw');
       const save = resolveTargetSave(
@@ -8598,10 +8960,40 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
             : 0;
       applyDamage(context, command.actor, command.target, amount);
       concentrationCheck(context, command.target, amount);
+      if (save.outcome === 'failure' && command.monsterFailureEffects !== undefined) {
+        applyMonsterOnHitEffects(
+          context,
+          command.actor,
+          command.target,
+          `save:${command.ability}:${String(command.dc)}`,
+          command.monsterFailureEffects,
+          null,
+          amount,
+        );
+      }
       return;
     }
     case 'roll_ability_check': {
       assertActiveActor(context, command.actor);
+      let escapeEffect: EncounterEffect | null = null;
+      if (command.escapeEffectId !== undefined) {
+        const candidate = context.state.effects.find((effect) => effect.id === command.escapeEffectId);
+        if (
+          candidate === undefined ||
+          !candidate.targets.includes(command.actor) ||
+          candidate.escapeCheck === undefined
+        ) {
+          throw new EncounterRuleError(`Effect ${command.escapeEffectId} is not escapable by ${command.actor}.`);
+        }
+        escapeEffect = candidate;
+        if (
+          command.ability !== candidate.escapeCheck.ability ||
+          command.skill !== candidate.escapeCheck.skill ||
+          command.dc !== candidate.escapeCheck.dc
+        ) {
+          throw new EncounterRuleError('An escape check must use the condition effect\'s declared ability, skill, and DC.');
+        }
+      }
       spendCost(context, command.actor, command.cost, 'Ability check');
       if (!Number.isFinite(command.bonus)) throw new EncounterRuleError('Ability check bonus must be finite.');
       const modifier = effectDiceModifier(
@@ -8628,6 +9020,9 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         type: 'ability_check_resolved', actor: command.actor,
         ability: command.ability, skill: command.skill, check,
       });
+      if (check.outcome === 'success' && escapeEffect !== null) {
+        removeEffectTarget(context, escapeEffect.id, command.actor, 'condition_removed');
+      }
       return;
     }
     case 'dash': {

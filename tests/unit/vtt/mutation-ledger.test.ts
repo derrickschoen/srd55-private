@@ -77,7 +77,7 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
-  it('D366-BEASTFAM-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
+  it('D366-BEASTFAM-MUTATION-LEDGER pins authored and supervisor-found controls to named killing tests', () => {
     const beastFamilyLedger = readFileSync(BEAST_FAMILY_LEDGER_PATH, 'utf8');
     const familyTests = readFileSync('tests/unit/combat/homebrew-beast-families.test.ts', 'utf8');
     for (const control of [
@@ -89,9 +89,20 @@ describe('phase-2 mutation ledger manifest', () => {
       expect(beastFamilyLedger).toContain(`\`${control}\``);
       expect(familyTests).toContain(`${control}:`);
     }
-    expect(beastFamilyLedger.match(/`exit 1`/gu)).toHaveLength(4);
     expect(beastFamilyLedger).toContain('Tests  9 passed (9)');
     expect(beastFamilyLedger).toContain('All four mutations were restored.');
+    const executionTests = readFileSync('tests/integration/vtt/monster-on-hit.test.ts', 'utf8');
+    for (const control of [
+      'squeeze_survives_release',
+      'rider_applies_on_miss',
+      'declared_effect_skipped',
+    ]) {
+      expect(beastFamilyLedger).toContain(`\`${control}\``);
+      expect(executionTests).toContain(`${control}:`);
+    }
+    expect(beastFamilyLedger.match(/`exit 1`/gu)).toHaveLength(7);
+    expect(beastFamilyLedger).toContain('Tests  5 passed (5)');
+    expect(beastFamilyLedger).toContain('All three supervisor-found mutations were restored.');
   });
 
   it('D361.1-D363.2-ADVDAY-MUTATION-LEDGER pins all six restored controls to named killing tests', () => {

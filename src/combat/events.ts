@@ -11,6 +11,7 @@ import type {
 import type { EffectApplication, EffectPayload, TurnBoundary } from './effects';
 import type { PersistentAreaHook, PersistentAreaInput, PersistentAreaOrigin } from './persistent-areas';
 import type { SpellCastCommand } from './spells/types';
+import type { MonsterOnHitEffect } from './statblock';
 import type { AreaTemplate } from './templates';
 import type { CombatantId, EncounterEffectId, Feet, ItemId, LimitedResourcePoolId, ObjectTargetId, PersistentAreaId, WorldObjectId } from './values';
 import type { LightLevel, WorldObject, WorldOperation } from './world-objects';
@@ -87,6 +88,8 @@ export type EncounterCommand =
       readonly damage: DamageRequest;
       /** Present for attacks selected from a typed party-pack attack form. */
       readonly attackId?: string;
+      /** Reducer-validated effects declared by a monster statblock attack. */
+      readonly monsterOnHit?: readonly MonsterOnHitEffect[];
       /** Chooses the declared first-attack Reckless Attack mode. */
       readonly recklessAttackEffectId?: EncounterEffectId;
       readonly bonusActionGrantEffectId?: EncounterEffectId;
@@ -116,6 +119,8 @@ export type EncounterCommand =
       readonly damage: DamageRequest;
       /** Required while a form replacement limits attacks to its statblock. */
       readonly attackId?: string;
+      /** Reducer-validated effects declared by a monster statblock attack. */
+      readonly monsterOnHit?: readonly MonsterOnHitEffect[];
       readonly rollModifierEffectIds?: readonly EncounterEffectId[];
     }
   | {
@@ -133,6 +138,10 @@ export type EncounterCommand =
       readonly damage: DamageRequest;
       readonly onSuccess: 'none' | 'half';
       readonly cost: ActionCost;
+      /** Identifies the monster saving-throw action when failure effects are carried. */
+      readonly monsterActionId?: string;
+      /** Effects declared on the failed branch of a monster saving-throw action. */
+      readonly monsterFailureEffects?: readonly MonsterOnHitEffect[];
       readonly rollModifierEffectIds?: readonly EncounterEffectId[];
     }
   | {
@@ -144,6 +153,8 @@ export type EncounterCommand =
       readonly dc: number;
       readonly rollMode: RollMode;
       readonly cost: ActionCost;
+      /** Names the reducer-owned condition lifecycle this check attempts to escape. */
+      readonly escapeEffectId?: EncounterEffectId;
       readonly rollModifierEffectIds?: readonly EncounterEffectId[];
     }
   | {
@@ -357,6 +368,7 @@ export type EncounterEvent =
       readonly source: CombatantId;
       readonly target: CombatantId;
       readonly ability: Ability;
+      readonly dc: number;
       readonly save: SavingThrowResult;
       readonly effectId: EncounterEffectId | null;
     })

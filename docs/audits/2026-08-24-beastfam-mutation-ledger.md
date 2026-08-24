@@ -12,3 +12,17 @@ All controls were applied one at a time to `src/combat/statblocks/homebrew-beast
 Restored targeted run: `Test Files  1 passed (1)` and `Tests  9 passed (9)`.
 
 All four mutations were restored.
+
+## Supervisor-found encounter-execution controls (r2)
+
+Each production mutation below was applied alone to `src/combat/encounter.ts`, killed by its named reducer integration test, and restored by the exact inverse edit before the next mutation.
+
+| Mutation | Mutated behavior | Killing test | Result |
+|---|---|---|---|
+| `squeeze_survives_release` | Disabled dependent-effect closure when the Grappled parent ended, leaving squeeze active after escape. | `squeeze_survives_release: bear grapple carries its DC, ticks at target start, and escape ends grapple plus squeeze` | `exit 1`; `Test Files  1 failed (1)`; `Tests  1 failed \| 4 skipped (5)`; the named assertion found the bound squeeze still live after escape. |
+| `rider_applies_on_miss` | Entered the attack damage-and-rider branch for both hits and misses. | `rider_applies_on_miss: the same bear, raptor, and spider attacks deal no damage and apply no effects when they miss` | `exit 1`; `Test Files  1 failed (1)`; `Tests  1 failed \| 4 skipped (5)`; the missed bear attack reduced the target from 250 to 241 HP. |
+| `declared_effect_skipped` | Returned from the `raises_as_zombie` switch arm instead of refusing the unlanded lifecycle. | `declared_effect_skipped: a real raises_as_zombie declaration refuses loudly until its lifecycle lands` | `exit 1`; `Test Files  1 failed (1)`; `Tests  1 failed \| 4 skipped (5)`; the named assertion reported that execution did not throw. |
+
+Restored reducer integration run: `Test Files  1 passed (1)` and `Tests  5 passed (5)`.
+
+All three supervisor-found mutations were restored.

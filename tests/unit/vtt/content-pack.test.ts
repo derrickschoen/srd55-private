@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import type { CombatantProfile } from '../../../src/combat/combatant';
 import { combatToken } from '../../../src/combat/combatant';
-import { createEncounter, reduceEncounter } from '../../../src/combat/encounter';
+import { combatantConditions, createEncounter, reduceEncounter } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { spellDefinition } from '../../../src/combat/spells/definitions';
@@ -202,12 +202,21 @@ describe('content-pack v1', () => {
 
   it('monster action damage null rejects the monster record while a healthy monster imports and executes', () => {
     const candidate = fixture() as {
-      monsters: Array<{ recordId: string; name: string; actions: Array<{ damage: unknown[] }> }>;
+      monsters: Array<{
+        recordId: string;
+        name: string;
+        actions: Array<{ damage: unknown[]; onHit: unknown[] }>;
+      }>;
     };
     const healthy = structuredClone(candidate.monsters[0]);
     if (healthy === undefined) throw new Error('Fixture monster is missing.');
     healthy.recordId = 'healthy-monster';
     healthy.name = 'Healthy Monster';
+    healthy.actions[0]!.onHit = [{
+      kind: 'condition', condition: 'Prone', trigger: { kind: 'always' },
+      target: { maximumSize: null, excludedKinds: [] }, savingThrow: null,
+      escapeDc: null, duration: 'until_end_of_target_next_turn',
+    }];
     candidate.monsters.push(healthy);
     candidate.monsters[0]!.actions[0]!.damage = [null];
     const content = loaded(loadContentPack(candidate));
@@ -234,6 +243,7 @@ describe('content-pack v1', () => {
       () => 0.5,
     ).state;
     expect(state.combatants.find(({ profile }) => profile.id === target.id)?.hitPoints).toBe(15);
+    expect(combatantConditions(state, target.id)).toContainEqual({ name: 'Prone' });
   });
 
   it('namespace_not_enforced: an undeclared source namespace rejects only that record and executes the declared healthy record', () => {

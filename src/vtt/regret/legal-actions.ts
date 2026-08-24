@@ -2,13 +2,17 @@ import type { LegalActionSummary } from '../../combat/controllers';
 import type { EncounterState } from '../../combat/encounter';
 import type { EncounterCommand } from '../../combat/events';
 import { adjacentCells, gridDistance } from '../../combat/grid';
-import type { DamageRequest, RollMode } from '../../combat/resolution';
+import type { RollMode } from '../../combat/resolution';
+import {
+  monsterAttackCommand,
+  monsterSavingThrowCommand,
+} from '../../combat/monster-commands';
 import type {
   MonsterAttackAction,
   MonsterSavingThrowAction,
   MonsterStatblock,
 } from '../../combat/statblock';
-import { STARTER_MONSTER_ROSTER } from '../../combat/statblocks/roster';
+import { BUNDLED_MONSTER_ROSTER } from '../../combat/statblocks/roster';
 import {
   damageType,
   dieSides,
@@ -17,7 +21,7 @@ import {
 import type { PlanAction } from '../dm-bridge/contracts';
 
 const STATBLOCKS: ReadonlyMap<string, MonsterStatblock> = new Map(
-  STARTER_MONSTER_ROSTER.map((row) => [row.id, row.statblock] as const),
+  BUNDLED_MONSTER_ROSTER.map((row) => [row.id, row.statblock] as const),
 );
 
 function subject(state: EncounterState, id: CombatantId) {
@@ -36,23 +40,6 @@ function monsterStatblock(state: EncounterState, actor: CombatantId): MonsterSta
   const profile = subject(state, actor).profile;
   if (profile.kind !== 'monster') return null;
   return STATBLOCKS.get(profile.statblockId) ?? null;
-}
-
-function monsterDamage(action: MonsterAttackAction): DamageRequest {
-  const applicable = action.damage.filter((term) => term.trigger.kind === 'always');
-  const terms = applicable.length === 0 ? action.damage : applicable;
-  return {
-    terms: terms.map((term) => ({
-      type: damageType(term.type),
-      dice: {
-        count: term.dice.count,
-        sides: dieSides(term.dice.sides),
-        modifier: term.dice.modifier,
-      },
-    })),
-    critical: false,
-    responses: [],
-  };
 }
 
 function deliveryRollMode(action: MonsterAttackAction, distance: number): RollMode | null {
@@ -120,17 +107,9 @@ function attacksAgainst(
     .flatMap((action) => {
       const rollMode = deliveryRollMode(action, distance);
       if (rollMode === null) return [];
-      return [{
-        type: options.opportunity ? 'opportunity_attack' as const : 'attack' as const,
-        actor,
-        target,
-        attackBonus: action.attackBonus,
-        criticalFloor: 20,
-        rollMode,
-        attackerCanSeeTarget: true,
-        targetCanSeeAttacker: true,
-        damage: monsterDamage(action),
-      }];
+      return [options.opportunity
+        ? monsterAttackCommand(action, actor, target, rollMode, true)
+        : monsterAttackCommand(action, actor, target, rollMode)];
     });
   if (attacks.length > 0) return attacks;
   return distance <= subject(state, actor).profile.rules.reach
@@ -154,28 +133,7 @@ function monsterSaveCommand(
   action: MonsterSavingThrowAction,
   cost: 'action' | 'none',
 ): Extract<EncounterCommand, { readonly type: 'force_save' }> {
-  return {
-    type: 'force_save',
-    actor,
-    target,
-    ability: action.savingThrow.ability,
-    dc: action.savingThrow.dc,
-    rollMode: 'normal',
-    damage: {
-      terms: action.failure.damage.map((term) => ({
-        type: damageType(term.type),
-        dice: {
-          count: term.dice.count,
-          sides: dieSides(term.dice.sides),
-          modifier: term.dice.modifier,
-        },
-      })),
-      critical: false,
-      responses: [],
-    },
-    onSuccess: 'none',
-    cost,
-  };
+  return monsterSavingThrowCommand(action, actor, target, cost);
 }
 
 function genericSaveCommand(
