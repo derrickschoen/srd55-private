@@ -60,7 +60,7 @@ function profile(
     },
   } as const;
   return kind === 'player_character'
-    ? { ...common, kind, characterId: key === 'fighter' ? 1 : key === 'cleric' ? 2 : 3 }
+    ? { ...common, kind, characterId: key === 'fighter' ? 1 : key === 'cleric' ? 2 : 3, wildShape: null }
     : { ...common, kind, statblockId: statblockId('statblock:training-brute') };
 }
 

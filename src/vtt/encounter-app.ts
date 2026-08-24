@@ -65,6 +65,8 @@ function decisionHeading(decision: PendingDecision): string {
 
 function actionLabel(action: EncounterCommand): string {
   switch (action.type) {
+    case 'assume_wild_shape': return 'Wild Shape';
+    case 'revert_wild_shape': return 'Revert Wild Shape';
     case 'drop_item': return 'Drop item';
     case 'pickup_item': return 'Pick up item';
     case 'equip_item': return 'Equip item';

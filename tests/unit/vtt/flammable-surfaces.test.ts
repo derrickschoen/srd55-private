@@ -13,7 +13,13 @@ import {
 } from '../../../src/combat/persistent-areas';
 import { spellDefinition } from '../../../src/combat/spells/definitions';
 import { feetPoint } from '../../../src/combat/templates';
-import { damageType, dieSides, feet, type DamageType } from '../../../src/combat/values';
+import {
+  damageType,
+  dieSides,
+  effectStackingIdentity,
+  feet,
+  type DamageType,
+} from '../../../src/combat/values';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const NONFLAMMABLE_MATERIAL: PersistentAreaMaterial = {
@@ -190,6 +196,49 @@ describe('D371.1 and D373.17 flammable persistent-area cells', () => {
     expect(hitPoints(state, subject.target.id)).toBe(29);
     state = reduceEncounter(state, { type: 'end_turn', actor: subject.fireDealer.id }, faceOne).state;
     expect(hitPoints(state, subject.target.id)).toBe(27);
+  });
+
+  it('a banished combatant in an ignited cell takes no burning damage at start of turn', () => {
+    const subject = setup();
+    let state = createArea(subject.state, area(subject.state, WEB_MATERIAL));
+    state = advanceToFireDealer(state, subject.owner);
+    state = dealDamage(state, subject.fireDealer, subject.target, damageType('Fire'));
+    state = reduceEncounter(state, {
+      type: 'apply_effect',
+      actor: subject.fireDealer.id,
+      cost: 'none',
+      effect: {
+        targets: [subject.target.id],
+        duration: { kind: 'permanent' },
+        concentration: false,
+        stackingIdentity: effectStackingIdentity('test:burning-cell-banishment'),
+        stacking: 'replace_same_source',
+        repeatedSave: null,
+        payload: {
+          kind: 'temporary_banishment',
+          returnDamage: {
+            terms: [{
+              type: damageType('Force'),
+              dice: { count: 0, sides: dieSides(4), modifier: 0 },
+            }],
+            critical: false,
+            responses: [],
+          },
+          returnPlacement: 'previous_or_nearest_unoccupied',
+        },
+      },
+    }, faceOne).state;
+    const banishedHitPoints = hitPoints(state, subject.target.id);
+    expect(state.tokens.some((token) => token.combatantId === subject.target.id)).toBe(false);
+
+    expect(() => {
+      state = reduceEncounter(
+        state,
+        { type: 'end_turn', actor: subject.fireDealer.id },
+        faceOne,
+      ).state;
+    }).not.toThrow();
+    expect(hitPoints(state, subject.target.id)).toBe(banishedHitPoints);
   });
 
   it('burn_lingers: an ignited cube burns away after exactly one full round', () => {
