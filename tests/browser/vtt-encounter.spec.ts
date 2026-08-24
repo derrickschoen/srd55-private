@@ -211,9 +211,14 @@ test('M38-PLAYER-NO-DM-CONTROLS and two local windows complete the resumable ref
   );
   await tray.getByRole('button', { name: 'Decline for Reference Fighter' }).click();
   await dm.getByRole('button', { name: 'End turn', exact: true }).click();
-  await expect(dm.locator('[data-hidden-roll="death-save"]')).toBeVisible();
+  await tray.getByRole('button', { name: 'Roll Death Save for Reference Fighter' }).click();
+  await expect(dm.locator('[data-hidden-roll="death-save"]')).toHaveText(
+    /^Hidden death save: (?:[1-9]|1\d|20) \([^)]+\)$/u,
+  );
   await expect(page.locator('.player-encounter')).not.toContainText('Hidden death save');
-  await expect(page.locator('.player-encounter')).not.toContainText('death save');
+  await expect(
+    page.locator('.encounter-log [data-event-type="death_save_resolved"]'),
+  ).toHaveText('death save resolved');
 
   await dm.getByRole('button', { name: 'Interrupt' }).click();
   await expect(dm.locator('[data-pause="interrupted"]')).toBeVisible();
