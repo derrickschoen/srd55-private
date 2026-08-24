@@ -1,0 +1,41 @@
+.player-guide-page {
+  width: min(100% - 2rem, 48rem);
+  padding-block: 2rem 3rem;
+  margin-inline: auto;
+}
+
+.player-guide-page > a {
+  color: #6d28d9;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.dark .player-guide-page > a {
+  color: #c4b5fd;
+}
+
+.player-guide-content h1,
+.player-guide-content h2 {
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.player-guide-content h1 {
+  margin: 0.5rem 0 1rem;
+  font-size: 1.9rem;
+}
+
+.player-guide-content h2 {
+  margin: 2rem 0 0.6rem;
+  font-size: 1.2rem;
+}
+
+.player-guide-content :is(p, li) {
+  line-height: 1.55;
+}
+
+.player-guide-content li + li {
+  margin-top: 0.6rem;
+}
+
