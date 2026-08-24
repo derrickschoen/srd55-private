@@ -29,8 +29,9 @@ test('DM Long Rest ends the adventuring day and logs a cited autosaved summary',
     'docs/srd/full/srd-5.2.1.txt:11901-11913',
   );
   await expect(card.locator('.long-rest-citations')).toContainText(
-    'D373.7 half-Hit-Dice recovery is a project override',
+    'docs/srd/full/srd-5.2.1.txt:11915-11917',
   );
+  await expect(card).toContainText('Interruption handling is deferred.');
   await expect(page.getByRole('button', { name: 'End room and enter next room' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Short Rest before next room' })).toHaveCount(0);
   await expect(page.locator('.dm-save-row[data-source="browser"]')).toHaveCount(1);
