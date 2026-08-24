@@ -216,6 +216,8 @@
 .active-pc-panel,
 .encounter-controls,
 .dm-pending-request,
+.dm-decision-tray,
+.dm-reaction-preferences,
 .dm-adjudication,
 .dm-controller-assignments {
   margin: 1rem 0;
@@ -226,6 +228,7 @@
 
 .encounter-controls button,
 .dm-pending-request button,
+.dm-decision-tray button,
 .dm-adjudication button {
   margin: 0.25rem;
 }
@@ -235,6 +238,44 @@
   display: grid;
   gap: 0.5rem;
   max-width: 32rem;
+}
+
+.dm-decision-tray[data-boundary-blocked='true'] {
+  border-color: #ffb454;
+  box-shadow: 0 0 0 2px rgb(255 180 84 / 35%);
+}
+
+.dm-decision-refusal {
+  color: #ffd59e;
+  font-weight: 700;
+}
+
+.dm-decision-entry {
+  margin: 0.5rem 0;
+  padding: 0.55rem;
+  border-left: 3px solid #7685ac;
+  background: #202637;
+}
+
+.dm-decision-auto_fire_log {
+  color: #bac3d9;
+  border-left-color: #59647d;
+}
+
+.dm-reaction-preferences {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 0.45rem 0.8rem;
+}
+
+.dm-reaction-preferences h2 {
+  grid-column: 1 / -1;
+}
+
+.dm-reaction-preferences label {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
 }
 
 .encounter-log [data-event-type='adjudicated'] {

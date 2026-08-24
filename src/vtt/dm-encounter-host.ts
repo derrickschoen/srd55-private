@@ -15,6 +15,8 @@ import {
 import {
   createEncounter,
   type EncounterState,
+  type ReactionKind,
+  type ReactionPolicy,
 } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
 import { projectDmView, projectPlayerView } from '../combat/visibility';
@@ -176,6 +178,10 @@ export class DmEncounterHost {
   #closed = false;
   #bridgeFailureGuard: BridgeFailureGuard | null = null;
   #roundPlanSession: DmRoundPlanSession | null = null;
+  #boundaryRefusal: null | {
+    readonly code: 'turn_boundary_blocked';
+    readonly message: string;
+  } = null;
   readonly #steeringMode: SteeringCoordinatorMode;
   readonly #onSteeringTelemetry: (telemetry: SteeringTelemetry) => void;
   readonly #playerIds: readonly CombatantId[];
@@ -284,7 +290,18 @@ export class DmEncounterHost {
       expectedControllers: resume.controllers,
       turnLegalActions: this.#turnLegalActions,
       reactionLegalActions: this.#reactionLegalActions,
+      pendingDecisionTray: true,
     });
+  }
+
+  #agentController(combatantId: CombatantId): Controller {
+    if (this.#roundPlanSession === null) {
+      throw new Error('Local host needs its DM bridge before restoring an agent controller.');
+    }
+    return new DmRoundPlanController(
+      this.#roundPlanSession,
+      () => this.#roundPlanContext(combatantId),
+    );
   }
 
   #roundPlanContext(_combatantId: CombatantId) {
@@ -319,6 +336,7 @@ export class DmEncounterHost {
         controllers: this.#registry.identities(),
         history,
         partyState: this.#journal.partyState(),
+        boundaryRefusal: this.#boundaryRefusal,
       }),
       player: this.#closed ? { ...player, authorityStatus: 'hard_paused' } : player,
     };
@@ -402,7 +420,14 @@ export class DmEncounterHost {
           throw error;
         }
         this.#publish();
-        if (result.kind === 'refused') return;
+        if (result.kind === 'refused') {
+          this.#boundaryRefusal = result.pendingDecisionCode === 'turn_boundary_blocked'
+            ? { code: result.pendingDecisionCode, message: result.reason }
+            : null;
+          this.#publish();
+          return;
+        }
+        this.#boundaryRefusal = null;
       }
     })().finally(() => {
       this.#pump = null;
@@ -414,6 +439,51 @@ export class DmEncounterHost {
     const human = this.#humans.get(actor);
     if (human === undefined) throw new Error(`Combatant ${actor} is not locally human-controlled.`);
     human.submit(decision);
+  }
+
+  async resolvePendingDecision(
+    decisionId: string,
+    optionId: 'accept' | 'decline' | 'roll',
+  ): Promise<void> {
+    const resumeAfter = this.#coordinator.pauseState() === null;
+    if (resumeAfter) this.#coordinator.interrupt();
+    await this.#pump;
+    const result = this.#coordinator.resolvePendingDecision({
+      type: 'resolve_pending_decision',
+      decisionId,
+      optionId,
+    });
+    this.#boundaryRefusal = result.kind === 'refused' && result.pendingDecisionCode === 'turn_boundary_blocked'
+      ? { code: result.pendingDecisionCode, message: result.reason }
+      : null;
+    this.#publish();
+    if (resumeAfter) {
+      this.#coordinator.resume();
+      this.#publish();
+      void this.#pumpCoordinator();
+    }
+  }
+
+  async setReactionPreference(
+    combatant: CombatantId,
+    reactionKind: ReactionKind,
+    policy: ReactionPolicy,
+  ): Promise<void> {
+    const resumeAfter = this.#coordinator.pauseState() === null;
+    if (resumeAfter) this.#coordinator.interrupt();
+    await this.#pump;
+    const resumed = this.#journal.updateReactionPreference(combatant, reactionKind, policy);
+    const built = registryFromIdentities(
+      resumed.controllers,
+      this.#roundPlanSession === null ? undefined : (id) => this.#agentController(id),
+    );
+    this.#registry = built.registry;
+    this.#humans = built.humans;
+    this.#coordinator = this.#coordinatorFor(resumed);
+    this.#boundaryRefusal = null;
+    if (resumeAfter) this.#coordinator.resume();
+    this.#publish();
+    if (resumeAfter) void this.#pumpCoordinator();
   }
 
   interrupt(): void {

@@ -12,6 +12,7 @@ import {
 import {
   combatantsAreAllies,
   EncounterRuleError,
+  PendingDecisionRuleError,
   reduceEncounter,
   type EncounterReduction,
   type ReactionDecisionHook,
@@ -116,6 +117,8 @@ export interface CoordinatorOptions {
   readonly expectedControllers?: readonly ControllerIdentity[];
   /** Synchronous event-interception seam; opportunity attacks keep the pending-request path above. */
   readonly reactionDecision?: ReactionDecisionHook;
+  /** Use the reducer's non-blocking PendingDecision tray instead of controller requests. */
+  readonly pendingDecisionTray?: boolean;
 }
 
 export type CoordinatorStep =
@@ -128,6 +131,7 @@ export type CoordinatorStep =
       readonly kind: 'refused';
       readonly state: EncounterState;
       readonly reason: string;
+      readonly pendingDecisionCode?: PendingDecisionRuleError['code'];
     };
 
 function cellKey(cell: GridCell): string {
@@ -221,6 +225,7 @@ export class TurnCoordinator {
   readonly #reactionLegalActions: ReactionLegalActions;
   readonly #persistence: CoordinatorPersistence | undefined;
   readonly #reactionDecision: ReactionDecisionHook | undefined;
+  readonly #pendingDecisionTray: boolean;
 
   constructor(
     initialState: EncounterState,
@@ -236,6 +241,7 @@ export class TurnCoordinator {
     this.#pause = options.resume?.pause ?? null;
     this.#persistence = options.persistence;
     this.#reactionDecision = options.reactionDecision;
+    this.#pendingDecisionTray = options.pendingDecisionTray ?? false;
     this.#turnLegalActions =
       options.turnLegalActions ??
       ((_state, actor) => ({ actions: [{ type: 'end_turn', actor }] }));
@@ -326,6 +332,25 @@ export class TurnCoordinator {
     this.#pause = { kind: 'adjudicated', eventSequence };
     const reduction = this.#apply(command, this.#continuation);
     return { kind: 'applied', state: this.#state, events: reduction.events };
+  }
+
+  resolvePendingDecision(
+    command: Extract<EncounterCommand, { readonly type: 'resolve_pending_decision' }>,
+  ): CoordinatorStep {
+    try {
+      const reduction = this.#apply(command, this.#continuation);
+      return { kind: 'applied', state: this.#state, events: reduction.events };
+    } catch (error: unknown) {
+      if (error instanceof PendingDecisionRuleError) {
+        return {
+          kind: 'refused',
+          state: this.#state,
+          reason: error.message,
+          pendingDecisionCode: error.code,
+        };
+      }
+      throw error;
+    }
   }
 
   setStandingReactionPolicy(
@@ -605,6 +630,10 @@ export class TurnCoordinator {
       const reduction = this.#apply(action, IDLE);
       return { kind: 'applied', state: this.#state, events: reduction.events };
     }
+    if (this.#pendingDecisionTray) {
+      const reduction = this.#apply(action, IDLE);
+      return { kind: 'applied', state: this.#state, events: reduction.events };
+    }
     const steps = coordinatedMovementSteps(this.#state, action);
     if (!steps.some((step) => step.reactors.length > 0)) {
       const reduction = this.#apply(action, IDLE);
@@ -637,6 +666,22 @@ export class TurnCoordinator {
       if (actor === null) {
         return { kind: 'refused', state: this.#state, reason: 'No active combatant.' };
       }
+      const deathSave = this.#state.pendingDecisions.find((decision) =>
+        decision.kind === 'death_save' && decision.combatant === actor);
+      if (deathSave !== undefined) {
+        this.#continuation = {
+          kind: 'turn',
+          actor,
+          legalActions: {
+            actions: [{
+              type: 'resolve_pending_decision',
+              decisionId: deathSave.id,
+              optionId: 'roll',
+            }],
+          },
+        };
+        return await this.#continueTurn();
+      }
       if (combatant(this.#state, actor).life !== 'living') {
         const reduction = this.#apply({ type: 'end_turn', actor }, IDLE);
         return { kind: 'applied', state: this.#state, events: reduction.events };
@@ -648,6 +693,14 @@ export class TurnCoordinator {
       };
       return await this.#continueTurn();
     } catch (error: unknown) {
+      if (error instanceof PendingDecisionRuleError) {
+        return {
+          kind: 'refused',
+          state: this.#state,
+          reason: error.message,
+          pendingDecisionCode: error.code,
+        };
+      }
       if (
         error instanceof EncounterRuleError ||
         error instanceof StaleControllerResponseError

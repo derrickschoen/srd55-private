@@ -314,13 +314,14 @@ describe('encounter reducer authority and action economy', () => {
     let state = start([monster, pc], [1, 2]);
     state = reduceEncounter(state, { type: 'end_turn', actor: monster.id }, () => 0.5).state;
 
-    expect(() =>
-      reduceEncounter(
-        state,
-        { type: 'move', actor: pc.id, path: [{ column: 3, row: 1 }], cause: 'voluntary' },
-        () => 0.5,
-      ),
-    ).toThrow('unresolved Opportunity Attack window');
+    const offered = reduceEncounter(
+      state,
+      { type: 'move', actor: pc.id, path: [{ column: 3, row: 1 }], cause: 'voluntary' },
+      () => 0.5,
+    );
+    expect(offered.state.pendingDecisions).toContainEqual(expect.objectContaining({
+      kind: 'reaction_offer', reactionKind: 'opportunity_attack', combatant: monster.id,
+    }));
 
     state = reduceEncounter(state, { type: 'disengage', actor: pc.id }, () => 0.5).state;
     state = reduceEncounter(

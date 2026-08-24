@@ -55,7 +55,49 @@ export type EncounterCommand =
       readonly type: 'move';
       readonly actor: CombatantId;
       readonly path: readonly GridCell[];
-      readonly cause: 'voluntary' | 'reactions_resolved';
+      readonly cause: 'voluntary' | 'reactions_resolved' | 'forced' | 'teleport';
+    }
+  | {
+      readonly type: 'hide';
+      readonly actor: CombatantId;
+    }
+  | {
+      readonly type: 'search';
+      readonly actor: CombatantId;
+      readonly target: CombatantId;
+      readonly reliance: 'sight' | 'hearing';
+    }
+  | {
+      readonly type: 'reveal_hidden';
+      readonly actor: CombatantId;
+      readonly reason: 'sound_louder_than_whisper' | 'stopped_hiding';
+    }
+  | {
+      readonly type: 'resolve_pending_decision';
+      readonly decisionId: string;
+      readonly optionId: 'accept' | 'decline' | 'roll';
+    }
+  | {
+      readonly type: 'set_hide_death_save_rolls';
+      readonly hidden: boolean;
+    }
+  | {
+      readonly type: 'dm_stabilize';
+      readonly target: CombatantId;
+    }
+  | {
+      readonly type: 'dm_revive_at_one_hit_point';
+      readonly target: CombatantId;
+    }
+  | {
+      readonly type: 'dm_set_death_save_counts';
+      readonly target: CombatantId;
+      readonly successes: number;
+      readonly failures: number;
+    }
+  | {
+      readonly type: 'dm_mark_dead';
+      readonly target: CombatantId;
     }
   | {
       readonly type: 'create_persistent_area';
@@ -85,6 +127,7 @@ export type EncounterCommand =
       readonly rollMode: RollMode;
       readonly attackerCanSeeTarget: boolean;
       readonly targetCanSeeAttacker: boolean;
+      readonly requiresSight?: true;
       readonly damage: DamageRequest;
       /** Present for attacks selected from a typed party-pack attack form. */
       readonly attackId?: string;
@@ -116,6 +159,7 @@ export type EncounterCommand =
       readonly rollMode: RollMode;
       readonly attackerCanSeeTarget: boolean;
       readonly targetCanSeeAttacker: boolean;
+      readonly requiresSight?: true;
       readonly damage: DamageRequest;
       /** Required while a form replacement limits attacks to its statblock. */
       readonly attackId?: string;
@@ -259,6 +303,22 @@ export type EncounterEvent =
             readonly kind: 'position';
             readonly from: GridCell;
             readonly to: GridCell;
+          }
+        | {
+            readonly kind: 'death_override';
+            readonly override: 'stabilize' | 'revive_at_one_hit_point' | 'set_death_save_counts' | 'mark_dead';
+            readonly before: {
+              readonly hitPoints: number;
+              readonly lifeState: 'living' | 'dying' | 'stable' | 'dead';
+              readonly successes: number;
+              readonly failures: number;
+            };
+            readonly after: {
+              readonly hitPoints: number;
+              readonly lifeState: 'living' | 'dying' | 'stable' | 'dead';
+              readonly successes: number;
+              readonly failures: number;
+            };
           };
     })
   | (SequencedEvent & {
@@ -290,6 +350,52 @@ export type EncounterEvent =
       readonly path: readonly GridCell[];
       readonly spent: Feet;
       readonly remaining: Feet;
+    })
+  | (SequencedEvent & {
+      readonly type: 'hide_resolved';
+      readonly combatant: CombatantId;
+      readonly edition: '2014' | '2024';
+      readonly total: number;
+      readonly outcome: 'hidden' | 'failed_dc' | 'invalid_position' | 'passively_detected';
+    })
+  | (SequencedEvent & {
+      readonly type: 'hidden_ended';
+      readonly combatant: CombatantId;
+      readonly reason: 'attack_roll' | 'verbal_spell' | 'sound_louder_than_whisper' | 'stopped_hiding' | 'found';
+      readonly finder?: CombatantId;
+    })
+  | (SequencedEvent & {
+      readonly type: 'search_resolved';
+      readonly combatant: CombatantId;
+      readonly target: CombatantId;
+      readonly total: number;
+      readonly outcome: 'found' | 'not_found' | 'target_not_hidden';
+    })
+  | (SequencedEvent & {
+      readonly type: 'pending_decision_queued';
+      readonly decisionId: string;
+      readonly combatant: CombatantId;
+    } & (
+      | {
+          readonly kind: 'reaction_offer';
+          readonly reactionKind: 'opportunity_attack';
+        }
+      | { readonly kind: 'death_save' }
+    ))
+  | (SequencedEvent & {
+      readonly type: 'pending_decision_resolved';
+      readonly decisionId: string;
+      readonly combatant: CombatantId;
+      readonly kind: 'reaction_offer' | 'death_save';
+      readonly optionId: 'accept' | 'decline' | 'roll';
+    })
+  | (SequencedEvent & {
+      readonly type: 'reaction_policy_auto_resolved';
+      readonly combatant: CombatantId;
+      readonly reactionKind: 'opportunity_attack';
+      readonly policy: 'always' | 'never';
+      readonly resolution: 'accept' | 'decline';
+      readonly autoFired: boolean;
     })
   | (SequencedEvent & {
       readonly type: 'persistent_area_created';
@@ -395,13 +501,14 @@ export type EncounterEvent =
     })
   | (SequencedEvent & {
       readonly type: 'death_save_resolved';
-      readonly visibility: 'dm_only';
       readonly combatant: CombatantId;
       readonly roll: number;
       readonly outcome: 'failure' | 'success' | 'natural_1' | 'natural_20';
       readonly successes: number;
       readonly failures: number;
       readonly lifeState: 'living' | 'dying' | 'stable' | 'dead';
+      /** Encounter rounds cannot advance this SRD recovery clock. */
+      readonly stableRecovery: '1d4_hours_outside_encounter' | null;
     })
   | (SequencedEvent & {
       readonly type: 'reaction_declined';

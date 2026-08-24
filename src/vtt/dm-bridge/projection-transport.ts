@@ -38,9 +38,11 @@ export type ProjectionTransfer =
         readonly coordinator: Omit<DmBoardProjection['coordinator'], 'pendingRequest'>;
         readonly pendingRequest: DmBoardProjection['pendingRequest'];
         readonly humanCommandActions: DmBoardProjection['humanCommandActions'];
+        readonly turnProgramLegalActions?: DmBoardProjection['turnProgramLegalActions'];
         readonly controllers: DmBoardProjection['controllers'];
         readonly adjudicatedTargets: DmBoardProjection['adjudicatedTargets'];
         readonly partySession: DmBoardProjection['partySession'];
+        readonly decisionTray: DmBoardProjection['decisionTray'];
       };
     }
   | {
@@ -170,9 +172,13 @@ export class ProjectionTransferSender {
         coordinator: structuredClone(coordinator),
         pendingRequest: structuredClone(projection.pendingRequest),
         humanCommandActions: structuredClone(projection.humanCommandActions),
+        ...(projection.turnProgramLegalActions === undefined
+          ? {}
+          : { turnProgramLegalActions: structuredClone(projection.turnProgramLegalActions) }),
         controllers: structuredClone(projection.controllers),
         adjudicatedTargets: structuredClone(projection.adjudicatedTargets),
         partySession: structuredClone(projection.partySession),
+        decisionTray: structuredClone(projection.decisionTray),
       },
     };
     const { projection: _projection, ...rest } = request;
@@ -211,10 +217,14 @@ export class ProjectionTransferReceiver {
         },
         pendingRequest: structuredClone(transfer.view.pendingRequest),
         humanCommandActions: structuredClone(transfer.view.humanCommandActions),
+        ...(transfer.view.turnProgramLegalActions === undefined
+          ? {}
+          : { turnProgramLegalActions: structuredClone(transfer.view.turnProgramLegalActions) }),
         controllers: structuredClone(transfer.view.controllers),
         history: structuredClone(request.history),
         adjudicatedTargets: structuredClone(transfer.view.adjudicatedTargets),
         partySession: structuredClone(transfer.view.partySession),
+        decisionTray: structuredClone(transfer.view.decisionTray),
       };
     } else {
       const previous = this.#received.get(request.encounterId);

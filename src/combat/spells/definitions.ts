@@ -243,14 +243,14 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'bane', name: 'Bane', level: 1,
     source: 'docs/srd/source/spell-descriptions.txt:670',
     castingTime: 'action', components: material('a drop of blood'),
-    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 3, additionalPerSlot: 1 },
+    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 3, additionalPerSlot: 1, requiresSight: true },
     operation: { kind: 'save_effect', ability: 'charisma', rollMode: 'normal', effect: effect({ kind: 'd20_test_modifier', tests: ['attack_roll', 'saving_throw'], count: 1, sides: 4, sign: -1 }, { concentration: true, durationRounds: 10 }) },
   },
   {
     id: 'charm-person', name: 'Charm Person', level: 1,
     source: 'docs/srd/source/spell-descriptions.txt:1046',
     castingTime: 'action', components: VS,
-    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 1, additionalPerSlot: 1 },
+    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 1, additionalPerSlot: 1, requiresSight: true },
     operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'condition', condition: 'Charmed' }, { durationRounds: 600 }) },
   },
   {
@@ -320,7 +320,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'magic-missile', name: 'Magic Missile', level: 1,
     source: 'docs/srd/source/spell-descriptions.txt:5033',
     castingTime: 'action', components: VS,
-    targeting: { kind: 'multiple', rangeFeet: 120, baseMaximum: 3, additionalPerSlot: 1 },
+    targeting: { kind: 'multiple', rangeFeet: 120, baseMaximum: 3, additionalPerSlot: 1, requiresSight: true },
     operation: { kind: 'magic_missiles', baseDarts: 3, additionalPerSlot: 1, damageType: damageType('Force'), dice: dice(1, 4, { modifier: 1 }) },
   },
   {
@@ -376,7 +376,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'command', name: 'Command', level: 1,
     source: 'docs/srd/source/spell-descriptions.txt:1209',
     castingTime: 'action', components: V,
-    targeting: { kind: 'multiple', rangeFeet: 60, baseMaximum: 1, additionalPerSlot: 1 },
+    targeting: { kind: 'multiple', rangeFeet: 60, baseMaximum: 1, additionalPerSlot: 1, requiresSight: true },
     operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'commanded_action', options: ['approach', 'drop', 'flee', 'grovel', 'halt'] }, { durationRounds: 1, expiresAt: 'target_end' }) },
   },
   {
@@ -607,7 +607,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'blindness-deafness', name: 'Blindness/Deafness', level: 2,
     source: 'docs/srd/source/spell-descriptions.txt:859',
     castingTime: 'action', components: V,
-    targeting: { kind: 'multiple', rangeFeet: 120, baseMaximum: 1, additionalPerSlot: 1 },
+    targeting: { kind: 'multiple', rangeFeet: 120, baseMaximum: 1, additionalPerSlot: 1, requiresSight: true },
     operation: { kind: 'save_effect', ability: 'constitution', rollMode: 'normal', effect: effect({ kind: 'condition_choice', conditions: ['Blinded', 'Deafened'] }, { durationRounds: 10, expiresAt: 'target_end', repeatedSave: { ability: 'constitution', rollMode: 'normal', timing: 'target_end' } }) },
   },
   {
@@ -670,7 +670,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'enlarge-reduce', name: 'Enlarge/Reduce', level: 2,
     source: 'docs/srd/source/spell-descriptions.txt:2679',
     castingTime: 'action', components: material('a pinch of powdered iron'),
-    targeting: { kind: 'single', rangeFeet: 30, willing: false },
+    targeting: { kind: 'single', rangeFeet: 30, willing: false, requiresSight: true },
     operation: { kind: 'effect', effect: effect({ kind: 'size_alteration', options: ['enlarge', 'reduce'], sizeCategoryDelta: 1, damageDieCount: 1, damageDieSides: 4 }, { concentration: true, durationRounds: 10 }) },
   },
   {
@@ -705,7 +705,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'hold-person', name: 'Hold Person', level: 2,
     source: 'docs/srd/source/spell-descriptions.txt:4342',
     castingTime: 'action', components: material('a straight piece of iron'),
-    targeting: { kind: 'multiple', rangeFeet: 60, baseMaximum: 1, additionalPerSlot: 1 },
+    targeting: { kind: 'multiple', rangeFeet: 60, baseMaximum: 1, additionalPerSlot: 1, requiresSight: true },
     operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'condition', condition: 'Paralyzed' }, { concentration: true, durationRounds: 10, expiresAt: 'target_end', repeatedSave: { ability: 'wisdom', rollMode: 'normal', timing: 'target_end' } }) },
   },
   {
@@ -1015,7 +1015,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
   {
     id: 'mass-healing-word', name: 'Mass Healing Word', level: 3,
     source: 'docs/srd/source/spell-descriptions.txt:5226', castingTime: 'bonus_action', components: V,
-    targeting: { kind: 'multiple', rangeFeet: 60, baseMaximum: 6, additionalPerSlot: 0 },
+    targeting: { kind: 'multiple', rangeFeet: 60, baseMaximum: 6, additionalPerSlot: 0, requiresSight: true },
     operation: { kind: 'healing', dice: dice(2, 4, { perSlotCount: 1 }), addSpellcastingModifier: true },
   },
   {
@@ -1134,7 +1134,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
   {
     id: 'banishment', name: 'Banishment', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:686', castingTime: 'action', components: material('a pentacle'),
-    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 1, additionalPerSlot: 1 },
+    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 1, additionalPerSlot: 1, requiresSight: true },
     operation: { kind: 'save_effect', ability: 'charisma', rollMode: 'normal', effect: effect({ kind: 'banishment', condition: 'Incapacitated', nativePlaneCreatureTypes: ['Aberration', 'Celestial', 'Elemental', 'Fey', 'Fiend'], permanentAfterRounds: 10 }, { concentration: true, durationRounds: 10 }) },
   },
   {
@@ -1146,13 +1146,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
   {
     id: 'blight', name: 'Blight', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:842', castingTime: 'action', components: VS,
-    targeting: { kind: 'single', rangeFeet: 30, willing: false },
+    targeting: { kind: 'single', rangeFeet: 30, willing: false, requiresSight: true },
     operation: { kind: 'save_damage', ability: 'constitution', onSuccess: 'half', damageType: damageType('Necrotic'), dice: dice(8, 8, { perSlotCount: 1 }), riderOnFailure: null, pushFeetOnFailure: 0 },
   },
   {
     id: 'charm-monster', name: 'Charm Monster', level: 4,
     source: 'docs/srd/source/spell-descriptions.txt:1025', castingTime: 'action', components: VS,
-    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 1, additionalPerSlot: 1 },
+    targeting: { kind: 'multiple', rangeFeet: 30, baseMaximum: 1, additionalPerSlot: 1, requiresSight: true },
     operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'charm_monster', condition: 'Charmed', hostileSaveMode: 'advantage', attitude: 'Friendly', endsWhenDamagedByCasterOrAllies: true, targetKnowsAfterward: true }, { durationRounds: 600 }) },
   },
   {
@@ -1374,14 +1374,14 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'hold-monster', name: 'Hold Monster', level: 5,
     source: 'docs/srd/source/spell-descriptions.txt:4317-4341',
     castingTime: 'action', components: material('a straight piece of iron'),
-    targeting: { kind: 'multiple', rangeFeet: 90, baseMaximum: 1, additionalPerSlot: 1 },
+    targeting: { kind: 'multiple', rangeFeet: 90, baseMaximum: 1, additionalPerSlot: 1, requiresSight: true },
     operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'condition', condition: 'Paralyzed' }, { concentration: true, durationRounds: 10, expiresAt: 'target_end', repeatedSave: { ability: 'wisdom', rollMode: 'normal', timing: 'target_end' } }) },
   },
   {
     id: 'heal', name: 'Heal', level: 6,
     source: 'docs/srd/source/spell-descriptions.txt:4158-4167',
     castingTime: 'action', components: VS,
-    targeting: { kind: 'single', rangeFeet: 60, willing: false },
+    targeting: { kind: 'single', rangeFeet: 60, willing: false, requiresSight: true },
     operation: { kind: 'fixed_healing', baseAmount: 70, additionalPerSlot: 10, removesConditions: ['Blinded', 'Deafened', 'Poisoned'] },
   },
 ] as const;

@@ -764,6 +764,21 @@ export function replayBundle(
         expectedState = parent.state;
         expectedRng = parent.rng;
         break;
+      case 'reaction_preference_changed': {
+        if (parent === null || parent === undefined || revision.partyState === null) {
+          throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'party-state reaction preference parent', revision.parentRevision);
+        }
+        const partyIds = new Set(revision.partyState.characters.map((entry) => entry.combatantId));
+        expectedState = {
+          ...parent.state,
+          reactionPolicies: [
+            ...parent.state.reactionPolicies.filter((entry) => !partyIds.has(entry.combatant)),
+            ...revision.partyState.reactionPolicies,
+          ],
+        };
+        expectedRng = parent.rng;
+        break;
+      }
       case 'short_rest_completed':
         if (parent === null || parent === undefined) {
           throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'existing Short Rest parent', revision.parentRevision);

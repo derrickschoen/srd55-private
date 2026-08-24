@@ -6,6 +6,7 @@ import {
   type EncounterState,
 } from '../../../src/combat/encounter';
 import type { EncounterCommand, EncounterEvent } from '../../../src/combat/events';
+import { projectDmView, projectPlayerView } from '../../../src/combat/visibility';
 import { damageType, dieSides } from '../../../src/combat/values';
 import { placedToken, playerProfile } from './fixtures';
 
@@ -88,11 +89,19 @@ function startPatientTurn(
   attacker: CombatantProfile,
   deathSaveFace: number,
 ): { readonly state: EncounterState; readonly event: Extract<EncounterEvent, { readonly type: 'death_save_resolved' }> } {
-  const reduction = reduceEncounter(
+  const started = reduceEncounter(
     state,
     { type: 'end_turn', actor: attacker.id },
-    fixedD20(deathSaveFace),
+    fixedD20(11),
   );
+  const decision = started.state.pendingDecisions.find((candidate) =>
+    candidate.kind === 'death_save');
+  if (decision === undefined) throw new Error('Missing death-save pending decision.');
+  const reduction = reduceEncounter(started.state, {
+    type: 'resolve_pending_decision',
+    decisionId: decision.id,
+    optionId: 'roll',
+  }, fixedD20(deathSaveFace));
   const event = reduction.events.find(
     (candidate): candidate is Extract<EncounterEvent, { readonly type: 'death_save_resolved' }> =>
       candidate.type === 'death_save_resolved',
@@ -113,6 +122,27 @@ function advanceToAttacker(
 }
 
 describe('SRD death-save reducer flow', () => {
+  it('queues a closed death_save PendingDecision at the start of a dying PC turn', () => {
+    // Start-of-turn Death Save: docs/srd/full/srd-5.2.1.txt:1084-1093,11633-11636.
+    const fixture = dyingEncounter();
+    const started = reduceEncounter(
+      fixture.state,
+      { type: 'end_turn', actor: fixture.attacker.id },
+      fixedD20(11),
+    );
+    expect(started.events).toContainEqual(expect.objectContaining({
+      type: 'pending_decision_queued',
+      kind: 'death_save',
+      combatant: fixture.patient.id,
+    }));
+    expect(started.state.pendingDecisions).toContainEqual(expect.objectContaining({
+      kind: 'death_save',
+      combatant: fixture.patient.id,
+      options: [{ id: 'roll', label: 'Roll Death Save' }],
+    }));
+    expect(started.events.some((event) => event.type === 'death_save_resolved')).toBe(false);
+  });
+
   it.each([
     [1, 'natural_1', 0, 2, 'dying', 0],
     [2, 'failure', 0, 1, 'dying', 0],
@@ -132,7 +162,7 @@ describe('SRD death-save reducer flow', () => {
         successes,
         failures,
         lifeState: life,
-        visibility: 'dm_only',
+        stableRecovery: null,
       });
       expect(subject(result.state, fixture.patient)).toMatchObject({
         hitPoints,
@@ -168,7 +198,7 @@ describe('SRD death-save reducer flow', () => {
     expect(DEATH_SAVE_RULE_EXPECTATIONS.criticalDamageAtZeroFailures).toBe(2);
   });
 
-  it('pins a natural 20 to exactly 1 HP and a playable conscious turn', () => {
+  it('nat20_plain_success: a natural 20 restores exactly 1 HP and a playable conscious turn', () => {
     expect(DEATH_SAVE_RULE_EXPECTATIONS.naturalTwenty).toBe(20);
     expect(DEATH_SAVE_RULE_EXPECTATIONS.naturalTwentyHitPoints).toBe(1);
     const fixture = dyingEncounter();
@@ -198,7 +228,10 @@ describe('SRD death-save reducer flow', () => {
       finalEvent = result.event;
       if (count < 2) state = advanceToAttacker(state, fixture.patient);
     }
-    expect(finalEvent).toMatchObject({ lifeState: life });
+    expect(finalEvent).toMatchObject({
+      lifeState: life,
+      stableRecovery: life === 'stable' ? '1d4_hours_outside_encounter' : null,
+    });
     expect(subject(state, fixture.patient)).toMatchObject({
       hitPoints: 0,
       life,
@@ -230,6 +263,30 @@ describe('SRD death-save reducer flow', () => {
       life: 'living',
       deathSaves: null,
     });
+  });
+
+  it('healing at 0 HP restores consciousness and clears a queued Death Save', () => {
+    // Healing ends Unconsciousness and resets Death Saves: docs/srd/full/srd-5.2.1.txt:1081-1099.
+    const fixture = dyingEncounter();
+    let state = reduceEncounter(
+      fixture.state,
+      { type: 'end_turn', actor: fixture.attacker.id },
+      fixedD20(11),
+    ).state;
+    expect(state.pendingDecisions).toContainEqual(expect.objectContaining({ kind: 'death_save' }));
+    state = reduceEncounter({ ...state, activeCombatant: fixture.attacker.id }, {
+      type: 'heal',
+      actor: fixture.attacker.id,
+      target: fixture.patient.id,
+      amount: 1,
+      cost: 'none',
+    }, fixedD20(11)).state;
+    expect(subject(state, fixture.patient)).toMatchObject({
+      hitPoints: 1,
+      life: 'living',
+      deathSaves: null,
+    });
+    expect(state.pendingDecisions).toEqual([]);
   });
 
   it('damage at 0 HP adds one failure and restarts a stable creature as dying', () => {
@@ -269,14 +326,41 @@ describe('SRD death-save reducer flow', () => {
     });
   });
 
-  it('a critical hit at 0 HP adds exactly two failures', () => {
-    const fixture = dyingEncounter();
-    const state = reduceEncounter(
-      fixture.state,
-      attack(fixture.attacker, fixture.patient, 1),
+  it('critical damage at 0 HP adds two failures while normal damage adds one', () => {
+    const ordinary = dyingEncounter();
+    const ordinaryState = reduceEncounter(
+      ordinary.state,
+      {
+        type: 'force_save',
+        actor: ordinary.attacker.id,
+        target: ordinary.patient.id,
+        ability: 'constitution',
+        dc: 30,
+        rollMode: 'normal',
+        damage: {
+          terms: [{
+            type: force,
+            dice: { count: 0, sides: dieSides(6), modifier: 1 },
+          }],
+          critical: false,
+          responses: [],
+        },
+        onSuccess: 'none',
+        cost: 'none',
+      },
       fixedD20(11),
     ).state;
-    expect(subject(state, fixture.patient)).toMatchObject({
+    const critical = dyingEncounter();
+    const criticalState = reduceEncounter(
+      critical.state,
+      attack(critical.attacker, critical.patient, 1),
+      fixedD20(20),
+    ).state;
+    expect(subject(ordinaryState, ordinary.patient)).toMatchObject({
+      life: 'dying',
+      deathSaves: { successes: 0, failures: 1 },
+    });
+    expect(subject(criticalState, critical.patient)).toMatchObject({
       life: 'dying',
       deathSaves: { successes: 0, failures: 2 },
     });
@@ -302,11 +386,82 @@ describe('SRD death-save reducer flow', () => {
     });
   });
 
-  it('kills at the exact massive-damage boundary while already at 0 HP', () => {
+  it('massive_damage_remainder_boundary: exact-maximum remainder kills while one less leaves the character dying', () => {
+    // SRD example: max 12, current 6, 18 damage leaves 12 and kills:
+    // docs/srd/full/srd-5.2.1.txt:1062-1067.
+    const applyExampleDamage = (amount: 17 | 18, fixtureName: string) => {
+      const attacker = playerProfile(`${fixtureName}-attacker`, {
+        initiativeBonus: 20,
+        attacksPerAction: 2,
+      });
+      const patient = playerProfile(`${fixtureName}-patient`, {
+        hitPoints: 12,
+        initiativeBonus: -20,
+      });
+      let state = createEncounter({
+        bounds: { columns: 3, rows: 2 },
+        combatants: [attacker, patient],
+        tokens: [placedToken(attacker, 0), placedToken(patient, 1)],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, fixedD20(11)).state;
+      state = reduceEncounter(state, attack(attacker, patient, 6), fixedD20(11)).state;
+      expect(subject(state, patient).hitPoints).toBe(6);
+      const result = reduceEncounter(state, attack(attacker, patient, amount), fixedD20(11));
+      const damageEvent = result.events.find((event) => event.type === 'damage_applied');
+      return { result, damageEvent, patient };
+    };
+
+    const exact = applyExampleDamage(18, 'exact-boundary');
+    expect(exact.damageEvent).toMatchObject({
+      amount: 18,
+      hitPointsBefore: 6,
+      hitPointsAfter: 0,
+      massiveDamage: true,
+      lifeState: 'dead',
+    });
+    expect(subject(exact.result.state, exact.patient)).toMatchObject({
+      hitPoints: 0,
+      life: 'dead',
+      deathSaves: null,
+    });
+
+    const oneBelow = applyExampleDamage(17, 'below-boundary-sibling');
+    expect(oneBelow.damageEvent).toMatchObject({
+      amount: 17,
+      hitPointsBefore: 6,
+      hitPointsAfter: 0,
+      massiveDamage: false,
+      lifeState: 'dying',
+    });
+    expect(subject(oneBelow.result.state, oneBelow.patient)).toMatchObject({
+      hitPoints: 0,
+      life: 'dying',
+      deathSaves: { successes: 0, failures: 0 },
+    });
+  });
+
+  it('massive_damage_ignored: kills at the exact massive-damage boundary while already at 0 HP', () => {
     const fixture = dyingEncounter();
     const result = reduceEncounter(
       fixture.state,
-      attack(fixture.attacker, fixture.patient, 10),
+      {
+        type: 'force_save',
+        actor: fixture.attacker.id,
+        target: fixture.patient.id,
+        ability: 'constitution',
+        dc: 30,
+        rollMode: 'normal',
+        damage: {
+          terms: [{
+            type: force,
+            dice: { count: 0, sides: dieSides(6), modifier: 10 },
+          }],
+          critical: false,
+          responses: [],
+        },
+        onSuccess: 'none',
+        cost: 'none',
+      },
       fixedD20(11),
     );
     const damageEvent = result.events.find((event) => event.type === 'damage_applied');
@@ -316,5 +471,64 @@ describe('SRD death-save reducer flow', () => {
       massiveDamage: true,
       lifeState: 'dead',
     });
+  });
+
+  it('override_unlogged: every explicit DM death override emits a D357 adjudicated ruling card', () => {
+    const fixture = dyingEncounter();
+    const commands = [
+      { type: 'dm_stabilize', target: fixture.patient.id },
+      { type: 'dm_revive_at_one_hit_point', target: fixture.patient.id },
+      { type: 'dm_set_death_save_counts', target: fixture.patient.id, successes: 2, failures: 1 },
+      { type: 'dm_mark_dead', target: fixture.patient.id },
+    ] as const satisfies readonly EncounterCommand[];
+    let state = fixture.state;
+    const overrides: string[] = [];
+    for (const command of commands) {
+      const reduction = reduceEncounter(state, command, fixedD20(11));
+      state = reduction.state;
+      const ruling = reduction.events.find((event) => event.type === 'adjudicated');
+      expect(ruling).toMatchObject({
+        type: 'adjudicated',
+        target: fixture.patient.id,
+        subject: expect.stringMatching(/^dm-override:/u),
+        consequence: expect.objectContaining({ kind: 'death_override' }),
+      });
+      if (ruling?.type === 'adjudicated' && ruling.consequence.kind === 'death_override') {
+        overrides.push(ruling.consequence.override);
+      }
+    }
+    expect(overrides).toEqual([
+      'stabilize',
+      'revive_at_one_hit_point',
+      'set_death_save_counts',
+      'mark_dead',
+    ]);
+    expect(subject(state, fixture.patient)).toMatchObject({ life: 'dead', hitPoints: 0, deathSaves: null });
+  });
+
+  it('hidden_roll_leaks: the toggle redacts only the number from PlayerView while DmView retains it', () => {
+    const fixture = dyingEncounter();
+    const resolved = startPatientTurn(fixture.state, fixture.attacker, 9).state;
+    const dm = projectDmView(resolved);
+    const shownState = reduceEncounter(resolved, {
+      type: 'set_hide_death_save_rolls', hidden: false,
+    }, fixedD20(11)).state;
+    const hiddenState = reduceEncounter(resolved, {
+      type: 'set_hide_death_save_rolls', hidden: true,
+    }, fixedD20(11)).state;
+    const shown = projectPlayerView(shownState, {
+      seatId: 'seat:death-save',
+      combatantId: fixture.patient.id,
+    });
+    const hidden = projectPlayerView(hiddenState, {
+      seatId: 'seat:death-save',
+      combatantId: fixture.patient.id,
+    });
+    const shownEvent = shown.recentEvents.find((event) => event.type === 'death_save_resolved');
+    const hiddenEvent = hidden.recentEvents.find((event) => event.type === 'death_save_resolved');
+    expect(shownEvent).toMatchObject({ rollVisibility: 'player_visible', roll: 9, lifeState: 'dying' });
+    expect(hiddenEvent).toMatchObject({ rollVisibility: 'dm_only', lifeState: 'dying', failures: 1 });
+    expect(hiddenEvent === undefined ? true : Object.hasOwn(hiddenEvent, 'roll')).toBe(false);
+    expect(dm.state.eventLog.find((event) => event.type === 'death_save_resolved')).toMatchObject({ roll: 9 });
   });
 });

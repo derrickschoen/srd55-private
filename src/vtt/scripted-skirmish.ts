@@ -390,6 +390,16 @@ export function recordScriptedReferenceSkirmish(
     if (activeState === undefined) throw new Error('Scripted active combatant is missing.');
     const controllerKind = activeState.profile.kind === 'player_character' ? 'human' : 'agent';
     const fleet = controllerKind === 'human' ? HUMAN_FLEET : AGENT_FLEET;
+    const deathSave = state.pendingDecisions.find((pending) =>
+      pending.kind === 'death_save' && pending.combatant === active);
+    if (deathSave !== undefined) {
+      decision(active, controllerKind, {
+        type: 'resolve_pending_decision',
+        decisionId: deathSave.id,
+        optionId: 'roll',
+      }, fleet);
+      continue;
+    }
 
     const planKey = initiativeMode === 'per_combatant'
       ? `${String(state.round)}:${active}`

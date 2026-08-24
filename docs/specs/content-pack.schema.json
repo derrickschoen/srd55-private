@@ -390,6 +390,10 @@
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
+                  "requiresSight": {
+                    "type": "boolean",
+                    "const": true
+                  },
                   "willing": {
                     "type": "boolean"
                   },
@@ -450,6 +454,10 @@
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
+                  "requiresSight": {
+                    "type": "boolean",
+                    "const": true
+                  },
                   "willing": {
                     "type": "boolean"
                   }
@@ -473,6 +481,10 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 100000
+                  },
+                  "requiresSight": {
+                    "type": "boolean",
+                    "const": true
                   },
                   "willing": {
                     "type": "boolean"
@@ -5293,7 +5305,7 @@
               },
               "senses": {
                 "minItems": 1,
-                "maxItems": 3,
+                "maxItems": 5,
                 "type": "array",
                 "items": {
                   "oneOf": [
@@ -5316,6 +5328,44 @@
                         "kind": {
                           "type": "string",
                           "const": "blindsight"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "darkvision"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "tremorsense"
                         },
                         "rangeFeet": {
                           "type": "integer",
@@ -5456,7 +5506,7 @@
               },
               "senses": {
                 "minItems": 1,
-                "maxItems": 3,
+                "maxItems": 5,
                 "type": "array",
                 "items": {
                   "oneOf": [
@@ -5479,6 +5529,44 @@
                         "kind": {
                           "type": "string",
                           "const": "blindsight"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "darkvision"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "tremorsense"
                         },
                         "rangeFeet": {
                           "type": "integer",
@@ -5755,7 +5843,7 @@
               },
               "senses": {
                 "minItems": 1,
-                "maxItems": 3,
+                "maxItems": 5,
                 "type": "array",
                 "items": {
                   "oneOf": [
@@ -5778,6 +5866,44 @@
                         "kind": {
                           "type": "string",
                           "const": "blindsight"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "darkvision"
+                        },
+                        "rangeFeet": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "rangeFeet"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "tremorsense"
                         },
                         "rangeFeet": {
                           "type": "integer",

@@ -30,6 +30,8 @@ export interface EncounterBoardProjectionShape {
   readonly adjudicatedTargets: readonly CombatantId[];
   /** Omit this property entirely for player projections. */
   readonly foggedCells?: readonly { readonly column: number; readonly row: number }[];
+  /** Player-safe, per-seat fog inferred by the canonical player projection. */
+  readonly concealedCells?: readonly { readonly column: number; readonly row: number }[];
   readonly worldObjects?: readonly EncounterBoardWorldObject[];
   readonly areas?: readonly EncounterBoardArea[];
   readonly lightOverlays?: readonly EncounterBoardLightOverlay[];
@@ -149,6 +151,7 @@ export interface DmEncounterBoardModel extends EncounterBoardProjectionShape {
   readonly initiative: readonly EncounterBoardInitiativeEntry[];
   readonly round: number;
   readonly activeCombatant: CombatantId | null;
+  readonly foggedCells: readonly { readonly column: number; readonly row: number }[];
   readonly worldObjects: readonly EncounterBoardWorldObject[];
   readonly areas: readonly EncounterBoardArea[];
   readonly lightOverlays: readonly EncounterBoardLightOverlay[];
@@ -412,8 +415,13 @@ export function projectEncounterBoard(
   adjudicatedTargets: readonly CombatantId[] = [],
 ): DmEncounterBoardModel {
   const state = view.state;
+  const hidden = new Set(state.hiddenCombatants.map((entry) => entry.combatant));
+  const hiddenCells = state.tokens
+    .filter((entry) => hidden.has(entry.combatantId))
+    .map((entry) => ({ ...entry.position }));
   const positions = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
   const combatants = state.combatants.flatMap((subject) => {
+    if (hidden.has(subject.profile.id)) return [];
     const position = positions.get(subject.profile.id);
     return position === undefined ? [] : [{
       id: subject.profile.id,
@@ -438,7 +446,9 @@ export function projectEncounterBoard(
     highlightedCombatant: state.activeCombatant,
     activeCombatant: state.activeCombatant,
     adjudicatedTargets: [...adjudicatedTargets],
-    foggedCells: state.foggedCells.map((cell) => ({ ...cell })),
+    foggedCells: [...new Map(
+      [...state.foggedCells, ...hiddenCells].map((cell) => [cellKey(cell), { ...cell }] as const),
+    ).values()],
     round: state.round,
     initiative: state.initiative.map((entry) => {
       const subject = state.combatants.find((candidate) => candidate.profile.id === entry.combatant);
@@ -485,7 +495,10 @@ export function encounterBoardRenderModel(
     combatants.set(key, occupants);
   }
   const terrain = new Map(art.terrain.map((entry) => [cellKey(entry.cell), entry.asset] as const));
-  const fog = new Set(projection.foggedCells?.map(cellKey) ?? []);
+  const fog = new Set([
+    ...(projection.foggedCells?.map(cellKey) ?? []),
+    ...(projection.concealedCells?.map(cellKey) ?? []),
+  ]);
   const adjudicated = new Set(projection.adjudicatedTargets);
   const worldObjects = projection.worldObjects ?? [];
   const areas = projection.areas ?? [];

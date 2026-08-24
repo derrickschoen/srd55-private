@@ -1,9 +1,13 @@
 import type { CombatantEquipment } from '../combat/equipment';
 import type {
+  CombatantReactionPolicy,
   DeathSaveState,
   EncounterState,
   LifeState,
+  ReactionKind,
+  ReactionPolicy,
 } from '../combat/encounter';
+import { REACTION_KINDS } from '../combat/encounter';
 import type { CombatantId, EncounterEffectId, LimitedResourcePoolId } from '../combat/values';
 import {
   combatantId,
@@ -67,6 +71,7 @@ export interface PartySessionState {
   readonly rulesEdition: '2024';
   readonly room: AdventuringDayRoom;
   readonly characters: readonly PartyCharacterSessionState[];
+  readonly reactionPolicies: readonly CombatantReactionPolicy[];
 }
 
 export const PARTY_SESSION_VIEW_CLASSIFICATION = {
@@ -74,6 +79,7 @@ export const PARTY_SESSION_VIEW_CLASSIFICATION = {
   rulesEdition: 'player_visible',
   room: 'player_visible',
   characters: 'per_seat',
+  reactionPolicies: 'per_seat',
 } as const satisfies Readonly<Record<keyof PartySessionState, PartySessionViewClassification>>;
 
 export const PARTY_CHARACTER_VIEW_CLASSIFICATION = {
@@ -118,6 +124,7 @@ export interface PlayerPartySessionView {
   readonly room: AdventuringDayRoom;
   readonly characters: readonly PlayerVisiblePartyMemberSummary[];
   readonly ownedCharacters: readonly PlayerOwnedPartyMember[];
+  readonly reactionPolicies: readonly CombatantReactionPolicy[];
 }
 
 export interface ShortRestHitDieSpend {
@@ -212,6 +219,29 @@ export function createPartySessionState(
     rulesEdition: '2024',
     room: 1,
     characters,
+    reactionPolicies: characters.flatMap((character) => REACTION_KINDS.map((reactionKind) => ({
+      combatant: character.combatantId,
+      reactionKind,
+      policy: 'ask' as const,
+    }))),
+  };
+}
+
+export function setPartyReactionPolicy(
+  state: PartySessionState,
+  combatant: CombatantId,
+  reactionKind: ReactionKind,
+  policy: ReactionPolicy,
+): PartySessionState {
+  if (!state.characters.some((character) => character.combatantId === combatant)) {
+    throw new Error(`Reaction preference names non-party character ${combatant}.`);
+  }
+  return {
+    ...state,
+    reactionPolicies: state.reactionPolicies.map((entry) =>
+      entry.combatant === combatant && entry.reactionKind === reactionKind
+        ? { ...entry, policy }
+        : entry),
   };
 }
 
@@ -331,6 +361,7 @@ export function preloadPartySessionState(
     combatants,
     effects: [...encounter.effects, ...partyConsumables],
     nextEffectSequence,
+    reactionPolicies: structuredClone(party.reactionPolicies),
     ...((encounter.equipment === undefined && partyEquipment.length === 0)
       ? {}
       : { equipment: [...retainedNonPartyEquipment, ...partyEquipment] }),
@@ -458,6 +489,9 @@ export function projectPlayerPartySession(
       consumables: structuredClone(character.consumables),
       equipment: structuredClone(character.equipment),
     })),
+    reactionPolicies: state.reactionPolicies
+      .filter((entry) => owned.has(entry.combatant))
+      .map((entry) => ({ ...entry })),
   };
 }
 
@@ -624,11 +658,11 @@ function decodePartyCharacter(value: unknown): PartyCharacterSessionState {
 export function decodePartySessionState(value: unknown): PartySessionState {
   if (
     !isRecord(value) ||
-    !exactKeys(value, ['schemaVersion', 'rulesEdition', 'room', 'characters']) ||
+    !exactKeys(value, ['schemaVersion', 'rulesEdition', 'room', 'characters', 'reactionPolicies']) ||
     value.schemaVersion !== PARTY_SESSION_SCHEMA_VERSION ||
     value.rulesEdition !== '2024' ||
     !([1, 2, 3, 4] as const).includes(Number(value.room) as AdventuringDayRoom) ||
-    !Array.isArray(value.characters) ||
+    !Array.isArray(value.characters) || !Array.isArray(value.reactionPolicies) ||
     value.characters.length < 3 ||
     value.characters.length > 5
   ) {
@@ -639,10 +673,30 @@ export function decodePartySessionState(value: unknown): PartySessionState {
     new Set(characters.map((character) => character.characterId)).size !== characters.length) {
     throw new TypeError('Party session character identities must be unique.');
   }
+  const characterIds = new Set(characters.map((character) => character.combatantId));
+  const reactionPolicies = value.reactionPolicies.map((entry): CombatantReactionPolicy => {
+    if (!isRecord(entry) || !exactKeys(entry, ['combatant', 'reactionKind', 'policy']) ||
+      typeof entry.combatant !== 'string' || !characterIds.has(combatantId(entry.combatant)) ||
+      !REACTION_KINDS.includes(entry.reactionKind as ReactionKind) ||
+      (entry.policy !== 'ask' && entry.policy !== 'always' && entry.policy !== 'never')) {
+      throw new TypeError('Party reaction policy is malformed.');
+    }
+    return {
+      combatant: combatantId(entry.combatant),
+      reactionKind: entry.reactionKind as ReactionKind,
+      policy: entry.policy,
+    };
+  });
+  const policyKeys = reactionPolicies.map((entry) => `${entry.combatant}:${entry.reactionKind}`);
+  if (new Set(policyKeys).size !== policyKeys.length ||
+    reactionPolicies.length !== characters.length * REACTION_KINDS.length) {
+    throw new TypeError('Party reaction policies must cover every character and reaction kind exactly once.');
+  }
   return {
     schemaVersion: PARTY_SESSION_SCHEMA_VERSION,
     rulesEdition: '2024',
     room: value.room as AdventuringDayRoom,
     characters,
+    reactionPolicies,
   };
 }

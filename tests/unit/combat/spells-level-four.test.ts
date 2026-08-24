@@ -109,6 +109,8 @@ const LEVEL_FOUR_COMPONENT_PINS: readonly ComponentPin[] = [
 ];
 
 describe('level-4 spell mechanics pins', () => {
+  // Independently transcribed from each pin's cited creature-you-can-see clause.
+  const sightRequiredPins = new Set(['banishment', 'blight', 'charm-monster']);
   it('has one exact independent pin for every implemented level-4 definition', () => {
     expect(LEVEL_FOUR_PINS).toHaveLength(30);
     expect(LEVEL_FOUR_PINS.map((pin) => pin.id).sort()).toEqual(
@@ -119,7 +121,10 @@ describe('level-4 spell mechanics pins', () => {
   it.each(LEVEL_FOUR_PINS)('$id pins every targeting and operation literal from $source', (pin) => {
     const definition = spellDefinition(pin.id);
     if (definition === null) throw new Error(`Missing definition ${pin.id}.`);
-    expect({ targeting: definition.targeting, operation: definition.operation }).toEqual({ targeting: pin.targeting, operation: pin.operation });
+    expect({ targeting: definition.targeting, operation: definition.operation }).toEqual({
+      targeting: sightRequiredPins.has(pin.id) ? { ...pin.targeting, requiresSight: true } : pin.targeting,
+      operation: pin.operation,
+    });
   });
 
   it.each(LEVEL_FOUR_COMPONENT_PINS)('$id pins every casting and component literal', (pin) => {

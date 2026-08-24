@@ -25,6 +25,7 @@ import {
   enterNextRoom,
   preloadPartySessionState,
   projectPlayerPartySession,
+  setPartyReactionPolicy,
   takeShortRest,
   type PartySessionState,
 } from '../../../src/vtt/party-session-state';
@@ -116,6 +117,82 @@ function character(state: PartySessionState, id: string) {
 }
 
 describe('adventuring-day party session state', () => {
+  it('prefs_reset_per_encounter: reaction policies survive closed decode and flow into every composed room', () => {
+    const members = loadedParty();
+    const wizardId = combatantId('combatant:advday-1');
+    const preferred = setPartyReactionPolicy(
+      createPartySessionState(members),
+      wizardId,
+      'opportunity_attack',
+      'always',
+    );
+    const decoded = decodePartySessionState(structuredClone(preferred));
+    const roomOne = composeStoredCharacterEncounter(members, new Map(), decoded);
+    const roomTwoParty = enterNextRoom(capturePartySessionState(decoded, roomOne.state));
+    const roomTwo = composeStoredCharacterEncounter(members, new Map(), roomTwoParty);
+
+    for (const encounter of [roomOne, roomTwo]) {
+      expect(encounter.state.reactionPolicies).toContainEqual({
+        combatant: wizardId,
+        reactionKind: 'opportunity_attack',
+        policy: 'always',
+      });
+    }
+    expect(roomTwo.partyState?.reactionPolicies).toContainEqual({
+      combatant: wizardId,
+      reactionKind: 'opportunity_attack',
+      policy: 'always',
+    });
+    const wizardView = projectPlayerPartySession(roomTwoParty, [wizardId]);
+    expect(wizardView.reactionPolicies).toHaveLength(5);
+    expect(JSON.stringify(wizardView.reactionPolicies)).not.toContain('combatant:advday-2');
+  });
+
+  it('reaction_preferences_fingerprinted: the closed session bundle round-trips an edited policy', () => {
+    const members = loadedParty();
+    const room = composeStoredCharacterEncounter(members);
+    if (room.partyState === null) throw new Error('Reaction preference fixture has no party state.');
+    const sessionId = encounterSessionId('session:reaction-preference-fingerprint');
+    const store = new MemoryBrowserSessionStore();
+    const journal = EncounterSessionJournal.create({
+      sessionId,
+      branchId: encounterBranchId('branch:reaction-preference-fingerprint'),
+      encounterState: room.state,
+      partyState: room.partyState,
+      coordinatorState: {
+        requestSequence: 1,
+        pendingRequest: null,
+        pendingCommand: null,
+        continuation: { kind: 'idle' },
+        pause: null,
+      },
+      controllers: room.controllers,
+      codexSessionId: codexSessionId('codex:reaction-preference-fingerprint'),
+      rng: mulberry32(3734),
+      store,
+      mirror: new MemoryMirrorSink(),
+    });
+    const wizardId = combatantId('combatant:advday-1');
+    journal.updateReactionPreference(wizardId, 'opportunity_attack', 'never');
+
+    const bytes = exportSavedSession(store, sessionId);
+    expect(bytes).toContain('"reactionPolicies"');
+    expect(bytes).toContain('"policy":"never"');
+    const imported = new MemoryBrowserSessionStore();
+    importSavedSession(imported, bytes);
+    const resumed = EncounterSessionJournal.resume(sessionId, imported, new MemoryMirrorSink());
+    expect(resumed.partyState?.reactionPolicies).toContainEqual({
+      combatant: wizardId,
+      reactionKind: 'opportunity_attack',
+      policy: 'never',
+    });
+    expect(resumed.encounterState.reactionPolicies).toContainEqual({
+      combatant: wizardId,
+      reactionKind: 'opportunity_attack',
+      policy: 'never',
+    });
+  });
+
   it('resources_reset_between_rooms: captures damage and an actual spell spend, then preloads both into room 2', () => {
     const members = loadedParty();
     const wizard = members[0]!;

@@ -180,7 +180,7 @@ function familyActions(family: HomebrewBeastFamily, index: number, dc: number, t
       const bite = melee('venom-bite', 'Venom Bite', 3 + index, [averageDamage(targetDpr - poison, 'Piercing'), averageDamage(poison, 'Poison')], [conditionRider('Poisoned', dc)]);
       const web: MonsterAction = { kind: 'saving_throw', id: 'web', name: 'Web', savingThrow: { ability: 'dexterity', dc }, target: { rangeFeet: 30 + index * 5, maximumSize: null, excludedKinds: [] }, failure: { damage: [], effects: [conditionOnHit('Restrained', null, { escapeDc: dc, duration: 'until_escape' })] }, success: { kind: 'none' } };
       return { actions: [bite, web], bonusActions: absent('This original beast has no bonus actions.'), attacksPerAction: 1, computedDpr: targetDpr,
-        signatures: [{ mechanic: 'web', magnitude: dc, standingInFor: null }, { mechanic: 'venom', magnitude: poison, standingInFor: null }, { mechanic: 'spider_climb', magnitude: 20 + index * 5, standingInFor: 'web_sense' }] };
+        signatures: [{ mechanic: 'web', magnitude: dc, standingInFor: null }, { mechanic: 'venom', magnitude: poison, standingInFor: null }, { mechanic: 'web_sense', magnitude: 60, standingInFor: null }] };
     }
     case 'saurian': {
       const count = index < 3 ? 1 : index < 6 ? 2 : 3;
@@ -195,8 +195,8 @@ function familyActions(family: HomebrewBeastFamily, index: number, dc: number, t
     case 'pterosaur': {
       const passDamage = index + 2;
       const beak = melee('raking-pass', 'Raking Pass', 3 + index, [averageDamage(targetDpr - passDamage, 'Piercing'), averageDamage(passDamage, 'Slashing', charge)], [conditionRider('Prone', dc, charge)]);
-      return { actions: [beak], bonusActions: present([{ kind: 'nimble_escape', actions: ['Disengage', 'Hide'] }]), attacksPerAction: 1, computedDpr: targetDpr,
-        signatures: [{ mechanic: 'fly_speed', magnitude: 30 + index * 5, standingInFor: null }, { mechanic: 'raking_pass', magnitude: passDamage, standingInFor: 'descent_triggered_dive' }, { mechanic: 'nimble_escape', magnitude: 1, standingInFor: 'flyby' }] };
+      return { actions: [beak], bonusActions: absent('Flyby removes the temporary Nimble Escape stand-in.'), attacksPerAction: 1, computedDpr: targetDpr,
+        signatures: [{ mechanic: 'fly_speed', magnitude: 30 + index * 5, standingInFor: null }, { mechanic: 'raking_pass', magnitude: passDamage, standingInFor: 'descent_triggered_dive' }, { mechanic: 'flyby', magnitude: 1, standingInFor: null }] };
     }
     case 'aquatic': {
       const grapple = index >= 3 ? [conditionOnHit('Grappled', 'Huge', { escapeDc: dc, duration: 'until_escape' })] : [];
@@ -208,8 +208,8 @@ function familyActions(family: HomebrewBeastFamily, index: number, dc: number, t
       const riders: MonsterOnHitEffect[] = [conditionRider('Prone', dc)];
       if (index >= 4) riders.push(conditionRider('Blinded', dc));
       const rake = melee('talon-rake', 'Talon Rake', 3 + index, [averageDamage(targetDpr, 'Slashing')], riders);
-      return { actions: [rake], bonusActions: present([{ kind: 'nimble_escape', actions: ['Disengage', 'Hide'] }]), attacksPerAction: 1, computedDpr: targetDpr,
-        signatures: [{ mechanic: 'fly_speed', magnitude: 35 + index * 5, standingInFor: null }, { mechanic: 'talon_rake', magnitude: targetDpr, standingInFor: null }, { mechanic: 'nimble_escape', magnitude: 1, standingInFor: 'flyby' }] };
+      return { actions: [rake], bonusActions: absent('Flyby removes the temporary Nimble Escape stand-in.'), attacksPerAction: 1, computedDpr: targetDpr,
+        signatures: [{ mechanic: 'fly_speed', magnitude: 35 + index * 5, standingInFor: null }, { mechanic: 'talon_rake', magnitude: targetDpr, standingInFor: null }, { mechanic: 'keen_sight', magnitude: 1, standingInFor: null }, { mechanic: 'flyby', magnitude: 1, standingInFor: null }] };
     }
   }
 }
@@ -224,7 +224,9 @@ function movements(family: HomebrewBeastFamily, index: number) {
 
 function traits(family: HomebrewBeastFamily) {
   switch (family) {
-    case 'arachnid': return present([{ kind: 'spider_climb' as const }, { kind: 'web_walker' as const }]);
+    case 'arachnid': return present([{ kind: 'spider_climb' as const }, { kind: 'web_walker' as const }, { kind: 'web_sense' as const }]);
+    case 'pterosaur': return present([{ kind: 'flyby' as const }]);
+    case 'raptor': return present([{ kind: 'keen_sight' as const }, { kind: 'flyby' as const }]);
     case 'aquatic': return present([{ kind: 'water_breathing' as const, onlyUnderwater: true as const }]);
     default: return absent<readonly import('../statblock').MonsterTrait[]>('This original beast has no additional traits.');
   }
@@ -286,9 +288,9 @@ export const HOMEBREW_BEAST_ROSTER: readonly HomebrewBeastRosterRow[] = FAMILIES
 
 export const HOMEBREW_BEAST_FAMILY_SIGNATURES: Readonly<Record<HomebrewBeastFamily, readonly string[]>> = {
   ursine: ['bear_hug', 'ongoing_squeeze', 'tank_hit_points'],
-  arachnid: ['web', 'venom', 'spider_climb'],
+  arachnid: ['web', 'venom', 'web_sense'],
   saurian: ['charge_burst', 'charge_prone', 'multiattack_growth'],
-  pterosaur: ['fly_speed', 'raking_pass', 'nimble_escape'],
+  pterosaur: ['fly_speed', 'raking_pass', 'flyby'],
   aquatic: ['swim_speed', 'blood_frenzy', 'water_breathing'],
-  raptor: ['fly_speed', 'talon_rake', 'nimble_escape'],
+  raptor: ['fly_speed', 'talon_rake', 'keen_sight', 'flyby'],
 };

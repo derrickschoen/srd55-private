@@ -5,6 +5,7 @@ import type {
   PersistedCoordinatorState,
 } from '../combat/coordinator';
 import type { TurnResources } from '../combat/encounter';
+import type { PendingDecision, ReactionPolicy } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
 import type { GridCell } from '../combat/grid';
 import {
@@ -44,6 +45,7 @@ export interface PlayerBoardProjection {
   readonly round: number;
   readonly bounds: PlayerView['bounds'];
   readonly blockedCells: readonly GridCell[];
+  readonly concealedCells: readonly GridCell[];
   readonly activeCombatant: CombatantId | null;
   readonly highlightedCombatant: CombatantId | null;
   readonly combatants: readonly PlayerVisibleCombatant[];
@@ -74,6 +76,51 @@ export interface DmBoardProjection {
   readonly history: readonly SessionHistoryEntry[];
   readonly adjudicatedTargets: readonly CombatantId[];
   readonly partySession: DmPartySessionView | null;
+  readonly decisionTray: DmDecisionTrayProjection;
+}
+
+export type DmDecisionTrayEntry =
+  | {
+      readonly kind: 'pending';
+      readonly decision: PendingDecision;
+      readonly combatantName: string;
+      readonly triggerContext: string;
+      readonly interactive: true;
+    }
+  | {
+      readonly kind: 'auto_fire_log';
+      readonly sequence: number;
+      readonly combatantId: CombatantId;
+      readonly combatantName: string;
+      readonly reactionKind: 'opportunity_attack';
+      readonly policy: Exclude<ReactionPolicy, 'ask'>;
+      readonly resolution: 'accept' | 'decline';
+      readonly autoFired: boolean;
+      readonly interactive: false;
+    };
+
+export interface DmDecisionTrayProjection {
+  readonly entries: readonly DmDecisionTrayEntry[];
+  readonly boundaryRefusal: null | {
+    readonly code: 'turn_boundary_blocked';
+    readonly message: string;
+  };
+}
+
+function decisionTriggerContext(
+  decision: PendingDecision,
+  names: ReadonlyMap<CombatantId, string>,
+): string {
+  switch (decision.kind) {
+    case 'reaction_offer':
+      return `${names.get(decision.opportunityAttack.mover) ?? String(decision.opportunityAttack.mover)} moved from ${String(decision.opportunityAttack.from.column)},${String(decision.opportunityAttack.from.row)} to ${String(decision.opportunityAttack.to.column)},${String(decision.opportunityAttack.to.row)} in round ${String(decision.boundary.round)}`;
+    case 'death_save':
+      return `start-of-turn death saving throw in round ${String(decision.boundary.round)}`;
+    default: {
+      const exhaustive: never = decision;
+      throw new Error(`Unhandled pending decision kind: ${String(exhaustive)}`);
+    }
+  }
 }
 
 function projectedRequest(
@@ -130,6 +177,7 @@ export function projectPlayerBoard(
     round: view.round,
     bounds: view.bounds,
     blockedCells: view.blockedCells,
+    concealedCells: view.concealedCells.map((cell) => ({ ...cell })),
     activeCombatant: view.activeCombatant,
     highlightedCombatant: view.activeCombatant,
     combatants,
@@ -155,12 +203,38 @@ export function projectDmBoard(input: {
   readonly controllers: readonly ControllerIdentity[];
   readonly history: readonly SessionHistoryEntry[];
   readonly partyState?: PartySessionState | null;
+  readonly boundaryRefusal?: DmDecisionTrayProjection['boundaryRefusal'];
 }): DmBoardProjection {
   const targets = adjudicatedTargets(input.view.state.eventLog, input.coordinator.pause);
   const pending = input.coordinator.pendingRequest;
   const pendingController = pending === null
     ? undefined
     : input.controllers.find((identity) => identity.combatantId === pending.actorId);
+  const names = new Map(input.view.state.combatants.map(
+    (subject) => [subject.profile.id, subject.profile.name] as const,
+  ));
+  const pendingEntries: readonly DmDecisionTrayEntry[] = input.view.state.pendingDecisions.map((decision) => ({
+    kind: 'pending',
+    decision: structuredClone(decision),
+    combatantName: names.get(decision.combatant) ?? String(decision.combatant),
+    triggerContext: decisionTriggerContext(decision, names),
+    interactive: true,
+  }));
+  const autoFireEntries: readonly DmDecisionTrayEntry[] = input.view.state.eventLog.flatMap(
+    (event): readonly DmDecisionTrayEntry[] => event.type === 'reaction_policy_auto_resolved'
+      ? [{
+          kind: 'auto_fire_log',
+          sequence: event.sequence,
+          combatantId: event.combatant,
+          combatantName: names.get(event.combatant) ?? String(event.combatant),
+          reactionKind: event.reactionKind,
+          policy: event.policy,
+          resolution: event.resolution,
+          autoFired: event.autoFired,
+          interactive: false,
+        }]
+      : [],
+  );
   return {
     audience: 'dm',
     encounter: dmVisibleEncounter(input.view),
@@ -176,6 +250,10 @@ export function projectDmBoard(input: {
     partySession: input.partyState === undefined || input.partyState === null
       ? null
       : projectDmPartySession(input.partyState),
+    decisionTray: {
+      entries: [...pendingEntries, ...autoFireEntries],
+      boundaryRefusal: input.boundaryRefusal ?? null,
+    },
   };
 }
 

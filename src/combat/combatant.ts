@@ -1,4 +1,4 @@
-import { abilities, creatureSizes, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
+import { abilities, creatureSizes, skills, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import type { CharacterSheet } from '../queries/character-sheet-builder';
 import type { CombatFeatureEffect } from './effects';
 import type { GridCell } from './grid';
@@ -42,6 +42,11 @@ export interface CombatRulesProfile {
   readonly conditionImmunities: readonly string[];
   readonly usesDeathSaves: boolean;
   readonly senses: readonly CombatSense[];
+  /** 10 + Wisdom (Perception), including proficiency when sourced. */
+  readonly passivePerception: number;
+  readonly detectionTraits: readonly ('web_sense' | 'keen_sight' | 'flyby')[];
+  /** Tremorsense requires both participants to contact the same surface or liquid. */
+  readonly contactMedium: 'surface' | 'liquid' | 'air';
   /** Absence means the source did not establish a mechanical size category. */
   readonly sizeCategory?: KnownCreatureSize;
   /** Known SRD creature types and homebrew passthrough values share this sourced field. */
@@ -177,6 +182,9 @@ export function characterCombatantProfile(
       conditionImmunities: [],
       usesDeathSaves: true,
       senses: [{ kind: 'normal_sight' }],
+      passivePerception: 10,
+      detectionTraits: [],
+      contactMedium: 'surface',
       spellSlots: identity.spellSlots ?? [],
     },
   };
@@ -209,6 +217,20 @@ export function monsterCombatantProfile(
       conditionImmunities: statblock.conditionImmunities,
       usesDeathSaves: statblock.usesDeathSaves,
       senses: statblock.senses,
+      passivePerception: statblock.sourceDetails.passivePerception.kind === 'present'
+        ? statblock.sourceDetails.passivePerception.value
+        : 10,
+      detectionTraits: statblock.sourceDetails.traits.kind === 'present'
+        ? statblock.sourceDetails.traits.value.flatMap((trait) => {
+            switch (trait.kind) {
+              case 'web_sense':
+              case 'keen_sight':
+              case 'flyby': return [trait.kind];
+              default: return [];
+            }
+          })
+        : [],
+      contactMedium: 'surface',
       ...(statblock.sourceDetails.classification.kind === 'present' &&
         statblock.sourceDetails.classification.value.sizes.length === 1 &&
         creatureSizes.includes(statblock.sourceDetails.classification.value.sizes[0] as KnownCreatureSize)
@@ -218,6 +240,14 @@ export function monsterCombatantProfile(
         ? { creatureType: statblock.sourceDetails.classification.value.type }
         : {}),
       spellSlots: [],
+      ...(statblock.sourceDetails.skills.kind === 'present'
+        ? {
+            skillBonuses: Object.fromEntries(statblock.sourceDetails.skills.value.flatMap((skill) => {
+              const normalized = skill.name.toLowerCase().replaceAll(' ', '_');
+              return skills.includes(normalized as Skill) ? [[normalized, skill.bonus]] : [];
+            })) as Readonly<Partial<Record<Skill, number>>>,
+          }
+        : {}),
     },
   };
 }

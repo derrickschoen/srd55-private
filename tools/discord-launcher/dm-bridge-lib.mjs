@@ -77,6 +77,9 @@ export class ProjectionReconstructor {
     } else if (transfer.kind === 'compact_projection') {
       const view = object(transfer.view, 'compact projection view');
       const coordinator = object(view.coordinator, 'compact projection coordinator');
+      const turnProgramLegalActions = 'turnProgramLegalActions' in view
+        ? array(view.turnProgramLegalActions, 'compact projection turn-program legal actions')
+        : undefined;
       projection = {
         audience: 'dm',
         encounter: structuredClone(object(view.encounter, 'compact projection encounter')),
@@ -84,10 +87,14 @@ export class ProjectionReconstructor {
         coordinator: { ...structuredClone(coordinator), pendingRequest: structuredClone(view.pendingRequest) },
         pendingRequest: structuredClone(view.pendingRequest),
         humanCommandActions: structuredClone(array(view.humanCommandActions, 'compact projection human commands')),
+        ...(turnProgramLegalActions === undefined
+          ? {}
+          : { turnProgramLegalActions: structuredClone(turnProgramLegalActions) }),
         controllers: structuredClone(array(view.controllers, 'compact projection controllers')),
         history: structuredClone(array(request.history, 'request.history')),
         adjudicatedTargets: structuredClone(array(view.adjudicatedTargets, 'compact projection adjudicated targets')),
         partySession: structuredClone(view.partySession),
+        decisionTray: structuredClone(object(view.decisionTray, 'compact projection decision tray')),
       };
     } else if (transfer.kind === 'projection_delta') {
       const previous = this.snapshots.get(request.encounterId);

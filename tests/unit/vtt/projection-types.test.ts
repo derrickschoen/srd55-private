@@ -14,8 +14,15 @@ const effectsAreAbsent: AssertTrue<IsAbsent<PlayerView, 'effects'>> = true;
 const rulesAreAbsent: AssertTrue<IsAbsent<PlayerCombatant, 'rules'>> = true;
 const deathSavesAreAbsent: AssertTrue<IsAbsent<PlayerCombatant, 'deathSaves'>> = true;
 const hitPointsAreAbsentFromObservedCombatants: AssertTrue<IsAbsent<PlayerCombatant, 'hitPoints'>> = true;
-const dmPrivateRollIsAbsent: AssertTrue<
-  Extract<PlayerEvent, { readonly type: 'death_save_resolved' }> extends never ? true : false
+type PlayerDeathSaveEvent = Extract<PlayerEvent, { readonly type: 'death_save_resolved' }>;
+const hiddenDeathSaveRollIsAbsent: AssertTrue<IsAbsent<
+  Extract<PlayerDeathSaveEvent, { readonly rollVisibility: 'dm_only' }>,
+  'roll'
+>> = true;
+const visibleDeathSaveRollIsNumber: AssertTrue<
+  Extract<PlayerDeathSaveEvent, { readonly rollVisibility: 'player_visible' }>['roll'] extends number
+    ? true
+    : false
 > = true;
 const playerViewIsNotCanonicalState: AssertTrue<IsNotAssignable<PlayerView, EncounterState>> = true;
 const canonicalStateIsNotDmView: AssertTrue<IsNotAssignable<EncounterState, DmView>> = true;
@@ -29,9 +36,10 @@ describe('D359 compile-time view boundary', () => {
       rulesAreAbsent,
       deathSavesAreAbsent,
       hitPointsAreAbsentFromObservedCombatants,
-      dmPrivateRollIsAbsent,
+      hiddenDeathSaveRollIsAbsent,
+      visibleDeathSaveRollIsNumber,
       playerViewIsNotCanonicalState,
       canonicalStateIsNotDmView,
-    ]).toEqual([true, true, true, true, true, true, true, true, true]);
+    ]).toEqual([true, true, true, true, true, true, true, true, true, true]);
   });
 });
