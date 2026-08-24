@@ -64,6 +64,7 @@ const BEAST_FAMILY_LEDGER_PATH = 'docs/audits/2026-08-24-beastfam-mutation-ledge
 const DUNGEON_LEDGER_PATH = 'docs/audits/2026-08-24-dungeon-mutation-ledger.md';
 const DETECTION_LEDGER_PATH = 'docs/audits/2026-08-24-detection-mutation-ledger.md';
 const DETECTION_UI_LEDGER_PATH = 'docs/audits/2026-08-24-detection-ui-mutation-ledger.md';
+const DEATH_LEDGER_PATH = 'docs/audits/2026-08-24-death-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -95,6 +96,22 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(detectionUiLedger.match(/`exit 1`/gu)).toHaveLength(3);
     expect(detectionUiLedger).toContain('Tests  15 passed (15)');
     expect(detectionUiLedger).toContain('All three mutations were restored.');
+  it('D373.8-DEATH-MUTATION-LEDGER pins all five restored controls to named killing tests', () => {
+    const deathLedger = readFileSync(DEATH_LEDGER_PATH, 'utf8');
+    const deathTests = readFileSync('tests/unit/combat/death-saves.test.ts', 'utf8');
+    for (const control of [
+      'nat20_plain_success',
+      'massive_damage_ignored',
+      'massive_damage_remainder_boundary',
+      'override_unlogged',
+      'hidden_roll_leaks',
+    ]) {
+      expect(deathLedger).toContain(`\`${control}\``);
+      expect(deathTests).toContain(`${control}:`);
+    }
+    expect(deathLedger.match(/`exit 1`/gu)).toHaveLength(5);
+    expect(deathLedger).toContain('Tests  22 passed (22)');
+    expect(deathLedger).toContain('All five mutations were restored.');
   });
 
   it('D356-D368.3-DETECTION-MUTATION-LEDGER pins all five restored controls to named killing tests', () => {

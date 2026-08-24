@@ -275,27 +275,38 @@ export interface HiddenCombatant {
 }
 
 export interface PendingDecisionOption {
-  readonly id: 'accept' | 'decline';
+  readonly id: 'accept' | 'decline' | 'roll';
   readonly label: string;
 }
 
-/** Fork #18 starts with reaction_offer; future decision kinds join this union. */
-export type PendingDecision = {
+interface PendingDecisionBase {
   readonly id: string;
   readonly combatant: CombatantId;
-  readonly kind: 'reaction_offer';
-  readonly reactionKind: 'opportunity_attack';
-  readonly options: readonly [PendingDecisionOption, PendingDecisionOption];
   readonly boundary: {
     readonly activeCombatant: CombatantId;
     readonly round: number;
   };
-  readonly opportunityAttack: {
-    readonly mover: CombatantId;
-    readonly from: GridCell;
-    readonly to: GridCell;
-  };
-};
+}
+
+/** Closed engine decision vocabulary; every kind owns its legal option tuple. */
+export type PendingDecision =
+  | (PendingDecisionBase & {
+      readonly kind: 'reaction_offer';
+      readonly reactionKind: 'opportunity_attack';
+      readonly options: readonly [
+        PendingDecisionOption & { readonly id: 'accept' },
+        PendingDecisionOption & { readonly id: 'decline' },
+      ];
+      readonly opportunityAttack: {
+        readonly mover: CombatantId;
+        readonly from: GridCell;
+        readonly to: GridCell;
+      };
+    })
+  | (PendingDecisionBase & {
+      readonly kind: 'death_save';
+      readonly options: readonly [PendingDecisionOption & { readonly id: 'roll' }];
+    });
 
 export interface CombatantReactionPolicy {
   readonly combatant: CombatantId;
@@ -323,6 +334,8 @@ export function isEncounterConfig(value: unknown): value is EncounterConfig {
 export interface EncounterState {
   readonly config: EncounterConfig;
   readonly rulesEdition: DetectionRulesEdition;
+  /** DM-controlled projection policy; the raw event always retains the roll. */
+  readonly hideDeathSaveRolls: boolean;
   readonly revision: number;
   readonly nextEventSequence: number;
   readonly nextDecisionSequence: number;
@@ -372,6 +385,7 @@ interface ReevaluatedSpellBranch {
 export interface EncounterSetup {
   readonly config?: EncounterConfig;
   readonly rulesEdition?: DetectionRulesEdition;
+  readonly hideDeathSaveRolls?: boolean;
   readonly bounds: GridBounds;
   readonly blockedCells?: readonly GridCell[];
   readonly worldObjects?: readonly WorldObject[];
@@ -746,6 +760,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   return {
     config: { ...config },
     rulesEdition: setup.rulesEdition ?? '2024',
+    hideDeathSaveRolls: setup.hideDeathSaveRolls ?? false,
     revision: 0,
     nextEventSequence: 1,
     nextDecisionSequence: 1,
@@ -2172,6 +2187,14 @@ function effectiveHitPointMaximum(state: EncounterState, target: CombatantId): n
       : maximum, base);
 }
 
+function clearDeathSaveDecisions(state: EncounterState, target: CombatantId): EncounterState {
+  return {
+    ...state,
+    pendingDecisions: state.pendingDecisions.filter((decision) =>
+      decision.kind !== 'death_save' || decision.combatant !== target),
+  };
+}
+
 function applyDamage(
   context: ReductionContext,
   source: CombatantId,
@@ -2263,6 +2286,7 @@ function applyDamage(
     deathSaves,
   };
   context.state = replaceCombatant(context.state, after);
+  if (life === 'dead') context.state = clearDeathSaveDecisions(context.state, target);
   emit(context, {
     type: 'damage_applied',
     source,
@@ -2355,16 +2379,57 @@ function resolveDeathSave(context: ReductionContext, id: CombatantId): void {
     hitPoints,
     life,
     deathSaves: life === 'dying' ? { successes, failures } : null,
+    ...(life === 'living'
+      ? {
+          turn: {
+            action: { kind: 'available' },
+            bonusActionAvailable: true,
+            reactionAvailable: true,
+            movement: startTurnMovement(feet(effectiveSpeed(context.state, id))),
+            disengaging: false,
+            dodging: false,
+            ...(context.state.equipment === undefined ? {} : { objectInteractionsUsed: 0 as const }),
+          },
+        }
+      : {}),
   });
   emit(context, {
     type: 'death_save_resolved',
-    visibility: 'dm_only',
     combatant: id,
     roll,
     outcome,
     successes,
     failures,
     lifeState: life,
+    stableRecovery: life === 'stable' ? '1d4_hours_outside_encounter' : null,
+  });
+}
+
+function queueDeathSave(context: ReductionContext, id: CombatantId): void {
+  const subject = combatant(context.state, id);
+  if (subject.life !== 'dying' || subject.hitPoints !== 0 || !subject.profile.rules.usesDeathSaves) return;
+  if (context.state.pendingDecisions.some((decision) =>
+    decision.kind === 'death_save' &&
+    decision.combatant === id &&
+    decision.boundary.round === context.state.round)) return;
+  const decisionId = `decision:${String(context.state.nextDecisionSequence)}`;
+  const decision: PendingDecision = {
+    id: decisionId,
+    combatant: id,
+    kind: 'death_save',
+    options: [{ id: 'roll', label: 'Roll Death Save' }],
+    boundary: { activeCombatant: id, round: context.state.round },
+  };
+  context.state = {
+    ...context.state,
+    nextDecisionSequence: context.state.nextDecisionSequence + 1,
+    pendingDecisions: [...context.state.pendingDecisions, decision],
+  };
+  emit(context, {
+    type: 'pending_decision_queued',
+    decisionId,
+    combatant: id,
+    kind: 'death_save',
   });
 }
 
@@ -3268,6 +3333,7 @@ function queueOpportunityAttack(
   trigger: OpportunityAttackTrigger,
 ): void {
   if (context.state.pendingDecisions.some((decision) =>
+    decision.kind === 'reaction_offer' &&
     decision.combatant === reactor && decision.reactionKind === 'opportunity_attack' &&
     decision.boundary.activeCombatant === trigger.mover && decision.boundary.round === context.state.round)) return;
   const id = `decision:${String(context.state.nextDecisionSequence)}`;
@@ -4239,22 +4305,7 @@ function startTurn(context: ReductionContext, id: CombatantId, round: number): v
     },
   });
   emit(context, { type: 'turn_started', combatant: id, round });
-  resolveDeathSave(context, id);
-  const afterSave = combatant(context.state, id);
-  if (afterSave.life === 'living' && beforeSave.life === 'dying') {
-    context.state = replaceCombatant(context.state, {
-      ...afterSave,
-      turn: {
-        action: { kind: 'available' },
-        bonusActionAvailable: true,
-        reactionAvailable: true,
-        movement: startTurnMovement(feet(effectiveSpeed(context.state, id))),
-        disengaging: false,
-        dodging: false,
-        ...(context.state.equipment === undefined ? {} : { objectInteractionsUsed: 0 as const }),
-      },
-    });
-  }
+  queueDeathSave(context, id);
 }
 
 function hasAdjacentAlly(
@@ -6027,6 +6078,7 @@ function applyHealing(
     life: hitPoints > 0 ? 'living' : before.life,
     deathSaves: hitPoints > 0 ? null : before.deathSaves,
   });
+  if (hitPoints > 0) context.state = clearDeathSaveDecisions(context.state, target);
   emit(context, {
     type: 'healing_applied', source, target, amount: hitPoints - before.hitPoints,
     hitPointsBefore: before.hitPoints, hitPointsAfter: hitPoints,
@@ -9148,6 +9200,75 @@ function processSustainedEffectActivation(
   });
 }
 
+type DmDeathOverrideCommand = Extract<EncounterCommand, {
+  readonly type:
+    | 'dm_stabilize'
+    | 'dm_revive_at_one_hit_point'
+    | 'dm_set_death_save_counts'
+    | 'dm_mark_dead';
+}>;
+
+function deathOverrideSnapshot(subject: EncounterCombatantState) {
+  return {
+    hitPoints: subject.hitPoints,
+    lifeState: subject.life,
+    successes: subject.deathSaves?.successes ?? 0,
+    failures: subject.deathSaves?.failures ?? 0,
+  };
+}
+
+function applyDmDeathOverride(context: ReductionContext, command: DmDeathOverrideCommand): void {
+  const before = combatant(context.state, command.target);
+  if (
+    command.type === 'dm_set_death_save_counts' &&
+    (
+      !Number.isSafeInteger(command.successes) ||
+      !Number.isSafeInteger(command.failures) ||
+      command.successes < 0 || command.successes >= DEATH_SAVE_RESOLUTION_COUNT ||
+      command.failures < 0 || command.failures >= DEATH_SAVE_RESOLUTION_COUNT
+    )
+  ) {
+    throw new EncounterRuleError('DM death-save counts must be safe integers from 0 through 2.');
+  }
+  const override = command.type === 'dm_stabilize'
+    ? 'stabilize' as const
+    : command.type === 'dm_revive_at_one_hit_point'
+      ? 'revive_at_one_hit_point' as const
+      : command.type === 'dm_set_death_save_counts'
+        ? 'set_death_save_counts' as const
+        : 'mark_dead' as const;
+  const after: EncounterCombatantState = command.type === 'dm_stabilize'
+    ? { ...before, hitPoints: 0, life: 'stable', deathSaves: null, turn: EMPTY_TURN }
+    : command.type === 'dm_revive_at_one_hit_point'
+      ? { ...before, hitPoints: 1, life: 'living', deathSaves: null }
+      : command.type === 'dm_set_death_save_counts'
+        ? {
+            ...before,
+            hitPoints: 0,
+            life: 'dying',
+            deathSaves: { successes: command.successes, failures: command.failures },
+            turn: EMPTY_TURN,
+          }
+        : { ...before, hitPoints: 0, life: 'dead', deathSaves: null, turn: EMPTY_TURN };
+  context.state = replaceCombatant(context.state, after);
+  if (command.type !== 'dm_set_death_save_counts') {
+    context.state = clearDeathSaveDecisions(context.state, command.target);
+  }
+  emit(context, {
+    // Reuses D357's adjudicated subject/reasoning/consequence ruling-card envelope.
+    type: 'adjudicated',
+    target: command.target,
+    subject: `dm-override:${override}`,
+    reasoning: `DM authority override: ${override.replaceAll('_', ' ')}.`,
+    consequence: {
+      kind: 'death_override',
+      override,
+      before: deathOverrideSnapshot(before),
+      after: deathOverrideSnapshot(after),
+    },
+  });
+}
+
 function processCommand(context: ReductionContext, command: EncounterCommand): void {
   switch (command.type) {
     case 'drop_item':
@@ -9232,6 +9353,15 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       reevaluatePersistentAreaMembership(context);
       return;
     }
+    case 'set_hide_death_save_rolls':
+      context.state = { ...context.state, hideDeathSaveRolls: command.hidden };
+      return;
+    case 'dm_stabilize':
+    case 'dm_revive_at_one_hit_point':
+    case 'dm_set_death_save_counts':
+    case 'dm_mark_dead':
+      applyDmDeathOverride(context, command);
+      return;
     case 'cast_spell':
       processSpellCast(context, command);
       return;
@@ -9288,22 +9418,31 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     case 'resolve_pending_decision': {
       const decision = context.state.pendingDecisions.find((candidate) => candidate.id === command.decisionId);
       if (decision === undefined) throw new PendingDecisionRuleError('unknown_decision');
+      if (!decision.options.some((option) => option.id === command.optionId)) {
+        throw new PendingDecisionRuleError('unknown_decision');
+      }
       context.state = {
         ...context.state,
         pendingDecisions: context.state.pendingDecisions.filter((candidate) => candidate.id !== decision.id),
       };
       emit(context, {
         type: 'pending_decision_resolved', decisionId: decision.id,
-        combatant: decision.combatant, optionId: command.optionId,
+        combatant: decision.combatant, kind: decision.kind, optionId: command.optionId,
       });
-      if (command.optionId === 'accept') {
-        processAttack(
-          context,
-          defaultOpportunityAttack(decision.combatant, decision.opportunityAttack.mover),
-          decision.opportunityAttack,
-        );
+      switch (decision.kind) {
+        case 'reaction_offer':
+          if (command.optionId === 'accept') {
+            processAttack(
+              context,
+              defaultOpportunityAttack(decision.combatant, decision.opportunityAttack.mover),
+              decision.opportunityAttack,
+            );
+          }
+          return;
+        case 'death_save':
+          resolveDeathSave(context, decision.combatant);
+          return;
       }
-      return;
     }
     case 'create_persistent_area': {
       if (command.cost !== 'reaction') assertActiveActor(context, command.actor);

@@ -666,6 +666,22 @@ export class TurnCoordinator {
       if (actor === null) {
         return { kind: 'refused', state: this.#state, reason: 'No active combatant.' };
       }
+      const deathSave = this.#state.pendingDecisions.find((decision) =>
+        decision.kind === 'death_save' && decision.combatant === actor);
+      if (deathSave !== undefined) {
+        this.#continuation = {
+          kind: 'turn',
+          actor,
+          legalActions: {
+            actions: [{
+              type: 'resolve_pending_decision',
+              decisionId: deathSave.id,
+              optionId: 'roll',
+            }],
+          },
+        };
+        return await this.#continueTurn();
+      }
       if (combatant(this.#state, actor).life !== 'living') {
         const reduction = this.#apply({ type: 'end_turn', actor }, IDLE);
         return { kind: 'applied', state: this.#state, events: reduction.events };

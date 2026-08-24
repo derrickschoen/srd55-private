@@ -54,7 +54,12 @@ function actionLabel(action: EncounterCommand): string {
     case 'hide': return 'Hide';
     case 'search': return 'Search';
     case 'reveal_hidden': return 'Reveal';
-    case 'resolve_pending_decision': return 'Resolve reaction';
+    case 'resolve_pending_decision': return action.optionId === 'roll' ? 'Roll death save' : 'Resolve reaction';
+    case 'set_hide_death_save_rolls': return action.hidden ? 'Hide death-save rolls' : 'Show death-save rolls';
+    case 'dm_stabilize': return 'DM: Stabilize';
+    case 'dm_revive_at_one_hit_point': return 'DM: Revive at 1 HP';
+    case 'dm_set_death_save_counts': return 'DM: Set death-save counts';
+    case 'dm_mark_dead': return 'DM: Mark dead';
     case 'create_persistent_area':
       return 'Create persistent area';
     case 'move_persistent_area':
