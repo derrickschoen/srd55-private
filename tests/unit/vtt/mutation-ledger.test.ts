@@ -82,7 +82,7 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
-  it('D371.3-LEGENDARY-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
+  it('D375-LEGENDARY-MUTATION-LEDGER pins all five restored controls to named killing tests', () => {
     const legendaryLedger = readFileSync(LEGENDARY_LEDGER_PATH, 'utf8');
     const legendaryTests = readFileSync('tests/unit/vtt/legendary-monsters.test.ts', 'utf8');
     for (const control of [
@@ -90,13 +90,14 @@ describe('phase-2 mutation ledger manifest', () => {
       'resistance_free',
       'window_on_own_turn',
       'cost_ignored',
+      'legendary_window_incapacitated',
     ]) {
       expect(legendaryLedger).toContain(`\`${control}\``);
       expect(legendaryTests).toContain(`${control}:`);
     }
-    expect(legendaryLedger.match(/`exit 1`/gu)).toHaveLength(4);
-    expect(legendaryLedger).toContain('Tests  10 passed (10)');
-    expect(legendaryLedger).toContain('All four mutations were restored.');
+    expect(legendaryLedger.match(/`exit 1`/gu)).toHaveLength(5);
+    expect(legendaryLedger).toContain('Tests  11 passed (11)');
+    expect(legendaryLedger).toContain('All five controls were restored.');
   });
 
   it('D373-DETECTION-UI-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {

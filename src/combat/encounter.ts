@@ -3614,7 +3614,8 @@ function queueLegendaryActionWindows(context: ReductionContext, activeCombatant:
     const actions = subject.profile.rules.legendary?.actions ?? [];
     if (
       actor === activeCombatant || subject.life !== 'living' || pool === undefined ||
-      pool.actionUsesRemaining < 1 || !isCombatantOnBoard(context.state, actor)
+      pool.actionUsesRemaining < 1 || !isCombatantOnBoard(context.state, actor) ||
+      isIncapacitated(combatantConditions(context.state, actor))
     ) continue;
     const alreadyHandled = context.state.eventLog.some((event) =>
       event.type === 'legendary_action_window_closed' && event.combatant === actor &&

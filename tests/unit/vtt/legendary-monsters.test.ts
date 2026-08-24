@@ -10,7 +10,7 @@ import type { EncounterCommand } from '../../../src/combat/events';
 import type { MonsterLegendaryAction } from '../../../src/combat/statblock';
 import { UNICORN } from '../../../src/combat/statblocks/monsters';
 import { LEGENDARY_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
-import { damageType, dieSides } from '../../../src/combat/values';
+import { damageType, dieSides, effectStackingIdentity } from '../../../src/combat/values';
 import { placedToken, playerProfile } from '../combat/fixtures';
 
 function face(value: number): () => number {
@@ -257,6 +257,32 @@ describe('D371.3 SRD legendary-monster vocabulary', () => {
     const ownEnd = reduceEncounter(unicornTurn, { type: 'end_turn', actor: setup.unicorn.id }, face(10)).state;
     expect(ownEnd.pendingDecisions).toEqual([]);
     expect(ownEnd.activeCombatant).toBe(player.id);
+  });
+
+  it('legendary_window_incapacitated: excludes an Incapacitated monster while queueing its eligible peer', () => {
+    const player = playerProfile('incapacitated-window-player', { initiativeBonus: 20 });
+    const incapacitated = unicornProfile('incapacitated-window-unicorn');
+    const eligible = unicornProfile('eligible-window-unicorn');
+    const setup = startedEncounter([player, incapacitated], eligible);
+    const conditioned = reduceEncounter(setup.state, {
+      type: 'apply_effect',
+      actor: player.id,
+      cost: 'none',
+      effect: {
+        targets: [incapacitated.id],
+        duration: { kind: 'permanent' },
+        concentration: false,
+        stackingIdentity: effectStackingIdentity('condition:incapacitated'),
+        stacking: 'replace_any_source',
+        repeatedSave: null,
+        payload: { kind: 'condition', condition: 'Incapacitated' },
+      },
+    }, face(10)).state;
+
+    const ended = reduceEncounter(conditioned, { type: 'end_turn', actor: player.id }, face(10));
+    const windows = ended.state.pendingDecisions.filter((decision) => decision.kind === 'legendary_action_window');
+    expect(windows.some((decision) => decision.combatant === incapacitated.id)).toBe(false);
+    expect(windows.some((decision) => decision.combatant === eligible.id)).toBe(true);
   });
 });
 
