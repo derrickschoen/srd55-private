@@ -1,4 +1,4 @@
-import type { ChallengeRating, MonsterStatblock, SourceSpan } from '../statblock';
+import type { ChallengeRating, MonsterProvenance, MonsterStatblock, SourceSpan } from '../statblock';
 import {
   ARCHELON, BANDIT, BANDIT_CAPTAIN, BERSERKER, BLACK_BEAR, BLOOD_HAWK, BOAR, BROWN_BEAR, BUGBEAR_STALKER, BUGBEAR_WARRIOR,
   CAMEL, CROCODILE, DIRE_WOLF, ELEPHANT, GHAST, GHOUL, GIANT_CONSTRICTOR_SNAKE, GIANT_CROCODILE, GIANT_SCORPION, GIANT_SHARK, GIANT_SPIDER, GOBLIN_BOSS, GOBLIN_MINION, GOBLIN_WARRIOR, GUARD,
@@ -6,6 +6,7 @@ import {
   KILLER_WHALE, POLAR_BEAR, PRIEST, PRIEST_ACOLYTE, SABER_TOOTHED_TIGER, SCOUT, SKELETON, SPECTER, SPY, TIGER,
   TOUGH, WARHORSE_SKELETON, WIGHT, WOLF, ZOMBIE,
 } from './monsters';
+import { HOMEBREW_BEAST_ROSTER, type HomebrewBeastRosterRow } from './homebrew-beast-families';
 
 export type StarterMonsterFamily = 'goblinoid_warband' | 'undead_crypt' | 'mercenary_company' | 'wild_beasts';
 
@@ -16,12 +17,13 @@ export interface StarterMonsterRosterRow {
   readonly challengeRating: ChallengeRating;
   readonly source: readonly SourceSpan[];
   readonly selectionNote: string | null;
-  readonly statblock: MonsterStatblock;
+  readonly provenance: Extract<MonsterProvenance, { readonly kind: 'srd_5_2_1_decoded' }>;
+  readonly statblock: MonsterStatblock & { readonly provenance: Extract<MonsterProvenance, { readonly kind: 'srd_5_2_1_decoded' }> };
 }
 
 const SRD_PATH = 'docs/srd/full/srd-5.2.1.txt' as const;
 
-export const STARTER_MONSTER_ROSTER = [
+const SRD_STARTER_MONSTER_ROWS = [
   { id: 'statblock:goblin-minion', name: 'Goblin Minion', family: 'goblinoid_warband', challengeRating: '1/8', source: [{ path: SRD_PATH, lineStart: 18957, lineEnd: 18983 }], selectionNote: null, statblock: GOBLIN_MINION },
   { id: 'statblock:goblin-warrior', name: 'Goblin Warrior', family: 'goblinoid_warband', challengeRating: '1/4', source: [{ path: SRD_PATH, lineStart: 18985, lineEnd: 19018 }], selectionNote: null, statblock: GOBLIN_WARRIOR },
   { id: 'statblock:hobgoblin-warrior', name: 'Hobgoblin Warrior', family: 'goblinoid_warband', challengeRating: '1/2', source: [{ path: SRD_PATH, lineStart: 19540, lineEnd: 19574 }], selectionNote: null, statblock: HOBGOBLIN_WARRIOR },
@@ -72,4 +74,17 @@ export const STARTER_MONSTER_ROSTER = [
   { id: 'statblock:elephant', name: 'Elephant', family: 'wild_beasts', challengeRating: 4, source: [{ path: SRD_PATH, lineStart: 22948, lineEnd: 22978 }], selectionNote: null, statblock: ELEPHANT },
   { id: 'statblock:giant-crocodile', name: 'Giant Crocodile', family: 'wild_beasts', challengeRating: 5, source: [{ path: SRD_PATH, lineStart: 23060, lineEnd: 23094 }], selectionNote: null, statblock: GIANT_CROCODILE },
   { id: 'statblock:giant-shark', name: 'Giant Shark', family: 'wild_beasts', challengeRating: 5, source: [{ path: SRD_PATH, lineStart: 23285, lineEnd: 23310 }], selectionNote: null, statblock: GIANT_SHARK },
-] as const satisfies readonly StarterMonsterRosterRow[];
+] as const;
+
+export const STARTER_MONSTER_ROSTER = SRD_STARTER_MONSTER_ROWS.map((row) => {
+  const provenance = { kind: 'srd_5_2_1_decoded' as const, source: row.source };
+  return { ...row, provenance, statblock: { ...row.statblock, provenance } };
+}) satisfies readonly StarterMonsterRosterRow[];
+
+export type BundledMonsterRosterRow = StarterMonsterRosterRow | HomebrewBeastRosterRow;
+
+/** SRD-decoded and clean-room homebrew rows share one bundled lookup surface. */
+export const BUNDLED_MONSTER_ROSTER: readonly BundledMonsterRosterRow[] = [
+  ...STARTER_MONSTER_ROSTER,
+  ...HOMEBREW_BEAST_ROSTER,
+];

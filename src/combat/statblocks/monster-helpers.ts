@@ -9,6 +9,7 @@ import type {
   MonsterOnHitEffect,
   MonsterSourceDetailsInput,
 } from '../statblock';
+import type { ConditionName } from '../conditions';
 
 export const SRD_PATH = 'docs/srd/full/srd-5.2.1.txt' as const;
 
@@ -113,7 +114,7 @@ export const meleeOrRanged = (
 ): MonsterAttackAction => attack(id, name, attackBonus, { kind: 'melee_or_ranged', reachFeet, rangeFeet, longRangeFeet }, terms, onHit);
 
 export const conditionOnHit = (
-  condition: 'Frightened' | 'Grappled' | 'Paralyzed' | 'Poisoned' | 'Prone' | 'Restrained',
+  condition: Exclude<ConditionName, 'Exhaustion'>,
   maximumSize: CreatureSize | null,
   options: {
     readonly excludedKinds?: readonly ('Undead' | 'Elf')[];

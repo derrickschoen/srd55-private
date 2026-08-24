@@ -60,6 +60,7 @@ const PCBRIDGE_LEDGER_PATH = 'docs/audits/2026-08-23-pcbridge-mutation-ledger.md
 const VIEW_SEAMS_LEDGER_PATH = 'docs/audits/2026-08-23-seams-mutation-ledger.md';
 const MONSTERS_LEDGER_PATH = 'docs/audits/2026-08-23-monsters-mutation-ledger.md';
 const ADVDAY_LEDGER_PATH = 'docs/audits/2026-08-24-advday-mutation-ledger.md';
+const BEAST_FAMILY_LEDGER_PATH = 'docs/audits/2026-08-24-beastfam-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -76,6 +77,23 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D366-BEASTFAM-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
+    const beastFamilyLedger = readFileSync(BEAST_FAMILY_LEDGER_PATH, 'utf8');
+    const familyTests = readFileSync('tests/unit/combat/homebrew-beast-families.test.ts', 'utf8');
+    for (const control of [
+      'signature_dropped_at_tier',
+      'dpr_out_of_band',
+      'homebrew_masquerades_as_srd',
+      'ladder_step_missing',
+    ]) {
+      expect(beastFamilyLedger).toContain(`\`${control}\``);
+      expect(familyTests).toContain(`${control}:`);
+    }
+    expect(beastFamilyLedger.match(/`exit 1`/gu)).toHaveLength(4);
+    expect(beastFamilyLedger).toContain('Tests  9 passed (9)');
+    expect(beastFamilyLedger).toContain('All four mutations were restored.');
+  });
+
   it('D361.1-D363.2-ADVDAY-MUTATION-LEDGER pins all six restored controls to named killing tests', () => {
     const adventuringDayLedger = readFileSync(ADVDAY_LEDGER_PATH, 'utf8');
     const partyStateTests = readFileSync('tests/unit/vtt/party-session-state.test.ts', 'utf8');

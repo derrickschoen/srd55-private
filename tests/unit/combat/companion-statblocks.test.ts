@@ -42,10 +42,10 @@ const caster = (overrides: Partial<CasterContext> = {}): CasterContext => ({
 });
 
 describe('D364 SRD companion monster registry', () => {
-  it('keeps static rows unchanged while exposing all 47 static and three parameterized entries through one registry', () => {
+  it('keeps 47 SRD rows unchanged while exposing them with 48 homebrew rows and three parameterized entries through one registry', () => {
     expect(STARTER_MONSTER_ROSTER).toHaveLength(47);
-    expect(BUNDLED_MONSTER_REGISTRY).toHaveLength(50);
-    expect(BUNDLED_MONSTER_REGISTRY.filter((entry) => entry.kind === 'static')).toHaveLength(47);
+    expect(BUNDLED_MONSTER_REGISTRY).toHaveLength(98);
+    expect(BUNDLED_MONSTER_REGISTRY.filter((entry) => entry.kind === 'static')).toHaveLength(95);
     expect(BUNDLED_MONSTER_REGISTRY.filter((entry) => entry.kind === 'parameterized')).toHaveLength(3);
     expect(STARTER_MONSTER_ROSTER.every((row) => row.statblock.id === row.id)).toBe(true);
   });

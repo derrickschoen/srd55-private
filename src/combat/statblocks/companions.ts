@@ -13,7 +13,7 @@ import {
   present,
   savingThrowBonuses,
 } from './monster-helpers';
-import { STARTER_MONSTER_ROSTER } from './roster';
+import { BUNDLED_MONSTER_ROSTER } from './roster';
 
 export type SpellSlotLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
@@ -206,7 +206,7 @@ export type BundledMonsterRegistryEntry =
   | (typeof PARAMETERIZED_MONSTER_TEMPLATES)[number];
 
 export const BUNDLED_MONSTER_REGISTRY: readonly BundledMonsterRegistryEntry[] = [
-  ...STARTER_MONSTER_ROSTER.map((row) => ({ kind: 'static' as const, id: row.statblock.id, statblock: row.statblock })),
+  ...BUNDLED_MONSTER_ROSTER.map((row) => ({ kind: 'static' as const, id: row.statblock.id, statblock: row.statblock })),
   ...PARAMETERIZED_MONSTER_TEMPLATES,
 ];
 
