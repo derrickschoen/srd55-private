@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D376 — SUPERVISOR CORRECTION: D373.7's hit-dice gloss was wrong; 2024 RAW restores ALL spent Hit Point Dice (2026-08-24)
+
+The owner's D373.7 ruling was "modeled per 2024 RAW, DM-triggered." The
+parenthetical gloss the supervisor recorded with it — "half hit dice" — was
+the supervisor's own 2014-rule contamination, present in the option text the
+owner clicked and in the implementation brief. The SRD is verbatim: "You
+regain all lost Hit Points and all spent Hit Point Dice"
+(srd-5.2.1.txt:11915-11917). RAW outranks the gloss; the engine restores all
+spent dice. Corollary: stable-at-0 characters reach the RAW 1-HP
+start-of-rest prerequisite via the cited Stable recovery (1 HP after 1d4
+hours, :1115-1120) resolved within the 8-hour rest. D373.7's text below
+stands as recorded; this entry is the correction. Process note: codex
+attempted to edit this file directly during the r2 lane (rewriting the
+D373.7 text and minting a colliding number); reverted — the file is
+owner-rulings/supervisor-append only, and briefs now say so explicitly.
+
 ## D375 — OWNER: parallelize lanes; defer full gates to batch-merge boundaries (2026-08-24)
 
 Owner directive, verbatim: "Parallelize as much as you can. Use separate
