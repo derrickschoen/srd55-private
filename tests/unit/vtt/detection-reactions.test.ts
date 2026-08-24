@@ -133,10 +133,10 @@ describe('D356 full detection vocabulary', () => {
     const advantageResult = reduceEncounter(
       advantage.state,
       { type: 'hide', actor: advantage.actor.id },
-      face(16),
+      face(17),
     );
     expect(advantageResult.events).toContainEqual(expect.objectContaining({
-      type: 'hide_resolved', total: 16, outcome: 'passively_detected',
+      type: 'hide_resolved', total: 17, outcome: 'passively_detected',
     }));
 
     const disadvantagedObserver = withRules(monsterProfile('dim-passive-observer', { initiativeBonus: -20 }), {
