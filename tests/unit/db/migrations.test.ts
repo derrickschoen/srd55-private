@@ -305,6 +305,15 @@ const SCHEMA_BEFORE_OPTIONAL_FEATURE_SELECTIONS = DATABASE_MIGRATIONS
   .join('\n');
 const OPTIONAL_FEATURE_SELECTIONS_MIGRATION =
   DATABASE_MIGRATIONS[OPTIONAL_FEATURE_SELECTIONS_INDEX]!;
+const VTT_SESSION_BRANCH_RNG_STATE_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0055_vtt_session_branch_rng_state',
+);
+const SCHEMA_BEFORE_VTT_SESSION_BRANCH_RNG_STATE = DATABASE_MIGRATIONS
+  .slice(0, VTT_SESSION_BRANCH_RNG_STATE_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const VTT_SESSION_BRANCH_RNG_STATE_MIGRATION =
+  DATABASE_MIGRATIONS[VTT_SESSION_BRANCH_RNG_STATE_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -3972,6 +3981,44 @@ describe('database migration chain', () => {
       )).toBe(20);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         OPTIONAL_FEATURE_SELECTIONS_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(
+        schemaSignature(SCHEMA_BEFORE_VTT_SESSION_BRANCH_RNG_STATE),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0055 admits branch-RNG revision schema four without losing prior revisions', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_VTT_SESSION_BRANCH_RNG_STATE);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES ('session:rng-migration-survivor', 1, 3, '{"state":"kept"}', '${'ab'.repeat(32)}')
+      `);
+
+      db.exec(VTT_SESSION_BRANCH_RNG_STATE_MIGRATION.sql);
+
+      expect(db.selectObjects(
+        `SELECT session_id, revision, schema_version, payload_json, payload_checksum
+         FROM vtt_session_revisions`,
+      )).toEqual([{
+        session_id: 'session:rng-migration-survivor',
+        revision: 1,
+        schema_version: 3,
+        payload_json: '{"state":"kept"}',
+        payload_checksum: 'ab'.repeat(32),
+      }]);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES ('session:rng-state', 1, 4, '{"branchRngStateFingerprint":"${'cd'.repeat(32)}"}', '${'ef'.repeat(32)}')
+      `);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        VTT_SESSION_BRANCH_RNG_STATE_MIGRATION.resultSchemaChecksum,
       );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {

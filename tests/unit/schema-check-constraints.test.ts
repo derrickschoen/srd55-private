@@ -1657,12 +1657,13 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     constraint: 'vtt_session_revisions_schema_version_check',
     rejects: [
       ['schema version zero', vttSessionRevision({ schema_version: 0 })],
-      ['schema version four', vttSessionRevision({ schema_version: 4 })],
+      ['schema version five', vttSessionRevision({ schema_version: 5 })],
     ],
     accepts: [
       ['schema version one', vttSessionRevision({ schema_version: 1 })],
       ['schema version two', vttSessionRevision({ schema_version: 2 })],
       ['schema version three', vttSessionRevision({ schema_version: 3 })],
+      ['schema version four', vttSessionRevision({ schema_version: 4 })],
     ],
   },
   {

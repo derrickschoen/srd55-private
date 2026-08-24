@@ -42,7 +42,7 @@ import {
   type ShortRestResult,
 } from './party-session-state';
 
-export const VTT_SESSION_SCHEMA_VERSION = 3 as const;
+export const VTT_SESSION_SCHEMA_VERSION = 4 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export type SessionTransition =
@@ -125,6 +125,8 @@ interface SessionRevisionBody {
   readonly branchId: EncounterBranchId;
   readonly transition: SessionTransition;
   readonly encounterState: EncounterState;
+  /** Digest of the persisted, mechanically relevant encounter representation. */
+  readonly branchRngStateFingerprint: string;
   readonly partyState: PartySessionState | null;
   readonly rngState: SerializableRngState;
   readonly coordinatorState: PersistedCoordinatorState;
@@ -492,6 +494,7 @@ function decodeRevision(value: unknown): SessionRevision {
     !isRecord(value.transition) ||
     !isRecord(value.encounterState) ||
     !isEncounterConfig(value.encounterState.config) ||
+    typeof value.branchRngStateFingerprint !== 'string' ||
     !(value.partyState === null || isRecord(value.partyState)) ||
     !isRecord(value.rngState) ||
     !isRecord(value.coordinatorState) ||
@@ -524,6 +527,12 @@ function decodeRevision(value: unknown): SessionRevision {
     ...value.encounterState,
     combatants: encounterCombatants,
   } as unknown as EncounterState;
+  if (
+    branchRngStateFingerprint(value.encounterState as unknown as EncounterState) !==
+    value.branchRngStateFingerprint
+  ) {
+    throw new Error('Persisted VTT branch RNG state fingerprint mismatch.');
+  }
   const revision = { ...value, transition, encounterState, partyState } as unknown as SessionRevision;
   const { checksum: _checksum, ...body } = revision;
   if (revisionChecksum(body) !== revision.checksum) {
@@ -532,10 +541,7 @@ function decodeRevision(value: unknown): SessionRevision {
   return revision;
 }
 
-export function deriveBranchRng(
-  target: SessionRevision,
-  branchId: EncounterBranchId,
-): SerializableRng {
+function mechanicalBranchState(encounterState: EncounterState): unknown {
   const {
     config: _config,
     hideDeathSaveRolls: _hideDeathSaveRolls,
@@ -551,7 +557,7 @@ export function deriveBranchRng(
     pendingDecisions,
     reactionPolicies,
     ...stateWithoutCombatants
-  } = target.encounterState;
+  } = encounterState;
   // Player-facing roll visibility cannot change the deterministic mechanical
   // future of an otherwise identical branch.
   const normalizedCombatants = combatants.map((entry) => {
@@ -587,8 +593,19 @@ export function deriveBranchRng(
   const mechanicalState = worldStateIsNeutral
     ? areaNeutralState
     : { ...areaNeutralState, worldObjects, nextWorldObjectSequence, environment };
+  return mechanicalState;
+}
+
+function branchRngStateFingerprint(encounterState: EncounterState): string {
+  return sha256(canonicalJson(mechanicalBranchState(encounterState)));
+}
+
+export function deriveBranchRng(
+  target: SessionRevision,
+  branchId: EncounterBranchId,
+): SerializableRng {
   const digest = sha256(canonicalJson({
-    encounterState: mechanicalState,
+    persistedEncounterStateFingerprint: target.branchRngStateFingerprint,
     parentRngState: target.rngState,
     branchId,
   }));
@@ -1118,6 +1135,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       branchId: input.branchId,
       transition: input.transition,
       encounterState: input.encounterState,
+      branchRngStateFingerprint: branchRngStateFingerprint(input.encounterState),
       partyState: input.partyState,
       rngState: this.#rng.snapshot(),
       coordinatorState: input.coordinatorState,
@@ -1206,6 +1224,7 @@ export interface VttSessionMigration {
 
 const V1_TO_V2_SOURCE = 'vtt-session-v1-to-v2:add-format-and-sha-fingerprint=vtt-session-revisions';
 const V2_TO_V3_SOURCE = 'vtt-session-v2-to-v3:add-party-session-state-null-and-rehash-revisions';
+const V3_TO_V4_SOURCE = 'vtt-session-v3-to-v4:add-persisted-branch-rng-state-fingerprint';
 
 export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
   Object.freeze([
@@ -1249,6 +1268,40 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
           ...oldBundle,
           format: 'vtt-session-revisions' as const,
           schemaVersion: 3 as const,
+          revisions,
+        };
+        return { ...body, fingerprint: sha256(canonicalJson(body)) };
+      },
+    }),
+    Object.freeze({
+      id: 'vtt_session_v3_to_v4',
+      from: 3,
+      to: 4,
+      source: V3_TO_V4_SOURCE,
+      checksum: '03fad58a6864c3419f1243aa818fdcb6b38e3411d832de8b32a2e9364ba4bd20',
+      migrate: (bundle: Readonly<Record<string, unknown>>) => {
+        if (!Array.isArray(bundle.revisions)) {
+          throw new TypeError('VTT session v3 revisions are malformed.');
+        }
+        const revisions = bundle.revisions.map((revision) => {
+          if (!isRecord(revision) || !isRecord(revision.encounterState)) {
+            throw new TypeError('VTT session v3 revision is malformed.');
+          }
+          const { checksum: _oldChecksum, ...oldBody } = revision;
+          const body = {
+            ...oldBody,
+            schemaVersion: 4 as const,
+            branchRngStateFingerprint: branchRngStateFingerprint(
+              revision.encounterState as unknown as EncounterState,
+            ),
+          };
+          return { ...body, checksum: sha256(canonicalJson(body)) };
+        });
+        const { fingerprint: _oldFingerprint, ...oldBundle } = bundle;
+        const body = {
+          ...oldBundle,
+          format: 'vtt-session-revisions' as const,
+          schemaVersion: 4 as const,
           revisions,
         };
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
@@ -1369,7 +1422,12 @@ export function exportSavedSessionV1ForMigrationTest(
   sessionId: EncounterSessionId,
 ): string {
   const revisions = store.revisions(sessionId).map((revision) => {
-    const { checksum: _checksum, partyState: _partyState, ...currentBody } = revision;
+    const {
+      checksum: _checksum,
+      partyState: _partyState,
+      branchRngStateFingerprint: _branchRngStateFingerprint,
+      ...currentBody
+    } = revision;
     const body = { ...currentBody, schemaVersion: 2 as const };
     return { ...body, checksum: sha256(canonicalJson(body)) };
   });
