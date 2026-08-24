@@ -6,7 +6,7 @@ import { HumanController, type ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
 import { REACTION_KINDS, type PendingDecision } from '../combat/encounter';
 import { previewAffectedCells } from '../combat/templates';
-import type { CombatantId } from '../combat/values';
+import { encounterSessionId, type CombatantId } from '../combat/values';
 import { DmEncounterHost } from './dm-encounter-host';
 import {
   encounterBoardRenderModel,
@@ -23,7 +23,18 @@ import {
   playerDecisionMessage,
 } from './local-window-channel';
 import { LocalStorageBrowserSessionStore } from './local-session-store';
+import {
+  IndexedDbDirectoryHandlePersistence,
+  SaveFolderRepository,
+} from './save-folder';
+import {
+  SaveManagerController,
+  buildSaveManagerViewModel,
+  type SaveManagerEntry,
+  type SaveManagerViewModel,
+} from './save-manager';
 import { REFERENCE_ENCOUNTER_ART } from './reference-encounter-art';
+import { decodeSavedSessionFingerprint } from './session-persistence';
 import type { StoredCharacterEncounter } from './stored-character-encounter';
 
 const HEARTBEAT_INTERVAL_MS = 250;
@@ -519,11 +530,19 @@ class PlayerEncounterView {
 
 class DmEncounterView {
   readonly #store = new LocalStorageBrowserSessionStore(localStorage);
+  readonly #folder = new SaveFolderRepository(
+    new IndexedDbDirectoryHandlePersistence(indexedDB),
+    window,
+  );
   readonly #host: DmEncounterHost;
   readonly #channel: BroadcastChannel;
   readonly #shell = element('main', { className: 'encounter-shell dm-encounter' });
   #projection: DmBoardProjection | null = null;
   #channelError: string | null = null;
+  #saveManagerError: string | null = null;
+  #folderSaves: readonly SaveManagerEntry[] = [];
+  #pendingDelete: SaveManagerViewModel['pendingDelete'] = null;
+  #saveManagerController: SaveManagerController | null = null;
   readonly #heartbeat: number;
   readonly #unsubscribe: () => void;
   readonly #onBeforeUnload = (): void => this.#host.close();
@@ -567,6 +586,24 @@ class DmEncounterView {
       this.#sendPlayerProjection(snapshot.player);
     }, HEARTBEAT_INTERVAL_MS);
     window.addEventListener('beforeunload', this.#onBeforeUnload);
+    void this.#restoreSaveFolder();
+  }
+
+  async #restoreSaveFolder(): Promise<void> {
+    try {
+      await this.#folder.restore();
+      await this.#refreshFolderSaves();
+    } catch (error: unknown) {
+      this.#saveManagerError = error instanceof Error
+        ? error.message
+        : 'The default save folder could not be restored.';
+      this.#render();
+    }
+  }
+
+  async #refreshFolderSaves(): Promise<void> {
+    this.#folderSaves = await this.#folder.list();
+    this.#render();
   }
 
   #sendPlayerProjection(projection: PlayerBoardProjection): void {
@@ -619,6 +656,279 @@ class DmEncounterView {
     });
   }
 
+  #browserSaves(): readonly SaveManagerEntry[] {
+    return this.#store.savedSessions().map((save) => ({
+      ...save,
+      id: `browser:${save.sessionId}`,
+      source: 'browser',
+    }));
+  }
+
+  #controller(entries: readonly SaveManagerEntry[]): SaveManagerController {
+    return new SaveManagerController(
+      new Map(entries.map((entry) => [entry.id, entry])),
+      {
+        load: (save) => this.#loadSave(save),
+        rename: async (save, name) => {
+          if (save.source === 'browser') {
+            this.#store.rename(save.sessionId, name);
+          } else {
+            await this.#folder.rename(save, name);
+            await this.#refreshFolderSaves();
+          }
+          this.#render();
+        },
+        delete: async (save) => {
+          if (save.source === 'browser') {
+            const deletingActiveSession = save.sessionId === encounterSessionId(this.sessionId);
+            if (deletingActiveSession) this.close();
+            this.#store.remove(save.sessionId);
+            if (deletingActiveSession) {
+              const url = new URL(location.href);
+              url.searchParams.set('encounter', 'reference');
+              url.searchParams.set('view', 'dm');
+              url.searchParams.set('session', `${this.sessionId}-new`);
+              location.assign(url);
+              return;
+            }
+          } else {
+            await this.#folder.delete(save);
+            await this.#refreshFolderSaves();
+          }
+          this.#render();
+        },
+        exportCopy: (save) => this.#download(save.name, save.bytes),
+        saveNow: async () => {
+          const sessionId = encounterSessionId(this.sessionId);
+          const bytes = this.#store.exported(sessionId);
+          const browser = this.#store.savedSessions().find(
+            (save) => save.sessionId === sessionId,
+          );
+          const name = browser?.name ?? sessionId;
+          if (this.#folder.mode().kind === 'folder') {
+            await this.#folder.write(name, bytes);
+            await this.#refreshFolderSaves();
+          } else {
+            this.#download(name, bytes);
+          }
+        },
+        chooseFolder: async () => {
+          await this.#folder.choose();
+          await this.#refreshFolderSaves();
+        },
+        uploadFile: () => this.#openUpload(),
+      },
+    );
+  }
+
+  async #loadSave(save: SaveManagerEntry): Promise<void> {
+    if (save.source === 'folder') {
+      const existing = this.#store.revisions(save.sessionId);
+      if (existing.length === 0) {
+        this.#store.import(save.bytes);
+      } else {
+        const browserFingerprint = decodeSavedSessionFingerprint(
+          this.#store.exported(save.sessionId),
+        ).fingerprint;
+        if (browserFingerprint !== save.fingerprint) {
+          throw new Error(
+            'This folder save has the same session ID as a different browser autosave. Rename or export the autosave before deleting it; it will not be overwritten.',
+          );
+        }
+      }
+    }
+    const url = new URL(location.href);
+    url.searchParams.set('encounter', 'reference');
+    url.searchParams.set('view', 'dm');
+    url.searchParams.set('session', save.sessionId);
+    location.assign(url);
+  }
+
+  #download(name: string, bytes: string): void {
+    const anchor = element('a');
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/json' }));
+    anchor.href = url;
+    anchor.download = `${name}.vtt.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  #openUpload(): void {
+    const input = element('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.hidden = true;
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      input.remove();
+      if (file === undefined) return;
+      void this.#runSaveManagerAction(async () => {
+        const bytes = await file.text();
+        const decoded = decodeSavedSessionFingerprint(bytes);
+        if (this.#store.revisions(decoded.sessionId).length !== 0) {
+          throw new Error('That uploaded session already exists in browser autosaves.');
+        }
+        this.#store.import(bytes);
+        this.#render();
+      });
+    }, { once: true });
+    this.#shell.append(input);
+    input.click();
+  }
+
+  async #runSaveManagerAction(action: () => void | Promise<void>): Promise<void> {
+    try {
+      await action();
+      this.#saveManagerError = null;
+    } catch (error: unknown) {
+      this.#saveManagerError = error instanceof Error
+        ? error.message
+        : 'The save-manager action failed.';
+      this.#render();
+    }
+  }
+
+  #renderSaveManager(): HTMLElement {
+    const browser = this.#browserSaves();
+    const entries = [...browser, ...this.#folderSaves];
+    if (this.#pendingDelete === null || this.#saveManagerController === null) {
+      this.#saveManagerController = this.#controller(entries);
+    }
+    const controller = this.#saveManagerController;
+    const model = buildSaveManagerViewModel({
+      browser,
+      folder: this.#folderSaves,
+      mode: this.#folder.mode(),
+      pendingDelete: this.#pendingDelete,
+    });
+    const manager = element('section', { className: 'dm-save-manager' });
+    manager.dataset.mode = model.mode.kind;
+    manager.append(element('h2', { text: 'Save manager' }));
+    manager.append(element('p', {
+      className: 'dm-last-autosave',
+      text: model.lastAutosaveAt === null
+        ? 'Last browser autosave: never'
+        : `Last browser autosave: ${new Date(model.lastAutosaveAt).toLocaleString('en-US')}`,
+    }));
+    manager.append(element('p', {
+      className: 'dm-save-mode',
+      text: model.mode.kind === 'folder'
+        ? `Default folder: ${model.mode.folderName}`
+        : `Download/upload fallback (${model.mode.reason.replaceAll('_', ' ')})`,
+    }));
+    if (this.#saveManagerError !== null) {
+      const error = element('p', { className: 'dm-save-error', text: this.#saveManagerError });
+      error.setAttribute('role', 'alert');
+      manager.append(error);
+    }
+    const toolbar = element('div', { className: 'dm-save-toolbar' });
+    const saveNow = element('button', {
+      text: model.primarySaveIntent === 'save_now_to_folder' ? 'Save now' : 'Download save now',
+    });
+    saveNow.type = 'button';
+    saveNow.dataset.intent = model.primarySaveIntent;
+    saveNow.addEventListener('click', () => {
+      void this.#runSaveManagerAction(() => controller.dispatch({ kind: 'save_now' }));
+    });
+    toolbar.append(saveNow);
+    for (const intent of model.transferIntents) {
+      const button = element('button', {
+        text: intent === 'choose_folder' ? 'Choose default folder' : 'Upload save file',
+      });
+      button.type = 'button';
+      button.dataset.intent = intent;
+      button.addEventListener('click', () => {
+        void this.#runSaveManagerAction(() => controller.dispatch({
+          kind: intent === 'choose_folder' ? 'choose_folder' : 'upload_file',
+        }));
+      });
+      toolbar.append(button);
+    }
+    manager.append(toolbar);
+
+    const list = element('div', { className: 'dm-save-list' });
+    for (const row of model.rows) {
+      const item = element('article', { className: 'dm-save-row' });
+      item.dataset.saveId = row.id;
+      item.dataset.source = row.badge;
+      item.append(
+        element('h3', { text: row.name }),
+        element('span', { className: 'dm-save-badge', text: row.badge }),
+        element('time', { text: row.timestampLabel }),
+        element('p', { className: 'dm-save-summary', text: row.summary }),
+      );
+      const actions = element('div', { className: 'dm-save-row-actions' });
+      for (const action of row.actions) {
+        const button = element('button', {
+          text: action === 'export_copy' ? 'Export copy' : `${action[0]!.toUpperCase()}${action.slice(1)}`,
+        });
+        button.type = 'button';
+        button.dataset.intent = action;
+        button.addEventListener('click', () => {
+          if (action === 'rename') {
+            const renamed = window.prompt('Save name', row.name);
+            if (renamed !== null) {
+              void this.#runSaveManagerAction(() => controller.dispatch({
+                kind: 'rename', saveId: row.id, name: renamed,
+              }));
+            }
+            return;
+          }
+          if (action === 'delete') {
+            void this.#runSaveManagerAction(async () => {
+              await controller.dispatch({ kind: 'request_delete', saveId: row.id });
+              this.#pendingDelete = controller.pendingDelete();
+              this.#render();
+            });
+            return;
+          }
+          void this.#runSaveManagerAction(() => controller.dispatch({
+            kind: action === 'export_copy' ? 'export_copy' : 'load',
+            saveId: row.id,
+          }));
+        });
+        actions.append(button);
+      }
+      item.append(actions);
+      if (model.pendingDelete?.saveId === row.id) {
+        const confirmation = element('form', { className: 'dm-save-delete-confirmation' });
+        confirmation.append(element('p', {
+          text: `Type ${model.pendingDelete.requiredText} to delete this save.`,
+        }));
+        const typedName = element('input');
+        typedName.setAttribute('aria-label', `Type ${row.name} to confirm deletion`);
+        const confirm = element('button', { text: 'Confirm delete' });
+        confirm.type = 'submit';
+        const cancel = element('button', { text: 'Cancel delete' });
+        cancel.type = 'button';
+        cancel.addEventListener('click', () => {
+          void this.#runSaveManagerAction(async () => {
+            await controller.dispatch({ kind: 'cancel_delete' });
+            this.#pendingDelete = null;
+            this.#saveManagerController = null;
+            this.#render();
+          });
+        });
+        confirmation.addEventListener('submit', (event) => {
+          event.preventDefault();
+          void this.#runSaveManagerAction(async () => {
+            await controller.dispatch({
+              kind: 'confirm_delete', saveId: row.id, typedName: typedName.value,
+            });
+            this.#pendingDelete = controller.pendingDelete();
+            if (this.#pendingDelete === null) this.#saveManagerController = null;
+            this.#render();
+          });
+        });
+        confirmation.append(typedName, confirm, cancel);
+        item.append(confirmation);
+      }
+      list.append(item);
+    }
+    manager.append(list);
+    return manager;
+  }
+
   #render(): void {
     this.#shell.replaceChildren(
       element('p', { className: 'vtt-kicker', text: 'DM-local authority' }),
@@ -639,6 +949,7 @@ class DmEncounterView {
     });
     status.dataset.pause = projection.coordinator.pause?.kind ?? 'none';
     this.#shell.append(status);
+    this.#shell.append(this.#renderSaveManager());
     if (projection.partySession !== null) {
       const adventuringDay = element('p', {
         text: `Adventuring day — room ${String(projection.partySession.state.room)} of 4 · 2024 rules`,

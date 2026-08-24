@@ -1078,6 +1078,14 @@ interface SavedSessionBundleV2 extends SavedSessionBundleV2Body {
   readonly fingerprint: string;
 }
 
+export interface DecodedSavedSessionFingerprint {
+  readonly sessionId: EncounterSessionId;
+  readonly fingerprint: string;
+  readonly revisionCount: number;
+  readonly room: number | null;
+  readonly round: number;
+}
+
 function sessionFingerprint(body: SavedSessionBundleV2Body): string {
   return sha256(canonicalJson(body));
 }
@@ -1221,6 +1229,21 @@ export function exportSavedSession(
     revisions,
   };
   return canonicalJson({ ...body, fingerprint: sessionFingerprint(body) } satisfies SavedSessionBundleV2);
+}
+
+/** Decodes, fingerprints, and replays a save without importing it. */
+export function decodeSavedSessionFingerprint(
+  bytes: string,
+): DecodedSavedSessionFingerprint {
+  const bundle = migrateSavedBundle(JSON.parse(bytes));
+  const latest = replaySessionRevisions(bundle.revisions);
+  return {
+    sessionId: bundle.sessionId,
+    fingerprint: bundle.fingerprint,
+    revisionCount: bundle.revisions.length,
+    room: latest.partyState?.room ?? null,
+    round: latest.encounterState.round,
+  };
 }
 
 export function importSavedSession(
