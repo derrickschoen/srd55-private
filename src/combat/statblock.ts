@@ -101,7 +101,8 @@ export interface MonsterSense {
 
 export type MonsterLanguage =
   | { readonly kind: 'named'; readonly name: string; readonly canSpeak: boolean }
-  | { readonly kind: 'choice'; readonly count: number; readonly qualifier: string; readonly canSpeak: boolean };
+  | { readonly kind: 'choice'; readonly count: number; readonly qualifier: string; readonly canSpeak: boolean }
+  | { readonly kind: 'telepathy'; readonly rangeFeet: number };
 
 export interface MonsterClassification {
   readonly sizes: readonly CreatureSize[];
@@ -209,8 +210,8 @@ export interface MonsterSavingThrowAction {
 
 export interface MonsterSpellReference {
   readonly id: string;
-  readonly availability: 'at_will' | '1_per_day' | '3_per_day';
-  readonly manifestStatus: SpellManifestStatus;
+  readonly availability: 'at_will' | '1_per_day' | '3_per_day' | 'shared_3_per_day';
+  readonly manifestStatus: SpellManifestStatus | 'not_in_manifest';
 }
 
 export interface MonsterSpellcastingAction {
@@ -221,6 +222,43 @@ export interface MonsterSpellcastingAction {
   readonly saveDc: DecodedField<number>;
   readonly spellAttackBonus: DecodedField<number>;
   readonly spells: readonly MonsterSpellReference[];
+}
+
+/** SRD legendary window, one-at-a-time use, and refresh: docs/srd/full/srd-5.2.1.txt:16703-16716. */
+export type MonsterLegendaryAction =
+  | {
+      readonly kind: 'move_and_attack';
+      readonly id: string;
+      readonly name: string;
+      readonly cost: number;
+      readonly movement: 'half_speed' | 'speed';
+      readonly avoidsOpportunityAttacks: boolean;
+      readonly attackId: string;
+    }
+  | {
+      readonly kind: 'temporary_defense';
+      readonly id: string;
+      readonly name: string;
+      readonly cost: number;
+      readonly target: 'self_or_visible_creature';
+      readonly rangeFeet: number;
+      readonly temporaryHitPoints: MonsterDice;
+      readonly temporaryHitPointsAverage: number;
+      readonly armorClassBonus: number;
+      readonly expiresAt: 'end_of_monster_next_turn';
+    };
+
+export interface MonsterLegendaryActions {
+  readonly maximumUses: number;
+  readonly actions: readonly MonsterLegendaryAction[];
+  readonly refresh: 'start_of_each_turn';
+  readonly window: 'after_another_creature_turn';
+}
+
+export interface MonsterLegendaryResistance {
+  readonly maximumUses: number;
+  readonly recharge: 'day';
+  readonly conversion: 'failed_save_to_success';
 }
 
 export type MonsterAction = MonsterAttackAction | MonsterMultiattackAction | MonsterSavingThrowAction | MonsterSpellcastingAction;
@@ -247,6 +285,7 @@ export type MonsterTrait =
   | { readonly kind: 'keen_sight' }
   /** SRD 5.2.1: docs/srd/full/srd-5.2.1.txt:23236-23237. */
   | { readonly kind: 'flyby' }
+  | { readonly kind: 'magic_resistance'; readonly advantageOn: 'spells_and_magical_effects' }
   | { readonly kind: 'life_bond'; readonly rangeFeet: 5; readonly spellMinimumLevel: 1 };
 
 export type MonsterBonusAction =
@@ -254,6 +293,15 @@ export type MonsterBonusAction =
   | { readonly kind: 'cunning_action'; readonly actions: readonly ['Dash', 'Disengage', 'Hide'] }
   | { readonly kind: 'teleport'; readonly distanceFeet: number; readonly includesRider: true }
   | { readonly kind: 'healing'; readonly rangeFeet: number; readonly average: number; readonly dice: MonsterDice }
+  | {
+      readonly kind: 'spell_choice';
+      readonly id: string;
+      readonly name: string;
+      readonly uses: number;
+      readonly recharge: 'day';
+      readonly ability: Ability;
+      readonly spells: readonly MonsterSpellReference[];
+    }
   | MonsterSavingThrowAction
   | MonsterSpellcastingAction;
 
@@ -292,6 +340,8 @@ export interface MonsterSourceDetailsInput {
   readonly actions: readonly MonsterAction[];
   readonly bonusActions: DecodedField<readonly MonsterBonusAction[]>;
   readonly reactions: DecodedField<readonly MonsterReaction[]>;
+  readonly legendaryActions?: DecodedField<MonsterLegendaryActions>;
+  readonly legendaryResistance?: DecodedField<MonsterLegendaryResistance>;
 }
 
 export interface MonsterSourceDetails {
@@ -312,6 +362,8 @@ export interface MonsterSourceDetails {
   readonly actions: DecodedField<readonly MonsterAction[]>;
   readonly bonusActions: DecodedField<readonly MonsterBonusAction[]>;
   readonly reactions: DecodedField<readonly MonsterReaction[]>;
+  readonly legendaryActions: DecodedField<MonsterLegendaryActions>;
+  readonly legendaryResistance: DecodedField<MonsterLegendaryResistance>;
 }
 
 export interface MonsterStatblockInput {
@@ -390,6 +442,10 @@ function validateDecoded<T>(field: DecodedField<T>, label: string, validate: (va
 
 function validateSpell(reference: MonsterSpellReference): MonsterSpellReference {
   const row = SPELL_MANIFEST.find(({ id }) => id === reference.id);
+  if (reference.manifestStatus === 'not_in_manifest') {
+    if (row !== undefined) throw new RangeError(`Monster spell ${reference.id} is present in the spell manifest.`);
+    return reference;
+  }
   if (row === undefined) throw new RangeError(`Monster spell ${reference.id} is absent from the spell manifest.`);
   if (row.status !== reference.manifestStatus) throw new RangeError(`Monster spell ${reference.id} has the wrong manifest status.`);
   return reference;
@@ -493,6 +549,12 @@ function validateAction<T extends MonsterAction | MonsterBonusAction>(action: T)
       nonNegativeInteger(action.average, 'Healing average');
       validateDice(action.dice, 'Healing');
       return action;
+    case 'spell_choice':
+      nonEmptyText(action.id, 'Spell-choice id');
+      nonEmptyText(action.name, 'Spell-choice name');
+      positiveInteger(action.uses, 'Spell-choice uses');
+      action.spells.forEach(validateSpell);
+      return action;
   }
 }
 
@@ -501,6 +563,7 @@ function emptySourceDetails(): MonsterSourceDetails {
     source: absent(), classification: absent(), challenge: absent(), hitPointDice: absent(), movement: absent(), abilities: absent(),
     skills: absent(), gear: absent(), senses: absent(), passivePerception: absent(), languages: absent(), damageResponses: absent(),
     conditionImmunities: absent(), traits: absent(), actions: absent(), bonusActions: absent(), reactions: absent(),
+    legendaryActions: absent(), legendaryResistance: absent(),
   };
 }
 
@@ -544,6 +607,37 @@ function validateSourceDetails(input: MonsterSourceDetailsInput | undefined, spe
   for (const action of actions) {
     if (action.kind === 'multiattack' && action.actionIds.some((id) => !actionIds.has(id))) throw new RangeError('Multiattack references an unknown action.');
   }
+  const legendaryActions = validateDecoded(
+    input.legendaryActions ?? absent<MonsterLegendaryActions>('The bundled SRD statblock does not list Legendary Actions.'),
+    'Legendary Actions',
+    (legendary) => {
+      positiveInteger(legendary.maximumUses, 'Legendary Action uses');
+      if (legendary.actions.length === 0) throw new RangeError('Legendary Actions must list at least one action.');
+      const legendaryIds = new Set<string>();
+      for (const action of legendary.actions) {
+        nonEmptyText(action.id, 'Legendary Action id');
+        nonEmptyText(action.name, 'Legendary Action name');
+        positiveInteger(action.cost, 'Legendary Action cost');
+        if (action.cost > legendary.maximumUses) throw new RangeError('Legendary Action cost exceeds the use pool.');
+        if (legendaryIds.has(action.id)) throw new RangeError('Legendary Action ids must be unique.');
+        legendaryIds.add(action.id);
+        if (action.kind === 'move_and_attack') {
+          if (!actionIds.has(action.attackId)) throw new RangeError('Legendary Action references an unknown attack.');
+        } else {
+          positiveInteger(action.rangeFeet, 'Legendary Action range');
+          validateDice(action.temporaryHitPoints, 'Legendary Action temporary Hit Points');
+          nonNegativeInteger(action.temporaryHitPointsAverage, 'Legendary Action temporary Hit Point average');
+          positiveInteger(action.armorClassBonus, 'Legendary Action Armor Class bonus');
+        }
+      }
+      return legendary;
+    },
+  );
+  const legendaryResistance = validateDecoded(
+    input.legendaryResistance ?? absent<MonsterLegendaryResistance>('The bundled SRD statblock does not list Legendary Resistance.'),
+    'Legendary Resistance',
+    (resistance) => ({ ...resistance, maximumUses: positiveInteger(resistance.maximumUses, 'Legendary Resistance uses') }),
+  );
   const decodedDamageResponses: MonsterSourceDetails['damageResponses'] = input.damageResponses.kind === 'absent'
     ? absent(nonEmptyText(input.damageResponses.note, 'Damage responses absence note'))
     : present(input.damageResponses.value.map((entry) => ({ type: damageType(entry.type), response: entry.response })));
@@ -557,12 +651,20 @@ function validateSourceDetails(input: MonsterSourceDetailsInput | undefined, spe
     gear: validateDecoded(input.gear, 'Gear', (gear) => gear.map((item) => nonEmptyText(item, 'Gear item'))),
     senses: validateDecoded(input.senses, 'Senses', (senses) => senses.map((sense) => ({ ...sense, rangeFeet: positiveInteger(sense.rangeFeet, `${sense.kind} range`) }))),
     passivePerception: present(nonNegativeInteger(input.passivePerception, 'Passive Perception')),
-    languages: validateDecoded(input.languages, 'Languages', (languages) => languages.map((language) => language.kind === 'named' ? { ...language, name: nonEmptyText(language.name, 'Language') } : { ...language, count: positiveInteger(language.count, 'Language choice count'), qualifier: nonEmptyText(language.qualifier, 'Language choice qualifier') })),
+    languages: validateDecoded(input.languages, 'Languages', (languages) => languages.map((language) => {
+      switch (language.kind) {
+        case 'named': return { ...language, name: nonEmptyText(language.name, 'Language') };
+        case 'choice': return { ...language, count: positiveInteger(language.count, 'Language choice count'), qualifier: nonEmptyText(language.qualifier, 'Language choice qualifier') };
+        case 'telepathy': return { ...language, rangeFeet: positiveInteger(language.rangeFeet, 'Telepathy range') };
+      }
+    })),
     damageResponses: decodedDamageResponses,
     conditionImmunities: decodedConditionImmunities,
     traits: validateDecoded(input.traits, 'Traits', (traits) => traits), actions: present(actions),
     bonusActions: validateDecoded(input.bonusActions, 'Bonus actions', (bonusActions) => bonusActions.map((action) => validateAction(action))),
     reactions: validateDecoded(input.reactions, 'Reactions', (reactions) => reactions),
+    legendaryActions,
+    legendaryResistance,
   };
 }
 

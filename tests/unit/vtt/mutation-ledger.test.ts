@@ -65,6 +65,7 @@ const DUNGEON_LEDGER_PATH = 'docs/audits/2026-08-24-dungeon-mutation-ledger.md';
 const DETECTION_LEDGER_PATH = 'docs/audits/2026-08-24-detection-mutation-ledger.md';
 const DETECTION_UI_LEDGER_PATH = 'docs/audits/2026-08-24-detection-ui-mutation-ledger.md';
 const DEATH_LEDGER_PATH = 'docs/audits/2026-08-24-death-mutation-ledger.md';
+const LEGENDARY_LEDGER_PATH = 'docs/audits/2026-08-24-legendary-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -81,6 +82,23 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D371.3-LEGENDARY-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
+    const legendaryLedger = readFileSync(LEGENDARY_LEDGER_PATH, 'utf8');
+    const legendaryTests = readFileSync('tests/unit/vtt/legendary-monsters.test.ts', 'utf8');
+    for (const control of [
+      'pool_never_refreshes',
+      'resistance_free',
+      'window_on_own_turn',
+      'cost_ignored',
+    ]) {
+      expect(legendaryLedger).toContain(`\`${control}\``);
+      expect(legendaryTests).toContain(`${control}:`);
+    }
+    expect(legendaryLedger.match(/`exit 1`/gu)).toHaveLength(4);
+    expect(legendaryLedger).toContain('Tests  10 passed (10)');
+    expect(legendaryLedger).toContain('All four mutations were restored.');
+  });
+
   it('D373-DETECTION-UI-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {
     const detectionUiLedger = readFileSync(DETECTION_UI_LEDGER_PATH, 'utf8');
     const uiTests = readFileSync('tests/unit/vtt/detection-ui.test.ts', 'utf8');

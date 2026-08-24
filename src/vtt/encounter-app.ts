@@ -43,6 +43,8 @@ function decisionHeading(decision: PendingDecision): string {
   switch (decision.kind) {
     case 'reaction_offer': return decision.reactionKind.replaceAll('_', ' ');
     case 'death_save': return 'death saving throw';
+    case 'legendary_action_window': return 'legendary action';
+    case 'legendary_resistance': return 'legendary resistance';
     default: {
       const exhaustive: never = decision;
       throw new Error(`Unhandled pending decision kind: ${String(exhaustive)}`);
