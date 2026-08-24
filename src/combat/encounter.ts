@@ -3113,6 +3113,7 @@ function applyBurningPersistentAreaDamage(
   context: ReductionContext,
   subjectId: CombatantId,
 ): void {
+  if (!isCombatantOnBoard(context.state, subjectId)) return;
   const subjectCell = token(context.state, subjectId).position;
   for (const snapshot of orderedAreas(context.state)) {
     const area = context.state.persistentAreas.find((candidate) => candidate.id === snapshot.id);
