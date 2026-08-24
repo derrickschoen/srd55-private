@@ -4,7 +4,7 @@ import { starterArtDataUri } from '../assets/starter-art-resolver';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
-import { REACTION_KINDS } from '../combat/encounter';
+import { REACTION_KINDS, type PendingDecision } from '../combat/encounter';
 import { previewAffectedCells } from '../combat/templates';
 import type { CombatantId } from '../combat/values';
 import { DmEncounterHost } from './dm-encounter-host';
@@ -37,6 +37,17 @@ function element<K extends keyof HTMLElementTagNameMap>(
   if (options.className !== undefined) node.className = options.className;
   if (options.text !== undefined) node.textContent = options.text;
   return node;
+}
+
+function decisionHeading(decision: PendingDecision): string {
+  switch (decision.kind) {
+    case 'reaction_offer': return decision.reactionKind.replaceAll('_', ' ');
+    case 'death_save': return 'death saving throw';
+    default: {
+      const exhaustive: never = decision;
+      throw new Error(`Unhandled pending decision kind: ${String(exhaustive)}`);
+    }
+  }
 }
 
 function actionLabel(action: EncounterCommand): string {
@@ -735,7 +746,7 @@ class DmEncounterView {
       tray.append(refusal);
     }
     if (projection.decisionTray.entries.length === 0) {
-      tray.append(element('p', { text: 'No queued or automatic reactions.' }));
+      tray.append(element('p', { text: 'No queued or automatic decisions.' }));
     }
     for (const entry of projection.decisionTray.entries) {
       const row = element('article', { className: `dm-decision-entry dm-decision-${entry.kind}` });
@@ -744,9 +755,7 @@ class DmEncounterView {
         row.dataset.decisionId = entry.decision.id;
         row.append(
           element('h3', {
-            text: `${entry.combatantName} — ${entry.decision.kind === 'reaction_offer'
-              ? entry.decision.reactionKind.replaceAll('_', ' ')
-              : 'death saving throw'}`,
+            text: `${entry.combatantName} — ${decisionHeading(entry.decision)}`,
           }),
           element('p', { text: entry.triggerContext }),
         );
