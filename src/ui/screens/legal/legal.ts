@@ -1,5 +1,6 @@
 import { srdAttributionSegments } from '../../../rules/srd-attribution';
 import { STARTER_ART_ATTRIBUTION } from '../../../assets/attribution';
+import { A5ESRD_ATTRIBUTION, SRD_5_1_ATTRIBUTION } from '../../../combat/statblocks/cc-by-attribution';
 
 /**
  * Where the build puts the two licence texts it ships. Emitted by the
@@ -67,6 +68,14 @@ export function renderLegalPage(): string {
             <a href="${STARTER_ART_NOTICE_HREF}"
             data-testid="starter-art-notice">read the bundled starter-art
             notice</a>. The complete CC-BY-4.0 terms are linked above.</p>
+        </section>
+
+        <section class="legal-section">
+          <h2>Additional CC-BY source attributions</h2>
+          <p data-testid="srd-5-1-attribution">${escapeHtml(SRD_5_1_ATTRIBUTION)}</p>
+          <p><a href="./licenses/SRD-5.1-ATTRIBUTION.txt">bundled SRD 5.1 attribution statement</a></p>
+          <p data-testid="a5esrd-attribution">${escapeHtml(A5ESRD_ATTRIBUTION)}</p>
+          <p><a href="./licenses/A5ESRD-ATTRIBUTION.txt">bundled A5ESRD attribution statement</a></p>
         </section>
 
         <section class="legal-section">

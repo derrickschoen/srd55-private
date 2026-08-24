@@ -11,6 +11,7 @@ import {
   type DamageType as DomainDamageType,
 } from '../domain/enums';
 import type { DamageResponse } from './resolution';
+import type { ConditionName } from './conditions';
 import { SPELL_MANIFEST, type SpellManifestStatus } from './spells/manifest';
 import {
   armorClass,
@@ -23,7 +24,7 @@ import {
   type StatblockId,
 } from './values';
 
-export type ChallengeRating = '1/8' | '1/4' | '1/2' | 1 | 2 | 3 | 4 | 5;
+export type ChallengeRating = '1/8' | '1/4' | '1/2' | 1 | 2 | 3 | 4 | 5 | 6;
 export type MovementKind = 'walk' | 'burrow' | 'climb' | 'fly' | 'swim';
 export type SenseKind = 'blindsight' | 'darkvision' | 'tremorsense' | 'truesight';
 export type CombatSense =
@@ -35,6 +36,33 @@ export interface SourceSpan {
   readonly lineStart: number;
   readonly lineEnd: number;
 }
+
+export type MonsterAttributionKey = 'srd-5.1-cc-by-4.0' | 'a5esrd-cc-by-4.0';
+
+export type MonsterProvenance =
+  | { readonly kind: 'srd_5_2_1_decoded'; readonly source: readonly SourceSpan[] }
+  | {
+      readonly kind: 'adapted_cc_by';
+      readonly sourceId: 'srd-5.1' | 'a5esrd';
+      readonly locator: string;
+      readonly attributionKey: MonsterAttributionKey;
+      readonly modifications: string;
+    }
+  | {
+      readonly kind: 'original_homebrew';
+      readonly comparableAnchors: readonly {
+        readonly name: string;
+        readonly source: SourceSpan;
+        readonly armorClass: number;
+        readonly hitPoints: number;
+        readonly computedDpr: number;
+        readonly allowedArmorClass: readonly [minimum: number, maximum: number];
+        readonly allowedHitPoints: readonly [minimum: number, maximum: number];
+        readonly allowedDpr: readonly [minimum: number, maximum: number];
+      }[];
+      readonly designNote: string;
+    }
+  | { readonly kind: 'external_import'; readonly sourceId: string };
 
 export type DecodedField<T> =
   | { readonly kind: 'present'; readonly value: T }
@@ -81,7 +109,7 @@ export interface MonsterClassification {
 
 export interface MonsterChallenge {
   readonly rating: ChallengeRating | 'none';
-  readonly experiencePoints: 0 | 25 | 50 | 100 | 200 | 450 | 700 | 1_100 | 1_800;
+  readonly experiencePoints: 0 | 25 | 50 | 100 | 200 | 450 | 700 | 1_100 | 1_800 | 2_300;
   readonly proficiencyBonus: 2 | 3 | 'caster';
 }
 
@@ -135,12 +163,21 @@ export type MonsterEffectDuration =
 export type MonsterOnHitEffect =
   | {
     readonly kind: 'condition';
-    readonly condition: 'Frightened' | 'Grappled' | 'Paralyzed' | 'Poisoned' | 'Prone' | 'Restrained';
+    /** Reuses the spell engine's closed condition vocabulary, including Blinded. */
+    readonly condition: Exclude<ConditionName, 'Exhaustion'>;
     readonly trigger: MonsterDamageTrigger;
     readonly target: MonsterEffectTarget;
     readonly savingThrow: MonsterSavingThrow | null;
     readonly escapeDc: number | null;
     readonly duration: MonsterEffectDuration | null;
+  }
+  | {
+    /** A1: the spell engine's ongoing-damage tick, owned by a named condition lifecycle. */
+    readonly kind: 'condition_bound_ongoing_damage';
+    readonly boundCondition: Extract<ConditionName, 'Grappled' | 'Restrained'>;
+    readonly damage: MonsterDamageTerm;
+    readonly event: { readonly kind: 'event_trigger'; readonly hook: 'target_turn_start'; readonly frequency: 'once_per_turn' };
+    readonly endsWhen: { readonly kind: 'condition_ends'; readonly condition: Extract<ConditionName, 'Grappled' | 'Restrained'> };
   }
   | { readonly kind: 'hit_point_maximum_reduction'; readonly amount: 'damage_taken' }
   | { readonly kind: 'speed_reduction'; readonly feet: 0; readonly duration: 'until_start_of_monster_next_turn' }
@@ -284,6 +321,7 @@ export interface MonsterStatblockInput {
   readonly conditionImmunities?: readonly string[];
   readonly usesDeathSaves?: boolean;
   readonly senses?: readonly CombatSense[];
+  readonly provenance?: MonsterProvenance;
   readonly sourceDetails?: MonsterSourceDetailsInput;
 }
 
@@ -301,6 +339,7 @@ export interface MonsterStatblock {
   readonly conditionImmunities: readonly string[];
   readonly usesDeathSaves: boolean;
   readonly senses: readonly CombatSense[];
+  readonly provenance: MonsterProvenance;
   readonly sourceDetails: MonsterSourceDetails;
 }
 
@@ -372,6 +411,12 @@ function validateEffect(effect: MonsterOnHitEffect, label: string): MonsterOnHit
         positiveInteger(effect.savingThrow.dc, `${label} save DC`);
       }
       if (effect.escapeDc !== null) positiveInteger(effect.escapeDc, `${label} escape DC`);
+      return effect;
+    case 'condition_bound_ongoing_damage':
+      validateDamageTerm(effect.damage, `${label} ongoing`);
+      if (effect.endsWhen.condition !== effect.boundCondition) {
+        throw new RangeError(`${label} ongoing damage must end with its bound condition.`);
+      }
       return effect;
     case 'hit_point_maximum_reduction':
     case 'speed_reduction':
@@ -462,7 +507,7 @@ function validateSourceDetails(input: MonsterSourceDetailsInput | undefined, spe
   creatureType(input.classification.type);
   nonEmptyText(input.classification.alignment, 'Alignment');
   const experienceByChallenge: Readonly<Record<ChallengeRating, MonsterChallenge['experiencePoints']>> = {
-    '1/8': 25, '1/4': 50, '1/2': 100, 1: 200, 2: 450, 3: 700, 4: 1_100, 5: 1_800,
+    '1/8': 25, '1/4': 50, '1/2': 100, 1: 200, 2: 450, 3: 700, 4: 1_100, 5: 1_800, 6: 2_300,
   };
   if (input.challenge.rating === 'none') {
     if (input.challenge.experiencePoints !== 0 || input.challenge.proficiencyBonus !== 'caster') {
@@ -470,7 +515,7 @@ function validateSourceDetails(input: MonsterSourceDetailsInput | undefined, spe
     }
   } else if (input.challenge.experiencePoints !== experienceByChallenge[input.challenge.rating]) {
     throw new RangeError('Monster XP must match its Challenge Rating.');
-  } else if (input.challenge.proficiencyBonus !== (input.challenge.rating === 5 ? 3 : 2)) {
+  } else if (input.challenge.proficiencyBonus !== (typeof input.challenge.rating === 'number' && input.challenge.rating >= 5 ? 3 : 2)) {
     throw new RangeError('Monster proficiency bonus must match its Challenge Rating.');
   }
   const decodedHitPointDice = 'kind' in input.hitPointDice
@@ -582,6 +627,9 @@ export function monsterStatblock(input: MonsterStatblockInput): MonsterStatblock
     hitPointMaximum, speed: feet(input.speedFeet), initiativeBonus: finiteInteger(input.initiativeBonus, 'Monster Initiative bonus'),
     savingThrowBonuses, attacksPerAction: positiveInteger(input.attacksPerAction ?? 1, 'Attacks per action'), reach: feet(input.reachFeet ?? 5),
     damageResponses, conditionImmunities, usesDeathSaves: input.usesDeathSaves ?? false, senses,
+    provenance: input.provenance ?? (sourceDetails.source.kind === 'present'
+      ? { kind: 'srd_5_2_1_decoded', source: sourceDetails.source.value }
+      : { kind: 'external_import', sourceId: 'authored-runtime' }),
     sourceDetails,
   };
 }

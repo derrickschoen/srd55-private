@@ -210,6 +210,7 @@ describe('increment 9 generated and approved encounter fixtures', () => {
     vi.resetModules();
     vi.doMock('../../../src/combat/statblocks/roster', () => ({
       STARTER_MONSTER_ROSTER: cappedRoster,
+      BUNDLED_MONSTER_ROSTER: cappedRoster,
     }));
     try {
       const constrainedModule = await import('../../../src/vtt/generated-encounter-fixtures');

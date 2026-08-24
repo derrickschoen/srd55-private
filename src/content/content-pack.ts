@@ -5,6 +5,7 @@ import { monsterCombatantProfile } from '../combat/combatant';
 import type { CombatFeatureEffect } from '../combat/effects';
 import { conditionNames } from '../combat/conditions';
 import type { EncounterCommand } from '../combat/events';
+import { monsterAttackCommand } from '../combat/monster-commands';
 import type { CombatSense, MonsterAction, MonsterStatblock, MonsterStatblockInput } from '../combat/statblock';
 import { monsterStatblock } from '../combat/statblock';
 import { SPELL_MANIFEST } from '../combat/spells/manifest';
@@ -1218,29 +1219,7 @@ export function importedMonsterAttackCommand(
   const action = monster.actions.find((candidate): candidate is Extract<MonsterAction, { readonly kind: 'attack' }> =>
     candidate.kind === 'attack' && candidate.id === actionId);
   if (action === undefined) throw new RangeError(`Imported monster has no attack ${actionId}.`);
-  return {
-    type: 'attack',
-    actor,
-    target,
-    attackBonus: action.attackBonus,
-    criticalFloor: 20,
-    rollMode: 'normal',
-    attackerCanSeeTarget: true,
-    targetCanSeeAttacker: true,
-    damage: {
-      terms: action.damage.filter((term) => term.trigger.kind === 'always').map((term) => ({
-        type: damageType(term.type),
-        dice: {
-          count: term.dice.count,
-          sides: dieSides(term.dice.sides),
-          modifier: term.dice.modifier,
-        },
-      })),
-      critical: false,
-      responses: [],
-    },
-    attackId: action.id,
-  };
+  return monsterAttackCommand(action, actor, target);
 }
 
 export function featureEffectsForCombatant(

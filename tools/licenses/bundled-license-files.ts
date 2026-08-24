@@ -80,6 +80,18 @@ export const BUNDLED_LICENSE_FILES: readonly BundledLicenseFile[] =
       sha256:
         'd09f1227f09d079dadd77abb1d586c53cc4c5539ecf6e56626f5b90e78c477c2',
     }),
+    Object.freeze({
+      fileName: 'licenses/SRD-5.1-ATTRIBUTION.txt',
+      sourcePath: 'docs/licenses/SRD-5.1-ATTRIBUTION.txt',
+      literal: 'System Reference Document 5.1',
+      sha256: 'eda8c11526612ba2426254db623a03c38ad1fe875ea28b946505f8ba11764d6b',
+    }),
+    Object.freeze({
+      fileName: 'licenses/A5ESRD-ATTRIBUTION.txt',
+      sourcePath: 'docs/licenses/A5ESRD-ATTRIBUTION.txt',
+      literal: 'A5E System Reference Document',
+      sha256: '7e6d471344a082c1fb8182663c70928cd873ac98759b71a28484b027eff72080',
+    }),
   ]);
 
 export interface BundledLicenseAsset {

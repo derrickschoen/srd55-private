@@ -77,11 +77,11 @@ describe('SRD attribution in the running application', () => {
     );
   });
 
-  it('attributes the licensor nowhere but inside the notice', () => {
-    const outsideNotice = renderLegalPage().replace(
-      /<p[^>]*data-testid="srd-attribution"[^>]*>[\s\S]*?<\/p>/,
-      '',
-    );
+  it('attributes licensors nowhere but inside the three required notices', () => {
+    const outsideNotice = renderLegalPage()
+      .replace(/<p[^>]*data-testid="srd-attribution"[^>]*>[\s\S]*?<\/p>/, '')
+      .replace(/<p[^>]*data-testid="srd-5-1-attribution"[^>]*>[\s\S]*?<\/p>/, '')
+      .replace(/<p[^>]*data-testid="a5esrd-attribution"[^>]*>[\s\S]*?<\/p>/, '');
     for (const forbidden of FORBIDDEN_OUTSIDE_THE_NOTICE) {
       expect(outsideNotice).not.toContain(forbidden);
     }

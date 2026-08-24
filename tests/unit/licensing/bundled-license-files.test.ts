@@ -15,6 +15,7 @@ import {
   bundledLicenseAssets,
 } from '../../../tools/licenses/bundled-license-files';
 import { renderLegalPage } from '../../../src/ui/screens/legal/legal';
+import { A5ESRD_ATTRIBUTION, SRD_5_1_ATTRIBUTION } from '../../../src/combat/statblocks/cc-by-attribution';
 
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
@@ -118,6 +119,14 @@ describe('the licence texts the build ships', () => {
 });
 
 describe('the legal screen points at the licences that ship', () => {
+  it('ships and renders the two staged CC-BY attribution statements verbatim', () => {
+    expect(repositoryFile('docs/licenses/SRD-5.1-ATTRIBUTION.txt').trimEnd()).toBe(SRD_5_1_ATTRIBUTION);
+    expect(repositoryFile('docs/licenses/A5ESRD-ATTRIBUTION.txt').trimEnd()).toBe(A5ESRD_ATTRIBUTION);
+    const markup = renderLegalPage();
+    expect(markup).toContain('data-testid="srd-5-1-attribution"');
+    expect(markup).toContain('data-testid="a5esrd-attribution"');
+  });
+
   it('links each bundled licence at the path the build emits it to', () => {
     const markup = renderLegalPage();
 

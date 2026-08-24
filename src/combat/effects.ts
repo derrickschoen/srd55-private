@@ -1,4 +1,4 @@
-import type { Ability } from '../domain/enums';
+import type { Ability, Skill } from '../domain/enums';
 import type { DamageOperationDelivery, DamageOperationSpec, ThresholdDamageRider } from './damage-operations';
 import type { ConditionName, ExhaustionLevel } from './conditions';
 import type { DamageRequest, RollMode } from './resolution';
@@ -1333,6 +1333,14 @@ export interface EffectApplication {
   readonly stackingIdentity: EffectStackingIdentity;
   readonly stacking: 'coexist' | 'replace_same_source' | 'replace_any_source';
   readonly repeatedSave: RepeatedSaveTiming | null;
+  /** An action-targeted check which removes this effect on success. */
+  readonly escapeCheck?: {
+    readonly ability: Ability;
+    readonly skill: Skill;
+    readonly dc: number;
+  };
+  /** This effect ends, target-for-target, with the named parent lifecycle. */
+  readonly parentEffectId?: EncounterEffectId;
   readonly damageBreak?: DamageBreakTiming | null;
   readonly payload: EffectPayload;
   /** Temporary combatants whose board lifetime is owned by this effect. */
@@ -1353,6 +1361,12 @@ export interface EncounterEffect {
   readonly stackingIdentity: EffectStackingIdentity;
   readonly stacking: EffectApplication['stacking'];
   readonly repeatedSave: RepeatedSaveTiming | null;
+  readonly escapeCheck?: {
+    readonly ability: Ability;
+    readonly skill: Skill;
+    readonly dc: number;
+  };
+  readonly parentEffectId?: EncounterEffectId;
   readonly damageBreak?: DamageBreakTiming | null;
   readonly payload: EffectPayload;
   readonly ownedCombatants?: readonly CombatantId[];

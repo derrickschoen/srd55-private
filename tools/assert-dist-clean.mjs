@@ -135,6 +135,14 @@ const LICENSE_REQUIRED = [
     'licenses/STARTER-ART-NOTICE.txt',
     'd09f1227f09d079dadd77abb1d586c53cc4c5539ecf6e56626f5b90e78c477c2',
   ],
+  [
+    'licenses/SRD-5.1-ATTRIBUTION.txt',
+    'eda8c11526612ba2426254db623a03c38ad1fe875ea28b946505f8ba11764d6b',
+  ],
+  [
+    'licenses/A5ESRD-ATTRIBUTION.txt',
+    '7e6d471344a082c1fb8182663c70928cd873ac98759b71a28484b027eff72080',
+  ],
 ];
 
 function walk(dir) {
