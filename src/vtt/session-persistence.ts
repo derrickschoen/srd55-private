@@ -466,6 +466,7 @@ export function deriveBranchRng(
 ): SerializableRng {
   const {
     config: _config,
+    hideDeathSaveRolls: _hideDeathSaveRolls,
     persistentAreas,
     nextPersistentAreaSequence,
     worldObjects,
@@ -479,6 +480,8 @@ export function deriveBranchRng(
     reactionPolicies,
     ...stateWithoutCombatants
   } = target.encounterState;
+  // Player-facing roll visibility cannot change the deterministic mechanical
+  // future of an otherwise identical branch.
   const normalizedCombatants = combatants.map((entry) => {
     const senses = entry.profile.rules.senses;
     const rulesAreDetectionNeutral = senses.length === 1 && senses[0]?.kind === 'normal_sight' &&

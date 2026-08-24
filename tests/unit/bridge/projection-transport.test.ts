@@ -82,6 +82,32 @@ describe('E04 revision-addressed projection transport', () => {
     expect(canonicalJson(result.request.projection)).toBe(canonicalJson(second.projection));
   });
 
+  it('COMPACT-LOSSLESS preserves the decision tray and optional turn-program domains', () => {
+    const sender = new ProjectionTransferSender();
+    const receiver = new ProjectionTransferReceiver();
+    const base = request(state(1, 4));
+    const actor = base.livingMonsterIds[0];
+    if (actor === undefined) throw new Error('Compact projection fixture has no monster.');
+    const input: RoundPlanRequest = {
+      ...base,
+      projection: {
+        ...base.projection,
+        turnProgramLegalActions: [{
+          actorId: actor,
+          combatantIds: base.projection.encounter.combatants.map((combatant) => combatant.id),
+          actions: [{ type: 'end_turn', actor }],
+          movementBudgetFeet: 30,
+        }],
+      },
+    };
+
+    const result = receiver.reconstruct(sender.encodeCompact(input));
+
+    expect(result.kind).toBe('reconstructed');
+    if (result.kind !== 'reconstructed') throw new Error('Expected reconstructed compact projection.');
+    expect(canonicalJson(result.request.projection)).toBe(canonicalJson(input.projection));
+  });
+
   it('delta_skips_hash_refusal: requests a full snapshot when corrupted delta bytes miss the full-projection hash', () => {
     const sender = new ProjectionTransferSender();
     const receiver = new ProjectionTransferReceiver();

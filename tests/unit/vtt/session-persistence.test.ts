@@ -483,6 +483,18 @@ describe('event-sourced encounter persistence', () => {
       differentStore,
       new MemoryMirrorSink(),
     ).journal.moveHead('undo', 1, encounterBranchId('branch:different'));
+    const hiddenRollSource = new MemoryBrowserSessionStore();
+    createJournal(
+      hiddenRollSource,
+      new MemoryMirrorSink(),
+      registry,
+      { ...fixture.state, hideDeathSaveRolls: true },
+    );
+    const hiddenRoll = EncounterSessionJournal.resume(
+      encounterSessionId('session:persistence-test'),
+      hiddenRollSource,
+      new MemoryMirrorSink(),
+    ).journal.moveHead('undo', 1, encounterBranchId('branch:pinned'));
 
     const streamPins = {
       sameA: sameA.rng.snapshot(),
@@ -503,6 +515,7 @@ describe('event-sourced encounter persistence', () => {
         streamId: 'branch:branch:different:4bd4aad40636c59ce1d2c94c3f4497e338c7b00221c4f2e3539379e3a1949f8a',
       },
     });
+    expect(hiddenRoll.rng.snapshot()).toEqual(sameA.rng.snapshot());
     const actual = {
       sameA: [sameA.rng(), sameA.rng(), sameA.rng()],
       sameB: [sameB.rng(), sameB.rng(), sameB.rng()],
