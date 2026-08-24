@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D374 — OWNER: post-detection queue approved minus elevation; forks 17/18 confirmed; mapper next (2026-08-24)
+
+1. **Queue approved, ELEVATION DROPPED**: detection engine -> detection UI
+   (tray/fog/prefs) -> death RAW + DM override -> legendary vocabulary ->
+   surfaces lever -> wildshape -> BG3 clone bundle -> long rest + save
+   manager -> onboarding package -> timeline/pacing. Elevation has NO queue
+   position — it stays in the deferred-upgrade register (dive, falls,
+   high-ground, web-bridge falls remain registered stand-ins).
+2. **Fork #18 CONFIRMED** (generic PendingDecision tray) and **fork #17
+   leaning ENDORSED** (wildshape overlay; finalized at wildshape dispatch).
+3. **Mapper increment (3 records: Mind Sliver, Barkskin, Tortoise Shell)
+   runs in the NEXT private-repo slot**, ahead of BG3 follow-up lanes;
+   floor expected 173 -> 176 and honest thereafter.
+
 ## D373 — OWNER: brainstorm round 2 — 18 rulings (2026-08-24)
 
 Second three-model brainstorm (codex sol + opus + fable, independent lists;
