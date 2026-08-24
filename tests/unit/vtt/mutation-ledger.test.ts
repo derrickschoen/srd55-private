@@ -80,21 +80,22 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
-  it('D373.8-DEATH-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
+  it('D373.8-DEATH-MUTATION-LEDGER pins all five restored controls to named killing tests', () => {
     const deathLedger = readFileSync(DEATH_LEDGER_PATH, 'utf8');
     const deathTests = readFileSync('tests/unit/combat/death-saves.test.ts', 'utf8');
     for (const control of [
       'nat20_plain_success',
       'massive_damage_ignored',
+      'massive_damage_remainder_boundary',
       'override_unlogged',
       'hidden_roll_leaks',
     ]) {
       expect(deathLedger).toContain(`\`${control}\``);
       expect(deathTests).toContain(`${control}:`);
     }
-    expect(deathLedger.match(/`exit 1`/gu)).toHaveLength(4);
-    expect(deathLedger).toContain('Tests  21 passed (21)');
-    expect(deathLedger).toContain('All four mutations were restored.');
+    expect(deathLedger.match(/`exit 1`/gu)).toHaveLength(5);
+    expect(deathLedger).toContain('Tests  22 passed (22)');
+    expect(deathLedger).toContain('All five mutations were restored.');
   });
 
   it('D356-D368.3-DETECTION-MUTATION-LEDGER pins all five restored controls to named killing tests', () => {

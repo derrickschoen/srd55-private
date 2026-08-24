@@ -386,6 +386,60 @@ describe('SRD death-save reducer flow', () => {
     });
   });
 
+  it('massive_damage_remainder_boundary: exact-maximum remainder kills while one less leaves the character dying', () => {
+    // SRD example: max 12, current 6, 18 damage leaves 12 and kills:
+    // docs/srd/full/srd-5.2.1.txt:1062-1067.
+    const applyExampleDamage = (amount: 17 | 18, fixtureName: string) => {
+      const attacker = playerProfile(`${fixtureName}-attacker`, {
+        initiativeBonus: 20,
+        attacksPerAction: 2,
+      });
+      const patient = playerProfile(`${fixtureName}-patient`, {
+        hitPoints: 12,
+        initiativeBonus: -20,
+      });
+      let state = createEncounter({
+        bounds: { columns: 3, rows: 2 },
+        combatants: [attacker, patient],
+        tokens: [placedToken(attacker, 0), placedToken(patient, 1)],
+      });
+      state = reduceEncounter(state, { type: 'roll_initiative' }, fixedD20(11)).state;
+      state = reduceEncounter(state, attack(attacker, patient, 6), fixedD20(11)).state;
+      expect(subject(state, patient).hitPoints).toBe(6);
+      const result = reduceEncounter(state, attack(attacker, patient, amount), fixedD20(11));
+      const damageEvent = result.events.find((event) => event.type === 'damage_applied');
+      return { result, damageEvent, patient };
+    };
+
+    const exact = applyExampleDamage(18, 'exact-boundary');
+    expect(exact.damageEvent).toMatchObject({
+      amount: 18,
+      hitPointsBefore: 6,
+      hitPointsAfter: 0,
+      massiveDamage: true,
+      lifeState: 'dead',
+    });
+    expect(subject(exact.result.state, exact.patient)).toMatchObject({
+      hitPoints: 0,
+      life: 'dead',
+      deathSaves: null,
+    });
+
+    const oneBelow = applyExampleDamage(17, 'below-boundary-sibling');
+    expect(oneBelow.damageEvent).toMatchObject({
+      amount: 17,
+      hitPointsBefore: 6,
+      hitPointsAfter: 0,
+      massiveDamage: false,
+      lifeState: 'dying',
+    });
+    expect(subject(oneBelow.result.state, oneBelow.patient)).toMatchObject({
+      hitPoints: 0,
+      life: 'dying',
+      deathSaves: { successes: 0, failures: 0 },
+    });
+  });
+
   it('massive_damage_ignored: kills at the exact massive-damage boundary while already at 0 HP', () => {
     const fixture = dyingEncounter();
     const result = reduceEncounter(
