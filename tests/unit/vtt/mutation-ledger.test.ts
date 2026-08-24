@@ -62,6 +62,7 @@ const MONSTERS_LEDGER_PATH = 'docs/audits/2026-08-23-monsters-mutation-ledger.md
 const ADVDAY_LEDGER_PATH = 'docs/audits/2026-08-24-advday-mutation-ledger.md';
 const BEAST_FAMILY_LEDGER_PATH = 'docs/audits/2026-08-24-beastfam-mutation-ledger.md';
 const DUNGEON_LEDGER_PATH = 'docs/audits/2026-08-24-dungeon-mutation-ledger.md';
+const DETECTION_LEDGER_PATH = 'docs/audits/2026-08-24-detection-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -78,6 +79,25 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D356-D368.3-DETECTION-MUTATION-LEDGER pins all five restored controls to named killing tests', () => {
+    const detectionLedger = readFileSync(DETECTION_LEDGER_PATH, 'utf8');
+    const detectionTests = readFileSync('tests/unit/vtt/detection-reactions.test.ts', 'utf8');
+    const sensesTests = readFileSync('tests/unit/vtt/senses.test.ts', 'utf8');
+    for (const control of [
+      'hidden_still_provokes',
+      'stealth_dc_off_by_one',
+      'always_policy_silent',
+      'darkvision_unbounded',
+      'advance_past_pending',
+    ]) {
+      expect(detectionLedger).toContain(`\`${control}\``);
+      expect(`${detectionTests}\n${sensesTests}`).toContain(`${control}:`);
+    }
+    expect(detectionLedger.match(/`exit 1`/gu)).toHaveLength(5);
+    expect(detectionLedger).toContain('Tests  21 passed (21)');
+    expect(detectionLedger).toContain('All five mutations were restored.');
+  });
+
   it('D365-DUNGEON-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
     const dungeonLedger = readFileSync(DUNGEON_LEDGER_PATH, 'utf8');
     const dungeonTests = readFileSync('tests/integration/vtt/d365-dungeon.test.ts', 'utf8');

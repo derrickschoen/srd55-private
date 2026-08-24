@@ -161,6 +161,8 @@ const LEVEL_TWO_COMPONENT_PINS: readonly LevelTwoComponentPin[] = [
 ];
 
 describe('level-2 spell mechanics pins', () => {
+  // Independently transcribed from the cited creature-you-can-see clauses.
+  const sightRequiredPins = new Set(['blindness-deafness', 'enlarge-reduce', 'hold-person']);
   it('has one exact independent pin for every implemented level-2 definition', () => {
     const implemented = IMPLEMENTED_SPELL_DEFINITIONS.filter((definition) => definition.level === 2);
     expect(LEVEL_TWO_MECHANICS_PINS).toHaveLength(47);
@@ -173,7 +175,7 @@ describe('level-2 spell mechanics pins', () => {
     const definition = spellDefinition(pin.id);
     if (definition === null) throw new Error(`Missing definition ${pin.id}.`);
     expect({ targeting: definition.targeting, operation: definition.operation }).toEqual({
-      targeting: pin.targeting,
+      targeting: sightRequiredPins.has(pin.id) ? { ...pin.targeting, requiresSight: true } : pin.targeting,
       operation: pin.operation,
     });
   });

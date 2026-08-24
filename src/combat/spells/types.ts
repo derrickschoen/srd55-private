@@ -76,6 +76,7 @@ export type SpellTargeting =
       readonly kind: 'single';
       readonly rangeFeet: number;
       readonly willing: boolean;
+      readonly requiresSight?: true;
       readonly allowDead?: true;
       readonly rangeByCasterLevel?: readonly {
         readonly minimumLevel: number;
@@ -88,11 +89,13 @@ export type SpellTargeting =
       readonly baseMaximum: number;
       readonly additionalPerSlot: number;
       readonly willing?: boolean;
+      readonly requiresSight?: true;
     }
   | {
       readonly kind: 'selected';
       readonly rangeFeet: number;
       readonly willing?: boolean;
+      readonly requiresSight?: true;
       readonly selection: TargetSelectionRule;
     }
   | {

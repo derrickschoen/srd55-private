@@ -123,6 +123,8 @@ const LEVEL_THREE_COMPONENT_PINS: readonly ComponentPin[] = [
 ];
 
 describe('level-3 spell mechanics pins', () => {
+  // Independently transcribed from spell-descriptions.txt:5226-5240.
+  const sightRequiredPins = new Set(['mass-healing-word']);
   it('has one exact independent pin for every implemented level-3 definition', () => {
     expect(LEVEL_THREE_PINS).toHaveLength(37);
     expect(LEVEL_THREE_PINS.map((pin) => pin.id).sort()).toEqual(
@@ -133,7 +135,10 @@ describe('level-3 spell mechanics pins', () => {
   it.each(LEVEL_THREE_PINS)('$id pins every targeting and operation literal from $source', (pin) => {
     const definition = spellDefinition(pin.id);
     if (definition === null) throw new Error(`Missing definition ${pin.id}.`);
-    expect({ targeting: definition.targeting, operation: definition.operation }).toEqual({ targeting: pin.targeting, operation: pin.operation });
+    expect({ targeting: definition.targeting, operation: definition.operation }).toEqual({
+      targeting: sightRequiredPins.has(pin.id) ? { ...pin.targeting, requiresSight: true } : pin.targeting,
+      operation: pin.operation,
+    });
   });
 
   it.each(LEVEL_THREE_COMPONENT_PINS)('$id pins every casting and component literal', (pin) => {

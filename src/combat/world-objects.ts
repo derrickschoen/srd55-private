@@ -61,7 +61,7 @@ export interface LightRegion extends EnvironmentRegion {
 }
 
 export interface ObscurementRegion extends EnvironmentRegion {
-  readonly obscurement: 'heavy' | 'magical_darkness';
+  readonly obscurement: 'light' | 'heavy' | 'magical_darkness';
 }
 
 export interface EncounterEnvironment {
@@ -136,7 +136,7 @@ export type WorldOperation =
   | {
       readonly kind: 'set_obscurement';
       readonly region: EnvironmentRegion;
-      readonly obscurement: 'heavy' | 'magical_darkness' | null;
+      readonly obscurement: 'light' | 'heavy' | 'magical_darkness' | null;
     };
 
 export interface WorldOperationRequest {

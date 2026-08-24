@@ -147,6 +147,28 @@ export interface DeathSaveState {
   readonly failures: number;
 }
 
+export class VisionTargetingRuleError extends EncounterRuleError {
+  override readonly name = 'VisionTargetingRuleError' as const;
+
+  constructor(
+    readonly code: 'target_not_seen',
+    readonly actor: CombatantId,
+    readonly target: CombatantId,
+  ) {
+    super(`Combatant ${actor} cannot select unseen target ${target} for an effect that requires sight.`);
+  }
+}
+
+export class PendingDecisionRuleError extends EncounterRuleError {
+  override readonly name = 'PendingDecisionRuleError' as const;
+
+  constructor(readonly code: 'turn_boundary_blocked' | 'unknown_decision') {
+    super(code === 'turn_boundary_blocked'
+      ? 'The turn cannot advance while a Reaction offer for this boundary is unresolved.'
+      : 'The pending decision does not exist.');
+  }
+}
+
 export type ActionResource =
   | { readonly kind: 'available' }
   | { readonly kind: 'attack_sequence'; readonly attacksRemaining: number }
@@ -234,6 +256,53 @@ export interface EncounterConfig {
   readonly initiativeMode: InitiativeMode;
 }
 
+export type DetectionRulesEdition = '2014' | '2024';
+
+export const REACTION_KINDS = [
+  'hit_by_attack',
+  'damaged_by_creature',
+  'taking_damage_of_type',
+  'creature_casts_spell',
+  'opportunity_attack',
+] as const;
+export type ReactionKind = (typeof REACTION_KINDS)[number];
+export type ReactionPolicy = 'ask' | 'always' | 'never';
+
+export interface HiddenCombatant {
+  readonly combatant: CombatantId;
+  readonly stealthTotal: number;
+  readonly edition: DetectionRulesEdition;
+}
+
+export interface PendingDecisionOption {
+  readonly id: 'accept' | 'decline';
+  readonly label: string;
+}
+
+/** Fork #18 starts with reaction_offer; future decision kinds join this union. */
+export type PendingDecision = {
+  readonly id: string;
+  readonly combatant: CombatantId;
+  readonly kind: 'reaction_offer';
+  readonly reactionKind: 'opportunity_attack';
+  readonly options: readonly [PendingDecisionOption, PendingDecisionOption];
+  readonly boundary: {
+    readonly activeCombatant: CombatantId;
+    readonly round: number;
+  };
+  readonly opportunityAttack: {
+    readonly mover: CombatantId;
+    readonly from: GridCell;
+    readonly to: GridCell;
+  };
+};
+
+export interface CombatantReactionPolicy {
+  readonly combatant: CombatantId;
+  readonly reactionKind: ReactionKind;
+  readonly policy: ReactionPolicy;
+}
+
 export const DEFAULT_ENCOUNTER_CONFIG: EncounterConfig = Object.freeze({
   initiativeMode: 'shared_enemy',
 });
@@ -253,8 +322,10 @@ export function isEncounterConfig(value: unknown): value is EncounterConfig {
 
 export interface EncounterState {
   readonly config: EncounterConfig;
+  readonly rulesEdition: DetectionRulesEdition;
   readonly revision: number;
   readonly nextEventSequence: number;
+  readonly nextDecisionSequence: number;
   readonly nextEffectSequence: number;
   readonly bounds: GridBounds;
   readonly blockedCells: readonly GridCell[];
@@ -278,6 +349,9 @@ export interface EncounterState {
   /** Creation-sequenced later-turn branches; evaluated after area hooks and before effects. */
   readonly reevaluatedBranches?: readonly ReevaluatedSpellBranch[];
   readonly eventLog: readonly EncounterEvent[];
+  readonly hiddenCombatants: readonly HiddenCombatant[];
+  readonly pendingDecisions: readonly PendingDecision[];
+  readonly reactionPolicies: readonly CombatantReactionPolicy[];
   /** Exact imported records plus their reducer-ready projections. */
   readonly contentPacks?: readonly LoadedContentPack[];
   readonly equipment?: readonly CombatantEquipment[];
@@ -297,6 +371,7 @@ interface ReevaluatedSpellBranch {
 
 export interface EncounterSetup {
   readonly config?: EncounterConfig;
+  readonly rulesEdition?: DetectionRulesEdition;
   readonly bounds: GridBounds;
   readonly blockedCells?: readonly GridCell[];
   readonly worldObjects?: readonly WorldObject[];
@@ -309,6 +384,7 @@ export interface EncounterSetup {
   readonly equipment?: readonly CombatantEquipment[];
   readonly groundItems?: readonly GroundItem[];
   readonly itemContacts?: readonly ItemPhysicalContact[];
+  readonly reactionPolicies?: readonly CombatantReactionPolicy[];
 }
 
 export interface EncounterReduction {
@@ -514,6 +590,9 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   if (!isEncounterConfig(config)) {
     throw new EncounterRuleError('Encounter configuration has an invalid initiative mode.');
   }
+  if (setup.rulesEdition !== undefined && setup.rulesEdition !== '2014' && setup.rulesEdition !== '2024') {
+    throw new EncounterRuleError('Encounter detection rules edition must be 2014 or 2024.');
+  }
   if (
     !Number.isSafeInteger(setup.bounds.columns) ||
     !Number.isSafeInteger(setup.bounds.rows) ||
@@ -552,6 +631,17 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     }
     if (!isCellInside(setup.bounds, token.position)) {
       throw new EncounterRuleError(`Token ${token.id} is outside the encounter grid.`);
+    }
+  }
+
+  const reactionPolicies = setup.reactionPolicies ?? [];
+  assertUnique(
+    reactionPolicies.map((policy) => `${String(policy.combatant)}:${policy.reactionKind}`),
+    'Reaction policies',
+  );
+  for (const policy of reactionPolicies) {
+    if (!profileIds.has(policy.combatant) || !REACTION_KINDS.includes(policy.reactionKind)) {
+      throw new EncounterRuleError('A Reaction policy must name a combatant and closed Reaction kind in this encounter.');
     }
   }
 
@@ -655,8 +745,10 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
 
   return {
     config: { ...config },
+    rulesEdition: setup.rulesEdition ?? '2024',
     revision: 0,
     nextEventSequence: 1,
+    nextDecisionSequence: 1,
     nextEffectSequence,
     bounds: { ...setup.bounds },
     blockedCells: blockedCells.map((cell) => ({ ...cell })),
@@ -694,6 +786,9 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     persistentAreas: [],
     nextPersistentAreaSequence: 1,
     eventLog: [],
+    hiddenCombatants: [],
+    pendingDecisions: [],
+    reactionPolicies: structuredClone(reactionPolicies),
     ...(setup.contentPacks === undefined
       ? {}
       : { contentPacks: structuredClone(setup.contentPacks) }),
@@ -1394,28 +1489,84 @@ export function coverTierBetween(
   return cover;
 }
 
-export function canCombatantSee(
+export type DetectionResult =
+  | {
+      readonly kind: 'seen';
+      readonly sense: 'normal_sight' | 'darkvision' | 'blindsight' | 'truesight';
+    }
+  | {
+      readonly kind: 'located';
+      readonly sense: 'tremorsense' | 'web_sense';
+    }
+  | {
+      readonly kind: 'undetected';
+      readonly reason: 'blocked' | 'hidden' | 'invisible' | 'obscured' | 'darkness' | 'out_of_range';
+    };
+
+function combatantIsHidden(state: EncounterState, subject: CombatantId): boolean {
+  return state.hiddenCombatants.some((entry) => entry.combatant === subject);
+}
+
+function sharesWebArea(state: EncounterState, observer: CombatantId, subject: CombatantId): boolean {
+  const observerCell = token(state, observer).position;
+  const subjectCell = token(state, subject).position;
+  return state.effects.some((effect) => {
+    if (effect.payload.kind !== 'web_area' || effect.payload.placement === 'selected_when_cast') return false;
+    const cells = affectedCells(
+      { bounds: state.bounds, blockedCells: templateBlockedCells(state) },
+      effect.payload.placement,
+    );
+    const keys = new Set(cells.map(cellKey));
+    return keys.has(cellKey(observerCell)) && keys.has(cellKey(subjectCell));
+  });
+}
+
+/**
+ * Detection vocabulary and source clauses:
+ * - Blindsight: docs/srd/full/srd-5.2.1.txt:11356-11362.
+ * - Darkvision: docs/srd/full/srd-5.2.1.txt:11582-11588.
+ * - Tremorsense: docs/srd/full/srd-5.2.1.txt:12206-12214 (location, not sight).
+ * - Truesight: docs/srd/full/srd-5.2.1.txt:12216-12241.
+ * - Web Sense: docs/homebrew/ogl/srd-5.1/srd-5.1-ogl.txt:23501-23503.
+ */
+export function detectCombatant(
   state: EncounterState,
   observer: CombatantId,
   subject: CombatantId,
-): boolean {
+): DetectionResult {
   const from = token(state, observer).position;
   const to = token(state, subject).position;
-  if (!hasLineOfSight(state, from, to)) return false;
   const distance = gridDistance(from, to);
   const senses = combatant(state, observer).profile.rules.senses;
   const hasBlindsight = senses.some((sense) =>
     sense.kind === 'blindsight' && distance <= sense.rangeFeet);
+  if (hasBlindsight && hasLineOfSight(state, from, to)) {
+    return { kind: 'seen', sense: 'blindsight' };
+  }
   const hasTruesight = senses.some((sense) =>
     sense.kind === 'truesight' && distance <= sense.rangeFeet);
-  if (hasBlindsight) return true;
+  const hasTremorsense = senses.some((sense) =>
+    sense.kind === 'tremorsense' && distance <= sense.rangeFeet);
+  const observerRules = combatant(state, observer).profile.rules;
+  const subjectRules = combatant(state, subject).profile.rules;
+  if (
+    hasTremorsense &&
+    observerRules.contactMedium !== 'air' &&
+    observerRules.contactMedium === subjectRules.contactMedium
+  ) return { kind: 'located', sense: 'tremorsense' };
+  if (observerRules.detectionTraits.includes('web_sense') && sharesWebArea(state, observer, subject)) {
+    return { kind: 'located', sense: 'web_sense' };
+  }
+  if (!hasLineOfSight(state, from, to)) return { kind: 'undetected', reason: 'blocked' };
 
   const observerBlinded = combatantConditions(state, observer)
     .some(({ name }) => name === 'Blinded');
-  if (observerBlinded) return false;
+  if (observerBlinded) return { kind: 'undetected', reason: 'obscured' };
   const subjectInvisible = combatantConditions(state, subject)
     .some(({ name }) => name === 'Invisible');
-  if (subjectInvisible && !hasTruesight) return false;
+  const hidden = combatantIsHidden(state, subject);
+  if (hidden && !hasTruesight) return { kind: 'undetected', reason: 'hidden' };
+  if (subjectInvisible && !hasTruesight) return { kind: 'undetected', reason: 'invisible' };
 
   const environmentObscurement = environmentObscurementAt(state.environment, to);
   let heavyObscurement = environmentObscurement === 'heavy';
@@ -1430,9 +1581,24 @@ export function canCombatantSee(
     if (effect.payload.obscurement === 'heavy') heavyObscurement = true;
     else magicalDarkness = true;
   }
-  if (heavyObscurement) return false;
-  if (magicalDarkness && !hasTruesight) return false;
-  return environmentLightAt(state.environment, to) !== 'darkness' || hasTruesight;
+  if (heavyObscurement) return { kind: 'undetected', reason: 'obscured' };
+  if (hasTruesight) return { kind: 'seen', sense: 'truesight' };
+  if (magicalDarkness) return { kind: 'undetected', reason: 'darkness' };
+  const light = environmentLightAt(state.environment, to);
+  if (light !== 'darkness') return { kind: 'seen', sense: 'normal_sight' };
+  const hasDarkvision = senses.some((sense) =>
+    sense.kind === 'darkvision' && distance <= sense.rangeFeet);
+  return hasDarkvision
+    ? { kind: 'seen', sense: 'darkvision' }
+    : { kind: 'undetected', reason: senses.some((sense) => sense.kind === 'darkvision') ? 'out_of_range' : 'darkness' };
+}
+
+export function canCombatantSee(
+  state: EncounterState,
+  observer: CombatantId,
+  subject: CombatantId,
+): boolean {
+  return detectCombatant(state, observer, subject).kind === 'seen';
 }
 
 function canCombatantPierceVisualIllusion(
@@ -1479,6 +1645,10 @@ function attackRollMode(
     canCombatantSee(state, command.actor, command.target);
   const targetCanSeeAttacker = command.targetCanSeeAttacker &&
     canCombatantSee(state, command.target, command.actor);
+  // Unseen attacker/target: docs/srd/full/srd-5.2.1.txt:884-894 and
+  // docs/homebrew/ogl/srd-5.1/srd-5.1-ogl.txt:5426-5442.
+  if (!attackerCanSeeTarget) modes.push('disadvantage');
+  if (!targetCanSeeAttacker) modes.push('advantage');
   for (const effect of state.effects) {
     if (effect.payload.kind === 'faerie_fire') {
       if (effect.targets.includes(command.target)) modes.push(effect.payload.attackModeAgainstTarget);
@@ -2915,6 +3085,215 @@ function processEnteredCell(context: ReductionContext, mover: CombatantId): void
   reevaluatePersistentAreaMembership(context);
 }
 
+function endHidden(
+  context: ReductionContext,
+  subject: CombatantId,
+  reason: 'attack_roll' | 'verbal_spell' | 'sound_louder_than_whisper' | 'stopped_hiding' | 'found',
+  finder?: CombatantId,
+): void {
+  if (!combatantIsHidden(context.state, subject)) return;
+  context.state = {
+    ...context.state,
+    hiddenCombatants: context.state.hiddenCombatants.filter((entry) => entry.combatant !== subject),
+  };
+  emit(context, {
+    type: 'hidden_ended', combatant: subject, reason,
+    ...(finder === undefined ? {} : { finder }),
+  });
+}
+
+function perceptionMode(
+  state: EncounterState,
+  observer: CombatantId,
+  subject: CombatantId,
+  reliance: 'sight' | 'hearing',
+): RollMode {
+  if (reliance === 'hearing') return 'normal';
+  const modes: RollMode[] = ['normal'];
+  if (combatant(state, observer).profile.rules.detectionTraits.includes('keen_sight')) {
+    modes.push('advantage');
+  }
+  const subjectCell = token(state, subject).position;
+  const light = environmentLightAt(state.environment, subjectCell);
+  const obscurement = environmentObscurementAt(state.environment, subjectCell);
+  // Lightly Obscured sight checks have Disadvantage: docs/srd/full/srd-5.2.1.txt:656-660.
+  // Dim Light creates Light Obscurement: docs/srd/full/srd-5.2.1.txt:673-678.
+  if (light === 'dim' || obscurement === 'light') modes.push('disadvantage');
+  return combineRollModes(modes);
+}
+
+function passivePerceptionAgainst(
+  state: EncounterState,
+  observer: CombatantId,
+  subject: CombatantId,
+): number {
+  const rules = combatant(state, observer).profile.rules;
+  const mode = perceptionMode(state, observer, subject, 'sight');
+  // Passive +/-5: docs/srd/full/srd-5.2.1.txt:11965-11979 (2024) and
+  // docs/homebrew/ogl/srd-5.1/srd-5.1-ogl.txt:4470-4488 (2014).
+  return rules.passivePerception + (mode === 'advantage' ? 5 : mode === 'disadvantage' ? -5 : 0);
+}
+
+function processHide(context: ReductionContext, actor: CombatantId): void {
+  assertActiveActor(context, actor);
+  assertCanUseActions(context, actor);
+  spendAction(context, actor, 'Hide');
+  const enemies = context.state.combatants.filter((candidate) =>
+    candidate.life === 'living' && !combatantsAreAllies(context.state, actor, candidate.profile.id));
+  const actorCell = token(context.state, actor).position;
+  const outOfEnemySight = enemies.every((enemy) => !canCombatantSee(context.state, enemy.profile.id, actor));
+  const obscurement = environmentObscurementAt(context.state.environment, actorCell);
+  const heavilyObscured =
+    obscurement === 'heavy' || obscurement === 'magical_darkness' ||
+    environmentLightAt(context.state.environment, actorCell) === 'darkness';
+  const behindCover = enemies.length > 0 && enemies.every((enemy) => {
+    const cover = coverTierBetween(
+      context.state,
+      token(context.state, enemy.profile.id).position,
+      actorCell,
+    );
+    return cover === 'three_quarters' || cover === 'total';
+  });
+  const validPosition = context.state.rulesEdition === '2014'
+    ? outOfEnemySight
+    : outOfEnemySight && (heavilyObscured || behindCover);
+  if (!validPosition) {
+    emit(context, {
+      type: 'hide_resolved', combatant: actor, edition: context.state.rulesEdition,
+      total: 0, outcome: 'invalid_position',
+    });
+    return;
+  }
+  const roll = rollD20(context.rng, 'normal');
+  const total = roll.chosen + (combatant(context.state, actor).profile.rules.skillBonuses?.stealth ?? 0);
+  // 2024 fixed gate: docs/srd/full/srd-5.2.1.txt:11774-11784.
+  if (context.state.rulesEdition === '2024' && total < 15) {
+    emit(context, { type: 'hide_resolved', combatant: actor, edition: '2024', total, outcome: 'failed_dc' });
+    return;
+  }
+  context.state = {
+    ...context.state,
+    hiddenCombatants: [
+      ...context.state.hiddenCombatants.filter((entry) => entry.combatant !== actor),
+      { combatant: actor, stealthTotal: total, edition: context.state.rulesEdition },
+    ],
+  };
+  const finder = enemies.find((enemy) => {
+    const detection = detectCombatant(context.state, enemy.profile.id, actor);
+    return detection.kind === 'located' || passivePerceptionAgainst(
+      context.state, enemy.profile.id, actor,
+    ) >= total;
+  });
+  if (finder !== undefined) {
+    context.state = {
+      ...context.state,
+      hiddenCombatants: context.state.hiddenCombatants.filter((entry) => entry.combatant !== actor),
+    };
+    emit(context, {
+      type: 'hide_resolved', combatant: actor, edition: context.state.rulesEdition,
+      total, outcome: 'passively_detected',
+    });
+    return;
+  }
+  emit(context, {
+    type: 'hide_resolved', combatant: actor, edition: context.state.rulesEdition,
+    total, outcome: 'hidden',
+  });
+}
+
+function processSearch(
+  context: ReductionContext,
+  command: Extract<EncounterCommand, { readonly type: 'search' }>,
+): void {
+  assertActiveActor(context, command.actor);
+  assertCanUseActions(context, command.actor);
+  spendAction(context, command.actor, 'Search');
+  const hidden = context.state.hiddenCombatants.find((entry) => entry.combatant === command.target);
+  if (hidden === undefined) {
+    emit(context, {
+      type: 'search_resolved', combatant: command.actor, target: command.target,
+      total: 0, outcome: 'target_not_hidden',
+    });
+    return;
+  }
+  const roll = rollD20(context.rng, perceptionMode(
+    context.state, command.actor, command.target, command.reliance,
+  ));
+  const total = roll.chosen + (combatant(context.state, command.actor).profile.rules.skillBonuses?.perception ?? 0);
+  const found = total >= hidden.stealthTotal;
+  emit(context, {
+    type: 'search_resolved', combatant: command.actor, target: command.target,
+    total, outcome: found ? 'found' : 'not_found',
+  });
+  if (found) endHidden(context, command.target, 'found', command.actor);
+}
+
+function reactionPolicyFor(
+  state: EncounterState,
+  combatantId: CombatantId,
+  reactionKind: ReactionKind,
+): ReactionPolicy {
+  return state.reactionPolicies.find((entry) =>
+    entry.combatant === combatantId && entry.reactionKind === reactionKind)?.policy ?? 'ask';
+}
+
+function defaultOpportunityAttack(
+  actor: CombatantId,
+  target: CombatantId,
+): Extract<EncounterCommand, { readonly type: 'opportunity_attack' }> {
+  return {
+    type: 'opportunity_attack', actor, target, attackBonus: 0, criticalFloor: 20,
+    rollMode: 'normal', attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+    requiresSight: true,
+    damage: {
+      terms: [{
+        type: damageType('Bludgeoning'),
+        dice: { count: 0, sides: dieSides(4), modifier: 1 },
+      }],
+      critical: false,
+      responses: [],
+    },
+  };
+}
+
+interface OpportunityAttackTrigger {
+  readonly mover: CombatantId;
+  readonly from: GridCell;
+  readonly to: GridCell;
+}
+
+function queueOpportunityAttack(
+  context: ReductionContext,
+  reactor: CombatantId,
+  trigger: OpportunityAttackTrigger,
+): void {
+  if (context.state.pendingDecisions.some((decision) =>
+    decision.combatant === reactor && decision.reactionKind === 'opportunity_attack' &&
+    decision.boundary.activeCombatant === trigger.mover && decision.boundary.round === context.state.round)) return;
+  const id = `decision:${String(context.state.nextDecisionSequence)}`;
+  const decision: PendingDecision = {
+    id,
+    combatant: reactor,
+    kind: 'reaction_offer',
+    reactionKind: 'opportunity_attack',
+    options: [
+      { id: 'accept', label: 'Make Opportunity Attack' },
+      { id: 'decline', label: 'Decline' },
+    ],
+    boundary: { activeCombatant: trigger.mover, round: context.state.round },
+    opportunityAttack: { mover: trigger.mover, from: { ...trigger.from }, to: { ...trigger.to } },
+  };
+  context.state = {
+    ...context.state,
+    nextDecisionSequence: context.state.nextDecisionSequence + 1,
+    pendingDecisions: [...context.state.pendingDecisions, decision],
+  };
+  emit(context, {
+    type: 'pending_decision_queued', decisionId: id, combatant: reactor,
+    kind: 'reaction_offer', reactionKind: 'opportunity_attack',
+  });
+}
+
 function processMove(
   context: ReductionContext,
   command: Extract<EncounterCommand, { readonly type: 'move' }>,
@@ -2952,12 +3331,41 @@ function processMove(
   if (plan.kind === 'illegal') {
     throw new EncounterRuleError(`Illegal movement: ${plan.reason} at step ${plan.stepIndex}.`);
   }
-  if (plan.steps.some((step) => step.beforeLeaving.length > 0)) {
-    throw new EncounterRuleError('Movement has an unresolved Opportunity Attack window.');
-  }
   const traversed: GridCell[] = [];
   let spent = feet(0);
   for (const step of plan.steps) {
+    for (const window of step.beforeLeaving) {
+      const reactor = combatant(context.state, window.reactorId);
+      const mover = combatant(context.state, command.actor);
+      if (
+        mover.profile.rules.detectionTraits.includes('flyby') ||
+        !canCombatantSee(context.state, window.reactorId, command.actor) ||
+        context.state.effects.some((effect) =>
+          effect.targets.includes(window.reactorId) && effect.payload.kind === 'opportunity_attacks_disabled')
+      ) continue;
+      const trigger: OpportunityAttackTrigger = {
+        mover: command.actor, from: { ...step.from }, to: { ...step.to },
+      };
+      const policy = reactionPolicyFor(context.state, window.reactorId, 'opportunity_attack');
+      if (policy === 'never') {
+        emit(context, {
+          type: 'reaction_policy_auto_resolved', combatant: window.reactorId,
+          reactionKind: 'opportunity_attack', policy, resolution: 'decline', autoFired: false,
+        });
+        continue;
+      }
+      if (policy === 'always') {
+        emit(context, {
+          type: 'reaction_policy_auto_resolved', combatant: window.reactorId,
+          reactionKind: 'opportunity_attack', policy, resolution: 'accept', autoFired: true,
+        });
+        processAttack(context, defaultOpportunityAttack(window.reactorId, command.actor), trigger);
+        if (combatant(context.state, command.actor).life !== 'living') break;
+        continue;
+      }
+      if (reactor.turn.reactionAvailable) queueOpportunityAttack(context, window.reactorId, trigger);
+    }
+    if (combatant(context.state, command.actor).life !== 'living') break;
     context.state = {
       ...context.state,
       tokens: context.state.tokens.map((candidate) => candidate.combatantId === command.actor
@@ -4424,6 +4832,7 @@ function processAttack(
     EncounterCommand,
     { readonly type: 'attack' | 'opportunity_attack' }
   >,
+  opportunityTrigger: OpportunityAttackTrigger | null = null,
 ): void {
   const activeForm = combatant(context.state, command.actor).form;
   if (activeForm !== undefined || command.monsterOnHit !== undefined) {
@@ -4451,6 +4860,12 @@ function processAttack(
   }
   if (!isCombatantOnBoard(context.state, command.target)) {
     throw new EncounterRuleError(`Combatant ${command.target} is absent from the board.`);
+  }
+  if (
+    opportunityTrigger === null && command.requiresSight === true &&
+    !canCombatantSee(context.state, command.actor, command.target)
+  ) {
+    throw new VisionTargetingRuleError('target_not_seen', command.actor, command.target);
   }
   let wasFirstAttack = false;
   const typeChoice = command.type === 'attack'
@@ -4483,6 +4898,7 @@ function processAttack(
       throw new EncounterRuleError('An Opportunity Attack must target the active mover.');
     }
     if (
+      opportunityTrigger === null &&
       gridDistance(
         token(context.state, command.actor).position,
         token(context.state, command.target).position,
@@ -4510,8 +4926,9 @@ function processAttack(
   const actorPosition = token(context.state, command.actor).position;
   const targetPosition = token(context.state, command.target).position;
   if (
-    !hasLineOfSight(context.state, actorPosition, targetPosition) ||
-    coverTierBetween(context.state, actorPosition, targetPosition) === 'total'
+    opportunityTrigger === null &&
+    (!hasLineOfSight(context.state, actorPosition, targetPosition) ||
+      coverTierBetween(context.state, actorPosition, targetPosition) === 'total')
   ) {
     throw new EncounterRuleError('The target has Total Cover or is outside line of sight.');
   }
@@ -4541,6 +4958,7 @@ function processAttack(
     },
     context.rng,
   );
+  endHidden(context, command.actor, 'attack_roll');
   endEffects(context, new Set([...madeModes.consumed, ...againstModes.consumed]), 'trigger_consumed');
   const consumedAdvantage = new Set(
     context.state.effects
@@ -6548,6 +6966,21 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
     throw new EncounterRuleError(`${definition.name} can be cast only through its declared Reaction trigger.`);
   }
   const targets = selectedSpellTargets(context.state, definition, command);
+  if (
+    definition.targeting.kind !== 'self' &&
+    definition.targeting.kind !== 'area' &&
+    definition.targeting.kind !== 'area_selected' &&
+    definition.targeting.kind !== 'all_in_range' &&
+    definition.targeting.kind !== 'remote' &&
+    definition.targeting.kind !== 'utility' &&
+    definition.targeting.requiresSight === true
+  ) {
+    const unseen = targets.find((target) => !canCombatantSee(context.state, command.actor, target));
+    if (unseen !== undefined) {
+      throw new VisionTargetingRuleError('target_not_seen', command.actor, unseen);
+    }
+  }
+  if (definition.components.verbal) endHidden(context, command.actor, 'verbal_spell');
   spendSpellCastingCost(context, definition, command);
   const interception = offerReaction(context, {
     kind: 'creature_casts_spell', caster: command.actor, spellId: definition.id,
@@ -6825,6 +7258,9 @@ function formReplacementRules(
       conditionImmunities: [...stats.conditionImmunities],
       usesDeathSaves: false,
       senses: structuredClone(stats.senses),
+      passivePerception: 10,
+      detectionTraits: [],
+      contactMedium: 'surface',
       ...(original.rules.creatureType === undefined ? {} : { creatureType: original.rules.creatureType }),
       spellSlots: [],
     },
@@ -8839,6 +9275,36 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     case 'move':
       processMove(context, command);
       return;
+    case 'hide':
+      processHide(context, command.actor);
+      return;
+    case 'search':
+      processSearch(context, command);
+      return;
+    case 'reveal_hidden':
+      assertActiveActor(context, command.actor);
+      endHidden(context, command.actor, command.reason);
+      return;
+    case 'resolve_pending_decision': {
+      const decision = context.state.pendingDecisions.find((candidate) => candidate.id === command.decisionId);
+      if (decision === undefined) throw new PendingDecisionRuleError('unknown_decision');
+      context.state = {
+        ...context.state,
+        pendingDecisions: context.state.pendingDecisions.filter((candidate) => candidate.id !== decision.id),
+      };
+      emit(context, {
+        type: 'pending_decision_resolved', decisionId: decision.id,
+        combatant: decision.combatant, optionId: command.optionId,
+      });
+      if (command.optionId === 'accept') {
+        processAttack(
+          context,
+          defaultOpportunityAttack(decision.combatant, decision.opportunityAttack.mover),
+          decision.opportunityAttack,
+        );
+      }
+      return;
+    }
     case 'create_persistent_area': {
       if (command.cost !== 'reaction') assertActiveActor(context, command.actor);
       spendCost(context, command.actor, command.cost, 'Create persistent area');
@@ -9249,6 +9715,10 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     case 'end_turn': {
       if (context.state.activeCombatant !== command.actor) {
         throw new EncounterRuleError(`Combatant ${command.actor} is not the active combatant.`);
+      }
+      if (context.state.pendingDecisions.some((decision) =>
+        decision.boundary.activeCombatant === command.actor && decision.boundary.round === context.state.round)) {
+        throw new PendingDecisionRuleError('turn_boundary_blocked');
       }
       const currentIndex = context.state.activeInitiativeIndex;
       if (currentIndex === null) throw new EncounterRuleError('Initiative is not active.');

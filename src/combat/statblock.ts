@@ -29,7 +29,10 @@ export type MovementKind = 'walk' | 'burrow' | 'climb' | 'fly' | 'swim';
 export type SenseKind = 'blindsight' | 'darkvision' | 'tremorsense' | 'truesight';
 export type CombatSense =
   | { readonly kind: 'normal_sight' }
-  | { readonly kind: 'blindsight' | 'truesight'; readonly rangeFeet: number };
+  | {
+      readonly kind: 'blindsight' | 'darkvision' | 'tremorsense' | 'truesight';
+      readonly rangeFeet: number;
+    };
 
 export interface SourceSpan {
   readonly path: 'docs/srd/full/srd-5.2.1.txt';
@@ -238,6 +241,12 @@ export type MonsterTrait =
   | { readonly kind: 'water_breathing'; readonly onlyUnderwater: true }
   | { readonly kind: 'spider_climb' }
   | { readonly kind: 'web_walker' }
+  /** SRD 5.1: docs/homebrew/ogl/srd-5.1/srd-5.1-ogl.txt:23501-23503. */
+  | { readonly kind: 'web_sense' }
+  /** SRD 5.1: docs/homebrew/ogl/srd-5.1/srd-5.1-ogl.txt:23547-23550. */
+  | { readonly kind: 'keen_sight' }
+  /** SRD 5.2.1: docs/srd/full/srd-5.2.1.txt:23236-23237. */
+  | { readonly kind: 'flyby' }
   | { readonly kind: 'life_bond'; readonly rangeFeet: 5; readonly spellMinimumLevel: 1 };
 
 export type MonsterBonusAction =
@@ -578,9 +587,9 @@ export function monsterStatblock(input: MonsterStatblockInput): MonsterStatblock
       ? sourceDetails.senses.value.flatMap((sense): readonly CombatSense[] => {
           switch (sense.kind) {
             case 'blindsight':
-            case 'truesight': return [{ kind: sense.kind, rangeFeet: sense.rangeFeet }];
             case 'darkvision':
-            case 'tremorsense': return [];
+            case 'tremorsense':
+            case 'truesight': return [{ kind: sense.kind, rangeFeet: sense.rangeFeet }];
           }
         })
       : []),
@@ -589,6 +598,8 @@ export function monsterStatblock(input: MonsterStatblockInput): MonsterStatblock
     switch (sense.kind) {
       case 'normal_sight': return sense;
       case 'blindsight':
+      case 'darkvision':
+      case 'tremorsense':
       case 'truesight': return { ...sense, rangeFeet: positiveInteger(sense.rangeFeet, `${sense.kind} range`) };
     }
   });

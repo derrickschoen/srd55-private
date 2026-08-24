@@ -115,18 +115,14 @@ describe('D366 clean-room Moon Druid beast families', () => {
     const spider = HOMEBREW_BEAST_ROSTER.find((row) => row.design.family === 'arachnid' && row.design.challengeRating === 3);
     if (bear === undefined || spider === undefined) throw new Error('Missing distinguishing CR 3 rows.');
     expect(bear.design.signatures.map((signature) => signature.mechanic)).toEqual(['bear_hug', 'ongoing_squeeze', 'tank_hit_points']);
-    expect(spider.design.signatures.map((signature) => signature.mechanic)).toEqual(['web', 'venom', 'spider_climb']);
+    expect(spider.design.signatures.map((signature) => signature.mechanic)).toEqual(['web', 'venom', 'web_sense']);
     expect(effects(bear).some((effect) => effect.kind === 'condition_bound_ongoing_damage')).toBe(true);
     expect(effects(spider).some((effect) => effect.kind === 'condition' && effect.condition === 'Poisoned')).toBe(true);
   });
 
   it('records every blocked signature, blocking vocabulary, and explicit standing-in mechanic', () => {
     expect(BEAST_FAMILY_DEFERRED_UPGRADES.map((entry) => [entry.family, entry.blockedSignature, entry.blockingVocabulary, entry.standingInMechanic])).toEqual([
-      ['arachnid', 'web_sense', 'detection_lever', 'spider_climb_and_web_walker'],
-      ['raptor', 'keen_sight', 'detection_lever', 'perception_skill'],
       ['pterosaur', 'descent_triggered_dive', 'elevation_and_flying', 'raking_pass_charge'],
-      ['pterosaur', 'flyby', 'movement_opportunity_reaction_trigger', 'nimble_escape'],
-      ['raptor', 'flyby', 'movement_opportunity_reaction_trigger', 'nimble_escape'],
     ]);
     expect(BEAST_FAMILY_DEFERRED_UPGRADES.every((entry) => entry.standingIn)).toBe(true);
   });
