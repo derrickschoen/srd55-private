@@ -218,12 +218,65 @@
 .dm-pending-request,
 .dm-decision-tray,
 .dm-reaction-preferences,
+.dm-save-manager,
 .dm-adjudication,
 .dm-controller-assignments {
   margin: 1rem 0;
   padding: 0.8rem;
   border: 1px solid #3e4961;
   background: #171b26;
+}
+
+.dm-save-manager {
+  margin-block: 1rem;
+}
+
+.dm-save-toolbar,
+.dm-save-row-actions,
+.dm-save-delete-confirmation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.dm-save-list {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+
+.dm-save-row {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) auto auto;
+  gap: 0.35rem 0.75rem;
+  align-items: center;
+  padding: 0.65rem;
+  border: 1px solid #515c72;
+  background: #191d27;
+}
+
+.dm-save-row h3,
+.dm-save-row p {
+  margin: 0;
+}
+
+.dm-save-badge {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid #93a2c2;
+  border-radius: 999px;
+  font: 700 0.72rem/1.4 system-ui, sans-serif;
+  text-transform: uppercase;
+}
+
+.dm-save-summary,
+.dm-save-row-actions,
+.dm-save-delete-confirmation {
+  grid-column: 1 / -1;
+}
+
+.dm-save-error {
+  color: #ffb8aa;
 }
 
 .encounter-controls button,

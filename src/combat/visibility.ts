@@ -208,6 +208,10 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'pending_decision_queued':
     case 'pending_decision_resolved':
     case 'reaction_policy_auto_resolved': return [event.combatant];
+    case 'legendary_action_used':
+    case 'legendary_action_pool_refreshed':
+    case 'legendary_action_window_closed':
+    case 'legendary_resistance_used': return [event.combatant];
     case 'initiative_block_rolled': return event.combatants;
     case 'spell_cast':
     case 'sustained_effect_activated':

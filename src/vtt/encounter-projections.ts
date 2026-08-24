@@ -92,7 +92,7 @@ export type DmDecisionTrayEntry =
       readonly sequence: number;
       readonly combatantId: CombatantId;
       readonly combatantName: string;
-      readonly reactionKind: 'opportunity_attack';
+      readonly reactionKind: 'opportunity_attack' | 'legendary_resistance';
       readonly policy: Exclude<ReactionPolicy, 'ask'>;
       readonly resolution: 'accept' | 'decline';
       readonly autoFired: boolean;
@@ -116,6 +116,10 @@ function decisionTriggerContext(
       return `${names.get(decision.opportunityAttack.mover) ?? String(decision.opportunityAttack.mover)} moved from ${String(decision.opportunityAttack.from.column)},${String(decision.opportunityAttack.from.row)} to ${String(decision.opportunityAttack.to.column)},${String(decision.opportunityAttack.to.row)} in round ${String(decision.boundary.round)}`;
     case 'death_save':
       return `start-of-turn death saving throw in round ${String(decision.boundary.round)}`;
+    case 'legendary_action_window':
+      return `end of ${names.get(decision.boundary.activeCombatant) ?? String(decision.boundary.activeCombatant)}'s turn in round ${String(decision.boundary.round)}`;
+    case 'legendary_resistance':
+      return `${decision.failedSave.ability} save failed against ${names.get(decision.failedSave.source) ?? String(decision.failedSave.source)} in round ${String(decision.boundary.round)}`;
     default: {
       const exhaustive: never = decision;
       throw new Error(`Unhandled pending decision kind: ${String(exhaustive)}`);
