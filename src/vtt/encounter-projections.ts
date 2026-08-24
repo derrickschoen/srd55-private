@@ -201,7 +201,9 @@ export function projectDmBoard(input: {
     kind: 'pending',
     decision: structuredClone(decision),
     combatantName: names.get(decision.combatant) ?? String(decision.combatant),
-    triggerContext: `${names.get(decision.opportunityAttack.mover) ?? String(decision.opportunityAttack.mover)} moved from ${String(decision.opportunityAttack.from.column)},${String(decision.opportunityAttack.from.row)} to ${String(decision.opportunityAttack.to.column)},${String(decision.opportunityAttack.to.row)} in round ${String(decision.boundary.round)}`,
+    triggerContext: decision.kind === 'reaction_offer'
+      ? `${names.get(decision.opportunityAttack.mover) ?? String(decision.opportunityAttack.mover)} moved from ${String(decision.opportunityAttack.from.column)},${String(decision.opportunityAttack.from.row)} to ${String(decision.opportunityAttack.to.column)},${String(decision.opportunityAttack.to.row)} in round ${String(decision.boundary.round)}`
+      : `start-of-turn death saving throw in round ${String(decision.boundary.round)}`,
     interactive: true,
   }));
   const autoFireEntries: readonly DmDecisionTrayEntry[] = input.view.state.eventLog.flatMap(

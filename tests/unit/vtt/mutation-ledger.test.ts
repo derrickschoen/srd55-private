@@ -96,6 +96,8 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(detectionUiLedger.match(/`exit 1`/gu)).toHaveLength(3);
     expect(detectionUiLedger).toContain('Tests  15 passed (15)');
     expect(detectionUiLedger).toContain('All three mutations were restored.');
+  });
+
   it('D373.8-DEATH-MUTATION-LEDGER pins all five restored controls to named killing tests', () => {
     const deathLedger = readFileSync(DEATH_LEDGER_PATH, 'utf8');
     const deathTests = readFileSync('tests/unit/combat/death-saves.test.ts', 'utf8');

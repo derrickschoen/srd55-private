@@ -443,7 +443,7 @@ export class DmEncounterHost {
 
   async resolvePendingDecision(
     decisionId: string,
-    optionId: 'accept' | 'decline',
+    optionId: 'accept' | 'decline' | 'roll',
   ): Promise<void> {
     const resumeAfter = this.#coordinator.pauseState() === null;
     if (resumeAfter) this.#coordinator.interrupt();

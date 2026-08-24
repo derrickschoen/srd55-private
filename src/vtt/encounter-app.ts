@@ -743,7 +743,11 @@ class DmEncounterView {
       if (entry.kind === 'pending') {
         row.dataset.decisionId = entry.decision.id;
         row.append(
-          element('h3', { text: `${entry.combatantName} — ${entry.decision.reactionKind.replaceAll('_', ' ')}` }),
+          element('h3', {
+            text: `${entry.combatantName} — ${entry.decision.kind === 'reaction_offer'
+              ? entry.decision.reactionKind.replaceAll('_', ' ')
+              : 'death saving throw'}`,
+          }),
           element('p', { text: entry.triggerContext }),
         );
         for (const option of entry.decision.options) {

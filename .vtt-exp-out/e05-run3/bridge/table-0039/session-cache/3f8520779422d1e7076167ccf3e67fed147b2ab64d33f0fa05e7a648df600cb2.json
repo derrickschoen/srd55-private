@@ -1,0 +1,1 @@
+{"request":{"kind":"create_dm_session","encounterId":"encounter:experiment:E05:39:424239208","requestId":"encounter:experiment:E05:39:424239208:create-dm-session","model":{"model":"gpt-5.6-terra","reasoningEffort":"medium"}},"reply":{"codexSessionId":"01a02798-8426-7703-bbf0-99b1f7ec3c76"}}

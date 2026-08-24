@@ -1,0 +1,34 @@
+{
+  "runId": "e05-run3",
+  "status": "abandoned-for-cause",
+  "reason": "Envelope validation failures dominate every arm; the type checker was never reached, so the typed-vs-untyped hypothesis is unmeasurable by this run. Stopped by the supervisor rather than early-stopped under D328.2 \u2014 this is NOT a preregistered stop and the partial data is NOT E05 evidence.",
+  "tablesCompleted": 52,
+  "preregisteredCeiling": 120,
+  "tablesByArm": {
+    "untyped-js": 26,
+    "typed-js": 26
+  },
+  "calls": 256,
+  "invalidCalls": 96,
+  "invalidRate": 0.375,
+  "typeCheckUniqueCatchObservations": 0,
+  "replyShapes": {
+    "encounterId + expectedRevision + kind + monsters + protocolVersion + requestId + round": 161,
+    "program": 35,
+    "kind + program": 12,
+    "kind + source": 10,
+    "source": 9,
+    "plans": 7,
+    "kind + plans": 6,
+    "combatant:gate-captain-north + combatant:gate-captain-south + combatant:gate-ogre-east + combatant:gate-ogre-west": 6,
+    "code + kind": 2,
+    "kind + program + requestId": 1,
+    "kind + programs": 1,
+    "expectedRevision + kind + program + requestId": 1,
+    "kind + plan": 1,
+    "combatant:gate-captain-north": 1,
+    "encounterId + expectedRevision + kind + programs + protocolVersion + requestId + round": 1,
+    "plan": 1,
+    "kind + sourceCode": 1
+  }
+}
