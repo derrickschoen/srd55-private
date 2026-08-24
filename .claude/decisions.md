@@ -7,6 +7,73 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D377 — OWNER: brainstorm round 3 — 18 rulings; v1 = clean rehearsal (2026-08-24)
+
+Third three-model brainstorm (codex + opus + fable, independent lists; raw
+lists and synthesis in the job tmp dir as brainstorm3-*). Rulings, in ask
+order:
+
+1. **Post-pacing primary lane: REHEARSAL-FIRST.** A full mock session runs
+   solo on the preview build; every stumble becomes a queue item — the
+   table generates the queue instead of speculation.
+2. **Real party: POST-V1.** The representative party carries all of v1
+   (supersedes D373.5's "closer to the first real session" timing; the
+   trigger question is closed).
+3. **Timeline/pacing scope: TIMELINE + REWIND.** Initiative timeline,
+   round counter, next-event preview (legendary windows, effect/burn
+   expiries), skip/delay, PLUS rewind-to-round built on the session
+   journal. Rewind doubles as the rehearsal's mistake-recovery story.
+4. **Player devices in live play: PLAYER ACTIONS enter v1 scope** — a
+   deliberate expansion beyond D312's screen-share-only draft 1. Scope:
+   **MOVE + ATTACK ONLY**; reactions, tray decisions, and free-form
+   interactions stay DM-clicked in v1. Owner left sequencing open;
+   supervisor default: player-board lane runs AFTER the DM-only
+   rehearsal, then a second multi-device rehearsal.
+5. **BG3 bundle: ONE FLAGSHIP, PLAYABLE** (Goblin Leaders as the richest
+   checklist); the other three clones follow on demand.
+6. **V1 done bar: CLEAN REHEARSAL.** v1 is done when a full mock session —
+   bundled dungeon + BG3 flagship, four browser tabs as players — runs
+   start to finish without opening a rulebook or hitting a dead end.
+7. **Long-rest interruption: DM-FIAT BUTTON** ("rest interrupted", DM
+   picks outcome, logged as a D357-style ruling card). Not RAW
+   enforcement.
+8. **Death reversal: REVIVIFY ONLY modeled RAW** (1-minute window, 300gp
+   diamond consumed, 1 HP return); all other reversal spells stay DM-fiat.
+9. **Autosave: TWO POOLS** — per-round autosaves (keep 10) AND
+   encounter-boundary autosaves (keep 10); named saves never touched.
+10. **Non-boundary refusal UX: PER-CATEGORY SETTING** choosing among
+    tray-fiat-prompt / hard-refuse-with-citation / default-plus-visible-log
+    per refusal category.
+11. **Coverage bar: REHEARSAL-DRIVEN.** Everything the representative
+    party, dungeon, and flagship touch must execute; a rehearsal refusal
+    is a defect. The 729 total is explicitly not a v1 number.
+12. **Pre-rehearsal slivers: PATH-DANGER PREVIEW + HIDDEN-ROLL
+    EXPANSION** (extend the death-save hide toggle to monster attack and
+    save rolls). The generic contested-check dialog waits for rehearsal
+    evidence.
+13. **Optional-rules cadence: PRE-V1 SWEEP.** Adopted BG3-isms accumulate
+    default-off unconfirmed; one owner review of the whole register
+    before the rehearsal.
+14. **Session record: BOTH** — structured end-of-session summary export
+    (rounds, damage, resources, deaths, overrides/fiats) AND the full
+    replay journal kept.
+15. **Physical dice: PLAYERS MAY ENTER ROLLS.** Optional manual-entry in
+    the player action flow; entered numbers logged as manual and excluded
+    from the deterministic stream; DM toggle per session.
+16. **Difficulty ruler: AFTER REHEARSAL DATA.** The D373.11 sim lane
+    opens once at least one full rehearsal's structured summaries exist.
+17. **No public rehearsal druid.** Owner verbatim: "keep the druid tests
+    to the private repo." The representative roster stays druid-free;
+    wildshape is exercised by private-repo tests, not the rehearsal bar.
+18. **Table guide: STRANGER-READABLE**, doubling as the public repo's
+    player-facing README.
+
+Derived queue (supervisor operationalization): BG3 flagship → pacing +
+rewind + pre-rehearsal package (path preview, hidden-roll expansion,
+rest-interrupt button, Revivify, autosave pools, refusal setting, session
+capture) → optional-rules sweep → DM-only rehearsal → player board
+(move+attack, dice entry) → multi-device rehearsal = v1.
+
 ## D376 — SUPERVISOR CORRECTION: D373.7's hit-dice gloss was wrong; 2024 RAW restores ALL spent Hit Point Dice (2026-08-24)
 
 The owner's D373.7 ruling was "modeled per 2024 RAW, DM-triggered." The
