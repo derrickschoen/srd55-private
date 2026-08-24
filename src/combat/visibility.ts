@@ -16,8 +16,10 @@ export type EncounterViewClassification = 'dm_only' | 'player_visible' | 'per_se
 /** D359's exhaustive projection-decision inventory. */
 export const ENCOUNTER_VIEW_CLASSIFICATION = {
   config: 'player_visible',
+  rulesEdition: 'player_visible',
   revision: 'player_visible',
   nextEventSequence: 'dm_only',
+  nextDecisionSequence: 'dm_only',
   nextEffectSequence: 'dm_only',
   bounds: 'player_visible',
   blockedCells: 'per_seat',
@@ -38,6 +40,9 @@ export const ENCOUNTER_VIEW_CLASSIFICATION = {
   nextPersistentAreaSequence: 'dm_only',
   reevaluatedBranches: 'dm_only',
   eventLog: 'per_seat',
+  hiddenCombatants: 'per_seat',
+  pendingDecisions: 'per_seat',
+  reactionPolicies: 'dm_only',
   contentPacks: 'dm_only',
   equipment: 'dm_only',
   groundItems: 'dm_only',
@@ -169,7 +174,12 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'item_dropped':
     case 'item_picked_up':
     case 'item_equipped':
-    case 'item_stowed': return [event.combatant];
+    case 'item_stowed':
+    case 'hide_resolved':
+    case 'search_resolved':
+    case 'pending_decision_queued':
+    case 'pending_decision_resolved':
+    case 'reaction_policy_auto_resolved': return [event.combatant];
     case 'initiative_block_rolled': return event.combatants;
     case 'spell_cast':
     case 'sustained_effect_activated':
@@ -206,6 +216,7 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'persistent_area_moved': return [event.owner];
     case 'persistent_area_membership_changed': return [...event.entered, ...event.exited];
     case 'persistent_area_triggered': return [event.target];
+    case 'hidden_ended': return [event.combatant];
   }
 }
 
@@ -250,8 +261,10 @@ export function projectDmView(state: EncounterState): DmView {
     audience: 'dm',
     state: {
       config: structuredClone(state.config),
+      rulesEdition: state.rulesEdition,
       revision: state.revision,
       nextEventSequence: state.nextEventSequence,
+      nextDecisionSequence: state.nextDecisionSequence,
       nextEffectSequence: state.nextEffectSequence,
       bounds: structuredClone(state.bounds),
       blockedCells: structuredClone(state.blockedCells),
@@ -272,6 +285,9 @@ export function projectDmView(state: EncounterState): DmView {
       nextPersistentAreaSequence: state.nextPersistentAreaSequence,
       ...(state.reevaluatedBranches === undefined ? {} : { reevaluatedBranches: structuredClone(state.reevaluatedBranches) }),
       eventLog: structuredClone(state.eventLog),
+      hiddenCombatants: structuredClone(state.hiddenCombatants),
+      pendingDecisions: structuredClone(state.pendingDecisions),
+      reactionPolicies: structuredClone(state.reactionPolicies),
       ...(state.contentPacks === undefined ? {} : { contentPacks: structuredClone(state.contentPacks) }),
       ...(state.equipment === undefined ? {} : { equipment: structuredClone(state.equipment) }),
       ...(state.groundItems === undefined ? {} : { groundItems: structuredClone(state.groundItems) }),

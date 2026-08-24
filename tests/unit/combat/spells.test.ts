@@ -1003,6 +1003,8 @@ describe('reference-party spell manifest', () => {
 });
 
 describe('spell foundations and implemented value pins', () => {
+  // Independently transcribed from the cited creature-you-can-see clauses.
+  const sightRequiredPins = new Set(['bane', 'charm-person', 'magic-missile', 'command']);
   it('has one exhaustive mechanics pin for every implemented cantrip and level-1 definition', () => {
     expect(COMPLETE_MECHANICS_PINS).toHaveLength(EXPECTED_CANTRIP_AND_LEVEL_ONE_IMPLEMENTED);
     expect(COMPLETE_MECHANICS_PINS.map((pin) => pin.id).sort()).toEqual(
@@ -1014,7 +1016,7 @@ describe('spell foundations and implemented value pins', () => {
     const definition = spellDefinition(pin.id);
     if (definition === null) throw new Error(`Missing definition ${pin.id}.`);
     expect({ targeting: definition.targeting, operation: definition.operation }).toEqual({
-      targeting: pin.targeting,
+      targeting: sightRequiredPins.has(pin.id) ? { ...pin.targeting, requiresSight: true } : pin.targeting,
       operation: pin.operation,
     });
   });

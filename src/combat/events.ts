@@ -55,7 +55,27 @@ export type EncounterCommand =
       readonly type: 'move';
       readonly actor: CombatantId;
       readonly path: readonly GridCell[];
-      readonly cause: 'voluntary' | 'reactions_resolved';
+      readonly cause: 'voluntary' | 'reactions_resolved' | 'forced' | 'teleport';
+    }
+  | {
+      readonly type: 'hide';
+      readonly actor: CombatantId;
+    }
+  | {
+      readonly type: 'search';
+      readonly actor: CombatantId;
+      readonly target: CombatantId;
+      readonly reliance: 'sight' | 'hearing';
+    }
+  | {
+      readonly type: 'reveal_hidden';
+      readonly actor: CombatantId;
+      readonly reason: 'sound_louder_than_whisper' | 'stopped_hiding';
+    }
+  | {
+      readonly type: 'resolve_pending_decision';
+      readonly decisionId: string;
+      readonly optionId: 'accept' | 'decline';
     }
   | {
       readonly type: 'create_persistent_area';
@@ -85,6 +105,7 @@ export type EncounterCommand =
       readonly rollMode: RollMode;
       readonly attackerCanSeeTarget: boolean;
       readonly targetCanSeeAttacker: boolean;
+      readonly requiresSight?: true;
       readonly damage: DamageRequest;
       /** Present for attacks selected from a typed party-pack attack form. */
       readonly attackId?: string;
@@ -116,6 +137,7 @@ export type EncounterCommand =
       readonly rollMode: RollMode;
       readonly attackerCanSeeTarget: boolean;
       readonly targetCanSeeAttacker: boolean;
+      readonly requiresSight?: true;
       readonly damage: DamageRequest;
       /** Required while a form replacement limits attacks to its statblock. */
       readonly attackId?: string;
@@ -290,6 +312,47 @@ export type EncounterEvent =
       readonly path: readonly GridCell[];
       readonly spent: Feet;
       readonly remaining: Feet;
+    })
+  | (SequencedEvent & {
+      readonly type: 'hide_resolved';
+      readonly combatant: CombatantId;
+      readonly edition: '2014' | '2024';
+      readonly total: number;
+      readonly outcome: 'hidden' | 'failed_dc' | 'invalid_position' | 'passively_detected';
+    })
+  | (SequencedEvent & {
+      readonly type: 'hidden_ended';
+      readonly combatant: CombatantId;
+      readonly reason: 'attack_roll' | 'verbal_spell' | 'sound_louder_than_whisper' | 'stopped_hiding' | 'found';
+      readonly finder?: CombatantId;
+    })
+  | (SequencedEvent & {
+      readonly type: 'search_resolved';
+      readonly combatant: CombatantId;
+      readonly target: CombatantId;
+      readonly total: number;
+      readonly outcome: 'found' | 'not_found' | 'target_not_hidden';
+    })
+  | (SequencedEvent & {
+      readonly type: 'pending_decision_queued';
+      readonly decisionId: string;
+      readonly combatant: CombatantId;
+      readonly kind: 'reaction_offer';
+      readonly reactionKind: 'opportunity_attack';
+    })
+  | (SequencedEvent & {
+      readonly type: 'pending_decision_resolved';
+      readonly decisionId: string;
+      readonly combatant: CombatantId;
+      readonly optionId: 'accept' | 'decline';
+    })
+  | (SequencedEvent & {
+      readonly type: 'reaction_policy_auto_resolved';
+      readonly combatant: CombatantId;
+      readonly reactionKind: 'opportunity_attack';
+      readonly policy: 'always' | 'never';
+      readonly resolution: 'accept' | 'decline';
+      readonly autoFired: boolean;
     })
   | (SequencedEvent & {
       readonly type: 'persistent_area_created';

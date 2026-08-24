@@ -52,6 +52,9 @@ function profile(
       conditionImmunities: [],
       usesDeathSaves: kind === 'player_character',
       senses: [{ kind: 'normal_sight' }],
+      passivePerception: 12,
+      detectionTraits: [],
+      contactMedium: 'surface',
       spellSlots: options.spellSlots ?? [],
     },
   } as const;

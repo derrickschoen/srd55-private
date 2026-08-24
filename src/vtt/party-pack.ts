@@ -1834,6 +1834,9 @@ function loadedMember(
         conditionImmunities: [...(passive?.conditionImmunities ?? [])],
         usesDeathSaves: true,
         senses: [{ kind: 'normal_sight' }],
+        passivePerception: 10 + (skillBonuses.perception ?? 0),
+        detectionTraits: [],
+        contactMedium: 'surface',
         ...(extensions.sizeCategory === null ? {} : { sizeCategory: extensions.sizeCategory }),
         spellSlots: [
           ...spellSlots.map((capacity) => ({

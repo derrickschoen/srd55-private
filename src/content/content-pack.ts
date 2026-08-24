@@ -147,6 +147,7 @@ const targetingSchema = z.discriminatedUnion('kind', [
     kind: z.literal('single'),
     rangeFeet: nonNegativeInteger,
     willing: z.boolean(),
+    requiresSight: z.literal(true).optional(),
     allowDead: z.literal(true).optional(),
     rangeByCasterLevel: z.array(z.strictObject({
       minimumLevel: positiveInteger.max(20),
@@ -159,10 +160,11 @@ const targetingSchema = z.discriminatedUnion('kind', [
     baseMaximum: positiveInteger,
     additionalPerSlot: nonNegativeInteger,
     willing: z.boolean().optional(),
+    requiresSight: z.literal(true).optional(),
   }),
   z.strictObject({
     kind: z.literal('selected'), rangeFeet: nonNegativeInteger.max(100_000),
-    willing: z.boolean().optional(), selection: targetSelectionSchema,
+    willing: z.boolean().optional(), requiresSight: z.literal(true).optional(), selection: targetSelectionSchema,
   }),
   z.strictObject({
     kind: z.literal('area'),
@@ -281,9 +283,11 @@ const itemSchema = z.strictObject({
 const combatSenseSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('normal_sight') }),
   z.strictObject({ kind: z.literal('blindsight'), rangeFeet: positiveInteger.max(100_000) }),
+  z.strictObject({ kind: z.literal('darkvision'), rangeFeet: positiveInteger.max(100_000) }),
+  z.strictObject({ kind: z.literal('tremorsense'), rangeFeet: positiveInteger.max(100_000) }),
   z.strictObject({ kind: z.literal('truesight'), rangeFeet: positiveInteger.max(100_000) }),
 ]);
-const combatSensesSchema = z.array(combatSenseSchema).min(1).max(3)
+const combatSensesSchema = z.array(combatSenseSchema).min(1).max(5)
   .refine((senses) => new Set(senses.map(({ kind }) => kind)).size === senses.length, {
     message: 'Combat senses must use unique kinds.',
   });
@@ -538,7 +542,6 @@ export type ContentPackRecordDiagnostic = {
   | { readonly reason: 'on-kill-spawn-not-modelled' }
   | { readonly reason: typeof TRUE_POLYMORPH_PERMANENCE_REFUSAL }
   | { readonly reason: typeof OBJECT_TO_CREATURE_REFUSAL }
-  | { readonly reason: 'tremorsense-not-modelled' }
   | { readonly reason: 'devilsight-not-modelled' }
   | { readonly reason: 'ethereal-plane-semantics-not-modelled' }
   | { readonly reason: 'obscurement-geometry-not-modelled' }
@@ -769,7 +772,6 @@ function compositionDepth(value: unknown): number {
 }
 
 type SensesBoundaryRefusal =
-  | 'tremorsense-not-modelled'
   | 'devilsight-not-modelled'
   | 'ethereal-plane-semantics-not-modelled';
 
@@ -779,7 +781,6 @@ function sensesBoundaryRefusal(record: unknown, surface: 'species' | 'background
   if (!Array.isArray(container?.senses)) return null;
   for (const value of container.senses) {
     const sense = objectRecord(value);
-    if (sense?.kind === 'tremorsense') return 'tremorsense-not-modelled';
     if (sense?.kind === 'devilsight' || sense?.kind === 'devil_sight') return 'devilsight-not-modelled';
     if (sense?.etherealPlane === true || sense?.seesEtherealPlane === true) {
       return 'ethereal-plane-semantics-not-modelled';

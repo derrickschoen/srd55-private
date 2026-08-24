@@ -29,7 +29,7 @@ function importedSightProfile(
   key: string,
   senses: readonly (
     | { readonly kind: 'normal_sight' }
-    | { readonly kind: 'blindsight' | 'truesight'; readonly rangeFeet: number }
+    | { readonly kind: 'blindsight' | 'darkvision' | 'tremorsense' | 'truesight'; readonly rangeFeet: number }
   )[],
 ): ImportedSightFixture {
   const pack = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8')) as unknown;
@@ -120,6 +120,30 @@ describe('D348.1 imported combat senses and subject-cell obscurement', () => {
     });
     expect(canCombatantSee(darkEnvironment(at.state, at.target), observer.profile.id, at.target.id)).toBe(true);
     expect(canCombatantSee(darkEnvironment(beyond.state, beyond.target), observer.profile.id, beyond.target.id)).toBe(false);
+  });
+
+  it('darkvision_unbounded: darkvision sees a creature at its range edge but not one cell beyond', () => {
+    // Darkvision: docs/srd/full/srd-5.2.1.txt:11582-11588.
+    const observer = importedSightProfile('boundary-darkvision', [
+      { kind: 'normal_sight' }, { kind: 'darkvision', rangeFeet: 30 },
+    ]);
+    const darkState = (distanceFeet: number): { readonly state: EncounterState; readonly target: CombatantProfile } => {
+      const setup = visibilityState(observer, distanceFeet);
+      return {
+        ...setup,
+        state: {
+          ...setup.state,
+          environment: {
+            ...setup.state.environment,
+            lightRegions: [{ id: 'darkness', cells: [placedToken(setup.target, 0, 1).position], level: 'darkness' }],
+          },
+        },
+      };
+    };
+    const at = darkState(30);
+    const beyond = darkState(35);
+    expect(canCombatantSee(at.state, observer.profile.id, at.target.id)).toBe(true);
+    expect(canCombatantSee(beyond.state, observer.profile.id, beyond.target.id)).toBe(false);
   });
 
   it('invisible_condition_ignored: invisible target differs under normal sight, in-range blindsight, and in-range truesight', () => {
@@ -291,12 +315,15 @@ describe('D348.1 imported combat senses and subject-cell obscurement', () => {
     expect(canCombatantSee(heavyObscurementState, truesight.id, subject.id)).toBe(false);
   });
 
-  it('refuses unsupported senses and ray-intersection obscurement with named record reasons', () => {
+  it('imports Tremorsense and refuses still-unsupported senses and ray-intersection obscurement with named record reasons', () => {
+    const tremor = importedSightProfile('tremorsense-supported', [
+      { kind: 'normal_sight' }, { kind: 'tremorsense', rangeFeet: 30 },
+    ]);
+    expect(tremor.profile.rules.senses).toContainEqual({ kind: 'tremorsense', rangeFeet: feet(30) });
     const cases: readonly {
       readonly reason: string;
       readonly mutate: (pack: { monsters: Array<{ statblock: { senses: unknown } }>; spells: Array<{ operation: unknown }> }) => void;
     }[] = [
-      { reason: 'tremorsense-not-modelled', mutate: (pack) => { pack.monsters[0]!.statblock.senses = [{ kind: 'tremorsense', rangeFeet: 30 }]; } },
       { reason: 'devilsight-not-modelled', mutate: (pack) => { pack.monsters[0]!.statblock.senses = [{ kind: 'devilsight', rangeFeet: 120 }]; } },
       { reason: 'ethereal-plane-semantics-not-modelled', mutate: (pack) => { pack.monsters[0]!.statblock.senses = [{ kind: 'truesight', rangeFeet: 30, seesEtherealPlane: true }]; } },
       { reason: 'ethereal-plane-semantics-not-modelled', mutate: (pack) => { pack.spells[0]!.operation = { kind: 'effect', effect: { payload: { kind: 'see_invisibility', seesEtherealPlane: true } } }; } },

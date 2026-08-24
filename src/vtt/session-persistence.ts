@@ -454,15 +454,36 @@ export function deriveBranchRng(
     nextWorldObjectSequence,
     environment,
     combatants,
+    rulesEdition,
+    nextDecisionSequence,
+    hiddenCombatants,
+    pendingDecisions,
+    reactionPolicies,
     ...stateWithoutCombatants
   } = target.encounterState;
   const normalizedCombatants = combatants.map((entry) => {
     const senses = entry.profile.rules.senses;
-    if (senses.length !== 1 || senses[0]?.kind !== 'normal_sight') return entry;
-    const { senses: _defaultNormalSight, ...rules } = entry.profile.rules;
+    const rulesAreDetectionNeutral = senses.length === 1 && senses[0]?.kind === 'normal_sight' &&
+      entry.profile.rules.passivePerception === 10 && entry.profile.rules.detectionTraits.length === 0 &&
+      entry.profile.rules.contactMedium === 'surface';
+    if (!rulesAreDetectionNeutral) return entry;
+    const {
+      senses: _defaultNormalSight,
+      passivePerception: _defaultPassivePerception,
+      detectionTraits: _defaultDetectionTraits,
+      contactMedium: _defaultContactMedium,
+      ...rules
+    } = entry.profile.rules;
     return { ...entry, profile: { ...entry.profile, rules } };
   });
-  const baseMechanicalState = { ...stateWithoutCombatants, combatants: normalizedCombatants };
+  const defaultDetectionState = rulesEdition === '2024' && nextDecisionSequence === 1 &&
+    hiddenCombatants.length === 0 && pendingDecisions.length === 0 && reactionPolicies.length === 0;
+  const baseMechanicalState = defaultDetectionState
+    ? { ...stateWithoutCombatants, combatants: normalizedCombatants }
+    : {
+        ...stateWithoutCombatants, combatants: normalizedCombatants, rulesEdition,
+        nextDecisionSequence, hiddenCombatants, pendingDecisions, reactionPolicies,
+      };
   // Empty additive state is mechanically neutral and does not perturb branch
   // streams; once an area exists, both its state and allocator are authoritative.
   const areaNeutralState = persistentAreas.length === 0 && nextPersistentAreaSequence === 1

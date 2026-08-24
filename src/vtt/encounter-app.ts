@@ -50,6 +50,10 @@ function actionLabel(action: EncounterCommand): string {
         ? 'Move'
         : `Move to ${destination.column},${destination.row}`;
     }
+    case 'hide': return 'Hide';
+    case 'search': return 'Search';
+    case 'reveal_hidden': return 'Reveal';
+    case 'resolve_pending_decision': return 'Resolve reaction';
     case 'create_persistent_area':
       return 'Create persistent area';
     case 'move_persistent_area':

@@ -379,7 +379,7 @@ const worldOperationsOperationSchema = z.strictObject({
     z.strictObject({ kind: z.literal('create_object'), placement: z.enum(['caster_cell', 'area_origin']), footprintOffsets: z.array(z.strictObject({ column: safeInteger, row: safeInteger })).min(1).max(400), object: worldObjectTemplateSchema }),
     z.strictObject({ kind: z.literal('transform_terrain'), regionId: z.string().min(1).max(64), difficultTerrain: z.boolean() }),
     z.strictObject({ kind: z.literal('set_light_level'), regionId: z.string().min(1).max(64), level: z.enum(['bright', 'dim', 'darkness']) }),
-    z.strictObject({ kind: z.literal('set_obscurement'), regionId: z.string().min(1).max(64), obscurement: z.enum(['heavy', 'magical_darkness']).nullable(), geometry: z.enum(['subject_cell', 'ray_intersection']) }),
+    z.strictObject({ kind: z.literal('set_obscurement'), regionId: z.string().min(1).max(64), obscurement: z.enum(['light', 'heavy', 'magical_darkness']).nullable(), geometry: z.enum(['subject_cell', 'ray_intersection']) }),
     z.strictObject({ kind: z.literal('remove_objects'), reason: z.enum(['destroyed', 'dismissed']) }),
     z.strictObject({ kind: z.literal('modify_objects'), changes: z.strictObject({
       name: z.string().min(1).max(1_000).optional(),
@@ -504,8 +504,8 @@ const reevaluatedBranchOperationSchema = z.strictObject({ kind: z.literal('reeva
 
 const sustainedTargetingSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('self') }),
-  z.strictObject({ kind: z.literal('single'), rangeFeet: importedDistance, willing: z.boolean(), allowDead: z.literal(true).optional(), rangeByCasterLevel: z.array(z.strictObject({ minimumLevel: positiveInteger.max(20), rangeFeet: importedDistance })).optional() }),
-  z.strictObject({ kind: z.literal('multiple'), rangeFeet: importedDistance, baseMaximum: positiveInteger.max(MAX_IMPORTED_DICE_COUNT), additionalPerSlot: nonNegativeInteger.max(MAX_IMPORTED_DICE_COUNT), willing: z.boolean().optional() }),
+  z.strictObject({ kind: z.literal('single'), rangeFeet: importedDistance, willing: z.boolean(), requiresSight: z.literal(true).optional(), allowDead: z.literal(true).optional(), rangeByCasterLevel: z.array(z.strictObject({ minimumLevel: positiveInteger.max(20), rangeFeet: importedDistance })).optional() }),
+  z.strictObject({ kind: z.literal('multiple'), rangeFeet: importedDistance, baseMaximum: positiveInteger.max(MAX_IMPORTED_DICE_COUNT), additionalPerSlot: nonNegativeInteger.max(MAX_IMPORTED_DICE_COUNT), willing: z.boolean().optional(), requiresSight: z.literal(true).optional() }),
   z.strictObject({ kind: z.literal('area'), rangeFeet: importedDistance, shape: z.enum(['cone', 'cube', 'cylinder', 'emanation', 'line', 'sphere']), baseSizeFeet: importedDistance, sizePerSlotFeet: importedDistance, secondarySizeFeet: importedDistance.optional(), surface: z.literal('ground_square').optional() }),
   z.strictObject({ kind: z.literal('area_selected'), rangeFeet: importedDistance, shape: z.enum(['cone', 'cube', 'cylinder', 'emanation', 'line', 'sphere']), baseSizeFeet: importedDistance, sizePerSlotFeet: importedDistance, secondarySizeFeet: importedDistance.optional(), baseMaximum: positiveInteger.max(MAX_IMPORTED_DICE_COUNT), additionalPerSlot: nonNegativeInteger.max(MAX_IMPORTED_DICE_COUNT) }),
   z.strictObject({ kind: z.literal('all_in_range'), rangeFeet: importedDistance }),
@@ -595,6 +595,8 @@ const formIdentifier = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,95}$/u);
 const formSenseSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('normal_sight') }),
   z.strictObject({ kind: z.literal('blindsight'), rangeFeet: importedPositiveDistance }),
+  z.strictObject({ kind: z.literal('darkvision'), rangeFeet: importedPositiveDistance }),
+  z.strictObject({ kind: z.literal('tremorsense'), rangeFeet: importedPositiveDistance }),
   z.strictObject({ kind: z.literal('truesight'), rangeFeet: importedPositiveDistance }),
 ]);
 const formAttackSchema = z.strictObject({
@@ -646,7 +648,7 @@ const declaredFormStatOverrideSchema: z.ZodType<DeclaredFormStatOverride> = z.st
     response: z.enum(['normal', 'resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune']),
   })).max(damageTypes.length),
   conditionImmunities: z.array(z.string().trim().min(1).max(1_000)).max(100),
-  senses: z.array(formSenseSchema).min(1).max(3)
+  senses: z.array(formSenseSchema).min(1).max(5)
     .refine((senses) => new Set(senses.map(({ kind }) => kind)).size === senses.length, {
       message: 'Form senses must use unique kinds.',
     }),
