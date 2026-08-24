@@ -7,6 +7,414 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D373 — OWNER: brainstorm round 2 — 18 rulings (2026-08-24)
+
+Second three-model brainstorm (codex sol + opus + fable, independent lists;
+synthesis and raw lists in the job tmp dir). Fork-class engine choices were
+filtered OUT per D352.3 (wildshape overlay-vs-swap, generic PendingDecision,
+projection typing) — those go to the private forks register, not owner
+questions. Rulings, in ask order:
+
+1. **Curation: curate NOW, disclose staleness.** The round proceeds with the
+   173/729 floor number explicitly flagged as converter-lagged (mappers never
+   taught the D351+ vocabulary); records presented may be mapper-blocked
+   rather than engine-blocked and are labeled as such.
+2. **Reaction prompts, draft-1: DM clicks, NON-BLOCKING TRAY.** Prompts stack
+   in a tray labeled with combatant + reaction; the DM resolves them in batch
+   before the turn advances. No suspended mid-action reducer state.
+3. **Hidden creatures: FOG-ONLY compromise.** A hidden creature's cell renders
+   as fogged on the shared board; no presenter tab this increment. (Accepted
+   tell: fog appearing where something hid.)
+4. **Reaction preferences (ask/always/never): SESSION-PERSISTENT,
+   per-encounter editable.** They join PartySessionState (D359-classified);
+   the tray logs what auto-fired.
+5. **Real party: NOT YET.** Representative party stands as the test vehicle;
+   the real roster arrives closer to the first real session.
+6. **Campaign persistence: autosave + export file, PLUS a BG3-style save
+   manager** — UI listing browser autosaves alongside file saves in a default
+   folder (File System Access API directory handle), with load/manage
+   operations. Owner-added requirement, verbatim intent: "save file manager
+   similar to bg3 where the browser saves to a default folder and there is a
+   ui to load and manage save files; show autosave browser saves as well as
+   file saves." Hidden/wildshape state must serialize from day one.
+7. **Long rest: modeled per 2024 RAW, DM-triggered** (full HP, half hit dice,
+   slots, exhaustion -1, per-long-rest features; cited). Interruption rules a
+   named deferred boundary.
+8. **Death: FULL RAW + DM override, plus a DM toggle hiding death-save roll
+   numbers from players** (dm_only when toggled; shared surface shows a save
+   happened, not the number). Override logs as a D357-style ruling card.
+   Death-reversal spells stay DM-fiat this increment.
+9. **BG3 public clones: CAPABILITY PARITY, PLAYABLE BUNDLE.** Clean-room
+   mechanics-checklist equivalents with independent maps/creatures/names,
+   shipped as playable bundled encounters. No shape/beat-for-beat cloning
+   publicly.
+10. **BG3-vs-SRD conflicts: SRD WINS as standing rule.** Every adopted
+    BG3-ism ships as a named optional rule defaulting off (high-ground
+    precedent generalized); supervisor registers each, owner batch-confirms.
+11. **Honour-Mode difficulty bar: CHECKLIST NOW, SIM LATER.** Clones ship
+    against a structural checklist; the sim-vs-encounter integration ruler is
+    a later lane.
+12. **Legendary operation: ENGINE PROMPTS THE DM at valid windows** (tray
+    entries for legendary-action windows and resistance spend-or-suffer;
+    uses tick down visibly).
+13. **Wildshape picker: RAW 2024 KNOWN FORMS** on the character sheet (count
+    by level, swappable on level-up); in-combat picker shows only those.
+14. **Player onboarding: BOTH build-your-PC flow (share-link, own device)
+    AND the one-page table guide, as one increment.**
+15. **DM tooling after the tray: ENCOUNTER TIMELINE / PACING controls**
+    (initiative timeline, next-event preview, skip/delay). Undo stays
+    panel-based repair for now.
+16. **BG3 provenance: ALL THREE LAYERS** — private inspiration dossier,
+    public rows plain original_homebrew with SRD comparables (zero BG3
+    traces), and a codex review per equivalent for "designable from public
+    sources alone" before landing.
+17. **Surfaces: FLAMMABLES + IGNITION CHAINING** — Web and Grease as
+    flammable surfaces, fire damage in-cell converts to burning with
+    SRD-cited damage. The water/cold/lightning interaction matrix is
+    PERMANENTLY EXCLUDED, owner's follow-up ruling verbatim: "I don't want
+    the water/cold/lightning interaction. It has no precedent in tabletop."
+    This is a Larian-only mechanic and does not become an optional rule
+    under D373.10 — it is out, not off-by-default.
+18. **Beast ladders: ON DEMAND above CR 6.** Higher-CR family members get
+    authored when a specific encounter needs one, inheriting signature-carry.
+
+## D372 — OWNER: clone parties both ways; Honour Mode target; curation resumes (2026-08-24)
+
+1. **Clone party = BOTH**: representative party first as the working
+   baseline, then SRD-approximated BG3-style builds with their guide
+   rotations as scripted turns (private repo).
+2. **Honour Mode is the clone target** — full legendary kits modeled;
+   feeds the queued legendary vocabulary.
+3. **Curation rounds RESUME in parallel** with the VTT thread; next
+   cluster drawn from the 2024-weighted floor blockers (the
+   ambiguous-parameters families suit the D354 template+spot-check
+   mechanism). Wish's two-round counter (D354.2) starts counting from
+   the first resumed round.
+
+## D371 — OWNER: surfaces enter combat via SRD text; BG3 corpus/legendary/high-ground rulings (2026-08-24)
+
+1. **Ground surfaces are IN-COMBAT vocabulary, and the SRD itself is
+   the template**: the owner pointed at the Web spell, and the SRD
+   states it verbatim — "The webs are flammable. Any 5-foot Cube of
+   webs exposed to fire burns away in 1 round, dealing 2d4 Fire damage
+   to any creature that starts its turn in the fire"
+   (docs/srd/full source; spell-descriptions.txt:8486-8489, verified).
+   So the surface vocabulary (area world-state per cell, ignition by
+   fire exposure, burn-away timing, start-of-turn damage) is
+   SRD-derived, not a BG3 import. R1/R6 STAND UNCHANGED for
+   carried/worn-adjacent object ignition. This surfaces lever slots
+   with/after the BG3 measurement round names its full shape.
+2. **BG3 clone corpus: the four Act-1 exemplars now** (Phase Spider
+   Matriarch, Grym, Githyanki Patrol, Goblin leaders), growing only
+   when a new encounter exercises mechanics these do not.
+3. **Legendary-monster vocabulary queued after detection** (legendary
+   actions between turns, legendary resistance charges — SRD boss
+   vocabulary; also serves the dungeon boss and the Grym clone).
+4. **High-ground modifiers: optional rule, DEFAULT OFF**, declared
+   per-campaign when elevation lands; SRD-RAW remains the default.
+
+## D370 — OWNER: BG3 becomes a private-repo source; exemplar encounter clones; hard licensing wall (2026-08-24)
+
+Extends D369. (1) The PRIVATE repo gains a **bg3 source alongside 2014
+and 2024**: scrape/import BG3 mechanics (spells, actions, statblocks,
+surfaces, reactions) from a website into the private corpus, run the
+converter over it, and measure. (2) **Exemplar BG3 encounters** —
+reconstructed from guides, detailed writeups, and videos of real
+encounters — become private test fixtures: clean-room CLONES of each
+encounter executed through the engine to exercise the mechanics
+(surfaces, verticality, reaction prompts, adds, environmental
+objects). (3) **!!IMPORTANT owner rule: BG3 material NEVER enters the
+public repo.** The private repo generates the clean-room SRD-shaped
+resources needed to build APPROXIMATE REPLICAS of BG3 encounters; only
+those clean-room equivalents may cross to public (same discipline as
+D59/D318 — the D367 CC-BY expansion does NOT cover BG3/Larian/wiki
+content). Engine gaps the encounters surface become public levers in
+SRD vocabulary (elevation, surface combos, etc. — the deferred
+register is the natural landing place).
+
+## D369 — OWNER: BG3 combat parity directive (2026-08-24)
+
+The VTT must be able to do what BG3's combat can do; the canonical
+example is the REACTION POPUP letting a player choose whether to spend
+their reaction (opportunity attack included). Supervisor parity audit:
+docs/design/bg3-combat-parity.md (draft, pending codex review in the
+next lane). Consequences folded into the queue: the reaction-prompt UI
+(per combatant x per reaction kind: ask/always/never) ships WITH the
+detection lever's OA trigger so the canonical example works end to end;
+movement-path provoke warnings follow as a board increment; elevation
+remains registered. OPEN OWNER QUESTION recorded in the audit: BG3's
+high-ground +2/-2 is a Larian houserule — adopt as an optional rule
+when elevation lands, or stay SRD-RAW.
+
+## D368 — OWNER: forks #15/#16 confirmed; no Moon-alike homebrew; OA joins detection (2026-08-24)
+
+1. **Fork #15 CONFIRMED** (beast mini-lever + stand-in signatures +
+   deferred-upgrade register, as landed).
+2. **Fork #16 resolved: Land druid is fine PERMANENTLY** — no homebrew
+   Moon-alike circle. The table's real Moon Druid arrives via private
+   imported content when they build it; the beast families remain the
+   wildshape form list and dungeon/summon bestiary.
+3. **Opportunity attacks join the detection lever** as a fifth closed
+   reaction trigger (movement out of melee reach provokes); Flyby then
+   upgrades automatically via the deferred-upgrade register.
+
+## D367 — OWNER: D59 wall expands to CC-BY 4.0 sources with per-source attribution (2026-08-24)
+
+The public repo's licensing wall (D59) widens from "SRD 5.2.1 only" to
+"CC-BY 4.0 licensed sources with per-source attribution": SRD 5.2.1,
+**WotC SRD 5.1** (2014 rules — Giant Ape, Triceratops, Tyrannosaurus,
+Plesiosaurus, Pteranodon, etc.), and the **A5E System Reference
+Document** (EN Publishing, a5esrd.com — includes the Monstrous
+Menagerie and its Beasts & Creatures section; attribution line: "This
+work includes material taken from the A5E System Reference Document
+(A5ESRD) by EN Publishing and available at A5ESRD.com, based on Level
+Up: Advanced 5th Edition, available at www.levelup5e.com."). Mechanics:
+each admitted source gets its license/attribution file under
+dist licenses, and statblock provenance names WHICH source each row
+derives from. Everything non-CC-BY (OGL-only, ORC, book content)
+remains outside the wall. The D366 beast families may now ADAPT this
+prior art, inventing only for true gaps.
+
+## D366 — OWNER: clean-room homebrew beast families for Moon Druid with powers carrying through CR (2026-08-24)
+
+Original homebrew beast FAMILIES ship as bundled public content fixing
+the known wildshape gaps (2014 was bad, 2024 only somewhat better):
+bears, spiders, dinosaurs (land AND flying), aquatic, birds, and kin —
+each family with a FULL CR ladder aligned to the 2024 Moon Druid
+unlocks (CR 1/4, 1/2, 1, 2, 3, 4, 5, 6 = druid levels 2-18) and
+SIGNATURE FAMILY POWERS THAT CARRY AND SCALE through the ladder (a
+spider druid stays a spider at CR 5; web/poison grow instead of
+vanishing). Research basis: guides' gap list — flying thin at usable
+CRs (fly unlocks druid level 8), aquatic thin (swim unlocks level 4),
+themes stop scaling (no big spider/bear/bird). Clean-room: ORIGINAL
+statblocks, no non-SRD reproduction; balance anchored to named SRD
+comparables at the same CR; provenance records the comparable anchors
+(a new provenance kind beside SRD line-span citations). Queued behind
+the adventuring-day lane (one codex lane at a time — box saturation).
+
+## D365 — OWNER: bundled sample dungeon; representative acceptance party; wildshape after detection (2026-08-24)
+
+1. **A four-room sample dungeon ships as bundled content** (SRD
+   monsters, maps, walls, fog, placement) — the D361 acceptance run is
+   reproducible and doubles as the demo encounter chain; the DM can
+   edit it live.
+2. **The acceptance party is representative, built through the app**:
+   Warlock (short-rest slots), Moon Druid (wildshape), a martial, a
+   prepared caster — replaced by the real table's characters whenever
+   they build them.
+3. **Wildshape (forms + beast registry through the Druid feature)
+   queues AFTER the detection lever**, preserving D361's confirmed
+   order: adventuring-day -> detection -> wildshape.
+
+## D364 — OWNER: summon statblocks stored as monsters with a spell mapping table; 2014 summons ignored; CR 1-5 beasts for Moon Druids (2026-08-23)
+
+1. **2014 summons are ignored for now** (consistent with the D363.1
+   2024 table).
+2. **Spell-companion statblocks are stored AS MONSTERS** in the
+   ordinary monster registry — no special spell-embedded statblock
+   representation — with a **mapping table linking monster ids to
+   spell ids** so the summon operation resolves its companion block
+   through the registry. Applies to both classes: SRD-decodable
+   companions (2024 find-steed's Otherworldly Steed, giant-insect,
+   animate-objects — public, citation-per-row) and non-SRD spirit
+   blocks (Summon Beast/Fey/Undead/Aberration/Celestial/Construct/
+   Elemental — arrive via private imported packs' monster surface with
+   the mapping carried in the pack).
+3. **The monster bundle must include CR 1-5 BEASTS for Moon Druid
+   wildshape** — SRD beast decode across CR 1/8-5 extending the
+   wild_beasts family, same citation discipline as the starter roster.
+4. **(Owner amendment)** The MonsterStatblock representation may be
+   REFACTORED to support summon companions that scale with PLAYER
+   STATS: registry entries are either static statblocks or
+   caster-parameterized templates closing over a typed CasterContext
+   (spell save DC, spell attack bonus, ability modifier, slot level)
+   at summon time; instantiating a template without its context must
+   fail to compile.
+
+## D363 — OWNER: table plays 2024; short rests in first adventuring-day increment; SRD monster bundle plus homebrew families (2026-08-23)
+
+1. The owner's table plays **2024**: the four-room dungeon locks to
+   2024 (D358), and the play-value floor (D352.2) weights the 2024
+   records.
+2. The first adventuring-day increment INCLUDES short rests: hit-dice
+   spending, short-rest slot recovery (Warlock), and per-short-rest
+   features, alongside cross-room persistence.
+3. Monsters: the SRD 5.2.1 monster statblocks become a BUNDLED content
+   pack (CC-BY, in-license), and HOMEBREW MONSTER FAMILIES fill any
+   gaps (owner recalls existing homebrew monster families — locate and
+   reuse before authoring new ones). Unblocks the 22 summon-blocked
+   floor records and supplies the dungeon bestiary.
+
+## D362 — OWNER: overlay is owner-only forever; transcript/cost defaults (2026-08-23)
+
+The curation overlay stays the owner's editorial layer permanently: no
+author field, no DM-facing ruling entry. The table DM's live
+adjudications stay verbal/session-local and never enter the data.
+Supervisor defaults accepted alongside: AI-table transcripts and
+replays are local-only unless explicitly exported; any codex-driven
+table controller states a per-session budget before running.
+
+## D361 — OWNER: the four-room dungeon requirement; queue prune; walk reframed (2026-08-23)
+
+1. **V1 acceptance scenario (owner: "I need"): run a FOUR-ROOM DUNGEON
+   where player resources do NOT reset between rooms.** Party state —
+   current HP, spent spell slots, used per-rest features, consumables —
+   persists across a chain of encounters in one session. This extends
+   the D352.1 PC bridge (which currently spawns fresh profiles per
+   encounter) with a party-session state layer feeding each next room.
+   Sequencing CONFIRMED BY OWNER (rejecting the supervisor's
+   dungeon-first proposal): D359 seam audit stays first, then the
+   adventuring-day increment, then the D355 detection lever.
+2. **Stale tail pruned** from the standing brief: mutshard shards 2-8
+   rerun, order-dependence campaign, walkthrough specs 11-12 dropped
+   (revivable by asking). wt/s7 findings doc merge and the 28MB tracked
+   cache cleanup remain someday-items.
+3. **D286 stranger walk reframed as player onboarding**: a player at
+   the owner's table builds a character and joins an encounter via the
+   PC bridge, on :4173 once the current build serves.
+4. Discord portal steps stay live on the owner's list.
+
+## D360 — OWNER: errata drift voids rulings at cited-clause granularity (2026-08-23)
+
+Ruling digests upgrade from whole-description to CITED-CLAUSE pins: a
+ruling names the specific clause it interprets, and only a text change
+touching that clause voids it (hard refuse until re-ruled); unrelated
+rewording carries silently. Back-fill from the clause quotes existing
+rulings already carry. Supersedes the whole-text digest reading of
+D340.2 once the schema upgrade lands; until then D340.2 behavior
+stands.
+
+## D359 — OWNER: full view-seam audit lane BEFORE the detection lever (2026-08-23)
+
+A dedicated lane introduces DM-visible vs player-visible PROJECTION
+TYPES (DmView / PlayerView-per-seat) and migrates EVERY existing
+surface — fog, dice log, OOC log cards, session persistence, board
+rendering — before the D355 detection lever starts. No transport, no
+player UI: the deliverable is that a feature leaking hidden state to a
+player view FAILS TO COMPILE. Queue order becomes: view-seam audit ->
+detection lever (built against the projection types from day one) ->
+board increments (D357 OOC cards, reaction toggle, D358 edition lock
+can ride along where natural).
+
+## D358 — OWNER: dual-edition stays; encounters lock to one edition (2026-08-23)
+
+Both 2014 and 2024 remain curated and measured. An encounter/campaign
+LOCKS to one edition, ENGINE-ENFORCED: a record from the other edition
+refuses to load into a locked encounter with a typed refusal naming the
+edition mismatch. Queued as an engine increment (small — records
+already carry their edition); the type-level expression should make a
+mixed-edition encounter unrepresentable or refused, per the project's
+wrong-program-fails-to-compile principle.
+
+## D357 — OWNER: OOC records get a DM log card carrying ruling text (2026-08-23)
+
+Out-of-combat / table-adjudicated records become VISIBLE-BUT-UNMODELED
+in the VTT: casting one renders a DM-facing log card carrying the
+ruling's one-line adjudication text (e.g. "Dream — table-adjudicated:
+narrative delivery; nightmare rider resolves at wake during rest").
+Every future OOC ruling includes that DM-facing sentence at creation;
+the existing OOC corpus (~118 floor records) is back-filled by codex-
+drafted template text with owner spot-check per the D354 mechanism.
+Queued as a board increment (after the detection lever, or bundled with
+another board increment); the ruling-text drafting can start sooner.
+
+## D356 — OWNER: capability wins over capability-driven rulings (2026-08-23)
+
+When a landed capability makes a scoped-out record expressible:
+CAPABILITY-DRIVEN rulings (scoped out because the engine could not
+express it) AUTO-RE-ENTER the denominator/queue when the capability
+lands; PREFERENCE rulings (R-param values, deliberate
+table-adjudication choices) stand until the owner rescinds. The
+supervisor classifies each existing ruling (R1-R20) into
+capability-driven vs preference and records the tag in the private
+rulings doc; future rulings carry the tag at creation. The
+binding-determination 154 hold follows the same rule: mapper
+improvement reaching them re-enters them automatically, no separate
+ruling needed.
+
+## D355 — OWNER: full detection vocabulary as one lever, next in queue (2026-08-23)
+
+The detection/hiding lever ships as the FULL vocabulary in one lane —
+Hide action, Invisible condition, Stealth contests as opposed actions,
+active Search, Passive Perception thresholds, unseen-attacker adv/dis,
+light levels, exploration-mode detection — touching the senses code
+once rather than twice. Queued as the next engine lever after the
+PC-bridge increment closes. Unblocks 2024:enthrall (D351.3) and
+mind-spike; builds on the D351 roll-mode grants and the landed
+senses/obscurement vocabulary.
+
+## D354 — OWNER: R-param scales via templates with spot-check; Wish waits (2026-08-23)
+
+Brainstorm Q&A rulings: (1) R-param approval for the
+parameter-determination 460 uses PATTERN TEMPLATES — the owner approves
+a template sentence plus its digest-pinned record list in one ruling and
+records inherit with provenance — WITH SPOT-CHECK: each template batch
+presents 3-4 randomly sampled records in full before approval, and a
+miss rejects the whole batch back to per-record review. Floor-weighted
+slice (D352.2) first. (2) Wish (D350) stays queued: owner chose "wait
+for more rounds"; supervisor re-presents after the next two curation
+rounds land.
+
+## D353 — OWNER: D59 fixture policy — generalized homebrew publicly, real exemplars privately (2026-08-23)
+
+Public-repo tests for mechanics whose exemplars are non-SRD spells use
+INVENTED HOMEBREW SPELLS THAT GENERALIZE the mechanic, not disguised
+copies: for a "flat AC bonus downgrading after movement" exemplar, the
+public fixture family covers "condition/benefit X that changes after
+event Y" across the combination space (moving, attacking, a creature
+entering a space, entering a creature's space, ...; the benefit need
+not be AC, need not be flat). Briefs to codex must ask for this breadth
+explicitly. Non-SRD spell names, text, and stat lines never appear in
+public files (today's supervisor scrub ratified). ADDITIONALLY the
+private repo carries exemplar tests using the REAL published spells
+against the public engine (private may read public). Queued: a private
+exemplar-test increment for the D351 rollmod lever; future levers ship
+both halves.
+
+## D352 — OWNER: v1 definition, play-value coverage floor, standing delegation (2026-08-23)
+
+Answers to the three-model brainstorm's top tier:
+
+1. **V1 is a personal tool for the owner's table**: players build
+   characters and play them on the VTT with their DM controlling.
+   Priority consequence: the character-build -> play-on-VTT loop (PC
+   integration, in-combat vocabulary like detection/hiding, table UX)
+   outranks raw coverage counts and distribution/licensing surfaces.
+2. **Coverage is gated by a play-value floor, not a raw percentage**:
+   spells a real level 1-10 party would actually cast must execute; the
+   long tail may refuse honestly. Operational first cut (supervisor):
+   SRD spells of spell level 0-5 form the floor universe; the lever
+   value function weights by that set.
+3. **Supervisor-choice-pending-confirmation is STANDING** (D348's
+   overnight mechanism made permanent): the supervisor chooses among
+   defensible engine-fork options, records them in the register as
+   pending-confirmation, and batches them for owner confirmation.
+   Conservative scope until the owner widens it: fork-class choices
+   only — R-param values, scope-outs, and denominator changes remain
+   owner-only.
+
+## D351 — OWNER: roll/defense-modifier lever authorized; Dream OOC; two no-rulings (2026-08-23)
+
+Roll/defense curation round 1 (four AskUserQuestion rulings):
+
+1. **Roll/defense-modifier engine lever dispatched now.** The ~18
+   fully-stated records of the 22-record cluster (Bless, Bane, Shield of
+   Faith, Guidance, Resistance, True Strike, Foresight, Circle of Power,
+   Protection from Energy, Stoneskin, Fortune's Favor, Compelled Duel,
+   Tortoise Shell, Elminster's pair, Antagonize's fallback clause, etc.)
+   need no owner value — they need vocabulary for flat AC/attack/save
+   bonuses, d4-style die riders, and advantage/disadvantage grants, each
+   with scope + eligibility + duration. Same per-lever pipeline as
+   D348.1, per-lever merge to main per D344.4 (browser suite now in the
+   gate set).
+2. **2014:dream — whole-record out-of-combat** (R20 in the private
+   rulings doc, clause digest there). Denominator 814 -> 813.
+3. **2024:enthrall — no scope-out**: stays engine-blocked on the
+   detection/hidden vocabulary; the -10 Passive Perception is a real
+   combat mechanic once hiding lands.
+4. **2014:dispel-evil-and-good — no R5 split**: whole record waits on
+   its three levers; no denominator change.
+
 ## D350 — OWNER: Wish duplicates any spell of level 8 or lower (2026-08-23)
 
 Curation-round directive (R19 exception): Wish's basic use becomes a real
