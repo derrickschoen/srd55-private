@@ -8,6 +8,7 @@ import type { LoadedPartyMember } from './party-pack';
 import {
   createPartySessionState,
   enterNextRoom as advancePartyRoom,
+  type LongRestResult,
   type PartySessionState,
   type ShortRestHitDieSpend,
   type ShortRestResult,
@@ -128,6 +129,13 @@ export class AdventuringDaySession {
 
   shortRest(spends: readonly ShortRestHitDieSpend[]): ShortRestResult {
     const result = this.journal.takeShortRest(spends);
+    this.#partyState = result.state;
+    return structuredClone(result);
+  }
+
+  finishAdventuringDay(): LongRestResult {
+    this.#partyState = this.journal.capturePartyState();
+    const result = this.journal.takeLongRest();
     this.#partyState = result.state;
     return structuredClone(result);
   }
