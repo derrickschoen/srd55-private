@@ -75,7 +75,7 @@ export type EncounterCommand =
   | {
       readonly type: 'resolve_pending_decision';
       readonly decisionId: string;
-      readonly optionId: 'accept' | 'decline' | 'roll';
+      readonly optionId: string;
     }
   | {
       readonly type: 'set_hide_death_save_rolls';
@@ -381,21 +381,50 @@ export type EncounterEvent =
           readonly reactionKind: 'opportunity_attack';
         }
       | { readonly kind: 'death_save' }
+      | { readonly kind: 'legendary_action_window' }
+      | { readonly kind: 'legendary_resistance' }
     ))
   | (SequencedEvent & {
       readonly type: 'pending_decision_resolved';
       readonly decisionId: string;
       readonly combatant: CombatantId;
-      readonly kind: 'reaction_offer' | 'death_save';
-      readonly optionId: 'accept' | 'decline' | 'roll';
+      readonly kind: 'reaction_offer' | 'death_save' | 'legendary_action_window' | 'legendary_resistance';
+      readonly optionId: string;
     })
   | (SequencedEvent & {
       readonly type: 'reaction_policy_auto_resolved';
       readonly combatant: CombatantId;
-      readonly reactionKind: 'opportunity_attack';
+      readonly reactionKind: 'opportunity_attack' | 'legendary_resistance';
       readonly policy: 'always' | 'never';
       readonly resolution: 'accept' | 'decline';
       readonly autoFired: boolean;
+    })
+  | (SequencedEvent & {
+      readonly type: 'legendary_action_used';
+      readonly combatant: CombatantId;
+      readonly actionId: string;
+      readonly cost: number;
+      readonly remaining: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'legendary_action_pool_refreshed';
+      readonly combatant: CombatantId;
+      readonly remaining: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'legendary_action_window_closed';
+      readonly combatant: CombatantId;
+      readonly activeCombatant: CombatantId;
+      readonly round: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'legendary_resistance_used';
+      readonly combatant: CombatantId;
+      readonly source: CombatantId;
+      readonly ability: Ability;
+      readonly originalOutcome: 'failure';
+      readonly convertedOutcome: 'success';
+      readonly remaining: number;
     })
   | (SequencedEvent & {
       readonly type: 'persistent_area_created';

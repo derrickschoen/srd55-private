@@ -3,7 +3,7 @@ import type { CharacterSheet } from '../queries/character-sheet-builder';
 import type { CombatFeatureEffect } from './effects';
 import type { GridCell } from './grid';
 import type { DamageResponse } from './resolution';
-import type { CombatSense, MonsterStatblock } from './statblock';
+import type { CombatSense, MonsterLegendaryAction, MonsterStatblock } from './statblock';
 import {
   armorClass,
   combatantId,
@@ -57,6 +57,12 @@ export interface CombatRulesProfile {
   readonly limitedResources?: readonly LimitedResourceCapacity[];
   readonly featureEffects?: readonly CombatFeatureEffect[];
   readonly skillBonuses?: Readonly<Partial<Record<Skill, number>>>;
+  readonly legendary?: {
+    readonly actionUsesMaximum: number;
+    readonly actions: readonly MonsterLegendaryAction[];
+    readonly resistanceUsesMaximum: number;
+  };
+  readonly magicResistance?: true;
 }
 
 export interface LimitedResourceCapacity {
@@ -247,6 +253,26 @@ export function monsterCombatantProfile(
               return skills.includes(normalized as Skill) ? [[normalized, skill.bonus]] : [];
             })) as Readonly<Partial<Record<Skill, number>>>,
           }
+        : {}),
+      ...(statblock.sourceDetails.legendaryActions.kind === 'absent' &&
+        statblock.sourceDetails.legendaryResistance.kind === 'absent'
+        ? {}
+        : {
+            legendary: {
+              actionUsesMaximum: statblock.sourceDetails.legendaryActions.kind === 'present'
+                ? statblock.sourceDetails.legendaryActions.value.maximumUses
+                : 0,
+              actions: statblock.sourceDetails.legendaryActions.kind === 'present'
+                ? statblock.sourceDetails.legendaryActions.value.actions
+                : [],
+              resistanceUsesMaximum: statblock.sourceDetails.legendaryResistance.kind === 'present'
+                ? statblock.sourceDetails.legendaryResistance.value.maximumUses
+                : 0,
+            },
+          }),
+      ...(statblock.sourceDetails.traits.kind === 'present' &&
+        statblock.sourceDetails.traits.value.some((trait) => trait.kind === 'magic_resistance')
+        ? { magicResistance: true as const }
         : {}),
     },
   };

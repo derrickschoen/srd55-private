@@ -201,3 +201,79 @@ export const WOLF = monsterStatblock({
     actions: [{ ...melee('bite', 'Bite', 4, 5, 1, 6, 2, 'Piercing'), onHit: [{ kind: 'condition', condition: 'Prone', trigger: { kind: 'always' }, target: { maximumSize: 'Medium', excludedKinds: [] }, savingThrow: null, escapeDc: null, duration: null }] }], bonusActions: notListed('bonus actions'), reactions: notListed('reactions'),
   },
 });
+
+const unicornAbilities = abilityLines([18, 4, 4], [14, 2, 2], [15, 2, 2], [11, 0, 0], [17, 3, 3], [16, 3, 3]);
+const unicornHooves = melee('hooves', 'Hooves', 7, 11, 2, 6, 4, 'Bludgeoning');
+const unicornRadiantHorn = melee('radiant-horn', 'Radiant Horn', 7, 9, 1, 10, 4, 'Radiant');
+
+/** Complete SRD 5.2.1 legendary exemplar: docs/srd/full/srd-5.2.1.txt:21945-22009. */
+export const UNICORN = monsterStatblock({
+  id: 'statblock:unicorn', name: 'Unicorn', armorClass: 12, hitPointMaximum: 97, speedFeet: 50, initiativeBonus: 8,
+  savingThrowBonuses: { strength: 4, dexterity: 2, constitution: 2, intelligence: 0, wisdom: 3, charisma: 3 },
+  attacksPerAction: 2, damageResponses: [{ type: 'Poison', response: 'immune' }],
+  conditionImmunities: ['Charmed', 'Paralyzed', 'Poisoned'], usesDeathSaves: false,
+  sourceDetails: {
+    ...baseDetails(
+      [{ path: SRD_PATH, lineStart: 21945, lineEnd: 22009 }],
+      { sizes: ['Large'], type: 'Celestial', subtype: null, alignment: 'Lawful Good' },
+      { rating: 5, experiencePoints: 1_800, proficiencyBonus: 3 },
+      { count: 13, sides: 10, modifier: 26 }, 50, unicornAbilities,
+    ),
+    skills: notListed('skills'), gear: notListed('gear'),
+    senses: present([{ kind: 'darkvision', rangeFeet: 60 }]), passivePerception: 13,
+    languages: present([
+      { kind: 'named', name: 'Celestial', canSpeak: true },
+      { kind: 'named', name: 'Elvish', canSpeak: true },
+      { kind: 'named', name: 'Sylvan', canSpeak: true },
+      { kind: 'telepathy', rangeFeet: 120 },
+    ]),
+    damageResponses: present([{ type: 'Poison', response: 'immune' }]),
+    conditionImmunities: present(['Charmed', 'Paralyzed', 'Poisoned']),
+    traits: present([{ kind: 'magic_resistance', advantageOn: 'spells_and_magical_effects' }]),
+    actions: [
+      { kind: 'multiattack', id: 'multiattack', count: 2, actionIds: ['hooves', 'radiant-horn'], combination: 'fixed' },
+      unicornHooves,
+      unicornRadiantHorn,
+      {
+        kind: 'spellcasting', id: 'spellcasting', actionEconomy: 'action', ability: 'charisma',
+        saveDc: present(14), spellAttackBonus: notListed('a spell attack bonus for the Unicorn'),
+        spells: [
+          { id: 'detect-evil-and-good', availability: 'at_will', manifestStatus: 'implemented' },
+          { id: 'druidcraft', availability: 'at_will', manifestStatus: 'not_in_manifest' },
+          { id: 'calm-emotions', availability: '1_per_day', manifestStatus: 'implemented' },
+          { id: 'dispel-evil-and-good', availability: '1_per_day', manifestStatus: 'not_in_manifest' },
+          { id: 'entangle', availability: '1_per_day', manifestStatus: 'implemented' },
+          { id: 'pass-without-trace', availability: '1_per_day', manifestStatus: 'implemented' },
+          { id: 'word-of-recall', availability: '1_per_day', manifestStatus: 'not_in_manifest' },
+        ],
+      },
+    ],
+    bonusActions: present([{
+      kind: 'spell_choice', id: 'unicorns-blessing', name: 'Unicorn’s Blessing', uses: 3,
+      recharge: 'day', ability: 'charisma',
+      spells: [
+        { id: 'cure-wounds', availability: 'shared_3_per_day', manifestStatus: 'implemented' },
+        { id: 'lesser-restoration', availability: 'shared_3_per_day', manifestStatus: 'implemented' },
+      ],
+    }]),
+    reactions: notListed('reactions'),
+    legendaryResistance: present({ maximumUses: 3, recharge: 'day', conversion: 'failed_save_to_success' }),
+    legendaryActions: present({
+      maximumUses: 3,
+      refresh: 'start_of_each_turn',
+      window: 'after_another_creature_turn',
+      actions: [
+        {
+          kind: 'move_and_attack', id: 'charging-horn', name: 'Charging Horn', cost: 1,
+          movement: 'half_speed', avoidsOpportunityAttacks: true, attackId: 'radiant-horn',
+        },
+        {
+          kind: 'temporary_defense', id: 'shimmering-shield', name: 'Shimmering Shield', cost: 1,
+          target: 'self_or_visible_creature', rangeFeet: 60,
+          temporaryHitPoints: { count: 3, sides: 6, modifier: 0 }, temporaryHitPointsAverage: 10,
+          armorClassBonus: 2, expiresAt: 'end_of_monster_next_turn',
+        },
+      ],
+    }),
+  },
+});

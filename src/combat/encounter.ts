@@ -42,13 +42,16 @@ import type {
   TurnBoundary,
 } from './effects';
 import type { EncounterCommand, EncounterEvent } from './events';
+import { monsterAttackCommand } from './monster-commands';
 import {
+  adjacentCells,
   gridDistance,
   isCellInside,
   type GridBounds,
   type GridCell,
 } from './grid';
 import {
+  findPath,
   planMovement,
   spendMovement,
   startTurnMovement,
@@ -102,6 +105,7 @@ import type {
   MonsterAction,
   MonsterDamageTrigger,
   MonsterEffectDuration,
+  MonsterLegendaryAction,
   MonsterOnHitEffect,
 } from './statblock';
 import { lookupBundledMonster } from './statblocks/companions';
@@ -201,6 +205,12 @@ export interface EncounterCombatantState {
   readonly form?: FormReplacementState;
   readonly spellSlots: readonly SpellSlotState[];
   readonly limitedResources?: readonly LimitedResourceState[];
+  readonly legendary?: {
+    readonly actionUsesMaximum: number;
+    readonly actionUsesRemaining: number;
+    readonly resistanceUsesMaximum: number;
+    readonly resistanceUsesRemaining: number;
+  };
 }
 
 /**
@@ -266,6 +276,8 @@ export const REACTION_KINDS = [
   'opportunity_attack',
 ] as const;
 export type ReactionKind = (typeof REACTION_KINDS)[number];
+export const DECISION_POLICY_KINDS = [...REACTION_KINDS, 'legendary_resistance'] as const;
+export type DecisionPolicyKind = (typeof DECISION_POLICY_KINDS)[number];
 export type ReactionPolicy = 'ask' | 'always' | 'never';
 
 export interface HiddenCombatant {
@@ -275,7 +287,7 @@ export interface HiddenCombatant {
 }
 
 export interface PendingDecisionOption {
-  readonly id: 'accept' | 'decline' | 'roll';
+  readonly id: string;
   readonly label: string;
 }
 
@@ -306,11 +318,37 @@ export type PendingDecision =
   | (PendingDecisionBase & {
       readonly kind: 'death_save';
       readonly options: readonly [PendingDecisionOption & { readonly id: 'roll' }];
+    })
+  | (PendingDecisionBase & {
+      readonly kind: 'legendary_action_window';
+      readonly options: readonly [
+        ...(PendingDecisionOption & { readonly id: `legendary_action:${string}` })[],
+        PendingDecisionOption & { readonly id: 'pass' },
+      ];
+    })
+  | (PendingDecisionBase & {
+      readonly kind: 'legendary_resistance';
+      readonly options: readonly [
+        PendingDecisionOption & { readonly id: 'spend' },
+        PendingDecisionOption & { readonly id: 'suffer' },
+      ];
+      readonly failedSave: {
+        readonly source: CombatantId;
+        readonly ability: Ability;
+        readonly dc: number;
+        readonly original: ReturnType<typeof resolveSavingThrow>;
+        readonly effectId: EncounterEffectId | null;
+      };
+      readonly checkpoint: {
+        readonly subject: EncounterCombatantState;
+        readonly tokenPosition: GridCell | null;
+        readonly effects: readonly EncounterEffect[];
+      };
     });
 
 export interface CombatantReactionPolicy {
   readonly combatant: CombatantId;
-  readonly reactionKind: ReactionKind;
+  readonly reactionKind: DecisionPolicyKind;
   readonly policy: ReactionPolicy;
 }
 
@@ -654,8 +692,8 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     'Reaction policies',
   );
   for (const policy of reactionPolicies) {
-    if (!profileIds.has(policy.combatant) || !REACTION_KINDS.includes(policy.reactionKind)) {
-      throw new EncounterRuleError('A Reaction policy must name a combatant and closed Reaction kind in this encounter.');
+    if (!profileIds.has(policy.combatant) || !DECISION_POLICY_KINDS.includes(policy.reactionKind)) {
+      throw new EncounterRuleError('A decision policy must name a combatant and closed policy kind in this encounter.');
     }
   }
 
@@ -790,6 +828,16 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
             limitedResources: profile.rules.limitedResources.map(
               (pool) => ({ ...pool, remaining: pool.maximum }),
             ),
+          }),
+      ...(profile.rules.legendary === undefined
+        ? {}
+        : {
+            legendary: {
+              actionUsesMaximum: profile.rules.legendary.actionUsesMaximum,
+              actionUsesRemaining: profile.rules.legendary.actionUsesMaximum,
+              resistanceUsesMaximum: profile.rules.legendary.resistanceUsesMaximum,
+              resistanceUsesRemaining: profile.rules.legendary.resistanceUsesMaximum,
+            },
           }),
     })),
     tokens: setup.tokens.map((token) => ({ ...token, position: { ...token.position } })),
@@ -1831,8 +1879,12 @@ function saveRollMode(
   target: CombatantId,
   ability: Ability,
   base: RollMode,
+  cause: RollCause,
 ): RollMode {
   const modes: RollMode[] = [base];
+  if (cause === 'spell_or_magical_effect' && combatant(state, target).profile.rules.magicResistance === true) {
+    modes.push('advantage');
+  }
   for (const effect of state.effects) {
     if (
       effect.targets.includes(target) &&
@@ -2465,14 +2517,109 @@ function resolveTargetSave(
             ),
           dc: difficultyClass(dc),
           rollMode: combineRollModes([
-            saveRollMode(context.state, target, ability, mode), ...modifierModes.modes,
+            saveRollMode(context.state, target, ability, mode, cause), ...modifierModes.modes,
           ]),
         },
         context.rng,
       );
   endEffects(context, modifierModes.consumed, 'trigger_consumed');
   emit(context, { type: 'save_resolved', source, target, ability, dc, save, effectId });
+  const afterRoll = combatant(context.state, target);
+  if (
+    save.outcome === 'failure' &&
+    afterRoll.life === 'living' &&
+    (afterRoll.legendary?.resistanceUsesRemaining ?? 0) > 0
+  ) {
+    const policy = reactionPolicyFor(context.state, target, 'legendary_resistance');
+    if (policy === 'always') {
+      emit(context, {
+        type: 'reaction_policy_auto_resolved', combatant: target,
+        reactionKind: 'legendary_resistance', policy, resolution: 'accept', autoFired: true,
+      });
+      spendLegendaryResistance(context, target, source, ability);
+      return { ...save, outcome: 'success' };
+    }
+    if (policy === 'never') {
+      emit(context, {
+        type: 'reaction_policy_auto_resolved', combatant: target,
+        reactionKind: 'legendary_resistance', policy, resolution: 'decline', autoFired: false,
+      });
+      return save;
+    }
+    const decisionId = `decision:${String(context.state.nextDecisionSequence)}`;
+    const subjectToken = context.state.tokens.find((candidate) => candidate.combatantId === target);
+    const checkpointEffects = context.state.effects.filter((candidate) =>
+      candidate.source === target || candidate.targets.includes(target) || candidate.concentrationOwner === target);
+    const decision: PendingDecision = {
+      id: decisionId,
+      combatant: target,
+      kind: 'legendary_resistance',
+      options: [
+        { id: 'spend', label: 'Spend Legendary Resistance' },
+        { id: 'suffer', label: 'Suffer the Failure' },
+      ],
+      boundary: {
+        activeCombatant: context.state.activeCombatant ?? source,
+        round: context.state.round,
+      },
+      failedSave: { source, ability, dc, original: save, effectId },
+      checkpoint: {
+        subject: structuredClone(afterRoll),
+        tokenPosition: subjectToken === undefined ? null : { ...subjectToken.position },
+        effects: structuredClone(checkpointEffects),
+      },
+    };
+    context.state = {
+      ...context.state,
+      nextDecisionSequence: context.state.nextDecisionSequence + 1,
+      pendingDecisions: [...context.state.pendingDecisions, decision],
+    };
+    emit(context, {
+      type: 'pending_decision_queued', decisionId, combatant: target, kind: 'legendary_resistance',
+    });
+  }
   return save;
+}
+
+function spendLegendaryResistance(
+  context: ReductionContext,
+  target: CombatantId,
+  source: CombatantId,
+  ability: Ability,
+  checkpoint?: Extract<PendingDecision, { readonly kind: 'legendary_resistance' }>['checkpoint'],
+): void {
+  const current = combatant(context.state, target);
+  const legendary = current.legendary;
+  if (legendary === undefined || legendary.resistanceUsesRemaining < 1) {
+    throw new PendingDecisionRuleError('unknown_decision');
+  }
+  if (checkpoint !== undefined) {
+    const touchesTarget = (effect: EncounterEffect): boolean =>
+      effect.source === target || effect.targets.includes(target) || effect.concentrationOwner === target;
+    context.state = {
+      ...context.state,
+      effects: [
+        ...context.state.effects.filter((effect) => !touchesTarget(effect)),
+        ...structuredClone(checkpoint.effects),
+      ].sort((left, right) => left.createdRevision - right.createdRevision || String(left.id).localeCompare(String(right.id))),
+      tokens: context.state.tokens.map((candidate) =>
+        candidate.combatantId === target && checkpoint.tokenPosition !== null
+          ? { ...candidate, position: { ...checkpoint.tokenPosition } }
+          : candidate),
+    };
+  }
+  const restored = checkpoint?.subject ?? current;
+  const restoredLegendary = restored.legendary;
+  if (restoredLegendary === undefined) throw new PendingDecisionRuleError('unknown_decision');
+  const remaining = legendary.resistanceUsesRemaining - 1;
+  context.state = replaceCombatant(context.state, {
+    ...restored,
+    legendary: { ...restoredLegendary, resistanceUsesRemaining: remaining },
+  });
+  emit(context, {
+    type: 'legendary_resistance_used', combatant: target, source, ability,
+    originalOutcome: 'failure', convertedOutcome: 'success', remaining,
+  });
 }
 
 function concentrationCheck(
@@ -3296,7 +3443,7 @@ function processSearch(
 function reactionPolicyFor(
   state: EncounterState,
   combatantId: CombatantId,
-  reactionKind: ReactionKind,
+  reactionKind: DecisionPolicyKind,
 ): ReactionPolicy {
   return state.reactionPolicies.find((entry) =>
     entry.combatant === combatantId && entry.reactionKind === reactionKind)?.policy ?? 'ask';
@@ -3358,6 +3505,148 @@ function queueOpportunityAttack(
     type: 'pending_decision_queued', decisionId: id, combatant: reactor,
     kind: 'reaction_offer', reactionKind: 'opportunity_attack',
   });
+}
+
+function legendaryActionTarget(state: EncounterState, actor: CombatantId): CombatantId | null {
+  if (!isCombatantOnBoard(state, actor)) return null;
+  const origin = token(state, actor).position;
+  return state.combatants
+    .filter((candidate) =>
+      candidate.profile.id !== actor && candidate.life === 'living' &&
+      isCombatantOnBoard(state, candidate.profile.id) &&
+      !combatantsAreAllies(state, actor, candidate.profile.id))
+    .sort((left, right) =>
+      gridDistance(origin, token(state, left.profile.id).position) -
+        gridDistance(origin, token(state, right.profile.id).position) ||
+      String(left.profile.id).localeCompare(String(right.profile.id)))[0]?.profile.id ?? null;
+}
+
+function moveForLegendaryAction(
+  context: ReductionContext,
+  actor: CombatantId,
+  target: CombatantId,
+  action: Extract<MonsterLegendaryAction, { readonly kind: 'move_and_attack' }>,
+): void {
+  const start = token(context.state, actor).position;
+  const targetPosition = token(context.state, target).position;
+  const maximumCost = feet(action.movement === 'half_speed'
+    ? Math.floor(combatant(context.state, actor).profile.rules.speed / 2)
+    : combatant(context.state, actor).profile.rules.speed);
+  const candidates = adjacentCells(context.state.bounds, targetPosition)
+    .filter((cell) => !context.state.tokens.some((candidate) =>
+      candidate.combatantId !== actor && cellKey(candidate.position) === cellKey(cell)))
+    .map((goal) => findPath(encounterMovementWorld(context.state), { actorId: actor, start, goal, maximumCost }))
+    .filter((result) => result.kind === 'found')
+    .sort((left, right) => left.cost - right.cost || left.cells.length - right.cells.length);
+  const path = candidates[0];
+  if (gridDistance(start, targetPosition) <= combatant(context.state, actor).profile.rules.reach) return;
+  if (path === undefined || path.kind !== 'found') {
+    throw new EncounterRuleError(`Legendary Action ${action.id} cannot reach an enemy.`);
+  }
+  for (const step of path.cells) {
+    context.state = {
+      ...context.state,
+      tokens: context.state.tokens.map((candidate) => candidate.combatantId === actor
+        ? { ...candidate, position: { ...step } }
+        : candidate),
+    };
+    processEnteredCell(context, actor);
+    if (combatant(context.state, actor).life !== 'living') break;
+  }
+  emit(context, {
+    type: 'movement_completed', combatant: actor, path: path.cells,
+    spent: path.cost, remaining: combatant(context.state, actor).turn.movement.remaining,
+  });
+}
+
+function executeLegendaryAction(
+  context: ReductionContext,
+  actor: CombatantId,
+  action: MonsterLegendaryAction,
+): void {
+  const subject = combatant(context.state, actor);
+  const legendary = subject.legendary;
+  if (legendary === undefined || legendary.actionUsesRemaining < action.cost) {
+    throw new PendingDecisionRuleError('unknown_decision');
+  }
+  const remaining = legendary.actionUsesRemaining - action.cost;
+  context.state = replaceCombatant(context.state, {
+    ...subject,
+    legendary: { ...legendary, actionUsesRemaining: remaining },
+  });
+  emit(context, {
+    type: 'legendary_action_used', combatant: actor, actionId: action.id, cost: action.cost, remaining,
+  });
+  if (action.kind === 'temporary_defense') {
+    const amount = rollDice(context.rng, {
+      ...action.temporaryHitPoints,
+      sides: dieSides(action.temporaryHitPoints.sides),
+    }).total;
+    grantTemporaryHitPoints(context, actor, amount);
+    applyEffect(context, actor, {
+      targets: [actor],
+      duration: {
+        kind: 'turn_boundaries',
+        timing: { combatant: actor, boundary: 'end', source: 'docs/srd/full/srd-5.2.1.txt:22006-22009' },
+        remaining: 1,
+      },
+      concentration: false,
+      stackingIdentity: effectStackingIdentity(`legendary:${action.id}:armor-class`),
+      stacking: 'replace_same_source',
+      repeatedSave: null,
+      payload: { kind: 'armor_class_modifier', amount: action.armorClassBonus },
+    });
+    return;
+  }
+  const target = legendaryActionTarget(context.state, actor);
+  if (target === null) throw new EncounterRuleError(`Legendary Action ${action.id} has no enemy target.`);
+  moveForLegendaryAction(context, actor, target, action);
+  const attack = declaredMonsterAction(context.state, actor, action.attackId);
+  if (attack.kind !== 'attack') throw new EncounterRuleError(`Legendary Action ${action.id} must reference an attack.`);
+  processAttack(context, monsterAttackCommand(attack, actor, target), null, 'legendary');
+}
+
+function queueLegendaryActionWindows(context: ReductionContext, activeCombatant: CombatantId): boolean {
+  let queued = false;
+  for (const subject of context.state.combatants) {
+    const actor = subject.profile.id;
+    const pool = subject.legendary;
+    const actions = subject.profile.rules.legendary?.actions ?? [];
+    if (
+      actor === activeCombatant || subject.life !== 'living' || pool === undefined ||
+      pool.actionUsesRemaining < 1 || !isCombatantOnBoard(context.state, actor) ||
+      isIncapacitated(combatantConditions(context.state, actor))
+    ) continue;
+    const alreadyHandled = context.state.eventLog.some((event) =>
+      event.type === 'legendary_action_window_closed' && event.combatant === actor &&
+      event.activeCombatant === activeCombatant && event.round === context.state.round);
+    const alreadyPending = context.state.pendingDecisions.some((decision) =>
+      decision.kind === 'legendary_action_window' && decision.combatant === actor &&
+      decision.boundary.activeCombatant === activeCombatant && decision.boundary.round === context.state.round);
+    if (alreadyHandled || alreadyPending) continue;
+    const affordable = actions.filter((action) => action.cost <= pool.actionUsesRemaining);
+    if (affordable.length === 0) continue;
+    const id = `decision:${String(context.state.nextDecisionSequence)}`;
+    const options: Extract<PendingDecision, { readonly kind: 'legendary_action_window' }>['options'] = [
+      ...affordable.map((action) => ({
+        id: `legendary_action:${action.id}` as const,
+        label: `${action.name} (${String(action.cost)} ${action.cost === 1 ? 'use' : 'uses'})`,
+      })),
+      { id: 'pass', label: 'Pass' },
+    ];
+    const decision: PendingDecision = {
+      id, combatant: actor, kind: 'legendary_action_window', options,
+      boundary: { activeCombatant, round: context.state.round },
+    };
+    context.state = {
+      ...context.state,
+      nextDecisionSequence: context.state.nextDecisionSequence + 1,
+      pendingDecisions: [...context.state.pendingDecisions, decision],
+    };
+    emit(context, { type: 'pending_decision_queued', decisionId: id, combatant: actor, kind: 'legendary_action_window' });
+    queued = true;
+  }
+  return queued;
 }
 
 function processMove(
@@ -4285,6 +4574,20 @@ function applyEffect(
 
 function startTurn(context: ReductionContext, id: CombatantId, round: number): void {
   context.state = { ...context.state, activeCombatant: id, round };
+  const entering = combatant(context.state, id);
+  if (entering.legendary !== undefined && entering.legendary.actionUsesMaximum > 0) {
+    context.state = replaceCombatant(context.state, {
+      ...entering,
+      legendary: {
+        ...entering.legendary,
+        actionUsesRemaining: entering.legendary.actionUsesMaximum,
+      },
+    });
+    emit(context, {
+      type: 'legendary_action_pool_refreshed', combatant: id,
+      remaining: entering.legendary.actionUsesMaximum,
+    });
+  }
   processBoundary(context, id, 'start');
   const beforeSave = combatant(context.state, id);
   const speed = feet(effectiveSpeed(context.state, id));
@@ -4884,6 +5187,7 @@ function processAttack(
     { readonly type: 'attack' | 'opportunity_attack' }
   >,
   opportunityTrigger: OpportunityAttackTrigger | null = null,
+  execution: 'ordinary' | 'legendary' = 'ordinary',
 ): void {
   const activeForm = combatant(context.state, command.actor).form;
   if (activeForm !== undefined || command.monsterOnHit !== undefined) {
@@ -4926,10 +5230,12 @@ function processAttack(
     ? selectedManeuver(context.state, command)
     : null;
   if (command.type === 'attack') {
-    assertActiveActor(context, command.actor);
-    wasFirstAttack = combatant(context.state, command.actor).turn.action.kind === 'available';
-    beginAttack(context, command);
-    activateRecklessAttack(context, command, wasFirstAttack);
+    if (execution === 'ordinary') {
+      assertActiveActor(context, command.actor);
+      wasFirstAttack = combatant(context.state, command.actor).turn.action.kind === 'available';
+      beginAttack(context, command);
+      activateRecklessAttack(context, command, wasFirstAttack);
+    }
   } else {
     const reactor = combatant(context.state, command.actor);
     if (
@@ -9442,6 +9748,27 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         case 'death_save':
           resolveDeathSave(context, decision.combatant);
           return;
+        case 'legendary_action_window': {
+          emit(context, {
+            type: 'legendary_action_window_closed', combatant: decision.combatant,
+            activeCombatant: decision.boundary.activeCombatant, round: decision.boundary.round,
+          });
+          if (command.optionId === 'pass') return;
+          const actionId = command.optionId.slice('legendary_action:'.length);
+          const action = combatant(context.state, decision.combatant).profile.rules.legendary?.actions
+            .find((candidate) => candidate.id === actionId);
+          if (action === undefined) throw new PendingDecisionRuleError('unknown_decision');
+          executeLegendaryAction(context, decision.combatant, action);
+          return;
+        }
+        case 'legendary_resistance':
+          if (command.optionId === 'spend') {
+            spendLegendaryResistance(
+              context, decision.combatant, decision.failedSave.source,
+              decision.failedSave.ability, decision.checkpoint,
+            );
+          }
+          return;
       }
     }
     case 'create_persistent_area': {
@@ -9859,6 +10186,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         decision.boundary.activeCombatant === command.actor && decision.boundary.round === context.state.round)) {
         throw new PendingDecisionRuleError('turn_boundary_blocked');
       }
+      if (queueLegendaryActionWindows(context, command.actor)) return;
       const currentIndex = context.state.activeInitiativeIndex;
       if (currentIndex === null) throw new EncounterRuleError('Initiative is not active.');
       processBoundary(context, command.actor, 'end');

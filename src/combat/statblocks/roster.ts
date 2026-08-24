@@ -4,7 +4,7 @@ import {
   CAMEL, CROCODILE, DIRE_WOLF, ELEPHANT, GHAST, GHOUL, GIANT_CONSTRICTOR_SNAKE, GIANT_CROCODILE, GIANT_SCORPION, GIANT_SHARK, GIANT_SPIDER, GOBLIN_BOSS, GOBLIN_MINION, GOBLIN_WARRIOR, GUARD,
   HOBGOBLIN_CAPTAIN, HOBGOBLIN_WARRIOR, KNIGHT, LION, MINOTAUR_SKELETON, OGRE, OGRE_ZOMBIE,
   KILLER_WHALE, POLAR_BEAR, PRIEST, PRIEST_ACOLYTE, SABER_TOOTHED_TIGER, SCOUT, SKELETON, SPECTER, SPY, TIGER,
-  TOUGH, WARHORSE_SKELETON, WIGHT, WOLF, ZOMBIE,
+  TOUGH, UNICORN, WARHORSE_SKELETON, WIGHT, WOLF, ZOMBIE,
 } from './monsters';
 import { HOMEBREW_BEAST_ROSTER, type HomebrewBeastRosterRow } from './homebrew-beast-families';
 
@@ -81,10 +81,34 @@ export const STARTER_MONSTER_ROSTER = SRD_STARTER_MONSTER_ROWS.map((row) => {
   return { ...row, provenance, statblock: { ...row.statblock, provenance } };
 }) satisfies readonly StarterMonsterRosterRow[];
 
-export type BundledMonsterRosterRow = StarterMonsterRosterRow | HomebrewBeastRosterRow;
+export interface LegendaryMonsterRosterRow {
+  readonly id: 'statblock:unicorn';
+  readonly name: 'Unicorn';
+  readonly family: 'legendary_monsters';
+  readonly challengeRating: 5;
+  readonly source: readonly SourceSpan[];
+  readonly selectionNote: string;
+  readonly provenance: Extract<MonsterProvenance, { readonly kind: 'srd_5_2_1_decoded' }>;
+  readonly statblock: MonsterStatblock & { readonly provenance: Extract<MonsterProvenance, { readonly kind: 'srd_5_2_1_decoded' }> };
+}
+
+const UNICORN_SOURCE = [{ path: SRD_PATH, lineStart: 21945, lineEnd: 22009 }] as const;
+export const LEGENDARY_MONSTER_ROSTER: readonly LegendaryMonsterRosterRow[] = [{
+  id: 'statblock:unicorn',
+  name: 'Unicorn',
+  family: 'legendary_monsters',
+  challengeRating: 5,
+  source: UNICORN_SOURCE,
+  selectionNote: 'SRD 5.2.1 exemplar with both Legendary Resistance and a complete Legendary Actions section.',
+  provenance: { kind: 'srd_5_2_1_decoded', source: UNICORN_SOURCE },
+  statblock: { ...UNICORN, provenance: { kind: 'srd_5_2_1_decoded', source: UNICORN_SOURCE } },
+}];
+
+export type BundledMonsterRosterRow = StarterMonsterRosterRow | LegendaryMonsterRosterRow | HomebrewBeastRosterRow;
 
 /** SRD-decoded and clean-room homebrew rows share one bundled lookup surface. */
 export const BUNDLED_MONSTER_ROSTER: readonly BundledMonsterRosterRow[] = [
   ...STARTER_MONSTER_ROSTER,
+  ...LEGENDARY_MONSTER_ROSTER,
   ...HOMEBREW_BEAST_ROSTER,
 ];

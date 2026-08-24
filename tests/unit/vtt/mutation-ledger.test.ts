@@ -66,6 +66,7 @@ const DETECTION_LEDGER_PATH = 'docs/audits/2026-08-24-detection-mutation-ledger.
 const DETECTION_UI_LEDGER_PATH = 'docs/audits/2026-08-24-detection-ui-mutation-ledger.md';
 const DEATH_LEDGER_PATH = 'docs/audits/2026-08-24-death-mutation-ledger.md';
 const SAVE_MANAGER_LEDGER_PATH = 'docs/audits/2026-08-24-savemgr-mutation-ledger.md';
+const LEGENDARY_LEDGER_PATH = 'docs/audits/2026-08-24-legendary-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -96,6 +97,24 @@ describe('phase-2 mutation ledger manifest', () => {
     expect(saveManagerLedger.match(/`exit 1`/gu)).toHaveLength(3);
     expect(saveManagerLedger).toContain('Tests  5 passed (5)');
     expect(saveManagerLedger).toContain('All three mutations were restored.');
+  });
+
+  it('D375-LEGENDARY-MUTATION-LEDGER pins all five restored controls to named killing tests', () => {
+    const legendaryLedger = readFileSync(LEGENDARY_LEDGER_PATH, 'utf8');
+    const legendaryTests = readFileSync('tests/unit/vtt/legendary-monsters.test.ts', 'utf8');
+    for (const control of [
+      'pool_never_refreshes',
+      'resistance_free',
+      'window_on_own_turn',
+      'cost_ignored',
+      'legendary_window_incapacitated',
+    ]) {
+      expect(legendaryLedger).toContain(`\`${control}\``);
+      expect(legendaryTests).toContain(`${control}:`);
+    }
+    expect(legendaryLedger.match(/`exit 1`/gu)).toHaveLength(5);
+    expect(legendaryLedger).toContain('Tests  11 passed (11)');
+    expect(legendaryLedger).toContain('All five controls were restored.');
   });
 
   it('D373-DETECTION-UI-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {
