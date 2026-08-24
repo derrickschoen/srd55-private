@@ -63,6 +63,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0051_fingerprint_content_key_index',
   '0052_vtt_session_revisions',
   '0053_vtt_session_party_state',
+  '0054_optional_feature_selections',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';

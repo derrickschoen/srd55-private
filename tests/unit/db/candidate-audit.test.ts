@@ -230,6 +230,7 @@ function markPreFlavorSnapshot(
   delete character.alignment;
   delete character.appearance;
   delete character.backstory;
+  delete character.optional_feature_selections;
 }
 
 /**
@@ -1034,7 +1035,7 @@ describe('candidate database semantic audit', () => {
        )`,
     );
     const snapshot = snapshotOf(db, 1);
-    expect(snapshot.schema_version).toBe('a7-v16');
+    expect(snapshot.schema_version).toBe('a7-v17');
     expect(snapshot.schema_version).not.toBe('a7-v15');
     insertSavePoint(db, 1, snapshot);
 

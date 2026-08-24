@@ -112,6 +112,17 @@ export const characters = sqliteTable('characters', {
   alignment: sqlText()('alignment'),
   appearance: sqlText()('appearance'),
   backstory: sqlText()('backstory'),
+  /**
+   * Stable content keys of optional class features this character selected.
+   *
+   * The empty JSON array is a first-class answer: this character selected no
+   * optional features. It is never a stand-in for "selection unknown". The
+   * authoring UI for adding entries remains deliberately outside this slice;
+   * readers can already distinguish an unselected feature from a selected one.
+   */
+  optional_feature_selections: sqlText()('optional_feature_selections')
+    .notNull()
+    .default('[]'),
   notes: sqlText()('notes'),
   /**
    * D99 library lifecycle. NULL is active; a timestamp is archived.
@@ -195,6 +206,11 @@ export const characters = sqliteTable('characters', {
   check(
     'characters_backstory_check',
     nullOrTextLengthAtMost('backstory', CHARACTER_TEXT_LIMITS.backstory),
+  ),
+  check(
+    'characters_optional_feature_selections_check',
+    sql`json_valid(${table.optional_feature_selections})
+      AND json_type(${table.optional_feature_selections}) IS 'array'`,
   ),
   check(
     'characters_archived_at_check',

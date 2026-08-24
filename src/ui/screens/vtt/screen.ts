@@ -5,6 +5,13 @@ export const screen = defineScreen({
   id: 'vtt',
   matches: (route) => route.path === '/vtt',
   render: async ({ root, route, rpc }) => {
+    if (route.query.get('encounter') === 'd365') {
+      const { mountD365SampleDungeon } = await import(
+        '../../../vtt/d365-sample-dungeon-app'
+      );
+      const mounted = mountD365SampleDungeon(root, rpc);
+      return () => mounted.close();
+    }
     if (route.query.get('encounter') === 'reference') {
       const { mountEncounterVtt } = await import('../../../vtt/encounter-app');
       const view = route.query.get('view') === 'dm' ? 'dm' : 'player';

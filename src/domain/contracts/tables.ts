@@ -770,10 +770,9 @@ export const TABLE_SCOPES = {
    * a `ReferenceKind` member, invalidating every existing backup document,
    * since `CharacterBackupReferences` is keyed by that union.
    *
-   * `named_features` gets the same answer for a blunter reason: NOTHING POINTS
-   * AT IT FROM A CHARACTER. There is no invocation selection anywhere in this
-   * schema, which is precisely why a grant sourced from one of these rows is
-   * surfaced against an attack profile rather than applied to it.
+   * `named_features` still is not a backup reference kind. The character root
+   * carries selected stable content keys verbatim; the full invocation catalog
+   * and source-instance authoring model remain outside character-owned rows.
    */
   subclass_features: {
     role: 'catalog_class',

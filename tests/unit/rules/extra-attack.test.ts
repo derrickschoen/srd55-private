@@ -261,7 +261,7 @@ describe('a weapon-scoped grant this application cannot resolve', () => {
     // BOTH axes, not one: the feature is optional AND it reaches one weapon.
     expect(grant?.unresolved).toHaveLength(2);
     expect(grant?.unresolved.join(' ')).toContain(
-      'does not record which optional class features',
+      'does not establish whether the optional class feature was selected',
     );
     expect(grant?.unresolved.join(' ')).toContain(
       'does not record which of a character’s weapons',

@@ -880,6 +880,7 @@ CREATE TABLE `characters` (
 	`alignment` TEXT,
 	`appearance` TEXT,
 	`backstory` TEXT,
+	`optional_feature_selections` TEXT DEFAULT '[]' NOT NULL,
 	`notes` TEXT,
 	`archived_at` DATETIME,
 	`created_at` DATETIME,
@@ -897,6 +898,8 @@ CREATE TABLE `characters` (
 	CONSTRAINT "characters_alignment_check" CHECK((`alignment` IS NULL OR (typeof(`alignment`) = 'text' AND length(`alignment`) BETWEEN 1 AND 120))),
 	CONSTRAINT "characters_appearance_check" CHECK((`appearance` IS NULL OR (typeof(`appearance`) = 'text' AND length(`appearance`) BETWEEN 1 AND 4000))),
 	CONSTRAINT "characters_backstory_check" CHECK((`backstory` IS NULL OR (typeof(`backstory`) = 'text' AND length(`backstory`) BETWEEN 1 AND 20000))),
+	CONSTRAINT "characters_optional_feature_selections_check" CHECK(json_valid("characters"."optional_feature_selections")
+      AND json_type("characters"."optional_feature_selections") IS 'array'),
 	CONSTRAINT "characters_archived_at_check" CHECK(archived_at IS NULL OR typeof(archived_at) = 'text')
 );
 

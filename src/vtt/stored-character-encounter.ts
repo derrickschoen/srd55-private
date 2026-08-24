@@ -28,7 +28,14 @@ export interface StoredCharacterEncounter {
   readonly playerIds: readonly CombatantId[];
   readonly controllers: readonly ControllerIdentity[];
   readonly turnLegalActions: TurnLegalActions;
+  readonly composeNextRoom?: StoredCharacterRoomComposer;
 }
+
+export type StoredCharacterRoomComposer = (
+  members: readonly LoadedPartyMember[],
+  displayNames: ReadonlyMap<number, string>,
+  partyState: PartySessionState,
+) => StoredCharacterEncounter;
 
 function position(state: EncounterState, id: CombatantId): GridCell {
   const token = state.tokens.find((candidate) => candidate.combatantId === id);

@@ -46,10 +46,16 @@ import type {
   DmBridgeModelConfig,
 } from './dm-bridge/contracts';
 import type { SteeringCoordinatorMode, SteeringTelemetry } from './dm-bridge/steering';
-import type { PartySessionState } from './party-session-state';
+import {
+  enterNextRoom as advancePartyRoom,
+  type PartySessionState,
+} from './party-session-state';
 import type { ShortRestHitDieSpend } from './party-session-state';
 import type { LoadedPartyMember } from './party-pack';
-import { composeStoredCharacterEncounter } from './stored-character-encounter';
+import {
+  composeStoredCharacterEncounter,
+  type StoredCharacterRoomComposer,
+} from './stored-character-encounter';
 import {
   projectDmBoard,
   projectPlayerBoard,
@@ -177,6 +183,7 @@ export class DmEncounterHost {
   readonly #reactionLegalActions: ReactionLegalActions;
   readonly #partyMembers: readonly LoadedPartyMember[] | null;
   readonly #partyDisplayNames: ReadonlyMap<number, string>;
+  readonly #composeRoom: StoredCharacterRoomComposer;
 
   constructor(
     sessionKey: string,
@@ -186,6 +193,7 @@ export class DmEncounterHost {
       readonly initialPartyState?: PartySessionState;
       readonly partyMembers?: readonly LoadedPartyMember[];
       readonly partyDisplayNames?: ReadonlyMap<number, string>;
+      readonly composeRoom?: StoredCharacterRoomComposer;
       readonly initialControllers?: readonly ControllerIdentity[];
       readonly playerIds?: readonly CombatantId[];
       readonly turnLegalActions?: TurnLegalActions;
@@ -206,6 +214,7 @@ export class DmEncounterHost {
     this.#reactionLegalActions = options.reactionLegalActions ?? referenceReactionLegalActions;
     this.#partyMembers = options.partyMembers ?? null;
     this.#partyDisplayNames = options.partyDisplayNames ?? new Map();
+    this.#composeRoom = options.composeRoom ?? composeStoredCharacterEncounter;
     if (options.bridge !== undefined) {
       this.#mirror.connect(options.bridge);
       this.#roundPlanSession = new DmRoundPlanSession(
@@ -455,10 +464,10 @@ export class DmEncounterHost {
     if (shortRestSpends !== null) {
       partyState = this.#journal.takeShortRest(shortRestSpends).state;
     }
-    const encounter = composeStoredCharacterEncounter(
+    const encounter = this.#composeRoom(
       this.#partyMembers,
       this.#partyDisplayNames,
-      partyState,
+      advancePartyRoom(partyState),
     );
     partyState = this.#journal.composeNextRoom({
       encounterState: encounter.state,

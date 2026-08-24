@@ -291,7 +291,7 @@ test('round-trips a named save point through the mutation path', async ({
     label: 'Before experiment',
     // a7-v15 adds durable level-feat provenance; a7-v14 remains frozen before
     // that table became character state.
-    schema_version: 'a7-v16',
+    schema_version: 'a7-v17',
   });
   expect(point.schema_version).not.toBe('a7-v15');
   const pointSnapshot = JSON.parse(String(point.snapshot)) as {
@@ -633,7 +633,7 @@ test('undoes a structural class change through its snapshot inverse', async ({
   )) as { type: string; snapshot: { schema_version: string } };
   expect(storedClassInverse).toEqual({
     type: 'internal_snapshot_restore',
-    snapshot: expect.objectContaining({ schema_version: 'a7-v16' }),
+    snapshot: expect.objectContaining({ schema_version: 'a7-v17' }),
   });
   expect(storedClassInverse.snapshot.schema_version).not.toBe('a7-v15');
   await undo(

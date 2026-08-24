@@ -1890,6 +1890,7 @@ describe('adversarial character-share rejection', () => {
     const positional = shareDocumentToPositional(minimalDocument());
     const v17 = shareDocumentToReferencePositional(minimalDocument()).slice(0, 21);
     v17[1] = 17;
+    v17[2] = (v17[2] as unknown[]).slice(0, 15);
     const withEffect = shareDocumentToPositional(
       minimalDocument({
         effects: [{
@@ -1920,7 +1921,7 @@ describe('adversarial character-share rejection', () => {
       ],
       [
         [positional[0], positional[1], ['short'], ...positional.slice(3)],
-        /wire character must be a tuple of length 15/,
+        /wire character must be a tuple of length 16/,
       ],
       [shortEffect, /wire effects\[0\] must be a tuple of length 20/],
       [longEffect, /wire effects\[0\] must be a tuple of length 20/],

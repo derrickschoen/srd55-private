@@ -519,6 +519,9 @@ class DmEncounterView {
           ...(encounter.partyState === null ? {} : { initialPartyState: encounter.partyState }),
           partyMembers: encounter.members,
           partyDisplayNames: encounter.displayNames,
+          ...(encounter.composeNextRoom === undefined
+            ? {}
+            : { composeRoom: encounter.composeNextRoom }),
           initialControllers: encounter.controllers,
           playerIds: encounter.playerIds,
           turnLegalActions: encounter.turnLegalActions,

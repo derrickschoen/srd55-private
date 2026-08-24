@@ -716,6 +716,26 @@ const VERSION_FIXTURES = {
       },
     },
   },
+  21: {
+    // Independently compressed from the hand-authored positional inventory;
+    // the product encoder was not used to mint this fixture.
+    fragment:
+      'H4sIAAAAAAACA62NMQ7CMAwAvxJ5TiQaMfUBiI2NJcrgJoZEMmllO_9nYGQE6XTjXYI6anhNtl4YVYMexKyhNBQsRhK0oRD4uPgE97i422F9H8juQmhTyF1JdvBjMv-uBPEUz-vjk16tdVHr4xk2xkqQs09f_OWc34PmUdUJAQAA',
+    expected: {
+      format: CHARACTER_SHARE_FORMAT,
+      version: CHARACTER_SHARE_VERSION,
+      character: {
+        name: 'V21 Optional Feature Hero',
+        optional_feature_selections: ['2024:feature:thirsting-blade'],
+      },
+      classes: [],
+      sources: [],
+      selections: [],
+      spellbook: [],
+      preferences: [],
+      overrides: [],
+    },
+  },
 } satisfies Record<SupportedShareVersion, FrozenFixture>;
 
 const HISTORICAL_SCHEMA_MODULE_SHA256 = {

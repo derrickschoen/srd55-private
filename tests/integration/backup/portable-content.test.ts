@@ -478,7 +478,7 @@ function emptyHistoricalSpellDefinitions() {
 }
 
 describe('portable content manifests', () => {
-  it('carries subclass contributions through library, character backup, and v20 share with exact wire keys', async () => {
+  it('carries subclass contributions through library, character backup, and v21 share with exact wire keys', async () => {
     const source = await database();
     const fixture = seedContributionSubclass(source);
     const characterId = seedContributionCharacter(source, fixture);
@@ -532,7 +532,7 @@ describe('portable content manifests', () => {
     expect(contributionRows(backupTarget)).toEqual(expectedRows);
 
     const share = exportCharacterShare(source, characterId);
-    expect(share.version).toBe(20);
+    expect(share.version).toBe(21);
     expect(share.classes).toEqual(expect.arrayContaining([
       expect.objectContaining({ subclassKey: fixture.contentKey }),
     ]));
@@ -1128,6 +1128,7 @@ describe('portable content manifests', () => {
     delete character.appearance;
     delete character.backstory;
     delete character.archived_at;
+    delete character.optional_feature_selections;
 
     const target = await database();
     seedClosureLibrary(target);
@@ -1160,6 +1161,8 @@ describe('portable content manifests', () => {
     previous.spell_definitions = emptyHistoricalSpellDefinitions();
     delete previous.content;
     delete previous.supersessions;
+    delete (previous.character as Record<string, unknown>)
+      .optional_feature_selections;
 
     const target = await database();
     const imported = importCharacterBackup(target, previous);
@@ -1189,6 +1192,8 @@ describe('portable content manifests', () => {
     )) as unknown as Record<string, unknown>;
     previous.version = PRE_LINEAGE_CHARACTER_BACKUP_VERSION;
     delete previous.supersessions;
+    delete (previous.character as Record<string, unknown>)
+      .optional_feature_selections;
 
     const target = await database();
     importCharacterBackup(target, previous);
@@ -1246,6 +1251,8 @@ describe('portable content manifests', () => {
     ) as unknown as Record<string, unknown>;
     historical.version = PRE_LINEAGE_CHARACTER_BACKUP_VERSION;
     delete historical.supersessions;
+    delete (historical.character as Record<string, unknown>)
+      .optional_feature_selections;
 
     const target = await database();
     applicationSeed(target);
@@ -1283,6 +1290,8 @@ describe('portable content manifests', () => {
       exportedAt,
     )) as unknown as Record<string, unknown>;
     previous.version = PRE_PROVENANCE_CHARACTER_BACKUP_VERSION;
+    delete (previous.character as Record<string, unknown>)
+      .optional_feature_selections;
     previous.content = (previous.content as Array<Record<string, unknown>>)
       .map(({ provenance: _provenance, ...entry }) => entry);
 

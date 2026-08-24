@@ -412,6 +412,11 @@ function appendV17Flavor(root: unknown[]): void {
   root[2] = [...(root[2] as unknown[]), null, null, null];
 }
 
+/** Hand-lifts the frozen v20 character tuple with the explicit-selection slot. */
+function appendV21OptionalFeatureSelections(root: unknown[]): void {
+  root[2] = [...(root[2] as unknown[]), null];
+}
+
 interface StructuralTupleSchema {
   readonly arities: readonly number[];
   readonly fields: readonly { readonly key: string }[];
@@ -1161,6 +1166,13 @@ const COMPLETE_V19_WIRE = [...COMPLETE_V18_WIRE.slice(0, 1), 19,
 /** S6-05: v20 appends stable document identity; this fixture has none. */
 const COMPLETE_V20_WIRE = [...COMPLETE_V19_WIRE.slice(0, 1), 20,
   ...COMPLETE_V19_WIRE.slice(2), null];
+/** Optional-feature selections append to the character tuple in v21. */
+const COMPLETE_V21_WIRE = [
+  COMPLETE_V20_WIRE[0],
+  21,
+  [...(COMPLETE_V20_WIRE[2] as unknown[]), null],
+  ...COMPLETE_V20_WIRE.slice(3),
+];
 
 /** The honest v13 migration: old wire carried neither provenance field. */
 const MIGRATED_COMPLETE_V15_WIRE = [
@@ -1325,10 +1337,11 @@ describe('character-share positional codec', () => {
     );
   });
 
-  it('keeps frozen v18/v19 readable and pins v20 as the identity append', () => {
+  it('keeps frozen v18/v19/v20 readable and pins v21 as the selection append', () => {
     expect(positionalToShareDocument(COMPLETE_V18_WIRE)).toEqual(complete);
     expect(positionalToShareDocument(COMPLETE_V19_WIRE)).toEqual(complete);
-    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V20_WIRE);
+    expect(positionalToShareDocument(COMPLETE_V20_WIRE)).toEqual(complete);
+    expect(shareDocumentToPositional(complete)).toEqual(COMPLETE_V21_WIRE);
   });
 
   it('accepts ability_override only in a hand-frozen v13 document', () => {
@@ -1598,7 +1611,7 @@ describe('character-share positional codec', () => {
     const positional = shareDocumentToPositional(minimal);
     expect(positional).toEqual([
       'dnd-multiclass-spells-character-share',
-      20,
+      21,
       [
         'Ten',
         null,
@@ -1618,6 +1631,7 @@ describe('character-share positional codec', () => {
         null, // alignment
         null, // appearance
         null, // backstory
+        null, // optional feature selections
       ],
       [
         [
@@ -1674,7 +1688,7 @@ describe('character-share positional codec', () => {
       null,
     ]);
     expect(positional).toHaveLength(23);
-    expect((positional[2] as unknown[]).length).toBe(15);
+    expect((positional[2] as unknown[]).length).toBe(16);
     expect((positional[3] as unknown[][])[0]).toHaveLength(8);
     expect((positional[4] as unknown[][])[0]).toHaveLength(7);
     expect(positional[12]).toHaveLength(3);
@@ -1699,8 +1713,8 @@ describe('character-share positional codec', () => {
   it('rejects every non-version-4 character, class, and source arity', () => {
     const positional = shareDocumentToPositional(complete);
     const cases: Array<[number, number, RegExp]> = [
-      [2, 14, /wire character must be a tuple of length 15/],
-      [2, 16, /wire character must be a tuple of length 15/],
+      [2, 15, /wire character must be a tuple of length 16/],
+      [2, 17, /wire character must be a tuple of length 16/],
       [3, 7, /wire classes\[0\] must be a tuple of length 8/],
       [3, 9, /wire classes\[0\] must be a tuple of length 8/],
       [4, 6, /wire sources\[0\] must be a tuple of length 7/],
@@ -1770,7 +1784,7 @@ describe('character-share positional codec', () => {
     wrongTuple[2] = ['Mira'];
     await expect(
       decodeShareFragment(await arbitraryFragment(wrongTuple)),
-    ).rejects.toThrow(/wire character must be a tuple of length 15/);
+    ).rejects.toThrow(/wire character must be a tuple of length 16/);
 
     const overCount = [...positional];
     overCount[6] = Array.from(
@@ -2272,6 +2286,7 @@ describe('a share link generated before the sheet inputs travelled', () => {
     const currentWithoutSheet = [...migratedRoot];
     currentWithoutSheet[1] = CHARACTER_SHARE_VERSION;
     appendV17Flavor(currentWithoutSheet);
+    appendV21OptionalFeatureSelections(currentWithoutSheet);
     appendV9SourceMarker(currentWithoutSheet);
     rewriteV14SpellAcquisitions(currentWithoutSheet);
     currentWithoutSheet.push(null); // skillGrants, absent
@@ -2498,6 +2513,7 @@ describe('a share link generated before weapons travelled', () => {
     const baseline = [...migratedRoot];
     baseline[1] = CHARACTER_SHARE_VERSION;
     appendV17Flavor(baseline);
+    appendV21OptionalFeatureSelections(baseline);
     appendV9SourceMarker(baseline);
     rewriteV14SpellAcquisitions(baseline);
     baseline.push(null); // skillGrants
@@ -2539,6 +2555,7 @@ describe('a share link generated before weapons travelled', () => {
     const withWeapons = [...migratedRoot];
     withWeapons[1] = CHARACTER_SHARE_VERSION;
     appendV17Flavor(withWeapons);
+    appendV21OptionalFeatureSelections(withWeapons);
     appendV9SourceMarker(withWeapons);
     rewriteV14SpellAcquisitions(withWeapons);
     withWeapons[11] = []; // weapons: explicitly recorded as none
@@ -2567,6 +2584,7 @@ describe('a share link generated before weapons travelled', () => {
     const withOrigin = [...migratedRoot];
     withOrigin[1] = CHARACTER_SHARE_VERSION;
     appendV17Flavor(withOrigin);
+    appendV21OptionalFeatureSelections(withOrigin);
     appendV9SourceMarker(withOrigin);
     rewriteV14SpellAcquisitions(withOrigin);
     withOrigin[11] = []; // weapons: explicitly recorded as none
@@ -2690,6 +2708,7 @@ describe('a share link generated before a character note could travel', () => {
     const migratedRoot = migrateV1WireToV4(withNote) as unknown[];
     migratedRoot[1] = CHARACTER_SHARE_VERSION;
     appendV17Flavor(migratedRoot);
+    appendV21OptionalFeatureSelections(migratedRoot);
     appendV9SourceMarker(migratedRoot);
     rewriteV14SpellAcquisitions(migratedRoot);
     migratedRoot.push(null); // skillGrants

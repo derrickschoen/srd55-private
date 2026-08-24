@@ -18,6 +18,7 @@ import { WIRE_SCHEMA_V17 } from './v17';
 import { WIRE_SCHEMA_V18 } from './v18';
 import { WIRE_SCHEMA_V19 } from './v19';
 import { WIRE_SCHEMA_V20 } from './v20';
+import { WIRE_SCHEMA_V21 } from './v21';
 import {
   versatileWeaponDamageFromLegacy,
   weaponDamageFromLegacy,
@@ -40,7 +41,7 @@ export {
  * domain requires a new schema version, an adjacent migration, and a
  * hand-frozen fragment fixture. Never edit an existing version.
  */
-export const CURRENT_CHARACTER_SHARE_VERSION = 20 as const;
+export const CURRENT_CHARACTER_SHARE_VERSION = 21 as const;
 
 /**
  * Any change to tuple field order, meaning, membership, or accepted value
@@ -68,6 +69,7 @@ export const SHARE_SCHEMAS = Object.freeze({
   18: WIRE_SCHEMA_V18,
   19: WIRE_SCHEMA_V19,
   20: WIRE_SCHEMA_V20,
+  21: WIRE_SCHEMA_V21,
 } as const);
 
 export type SupportedShareVersion = keyof typeof SHARE_SCHEMAS;
@@ -1021,6 +1023,39 @@ function migrateV19ToV20(document: unknown): unknown {
   return migrated;
 }
 
+/** V20 predates optional-feature selections; absence imports to explicit empty. */
+function migrateV20ToV21(document: unknown): unknown {
+  if (
+    !Array.isArray(document) ||
+    !WIRE_SCHEMA_V20.tuples.root.arities.some((arity) => arity === document.length)
+  ) {
+    throw new TypeError('wire document has an unsupported v20 tuple length.');
+  }
+  const characterIndex = WIRE_SCHEMA_V20.tuples.root.fields.findIndex(
+    (field) => field.key === 'character',
+  );
+  const versionIndex = WIRE_SCHEMA_V20.tuples.root.fields.findIndex(
+    (field) => field.key === 'version',
+  );
+  assertShareWireSchemaRequiredFields(20, {
+    character: characterIndex,
+    version: versionIndex,
+  });
+  const character = document[characterIndex];
+  if (
+    !Array.isArray(character) ||
+    !WIRE_SCHEMA_V20.tuples.character.arities.some(
+      (arity) => arity === character.length,
+    )
+  ) {
+    throw new TypeError('wire character has an unsupported v20 tuple length.');
+  }
+  const migrated = [...document];
+  migrated[versionIndex] = 21;
+  migrated[characterIndex] = [...character, null];
+  return migrated;
+}
+
 /**
  * V18 carried rules but no provenance. Absence cannot prove an author, source,
  * or licence, so the adjacent migration states only that the origin is
@@ -1098,6 +1133,7 @@ export const MIGRATIONS = Object.freeze({
   17: migrateV17ToV18,
   18: migrateV18ToV19,
   19: migrateV19ToV20,
+  20: migrateV20ToV21,
 }) satisfies AdjacentMigrations;
 
 export { WIRE_SCHEMA_V1 } from './v1';
@@ -1120,6 +1156,7 @@ export { WIRE_SCHEMA_V17 } from './v17';
 export { WIRE_SCHEMA_V18 } from './v18';
 export { WIRE_SCHEMA_V19 } from './v19';
 export { WIRE_SCHEMA_V20 } from './v20';
+export { WIRE_SCHEMA_V21 } from './v21';
 export type { WireField, WireSchemaV1 } from './v1';
 export type { WireSchemaV2 } from './v2';
 export type { WireSchemaV14 } from './v14';
@@ -1129,6 +1166,7 @@ export type { WireSchemaV17 } from './v17';
 export type { WireSchemaV18 } from './v18';
 export type { WireSchemaV19 } from './v19';
 export type { WireSchemaV20 } from './v20';
+export type { WireSchemaV21 } from './v21';
 export type { WireSchemaV3 } from './v3';
 export type { WireSchemaV4 } from './v4';
 export type { WireSchemaV5 } from './v5';

@@ -368,6 +368,7 @@ describe('portable character backup user-authored spells', () => {
     delete character.appearance;
     delete character.backstory;
     delete character.archived_at;
+    delete character.optional_feature_selections;
 
     const target = await database();
     const imported = importCharacterBackup(target, historical);

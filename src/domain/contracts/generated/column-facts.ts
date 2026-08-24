@@ -472,6 +472,7 @@ export const COLUMN_FACTS = {
     alignment: { base: 'degraded', notNull: false },
     appearance: { base: 'degraded', notNull: false },
     backstory: { base: 'degraded', notNull: false },
+    optional_feature_selections: { base: 'degraded', notNull: true },
     notes: { base: 'degraded', notNull: false },
     archived_at: { base: 'degraded', notNull: false },
     created_at: { base: 'degraded', notNull: false },

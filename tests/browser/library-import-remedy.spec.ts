@@ -293,7 +293,7 @@ test('v20 names embedded Portable Elf before direct commit and omits the line fo
   const portableWire = JSON.parse(gunzipSync(
     Buffer.from(new URL(portableLink).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(portableWire[1]).toBe(20);
+  expect(portableWire[1]).toBe(21);
 
   await page.getByRole('link', { name: 'Create a character' }).click();
   await page.getByRole('button', { name: /^Wizard\b/u }).click();
@@ -451,7 +451,7 @@ test('v17 refusal links through library adoption to the exact restored choice', 
   const positional = JSON.parse(gunzipSync(
     Buffer.from(new URL(link).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(positional[1]).toBe(20);
+  expect(positional[1]).toBe(21);
 
   const profile = await browser.newContext();
   try {

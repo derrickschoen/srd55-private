@@ -61,6 +61,7 @@ const VIEW_SEAMS_LEDGER_PATH = 'docs/audits/2026-08-23-seams-mutation-ledger.md'
 const MONSTERS_LEDGER_PATH = 'docs/audits/2026-08-23-monsters-mutation-ledger.md';
 const ADVDAY_LEDGER_PATH = 'docs/audits/2026-08-24-advday-mutation-ledger.md';
 const BEAST_FAMILY_LEDGER_PATH = 'docs/audits/2026-08-24-beastfam-mutation-ledger.md';
+const DUNGEON_LEDGER_PATH = 'docs/audits/2026-08-24-dungeon-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -77,6 +78,26 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D365-DUNGEON-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
+    const dungeonLedger = readFileSync(DUNGEON_LEDGER_PATH, 'utf8');
+    const dungeonTests = readFileSync('tests/integration/vtt/d365-dungeon.test.ts', 'utf8');
+    const optionalFeatureTests = readFileSync(
+      'tests/integration/vtt/stored-character-party-member.test.ts',
+      'utf8',
+    );
+    for (const control of [
+      'rooms_reset_party',
+      'rest_misplaced',
+      'dungeon_monster_unregistered',
+      'optional_feature_grants_resurrected',
+    ]) {
+      expect(dungeonLedger).toContain(`\`${control}\``);
+      expect(`${dungeonTests}\n${optionalFeatureTests}`).toContain(`${control}:`);
+    }
+    expect(dungeonLedger.match(/`exit 1`/gu)).toHaveLength(4);
+    expect(dungeonLedger).toContain('All four mutations were restored.');
+  });
+
   it('D366-BEASTFAM-MUTATION-LEDGER pins authored and supervisor-found controls to named killing tests', () => {
     const beastFamilyLedger = readFileSync(BEAST_FAMILY_LEDGER_PATH, 'utf8');
     const familyTests = readFileSync('tests/unit/combat/homebrew-beast-families.test.ts', 'utf8');

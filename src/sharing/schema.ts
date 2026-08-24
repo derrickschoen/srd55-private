@@ -68,6 +68,7 @@ export const SHARE_LIMITS = Object.freeze({
   spellbook: 1_000,
   preferences: 1_000,
   overrides: 200,
+  optionalFeatureSelections: 200,
   acknowledgements: 500,
   loadouts: 100,
   loadoutEntries: 1_000,
@@ -178,6 +179,7 @@ export interface ShareCharacter {
   readonly proficiency_bonus_override?: number;
   readonly rules_edition_preference?: string;
   readonly allow_legacy?: true;
+  readonly optional_feature_selections?: readonly string[];
   readonly alignment?: string;
   readonly appearance?: string;
   readonly backstory?: string;
@@ -2000,6 +2002,7 @@ export function validateShareDocument(
       'alignment',
       'appearance',
       'backstory',
+      'optional_feature_selections',
       'notes',
     ],
     'character',
@@ -2069,6 +2072,21 @@ export function validateShareDocument(
       );
     }
     character.allow_legacy = true;
+  }
+  if (rawCharacter.optional_feature_selections !== undefined) {
+    const selected = list(
+      rawCharacter.optional_feature_selections,
+      'character.optional_feature_selections',
+      SHARE_LIMITS.optionalFeatureSelections,
+    ).map((value, index) =>
+      text(
+        value,
+        `character.optional_feature_selections[${String(index)}]`,
+        500,
+      )
+    );
+    assertUnique(selected, 'character.optional_feature_selections');
+    character.optional_feature_selections = Object.freeze(selected);
   }
   for (const field of ['alignment', 'appearance', 'backstory'] as const) {
     if (rawCharacter[field] !== undefined) {

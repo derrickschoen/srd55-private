@@ -588,22 +588,20 @@ export const subclass_feature_effects = sqliteTable(
  * because its source is an invocation and not a class table, the second because
  * it UPGRADES the first rather than adding to it.
  *
- * WHAT THIS APPLICATION DOES NOT KNOW ABOUT THESE ROWS, AND STATES:
+ * WHAT THE MINIMAL SELECTION SLICE KNOWS, AND WHAT IT STILL DOES NOT:
  *
- *  1. WHETHER THE CHARACTER HAS TAKEN ONE. There is no invocation table, no
- *     feat-feature table and no class-feature selection anywhere in
- *     `db/schema/`, so `character_class_levels` cannot say. The prerequisite is
- *     not a level either — it is "Level 5+ Warlock, Pact of the Blade", and the
- *     second half is a choice this schema does not record.
+ *  1. `characters.optional_feature_selections` explicitly records selected
+ *     `named_features.content_key` values. Empty means none, never unknown.
+ *     There is still no invocation-authoring command or source-instance-tied
+ *     selection row. The prerequisite is not only a level — it includes Pact
+ *     of the Blade, whose structured selection this schema does not record.
  *  2. WHICH WEAPON IS THE BONDED ONE, when a child effect's `weapon_scope`
  *     says the grant reaches only one.
  *
- * So a grant from this table is SURFACED against every attack profile and
- * applied to none, with both reasons printed. That is not a shortcoming hidden
- * in a comment: it is the `content_missing` posture `WeaponMasteryLookup`
- * established, and `prerequisite` exists as a NOT NULL column precisely so the
- * sentence the user reads is the source's own and not this application's
- * paraphrase.
+ * Unselected rows emit no grant. A selected row emits its typed grant, while a
+ * bonded-weapon scope remains unresolved until the full authoring track can
+ * name that weapon. `prerequisite` stays NOT NULL so later prerequisite
+ * authoring can show the source's own sentence rather than a paraphrase.
  *
  * NOT DELETED-AND-REWRITTEN BY THE SEEDER. Rows are upserted on `content_key`,
  * so a user's own named feature on the same class is never collateral.

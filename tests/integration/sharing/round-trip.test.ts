@@ -2754,7 +2754,7 @@ describe('D83 ability override sharing', () => {
     const decoded = await decodeShareFragment(
       await encodeShareFragment(exportCharacterShare(source, characterId)),
     );
-    expect(decoded.version).toBe(20);
+    expect(decoded.version).toBe(21);
     expect(decoded.effects).toMatchObject([
       {
         kind: 'ability_override',
