@@ -52,6 +52,7 @@ import {
   PRE_ARCHIVE_CHARACTER_BACKUP_VERSION,
   PRE_FLAVOR_CHARACTER_BACKUP_VERSION,
   PRE_LINEAGE_CHARACTER_BACKUP_VERSION,
+  PRE_OPTIONAL_FEATURE_SELECTION_CHARACTER_BACKUP_VERSION,
   PRE_PROVENANCE_CHARACTER_BACKUP_VERSION,
   PREVIOUS_CHARACTER_BACKUP_VERSION,
 } from './backup-version';
@@ -145,6 +146,18 @@ export type CharacterBackupSpellDefinitions = {
 export interface CharacterBackupDocument {
   readonly format: typeof CHARACTER_BACKUP_FORMAT;
   readonly version: typeof CHARACTER_BACKUP_VERSION;
+  readonly exported_at: string;
+  readonly source_character_id: number;
+  readonly character: BackupRow;
+  readonly tables: CharacterBackupTables;
+  readonly references: CharacterBackupReferences;
+  readonly content: readonly PortableContentAggregate[];
+  readonly supersessions: readonly PortableContentSupersession[];
+}
+
+export interface PreOptionalFeatureSelectionCharacterBackupDocument {
+  readonly format: typeof CHARACTER_BACKUP_FORMAT;
+  readonly version: typeof PRE_OPTIONAL_FEATURE_SELECTION_CHARACTER_BACKUP_VERSION;
   readonly exported_at: string;
   readonly source_character_id: number;
   readonly character: BackupRow;
@@ -1257,6 +1270,7 @@ function validateDocument(input: unknown): ValidatedDocument {
   const version = document.version;
   if (
     version !== CHARACTER_BACKUP_VERSION &&
+    version !== PRE_OPTIONAL_FEATURE_SELECTION_CHARACTER_BACKUP_VERSION &&
     version !== PRE_PROVENANCE_CHARACTER_BACKUP_VERSION &&
     version !== PRE_LINEAGE_CHARACTER_BACKUP_VERSION &&
     version !== PREVIOUS_CHARACTER_BACKUP_VERSION &&
@@ -1284,6 +1298,7 @@ function validateDocument(input: unknown): ValidatedDocument {
           'references',
         ]
       : version === CHARACTER_BACKUP_VERSION ||
+          version === PRE_OPTIONAL_FEATURE_SELECTION_CHARACTER_BACKUP_VERSION ||
           version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION
         ? [
             'format',
@@ -1341,9 +1356,45 @@ function validateDocument(input: unknown): ValidatedDocument {
     'created_at',
     'updated_at',
   ] as const;
+  const preOptionalFeatureSelectionCharacterColumns = [
+    'id',
+    'name',
+    'strength',
+    'dexterity',
+    'constitution',
+    'intelligence',
+    'wisdom',
+    'charisma',
+    'proficiency_bonus_override',
+    'rules_edition_preference',
+    'allow_legacy',
+    'notes',
+    'ability_allocation_method',
+    'alignment',
+    'appearance',
+    'backstory',
+    'revision',
+    'archived_at',
+    'created_at',
+    'updated_at',
+  ] as const;
   const preArchiveCharacterColumns = [
     'id',
-    ...CHARACTER_STATE_COLUMNS,
+    'name',
+    'strength',
+    'dexterity',
+    'constitution',
+    'intelligence',
+    'wisdom',
+    'charisma',
+    'proficiency_bonus_override',
+    'rules_edition_preference',
+    'allow_legacy',
+    'notes',
+    'ability_allocation_method',
+    'alignment',
+    'appearance',
+    'backstory',
     'revision',
     'created_at',
     'updated_at',
@@ -1368,18 +1419,21 @@ function validateDocument(input: unknown): ValidatedDocument {
   ] as const;
   assertExactKeys(
     rawCharacter,
-    version === CHARACTER_BACKUP_VERSION ||
-    version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION ||
-    version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION ||
-    version === PREVIOUS_CHARACTER_BACKUP_VERSION
+    version === CHARACTER_BACKUP_VERSION
       ? currentCharacterColumns
-      : version === PRE_ARCHIVE_CHARACTER_BACKUP_VERSION
-        ? preArchiveCharacterColumns
-        : preFlavorCharacterColumns,
+      : version === PRE_OPTIONAL_FEATURE_SELECTION_CHARACTER_BACKUP_VERSION ||
+          version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION ||
+          version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION ||
+          version === PREVIOUS_CHARACTER_BACKUP_VERSION
+        ? preOptionalFeatureSelectionCharacterColumns
+        : version === PRE_ARCHIVE_CHARACTER_BACKUP_VERSION
+          ? preArchiveCharacterColumns
+          : preFlavorCharacterColumns,
     'Character backup character',
   );
-  const character: MutableRow =
+  const historicalCharacter: MutableRow =
     version === CHARACTER_BACKUP_VERSION ||
+    version === PRE_OPTIONAL_FEATURE_SELECTION_CHARACTER_BACKUP_VERSION ||
     version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION ||
     version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION ||
     version === PREVIOUS_CHARACTER_BACKUP_VERSION
@@ -1393,6 +1447,10 @@ function validateDocument(input: unknown): ValidatedDocument {
             backstory: null,
             archived_at: null,
           };
+  const character: MutableRow =
+    version === CHARACTER_BACKUP_VERSION
+      ? historicalCharacter
+      : { ...historicalCharacter, optional_feature_selections: '[]' };
   if (character.id !== characterId) {
     throw new BackupValidationError(
       'Character backup character belongs to another character.',
@@ -1565,6 +1623,8 @@ function validateDocument(input: unknown): ValidatedDocument {
       ? emptySpellDefinitions()
       : version === CHARACTER_BACKUP_VERSION
         ? emptySpellDefinitions()
+      : version === PRE_OPTIONAL_FEATURE_SELECTION_CHARACTER_BACKUP_VERSION
+        ? emptySpellDefinitions()
       : version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION
         ? emptySpellDefinitions()
       : version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION
@@ -1574,14 +1634,17 @@ function validateDocument(input: unknown): ValidatedDocument {
           referenceMaps.spell_versions,
         );
   const content = version === CHARACTER_BACKUP_VERSION ||
+      version === PRE_OPTIONAL_FEATURE_SELECTION_CHARACTER_BACKUP_VERSION ||
       version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION ||
       version === PRE_LINEAGE_CHARACTER_BACKUP_VERSION
     ? validatePortableContent(
         document.content,
-        version === CHARACTER_BACKUP_VERSION,
+        version === CHARACTER_BACKUP_VERSION ||
+          version === PRE_OPTIONAL_FEATURE_SELECTION_CHARACTER_BACKUP_VERSION,
       )
     : Object.freeze([]);
   const supersessions = version === CHARACTER_BACKUP_VERSION ||
+      version === PRE_OPTIONAL_FEATURE_SELECTION_CHARACTER_BACKUP_VERSION ||
       version === PRE_PROVENANCE_CHARACTER_BACKUP_VERSION
     ? validatePortableContentBundle({
         content,

@@ -252,8 +252,14 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
   }, workspaceImage.ids.character);
   expect(exported.character).toMatchObject({
     format: 'dnd-multiclass-spells/character',
-    version: 7,
+    // Migration 0054 minted a7-v17, backup v8, and share v21 for the new
+    // optional-feature-selection field; this portable document uses backup v8.
+    version: 8,
     source_character_id: workspaceImage.ids.character,
+    character: {
+      // Migration 0054: the exported root-state inventory carries selections.
+      optional_feature_selections: '["2024:feature:parity-selection"]',
+    },
   });
   expect(exported.database).toMatchObject({
     format: 'dnd-multiclass-spells/database',
@@ -272,6 +278,15 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
     'R40 Golden',
     'R40 Golden',
   ]);
+  expect(
+    (await rows(page, 'characters')).find(
+      (row) => row.id === imported.characterId,
+    ),
+  ).toMatchObject({
+    // Backup v8 restores migration 0054's field; a7-v17 and share v21 carry
+    // the same non-empty selection without defaulting it away.
+    optional_feature_selections: '["2024:feature:parity-selection"]',
+  });
   expect(
     forCharacter(
       await rows(page, 'spell_selection_slots'),
@@ -295,7 +310,8 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
   const countBeforeCorruption = (await rows(page, 'characters')).length;
   const beforeCorruption = await databaseBytes(page);
   const corruptCharacter = structuredClone(exported.character);
-  (corruptCharacter as unknown as { version: number }).version = 99;
+  // Backup v8 is current after migration 0054; the next version stays rejected.
+  (corruptCharacter as unknown as { version: number }).version = 9;
   expect(
     (
       await rejectedRpc(page, 'backup.planCharacterImport', {
@@ -303,16 +319,17 @@ test('whole-database and portable-character export/import round-trip, corrupt-ve
         choices: {},
       })
     ).message,
-  ).toBe('Unsupported character backup version 99.');
+  ).toBe('Unsupported character backup version 9.');
   const corruptDatabase = structuredClone(exported.database);
-  (corruptDatabase as unknown as { version: number }).version = 99;
+  // Database backup v1 is still current; its next version stays rejected too.
+  (corruptDatabase as unknown as { version: number }).version = 2;
   expect(
     (
       await rejectedRpc(page, 'backup.importDatabase', {
         backup: corruptDatabase,
       })
     ).message,
-  ).toBe('Unsupported database backup version 99.');
+  ).toBe('Unsupported database backup version 2.');
   expect(await databaseBytes(page)).toEqual(beforeCorruption);
   expect(await rows(page, 'characters')).toHaveLength(countBeforeCorruption);
   await page.reload();

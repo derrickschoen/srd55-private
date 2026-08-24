@@ -311,6 +311,8 @@ function seedCompleteCharacter(
   delete (legacyCharacter as Record<string, unknown>).alignment;
   delete (legacyCharacter as Record<string, unknown>).appearance;
   delete (legacyCharacter as Record<string, unknown>).backstory;
+  delete (legacyCharacter as Record<string, unknown>)
+    .optional_feature_selections;
   delete legacySnapshot.character_weapons;
   delete legacySnapshot.character_species;
   delete legacySnapshot.character_species_traits;
@@ -517,6 +519,7 @@ describe('portable character backup', () => {
     delete root.appearance;
     delete root.backstory;
     delete root.archived_at;
+    delete root.optional_feature_selections;
 
     const target = await database();
     seedCatalog(target, true);
@@ -568,7 +571,9 @@ describe('portable character backup', () => {
     historical.spell_definitions = emptyHistoricalSpellDefinitions();
     delete historical.content;
     delete historical.supersessions;
-    delete (historical.character as Record<string, unknown>).archived_at;
+    const historicalCharacter = historical.character as Record<string, unknown>;
+    delete historicalCharacter.archived_at;
+    delete historicalCharacter.optional_feature_selections;
     const activeTarget = await database();
     seedCatalog(activeTarget, true);
     const activeImport = importCharacterBackup(activeTarget, historical);
@@ -775,7 +780,7 @@ describe('portable character backup', () => {
     // The current-format save point carries the weapons, re-keyed to the rows
     // that were just written, so restoring it puts back the same two weapons.
     expect(saved.schema_version).not.toBe('a7-v15');
-    expect(saved.schema_version).toBe('a7-v16');
+    expect(saved.schema_version).toBe('a7-v17');
     expect(saved.character_weapons.map((row: { name: string }) => row.name)).toEqual([
       'Weathered Longsword',
       'Half-entered club',
@@ -1479,6 +1484,7 @@ describe('a backup file written while the dormant orphan column existed', () => 
         alignment: null,
         appearance: null,
         backstory: null,
+        optional_feature_selections: '[]',
         notes: null,
         archived_at: null,
         created_at: null,

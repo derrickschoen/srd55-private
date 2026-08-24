@@ -201,9 +201,9 @@ export type WarningAcknowledgementId = Brand<
  * Branded apart because both are `number`, both are read by
  * `src/rules/sheet-content-lookup.ts` in the same pass, and the two tables
  * answer different questions: a `SubclassFeatureId` belongs to a subclass the
- * character HAS chosen, a `NamedFeatureId` to an optional feature this
- * application cannot confirm they have taken. Swapping them swaps "applied" for
- * "surfaced", which is the whole distinction the grant model exists to keep.
+ * character chose, while a `NamedFeatureId` belongs to optional catalog content
+ * that emits a grant only when its content key appears in the character's
+ * explicit selection list. Swapping them bypasses that selection boundary.
  */
 export type SubclassFeatureId = Brand<number, 'SubclassFeatureId'>;
 export type NamedFeatureId = Brand<number, 'NamedFeatureId'>;

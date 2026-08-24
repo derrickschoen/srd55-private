@@ -88,6 +88,13 @@ describe('the grants a character actually has, read from the database', () => {
     return lookup().forCharacter(characterId);
   }
 
+  function selectOptionalFeatures(...contentKeys: readonly string[]): void {
+    db.exec(
+      'UPDATE characters SET optional_feature_selections = ? WHERE id = ?',
+      [JSON.stringify(contentKeys), characterId],
+    );
+  }
+
   /* ── the bundled named features ─────────────────────────────────────────── */
 
   it('seeds exactly the two invocations the extract prints, on the Warlock', () => {
@@ -446,24 +453,34 @@ describe('the grants a character actually has, read from the database', () => {
     ).toBe(1);
   });
 
-  /* ── the feature arm: surfaced, never applied ───────────────────────────── */
+  /* ── the optional-feature arm: only selected rows become grants ────────── */
 
-  it('surfaces Thirsting Blade against a Warlock 5 without applying it', () => {
+  it('does not resurrect Thirsting Blade for a Warlock 5 with explicit-empty selections', () => {
     addLevels('Warlock', 5, { starting: true });
     const result = attacksPerAction(classes());
-    // ONE attack. This application records neither the invocation nor which
-    // weapon is the pact weapon, so two would be wrong for every other weapon.
+    expect(result.count).toBe(1);
+    expect(result.unresolved).toEqual([]);
+  });
+
+  it('surfaces a selected Thirsting Blade as genuinely weapon-unresolved', () => {
+    addLevels('Warlock', 5, { starting: true });
+    selectOptionalFeatures('2024:feature:thirsting-blade');
+    const result = attacksPerAction(classes());
     expect(result.count).toBe(1);
     expect(result.unresolved).toHaveLength(1);
     expect(result.unresolved[0]?.source).toBe('feature');
     expect(result.unresolved[0]?.source_name).toBe('Thirsting Blade');
     expect(result.unresolved[0]?.attack_count).toBe(2);
-    // Both reasons, because both are true at once.
-    expect(result.unresolved[0]?.unresolved).toHaveLength(2);
+    expect(result.unresolved[0]?.unresolved).toHaveLength(1);
+    expect(result.unresolved[0]?.unresolved[0]).toContain('one bonded weapon only');
   });
 
   it('reports both invocations a Warlock 12 holds, highest first', () => {
     addLevels('Warlock', 12, { starting: true });
+    selectOptionalFeatures(
+      '2024:feature:thirsting-blade',
+      '2024:feature:devouring-blade',
+    );
     const result = attacksPerAction(classes());
     // Still ONE applied attack: neither can be confirmed.
     expect(result.count).toBe(1);
@@ -483,6 +500,10 @@ describe('the grants a character actually has, read from the database', () => {
     // "…doesn't give you additional attacks if you also have Extra Attack."
     addLevels('Fighter', 11, { starting: true });
     addLevels('Warlock', 12);
+    selectOptionalFeatures(
+      '2024:feature:thirsting-blade',
+      '2024:feature:devouring-blade',
+    );
     const result = attacksPerAction(classes());
     expect(result.count).toBe(3);
     expect(result.unresolved).toEqual([]);
@@ -491,6 +512,10 @@ describe('the grants a character actually has, read from the database', () => {
   it('is the case one number cannot answer: Fighter 5 / Warlock 12', () => {
     addLevels('Fighter', 5, { starting: true });
     addLevels('Warlock', 12);
+    selectOptionalFeatures(
+      '2024:feature:thirsting-blade',
+      '2024:feature:devouring-blade',
+    );
     const result = attacksPerAction(classes());
     // Two with any weapon; three with the pact weapon, if they took both
     // invocations. Neither number is right for the other case.
@@ -647,6 +672,7 @@ describe('the grants a character actually has, read from the database', () => {
 
   it('states the ignorance on the profile AND in a panel warning', () => {
     addLevels('Warlock', 5, { starting: true });
+    selectOptionalFeatures('2024:feature:thirsting-blade');
     const result = attackProfiles({
       weapons: [
         {

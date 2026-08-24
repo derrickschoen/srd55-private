@@ -1168,7 +1168,10 @@ export function positionalToShareDocument(
       }
       return decodeCurrentWire(migrated);
     }
-    case 20:
+    case 20: {
+      return decodeCurrentWire(MIGRATIONS[20](input));
+    }
+    case 21:
       return decodeCurrentWire(input);
     default:
       throw new ShareValidationError('version is unsupported.');

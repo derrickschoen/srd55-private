@@ -2169,6 +2169,19 @@ const CONSTRAINT_CASES: readonly ConstraintCase[] = [
     ],
   },
   {
+    constraint: 'characters_optional_feature_selections_check',
+    rejects: [
+      ['malformed JSON', character({ optional_feature_selections: '[' })],
+      ['an object that cannot represent an ordered selection list', character({ optional_feature_selections: '{}' })],
+      ['a scalar feature key', character({ optional_feature_selections: '"2024:feature:thirsting-blade"' })],
+    ],
+    accepts: [
+      ['the explicit-empty default', character({})],
+      ['an explicit empty selection list', character({ optional_feature_selections: '[]' })],
+      ['a selected content key', character({ optional_feature_selections: '["2024:feature:thirsting-blade"]' })],
+    ],
+  },
+  {
     constraint: 'characters_archived_at_check',
     rejects: [
       ['an integer lifecycle value', character({ archived_at: 20420304 })],

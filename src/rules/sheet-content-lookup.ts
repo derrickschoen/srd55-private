@@ -53,7 +53,6 @@ import type { MartialArtsDieSize } from '../domain/enums';
 import type { ClassFeatureEffect } from './class-feature-effects';
 import { classFeatureEffect } from './class-feature-effects';
 import type { ExtraAttackGrant } from './extra-attack';
-import { selectionUnresolved } from './extra-attack';
 import type { ClassDefinitionId, ContentKey } from '../domain/ids';
 import {
   parseSrdClassResourceFormulaManifest,
@@ -395,6 +394,19 @@ export class SheetContentLookup {
    * an INNER join would silently drop a level 1 Fighter's whole class row.
    */
   forCharacter(characterId: number): readonly SheetClassContent[] {
+    const selectedOptionalFeatures = new Set(
+      this.db.all(
+        `SELECT value AS content_key
+         FROM json_each((
+           SELECT optional_feature_selections
+           FROM characters
+           WHERE id = ?
+         ))
+         WHERE type = 'text'`,
+        [characterId],
+        (row) => sqlString(row, 'content_key'),
+      ),
+    );
     const classes = this.db.all(
       `SELECT level.class_definition_id AS class_definition_id,
               level.level AS class_level,
@@ -508,7 +520,10 @@ export class SheetContentLookup {
             entry.class_name,
           ),
           ...subclassGrants(features),
-          ...namedFeatureGrants(this.namedFeatures(entry.class_definition_id)),
+          ...namedFeatureGrants(
+            this.namedFeatures(entry.class_definition_id),
+            selectedOptionalFeatures,
+          ),
         ],
         martial_arts_dice: this.martialArtsDice(entry.class_definition_id),
       };
@@ -555,28 +570,29 @@ function subclassGrants(
 }
 
 /**
- * A named feature that grants Extra Attack becomes a grant this application
- * CANNOT CONFIRM, and says so in as many sentences as it has reasons.
+ * A selected named feature that grants Extra Attack becomes a grant the
+ * character has. A feature absent from the explicit selection does not.
  *
- * EVERY ROW GETS THE SELECTION REASON, UNCONDITIONALLY. There is no invocation
- * table, no feat-feature table and no class-feature selection anywhere in
- * `db/schema/`, so the answer is the same for every character and is a fact
- * about this application rather than about them. THAT is the reason this
- * builder writes, because nothing on the grant states it: it is a fact about
- * the SCHEMA, not about the row.
+ * Only selected rows become grants. Optionality comes from the feature's own
+ * storage kind: every `named_features` row is optional, while unconditional
+ * class-table features live in `class_feature_effects` and enter through
+ * `classExtraAttackGrants` above. The selection stores the row's stable
+ * content key, so this decision does not depend on a hand-maintained name list.
  *
- * THE WEAPON REASON IS NOT WRITTEN HERE. Thirsting Blade collects it too — it
- * is why `unresolved` is a list, the two axes being independent and both true
- * at once — but it is DERIVED from `weapon_scope` by `resolveAttacksPerAction`
- * rather than restated at this call site, so the grant cannot carry a scope its
- * reasons contradict. See `scopeUnresolved` in `src/rules/extra-attack.ts`.
+ * THE WEAPON REASON IS NOT WRITTEN HERE. It is derived from `weapon_scope` by
+ * `resolveAttacksPerAction`, so the grant cannot carry a scope its reasons
+ * contradict. See `scopeUnresolved` in `src/rules/extra-attack.ts`.
  */
 function namedFeatureGrants(
   features: readonly NamedFeature[],
+  selectedContentKeys: ReadonlySet<string>,
 ): readonly ExtraAttackGrant[] {
   const grants: ExtraAttackGrant[] = [];
   for (const feature of features) {
-    if (feature.effect === null) {
+    if (
+      feature.effect === null ||
+      !selectedContentKeys.has(feature.content_key)
+    ) {
       continue;
     }
     grants.push({
@@ -585,7 +601,7 @@ function namedFeatureGrants(
       class_level: feature.class_level,
       attack_count: feature.effect.attack_count,
       weapon_scope: feature.effect.weapon_scope,
-      unresolved: [selectionUnresolved(feature.name, feature.prerequisite)],
+      unresolved: [],
     });
   }
   return grants;

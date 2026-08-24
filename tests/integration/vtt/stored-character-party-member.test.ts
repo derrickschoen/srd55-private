@@ -67,10 +67,12 @@ function exportable(
 
 function exportedMember(db: DatabaseContext, characterId: number) {
   const result = new StoredCharacterPartyPackExporter(db).export(characterId);
-  expect(result.status).toBe('exported');
   if (result.status !== 'exported') {
-    throw new Error(`Export refused at ${result.refusal.field}.`);
+    throw new Error(
+      `Export refused at ${result.refusal.field}: ${result.refusal.detail}`,
+    );
   }
+  expect(result.status).toBe('exported');
   return result.member;
 }
 
@@ -165,6 +167,82 @@ describe('stored character party-pack bridge', () => {
     const db = harness.context.db;
     const attacklessId = exportable(db, 'Attackless Caster', [{ name: 'Wizard', level: 1 }]);
     expect(exportedMember(db, attacklessId).attacks).toEqual([]);
+  });
+
+  it('optional_feature_grants_resurrected: distinguishes unselected Warlock, Fighter Extra Attack, and selected unresolved grant', async () => {
+    harness = await createSeededRpcHarness([]);
+    const db = harness.context.db;
+    const warlockId = exportable(db, 'Explicit Empty Warlock', [
+      { name: 'Warlock', level: 5 },
+    ]);
+    const fighterId = exportable(db, 'Extra Attack Fighter', [
+      { name: 'Fighter', level: 5 },
+    ]);
+    const fiendId = db.scalar<number>(
+      `SELECT id FROM subclass_definitions
+       WHERE name = 'Fiend Patron' AND rules_edition = '2024'`,
+    );
+    const warlockClassId = db.scalar<number>(
+      `SELECT class_definition_id FROM character_class_levels
+       WHERE character_id = ?`,
+      [warlockId],
+    );
+    if (fiendId === null || warlockClassId === null) {
+      throw new Error('Seeded Fiend Warlock content is missing.');
+    }
+    db.exec(
+      `UPDATE character_class_levels SET subclass_definition_id = ?
+       WHERE character_id = ?`,
+      [fiendId, warlockId],
+    );
+    const warlockSourceId = createSource(
+      db,
+      warlockId,
+      'class',
+      warlockClassId,
+      'Warlock 5',
+      { spellcasting_ability: 'charisma' },
+    );
+    const eldritchBlastId = db.scalar<number>(
+      `SELECT id FROM spell_versions
+       WHERE display_name = 'Eldritch Blast'
+         AND rules_edition = '2024'
+         AND is_active = 1`,
+    );
+    if (eldritchBlastId === null) {
+      throw new Error('Seeded Eldritch Blast is missing.');
+    }
+    createSlot(
+      db,
+      warlockId,
+      warlockSourceId,
+      eldritchBlastId,
+      'optional-feature-regression:cantrip',
+      1,
+      { bucket: 'cantrip_known', levelMin: 0, levelMax: 0, allowedSpellLists: ['Warlock'] },
+    );
+
+    expect(
+      db.scalar(
+        'SELECT optional_feature_selections FROM characters WHERE id = ?',
+        [warlockId],
+      ),
+    ).toBe('[]');
+    expect(exportedMember(db, warlockId).attacksPerAction).toBe(1);
+    expect(exportedMember(db, fighterId).attacksPerAction).toBe(2);
+
+    db.exec(
+      'UPDATE characters SET optional_feature_selections = ? WHERE id = ?',
+      [JSON.stringify(['2024:feature:thirsting-blade']), warlockId],
+    );
+    expect(new StoredCharacterPartyPackExporter(db).export(warlockId)).toEqual({
+      status: 'refused',
+      refusal: {
+        kind: 'stored_character_party_pack_refusal',
+        field: 'attacksPerAction',
+        detail: 'The sheet has unresolved weapon-scoped Extra Attack grants.',
+      },
+    });
   });
 
   it('refusal_defaulted: refuses a named missing required field instead of supplying speed', async () => {

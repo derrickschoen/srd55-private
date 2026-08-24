@@ -48,6 +48,7 @@ function minimalCharacterBackup(): CharacterBackupDocument {
       alignment: null,
       appearance: null,
       backstory: null,
+      optional_feature_selections: '[]',
       notes: null,
       archived_at: null,
       created_at: null,

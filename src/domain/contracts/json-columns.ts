@@ -69,6 +69,12 @@ type EveryColumnKey = { [T in FactTable]: AnyColumnKey<T> }[FactTable];
 
 export const JSON_COLUMNS = {
   // --- character-owned ------------------------------------------------------
+  'characters.optional_feature_selections': {
+    shape: 'array',
+    allowEmpty: false,
+    items: 'string',
+    reader: 'SheetContentLookup.forCharacter — stable named-feature content keys selected by the character',
+  },
   'character_source_instances.config': {
     shape: 'object',
     allowEmpty: true,

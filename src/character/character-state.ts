@@ -102,6 +102,10 @@ import {
  * and backstory. `a7-v15` is frozen before those columns exist; restoring it
  * writes NULL for each absence rather than inventing text.
  *
+ * The optional-feature representability slice mints `a7-v17` because the root
+ * projection gains `optional_feature_selections`. `a7-v16` is frozen before
+ * that column exists; restoring it writes the truthful explicit-empty array.
+ *
  * NOT BUMPING WOULD HAVE BEEN THE LOUDEST FAILURE IN THIS CHANGE.
  * `SNAPSHOT_TABLES_BY_VERSION` aliases the CURRENT version to the live
  * `CHARACTER_STATE_TABLES`, so adding four tables without minting `a7-v4` would
@@ -111,7 +115,7 @@ import {
  * containing one. Undo, save-point restore and `exportCharacterBackup` — which
  * re-parses its own stored save points on the way out — would break together.
  */
-export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v16' as const;
+export const CHARACTER_SNAPSHOT_SCHEMA_VERSION = 'a7-v17' as const;
 
 /**
  * D83 does not mint a snapshot version. `ability_override` occupies the
@@ -288,6 +292,7 @@ const SNAPSHOT_TABLES_BY_VERSION = {
   'a7-v14': A7_V14_TABLES,
   'a7-v15': A7_V15_TABLES,
   'a7-v16': CHARACTER_STATE_TABLES,
+  'a7-v17': CHARACTER_STATE_TABLES,
 } as const satisfies Readonly<Record<string, readonly SnapshotTable[]>>;
 
 /**
@@ -318,6 +323,7 @@ export const CHARACTER_SNAPSHOT_SCHEMA_VERSIONS = [
   'a7-v14',
   'a7-v15',
   'a7-v16',
+  'a7-v17',
 ] as const satisfies readonly (keyof typeof SNAPSHOT_TABLES_BY_VERSION)[];
 
 export type CharacterSnapshotSchemaVersion =
@@ -392,11 +398,16 @@ const PRE_V16_CHARACTER_COLUMNS = [
   'ability_allocation_method',
 ] as const;
 
-export const CHARACTER_STATE_COLUMNS = [
+const PRE_V17_CHARACTER_COLUMNS = [
   ...PRE_V16_CHARACTER_COLUMNS,
   'alignment',
   'appearance',
   'backstory',
+] as const;
+
+export const CHARACTER_STATE_COLUMNS = [
+  ...PRE_V17_CHARACTER_COLUMNS,
+  'optional_feature_selections',
 ] as const;
 
 const SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION = {
@@ -422,7 +433,8 @@ const SNAPSHOT_CHARACTER_COLUMNS_BY_VERSION = {
   'a7-v13': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
   'a7-v14': [...PRE_V8_CHARACTER_COLUMNS, 'ability_allocation_method'] as const,
   'a7-v15': PRE_V16_CHARACTER_COLUMNS,
-  'a7-v16': CHARACTER_STATE_COLUMNS,
+  'a7-v16': PRE_V17_CHARACTER_COLUMNS,
+  'a7-v17': CHARACTER_STATE_COLUMNS,
 } as const satisfies Readonly<
   Record<CharacterSnapshotSchemaVersion, readonly string[]>
 >;
@@ -760,11 +772,9 @@ export class CharacterState {
       characterId,
       snapshot,
     );
-    // A current column the snapshot's version predates restores as NULL: the
-    // snapshot records a character from before that column could hold
-    // anything, and NULL is that state's honest value. For
-    // `ability_allocation_method` specifically, NULL is "never allocated" —
-    // which is exactly what was true when the snapshot was written.
+    // A current column the snapshot's version predates restores to that
+    // column's truthful empty state. Optional-feature selection is NOT NULL,
+    // and [] means none selected; the older nullable columns use NULL.
     const carriedColumns = new Set<string>(columns);
     const carried = new Set<string>(tables);
     const legacyTraits =
@@ -793,7 +803,9 @@ export class CharacterState {
             (column) =>
               (carriedColumns.has(column)
                 ? character[column]
-                : null) as SqlValue,
+                : column === 'optional_feature_selections'
+                  ? '[]'
+                  : null) as SqlValue,
           ),
           characterId,
         ],

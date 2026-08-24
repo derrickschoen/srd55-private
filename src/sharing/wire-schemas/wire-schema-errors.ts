@@ -1,4 +1,4 @@
-export type ShareWireSchemaCheckedVersion = 12 | 13 | 14 | 15 | 17 | 19;
+export type ShareWireSchemaCheckedVersion = 12 | 13 | 14 | 15 | 17 | 19 | 20;
 
 /** A frozen schema lacks fields its adjacent migration requires. */
 export class ShareWireSchemaRequiredFieldError extends Error {

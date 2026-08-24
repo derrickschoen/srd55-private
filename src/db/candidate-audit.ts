@@ -682,6 +682,15 @@ function auditJsonColumns(db: Database): void {
   for (const key of JSON_COLUMN_KEYS) {
     const { table, column } = jsonColumnLocation(key);
     const fact = JSON_COLUMNS[key];
+    const columnExists = db.selectValue(
+      'SELECT 1 FROM pragma_table_info(?) WHERE name = ?',
+      [table, column],
+    );
+    // Candidate audit runs before pending migrations. A classified JSON column
+    // introduced by a later migration therefore has no values to validate yet.
+    if (columnExists === undefined) {
+      continue;
+    }
     const rows: ReadonlyArray<Record<string, SqlValue>> = db.selectObjects(
       `SELECT rowid AS row_id, ${quoted(column)} AS value
        FROM ${quoted(table)}

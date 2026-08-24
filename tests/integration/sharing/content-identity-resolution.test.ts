@@ -285,8 +285,9 @@ describe('CI-SHARE-REFERENCE', () => {
     }
     expect(shareDocumentToReferencePositional(matchingWire.document)).toEqual([
       matchingWire.raw[0],
-      20,
-      ...matchingWire.raw.slice(2),
+      21,
+      [...(matchingWire.raw[2] as unknown[]), null],
+      ...matchingWire.raw.slice(3),
       null, // v18 portable content stays absent in reference-only mode
       null, // v20 stable document identity was absent from the v17 fixture
     ]);

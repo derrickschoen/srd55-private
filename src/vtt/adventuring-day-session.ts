@@ -7,6 +7,7 @@ import type { CodexSessionId, EncounterBranchId, EncounterSessionId } from '../c
 import type { LoadedPartyMember } from './party-pack';
 import {
   createPartySessionState,
+  enterNextRoom as advancePartyRoom,
   type PartySessionState,
   type ShortRestHitDieSpend,
   type ShortRestResult,
@@ -132,7 +133,8 @@ export class AdventuringDaySession {
   }
 
   enterNextRoom(composeRoom: DmRoomComposer = composeStoredCharacterEncounter): StoredCharacterEncounter {
-    const encounter = composeRoom(this.members, this.displayNames, this.#partyState);
+    const nextPartyState = advancePartyRoom(this.#partyState);
+    const encounter = composeRoom(this.members, this.displayNames, nextPartyState);
     if (encounter.rulesEdition !== '2024') {
       throw new Error('Every encounter in the chain must use the locked 2024 rules edition.');
     }

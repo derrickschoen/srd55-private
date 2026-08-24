@@ -207,7 +207,8 @@ const expectedColumns: Record<string, ColumnsByAffinity> = {
     ],
     text: [
       'name', 'ability_allocation_method', 'rules_edition_preference',
-      'alignment', 'appearance', 'backstory', 'notes',
+      'alignment', 'appearance', 'backstory', 'optional_feature_selections',
+      'notes',
     ],
     numeric: ['archived_at', 'created_at', 'updated_at'],
   },
@@ -1021,6 +1022,7 @@ const expectedNotNull: Record<string, string[]> = {
   characters: [
     'id', 'name', 'strength', 'dexterity', 'constitution', 'intelligence',
     'wisdom', 'charisma', 'rules_edition_preference', 'allow_legacy', 'revision',
+    'optional_feature_selections',
   ],
   class_definitions: [
     'id', 'content_key', 'name', 'rules_edition', 'progression_type',
@@ -1512,6 +1514,7 @@ const expectedDefaults: Record<string, Record<string, string>> = {
   characters: {
     allow_legacy: 'false', charisma: '10', constitution: '10',
     dexterity: '10', intelligence: '10', revision: '0',
+    optional_feature_selections: "'[]'",
     rules_edition_preference: "'2024'", strength: '10', wisdom: '10',
   },
   class_definitions: {

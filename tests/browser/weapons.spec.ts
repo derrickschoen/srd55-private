@@ -788,18 +788,11 @@ test('the damage-type choice is undecided on both sides until it is made', async
 /**
  * THE IGNORANCE, ON A REAL SCREEN.
  *
- * D19's weapon-scoped grant is the one number this application refuses to give:
- * a Warlock 5 may have taken Thirsting Blade and may be holding their pact
- * weapon, and this schema records neither. The derivation therefore answers ONE
- * attack and states what it could not count — and both halves of that statement
- * are rendered here and nowhere else, because the vitest suite runs in the
- * `node` environment and has no DOM at all.
- *
- * Two places say it, and they say different things: the panel-level warning
- * names the feature and prints every reason; the per-profile list says WHICH
- * WEAPON ROW the missing attack would have belonged to.
+ * An explicit-empty optional-feature list means the Warlock did not select
+ * Thirsting Blade. Catalog presence alone must therefore produce neither a
+ * second attack nor an unresolved-grant warning.
  */
-test('a grant it cannot apply is stated on the page, not folded into the number', async ({
+test('an unselected optional grant is absent from both the number and warnings', async ({
   page,
 }) => {
   // The four-worker pool measured this test at 12.9s; 35s gives both
@@ -835,26 +828,15 @@ test('a grant it cannot apply is stated on the page, not folded into the number'
   await expect(profiles).toContainText('The Attack action gives one attack.', {
     timeout: 35_000,
   });
-  await expect(profiles).toContainText(
+  await expect(profiles).not.toContainText(
     'features this application cannot apply are listed below',
   );
-
-  // The panel-level statement: named, and with both reasons.
-  const warning = page
-    .getByTestId('attack-profile-warning')
-    .filter({ hasText: 'Thirsting Blade' });
-  await expect(warning).toHaveAttribute('data-code', 'unresolved_extra_attack');
-  await expect(warning).toContainText('would give 2 attacks');
-  await expect(warning).toContainText(
-    'does not record which optional class features',
-  );
-  await expect(warning).toContainText('one bonded weapon only');
-  await expect(warning).toContainText('never the sum');
+  await expect(page.getByTestId('attack-profile-warning')).toHaveCount(0);
 
   // The per-profile statement, on the weapon row itself.
   const weapon = page.getByTestId('attack-weapon').first();
   await expect(weapon).toContainText('One attack.');
-  await expect(weapon).toContainText('Thirsting Blade would give 2 attacks.');
+  await expect(weapon).not.toContainText('Thirsting Blade');
 
   // Nothing was written to produce any of it, and the licensor is unnamed.
   expect(

@@ -199,15 +199,15 @@ function scopeUnresolved(grant: ExtraAttackGrant): readonly string[] {
   }
 }
 
-/** The sentence for a feature this application cannot confirm was taken. */
+/** The sentence for a grant input whose selection state is genuinely unknown. */
 export function selectionUnresolved(
   sourceName: string,
   prerequisite: string,
 ): string {
   return (
     `${sourceName} is optional and its prerequisite is “${prerequisite}”. ` +
-    'This application does not record which optional class features a ' +
-    'character has taken, so it cannot confirm this one and has not applied it.'
+    'This grant input does not establish whether the optional class feature was ' +
+    'selected, so it cannot be applied.'
   );
 }
 

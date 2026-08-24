@@ -241,6 +241,7 @@ const PROBES: { readonly [N in ProbedTable]: Probe<N> } = {
         option: 'writtenText',
         why: 'D124 puts every character-authored text field behind the single written-text option, default off.',
       },
+      optional_feature_selections: { kind: 'verbatim' },
       notes: {
         kind: 'opt_in',
         option: 'writtenText',
@@ -1173,11 +1174,13 @@ function seedSender(db: DatabaseContext, catalog: Catalog): number {
        name, strength, dexterity, constitution, intelligence, wisdom,
        charisma, ability_allocation_method, proficiency_bonus_override,
        rules_edition_preference, allow_legacy, revision, alignment, appearance,
-       backstory, notes, archived_at, created_at, updated_at
+       backstory, optional_feature_selections, notes, archived_at, created_at,
+       updated_at
      ) VALUES (
        'Portability Probe', 8, 14, 13, 18, 12, 11, 'manual', 4, 'expanded',
        1, 7, 'Chaotic Good', 'Silver scales and a blue cloak.',
        'Left the northern watch to find a vanished mentor.',
+       '["2024:feature:portability-probe"]',
        'sender private character note', '2042-03-04T05:06:07.000Z', ?, ?
      )`,
     [SENDER_TIME, SENDER_TIME],

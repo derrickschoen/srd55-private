@@ -151,10 +151,10 @@ Two mechanisms make this stick, and they are worth knowing by name:
    without that column is `Type 'true' is not assignable to type 'false'`. That
    fact previously lived only in a reviewer's head.
 
-Derived from the classification: `SnapshotTable` (`:1232`), `BackupTable` (`:1234`),
-`ShareTable` (`:1235`), and the ordered constants `CHARACTER_STATE_TABLES`
-(`:1446`), `DELETE_ORDER` (`:1531`), `BACKUP_TABLES` (`:1598`), `SHARE_TABLES`
-(`:1691`).
+Derived from the classification: `SnapshotTable` (`:1231`), `BackupTable` (`:1233`),
+`ShareTable` (`:1234`), and the ordered constants `CHARACTER_STATE_TABLES`
+(`:1445`), `DELETE_ORDER` (`:1530`), `BACKUP_TABLES` (`:1597`), `SHARE_TABLES`
+(`:1690`).
 
 **Classification is not the same as working.** That was Q8's bug, and D24 records
 the discipline that replaced it: each arm gets its own test — a column-for-column
@@ -166,7 +166,7 @@ save-point restore. [RECIPES.md](RECIPES.md) §3 is that checklist.
 ## 4. The character root is NOT covered by the table loop
 
 `characters` is classified all-false. The root is serialized through its own
-path in `src/character/character-state.ts`: `CHARACTER_STATE_COLUMNS` (`:395`) for
+path in `src/character/character-state.ts`: `CHARACTER_STATE_COLUMNS` (`:408`) for
 snapshots, and `document.character` for backups. **A new column on `characters`
 therefore does NOT get picked up by any of the table-scope machinery.** It has to
 be added to `CHARACTER_STATE_COLUMNS` by hand, and to the backup and share paths

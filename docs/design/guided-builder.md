@@ -512,11 +512,11 @@ ordinary ability modifier.” That is a product guess. Put the exact comparison
 in one pure policy function and test boundary ties so the guess is at least
 consistent and replaceable.
 
-Pact of the Blade cannot participate yet. The repository stores only the
-unresolved text “Level 5+ Warlock, Pact of the Blade” for a different optional
-feature (`db/schema/catalog-classes.ts:469-484`). It has no invocation
-selection, no selected pact weapon, and no structured ability substitution
-(`src/rules/extra-attack.ts:47-60`).
+Pact of the Blade cannot participate yet. The character root can now represent
+an explicit list of selected optional-feature content keys, but the repository
+still has no invocation-authoring command, source-instance-tied selection,
+selected pact weapon, or structured ability substitution. The stored
+prerequisite remains prose (`db/schema/catalog-classes.ts`).
 
 ### UI language
 
@@ -642,9 +642,9 @@ and portability (about 1–2 weeks), and **XL** is a new reusable domain track
     recommendation thresholds in one pure policy and test that mutating fit can
     never mutate eligibility.
 
-15. **Pact of the Blade and optional class-feature selection — XL.** Build a
-    general optional-feature catalog/selection model, not a boolean named after
-    one invocation. It needs:
+15. **Pact of the Blade and optional class-feature authoring — XL.** Replace the
+    minimal root content-key list with a general authored selection model, not
+    a boolean named after one invocation. It needs:
 
     - sourced Pact of the Blade feature content and structured prerequisites;
     - character selection tied to the granting Warlock source and acquired
@@ -728,8 +728,9 @@ sub-choice work as prerequisites, not polish.
 
 True Strike has a weapon-cost condition the weapon schema does not store;
 Shillelagh names two weapon kinds that cannot safely be recovered from an
-edited value row by name; Pact of the Blade has no selection at all. Until the
-applicability work lands, show “cannot determine” rather than a positive badge.
+edited value row by name; Pact of the Blade has no authoring or pact-weapon
+selection. Until the applicability work lands, show “cannot determine” rather
+than a positive badge.
 The most dangerous failure is a positive badge inferred from display text.
 
 ### Existing gear cannot yet be re-ranked honestly on level-up

@@ -31,6 +31,7 @@ import { canonicalJson } from '../commands/canonical-json';
 import { sha256 } from '../crypto/sha256';
 import { assertSourceRepeatable } from '../commands/add-source';
 import {
+  parseJson,
   sqlVersatileWeaponDamage,
   sqlWeaponDamage,
   type SqlRow,
@@ -1114,6 +1115,27 @@ export function exportCharacterShare(
   const appearance = writtenText(character.appearance);
   const backstory = writtenText(character.backstory);
   const notes = writtenText(character.notes);
+  const optionalFeatureSelections = parseJson(
+    String(character.optional_feature_selections),
+    'characters.optional_feature_selections',
+  );
+  if (
+    !Array.isArray(optionalFeatureSelections) ||
+    optionalFeatureSelections.some((value) => typeof value !== 'string')
+  ) {
+    throw new ShareValidationError(
+      'characters.optional_feature_selections must be a JSON list of content keys.',
+    );
+  }
+  const selectedOptionalFeatureKeys: string[] = [];
+  for (const value of optionalFeatureSelections) {
+    if (typeof value !== 'string') {
+      throw new ShareValidationError(
+        'characters.optional_feature_selections must contain only content keys.',
+      );
+    }
+    selectedOptionalFeatureKeys.push(value);
+  }
   // Not behind an option flag. `acknowledgements` and `loadouts` are opt-in
   // because they are working state the recipient may not want; a weapon is part
   // of the build being shared, like the class levels and the spellbook.
@@ -1391,6 +1413,7 @@ export function exportCharacterShare(
       ...(alignment === undefined ? {} : { alignment }),
       ...(appearance === undefined ? {} : { appearance }),
       ...(backstory === undefined ? {} : { backstory }),
+      optional_feature_selections: selectedOptionalFeatureKeys,
       ...(notes === undefined ? {} : { notes }),
     },
     classes,
@@ -2345,6 +2368,7 @@ function insertCharacterShare(
            alignment = COALESCE(?, alignment),
            appearance = COALESCE(?, appearance),
            backstory = COALESCE(?, backstory),
+           optional_feature_selections = ?,
            notes = COALESCE(?, notes), updated_at = ?
          WHERE id = ? AND revision = ?`,
         [
@@ -2362,6 +2386,7 @@ function insertCharacterShare(
           c.alignment ?? null,
           c.appearance ?? null,
           c.backstory ?? null,
+          JSON.stringify(c.optional_feature_selections ?? []),
           c.notes ?? null,
           now,
           update.characterId,
@@ -2381,9 +2406,9 @@ function insertCharacterShare(
          name, strength, dexterity, constitution, intelligence, wisdom,
          charisma, ability_allocation_method, proficiency_bonus_override,
          rules_edition_preference, allow_legacy, revision,
-         alignment, appearance, backstory, notes,
+         alignment, appearance, backstory, optional_feature_selections, notes,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
       [
         c.name,
         // `?? 10` refills the scores the exporter compressed away — which is
@@ -2403,6 +2428,7 @@ function insertCharacterShare(
         c.alignment ?? null,
         c.appearance ?? null,
         c.backstory ?? null,
+        JSON.stringify(c.optional_feature_selections ?? []),
         // A document that carries no note leaves the recipient's column at its
         // own NULL, which is what a link minted before Q12 has always produced.
         c.notes ?? null,

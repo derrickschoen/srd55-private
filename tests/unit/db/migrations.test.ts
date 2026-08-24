@@ -296,6 +296,15 @@ const SCHEMA_BEFORE_VTT_SESSION_PARTY_STATE = DATABASE_MIGRATIONS
   .join('\n');
 const VTT_SESSION_PARTY_STATE_MIGRATION =
   DATABASE_MIGRATIONS[VTT_SESSION_PARTY_STATE_INDEX]!;
+const OPTIONAL_FEATURE_SELECTIONS_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0054_optional_feature_selections',
+);
+const SCHEMA_BEFORE_OPTIONAL_FEATURE_SELECTIONS = DATABASE_MIGRATIONS
+  .slice(0, OPTIONAL_FEATURE_SELECTIONS_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const OPTIONAL_FEATURE_SELECTIONS_MIGRATION =
+  DATABASE_MIGRATIONS[OPTIONAL_FEATURE_SELECTIONS_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -3891,6 +3900,78 @@ describe('database migration chain', () => {
       `);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         VTT_SESSION_PARTY_STATE_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(
+        schemaSignature(SCHEMA_BEFORE_OPTIONAL_FEATURE_SELECTIONS),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0054 truthfully backfills existing characters to an explicit empty optional-feature selection', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_OPTIONAL_FEATURE_SELECTIONS);
+      db.exec(`
+        INSERT INTO characters (
+          id, name, strength, dexterity, constitution, intelligence, wisdom,
+          charisma, ability_allocation_method, proficiency_bonus_override,
+          rules_edition_preference, allow_legacy, revision, alignment,
+          appearance, backstory, notes, archived_at, created_at, updated_at
+        ) VALUES (
+          7, 'Migration Survivor', 15, 14, 13, 12, 11, 9, 'manual', 4,
+          'expanded', 1, 6, 'Neutral Good', 'Mud-streaked cloak',
+          'Survived the rebuild', 'Keep this note',
+          '2042-03-04T05:06:07.000Z', '2040-01-02T03:04:05.000Z',
+          '2041-02-03T04:05:06.000Z'
+        );
+        INSERT INTO characters (id, name) VALUES (19, 'Sequence Marker');
+        DELETE FROM characters WHERE id = 19;
+      `);
+
+      db.exec(OPTIONAL_FEATURE_SELECTIONS_MIGRATION.sql);
+
+      expect(db.selectObject(
+        `SELECT id, name, strength, dexterity, constitution, intelligence,
+                wisdom, charisma, ability_allocation_method,
+                proficiency_bonus_override, rules_edition_preference,
+                allow_legacy, revision, alignment, appearance, backstory,
+                optional_feature_selections, notes, archived_at, created_at,
+                updated_at
+         FROM characters WHERE id = 7`,
+      )).toEqual({
+        id: 7,
+        name: 'Migration Survivor',
+        strength: 15,
+        dexterity: 14,
+        constitution: 13,
+        intelligence: 12,
+        wisdom: 11,
+        charisma: 9,
+        ability_allocation_method: 'manual',
+        proficiency_bonus_override: 4,
+        rules_edition_preference: 'expanded',
+        allow_legacy: 1,
+        revision: 6,
+        alignment: 'Neutral Good',
+        appearance: 'Mud-streaked cloak',
+        backstory: 'Survived the rebuild',
+        optional_feature_selections: '[]',
+        notes: 'Keep this note',
+        archived_at: '2042-03-04T05:06:07.000Z',
+        created_at: '2040-01-02T03:04:05.000Z',
+        updated_at: '2041-02-03T04:05:06.000Z',
+      });
+      db.exec("INSERT INTO characters (name) VALUES ('Default Empty')");
+      expect(db.selectValue(
+        "SELECT optional_feature_selections FROM characters WHERE name = 'Default Empty'",
+      )).toBe('[]');
+      expect(db.selectValue(
+        "SELECT id FROM characters WHERE name = 'Default Empty'",
+      )).toBe(20);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        OPTIONAL_FEATURE_SELECTIONS_MIGRATION.resultSchemaChecksum,
       );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {

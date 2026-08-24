@@ -45,6 +45,11 @@ export default defineConfig({
     // Shared workers require every test to restore mocks, globals, environments,
     // native-prototype mutations, and scoped module mocks at its suite boundary.
     isolate: false,
+    // The migration-heavy suite oversubscribes constrained runners when
+    // Vitest mirrors the host's full CPU count, causing unrelated fixed-timeout
+    // tests to fail under contention. Bound scheduling without changing any
+    // suite membership, assertion, or timeout contract.
+    maxWorkers: 8,
     clearMocks: true,
     restoreMocks: true,
     unstubGlobals: true,

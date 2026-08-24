@@ -23,6 +23,37 @@ async function resetHome(page: Page): Promise<void> {
   });
 }
 
+test('DM loads the bundled D365 dungeon and RPC-authored party into room 1', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await resetHome(page);
+  await page.goto('/vtt?encounter=d365');
+  await expect(page.getByRole('heading', { name: 'D365 sample dungeon' })).toBeVisible({
+    timeout: 65_000,
+  });
+  await page.getByRole('button', { name: 'Load bundled dungeon and party' }).click();
+
+  await expect(page.getByRole('heading', { name: 'DM controls' })).toBeVisible({
+    timeout: 65_000,
+  });
+  await expect(page.locator('.adventuring-day-status')).toHaveText(
+    'Adventuring day — room 1 of 4 · 2024 rules',
+  );
+  for (const name of ['Mirel Ash', 'Orin Reed', 'Brann Vale', 'Sera Dawn']) {
+    await expect(
+      page.locator('.encounter-token[data-kind="player_character"]', { hasText: name }),
+    ).toBeVisible();
+  }
+  await expect(
+    page.locator('.encounter-token[data-kind="monster"]', { hasText: 'Goblin Warrior' }),
+  ).toHaveCount(2);
+  await expect(
+    page.locator('.encounter-token[data-kind="monster"]', { hasText: 'Wolf' }),
+  ).toHaveCount(2);
+  await expect(page.locator('.encounter-board')).toBeVisible();
+});
+
 test('DM composes stored builder characters and each PC defaults to human control', async ({
   page,
 }) => {

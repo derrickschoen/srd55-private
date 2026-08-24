@@ -278,13 +278,13 @@ describe('capture and deterministic diff', () => {
       'character',
       ...CHARACTER_STATE_TABLES,
     ]);
-    // a7-v15 is still accepted as the frozen LU-1 shape. D104 writes v16.
+    // a7-v15 is still accepted as the frozen LU-1 shape. Current writes use v17.
     // Written out rather than compared against the exported constant: a version
     // identifier is a wire fact that other stored data is matched against, so a
     // test that reads it from the module under test could never notice it
     // changing.
     expect(snapshotSchemaVersion('a7-v15')).toBe('a7-v15');
-    expect(snapshot.schema_version).toBe('a7-v16');
+    expect(snapshot.schema_version).toBe('a7-v17');
     expect(Object.keys(snapshot.character)).toEqual(CHARACTER_STATE_COLUMNS);
     expect(snapshot.character).toEqual({
       name: 'Snapshot Hero',
@@ -301,6 +301,7 @@ describe('capture and deterministic diff', () => {
       alignment: null,
       appearance: null,
       backstory: null,
+      optional_feature_selections: '[]',
       notes: 'preserve this note',
     });
     expect(snapshot.character_class_levels).toHaveLength(1);
@@ -981,7 +982,7 @@ describe('restoring a snapshot written by an older build', () => {
     // oversight: a current snapshot DOES speak for weapons, so restoring it
     // removes one added afterwards.
     const snapshot = mutableCapture();
-    expect(snapshot.schema_version).toBe('a7-v16');
+    expect(snapshot.schema_version).toBe('a7-v17');
     db.exec(
       `INSERT INTO character_weapons (character_id, name)
        VALUES (?, 'Bought since')`,

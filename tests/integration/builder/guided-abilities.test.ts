@@ -323,6 +323,7 @@ describe('B1-SIGNAL: all-10s sharing preserves allocation', () => {
     expect(exported.character).toEqual({
       name: 'Shared Tens',
       ability_allocation_method: 'manual',
+      optional_feature_selections: [],
     });
 
     const document = await decodeShareFragment(

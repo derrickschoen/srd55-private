@@ -68,7 +68,7 @@ describe('lineage portability through fresh databases', () => {
       source.characterId,
       '2042-08-09T00:00:00.000Z',
     );
-    expect(backup.version).toBe(7);
+    expect(backup.version).toBe(8);
 
     const target = await lifecycle();
     const imported = importCharacterBackup(target.database, backup);

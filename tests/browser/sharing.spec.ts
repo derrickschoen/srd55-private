@@ -231,16 +231,21 @@ test('creates, independently verifies, previews, and explicitly imports a durabl
   // mints v15 by appending the Expertise-grant collection at the root. LU-1
   // mints v16 by appending durable class-level feat occurrences. D104 mints
   // v17 by appending alignment, appearance, and backstory to the character.
-  // v18 appended portable authored content, v19 added provenance, and v20
-  // appends stable identity so a later delivery can be reviewed as an update.
-  expect(positional[1]).toBe(20);
+  // v18 appended portable authored content, v19 added provenance, v20 added
+  // stable identity, and v21 appends explicit optional-feature selections.
+  expect(positional[1]).toBe(21);
   expect((positional[2] as unknown[])[0]).toBe('Journey Hero 🧙');
-  // FIFTEEN since v17, with notes and the allocation signal still in their
-  // frozen positions, followed by three null flavor absences.
-  expect(positional[2]).toHaveLength(15);
+  // SIXTEEN since v21, with the frozen v17 fields followed by the explicit
+  // optional-feature selection slot.
+  expect(positional[2]).toHaveLength(16);
   expect((positional[2] as unknown[])[10]).toBeNull();
   expect((positional[2] as unknown[])[11]).toBeNull();
-  expect((positional[2] as unknown[]).slice(12)).toEqual([null, null, null]);
+  expect((positional[2] as unknown[]).slice(12)).toEqual([
+    null,
+    null,
+    null,
+    [],
+  ]);
   expect(positional.slice(3, 9)).toEqual([[], [], [], [], [], []]);
   // V10 always writes the three-field sheet tuple. This blank character has no
   // armour, hit point rolls, or skill proficiencies, so all three are NULL.
@@ -404,7 +409,7 @@ test('fits authored content into v20 and imports it with the dependent character
   const positional = JSON.parse(gunzipSync(
     Buffer.from(new URL(link).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(positional[1]).toBe(20);
+  expect(positional[1]).toBe(21);
   expect(positional[21]).toMatchObject({
     content: [expect.objectContaining({
       kind: 'species',
@@ -472,7 +477,7 @@ test('omits oversized content, preserves v20 identity, and the recipient refuses
   const positional = JSON.parse(gunzipSync(
     Buffer.from(new URL(link).hash.slice(1), 'base64url'),
   ).toString('utf8')) as unknown[];
-  expect(positional[1]).toBe(20);
+  expect(positional[1]).toBe(21);
   expect(positional).toHaveLength(23);
   expect(positional[21]).toBeNull();
   expect(positional[22]).toEqual({
