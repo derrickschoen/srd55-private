@@ -4,6 +4,7 @@ import type { CombatFeatureEffect } from './effects';
 import type { GridCell } from './grid';
 import type { DamageResponse } from './resolution';
 import type { CombatSense, MonsterLegendaryAction, MonsterStatblock } from './statblock';
+import type { WildShapeCharacterSheet } from './wild-shape';
 import {
   armorClass,
   combatantId,
@@ -32,6 +33,10 @@ export interface CombatRulesProfile {
   readonly hitPointMaximum: number;
   readonly speed: Feet;
   readonly initiativeBonus: number;
+  /** Present when the source exposes scores rather than modifiers alone. */
+  readonly abilityScores?: Readonly<Record<Ability, number>>;
+  /** Present when the source exposes the bonus separately from final modifiers. */
+  readonly proficiencyBonus?: number;
   readonly savingThrowBonuses: Readonly<Record<Ability, number>>;
   readonly attacksPerAction: number;
   readonly reach: Feet;
@@ -87,6 +92,8 @@ export type CombatantProfile =
       readonly tokenId: TokenId;
       readonly name: string;
       readonly characterId: number;
+      /** Typed absence: non-Druids and Druids without a configured form list have no feature. */
+      readonly wildShape: WildShapeCharacterSheet | null;
       readonly rules: CombatRulesProfile;
     }
   | {
@@ -108,6 +115,7 @@ export interface CharacterCombatantIdentity {
   readonly combatantId: string;
   readonly tokenId: string;
   readonly spellSlots?: readonly SpellSlotCapacity[];
+  readonly wildShape?: WildShapeCharacterSheet;
 }
 
 export type CharacterCombatSheet = Pick<
@@ -118,6 +126,8 @@ export type CharacterCombatSheet = Pick<
   | 'walking_speed'
   | 'armor_class'
   | 'initiative'
+  | 'ability_scores'
+  | 'proficiency_bonus'
   | 'saves'
   | 'attacks_per_action'
   | 'damage_resistances'
@@ -166,7 +176,8 @@ export function characterCombatantProfile(
     id: combatantId(identity.combatantId),
     tokenId: tokenId(identity.tokenId),
     name: sheet.name,
-    characterId: sheet.character_id,
+      characterId: sheet.character_id,
+    wildShape: identity.wildShape ?? null,
     rules: {
       armorClass: armorClass(sheet.armor_class.value),
       hitPointMaximum: positiveInteger(
@@ -175,6 +186,8 @@ export function characterCombatantProfile(
       ),
       speed: feet(sheet.walking_speed.value),
       initiativeBonus: sheet.initiative.value,
+      abilityScores: Object.fromEntries(sheet.ability_scores.map((score) => [score.ability, score.score])) as Readonly<Record<Ability, number>>,
+      ...(sheet.proficiency_bonus.value === null ? {} : { proficiencyBonus: sheet.proficiency_bonus.value }),
       savingThrowBonuses: sheetSaveBonuses(sheet),
       attacksPerAction: positiveInteger(
         sheet.attacks_per_action.count,
@@ -216,6 +229,20 @@ export function monsterCombatantProfile(
       hitPointMaximum: statblock.hitPointMaximum,
       speed: statblock.speed,
       initiativeBonus: statblock.initiativeBonus,
+      ...(statblock.sourceDetails.abilities.kind === 'present'
+        ? {
+            abilityScores: Object.fromEntries(abilities.map((ability) => [
+              ability,
+              statblock.sourceDetails.abilities.kind === 'present'
+                ? statblock.sourceDetails.abilities.value[ability].score
+                : 10,
+            ])) as Readonly<Record<Ability, number>>,
+          }
+        : {}),
+      ...(statblock.sourceDetails.challenge.kind === 'present' &&
+        typeof statblock.sourceDetails.challenge.value.proficiencyBonus === 'number'
+          ? { proficiencyBonus: statblock.sourceDetails.challenge.value.proficiencyBonus }
+          : {}),
       savingThrowBonuses: statblock.savingThrowBonuses,
       attacksPerAction: statblock.attacksPerAction,
       reach: statblock.reach,

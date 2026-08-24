@@ -27,11 +27,13 @@ const PARTY_STATE: PartySessionState = {
   schemaVersion: 1,
   rulesEdition: '2024',
   room: 1,
+  adventuringDayStatus: 'active',
   characters: PARTY_COMBATANTS.map((id, index) => ({
     characterId: index + 1,
     combatantId: id,
     currentHitPoints: 10,
     hitPointMaximum: 10,
+    exhaustionLevel: 0,
     constitutionModifier: 0,
     life: 'living',
     deathSaves: null,

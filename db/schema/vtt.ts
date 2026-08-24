@@ -37,7 +37,7 @@ export const vtt_session_revisions = sqliteTable(
     ),
     check(
       'vtt_session_revisions_schema_version_check',
-      sql`${table.schema_version} IN (1, 2, 3)`,
+      sql`${table.schema_version} IN (1, 2, 3, 4)`,
     ),
     check(
       'vtt_session_revisions_payload_json_check',

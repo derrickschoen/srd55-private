@@ -93,6 +93,23 @@ export function characterSheet(
       value: initiativeBonus,
       formula: 'fixture',
     },
+    ability_scores: abilities.map((ability) => ({
+      id: `ability:${ability}`,
+      label: ability,
+      ability,
+      value: ability === 'wisdom' ? 18 : 10,
+      score: ability === 'wisdom' ? 18 : 10,
+      base_score: ability === 'wisdom' ? 18 : 10,
+      increased_score: ability === 'wisdom' ? 18 : 10,
+      override_terms: [],
+      formula: 'fixture',
+    })),
+    proficiency_bonus: {
+      id: 'proficiency_bonus',
+      label: 'Proficiency Bonus',
+      value: 2,
+      formula: 'fixture',
+    },
     saves: abilities.map((ability) => ({
       id: `save:${ability}`,
       label: ability,

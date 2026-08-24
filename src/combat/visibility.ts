@@ -1,12 +1,13 @@
 import type { CombatRulesProfile } from './combatant';
 import type {
   DeathSaveState,
+  EncounterCombatantState,
   EncounterState,
   LifeState,
   SpellSlotState,
   TurnResources,
 } from './encounter';
-import { canCombatantSee, combatantSide } from './encounter';
+import { canCombatantSee, combatantSide, effectiveCombatRules } from './encounter';
 import type { EncounterEvent } from './events';
 import type { GridCell } from './grid';
 import type { CombatantId } from './values';
@@ -50,6 +51,22 @@ export const ENCOUNTER_VIEW_CLASSIFICATION = {
   itemContacts: 'dm_only',
 } as const satisfies Readonly<Record<keyof EncounterState, EncounterViewClassification>>;
 
+/** D359 classification for every nested combatant field, including the overlay. */
+export const COMBATANT_VIEW_CLASSIFICATION = {
+  profile: 'per_seat',
+  hitPoints: 'per_seat',
+  life: 'player_visible',
+  deathSaves: 'dm_only',
+  turn: 'per_seat',
+  temporaryHitPoints: 'per_seat',
+  wildShapeUses: 'per_seat',
+  wildShape: 'player_visible',
+  form: 'per_seat',
+  spellSlots: 'per_seat',
+  limitedResources: 'per_seat',
+  legendary: 'player_visible',
+} as const satisfies Readonly<Record<keyof EncounterCombatantState, EncounterViewClassification>>;
+
 type ProjectedCanonicalEncounterState = {
   readonly [Field in keyof EncounterState]: EncounterState[Field];
 };
@@ -75,12 +92,14 @@ export interface PlayerVisibleCombatant {
   readonly life: LifeState;
   readonly position: GridCell;
   readonly active: boolean;
+  readonly formName: string | null;
 }
 
 export interface PlayerOwnedCombatant {
   readonly id: CombatantId;
   readonly hitPoints: number;
   readonly turn: TurnResources;
+  readonly wildShapeUses: EncounterCombatantState['wildShapeUses'];
 }
 
 export interface DmVisibleCombatant extends PlayerVisibleCombatant {
@@ -203,6 +222,8 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'item_picked_up':
     case 'item_equipped':
     case 'item_stowed':
+    case 'wild_shape_assumed':
+    case 'wild_shape_reverted':
     case 'hide_resolved':
     case 'search_resolved':
     case 'pending_decision_queued':
@@ -374,6 +395,7 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
       life: subject.life,
       position: { ...token.position },
       active: state.activeCombatant === subject.profile.id,
+      formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
     }];
   });
   const visibleIds = new Set(combatants.map((subject) => subject.id));
@@ -397,7 +419,12 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
     combatants,
     ownedCombatants: state.combatants
       .filter((subject) => ownedIds.has(subject.profile.id))
-      .map((subject) => ({ id: subject.profile.id, hitPoints: subject.hitPoints, turn: structuredClone(subject.turn) })),
+      .map((subject) => ({
+        id: subject.profile.id,
+        hitPoints: subject.hitPoints,
+        turn: structuredClone(subject.turn),
+        wildShapeUses: structuredClone(subject.wildShapeUses),
+      })),
     recentEvents: playerEvents(state.eventLog, visibleIds, state.hideDeathSaveRolls),
   };
 }
@@ -426,7 +453,8 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
         life: subject.life,
         position: { ...token.position },
         active: state.activeCombatant === subject.profile.id,
-        rules: structuredClone(subject.profile.rules),
+        formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
+        rules: structuredClone(effectiveCombatRules(state, subject.profile.id)),
         deathSaves: structuredClone(subject.deathSaves),
         turn: structuredClone(subject.turn),
         spellSlots: structuredClone(subject.spellSlots),

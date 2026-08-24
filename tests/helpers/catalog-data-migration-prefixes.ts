@@ -64,6 +64,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0052_vtt_session_revisions',
   '0053_vtt_session_party_state',
   '0054_optional_feature_selections',
+  '0055_vtt_session_branch_rng_state',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';

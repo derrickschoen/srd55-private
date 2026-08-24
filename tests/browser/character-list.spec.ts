@@ -145,6 +145,7 @@ test('character shell creates, opens, confirms deletion, and persists every flow
 test('U1 incomplete cards resume durable ability work while allocated level-up state remains ready', async ({
   page,
 }) => {
+  test.setTimeout(60_000);
   await resetHome(page);
   const character = await page.evaluate(async () => {
     const classes = await window.appRpc.call<

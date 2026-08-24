@@ -50,6 +50,7 @@ import type {
 import type { SteeringCoordinatorMode, SteeringTelemetry } from './dm-bridge/steering';
 import {
   enterNextRoom as advancePartyRoom,
+  type LongRestResult,
   type PartySessionState,
 } from './party-session-state';
 import type { ShortRestHitDieSpend } from './party-session-state';
@@ -558,6 +559,18 @@ export class DmEncounterHost {
     });
     this.#publish();
     void this.#pumpCoordinator();
+  }
+
+  async finishAdventuringDay(): Promise<LongRestResult> {
+    if (this.#partyMembers === null || this.#journal.partyState() === null) {
+      throw new Error('This encounter is not part of a stored-character adventuring day.');
+    }
+    this.#coordinator.interrupt();
+    await this.#pump;
+    this.#journal.capturePartyState();
+    const rested = this.#journal.takeLongRest();
+    this.#publish();
+    return structuredClone(rested);
   }
 
   replaceController(combatantId: CombatantId, kind: 'human' | 'algorithm'): void {

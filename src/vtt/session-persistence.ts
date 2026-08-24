@@ -25,19 +25,24 @@ import {
 } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import type { DatabaseContext } from '../db/database';
+import { decodeWildShapeOverlay, decodeWildShapeUseState } from '../combat/wild-shape';
 import {
   capturePartySessionState,
   decodePartySessionState,
   enterNextRoom,
+  LONG_REST_CITATIONS,
   setPartyReactionPolicy,
+  takeLongRest,
   takeShortRest,
+  type LongRestResult,
+  type LongRestSummaryCard,
   type PartySessionState,
   type ShortRestHitDieRoll,
   type ShortRestHitDieSpend,
   type ShortRestResult,
 } from './party-session-state';
 
-export const VTT_SESSION_SCHEMA_VERSION = 3 as const;
+export const VTT_SESSION_SCHEMA_VERSION = 4 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export type SessionTransition =
@@ -56,6 +61,11 @@ export type SessionTransition =
       readonly spends: readonly ShortRestHitDieSpend[];
       readonly rolls: readonly ShortRestHitDieRoll[];
     }
+  | {
+      readonly kind: 'long_rest_completed';
+      readonly room: number;
+      readonly summary: LongRestSummaryCard;
+    }
   | { readonly kind: 'room_composed'; readonly room: number }
   | {
       readonly kind: 'head_moved';
@@ -69,6 +79,7 @@ export const SESSION_TRANSITION_KINDS = [
   'party_state_captured',
   'reaction_preference_changed',
   'short_rest_completed',
+  'long_rest_completed',
   'room_composed',
   'head_moved',
   'controller_request_issued',
@@ -114,6 +125,8 @@ interface SessionRevisionBody {
   readonly branchId: EncounterBranchId;
   readonly transition: SessionTransition;
   readonly encounterState: EncounterState;
+  /** Digest of the persisted, mechanically relevant encounter representation. */
+  readonly branchRngStateFingerprint: string;
   readonly partyState: PartySessionState | null;
   readonly rngState: SerializableRngState;
   readonly coordinatorState: PersistedCoordinatorState;
@@ -354,6 +367,41 @@ function validShortRestRolls(value: unknown): value is readonly ShortRestHitDieR
     Number.isSafeInteger(roll.healing) && typeof roll.healing === 'number' && roll.healing >= 1);
 }
 
+function validLongRestSummary(value: unknown): value is LongRestSummaryCard {
+  if (!isRecord(value) || !hasExactlyKeys(value, ['kind', 'durationHours', 'characters', 'citations']) ||
+    value.kind !== 'long_rest_summary' || value.durationHours !== 8 || !Array.isArray(value.characters) ||
+    !isRecord(value.citations) || canonicalJson(value.citations) !== canonicalJson(LONG_REST_CITATIONS)) {
+    return false;
+  }
+  return value.characters.every((character) => {
+    if (!isRecord(character) || !hasExactlyKeys(character, [
+      'combatantId', 'hitPointsRestored', 'hitDiceRestored', 'spellSlotsRestored',
+      'exhaustionLevelsRemoved', 'limitedResourcesRestored', 'lifeBefore', 'lifeAfter',
+    ]) || typeof character.combatantId !== 'string' ||
+      !Number.isSafeInteger(character.hitPointsRestored) ||
+      typeof character.hitPointsRestored !== 'number' || character.hitPointsRestored < 0 ||
+      (character.exhaustionLevelsRemoved !== 0 && character.exhaustionLevelsRemoved !== 1) ||
+      !['living', 'dying', 'stable', 'dead'].includes(String(character.lifeBefore)) ||
+      !['living', 'dying', 'stable', 'dead'].includes(String(character.lifeAfter)) ||
+      !Array.isArray(character.hitDiceRestored) || !Array.isArray(character.spellSlotsRestored) ||
+      !Array.isArray(character.limitedResourcesRestored)) return false;
+    const hitDiceValid = character.hitDiceRestored.every((die) =>
+      isRecord(die) && hasExactlyKeys(die, ['sides', 'count']) &&
+      (die.sides === 6 || die.sides === 8 || die.sides === 10 || die.sides === 12) &&
+      Number.isSafeInteger(die.count) && typeof die.count === 'number' && die.count > 0);
+    const spellSlotsValid = character.spellSlotsRestored.every((slot) =>
+      isRecord(slot) && hasExactlyKeys(slot, ['pool', 'level', 'count']) &&
+      (slot.pool === 'shared' || slot.pool === 'pact_magic') &&
+      Number.isSafeInteger(slot.level) && typeof slot.level === 'number' && slot.level >= 1 && slot.level <= 9 &&
+      Number.isSafeInteger(slot.count) && typeof slot.count === 'number' && slot.count > 0);
+    const resourcesValid = character.limitedResourcesRestored.every((resource) =>
+      isRecord(resource) && hasExactlyKeys(resource, ['id', 'count']) &&
+      typeof resource.id === 'string' &&
+      Number.isSafeInteger(resource.count) && typeof resource.count === 'number' && resource.count > 0);
+    return hitDiceValid && spellSlotsValid && resourcesValid;
+  });
+}
+
 function decodeTransition(value: unknown): SessionTransition {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     throw new TypeError('Malformed VTT session transition.');
@@ -385,6 +433,13 @@ function decodeTransition(value: unknown): SessionTransition {
         validRoom(value.room) &&
         validShortRestSpends(value.spends) &&
         validShortRestRolls(value.rolls)
+      ) return value as unknown as SessionTransition;
+      break;
+    case 'long_rest_completed':
+      if (
+        hasExactlyKeys(value, ['kind', 'room', 'summary']) &&
+        validRoom(value.room) &&
+        validLongRestSummary(value.summary)
       ) return value as unknown as SessionTransition;
       break;
     case 'head_moved':
@@ -439,6 +494,7 @@ function decodeRevision(value: unknown): SessionRevision {
     !isRecord(value.transition) ||
     !isRecord(value.encounterState) ||
     !isEncounterConfig(value.encounterState.config) ||
+    typeof value.branchRngStateFingerprint !== 'string' ||
     !(value.partyState === null || isRecord(value.partyState)) ||
     !isRecord(value.rngState) ||
     !isRecord(value.coordinatorState) ||
@@ -452,7 +508,32 @@ function decodeRevision(value: unknown): SessionRevision {
   const partyState = value.partyState === null
     ? null
     : decodePartySessionState(value.partyState);
-  const revision = { ...value, transition, partyState } as unknown as SessionRevision;
+  if (!Array.isArray(value.encounterState.combatants)) {
+    throw new TypeError('Persisted encounter combatants are malformed.');
+  }
+  const encounterCombatants = value.encounterState.combatants.map((combatant) => {
+    if (!isRecord(combatant)) throw new TypeError('Persisted encounter combatant is malformed.');
+    if (!Object.hasOwn(combatant, 'wildShapeUses')) {
+      throw new TypeError('Persisted encounter combatant lacks Wild Shape use state.');
+    }
+    const wildShapeUses = combatant.wildShapeUses === null
+      ? null
+      : decodeWildShapeUseState(combatant.wildShapeUses);
+    return Object.hasOwn(combatant, 'wildShape')
+      ? { ...combatant, wildShapeUses, wildShape: decodeWildShapeOverlay(combatant.wildShape) }
+      : { ...combatant, wildShapeUses };
+  });
+  const encounterState = {
+    ...value.encounterState,
+    combatants: encounterCombatants,
+  } as unknown as EncounterState;
+  if (
+    branchRngStateFingerprint(value.encounterState as unknown as EncounterState) !==
+    value.branchRngStateFingerprint
+  ) {
+    throw new Error('Persisted VTT branch RNG state fingerprint mismatch.');
+  }
+  const revision = { ...value, transition, encounterState, partyState } as unknown as SessionRevision;
   const { checksum: _checksum, ...body } = revision;
   if (revisionChecksum(body) !== revision.checksum) {
     throw new Error('VTT session revision checksum mismatch.');
@@ -460,10 +541,7 @@ function decodeRevision(value: unknown): SessionRevision {
   return revision;
 }
 
-export function deriveBranchRng(
-  target: SessionRevision,
-  branchId: EncounterBranchId,
-): SerializableRng {
+function mechanicalBranchState(encounterState: EncounterState): unknown {
   const {
     config: _config,
     hideDeathSaveRolls: _hideDeathSaveRolls,
@@ -479,7 +557,7 @@ export function deriveBranchRng(
     pendingDecisions,
     reactionPolicies,
     ...stateWithoutCombatants
-  } = target.encounterState;
+  } = encounterState;
   // Player-facing roll visibility cannot change the deterministic mechanical
   // future of an otherwise identical branch.
   const normalizedCombatants = combatants.map((entry) => {
@@ -515,8 +593,19 @@ export function deriveBranchRng(
   const mechanicalState = worldStateIsNeutral
     ? areaNeutralState
     : { ...areaNeutralState, worldObjects, nextWorldObjectSequence, environment };
+  return mechanicalState;
+}
+
+function branchRngStateFingerprint(encounterState: EncounterState): string {
+  return sha256(canonicalJson(mechanicalBranchState(encounterState)));
+}
+
+export function deriveBranchRng(
+  target: SessionRevision,
+  branchId: EncounterBranchId,
+): SerializableRng {
   const digest = sha256(canonicalJson({
-    encounterState: mechanicalState,
+    persistedEncounterStateFingerprint: target.branchRngStateFingerprint,
     parentRngState: target.rngState,
     branchId,
   }));
@@ -633,6 +722,18 @@ export function replaySessionRevisions(
         requireCanonicalEqual(revision.partyState, rested.state, 'Short Rest party state');
         requireCanonicalEqual(transition.rolls, rested.rolls, 'Short Rest rolls');
         requireCanonicalEqual(revision.rngState, restRng.snapshot(), 'Short Rest RNG state');
+        break;
+      }
+      case 'long_rest_completed': {
+        if (parent === null || parent === undefined || parent.partyState === null) {
+          throw new Error('A Long Rest requires an existing party session state.');
+        }
+        const rested = takeLongRest(parent.partyState);
+        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'Long Rest encounter state');
+        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'Long Rest coordinator state');
+        requireCanonicalEqual(revision.partyState, rested.state, 'Long Rest party state');
+        requireCanonicalEqual(transition.summary, rested.summary, 'Long Rest summary');
+        requireCanonicalEqual(revision.rngState, parent.rngState, 'Long Rest RNG state');
         break;
       }
       case 'room_composed': {
@@ -928,6 +1029,27 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     return rested;
   }
 
+  takeLongRest(): LongRestResult {
+    const latest = this.#latest();
+    if (latest.partyState === null) throw new Error('Encounter session has no party state to rest.');
+    const rested = takeLongRest(latest.partyState);
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: {
+        kind: 'long_rest_completed',
+        room: rested.state.room,
+        summary: rested.summary,
+      },
+      encounterState: latest.encounterState,
+      partyState: rested.state,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      codexSessionId: latest.codexSessionId,
+    });
+    return rested;
+  }
+
   updateReactionPreference(
     combatant: import('../combat/values').CombatantId,
     reactionKind: ReactionKind,
@@ -1013,6 +1135,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       branchId: input.branchId,
       transition: input.transition,
       encounterState: input.encounterState,
+      branchRngStateFingerprint: branchRngStateFingerprint(input.encounterState),
       partyState: input.partyState,
       rngState: this.#rng.snapshot(),
       coordinatorState: input.coordinatorState,
@@ -1101,6 +1224,7 @@ export interface VttSessionMigration {
 
 const V1_TO_V2_SOURCE = 'vtt-session-v1-to-v2:add-format-and-sha-fingerprint=vtt-session-revisions';
 const V2_TO_V3_SOURCE = 'vtt-session-v2-to-v3:add-party-session-state-null-and-rehash-revisions';
+const V3_TO_V4_SOURCE = 'vtt-session-v3-to-v4:add-persisted-branch-rng-state-fingerprint';
 
 export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
   Object.freeze([
@@ -1144,6 +1268,40 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
           ...oldBundle,
           format: 'vtt-session-revisions' as const,
           schemaVersion: 3 as const,
+          revisions,
+        };
+        return { ...body, fingerprint: sha256(canonicalJson(body)) };
+      },
+    }),
+    Object.freeze({
+      id: 'vtt_session_v3_to_v4',
+      from: 3,
+      to: 4,
+      source: V3_TO_V4_SOURCE,
+      checksum: '03fad58a6864c3419f1243aa818fdcb6b38e3411d832de8b32a2e9364ba4bd20',
+      migrate: (bundle: Readonly<Record<string, unknown>>) => {
+        if (!Array.isArray(bundle.revisions)) {
+          throw new TypeError('VTT session v3 revisions are malformed.');
+        }
+        const revisions = bundle.revisions.map((revision) => {
+          if (!isRecord(revision) || !isRecord(revision.encounterState)) {
+            throw new TypeError('VTT session v3 revision is malformed.');
+          }
+          const { checksum: _oldChecksum, ...oldBody } = revision;
+          const body = {
+            ...oldBody,
+            schemaVersion: 4 as const,
+            branchRngStateFingerprint: branchRngStateFingerprint(
+              revision.encounterState as unknown as EncounterState,
+            ),
+          };
+          return { ...body, checksum: sha256(canonicalJson(body)) };
+        });
+        const { fingerprint: _oldFingerprint, ...oldBundle } = bundle;
+        const body = {
+          ...oldBundle,
+          format: 'vtt-session-revisions' as const,
+          schemaVersion: 4 as const,
           revisions,
         };
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
@@ -1264,7 +1422,12 @@ export function exportSavedSessionV1ForMigrationTest(
   sessionId: EncounterSessionId,
 ): string {
   const revisions = store.revisions(sessionId).map((revision) => {
-    const { checksum: _checksum, partyState: _partyState, ...currentBody } = revision;
+    const {
+      checksum: _checksum,
+      partyState: _partyState,
+      branchRngStateFingerprint: _branchRngStateFingerprint,
+      ...currentBody
+    } = revision;
     const body = { ...currentBody, schemaVersion: 2 as const };
     return { ...body, checksum: sha256(canonicalJson(body)) };
   });

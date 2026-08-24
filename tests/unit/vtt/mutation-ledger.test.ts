@@ -68,6 +68,8 @@ const DEATH_LEDGER_PATH = 'docs/audits/2026-08-24-death-mutation-ledger.md';
 const SAVE_MANAGER_LEDGER_PATH = 'docs/audits/2026-08-24-savemgr-mutation-ledger.md';
 const LEGENDARY_LEDGER_PATH = 'docs/audits/2026-08-24-legendary-mutation-ledger.md';
 const SURFACES_LEDGER_PATH = 'docs/audits/2026-08-24-surfaces-mutation-ledger.md';
+const LONG_REST_LEDGER_PATH = 'docs/audits/2026-08-24-longrest-mutation-ledger.md';
+const WILD_SHAPE_LEDGER_PATH = 'docs/audits/2026-08-24-wildshape-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -84,6 +86,39 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D373.7-LONG-REST-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {
+    const longRestLedger = readFileSync(LONG_REST_LEDGER_PATH, 'utf8');
+    const partyTests = readFileSync('tests/unit/vtt/party-session-state.test.ts', 'utf8');
+    for (const control of [
+      'half_hit_dice_returned',
+      'exhaustion_cleared',
+      'dead_rises',
+    ]) {
+      expect(longRestLedger).toContain(`\`${control}\``);
+      expect(partyTests).toContain(`${control}:`);
+    }
+    expect(longRestLedger.match(/`exit 1`/gu)).toHaveLength(3);
+    expect(longRestLedger).toContain('Tests 16 passed (16)');
+    expect(longRestLedger).toContain('All three mutations were restored.');
+  });
+
+  it('D365.3-D373.13-WILD-SHAPE-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
+    const wildShapeLedger = readFileSync(WILD_SHAPE_LEDGER_PATH, 'utf8');
+    const wildShapeTests = readFileSync('tests/unit/combat/wild-shape.test.ts', 'utf8');
+    for (const control of [
+      'mental_stats_replaced',
+      'excess_damage_dropped',
+      'unknown_form_allowed',
+      'concentration_dropped_on_shift',
+    ]) {
+      expect(wildShapeLedger).toContain(`\`${control}\``);
+      expect(wildShapeTests).toContain(`${control}:`);
+    }
+    expect(wildShapeLedger.match(/`exit 1`/gu)).toHaveLength(4);
+    expect(wildShapeLedger).toContain('Tests  13 passed (13)');
+    expect(wildShapeLedger).toContain('All four mutations were restored.');
+  });
+
   it('D373.17-SURFACES-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
     const surfacesLedger = readFileSync(SURFACES_LEDGER_PATH, 'utf8');
     const surfaceTests = readFileSync('tests/unit/vtt/flammable-surfaces.test.ts', 'utf8');

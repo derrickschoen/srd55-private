@@ -55,6 +55,7 @@ import fingerprintContentKeyIndex from '../../drizzle/0051_fingerprint_content_k
 import vttSessionRevisions from '../../drizzle/0052_vtt_session_revisions.sql?raw';
 import vttSessionPartyState from '../../drizzle/0053_vtt_session_party_state.sql?raw';
 import optionalFeatureSelections from '../../drizzle/0054_optional_feature_selections.sql?raw';
+import vttSessionBranchRngState from '../../drizzle/0055_vtt_session_branch_rng_state.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -602,6 +603,12 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     sql: optionalFeatureSelections,
     checksum: '37cab1798408275d4d909f5b54bc6bc69088f1956e145fff56dcbd9d3a57145a',
     resultSchemaChecksum: '90a8cc6544df163cf1342550169ce51ae01428948cc38d72cd2d7602ffbd9ed9',
+  }),
+  Object.freeze({
+    id: '0055_vtt_session_branch_rng_state',
+    sql: vttSessionBranchRngState,
+    checksum: '82fcb3726b48b10b17652962b53a32cc3e2a7ec601219c9c2143df6a1b7fee5d',
+    resultSchemaChecksum: '9b47807b37845efd95bc703fb426638aa17567220fb3318884bbd98e3609440b',
   }),
 ]);
 

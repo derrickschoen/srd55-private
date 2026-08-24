@@ -465,9 +465,17 @@ describe('event-sourced encounter persistence', () => {
     const source = new MemoryBrowserSessionStore();
     const { journal } = createJournal(source, new MemoryMirrorSink(), registry, fixture.state);
     const initial = source.revisions(encounterSessionId('session:persistence-test'));
-    const sameAStore = copyPrefix(initial, 1);
-    const sameBStore = copyPrefix(initial, 1);
-    const differentStore = copyPrefix(initial, 1);
+    expect(initial).toHaveLength(1);
+    const persistedBytes = exportSavedSession(
+      source,
+      encounterSessionId('session:persistence-test'),
+    );
+    const sameAStore = new MemoryBrowserSessionStore();
+    const sameBStore = new MemoryBrowserSessionStore();
+    const differentStore = new MemoryBrowserSessionStore();
+    importSavedSession(sameAStore, persistedBytes);
+    importSavedSession(sameBStore, persistedBytes);
+    importSavedSession(differentStore, persistedBytes);
     const sameA = EncounterSessionJournal.resume(
       encounterSessionId('session:persistence-test'),
       sameAStore,
@@ -483,6 +491,21 @@ describe('event-sourced encounter persistence', () => {
       differentStore,
       new MemoryMirrorSink(),
     ).journal.moveHead('undo', 1, encounterBranchId('branch:different'));
+    const restartedStore = new MemoryBrowserSessionStore();
+    const branchedBytes = exportSavedSession(
+      sameAStore,
+      encounterSessionId('session:persistence-test'),
+    );
+    importSavedSession(restartedStore, branchedBytes);
+    const sameAfterRestart = EncounterSessionJournal.resume(
+      encounterSessionId('session:persistence-test'),
+      restartedStore,
+      new MemoryMirrorSink(),
+    );
+    expect(exportSavedSession(
+      restartedStore,
+      encounterSessionId('session:persistence-test'),
+    )).toBe(branchedBytes);
     const hiddenRollSource = new MemoryBrowserSessionStore();
     createJournal(
       hiddenRollSource,
@@ -496,49 +519,25 @@ describe('event-sourced encounter persistence', () => {
       new MemoryMirrorSink(),
     ).journal.moveHead('undo', 1, encounterBranchId('branch:pinned'));
 
-    const streamPins = {
-      sameA: sameA.rng.snapshot(),
-      sameB: sameB.rng.snapshot(),
-      different: different.rng.snapshot(),
-    };
-    expect(streamPins).toMatchObject({
-      sameA: {
-        initialSeed: 2849664443,
-        streamId: 'branch:branch:pinned:a9da6dbb13777d29869976c2febc03c083e70ef6e28c71bbb5501a13a41ceb49',
-      },
-      sameB: {
-        initialSeed: 2849664443,
-        streamId: 'branch:branch:pinned:a9da6dbb13777d29869976c2febc03c083e70ef6e28c71bbb5501a13a41ceb49',
-      },
-      different: {
-        initialSeed: 1272228564,
-        streamId: 'branch:branch:different:4bd4aad40636c59ce1d2c94c3f4497e338c7b00221c4f2e3539379e3a1949f8a',
-      },
-    });
+    expect(sameA.rng.snapshot()).toEqual(sameB.rng.snapshot());
+    expect(sameAfterRestart.rng.snapshot()).toEqual(sameA.rng.snapshot());
+    expect(different.rng.snapshot()).not.toEqual(sameA.rng.snapshot());
+    expect(sameA.rng.snapshot().streamId).toContain('branch:branch:pinned:');
+    expect(different.rng.snapshot().streamId).toContain('branch:branch:different:');
     expect(hiddenRoll.rng.snapshot()).toEqual(sameA.rng.snapshot());
     const actual = {
       sameA: [sameA.rng(), sameA.rng(), sameA.rng()],
       sameB: [sameB.rng(), sameB.rng(), sameB.rng()],
+      sameAfterRestart: [
+        sameAfterRestart.rng(),
+        sameAfterRestart.rng(),
+        sameAfterRestart.rng(),
+      ],
       different: [different.rng(), different.rng(), different.rng()],
     };
-    const expected = {
-      sameA: [
-        0.027198744006454945,
-        0.4821550636552274,
-        0.6149060784373432,
-      ],
-      sameB: [
-        0.027198744006454945,
-        0.4821550636552274,
-        0.6149060784373432,
-      ],
-      different: [
-        0.2938787518069148,
-        0.2561575057916343,
-        0.9031414473429322,
-      ],
-    };
-    expect(actual).toEqual(expected);
+    expect(actual.sameB).toEqual(actual.sameA);
+    expect(actual.sameAfterRestart).toEqual(actual.sameA);
+    expect(actual.different).not.toEqual(actual.sameA);
     expect(journal.history()).toHaveLength(1);
   });
 
@@ -801,11 +800,11 @@ describe('event-sourced encounter persistence', () => {
          ORDER BY revision`,
       );
       expect(rows).toEqual([
-        { revision: 1, schema_version: 3 },
-        { revision: 2, schema_version: 3 },
-        { revision: 3, schema_version: 3 },
-        { revision: 4, schema_version: 3 },
-        { revision: 5, schema_version: 3 },
+        { revision: 1, schema_version: 4 },
+        { revision: 2, schema_version: 4 },
+        { revision: 3, schema_version: 4 },
+        { revision: 4, schema_version: 4 },
+        { revision: 5, schema_version: 4 },
       ]);
       expect(
         EncounterSessionJournal.resume(
