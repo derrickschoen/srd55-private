@@ -4,6 +4,7 @@ import { starterArtDataUri } from '../assets/starter-art-resolver';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
+import { REACTION_KINDS } from '../combat/encounter';
 import { previewAffectedCells } from '../combat/templates';
 import type { CombatantId } from '../combat/values';
 import { DmEncounterHost } from './dm-encounter-host';
@@ -706,11 +707,100 @@ class DmEncounterView {
       this.#shell.append(rest);
     }
 
-    const projectedFog = projection.encounter.dmOnly.foggedCells;
-    if (canonicalJson(projectedFog) !== canonicalJson(projection.board.foggedCells)) {
-      throw new Error('DM board fog diverged from the encounter projection.');
+    const boardFog = new Set(projection.board.foggedCells.map(
+      (cell) => `${String(cell.column)},${String(cell.row)}`,
+    ));
+    if (projection.encounter.dmOnly.foggedCells.some(
+      (cell) => !boardFog.has(`${String(cell.column)},${String(cell.row)}`),
+    )) {
+      throw new Error('DM board omitted encounter fog.');
     }
     this.#shell.append(renderBoard(projection.board));
+
+    const tray = element('section', { className: 'dm-decision-tray' });
+    tray.append(element('h2', { text: 'Decision tray' }));
+    tray.dataset.boundaryBlocked = String(projection.decisionTray.boundaryRefusal !== null);
+    if (projection.decisionTray.boundaryRefusal !== null) {
+      const refusal = element('p', {
+        className: 'dm-decision-refusal',
+        text: projection.decisionTray.boundaryRefusal.message,
+      });
+      refusal.setAttribute('role', 'alert');
+      refusal.dataset.refusalCode = projection.decisionTray.boundaryRefusal.code;
+      tray.append(refusal);
+    }
+    if (projection.decisionTray.entries.length === 0) {
+      tray.append(element('p', { text: 'No queued or automatic reactions.' }));
+    }
+    for (const entry of projection.decisionTray.entries) {
+      const row = element('article', { className: `dm-decision-entry dm-decision-${entry.kind}` });
+      row.dataset.entryKind = entry.kind;
+      if (entry.kind === 'pending') {
+        row.dataset.decisionId = entry.decision.id;
+        row.append(
+          element('h3', { text: `${entry.combatantName} — ${entry.decision.reactionKind.replaceAll('_', ' ')}` }),
+          element('p', { text: entry.triggerContext }),
+        );
+        for (const option of entry.decision.options) {
+          const button = element('button', { text: `${option.label} for ${entry.combatantName}` });
+          button.type = 'button';
+          button.addEventListener('click', () => {
+            button.disabled = true;
+            void this.#host.resolvePendingDecision(entry.decision.id, option.id).catch((error: unknown) => {
+              this.#channelError = error instanceof Error ? error.message : 'Decision resolution failed.';
+              this.#render();
+            });
+          });
+          row.append(button);
+        }
+      } else {
+        row.dataset.policy = entry.policy;
+        row.dataset.sequence = String(entry.sequence);
+        row.append(element('p', {
+          text: `${entry.combatantName} — ${entry.reactionKind.replaceAll('_', ' ')}: ${entry.policy} automatically ${entry.resolution === 'accept' ? 'accepted' : 'declined'}${entry.autoFired ? ' and fired' : ''}`,
+        }));
+      }
+      tray.append(row);
+    }
+    this.#shell.append(tray);
+
+    if (projection.partySession !== null) {
+      const preferences = element('section', { className: 'dm-reaction-preferences' });
+      preferences.append(element('h2', { text: 'Reaction preferences' }));
+      for (const character of projection.partySession.state.characters) {
+        const name = projection.encounter.combatants.find(
+          (candidate) => candidate.id === character.combatantId,
+        )?.name ?? character.combatantId;
+        for (const reactionKind of REACTION_KINDS) {
+          const current = projection.partySession.state.reactionPolicies.find(
+            (entry) => entry.combatant === character.combatantId && entry.reactionKind === reactionKind,
+          );
+          if (current === undefined) throw new Error('Party reaction preference coverage is incomplete.');
+          const label = element('label');
+          label.append(document.createTextNode(`${name} — ${reactionKind.replaceAll('_', ' ')}`));
+          const select = element('select');
+          select.setAttribute('aria-label', `${name} ${reactionKind} reaction policy`);
+          for (const policy of ['ask', 'always', 'never'] as const) {
+            const option = element('option', { text: policy });
+            option.value = policy;
+            option.selected = current.policy === policy;
+            select.append(option);
+          }
+          select.addEventListener('change', () => {
+            if (select.value !== 'ask' && select.value !== 'always' && select.value !== 'never') return;
+            select.disabled = true;
+            void this.#host.setReactionPreference(character.combatantId, reactionKind, select.value)
+              .catch((error: unknown) => {
+                this.#channelError = error instanceof Error ? error.message : 'Reaction preference update failed.';
+                this.#render();
+              });
+          });
+          label.append(select);
+          preferences.append(label);
+        }
+      }
+      this.#shell.append(preferences);
+    }
 
     const initiative = element('section', { className: 'dm-initiative' });
     initiative.append(element('h2', { text: `Initiative — round ${String(projection.board.round)}` }));

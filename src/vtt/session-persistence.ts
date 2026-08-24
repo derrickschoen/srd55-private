@@ -9,6 +9,8 @@ import {
   isEncounterConfig,
   reduceEncounter,
   type EncounterState,
+  type ReactionKind,
+  type ReactionPolicy,
 } from '../combat/encounter';
 import {
   restoreMulberry32,
@@ -27,6 +29,7 @@ import {
   capturePartySessionState,
   decodePartySessionState,
   enterNextRoom,
+  setPartyReactionPolicy,
   takeShortRest,
   type PartySessionState,
   type ShortRestHitDieRoll,
@@ -41,6 +44,12 @@ export type SessionTransition =
   | { readonly kind: 'session_started' }
   | DurableCoordinatorTransition
   | { readonly kind: 'party_state_captured'; readonly room: number }
+  | {
+      readonly kind: 'reaction_preference_changed';
+      readonly combatant: import('../combat/values').CombatantId;
+      readonly reactionKind: ReactionKind;
+      readonly policy: ReactionPolicy;
+    }
   | {
       readonly kind: 'short_rest_completed';
       readonly room: number;
@@ -58,6 +67,7 @@ export type SessionTransition =
 export const SESSION_TRANSITION_KINDS = [
   'session_started',
   'party_state_captured',
+  'reaction_preference_changed',
   'short_rest_completed',
   'room_composed',
   'head_moved',
@@ -361,6 +371,14 @@ function decodeTransition(value: unknown): SessionTransition {
         return value as unknown as SessionTransition;
       }
       break;
+    case 'reaction_preference_changed':
+      if (
+        hasExactlyKeys(value, ['kind', 'combatant', 'reactionKind', 'policy']) &&
+        typeof value.combatant === 'string' &&
+        ['hit_by_attack', 'damaged_by_creature', 'taking_damage_of_type', 'creature_casts_spell', 'opportunity_attack'].includes(String(value.reactionKind)) &&
+        (value.policy === 'ask' || value.policy === 'always' || value.policy === 'never')
+      ) return value as unknown as SessionTransition;
+      break;
     case 'short_rest_completed':
       if (
         hasExactlyKeys(value, ['kind', 'room', 'spends', 'rolls']) &&
@@ -644,6 +662,29 @@ export function replaySessionRevisions(
         requireCanonicalEqual(revision.rngState, expected, 'head-move RNG state');
         break;
       }
+      case 'reaction_preference_changed': {
+        if (parent === null || parent === undefined || parent.partyState === null) {
+          throw new Error('A reaction preference revision requires party state.');
+        }
+        const expectedParty = setPartyReactionPolicy(
+          parent.partyState,
+          transition.combatant,
+          transition.reactionKind,
+          transition.policy,
+        );
+        requireCanonicalEqual(revision.partyState, expectedParty, 'reaction preference party state');
+        const partyIds = new Set(expectedParty.characters.map((entry) => entry.combatantId));
+        const expectedEncounter = {
+          ...parent.encounterState,
+          reactionPolicies: [
+            ...parent.encounterState.reactionPolicies.filter((entry) => !partyIds.has(entry.combatant)),
+            ...expectedParty.reactionPolicies,
+          ],
+        };
+        requireCanonicalEqual(revision.encounterState, expectedEncounter, 'reaction preference encounter state');
+        requireCanonicalEqual(revision.rngState, parent.rngState, 'reaction preference RNG state');
+        break;
+      }
       case 'reducer_applied': {
         if (parent === null || parent === undefined) {
           throw new Error('A reducer revision requires a parent.');
@@ -882,6 +923,43 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       codexSessionId: latest.codexSessionId,
     });
     return rested;
+  }
+
+  updateReactionPreference(
+    combatant: import('../combat/values').CombatantId,
+    reactionKind: ReactionKind,
+    policy: ReactionPolicy,
+  ): SessionResume {
+    const latest = this.#latest();
+    if (latest.partyState === null) throw new Error('Encounter session has no party state for reaction preferences.');
+    const partyState = setPartyReactionPolicy(latest.partyState, combatant, reactionKind, policy);
+    const partyIds = new Set(partyState.characters.map((entry) => entry.combatantId));
+    const encounterState: EncounterState = {
+      ...latest.encounterState,
+      reactionPolicies: [
+        ...latest.encounterState.reactionPolicies.filter((entry) => !partyIds.has(entry.combatant)),
+        ...partyState.reactionPolicies,
+      ],
+    };
+    const appended = this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: { kind: 'reaction_preference_changed', combatant, reactionKind, policy },
+      encounterState,
+      partyState,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      codexSessionId: latest.codexSessionId,
+    });
+    return {
+      journal: this,
+      encounterState: appended.encounterState,
+      partyState: appended.partyState,
+      coordinatorState: appended.coordinatorState,
+      controllers: appended.controllers,
+      codexSessionId: appended.codexSessionId,
+      rng: this.#rng,
+    };
   }
 
   composeNextRoom(input: {

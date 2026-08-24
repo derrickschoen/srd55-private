@@ -55,6 +55,7 @@ function profile(
       passivePerception: 12,
       detectionTraits: [],
       contactMedium: 'surface',
+      ...(key === 'training-brute' ? { skillBonuses: { stealth: 20 } } : {}),
       spellSlots: options.spellSlots ?? [],
     },
   } as const;
@@ -79,6 +80,7 @@ export function referenceEncounterSetup(): {
   readonly tokens: readonly CombatToken[];
   readonly blockedCells: readonly GridCell[];
   readonly foggedCells: readonly GridCell[];
+  readonly environment: EncounterState['environment'];
   readonly dmNotes: readonly string[];
 } {
   const fighter = profile('fighter', 'Reference Fighter', 'player_character', {
@@ -120,6 +122,12 @@ export function referenceEncounterSetup(): {
     })),
     blockedCells: [{ column: 7, row: 2 }],
     foggedCells: [{ column: 8, row: 1 }, { column: 8, row: 2 }],
+    environment: {
+      lightRegions: [{ id: 'reference-hiding-shadow', cells: [{ column: 4, row: 3 }], level: 'darkness' }],
+      obscurementRegions: [],
+      difficultTerrainRegions: [],
+      movementRegions: [],
+    },
     dmNotes: ['Training Brute retreats after the three reference PCs act.'],
   };
 }
@@ -251,7 +259,7 @@ export function referenceTurnLegalActions(
   const actions: EncounterCommand[] = [...movementActions(state, actor)];
   if (active.turn.action.kind !== 'spent') {
     if (actor === REFERENCE_MONSTER_ID) {
-      // The movement choices above are the local-human monster action set.
+      actions.push({ type: 'hide', actor });
     } else {
       if (gridDistance(position(state, actor), position(state, REFERENCE_MONSTER_ID)) <= 5) {
         actions.push(weaponAttack(actor, REFERENCE_MONSTER_ID));

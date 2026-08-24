@@ -110,6 +110,8 @@ export interface PlayerView {
   readonly bounds: EncounterState['bounds'];
   /** Cells that exist for this seat. Fogged cells are absent, not flagged. */
   readonly cells: readonly GridCell[];
+  /** Per-seat concealed cells, including a cell occupied by a Hidden combatant. */
+  readonly concealedCells: readonly GridCell[];
   readonly blockedCells: readonly GridCell[];
   readonly worldObjects: EncounterState['worldObjects'];
   readonly combatants: readonly PlayerVisibleCombatant[];
@@ -307,11 +309,16 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
   }
   const tokensByCombatant = new Map(state.tokens.map((token) => [token.combatantId, token] as const));
   const fog = new Set(state.foggedCells.map(cellKey));
+  const hidden = new Set(state.hiddenCombatants.map((entry) => entry.combatant));
+  const hiddenCells = new Set(state.tokens
+    .filter((entry) => hidden.has(entry.combatantId))
+    .map((entry) => cellKey(entry.position)));
+  const concealed = new Set([...fog, ...hiddenCells]);
   const combatants = state.combatants.flatMap((subject): readonly PlayerVisibleCombatant[] => {
     const token = tokensByCombatant.get(subject.profile.id);
     if (token === undefined) throw new Error('Encounter projection found no token.');
     const owned = ownedIds.has(subject.profile.id);
-    if (!owned && (fog.has(cellKey(token.position)) || !canCombatantSee(state, binding.combatantId, subject.profile.id))) return [];
+    if (hidden.has(subject.profile.id) || (!owned && (fog.has(cellKey(token.position)) || !canCombatantSee(state, binding.combatantId, subject.profile.id)))) return [];
     return [{
       id: subject.profile.id,
       name: subject.profile.name,
@@ -333,10 +340,11 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
     round: state.round,
     activeCombatant: state.activeCombatant,
     bounds: { ...state.bounds },
-    cells: allCells(state.bounds).filter((cell) => !fog.has(cellKey(cell))),
-    blockedCells: state.blockedCells.filter((cell) => !fog.has(cellKey(cell))).map((cell) => ({ ...cell })),
+    cells: allCells(state.bounds).filter((cell) => !concealed.has(cellKey(cell))),
+    concealedCells: allCells(state.bounds).filter((cell) => concealed.has(cellKey(cell))),
+    blockedCells: state.blockedCells.filter((cell) => !concealed.has(cellKey(cell))).map((cell) => ({ ...cell })),
     worldObjects: state.worldObjects
-      .filter((object) => object.footprint.every((cell) => !fog.has(cellKey(cell))))
+      .filter((object) => object.footprint.every((cell) => !concealed.has(cellKey(cell))))
       .map((object) => structuredClone(object)),
     combatants,
     ownedCombatants: state.combatants

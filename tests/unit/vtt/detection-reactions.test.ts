@@ -121,6 +121,51 @@ describe('D356 full detection vocabulary', () => {
     expect(result.state.hiddenCombatants).toEqual([]);
   });
 
+  it('passive_five_shift: Advantage adds 5 and Disadvantage subtracts 5 from passive Perception', () => {
+    const keenObserver = withRules(monsterProfile('keen-passive-observer', { initiativeBonus: -20 }), {
+      passivePerception: 12,
+      detectionTraits: ['keen_sight'],
+    });
+    const advantage = startedEncounter({
+      reactor: keenObserver,
+      darkness: [{ column: 1, row: 1 }],
+    });
+    const advantageResult = reduceEncounter(
+      advantage.state,
+      { type: 'hide', actor: advantage.actor.id },
+      face(16),
+    );
+    expect(advantageResult.events).toContainEqual(expect.objectContaining({
+      type: 'hide_resolved', total: 16, outcome: 'passively_detected',
+    }));
+
+    const disadvantagedObserver = withRules(monsterProfile('dim-passive-observer', { initiativeBonus: -20 }), {
+      passivePerception: 20,
+    });
+    const disadvantage = startedEncounter({ reactor: disadvantagedObserver });
+    const subjectCell = { column: 1, row: 1 } as const;
+    const obscured: EncounterState = {
+      ...disadvantage.state,
+      environment: {
+        ...disadvantage.state.environment,
+        lightRegions: [{ id: 'dim-passive', cells: [subjectCell], level: 'dim' }],
+        obscurementRegions: [{ id: 'heavy-passive', cells: [subjectCell], obscurement: 'heavy' }],
+      },
+    };
+    const disadvantageResult = reduceEncounter(
+      obscured,
+      { type: 'hide', actor: disadvantage.actor.id },
+      face(16),
+    );
+    expect(disadvantageResult.events).toContainEqual(expect.objectContaining({
+      type: 'hide_resolved', total: 16, outcome: 'hidden',
+    }));
+    expect(disadvantageResult.state.hiddenCombatants).toContainEqual(expect.objectContaining({
+      combatant: disadvantage.actor.id,
+      stealthTotal: 16,
+    }));
+  });
+
   it('hidden attacker has Advantage and making the attack roll reveals it', () => {
     // Unseen attacks and reveal: docs/srd/full/srd-5.2.1.txt:884-894,11784-11789.
     const setup = startedEncounter({ darkness: [{ column: 1, row: 1 }] });

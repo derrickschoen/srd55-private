@@ -168,12 +168,19 @@ test('M38-PLAYER-NO-DM-CONTROLS and two local windows complete the resumable ref
 
   await expect(dm.getByRole('button', { name: 'Move to 4,3', exact: true })).toBeVisible();
   await dm.getByRole('button', { name: 'Move to 4,3', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Use reaction', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Use reaction', exact: true }).click();
+  const tray = dm.locator('.dm-decision-tray');
+  await expect(tray.locator('[data-entry-kind="pending"]')).toContainText(
+    'Reference Fighter — opportunity attack',
+  );
+  await expect(tray).toContainText('Training Brute moved from 3,3 to 4,3');
   await expect(dm.locator('.dm-pending-request')).toContainText('turn: Training Brute');
-  await expect(
-    dm.locator('[data-cell="4,3"] .encounter-token[data-kind="monster"]'),
-  ).toHaveText('Training Brute');
+  await dm.getByRole('button', { name: 'Hide', exact: true }).click();
+  for (const board of [dm, page]) {
+    await expect(board.locator('[data-cell="4,3"] .encounter-art-fog')).toBeVisible();
+    await expect(
+      board.locator('[data-cell="4,3"] .encounter-token[data-kind="monster"]'),
+    ).toHaveCount(0);
+  }
   await expect(dm.getByRole('button', { name: 'End turn', exact: true })).toBeVisible();
 
   await dm.getByLabel('Adjudication target').selectOption({ label: 'Reference Fighter' });
@@ -196,6 +203,13 @@ test('M38-PLAYER-NO-DM-CONTROLS and two local windows complete the resumable ref
 
   await dm.getByRole('button', { name: 'Resume' }).click();
   await expect(dm.getByRole('button', { name: 'End turn', exact: true })).toBeVisible();
+  await dm.getByRole('button', { name: 'End turn', exact: true }).click();
+  await expect(tray).toHaveAttribute('data-boundary-blocked', 'true');
+  await expect(tray.getByRole('alert')).toHaveAttribute(
+    'data-refusal-code',
+    'turn_boundary_blocked',
+  );
+  await tray.getByRole('button', { name: 'Decline for Reference Fighter' }).click();
   await dm.getByRole('button', { name: 'End turn', exact: true }).click();
   await expect(dm.locator('[data-hidden-roll="death-save"]')).toBeVisible();
   await expect(page.locator('.player-encounter')).not.toContainText('Hidden death save');

@@ -41,6 +41,7 @@ export type ProjectionTransfer =
         readonly controllers: DmBoardProjection['controllers'];
         readonly adjudicatedTargets: DmBoardProjection['adjudicatedTargets'];
         readonly partySession: DmBoardProjection['partySession'];
+        readonly decisionTray: DmBoardProjection['decisionTray'];
       };
     }
   | {
@@ -173,6 +174,7 @@ export class ProjectionTransferSender {
         controllers: structuredClone(projection.controllers),
         adjudicatedTargets: structuredClone(projection.adjudicatedTargets),
         partySession: structuredClone(projection.partySession),
+        decisionTray: structuredClone(projection.decisionTray),
       },
     };
     const { projection: _projection, ...rest } = request;
@@ -215,6 +217,7 @@ export class ProjectionTransferReceiver {
         history: structuredClone(request.history),
         adjudicatedTargets: structuredClone(transfer.view.adjudicatedTargets),
         partySession: structuredClone(transfer.view.partySession),
+        decisionTray: structuredClone(transfer.view.decisionTray),
       };
     } else {
       const previous = this.#received.get(request.encounterId);
