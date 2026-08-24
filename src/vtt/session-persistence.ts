@@ -29,8 +29,12 @@ import {
   capturePartySessionState,
   decodePartySessionState,
   enterNextRoom,
+  LONG_REST_CITATIONS,
   setPartyReactionPolicy,
+  takeLongRest,
   takeShortRest,
+  type LongRestResult,
+  type LongRestSummaryCard,
   type PartySessionState,
   type ShortRestHitDieRoll,
   type ShortRestHitDieSpend,
@@ -56,6 +60,11 @@ export type SessionTransition =
       readonly spends: readonly ShortRestHitDieSpend[];
       readonly rolls: readonly ShortRestHitDieRoll[];
     }
+  | {
+      readonly kind: 'long_rest_completed';
+      readonly room: number;
+      readonly summary: LongRestSummaryCard;
+    }
   | { readonly kind: 'room_composed'; readonly room: number }
   | {
       readonly kind: 'head_moved';
@@ -69,6 +78,7 @@ export const SESSION_TRANSITION_KINDS = [
   'party_state_captured',
   'reaction_preference_changed',
   'short_rest_completed',
+  'long_rest_completed',
   'room_composed',
   'head_moved',
   'controller_request_issued',
@@ -354,6 +364,41 @@ function validShortRestRolls(value: unknown): value is readonly ShortRestHitDieR
     Number.isSafeInteger(roll.healing) && typeof roll.healing === 'number' && roll.healing >= 1);
 }
 
+function validLongRestSummary(value: unknown): value is LongRestSummaryCard {
+  if (!isRecord(value) || !hasExactlyKeys(value, ['kind', 'durationHours', 'characters', 'citations']) ||
+    value.kind !== 'long_rest_summary' || value.durationHours !== 8 || !Array.isArray(value.characters) ||
+    !isRecord(value.citations) || canonicalJson(value.citations) !== canonicalJson(LONG_REST_CITATIONS)) {
+    return false;
+  }
+  return value.characters.every((character) => {
+    if (!isRecord(character) || !hasExactlyKeys(character, [
+      'combatantId', 'hitPointsRestored', 'hitDiceRestored', 'spellSlotsRestored',
+      'exhaustionLevelsRemoved', 'limitedResourcesRestored', 'lifeBefore', 'lifeAfter',
+    ]) || typeof character.combatantId !== 'string' ||
+      !Number.isSafeInteger(character.hitPointsRestored) ||
+      typeof character.hitPointsRestored !== 'number' || character.hitPointsRestored < 0 ||
+      (character.exhaustionLevelsRemoved !== 0 && character.exhaustionLevelsRemoved !== 1) ||
+      !['living', 'dying', 'stable', 'dead'].includes(String(character.lifeBefore)) ||
+      !['living', 'dying', 'stable', 'dead'].includes(String(character.lifeAfter)) ||
+      !Array.isArray(character.hitDiceRestored) || !Array.isArray(character.spellSlotsRestored) ||
+      !Array.isArray(character.limitedResourcesRestored)) return false;
+    const hitDiceValid = character.hitDiceRestored.every((die) =>
+      isRecord(die) && hasExactlyKeys(die, ['sides', 'count']) &&
+      (die.sides === 6 || die.sides === 8 || die.sides === 10 || die.sides === 12) &&
+      Number.isSafeInteger(die.count) && typeof die.count === 'number' && die.count > 0);
+    const spellSlotsValid = character.spellSlotsRestored.every((slot) =>
+      isRecord(slot) && hasExactlyKeys(slot, ['pool', 'level', 'count']) &&
+      (slot.pool === 'shared' || slot.pool === 'pact_magic') &&
+      Number.isSafeInteger(slot.level) && typeof slot.level === 'number' && slot.level >= 1 && slot.level <= 9 &&
+      Number.isSafeInteger(slot.count) && typeof slot.count === 'number' && slot.count > 0);
+    const resourcesValid = character.limitedResourcesRestored.every((resource) =>
+      isRecord(resource) && hasExactlyKeys(resource, ['id', 'count']) &&
+      typeof resource.id === 'string' &&
+      Number.isSafeInteger(resource.count) && typeof resource.count === 'number' && resource.count > 0);
+    return hitDiceValid && spellSlotsValid && resourcesValid;
+  });
+}
+
 function decodeTransition(value: unknown): SessionTransition {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     throw new TypeError('Malformed VTT session transition.');
@@ -385,6 +430,13 @@ function decodeTransition(value: unknown): SessionTransition {
         validRoom(value.room) &&
         validShortRestSpends(value.spends) &&
         validShortRestRolls(value.rolls)
+      ) return value as unknown as SessionTransition;
+      break;
+    case 'long_rest_completed':
+      if (
+        hasExactlyKeys(value, ['kind', 'room', 'summary']) &&
+        validRoom(value.room) &&
+        validLongRestSummary(value.summary)
       ) return value as unknown as SessionTransition;
       break;
     case 'head_moved':
@@ -633,6 +685,18 @@ export function replaySessionRevisions(
         requireCanonicalEqual(revision.partyState, rested.state, 'Short Rest party state');
         requireCanonicalEqual(transition.rolls, rested.rolls, 'Short Rest rolls');
         requireCanonicalEqual(revision.rngState, restRng.snapshot(), 'Short Rest RNG state');
+        break;
+      }
+      case 'long_rest_completed': {
+        if (parent === null || parent === undefined || parent.partyState === null) {
+          throw new Error('A Long Rest requires an existing party session state.');
+        }
+        const rested = takeLongRest(parent.partyState);
+        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'Long Rest encounter state');
+        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'Long Rest coordinator state');
+        requireCanonicalEqual(revision.partyState, rested.state, 'Long Rest party state');
+        requireCanonicalEqual(transition.summary, rested.summary, 'Long Rest summary');
+        requireCanonicalEqual(revision.rngState, parent.rngState, 'Long Rest RNG state');
         break;
       }
       case 'room_composed': {
@@ -918,6 +982,27 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
         room: rested.state.room,
         spends: structuredClone(spends),
         rolls: rested.rolls,
+      },
+      encounterState: latest.encounterState,
+      partyState: rested.state,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      codexSessionId: latest.codexSessionId,
+    });
+    return rested;
+  }
+
+  takeLongRest(): LongRestResult {
+    const latest = this.#latest();
+    if (latest.partyState === null) throw new Error('Encounter session has no party state to rest.');
+    const rested = takeLongRest(latest.partyState);
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: {
+        kind: 'long_rest_completed',
+        room: rested.state.room,
+        summary: rested.summary,
       },
       encounterState: latest.encounterState,
       partyState: rested.state,

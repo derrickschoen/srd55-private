@@ -953,11 +953,15 @@ class DmEncounterView {
     this.#shell.append(status);
     this.#shell.append(this.#renderSaveManager());
     if (projection.partySession !== null) {
+      const dayEnded = projection.partySession.state.adventuringDayStatus === 'ended_by_long_rest';
       const adventuringDay = element('p', {
-        text: `Adventuring day — room ${String(projection.partySession.state.room)} of 4 · 2024 rules`,
+        text: dayEnded
+          ? `Adventuring day ended by Long Rest · room ${String(projection.partySession.state.room)} · 2024 rules`
+          : `Adventuring day — room ${String(projection.partySession.state.room)} of 4 · 2024 rules`,
       });
       adventuringDay.className = 'adventuring-day-status';
       adventuringDay.dataset.room = String(projection.partySession.state.room);
+      adventuringDay.dataset.status = projection.partySession.state.adventuringDayStatus;
       this.#shell.append(adventuringDay);
     }
 
@@ -972,7 +976,20 @@ class DmEncounterView {
     undo.type = 'button';
     undo.addEventListener('click', () => void this.#host.undoLast());
     controls.append(interrupt, resume, undo);
-    if (projection.partySession !== null && projection.partySession.state.room < 4) {
+    if (projection.partySession !== null && projection.partySession.state.adventuringDayStatus === 'active') {
+      const longRest = element('button', { text: 'Complete Long Rest and end adventuring day' });
+      longRest.type = 'button';
+      longRest.addEventListener('click', () => {
+        void this.#host.finishAdventuringDay().catch((error: unknown) => {
+          this.#channelError = error instanceof Error ? error.message : 'Long Rest failed.';
+          this.#render();
+        });
+      });
+      controls.append(longRest);
+    }
+    if (projection.partySession !== null &&
+      projection.partySession.state.adventuringDayStatus === 'active' &&
+      projection.partySession.state.room < 4) {
       const nextRoom = element('button', { text: 'End room and enter next room' });
       nextRoom.type = 'button';
       nextRoom.addEventListener('click', () => {
@@ -985,7 +1002,9 @@ class DmEncounterView {
     }
     this.#shell.append(controls);
 
-    if (projection.partySession !== null && projection.partySession.state.room < 4) {
+    if (projection.partySession !== null &&
+      projection.partySession.state.adventuringDayStatus === 'active' &&
+      projection.partySession.state.room < 4) {
       const rest = element('form', { className: 'dm-short-rest' });
       rest.append(element('h2', { text: 'Short Rest before next room' }));
       const requested: Array<{
@@ -1034,6 +1053,42 @@ class DmEncounterView {
         });
       });
       this.#shell.append(rest);
+    }
+
+    for (const entry of projection.history) {
+      if (entry.void || entry.transition.kind !== 'long_rest_completed') continue;
+      const card = element('section', { className: 'long-rest-summary-card' });
+      card.dataset.revision = String(entry.revision);
+      card.append(element('h2', {
+        text: `Long Rest completed — ${String(entry.transition.summary.durationHours)} hours`,
+      }));
+      const restored = element('ul');
+      for (const character of entry.transition.summary.characters) {
+        const name = projection.encounter.combatants.find(
+          (candidate) => candidate.id === character.combatantId,
+        )?.name ?? character.combatantId;
+        const hitDice = character.hitDiceRestored.length === 0
+          ? '0 Hit Point Dice'
+          : character.hitDiceRestored.map((die) => `${String(die.count)}d${String(die.sides)}`).join(', ');
+        const slots = character.spellSlotsRestored.length === 0
+          ? '0 spell slots'
+          : character.spellSlotsRestored.map((slot) =>
+            `${slot.pool} level ${String(slot.level)} × ${String(slot.count)}`).join(', ');
+        const resources = character.limitedResourcesRestored.length === 0
+          ? '0 long-rest feature uses'
+          : character.limitedResourcesRestored.map((resource) =>
+            `${resource.id} × ${String(resource.count)}`).join(', ');
+        restored.append(element('li', {
+          text: `${name}: ${String(character.hitPointsRestored)} HP; ${hitDice}; ${slots}; Exhaustion −${String(character.exhaustionLevelsRemoved)}; ${resources}; ${character.lifeBefore} → ${character.lifeAfter}`,
+        }));
+      }
+      card.append(restored);
+      const citations = element('p', {
+        text: `Rules: ${Object.values(entry.transition.summary.citations).join('; ')}. Stable-at-0 eligibility resolves through the cited natural recovery before Long Rest benefits. Interruption handling is deferred.`,
+      });
+      citations.className = 'long-rest-citations';
+      card.append(citations);
+      this.#shell.append(card);
     }
 
     const boardFog = new Set(projection.board.foggedCells.map(

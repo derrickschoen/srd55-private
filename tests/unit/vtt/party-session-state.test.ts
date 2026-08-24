@@ -26,6 +26,7 @@ import {
   preloadPartySessionState,
   projectPlayerPartySession,
   setPartyReactionPolicy,
+  takeLongRest,
   takeShortRest,
   type PartySessionState,
 } from '../../../src/vtt/party-session-state';
@@ -326,6 +327,169 @@ describe('adventuring-day party session state', () => {
       .toMatchObject({ hitPoints: 0, life: 'dead', deathSaves: null });
     expect(room.state.combatants.find((entry) => entry.profile.id === combatantId('combatant:advday-3')))
       .toMatchObject({ hitPoints: 0, life: 'dying', deathSaves: { successes: 0, failures: 0 } });
+  });
+
+  it('half_hit_dice_returned: restores every spent Hit Point Die for odd totals', () => {
+    const initial = createPartySessionState(loadedParty());
+    const depleted: PartySessionState = {
+      ...initial,
+      characters: initial.characters.map((entry, index) => ({
+        ...entry,
+        hitDice: [{
+          ...entry.hitDice[0]!,
+          maximum: index === 0 ? 5 : index === 1 ? 3 : 1,
+          remaining: 0,
+        }],
+      })),
+    };
+
+    const rested = takeLongRest(depleted);
+
+    expect(character(rested.state, 'combatant:advday-1').hitDice[0]?.remaining).toBe(5);
+    expect(character(rested.state, 'combatant:advday-2').hitDice[0]?.remaining).toBe(3);
+    expect(character(rested.state, 'combatant:advday-3').hitDice[0]?.remaining).toBe(1);
+    expect(rested.summary.characters.map((entry) => entry.hitDiceRestored)).toEqual([
+      [{ sides: 6, count: 5 }],
+      [{ sides: 8, count: 3 }],
+      [{ sides: 10, count: 1 }],
+    ]);
+  });
+
+  it('exhaustion_cleared: reduces Exhaustion by exactly 1, including the 1-to-0 and 0 floor boundaries', () => {
+    const initial = createPartySessionState(loadedParty());
+    const exhausted: PartySessionState = {
+      ...initial,
+      characters: initial.characters.map((entry, index) => ({
+        ...entry,
+        exhaustionLevel: index === 0 ? 1 : index === 1 ? 0 : 5,
+      })),
+    };
+
+    const rested = takeLongRest(exhausted);
+
+    expect(rested.state.characters.map((entry) => entry.exhaustionLevel)).toEqual([0, 0, 4]);
+    expect(rested.summary.characters.map((entry) => entry.exhaustionLevelsRemoved)).toEqual([1, 0, 1]);
+  });
+
+  it('dead_rises: leaves a dead character untouched while a stabilized character wakes at full HP', () => {
+    const initial = createPartySessionState(loadedParty());
+    const statuses: PartySessionState = {
+      ...initial,
+      characters: initial.characters.map((entry, index) => index === 0
+        ? {
+            ...entry,
+            currentHitPoints: 0,
+            life: 'dead',
+            exhaustionLevel: 2,
+            spellSlots: entry.spellSlots.map((slot) => ({ ...slot, remaining: 0 })),
+            hitDice: entry.hitDice.map((pool) => ({ ...pool, remaining: 0 })),
+          }
+        : index === 1
+          ? { ...entry, currentHitPoints: 0, life: 'stable' }
+          : entry),
+    };
+    const deadBefore = structuredClone(character(statuses, 'combatant:advday-1'));
+
+    const rested = takeLongRest(statuses);
+
+    expect(character(rested.state, 'combatant:advday-1')).toEqual(deadBefore);
+    expect(character(rested.state, 'combatant:advday-2')).toMatchObject({
+      currentHitPoints: 20,
+      life: 'living',
+      deathSaves: null,
+    });
+    expect(rested.summary.characters[1]).toMatchObject({
+      hitPointsRestored: 20,
+      lifeBefore: 'stable',
+      lifeAfter: 'living',
+    });
+  });
+
+  it('pact_magic_not_double_restored: restores Wizard and Warlock slots once through distinct pools', () => {
+    const initial = createPartySessionState(loadedParty());
+    const depleted: PartySessionState = {
+      ...initial,
+      characters: initial.characters.map((entry) => ({
+        ...entry,
+        spellSlots: entry.spellSlots.map((slot) => ({ ...slot, remaining: 0 })),
+        limitedResources: entry.combatantId === combatantId('combatant:advday-1')
+          ? [{ id: limitedResourcePoolId('resource:long-rest-feature'), maximum: 3, remaining: 1, recharge: 'long_rest' }]
+          : entry.limitedResources,
+      })),
+    };
+
+    const rested = takeLongRest(depleted);
+    const wizard = character(rested.state, 'combatant:advday-1');
+    const warlock = character(rested.state, 'combatant:advday-2');
+
+    expect(wizard.spellSlots).toEqual([
+      expect.objectContaining({ pool: 'shared', recharge: 'long_rest', remaining: 3 }),
+    ]);
+    expect(warlock.spellSlots).toEqual([
+      expect.objectContaining({ pool: 'pact_magic', recharge: 'short_rest', remaining: 2 }),
+    ]);
+    expect(rested.summary.characters[0]?.spellSlotsRestored).toEqual([
+      { pool: 'shared', level: 1, count: 3 },
+    ]);
+    expect(rested.summary.characters[1]?.spellSlotsRestored).toEqual([
+      { pool: 'pact_magic', level: 1, count: 2 },
+    ]);
+    expect(rested.summary.characters[0]?.limitedResourcesRestored).toEqual([
+      { id: limitedResourcePoolId('resource:long-rest-feature'), count: 2 },
+    ]);
+  });
+
+  it('campaign save round-trips the post-rest state and cited summary transition', () => {
+    const members = loadedParty();
+    const room = composeStoredCharacterEncounter(members);
+    if (room.partyState === null) throw new Error('Long Rest save fixture has no party state.');
+    const depleted: PartySessionState = {
+      ...room.partyState,
+      characters: room.partyState.characters.map((entry, index) => ({
+        ...entry,
+        currentHitPoints: index === 0 ? 4 : entry.currentHitPoints,
+        exhaustionLevel: index === 0 ? 1 : 0,
+        spellSlots: entry.spellSlots.map((slot) => ({ ...slot, remaining: 0 })),
+      })),
+    };
+    const sessionId = encounterSessionId('session:long-rest-save');
+    const store = new MemoryBrowserSessionStore();
+    const journal = EncounterSessionJournal.create({
+      sessionId,
+      branchId: encounterBranchId('branch:long-rest-save'),
+      encounterState: room.state,
+      partyState: depleted,
+      coordinatorState: {
+        requestSequence: 1,
+        pendingRequest: null,
+        pendingCommand: null,
+        continuation: { kind: 'idle' },
+        pause: null,
+      },
+      controllers: room.controllers,
+      codexSessionId: codexSessionId('codex:long-rest-save'),
+      rng: mulberry32(3737),
+      store,
+      mirror: new MemoryMirrorSink(),
+    });
+    const expected = journal.takeLongRest();
+
+    const exported = exportSavedSession(store, sessionId);
+    const imported = new MemoryBrowserSessionStore();
+    importSavedSession(imported, exported);
+    const resumed = EncounterSessionJournal.resume(sessionId, imported, new MemoryMirrorSink());
+
+    expect(resumed.partyState).toEqual(expected.state);
+    expect(resumed.partyState?.adventuringDayStatus).toBe('ended_by_long_rest');
+    expect(character(resumed.partyState!, 'combatant:advday-1')).toMatchObject({
+      currentHitPoints: 20,
+      exhaustionLevel: 0,
+    });
+    expect(resumed.journal.history().at(-1)?.transition).toEqual({
+      kind: 'long_rest_completed',
+      room: 1,
+      summary: expected.summary,
+    });
   });
 
   it('party_state_leaks: another PC spent-slot detail is absent from a non-owning PlayerView', () => {

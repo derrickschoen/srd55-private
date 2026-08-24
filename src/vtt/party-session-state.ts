@@ -1,4 +1,5 @@
 import type { CombatantEquipment } from '../combat/equipment';
+import type { ExhaustionLevel } from '../combat/conditions';
 import type {
   CombatantReactionPolicy,
   DeathSaveState,
@@ -7,7 +8,7 @@ import type {
   ReactionKind,
   ReactionPolicy,
 } from '../combat/encounter';
-import { REACTION_KINDS } from '../combat/encounter';
+import { combatantConditions, REACTION_KINDS } from '../combat/encounter';
 import type { CombatantId, EncounterEffectId, LimitedResourcePoolId } from '../combat/values';
 import {
   combatantId,
@@ -23,7 +24,30 @@ export const PARTY_SESSION_SCHEMA_VERSION = 1 as const;
 export const ADVENTURING_DAY_ROOM_COUNT = 4 as const;
 
 export type AdventuringDayRoom = 1 | 2 | 3 | 4;
+export type AdventuringDayStatus = 'active' | 'ended_by_long_rest';
+export type PartyExhaustionLevel = 0 | ExhaustionLevel;
 export type PartySessionViewClassification = 'dm_only' | 'player_visible' | 'per_seat';
+
+export const LONG_REST_RULES = {
+  minimumDurationHours: 8,
+  minimumSleepHours: 6,
+  maximumLightActivityHours: 2,
+  minimumHoursBeforeInterruptedShortRestBenefits: 1,
+  minimumHoursBetweenStarts: 16,
+  maximumStableRecoveryHours: 4,
+  stableRecoveryResolution: 'deterministic_at_rest_start' as const,
+  interruptionHandling: 'deferred' as const,
+} as const;
+
+export const LONG_REST_CITATIONS = {
+  structure: 'docs/srd/full/srd-5.2.1.txt:11901-11913',
+  hitPointsAndHitDice: 'docs/srd/full/srd-5.2.1.txt:11915-11917',
+  exhaustion: 'docs/srd/full/srd-5.2.1.txt:11686-11688',
+  specialFeatures: 'docs/srd/full/srd-5.2.1.txt:11922-11924',
+  spellSlots: 'docs/srd/full/srd-5.2.1.txt:6321-6322',
+  pactMagic: 'docs/srd/full/srd-5.2.1.txt:4290-4295',
+  stableHealing: 'docs/srd/full/srd-5.2.1.txt:1115-1120',
+} as const;
 
 export interface PartyHitDiceState {
   readonly sides: HitDieSize;
@@ -56,6 +80,7 @@ export interface PartyCharacterSessionState {
   readonly combatantId: CombatantId;
   readonly currentHitPoints: number;
   readonly hitPointMaximum: number;
+  readonly exhaustionLevel: PartyExhaustionLevel;
   readonly constitutionModifier: number;
   readonly life: LifeState;
   readonly deathSaves: DeathSaveState | null;
@@ -70,6 +95,7 @@ export interface PartySessionState {
   readonly schemaVersion: typeof PARTY_SESSION_SCHEMA_VERSION;
   readonly rulesEdition: '2024';
   readonly room: AdventuringDayRoom;
+  readonly adventuringDayStatus: AdventuringDayStatus;
   readonly characters: readonly PartyCharacterSessionState[];
   readonly reactionPolicies: readonly CombatantReactionPolicy[];
 }
@@ -78,6 +104,7 @@ export const PARTY_SESSION_VIEW_CLASSIFICATION = {
   schemaVersion: 'player_visible',
   rulesEdition: 'player_visible',
   room: 'player_visible',
+  adventuringDayStatus: 'player_visible',
   characters: 'per_seat',
   reactionPolicies: 'per_seat',
 } as const satisfies Readonly<Record<keyof PartySessionState, PartySessionViewClassification>>;
@@ -87,6 +114,7 @@ export const PARTY_CHARACTER_VIEW_CLASSIFICATION = {
   combatantId: 'player_visible',
   currentHitPoints: 'per_seat',
   hitPointMaximum: 'per_seat',
+  exhaustionLevel: 'per_seat',
   constitutionModifier: 'per_seat',
   life: 'player_visible',
   deathSaves: 'dm_only',
@@ -110,6 +138,7 @@ export interface PlayerVisiblePartyMemberSummary {
 export interface PlayerOwnedPartyMember extends PlayerVisiblePartyMemberSummary {
   readonly currentHitPoints: number;
   readonly hitPointMaximum: number;
+  readonly exhaustionLevel: PartyExhaustionLevel;
   readonly constitutionModifier: number;
   readonly spellSlots: readonly PartySpellSlotState[];
   readonly limitedResources: readonly PartyLimitedResourceState[];
@@ -122,6 +151,7 @@ export interface PlayerPartySessionView {
   readonly audience: 'player';
   readonly rulesEdition: '2024';
   readonly room: AdventuringDayRoom;
+  readonly adventuringDayStatus: AdventuringDayStatus;
   readonly characters: readonly PlayerVisiblePartyMemberSummary[];
   readonly ownedCharacters: readonly PlayerOwnedPartyMember[];
   readonly reactionPolicies: readonly CombatantReactionPolicy[];
@@ -146,6 +176,36 @@ export interface ShortRestHitDieRoll {
 export interface ShortRestResult {
   readonly state: PartySessionState;
   readonly rolls: readonly ShortRestHitDieRoll[];
+}
+
+export interface LongRestCharacterSummary {
+  readonly combatantId: CombatantId;
+  readonly hitPointsRestored: number;
+  readonly hitDiceRestored: readonly { readonly sides: HitDieSize; readonly count: number }[];
+  readonly spellSlotsRestored: readonly {
+    readonly pool: PartySpellSlotState['pool'];
+    readonly level: number;
+    readonly count: number;
+  }[];
+  readonly exhaustionLevelsRemoved: 0 | 1;
+  readonly limitedResourcesRestored: readonly {
+    readonly id: LimitedResourcePoolId;
+    readonly count: number;
+  }[];
+  readonly lifeBefore: LifeState;
+  readonly lifeAfter: LifeState;
+}
+
+export interface LongRestSummaryCard {
+  readonly kind: 'long_rest_summary';
+  readonly durationHours: typeof LONG_REST_RULES.minimumDurationHours;
+  readonly characters: readonly LongRestCharacterSummary[];
+  readonly citations: typeof LONG_REST_CITATIONS;
+}
+
+export interface LongRestResult {
+  readonly state: PartySessionState;
+  readonly summary: LongRestSummaryCard;
 }
 
 function abilityModifier(score: number): number {
@@ -198,6 +258,7 @@ export function createPartySessionState(
       combatantId: member.profile.id,
       currentHitPoints: member.profile.rules.hitPointMaximum,
       hitPointMaximum: member.profile.rules.hitPointMaximum,
+      exhaustionLevel: 0,
       constitutionModifier: abilityModifier(member.source.abilities.constitution),
       life: 'living',
       deathSaves: null,
@@ -218,6 +279,7 @@ export function createPartySessionState(
     schemaVersion: PARTY_SESSION_SCHEMA_VERSION,
     rulesEdition: '2024',
     room: 1,
+    adventuringDayStatus: 'active',
     characters,
     reactionPolicies: characters.flatMap((character) => REACTION_KINDS.map((reactionKind) => ({
       combatant: character.combatantId,
@@ -281,10 +343,14 @@ export function capturePartySessionState(
       effect.source === persisted.combatantId && effect.payload.kind === 'consumable_healing_pool'
         ? [{ effectId: effect.id, remainingUses: effect.payload.remainingUses }]
         : []);
+    const exhaustion = combatantConditions(encounter, persisted.combatantId).find(
+      (condition) => condition.name === 'Exhaustion',
+    );
     return {
       ...persisted,
       currentHitPoints: subject.hitPoints,
       hitPointMaximum: subject.profile.rules.hitPointMaximum,
+      exhaustionLevel: exhaustion?.name === 'Exhaustion' ? exhaustion.level : 0,
       life: subject.life,
       deathSaves: structuredClone(subject.deathSaves),
       spellSlots: encounterSpellSlots(subject, persisted),
@@ -356,10 +422,28 @@ export function preloadPartySessionState(
         },
       };
     }));
+  const partyExhaustion = party.characters.flatMap((character) => {
+    if (character.exhaustionLevel === 0) return [];
+    const id = encounterEffectId(`effect:${String(nextEffectSequence)}`);
+    nextEffectSequence += 1;
+    return [{
+      id,
+      source: character.combatantId,
+      targets: [character.combatantId],
+      createdRevision: encounter.revision,
+      duration: { kind: 'permanent' as const },
+      concentrationOwner: null,
+      stackingIdentity: effectStackingIdentity('condition:exhaustion'),
+      stacking: 'coexist' as const,
+      repeatedSave: null,
+      damageBreak: null,
+      payload: { kind: 'exhaustion' as const, level: character.exhaustionLevel },
+    }];
+  });
   return {
     ...encounter,
     combatants,
-    effects: [...encounter.effects, ...partyConsumables],
+    effects: [...encounter.effects, ...partyConsumables, ...partyExhaustion],
     nextEffectSequence,
     reactionPolicies: structuredClone(party.reactionPolicies),
     ...((encounter.equipment === undefined && partyEquipment.length === 0)
@@ -378,6 +462,9 @@ function advanceRoom(room: AdventuringDayRoom): AdventuringDayRoom {
 }
 
 export function enterNextRoom(state: PartySessionState): PartySessionState {
+  if (state.adventuringDayStatus !== 'active') {
+    throw new Error('A Long Rest ended this adventuring day.');
+  }
   return { ...state, room: advanceRoom(state.room) };
 }
 
@@ -460,6 +547,104 @@ export function takeShortRest(
   return { state: { ...state, characters }, rolls };
 }
 
+export function takeLongRest(state: PartySessionState): LongRestResult {
+  if (state.adventuringDayStatus !== 'active') {
+    throw new Error('This adventuring day already ended with a Long Rest.');
+  }
+  // SRD structure and completion benefits: docs/srd/full/srd-5.2.1.txt:11901-11924.
+  // Spellcasting slots: docs/srd/full/srd-5.2.1.txt:6321-6322. Pact Magic is
+  // independently a Short-or-Long-Rest pool: docs/srd/full/srd-5.2.1.txt:4290-4295.
+  const summaries: LongRestCharacterSummary[] = [];
+  const characters = state.characters.map((character): PartyCharacterSessionState => {
+    if (character.life === 'dead' || character.life === 'dying') {
+      summaries.push({
+        combatantId: character.combatantId,
+        hitPointsRestored: 0,
+        hitDiceRestored: [],
+        spellSlotsRestored: [],
+        exhaustionLevelsRemoved: 0,
+        limitedResourcesRestored: [],
+        lifeBefore: character.life,
+        lifeAfter: character.life,
+      });
+      return character;
+    }
+
+    // A Stable creature naturally regains 1 HP after 1d4 hours. Since 1d4 is
+    // bounded by 4 hours, an uninterrupted 8-hour Long Rest always spans that
+    // recovery. Resolve it deterministically at rest start so the creature has
+    // 1 HP and is conscious before checking eligibility and applying benefits:
+    // docs/srd/full/srd-5.2.1.txt:1115-1120, 11910-11917.
+    const restStarter: PartyCharacterSessionState = character.life === 'stable' &&
+      character.currentHitPoints === 0
+      ? { ...character, currentHitPoints: 1, life: 'living', deathSaves: null }
+      : character;
+    if (restStarter.life !== 'living' || restStarter.currentHitPoints < 1) {
+      summaries.push({
+        combatantId: character.combatantId,
+        hitPointsRestored: 0,
+        hitDiceRestored: [],
+        spellSlotsRestored: [],
+        exhaustionLevelsRemoved: 0,
+        limitedResourcesRestored: [],
+        lifeBefore: character.life,
+        lifeAfter: character.life,
+      });
+      return character;
+    }
+
+    const hitDiceRestored: LongRestCharacterSummary['hitDiceRestored'][number][] = [];
+    const hitDice = restStarter.hitDice.map((pool) => {
+      const restored = pool.maximum - pool.remaining;
+      if (restored > 0) hitDiceRestored.push({ sides: pool.sides, count: restored });
+      return { ...pool, remaining: pool.maximum };
+    });
+    const spellSlotsRestored = restStarter.spellSlots.flatMap((slot) => {
+      const count = slot.maximum - slot.remaining;
+      return count === 0 ? [] : [{ pool: slot.pool, level: slot.level, count }];
+    });
+    const limitedResourcesRestored = restStarter.limitedResources.flatMap((resource) => {
+      if (resource.recharge !== 'long_rest') return [];
+      const count = resource.maximum - resource.remaining;
+      return count === 0 ? [] : [{ id: resource.id, count }];
+    });
+    const exhaustionLevelsRemoved = restStarter.exhaustionLevel === 0 ? 0 : 1;
+    const lifeAfter: LifeState = 'living';
+    summaries.push({
+      combatantId: character.combatantId,
+      hitPointsRestored: character.hitPointMaximum - character.currentHitPoints,
+      hitDiceRestored,
+      spellSlotsRestored,
+      exhaustionLevelsRemoved,
+      limitedResourcesRestored,
+      lifeBefore: character.life,
+      lifeAfter,
+    });
+    return {
+      ...restStarter,
+      currentHitPoints: character.hitPointMaximum,
+      exhaustionLevel: Math.max(0, restStarter.exhaustionLevel - 1) as PartyExhaustionLevel,
+      life: lifeAfter,
+      deathSaves: null,
+      hitDice,
+      spellSlots: restStarter.spellSlots.map((slot) => ({ ...slot, remaining: slot.maximum })),
+      limitedResources: restStarter.limitedResources.map((resource) =>
+        resource.recharge === 'long_rest'
+          ? { ...resource, remaining: resource.maximum }
+          : resource),
+    };
+  });
+  return {
+    state: { ...state, adventuringDayStatus: 'ended_by_long_rest', characters },
+    summary: {
+      kind: 'long_rest_summary',
+      durationHours: LONG_REST_RULES.minimumDurationHours,
+      characters: summaries,
+      citations: LONG_REST_CITATIONS,
+    },
+  };
+}
+
 export function projectDmPartySession(state: PartySessionState): DmPartySessionView {
   return { audience: 'dm', state: structuredClone(state) };
 }
@@ -473,6 +658,7 @@ export function projectPlayerPartySession(
     audience: 'player',
     rulesEdition: state.rulesEdition,
     room: state.room,
+    adventuringDayStatus: state.adventuringDayStatus,
     characters: state.characters.map((character) => ({
       combatantId: character.combatantId,
       life: character.life,
@@ -482,6 +668,7 @@ export function projectPlayerPartySession(
       life: character.life,
       currentHitPoints: character.currentHitPoints,
       hitPointMaximum: character.hitPointMaximum,
+      exhaustionLevel: character.exhaustionLevel,
       constitutionModifier: character.constitutionModifier,
       spellSlots: structuredClone(character.spellSlots),
       limitedResources: structuredClone(character.limitedResources),
@@ -578,13 +765,14 @@ function decodeHitDice(value: unknown): readonly PartyHitDiceState[] {
 function decodePartyCharacter(value: unknown): PartyCharacterSessionState {
   const keys = [
     'characterId', 'combatantId', 'currentHitPoints', 'hitPointMaximum',
-    'constitutionModifier', 'life', 'deathSaves', 'spellSlots',
+    'exhaustionLevel', 'constitutionModifier', 'life', 'deathSaves', 'spellSlots',
     'limitedResources', 'hitDice', 'consumables', 'equipment',
   ] as const;
   if (!isRecord(value) || !exactKeys(value, keys) ||
     !Number.isSafeInteger(value.characterId) || typeof value.characterId !== 'number' || value.characterId < 1 ||
     typeof value.combatantId !== 'string' || !safeNonnegativeInteger(value.currentHitPoints) ||
     !safeNonnegativeInteger(value.hitPointMaximum) || value.hitPointMaximum < 1 || value.currentHitPoints > value.hitPointMaximum ||
+    !safeNonnegativeInteger(value.exhaustionLevel) || value.exhaustionLevel > 6 ||
     !Number.isSafeInteger(value.constitutionModifier) || typeof value.constitutionModifier !== 'number' ||
     !['living', 'dying', 'stable', 'dead'].includes(String(value.life)) ||
     !(value.deathSaves === null || isRecord(value.deathSaves)) ||
@@ -644,6 +832,7 @@ function decodePartyCharacter(value: unknown): PartyCharacterSessionState {
     combatantId: combatant,
     currentHitPoints: value.currentHitPoints,
     hitPointMaximum: value.hitPointMaximum,
+    exhaustionLevel: value.exhaustionLevel as PartyExhaustionLevel,
     constitutionModifier: value.constitutionModifier,
     life,
     deathSaves: decodeDeathSaves(value.deathSaves, life),
@@ -658,10 +847,11 @@ function decodePartyCharacter(value: unknown): PartyCharacterSessionState {
 export function decodePartySessionState(value: unknown): PartySessionState {
   if (
     !isRecord(value) ||
-    !exactKeys(value, ['schemaVersion', 'rulesEdition', 'room', 'characters', 'reactionPolicies']) ||
+    !exactKeys(value, ['schemaVersion', 'rulesEdition', 'room', 'adventuringDayStatus', 'characters', 'reactionPolicies']) ||
     value.schemaVersion !== PARTY_SESSION_SCHEMA_VERSION ||
     value.rulesEdition !== '2024' ||
     !([1, 2, 3, 4] as const).includes(Number(value.room) as AdventuringDayRoom) ||
+    (value.adventuringDayStatus !== 'active' && value.adventuringDayStatus !== 'ended_by_long_rest') ||
     !Array.isArray(value.characters) || !Array.isArray(value.reactionPolicies) ||
     value.characters.length < 3 ||
     value.characters.length > 5
@@ -696,6 +886,7 @@ export function decodePartySessionState(value: unknown): PartySessionState {
     schemaVersion: PARTY_SESSION_SCHEMA_VERSION,
     rulesEdition: '2024',
     room: value.room as AdventuringDayRoom,
+    adventuringDayStatus: value.adventuringDayStatus,
     characters,
     reactionPolicies,
   };
