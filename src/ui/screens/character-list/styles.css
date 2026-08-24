@@ -139,6 +139,13 @@
   color: #b9b0a5;
 }
 
+.player-guide-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
 .start-panel .button-primary {
   flex: none;
 }

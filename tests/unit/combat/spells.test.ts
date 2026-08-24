@@ -9,7 +9,7 @@ import {
   reduceEncounter,
   type EncounterState,
 } from '../../../src/combat/encounter';
-import { damageType, feet } from '../../../src/combat/values';
+import { damageType, dieSides, feet } from '../../../src/combat/values';
 import { feetPoint } from '../../../src/combat/templates';
 import {
   IMPLEMENTED_SPELL_DEFINITIONS,
@@ -109,7 +109,7 @@ const VALUE_PINS: readonly ValuePin[] = [
   { id: 'find-familiar', level: 1, operation: 'utility', rangeFeet: 10, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:2979' },
   { id: 'floating-disk', level: 1, operation: 'utility', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:3335' },
   { id: 'fog-cloud', level: 1, operation: 'utility', rangeFeet: 120, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:3396' },
-  { id: 'grease', level: 1, operation: 'save_effect', rangeFeet: 60, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:3883' },
+  { id: 'grease', level: 1, operation: 'persistent_area', rangeFeet: 60, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:3883' },
   { id: 'hideous-laughter', level: 1, operation: 'save_effect', rangeFeet: 30, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:4294' },
   { id: 'ice-knife', level: 1, operation: 'attack_then_save_damage', rangeFeet: 60, baseDice: [2, 6], perSlotCount: 1, source: 'spell-descriptions.txt:4430' },
   { id: 'identify', level: 1, operation: 'utility', rangeFeet: 5, baseDice: null, perSlotCount: 0, source: 'spell-descriptions.txt:4476' },
@@ -149,7 +149,7 @@ const LEVEL_ONE_BATCH_NUMERIC_PINS: readonly BatchNumericPin[] = [
   { id: 'find-familiar', mechanics: [10, 100], source: 'spell-descriptions.txt:2979' },
   { id: 'floating-disk', mechanics: [30, 3, 3, 1, 500, 20, 100, 600], source: 'spell-descriptions.txt:3335' },
   { id: 'fog-cloud', mechanics: [120, 20, 20, 20, 600], source: 'spell-descriptions.txt:3396' },
-  { id: 'grease', mechanics: [60, 10, 0, 10], source: 'spell-descriptions.txt:3883' },
+  { id: 'grease', mechanics: [60, 10, 0, 10, 1, 2, 4, 0, 1, 1], source: 'spell-descriptions.txt:3883,8486-8489 + D373.10' },
   { id: 'hideous-laughter', mechanics: [30, 1, 1, 10], source: 'spell-descriptions.txt:4294' },
   { id: 'ice-knife', mechanics: [60, 1, 10, 0, 0, 0, 2, 6, 0, 1, 0, 5], source: 'spell-descriptions.txt:4430' },
   { id: 'identify', mechanics: [5], source: 'spell-descriptions.txt:4476' },
@@ -246,6 +246,17 @@ function pinnedDice(
     perSlotCount: options.perSlotCount ?? 0,
     perSlotModifier: options.perSlotModifier ?? 0,
     cantripUpgrade: options.cantripUpgrade ?? false,
+  };
+}
+
+function pinnedSurfaceBurningRule() {
+  return {
+    burnAwayAfterRounds: 1 as const,
+    startOfTurnDamage: {
+      terms: [{ type: damageType('Fire'), dice: { count: 2, sides: dieSides(4), modifier: 0 } }],
+      critical: false,
+      responses: [],
+    },
   };
 }
 
@@ -543,7 +554,31 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'grease', source: 'spell-descriptions.txt:3883',
     targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 10, sizePerSlotFeet: 0, surface: 'ground_square' },
-    operation: { kind: 'save_effect', ability: 'dexterity', rollMode: 'normal', effect: pinnedEffect({ kind: 'condition', condition: 'Prone' }, { durationRounds: 10, expiresAt: 'target_end' }) },
+    operation: {
+      kind: 'persistent_area', origin: 'selected_when_cast', shape: null,
+      durationRounds: 10, concentration: false, targetFilter: 'all', includeOwner: false,
+      difficultTerrain: true,
+      material: {
+        id: 'grease',
+        flammability: {
+          kind: 'optional_rule', rule: 'flammable_grease', ignition: pinnedSurfaceBurningRule(),
+        },
+      },
+      movableFeet: null,
+      hooks: (['on_enter', 'on_end_of_turn_inside'] as const).map((hook) => ({
+        hook, frequency: 'once_per_turn' as const,
+        effect: {
+          kind: 'save_gated' as const, ability: 'dexterity' as const, rollMode: 'normal' as const,
+          onSuccess: 'none' as const,
+          payload: {
+            kind: 'effect' as const,
+            payload: { kind: 'condition' as const, condition: 'Prone' as const },
+            lifetime: { kind: 'fixed_rounds' as const, rounds: 1, boundary: 'end' as const },
+          },
+        },
+      })),
+      initialEffects: [],
+    },
   },
   {
     id: 'hideous-laughter', source: 'spell-descriptions.txt:4294',

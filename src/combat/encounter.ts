@@ -61,11 +61,14 @@ import {
 import {
   fixedOrigin,
   feetShape,
+  PERSISTENT_AREA_OPTIONAL_RULES,
   persistentAreaContains,
   type PersistentArea,
   type PersistentAreaEffectSpec,
   type PersistentAreaHook,
   type PersistentAreaInput,
+  type PersistentAreaIgnitionRule,
+  type PersistentAreaOptionalRule,
 } from './persistent-areas';
 import { rollDice, rollDie, transactionalRng, type Rng, type TransactionalRng } from './random';
 import {
@@ -264,6 +267,8 @@ export type InitiativeMode = (typeof INITIATIVE_MODES)[number];
 
 export interface EncounterConfig {
   readonly initiativeMode: InitiativeMode;
+  /** Named deviations are absent by default; SRD behavior remains the baseline. */
+  readonly optionalRules?: readonly PersistentAreaOptionalRule[];
 }
 
 export type DetectionRulesEdition = '2014' | '2024';
@@ -361,11 +366,20 @@ export function isInitiativeMode(value: unknown): value is InitiativeMode {
 }
 
 export function isEncounterConfig(value: unknown): value is EncounterConfig {
+  const optionalRules = typeof value === 'object' && value !== null
+    ? Reflect.get(value, 'optionalRules')
+    : undefined;
   return (
     typeof value === 'object' &&
     value !== null &&
     !Array.isArray(value) &&
-    isInitiativeMode(Reflect.get(value, 'initiativeMode'))
+    isInitiativeMode(Reflect.get(value, 'initiativeMode')) &&
+    (optionalRules === undefined || (
+      Array.isArray(optionalRules) &&
+      optionalRules.every((rule) => typeof rule === 'string' &&
+        PERSISTENT_AREA_OPTIONAL_RULES.includes(rule as PersistentAreaOptionalRule)) &&
+      new Set(optionalRules).size === optionalRules.length
+    ))
   );
 }
 
@@ -1573,7 +1587,18 @@ function combatantIsHidden(state: EncounterState, subject: CombatantId): boolean
 function sharesWebArea(state: EncounterState, observer: CombatantId, subject: CombatantId): boolean {
   const observerCell = token(state, observer).position;
   const subjectCell = token(state, subject).position;
-  return state.effects.some((effect) => {
+  const persistentWeb = state.persistentAreas.some((area) => {
+    if (area.material?.id !== 'webs') return false;
+    const origin = area.origin;
+    const anchor = origin.kind === 'anchored'
+      ? state.tokens.find((candidate) => candidate.combatantId === origin.combatant)?.position ?? null
+      : origin.kind === 'anchored_to_object'
+        ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
+        : null;
+    return persistentAreaContains(area, observerCell, anchor, state) &&
+      persistentAreaContains(area, subjectCell, anchor, state);
+  });
+  return persistentWeb || state.effects.some((effect) => {
     if (effect.payload.kind !== 'web_area' || effect.payload.placement === 'selected_when_cast') return false;
     const cells = affectedCells(
       { bounds: state.bounds, blockedCells: templateBlockedCells(state) },
@@ -2045,7 +2070,9 @@ function resolveTargetDamage(
     ...term,
     afterResponse: applyDamageResponse(adjusted[index] ?? 0, responses.get(term.type) ?? 'normal'),
   }));
-  return { terms, total: terms.reduce((sum, term) => sum + term.afterResponse, 0) };
+  const result = { terms, total: terms.reduce((sum, term) => sum + term.afterResponse, 0) };
+  exposePersistentAreasAtDamageCell(context, source, target, result);
+  return result;
 }
 
 type UnsequencedEvent<T> = T extends EncounterEvent
@@ -3014,6 +3041,115 @@ function orderedAreas(state: EncounterState): readonly PersistentArea[] {
     left.sequence - right.sequence || String(left.id).localeCompare(String(right.id)));
 }
 
+function persistentAreaAnchorCell(state: EncounterState, area: PersistentArea): GridCell | null {
+  const origin = area.origin;
+  return origin.kind === 'anchored'
+    ? state.tokens.find((candidate) => candidate.combatantId === origin.combatant)?.position ?? null
+    : origin.kind === 'anchored_to_object'
+      ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
+      : null;
+}
+
+function effectiveIgnitionRule(
+  state: EncounterState,
+  area: PersistentArea,
+): PersistentAreaIgnitionRule | null {
+  const flammability = area.material?.flammability;
+  if (flammability === undefined || flammability.kind === 'nonflammable') return null;
+  if (flammability.kind === 'flammable') return flammability.ignition;
+  return state.config.optionalRules?.includes(flammability.rule) === true
+    ? flammability.ignition
+    : null;
+}
+
+function areaHasBurningCell(area: PersistentArea, cell: GridCell): boolean {
+  return area.burningCells.some((entry) => cellKey(entry.cell) === cellKey(cell));
+}
+
+/**
+ * A damage resolution exposes only its target's occupied 5-foot cell. Web's
+ * text says each exposed Cube burns; it supplies no adjacent-cell spread rule
+ * (spell-descriptions.txt:8486-8489), so this deliberately does not traverse.
+ */
+function exposePersistentAreasAtDamageCell(
+  context: ReductionContext,
+  source: CombatantId,
+  target: CombatantId,
+  damage: ReturnType<typeof resolveDamage>,
+): void {
+  if (!damage.terms.some((term) => term.type === 'Fire' && term.beforeResponse > 0)) return;
+  const exposedCell = token(context.state, target).position;
+  const initiativeIndex = context.state.activeInitiativeIndex;
+  if (initiativeIndex === null) return;
+  for (const snapshot of orderedAreas(context.state)) {
+    const area = context.state.persistentAreas.find((candidate) => candidate.id === snapshot.id);
+    if (
+      area === undefined ||
+      effectiveIgnitionRule(context.state, area) === null ||
+      areaHasBurningCell(area, exposedCell) ||
+      !persistentAreaContains(area, exposedCell, persistentAreaAnchorCell(context.state, area), context.state)
+    ) continue;
+    context.state = {
+      ...context.state,
+      persistentAreas: context.state.persistentAreas.map((candidate) => candidate.id === area.id
+        ? {
+            ...candidate,
+            burningCells: [...candidate.burningCells, {
+              cell: { ...exposedCell },
+              burnsAwayAt: {
+                round: context.state.round + 1,
+                initiativeIndex,
+              },
+            }].sort((left, right) =>
+              left.cell.row - right.cell.row || left.cell.column - right.cell.column),
+          }
+        : candidate),
+    };
+  }
+  void source;
+}
+
+function applyBurningPersistentAreaDamage(
+  context: ReductionContext,
+  subjectId: CombatantId,
+): void {
+  if (!isCombatantOnBoard(context.state, subjectId)) return;
+  const subjectCell = token(context.state, subjectId).position;
+  for (const snapshot of orderedAreas(context.state)) {
+    const area = context.state.persistentAreas.find((candidate) => candidate.id === snapshot.id);
+    if (area === undefined || !areaHasBurningCell(area, subjectCell)) continue;
+    const ignition = effectiveIgnitionRule(context.state, area);
+    if (ignition === null) continue;
+    const result = resolveTargetDamage(context, area.owner, subjectId, ignition.startOfTurnDamage);
+    applyDamage(context, area.owner, subjectId, result.total);
+    concentrationCheck(context, subjectId, result.total);
+  }
+}
+
+function burnAwayExpiredPersistentAreaCells(context: ReductionContext): void {
+  const initiativeIndex = context.state.activeInitiativeIndex;
+  if (initiativeIndex === null) return;
+  let changed = false;
+  context.state = {
+    ...context.state,
+    persistentAreas: context.state.persistentAreas.map((area) => {
+      const expired = area.burningCells.filter((entry) =>
+        context.state.round > entry.burnsAwayAt.round ||
+        (context.state.round === entry.burnsAwayAt.round && initiativeIndex >= entry.burnsAwayAt.initiativeIndex));
+      if (expired.length === 0) return area;
+      changed = true;
+      const expiredKeys = new Set(expired.map((entry) => cellKey(entry.cell)));
+      return {
+        ...area,
+        burningCells: area.burningCells.filter((entry) => !expiredKeys.has(cellKey(entry.cell))),
+        burnedAwayCells: [...area.burnedAwayCells, ...expired.map((entry) => ({ ...entry.cell }))]
+          .sort((left, right) => left.row - right.row || left.column - right.column),
+      };
+    }),
+  };
+  if (changed) reevaluatePersistentAreaMembership(context);
+}
+
 function areaTargetEligible(state: EncounterState, area: PersistentArea, target: CombatantId): boolean {
   switch (area.targetFilter.kind) {
     case 'all': return true;
@@ -3024,12 +3160,7 @@ function areaTargetEligible(state: EncounterState, area: PersistentArea, target:
 }
 
 function areaMembers(state: EncounterState, area: PersistentArea): readonly CombatantId[] {
-  const origin = area.origin;
-  const anchor = origin.kind === 'anchored'
-    ? state.tokens.find((candidate) => candidate.combatantId === origin.combatant)?.position ?? null
-    : origin.kind === 'anchored_to_object'
-      ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
-      : null;
+  const anchor = persistentAreaAnchorCell(state, area);
   return state.combatants
     .filter((subject) => subject.life !== 'dead')
     .filter((subject) => areaTargetEligible(state, area, subject.profile.id))
@@ -3247,6 +3378,9 @@ function createPersistentArea(context: ReductionContext, actor: CombatantId, inp
     ...structuredClone(input),
     id,
     sequence,
+    material: input.material === undefined ? null : structuredClone(input.material),
+    burningCells: [],
+    burnedAwayCells: [],
     members: [],
     consumedTurnKeys: [],
   };
@@ -3937,6 +4071,7 @@ function processBoundary(
   boundary: TurnBoundary,
 ): void {
   reevaluatePersistentAreaMembership(context);
+  if (boundary === 'start') applyBurningPersistentAreaDamage(context, subjectId);
   const areaHook: PersistentAreaHook = boundary === 'start'
     ? 'on_start_of_turn_inside'
     : 'on_end_of_turn_inside';
@@ -4101,6 +4236,7 @@ function processBoundary(
     }
   }
   if (boundary === 'start') {
+    burnAwayExpiredPersistentAreaCells(context);
     for (const snapshot of orderedAreas(context.state)) {
       const area = context.state.persistentAreas.find((candidate) => candidate.id === snapshot.id);
       if (area === undefined || area.owner !== subjectId) continue;
@@ -8234,6 +8370,7 @@ function executeSpellOperation(
         },
         targetFilter,
         difficultTerrain: operation.difficultTerrain,
+        material: operation.material === undefined ? null : structuredClone(operation.material),
         hooks: operation.hooks.map((hook) => ({
           hook: hook.hook,
           frequency: hook.frequency,

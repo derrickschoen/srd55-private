@@ -6,6 +6,7 @@ import type {
   PersistentAreaAppliedPayload,
   PersistentAreaEffectLifetime,
   PersistentAreaHook,
+  PersistentAreaMaterial,
   PersistentAreaShape,
 } from '../persistent-areas';
 import type { AreaTemplate } from '../templates';
@@ -742,6 +743,7 @@ export type BranchSpellOperation =
       readonly targetFilter: 'all' | 'allies' | 'enemies' | 'selected';
       readonly includeOwner: boolean;
       readonly difficultTerrain: boolean;
+      readonly material?: PersistentAreaMaterial | null;
       readonly movableFeet: number | null;
       readonly hooks: readonly {
         readonly hook: PersistentAreaHook;

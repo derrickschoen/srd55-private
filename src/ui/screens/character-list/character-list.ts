@@ -29,6 +29,7 @@ import {
 } from './share-controls';
 import { HOMEBREW_ROUTE } from '../homebrew/homebrew-library';
 import { catalogLayerLabel } from '../../../catalog/catalog-disclosure';
+import { PLAYER_BUILD_GUIDE_ROUTE } from '../player-guide/screen';
 
 export interface CharacterListQueries {
   listCharacters(): Promise<CharacterSummary[]>;
@@ -293,6 +294,17 @@ function createGuidedStart(
       context.router.navigate(GUIDED_NEW_ROUTE);
     }),
   );
+  const guide = element('a', {
+    className: 'player-guide-link',
+    text: 'New player? Start here',
+    attributes: { href: PLAYER_BUILD_GUIDE_ROUTE },
+  });
+  cleanups.push(
+    listen(guide, 'click', (event) => {
+      event.preventDefault();
+      context.router.navigate(PLAYER_BUILD_GUIDE_ROUTE);
+    }),
+  );
   return element('section', { className: 'start-panel panel' }, [
     element('div', { className: 'start-copy' }, [
       element('h2', { text: 'Start a new character' }),
@@ -301,6 +313,7 @@ function createGuidedStart(
           'The guided builder opens with the class choice and walks the ' +
           'level 1 steps in order.',
       }),
+      guide,
     ]),
     start,
   ]);
