@@ -25,6 +25,7 @@ import {
 } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import type { DatabaseContext } from '../db/database';
+import { decodeWildShapeOverlay, decodeWildShapeUseState } from '../combat/wild-shape';
 import {
   capturePartySessionState,
   decodePartySessionState,
@@ -452,7 +453,26 @@ function decodeRevision(value: unknown): SessionRevision {
   const partyState = value.partyState === null
     ? null
     : decodePartySessionState(value.partyState);
-  const revision = { ...value, transition, partyState } as unknown as SessionRevision;
+  if (!Array.isArray(value.encounterState.combatants)) {
+    throw new TypeError('Persisted encounter combatants are malformed.');
+  }
+  const encounterCombatants = value.encounterState.combatants.map((combatant) => {
+    if (!isRecord(combatant)) throw new TypeError('Persisted encounter combatant is malformed.');
+    if (!Object.hasOwn(combatant, 'wildShapeUses')) {
+      throw new TypeError('Persisted encounter combatant lacks Wild Shape use state.');
+    }
+    const wildShapeUses = combatant.wildShapeUses === null
+      ? null
+      : decodeWildShapeUseState(combatant.wildShapeUses);
+    return Object.hasOwn(combatant, 'wildShape')
+      ? { ...combatant, wildShapeUses, wildShape: decodeWildShapeOverlay(combatant.wildShape) }
+      : { ...combatant, wildShapeUses };
+  });
+  const encounterState = {
+    ...value.encounterState,
+    combatants: encounterCombatants,
+  } as unknown as EncounterState;
+  const revision = { ...value, transition, encounterState, partyState } as unknown as SessionRevision;
   const { checksum: _checksum, ...body } = revision;
   if (revisionChecksum(body) !== revision.checksum) {
     throw new Error('VTT session revision checksum mismatch.');

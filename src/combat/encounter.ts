@@ -146,6 +146,17 @@ import {
   type WorldObject,
   type WorldOperation,
 } from './world-objects';
+import {
+  WildShapeRuleError,
+  wildShapeDurationRounds,
+  wildShapeForm,
+  wildShapeGateFor,
+  wildShapePhysicalLayer,
+  wildShapeRulesLens,
+  type WildShapeOverlay,
+  type WildShapeReversionReason,
+  type WildShapeUseState,
+} from './wild-shape';
 
 export type LifeState = 'living' | 'dying' | 'stable' | 'dead';
 
@@ -204,6 +215,8 @@ export interface EncounterCombatantState {
   readonly deathSaves: DeathSaveState | null;
   readonly turn: TurnResources;
   readonly temporaryHitPoints: number;
+  readonly wildShapeUses: WildShapeUseState | null;
+  readonly wildShape?: WildShapeOverlay;
   /** Present only while a replacement form is active; omission preserves untouched state identity. */
   readonly form?: FormReplacementState;
   readonly spellSlots: readonly SpellSlotState[];
@@ -215,6 +228,28 @@ export interface EncounterCombatantState {
     readonly resistanceUsesRemaining: number;
   };
 }
+
+export type WildShapeTransferClassification =
+  | 'true_form_retained'
+  | 'physical_lens'
+  | 'feature_resource'
+  | 'active_overlay';
+
+/** A new combatant-state field cannot silently cross the Wild Shape boundary. */
+export const WILD_SHAPE_COMBATANT_TRANSFER = {
+  profile: 'true_form_retained',
+  hitPoints: 'true_form_retained',
+  life: 'true_form_retained',
+  deathSaves: 'true_form_retained',
+  turn: 'true_form_retained',
+  temporaryHitPoints: 'true_form_retained',
+  wildShapeUses: 'feature_resource',
+  wildShape: 'active_overlay',
+  form: 'true_form_retained',
+  spellSlots: 'true_form_retained',
+  limitedResources: 'true_form_retained',
+  legendary: 'true_form_retained',
+} as const satisfies Readonly<Record<keyof EncounterCombatantState, WildShapeTransferClassification>>;
 
 /**
  * Reducer-owned reversible form state. Original HP remains on the combatant;
@@ -833,6 +868,13 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
       temporaryHitPoints: Math.max(0, ...(profile.rules.featureEffects ?? [])
         .filter((effect) => effect.trigger === 'always_on' && effect.payload.kind === 'temporary_hit_points')
         .map((effect) => effect.payload.kind === 'temporary_hit_points' ? effect.payload.amount : 0)),
+      wildShapeUses: profile.kind === 'player_character' && profile.wildShape !== null
+        ? {
+            kind: 'wild_shape_uses',
+            maximum: profile.wildShape.usesMaximum,
+            remaining: profile.wildShape.usesMaximum,
+          }
+        : null,
       spellSlots: validateSpellSlotCapacities(profile.rules.spellSlots).map(
         (slot) => ({ ...slot, remaining: slot.maximum }),
       ),
@@ -899,7 +941,19 @@ export function availableFormActions(
   state: EncounterState,
   id: CombatantId,
 ): readonly MonsterAction[] | null {
-  return combatant(state, id).form?.availableActions ?? null;
+  const subject = combatant(state, id);
+  return subject.wildShape?.physical.actions ?? subject.form?.availableActions ?? null;
+}
+
+/** The only combatant-state -> active-rules lens. */
+export function effectiveCombatRules(
+  state: EncounterState,
+  id: CombatantId,
+): CombatRulesProfile {
+  const subject = combatant(state, id);
+  return subject.wildShape === undefined
+    ? subject.profile.rules
+    : wildShapeRulesLens(subject.profile.rules, subject.wildShape);
 }
 
 function replaceCombatant(
@@ -1222,7 +1276,7 @@ export function effectiveSkillModifier(
   id: CombatantId,
   skill: keyof NonNullable<CombatantProfile['rules']['skillBonuses']>,
 ): number {
-  const base = combatant(state, id).profile.rules.skillBonuses?.[skill] ?? 0;
+  const base = effectiveCombatRules(state, id).skillBonuses?.[skill] ?? 0;
   return state.effects.reduce((total, effect) =>
     effect.targets.includes(id) &&
     effect.payload.kind === 'skill_modifier' &&
@@ -1246,7 +1300,7 @@ function movementEffects(state: EncounterState, id: CombatantId): readonly Extra
  * fastest granted movement mode supplies the usable turn speed.
  */
 function effectiveSpeed(state: EncounterState, id: CombatantId): number {
-  const base = combatant(state, id).profile.rules.speed;
+  const base = effectiveCombatRules(state, id).speed;
   const penalty = conditionSpeedPenaltyFeet(combatantConditions(state, id));
   if (penalty === Number.NEGATIVE_INFINITY) return 0;
   const modifiers = movementEffects(state, id);
@@ -1295,7 +1349,7 @@ function effectiveArmorClass(
   id: CombatantId,
   attacker: CombatantId,
 ): ReturnType<typeof armorClass> {
-  const base = combatant(state, id).profile.rules.armorClass;
+  const base = effectiveCombatRules(state, id).armorClass;
   let bonus = 0;
   let floor = 0;
   for (const effect of state.effects) {
@@ -1625,7 +1679,7 @@ export function detectCombatant(
   const from = token(state, observer).position;
   const to = token(state, subject).position;
   const distance = gridDistance(from, to);
-  const senses = combatant(state, observer).profile.rules.senses;
+  const senses = effectiveCombatRules(state, observer).senses;
   const hasBlindsight = senses.some((sense) =>
     sense.kind === 'blindsight' && distance <= sense.rangeFeet);
   if (hasBlindsight && hasLineOfSight(state, from, to)) {
@@ -1635,8 +1689,8 @@ export function detectCombatant(
     sense.kind === 'truesight' && distance <= sense.rangeFeet);
   const hasTremorsense = senses.some((sense) =>
     sense.kind === 'tremorsense' && distance <= sense.rangeFeet);
-  const observerRules = combatant(state, observer).profile.rules;
-  const subjectRules = combatant(state, subject).profile.rules;
+  const observerRules = effectiveCombatRules(state, observer);
+  const subjectRules = effectiveCombatRules(state, subject);
   if (
     hasTremorsense &&
     observerRules.contactMedium !== 'air' &&
@@ -1695,7 +1749,7 @@ function canCombatantPierceVisualIllusion(
   subject: CombatantId,
 ): boolean {
   const distance = gridDistance(token(state, observer).position, token(state, subject).position);
-  return combatant(state, observer).profile.rules.senses.some((sense) =>
+  return effectiveCombatRules(state, observer).senses.some((sense) =>
     (sense.kind === 'blindsight' || sense.kind === 'truesight') && distance <= sense.rangeFeet);
 }
 
@@ -1907,7 +1961,7 @@ function saveRollMode(
   cause: RollCause,
 ): RollMode {
   const modes: RollMode[] = [base];
-  if (cause === 'spell_or_magical_effect' && combatant(state, target).profile.rules.magicResistance === true) {
+  if (cause === 'spell_or_magical_effect' && effectiveCombatRules(state, target).magicResistance === true) {
     modes.push('advantage');
   }
   for (const effect of state.effects) {
@@ -1968,7 +2022,7 @@ function targetDamageResponses(
     responses.add(response);
     responseByType.set(type, responses);
   };
-  for (const entry of subject.profile.rules.damageResponses) {
+  for (const entry of effectiveCombatRules(state, target).damageResponses) {
     add(entry.type, entry.response);
   }
   const resistsAll = conditionMechanicalState(
@@ -2259,11 +2313,120 @@ const NATURAL_TWENTY_HIT_POINTS = 1;
 
 function effectiveHitPointMaximum(state: EncounterState, target: CombatantId): number {
   const subject = combatant(state, target);
-  const base = (subject.form?.originalProfile ?? subject.profile).rules.hitPointMaximum;
+  const base = subject.form?.originalProfile.rules.hitPointMaximum ??
+    effectiveCombatRules(state, target).hitPointMaximum;
   return state.effects.reduce((maximum, candidate) =>
     candidate.targets.includes(target) && candidate.payload.kind === 'hit_point_maximum_modifier'
       ? maximum + candidate.payload.amount
       : maximum, base);
+}
+
+function revertWildShape(
+  context: ReductionContext,
+  target: CombatantId,
+  reason: WildShapeReversionReason,
+  excessDamage = 0,
+): void {
+  const subject = combatant(context.state, target);
+  const overlay = subject.wildShape;
+  if (overlay === undefined) return;
+  const { wildShape: _wildShape, ...trueForm } = subject;
+  context.state = replaceCombatant(context.state, trueForm);
+  emit(context, {
+    type: 'wild_shape_reverted',
+    combatant: target,
+    formId: overlay.formId,
+    reason,
+    excessDamage,
+  });
+}
+
+function revertExpiredWildShapes(context: ReductionContext, round: number): void {
+  for (const subject of [...context.state.combatants]) {
+    if (subject.wildShape !== undefined && round >= subject.wildShape.expiresAtRound) {
+      revertWildShape(context, subject.profile.id, 'duration_expired');
+    }
+  }
+}
+
+function assumeWildShape(
+  context: ReductionContext,
+  command: Extract<EncounterCommand, { readonly type: 'assume_wild_shape' }>,
+): void {
+  const subject = assertActiveActor(context, command.actor);
+  if (subject.profile.kind !== 'player_character') {
+    throw new WildShapeRuleError('not_player_character', null, 'Only a player character can use Wild Shape.');
+  }
+  const feature = subject.profile.wildShape;
+  if (feature === null || subject.wildShapeUses === null) {
+    throw new WildShapeRuleError('feature_unavailable', null, `Combatant ${command.actor} has no configured Wild Shape feature.`);
+  }
+  if (subject.form !== undefined) {
+    throw new WildShapeRuleError('feature_unavailable', null, 'Wild Shape cannot overlay another replacement form.');
+  }
+  if (subject.wildShapeUses.remaining < 1) {
+    throw new WildShapeRuleError('no_uses_remaining', null, `Combatant ${command.actor} has no Wild Shape uses remaining.`);
+  }
+  const form = wildShapeForm(command.formId);
+  if (form === null) {
+    throw new WildShapeRuleError('unknown_form', null, `Wild Shape form ${command.formId} is not a bundled Beast.`);
+  }
+  if (!feature.knownForms.includes(command.formId)) {
+    throw new WildShapeRuleError('form_not_known', null, `Wild Shape form ${command.formId} is not on the character sheet.`);
+  }
+  const gate = wildShapeGateFor(feature.druidLevel, form);
+  if (gate !== null) {
+    switch (gate.kind) {
+      case 'challenge_rating':
+        throw new WildShapeRuleError('challenge_rating_gate', gate, `Wild Shape form ${command.formId} exceeds the level-${String(feature.druidLevel)} Challenge Rating gate.`);
+      case 'fly_speed':
+        throw new WildShapeRuleError('fly_speed_gate', gate, `Wild Shape form ${command.formId} requires Druid level 8 for its Fly Speed.`);
+      case 'swim_speed':
+        throw new WildShapeRuleError('swim_speed_gate', gate, `Wild Shape form ${command.formId} requires Druid level 4 for its Swim Speed.`);
+    }
+  }
+  if (subject.profile.rules.abilityScores === undefined) {
+    throw new WildShapeRuleError('feature_unavailable', null, 'Wild Shape requires sourced true-form ability scores.');
+  }
+  spendCost(context, command.actor, 'bonus_action', `Wild Shape: ${form.name}`);
+  const refreshed = combatant(context.state, command.actor);
+  if (refreshed.wildShape !== undefined) {
+    revertWildShape(context, command.actor, 'new_wild_shape');
+  }
+  const beforeOverlay = combatant(context.state, command.actor);
+  const remaining = (beforeOverlay.wildShapeUses?.remaining ?? 0) - 1;
+  const physical = wildShapePhysicalLayer(form);
+  const expiresAtRound = context.state.round + wildShapeDurationRounds(feature.druidLevel);
+  context.state = replaceCombatant(context.state, {
+    ...beforeOverlay,
+    wildShapeUses: {
+      kind: 'wild_shape_uses',
+      maximum: feature.usesMaximum,
+      remaining,
+    },
+    wildShape: {
+      kind: 'wild_shape_overlay',
+      formId: form.id,
+      formName: form.name,
+      druidLevel: feature.druidLevel,
+      startedRound: context.state.round,
+      expiresAtRound,
+      equipmentDisposition: command.equipmentDisposition,
+      physical,
+    },
+  });
+  grantTemporaryHitPoints(context, command.actor, feature.druidLevel);
+  if (command.equipmentDisposition === 'dropped_at_origin') {
+    dropEquipmentForWildShape(context, command.actor);
+  }
+  emit(context, {
+    type: 'wild_shape_assumed',
+    combatant: command.actor,
+    formId: form.id,
+    formName: form.name,
+    expiresAtRound,
+    usesRemaining: remaining,
+  });
 }
 
 function clearDeathSaveDecisions(state: EncounterState, target: CombatantId): EncounterState {
@@ -2287,6 +2450,43 @@ function applyDamage(
   const before = combatant(context.state, target);
   const hitPointMaximum = effectiveHitPointMaximum(context.state, target);
   if (before.life === 'dead' || amount === 0) return;
+  if (before.wildShape !== undefined) {
+    const absorbedTemporary = Math.min(before.temporaryHitPoints, amount);
+    const afterTemporary = before.temporaryHitPoints - absorbedTemporary;
+    const afterTemporaryDamage = amount - absorbedTemporary;
+    const absorbedByForm = Math.min(before.wildShape.physical.hitPoints, afterTemporaryDamage);
+    const formHitPoints = before.wildShape.physical.hitPoints - absorbedByForm;
+    context.state = replaceCombatant(context.state, {
+      ...before,
+      temporaryHitPoints: afterTemporary,
+      wildShape: {
+        ...before.wildShape,
+        physical: { ...before.wildShape.physical, hitPoints: formHitPoints },
+      },
+    });
+    if (formHitPoints > 0) {
+      emit(context, {
+        type: 'damage_applied', source, target, amount: 0,
+        hitPointsBefore: before.hitPoints, hitPointsAfter: before.hitPoints,
+        lifeState: before.life, massiveDamage: false,
+      });
+      breakEffectsOnDamage(context, source, target, amount);
+      return;
+    }
+    const carryover = afterTemporaryDamage - absorbedByForm;
+    revertWildShape(context, target, 'form_hit_points_depleted', carryover);
+    if (carryover > 0) {
+      applyDamage(context, source, target, carryover, critical);
+    } else {
+      emit(context, {
+        type: 'damage_applied', source, target, amount: 0,
+        hitPointsBefore: before.hitPoints, hitPointsAfter: before.hitPoints,
+        lifeState: before.life, massiveDamage: false,
+      });
+      breakEffectsOnDamage(context, source, target, amount);
+    }
+    return;
+  }
   if (before.form !== undefined) {
     const absorbedByForm = Math.min(before.form.hitPoints, amount);
     const formHitPoints = before.form.hitPoints - absorbedByForm;
@@ -2536,7 +2736,7 @@ function resolveTargetSave(
     : resolveSavingThrow(
         {
           bonus:
-            subject.profile.rules.savingThrowBonuses[ability] +
+            effectiveCombatRules(context.state, target).savingThrowBonuses[ability] +
             exhaustionPenalty(combatantConditions(context.state, target)) +
             effectDiceModifier(context.state, target, 'saving_throw', context.rng) +
             rollDefenseTotalModifier(
@@ -2800,7 +3000,11 @@ function processEquipmentCommand(
   context: ReductionContext,
   command: Extract<EncounterCommand, { readonly type: 'drop_item' | 'pickup_item' | 'equip_item' | 'stow_item' }>,
 ): void {
-  if (combatant(context.state, command.actor).form?.equipmentDisposition === 'merged_into_form') {
+  const transforming = combatant(context.state, command.actor);
+  if (
+    transforming.form?.equipmentDisposition === 'merged_into_form' ||
+    transforming.wildShape?.equipmentDisposition === 'merged_into_form'
+  ) {
     throw new EquipmentRuleError(
       'form_equipment_unavailable',
       `Combatant ${command.actor}'s equipment is merged into its current form.`,
@@ -2919,7 +3123,7 @@ function attacksPerAction(subject: EncounterCombatantState): number {
       ? [effect.payload.attackCount]
       : []);
   return overrides.length === 0
-    ? subject.profile.rules.attacksPerAction
+    ? subject.wildShape?.physical.attacksPerAction ?? subject.profile.rules.attacksPerAction
     : Math.max(...overrides);
 }
 
@@ -3456,7 +3660,7 @@ function perceptionMode(
 ): RollMode {
   if (reliance === 'hearing') return 'normal';
   const modes: RollMode[] = ['normal'];
-  if (combatant(state, observer).profile.rules.detectionTraits.includes('keen_sight')) {
+  if (effectiveCombatRules(state, observer).detectionTraits.includes('keen_sight')) {
     modes.push('advantage');
   }
   const subjectCell = token(state, subject).position;
@@ -3473,7 +3677,7 @@ function passivePerceptionAgainst(
   observer: CombatantId,
   subject: CombatantId,
 ): number {
-  const rules = combatant(state, observer).profile.rules;
+  const rules = effectiveCombatRules(state, observer);
   const mode = perceptionMode(state, observer, subject, 'sight');
   // Passive +/-5: docs/srd/full/srd-5.2.1.txt:11965-11979 (2024) and
   // docs/homebrew/ogl/srd-5.1/srd-5.1-ogl.txt:4470-4488 (2014).
@@ -3511,7 +3715,7 @@ function processHide(context: ReductionContext, actor: CombatantId): void {
     return;
   }
   const roll = rollD20(context.rng, 'normal');
-  const total = roll.chosen + (combatant(context.state, actor).profile.rules.skillBonuses?.stealth ?? 0);
+  const total = roll.chosen + (effectiveCombatRules(context.state, actor).skillBonuses?.stealth ?? 0);
   // 2024 fixed gate: docs/srd/full/srd-5.2.1.txt:11774-11784.
   if (context.state.rulesEdition === '2024' && total < 15) {
     emit(context, { type: 'hide_resolved', combatant: actor, edition: '2024', total, outcome: 'failed_dc' });
@@ -3565,7 +3769,7 @@ function processSearch(
   const roll = rollD20(context.rng, perceptionMode(
     context.state, command.actor, command.target, command.reliance,
   ));
-  const total = roll.chosen + (combatant(context.state, command.actor).profile.rules.skillBonuses?.perception ?? 0);
+  const total = roll.chosen + (effectiveCombatRules(context.state, command.actor).skillBonuses?.perception ?? 0);
   const found = total >= hidden.stealthTotal;
   emit(context, {
     type: 'search_resolved', combatant: command.actor, target: command.target,
@@ -3664,8 +3868,8 @@ function moveForLegendaryAction(
   const start = token(context.state, actor).position;
   const targetPosition = token(context.state, target).position;
   const maximumCost = feet(action.movement === 'half_speed'
-    ? Math.floor(combatant(context.state, actor).profile.rules.speed / 2)
-    : combatant(context.state, actor).profile.rules.speed);
+    ? Math.floor(effectiveCombatRules(context.state, actor).speed / 2)
+    : effectiveCombatRules(context.state, actor).speed);
   const candidates = adjacentCells(context.state.bounds, targetPosition)
     .filter((cell) => !context.state.tokens.some((candidate) =>
       candidate.combatantId !== actor && cellKey(candidate.position) === cellKey(cell)))
@@ -3673,7 +3877,7 @@ function moveForLegendaryAction(
     .filter((result) => result.kind === 'found')
     .sort((left, right) => left.cost - right.cost || left.cells.length - right.cells.length);
   const path = candidates[0];
-  if (gridDistance(start, targetPosition) <= combatant(context.state, actor).profile.rules.reach) return;
+  if (gridDistance(start, targetPosition) <= effectiveCombatRules(context.state, actor).reach) return;
   if (path === undefined || path.kind !== 'found') {
     throw new EncounterRuleError(`Legendary Action ${action.id} cannot reach an enemy.`);
   }
@@ -3800,7 +4004,7 @@ function processMove(
     .map((candidate) => ({
       reactorId: candidate.profile.id,
       cell: token(context.state, candidate.profile.id).position,
-      reach: candidate.profile.rules.reach,
+      reach: effectiveCombatRules(context.state, candidate.profile.id).reach,
       reactionAvailable: candidate.turn.reactionAvailable,
       hostile: true,
     }));
@@ -3827,7 +4031,7 @@ function processMove(
       const reactor = combatant(context.state, window.reactorId);
       const mover = combatant(context.state, command.actor);
       if (
-        mover.profile.rules.detectionTraits.includes('flyby') ||
+        effectiveCombatRules(context.state, mover.profile.id).detectionTraits.includes('flyby') ||
         !canCombatantSee(context.state, window.reactorId, command.actor) ||
         context.state.effects.some((effect) =>
           effect.targets.includes(window.reactorId) && effect.payload.kind === 'opportunity_attacks_disabled')
@@ -4641,7 +4845,7 @@ function applyEffect(
 
   if (owned.payload.kind === 'condition') {
     for (const target of [...targets]) {
-      if (combatant(context.state, target).profile.rules.conditionImmunities.includes(owned.payload.condition)) {
+      if (effectiveCombatRules(context.state, target).conditionImmunities.includes(owned.payload.condition)) {
         removeEffectTarget(context, id, target, 'condition_immunity');
         targets = targets.filter((candidate) => candidate !== target);
       }
@@ -4649,7 +4853,7 @@ function applyEffect(
   }
   if (owned.payload.kind === 'ensnaring_strike') {
     for (const target of [...targets]) {
-      if (combatant(context.state, target).profile.rules.conditionImmunities.includes('Restrained')) {
+      if (effectiveCombatRules(context.state, target).conditionImmunities.includes('Restrained')) {
         removeEffectTarget(context, id, target, 'condition_immunity');
         targets = targets.filter((candidate) => candidate !== target);
       }
@@ -4680,6 +4884,7 @@ function applyEffect(
         (clause) => clause.kind === 'exhaustion' && clause.dies,
       )
     ) {
+      revertWildShape(context, target, 'death');
       const subject = combatant(context.state, target);
       context.state = replaceCombatant(context.state, {
         ...subject,
@@ -4692,6 +4897,7 @@ function applyEffect(
       continue;
     }
     if (isIncapacitated(targetConditions)) {
+      revertWildShape(context, target, 'incapacitated');
       const subject = combatant(context.state, target);
       context.state = replaceCombatant(context.state, {
         ...subject,
@@ -4710,6 +4916,7 @@ function applyEffect(
 
 function startTurn(context: ReductionContext, id: CombatantId, round: number): void {
   context.state = { ...context.state, activeCombatant: id, round };
+  revertExpiredWildShapes(context, round);
   const entering = combatant(context.state, id);
   if (entering.legendary !== undefined && entering.legendary.actionUsesMaximum > 0) {
     context.state = replaceCombatant(context.state, {
@@ -5088,7 +5295,7 @@ function monsterEffectTargetIsEligible(
   target: CombatantId,
   effect: Extract<MonsterOnHitEffect, { readonly kind: 'condition' }>,
 ): boolean {
-  const rules = combatant(context.state, target).profile.rules;
+  const rules = effectiveCombatRules(context.state, target);
   if (effect.target.maximumSize !== null) {
     if (rules.sizeCategory === undefined) {
       throw new EncounterRuleError(`Monster on-hit size eligibility requires a known size for ${target}.`);
@@ -5273,6 +5480,11 @@ function declaredMonsterAction(
   actionId: string,
 ): MonsterAction {
   const subject = combatant(state, actor);
+  const wildShapeAction = subject.wildShape?.physical.actions.find((candidate) => candidate.id === actionId);
+  if (wildShapeAction !== undefined) return wildShapeAction;
+  if (subject.wildShape !== undefined) {
+    throw new EncounterRuleError(`Combatant ${actor} must use an attack from Wild Shape form ${subject.wildShape.formId}.`);
+  }
   const formAction = subject.form?.availableActions.find((candidate) => candidate.id === actionId);
   if (formAction !== undefined) return formAction;
   if (subject.form !== undefined) {
@@ -5325,11 +5537,16 @@ function processAttack(
   opportunityTrigger: OpportunityAttackTrigger | null = null,
   execution: 'ordinary' | 'legendary' = 'ordinary',
 ): void {
-  const activeForm = combatant(context.state, command.actor).form;
-  if (activeForm !== undefined || command.monsterOnHit !== undefined) {
+  const attackingSubject = combatant(context.state, command.actor);
+  const activeForm = attackingSubject.form;
+  const activeWildShape = attackingSubject.wildShape;
+  if (activeForm !== undefined || activeWildShape !== undefined || command.monsterOnHit !== undefined) {
     if (command.attackId === undefined) {
       if (activeForm !== undefined) {
         throw new EncounterRuleError(`Combatant ${command.actor} must use an attack from form ${activeForm.formId}.`);
+      }
+      if (activeWildShape !== undefined) {
+        throw new EncounterRuleError(`Combatant ${command.actor} must use an attack from Wild Shape form ${activeWildShape.formId}.`);
       }
       throw new EncounterRuleError('A declared monster attack requires its action id.');
     }
@@ -5395,7 +5612,7 @@ function processAttack(
       gridDistance(
         token(context.state, command.actor).position,
         token(context.state, command.target).position,
-      ) > reactor.profile.rules.reach
+      ) > effectiveCombatRules(context.state, reactor.profile.id).reach
     ) {
       throw new EncounterRuleError('An Opportunity Attack reactor is out of reach.');
     }
@@ -6771,7 +6988,7 @@ function operationDiceExpression(
     switch (scaling.kind) {
       case 'none': return 0;
       case 'target_size': {
-        const size = subject.profile.rules.sizeCategory;
+        const size = effectiveCombatRules(state, subject.profile.id).sizeCategory;
         if (size === undefined) {
           throw new EncounterRuleError(`Damage scaling requires a known size for ${target}.`);
         }
@@ -7180,7 +7397,7 @@ function applyConditionLifecycleOperation(
   let refusedTargets = 0;
   let appliedTargets = 0;
   for (const target of targets) {
-    const conditionImmunities = combatant(context.state, target).profile.rules.conditionImmunities;
+    const conditionImmunities = effectiveCombatRules(context.state, target).conditionImmunities;
     const blockingImmunity = conditionImmunities.includes(operation.condition)
       ? operation.condition
       : operation.immunity !== null && conditionImmunities.includes(operation.immunity.condition)
@@ -7452,6 +7669,10 @@ function offerReaction(
 function processSpellCast(context: ReductionContext, command: SpellCastCommand): void {
   if (combatant(context.state, command.actor).form?.spellcasting === 'prohibited') {
     throw new EncounterRuleError(`Combatant ${command.actor} cannot cast spells in its current form.`);
+  }
+  const wildShape = combatant(context.state, command.actor).wildShape;
+  if (wildShape !== undefined && wildShape.druidLevel < 18) {
+    throw new EncounterRuleError(`Combatant ${command.actor} cannot cast spells while using Wild Shape before Druid level 18.`);
   }
   const definition = spellDefinition(command.spellId) ??
     importedSpellDefinition(context.state.contentPacks, command.spellId);
@@ -7762,7 +7983,11 @@ function formReplacementRules(
   };
 }
 
-function dropEquipmentForForm(context: ReductionContext, target: CombatantId): void {
+function dropEquipmentForForm(
+  context: ReductionContext,
+  target: CombatantId,
+  cause: Extract<EncounterEvent, { readonly type: 'item_dropped' }>['cause'] = 'form_replacement',
+): void {
   if (context.state.equipment === undefined) return;
   const equipment = combatantEquipment(context.state, target);
   const items = [...heldItems(equipment.hands), ...equipment.worn, ...equipment.carried];
@@ -7780,8 +8005,12 @@ function dropEquipmentForForm(context: ReductionContext, target: CombatantId): v
       contact.combatant !== target || !items.includes(contact.item)),
   };
   for (const item of items) {
-    emit(context, { type: 'item_dropped', combatant: target, item, position, cause: 'form_replacement' });
+    emit(context, { type: 'item_dropped', combatant: target, item, position, cause });
   }
+}
+
+function dropEquipmentForWildShape(context: ReductionContext, target: CombatantId): void {
+  dropEquipmentForForm(context, target, 'wild_shape');
 }
 
 function resolveFormReplacement(
@@ -7911,6 +8140,7 @@ function resolveSummon(
     deathSaves: null,
     turn: EMPTY_TURN,
     temporaryHitPoints: 0,
+    wildShapeUses: null,
     spellSlots: [],
   }));
   const tokens = profiles.map((profile, index): CombatToken => ({
@@ -8064,7 +8294,7 @@ function executeSpellOperation(
         const branch = operation.branches.find((candidate) => {
           switch (candidate.predicate.kind) {
             case 'creature_type':
-              return subject.profile.rules.creatureType === candidate.predicate.creatureType;
+              return effectiveCombatRules(context.state, subject.profile.id).creatureType === candidate.predicate.creatureType;
           }
         });
         const selected = branch?.operation ?? operation.otherwise;
@@ -9235,7 +9465,7 @@ function initiativeBonusFor(
   state: EncounterState,
   subject: EncounterCombatantState,
 ): number {
-  return subject.profile.rules.initiativeBonus + exhaustionPenalty(
+  return effectiveCombatRules(state, subject.profile.id).initiativeBonus + exhaustionPenalty(
     combatantConditions(state, subject.profile.id),
   );
 }
@@ -9714,6 +9944,18 @@ function applyDmDeathOverride(context: ReductionContext, command: DmDeathOverrid
 
 function processCommand(context: ReductionContext, command: EncounterCommand): void {
   switch (command.type) {
+    case 'assume_wild_shape':
+      assumeWildShape(context, command);
+      return;
+    case 'revert_wild_shape': {
+      const subject = assertActiveActor(context, command.actor);
+      if (subject.wildShape === undefined) {
+        throw new WildShapeRuleError('not_wildshaped', null, `Combatant ${command.actor} is not using Wild Shape.`);
+      }
+      spendCost(context, command.actor, 'bonus_action', 'Revert Wild Shape');
+      revertWildShape(context, command.actor, 'voluntary_bonus_action');
+      return;
+    }
     case 'drop_item':
     case 'pickup_item':
     case 'equip_item':

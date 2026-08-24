@@ -15,11 +15,23 @@ import type { MonsterOnHitEffect } from './statblock';
 import type { AreaTemplate } from './templates';
 import type { CombatantId, EncounterEffectId, Feet, ItemId, LimitedResourcePoolId, ObjectTargetId, PersistentAreaId, WorldObjectId } from './values';
 import type { LightLevel, WorldObject, WorldOperation } from './world-objects';
+import type { WildShapeEquipmentDisposition, WildShapeReversionReason } from './wild-shape';
+import type { StatblockId } from './values';
 
 export type ActionCost = 'action' | 'bonus_action' | 'reaction' | 'none';
 
 export type EncounterCommand =
   | { readonly type: 'roll_initiative' }
+  | {
+      readonly type: 'assume_wild_shape';
+      readonly actor: CombatantId;
+      readonly formId: StatblockId;
+      readonly equipmentDisposition: WildShapeEquipmentDisposition;
+    }
+  | {
+      readonly type: 'revert_wild_shape';
+      readonly actor: CombatantId;
+    }
   | SpellCastCommand
   | {
       readonly type: 'activate_sustained_effect';
@@ -280,7 +292,7 @@ export type EncounterEvent =
       readonly combatant: CombatantId;
       readonly item: ItemId;
       readonly position: GridCell;
-      readonly cause: 'interaction' | 'forced' | 'form_replacement';
+      readonly cause: 'interaction' | 'forced' | 'form_replacement' | 'wild_shape';
     })
   | (SequencedEvent & {
       readonly type: 'item_picked_up' | 'item_equipped' | 'item_stowed';
@@ -320,6 +332,21 @@ export type EncounterEvent =
               readonly failures: number;
             };
           };
+    })
+  | (SequencedEvent & {
+      readonly type: 'wild_shape_assumed';
+      readonly combatant: CombatantId;
+      readonly formId: StatblockId;
+      readonly formName: string;
+      readonly expiresAtRound: number;
+      readonly usesRemaining: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'wild_shape_reverted';
+      readonly combatant: CombatantId;
+      readonly formId: StatblockId;
+      readonly reason: WildShapeReversionReason;
+      readonly excessDamage: number;
     })
   | (SequencedEvent & {
       readonly type: 'initiative_rolled';
