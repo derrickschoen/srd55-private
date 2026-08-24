@@ -5,7 +5,7 @@ import { IMPLEMENTED_SPELL_DEFINITIONS, spellDefinition } from '../../../src/com
 import { referencePartySpellSlots } from '../../../src/combat/spells/resources';
 import type { EffectData, ScaledDice, SpellCastCommand, SpellCastingTime, SpellDefinition } from '../../../src/combat/spells/types';
 import { feetPoint } from '../../../src/combat/templates';
-import { damageType, feet } from '../../../src/combat/values';
+import { damageType, dieSides, feet } from '../../../src/combat/values';
 import { monsterProfile, placedToken, playerProfile } from './fixtures';
 
 interface LevelTwoMechanicsPin {
@@ -28,6 +28,17 @@ function dice(baseCount: number, sides: number, options: {
     perSlotCount: options.perSlotCount ?? 0,
     perSlotModifier: options.perSlotModifier ?? 0,
     cantripUpgrade: options.cantripUpgrade ?? false,
+  };
+}
+
+function webBurningRule() {
+  return {
+    burnAwayAfterRounds: 1 as const,
+    startOfTurnDamage: {
+      terms: [{ type: damageType('Fire'), dice: { count: 2, sides: dieSides(4), modifier: 0 } }],
+      critical: false,
+      responses: [],
+    },
   };
 }
 
@@ -94,7 +105,7 @@ const LEVEL_TWO_MECHANICS_PINS: readonly LevelTwoMechanicsPin[] = [
   { id: 'spiritual-weapon', source: 'spell-descriptions.txt:7353', targeting: { kind: 'single', rangeFeet: 60, willing: false }, operation: { kind: 'summoned_weapon_attack', damageType: damageType('Force'), dice: dice(1, 8, { perSlotCount: 1 }), addSpellcastingModifier: true, attackReachFeet: 5, moveFeetPerBonusAction: 20, effect: effect({ kind: 'spiritual_weapon', moveFeetPerBonusAction: 20, attackReachFeet: 5 }, { target: 'self', concentration: true, durationRounds: 10 }) } },
   { id: 'suggestion', source: 'spell-descriptions.txt:7477', targeting: { kind: 'single', rangeFeet: 30, willing: false }, operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'condition', condition: 'Charmed' }, { concentration: true, durationRounds: 4800 }) } },
   { id: 'warding-bond', source: 'spell-descriptions.txt:8388', targeting: { kind: 'single', rangeFeet: 5, willing: true }, operation: { kind: 'effect', effect: effect({ kind: 'warding_bond', maximumDistanceFeet: 60, armorClassBonus: 1, savingThrowBonus: 1, resistanceToAllDamage: true, mirrorsDamageToSource: true }, { durationRounds: 600 }) } },
-  { id: 'web', source: 'spell-descriptions.txt:8453', targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0 }, operation: { kind: 'effect', effect: effect({ kind: 'web_area', placement: 'selected_when_cast', cubeFeet: 20, flatDepthFeet: 5, fireDamageCount: 2, fireDamageSides: 4 }, { target: 'self', concentration: true, durationRounds: 600 }) } },
+  { id: 'web', source: 'spell-descriptions.txt:8453', targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0 }, operation: { kind: 'persistent_area', origin: 'selected_when_cast', shape: null, durationRounds: 600, concentration: true, targetFilter: 'all', includeOwner: false, difficultTerrain: true, material: { id: 'webs', flammability: { kind: 'flammable', ignition: webBurningRule() } }, movableFeet: null, hooks: (['on_enter', 'on_start_of_turn_inside'] as const).map((hook) => ({ hook, frequency: 'once_per_turn' as const, effect: { kind: 'save_gated' as const, ability: 'dexterity' as const, rollMode: 'normal' as const, onSuccess: 'none' as const, payload: { kind: 'effect' as const, payload: { kind: 'condition' as const, condition: 'Restrained' as const }, lifetime: { kind: 'while_inside' as const } } } })), initialEffects: [] } },
   { id: 'zone-of-truth', source: 'spell-descriptions.txt:8699', targeting: { kind: 'area', rangeFeet: 60, shape: 'sphere', baseSizeFeet: 15, sizePerSlotFeet: 0 }, operation: { kind: 'effect', effect: effect({ kind: 'truth_zone', placement: 'selected_when_cast', radiusFeet: 15, saveAbility: 'charisma' }, { target: 'self', durationRounds: 100 }) } },
   { id: 'pass-without-trace', source: 'spell-descriptions.txt:5688', targeting: { kind: 'all_in_range', rangeFeet: 30 }, operation: { kind: 'persistent_area', origin: 'anchored_to_caster', shape: { kind: 'emanation', radius: feet(30) }, durationRounds: 600, concentration: true, targetFilter: 'selected', includeOwner: true, difficultTerrain: false, movableFeet: null, hooks: [{ hook: 'on_enter', frequency: 'every_trigger', effect: { kind: 'automatic', payload: { kind: 'effect', payload: { kind: 'skill_modifier', skill: 'stealth', amount: 10 }, lifetime: { kind: 'while_inside' } } } }], initialEffects: [] } },
 ];

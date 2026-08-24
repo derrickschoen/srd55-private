@@ -1,4 +1,5 @@
 import type { EffectPayload } from '../effects';
+import { GREASE_MATERIAL, WEB_MATERIAL } from '../persistent-areas';
 import { damageType, feet } from '../values';
 import type {
   EffectData,
@@ -461,7 +462,25 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:3883',
     castingTime: 'action', components: material('a bit of pork rind or butter'),
     targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 10, sizePerSlotFeet: 0, surface: 'ground_square' },
-    operation: { kind: 'save_effect', ability: 'dexterity', rollMode: 'normal', effect: effect({ kind: 'condition', condition: 'Prone' }, { durationRounds: 10, expiresAt: 'target_end' }) },
+    // Nonflammable, Difficult Terrain, and entry/end saves: spell-descriptions.txt:3891-3898.
+    operation: {
+      kind: 'persistent_area', origin: 'selected_when_cast', shape: null,
+      durationRounds: 10, concentration: false, targetFilter: 'all', includeOwner: false,
+      difficultTerrain: true, material: GREASE_MATERIAL, movableFeet: null,
+      hooks: (['on_enter', 'on_end_of_turn_inside'] as const).map((hook) => ({
+        hook, frequency: 'once_per_turn' as const,
+        effect: {
+          kind: 'save_gated' as const, ability: 'dexterity' as const, rollMode: 'normal' as const,
+          onSuccess: 'none' as const,
+          payload: {
+            kind: 'effect' as const,
+            payload: { kind: 'condition' as const, condition: 'Prone' as const },
+            lifetime: { kind: 'fixed_rounds' as const, rounds: 1, boundary: 'end' as const },
+          },
+        },
+      })),
+      initialEffects: [],
+    },
   },
   {
     id: 'hideous-laughter', name: 'Hideous Laughter', level: 1,
@@ -889,7 +908,25 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:8453',
     castingTime: 'action', components: material('a bit of spiderweb'),
     targeting: { kind: 'area', rangeFeet: 60, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0 },
-    operation: { kind: 'effect', effect: effect({ kind: 'web_area', placement: 'selected_when_cast', cubeFeet: 20, flatDepthFeet: 5, fireDamageCount: 2, fireDamageSides: 4 }, { target: 'self', concentration: true, durationRounds: 600 }) },
+    // Terrain/restraint: spell-descriptions.txt:8463-8485; per-cube burning: 8486-8489.
+    operation: {
+      kind: 'persistent_area', origin: 'selected_when_cast', shape: null,
+      durationRounds: 600, concentration: true, targetFilter: 'all', includeOwner: false,
+      difficultTerrain: true, material: WEB_MATERIAL, movableFeet: null,
+      hooks: (['on_enter', 'on_start_of_turn_inside'] as const).map((hook) => ({
+        hook, frequency: 'once_per_turn' as const,
+        effect: {
+          kind: 'save_gated' as const, ability: 'dexterity' as const, rollMode: 'normal' as const,
+          onSuccess: 'none' as const,
+          payload: {
+            kind: 'effect' as const,
+            payload: { kind: 'condition' as const, condition: 'Restrained' as const },
+            lifetime: { kind: 'while_inside' as const },
+          },
+        },
+      })),
+      initialEffects: [],
+    },
   },
   {
     id: 'zone-of-truth', name: 'Zone of Truth', level: 2,

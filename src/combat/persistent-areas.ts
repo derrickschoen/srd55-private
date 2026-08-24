@@ -4,7 +4,15 @@ import type { EffectPayload } from './effects';
 import type { GridCell } from './grid';
 import type { DamageRequest, RollMode } from './resolution';
 import { affectedCells, creatureOccupiesAffectedCell, feetPoint, type AreaTemplate, type Direction, type FeetPoint } from './templates';
-import { feet, type CombatantId, type Feet, type PersistentAreaId, type WorldObjectId } from './values';
+import {
+  damageType,
+  dieSides,
+  feet,
+  type CombatantId,
+  type Feet,
+  type PersistentAreaId,
+  type WorldObjectId,
+} from './values';
 
 export type PersistentAreaOrigin =
   | { readonly kind: 'fixed'; readonly point: FeetPoint }
@@ -79,6 +87,68 @@ export interface PersistentAreaHookSpec {
   readonly effect: PersistentAreaEffectSpec;
 }
 
+export const PERSISTENT_AREA_OPTIONAL_RULES = ['flammable_grease'] as const;
+export type PersistentAreaOptionalRule = (typeof PERSISTENT_AREA_OPTIONAL_RULES)[number];
+
+export interface PersistentAreaIgnitionRule {
+  readonly burnAwayAfterRounds: 1;
+  readonly startOfTurnDamage: DamageRequest;
+}
+
+export type PersistentAreaFlammability =
+  | { readonly kind: 'nonflammable' }
+  | { readonly kind: 'flammable'; readonly ignition: PersistentAreaIgnitionRule }
+  | {
+      readonly kind: 'optional_rule';
+      readonly rule: 'flammable_grease';
+      readonly ignition: PersistentAreaIgnitionRule;
+    };
+
+/** Open material id plus closed mechanical flammability behavior preserves homebrew names. */
+export interface PersistentAreaMaterial {
+  readonly id: string;
+  readonly flammability: PersistentAreaFlammability;
+}
+
+/**
+ * Web's per-cube fire lifecycle: spell-descriptions.txt:8486-8489.
+ * This is also the explicitly adopted behavior of the optional flammable-grease rule.
+ */
+export const WEB_BURNING_RULE: PersistentAreaIgnitionRule = Object.freeze({
+  burnAwayAfterRounds: 1,
+  startOfTurnDamage: {
+    terms: [{
+      type: damageType('Fire'),
+      dice: { count: 2, sides: dieSides(4), modifier: 0 },
+    }],
+    critical: false,
+    responses: [],
+  },
+});
+
+export const WEB_MATERIAL = Object.freeze<PersistentAreaMaterial>({
+  id: 'webs',
+  flammability: { kind: 'flammable', ignition: WEB_BURNING_RULE },
+});
+
+/** Grease is nonflammable by default; the named D373.10 rule is the sole opt-in. */
+export const GREASE_MATERIAL = Object.freeze<PersistentAreaMaterial>({
+  id: 'grease',
+  flammability: {
+    kind: 'optional_rule',
+    rule: 'flammable_grease',
+    ignition: WEB_BURNING_RULE,
+  },
+});
+
+export interface BurningPersistentAreaCell {
+  readonly cell: GridCell;
+  readonly burnsAwayAt: {
+    readonly round: number;
+    readonly initiativeIndex: number;
+  };
+}
+
 export interface PersistentAreaInput {
   readonly owner: CombatantId;
   readonly origin: PersistentAreaOrigin;
@@ -86,13 +156,19 @@ export interface PersistentAreaInput {
   readonly duration: PersistentAreaDuration;
   readonly targetFilter: PersistentAreaTargetFilter;
   readonly difficultTerrain: boolean;
+  readonly material?: PersistentAreaMaterial | null;
   readonly hooks: readonly PersistentAreaHookSpec[];
   readonly movable: null | { readonly maximumFeet: Feet };
 }
 
-export interface PersistentArea extends PersistentAreaInput {
+export interface PersistentArea extends Omit<PersistentAreaInput, 'material'> {
   readonly id: PersistentAreaId;
   readonly sequence: number;
+  readonly material: PersistentAreaMaterial | null;
+  /** Fire-exposed cells remain mechanically present until their one-round burn clock elapses. */
+  readonly burningCells: readonly BurningPersistentAreaCell[];
+  /** Removed cells no longer contribute membership, terrain, or area-bound effects. */
+  readonly burnedAwayCells: readonly GridCell[];
   /** Physically present creatures, sorted by CombatantId for replay stability. */
   readonly members: readonly CombatantId[];
   /** Once-per-turn hook keys already consumed during the current turn. */
@@ -163,6 +239,8 @@ export function persistentAreaContains(
   anchorCell: GridCell | null,
   grid: { readonly bounds: { readonly columns: number; readonly rows: number }; readonly blockedCells: readonly GridCell[] },
 ): boolean {
+  if (area.burnedAwayCells.some((removed) =>
+    removed.column === cell.column && removed.row === cell.row)) return false;
   const template = persistentAreaTemplate(area, anchorCell);
   if (
     template.shape === 'emanation' &&

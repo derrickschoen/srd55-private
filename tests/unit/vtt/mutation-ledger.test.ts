@@ -67,6 +67,7 @@ const DETECTION_UI_LEDGER_PATH = 'docs/audits/2026-08-24-detection-ui-mutation-l
 const DEATH_LEDGER_PATH = 'docs/audits/2026-08-24-death-mutation-ledger.md';
 const SAVE_MANAGER_LEDGER_PATH = 'docs/audits/2026-08-24-savemgr-mutation-ledger.md';
 const LEGENDARY_LEDGER_PATH = 'docs/audits/2026-08-24-legendary-mutation-ledger.md';
+const SURFACES_LEDGER_PATH = 'docs/audits/2026-08-24-surfaces-mutation-ledger.md';
 const WAVE_ONE_LEDGER_PATH = 'docs/audits/2026-08-22-wave1-mutation-ledger.md';
 const PLAN_PATH = 'docs/design/2026-08-19-vtt-phase2-movement-controllers.md';
 
@@ -83,6 +84,23 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D373.17-SURFACES-MUTATION-LEDGER pins all four restored controls to named killing tests', () => {
+    const surfacesLedger = readFileSync(SURFACES_LEDGER_PATH, 'utf8');
+    const surfaceTests = readFileSync('tests/unit/vtt/flammable-surfaces.test.ts', 'utf8');
+    for (const control of [
+      'cold_ignites',
+      'burn_lingers',
+      'restraint_survives_burn',
+      'ignition_ignores_exposure',
+    ]) {
+      expect(surfacesLedger).toContain(`\`${control}\``);
+      expect(surfaceTests).toContain(`${control}:`);
+    }
+    expect(surfacesLedger.match(/`exit 1`/gu)).toHaveLength(4);
+    expect(surfacesLedger).toContain('Tests  8 passed (8)');
+    expect(surfacesLedger).toContain('All four mutations were restored.');
+  });
+
   it('D373.6-SAVE-MANAGER-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {
     const saveManagerLedger = readFileSync(SAVE_MANAGER_LEDGER_PATH, 'utf8');
     const saveManagerTests = readFileSync('tests/unit/vtt/save-manager.test.ts', 'utf8');
