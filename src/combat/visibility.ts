@@ -17,6 +17,7 @@ export type EncounterViewClassification = 'dm_only' | 'player_visible' | 'per_se
 export const ENCOUNTER_VIEW_CLASSIFICATION = {
   config: 'player_visible',
   rulesEdition: 'player_visible',
+  hideDeathSaveRolls: 'dm_only',
   revision: 'player_visible',
   nextEventSequence: 'dm_only',
   nextDecisionSequence: 'dm_only',
@@ -90,10 +91,35 @@ export interface DmVisibleCombatant extends PlayerVisibleCombatant {
   readonly spellSlots: readonly SpellSlotState[];
 }
 
+type DeathSaveResolvedEvent = Extract<EncounterEvent, { readonly type: 'death_save_resolved' }>;
+
+export type DeathSaveEventFieldClassification =
+  | EncounterViewClassification
+  | 'toggle_controlled';
+
+/** D359 forces every raw death-save event field through an explicit projection decision. */
+export const DEATH_SAVE_EVENT_VIEW_CLASSIFICATION = {
+  sequence: 'player_visible',
+  type: 'player_visible',
+  combatant: 'player_visible',
+  roll: 'toggle_controlled',
+  outcome: 'player_visible',
+  successes: 'player_visible',
+  failures: 'player_visible',
+  lifeState: 'player_visible',
+  stableRecovery: 'player_visible',
+} as const satisfies Readonly<Record<keyof DeathSaveResolvedEvent, DeathSaveEventFieldClassification>>;
+
+export type PlayerVisibleDeathSaveEvent =
+  | (DeathSaveResolvedEvent & { readonly rollVisibility: 'player_visible' })
+  | (Omit<DeathSaveResolvedEvent, 'roll'> & { readonly rollVisibility: 'dm_only' });
+
 export type PlayerVisibleEncounterEvent =
   | Exclude<EncounterEvent,
-      { readonly type: 'adjudicated' } | { readonly visibility: 'dm_only' }
+      | { readonly type: 'adjudicated' | 'death_save_resolved' }
+      | { readonly visibility: 'dm_only' }
     >
+  | PlayerVisibleDeathSaveEvent
   | {
       readonly sequence: number;
       readonly type: 'adjudicated';
@@ -229,8 +255,25 @@ function isDmOnlyEvent(
 function playerEvents(
   events: readonly EncounterEvent[],
   visibleIds: ReadonlySet<CombatantId>,
+  hideDeathSaveRolls: boolean,
 ): readonly PlayerVisibleEncounterEvent[] {
   return events.flatMap((event): readonly PlayerVisibleEncounterEvent[] => {
+    if (event.type === 'death_save_resolved') {
+      if (!visibleIds.has(event.combatant)) return [];
+      return hideDeathSaveRolls
+        ? [{
+            sequence: event.sequence,
+            type: event.type,
+            combatant: event.combatant,
+            outcome: event.outcome,
+            successes: event.successes,
+            failures: event.failures,
+            lifeState: event.lifeState,
+            stableRecovery: event.stableRecovery,
+            rollVisibility: 'dm_only',
+          }]
+        : [{ ...event, rollVisibility: 'player_visible' }];
+    }
     if (isDmOnlyEvent(event)) return [];
     if (
       event.type === 'effect_ended' ||
@@ -262,6 +305,7 @@ export function projectDmView(state: EncounterState): DmView {
     state: {
       config: structuredClone(state.config),
       rulesEdition: state.rulesEdition,
+      hideDeathSaveRolls: state.hideDeathSaveRolls,
       revision: state.revision,
       nextEventSequence: state.nextEventSequence,
       nextDecisionSequence: state.nextDecisionSequence,
@@ -342,7 +386,7 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
     ownedCombatants: state.combatants
       .filter((subject) => ownedIds.has(subject.profile.id))
       .map((subject) => ({ id: subject.profile.id, hitPoints: subject.hitPoints, turn: structuredClone(subject.turn) })),
-    recentEvents: playerEvents(state.eventLog, visibleIds),
+    recentEvents: playerEvents(state.eventLog, visibleIds, state.hideDeathSaveRolls),
   };
 }
 

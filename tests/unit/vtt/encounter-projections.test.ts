@@ -41,7 +41,7 @@ function partyView(state: ReturnType<typeof hiddenDeathSaveState>) {
 
 function hiddenDeathSaveState() {
   const rng = mulberry32(61);
-  let state = createEncounter(referenceEncounterSetup());
+  let state = createEncounter({ ...referenceEncounterSetup(), hideDeathSaveRolls: true });
   state = reduceEncounter(state, { type: 'roll_initiative' }, rng).state;
   state = reduceEncounter(state, {
     type: 'adjudicate',
@@ -58,7 +58,11 @@ function hiddenDeathSaveState() {
   ]) {
     state = reduceEncounter(state, { type: 'end_turn', actor }, rng).state;
   }
-  return state;
+  const decision = state.pendingDecisions.find((candidate) => candidate.kind === 'death_save');
+  if (decision === undefined) throw new Error('Projection fixture has no death-save decision.');
+  return reduceEncounter(state, {
+    type: 'resolve_pending_decision', decisionId: decision.id, optionId: 'roll',
+  }, rng).state;
 }
 
 function hostBoundaryHiddenState() {
@@ -73,7 +77,7 @@ function hostBoundaryHiddenState() {
     ),
   };
   const rng = mulberry32(8102);
-  let state = createEncounter(setup);
+  let state = createEncounter({ ...setup, hideDeathSaveRolls: true });
   state = reduceEncounter(state, { type: 'roll_initiative' }, rng).state;
   state = reduceEncounter(state, {
     type: 'adjudicate',
@@ -90,7 +94,11 @@ function hostBoundaryHiddenState() {
   ]) {
     state = reduceEncounter(state, { type: 'end_turn', actor }, rng).state;
   }
-  return state;
+  const decision = state.pendingDecisions.find((candidate) => candidate.kind === 'death_save');
+  if (decision === undefined) throw new Error('Host projection fixture has no death-save decision.');
+  return reduceEncounter(state, {
+    type: 'resolve_pending_decision', decisionId: decision.id, optionId: 'roll',
+  }, rng).state;
 }
 
 describe('increment 6 projection boundary', () => {
@@ -116,7 +124,10 @@ describe('increment 6 projection boundary', () => {
     }));
     expect(serialized).toContain('Reference Fighter');
     expect(serialized).toContain('"round":2');
-    expect(serialized).not.toContain('death_save_resolved');
+    expect(player.events).toContainEqual(expect.objectContaining({
+      type: 'death_save_resolved', rollVisibility: 'dm_only',
+    }));
+    expect(serialized).not.toMatch(/"roll":\d+/u);
     expect(serialized).not.toContain('combatant:training-brute');
     expect(serialized).not.toContain('DM tactics sentinel: ash-owl');
     expect(serialized).not.toContain('DM reasoning sentinel: basalt-raven');
@@ -125,14 +136,17 @@ describe('increment 6 projection boundary', () => {
     host.close();
   });
 
-  it('M37-HIDDEN-ROLL-ABSENT serializes no hidden death-save result or DM facts', () => {
+  it('M37-HIDDEN-ROLL-ABSENT serializes no hidden death-save result or DM facts, only a redacted save event', () => {
     const projection = projectPlayerBoard(
       partyView(hiddenDeathSaveState()),
       IDLE,
     );
     const serialized = serializePlayerBoard(projection);
 
-    expect(serialized).not.toContain('death_save_resolved');
+    expect(projection.events).toContainEqual(expect.objectContaining({
+      type: 'death_save_resolved', rollVisibility: 'dm_only',
+    }));
+    expect(serialized).not.toMatch(/"roll":\d+/u);
     expect(serialized).not.toContain('DM-only reason sentinel 9f59');
     expect(serialized).not.toContain('dmNotes');
     expect(serialized).not.toContain('foggedCells');

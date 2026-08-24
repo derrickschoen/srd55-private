@@ -75,7 +75,29 @@ export type EncounterCommand =
   | {
       readonly type: 'resolve_pending_decision';
       readonly decisionId: string;
-      readonly optionId: 'accept' | 'decline';
+      readonly optionId: 'accept' | 'decline' | 'roll';
+    }
+  | {
+      readonly type: 'set_hide_death_save_rolls';
+      readonly hidden: boolean;
+    }
+  | {
+      readonly type: 'dm_stabilize';
+      readonly target: CombatantId;
+    }
+  | {
+      readonly type: 'dm_revive_at_one_hit_point';
+      readonly target: CombatantId;
+    }
+  | {
+      readonly type: 'dm_set_death_save_counts';
+      readonly target: CombatantId;
+      readonly successes: number;
+      readonly failures: number;
+    }
+  | {
+      readonly type: 'dm_mark_dead';
+      readonly target: CombatantId;
     }
   | {
       readonly type: 'create_persistent_area';
@@ -281,6 +303,22 @@ export type EncounterEvent =
             readonly kind: 'position';
             readonly from: GridCell;
             readonly to: GridCell;
+          }
+        | {
+            readonly kind: 'death_override';
+            readonly override: 'stabilize' | 'revive_at_one_hit_point' | 'set_death_save_counts' | 'mark_dead';
+            readonly before: {
+              readonly hitPoints: number;
+              readonly lifeState: 'living' | 'dying' | 'stable' | 'dead';
+              readonly successes: number;
+              readonly failures: number;
+            };
+            readonly after: {
+              readonly hitPoints: number;
+              readonly lifeState: 'living' | 'dying' | 'stable' | 'dead';
+              readonly successes: number;
+              readonly failures: number;
+            };
           };
     })
   | (SequencedEvent & {
@@ -337,14 +375,19 @@ export type EncounterEvent =
       readonly type: 'pending_decision_queued';
       readonly decisionId: string;
       readonly combatant: CombatantId;
-      readonly kind: 'reaction_offer';
-      readonly reactionKind: 'opportunity_attack';
-    })
+    } & (
+      | {
+          readonly kind: 'reaction_offer';
+          readonly reactionKind: 'opportunity_attack';
+        }
+      | { readonly kind: 'death_save' }
+    ))
   | (SequencedEvent & {
       readonly type: 'pending_decision_resolved';
       readonly decisionId: string;
       readonly combatant: CombatantId;
-      readonly optionId: 'accept' | 'decline';
+      readonly kind: 'reaction_offer' | 'death_save';
+      readonly optionId: 'accept' | 'decline' | 'roll';
     })
   | (SequencedEvent & {
       readonly type: 'reaction_policy_auto_resolved';
@@ -458,13 +501,14 @@ export type EncounterEvent =
     })
   | (SequencedEvent & {
       readonly type: 'death_save_resolved';
-      readonly visibility: 'dm_only';
       readonly combatant: CombatantId;
       readonly roll: number;
       readonly outcome: 'failure' | 'success' | 'natural_1' | 'natural_20';
       readonly successes: number;
       readonly failures: number;
       readonly lifeState: 'living' | 'dying' | 'stable' | 'dead';
+      /** Encounter rounds cannot advance this SRD recovery clock. */
+      readonly stableRecovery: '1d4_hours_outside_encounter' | null;
     })
   | (SequencedEvent & {
       readonly type: 'reaction_declined';

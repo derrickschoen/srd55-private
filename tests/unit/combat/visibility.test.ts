@@ -15,6 +15,7 @@ function hiddenDeathSaveState(): EncounterState {
   const pc = playerProfile('viewer', { initiativeBonus: -20, hitPoints: 10 });
   const monster = monsterProfile('fogged', { initiativeBonus: 20 });
   let state = createEncounter({
+    hideDeathSaveRolls: true,
     bounds: { columns: 5, rows: 2 },
     blockedCells: [{ column: 4, row: 0 }],
     foggedCells: [{ column: 3, row: 0 }, { column: 4, row: 0 }],
@@ -42,7 +43,12 @@ function hiddenDeathSaveState(): EncounterState {
     },
   };
   state = reduceEncounter(state, attack, fixedD20(11)).state;
-  return reduceEncounter(state, { type: 'end_turn', actor: monster.id }, fixedD20(9)).state;
+  state = reduceEncounter(state, { type: 'end_turn', actor: monster.id }, fixedD20(11)).state;
+  const decision = state.pendingDecisions.find((candidate) => candidate.kind === 'death_save');
+  if (decision === undefined) throw new Error('Visibility fixture has no death-save decision.');
+  return reduceEncounter(state, {
+    type: 'resolve_pending_decision', decisionId: decision.id, optionId: 'roll',
+  }, fixedD20(9)).state;
 }
 
 describe('D359 encounter views', () => {
@@ -70,7 +76,7 @@ describe('D359 encounter views', () => {
     expect(revealed.combatants.map((entry) => entry.name)).toContain('fogged');
   });
 
-  it('omits hidden death-save results, fog facts, and DM-only fields from player objects', () => {
+  it('omits hidden death-save results, fog facts, and DM-only fields from player objects while exposing a redacted result', () => {
     const state = hiddenDeathSaveState();
     const pc = state.combatants.find((subject) => subject.profile.kind === 'player_character');
     if (pc === undefined) throw new Error('Visibility fixture has no player seat.');
@@ -83,12 +89,16 @@ describe('D359 encounter views', () => {
 
     expect(serializedPlayer).not.toContain('hidden mechanism');
     expect(serializedPlayer).not.toContain('foggedCells');
-    expect(serializedPlayer).not.toContain('death_save_resolved');
+    expect(player.recentEvents.find((event) => event.type === 'death_save_resolved')).toMatchObject({
+      rollVisibility: 'dm_only',
+      failures: 1,
+      lifeState: 'dying',
+    });
+    expect(serializedPlayer).not.toContain('"roll":9');
     expect(dm.dmOnly.notes).toContain('The east square contains a hidden mechanism.');
     expect(dm.recentEvents.find((event) => event.type === 'death_save_resolved')).toMatchObject({
       roll: 9,
       failures: 1,
-      visibility: 'dm_only',
     });
   });
 
