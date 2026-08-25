@@ -10,7 +10,15 @@ import {
   DmEncounterHost,
   type DmEncounterHostSnapshot,
 } from '../../../src/vtt/dm-encounter-host';
-import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence';
+import {
+  MemoryBrowserSessionStore,
+  replaySessionRevisions,
+} from '../../../src/vtt/session-persistence';
+import {
+  createVaneWarrenFight,
+  reduceVaneWarrenEncounter,
+  vaneWarrenDmWarDrumControl,
+} from '../../../src/vtt/vane-warren';
 import { monsterProfile, placedToken, playerProfile } from '../../unit/combat/fixtures';
 
 function position(state: EncounterState, id: CombatantId): GridCell {
@@ -120,6 +128,33 @@ function hostUntil(
 }
 
 describe('DmEncounterHost live algorithm path', () => {
+  it('replays the same configured pure reducer used by live host commands', async () => {
+    const players = [
+      playerProfile('host-replay-player-a', { initiativeBonus: 30, hitPoints: 40 }),
+      playerProfile('host-replay-player-b', { initiativeBonus: 20, hitPoints: 40 }),
+      playerProfile('host-replay-player-c', { initiativeBonus: 10, hitPoints: 40 }),
+      playerProfile('host-replay-player-d', { initiativeBonus: 5, hitPoints: 40 }),
+    ] as const;
+    const bundled = createVaneWarrenFight('cinder-rite', players);
+    const soundDrum = vaneWarrenDmWarDrumControl(bundled);
+    if (soundDrum === null) throw new Error('The Vane Warren war drum control is missing.');
+    const alarmed = reduceVaneWarrenEncounter(bundled.encounter, soundDrum, () => 0).state;
+    const initialState = { ...alarmed, round: 2 };
+    const store = new MemoryBrowserSessionStore();
+    const host = new DmEncounterHost('session:host-live-custom-reducer-replay', store, {
+      initialState,
+      initialControllers: algorithmIdentities(initialState),
+      playerIds: players.map((player) => player.id),
+    });
+
+    await host.setHiddenRollCategory('death_saves', true);
+
+    expect(replaySessionRevisions(store.revisions(host.sessionId)).encounterState).toEqual(
+      store.revisions(host.sessionId).at(-1)?.encounterState,
+    );
+    host.close();
+  });
+
   it('advances a 14x10 all-algorithm encounter past round 2 without an over-budget refusal', async () => {
     const player = playerProfile('host-large-board-player', { hitPoints: 100, initiativeBonus: 20 });
     const monster = monsterProfile('host-large-board-monster', { hitPoints: 100, initiativeBonus: -20 });
@@ -137,9 +172,10 @@ describe('DmEncounterHost live algorithm path', () => {
         obscurementRegions: [],
       },
     });
+    const store = new MemoryBrowserSessionStore();
     const host = new DmEncounterHost(
       'session:host-live-large-board',
-      new MemoryBrowserSessionStore(),
+      store,
       {
         initialState,
         initialControllers: algorithmIdentities(initialState),
@@ -161,6 +197,9 @@ describe('DmEncounterHost live algorithm path', () => {
 
     expect(advanced.dm.encounter.round).toBeGreaterThan(2);
     expect(advanced.dm.decisionTray.actionRefusal).toBeNull();
+    expect(replaySessionRevisions(store.revisions(host.sessionId)).encounterState).toEqual(
+      store.revisions(host.sessionId).at(-1)?.encounterState,
+    );
     host.close();
   });
 

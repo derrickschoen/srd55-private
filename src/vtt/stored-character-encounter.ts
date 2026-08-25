@@ -2,7 +2,6 @@ import type { ControllerIdentity } from '../combat/controllers';
 import type { TurnLegalActions } from '../combat/coordinator';
 import {
   createEncounter,
-  type EncounterCommandReducer,
   type EncounterState,
 } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
@@ -29,7 +28,6 @@ export interface StoredCharacterEncounter {
   readonly playerIds: readonly CombatantId[];
   readonly controllers: readonly ControllerIdentity[];
   readonly turnLegalActions: TurnLegalActions;
-  readonly commandReducer?: EncounterCommandReducer;
   readonly composeNextRoom?: StoredCharacterRoomComposer;
   readonly sessionFlow?: StoredCharacterSessionFlow;
 }

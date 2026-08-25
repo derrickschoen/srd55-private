@@ -834,7 +834,6 @@ export function composeVaneWarrenFight(
         : partyActions(current, actor).actions;
       return { actions: [...worldObjectClassActionCommands(current, actor).actions, ...base] };
     },
-    commandReducer: reduceVaneWarrenEncounter,
   };
 }
 

@@ -57,6 +57,7 @@ import {
 } from './refusal-handling';
 import { deriveSessionRecord, type SessionRecord } from './session-record';
 import { isHiddenRollCategory } from '../combat/roll-visibility';
+import { reduceSessionEncounter } from './session-encounter-reducer';
 
 export const VTT_SESSION_SCHEMA_VERSION = 6 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
@@ -1066,7 +1067,7 @@ export function replaySessionRevisions(
           throw new Error('A reducer revision requires a parent.');
         }
         const replayRng = restoreMulberry32(parent.rngState);
-        const replayed = reduceEncounter(
+        const replayed = reduceSessionEncounter(
           parent.encounterState,
           transition.command,
           replayRng,

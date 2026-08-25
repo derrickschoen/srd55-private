@@ -55,6 +55,7 @@ import {
   handlingModesForCategory,
   type RefusalHandlingMode,
 } from './refusal-handling';
+import { reconcileStableRenderedChildren } from './stable-dom-render';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -614,7 +615,7 @@ class DmEncounterView {
   );
   readonly #host: DmEncounterHost;
   readonly #channel: BroadcastChannel;
-  readonly #shell = element('main', { className: 'encounter-shell dm-encounter' });
+  #shell = element('main', { className: 'encounter-shell dm-encounter' });
   #projection: DmBoardProjection | null = null;
   #channelError: string | null = null;
   #saveManagerError: string | null = null;
@@ -651,7 +652,6 @@ class DmEncounterView {
           initialControllers: encounter.controllers,
           playerIds: encounter.playerIds,
           turnLegalActions: encounter.turnLegalActions,
-          ...(encounter.commandReducer === undefined ? {} : { commandReducer: encounter.commandReducer }),
           reactionLegalActions: () => [],
         });
     this.#channel = new BroadcastChannel(`srd55:vtt:${sessionId}`);
@@ -1066,6 +1066,18 @@ class DmEncounterView {
   }
 
   #render(): void {
+    const live = this.#shell;
+    const draft = element('main', { className: 'encounter-shell dm-encounter' });
+    this.#shell = draft;
+    try {
+      this.#renderFresh();
+    } finally {
+      this.#shell = live;
+    }
+    reconcileStableRenderedChildren(live, draft);
+  }
+
+  #renderFresh(): void {
     this.#shell.replaceChildren(
       element('p', { className: 'vtt-kicker', text: 'DM-local authority' }),
       element('h1', { text: 'DM controls' }),
@@ -1437,6 +1449,7 @@ class DmEncounterView {
     if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
 
     const tray = element('section', { className: 'dm-decision-tray' });
+    tray.dataset.renderKey = 'decision-tray';
     tray.append(element('h2', { text: 'Decision tray' }));
     tray.dataset.boundaryBlocked = String(projection.decisionTray.boundaryRefusal !== null);
     if (projection.decisionTray.boundaryRefusal !== null) {
@@ -1465,6 +1478,7 @@ class DmEncounterView {
       row.dataset.entryKind = entry.kind;
       if (entry.kind === 'pending') {
         row.dataset.decisionId = entry.decision.id;
+        row.dataset.renderKey = `decision:${entry.decision.id}`;
         row.append(
           element('h3', {
             text: `${entry.combatantName} — ${decisionHeading(entry.decision)}`,
@@ -1478,6 +1492,7 @@ class DmEncounterView {
           amount.setAttribute('aria-label', 'DM override hit point delta');
           const button = element('button', { text: `Apply DM override for ${entry.combatantName}` });
           button.type = 'button';
+          button.dataset.renderKey = `option:${entry.decision.options[0]?.id ?? 'rule_manually'}`;
           button.addEventListener('click', () => {
             const parsed = Number(amount.value);
             if (!Number.isSafeInteger(parsed)) return;
@@ -1494,6 +1509,7 @@ class DmEncounterView {
         for (const option of entry.decision.options) {
           const button = element('button', { text: `${option.label} for ${entry.combatantName}` });
           button.type = 'button';
+          button.dataset.renderKey = `option:${option.id}`;
           button.addEventListener('click', () => {
             button.disabled = true;
             void this.#host.resolvePendingDecision(entry.decision.id, option.id).catch((error: unknown) => {
@@ -1506,6 +1522,7 @@ class DmEncounterView {
       } else {
         row.dataset.policy = entry.policy;
         row.dataset.sequence = String(entry.sequence);
+        row.dataset.renderKey = `automatic:${String(entry.sequence)}`;
         row.append(element('p', {
           text: `${entry.combatantName} — ${entry.reactionKind.replaceAll('_', ' ')}: ${entry.policy} automatically ${entry.resolution === 'accept' ? 'accepted' : 'declined'}${entry.autoFired ? ' and fired' : ''}`,
         }));
