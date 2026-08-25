@@ -7,6 +7,15 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D380 — OWNER: winning-run standard is STRENGTHEN THE POLICY on the fixed seed (2026-08-25)
+
+When the algorithm party loses a winnable rehearsal fight, the sanctioned
+path is improving the PC policy's tactics (focus fire, healing usage,
+positioning) until it wins on the FIXED seed (20260824). No seed shopping,
+no DM-assist swings for the winning leg. Rationale accepted with the
+ruling: the policy improvements are real product value — they are the
+D312 code-algorithm controller the table will use.
+
 ## D379 — OWNER: rehearsal bar accepts the session seam; requires a winning run AND a TPK run (2026-08-25)
 
 1. **Dungeon→Vane seam SATISFIES the v1 bar.** Two back-to-back chained
