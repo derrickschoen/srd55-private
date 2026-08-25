@@ -31,6 +31,23 @@ export interface WorldObjectBlocking {
   readonly cover: CoverTier;
 }
 
+export interface WorldObjectClassAction {
+  readonly id: string;
+  readonly label: string;
+  readonly cost: 'action';
+  readonly reach: 'adjacent';
+  readonly uses: 'once';
+  readonly eligibleActor: 'monster' | 'player_character' | 'either';
+  readonly controllerPriority?: {
+    readonly actor: CombatantId;
+    readonly score: number;
+  };
+  readonly dmOverride?: {
+    readonly actor: CombatantId;
+    readonly reasoning: string;
+  };
+}
+
 /** Footprint cells are absolute grid cells and always include position. */
 export interface WorldObjectInput {
   readonly id: WorldObjectId;
@@ -45,6 +62,7 @@ export interface WorldObjectInput {
     readonly response: DamageResponse;
   }[];
   readonly blocking: WorldObjectBlocking;
+  readonly classActions?: readonly WorldObjectClassAction[];
 }
 
 export interface WorldObject extends WorldObjectInput {
@@ -95,7 +113,7 @@ export const EMPTY_ENCOUNTER_ENVIRONMENT: EncounterEnvironment = Object.freeze({
 
 export type WorldObjectChanges = Partial<Pick<
   WorldObjectInput,
-  'name' | 'kind' | 'position' | 'footprint' | 'durability' | 'armorClass' | 'damageResponses' | 'blocking'
+  'name' | 'kind' | 'position' | 'footprint' | 'durability' | 'armorClass' | 'damageResponses' | 'blocking' | 'classActions'
 >>;
 
 export type WorldOperation =
@@ -182,6 +200,17 @@ export function assertWorldObjectInput(bounds: GridBounds, object: WorldObjectIn
   const responseTypes = object.damageResponses.map((response) => response.type);
   if (new Set(responseTypes).size !== responseTypes.length) {
     throw new RangeError('World object damage responses must use unique damage types.');
+  }
+  const classActions = object.classActions ?? [];
+  if (
+    classActions.some((action) =>
+      action.id.trim().length === 0 ||
+      action.label.trim().length === 0 ||
+      (action.controllerPriority !== undefined && !Number.isFinite(action.controllerPriority.score)) ||
+      (action.dmOverride !== undefined && action.dmOverride.reasoning.trim().length === 0))
+    || new Set(classActions.map((action) => action.id)).size !== classActions.length
+  ) {
+    throw new RangeError('World-object class actions require unique non-empty ids, labels, and valid control metadata.');
   }
 }
 

@@ -309,6 +309,8 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'environment_terrain_changed':
     case 'environment_light_changed':
       return 'actor' in event && event.actor !== null ? [event.actor] : [];
+    case 'world_object_used': return [event.actor];
+    case 'reinforcement_wave_deployed': return [event.calledBy, ...event.combatants];
     case 'persistent_area_created':
     case 'persistent_area_moved': return [event.owner];
     case 'persistent_area_membership_changed': return [...event.entered, ...event.exited];

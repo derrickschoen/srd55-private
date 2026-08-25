@@ -1,5 +1,4 @@
 import {
-  AlgorithmController,
   ControllerRegistry,
   HumanController,
   type Controller,
@@ -83,6 +82,8 @@ import {
   referenceReactionLegalActions,
   referenceTurnLegalActions,
 } from './reference-encounter';
+import { WorldObjectAlgorithmController } from '../combat/world-object-controller';
+import type { EncounterCommandReducer } from '../combat/encounter';
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -100,7 +101,7 @@ function controllerForKind(
     case 'human':
       return new HumanController();
     case 'algorithm':
-      return new AlgorithmController();
+      return new WorldObjectAlgorithmController();
     case 'agent':
       if (agentController !== undefined) return agentController();
       throw new Error('Local host needs its DM bridge before restoring an agent controller.');
@@ -212,6 +213,7 @@ export class DmEncounterHost {
   readonly #partyMembers: readonly LoadedPartyMember[] | null;
   readonly #partyDisplayNames: ReadonlyMap<number, string>;
   readonly #composeRoom: StoredCharacterRoomComposer;
+  readonly #commandReducer: EncounterCommandReducer | undefined;
 
   constructor(
     sessionKey: string,
@@ -227,6 +229,7 @@ export class DmEncounterHost {
       readonly playerIds?: readonly CombatantId[];
       readonly turnLegalActions?: TurnLegalActions;
       readonly reactionLegalActions?: ReactionLegalActions;
+      readonly commandReducer?: EncounterCommandReducer;
       readonly bridge?: DmBridgeConnection;
       readonly dmModel?: DmBridgeModelConfig;
       readonly codexSessionId?: ReturnType<typeof codexSessionId>;
@@ -241,6 +244,7 @@ export class DmEncounterHost {
     this.#playerIds = options.playerIds ?? REFERENCE_PLAYER_IDS;
     this.#turnLegalActions = options.turnLegalActions ?? referenceTurnLegalActions;
     this.#reactionLegalActions = options.reactionLegalActions ?? referenceReactionLegalActions;
+    this.#commandReducer = options.commandReducer;
     this.#partyMembers = options.partyMembers ?? null;
     this.#partyDisplayNames = options.partyDisplayNames ?? new Map();
     this.#composeRoom = options.composeRoom ?? composeStoredCharacterEncounter;
@@ -322,6 +326,7 @@ export class DmEncounterHost {
       turnLegalActions: this.#turnLegalActions,
       reactionLegalActions: this.#reactionLegalActions,
       pendingDecisionTray: true,
+      ...(this.#commandReducer === undefined ? {} : { commandReducer: this.#commandReducer }),
     });
   }
 
@@ -628,6 +633,11 @@ export class DmEncounterHost {
     this.#publish();
   }
 
+  dmUseWorldObject(command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>): void {
+    this.#coordinator.dmUseWorldObject(command);
+    this.#publish();
+  }
+
   async undoLast(): Promise<void> {
     const history = this.#journal.history();
     const reducer = [...history].reverse().find(
@@ -775,7 +785,7 @@ export class DmEncounterHost {
     if (this.#coordinator.coordinatorState().pendingRequest !== null) {
       throw new Error('Controller assignment changes require an action boundary.');
     }
-    const controller = kind === 'human' ? new HumanController() : new AlgorithmController();
+    const controller = kind === 'human' ? new HumanController() : new WorldObjectAlgorithmController();
     this.#coordinator.replaceController(combatantId, controller);
     const humans = new Map(this.#humans);
     if (controller instanceof HumanController) humans.set(combatantId, controller);

@@ -45,6 +45,7 @@ export type ProjectionTransfer =
         readonly partySession: DmBoardProjection['partySession'];
         readonly decisionTray: DmBoardProjection['decisionTray'];
         readonly timeline: DmBoardProjection['timeline'];
+        readonly worldObjectControls: DmBoardProjection['worldObjectControls'];
       };
     }
   | {
@@ -183,6 +184,7 @@ export class ProjectionTransferSender {
         partySession: structuredClone(projection.partySession),
         decisionTray: structuredClone(projection.decisionTray),
         timeline: structuredClone(projection.timeline),
+        worldObjectControls: structuredClone(projection.worldObjectControls),
       },
     };
     const { projection: _projection, ...rest } = request;
@@ -231,6 +233,7 @@ export class ProjectionTransferReceiver {
         partySession: structuredClone(transfer.view.partySession),
         decisionTray: structuredClone(transfer.view.decisionTray),
         timeline: structuredClone(transfer.view.timeline),
+        worldObjectControls: structuredClone(transfer.view.worldObjectControls),
       };
     } else {
       const previous = this.#received.get(request.encounterId);

@@ -16,6 +16,7 @@ import {
   PendingDecisionRuleError,
   reduceEncounter,
   type EncounterReduction,
+  type EncounterCommandReducer,
   type ReactionDecisionHook,
   type EncounterState,
 } from './encounter';
@@ -113,6 +114,7 @@ export interface CoordinatorPersistence {
 }
 
 export interface CoordinatorOptions {
+  readonly commandReducer?: EncounterCommandReducer;
   readonly turnLegalActions?: TurnLegalActions;
   readonly reactionLegalActions?: ReactionLegalActions;
   readonly standingReactionPolicies?: ReadonlyMap<
@@ -231,6 +233,7 @@ export class TurnCoordinator {
   readonly #persistence: CoordinatorPersistence | undefined;
   readonly #reactionDecision: ReactionDecisionHook | undefined;
   readonly #pendingDecisionTray: boolean;
+  readonly #commandReducer: EncounterCommandReducer;
 
   constructor(
     initialState: EncounterState,
@@ -247,6 +250,7 @@ export class TurnCoordinator {
     this.#persistence = options.persistence;
     this.#reactionDecision = options.reactionDecision;
     this.#pendingDecisionTray = options.pendingDecisionTray ?? false;
+    this.#commandReducer = options.commandReducer ?? reduceEncounter;
     this.#turnLegalActions =
       options.turnLegalActions ??
       ((_state, actor) => ({ actions: [{ type: 'end_turn', actor }] }));
@@ -331,6 +335,16 @@ export class TurnCoordinator {
 
   adjudicate(
     command: Extract<EncounterCommand, { readonly type: 'adjudicate' }>,
+  ): CoordinatorStep {
+    this.#cancelPendingRequest();
+    const eventSequence = this.#state.nextEventSequence;
+    this.#pause = { kind: 'adjudicated', eventSequence };
+    const reduction = this.#apply(command, this.#continuation);
+    return { kind: 'applied', state: this.#state, events: reduction.events };
+  }
+
+  dmUseWorldObject(
+    command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>,
   ): CoordinatorStep {
     this.#cancelPendingRequest();
     const eventSequence = this.#state.nextEventSequence;
@@ -469,7 +483,7 @@ export class TurnCoordinator {
     continuation: CoordinatorContinuation,
   ): EncounterReduction {
     this.#lastAttemptedCommand = command;
-    const reduction = reduceEncounter(this.#state, command, this.rng, {
+    const reduction = this.#commandReducer(this.#state, command, this.rng, {
       ...(this.#reactionDecision === undefined ? {} : { reactionDecision: this.#reactionDecision }),
     });
     this.#state = reduction.state;
@@ -478,6 +492,10 @@ export class TurnCoordinator {
         this.registry.assignFrom(event.combatant, event.summoner);
       } else if (event.type === 'summoned_combatant_despawned') {
         this.registry.remove(event.combatant);
+      } else if (event.type === 'reinforcement_wave_deployed') {
+        for (const combatantId of event.combatants) {
+          this.registry.assignFrom(combatantId, event.calledBy);
+        }
       }
     }
     this.#pendingCommand = null;

@@ -6,12 +6,20 @@ import {
 } from '../../../src/combat/encounter';
 import { persistentAreaContains } from '../../../src/combat/persistent-areas';
 import type { CombatantId } from '../../../src/combat/values';
+import { projectPlayerView } from '../../../src/combat/visibility';
+import { WorldObjectAlgorithmController } from '../../../src/combat/world-object-controller';
 import {
+  VANE_WARREN_DRUMMER_PRIORITY,
   VANE_WARREN_FIGHTS,
+  VANE_WARREN_SOUND_DRUM_ACTION_ID,
   advanceVaneWarrenAlarm,
   createVaneWarrenFight,
   igniteVaneWarrenSurfaceFromBrazier,
+  reduceVaneWarrenEncounter,
+  reduceVaneWarrenWorldObjectAction,
   useVaneWarrenWarDrum,
+  vaneWarrenDmWarDrumControl,
+  vaneWarrenWorldObjectLegalActions,
   vaneWarrenActionEconomy,
   type VaneWarrenEncounterState,
   type VaneWarrenFightId,
@@ -48,7 +56,166 @@ function hitPoints(state: EncounterState, id: CombatantId): number {
   return subject.hitPoints;
 }
 
+function activeTurn(
+  state: VaneWarrenEncounterState,
+  actor: CombatantId,
+): VaneWarrenEncounterState {
+  return {
+    ...state,
+    encounter: {
+      ...state.encounter,
+      activeCombatant: actor,
+      round: 1,
+      combatants: state.encounter.combatants.map((candidate) => candidate.profile.id === actor
+        ? {
+            ...candidate,
+            turn: {
+              ...candidate.turn,
+              action: { kind: 'available' },
+            },
+          }
+        : candidate),
+    },
+  };
+}
+
 describe('D377.5 The Vane Warren flagship bundle', () => {
+  it('drum_from_anywhere: exposes the typed alarm action only to adjacent enemies and gives the designated drummer highest algorithm priority', async () => {
+    let state = fight('cinder-rite');
+    const drummer = combatantIdFor(state, 'cinder-guard-b');
+    state = activeTurn(state, drummer);
+    const action = vaneWarrenWorldObjectLegalActions(state, drummer).find((candidate) =>
+      candidate.type === 'use_world_object' && candidate.actionId === VANE_WARREN_SOUND_DRUM_ACTION_ID);
+    if (action?.type !== 'use_world_object') throw new Error('The adjacent drummer has no alarm action.');
+    expect(action).toEqual({
+      type: 'use_world_object',
+      actor: drummer,
+      objectId: 'world-object:vane-warren:cinder-rite:war_drum',
+      actionId: VANE_WARREN_SOUND_DRUM_ACTION_ID,
+    });
+    const warDrum = state.encounter.worldObjects.find((object) => object.id === action?.objectId);
+    expect(warDrum?.classActions?.[0]?.controllerPriority).toEqual({
+      actor: drummer,
+      score: VANE_WARREN_DRUMMER_PRIORITY,
+    });
+    const controller = new WorldObjectAlgorithmController();
+    const decision = await controller.choose({
+      kind: 'turn',
+      requestId: 'turn:alarm-surface',
+      encounterRevision: state.encounter.revision,
+      actorId: drummer,
+      visibleState: projectPlayerView(state.encounter, { seatId: 'seat:drummer', combatantId: drummer }),
+      legalActions: {
+        actions: [
+          { type: 'move', actor: drummer, path: [{ column: 9, row: 4 }], cause: 'voluntary' },
+          action,
+        ],
+      },
+    }, new AbortController().signal);
+    expect(decision.action).toEqual(action);
+
+    state = {
+      ...state,
+      encounter: {
+        ...state.encounter,
+        tokens: state.encounter.tokens.map((token) => token.combatantId === drummer
+          ? { ...token, position: { column: 2, row: 2 } }
+          : token),
+      },
+    };
+    expect(vaneWarrenWorldObjectLegalActions(state, drummer)).toEqual([]);
+  });
+
+  it('refuses the typed war-drum action from exactly two cells away', () => {
+    let state = fight('cinder-rite');
+    const drummer = combatantIdFor(state, 'cinder-guard-b');
+    state = activeTurn(state, drummer);
+    const action = vaneWarrenWorldObjectLegalActions(state, drummer)[0];
+    if (action?.type !== 'use_world_object') throw new Error('The adjacent drummer has no use-object action.');
+    const warDrum = state.encounter.worldObjects.find((object) => object.id === action.objectId);
+    if (warDrum === undefined) throw new Error('The war drum is missing.');
+    state = {
+      ...state,
+      encounter: {
+        ...state.encounter,
+        tokens: state.encounter.tokens.map((token) => token.combatantId === drummer
+          ? {
+              ...token,
+              position: { column: warDrum.position.column + 2, row: warDrum.position.row },
+            }
+          : token),
+      },
+    };
+
+    expect(() => reduceVaneWarrenEncounter(state.encounter, action, faceOne)).toThrowError(expect.objectContaining({
+      name: 'EncounterRuleError',
+      refusalClass: 'validation',
+      reason: 'Sound the war drum requires adjacency to Vane Warren War Drum.',
+    }));
+  });
+
+  it('drum_double_trigger: taking the adjacent class action sounds the alarm once and cannot queue it again', () => {
+    let state = fight('cinder-rite');
+    const drummer = combatantIdFor(state, 'cinder-guard-b');
+    state = activeTurn(state, drummer);
+    const action = vaneWarrenWorldObjectLegalActions(state, drummer)[0];
+    if (action?.type !== 'use_world_object') throw new Error('The drummer has no use-object action.');
+    state = reduceVaneWarrenWorldObjectAction(state, action);
+    expect(state.alarm).toMatchObject({ kind: 'sounded', usedBy: drummer, usedAtRound: 1 });
+    expect(state.transitions.filter((transition) => transition.kind === 'alarm_used')).toHaveLength(1);
+    expect(state.encounter.eventLog.filter((event) => event.type === 'world_object_used')).toHaveLength(1);
+    const nextTurn = activeTurn(state, drummer);
+    expect(() => reduceVaneWarrenEncounter(nextTurn.encounter, action, faceOne)).toThrow('already been used');
+  });
+
+  it('the live command reducer deploys each alarm wave once when its arrival round is reached', () => {
+    let bundled = fight('cinder-rite');
+    const drummer = combatantIdFor(bundled, 'cinder-guard-b');
+    bundled = activeTurn(bundled, drummer);
+    const action = vaneWarrenWorldObjectLegalActions(bundled, drummer)[0];
+    if (action?.type !== 'use_world_object') throw new Error('The drummer has no live use-object action.');
+    let state = reduceVaneWarrenEncounter(bundled.encounter, action, faceOne).state;
+    state = { ...state, round: 2 };
+    state = reduceVaneWarrenEncounter(state, {
+      type: 'set_hidden_roll_category', category: 'death_saves', hidden: true,
+    }, faceOne).state;
+    expect(state.eventLog.filter((event) => event.type === 'reinforcement_wave_deployed')).toHaveLength(1);
+    expect(state.combatants.filter((subject) => String(subject.profile.id).includes(':cinder-wave-1-'))).toHaveLength(4);
+    state = reduceVaneWarrenEncounter(state, {
+      type: 'set_hidden_roll_category', category: 'death_saves', hidden: false,
+    }, faceOne).state;
+    expect(state.eventLog.filter((event) => event.type === 'reinforcement_wave_deployed')).toHaveLength(1);
+    state = { ...state, round: 3 };
+    state = reduceVaneWarrenEncounter(state, {
+      type: 'set_hidden_roll_category', category: 'death_saves', hidden: true,
+    }, faceOne).state;
+    expect(state.eventLog.filter((event) => event.type === 'reinforcement_wave_deployed')).toHaveLength(2);
+    expect(state.combatants.filter((subject) => String(subject.profile.id).includes(':cinder-wave-'))).toHaveLength(8);
+  });
+
+  it('dm_trigger_unlogged: exposes the object fallback and records its ruling card while sounding the same alarm once', () => {
+    const initial = fight('cinder-rite');
+    const command = vaneWarrenDmWarDrumControl(initial);
+    if (command === null) throw new Error('The DM war-drum control is missing.');
+    const state = reduceVaneWarrenWorldObjectAction(initial, command);
+    expect(state.alarm).toMatchObject({ kind: 'sounded', usedBy: command.actor, usedAtRound: 1 });
+    expect(state.encounter.eventLog.filter((event) => event.type === 'world_object_used')).toEqual([
+      expect.objectContaining({ authority: 'dm_override', actionId: VANE_WARREN_SOUND_DRUM_ACTION_ID }),
+    ]);
+    expect(state.encounter.eventLog.filter((event) => event.type === 'adjudicated')).toEqual([
+      expect.objectContaining({
+        target: command.actor,
+        subject: `dm-override:world-object:${VANE_WARREN_SOUND_DRUM_ACTION_ID}`,
+        consequence: {
+          kind: 'world_object_interaction',
+          objectId: command.objectId,
+          actionId: VANE_WARREN_SOUND_DRUM_ACTION_ID,
+        },
+      }),
+    ]);
+    expect(vaneWarrenDmWarDrumControl(state)).toBeNull();
+  });
+
   it('loads each separate fight with pre-placed tokens, fog, light, surfaces, and at least six landed terrain or hazard elements', () => {
     for (const manifest of VANE_WARREN_FIGHTS) {
       const loaded = fight(manifest.id);
@@ -268,5 +435,21 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
     }
     expect(ledger.match(/`exit 1`/gu)).toHaveLength(4);
     expect(ledger).toContain('All four mutations were restored.');
+  });
+
+  it('pins the three alarm-surface mutations to their named killing tests', () => {
+    const ledger = readFileSync('docs/audits/2026-08-25-alarm-surface-mutation-ledger.md', 'utf8');
+    const tests = readFileSync('tests/unit/vtt/vane-warren.test.ts', 'utf8');
+    for (const control of [
+      'drum_from_anywhere',
+      'drum_double_trigger',
+      'dm_trigger_unlogged',
+    ]) {
+      expect(ledger).toContain(`\`${control}\``);
+      expect(tests).toContain(`${control}:`);
+    }
+    expect(ledger.match(/`exit 1`/gu)).toHaveLength(3);
+    expect(ledger).toContain('Tests  13 passed (13)');
+    expect(ledger).toContain('All three mutations were restored.');
   });
 });
