@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D378 — OWNER: optional-rules sweep ratified; rehearsal is supervisor-only until clean (2026-08-24)
+
+1. **Optional-rules sweep (per D377.13) RATIFIED AS-IS.** flammable_grease
+   stays globally default off; bundled encounters MAY enable named
+   optional rules in their own encounter config, visibly listed in the
+   encounter's setup panel. Vane Warren ships with flammable_grease on.
+   This generalizes: bundle-local enablement is the sanctioned pattern.
+2. **Rehearsal driver: SUPERVISOR ONLY UNTIL CLEAN.** The supervisor
+   iterates rehearse → fix → rehearse autonomously (algorithm/codex
+   controllers playing the party) and brings the owner in only when a
+   full clean run exists — the D377.6 v1 bar is met before the owner
+   ever sits down for their pass.
+
 ## D377 — OWNER: brainstorm round 3 — 18 rulings; v1 = clean rehearsal (2026-08-24)
 
 Third three-model brainstorm (codex + opus + fable, independent lists; raw
