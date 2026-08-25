@@ -87,6 +87,7 @@ export class ProjectionReconstructor {
         coordinator: { ...structuredClone(coordinator), pendingRequest: structuredClone(view.pendingRequest) },
         pendingRequest: structuredClone(view.pendingRequest),
         humanCommandActions: structuredClone(array(view.humanCommandActions, 'compact projection human commands')),
+        movementPreviews: structuredClone(array(view.movementPreviews, 'compact projection movement previews')),
         ...(turnProgramLegalActions === undefined
           ? {}
           : { turnProgramLegalActions: structuredClone(turnProgramLegalActions) }),
