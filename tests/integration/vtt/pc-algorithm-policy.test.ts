@@ -106,9 +106,10 @@ function startedState(
   combatants: readonly ReturnType<typeof playerProfile>[],
   tokens: readonly ReturnType<typeof placedToken>[],
   columns = 12,
+  rows = 3,
 ): EncounterState {
   const state = createEncounter({
-    bounds: { columns, rows: 3 },
+    bounds: { columns, rows },
     combatants,
     tokens,
   });
@@ -173,6 +174,36 @@ function meleeOnlyLegalActions(
     // docs/srd/full/srd-5.2.1.txt:11589-11596.
     actions.push({ type: 'dash', actor });
   }
+  actions.push({ type: 'end_turn', actor });
+  return { actions };
+}
+
+function fullPathMeleeLegalActions(
+  state: EncounterState,
+  actor: CombatantId,
+  target: CombatantId,
+): LegalActionSummary {
+  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  if (acting === undefined) throw new Error(`Missing actor ${actor}.`);
+  const origin = combatantPosition(state, actor);
+  const destination = combatantPosition(state, target);
+  const actions: EncounterCommand[] = [];
+  if (gridDistance(origin, destination) <= 5 && acting.turn.action.kind === 'available') {
+    actions.push(attack(actor, target, 'attack:large-board-melee'));
+  }
+  if (acting.turn.movement.remaining >= 5 && gridDistance(origin, destination) > 5) {
+    const path: Array<{ readonly column: number; readonly row: number }> = [];
+    let cursor = origin;
+    while (gridDistance(cursor, destination) > 5) {
+      cursor = {
+        column: cursor.column + Math.sign(destination.column - cursor.column),
+        row: cursor.row + Math.sign(destination.row - cursor.row),
+      };
+      path.push(cursor);
+    }
+    actions.push({ type: 'move', actor, path, cause: 'voluntary' });
+  }
+  if (acting.turn.action.kind === 'available') actions.push({ type: 'dash', actor });
   actions.push({ type: 'end_turn', actor });
   return { actions };
 }
@@ -341,6 +372,43 @@ describe('player-character AlgorithmController policy', () => {
     expect(result.eventTypes).toContain('spell_cast');
     expect(result.spellSlotLevels.length).toBeGreaterThan(0);
     expect(result.spellSlotLevels.every((slotLevel) => slotLevel === null)).toBe(true);
+  });
+
+  it('large-board-terminates: a 14x10 fight clips approach paths, advances rounds, and terminates', async () => {
+    const player = playerProfile('large-board-player', { hitPoints: 6, initiativeBonus: 20 });
+    const monster = monsterProfile('large-board-monster', { hitPoints: 6, initiativeBonus: -20 });
+    const initial = startedState(
+      [player, monster],
+      [placedToken(player, 0, 5), placedToken(monster, 13, 5)],
+      14,
+      10,
+    );
+    const coordinator = new TurnCoordinator(
+      initial,
+      new ControllerRegistry([
+        { combatantId: player.id, controller: new AlgorithmController() },
+        { combatantId: monster.id, controller: new AlgorithmController() },
+      ]),
+      mulberry32(37_510),
+      {
+        turnLegalActions: (state, actor) => fullPathMeleeLegalActions(
+          state,
+          actor,
+          actor === player.id ? monster.id : player.id,
+        ),
+      },
+    );
+
+    let steps = 0;
+    while (!combatResolved(coordinator.state()) && steps < 100) {
+      const step = await coordinator.step();
+      if (step.kind === 'refused') throw new Error(step.reason);
+      steps += 1;
+    }
+
+    expect(coordinator.state().round).toBeGreaterThan(1);
+    expect(combatResolved(coordinator.state())).toBe(true);
+    expect(steps).toBeLessThan(100);
   });
 
   it('same-seed-determinism: two room-1 runs produce identical journals and outcomes', async () => {

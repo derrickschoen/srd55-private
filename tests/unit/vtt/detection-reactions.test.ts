@@ -312,6 +312,31 @@ describe('D368.3 opportunity attacks and fork #18 decisions', () => {
       .toBe(setup.reactor.id);
   });
 
+  it('resolved_offer_reissues + resolution_leaves_pending: a resolved trigger stays resolved for its turn boundary', () => {
+    const setup = startedEncounter();
+    const firstMove = reduceEncounter(setup.state, {
+      type: 'move', actor: setup.actor.id, path: [{ column: 2, row: 1 }], cause: 'voluntary',
+    }, face(20)).state;
+    const decision = firstMove.pendingDecisions[0];
+    if (decision === undefined) throw new Error('Expected queued OA decision.');
+    const resolved = reduceEncounter(firstMove, {
+      type: 'resolve_pending_decision', decisionId: decision.id, optionId: 'decline',
+    }, face(10)).state;
+    expect(resolved.pendingDecisions).toEqual([]);
+
+    const returned = reduceEncounter(resolved, {
+      type: 'move', actor: setup.actor.id, path: [{ column: 1, row: 1 }], cause: 'voluntary',
+    }, face(20)).state;
+    const crossedAgain = reduceEncounter(returned, {
+      type: 'move', actor: setup.actor.id, path: [{ column: 2, row: 1 }], cause: 'voluntary',
+    }, face(20)).state;
+
+    expect(crossedAgain.pendingDecisions).toEqual([]);
+    expect(reduceEncounter(crossedAgain, {
+      type: 'end_turn', actor: setup.actor.id,
+    }, face(10)).state.activeCombatant).toBe(setup.reactor.id);
+  });
+
   it('Flyby suppresses the real movement-triggered opportunity attack', () => {
     // Flyby: docs/srd/full/srd-5.2.1.txt:23236-23237.
     const row = HOMEBREW_BEAST_ROSTER.find((candidate) => candidate.design.family === 'pterosaur');

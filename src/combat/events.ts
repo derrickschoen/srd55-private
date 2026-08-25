@@ -421,6 +421,11 @@ export type EncounterEvent =
       readonly combatant: CombatantId;
       readonly kind: 'reaction_offer' | 'death_save' | 'legendary_action_window' | 'legendary_resistance';
       readonly optionId: string;
+      readonly boundary: {
+        readonly activeCombatant: CombatantId;
+        readonly round: number;
+      };
+      readonly reactionKind: 'opportunity_attack' | null;
     })
   | (SequencedEvent & {
       readonly type: 'reaction_policy_auto_resolved';
