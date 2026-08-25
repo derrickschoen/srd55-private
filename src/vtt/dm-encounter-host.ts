@@ -1,5 +1,4 @@
 import {
-  AlgorithmController,
   ControllerRegistry,
   HumanController,
   type Controller,
@@ -83,6 +82,8 @@ import {
   referenceReactionLegalActions,
   referenceTurnLegalActions,
 } from './reference-encounter';
+import { WorldObjectAlgorithmController } from '../combat/world-object-controller';
+import { reduceSessionEncounter } from './session-encounter-reducer';
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -100,7 +101,7 @@ function controllerForKind(
     case 'human':
       return new HumanController();
     case 'algorithm':
-      return new AlgorithmController();
+      return new WorldObjectAlgorithmController();
     case 'agent':
       if (agentController !== undefined) return agentController();
       throw new Error('Local host needs its DM bridge before restoring an agent controller.');
@@ -175,6 +176,18 @@ export interface DmEncounterHostSnapshot {
   readonly player: PlayerBoardProjection;
 }
 
+export class ControllerAssignmentError extends Error {
+  override readonly name = 'ControllerAssignmentError' as const;
+
+  constructor(
+    readonly code: 'action_boundary_required' | 'combatant_not_found' | 'assignment_failed',
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+  }
+}
+
 export interface DmBridgeConnection extends DmBridgeExchange, MirrorSink {}
 
 function hasDurableFlush(
@@ -194,6 +207,7 @@ export class DmEncounterHost {
   #coordinator: TurnCoordinator;
   #rng: SerializableRng;
   #pump: Promise<void> | null = null;
+  #repumpRequested = false;
   #closed = false;
   #bridgeFailureGuard: BridgeFailureGuard | null = null;
   #roundPlanSession: DmRoundPlanSession | null = null;
@@ -322,6 +336,7 @@ export class DmEncounterHost {
       turnLegalActions: this.#turnLegalActions,
       reactionLegalActions: this.#reactionLegalActions,
       pendingDecisionTray: true,
+      commandReducer: reduceSessionEncounter,
     });
   }
 
@@ -442,7 +457,11 @@ export class DmEncounterHost {
   }
 
   async #pumpCoordinator(): Promise<void> {
-    if (this.#pump !== null || this.#closed) return this.#pump ?? Promise.resolve();
+    if (this.#closed) return;
+    if (this.#pump !== null) {
+      if (this.#coordinator.pauseState() === null) this.#repumpRequested = true;
+      return this.#pump;
+    }
     this.#pump = (async () => {
       for (;;) {
         if (this.#closed || this.#coordinator.pauseState() !== null) return;
@@ -473,6 +492,15 @@ export class DmEncounterHost {
       }
     })().finally(() => {
       this.#pump = null;
+      const repump = this.#repumpRequested;
+      this.#repumpRequested = false;
+      if (
+        repump &&
+        !this.#closed &&
+        this.#coordinator.pauseState() === null
+      ) {
+        void this.#pumpCoordinator();
+      }
     });
     return this.#pump;
   }
@@ -628,6 +656,11 @@ export class DmEncounterHost {
     this.#publish();
   }
 
+  dmUseWorldObject(command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>): void {
+    this.#coordinator.dmUseWorldObject(command);
+    this.#publish();
+  }
+
   async undoLast(): Promise<void> {
     const history = this.#journal.history();
     const reducer = [...history].reverse().find(
@@ -773,10 +806,27 @@ export class DmEncounterHost {
 
   replaceController(combatantId: CombatantId, kind: 'human' | 'algorithm'): void {
     if (this.#coordinator.coordinatorState().pendingRequest !== null) {
-      throw new Error('Controller assignment changes require an action boundary.');
+      throw new ControllerAssignmentError(
+        'action_boundary_required',
+        'Controller assignment changes require an action boundary.',
+      );
     }
-    const controller = kind === 'human' ? new HumanController() : new AlgorithmController();
-    this.#coordinator.replaceController(combatantId, controller);
+    const controller = kind === 'human' ? new HumanController() : new WorldObjectAlgorithmController();
+    if (!this.#registry.identities().some((identity) => identity.combatantId === combatantId)) {
+      throw new ControllerAssignmentError(
+        'combatant_not_found',
+        `Controller assignment target ${combatantId} does not exist.`,
+      );
+    }
+    try {
+      this.#coordinator.replaceController(combatantId, controller);
+    } catch (error: unknown) {
+      throw new ControllerAssignmentError(
+        'assignment_failed',
+        `Controller assignment for ${combatantId} failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+        { cause: error },
+      );
+    }
     const humans = new Map(this.#humans);
     if (controller instanceof HumanController) humans.set(combatantId, controller);
     else humans.delete(combatantId);

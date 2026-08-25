@@ -1,6 +1,7 @@
 import {
   chromium,
   type Browser,
+  type BrowserContext,
   type ConsoleMessage,
   type Download,
   type Locator,
@@ -20,6 +21,11 @@ import { setTimeout as wait } from 'node:timers/promises';
 const REHEARSAL_SEED = 20_260_824;
 const APP_READY_TIMEOUT_MS = 180_000;
 const UI_TIMEOUT_MS = 65_000;
+const CLEANUP_TIMEOUT_MS = 10_000;
+const CLICK_STEP_BUDGET_MS = 30_000;
+const CLICK_ATTEMPT_TIMEOUT_MS = 5_000;
+const CLICK_RETRY_DELAY_MS = 100;
+const DEFAULT_RUN_WATCHDOG_MS = 40 * 60 * 1_000;
 const TURN_PULSE_MS = 35;
 const ROUND_STALL_ATTEMPTS = 24;
 const MAX_TURN_ATTEMPTS = 600;
@@ -32,10 +38,12 @@ const FINDING_CLASSES = [
   'turn_advance_stall',
   'tray_unresolved',
   'scripted_nudge',
+  'watchdog_timeout',
+  'skipped_dependency',
 ] as const;
 
 type FindingClass = (typeof FINDING_CLASSES)[number];
-type PhaseStatus = 'completed' | 'aborted';
+type PhaseStatus = 'completed' | 'aborted' | 'skipped_dependency';
 
 interface Finding {
   readonly sequence: number;
@@ -57,6 +65,7 @@ interface ParsedOptions {
   readonly date: string;
   readonly run: number;
   readonly port: number;
+  readonly watchdogMs: number;
 }
 
 interface SessionExport {
@@ -79,9 +88,37 @@ interface EncounterOutcome {
 interface TimelineProgress {
   previewListed: boolean;
   delayUsed: boolean;
+  skipUsed: boolean;
   rewindUsed: boolean;
   continuedForward: boolean;
   rewindRound: number | null;
+}
+
+async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+  const timeout = new Promise<never>((_complete, reject) => {
+    timer = globalThis.setTimeout(() => {
+      reject(new Error(`${label} exceeded its ${String(timeoutMs)}ms timeout.`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timer !== undefined) globalThis.clearTimeout(timer);
+  }
+}
+
+function findingDedupeKey(
+  findingClass: FindingClass,
+  phase: string,
+  step: string,
+  detail: string,
+): string {
+  return JSON.stringify([findingClass, phase, step, detail.slice(0, 120)]);
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -139,7 +176,12 @@ async function parseOptions(argv: readonly string[]): Promise<ParsedOptions> {
     ? 0
     : positiveInteger('PORT', requestedPort, 1);
   if (port > 65_535) throw new Error(`PORT must not exceed 65535; received ${String(port)}.`);
-  return { date, run, port };
+  const watchdogMs = positiveInteger(
+    'REHEARSAL_WATCHDOG_MS',
+    process.env.REHEARSAL_WATCHDOG_MS,
+    DEFAULT_RUN_WATCHDOG_MS,
+  );
+  return { date, run, port, watchdogMs };
 }
 
 class FindingsRecorder {
@@ -147,7 +189,11 @@ class FindingsRecorder {
   readonly phases: PhaseResult[] = [];
   readonly seenRefusals = new Set<string>();
   readonly exports: SessionExport[] = [];
+  readonly pendingScreenshots = new Map<string, Promise<void>>();
   screenshotCount = 0;
+  page: Page | null = null;
+  currentPhase = 'driver startup';
+  currentStep = 'parse options';
 
   constructor(
     readonly date: string,
@@ -156,6 +202,21 @@ class FindingsRecorder {
     readonly reportPath: string,
   ) {}
 
+  attachPage(page: Page): void {
+    this.page = page;
+  }
+
+  track(phase: string, step: string): void {
+    this.currentPhase = phase;
+    this.currentStep = step;
+  }
+
+  async flushScreenshots(): Promise<void> {
+    while (this.pendingScreenshots.size > 0) {
+      await Promise.allSettled([...this.pendingScreenshots.values()]);
+    }
+  }
+
   add(
     findingClass: FindingClass,
     phase: string,
@@ -163,8 +224,9 @@ class FindingsRecorder {
     detail: string,
     screenshot: string | null = null,
   ): void {
+    const key = findingDedupeKey(findingClass, phase, step, detail);
     const duplicate = this.findings.findIndex((finding) =>
-      finding.class === findingClass && finding.detail === detail);
+      findingDedupeKey(finding.class, finding.phase, finding.step, finding.detail) === key);
     if (duplicate !== -1) {
       const existing = this.findings[duplicate];
       if (existing === undefined) throw new Error('Finding dedupe index is missing.');
@@ -173,6 +235,7 @@ class FindingsRecorder {
         screenshot: existing.screenshot ?? screenshot,
         count: existing.count + 1,
       });
+      if (existing.screenshot === null && screenshot === null) this.captureFindingScreenshot(key, step);
       return;
     }
     this.findings.push({
@@ -184,6 +247,24 @@ class FindingsRecorder {
       screenshot,
       count: 1,
     });
+    if (screenshot === null) this.captureFindingScreenshot(key, step);
+  }
+
+  private captureFindingScreenshot(key: string, label: string): void {
+    if (this.page === null || this.pendingScreenshots.has(key)) return;
+    const capture = screenshot(this.page, this, label)
+      .then((path) => {
+        if (path === null) return;
+        const index = this.findings.findIndex((finding) =>
+          findingDedupeKey(finding.class, finding.phase, finding.step, finding.detail) === key);
+        const finding = this.findings[index];
+        if (finding === undefined || finding.screenshot !== null) return;
+        this.findings.splice(index, 1, { ...finding, screenshot: path });
+      })
+      .finally(() => {
+        this.pendingScreenshots.delete(key);
+      });
+    this.pendingScreenshots.set(key, capture);
   }
 
   phase(name: string, status: PhaseStatus, detail: string): void {
@@ -205,16 +286,19 @@ class FindingsRecorder {
   summaryBlock(): string {
     const completed = this.phases.filter((phase) => phase.status === 'completed');
     const aborted = this.phases.filter((phase) => phase.status === 'aborted');
+    const skipped = this.phases.filter((phase) => phase.status === 'skipped_dependency');
     const counts = this.counts();
     const clean = counts.page_console_error === 0 &&
       counts.selector_timeout === 0 &&
       counts.turn_advance_stall === 0 &&
-      counts.tray_unresolved === 0;
+      counts.tray_unresolved === 0 &&
+      counts.watchdog_timeout === 0;
     return [
       '## Summary',
       '',
       `Phases completed: ${String(completed.length)}${completed.length === 0 ? '' : ` — ${completed.map((phase) => phase.name).join(', ')}`}`,
       `Phases aborted: ${String(aborted.length)}${aborted.length === 0 ? '' : ` — ${aborted.map((phase) => phase.name).join(', ')}`}`,
+      `Phases skipped (dependency): ${String(skipped.length)}${skipped.length === 0 ? '' : ` — ${skipped.map((phase) => phase.name).join(', ')}`}`,
       'Finding counts by class:',
       '',
       ...FINDING_CLASSES.map((findingClass) =>
@@ -348,11 +432,61 @@ async function screenshot(
   recorder.screenshotCount += 1;
   const path = resolve(recorder.runDirectory, `${String(recorder.screenshotCount).padStart(3, '0')}-${safe || 'finding'}.png`);
   try {
-    await page.screenshot({ path, fullPage: true });
+    await withTimeout(
+      page.screenshot({ path, fullPage: true, timeout: CLEANUP_TIMEOUT_MS }),
+      CLEANUP_TIMEOUT_MS,
+      `capture ${label} screenshot`,
+    );
     return path;
   } catch {
     return null;
   }
+}
+
+async function retryClick(locator: () => Locator, label: string): Promise<void> {
+  const deadline = Date.now() + CLICK_STEP_BUDGET_MS;
+  let attempts = 0;
+  let lastError: unknown = new Error(`${label} was not attempted.`);
+  while (Date.now() < deadline) {
+    attempts += 1;
+    const remaining = deadline - Date.now();
+    const attemptTimeout = Math.min(CLICK_ATTEMPT_TIMEOUT_MS, remaining);
+    const playwrightTimeout = Math.max(1, attemptTimeout - 250);
+    try {
+      await withTimeout(
+        locator().click({ timeout: playwrightTimeout }),
+        attemptTimeout,
+        `${label} click attempt ${String(attempts)}`,
+      );
+      return;
+    } catch (error: unknown) {
+      lastError = error;
+      const delay = Math.min(CLICK_RETRY_DELAY_MS, deadline - Date.now());
+      if (delay > 0) await wait(delay);
+    }
+  }
+  throw new Error(
+    `${label} could not be clicked within ${String(CLICK_STEP_BUDGET_MS)}ms after ${String(attempts)} attempts. Last error: ${errorDetail(lastError)}`,
+  );
+}
+
+async function locatorCount(locator: () => Locator, label: string): Promise<number> {
+  return withTimeout(locator().count(), CLICK_ATTEMPT_TIMEOUT_MS, label);
+}
+
+async function locatorIsVisible(locator: () => Locator, label: string): Promise<boolean> {
+  return withTimeout(locator().isVisible(), CLICK_ATTEMPT_TIMEOUT_MS, label);
+}
+
+function skipDependency(
+  recorder: FindingsRecorder,
+  phase: string,
+  prerequisite: string,
+): void {
+  const detail = `Skipped because prerequisite phase ${prerequisite} did not complete.`;
+  recorder.track(phase, 'skip unmet dependency');
+  recorder.add('skipped_dependency', phase, 'prerequisite phase', detail);
+  recorder.phase(phase, 'skipped_dependency', detail);
 }
 
 async function waitVisible(
@@ -363,8 +497,13 @@ async function waitVisible(
   locator: Locator,
   timeout = UI_TIMEOUT_MS,
 ): Promise<boolean> {
+  recorder.track(phase, step);
   try {
-    await locator.first().waitFor({ state: 'visible', timeout });
+    await withTimeout(
+      locator.first().waitFor({ state: 'visible', timeout }),
+      timeout,
+      step,
+    );
     return true;
   } catch (error: unknown) {
     const image = await screenshot(page, recorder, step);
@@ -373,15 +512,15 @@ async function waitVisible(
   }
 }
 
-function attachPageFindingCapture(page: Page, recorder: FindingsRecorder, currentPhase: () => string): void {
+function attachPageFindingCapture(page: Page, recorder: FindingsRecorder): void {
   page.on('pageerror', (error) => {
-    recorder.add('page_console_error', currentPhase(), 'pageerror', errorDetail(error));
+    recorder.add('page_console_error', recorder.currentPhase, 'pageerror', errorDetail(error));
   });
   page.on('console', (message: ConsoleMessage) => {
     if (message.type() !== 'error') return;
     const location = message.location();
     const source = location.url === '' ? '' : ` (${location.url}:${String(location.lineNumber)})`;
-    recorder.add('page_console_error', currentPhase(), 'console.error', `${message.text()}${source}`);
+    recorder.add('page_console_error', recorder.currentPhase, 'console.error', `${message.text()}${source}`);
   });
 }
 
@@ -424,7 +563,11 @@ async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase
       return resolved;
     }
     try {
-      await options.first().click({ timeout: 5_000 });
+      await retryClick(
+        () => page.locator('.dm-decision-entry[data-entry-kind="pending"]').first()
+          .getByRole('button').first(),
+        `resolve decision tray entry ${heading}`,
+      );
       resolved += 1;
       await wait(20);
     } catch (error: unknown) {
@@ -453,8 +596,24 @@ async function pauseEncounter(page: Page): Promise<void> {
   if (pause === 'interrupted') return;
   const interrupt = page.getByRole('button', { name: 'Interrupt', exact: true });
   if (await interrupt.count() > 0) {
-    await interrupt.click({ timeout: 5_000 });
+    await retryClick(
+      () => page.getByRole('button', { name: 'Interrupt', exact: true }),
+      'interrupt encounter',
+    );
     await page.locator('[data-pause="interrupted"]').waitFor({ state: 'visible', timeout: 5_000 });
+  }
+}
+
+async function resumeEncounter(page: Page): Promise<void> {
+  const pause = await page.locator('[data-pause]').first().getAttribute('data-pause');
+  if (pause === 'none') return;
+  const resume = page.locator('.dm-controls').getByRole('button', { name: 'Resume', exact: true });
+  if (await resume.count() > 0) {
+    await retryClick(
+      () => page.locator('.dm-controls').getByRole('button', { name: 'Resume', exact: true }),
+      'resume encounter',
+    );
+    await page.locator('[data-pause="none"]').waitFor({ state: 'visible', timeout: 5_000 });
   }
 }
 
@@ -464,11 +623,12 @@ async function assignAlgorithms(
   phase: string,
 ): Promise<boolean> {
   try {
+    recorder.track(phase, 'assign algorithm controllers through UI');
     await pauseEncounter(page);
     for (let guard = 0; guard < 40; guard += 1) {
       const human = page.locator('.dm-controller-assignments select').filter({ has: page.locator('option:checked[value="human"]') });
       if (await human.count() === 0) break;
-      await human.first().selectOption('algorithm');
+      await human.first().selectOption('algorithm', { timeout: 5_000 });
       await wait(10);
     }
     const selects = page.locator('.dm-controller-assignments select');
@@ -485,6 +645,7 @@ async function assignAlgorithms(
       );
       return false;
     }
+    await resumeEncounter(page);
     return true;
   } catch (error: unknown) {
     const image = await screenshot(page, recorder, 'assign-algorithm-controllers');
@@ -500,67 +661,18 @@ async function assignAlgorithms(
 }
 
 async function roundOf(page: Page): Promise<number> {
-  const raw = await page.locator('.dm-initiative-timeline').getAttribute('data-round');
+  const raw = await page.locator('.dm-initiative-timeline').getAttribute('data-round', { timeout: 5_000 });
   const round = Number(raw);
   return Number.isSafeInteger(round) ? round : 0;
 }
 
-async function encounterSideState(
+async function visibleEncounterOutcome(
   page: Page,
-  monsterIdFragment: string,
-): Promise<{ readonly playersAlive: number; readonly monstersAlive: number }> {
-  const entries = page.locator('.dm-initiative li[data-combatant-id]');
-  let playersAlive = 0;
-  let monstersAlive = 0;
-  for (let index = 0; index < await entries.count(); index += 1) {
-    const entry = entries.nth(index);
-    const id = await entry.getAttribute('data-combatant-id') ?? '';
-    const life = await entry.getAttribute('data-life');
-    if (life === 'dead') continue;
-    if (id.includes(monsterIdFragment)) monstersAlive += 1;
-    else playersAlive += 1;
-  }
-  return { playersAlive, monstersAlive };
-}
-
-async function tryTimelineControls(
-  page: Page,
-  recorder: FindingsRecorder,
-  phase: string,
-  progress: TimelineProgress,
-): Promise<void> {
-  await observeTimelinePreview(page, progress);
-  if (!progress.delayUsed) {
-    const delay = page.getByRole('button', { name: 'Delay turn', exact: true });
-    if (await delay.count() > 0) {
-      try {
-        await delay.click({ timeout: 5_000 });
-        progress.delayUsed = true;
-      } catch (error: unknown) {
-        recorder.add('scripted_nudge', phase, 'delay one turn', errorDetail(error));
-      }
-    }
-  }
-  if (!progress.rewindUsed && await roundOf(page) >= 2) {
-    const rewind = page.getByRole('button', { name: /^Rewind to round 1$/u });
-    if (await rewind.count() > 0) {
-      try {
-        await rewind.first().click({ timeout: 5_000 });
-        await wait(30);
-        progress.rewindUsed = true;
-        progress.rewindRound = await roundOf(page);
-        // Rewind restores the controller identities captured at that boundary.
-        // The driver must therefore re-apply its UI assignment before asking
-        // the restored branch to continue.
-        await assignAlgorithms(page, recorder, phase);
-      } catch (error: unknown) {
-        recorder.add('scripted_nudge', phase, 'rewind to round 1', errorDetail(error));
-      }
-    }
-  }
-  if (progress.rewindUsed && !progress.continuedForward && await roundOf(page) >= 2) {
-    progress.continuedForward = true;
-  }
+): Promise<'victory' | 'defeat' | 'mutual' | null> {
+  const value = await page.locator('[data-encounter-outcome]')
+    .getAttribute('data-encounter-outcome')
+    .catch(() => null);
+  return value === 'victory' || value === 'defeat' || value === 'mutual' ? value : null;
 }
 
 async function observeTimelinePreview(
@@ -577,41 +689,44 @@ async function observeTimelinePreview(
 }
 
 async function pulseTurn(page: Page): Promise<void> {
-  const pause = await page.locator('[data-pause]').first().getAttribute('data-pause');
-  if (pause !== 'none') {
-    const resume = page.getByRole('button', { name: 'Resume', exact: true });
-    if (await resume.count() > 0) await resume.click({ timeout: 5_000 });
+  const endTurn = (): Locator => page.locator('.dm-pending-request').getByRole('button', {
+    name: 'End turn',
+    exact: true,
+  }).first();
+  if (await locatorCount(endTurn, 'find end-turn control') > 0 &&
+    await locatorIsVisible(endTurn, 'check end-turn control visibility')) {
+    await retryClick(
+      endTurn,
+      'end current turn',
+    );
   }
   await wait(TURN_PULSE_MS);
-  const interrupt = page.getByRole('button', { name: 'Interrupt', exact: true });
-  if (await interrupt.count() > 0) await interrupt.click({ timeout: 5_000 });
-  await wait(10);
 }
 
 async function playEncounter(
   page: Page,
   recorder: FindingsRecorder,
   phase: string,
-  monsterIdFragment: string,
-  timeline: TimelineProgress,
 ): Promise<EncounterOutcome> {
+  recorder.track(phase, 'initialize encounter driver');
   let lastRound = await roundOf(page);
   let unchangedAttempts = 0;
   for (let attempt = 1; attempt <= MAX_TURN_ATTEMPTS; attempt += 1) {
     await captureRefusals(page, recorder, phase);
     await resolveDecisionTray(page, recorder, phase);
-    const side = await encounterSideState(page, monsterIdFragment);
-    if (side.monstersAlive === 0 && side.playersAlive > 0) {
+    const outcome = await visibleEncounterOutcome(page);
+    if (outcome === 'victory') {
       return { kind: 'victory', round: await roundOf(page), attempts: attempt - 1 };
     }
-    if (side.playersAlive === 0 && side.monstersAlive > 0) {
+    if (outcome === 'defeat' || outcome === 'mutual') {
       return { kind: 'defeat', round: await roundOf(page), attempts: attempt - 1 };
     }
-    await tryTimelineControls(page, recorder, phase, timeline);
     try {
+      recorder.track(phase, 'turn pulse through DM controls');
       await pulseTurn(page);
     } catch (error: unknown) {
       recorder.add('scripted_nudge', phase, 'turn pulse through DM controls', errorDetail(error));
+      return { kind: 'aborted', round: lastRound, attempts: attempt };
     }
     const round = await roundOf(page);
     if (round === lastRound) unchangedAttempts += 1;
@@ -649,16 +764,117 @@ async function playEncounter(
   return { kind: 'aborted', round: lastRound, attempts: MAX_TURN_ATTEMPTS };
 }
 
+async function advanceTimelineToRound(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
+  targetRound: number,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= MAX_TURN_ATTEMPTS; attempt += 1) {
+    await captureRefusals(page, recorder, phase);
+    await resolveDecisionTray(page, recorder, phase);
+    if (await roundOf(page) >= targetRound) return true;
+    try {
+      recorder.track(phase, 'advance in-session timeline exercise');
+      await pulseTurn(page);
+    } catch (error: unknown) {
+      recorder.add('scripted_nudge', phase, 'advance in-session timeline exercise', errorDetail(error));
+      return false;
+    }
+  }
+  const image = await screenshot(page, recorder, 'timeline-forward-stall');
+  recorder.add(
+    'turn_advance_stall',
+    phase,
+    'advance in-session timeline exercise',
+    `Timeline exercise did not reach round ${String(targetRound)} after ${String(MAX_TURN_ATTEMPTS)} pulses.`,
+    image,
+  );
+  return false;
+}
+
+async function exerciseTimelineControls(
+  page: Page,
+  recorder: FindingsRecorder,
+  progress: TimelineProgress,
+): Promise<void> {
+  const phase = 'timeline';
+  await observeTimelinePreview(page, progress, 2_000);
+
+  const controls = page.locator('.dm-controls');
+  const delay = controls.getByRole('button', { name: 'Delay turn', exact: true });
+  if (await waitVisible(page, recorder, phase, 'delay one turn', delay, 10_000)) {
+    await retryClick(
+      () => page.locator('.dm-controls').getByRole('button', { name: 'Delay turn', exact: true }),
+      'delay one turn',
+    );
+    progress.delayUsed = true;
+    await wait(30);
+  }
+
+  const skip = controls.getByRole('button', { name: 'Skip turn', exact: true });
+  if (await waitVisible(page, recorder, phase, 'skip one turn', skip, 10_000)) {
+    await retryClick(
+      () => page.locator('.dm-controls').getByRole('button', { name: 'Skip turn', exact: true }),
+      'skip one turn',
+    );
+    progress.skipUsed = true;
+    await wait(30);
+  }
+
+  const reachedRoundTwo = await advanceTimelineToRound(page, recorder, phase, 2);
+  if (reachedRoundTwo) {
+    const rewind = page.locator('.dm-round-rewind').getByRole('button', {
+      name: 'Rewind to round 1',
+      exact: true,
+    });
+    if (await waitVisible(page, recorder, phase, 'rewind to round 1', rewind, 10_000)) {
+      await retryClick(
+        () => page.locator('.dm-round-rewind').getByRole('button', {
+          name: 'Rewind to round 1',
+          exact: true,
+        }),
+        'rewind to round 1',
+      );
+      await page.locator('.dm-initiative-timeline[data-round="1"]').waitFor({
+        state: 'visible',
+        timeout: 10_000,
+      });
+      progress.rewindUsed = true;
+      progress.rewindRound = await roundOf(page);
+      if (await assignAlgorithms(page, recorder, phase)) {
+        progress.continuedForward = await advanceTimelineToRound(page, recorder, phase, 2);
+      }
+    }
+  }
+
+  const complete = progress.previewListed && progress.delayUsed && progress.skipUsed &&
+    progress.rewindUsed && progress.continuedForward;
+  if (!complete) {
+    recorder.add(
+      'scripted_nudge',
+      phase,
+      'complete timeline exercise',
+      `Timeline coverage was preview=${String(progress.previewListed)}, delay=${String(progress.delayUsed)}, skip=${String(progress.skipUsed)}, rewind=${String(progress.rewindUsed)}, forward=${String(progress.continuedForward)}.`,
+    );
+  }
+  recorder.phase(phase, complete ? 'completed' : 'aborted', complete
+    ? `Listed scheduled events, delayed and skipped once, rewound to round ${String(progress.rewindRound)}, and advanced forward again.`
+    : 'One or more required timeline controls could not be exercised on the live session board.');
+}
+
 async function resetApplication(page: Page, baseUrl: string, recorder: FindingsRecorder): Promise<boolean> {
   const phase = 'new session';
-  await page.goto(baseUrl);
+  recorder.track(phase, 'navigate to application');
+  await page.goto(baseUrl, { timeout: UI_TIMEOUT_MS });
   if (!await waitVisible(page, recorder, phase, 'wait for application database', page.locator('#status[data-ready="true"]'))) {
     recorder.phase(phase, 'aborted', 'Application database did not become ready.');
     return false;
   }
   try {
-    await page.evaluate(async () => window.staticApp.reset());
-    await page.reload();
+    recorder.track(phase, 'reset application data');
+    await withTimeout(page.evaluate(async () => window.staticApp.reset()), UI_TIMEOUT_MS, 'reset application data');
+    await page.reload({ timeout: UI_TIMEOUT_MS });
     await page.locator('#status[data-ready="true"]').waitFor({ state: 'visible', timeout: UI_TIMEOUT_MS });
     recorder.phase(phase, 'completed', 'Reset browser data and opened a fresh application session.');
     return true;
@@ -676,14 +892,18 @@ async function loadDungeon(
   recorder: FindingsRecorder,
 ): Promise<boolean> {
   const phase = 'representative party';
-  await page.goto(`${baseUrl}/vtt?encounter=d365`);
+  recorder.track(phase, 'navigate to bundled dungeon');
+  await page.goto(`${baseUrl}/vtt?encounter=d365`, { timeout: UI_TIMEOUT_MS });
   const loader = page.getByRole('button', { name: 'Load bundled dungeon and party', exact: true });
   if (!await waitVisible(page, recorder, phase, 'open bundled dungeon loader', loader)) {
     recorder.phase(phase, 'aborted', 'Bundled dungeon loader was unavailable.');
     return false;
   }
-  await page.getByLabel('Encounter seed', { exact: true }).fill(String(REHEARSAL_SEED));
-  await loader.click();
+  await page.getByLabel('Encounter seed', { exact: true }).fill(String(REHEARSAL_SEED), { timeout: 5_000 });
+  await retryClick(
+    () => page.getByRole('button', { name: 'Load bundled dungeon and party', exact: true }),
+    'load bundled dungeon and party',
+  );
   if (!await waitVisible(page, recorder, phase, 'author representative party and mount DM controls', page.getByRole('heading', { name: 'DM controls' }))) {
     recorder.phase(phase, 'aborted', 'Representative party did not load.');
     return false;
@@ -727,6 +947,16 @@ async function transitionToNextDungeonRoom(
   completedRoom: number,
 ): Promise<boolean> {
   const phase = `dungeon room ${String(completedRoom)}`;
+  const outcome = await visibleEncounterOutcome(page);
+  if (outcome !== 'victory') {
+    recorder.add(
+      'scripted_nudge',
+      phase,
+      `refuse room boundary after room ${String(completedRoom)}`,
+      `Room-boundary control was not clicked because the encounter outcome was ${outcome ?? 'not concluded'}.`,
+    );
+    return false;
+  }
   const shortRest = page.getByRole('button', { name: 'Take Short Rest and enter next room', exact: true });
   const direct = page.getByRole('button', { name: 'End room and enter next room', exact: true });
   const control = await shortRest.count() > 0 ? shortRest : direct;
@@ -734,7 +964,15 @@ async function transitionToNextDungeonRoom(
   if (!await waitVisible(page, recorder, phase, `${label} after room ${String(completedRoom)}`, control, 10_000)) {
     return false;
   }
-  await control.click();
+  await retryClick(
+    () => page.getByRole('button', {
+      name: label === 'short rest'
+        ? 'Take Short Rest and enter next room'
+        : 'End room and enter next room',
+      exact: true,
+    }),
+    `${label} after room ${String(completedRoom)}`,
+  );
   return waitVisible(
     page,
     recorder,
@@ -752,7 +990,13 @@ async function completeLongRest(page: Page, recorder: FindingsRecorder): Promise
     recorder.phase(phase, 'aborted', 'DM long-rest control was unavailable.');
     return false;
   }
-  await button.click();
+  await retryClick(
+    () => page.getByRole('button', {
+      name: 'Complete Long Rest and end adventuring day',
+      exact: true,
+    }),
+    'complete long rest',
+  );
   const ended = await waitVisible(
     page,
     recorder,
@@ -767,90 +1011,146 @@ async function completeLongRest(page: Page, recorder: FindingsRecorder): Promise
   return ended;
 }
 
-async function configureSaveFolder(page: Page, recorder: FindingsRecorder, phase: string): Promise<boolean> {
-  const manager = page.locator('.dm-save-manager');
-  if (!await waitVisible(page, recorder, phase, 'open save manager', manager, 10_000)) return false;
-  if (await manager.getAttribute('data-mode') === 'folder') return true;
-  const choose = manager.getByRole('button', { name: 'Choose default folder', exact: true });
-  if (!await waitVisible(page, recorder, phase, 'choose default save folder', choose, 10_000)) return false;
-  await choose.click();
-  return waitVisible(page, recorder, phase, 'activate default save folder', page.locator('.dm-save-manager[data-mode="folder"]'), 10_000);
-}
+type ManualFileSave =
+  | { readonly kind: 'folder'; readonly row: () => Locator }
+  | { readonly kind: 'download'; readonly exported: SessionExport };
 
-async function saveCurrentToFolder(page: Page, recorder: FindingsRecorder, phase: string): Promise<Locator | null> {
-  if (!await configureSaveFolder(page, recorder, phase)) return null;
-  const before = await page.locator('.dm-save-row[data-source="folder"]').count();
-  const save = page.getByRole('button', { name: 'Save now', exact: true });
-  if (!await waitVisible(page, recorder, phase, 'create manual file save', save, 10_000)) return null;
-  await save.click();
+async function createManualFileSave(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
+): Promise<ManualFileSave | null> {
+  const manager = page.locator('.dm-save-manager');
+  if (!await waitVisible(page, recorder, phase, 'open save manager', manager, 10_000)) return null;
+  recorder.track(phase, 'detect save-manager mode');
+  if (await manager.getAttribute('data-mode', { timeout: 5_000 }) !== 'folder') {
+    const save = manager.getByRole('button', { name: 'Download save now', exact: true });
+    if (!await waitVisible(page, recorder, phase, 'create fallback manual file save', save, 10_000)) return null;
+    try {
+      recorder.track(phase, 'wait for fallback manual-save download');
+      const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
+      await retryClick(
+        () => page.locator('.dm-save-manager')
+          .getByRole('button', { name: 'Download save now', exact: true }),
+        'download save now',
+      );
+      const download: Download = await pendingDownload;
+      return {
+        kind: 'download',
+        exported: await recordDownloadedExport(download, recorder, phase, 'd365-session'),
+      };
+    } catch (error: unknown) {
+      const image = await screenshot(page, recorder, 'manual-file-save-download');
+      recorder.add('selector_timeout', phase, 'create fallback manual file save', errorDetail(error), image);
+      recordFailedExport(recorder, phase, 'd365-session');
+      return null;
+    }
+  }
+
+  const before = await manager.locator('.dm-save-row[data-source="folder"]').count();
+  const save = manager.getByRole('button', { name: 'Save now', exact: true });
+  if (!await waitVisible(page, recorder, phase, 'create folder manual file save', save, 10_000)) return null;
+  await retryClick(
+    () => page.locator('.dm-save-manager')
+      .getByRole('button', { name: 'Save now', exact: true }),
+    'save current session to folder',
+  );
   try {
+    recorder.track(phase, 'wait for folder save row');
     await page.waitForFunction((count) =>
-      document.querySelectorAll('.dm-save-row[data-source="folder"]').length >= Number(count), before === 0 ? 1 : before);
+      document.querySelectorAll('.dm-save-row[data-source="folder"]').length >= Number(count), before + 1, {
+        timeout: 10_000,
+      });
   } catch (error: unknown) {
     const image = await screenshot(page, recorder, 'manual-file-save');
     recorder.add('selector_timeout', phase, 'create manual file save', errorDetail(error), image);
     return null;
   }
-  return page.locator('.dm-save-row[data-source="folder"]').first();
+  return {
+    kind: 'folder',
+    row: () => page.locator('.dm-save-manager .dm-save-row[data-source="folder"]').first(),
+  };
 }
 
 async function downloadExport(
   page: Page,
-  row: Locator,
+  row: () => Locator,
   recorder: FindingsRecorder,
   phase: string,
   label: string,
 ): Promise<SessionExport | null> {
-  const button = row.getByRole('button', { name: 'Export copy', exact: true });
+  const button = row().getByRole('button', { name: 'Export copy', exact: true });
   if (!await waitVisible(page, recorder, phase, `export ${label} session record`, button, 10_000)) return null;
   try {
+    recorder.track(phase, `wait for ${label} export download`);
     const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
-    await button.click();
+    await retryClick(
+      () => row().getByRole('button', { name: 'Export copy', exact: true }),
+      `export ${label} session record`,
+    );
     const download: Download = await pendingDownload;
-    const filename = `${label}.vtt.json`;
-    const path = resolve(recorder.runDirectory, filename);
-    await download.saveAs(path);
-    const bytes = await readFile(path, 'utf8');
-    const value: unknown = JSON.parse(bytes);
-    const sessionRecord = isRecord(value) && isRecord(value.sessionRecord)
-      ? value.sessionRecord
-      : null;
-    const encounters = sessionRecord === null ? null : sessionRecord.encounters;
-    const revisions = isRecord(value) && Array.isArray(value.revisions) ? value.revisions : [];
-    const firstRevision = revisions[0];
-    const rngState = isRecord(firstRevision) && isRecord(firstRevision.rngState)
-      ? firstRevision.rngState
-      : null;
-    const seed = rngState !== null && typeof rngState.initialSeed === 'number' &&
-      Number.isSafeInteger(rngState.initialSeed)
-      ? rngState.initialSeed
-      : null;
-    const result: SessionExport = {
-      phase,
-      filename,
-      encounterCount: Array.isArray(encounters) ? encounters.length : 0,
-      parsed: true,
-      hasSessionRecord: Array.isArray(encounters),
-      hasAlarm: bytes.includes('cinder-wave-1-a') || bytes.includes('alarm_used'),
-      hasIgnition: bytes.includes('surface_ignited') || /"burningCells":\[(?!\])/u.test(bytes),
-      seed,
-    };
-    recorder.exports.push(result);
-    return result;
+    return await recordDownloadedExport(download, recorder, phase, label);
   } catch (error: unknown) {
     recorder.add('scripted_nudge', phase, `export ${label} session record`, errorDetail(error));
-    recorder.exports.push({
-      phase,
-      filename: `${label}.vtt.json`,
-      encounterCount: 0,
-      parsed: false,
-      hasSessionRecord: false,
-      hasAlarm: false,
-      hasIgnition: false,
-      seed: null,
-    });
+    recordFailedExport(recorder, phase, label);
     return null;
   }
+}
+
+async function recordDownloadedExport(
+  download: Download,
+  recorder: FindingsRecorder,
+  phase: string,
+  label: string,
+): Promise<SessionExport> {
+  const filename = `${label}.vtt.json`;
+  const path = resolve(recorder.runDirectory, filename);
+  recorder.track(phase, `save ${label} export download`);
+  await withTimeout(download.saveAs(path), 10_000, `save ${label} export download`);
+  const bytes = await withTimeout(readFile(path, 'utf8'), 10_000, `read ${label} export download`);
+  const value: unknown = JSON.parse(bytes);
+  const sessionRecord = isRecord(value) && isRecord(value.sessionRecord)
+    ? value.sessionRecord
+    : null;
+  const encounters = sessionRecord === null ? null : sessionRecord.encounters;
+  const revisions = isRecord(value) && Array.isArray(value.revisions) ? value.revisions : [];
+  const firstRevision = revisions[0];
+  const rngState = isRecord(firstRevision) && isRecord(firstRevision.rngState)
+    ? firstRevision.rngState
+    : null;
+  const seed = rngState !== null && typeof rngState.initialSeed === 'number' &&
+    Number.isSafeInteger(rngState.initialSeed)
+    ? rngState.initialSeed
+    : null;
+  const result: SessionExport = {
+    phase,
+    filename,
+    encounterCount: Array.isArray(encounters) ? encounters.length : 0,
+    parsed: true,
+    hasSessionRecord: Array.isArray(encounters),
+    hasAlarm: bytes.includes('cinder-wave-1-a') || bytes.includes('alarm_used'),
+    hasIgnition: bytes.includes('surface_ignited') || /"burningCells":\[(?!\])/u.test(bytes),
+    seed,
+  };
+  recorder.exports.push(result);
+  return result;
+}
+
+function recordFailedExport(
+  recorder: FindingsRecorder,
+  phase: string,
+  label: string,
+): void {
+  recorder.exports.push({
+    phase,
+    filename: `${label}.vtt.json`,
+    encounterCount: 0,
+    parsed: false,
+    hasSessionRecord: false,
+    hasAlarm: false,
+    hasIgnition: false,
+    seed: null,
+  });
 }
 
 async function saveManagerRoundTrip(
@@ -863,122 +1163,253 @@ async function saveManagerRoundTrip(
   const boundary = browserRows.filter({ has: page.locator('.dm-save-pool', { hasText: /^Encounter-boundary autosave$/u }) });
   const poolsPresent = await waitVisible(page, recorder, phase, 'find per-round autosave pool', perRound, 10_000) &&
     await waitVisible(page, recorder, phase, 'find encounter-boundary autosave pool', boundary, 10_000);
-  const row = await saveCurrentToFolder(page, recorder, phase);
-  if (row === null) {
+  const manualSave = await createManualFileSave(page, recorder, phase);
+  if (manualSave === null) {
     recorder.phase(phase, 'aborted', 'Could not create a manual file save.');
     return null;
   }
-  await pauseEncounter(page);
-  const history = page.locator('details ol [data-revision]');
-  await page.getByText('Full revision history', { exact: true }).click();
-  const revisionCount = await history.count();
-  const exported = await downloadExport(page, row, recorder, phase, 'd365-session');
-  const load = row.getByRole('button', { name: 'Load', exact: true });
-  if (!await waitVisible(page, recorder, phase, 'load manual save', load, 10_000)) {
-    recorder.phase(phase, 'aborted', 'Manual save could not be loaded.');
-    return exported;
-  }
-  await load.click();
-  const mounted = await waitVisible(page, recorder, phase, 'mount loaded save', page.getByRole('heading', { name: 'DM controls' }), 20_000);
-  if (mounted) {
-    await page.getByText('Full revision history', { exact: true }).click();
-    const loadedCount = await page.locator('details ol [data-revision]').count();
-    if (loadedCount < revisionCount) {
-      const image = await screenshot(page, recorder, 'load-round-trip-history');
-      recorder.add(
-        'selector_timeout',
-        phase,
-        'verify load round-trip',
-        `Revision history shrank from ${String(revisionCount)} to ${String(loadedCount)}.`,
-        image,
+  let exported: SessionExport | null;
+  let loadPathReady: boolean;
+  if (manualSave.kind === 'download') {
+    exported = manualSave.exported;
+    loadPathReady = await waitVisible(
+      page,
+      recorder,
+      phase,
+      'find fallback upload path',
+      page.locator('.dm-save-manager').getByRole('button', { name: 'Upload save file', exact: true }),
+      10_000,
+    );
+  } else {
+    await pauseEncounter(page);
+    const history = page.locator('details ol [data-revision]');
+    await retryClick(
+      () => page.getByText('Full revision history', { exact: true }),
+      'open full revision history',
+    );
+    const revisionCount = await history.count();
+    exported = await downloadExport(page, manualSave.row, recorder, phase, 'd365-session');
+    const load = manualSave.row().getByRole('button', { name: 'Load', exact: true });
+    if (!await waitVisible(page, recorder, phase, 'load manual save', load, 10_000)) {
+      recorder.phase(phase, 'aborted', 'Manual save could not be loaded.');
+      return exported;
+    }
+    await retryClick(
+      () => manualSave.row().getByRole('button', { name: 'Load', exact: true }),
+      'load manual save',
+    );
+    loadPathReady = await waitVisible(page, recorder, phase, 'mount loaded save', page.getByRole('heading', { name: 'DM controls' }), 20_000);
+    if (loadPathReady) {
+      await retryClick(
+        () => page.getByText('Full revision history', { exact: true }),
+        'open loaded full revision history',
       );
+      const loadedCount = await page.locator('details ol [data-revision]').count();
+      if (loadedCount < revisionCount) {
+        const image = await screenshot(page, recorder, 'load-round-trip-history');
+        recorder.add(
+          'selector_timeout',
+          phase,
+          'verify load round-trip',
+          `Revision history shrank from ${String(revisionCount)} to ${String(loadedCount)}.`,
+          image,
+        );
+      }
     }
   }
-  const complete = poolsPresent && mounted && exported?.parsed === true &&
-    exported.hasSessionRecord && exported.seed === REHEARSAL_SEED;
+  const complete = poolsPresent && loadPathReady && exported?.parsed === true &&
+    exported.hasSessionRecord && exported.encounterCount === 4 && exported.seed === REHEARSAL_SEED;
   recorder.phase(phase, complete ? 'completed' : 'aborted', complete
-    ? `Found both autosave pools, created and loaded a manual file save, and parsed ${String(exported.encounterCount)} exported encounter records with seed ${String(exported.seed)}.`
+    ? `Found both autosave pools, exercised the ${manualSave.kind === 'download' ? 'download/upload fallback' : 'folder save/load path'}, and parsed ${String(exported?.encounterCount)} exported encounter records with seed ${String(exported?.seed)}.`
     : 'One or more save-manager checks did not complete.');
   return exported;
 }
 
-async function openVaneFight(
+async function openVaneWarrenSession(
   page: Page,
   baseUrl: string,
   recorder: FindingsRecorder,
-  fightName: string,
+  phase: string,
 ): Promise<boolean> {
-  const phase = `Vane Warren — ${fightName}`;
-  await page.goto(`${baseUrl}/vtt?encounter=vane-warren`);
-  const load = page.getByRole('button', { name: `Load ${fightName}`, exact: true });
-  if (!await waitVisible(page, recorder, phase, `load ${fightName}`, load)) {
-    recorder.phase(phase, 'aborted', 'Fight loader was unavailable.');
+  recorder.track(phase, 'navigate to Vane Warren');
+  await page.goto(`${baseUrl}/vtt?encounter=vane-warren`, { timeout: UI_TIMEOUT_MS });
+  const start = page.getByRole('button', { name: 'Start the Vane Warren', exact: true });
+  if (!await waitVisible(page, recorder, phase, 'open Vane Warren start flow', start)) {
+    recorder.phase(phase, 'aborted', 'Vane Warren session start flow was unavailable.');
     return false;
   }
-  await load.click();
+  await retryClick(
+    () => page.getByRole('button', { name: 'Start the Vane Warren', exact: true }),
+    'start the Vane Warren',
+  );
   const heading = page.getByRole('heading', { name: 'DM controls' });
   const status = page.locator('.vane-warren-loader-status');
   const deadline = Date.now() + UI_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (await heading.count() > 0 && await heading.isVisible()) return true;
-    const message = await status.evaluate((node) =>
-      node instanceof HTMLOutputElement ? node.value.trim() : node.textContent?.trim() ?? '');
+    const message = await status.count() === 0
+      ? ''
+      : await status.evaluate((node) =>
+          node instanceof HTMLOutputElement ? node.value.trim() : node.textContent?.trim() ?? '');
     if (message !== '' && !message.startsWith('Authoring the bundled')) {
-      const image = await screenshot(page, recorder, `mount-${fightName}`);
-      recorder.add('selector_timeout', phase, `mount ${fightName}`, `Loader stopped before DM controls mounted: ${message}`, image);
-      recorder.phase(phase, 'aborted', 'Fight loader surfaced a terminal UI dead end.');
+      const image = await screenshot(page, recorder, 'mount-vane-warren-session');
+      recorder.add('selector_timeout', phase, 'mount Vane Warren session', `Start flow stopped before DM controls mounted: ${message}`, image);
+      recorder.phase(phase, 'aborted', 'Vane Warren start flow surfaced a terminal UI dead end.');
       return false;
     }
     await wait(100);
   }
-  const image = await screenshot(page, recorder, `mount-${fightName}`);
-  recorder.add('selector_timeout', phase, `mount ${fightName}`, 'DM controls did not mount before the loader timeout.', image);
-  recorder.phase(phase, 'aborted', 'Fight did not mount.');
+  const image = await screenshot(page, recorder, 'mount-vane-warren-session');
+  recorder.add('selector_timeout', phase, 'mount Vane Warren session', 'DM controls did not mount before the start-flow timeout.', image);
+  recorder.phase(phase, 'aborted', 'Vane Warren session did not mount.');
   return false;
 }
 
-async function resetCharacterDatabaseForVaneFight(
+async function prepareVaneWarrenSession(
   page: Page,
   baseUrl: string,
   recorder: FindingsRecorder,
   phase: string,
 ): Promise<boolean> {
   try {
-    await page.goto(baseUrl);
+    recorder.track(phase, 'clear prior Vane Warren session state');
+    await page.goto(baseUrl, { timeout: UI_TIMEOUT_MS });
     await page.locator('#status[data-ready="true"]').waitFor({ state: 'visible', timeout: UI_TIMEOUT_MS });
-    await page.evaluate(() => {
+    await withTimeout(page.evaluate(() => {
       const keys: string[] = [];
       for (let index = 0; index < localStorage.length; index += 1) {
         const key = localStorage.key(index);
         if (key?.startsWith('srd55:vtt') === true) keys.push(key);
       }
       for (const key of keys) localStorage.removeItem(key);
-    });
-    await page.evaluate(async () => window.staticApp.reset());
-    await page.reload();
+    }), UI_TIMEOUT_MS, 'clear Vane Warren local storage');
+    await withTimeout(page.evaluate(async () => window.staticApp.reset()), UI_TIMEOUT_MS, 'reset Vane Warren application data');
+    await page.reload({ timeout: UI_TIMEOUT_MS });
     await page.locator('#status[data-ready="true"]').waitFor({ state: 'visible', timeout: UI_TIMEOUT_MS });
-    recorder.add(
-      'scripted_nudge',
-      phase,
-      'prepare representative party for separate fight loader',
-      'Each Vane Warren loader authors the same fixed representative party again and uses a separate session ID; the driver exported prior work, then reset character and VTT browser storage so duplicate-operation and quota failures would not prevent the next loader from mounting.',
-    );
     return true;
   } catch (error: unknown) {
-    const image = await screenshot(page, recorder, 'reset-vane-character-database');
-    recorder.add('selector_timeout', phase, 'reset character database for fight loader', errorDetail(error), image);
+    const image = await screenshot(page, recorder, 'prepare-vane-warren-session');
+    recorder.add('selector_timeout', phase, 'prepare separate Vane Warren session', errorDetail(error), image);
     return false;
   }
 }
 
-async function exportCurrentFight(
+async function waitForVaneWarrenFight(
   page: Page,
   recorder: FindingsRecorder,
   phase: string,
-  slug: string,
+  fightNumber: number,
+): Promise<boolean> {
+  return waitVisible(
+    page,
+    recorder,
+    phase,
+    `enter Vane Warren fight ${String(fightNumber)}`,
+    page.locator(`.adventuring-day-status[data-room="${String(fightNumber)}"]`),
+    10_000,
+  );
+}
+
+async function transitionToNextVaneWarrenFight(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
+  completedFight: number,
+): Promise<boolean> {
+  const outcome = await visibleEncounterOutcome(page);
+  if (outcome !== 'victory') {
+    recorder.add(
+      'scripted_nudge',
+      phase,
+      `refuse fight boundary after Vane Warren fight ${String(completedFight)}`,
+      `Room-boundary control was not clicked because the encounter outcome was ${outcome ?? 'not concluded'}.`,
+    );
+    return false;
+  }
+  const control = page.getByRole('button', { name: 'End room and enter next room', exact: true });
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    `cross boundary after Vane Warren fight ${String(completedFight)}`,
+    control,
+    10_000,
+  )) return false;
+  await retryClick(
+    () => page.getByRole('button', { name: 'End room and enter next room', exact: true }),
+    `cross boundary after Vane Warren fight ${String(completedFight)}`,
+  );
+  return waitForVaneWarrenFight(page, recorder, phase, completedFight + 1);
+}
+
+async function endVaneWarrenSession(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
 ): Promise<SessionExport | null> {
-  const row = await saveCurrentToFolder(page, recorder, phase);
-  return row === null ? null : downloadExport(page, row, recorder, phase, slug);
+  const label = 'vane-warren-session';
+  const control = page.getByRole('button', { name: 'End Session and export', exact: true });
+  if (!await waitVisible(page, recorder, phase, 'end chained Vane Warren session', control, 10_000)) {
+    return null;
+  }
+  try {
+    recorder.track(phase, 'wait for final Vane Warren export download');
+    const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
+    await retryClick(
+      () => page.getByRole('button', { name: 'End Session and export', exact: true }),
+      'end chained Vane Warren session',
+    );
+    const download: Download = await pendingDownload;
+    const exported = await recordDownloadedExport(download, recorder, phase, label);
+    await waitVisible(
+      page,
+      recorder,
+      phase,
+      'confirm finalized Vane Warren session',
+      page.locator('.dm-end-session-export-status'),
+      10_000,
+    );
+    return exported;
+  } catch (error: unknown) {
+    recorder.add('scripted_nudge', phase, 'end chained Vane Warren session', errorDetail(error));
+    recordFailedExport(recorder, phase, label);
+    return null;
+  }
+}
+
+class PreviewInfrastructureError extends Error {}
+
+function assertPreviewRunning(preview: ChildProcess): void {
+  if (preview.exitCode === null && preview.signalCode === null) return;
+  throw new PreviewInfrastructureError(
+    `Built preview stopped unexpectedly (exit=${String(preview.exitCode)}, signal=${String(preview.signalCode)}).`,
+  );
+}
+
+async function runIsolatedPhase<T>(
+  preview: ChildProcess,
+  recorder: FindingsRecorder,
+  phase: string,
+  task: () => Promise<T>,
+): Promise<T | null> {
+  recorder.track(phase, 'run isolated phase');
+  assertPreviewRunning(preview);
+  try {
+    const result = await task();
+    assertPreviewRunning(preview);
+    await recorder.flushScreenshots();
+    return result;
+  } catch (error: unknown) {
+    assertPreviewRunning(preview);
+    recorder.add('selector_timeout', phase, 'phase abort', errorDetail(error));
+    recorder.phase(
+      phase,
+      'aborted',
+      'Phase aborted after an unexpected UI or driver error; the rehearsal continued to the next phase.',
+    );
+    await recorder.flushScreenshots();
+    return null;
+  }
 }
 
 async function main(): Promise<void> {
@@ -993,85 +1424,198 @@ async function main(): Promise<void> {
   let currentPhase = 'preview startup';
   let preview: ChildProcess | null = null;
   let browser: Browser | null = null;
+  let context: BrowserContext | null = null;
+  let reportWritten = false;
+  let watchdogHandling = false;
+  const watchdogTimer = globalThis.setTimeout(() => {
+    if (reportWritten || watchdogHandling) return;
+    watchdogHandling = true;
+    void (async () => {
+      const stuckPhase = recorder.currentPhase;
+      const stuckStep = recorder.currentStep;
+      recorder.page = null;
+      recorder.add(
+        'watchdog_timeout',
+        stuckPhase,
+        stuckStep,
+        `Global run watchdog expired after ${String(options.watchdogMs)}ms while this step was still pending.`,
+      );
+      recorder.phase(
+        stuckPhase,
+        'aborted',
+        `Global run watchdog expired during ${stuckStep}; the partial findings report was written before forced exit.`,
+      );
+      await recorder.write(baseUrl);
+      reportWritten = true;
+      process.stdout.write(`\n${recorder.summaryBlock()}\n\nFindings: ${recorder.reportPath}\n`);
+      if (context !== null) {
+        await withTimeout(context.close(), CLEANUP_TIMEOUT_MS, 'watchdog browser-context cleanup')
+          .catch(() => undefined);
+      }
+      if (browser !== null) {
+        await withTimeout(browser.close(), CLEANUP_TIMEOUT_MS, 'watchdog browser cleanup')
+          .catch(() => undefined);
+      }
+      if (preview !== null) await stopPreview(preview).catch(() => undefined);
+      process.exit(1);
+    })().catch((error: unknown) => {
+      process.stderr.write(`Watchdog could not write the rehearsal report: ${errorDetail(error)}\n`);
+      process.exit(1);
+    });
+  }, options.watchdogMs);
 
   try {
+    recorder.track(currentPhase, 'start built preview');
     preview = await startPreview(options.port, resolve(runDirectory, 'preview.log'));
+    recorder.track(currentPhase, 'wait for built preview readiness');
     baseUrl = await waitForPreview(preview);
     recorder.phase('preview startup', 'completed', 'Fresh npm build passed and the built preview accepted requests.');
 
-    browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({ acceptDownloads: true, baseURL: baseUrl });
-    await context.addInitScript(() => {
-      Reflect.set(window, 'showDirectoryPicker', async () => navigator.storage.getDirectory());
-    });
-    const page = await context.newPage();
-    attachPageFindingCapture(page, recorder, () => currentPhase);
+    recorder.track(currentPhase, 'launch Playwright Chromium');
+    browser = await chromium.launch({ headless: true, timeout: APP_READY_TIMEOUT_MS });
+    recorder.track(currentPhase, 'create browser context');
+    context = await withTimeout(
+      browser.newContext({ acceptDownloads: true, baseURL: baseUrl }),
+      UI_TIMEOUT_MS,
+      'create browser context',
+    );
+    recorder.track(currentPhase, 'open and attach browser page');
+    const page = await withTimeout(context.newPage(), UI_TIMEOUT_MS, 'open browser page');
+    page.setDefaultTimeout(UI_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(UI_TIMEOUT_MS);
+    recorder.attachPage(page);
+    attachPageFindingCapture(page, recorder);
 
     currentPhase = 'new session';
-    const reset = await resetApplication(page, baseUrl, recorder);
-    currentPhase = 'representative party';
-    const dungeonLoaded = reset && await loadDungeon(page, baseUrl, recorder);
-    const timeline: TimelineProgress = {
-      previewListed: false,
-      delayUsed: false,
-      rewindUsed: false,
-      continuedForward: false,
-      rewindRound: null,
-    };
+    const newSessionReady = await runIsolatedPhase(preview, recorder, currentPhase, async () =>
+      resetApplication(page, baseUrl, recorder));
 
-    if (dungeonLoaded) {
-      for (let room = 1; room <= 4; room += 1) {
-        currentPhase = `dungeon room ${String(room)}`;
-        if (!await advanceDungeonRoom(page, recorder, room)) continue;
-        const outcome = await playEncounter(page, recorder, currentPhase, `d365-room-${String(room)}-monster`, timeline);
-        recorder.phase(currentPhase, outcome.kind === 'aborted' ? 'aborted' : 'completed',
-          `${outcome.kind} at round ${String(outcome.round)} after ${String(outcome.attempts)} driver pulses.`);
-        if (room === 4) continue;
-        if (outcome.kind === 'aborted') {
-          recorder.add(
-            'scripted_nudge',
-            currentPhase,
-            'leave an aborted dungeon room',
-            'The turn phase stalled; the driver attempted the offered room-boundary control so later rooms could still be rehearsed.',
-          );
-        }
-        await transitionToNextDungeonRoom(page, recorder, room);
+    currentPhase = 'representative party';
+    const representativePartyReady = newSessionReady === true
+      ? await runIsolatedPhase(preview, recorder, currentPhase, async () =>
+          loadDungeon(page, baseUrl, recorder))
+      : (skipDependency(recorder, currentPhase, 'new session'), false);
+
+    let dungeonReady = representativePartyReady === true;
+    for (let room = 1; room <= 4; room += 1) {
+      currentPhase = `dungeon room ${String(room)}`;
+      const prerequisite = room === 1 ? 'representative party' : `dungeon room ${String(room - 1)}`;
+      if (!dungeonReady) {
+        skipDependency(recorder, currentPhase, prerequisite);
+        continue;
       }
-      currentPhase = 'long rest';
-      await completeLongRest(page, recorder);
-      currentPhase = 'save manager';
-      await saveManagerRoundTrip(page, recorder);
+      const roomReady = await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+        if (!await advanceDungeonRoom(page, recorder, room)) return false;
+        const outcome = await playEncounter(page, recorder, currentPhase);
+        recorder.phase(currentPhase, outcome.kind === 'victory' ? 'completed' : 'aborted',
+          `${outcome.kind} at round ${String(outcome.round)} after ${String(outcome.attempts)} driver pulses.`);
+        if (room === 4) return outcome.kind === 'victory';
+        if (outcome.kind !== 'victory') return false;
+        if (!await transitionToNextDungeonRoom(page, recorder, room)) {
+          recorder.phase(currentPhase, 'aborted', 'Could not cross the room boundary; later phases continued.');
+          return false;
+        }
+        return true;
+      });
+      dungeonReady = roomReady === true;
     }
 
-    const fights = [
-      { name: 'The Cinder Rite', slug: 'cinder-rite' },
-      { name: 'The Iron Voice', slug: 'iron-voice' },
-      { name: 'The Last Muster', slug: 'last-muster' },
-    ] as const;
-    for (const [index, fight] of fights.entries()) {
-      currentPhase = `Vane Warren — ${fight.name}`;
-      if (!await resetCharacterDatabaseForVaneFight(page, baseUrl, recorder, currentPhase)) {
-        recorder.phase(currentPhase, 'aborted', 'Could not prepare the fixed representative-party loader.');
+    currentPhase = 'long rest';
+    const longRestReady = dungeonReady
+      ? await runIsolatedPhase(preview, recorder, currentPhase, async () =>
+          completeLongRest(page, recorder))
+      : (skipDependency(recorder, currentPhase, 'dungeon room 4'), false);
+
+    currentPhase = 'save manager';
+    if (longRestReady === true) {
+      await runIsolatedPhase(preview, recorder, currentPhase, async () =>
+        saveManagerRoundTrip(page, recorder));
+    } else {
+      skipDependency(recorder, currentPhase, 'long rest');
+    }
+
+    currentPhase = 'dungeon → Vane Warren seam';
+    const vaneSessionReady = await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+      if (!await prepareVaneWarrenSession(page, baseUrl, recorder, currentPhase)) {
+        recorder.phase(currentPhase, 'aborted', 'Could not prepare the separately exported Vane Warren session.');
+        return false;
+      }
+      if (!await openVaneWarrenSession(page, baseUrl, recorder, currentPhase)) return false;
+      const entered = await waitForVaneWarrenFight(page, recorder, currentPhase, 1);
+      recorder.phase(currentPhase, entered ? 'completed' : 'aborted', entered
+        ? 'Named two-export deviation: after the four-room dungeon export, reset browser session state and entered the separate three-fight Vane Warren chain once through its start flow.'
+        : 'The Vane Warren chain did not enter its first fight.');
+      return entered;
+    });
+
+    currentPhase = 'timeline';
+    if (vaneSessionReady === true) {
+      await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+        const timeline: TimelineProgress = {
+          previewListed: false,
+          delayUsed: false,
+          skipUsed: false,
+          rewindUsed: false,
+          continuedForward: false,
+          rewindRound: null,
+        };
+        if (!await assignAlgorithms(page, recorder, currentPhase)) {
+          recorder.phase(currentPhase, 'aborted', 'Could not assign controllers for the in-session timeline exercise.');
+          return;
+        }
+        await exerciseTimelineControls(page, recorder, timeline);
+      });
+    } else {
+      skipDependency(recorder, currentPhase, 'dungeon → Vane Warren seam');
+    }
+
+    const fights = ['The Cinder Rite', 'The Iron Voice', 'The Last Muster'] as const;
+    let vaneFightReady = vaneSessionReady === true;
+    for (const [index, fightName] of fights.entries()) {
+      currentPhase = `Vane Warren — ${fightName}`;
+      const prerequisite = index === 0
+        ? 'dungeon → Vane Warren seam'
+        : `Vane Warren — ${fights[index - 1] ?? 'unknown fight'}`;
+      if (!vaneFightReady) {
+        skipDependency(recorder, currentPhase, prerequisite);
         continue;
       }
-      if (!await openVaneFight(page, baseUrl, recorder, fight.name)) continue;
-      await observeTimelinePreview(page, timeline, fight.slug === 'iron-voice' ? 2_000 : 0);
-      if (!await assignAlgorithms(page, recorder, currentPhase)) {
-        recorder.phase(currentPhase, 'aborted', 'Could not assign every combatant to the algorithm controller.');
-        continue;
-      }
-      await observeTimelinePreview(page, timeline, fight.slug === 'iron-voice' ? 2_000 : 0);
-      const outcome = await playEncounter(page, recorder, currentPhase, 'vane-warren', timeline);
-      const exported = await exportCurrentFight(page, recorder, currentPhase, `vane-${fight.slug}`);
-      if (fight.slug === 'cinder-rite' && exported?.hasAlarm !== true) {
+      const fightReady = await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+        const fightNumber = index + 1;
+        if (!await waitForVaneWarrenFight(page, recorder, currentPhase, fightNumber)) {
+          recorder.phase(currentPhase, 'aborted', 'The chained session was not at the requested fight.');
+          return false;
+        }
+        if (!await assignAlgorithms(page, recorder, currentPhase)) {
+          recorder.phase(currentPhase, 'aborted', 'Could not assign every combatant to the algorithm controller.');
+          return false;
+        }
+        const outcome = await playEncounter(page, recorder, currentPhase);
+        recorder.phase(currentPhase, outcome.kind === 'victory' ? 'completed' : 'aborted',
+          `${outcome.kind} at round ${String(outcome.round)} after ${String(outcome.attempts)} driver pulses.`);
+        if (fightNumber === fights.length) return outcome.kind === 'victory';
+        if (outcome.kind !== 'victory') return false;
+        if (!await transitionToNextVaneWarrenFight(page, recorder, currentPhase, fightNumber)) {
+          recorder.phase(currentPhase, 'aborted', 'Could not cross the Vane Warren room boundary.');
+          return false;
+        }
+        return true;
+      });
+      vaneFightReady = fightReady === true;
+    }
+
+    currentPhase = 'end session and export coverage';
+    if (vaneFightReady) await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+      const vaneExport = await endVaneWarrenSession(page, recorder, currentPhase);
+      if (vaneExport?.hasAlarm !== true) {
         recorder.add(
           'scripted_nudge',
           currentPhase,
           'sound Cinder Rite alarm',
-          'The board renders the war drum, but controller legal actions and DM tools expose no alarm interaction; the exported encounter contains no deployed alarm wave.',
+          'The board renders the war drum, but controller legal actions and DM tools expose no alarm interaction; the chained session export contains no deployed alarm wave.',
         );
       }
-      if (exported?.hasIgnition !== true) {
+      if (vaneExport?.hasIgnition !== true) {
         recorder.add(
           'scripted_nudge',
           currentPhase,
@@ -1079,69 +1623,41 @@ async function main(): Promise<void> {
           'The board renders braziers and flammable surfaces, but no controller action or DM tool can place fire or invoke the ignition chain.',
         );
       }
-      recorder.phase(currentPhase, outcome.kind === 'aborted' ? 'aborted' : 'completed',
-        `${outcome.kind} at round ${String(outcome.round)}; export parsed ${String(exported?.encounterCount ?? 0)} encounter record(s).`);
-      if (index < fights.length - 1) {
-        const nextControl = page.getByRole('button', { name: /Load The (?:Iron Voice|Last Muster)/u });
-        if (await nextControl.count() === 0) {
-          recorder.add(
-            'scripted_nudge',
-            currentPhase,
-            'continue to the next Vane Warren fight',
-            'The completed fight offers no in-session next-fight path; the driver returned to the bundle selector by URL.',
-          );
-        }
-      }
-    }
+      const dungeonExport = recorder.exports.find((entry) => entry.filename === 'd365-session.vtt.json');
+      const coverage = recorder.exports.length === 2 &&
+        dungeonExport?.parsed === true && dungeonExport.hasSessionRecord && dungeonExport.encounterCount === 4 &&
+        vaneExport?.parsed === true && vaneExport.hasSessionRecord && vaneExport.encounterCount === 3;
+      const totalEncounters = recorder.exports.reduce((total, entry) => total + entry.encounterCount, 0);
+      recorder.phase(currentPhase, coverage ? 'completed' : 'aborted', coverage
+        ? 'The final control exported one three-encounter Vane Warren session; with the four-encounter dungeon export, two structured files cover all seven fights.'
+        : `Parsed export coverage was ${String(totalEncounters)} encounters across ${String(recorder.exports.length)} files; expected a four-encounter dungeon export and one three-encounter Vane Warren export.`);
+    });
+    else skipDependency(recorder, currentPhase, 'Vane Warren — The Last Muster');
 
-    currentPhase = 'timeline';
-    const timelineComplete = timeline.previewListed && timeline.delayUsed &&
-      timeline.rewindUsed && timeline.continuedForward;
-    if (!timelineComplete) {
-      recorder.add(
-        'scripted_nudge',
-        currentPhase,
-        'complete timeline exercise',
-        `Timeline coverage was preview=${String(timeline.previewListed)}, delay=${String(timeline.delayUsed)}, rewind=${String(timeline.rewindUsed)}, forward=${String(timeline.continuedForward)}.`,
-      );
-    }
-    recorder.phase(currentPhase, timelineComplete ? 'completed' : 'aborted', timelineComplete
-      ? `Listed scheduled events, delayed once, rewound to round ${String(timeline.rewindRound)}, and advanced forward again.`
-      : 'One or more required timeline controls could not be exercised during the played encounters.');
-
-    currentPhase = 'end session and export coverage';
-    const totalEncounters = recorder.exports.reduce((total, entry) => total + entry.encounterCount, 0);
-    const allParsed = recorder.exports.length === 4 && recorder.exports.every((entry) => entry.parsed && entry.hasSessionRecord);
-    const endSessionControl = page.getByRole('button', { name: /End session/u });
-    if (await endSessionControl.count() === 0) {
-      recorder.add(
-        'scripted_nudge',
-        currentPhase,
-        'end session',
-        'No end-session control exists. The driver paused at the final encounter and exported through the save manager.',
-      );
-    }
-    if (recorder.exports.length > 1) {
-      recorder.add(
-        'scripted_nudge',
-        currentPhase,
-        'verify one export covers everything played',
-        'The dungeon and each Vane Warren fight use separate session IDs, so no single application export can contain all seven played encounters; coverage was verified across four parsed exports.',
-      );
-    }
-    const coverage = allParsed && totalEncounters === 7;
-    recorder.phase(currentPhase, coverage ? 'completed' : 'aborted', coverage
-      ? 'Four application exports parsed and their structured encounter lists cover all seven played encounters.'
-      : `Parsed export coverage was ${String(totalEncounters)} encounters across ${String(recorder.exports.length)} files; expected seven across four files.`);
-
-    await context.close();
   } catch (error: unknown) {
     recorder.add('page_console_error', currentPhase, 'driver infrastructure', errorDetail(error));
     recorder.phase(currentPhase, 'aborted', 'Driver infrastructure stopped this phase.');
   } finally {
-    await browser?.close().catch(() => undefined);
+    recorder.track('driver cleanup', 'flush pending screenshots');
+    await withTimeout(recorder.flushScreenshots(), CLEANUP_TIMEOUT_MS, 'flush pending screenshots')
+      .catch(() => undefined);
+    recorder.page = null;
+    recorder.track('driver cleanup', 'close browser context');
+    if (context !== null) {
+      await withTimeout(context.close(), CLEANUP_TIMEOUT_MS, 'close browser context')
+        .catch(() => undefined);
+    }
+    recorder.track('driver cleanup', 'close browser');
+    if (browser !== null) {
+      await withTimeout(browser.close(), CLEANUP_TIMEOUT_MS, 'close browser')
+        .catch(() => undefined);
+    }
+    recorder.track('driver cleanup', 'stop built preview');
     if (preview !== null) await stopPreview(preview);
+    recorder.track('driver cleanup', 'write findings report');
     await recorder.write(baseUrl);
+    reportWritten = true;
+    globalThis.clearTimeout(watchdogTimer);
     process.stdout.write(`\n${recorder.summaryBlock()}\n\nFindings: ${recorder.reportPath}\n`);
   }
 }

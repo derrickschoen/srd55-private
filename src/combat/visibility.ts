@@ -18,6 +18,7 @@ export type EncounterViewClassification = 'dm_only' | 'player_visible' | 'per_se
 /** D359's exhaustive projection-decision inventory. */
 export const ENCOUNTER_VIEW_CLASSIFICATION = {
   config: 'player_visible',
+  phase: 'dm_only',
   rulesEdition: 'player_visible',
   hiddenRolls: 'dm_only',
   revision: 'player_visible',
@@ -209,6 +210,7 @@ export interface PlayerView {
 /** Compact DM-facing summary used by controllers and bridge envelopes. */
 export interface DmVisibleEncounterState {
   readonly viewer: 'dm';
+  readonly phase: EncounterState['phase'];
   readonly revision: number;
   readonly round: number;
   readonly activeCombatant: CombatantId | null;
@@ -309,6 +311,8 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'environment_terrain_changed':
     case 'environment_light_changed':
       return 'actor' in event && event.actor !== null ? [event.actor] : [];
+    case 'world_object_used': return [event.actor];
+    case 'reinforcement_wave_deployed': return [event.calledBy, ...event.combatants];
     case 'persistent_area_created':
     case 'persistent_area_moved': return [event.owner];
     case 'persistent_area_membership_changed': return [...event.entered, ...event.exited];
@@ -404,6 +408,7 @@ export function projectDmView(state: EncounterState): DmView {
     audience: 'dm',
     state: {
       config: structuredClone(state.config),
+      phase: structuredClone(state.phase),
       rulesEdition: state.rulesEdition,
       hiddenRolls: [...state.hiddenRolls],
       revision: state.revision,
@@ -510,6 +515,7 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
   const tokensByCombatant = new Map(state.tokens.map((token) => [token.combatantId, token] as const));
   return {
     viewer: 'dm',
+    phase: structuredClone(state.phase),
     revision: state.revision,
     round: state.round,
     activeCombatant: state.activeCombatant,

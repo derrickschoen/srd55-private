@@ -4,11 +4,20 @@ import { starterArtDataUri } from '../assets/starter-art-resolver';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
-import { MOVEMENT_PATH_DANGER_KINDS, REACTION_KINDS, type PendingDecision } from '../combat/encounter';
+import {
+  MOVEMENT_PATH_DANGER_KINDS,
+  REACTION_KINDS,
+  type EncounterPhase,
+  type PendingDecision,
+} from '../combat/encounter';
 import { HIDDEN_ROLL_CATEGORIES, type HiddenRollCategory } from '../combat/roll-visibility';
 import { previewAffectedCells } from '../combat/templates';
 import { encounterSessionId, type CombatantId } from '../combat/values';
-import { DmEncounterHost, type DmEncounterHostSnapshot } from './dm-encounter-host';
+import {
+  ControllerAssignmentError,
+  DmEncounterHost,
+  type DmEncounterHostSnapshot,
+} from './dm-encounter-host';
 import {
   encounterBoardRenderModel,
   type EncounterBoardProjectionShape,
@@ -51,6 +60,7 @@ import {
   handlingModesForCategory,
   type RefusalHandlingMode,
 } from './refusal-handling';
+import { reconcileStableRenderedChildren, stableRenderKey } from './stable-dom-render';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -63,6 +73,24 @@ function element<K extends keyof HTMLElementTagNameMap>(
   if (options.className !== undefined) node.className = options.className;
   if (options.text !== undefined) node.textContent = options.text;
   return node;
+}
+
+export function renderDmEncounterOutcome(
+  conclusion: Extract<EncounterPhase, { readonly kind: 'concluded' }>,
+): HTMLElement {
+  const side = conclusion.survivingSide === 'player_character'
+    ? 'Player characters survive'
+    : conclusion.survivingSide === 'monster'
+      ? 'Monsters survive'
+      : 'No side survives';
+  const banner = element('section', {
+    className: 'dm-encounter-outcome',
+    text: `${conclusion.outcome[0]?.toUpperCase() ?? ''}${conclusion.outcome.slice(1)} — ${side}. Choose the room boundary or rest control to continue.`,
+  });
+  banner.dataset.encounterOutcome = conclusion.outcome;
+  banner.dataset.survivingSide = conclusion.survivingSide ?? 'none';
+  banner.setAttribute('role', 'status');
+  return banner;
 }
 
 function decisionHeading(decision: PendingDecision): string {
@@ -160,6 +188,10 @@ function actionLabel(action: EncounterCommand): string {
       return 'End concentration';
     case 'adjudicate':
       return 'ADJUDICATED';
+    case 'use_world_object':
+      return action.actionId.replaceAll('_', ' ');
+    case 'dm_use_world_object':
+      return `DM override: ${action.actionId.replaceAll('_', ' ')}`;
   }
 }
 
@@ -606,7 +638,7 @@ class DmEncounterView {
   );
   readonly #host: DmEncounterHost;
   readonly #channel: BroadcastChannel;
-  readonly #shell = element('main', { className: 'encounter-shell dm-encounter' });
+  #shell = element('main', { className: 'encounter-shell dm-encounter' });
   #projection: DmBoardProjection | null = null;
   #channelError: string | null = null;
   #saveManagerError: string | null = null;
@@ -928,6 +960,7 @@ class DmEncounterView {
       pendingDelete: this.#pendingDelete,
     });
     const manager = element('section', { className: 'dm-save-manager' });
+    manager.dataset.renderKey = stableRenderKey('dm', 'save-manager');
     manager.dataset.mode = model.mode.kind;
     manager.append(element('h2', { text: 'Save manager' }));
     manager.append(element('p', {
@@ -948,10 +981,12 @@ class DmEncounterView {
       manager.append(error);
     }
     const toolbar = element('div', { className: 'dm-save-toolbar' });
+    toolbar.dataset.renderKey = stableRenderKey('dm', 'save-manager', 'toolbar');
     const saveNow = element('button', {
       text: model.primarySaveIntent === 'save_now_to_folder' ? 'Save now' : 'Download save now',
     });
     saveNow.type = 'button';
+    saveNow.dataset.renderKey = stableRenderKey('dm', 'save-manager', 'toolbar', 'save-now');
     saveNow.dataset.intent = model.primarySaveIntent;
     saveNow.addEventListener('click', () => {
       void this.#runSaveManagerAction(() => controller.dispatch({ kind: 'save_now' }));
@@ -962,6 +997,7 @@ class DmEncounterView {
         text: intent === 'choose_folder' ? 'Choose default folder' : 'Upload save file',
       });
       button.type = 'button';
+      button.dataset.renderKey = stableRenderKey('dm', 'save-manager', 'toolbar', 'transfer', intent);
       button.dataset.intent = intent;
       button.addEventListener('click', () => {
         void this.#runSaveManagerAction(() => controller.dispatch({
@@ -973,8 +1009,10 @@ class DmEncounterView {
     manager.append(toolbar);
 
     const list = element('div', { className: 'dm-save-list' });
+    list.dataset.renderKey = stableRenderKey('dm', 'save-manager', 'list');
     for (const row of model.rows) {
       const item = element('article', { className: 'dm-save-row' });
+      item.dataset.renderKey = stableRenderKey('dm', 'save-manager', 'save', row.id);
       item.dataset.saveId = row.id;
       item.dataset.source = row.badge;
       item.append(
@@ -985,11 +1023,13 @@ class DmEncounterView {
         element('p', { className: 'dm-save-summary', text: row.summary }),
       );
       const actions = element('div', { className: 'dm-save-row-actions' });
+      actions.dataset.renderKey = stableRenderKey('dm', 'save-manager', 'save', row.id, 'actions');
       for (const action of row.actions) {
         const button = element('button', {
           text: action === 'export_copy' ? 'Export copy' : `${action[0]!.toUpperCase()}${action.slice(1)}`,
         });
         button.type = 'button';
+        button.dataset.renderKey = stableRenderKey('dm', 'save-manager', 'save', row.id, 'action', action);
         button.dataset.intent = action;
         button.addEventListener('click', () => {
           if (action === 'rename') {
@@ -1019,6 +1059,13 @@ class DmEncounterView {
       item.append(actions);
       if (model.pendingDelete?.saveId === row.id) {
         const confirmation = element('form', { className: 'dm-save-delete-confirmation' });
+        confirmation.dataset.renderKey = stableRenderKey(
+          'dm',
+          'save-manager',
+          'save',
+          row.id,
+          'delete-confirmation',
+        );
         confirmation.append(element('p', {
           text: `Type ${model.pendingDelete.requiredText} to delete this save.`,
         }));
@@ -1057,6 +1104,18 @@ class DmEncounterView {
   }
 
   #render(): void {
+    const live = this.#shell;
+    const draft = element('main', { className: 'encounter-shell dm-encounter' });
+    this.#shell = draft;
+    try {
+      this.#renderFresh();
+    } finally {
+      this.#shell = live;
+    }
+    reconcileStableRenderedChildren(live, draft);
+  }
+
+  #renderFresh(): void {
     this.#shell.replaceChildren(
       element('p', { className: 'vtt-kicker', text: 'DM-local authority' }),
       element('h1', { text: 'DM controls' }),
@@ -1070,12 +1129,17 @@ class DmEncounterView {
       this.#shell.append(error);
     }
     const status = element('p', {
-      text: projection.coordinator.pause === null
-        ? 'Encounter running'
-        : `Paused: ${projection.coordinator.pause.kind}`,
+      text: projection.encounter.phase.kind === 'concluded'
+        ? `Encounter concluded: ${projection.encounter.phase.outcome}`
+        : projection.coordinator.pause === null
+          ? 'Encounter running'
+          : `Paused: ${projection.coordinator.pause.kind}`,
     });
     status.dataset.pause = projection.coordinator.pause?.kind ?? 'none';
     this.#shell.append(status);
+    if (projection.encounter.phase.kind === 'concluded') {
+      this.#shell.append(renderDmEncounterOutcome(projection.encounter.phase));
+    }
     this.#shell.append(this.#renderSaveManager());
     if (projection.partySession !== null) {
       const dayEnded = projection.partySession.state.adventuringDayStatus === 'ended_by_long_rest';
@@ -1093,18 +1157,23 @@ class DmEncounterView {
     }
 
     const controls = element('div', { className: 'encounter-controls dm-controls' });
+    controls.dataset.renderKey = stableRenderKey('dm', 'controls');
     const interrupt = element('button', { text: 'Interrupt' });
     interrupt.type = 'button';
+    interrupt.dataset.renderKey = stableRenderKey('dm', 'controls', 'interrupt');
     interrupt.addEventListener('click', () => this.#host.interrupt());
     const resume = element('button', { text: 'Resume' });
     resume.type = 'button';
+    resume.dataset.renderKey = stableRenderKey('dm', 'controls', 'resume');
     resume.addEventListener('click', () => this.#host.resume());
     const undo = element('button', { text: 'Undo last' });
     undo.type = 'button';
+    undo.dataset.renderKey = stableRenderKey('dm', 'controls', 'undo-last');
     undo.addEventListener('click', () => void this.#host.undoLast());
     const skip = element('button', { text: 'Skip turn' });
     skip.type = 'button';
-    skip.disabled = projection.timeline.currentCombatant === null;
+    skip.dataset.renderKey = stableRenderKey('dm', 'controls', 'skip-turn');
+    skip.disabled = projection.timeline.currentCombatant === null || projection.timeline.phase.kind === 'concluded';
     skip.addEventListener('click', () => {
       void this.#host.skipTurn().catch((error: unknown) => {
         this.#channelError = error instanceof Error ? error.message : 'Skip turn failed.';
@@ -1118,9 +1187,22 @@ class DmEncounterView {
     const later = projection.timeline.initiative.filter(
       (entry) => currentPosition !== undefined && entry.position > currentPosition && entry.life !== 'dead',
     );
-    if (later.length > 0) {
+    if (later.length > 0 && projection.timeline.phase.kind === 'active') {
       const delay = element('form', { className: 'dm-delay-turn' });
+      delay.dataset.renderKey = stableRenderKey(
+        'dm',
+        'controls',
+        'delay-turn',
+        projection.timeline.currentCombatant ?? 'none',
+      );
       const target = element('select');
+      target.dataset.renderKey = stableRenderKey(
+        'dm',
+        'controls',
+        'delay-turn',
+        projection.timeline.currentCombatant ?? 'none',
+        'target',
+      );
       target.setAttribute('aria-label', 'Delay current turn until after');
       for (const entry of later) {
         const option = element('option', { text: `After ${entry.name}` });
@@ -1129,6 +1211,13 @@ class DmEncounterView {
       }
       const submit = element('button', { text: 'Delay turn' });
       submit.type = 'submit';
+      submit.dataset.renderKey = stableRenderKey(
+        'dm',
+        'controls',
+        'delay-turn',
+        projection.timeline.currentCombatant ?? 'none',
+        'submit',
+      );
       delay.append(target, submit);
       delay.addEventListener('submit', (event) => {
         event.preventDefault();
@@ -1144,6 +1233,7 @@ class DmEncounterView {
     if (projection.partySession !== null && projection.partySession.state.adventuringDayStatus === 'active') {
       const longRest = element('button', { text: 'Complete Long Rest and end adventuring day' });
       longRest.type = 'button';
+      longRest.dataset.renderKey = stableRenderKey('dm', 'controls', 'long-rest');
       longRest.addEventListener('click', () => {
         void this.#host.finishAdventuringDay().catch((error: unknown) => {
           this.#channelError = error instanceof Error ? error.message : 'Long Rest failed.';
@@ -1203,6 +1293,7 @@ class DmEncounterView {
       projection.partySession.state.room < (this.#sessionFlow?.encounterCount ?? 4)) {
       const nextRoom = element('button', { text: 'End room and enter next room' });
       nextRoom.type = 'button';
+      nextRoom.dataset.renderKey = stableRenderKey('dm', 'controls', 'next-room');
       nextRoom.addEventListener('click', () => {
         void this.#host.finishRoom(null).catch((error: unknown) => {
           this.#channelError = error instanceof Error ? error.message : 'Room transition failed.';
@@ -1215,6 +1306,7 @@ class DmEncounterView {
       projection.partySession.state.room === this.#sessionFlow.encounterCount) {
       const endSession = element('button', { text: this.#sessionFlow.endControlLabel });
       endSession.type = 'button';
+      endSession.dataset.renderKey = stableRenderKey('dm', 'controls', 'end-session');
       endSession.dataset.intent = 'end_session';
       endSession.disabled = this.#endSessionExported || this.#host.sessionEnded();
       endSession.addEventListener('click', () => {
@@ -1243,8 +1335,11 @@ class DmEncounterView {
 
     const timeline = element('section', { className: 'dm-initiative-timeline' });
     timeline.dataset.round = String(projection.timeline.round);
+    timeline.dataset.encounterStatus = projection.timeline.phase.kind;
     timeline.append(element('h2', { text: `Initiative timeline — round ${String(projection.timeline.round)}` }));
     const strip = element('ol', { className: 'dm-initiative-strip' });
+    strip.dataset.encounterStatus = projection.timeline.phase.kind;
+    strip.dataset.concluded = String(projection.timeline.phase.kind === 'concluded');
     for (const entry of projection.timeline.initiative) {
       const item = element('li', {
         text: `${entry.name}${entry.delayedThisRound ? ' (delayed)' : ''}`,
@@ -1428,6 +1523,7 @@ class DmEncounterView {
     if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
 
     const tray = element('section', { className: 'dm-decision-tray' });
+    tray.dataset.renderKey = stableRenderKey('dm', 'decision-tray');
     tray.append(element('h2', { text: 'Decision tray' }));
     tray.dataset.boundaryBlocked = String(projection.decisionTray.boundaryRefusal !== null);
     if (projection.decisionTray.boundaryRefusal !== null) {
@@ -1456,6 +1552,7 @@ class DmEncounterView {
       row.dataset.entryKind = entry.kind;
       if (entry.kind === 'pending') {
         row.dataset.decisionId = entry.decision.id;
+        row.dataset.renderKey = stableRenderKey('dm', 'decision-tray', 'decision', entry.decision.id);
         row.append(
           element('h3', {
             text: `${entry.combatantName} — ${decisionHeading(entry.decision)}`,
@@ -1469,6 +1566,14 @@ class DmEncounterView {
           amount.setAttribute('aria-label', 'DM override hit point delta');
           const button = element('button', { text: `Apply DM override for ${entry.combatantName}` });
           button.type = 'button';
+          button.dataset.renderKey = stableRenderKey(
+            'dm',
+            'decision-tray',
+            'decision',
+            entry.decision.id,
+            'option',
+            entry.decision.options[0]?.id ?? 'rule_manually',
+          );
           button.addEventListener('click', () => {
             const parsed = Number(amount.value);
             if (!Number.isSafeInteger(parsed)) return;
@@ -1485,6 +1590,14 @@ class DmEncounterView {
         for (const option of entry.decision.options) {
           const button = element('button', { text: `${option.label} for ${entry.combatantName}` });
           button.type = 'button';
+          button.dataset.renderKey = stableRenderKey(
+            'dm',
+            'decision-tray',
+            'decision',
+            entry.decision.id,
+            'option',
+            option.id,
+          );
           button.addEventListener('click', () => {
             button.disabled = true;
             void this.#host.resolvePendingDecision(entry.decision.id, option.id).catch((error: unknown) => {
@@ -1497,6 +1610,12 @@ class DmEncounterView {
       } else {
         row.dataset.policy = entry.policy;
         row.dataset.sequence = String(entry.sequence);
+        row.dataset.renderKey = stableRenderKey(
+          'dm',
+          'decision-tray',
+          'automatic',
+          String(entry.sequence),
+        );
         row.append(element('p', {
           text: `${entry.combatantName} — ${entry.reactionKind.replaceAll('_', ' ')}: ${entry.policy} automatically ${entry.resolution === 'accept' ? 'accepted' : 'declined'}${entry.autoFired ? ' and fired' : ''}`,
         }));
@@ -1632,6 +1751,21 @@ class DmEncounterView {
     }
     this.#shell.append(pending);
 
+    const objectControls = element('section', { className: 'dm-world-object-controls' });
+    objectControls.append(element('h2', { text: 'World-object controls' }));
+    if (projection.worldObjectControls.length === 0) {
+      objectControls.append(element('p', { text: 'No available object overrides.' }));
+    } else {
+      for (const control of projection.worldObjectControls) {
+        const button = element('button', { text: `${control.label} — ${control.objectName}` });
+        button.type = 'button';
+        button.dataset.objectId = control.objectId;
+        button.addEventListener('click', () => this.#host.dmUseWorldObject(control.command));
+        objectControls.append(button);
+      }
+    }
+    this.#shell.append(objectControls);
+
     const adjudication = element('form', { className: 'dm-adjudication' });
     const target = element('select');
     target.setAttribute('aria-label', 'Adjudication target');
@@ -1668,14 +1802,26 @@ class DmEncounterView {
     this.#shell.append(adjudication);
 
     const assignments = element('section', { className: 'dm-controller-assignments' });
+    assignments.dataset.renderKey = stableRenderKey('dm', 'controller-assignments');
     assignments.append(element('h2', { text: 'Controller assignment' }));
     for (const identity of projection.controllers) {
       const row = element('label');
+      row.dataset.renderKey = stableRenderKey(
+        'dm',
+        'controller-assignments',
+        identity.combatantId,
+      );
       const name = projection.encounter.combatants.find(
         (combatant) => combatant.id === identity.combatantId,
       )?.name ?? identity.combatantId;
       row.append(document.createTextNode(name));
       const select = element('select');
+      select.dataset.renderKey = stableRenderKey(
+        'dm',
+        'controller-assignments',
+        identity.combatantId,
+        'kind',
+      );
       select.setAttribute('aria-label', `${name} controller`);
       for (const kind of ['human', 'algorithm'] as const) {
         const option = element('option', { text: kind });
@@ -1683,10 +1829,17 @@ class DmEncounterView {
         option.selected = identity.kind === kind;
         select.append(option);
       }
-      select.disabled = projection.pendingRequest !== null;
+      select.value = identity.kind;
       select.addEventListener('change', () => {
         if (select.value === 'human' || select.value === 'algorithm') {
-          this.#host.replaceController(identity.combatantId, select.value);
+          try {
+            this.#host.replaceController(identity.combatantId, select.value);
+            this.#channelError = null;
+          } catch (error: unknown) {
+            if (!(error instanceof ControllerAssignmentError)) throw error;
+            this.#channelError = error.message;
+            this.#render();
+          }
         }
       });
       row.append(select);

@@ -42,7 +42,10 @@ import type {
   TurnBoundary,
 } from './effects';
 import type { EncounterCommand, EncounterEvent } from './events';
-import { monsterAttackCommand } from './monster-commands';
+import {
+  executableMonsterOnHitEffects,
+  monsterAttackCommand,
+} from './monster-commands';
 import {
   adjacentCells,
   gridDistance,
@@ -142,6 +145,7 @@ import {
   environmentLightAt,
   environmentObscurementAt,
   isEnvironmentDifficultTerrain,
+  type WorldObjectClassAction,
   type CoverTier,
   type EncounterEnvironment,
   type WorldObject,
@@ -160,6 +164,33 @@ import {
 } from './wild-shape';
 
 export type LifeState = 'living' | 'dying' | 'stable' | 'dead';
+
+export type EncounterOutcome = 'victory' | 'defeat' | 'mutual';
+
+export type EncounterPhase =
+  | { readonly kind: 'active' }
+  | {
+      readonly kind: 'concluded';
+      readonly outcome: EncounterOutcome;
+      readonly survivingSide: 'player_character' | 'monster' | null;
+      readonly round: number;
+      readonly revision: number;
+    };
+
+export function isEncounterPhase(value: unknown): value is EncounterPhase {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const kind = Reflect.get(value, 'kind');
+  if (kind === 'active') return Object.keys(value).length === 1;
+  if (kind !== 'concluded' || Object.keys(value).length !== 5) return false;
+  const outcome = Reflect.get(value, 'outcome');
+  const survivingSide = Reflect.get(value, 'survivingSide');
+  return (
+    (outcome === 'victory' || outcome === 'defeat' || outcome === 'mutual') &&
+    (survivingSide === 'player_character' || survivingSide === 'monster' || survivingSide === null) &&
+    Number.isSafeInteger(Reflect.get(value, 'round')) &&
+    Number.isSafeInteger(Reflect.get(value, 'revision'))
+  );
+}
 
 export interface DeathSaveState {
   readonly successes: number;
@@ -210,6 +241,20 @@ export class PendingDecisionRuleError extends EncounterRuleError {
     super(code === 'turn_boundary_blocked' ? 'pending_decision_boundary' : 'pending_decision_validation', code === 'turn_boundary_blocked'
       ? 'The turn cannot advance while a Reaction offer for this boundary is unresolved.'
       : 'The pending decision does not exist.');
+  }
+}
+
+export class EncounterConcludedBoundaryError extends EncounterRuleError {
+  override readonly name = 'EncounterConcludedBoundaryError' as const;
+
+  constructor(
+    readonly code: 'encounter_concluded',
+    readonly conclusion: Extract<EncounterPhase, { readonly kind: 'concluded' }>,
+  ) {
+    super(
+      'encounter_concluded_boundary',
+      `The encounter concluded with ${conclusion.outcome}; turn advancement is unavailable.`,
+    );
   }
 }
 
@@ -359,9 +404,14 @@ export interface PendingDecisionOption {
   readonly label: string;
 }
 
-interface PendingDecisionBase {
+export type NonEmptyPendingDecisionOptions<
+  Option extends PendingDecisionOption = PendingDecisionOption,
+> = readonly [Option, ...Option[]] | readonly [...Option[], Option];
+
+interface PendingDecisionBase<Options extends NonEmptyPendingDecisionOptions> {
   readonly id: string;
   readonly combatant: CombatantId;
+  readonly options: Options;
   readonly boundary: {
     readonly activeCombatant: CombatantId;
     readonly round: number;
@@ -370,36 +420,33 @@ interface PendingDecisionBase {
 
 /** Closed engine decision vocabulary; every kind owns its legal option tuple. */
 export type PendingDecision =
-  | (PendingDecisionBase & {
+  | (PendingDecisionBase<readonly [
+      PendingDecisionOption & { readonly id: 'accept' },
+      PendingDecisionOption & { readonly id: 'decline' },
+    ]> & {
       readonly kind: 'reaction_offer';
       readonly reactionKind: 'opportunity_attack';
-      readonly options: readonly [
-        PendingDecisionOption & { readonly id: 'accept' },
-        PendingDecisionOption & { readonly id: 'decline' },
-      ];
       readonly opportunityAttack: {
         readonly mover: CombatantId;
         readonly from: GridCell;
         readonly to: GridCell;
+        readonly command: Extract<EncounterCommand, { readonly type: 'opportunity_attack' }>;
       };
     })
-  | (PendingDecisionBase & {
+  | (PendingDecisionBase<readonly [PendingDecisionOption & { readonly id: 'roll' }]> & {
       readonly kind: 'death_save';
-      readonly options: readonly [PendingDecisionOption & { readonly id: 'roll' }];
     })
-  | (PendingDecisionBase & {
+  | (PendingDecisionBase<readonly [
+      ...(PendingDecisionOption & { readonly id: `legendary_action:${string}` })[],
+      PendingDecisionOption & { readonly id: 'pass' },
+    ]> & {
       readonly kind: 'legendary_action_window';
-      readonly options: readonly [
-        ...(PendingDecisionOption & { readonly id: `legendary_action:${string}` })[],
-        PendingDecisionOption & { readonly id: 'pass' },
-      ];
     })
-  | (PendingDecisionBase & {
+  | (PendingDecisionBase<readonly [
+      PendingDecisionOption & { readonly id: 'spend' },
+      PendingDecisionOption & { readonly id: 'suffer' },
+    ]> & {
       readonly kind: 'legendary_resistance';
-      readonly options: readonly [
-        PendingDecisionOption & { readonly id: 'spend' },
-        PendingDecisionOption & { readonly id: 'suffer' },
-      ];
       readonly failedSave: {
         readonly source: CombatantId;
         readonly ability: Ability;
@@ -413,9 +460,8 @@ export type PendingDecision =
         readonly effects: readonly EncounterEffect[];
       };
     })
-  | (PendingDecisionBase & {
+  | (PendingDecisionBase<readonly [PendingDecisionOption & { readonly id: 'rule_manually' }]> & {
       readonly kind: 'adjudication_prompt';
-      readonly options: readonly [PendingDecisionOption & { readonly id: 'rule_manually' }];
       readonly refusal: import('../vtt/refusal-handling').NonBoundaryActionRefusal;
     });
 
@@ -453,6 +499,7 @@ export function isEncounterConfig(value: unknown): value is EncounterConfig {
 
 export interface EncounterState {
   readonly config: EncounterConfig;
+  readonly phase: EncounterPhase;
   readonly rulesEdition: DetectionRulesEdition;
   /** DM-controlled projection policy; raw events always retain their rolls. */
   readonly hiddenRolls: readonly HiddenRollCategory[];
@@ -587,7 +634,68 @@ export interface EncounterReductionOptions {
   readonly reactionDecision?: ReactionDecisionHook;
 }
 
+export type EncounterCommandReducer = (
+  state: EncounterState,
+  command: EncounterCommand,
+  rng: Rng,
+  options?: EncounterReductionOptions,
+) => EncounterReduction;
+
 export { combatantSide, combatantsAreAllies, EncounterRuleError };
+
+/** Dying and stable combatants remain on their side; only `dead` removes one. */
+export function nonDeadEncounterSides(
+  state: EncounterState,
+): ReadonlySet<'player_character' | 'monster'> {
+  return new Set(state.combatants
+    .filter((subject) => subject.life !== 'dead')
+    .map((subject) => combatantSide(state, subject.profile.id)));
+}
+
+export function encounterConclusionAfter(
+  before: EncounterState,
+  after: EncounterState,
+): Extract<EncounterPhase, { readonly kind: 'concluded' }> | null {
+  if (before.phase.kind === 'concluded') return null;
+  const beforeSides = nonDeadEncounterSides(before);
+  if (!beforeSides.has('player_character') || !beforeSides.has('monster')) return null;
+  return encounterConclusionFromCurrentState(after);
+}
+
+function encounterConclusionFromCurrentState(
+  state: EncounterState,
+): Extract<EncounterPhase, { readonly kind: 'concluded' }> | null {
+  const afterSides = nonDeadEncounterSides(state);
+  if (afterSides.has('player_character') && afterSides.has('monster')) return null;
+  const survivingSide = afterSides.has('player_character')
+    ? 'player_character' as const
+    : afterSides.has('monster')
+      ? 'monster' as const
+      : null;
+  return {
+    kind: 'concluded',
+    outcome: survivingSide === 'player_character'
+      ? 'victory'
+      : survivingSide === 'monster'
+        ? 'defeat'
+        : 'mutual',
+    survivingSide,
+    round: state.round,
+    revision: state.revision,
+  };
+}
+
+function resumesLegendaryTurnBoundary(
+  state: EncounterState,
+  actor: CombatantId,
+): boolean {
+  const closedWindow = state.eventLog.some((event) =>
+    event.type === 'legendary_action_window_closed' &&
+    event.activeCombatant === actor && event.round === state.round);
+  const completedBoundary = state.eventLog.some((event) =>
+    event.type === 'turn_ended' && event.combatant === actor && event.round === state.round);
+  return closedWindow && !completedBoundary;
+}
 
 export type TargetSelectionRefusalRule =
   | 'fixed_count'
@@ -888,6 +996,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
 
   return {
     config: { ...config },
+    phase: { kind: 'active' },
     rulesEdition: setup.rulesEdition ?? '2024',
     hiddenRolls: setup.hiddenRolls === undefined
       ? setup.hideDeathSaveRolls === true ? ['death_saves'] : []
@@ -4005,7 +4114,13 @@ function queueOpportunityAttack(
   context: ReductionContext,
   reactor: CombatantId,
   trigger: OpportunityAttackTrigger,
+  command: Extract<EncounterCommand, { readonly type: 'opportunity_attack' }>,
 ): void {
+  if (context.state.eventLog.some((event) =>
+    event.type === 'pending_decision_resolved' &&
+    event.kind === 'reaction_offer' && event.reactionKind === 'opportunity_attack' &&
+    event.combatant === reactor &&
+    event.boundary.activeCombatant === trigger.mover && event.boundary.round === context.state.round)) return;
   if (context.state.pendingDecisions.some((decision) =>
     decision.kind === 'reaction_offer' &&
     decision.combatant === reactor && decision.reactionKind === 'opportunity_attack' &&
@@ -4021,7 +4136,12 @@ function queueOpportunityAttack(
       { id: 'decline', label: 'Decline' },
     ],
     boundary: { activeCombatant: trigger.mover, round: context.state.round },
-    opportunityAttack: { mover: trigger.mover, from: { ...trigger.from }, to: { ...trigger.to } },
+    opportunityAttack: {
+      mover: trigger.mover,
+      from: { ...trigger.from },
+      to: { ...trigger.to },
+      command: structuredClone(command),
+    },
   };
   context.state = {
     ...context.state,
@@ -4133,6 +4253,29 @@ function executeLegendaryAction(
   processAttack(context, monsterAttackCommand(attack, actor, target), null, 'legendary');
 }
 
+function legendaryActionAvailable(
+  state: EncounterState,
+  actor: CombatantId,
+  action: MonsterLegendaryAction,
+): boolean {
+  if (action.kind === 'temporary_defense') return true;
+  const target = legendaryActionTarget(state, actor);
+  if (target === null) return false;
+  const start = token(state, actor).position;
+  const targetPosition = token(state, target).position;
+  if (gridDistance(start, targetPosition) <= effectiveCombatRules(state, actor).reach) return true;
+  const maximumCost = feet(action.movement === 'half_speed'
+    ? Math.floor(effectiveCombatRules(state, actor).speed / 2)
+    : effectiveCombatRules(state, actor).speed);
+  return adjacentCells(state.bounds, targetPosition)
+    .filter((cell) => !state.tokens.some((candidate) =>
+      candidate.combatantId !== actor && cellKey(candidate.position) === cellKey(cell)))
+    .some((goal) => findPath(
+      encounterMovementWorld(state),
+      { actorId: actor, start, goal, maximumCost },
+    ).kind === 'found');
+}
+
 function queueLegendaryActionWindows(context: ReductionContext, activeCombatant: CombatantId): boolean {
   let queued = false;
   for (const subject of context.state.combatants) {
@@ -4151,7 +4294,9 @@ function queueLegendaryActionWindows(context: ReductionContext, activeCombatant:
       decision.kind === 'legendary_action_window' && decision.combatant === actor &&
       decision.boundary.activeCombatant === activeCombatant && decision.boundary.round === context.state.round);
     if (alreadyHandled || alreadyPending) continue;
-    const affordable = actions.filter((action) => action.cost <= pool.actionUsesRemaining);
+    const affordable = actions.filter((action) =>
+      action.cost <= pool.actionUsesRemaining &&
+      legendaryActionAvailable(context.state, actor, action));
     if (affordable.length === 0) continue;
     const id = `decision:${String(context.state.nextDecisionSequence)}`;
     const options: Extract<PendingDecision, { readonly kind: 'legendary_action_window' }>['options'] = [
@@ -4207,6 +4352,11 @@ function processMove(
       const trigger: OpportunityAttackTrigger = {
         mover: command.actor, from: { ...step.from }, to: { ...step.to },
       };
+      const executableOpportunityAttack = command.executableOpportunityAttacks === undefined
+        ? defaultOpportunityAttack(window.reactorId, command.actor)
+        : command.executableOpportunityAttacks.find((candidate) =>
+            candidate.actor === window.reactorId && candidate.target === command.actor);
+      if (executableOpportunityAttack === undefined) continue;
       const policy = reactionPolicyFor(context.state, window.reactorId, 'opportunity_attack');
       if (policy === 'never') {
         emit(context, {
@@ -4220,11 +4370,13 @@ function processMove(
           type: 'reaction_policy_auto_resolved', combatant: window.reactorId,
           reactionKind: 'opportunity_attack', policy, resolution: 'accept', autoFired: true,
         });
-        processAttack(context, defaultOpportunityAttack(window.reactorId, command.actor), trigger);
+        processAttack(context, executableOpportunityAttack, trigger);
         if (combatant(context.state, command.actor).life !== 'living') break;
         continue;
       }
-      if (reactor.turn.reactionAvailable) queueOpportunityAttack(context, window.reactorId, trigger);
+      if (reactor.turn.reactionAvailable) {
+        queueOpportunityAttack(context, window.reactorId, trigger, executableOpportunityAttack);
+      }
     }
     if (combatant(context.state, command.actor).life !== 'living') break;
     context.state = {
@@ -5726,7 +5878,9 @@ function processAttack(
       command.attackBonus !== declared.attackBonus ||
       command.criticalFloor !== 20 ||
       canonicalJson(command.damage) !== canonicalJson(declaredMonsterDamage(declared.damage)) ||
-      canonicalJson(command.monsterOnHit ?? []) !== canonicalJson(declared.onHit)
+      canonicalJson(command.monsterOnHit ?? []) !== canonicalJson(
+        executableMonsterOnHitEffects(declared.onHit),
+      )
     ) {
       throw new EncounterRuleError('validation', `Combatant ${command.actor}'s monster attack declaration was altered.`);
     }
@@ -9986,6 +10140,63 @@ function processWorldOperation(
   }
 }
 
+function worldObjectClassActionFor(
+  state: EncounterState,
+  objectId: WorldObjectId,
+  actionId: string,
+): { readonly object: WorldObject; readonly action: WorldObjectClassAction } {
+  const object = worldObject(state, objectId);
+  const action = object.classActions?.find((candidate) => candidate.id === actionId);
+  if (action === undefined) {
+    throw new EncounterRuleError('validation', `World object ${objectId} has no class action ${actionId}.`);
+  }
+  if (action.uses === 'once' && state.eventLog.some((event) =>
+    event.type === 'world_object_used' && event.objectId === objectId && event.actionId === actionId)) {
+    throw new EncounterRuleError('validation', `${action.label} has already been used.`);
+  }
+  return { object, action };
+}
+
+function useWorldObject(
+  context: ReductionContext,
+  command: Extract<EncounterCommand, { readonly type: 'use_world_object' }>,
+): void {
+  const subject = assertActiveActor(context, command.actor);
+  const { object, action } = worldObjectClassActionFor(context.state, command.objectId, command.actionId);
+  if (action.eligibleActor !== 'either' && action.eligibleActor !== subject.profile.kind) {
+    throw new EncounterRuleError('validation', `${action.label} is unavailable to ${subject.profile.kind}.`);
+  }
+  if (action.reach === 'adjacent' && gridDistance(token(context.state, command.actor).position, object.position) > 5) {
+    throw new EncounterRuleError('validation', `${action.label} requires adjacency to ${object.name}.`);
+  }
+  spendCost(context, command.actor, action.cost, action.label);
+  emit(context, {
+    type: 'world_object_used', actor: command.actor, objectId: object.id,
+    actionId: action.id, round: Math.max(1, context.state.round), authority: 'combatant_action',
+  });
+}
+
+function overrideWorldObjectUse(
+  context: ReductionContext,
+  command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>,
+): void {
+  const { object, action } = worldObjectClassActionFor(context.state, command.objectId, command.actionId);
+  if (action.dmOverride === undefined || action.dmOverride.actor !== command.actor) {
+    throw new EncounterRuleError('validation', `${action.label} has no matching DM override control.`);
+  }
+  combatant(context.state, command.actor);
+  emit(context, {
+    type: 'adjudicated', target: command.actor,
+    subject: `dm-override:world-object:${action.id}`,
+    reasoning: action.dmOverride.reasoning,
+    consequence: { kind: 'world_object_interaction', objectId: object.id, actionId: action.id },
+  });
+  emit(context, {
+    type: 'world_object_used', actor: command.actor, objectId: object.id,
+    actionId: action.id, round: Math.max(1, context.state.round), authority: 'dm_override',
+  });
+}
+
 function sameIdentitySet<T>(left: readonly T[], right: readonly T[]): boolean {
   return left.length === right.length &&
     new Set(left).size === left.length &&
@@ -10163,6 +10374,12 @@ function applyDmDeathOverride(context: ReductionContext, command: DmDeathOverrid
 
 function processCommand(context: ReductionContext, command: EncounterCommand): void {
   switch (command.type) {
+    case 'use_world_object':
+      useWorldObject(context, command);
+      return;
+    case 'dm_use_world_object':
+      overrideWorldObjectUse(context, command);
+      return;
     case 'assume_wild_shape':
       assumeWildShape(context, command);
       return;
@@ -10349,13 +10566,15 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       emit(context, {
         type: 'pending_decision_resolved', decisionId: decision.id,
         combatant: decision.combatant, kind: decision.kind, optionId: command.optionId,
+        boundary: { ...decision.boundary },
+        reactionKind: decision.kind === 'reaction_offer' ? decision.reactionKind : null,
       });
       switch (decision.kind) {
         case 'reaction_offer':
           if (command.optionId === 'accept') {
             processAttack(
               context,
-              defaultOpportunityAttack(decision.combatant, decision.opportunityAttack.mover),
+              decision.opportunityAttack.command,
               decision.opportunityAttack,
             );
           }
@@ -10794,6 +11013,9 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       endConcentration(context, command.actor, 'concentration_ended');
       return;
     case 'end_turn': {
+      if (context.state.phase.kind === 'concluded') {
+        throw new EncounterConcludedBoundaryError('encounter_concluded', context.state.phase);
+      }
       if (context.state.activeCombatant !== command.actor) {
         throw new EncounterRuleError('validation', `Combatant ${command.actor} is not the active combatant.`);
       }
@@ -10835,6 +11057,19 @@ export function reduceEncounter(
     events: [],
     reactionDecision: options.reactionDecision ?? null,
   };
+  const resolvedDecision = command.type === 'resolve_pending_decision'
+    ? state.pendingDecisions.find((decision) => decision.id === command.decisionId)
+    : undefined;
+  const deferredLegendaryBoundary = resolvedDecision?.kind === 'legendary_action_window';
+  const resumedLegendaryBoundary = command.type === 'end_turn' &&
+    resumesLegendaryTurnBoundary(state, command.actor);
   processCommand(context, command);
+  const conclusion = deferredLegendaryBoundary
+    ? null
+    : encounterConclusionAfter(state, context.state) ??
+      (resumedLegendaryBoundary
+        ? encounterConclusionFromCurrentState(context.state)
+        : null);
+  if (conclusion !== null) context.state = { ...context.state, phase: conclusion };
   return { state: context.state, events: context.events };
 }

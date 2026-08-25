@@ -330,6 +330,15 @@ const SCHEMA_BEFORE_VTT_SESSION_HIDDEN_ROLLS = DATABASE_MIGRATIONS
   .slice(0, VTT_SESSION_HIDDEN_ROLLS_INDEX)
   .map((entry) => entry.sql)
   .join('\n');
+const VTT_SESSION_ENCOUNTER_PHASE_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0058_vtt_session_encounter_phase',
+);
+const SCHEMA_BEFORE_VTT_SESSION_ENCOUNTER_PHASE = DATABASE_MIGRATIONS
+  .slice(0, VTT_SESSION_ENCOUNTER_PHASE_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const VTT_SESSION_ENCOUNTER_PHASE_MIGRATION =
+  DATABASE_MIGRATIONS[VTT_SESSION_ENCOUNTER_PHASE_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -4077,6 +4086,42 @@ describe('database migration chain', () => {
       expect(databaseSchemaSignature(db)).toBe(
         schemaSignature(SCHEMA_BEFORE_VTT_SESSION_HIDDEN_ROLLS),
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0058 admits typed encounter-phase revision schema seven without losing prior revisions', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_VTT_SESSION_ENCOUNTER_PHASE);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES ('session:phase-migration-survivor', 1, 6, '{"state":"kept"}', '${'ab'.repeat(32)}')
+      `);
+
+      db.exec(VTT_SESSION_ENCOUNTER_PHASE_MIGRATION.sql);
+
+      expect(db.selectObjects(
+        `SELECT session_id, revision, schema_version, payload_json, payload_checksum
+         FROM vtt_session_revisions`,
+      )).toEqual([{
+        session_id: 'session:phase-migration-survivor',
+        revision: 1,
+        schema_version: 6,
+        payload_json: '{"state":"kept"}',
+        payload_checksum: 'ab'.repeat(32),
+      }]);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES ('session:phase-state', 1, 7, '{"phase":{"kind":"active"}}', '${'cd'.repeat(32)}')
+      `);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        VTT_SESSION_ENCOUNTER_PHASE_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {
       db.close();
     }

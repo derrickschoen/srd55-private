@@ -4,10 +4,16 @@ import {
 } from '../combat/combatant';
 import {
   createEncounter,
+  reduceEncounter,
+  type EncounterCommandReducer,
+  type EncounterReduction,
   type EncounterState,
+  type EncounterReductionOptions,
   type InitiativeEntry,
 } from '../combat/encounter';
+import type { EncounterCommand, EncounterEvent } from '../combat/events';
 import type { GridCell } from '../combat/grid';
+import type { Rng } from '../combat/random';
 import {
   GREASE_MATERIAL,
   WEB_MATERIAL,
@@ -31,6 +37,10 @@ import type {
   EncounterEnvironment,
   WorldObject,
 } from '../combat/world-objects';
+import {
+  dmWorldObjectOverrideCommand,
+  worldObjectClassActionCommands,
+} from '../combat/world-object-actions';
 import { loadedPartyTurnLegalActions, type LoadedPartyMember } from './party-pack';
 import { preloadPartySessionState, type PartySessionState } from './party-session-state';
 import {
@@ -180,6 +190,8 @@ export function vaneWarrenActionEconomy(fight: VaneWarrenFight): VaneWarrenActio
 }
 
 export type VaneWarrenObjectClass = 'war_drum' | 'brazier' | 'oil_cask';
+export const VANE_WARREN_SOUND_DRUM_ACTION_ID = 'sound_war_drum' as const;
+export const VANE_WARREN_DRUMMER_PRIORITY = 10_000 as const;
 
 export interface VaneWarrenWorldObject {
   readonly class: VaneWarrenObjectClass;
@@ -207,6 +219,26 @@ function encounterObject(
       armorClass: armorClass(objectClass === 'oil_cask' ? 10 : 12),
       damageResponses: [],
       blocking: { movement: false, lineOfSight: false, cover: 'none' },
+      ...(objectClass === 'war_drum'
+        ? {
+            classActions: [{
+              id: VANE_WARREN_SOUND_DRUM_ACTION_ID,
+              label: 'Sound the war drum',
+              cost: 'action',
+              reach: 'adjacent',
+              uses: 'once',
+              eligibleActor: 'monster',
+              controllerPriority: {
+                actor: combatantId(`combatant:vane-warren:${fightId}:cinder-guard-b`),
+                score: VANE_WARREN_DRUMMER_PRIORITY,
+              },
+              dmOverride: {
+                actor: combatantId(`combatant:vane-warren:${fightId}:cinder-guard-b`),
+                reasoning: 'DM fallback: the Vane Warren war drum sounds and starts its authored alarm waves.',
+              },
+            }],
+          }
+        : {}),
       createdRevision: 0,
     },
   };
@@ -503,6 +535,34 @@ export function useVaneWarrenWarDrum(
   };
 }
 
+export function vaneWarrenWorldObjectLegalActions(
+  state: VaneWarrenEncounterState,
+  actor: CombatantId,
+): readonly EncounterCommand[] {
+  return worldObjectClassActionCommands(state.encounter, actor).actions;
+}
+
+export function vaneWarrenDmWarDrumControl(
+  state: VaneWarrenEncounterState,
+): Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }> | null {
+  const alarmObject = drum(state);
+  return dmWorldObjectOverrideCommand(
+    state.encounter,
+    alarmObject.object.id,
+    VANE_WARREN_SOUND_DRUM_ACTION_ID,
+  );
+}
+
+export function reduceVaneWarrenWorldObjectAction(
+  state: VaneWarrenEncounterState,
+  command: Extract<EncounterCommand, { readonly type: 'use_world_object' | 'dm_use_world_object' }>,
+  rng: Rng = () => 0,
+): VaneWarrenEncounterState {
+  const reduction = reduceEncounter(state.encounter, command, rng);
+  const sounded = useVaneWarrenWarDrum({ ...state, encounter: reduction.state }, command.actor);
+  return sounded;
+}
+
 function openPosition(state: EncounterState, preferred: GridCell): GridCell {
   const occupied = new Set(state.tokens.map((token) => `${String(token.position.column)},${String(token.position.row)}`));
   const blocked = new Set(state.blockedCells.map((cell) => `${String(cell.column)},${String(cell.row)}`));
@@ -517,15 +577,17 @@ function openPosition(state: EncounterState, preferred: GridCell): GridCell {
   throw new Error('The Vane Warren has no open reinforcement cell.');
 }
 
-function deployRosterEntries(
-  state: VaneWarrenEncounterState,
+function deployRosterEntriesInEncounter(
+  initial: EncounterState,
+  fight: VaneWarrenFight,
   entries: readonly VaneWarrenRosterEntry[],
-): VaneWarrenEncounterState {
-  let encounter = state.encounter;
+  incrementRevision = true,
+): EncounterState {
+  let encounter = initial;
   const profiles: CombatantProfile[] = [];
   const positions: GridCell[] = [];
   for (const entry of entries) {
-    const profile = profileFor(state.fight.id, entry);
+    const profile = profileFor(fight.id, entry);
     const position = openPosition(encounter, entry.position);
     profiles.push(profile);
     positions.push(position);
@@ -535,7 +597,7 @@ function deployRosterEntries(
     };
   }
   const initialized = createEncounter({
-    bounds: state.encounter.bounds,
+    bounds: initial.bounds,
     combatants: profiles,
     tokens: profiles.map((profile, index) => ({
       id: profile.tokenId,
@@ -555,16 +617,70 @@ function deployRosterEntries(
         slot: lastSlot + index + 1,
       }));
   return {
+    ...encounter,
+    revision: incrementRevision ? encounter.revision + 1 : encounter.revision,
+    combatants: [...encounter.combatants, ...initialized.combatants],
+    initiative: [...encounter.initiative, ...appendedInitiative],
+  };
+}
+
+function deployRosterEntries(
+  state: VaneWarrenEncounterState,
+  entries: readonly VaneWarrenRosterEntry[],
+): VaneWarrenEncounterState {
+  return {
     ...state,
-    encounter: {
-      ...encounter,
-      revision: encounter.revision + 1,
-      combatants: [...encounter.combatants, ...initialized.combatants],
-      initiative: [...encounter.initiative, ...appendedInitiative],
-    },
+    encounter: deployRosterEntriesInEncounter(state.encounter, state.fight, entries),
     deployedRosterIds: [...state.deployedRosterIds, ...entries.map((entry) => entry.id)],
   };
 }
+
+function fightForAlarmObject(state: EncounterState): VaneWarrenFight | null {
+  return VANE_WARREN_FIGHTS.find((fight) => state.worldObjects.some((object) =>
+    object.id === worldObjectId(`world-object:vane-warren:${fight.id}:war_drum`))) ?? null;
+}
+
+export const reduceVaneWarrenEncounter: EncounterCommandReducer = (
+  state: EncounterState,
+  command: EncounterCommand,
+  rng: Rng,
+  options: EncounterReductionOptions = {},
+): EncounterReduction => {
+  const reduction = reduceEncounter(state, command, rng, options);
+  const fight = fightForAlarmObject(reduction.state);
+  if (fight === null) return reduction;
+  const alarmObjectId = worldObjectId(`world-object:vane-warren:${fight.id}:war_drum`);
+  const alarm = reduction.state.eventLog.find((event) =>
+    event.type === 'world_object_used' &&
+    event.objectId === alarmObjectId &&
+    event.actionId === VANE_WARREN_SOUND_DRUM_ACTION_ID);
+  if (alarm?.type !== 'world_object_used') return reduction;
+  let next = reduction.state;
+  const events: EncounterEvent[] = [...reduction.events];
+  for (const wave of fight.alarmWaves) {
+    const deployAtRound = alarm.round + wave.delayRounds;
+    const alreadyDeployed = wave.adds.every((entry) => next.combatants.some((subject) =>
+      subject.profile.id === combatantId(`combatant:vane-warren:${fight.id}:${entry.id}`)));
+    if (alreadyDeployed || deployAtRound > next.round) continue;
+    next = deployRosterEntriesInEncounter(next, fight, wave.adds, false);
+    const event: EncounterEvent = {
+      sequence: next.nextEventSequence,
+      type: 'reinforcement_wave_deployed',
+      objectId: alarmObjectId,
+      waveId: wave.id,
+      calledBy: alarm.actor,
+      combatants: wave.adds.map((entry) => combatantId(`combatant:vane-warren:${fight.id}:${entry.id}`)),
+      round: next.round,
+    };
+    next = {
+      ...next,
+      nextEventSequence: next.nextEventSequence + 1,
+      eventLog: [...next.eventLog, event],
+    };
+    events.push(event);
+  }
+  return { state: next, events };
+};
 
 export function advanceVaneWarrenAlarm(
   state: VaneWarrenEncounterState,
@@ -713,9 +829,10 @@ export function composeVaneWarrenFight(
     controllers: storedPartyControllerIdentities(state.combatants),
     turnLegalActions: (current, actor) => {
       const member = members.find((candidate) => candidate.profile.id === actor);
-      return member === undefined
-        ? { actions: [{ type: 'end_turn', actor }] }
-        : partyActions(current, actor);
+      const base = member === undefined
+        ? [{ type: 'end_turn', actor } as const]
+        : partyActions(current, actor).actions;
+      return { actions: [...worldObjectClassActionCommands(current, actor).actions, ...base] };
     },
   };
 }

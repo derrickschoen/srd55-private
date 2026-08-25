@@ -1,0 +1,146 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  StableRenderKeyCollisionError,
+  reconcileStableRenderedChildren,
+  stableRenderKey,
+} from '../../../src/vtt/stable-dom-render';
+import {
+  installInteractiveDocument,
+  interactiveElement,
+} from '../../fixtures/interactive-dom';
+
+describe('stable VTT control rendering', () => {
+  let restoreDocument: () => void;
+
+  beforeEach(() => {
+    restoreDocument = installInteractiveDocument();
+  });
+
+  afterEach(() => restoreDocument());
+
+  it('keeps a pending tray option connected and clickable across live publishes', () => {
+    const live = document.createElement('main');
+    const liveTray = document.createElement('section');
+    liveTray.dataset.renderKey = stableRenderKey('dm', 'decision-tray');
+    const liveRow = document.createElement('article');
+    liveRow.dataset.renderKey = stableRenderKey('dm', 'decision-tray', 'decision', 'reaction-7');
+    const liveButton = document.createElement('button');
+    liveButton.dataset.renderKey = stableRenderKey(
+      'dm', 'decision-tray', 'decision', 'reaction-7', 'option', 'accept',
+    );
+    const clicked = vi.fn();
+    liveButton.addEventListener('click', clicked);
+    liveRow.append(liveButton);
+    liveTray.append(liveRow);
+    live.append(liveTray);
+    document.body.append(live);
+
+    const draft = document.createElement('main');
+    const nextTray = document.createElement('section');
+    nextTray.dataset.renderKey = stableRenderKey('dm', 'decision-tray');
+    const nextRow = document.createElement('article');
+    nextRow.dataset.renderKey = stableRenderKey('dm', 'decision-tray', 'decision', 'reaction-7');
+    const nextButton = document.createElement('button');
+    nextButton.dataset.renderKey = stableRenderKey(
+      'dm', 'decision-tray', 'decision', 'reaction-7', 'option', 'accept',
+    );
+    nextButton.textContent = 'Make Opportunity Attack for Vane Spear';
+    nextRow.append(nextButton);
+    nextTray.append(nextRow);
+    draft.append(nextTray);
+
+    reconcileStableRenderedChildren(live, draft);
+
+    const rendered = interactiveElement(live).querySelector(
+      `[data-render-key="${stableRenderKey(
+        'dm', 'decision-tray', 'decision', 'reaction-7', 'option', 'accept',
+      )}"]`,
+    );
+    expect(rendered).toBe(interactiveElement(liveButton));
+    expect(interactiveElement(liveButton).isConnected).toBe(true);
+    interactiveElement(liveButton).click();
+    expect(clicked).toHaveBeenCalledOnce();
+  });
+
+  it('keeps controller controls connected while adding a deferred roster member', () => {
+    const assignment = (
+      combatantId: string,
+      kind: 'human' | 'algorithm',
+      changed?: () => void,
+    ): HTMLElement => {
+      const row = document.createElement('label');
+      row.dataset.renderKey = stableRenderKey('dm', 'controller-assignments', combatantId);
+      const select = document.createElement('select');
+      select.dataset.renderKey = stableRenderKey(
+        'dm', 'controller-assignments', combatantId, 'kind',
+      );
+      select.value = kind;
+      if (changed !== undefined) select.addEventListener('change', changed);
+      row.append(select);
+      return row;
+    };
+    const section = (rows: readonly HTMLElement[]): HTMLElement => {
+      const assignments = document.createElement('section');
+      assignments.dataset.renderKey = stableRenderKey('dm', 'controller-assignments');
+      assignments.append(...rows);
+      return assignments;
+    };
+
+    const changed = vi.fn();
+    const live = document.createElement('main');
+    const originalRow = assignment('combatant:cinder-guard-a', 'human', changed);
+    const originalSelect = originalRow.children[0];
+    if (originalSelect === undefined) throw new Error('Controller select fixture is missing.');
+    live.append(section([originalRow]));
+    document.body.append(live);
+
+    const draft = document.createElement('main');
+    draft.append(section([
+      assignment('combatant:cinder-guard-a', 'algorithm'),
+      assignment('combatant:cinder-wave-1-a', 'human'),
+    ]));
+    reconcileStableRenderedChildren(live, draft);
+
+    const renderedRow = interactiveElement(live).querySelector(
+      `[data-render-key="${stableRenderKey(
+        'dm', 'controller-assignments', 'combatant:cinder-guard-a',
+      )}"]`,
+    );
+    if (renderedRow === null) throw new Error('Original controller row was not reconciled.');
+    const renderedOriginal = renderedRow.querySelector(
+      `[data-render-key="${stableRenderKey(
+        'dm', 'controller-assignments', 'combatant:cinder-guard-a', 'kind',
+      )}"]`,
+    );
+    expect(renderedOriginal).toBe(interactiveElement(originalSelect as HTMLElement));
+    expect(interactiveElement(originalSelect as HTMLElement).isConnected).toBe(true);
+    expect(Reflect.get(originalSelect, 'value')).toBe('algorithm');
+    const renderedSection = interactiveElement(live).querySelector(
+      `[data-render-key="${stableRenderKey('dm', 'controller-assignments')}"]`,
+    );
+    expect(renderedSection?.children).toHaveLength(2);
+    interactiveElement(originalSelect as HTMLElement).dispatchEvent(new Event('change'));
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it('rejects colliding logical identities before mutating the live tree', () => {
+    const live = document.createElement('main');
+    const draft = document.createElement('main');
+    const first = document.createElement('button');
+    const second = document.createElement('button');
+    const collision = stableRenderKey('dm', 'controls', 'interrupt');
+    first.dataset.renderKey = collision;
+    second.dataset.renderKey = collision;
+    draft.append(first, second);
+
+    expect(() => reconcileStableRenderedChildren(live, draft)).toThrowError(
+      expect.objectContaining<Partial<StableRenderKeyCollisionError>>({
+        name: 'StableRenderKeyCollisionError',
+        code: 'duplicate_stable_render_key',
+        key: collision,
+        tree: 'draft',
+      }),
+    );
+    expect(live.children).toHaveLength(0);
+  });
+});

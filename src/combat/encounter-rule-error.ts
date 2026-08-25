@@ -8,6 +8,7 @@ export const ENCOUNTER_REFUSAL_CLASSES = [
   'equipment_validation',
   'sustained_activation_validation',
   'wild_shape_validation',
+  'encounter_concluded_boundary',
   'pending_decision_boundary',
   'pending_decision_validation',
 ] as const;
@@ -16,7 +17,9 @@ export type EncounterRefusalClass = (typeof ENCOUNTER_REFUSAL_CLASSES)[number];
 
 export type NonBoundaryRefusalClass = Exclude<
   EncounterRefusalClass,
-  'pending_decision_boundary' | 'pending_decision_validation'
+  | 'encounter_concluded_boundary'
+  | 'pending_decision_boundary'
+  | 'pending_decision_validation'
 >;
 
 export class EncounterRuleError extends Error {

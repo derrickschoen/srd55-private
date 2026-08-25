@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { CodexCliExchange, FileExchangeCache, FileRevisionMirror, ScriptedCodexExchange, dmBridgeLibInternals } from './dm-bridge-lib.mjs';
+import { CodexCliExchange, FileExchangeCache, FileRevisionMirror, ProjectionReconstructor, ScriptedCodexExchange, dmBridgeLibInternals } from './dm-bridge-lib.mjs';
 
 async function availablePort() {
   const server = createServer();
@@ -53,6 +53,49 @@ test('scripted exchange resumes one persisted Codex session', async () => {
     }),
     /transcript expected/,
   );
+});
+
+test('compact projection manifest names a bridge field omission before hash comparison', () => {
+  const reconstructor = new ProjectionReconstructor();
+  assert.throws(() => reconstructor.reconstruct({
+    encounterId: 'encounter:compact-manifest',
+    expectedRevision: 3,
+    history: [],
+    projectionTransfer: {
+      kind: 'compact_projection',
+      revision: 3,
+      stateHash: '0'.repeat(64),
+      projectionFields: [
+        'audience',
+        'encounter',
+        'board',
+        'coordinator',
+        'pendingRequest',
+        'humanCommandActions',
+        'movementPreviews',
+        'controllers',
+        'history',
+        'adjudicatedTargets',
+        'partySession',
+        'decisionTray',
+        'timeline',
+        'worldObjectControls',
+      ],
+      view: {
+        encounter: { revision: 3 },
+        board: {},
+        coordinator: {},
+        pendingRequest: null,
+        humanCommandActions: [],
+        movementPreviews: [],
+        controllers: [],
+        adjudicatedTargets: [],
+        partySession: null,
+        decisionTray: {},
+        timeline: {},
+      },
+    },
+  }), /missing: worldObjectControls; unexpected: none/u);
 });
 
 test('Codex CLI contract writes the request on stdin and resumes only the supplied session', async () => {

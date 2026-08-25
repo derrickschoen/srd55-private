@@ -218,8 +218,8 @@ describe('DM save manager', () => {
     const boundaryTriggers = [
       'encounter_start',
       'encounter_end',
-      'short_rest_boundary',
-      'long_rest_boundary',
+      'rest_boundary',
+      'rest_interruption',
     ] as const;
     expect(boundaryTriggers.map((trigger) => autosavePoolForTrigger(trigger))).toEqual([
       'encounter_boundary',

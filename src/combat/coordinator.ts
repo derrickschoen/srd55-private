@@ -2,6 +2,7 @@ import {
   ControllerRequestCancelledError,
   StaleControllerResponseError,
   evaluateOpportunityAttackPolicy,
+  isListedControllerAction,
   type ControllerDecision,
   type ControllerIdentity,
   type ControllerRegistry,
@@ -11,20 +12,24 @@ import {
 } from './controllers';
 import {
   combatantsAreAllies,
+  EncounterConcludedBoundaryError,
+  encounterMovementWorld,
   EncounterRuleError,
   PendingDecisionRuleError,
   reduceEncounter,
   type EncounterReduction,
+  type EncounterCommandReducer,
   type ReactionDecisionHook,
   type EncounterState,
+  type EncounterPhase,
 } from './encounter';
 import type { EncounterCommand, EncounterEvent } from './events';
 import type { NonBoundaryRefusalClass } from './encounter-rule-error';
 import type { GridCell } from './grid';
-import { planMovement, type MovementWorld } from './movement';
+import { planMovement } from './movement';
 import type { Rng } from './random';
 import type { HiddenRollCategory } from './roll-visibility';
-import { feet, type CombatantId } from './values';
+import type { CombatantId } from './values';
 import { projectPlayerView } from './visibility';
 import {
   REFUSAL_CLASS_CATEGORIES,
@@ -112,6 +117,7 @@ export interface CoordinatorPersistence {
 }
 
 export interface CoordinatorOptions {
+  readonly commandReducer?: EncounterCommandReducer;
   readonly turnLegalActions?: TurnLegalActions;
   readonly reactionLegalActions?: ReactionLegalActions;
   readonly standingReactionPolicies?: ReadonlyMap<
@@ -137,17 +143,11 @@ export type CoordinatorStep =
       readonly kind: 'refused';
       readonly state: EncounterState;
       readonly reason: string;
+      readonly encounterConclusionCode?: EncounterConcludedBoundaryError['code'];
+      readonly conclusion?: Extract<EncounterPhase, { readonly kind: 'concluded' }>;
       readonly pendingDecisionCode?: PendingDecisionRuleError['code'];
       readonly actionRefusal?: NonBoundaryActionRefusal;
     };
-
-function cellKey(cell: GridCell): string {
-  return `${cell.column},${cell.row}`;
-}
-
-function commandKey(command: EncounterCommand): string {
-  return JSON.stringify(command);
-}
 
 function combatant(state: EncounterState, id: CombatantId) {
   const found = state.combatants.find((candidate) => candidate.profile.id === id);
@@ -155,22 +155,39 @@ function combatant(state: EncounterState, id: CombatantId) {
   return found;
 }
 
-function movementWorld(state: EncounterState): MovementWorld<CombatantId> {
+function movementCause(
+  state: EncounterState,
+  command: Extract<EncounterCommand, { readonly type: 'move' }>,
+) {
+  return (command.cause === 'voluntary' && combatant(state, command.actor).turn.disengaging) ||
+    command.cause === 'reactions_resolved'
+    ? 'disengaged' as const
+    : command.cause;
+}
+
+function legalizeTurnActions(
+  state: EncounterState,
+  actor: CombatantId,
+  legalActions: LegalActionSummary,
+): LegalActionSummary {
+  const subject = combatant(state, actor);
+  const actorToken = state.tokens.find((token) => token.combatantId === actor);
+  if (actorToken === undefined) throw new EncounterRuleError('validation', 'Active combatant has no token.');
   return {
-    bounds: state.bounds,
-    canTraverseStep: () => true,
-    traversal: (actor, _from, to) => {
-      if (state.blockedCells.some((cell) => cellKey(cell) === cellKey(to))) {
-        return { kind: 'blocked', reason: 'blocked cell' };
-      }
-      const occupied = state.tokens.some(
-        (token) =>
-          token.combatantId !== actor &&
-          combatant(state, token.combatantId).life !== 'dead' &&
-          cellKey(token.position) === cellKey(to),
-      );
-      return { kind: 'enterable', cost: feet(5), canEnd: !occupied };
-    },
+    actions: legalActions.actions.flatMap((command): readonly EncounterCommand[] => {
+      if (command.type !== 'move' || command.actor !== actor) return [command];
+      const plan = planMovement(encounterMovementWorld(state), {
+        actorId: actor,
+        start: actorToken.position,
+        path: command.path,
+        budgetRemaining: subject.turn.movement.remaining,
+        cause: movementCause(state, command),
+        reachSources: [],
+      });
+      if (plan.kind === 'legal' || plan.reason !== 'over_budget') return [command];
+      if (plan.stepIndex === 0) return [];
+      return [{ ...command, path: command.path.slice(0, plan.stepIndex) }];
+    }),
   };
 }
 
@@ -202,12 +219,12 @@ function coordinatedMovementSteps(
         hostile: true,
       };
     });
-  const plan = planMovement(movementWorld(state), {
+  const plan = planMovement(encounterMovementWorld(state), {
     actorId: command.actor,
     start: actorToken.position,
     path: command.path,
     budgetRemaining: actor.turn.movement.remaining,
-    cause: actor.turn.disengaging ? 'disengaged' : 'voluntary',
+    cause: movementCause(state, command),
     reachSources,
   });
   if (plan.kind === 'illegal') return [];
@@ -234,6 +251,7 @@ export class TurnCoordinator {
   readonly #persistence: CoordinatorPersistence | undefined;
   readonly #reactionDecision: ReactionDecisionHook | undefined;
   readonly #pendingDecisionTray: boolean;
+  readonly #commandReducer: EncounterCommandReducer;
 
   constructor(
     initialState: EncounterState,
@@ -250,6 +268,7 @@ export class TurnCoordinator {
     this.#persistence = options.persistence;
     this.#reactionDecision = options.reactionDecision;
     this.#pendingDecisionTray = options.pendingDecisionTray ?? false;
+    this.#commandReducer = options.commandReducer ?? reduceEncounter;
     this.#turnLegalActions =
       options.turnLegalActions ??
       ((_state, actor) => ({ actions: [{ type: 'end_turn', actor }] }));
@@ -334,6 +353,16 @@ export class TurnCoordinator {
 
   adjudicate(
     command: Extract<EncounterCommand, { readonly type: 'adjudicate' }>,
+  ): CoordinatorStep {
+    this.#cancelPendingRequest();
+    const eventSequence = this.#state.nextEventSequence;
+    this.#pause = { kind: 'adjudicated', eventSequence };
+    const reduction = this.#apply(command, this.#continuation);
+    return { kind: 'applied', state: this.#state, events: reduction.events };
+  }
+
+  dmUseWorldObject(
+    command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>,
   ): CoordinatorStep {
     this.#cancelPendingRequest();
     const eventSequence = this.#state.nextEventSequence;
@@ -472,7 +501,7 @@ export class TurnCoordinator {
     continuation: CoordinatorContinuation,
   ): EncounterReduction {
     this.#lastAttemptedCommand = command;
-    const reduction = reduceEncounter(this.#state, command, this.rng, {
+    const reduction = this.#commandReducer(this.#state, command, this.rng, {
       ...(this.#reactionDecision === undefined ? {} : { reactionDecision: this.#reactionDecision }),
     });
     this.#state = reduction.state;
@@ -481,6 +510,10 @@ export class TurnCoordinator {
         this.registry.assignFrom(event.combatant, event.summoner);
       } else if (event.type === 'summoned_combatant_despawned') {
         this.registry.remove(event.combatant);
+      } else if (event.type === 'reinforcement_wave_deployed') {
+        for (const combatantId of event.combatants) {
+          this.registry.assignFrom(combatantId, event.calledBy);
+        }
       }
     }
     this.#pendingCommand = null;
@@ -498,9 +531,7 @@ export class TurnCoordinator {
     command: EncounterCommand,
     legalActions: LegalActionSummary,
   ): boolean {
-    return legalActions.actions.some(
-      (candidate) => commandKey(candidate) === commandKey(command),
-    );
+    return isListedControllerAction(command, legalActions);
   }
 
   #refuseAccepted(command: EncounterCommand, reason: string): CoordinatorStep {
@@ -680,7 +711,11 @@ export class TurnCoordinator {
       return { kind: 'applied', state: this.#state, events: reduction.events };
     }
     if (this.#pendingDecisionTray) {
-      const reduction = this.#apply(action, IDLE);
+      const executableOpportunityAttacks = coordinatedMovementSteps(this.#state, action)
+        .flatMap((step) => step.reactors)
+        .filter((reactor, index, reactors) => reactors.indexOf(reactor) === index)
+        .flatMap((reactor) => this.#reactionLegalActions(this.#state, reactor, actor));
+      const reduction = this.#apply({ ...action, executableOpportunityAttacks }, IDLE);
       return { kind: 'applied', state: this.#state, events: reduction.events };
     }
     const steps = coordinatedMovementSteps(this.#state, action);
@@ -704,6 +739,19 @@ export class TurnCoordinator {
     try {
       if (this.#pause !== null) {
         return { kind: 'refused', state: this.#state, reason: 'Coordinator is paused.' };
+      }
+      if (this.#state.phase.kind === 'concluded') {
+        const error = new EncounterConcludedBoundaryError(
+          'encounter_concluded',
+          this.#state.phase,
+        );
+        return {
+          kind: 'refused',
+          state: this.#state,
+          reason: error.message,
+          encounterConclusionCode: error.code,
+          conclusion: error.conclusion,
+        };
       }
       if (this.#continuation.kind === 'movement') return await this.#continueMovement();
       if (this.#continuation.kind === 'turn') return await this.#continueTurn();
@@ -738,10 +786,23 @@ export class TurnCoordinator {
       this.#continuation = {
         kind: 'turn',
         actor,
-        legalActions: this.#turnLegalActions(this.#state, actor),
+        legalActions: legalizeTurnActions(
+          this.#state,
+          actor,
+          this.#turnLegalActions(this.#state, actor),
+        ),
       };
       return await this.#continueTurn();
     } catch (error: unknown) {
+      if (error instanceof EncounterConcludedBoundaryError) {
+        return {
+          kind: 'refused',
+          state: this.#state,
+          reason: error.message,
+          encounterConclusionCode: error.code,
+          conclusion: error.conclusion,
+        };
+      }
       if (error instanceof PendingDecisionRuleError) {
         return {
           kind: 'refused',
@@ -759,7 +820,11 @@ export class TurnCoordinator {
         const refusalClass = error instanceof StaleControllerResponseError
           ? 'validation'
           : error.refusalClass;
-        if (refusalClass === 'pending_decision_boundary' || refusalClass === 'pending_decision_validation') {
+        if (
+          refusalClass === 'encounter_concluded_boundary' ||
+          refusalClass === 'pending_decision_boundary' ||
+          refusalClass === 'pending_decision_validation'
+        ) {
           return { kind: 'refused', state: this.#state, reason: error.message };
         }
         return {

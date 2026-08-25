@@ -70,6 +70,11 @@ export type EncounterCommand =
       readonly actor: CombatantId;
       readonly path: readonly GridCell[];
       readonly cause: 'voluntary' | 'reactions_resolved' | 'forced' | 'teleport';
+      /** Coordinator-validated OA commands; absent only for direct reducer callers. */
+      readonly executableOpportunityAttacks?: readonly Extract<
+        EncounterCommand,
+        { readonly type: 'opportunity_attack' }
+      >[];
     }
   | {
       readonly type: 'hide';
@@ -132,6 +137,18 @@ export type EncounterCommand =
       readonly actor: CombatantId | null;
       readonly cost: ActionCost;
       readonly operation: WorldOperation;
+    }
+  | {
+      readonly type: 'use_world_object';
+      readonly actor: CombatantId;
+      readonly objectId: WorldObjectId;
+      readonly actionId: string;
+    }
+  | {
+      readonly type: 'dm_use_world_object';
+      readonly actor: CombatantId;
+      readonly objectId: WorldObjectId;
+      readonly actionId: string;
     }
   | {
       readonly type: 'attack';
@@ -285,6 +302,22 @@ interface SequencedEvent {
 
 export type EncounterEvent =
   | (SequencedEvent & {
+      readonly type: 'world_object_used';
+      readonly actor: CombatantId;
+      readonly objectId: WorldObjectId;
+      readonly actionId: string;
+      readonly round: number;
+      readonly authority: 'combatant_action' | 'dm_override';
+    })
+  | (SequencedEvent & {
+      readonly type: 'reinforcement_wave_deployed';
+      readonly objectId: WorldObjectId;
+      readonly waveId: string;
+      readonly calledBy: CombatantId;
+      readonly combatants: readonly CombatantId[];
+      readonly round: number;
+    })
+  | (SequencedEvent & {
       readonly type: 'object_interaction_spent';
       readonly combatant: CombatantId;
       readonly mode: ObjectInteractionMode;
@@ -320,6 +353,11 @@ export type EncounterEvent =
             readonly to: GridCell;
           }
         | { readonly kind: 'no_effect' }
+        | {
+            readonly kind: 'world_object_interaction';
+            readonly objectId: WorldObjectId;
+            readonly actionId: string;
+          }
         | {
             readonly kind: 'death_override';
             readonly override: 'stabilize' | 'revive_at_one_hit_point' | 'set_death_save_counts' | 'mark_dead';
@@ -421,6 +459,11 @@ export type EncounterEvent =
       readonly combatant: CombatantId;
       readonly kind: 'reaction_offer' | 'death_save' | 'legendary_action_window' | 'legendary_resistance';
       readonly optionId: string;
+      readonly boundary: {
+        readonly activeCombatant: CombatantId;
+        readonly round: number;
+      };
+      readonly reactionKind: 'opportunity_attack' | null;
     })
   | (SequencedEvent & {
       readonly type: 'reaction_policy_auto_resolved';

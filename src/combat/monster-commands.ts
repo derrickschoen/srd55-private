@@ -1,6 +1,10 @@
 import type { EncounterCommand } from './events';
 import type { DamageRequest, RollMode } from './resolution';
-import type { MonsterAttackAction, MonsterSavingThrowAction } from './statblock';
+import type {
+  MonsterAttackAction,
+  MonsterOnHitEffect,
+  MonsterSavingThrowAction,
+} from './statblock';
 import { damageType, dieSides, type CombatantId } from './values';
 
 export function monsterActionDamage(
@@ -18,6 +22,20 @@ export function monsterActionDamage(
     critical: false,
     responses: [],
   };
+}
+
+/**
+ * Charge riders require reducer-owned proof of the preceding straight-line
+ * movement. Until that turn state lands, the declared base attack remains
+ * executable but the conditional rider is outside the legal command domain.
+ * The SRD Boar states this as movement immediately before the hit:
+ * docs/srd/full/srd-5.2.1.txt:22805-22809.
+ */
+export function executableMonsterOnHitEffects(
+  effects: readonly MonsterOnHitEffect[],
+): readonly MonsterOnHitEffect[] {
+  return effects.filter((effect) =>
+    effect.kind !== 'condition' || effect.trigger.kind !== 'charge');
 }
 
 export function monsterAttackCommand(
@@ -52,7 +70,7 @@ export function monsterAttackCommand(
     targetCanSeeAttacker: true,
     damage: monsterActionDamage(action.damage),
     attackId: action.id,
-    monsterOnHit: action.onHit,
+    monsterOnHit: executableMonsterOnHitEffects(action.onHit),
   };
 }
 

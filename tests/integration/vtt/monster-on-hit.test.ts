@@ -6,7 +6,7 @@ import {
   reduceEncounter,
   type EncounterState,
 } from '../../../src/combat/encounter';
-import type { EncounterEvent } from '../../../src/combat/events';
+import type { EncounterCommand, EncounterEvent } from '../../../src/combat/events';
 import {
   monsterAttackCommand,
   monsterSavingThrowCommand,
@@ -22,6 +22,7 @@ import {
   type HomebrewBeastFamily,
 } from '../../../src/combat/statblocks/homebrew-beast-families';
 import { STARTER_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
+import { regretTurnLegalActions } from '../../../src/vtt/regret/legal-actions';
 import { playerProfile } from '../../unit/combat/fixtures';
 
 function beast(family: HomebrewBeastFamily, challengeRating: 3) {
@@ -94,6 +95,38 @@ function attackEvent(events: readonly EncounterEvent[]) {
 }
 
 describe('monster statblock effects execute through the encounter reducer', () => {
+  it('charge_precondition_unmet: offers the declared base attack without its charge rider', () => {
+    // Charge applies only after straight movement immediately before the hit:
+    // docs/srd/full/srd-5.2.1.txt:22805-22809.
+    const row = beast('pterosaur', 3);
+    const subject = started(row.statblock, knownTarget('charge-domain-target'));
+    const declared = attack(row.statblock, 'raking-pass');
+    expect(declared.damage).toContainEqual(expect.objectContaining({
+      trigger: expect.objectContaining({ kind: 'charge', minimumStraightFeet: 20 }),
+    }));
+    expect(declared.onHit).toContainEqual(expect.objectContaining({
+      kind: 'condition', condition: 'Prone', trigger: expect.objectContaining({ kind: 'charge' }),
+    }));
+
+    const command = regretTurnLegalActions(subject.state, subject.actor.id).actions.find(
+      (candidate): candidate is Extract<EncounterCommand, { readonly type: 'attack' }> =>
+        candidate.type === 'attack' && candidate.attackId === 'raking-pass',
+    );
+    if (command === undefined) throw new Error('The pterosaur base attack is missing from the legal domain.');
+    expect(command.damage.terms).toHaveLength(1);
+    expect(command.monsterOnHit).toEqual([]);
+
+    const hit = reduceEncounter(subject.state, command, () => 0.5);
+    expect(attackEvent(hit.events)).toMatchObject({
+      actor: subject.actor.id,
+      target: subject.target.id,
+      damage: expect.objectContaining({ terms: [expect.objectContaining({ type: 'Piercing' })] }),
+    });
+    expect(combatantConditions(hit.state, subject.target.id)).not.toContainEqual(
+      expect.objectContaining({ name: 'Prone' }),
+    );
+  });
+
   it('squeeze_survives_release: bear grapple carries its DC, ticks at target start, and escape ends grapple plus squeeze', () => {
     const row = beast('ursine', 3);
     const subject = started(row.statblock, knownTarget('bear-grapple-target'));

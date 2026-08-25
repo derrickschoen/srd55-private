@@ -46,6 +46,7 @@ export type UpcomingTimelineEvent =
     };
 
 export interface EncounterTimelineProjection {
+  readonly phase: EncounterState['phase'];
   readonly round: number;
   readonly currentCombatant: CombatantId | null;
   readonly initiative: readonly InitiativeTimelineEntry[];
@@ -188,6 +189,7 @@ export function projectEncounterTimeline(
       ? [entry.transition.combatant]
       : []));
   return {
+    phase: structuredClone(state.phase),
     round: state.round,
     currentCombatant: state.activeCombatant,
     initiative: state.initiative.map((entry, position) => {

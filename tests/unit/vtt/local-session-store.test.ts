@@ -11,6 +11,12 @@ import {
   MemoryBrowserSessionStore,
   exportSavedSession,
 } from '../../../src/vtt/session-persistence';
+import {
+  loadExternalPartyPack,
+  type ExternalPartyPackV2,
+  type LoadedPartyMember,
+} from '../../../src/vtt/party-pack';
+import { composeStoredCharacterEncounter } from '../../../src/vtt/stored-character-encounter';
 
 class MemoryStorage implements Storage {
   readonly #values = new Map<string, string>();
@@ -55,6 +61,48 @@ function padSavedSession(bytes: string, length: number): string {
   const paddingPropertyLength = ',"padding":""'.length;
   if (bytes.length + paddingPropertyLength > length) throw new Error('Saved session exceeds target length.');
   return `${bytes.slice(0, -1)},"padding":"${'x'.repeat(length - bytes.length - paddingPropertyLength)}"}`;
+}
+
+function boundaryPartyMembers(): readonly LoadedPartyMember[] {
+  const member = (index: number): ExternalPartyPackV2['members'][number] => ({
+    combatantId: `combatant:boundary-${String(index)}`,
+    tokenId: `token:boundary-${String(index)}`,
+    characterId: index,
+    classes: [{ classId: 'Fighter', level: 2 }],
+    hitDice: [{ sides: 10, maximum: 2 }],
+    abilities: {
+      strength: 16, dexterity: 12, constitution: 14,
+      intelligence: 10, wisdom: 10, charisma: 8,
+    },
+    armorClass: 16,
+    hitPointMaximum: 20,
+    sizeCategory: 'Medium',
+    walkingSpeedFeet: 30,
+    initiativeBonus: index,
+    savingThrowBonuses: {
+      strength: 5, dexterity: 1, constitution: 4,
+      intelligence: 0, wisdom: 0, charisma: -1,
+    },
+    attacksPerAction: 1,
+    attacks: [{
+      attackId: `attack:boundary-${String(index)}`,
+      kind: 'melee',
+      attackBonus: 5,
+      criticalFloor: 20,
+      reachFeet: 5,
+      rangeFeet: 5,
+      damage: [{ damageTypeId: 'Slashing', count: 1, sides: 8, modifier: 3 }],
+    }],
+    startingConditions: [],
+  });
+  const loaded = loadExternalPartyPack({
+    schemaVersion: 2,
+    partyId: 'party:boundary-classification',
+    allowPartial: false,
+    members: [member(1), member(2), member(3)],
+  });
+  if (loaded.status !== 'loaded') throw new Error(`Boundary party refused: ${loaded.refusal.reason}.`);
+  return loaded.party.members;
 }
 
 describe('IndexedDB durable VTT session adapter', () => {
@@ -243,6 +291,57 @@ describe('IndexedDB durable VTT session adapter', () => {
     });
     put.mockRestore();
     expect(() => host.close()).toThrow(BrowserSessionWriteError);
+    store.close();
+  });
+
+  it('rest interruption mid-fight has its own boundary label and only actual victory ends the encounter', async () => {
+    const store = await IndexedDbBrowserSessionStore.open(new IDBFactory(), new MemoryStorage());
+    const members = boundaryPartyMembers();
+    const encounter = composeStoredCharacterEncounter(members);
+    if (encounter.partyState === null) throw new Error('Boundary encounter has no party state.');
+    const host = new DmEncounterHost('session:boundary-classification', store, {
+      initialState: encounter.state,
+      initialPartyState: encounter.partyState,
+      partyMembers: members,
+      partyDisplayNames: encounter.displayNames,
+      initialControllers: encounter.controllers,
+      playerIds: encounter.playerIds,
+      turnLegalActions: encounter.turnLegalActions,
+    });
+    host.interrupt();
+
+    for (const partyMember of members) {
+      host.adjudicate({
+        type: 'adjudicate',
+        target: partyMember.profile.id,
+        subject: 'Mid-fight rest-interruption boundary fixture',
+        reasoning: 'Leave the player character dying but not dead.',
+        consequence: {
+          kind: 'hit_point_delta',
+          amount: -partyMember.profile.rules.hitPointMaximum,
+        },
+      });
+    }
+    await host.resolveRestInterruption({ kind: 'no_benefit' });
+    await store.flush();
+
+    const beforeVictory = store.savedSessions().map((save) => save.name);
+    expect(beforeVictory).toContain('Encounter boundary — rest interruption — r0');
+    expect(beforeVictory.some((name) => name.includes('encounter end'))).toBe(false);
+
+    host.adjudicate({
+      type: 'adjudicate',
+      target: REFERENCE_MONSTER_ID,
+      subject: 'Actual encounter victory boundary fixture',
+      reasoning: 'Defeat the final enemy.',
+      consequence: { kind: 'hit_point_delta', amount: -80 },
+    });
+    await store.flush();
+
+    expect(store.savedSessions().map((save) => save.name)).toContain(
+      'Encounter boundary — encounter end — r0',
+    );
+    host.close();
     store.close();
   });
 

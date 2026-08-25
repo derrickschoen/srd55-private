@@ -107,7 +107,121 @@ export class HumanController implements Controller {
 }
 
 function commandKey(command: EncounterCommand): string {
-  return JSON.stringify(command);
+  return canonicalJson(command);
+}
+
+function movementRemaining(
+  request: ControllerRequest,
+  actorId: CombatantId,
+): number | null {
+  if ('viewer' in request.visibleState && request.visibleState.viewer === 'dm') {
+    return request.visibleState.combatants.find((candidate) => candidate.id === actorId)
+      ?.turn.movement.remaining ?? null;
+  }
+  if ('ownedCombatants' in request.visibleState) {
+    return request.visibleState.ownedCombatants.find((candidate) => candidate.id === actorId)
+      ?.turn.movement.remaining ?? null;
+  }
+  return null;
+}
+
+function clipMovementCandidate(
+  request: ControllerRequest,
+  command: EncounterCommand,
+): EncounterCommand | null {
+  if (command.type !== 'move') return command;
+  const actor = request.visibleState.combatants.find((candidate) => candidate.id === command.actor);
+  const budget = movementRemaining(request, command.actor);
+  if (actor === undefined || budget === null) return command;
+  const path: Array<(typeof command.path)[number]> = [];
+  let previous = actor.position;
+  let spent = 0;
+  for (const cell of command.path) {
+    const cost = gridDistance(previous, cell);
+    if (spent + cost > budget) break;
+    path.push(cell);
+    spent += cost;
+    previous = cell;
+  }
+  return path.length === 0 ? null : { ...command, path };
+}
+
+export function isListedControllerAction(
+  command: EncounterCommand,
+  legalActions: LegalActionSummary,
+): boolean {
+  return legalActions.actions.some((candidate) => {
+    if (commandKey(candidate) === commandKey(command)) return true;
+    if (
+      command.type !== 'move' || candidate.type !== 'move' ||
+      command.actor !== candidate.actor || command.cause !== candidate.cause ||
+      command.path.length === 0 || command.path.length >= candidate.path.length
+    ) return false;
+    return command.path.every((cell, index) => {
+      const listed = candidate.path[index];
+      return listed !== undefined && listed.column === cell.column && listed.row === cell.row;
+    });
+  });
+}
+
+function visibleHostile(
+  request: ControllerRequest,
+  actorKind: VisibleEncounterState['combatants'][number]['kind'],
+  id: CombatantId,
+) {
+  const target = request.visibleState.combatants.find((candidate) => candidate.id === id);
+  return target !== undefined && target.kind !== actorKind && target.life !== 'dead'
+    ? target
+    : null;
+}
+
+function playerCharacterAlgorithmRank(
+  request: ControllerRequest,
+  command: EncounterCommand,
+  actor: VisibleEncounterState['combatants'][number],
+): readonly [number, number, string] {
+  if (command.type === 'opportunity_attack') {
+    const target = visibleHostile(request, actor.kind, command.target);
+    if (target !== null) {
+      return [0, gridDistance(actor.position, target.position), commandKey(command)];
+    }
+  }
+  if (command.type === 'cast_spell') {
+    const target = command.targets
+      .map((id) => visibleHostile(request, actor.kind, id))
+      .filter((candidate) => candidate !== null)
+      .sort((left, right) =>
+        gridDistance(actor.position, left.position) - gridDistance(actor.position, right.position) ||
+        left.id.localeCompare(right.id))[0];
+    if (target !== undefined) {
+      return [1, gridDistance(actor.position, target.position), commandKey(command)];
+    }
+  }
+  if (command.type === 'attack') {
+    const target = visibleHostile(request, actor.kind, command.target);
+    if (target !== null) {
+      return [2, gridDistance(actor.position, target.position), commandKey(command)];
+    }
+  }
+  if (command.type === 'force_save') {
+    const target = visibleHostile(request, actor.kind, command.target);
+    if (target !== null) {
+      return [2, gridDistance(actor.position, target.position), commandKey(command)];
+    }
+  }
+  if (command.type === 'move') {
+    const destination = command.path.at(-1) ?? actor.position;
+    const nearest = Math.min(
+      ...request.visibleState.combatants
+        .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
+        .map((candidate) => gridDistance(destination, candidate.position)),
+    );
+    return [3, nearest, commandKey(command)];
+  }
+  if (command.type === 'dash') return [4, 0, commandKey(command)];
+  if (command.type === 'decline_reaction') return [5, 0, commandKey(command)];
+  if (command.type === 'end_turn') return [9, 0, commandKey(command)];
+  return [8, 0, commandKey(command)];
 }
 
 function algorithmRank(
@@ -117,6 +231,9 @@ function algorithmRank(
   const actor = request.visibleState.combatants.find(
     (candidate) => candidate.id === request.actorId,
   );
+  if (actor?.kind === 'player_character') {
+    return playerCharacterAlgorithmRank(request, command, actor);
+  }
   const hostile = (id: CombatantId) => {
     const target = request.visibleState.combatants.find((candidate) => candidate.id === id);
     return actor !== undefined && target !== undefined && actor.kind !== target.kind;
@@ -160,14 +277,16 @@ export class AlgorithmController implements Controller {
   enumerateTurnPrograms(
     state: DmVisibleEncounterState,
     actorId: CombatantId,
-    limit = 64,
+    limitOrLegalActions: number | LegalActionSummary = 64,
+    playerLimit = 64,
   ): readonly AlgorithmTurnCandidate[] {
+    const limit = typeof limitOrLegalActions === 'number' ? limitOrLegalActions : playerLimit;
     if (!Number.isSafeInteger(limit) || limit < 1) {
       throw new RangeError('Algorithm turn candidate limit must be a positive integer.');
     }
     const actor = state.combatants.find((candidate) => candidate.id === actorId);
-    if (actor === undefined || actor.kind !== 'monster' || actor.life !== 'living') {
-      throw new TypeError('Algorithm turn candidates require a living monster in the DM projection.');
+    if (actor === undefined || actor.life !== 'living') {
+      throw new TypeError('Algorithm turn candidates require a living combatant in the DM projection.');
     }
     const enemies = state.combatants
       .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
@@ -177,6 +296,120 @@ export class AlgorithmController implements Controller {
       });
     const nearest = enemies[0];
     const candidates: { readonly program: DecisionProgram; readonly score: number }[] = [];
+    if (actor.kind === 'player_character') {
+      const legalActions = typeof limitOrLegalActions === 'number'
+        ? null
+        : limitOrLegalActions.actions;
+      if (legalActions === null) {
+        for (const enemy of enemies) {
+          candidates.push({
+            program: {
+              kind: 'action',
+              action: { kind: 'attack', target: { kind: 'combatant', combatantId: enemy.id } },
+            },
+            score: 1_000 - enemy.hitPoints,
+          });
+          candidates.push({
+            program: {
+              kind: 'action',
+              action: { kind: 'force_save', target: { kind: 'combatant', combatantId: enemy.id } },
+            },
+            score: 990 - enemy.hitPoints,
+          });
+        }
+        if (nearest !== undefined) {
+          candidates.push({
+            program: {
+              kind: 'action',
+              action: { kind: 'move_toward', target: { kind: 'combatant', combatantId: nearest.id } },
+            },
+            score: 50,
+          });
+        }
+        candidates.push({
+          program: { kind: 'action', action: { kind: 'use_action', action: 'dash' } },
+          score: 40,
+        });
+      } else {
+        for (const command of legalActions) {
+          if (command.type === 'attack') {
+            const target = enemies.find((enemy) => enemy.id === command.target);
+            if (target === undefined) continue;
+            candidates.push({
+              program: {
+                kind: 'action',
+                action: {
+                  kind: 'attack',
+                  target: { kind: 'combatant', combatantId: target.id },
+                  ...(command.attackId === undefined ? {} : { attackId: command.attackId }),
+                },
+              },
+              score: 1_000 - target.hitPoints,
+            });
+          } else if (command.type === 'force_save') {
+            const target = enemies.find((enemy) => enemy.id === command.target);
+            if (target === undefined) continue;
+            candidates.push({
+              program: {
+                kind: 'action',
+                action: { kind: 'force_save', target: { kind: 'combatant', combatantId: target.id } },
+              },
+              score: 990 - target.hitPoints,
+            });
+          } else if (command.type === 'cast_spell') {
+            for (const targetId of new Set(command.targets)) {
+              const target = enemies.find((enemy) => enemy.id === targetId);
+              if (target === undefined) continue;
+              candidates.push({
+                program: {
+                  kind: 'action',
+                  action: {
+                    kind: 'cast_spell',
+                    spellId: command.spellId,
+                    target: { kind: 'combatant', combatantId: target.id },
+                  },
+                },
+                score: 1_100 - target.hitPoints,
+              });
+            }
+          }
+        }
+        if (
+          nearest !== undefined &&
+          legalActions.some((command) => command.type === 'move')
+        ) {
+          candidates.push({
+            program: {
+              kind: 'action',
+              action: { kind: 'move_toward', target: { kind: 'combatant', combatantId: nearest.id } },
+            },
+            score: 50,
+          });
+        }
+        if (legalActions.some((command) => command.type === 'dash')) {
+          candidates.push({
+            program: { kind: 'action', action: { kind: 'use_action', action: 'dash' } },
+            score: 40,
+          });
+        }
+      }
+      candidates.push({
+        program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+        score: 0,
+      });
+      const byProgram = new Map<string, AlgorithmTurnCandidate>();
+      for (const candidate of candidates) {
+        const stableSortKey = canonicalJson(candidate.program);
+        const existing = byProgram.get(stableSortKey);
+        if (existing === undefined || candidate.score > existing.score) {
+          byProgram.set(stableSortKey, { ...candidate, stableSortKey });
+        }
+      }
+      return [...byProgram.values()]
+        .sort((left, right) =>
+          right.score - left.score || left.stableSortKey.localeCompare(right.stableSortKey))
+        .slice(0, limit);
+    }
     for (const enemy of enemies) {
       const distance = gridDistance(actor.position, enemy.position);
       candidates.push({
@@ -240,15 +473,18 @@ export class AlgorithmController implements Controller {
     if (signal.aborted) {
       throw new ControllerRequestCancelledError('Controller request was cancelled.');
     }
-    const action = [...request.legalActions.actions].sort((left, right) => {
-      const leftRank = algorithmRank(request, left);
-      const rightRank = algorithmRank(request, right);
-      return (
-        leftRank[0] - rightRank[0] ||
-        leftRank[1] - rightRank[1] ||
-        leftRank[2].localeCompare(rightRank[2])
-      );
-    })[0];
+    const action = request.legalActions.actions
+      .map((candidate) => clipMovementCandidate(request, candidate))
+      .filter((candidate) => candidate !== null)
+      .sort((left, right) => {
+        const leftRank = algorithmRank(request, left);
+        const rightRank = algorithmRank(request, right);
+        return (
+          leftRank[0] - rightRank[0] ||
+          leftRank[1] - rightRank[1] ||
+          leftRank[2].localeCompare(rightRank[2])
+        );
+      })[0];
     if (action === undefined) throw new Error('Controller request has no legal actions.');
     return {
       requestId: request.requestId,
