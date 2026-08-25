@@ -525,6 +525,49 @@ export class DmEncounterHost {
     void this.#pumpCoordinator();
   }
 
+  async skipTurn(): Promise<void> {
+    const resumeAfter = this.#coordinator.pauseState() === null;
+    if (resumeAfter) this.#coordinator.interrupt();
+    await this.#pump;
+    this.#replaceFromResume(this.#journal.skipTurn());
+    if (resumeAfter) this.#coordinator.resume();
+    this.#publish();
+    if (resumeAfter) void this.#pumpCoordinator();
+  }
+
+  async delayTurn(afterCombatant: CombatantId): Promise<void> {
+    const resumeAfter = this.#coordinator.pauseState() === null;
+    if (resumeAfter) this.#coordinator.interrupt();
+    await this.#pump;
+    this.#replaceFromResume(this.#journal.delayTurn(afterCombatant));
+    if (resumeAfter) this.#coordinator.resume();
+    this.#publish();
+    if (resumeAfter) void this.#pumpCoordinator();
+  }
+
+  async rewindToRound(round: number): Promise<void> {
+    this.#coordinator.interrupt();
+    await this.#pump;
+    const historyLength = this.#journal.history().length;
+    this.#replaceFromResume(this.#journal.rewindToRound(
+      round,
+      encounterBranchId(`branch:rewind-round:${String(round)}:${String(historyLength + 1)}`),
+    ));
+    this.#boundaryRefusal = null;
+    this.#publish();
+  }
+
+  #replaceFromResume(resumed: SessionResume): void {
+    const built = registryFromIdentities(
+      resumed.controllers,
+      this.#roundPlanSession === null ? undefined : (id) => this.#agentController(id),
+    );
+    this.#registry = built.registry;
+    this.#humans = built.humans;
+    this.#rng = resumed.rng;
+    this.#coordinator = this.#coordinatorFor(resumed);
+  }
+
   async finishRoom(shortRestSpends: readonly ShortRestHitDieSpend[] | null): Promise<void> {
     if (this.#partyMembers === null || this.#journal.partyState() === null) {
       throw new Error('This encounter is not part of a stored-character adventuring day.');

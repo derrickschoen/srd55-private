@@ -12,6 +12,7 @@ import {
   type ReactionKind,
   type ReactionPolicy,
 } from '../combat/encounter';
+import type { EncounterEvent } from '../combat/events';
 import {
   restoreMulberry32,
   type SerializableRng,
@@ -41,6 +42,7 @@ import {
   type ShortRestHitDieSpend,
   type ShortRestResult,
 } from './party-session-state';
+import { deriveSessionRecord, type SessionRecord } from './session-record';
 
 export const VTT_SESSION_SCHEMA_VERSION = 4 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
@@ -68,6 +70,21 @@ export type SessionTransition =
     }
   | { readonly kind: 'room_composed'; readonly room: number }
   | {
+      readonly kind: 'turn_skipped';
+      readonly combatant: import('../combat/values').CombatantId;
+      readonly round: number;
+      readonly events: readonly EncounterEvent[];
+    }
+  | {
+      readonly kind: 'turn_delayed';
+      readonly combatant: import('../combat/values').CombatantId;
+      readonly afterCombatant: import('../combat/values').CombatantId;
+      readonly round: number;
+      readonly fromIndex: number;
+      readonly toIndex: number;
+      readonly events: readonly EncounterEvent[];
+    }
+  | {
       readonly kind: 'head_moved';
       readonly operation: 'undo' | 'redo';
       readonly sourceRevision: number;
@@ -81,6 +98,8 @@ export const SESSION_TRANSITION_KINDS = [
   'short_rest_completed',
   'long_rest_completed',
   'room_composed',
+  'turn_skipped',
+  'turn_delayed',
   'head_moved',
   'controller_request_issued',
   'controller_response_received',
@@ -449,6 +468,26 @@ function decodeTransition(value: unknown): SessionTransition {
         Number.isSafeInteger(value.sourceRevision) && Number.isSafeInteger(value.targetRevision)
       ) return value as unknown as Extract<SessionTransition, { readonly kind: 'head_moved' }>;
       break;
+    case 'turn_skipped':
+      if (
+        hasExactlyKeys(value, ['kind', 'combatant', 'round', 'events']) &&
+        typeof value.combatant === 'string' &&
+        Number.isSafeInteger(value.round) && typeof value.round === 'number' && value.round >= 1 &&
+        Array.isArray(value.events)
+      ) return value as unknown as Extract<SessionTransition, { readonly kind: 'turn_skipped' }>;
+      break;
+    case 'turn_delayed':
+      if (
+        hasExactlyKeys(value, [
+          'kind', 'combatant', 'afterCombatant', 'round', 'fromIndex', 'toIndex', 'events',
+        ]) &&
+        typeof value.combatant === 'string' && typeof value.afterCombatant === 'string' &&
+        Number.isSafeInteger(value.round) && typeof value.round === 'number' && value.round >= 1 &&
+        Number.isSafeInteger(value.fromIndex) && typeof value.fromIndex === 'number' && value.fromIndex >= 0 &&
+        Number.isSafeInteger(value.toIndex) && typeof value.toIndex === 'number' && value.toIndex > value.fromIndex &&
+        Array.isArray(value.events)
+      ) return value as unknown as Extract<SessionTransition, { readonly kind: 'turn_delayed' }>;
+      break;
     case 'controller_request_issued':
       if (hasExactlyKeys(value, ['kind', 'request']) && isRecord(value.request)) return value as unknown as SessionTransition;
       break;
@@ -619,6 +658,90 @@ export function deriveBranchRng(
   });
 }
 
+export interface PacingAdvance {
+  readonly encounterState: EncounterState;
+  readonly events: readonly EncounterEvent[];
+}
+
+function pacingCoordinatorState(state: PersistedCoordinatorState): PersistedCoordinatorState {
+  return {
+    ...state,
+    pendingRequest: null,
+    pendingCommand: null,
+    continuation: { kind: 'idle' },
+  };
+}
+
+function advanceSkippedTurn(
+  state: EncounterState,
+  rng: SerializableRng,
+): PacingAdvance {
+  const actor = state.activeCombatant;
+  if (actor === null || state.round < 1) throw new Error('A turn can only be skipped during initiative.');
+  const reduction = reduceEncounter(state, { type: 'end_turn', actor }, rng);
+  if (reduction.state.activeCombatant === actor) {
+    throw new Error('Resolve the current turn-boundary decision before skipping or delaying.');
+  }
+  return { encounterState: reduction.state, events: reduction.events };
+}
+
+function advanceDelayedTurn(
+  state: EncounterState,
+  afterCombatant: import('../combat/values').CombatantId,
+  rng: SerializableRng,
+): PacingAdvance & { readonly fromIndex: number; readonly toIndex: number } {
+  const actor = state.activeCombatant;
+  const fromIndex = state.activeInitiativeIndex;
+  if (actor === null || fromIndex === null || state.round < 1) {
+    throw new Error('A turn can only be delayed during initiative.');
+  }
+  const toIndex = state.initiative.findIndex((entry) => entry.combatant === afterCombatant);
+  if (toIndex <= fromIndex) {
+    throw new Error('A delayed combatant must move after a later initiative entry this round.');
+  }
+  const advanced = advanceSkippedTurn(state, rng);
+  const moved = state.initiative[fromIndex];
+  if (moved === undefined || moved.combatant !== actor) {
+    throw new Error('Active combatant and initiative index disagree.');
+  }
+  const withoutActor = state.initiative.filter((entry) => entry.combatant !== actor);
+  const targetIndex = withoutActor.findIndex((entry) => entry.combatant === afterCombatant);
+  if (targetIndex < 0) throw new Error('Delay target is absent from initiative.');
+  const initiative = [
+    ...withoutActor.slice(0, targetIndex + 1),
+    moved,
+    ...withoutActor.slice(targetIndex + 1),
+  ];
+  const nextActiveIndex = initiative.findIndex(
+    (entry) => entry.combatant === advanced.encounterState.activeCombatant,
+  );
+  if (nextActiveIndex < 0) throw new Error('Delayed initiative lost the next active combatant.');
+  return {
+    encounterState: {
+      ...advanced.encounterState,
+      initiative,
+      activeInitiativeIndex: nextActiveIndex,
+      initiativeBeforeDelays: state.initiativeBeforeDelays ?? {
+        round: state.round,
+        order: state.initiative.map((entry) => entry.combatant),
+      },
+    },
+    events: advanced.events,
+    fromIndex,
+    toIndex,
+  };
+}
+
+export function replayPacingTransition(
+  state: EncounterState,
+  transition: Extract<SessionTransition, { readonly kind: 'turn_skipped' | 'turn_delayed' }>,
+  rng: SerializableRng,
+): PacingAdvance {
+  return transition.kind === 'turn_skipped'
+    ? advanceSkippedTurn(state, rng)
+    : advanceDelayedTurn(state, transition.afterCombatant, rng);
+}
+
 function requireCanonicalEqual(
   actual: unknown,
   expected: unknown,
@@ -745,6 +868,53 @@ export function replaySessionRevisions(
         requireCanonicalEqual(revision.rngState, parent.rngState, 'room-composition RNG state');
         if (transition.room !== advanced.room) throw new Error('Room transition ordinal disagrees with party state.');
         requireEncounterMatchesParty(revision.encounterState, advanced);
+        break;
+      }
+      case 'turn_skipped': {
+        if (parent === null || parent === undefined) throw new Error('A skipped turn requires a parent.');
+        if (
+          parent.encounterState.activeCombatant !== transition.combatant ||
+          parent.encounterState.round !== transition.round
+        ) throw new Error('Skipped-turn metadata disagrees with its parent state.');
+        const replayRng = restoreMulberry32(parent.rngState);
+        const replayed = advanceSkippedTurn(parent.encounterState, replayRng);
+        requireCanonicalEqual(revision.encounterState, replayed.encounterState, 'skipped-turn state');
+        requireCanonicalEqual(transition.events, replayed.events, 'skipped-turn events');
+        requireCanonicalEqual(revision.rngState, replayRng.snapshot(), 'skipped-turn RNG state');
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'skipped-turn party state');
+        requireCanonicalEqual(
+          revision.coordinatorState,
+          pacingCoordinatorState(parent.coordinatorState),
+          'skipped-turn coordinator state',
+        );
+        break;
+      }
+      case 'turn_delayed': {
+        if (parent === null || parent === undefined) throw new Error('A delayed turn requires a parent.');
+        if (
+          parent.encounterState.activeCombatant !== transition.combatant ||
+          parent.encounterState.round !== transition.round
+        ) throw new Error('Delayed-turn metadata disagrees with its parent state.');
+        const replayRng = restoreMulberry32(parent.rngState);
+        const replayed = advanceDelayedTurn(
+          parent.encounterState,
+          transition.afterCombatant,
+          replayRng,
+        );
+        requireCanonicalEqual(
+          { fromIndex: transition.fromIndex, toIndex: transition.toIndex },
+          { fromIndex: replayed.fromIndex, toIndex: replayed.toIndex },
+          'delayed-turn reposition',
+        );
+        requireCanonicalEqual(revision.encounterState, replayed.encounterState, 'delayed-turn state');
+        requireCanonicalEqual(transition.events, replayed.events, 'delayed-turn events');
+        requireCanonicalEqual(revision.rngState, replayRng.snapshot(), 'delayed-turn RNG state');
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'delayed-turn party state');
+        requireCanonicalEqual(
+          revision.coordinatorState,
+          pacingCoordinatorState(parent.coordinatorState),
+          'delayed-turn coordinator state',
+        );
         break;
       }
       case 'head_moved': {
@@ -986,8 +1156,65 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     };
   }
 
+  skipTurn(): SessionResume {
+    const latest = this.#latest();
+    const actor = latest.encounterState.activeCombatant;
+    if (actor === null) throw new Error('A turn can only be skipped during initiative.');
+    const advanced = advanceSkippedTurn(latest.encounterState, this.#rng);
+    return this.#appendPacing({
+      latest,
+      transition: {
+        kind: 'turn_skipped',
+        combatant: actor,
+        round: latest.encounterState.round,
+        events: advanced.events,
+      },
+      encounterState: advanced.encounterState,
+    });
+  }
+
+  delayTurn(afterCombatant: import('../combat/values').CombatantId): SessionResume {
+    const latest = this.#latest();
+    const actor = latest.encounterState.activeCombatant;
+    if (actor === null) throw new Error('A turn can only be delayed during initiative.');
+    const advanced = advanceDelayedTurn(latest.encounterState, afterCombatant, this.#rng);
+    return this.#appendPacing({
+      latest,
+      transition: {
+        kind: 'turn_delayed',
+        combatant: actor,
+        afterCombatant,
+        round: latest.encounterState.round,
+        fromIndex: advanced.fromIndex,
+        toIndex: advanced.toIndex,
+        events: advanced.events,
+      },
+      encounterState: advanced.encounterState,
+    });
+  }
+
   history(): readonly SessionHistoryEntry[] {
     return sessionHistory(this.store.revisions(this.sessionId));
+  }
+
+  roundBoundaries(): readonly SessionRoundBoundary[] {
+    const history = this.history();
+    const currentEncounter = history.at(-1)?.encounterOrdinal;
+    if (currentEncounter === undefined) return [];
+    return history.flatMap((entry): readonly SessionRoundBoundary[] =>
+      !entry.void && entry.encounterOrdinal === currentEncounter && entry.roundBoundary
+        ? [{
+            round: entry.encounterRound,
+            revision: entry.revision,
+            branchId: entry.branchId,
+          }]
+        : []);
+  }
+
+  rewindToRound(round: number, requestedBranchId: EncounterBranchId): SessionResume {
+    const boundary = this.roundBoundaries().find((candidate) => candidate.round === round);
+    if (boundary === undefined) throw new Error(`Round ${String(round)} has no active boundary snapshot.`);
+    return this.moveHead('undo', boundary.revision, requestedBranchId);
   }
 
   capturePartyState(): PartySessionState {
@@ -1115,6 +1342,32 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     return latest;
   }
 
+  #appendPacing(input: {
+    readonly latest: SessionRevision;
+    readonly transition: Extract<SessionTransition, { readonly kind: 'turn_skipped' | 'turn_delayed' }>;
+    readonly encounterState: EncounterState;
+  }): SessionResume {
+    const appended = this.#append({
+      parentRevision: input.latest.revision,
+      branchId: input.latest.branchId,
+      transition: input.transition,
+      encounterState: input.encounterState,
+      partyState: input.latest.partyState,
+      coordinatorState: pacingCoordinatorState(input.latest.coordinatorState),
+      controllers: input.latest.controllers,
+      codexSessionId: input.latest.codexSessionId,
+    });
+    return {
+      journal: this,
+      encounterState: appended.encounterState,
+      partyState: appended.partyState,
+      coordinatorState: appended.coordinatorState,
+      controllers: appended.controllers,
+      codexSessionId: appended.codexSessionId,
+      rng: this.#rng,
+    };
+  }
+
   #append(input: {
     readonly parentRevision: number | null;
     readonly branchId: EncounterBranchId;
@@ -1158,6 +1411,15 @@ export interface SessionHistoryEntry {
   readonly branchId: EncounterBranchId;
   readonly transition: SessionTransition;
   readonly void: boolean;
+  readonly encounterOrdinal: number;
+  readonly encounterRound: number;
+  readonly roundBoundary: boolean;
+}
+
+export interface SessionRoundBoundary {
+  readonly round: number;
+  readonly revision: number;
+  readonly branchId: EncounterBranchId;
 }
 
 export function sessionHistory(
@@ -1175,12 +1437,29 @@ export function sessionHistory(
     if (revision === undefined) throw new Error('Session ancestry is incomplete.');
     cursor = revision.parentRevision;
   }
+  const encounterOrdinals = new Map<number, number>();
+  for (const revision of revisions) {
+    const parentOrdinal = revision.parentRevision === null
+      ? 1
+      : encounterOrdinals.get(revision.parentRevision);
+    if (parentOrdinal === undefined) throw new Error('Session encounter ancestry is incomplete.');
+    encounterOrdinals.set(
+      revision.revision,
+      revision.transition.kind === 'room_composed' ? parentOrdinal + 1 : parentOrdinal,
+    );
+  }
   return revisions.map((revision) => ({
     revision: revision.revision,
     parentRevision: revision.parentRevision,
     branchId: revision.branchId,
     transition: revision.transition,
     void: !active.has(revision.revision),
+    encounterOrdinal: encounterOrdinals.get(revision.revision) ?? 1,
+    encounterRound: revision.encounterState.round,
+    roundBoundary: revision.encounterState.round > 0 && (
+      revision.parentRevision === null ||
+      byRevision.get(revision.parentRevision)?.encounterState.round !== revision.encounterState.round
+    ),
   }));
 }
 
@@ -1199,6 +1478,7 @@ interface SavedSessionBundleV2Body {
 
 interface SavedSessionBundleV2 extends SavedSessionBundleV2Body {
   readonly fingerprint: string;
+  readonly sessionRecord?: SessionRecord;
 }
 
 export interface DecodedSavedSessionFingerprint {
@@ -1386,7 +1666,11 @@ export function exportSavedSession(
     sessionId,
     revisions,
   };
-  return canonicalJson({ ...body, fingerprint: sessionFingerprint(body) } satisfies SavedSessionBundleV2);
+  return canonicalJson({
+    ...body,
+    fingerprint: sessionFingerprint(body),
+    sessionRecord: deriveSessionRecord(revisions),
+  } satisfies SavedSessionBundleV2);
 }
 
 /** Decodes, fingerprints, and replays a save without importing it. */
