@@ -8,6 +8,7 @@ import {
 import type { Ability } from '../../domain/enums';
 
 export * from './goblinoid-warband';
+export * from './vane-warren';
 export * from './mercenary-company';
 export * from './undead-crypt';
 export * from './wild-beasts';
