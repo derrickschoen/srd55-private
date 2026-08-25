@@ -1,6 +1,7 @@
 import {
   chromium,
   type Browser,
+  type BrowserContext,
   type ConsoleMessage,
   type Download,
   type Locator,
@@ -20,6 +21,8 @@ import { setTimeout as wait } from 'node:timers/promises';
 const REHEARSAL_SEED = 20_260_824;
 const APP_READY_TIMEOUT_MS = 180_000;
 const UI_TIMEOUT_MS = 65_000;
+const CLEANUP_TIMEOUT_MS = 10_000;
+const DEFAULT_RUN_WATCHDOG_MS = 40 * 60 * 1_000;
 const TURN_PULSE_MS = 35;
 const ROUND_STALL_ATTEMPTS = 24;
 const MAX_TURN_ATTEMPTS = 600;
@@ -32,6 +35,7 @@ const FINDING_CLASSES = [
   'turn_advance_stall',
   'tray_unresolved',
   'scripted_nudge',
+  'watchdog_timeout',
 ] as const;
 
 type FindingClass = (typeof FINDING_CLASSES)[number];
@@ -57,6 +61,7 @@ interface ParsedOptions {
   readonly date: string;
   readonly run: number;
   readonly port: number;
+  readonly watchdogMs: number;
 }
 
 interface SessionExport {
@@ -83,6 +88,24 @@ interface TimelineProgress {
   rewindUsed: boolean;
   continuedForward: boolean;
   rewindRound: number | null;
+}
+
+async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+  const timeout = new Promise<never>((_complete, reject) => {
+    timer = globalThis.setTimeout(() => {
+      reject(new Error(`${label} exceeded its ${String(timeoutMs)}ms timeout.`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timer !== undefined) globalThis.clearTimeout(timer);
+  }
 }
 
 function findingDedupeKey(
@@ -149,7 +172,12 @@ async function parseOptions(argv: readonly string[]): Promise<ParsedOptions> {
     ? 0
     : positiveInteger('PORT', requestedPort, 1);
   if (port > 65_535) throw new Error(`PORT must not exceed 65535; received ${String(port)}.`);
-  return { date, run, port };
+  const watchdogMs = positiveInteger(
+    'REHEARSAL_WATCHDOG_MS',
+    process.env.REHEARSAL_WATCHDOG_MS,
+    DEFAULT_RUN_WATCHDOG_MS,
+  );
+  return { date, run, port, watchdogMs };
 }
 
 class FindingsRecorder {
@@ -160,6 +188,8 @@ class FindingsRecorder {
   readonly pendingScreenshots = new Map<string, Promise<void>>();
   screenshotCount = 0;
   page: Page | null = null;
+  currentPhase = 'driver startup';
+  currentStep = 'parse options';
 
   constructor(
     readonly date: string,
@@ -170,6 +200,11 @@ class FindingsRecorder {
 
   attachPage(page: Page): void {
     this.page = page;
+  }
+
+  track(phase: string, step: string): void {
+    this.currentPhase = phase;
+    this.currentStep = step;
   }
 
   async flushScreenshots(): Promise<void> {
@@ -251,7 +286,8 @@ class FindingsRecorder {
     const clean = counts.page_console_error === 0 &&
       counts.selector_timeout === 0 &&
       counts.turn_advance_stall === 0 &&
-      counts.tray_unresolved === 0;
+      counts.tray_unresolved === 0 &&
+      counts.watchdog_timeout === 0;
     return [
       '## Summary',
       '',
@@ -390,7 +426,7 @@ async function screenshot(
   recorder.screenshotCount += 1;
   const path = resolve(recorder.runDirectory, `${String(recorder.screenshotCount).padStart(3, '0')}-${safe || 'finding'}.png`);
   try {
-    await page.screenshot({ path, fullPage: true });
+    await page.screenshot({ path, fullPage: true, timeout: 10_000 });
     return path;
   } catch {
     return null;
@@ -405,6 +441,7 @@ async function waitVisible(
   locator: Locator,
   timeout = UI_TIMEOUT_MS,
 ): Promise<boolean> {
+  recorder.track(phase, step);
   try {
     await locator.first().waitFor({ state: 'visible', timeout });
     return true;
@@ -415,15 +452,15 @@ async function waitVisible(
   }
 }
 
-function attachPageFindingCapture(page: Page, recorder: FindingsRecorder, currentPhase: () => string): void {
+function attachPageFindingCapture(page: Page, recorder: FindingsRecorder): void {
   page.on('pageerror', (error) => {
-    recorder.add('page_console_error', currentPhase(), 'pageerror', errorDetail(error));
+    recorder.add('page_console_error', recorder.currentPhase, 'pageerror', errorDetail(error));
   });
   page.on('console', (message: ConsoleMessage) => {
     if (message.type() !== 'error') return;
     const location = message.location();
     const source = location.url === '' ? '' : ` (${location.url}:${String(location.lineNumber)})`;
-    recorder.add('page_console_error', currentPhase(), 'console.error', `${message.text()}${source}`);
+    recorder.add('page_console_error', recorder.currentPhase, 'console.error', `${message.text()}${source}`);
   });
 }
 
@@ -520,7 +557,7 @@ async function assignAlgorithms(
     for (let guard = 0; guard < 40; guard += 1) {
       const human = page.locator('.dm-controller-assignments select').filter({ has: page.locator('option:checked[value="human"]') });
       if (await human.count() === 0) break;
-      await human.first().selectOption('algorithm');
+      await human.first().selectOption('algorithm', { timeout: 5_000 });
       await wait(10);
     }
     const selects = page.locator('.dm-controller-assignments select');
@@ -736,14 +773,16 @@ async function exerciseTimelineControls(
 
 async function resetApplication(page: Page, baseUrl: string, recorder: FindingsRecorder): Promise<boolean> {
   const phase = 'new session';
-  await page.goto(baseUrl);
+  recorder.track(phase, 'navigate to application');
+  await page.goto(baseUrl, { timeout: UI_TIMEOUT_MS });
   if (!await waitVisible(page, recorder, phase, 'wait for application database', page.locator('#status[data-ready="true"]'))) {
     recorder.phase(phase, 'aborted', 'Application database did not become ready.');
     return false;
   }
   try {
-    await page.evaluate(async () => window.staticApp.reset());
-    await page.reload();
+    recorder.track(phase, 'reset application data');
+    await withTimeout(page.evaluate(async () => window.staticApp.reset()), UI_TIMEOUT_MS, 'reset application data');
+    await page.reload({ timeout: UI_TIMEOUT_MS });
     await page.locator('#status[data-ready="true"]').waitFor({ state: 'visible', timeout: UI_TIMEOUT_MS });
     recorder.phase(phase, 'completed', 'Reset browser data and opened a fresh application session.');
     return true;
@@ -761,14 +800,15 @@ async function loadDungeon(
   recorder: FindingsRecorder,
 ): Promise<boolean> {
   const phase = 'representative party';
-  await page.goto(`${baseUrl}/vtt?encounter=d365`);
+  recorder.track(phase, 'navigate to bundled dungeon');
+  await page.goto(`${baseUrl}/vtt?encounter=d365`, { timeout: UI_TIMEOUT_MS });
   const loader = page.getByRole('button', { name: 'Load bundled dungeon and party', exact: true });
   if (!await waitVisible(page, recorder, phase, 'open bundled dungeon loader', loader)) {
     recorder.phase(phase, 'aborted', 'Bundled dungeon loader was unavailable.');
     return false;
   }
-  await page.getByLabel('Encounter seed', { exact: true }).fill(String(REHEARSAL_SEED));
-  await loader.click();
+  await page.getByLabel('Encounter seed', { exact: true }).fill(String(REHEARSAL_SEED), { timeout: 5_000 });
+  await loader.click({ timeout: 5_000 });
   if (!await waitVisible(page, recorder, phase, 'author representative party and mount DM controls', page.getByRole('heading', { name: 'DM controls' }))) {
     recorder.phase(phase, 'aborted', 'Representative party did not load.');
     return false;
@@ -829,7 +869,7 @@ async function transitionToNextDungeonRoom(
   if (!await waitVisible(page, recorder, phase, `${label} after room ${String(completedRoom)}`, control, 10_000)) {
     return false;
   }
-  await control.click();
+  await control.click({ timeout: 5_000 });
   return waitVisible(
     page,
     recorder,
@@ -847,7 +887,7 @@ async function completeLongRest(page: Page, recorder: FindingsRecorder): Promise
     recorder.phase(phase, 'aborted', 'DM long-rest control was unavailable.');
     return false;
   }
-  await button.click();
+  await button.click({ timeout: 5_000 });
   const ended = await waitVisible(
     page,
     recorder,
@@ -873,12 +913,14 @@ async function createManualFileSave(
 ): Promise<ManualFileSave | null> {
   const manager = page.locator('.dm-save-manager');
   if (!await waitVisible(page, recorder, phase, 'open save manager', manager, 10_000)) return null;
-  if (await manager.getAttribute('data-mode') !== 'folder') {
+  recorder.track(phase, 'detect save-manager mode');
+  if (await manager.getAttribute('data-mode', { timeout: 5_000 }) !== 'folder') {
     const save = manager.getByRole('button', { name: 'Download save now', exact: true });
     if (!await waitVisible(page, recorder, phase, 'create fallback manual file save', save, 10_000)) return null;
     try {
+      recorder.track(phase, 'wait for fallback manual-save download');
       const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
-      await save.click();
+      await save.click({ timeout: 5_000 });
       const download: Download = await pendingDownload;
       return {
         kind: 'download',
@@ -895,10 +937,13 @@ async function createManualFileSave(
   const before = await manager.locator('.dm-save-row[data-source="folder"]').count();
   const save = manager.getByRole('button', { name: 'Save now', exact: true });
   if (!await waitVisible(page, recorder, phase, 'create folder manual file save', save, 10_000)) return null;
-  await save.click();
+  await save.click({ timeout: 5_000 });
   try {
+    recorder.track(phase, 'wait for folder save row');
     await page.waitForFunction((count) =>
-      document.querySelectorAll('.dm-save-row[data-source="folder"]').length >= Number(count), before + 1);
+      document.querySelectorAll('.dm-save-row[data-source="folder"]').length >= Number(count), before + 1, {
+        timeout: 10_000,
+      });
   } catch (error: unknown) {
     const image = await screenshot(page, recorder, 'manual-file-save');
     recorder.add('selector_timeout', phase, 'create manual file save', errorDetail(error), image);
@@ -917,8 +962,9 @@ async function downloadExport(
   const button = row.getByRole('button', { name: 'Export copy', exact: true });
   if (!await waitVisible(page, recorder, phase, `export ${label} session record`, button, 10_000)) return null;
   try {
+    recorder.track(phase, `wait for ${label} export download`);
     const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
-    await button.click();
+    await button.click({ timeout: 5_000 });
     const download: Download = await pendingDownload;
     return await recordDownloadedExport(download, recorder, phase, label);
   } catch (error: unknown) {
@@ -936,8 +982,9 @@ async function recordDownloadedExport(
 ): Promise<SessionExport> {
   const filename = `${label}.vtt.json`;
   const path = resolve(recorder.runDirectory, filename);
-  await download.saveAs(path);
-  const bytes = await readFile(path, 'utf8');
+  recorder.track(phase, `save ${label} export download`);
+  await withTimeout(download.saveAs(path), 10_000, `save ${label} export download`);
+  const bytes = await withTimeout(readFile(path, 'utf8'), 10_000, `read ${label} export download`);
   const value: unknown = JSON.parse(bytes);
   const sessionRecord = isRecord(value) && isRecord(value.sessionRecord)
     ? value.sessionRecord
@@ -1013,7 +1060,7 @@ async function saveManagerRoundTrip(
   } else {
     await pauseEncounter(page);
     const history = page.locator('details ol [data-revision]');
-    await page.getByText('Full revision history', { exact: true }).click();
+    await page.getByText('Full revision history', { exact: true }).click({ timeout: 5_000 });
     const revisionCount = await history.count();
     exported = await downloadExport(page, manualSave.row, recorder, phase, 'd365-session');
     const load = manualSave.row.getByRole('button', { name: 'Load', exact: true });
@@ -1021,10 +1068,10 @@ async function saveManagerRoundTrip(
       recorder.phase(phase, 'aborted', 'Manual save could not be loaded.');
       return exported;
     }
-    await load.click();
+    await load.click({ timeout: 5_000 });
     loadPathReady = await waitVisible(page, recorder, phase, 'mount loaded save', page.getByRole('heading', { name: 'DM controls' }), 20_000);
     if (loadPathReady) {
-      await page.getByText('Full revision history', { exact: true }).click();
+      await page.getByText('Full revision history', { exact: true }).click({ timeout: 5_000 });
       const loadedCount = await page.locator('details ol [data-revision]').count();
       if (loadedCount < revisionCount) {
         const image = await screenshot(page, recorder, 'load-round-trip-history');
@@ -1052,13 +1099,14 @@ async function openVaneWarrenSession(
   recorder: FindingsRecorder,
   phase: string,
 ): Promise<boolean> {
-  await page.goto(`${baseUrl}/vtt?encounter=vane-warren`);
+  recorder.track(phase, 'navigate to Vane Warren');
+  await page.goto(`${baseUrl}/vtt?encounter=vane-warren`, { timeout: UI_TIMEOUT_MS });
   const start = page.getByRole('button', { name: 'Start the Vane Warren', exact: true });
   if (!await waitVisible(page, recorder, phase, 'open Vane Warren start flow', start)) {
     recorder.phase(phase, 'aborted', 'Vane Warren session start flow was unavailable.');
     return false;
   }
-  await start.click();
+  await start.click({ timeout: 5_000 });
   const heading = page.getByRole('heading', { name: 'DM controls' });
   const status = page.locator('.vane-warren-loader-status');
   const deadline = Date.now() + UI_TIMEOUT_MS;
@@ -1089,18 +1137,19 @@ async function prepareVaneWarrenSession(
   phase: string,
 ): Promise<boolean> {
   try {
-    await page.goto(baseUrl);
+    recorder.track(phase, 'clear prior Vane Warren session state');
+    await page.goto(baseUrl, { timeout: UI_TIMEOUT_MS });
     await page.locator('#status[data-ready="true"]').waitFor({ state: 'visible', timeout: UI_TIMEOUT_MS });
-    await page.evaluate(() => {
+    await withTimeout(page.evaluate(() => {
       const keys: string[] = [];
       for (let index = 0; index < localStorage.length; index += 1) {
         const key = localStorage.key(index);
         if (key?.startsWith('srd55:vtt') === true) keys.push(key);
       }
       for (const key of keys) localStorage.removeItem(key);
-    });
-    await page.evaluate(async () => window.staticApp.reset());
-    await page.reload();
+    }), UI_TIMEOUT_MS, 'clear Vane Warren local storage');
+    await withTimeout(page.evaluate(async () => window.staticApp.reset()), UI_TIMEOUT_MS, 'reset Vane Warren application data');
+    await page.reload({ timeout: UI_TIMEOUT_MS });
     await page.locator('#status[data-ready="true"]').waitFor({ state: 'visible', timeout: UI_TIMEOUT_MS });
     return true;
   } catch (error: unknown) {
@@ -1151,7 +1200,7 @@ async function transitionToNextVaneWarrenFight(
     control,
     10_000,
   )) return false;
-  await control.click();
+  await control.click({ timeout: 5_000 });
   return waitForVaneWarrenFight(page, recorder, phase, completedFight + 1);
 }
 
@@ -1166,8 +1215,9 @@ async function endVaneWarrenSession(
     return null;
   }
   try {
+    recorder.track(phase, 'wait for final Vane Warren export download');
     const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
-    await control.click();
+    await control.click({ timeout: 5_000 });
     const download: Download = await pendingDownload;
     const exported = await recordDownloadedExport(download, recorder, phase, label);
     await waitVisible(
@@ -1201,6 +1251,7 @@ async function runIsolatedPhase<T>(
   phase: string,
   task: () => Promise<T>,
 ): Promise<T | null> {
+  recorder.track(phase, 'run isolated phase');
   assertPreviewRunning(preview);
   try {
     const result = await task();
@@ -1232,17 +1283,67 @@ async function main(): Promise<void> {
   let currentPhase = 'preview startup';
   let preview: ChildProcess | null = null;
   let browser: Browser | null = null;
+  let context: BrowserContext | null = null;
+  let reportWritten = false;
+  let watchdogHandling = false;
+  const watchdogTimer = globalThis.setTimeout(() => {
+    if (reportWritten || watchdogHandling) return;
+    watchdogHandling = true;
+    void (async () => {
+      const stuckPhase = recorder.currentPhase;
+      const stuckStep = recorder.currentStep;
+      recorder.page = null;
+      recorder.add(
+        'watchdog_timeout',
+        stuckPhase,
+        stuckStep,
+        `Global run watchdog expired after ${String(options.watchdogMs)}ms while this step was still pending.`,
+      );
+      recorder.phase(
+        stuckPhase,
+        'aborted',
+        `Global run watchdog expired during ${stuckStep}; the partial findings report was written before forced exit.`,
+      );
+      await recorder.write(baseUrl);
+      reportWritten = true;
+      process.stdout.write(`\n${recorder.summaryBlock()}\n\nFindings: ${recorder.reportPath}\n`);
+      if (context !== null) {
+        await withTimeout(context.close(), CLEANUP_TIMEOUT_MS, 'watchdog browser-context cleanup')
+          .catch(() => undefined);
+      }
+      if (browser !== null) {
+        await withTimeout(browser.close(), CLEANUP_TIMEOUT_MS, 'watchdog browser cleanup')
+          .catch(() => undefined);
+      }
+      if (preview !== null) await stopPreview(preview).catch(() => undefined);
+      process.exit(1);
+    })().catch((error: unknown) => {
+      process.stderr.write(`Watchdog could not write the rehearsal report: ${errorDetail(error)}\n`);
+      process.exit(1);
+    });
+  }, options.watchdogMs);
 
   try {
+    recorder.track(currentPhase, 'start built preview');
     preview = await startPreview(options.port, resolve(runDirectory, 'preview.log'));
+    recorder.track(currentPhase, 'wait for built preview readiness');
     baseUrl = await waitForPreview(preview);
     recorder.phase('preview startup', 'completed', 'Fresh npm build passed and the built preview accepted requests.');
 
-    browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({ acceptDownloads: true, baseURL: baseUrl });
-    const page = await context.newPage();
+    recorder.track(currentPhase, 'launch Playwright Chromium');
+    browser = await chromium.launch({ headless: true, timeout: APP_READY_TIMEOUT_MS });
+    recorder.track(currentPhase, 'create browser context');
+    context = await withTimeout(
+      browser.newContext({ acceptDownloads: true, baseURL: baseUrl }),
+      UI_TIMEOUT_MS,
+      'create browser context',
+    );
+    recorder.track(currentPhase, 'open and attach browser page');
+    const page = await withTimeout(context.newPage(), UI_TIMEOUT_MS, 'open browser page');
+    page.setDefaultTimeout(UI_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(UI_TIMEOUT_MS);
     recorder.attachPage(page);
-    attachPageFindingCapture(page, recorder, () => currentPhase);
+    attachPageFindingCapture(page, recorder);
 
     currentPhase = 'new session';
     await runIsolatedPhase(preview, recorder, currentPhase, async () =>
@@ -1363,18 +1464,30 @@ async function main(): Promise<void> {
         : `Parsed export coverage was ${String(totalEncounters)} encounters across ${String(recorder.exports.length)} files; expected a four-encounter dungeon export and one three-encounter Vane Warren export.`);
     });
 
-    await recorder.flushScreenshots();
-    recorder.page = null;
-    await context.close();
   } catch (error: unknown) {
     recorder.add('page_console_error', currentPhase, 'driver infrastructure', errorDetail(error));
     recorder.phase(currentPhase, 'aborted', 'Driver infrastructure stopped this phase.');
   } finally {
-    await recorder.flushScreenshots().catch(() => undefined);
+    recorder.track('driver cleanup', 'flush pending screenshots');
+    await withTimeout(recorder.flushScreenshots(), CLEANUP_TIMEOUT_MS, 'flush pending screenshots')
+      .catch(() => undefined);
     recorder.page = null;
-    await browser?.close().catch(() => undefined);
+    recorder.track('driver cleanup', 'close browser context');
+    if (context !== null) {
+      await withTimeout(context.close(), CLEANUP_TIMEOUT_MS, 'close browser context')
+        .catch(() => undefined);
+    }
+    recorder.track('driver cleanup', 'close browser');
+    if (browser !== null) {
+      await withTimeout(browser.close(), CLEANUP_TIMEOUT_MS, 'close browser')
+        .catch(() => undefined);
+    }
+    recorder.track('driver cleanup', 'stop built preview');
     if (preview !== null) await stopPreview(preview);
+    recorder.track('driver cleanup', 'write findings report');
     await recorder.write(baseUrl);
+    reportWritten = true;
+    globalThis.clearTimeout(watchdogTimer);
     process.stdout.write(`\n${recorder.summaryBlock()}\n\nFindings: ${recorder.reportPath}\n`);
   }
 }
