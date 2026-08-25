@@ -70,6 +70,11 @@ export type EncounterCommand =
       readonly actor: CombatantId;
       readonly path: readonly GridCell[];
       readonly cause: 'voluntary' | 'reactions_resolved' | 'forced' | 'teleport';
+      /** Coordinator-validated OA commands; absent only for direct reducer callers. */
+      readonly executableOpportunityAttacks?: readonly Extract<
+        EncounterCommand,
+        { readonly type: 'opportunity_attack' }
+      >[];
     }
   | {
       readonly type: 'hide';

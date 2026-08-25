@@ -5,7 +5,7 @@ import { createEncounter, reduceEncounter, type EncounterState } from '../../../
 import type { EncounterCommand } from '../../../src/combat/events';
 import { gridDistance, type GridCell } from '../../../src/combat/grid';
 import { damageType, dieSides, type CombatantId } from '../../../src/combat/values';
-import { UNICORN } from '../../../src/combat/statblocks/monsters';
+import { UNICORN, WOLF } from '../../../src/combat/statblocks/monsters';
 import {
   DmEncounterHost,
   type DmEncounterHostSnapshot,
@@ -241,6 +241,9 @@ describe('DmEncounterHost live algorithm path', () => {
               ],
             }
           : { actions: [{ type: 'end_turn', actor }] },
+        reactionLegalActions: (_state, reacting, moving) => reacting === reactor.id && moving === mover.id
+          ? [{ ...attack(reacting, moving), type: 'opportunity_attack' }]
+          : [],
       },
     );
 
@@ -283,6 +286,57 @@ describe('DmEncounterHost live algorithm path', () => {
     expect(advanced.dm.encounter.recentEvents.filter(
       (event) => event.type === 'pending_decision_resolved' && resolvedIds.includes(event.decisionId),
     )).toHaveLength(resolvedIds.length);
+    host.close();
+  });
+
+  it('does not queue a Wolf opportunity-attack decision when no attack is executable', async () => {
+    const mover = playerProfile('host-wolf-oa-mover', { hitPoints: 100, initiativeBonus: 20 });
+    const wolf = monsterCombatantProfile(WOLF, {
+      combatantId: 'combatant:host-wolf-oa-reactor',
+      tokenId: 'token:host-wolf-oa-reactor',
+    });
+    const initialState = startedEncounter({
+      bounds: { columns: 4, rows: 3 },
+      combatants: [mover, wolf],
+      tokens: [placedToken(mover, 1, 1), placedToken(wolf, 0, 1)],
+    });
+    const host = new DmEncounterHost(
+      'session:host-wolf-no-executable-oa',
+      new MemoryBrowserSessionStore(),
+      {
+        initialState,
+        initialControllers: algorithmIdentities(initialState),
+        playerIds: [mover.id],
+        turnLegalActions: (state, actor) => actor === mover.id
+          ? {
+              actions: [
+                ...(position(state, actor).column === 1
+                  ? [{
+                      type: 'move' as const,
+                      actor,
+                      path: [{ column: 2, row: 1 }],
+                      cause: 'voluntary' as const,
+                    }]
+                  : []),
+                { type: 'end_turn' as const, actor },
+              ],
+            }
+          : { actions: [{ type: 'end_turn', actor }] },
+        reactionLegalActions: () => [],
+      },
+    );
+
+    const startedRound = host.snapshot().dm.encounter.round;
+    const advanced = await hostUntil(
+      host,
+      (snapshot) => snapshot.dm.encounter.round > startedRound ||
+        snapshot.dm.decisionTray.boundaryRefusal?.code === 'turn_boundary_blocked',
+      40,
+    );
+
+    expect(advanced.dm.encounter.round).toBeGreaterThan(startedRound);
+    expect(advanced.dm.decisionTray.entries.filter((entry) => entry.kind === 'pending')).toEqual([]);
+    expect(advanced.dm.decisionTray.boundaryRefusal).toBeNull();
     host.close();
   });
 });

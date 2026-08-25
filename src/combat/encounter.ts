@@ -360,9 +360,14 @@ export interface PendingDecisionOption {
   readonly label: string;
 }
 
-interface PendingDecisionBase {
+export type NonEmptyPendingDecisionOptions<
+  Option extends PendingDecisionOption = PendingDecisionOption,
+> = readonly [Option, ...Option[]] | readonly [...Option[], Option];
+
+interface PendingDecisionBase<Options extends NonEmptyPendingDecisionOptions> {
   readonly id: string;
   readonly combatant: CombatantId;
+  readonly options: Options;
   readonly boundary: {
     readonly activeCombatant: CombatantId;
     readonly round: number;
@@ -371,36 +376,33 @@ interface PendingDecisionBase {
 
 /** Closed engine decision vocabulary; every kind owns its legal option tuple. */
 export type PendingDecision =
-  | (PendingDecisionBase & {
+  | (PendingDecisionBase<readonly [
+      PendingDecisionOption & { readonly id: 'accept' },
+      PendingDecisionOption & { readonly id: 'decline' },
+    ]> & {
       readonly kind: 'reaction_offer';
       readonly reactionKind: 'opportunity_attack';
-      readonly options: readonly [
-        PendingDecisionOption & { readonly id: 'accept' },
-        PendingDecisionOption & { readonly id: 'decline' },
-      ];
       readonly opportunityAttack: {
         readonly mover: CombatantId;
         readonly from: GridCell;
         readonly to: GridCell;
+        readonly command: Extract<EncounterCommand, { readonly type: 'opportunity_attack' }>;
       };
     })
-  | (PendingDecisionBase & {
+  | (PendingDecisionBase<readonly [PendingDecisionOption & { readonly id: 'roll' }]> & {
       readonly kind: 'death_save';
-      readonly options: readonly [PendingDecisionOption & { readonly id: 'roll' }];
     })
-  | (PendingDecisionBase & {
+  | (PendingDecisionBase<readonly [
+      ...(PendingDecisionOption & { readonly id: `legendary_action:${string}` })[],
+      PendingDecisionOption & { readonly id: 'pass' },
+    ]> & {
       readonly kind: 'legendary_action_window';
-      readonly options: readonly [
-        ...(PendingDecisionOption & { readonly id: `legendary_action:${string}` })[],
-        PendingDecisionOption & { readonly id: 'pass' },
-      ];
     })
-  | (PendingDecisionBase & {
+  | (PendingDecisionBase<readonly [
+      PendingDecisionOption & { readonly id: 'spend' },
+      PendingDecisionOption & { readonly id: 'suffer' },
+    ]> & {
       readonly kind: 'legendary_resistance';
-      readonly options: readonly [
-        PendingDecisionOption & { readonly id: 'spend' },
-        PendingDecisionOption & { readonly id: 'suffer' },
-      ];
       readonly failedSave: {
         readonly source: CombatantId;
         readonly ability: Ability;
@@ -414,9 +416,8 @@ export type PendingDecision =
         readonly effects: readonly EncounterEffect[];
       };
     })
-  | (PendingDecisionBase & {
+  | (PendingDecisionBase<readonly [PendingDecisionOption & { readonly id: 'rule_manually' }]> & {
       readonly kind: 'adjudication_prompt';
-      readonly options: readonly [PendingDecisionOption & { readonly id: 'rule_manually' }];
       readonly refusal: import('../vtt/refusal-handling').NonBoundaryActionRefusal;
     });
 
@@ -4013,6 +4014,7 @@ function queueOpportunityAttack(
   context: ReductionContext,
   reactor: CombatantId,
   trigger: OpportunityAttackTrigger,
+  command: Extract<EncounterCommand, { readonly type: 'opportunity_attack' }>,
 ): void {
   if (context.state.eventLog.some((event) =>
     event.type === 'pending_decision_resolved' &&
@@ -4034,7 +4036,12 @@ function queueOpportunityAttack(
       { id: 'decline', label: 'Decline' },
     ],
     boundary: { activeCombatant: trigger.mover, round: context.state.round },
-    opportunityAttack: { mover: trigger.mover, from: { ...trigger.from }, to: { ...trigger.to } },
+    opportunityAttack: {
+      mover: trigger.mover,
+      from: { ...trigger.from },
+      to: { ...trigger.to },
+      command: structuredClone(command),
+    },
   };
   context.state = {
     ...context.state,
@@ -4245,6 +4252,11 @@ function processMove(
       const trigger: OpportunityAttackTrigger = {
         mover: command.actor, from: { ...step.from }, to: { ...step.to },
       };
+      const executableOpportunityAttack = command.executableOpportunityAttacks === undefined
+        ? defaultOpportunityAttack(window.reactorId, command.actor)
+        : command.executableOpportunityAttacks.find((candidate) =>
+            candidate.actor === window.reactorId && candidate.target === command.actor);
+      if (executableOpportunityAttack === undefined) continue;
       const policy = reactionPolicyFor(context.state, window.reactorId, 'opportunity_attack');
       if (policy === 'never') {
         emit(context, {
@@ -4258,11 +4270,13 @@ function processMove(
           type: 'reaction_policy_auto_resolved', combatant: window.reactorId,
           reactionKind: 'opportunity_attack', policy, resolution: 'accept', autoFired: true,
         });
-        processAttack(context, defaultOpportunityAttack(window.reactorId, command.actor), trigger);
+        processAttack(context, executableOpportunityAttack, trigger);
         if (combatant(context.state, command.actor).life !== 'living') break;
         continue;
       }
-      if (reactor.turn.reactionAvailable) queueOpportunityAttack(context, window.reactorId, trigger);
+      if (reactor.turn.reactionAvailable) {
+        queueOpportunityAttack(context, window.reactorId, trigger, executableOpportunityAttack);
+      }
     }
     if (combatant(context.state, command.actor).life !== 'living') break;
     context.state = {
@@ -10458,7 +10472,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
           if (command.optionId === 'accept') {
             processAttack(
               context,
-              defaultOpportunityAttack(decision.combatant, decision.opportunityAttack.mover),
+              decision.opportunityAttack.command,
               decision.opportunityAttack,
             );
           }

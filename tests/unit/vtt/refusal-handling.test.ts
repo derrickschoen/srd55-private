@@ -3,6 +3,7 @@ import { createEncounter, reduceEncounter, REACTION_KINDS, type EncounterState }
 import type { NonBoundaryRefusalClass } from '../../../src/combat/encounter-rule-error';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
+import { damageType, dieSides } from '../../../src/combat/values';
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
 import type { PartySessionState } from '../../../src/vtt/party-session-state';
 import {
@@ -224,6 +225,24 @@ describe('D377.10 refusal handling', () => {
           mover: REFERENCE_FIGHTER_ID,
           from: { column: 2, row: 3 },
           to: { column: 2, row: 4 },
+          command: {
+            type: 'opportunity_attack',
+            actor: REFERENCE_MONSTER_ID,
+            target: REFERENCE_FIGHTER_ID,
+            attackBonus: 0,
+            criticalFloor: 20,
+            rollMode: 'normal',
+            attackerCanSeeTarget: true,
+            targetCanSeeAttacker: true,
+            damage: {
+              terms: [{
+                type: damageType('Bludgeoning'),
+                dice: { count: 0, sides: dieSides(4), modifier: 1 },
+              }],
+              critical: false,
+              responses: [],
+            },
+          },
         },
       }],
     };

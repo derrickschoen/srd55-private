@@ -707,7 +707,11 @@ export class TurnCoordinator {
       return { kind: 'applied', state: this.#state, events: reduction.events };
     }
     if (this.#pendingDecisionTray) {
-      const reduction = this.#apply(action, IDLE);
+      const executableOpportunityAttacks = coordinatedMovementSteps(this.#state, action)
+        .flatMap((step) => step.reactors)
+        .filter((reactor, index, reactors) => reactors.indexOf(reactor) === index)
+        .flatMap((reactor) => this.#reactionLegalActions(this.#state, reactor, actor));
+      const reduction = this.#apply({ ...action, executableOpportunityAttacks }, IDLE);
       return { kind: 'applied', state: this.#state, events: reduction.events };
     }
     const steps = coordinatedMovementSteps(this.#state, action);
