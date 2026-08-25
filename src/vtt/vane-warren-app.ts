@@ -41,7 +41,7 @@ export function mountVaneWarren(root: HTMLElement, rpc: RpcClient): VaneWarrenMo
     if (loading) return;
     loading = true;
     choices.querySelectorAll('button').forEach((button) => { button.disabled = true; });
-    status.value = 'Authoring the bundled four-character party through RPC…';
+    status.value = 'Authoring the bundled five-character party through RPC…';
     void loadD365SampleParty(rpc).then((sample) => {
       if (closed) return;
       const encounter = composeVaneWarrenSessionEncounter(

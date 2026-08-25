@@ -36,6 +36,7 @@ function players() {
     playerProfile('vane-player-b', { initiativeBonus: 20, hitPoints: 40 }),
     playerProfile('vane-player-c', { initiativeBonus: 10, hitPoints: 40 }),
     playerProfile('vane-player-d', { initiativeBonus: 5, hitPoints: 40 }),
+    playerProfile('vane-player-e', { initiativeBonus: 0, hitPoints: 40 }),
   ] as const;
 }
 
@@ -217,9 +218,16 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
   });
 
   it('loads each separate fight with pre-placed tokens, fog, light, surfaces, and at least six landed terrain or hazard elements', () => {
+    expect(players().map((player) => player.id)).toEqual([
+      'combatant:vane-player-a',
+      'combatant:vane-player-b',
+      'combatant:vane-player-c',
+      'combatant:vane-player-d',
+      'combatant:vane-player-e',
+    ]);
     for (const manifest of VANE_WARREN_FIGHTS) {
       const loaded = fight(manifest.id);
-      expect(loaded.encounter.combatants).toHaveLength(4 + manifest.standing.length);
+      expect(loaded.encounter.combatants).toHaveLength(5 + manifest.standing.length);
       expect(loaded.encounter.tokens).toHaveLength(loaded.encounter.combatants.length);
       expect(loaded.encounter.foggedCells.length).toBeGreaterThan(0);
       expect(loaded.encounter.environment.lightRegions.length).toBeGreaterThan(0);
@@ -242,9 +250,9 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       ...vaneWarrenActionEconomy(manifest),
       recorded: manifest.targetActionEconomyRatio,
     }))).toEqual([
-      { id: 'cinder-rite', enemyOpportunities: 4, partyOpportunities: 4, ratio: 1, recorded: 1 },
-      { id: 'iron-voice', enemyOpportunities: 2, partyOpportunities: 4, ratio: 0.5, recorded: 0.5 },
-      { id: 'last-muster', enemyOpportunities: 2, partyOpportunities: 4, ratio: 0.5, recorded: 0.5 },
+      { id: 'cinder-rite', enemyOpportunities: 4, partyOpportunities: 5, ratio: 0.8, recorded: 0.8 },
+      { id: 'iron-voice', enemyOpportunities: 2, partyOpportunities: 5, ratio: 0.4, recorded: 0.4 },
+      { id: 'last-muster', enemyOpportunities: 2, partyOpportunities: 5, ratio: 0.4, recorded: 0.4 },
     ]);
   });
 

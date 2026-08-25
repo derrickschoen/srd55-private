@@ -179,6 +179,14 @@ function attacks(
       criticalFloor: 20,
       reachFeet: weapon.reach ? 10 : 5,
       rangeFeet: weapon.range.kind === 'ranged' ? weapon.range.near_feet : 5,
+      ...(weapon.mastery_selected && (weapon.mastery_property === 'Slow' || weapon.mastery_property === 'Topple')
+        ? {
+            masteryProperty: weapon.mastery_property,
+            ...(weapon.mastery_property === 'Topple'
+              ? { masterySaveDc: 8 + ability.attack_bonus }
+              : {}),
+          }
+        : {}),
       damage: [{
         damageTypeId: damageType,
         count: parsedDice.count,

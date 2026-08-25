@@ -34,7 +34,7 @@ export interface D365DungeonRoom {
   readonly monsters: readonly D365DungeonMonster[];
   readonly blockedCells: readonly GridCell[];
   readonly designSignals: readonly string[];
-  readonly recordedActionEconomyRatio: 0.25 | 0.5 | 0.75 | 1;
+  readonly recordedActionEconomyRatio: 0.2 | 0.4 | 0.6 | 0.8;
 }
 
 export interface D365DungeonManifest {
@@ -63,7 +63,7 @@ export const D365_SAMPLE_DUNGEON: D365DungeonManifest = {
       ],
       blockedCells: [{ column: 5, row: 3 }],
       designSignals: ['pack_tactics', 'distributed_targets'],
-      recordedActionEconomyRatio: 1,
+      recordedActionEconomyRatio: 0.8,
     },
     {
       room: 2,
@@ -75,7 +75,7 @@ export const D365_SAMPLE_DUNGEON: D365DungeonManifest = {
       ],
       blockedCells: [{ column: 5, row: 1 }, { column: 5, row: 5 }],
       designSignals: ['bear_hug', 'ongoing_squeeze', 'web', 'venom', 'spider_climb'],
-      recordedActionEconomyRatio: 0.5,
+      recordedActionEconomyRatio: 0.4,
     },
     {
       room: 3,
@@ -88,7 +88,7 @@ export const D365_SAMPLE_DUNGEON: D365DungeonManifest = {
       ],
       blockedCells: [{ column: 4, row: 2 }, { column: 4, row: 4 }],
       designSignals: ['longbow', 'fly_speed', 'raking_pass', 'talon_rake', 'nimble_escape'],
-      recordedActionEconomyRatio: 0.75,
+      recordedActionEconomyRatio: 0.6,
     },
     {
       room: 4,
@@ -99,7 +99,7 @@ export const D365_SAMPLE_DUNGEON: D365DungeonManifest = {
       ],
       blockedCells: [{ column: 5, row: 2 }, { column: 5, row: 4 }],
       designSignals: ['boss_web_control', 'venom', 'ambush_support'],
-      recordedActionEconomyRatio: 0.25,
+      recordedActionEconomyRatio: 0.2,
     },
   ],
 };
@@ -209,6 +209,7 @@ export function composeD365Room(
     { column: 1, row: 3 },
     { column: 1, row: 5 },
     { column: 2, row: 3 },
+    { column: 2, row: 5 },
   ];
   const fresh = createEncounter({
     bounds: { columns: 10, rows: 7 },
@@ -237,6 +238,8 @@ export function composeD365Room(
     useHealingPotions: true,
     openWithBless: true,
     reserveClericSlotsForBless: true,
+    useWizardTactics: true,
+    useClericContingency: true,
   });
   return {
     rulesEdition: '2024',

@@ -179,3 +179,97 @@ and 110.40 Short-Rest healing. The gross healing gap fell from 385.00 to
 The deterministic harness is `src/vtt/survival-harness.ts`, its CLI is
 `tools/rehearsal/survival-headless.ts`, and the pinned acceptance is in
 `tests/integration/vtt/survival-policy.test.ts`.
+
+## 2026-08-25 D383–D385 addendum — five PCs and tactical recovery
+
+This addendum supersedes the four-PC measurement above without changing any
+encounter roster. The fixed seeds 20260801–20260830 now complete The Last
+Muster in **29/30 chains (96.7%)**. All 30 clear the four D365 rooms and Cinder;
+29 clear Iron Voice, reach Last Muster, and win it. Aggregate recovery was
+2,202 HP from Hit Dice, 1,490 HP from between-fight Cure Wounds, 2,347 HP from
+in-combat healing, and 69 emergency potions. The acceptance pins 29/30 and
+retains the owner floor of 20/30.
+
+### Fifth-PC build
+
+Tamsin Quill is a Human Evoker Wizard 5 with Sage and Alert. The allocated
+standard array is 8/14/13/15/12/10 (Str/Dex/Con/Int/Wis/Cha); Sage and the
+level-4 Intelligence increase produce 8/14/14/19/12/10. She has 32 HP, AC 12,
+5d6 Hit Dice, four cantrips, nine prepared spells, and shared slots 4/3/2. Those
+counts come from the Wizard table
+(`docs/srd/full/srd-5.2.1.txt:4615-4695`;
+`docs/srd/source/class-level-tables.txt:116-138`).
+
+| Spell set | Choices and SRD sources |
+|---|---|
+| Cantrips | Fire Bolt (`spell-descriptions.txt:3184-3200`), Mage Hand (`:4931-4950`), Prestidigitation (`:6034-6060`), Ray of Frost (`:6427-6440`). |
+| Prepared | Mage Armor (`:4920-4930`), Shield (`:6937-6950`), Magic Missile (`:5033-5050`), Thunderwave (`:7868-7885`), Misty Step (`:5523-5535`), Web (`:8453-8475`), Counterspell (`:1767-1786`), Fireball (`:3160-3183`), Slow (`:7140-7163`). |
+| Additional spellbook | Detect Magic (`:2085-2100`), Feather Fall (`:2964-2980`), Sleep (`:7103-7125`), Grease (`:3883-3900`), Invisibility (`:4691-4710`). |
+
+Slow is offered only when at least three living enemies occupy one candidate
+40-foot Cube and selects at most six; Ray of Frost is the at-will keep-away
+attack (`docs/srd/source/spell-descriptions.txt:7140-7163`, `:6427-6440`). The
+controller moves ranged casters away from the nearest enemy and then prefers
+the best available cover tier.
+
+### Recovery and slot reserve
+
+A character spends a Hit Point Die only when missing HP is at least the die's
+average plus Constitution modifier. Cure Wounds follows the same no-overheal
+rule and tries the lowest-level available slot first; its average is 2d8 plus
+the casting modifier, plus 2d8 per higher slot
+(`docs/srd/full/srd-5.2.1.txt:7493-7508`;
+`docs/srd/source/spell-descriptions.txt:1895-1906`). Potions remain exempt only
+for the existing below-40% emergency policy. The Short Rest and Hit Point Die
+rules are at `docs/srd/full/srd-5.2.1.txt:12035-12055`.
+
+Orin now pays the two level-2 Aid slots needed to cover five PCs in groups of
+three and two, leaving Sera's nine Cleric slots intact. Sera's reserve is seven
+cheapest-slot Bless openings plus her two level-3 slots for at most two Spirit
+Guardians contingencies. Between fights, a Cleric Cure Wounds cast is allowed
+only from slots above the remaining Bless-plus-contingency floor; Orin has no
+Bless reserve. Bless is sourced at `docs/srd/source/spell-descriptions.txt:824-840`,
+Spirit Guardians at `:7324-7344`, Aid at `:53-65`, and the Cleric 4/3/2 table at
+`docs/srd/source/class-level-tables.txt:64-71`.
+
+Per owner ruling D383, Cure Wounds cast during the Short Rest does not interrupt
+that rest: Hit Point Die healing and Short-Rest resource recharge still apply.
+This is an owner ruling because the 2024 rest text can be read more strictly.
+
+### Cleric and defender tactics
+
+Sera opens with Bless. Spirit Guardians is offered exactly after that Bless
+concentration breaks and while she has a level-3 slot; Command (Flee) is her
+adjacent-enemy keep-away choice. The spell sources are
+`docs/srd/source/spell-descriptions.txt:7324-7344` and `:7105-7123`.
+
+Brann's Soldier increase and level-4 ASI produce Strength 19, maximizing the
+legal build's grappling modifier. Fighter 5 permits four Weapon
+Mastery choices (`docs/srd/source/class-level-tables.txt:99-111`); this build
+uses two: Battleaxe/Topple and Longbow/Slow, as listed in
+`docs/srd/source/weapons-table.txt:0`. Topple forces the listed Constitution
+save and applies Prone on failure; Slow reduces Speed by 10 feet until the
+start of Brann's next turn and does not stack beyond one reduction
+(`docs/srd/full/srd-5.2.1.txt:766`, `:12807`). Brann advances toward the nearest
+hostile until Topple is available, then prefers Topple over the ranged Slow
+attack, concretely interposing on the only path primitive the grid exposes.
+
+### Five-PC action-economy remeasurement
+
+No encounter was tuned upward. D365 ratios are 4/5, 2/5, 3/5, and 1/5
+(0.8x, 0.4x, 0.6x, 0.2x). Cinder, Iron, and Last Muster are 4/5, 2/5, and 2/5
+(0.8x, 0.4x, 0.4x); the Iron numerator includes its one Legendary Action.
+The roster arithmetic is pinned by ID in the D365 and Vane tests.
+
+### Declared engine limits in this measurement
+
+The cover vocabulary and line-of-cover calculation are implemented, and the
+caster policy consults them. These representative maps expose no beneficial
+world-object cover cell, so their measured positioning resolves by distance.
+The engine stores Slow's complete typed effect, Spirit Guardians' typed area,
+and Command's typed commanded action, but it does not yet intercept every
+downstream rule those payloads describe. Consequently the measurement includes
+their cast timing, slot and concentration costs, target/area selection, saves,
+and effect lifetime, but not every Slow action/reaction/AC rider, recurring
+Spirit Guardians damage, or compelled Flee movement. These limits are not
+replaced with invented approximations.

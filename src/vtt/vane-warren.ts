@@ -85,7 +85,7 @@ export interface VaneWarrenFight {
   readonly alarmWaves: readonly VaneWarrenAlarmWave[];
   readonly conditionalJoiners: readonly VaneWarrenRosterEntry[];
   readonly legendaryActionPool: number;
-  readonly targetActionEconomyRatio: 0.5 | 1;
+  readonly targetActionEconomyRatio: 0.4 | 0.8;
 }
 
 const standing = { kind: 'standing' } as const;
@@ -124,7 +124,7 @@ export const VANE_WARREN_FIGHTS = [
     ],
     conditionalJoiners: [],
     legendaryActionPool: 0,
-    targetActionEconomyRatio: 1,
+    targetActionEconomyRatio: 0.8,
   },
   {
     id: 'iron-voice',
@@ -136,7 +136,7 @@ export const VANE_WARREN_FIGHTS = [
     alarmWaves: [],
     conditionalJoiners: [],
     legendaryActionPool: 1,
-    targetActionEconomyRatio: 0.5,
+    targetActionEconomyRatio: 0.4,
   },
   {
     id: 'last-muster',
@@ -150,13 +150,13 @@ export const VANE_WARREN_FIGHTS = [
       roster('muster-joiner-a', 'statblock:goblin-warrior', 'Reserve Spear', 12, 3, bloodied),
     ],
     legendaryActionPool: 0,
-    targetActionEconomyRatio: 0.5,
+    targetActionEconomyRatio: 0.4,
   },
 ] as const satisfies readonly VaneWarrenFight[];
 
 export interface VaneWarrenActionEconomy {
   readonly enemyOpportunities: number;
-  readonly partyOpportunities: 4;
+  readonly partyOpportunities: 5;
   readonly ratio: number;
 }
 
@@ -167,8 +167,8 @@ export function vaneWarrenActionEconomy(fight: VaneWarrenFight): VaneWarrenActio
   const enemyOpportunities = listedEnemies + fight.legendaryActionPool;
   return {
     enemyOpportunities,
-    partyOpportunities: 4,
-    ratio: enemyOpportunities / 4,
+    partyOpportunities: 5,
+    ratio: enemyOpportunities / 5,
   };
 }
 
@@ -389,6 +389,7 @@ function playerPositions(): readonly GridCell[] {
     { column: 1, row: 4 },
     { column: 1, row: 6 },
     { column: 1, row: 8 },
+    { column: 2, row: 5 },
   ];
 }
 
@@ -396,8 +397,8 @@ export function createVaneWarrenFight(
   fightId: VaneWarrenFightId,
   players: readonly CombatantProfile[],
 ): VaneWarrenEncounterState {
-  if (players.length !== 4 || players.some((profile) => profile.kind !== 'player_character')) {
-    throw new RangeError('The Vane Warren is balanced and bundled for exactly four player characters.');
+  if (players.length !== 5 || players.some((profile) => profile.kind !== 'player_character')) {
+    throw new RangeError('The Vane Warren is bundled for exactly five player characters.');
   }
   const fight = fightById(fightId);
   const standingProfiles = fight.standing.map((entry) => profileFor(fightId, entry));
@@ -829,6 +830,8 @@ export function composeVaneWarrenFight(
     useHealingPotions: true,
     openWithBless: true,
     reserveClericSlotsForBless: true,
+    useWizardTactics: true,
+    useClericContingency: true,
   });
   return {
     rulesEdition: '2024',

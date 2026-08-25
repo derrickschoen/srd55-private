@@ -1776,9 +1776,17 @@ export function coverTierBetween(
   from: GridCell,
   to: GridCell,
 ): CoverTier {
+  return coverTierBetweenObjects(state.worldObjects, from, to);
+}
+
+export function coverTierBetweenObjects(
+  objects: readonly WorldObject[],
+  from: GridCell,
+  to: GridCell,
+): CoverTier {
   let cover: CoverTier = 'none';
   for (const cell of interveningCells(from, to)) {
-    for (const object of state.worldObjects) {
+    for (const object of objects) {
       if (
         worldObjectOccupiesCell(object, cell) &&
         COVER_ORDER[object.blocking.cover] > COVER_ORDER[cover]
@@ -5512,6 +5520,69 @@ function applyManeuverCondition(
   });
 }
 
+function applyWeaponMastery(
+  context: ReductionContext,
+  source: CombatantId,
+  target: CombatantId,
+  mastery: NonNullable<Extract<EncounterCommand, { readonly type: 'attack' }>['weaponMastery']>,
+  damageTaken: number,
+): void {
+  if (combatant(context.state, target).life === 'dead') return;
+  switch (mastery.property) {
+    case 'Slow':
+      // Slow reduces Speed by 10 feet until the start of the attacker's next
+      // turn, and repeated Slow properties never exceed that reduction:
+      // docs/srd/full/srd-5.2.1.txt:766; weapon table at :12807.
+      if (damageTaken === 0) return;
+      applyEffect(context, source, {
+        targets: [target],
+        duration: {
+          kind: 'turn_boundaries',
+          timing: { combatant: source, boundary: 'start', source: 'weapon-mastery:slow' },
+          remaining: 1,
+        },
+        concentration: false,
+        stackingIdentity: effectStackingIdentity(`weapon-mastery:slow:${String(target)}`),
+        stacking: 'replace_any_source',
+        repeatedSave: null,
+        payload: {
+          kind: 'movement_modifier',
+          speedChange: { kind: 'reduce', reduction: { kind: 'feet', feet: 10 } },
+          modeGrants: [],
+          difficultTerrainImmunity: false,
+          magicalSpeedReductionImmunity: false,
+        },
+      });
+      return;
+    case 'Topple': {
+      // Topple forces a Constitution save at DC 8 + the attack ability
+      // modifier + Proficiency Bonus and applies Prone on failure:
+      // docs/srd/full/srd-5.2.1.txt:12807.
+      const save = resolveTargetSave(
+        context,
+        source,
+        target,
+        'constitution',
+        mastery.saveDc,
+        'normal',
+        null,
+        'other',
+      );
+      if (save.outcome === 'success') return;
+      applyEffect(context, source, {
+        targets: [target],
+        duration: { kind: 'permanent' },
+        concentration: false,
+        stackingIdentity: effectStackingIdentity(`weapon-mastery:topple:${String(target)}`),
+        stacking: 'replace_any_source',
+        repeatedSave: null,
+        payload: { kind: 'condition', condition: 'Prone' },
+      });
+      return;
+    }
+  }
+}
+
 function applySaveGatedBanishments(
   context: ReductionContext,
   actor: CombatantId,
@@ -6166,6 +6237,9 @@ function processAttack(
     );
     concentrationCheck(context, command.target, damageResult.total);
     if (maneuver !== null) applyManeuverCondition(context, command.actor, command.target, maneuver);
+    if (command.type === 'attack' && command.weaponMastery !== undefined) {
+      applyWeaponMastery(context, command.actor, command.target, command.weaponMastery, damageResult.total);
+    }
     for (const rider of triggeredRiders) {
       if (rider.encounterEffect === null) continue;
       if (rider.payload.consumeOnHit === true) {

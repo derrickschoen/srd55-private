@@ -163,6 +163,10 @@ export type EncounterCommand =
       readonly damage: DamageRequest;
       /** Present for attacks selected from a typed party-pack attack form. */
       readonly attackId?: string;
+      /** Selected 2024 weapon mastery carried by the party-pack attack. */
+      readonly weaponMastery?:
+        | { readonly property: 'Slow' }
+        | { readonly property: 'Topple'; readonly saveDc: number };
       /** Reducer-validated effects declared by a monster statblock attack. */
       readonly monsterOnHit?: readonly MonsterOnHitEffect[];
       /** Chooses the declared first-attack Reckless Attack mode. */

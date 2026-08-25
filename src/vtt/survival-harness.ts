@@ -16,7 +16,12 @@ import {
 } from './party-session-state';
 import { regretReactionLegalActions } from './regret/legal-actions';
 import type { StoredCharacterEncounter } from './stored-character-encounter';
-import { createD365SurvivalPartySessionState } from './survival-policy';
+import {
+  averageHitDieHealing,
+  castBetweenFightCureWounds,
+  createD365SurvivalPartySessionState,
+  shouldSpendHitDie,
+} from './survival-policy';
 import {
   composeVaneWarrenFight,
   reduceVaneWarrenEncounter,
@@ -44,6 +49,7 @@ export interface SurvivalFightMeasurement {
   readonly outgoingDamage: number;
   readonly inCombatHealing: number;
   readonly shortRestHealingAfter: number;
+  readonly betweenFightSpellHealingAfter: number;
   readonly playerTurnOpportunities: number;
   readonly enemyTurnOpportunities: number;
   readonly potionUses: number;
@@ -62,6 +68,7 @@ export interface SurvivalCampaignMeasurement {
   readonly totalOutgoingDamage: number;
   readonly totalInCombatHealing: number;
   readonly totalShortRestHealing: number;
+  readonly totalBetweenFightSpellHealing: number;
   readonly totalPotionUses: number;
 }
 
@@ -153,7 +160,10 @@ async function runFight(
         : pending.kind === 'reaction_offer'
           ? pending.options.find((candidate) => candidate.id === 'accept')
           : pending.kind === 'legendary_resistance'
-            ? pending.options.find((candidate) => candidate.id === 'spend')
+            ? pending.options.find((candidate) => candidate.id === (
+                (coordinator.state().combatants.find((combatant) => combatant.profile.id === pending.combatant)
+                  ?.legendary?.resistanceUsesRemaining ?? 0) > 0 ? 'spend' : 'suffer'
+              ))
             : pending.options.find((candidate) => candidate.id !== 'pass');
       if (option === undefined) throw new Error(`${name}: pending ${pending.kind} decision has no executable option.`);
       const resolution = coordinator.resolvePendingDecision({
@@ -198,6 +208,7 @@ async function runFight(
       inCombatHealing: eventTotal(state.eventLog, (event) =>
         event.type === 'healing_applied' && sideOf(state, event.target) === 'player' ? event.amount : 0),
       shortRestHealingAfter: 0,
+      betweenFightSpellHealingAfter: 0,
       playerTurnOpportunities: state.eventLog.filter((event) =>
         event.type === 'turn_started' && sideOf(state, event.combatant) === 'player').length,
       enemyTurnOpportunities: state.eventLog.filter((event) =>
@@ -212,18 +223,24 @@ async function runFight(
   };
 }
 
-function shortRestPolicy(state: PartySessionState): readonly ShortRestHitDieSpend[] {
+export function survivalShortRestPolicy(state: PartySessionState): readonly ShortRestHitDieSpend[] {
   return state.characters.flatMap((character): readonly ShortRestHitDieSpend[] => {
     if (character.life !== 'living' || character.currentHitPoints >= character.hitPointMaximum) return [];
     let deficit = character.hitPointMaximum - character.currentHitPoints;
     const dice: Array<{ readonly sides: 6 | 8 | 10 | 12; readonly count: number }> = [];
     for (const pool of [...character.hitDice].sort((left, right) => right.sides - left.sides)) {
-      if (deficit <= 0) break;
-      const expectedHealing = Math.max(1, (pool.sides + 1) / 2 + character.constitutionModifier);
-      const count = Math.min(pool.remaining, Math.ceil(deficit / expectedHealing));
+      const expectedHealing = averageHitDieHealing(pool.sides, character.constitutionModifier);
+      let count = 0;
+      while (count < pool.remaining && shouldSpendHitDie({
+        missingHitPoints: deficit,
+        sides: pool.sides,
+        constitutionModifier: character.constitutionModifier,
+      })) {
+        count += 1;
+        deficit -= expectedHealing;
+      }
       if (count > 0) {
         dice.push({ sides: pool.sides, count });
-        deficit -= count * expectedHealing;
       }
     }
     return dice.length === 0 ? [] : [{ combatantId: character.combatantId, dice }];
@@ -232,9 +249,14 @@ function shortRestPolicy(state: PartySessionState): readonly ShortRestHitDieSpen
 
 function withShortRestHealing(
   measurement: SurvivalFightMeasurement,
-  healing: number,
+  hitDieHealing: number,
+  spellHealing: number,
 ): SurvivalFightMeasurement {
-  return { ...measurement, shortRestHealingAfter: healing };
+  return {
+    ...measurement,
+    shortRestHealingAfter: hitDieHealing,
+    betweenFightSpellHealingAfter: spellHealing,
+  };
 }
 
 export async function runSurvivalCampaign(
@@ -248,18 +270,38 @@ export async function runSurvivalCampaign(
     ? createD365SurvivalPartySessionState(members).state
     : createPartySessionState(members);
   const policy = mode === 'survival_package'
-    ? { useHealingPotions: true, openWithBless: true, reserveClericSlotsForBless: true }
-    : { useHealingPotions: false, openWithBless: false, reserveClericSlotsForBless: false };
+    ? {
+        useHealingPotions: true,
+        openWithBless: true,
+        reserveClericSlotsForBless: true,
+        useWizardTactics: true,
+        useClericContingency: true,
+      }
+    : {
+        useHealingPotions: false,
+        openWithBless: false,
+        reserveClericSlotsForBless: false,
+        useWizardTactics: false,
+        useClericContingency: false,
+      };
   const fights: SurvivalFightMeasurement[] = [];
 
   const finishFight = (result: Awaited<ReturnType<typeof runFight>>, allowRest: boolean): boolean => {
     let measurement = result.measurement;
     partyState = capturePartySessionState(partyState, result.state);
     if (measurement.outcome === 'victory' && allowRest && mode === 'survival_package') {
-      const rested = takeShortRest(partyState, shortRestPolicy(partyState), rng);
+      const remainingBlessOpenings = 7 - (fights.length + 1);
+      const cured = castBetweenFightCureWounds(members, partyState, {
+        clericBlessOpeningsReserved: remainingBlessOpenings,
+        clericSpiritGuardiansSlotsReserved: Math.min(2, remainingBlessOpenings),
+      });
+      // Owner ruling D383: these Cure Wounds castings occur during the Short
+      // Rest and do not interrupt its Hit-Die or recharge benefits.
+      const rested = takeShortRest(cured.state, survivalShortRestPolicy(cured.state), rng);
       measurement = withShortRestHealing(
         measurement,
         rested.rolls.reduce((total, roll) => total + roll.healing, 0),
+        cured.castings.reduce((total, casting) => total + casting.averageHealing, 0),
       );
       partyState = rested.state;
     }
@@ -319,6 +361,7 @@ function summarize(
     totalOutgoingDamage: fights.reduce((total, fight) => total + fight.outgoingDamage, 0),
     totalInCombatHealing: fights.reduce((total, fight) => total + fight.inCombatHealing, 0),
     totalShortRestHealing: fights.reduce((total, fight) => total + fight.shortRestHealingAfter, 0),
+    totalBetweenFightSpellHealing: fights.reduce((total, fight) => total + fight.betweenFightSpellHealingAfter, 0),
     totalPotionUses: fights.reduce((total, fight) => total + fight.potionUses, 0),
   };
 }

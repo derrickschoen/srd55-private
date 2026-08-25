@@ -61,6 +61,7 @@ try {
     process.stdout.write(`${JSON.stringify(sample.party.members.map((member) => ({
       name: sample.displayNames.get(member.profile.characterId) ?? member.profile.name,
       classes: member.source.classes,
+      abilities: member.source.abilities,
       armorClass: member.profile.rules.armorClass,
       hitPointMaximum: member.profile.rules.hitPointMaximum,
       attacks: member.attacks,

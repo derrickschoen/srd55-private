@@ -16,6 +16,7 @@ import {
 } from '../combat/effects';
 import type { EncounterCommand } from '../combat/events';
 import { adjacentCells, gridDistance } from '../combat/grid';
+import { affectedCells, feetPoint } from '../combat/templates';
 import type { PersistentAreaEffectSpec, PersistentAreaShape } from '../combat/persistent-areas';
 import { spellDefinition } from '../combat/spells/definitions';
 import type { SpellCastCommand, SpellTargeting } from '../combat/spells/types';
@@ -36,7 +37,7 @@ import {
   type EncounterEffectId,
 } from '../combat/values';
 import type { WorldOperation } from '../combat/world-objects';
-import { abilities, creatureSizes, damageTypes, skills, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
+import { abilities, creatureSizes, damageTypes, skills, weaponMasteryProperties, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import { hitDieSizes, type HitDieSize } from '../domain/enums';
 import { SRD_CLASS_NAMES } from '../rules/class-traits-srd';
 import {
@@ -100,12 +101,21 @@ const attackSchema = z.strictObject({
   criticalFloor: integerSchema.min(2).max(20),
   reachFeet: distanceSchema,
   rangeFeet: distanceSchema,
+  masteryProperty: z.enum(weaponMasteryProperties).optional(),
+  masterySaveDc: integerSchema.min(1).max(50).optional(),
   damage: z.array(z.strictObject({
     damageTypeId: z.enum(damageTypes),
     count: integerSchema.min(0).max(100),
     sides: dieSidesSchema,
     modifier: modifierSchema,
   })).min(1).max(20),
+}).superRefine((attack, context) => {
+  if (attack.masteryProperty === 'Topple' && attack.masterySaveDc === undefined) {
+    context.addIssue({ code: 'custom', path: ['masterySaveDc'], message: 'Topple mastery requires its sourced save DC.' });
+  }
+  if (attack.masteryProperty !== 'Topple' && attack.masterySaveDc !== undefined) {
+    context.addIssue({ code: 'custom', path: ['masterySaveDc'], message: 'Only Topple mastery carries a save DC.' });
+  }
 });
 
 const gridCellSchema = z.strictObject({
@@ -879,6 +889,10 @@ export interface LoadedPartyAttack {
   readonly criticalFloor: number;
   readonly reach: ReturnType<typeof feet>;
   readonly range: ReturnType<typeof feet>;
+  readonly mastery:
+    | { readonly property: 'Slow' }
+    | { readonly property: 'Topple'; readonly saveDc: number }
+    | null;
   readonly damage: readonly {
     readonly type: DamageType;
     readonly count: number;
@@ -1054,7 +1068,7 @@ const LEGACY_SPELLCASTING_FIELDS = new Set([
 const RESOURCE_SPELL_USE_FIELDS = new Set(['spellId', 'resourcePoolId']);
 const PREPARED_SPELL_GRANT_FIELDS = new Set(['spellId', 'ability']);
 const ATTACK_FIELDS = new Set([
-  'attackId', 'kind', 'attackBonus', 'criticalFloor', 'reachFeet', 'rangeFeet', 'damage',
+  'attackId', 'kind', 'attackBonus', 'criticalFloor', 'reachFeet', 'rangeFeet', 'masteryProperty', 'masterySaveDc', 'damage',
 ]);
 const DAMAGE_FIELDS = new Set(['damageTypeId', 'count', 'sides', 'modifier']);
 const CONDITION_FIELDS = new Set(['effectId', 'conditionId']);
@@ -1284,6 +1298,11 @@ function loadedAttack(attack: ExternalPartyPackAttack): LoadedPartyAttack {
     criticalFloor: attack.criticalFloor,
     reach: feet(attack.reachFeet),
     range: feet(attack.rangeFeet),
+    mastery: attack.masteryProperty === 'Topple'
+      ? { property: 'Topple', saveDc: attack.masterySaveDc as number }
+      : attack.masteryProperty === 'Slow'
+        ? { property: 'Slow' }
+        : null,
     damage: attack.damage.map((term) => ({
       type: damageType(term.damageTypeId),
       count: term.count,
@@ -2045,6 +2064,7 @@ export function loadedPartyAttackCommand(
       responses: [],
     },
     attackId: attack.attackId,
+    ...(attack.mastery === null ? {} : { weaponMastery: attack.mastery }),
     ...(options.recklessAttackEffectId === undefined
       ? {}
       : { recklessAttackEffectId: options.recklessAttackEffectId }),
@@ -2151,10 +2171,15 @@ function healingSpellCommands(
   if (!allowLeveledHealing) return [];
   const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
   if (acting === undefined) throw new Error(`Loaded party combatant ${actor} is absent from the encounter.`);
+  const effectiveMaximum = (target: typeof state.combatants[number]) => state.effects.reduce((maximum, effect) =>
+    effect.targets.includes(target.profile.id) && effect.payload.kind === 'hit_point_maximum_modifier'
+      ? maximum + effect.payload.amount
+      : maximum,
+  target.profile.rules.hitPointMaximum);
   const allies = state.combatants.filter((candidate) =>
     combatantsAreAllies(state, candidate.profile.id, actor) &&
     candidate.life !== 'dead' &&
-    candidate.hitPoints < candidate.profile.rules.hitPointMaximum &&
+    candidate.hitPoints < effectiveMaximum(candidate) &&
     state.tokens.some((token) => token.combatantId === candidate.profile.id));
   return member.spells.flatMap((spell) => {
     const definition = spellDefinition(spell.id);
@@ -2164,6 +2189,13 @@ function healingSpellCommands(
       definition.operation.kind !== 'healing' ||
       (definition.targeting.kind !== 'single' && definition.targeting.kind !== 'multiple')
     ) return [];
+    const operation = definition.operation;
+    if (operation.kind !== 'healing') return [];
+    const source = member.spellcasting.find((candidate) =>
+      candidate.preparedSpells.some((prepared) => prepared.id === spell.id) ||
+      candidate.knownSpells.some((known) => known.id === spell.id) ||
+      candidate.grants.some((grant) => grant.spell.id === spell.id));
+    if (source === undefined) return [];
     const costAvailable = definition.castingTime === 'action'
       ? acting.turn.action.kind === 'available' ||
         acting.turn.additionalLeveledSpellActionsRemaining === 1
@@ -2174,12 +2206,22 @@ function healingSpellCommands(
     const range = effectiveSingleTargetRange(definition.targeting, 1);
     if (range === null) return [];
     const slots = acting.spellSlots.filter((slot) =>
-      slot.remaining > 0 && slot.level >= definition.level);
+      slot.remaining > 0 && slot.level >= definition.level)
+      .sort((left, right) => left.level - right.level);
     return slots.flatMap((slot) => allies.flatMap((target) => {
       if (gridDistance(
         loadedMemberPosition(state, actor),
         loadedMemberPosition(state, target.profile.id),
       ) > range) return [];
+      const slotDelta = slot.level - definition.level;
+      const diceCount = operation.dice.baseCount + operation.dice.perSlotCount * slotDelta;
+      const averageHealing = diceCount * (operation.dice.sides + 1) / 2 +
+        operation.dice.modifier + operation.dice.perSlotModifier * slotDelta +
+        (operation.addSpellcastingModifier ? source.spellcastingModifier : 0);
+      // D384.1: a non-emergency spell heal is never offered when its average
+      // would exceed the missing HP. Cure Wounds math is sourced at
+      // docs/srd/source/spell-descriptions.txt:1895-1906.
+      if (averageHealing > effectiveMaximum(target) - target.hitPoints) return [];
       // Cure Wounds is an Action with Touch range, and Healing Word is a Bonus
       // Action with 60-foot range: docs/srd/source/spell-descriptions.txt:1182,735.
       return [loadedPartySpellCastCommand(member, spell.id, {
@@ -2256,6 +2298,161 @@ function blessSpellCommands(
   })];
 }
 
+function sharedSpellSlot(
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+  minimumLevel: number,
+) {
+  return state.combatants.find((candidate) => candidate.profile.id === actor)?.spellSlots
+    .filter((slot) => slot.remaining > 0 && slot.level >= minimumLevel)
+    .sort((left, right) => left.level - right.level)[0];
+}
+
+function slowSpellCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+  targets: Parameters<TurnLegalActions>[0]['combatants'],
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  if (
+    acting === undefined || acting.turn.action.kind !== 'available' ||
+    !member.spells.some((spell) => spell.id === 'slow') ||
+    state.effects.some((effect) => effect.concentrationOwner === actor)
+  ) return [];
+  const slot = sharedSpellSlot(state, actor, 3);
+  if (slot === undefined) return [];
+  const hostiles = targets.filter((target) => target.life !== 'dead');
+  const templateObstacles = [
+    ...state.blockedCells,
+    ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
+  ];
+  const minimumCenterColumn = 4;
+  const candidates = Array.from(
+    { length: Math.max(0, state.bounds.columns - minimumCenterColumn + 1) },
+    (_column, index) => index + minimumCenterColumn,
+  )
+    .flatMap((column) => Array.from({ length: state.bounds.rows + 1 }, (_row, row) => {
+      const center = feetPoint(column * 5, row * 5);
+      const area = {
+        shape: 'cube' as const,
+        template: {
+          origin: feetPoint(column * 5 - 20, row * 5),
+          center,
+          axis: { x: 1, y: 0 },
+          size: feet(40),
+          includeOrigin: false,
+        },
+      };
+      const cells = new Set(affectedCells({ bounds: state.bounds, blockedCells: templateObstacles }, area)
+        .map((cell) => `${String(cell.column)},${String(cell.row)}`));
+      const selected = hostiles.filter((target) => {
+        const position = loadedMemberPosition(state, target.profile.id);
+        return cells.has(`${String(position.column)},${String(position.row)}`);
+      }).slice(0, 6);
+      return { area, selected };
+    }))
+    .filter((candidate) => candidate.selected.length >= 3)
+    .sort((left, right) =>
+      right.selected.length - left.selected.length ||
+      left.selected.map((target) => target.profile.id).join('|')
+        .localeCompare(right.selected.map((target) => target.profile.id).join('|')));
+  const chosen = candidates[0];
+  if (chosen === undefined) return [];
+  // Slow selects up to six creatures in a 40-foot Cube at 120 feet:
+  // docs/srd/source/spell-descriptions.txt:7140-7163.
+  return [loadedPartySpellCastCommand(member, 'slow', {
+    slotLevel: slot.level as 3 | 4 | 5 | 6 | 7 | 8 | 9,
+    castAsRitual: false,
+    targets: chosen.selected.map((target) => target.profile.id),
+    area: chosen.area,
+    weaponAttack: null,
+    selectedOption: null,
+  })];
+}
+
+function blessConcentrationBroke(
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+): boolean {
+  let lastBless = -1;
+  let lastSpiritGuardians = -1;
+  let lastBreak = -1;
+  for (const [index, event] of state.eventLog.entries()) {
+    if (event.type === 'spell_cast' && event.caster === actor && event.spellId === 'bless') lastBless = index;
+    if (event.type === 'spell_cast' && event.caster === actor && event.spellId === 'spirit-guardians') {
+      lastSpiritGuardians = index;
+    }
+    if (event.type === 'effect_ended' && event.reason === 'concentration_broken') lastBreak = index;
+  }
+  return lastBless >= 0 && lastBreak > lastBless && lastSpiritGuardians < lastBreak;
+}
+
+function spiritGuardiansSpellCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  if (
+    acting === undefined || acting.turn.action.kind !== 'available' ||
+    !member.spells.some((spell) => spell.id === 'spirit-guardians') ||
+    !blessConcentrationBroke(state, actor) ||
+    state.effects.some((effect) => effect.concentrationOwner === actor)
+  ) return [];
+  const slot = sharedSpellSlot(state, actor, 3);
+  if (slot === undefined) return [];
+  const position = loadedMemberPosition(state, actor);
+  // Spirit Guardians is a 15-foot self Emanation, concentration, and requires
+  // a level-3 slot: docs/srd/source/spell-descriptions.txt:7324-7344.
+  return [loadedPartySpellCastCommand(member, 'spirit-guardians', {
+    slotLevel: slot.level as 3 | 4 | 5 | 6 | 7 | 8 | 9,
+    castAsRitual: false,
+    targets: [],
+    area: {
+      shape: 'emanation',
+      template: {
+        origin: feetPoint(position.column * 5 + 2.5, position.row * 5 + 2.5),
+        radius: feet(15),
+        includeOrigin: true,
+      },
+    },
+    weaponAttack: null,
+    selectedOption: null,
+  })];
+}
+
+function commandKeepAwaySpellCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+  targets: Parameters<TurnLegalActions>[0]['combatants'],
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  if (
+    acting === undefined || acting.turn.action.kind !== 'available' ||
+    !member.spells.some((spell) => spell.id === 'command')
+  ) return [];
+  const adjacent = targets
+    .filter((target) => gridDistance(
+      loadedMemberPosition(state, actor),
+      loadedMemberPosition(state, target.profile.id),
+    ) <= 5)
+    .sort((left, right) => left.hitPoints - right.hitPoints || left.profile.id.localeCompare(right.profile.id))[0];
+  const slot = sharedSpellSlot(state, actor, 1);
+  if (adjacent === undefined || slot === undefined) return [];
+  // Flee makes the target spend its turn moving away by the fastest available
+  // means: docs/srd/source/spell-descriptions.txt:1209-1234.
+  return [loadedPartySpellCastCommand(member, 'command', {
+    slotLevel: slot.level as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
+    castAsRitual: false,
+    targets: [adjacent.profile.id],
+    area: null,
+    weaponAttack: null,
+    selectedOption: 'flee',
+  })];
+}
+
 /** Enumerates reducer-valid attacks and feature actions for loaded v2 party members. */
 export function loadedPartyTurnLegalActions(
   members: readonly LoadedPartyMember[],
@@ -2263,6 +2460,8 @@ export function loadedPartyTurnLegalActions(
     readonly useHealingPotions: boolean;
     readonly openWithBless: boolean;
     readonly reserveClericSlotsForBless?: boolean;
+    readonly useWizardTactics?: boolean;
+    readonly useClericContingency?: boolean;
   } = { useHealingPotions: false, openWithBless: false, reserveClericSlotsForBless: false },
 ): TurnLegalActions {
   const byId = new Map(members.map((member) => [member.profile.id, member] as const));
@@ -2344,6 +2543,11 @@ export function loadedPartyTurnLegalActions(
     if (acting.turn.action.kind !== 'spent') actions.push(...commands());
     if (acting.turn.action.kind === 'available') {
       if (policy.openWithBless) actions.push(...blessSpellCommands(member, state, actor));
+      if (policy.useWizardTactics === true) actions.push(...slowSpellCommands(member, state, actor, targets));
+      if (policy.useClericContingency === true) {
+        actions.push(...spiritGuardiansSpellCommands(member, state, actor));
+        actions.push(...commandKeepAwaySpellCommands(member, state, actor, targets));
+      }
       actions.push(...basicDamageCantripCommands(member, state, actor, targets));
       // Dash grants extra movement equal to Speed for the current turn.
       // SRD 5.2.1: docs/srd/full/srd-5.2.1.txt:11589-11596.

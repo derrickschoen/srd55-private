@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mulberry32 } from '../../../src/combat/random';
 import { RpcClient, type RpcTransport } from '../../../src/rpc/client';
+import { createQueriesClient } from '../../../src/queries/client';
 import type { RpcRequest, RpcResponse } from '../../../src/rpc/protocol';
 import { feetPoint } from '../../../src/combat/templates';
 import {
@@ -22,6 +23,9 @@ import {
 } from '../../../src/vtt/d365-sample-dungeon';
 import {
   D365_SAMPLE_PARTY_BUILDS,
+  D385_WIZARD_CANTRIPS,
+  D385_WIZARD_PREPARED,
+  D385_WIZARD_SPELLBOOK,
   loadD365SampleParty,
 } from '../../../src/vtt/d365-sample-party';
 import { loadedPartySpellCastCommand } from '../../../src/vtt/party-pack';
@@ -124,7 +128,10 @@ describe('D365 bundled dungeon acceptance', () => {
     const sample = await loadD365SampleParty(rpc);
 
     expect(sample.builds).toEqual(D365_SAMPLE_PARTY_BUILDS);
-    expect(sample.party.members).toHaveLength(4);
+    expect(sample.party.members).toHaveLength(5);
+    expect(Object.keys(sample.characterIds).sort()).toEqual([
+      'arcane_controller', 'land_druid', 'martial', 'pact_caster', 'prepared_caster',
+    ]);
     expect(sample.party.members.map((member) => ({
       name: sample.displayNames.get(member.profile.characterId),
       class: member.source.classes[0]?.classId,
@@ -135,8 +142,55 @@ describe('D365 bundled dungeon acceptance', () => {
       { name: 'Mirel Ash', class: 'Warlock', level: 5, attacksPerAction: 1, spells: expect.arrayContaining(['Eldritch Blast', 'Burning Hands']) },
       { name: 'Orin Reed', class: 'Druid', level: 5, attacksPerAction: 1, spells: expect.arrayContaining(['Cure Wounds']) },
       { name: 'Brann Vale', class: 'Fighter', level: 5, attacksPerAction: 2, spells: [] },
-      { name: 'Sera Dawn', class: 'Cleric', level: 5, attacksPerAction: 1, spells: expect.arrayContaining(['Cure Wounds']) },
+      { name: 'Sera Dawn', class: 'Cleric', level: 5, attacksPerAction: 1, spells: expect.arrayContaining(['Cure Wounds', 'Command', 'Spirit Guardians']) },
+      { name: 'Tamsin Quill', class: 'Wizard', level: 5, attacksPerAction: 1, spells: expect.arrayContaining(['Ray of Frost', 'Slow']) },
     ]);
+
+    const wizardBuild = sample.builds.find((build) => build.role === 'arcane_controller');
+    const wizard = sample.party.members.find((member) =>
+      member.source.classes.some((entry) => entry.classId === 'Wizard'));
+    if (wizardBuild === undefined || wizard === undefined) throw new Error('D385 Wizard fixture is missing.');
+    expect([...Object.values(wizardBuild.abilities)].sort((left, right) => left - right))
+      .toEqual([8, 10, 12, 13, 14, 15]);
+    expect(wizardBuild.levelFourAbility).toBe('intelligence');
+    expect(wizardBuild.subclassName).toBe('Evoker');
+    expect(wizardBuild.backgroundName).toBe('Sage');
+    expect(wizard.source.classes).toContainEqual({ classId: 'Wizard', level: 5 });
+    expect(wizard.source.abilities).toEqual({
+      strength: 8,
+      dexterity: 14,
+      constitution: 14,
+      intelligence: 19,
+      wisdom: 12,
+      charisma: 10,
+    });
+    expect(wizard.sharedSpellSlots).toEqual([
+      { level: 1, maximum: 4, recharge: 'long_rest' },
+      { level: 2, maximum: 3, recharge: 'long_rest' },
+      { level: 3, maximum: 2, recharge: 'long_rest' },
+    ]);
+    const wizardSource = wizard.spellcasting.find((source) => source.ability === 'intelligence');
+    if (wizardSource === undefined) throw new Error('D385 Wizard spellcasting source is missing.');
+    expect(wizardSource.preparedSpells.map((spell) => spell.name).sort()).toEqual([...D385_WIZARD_PREPARED].sort());
+    expect(wizardSource.knownSpells.map((spell) => spell.name).sort()).toEqual([...D385_WIZARD_CANTRIPS].sort());
+    const wizardSpellChoices = (await createQueriesClient(rpc).spellsStep(sample.characterIds.arcane_controller)).choices;
+    expect(wizardSpellChoices.filter((choice) => choice.label.includes('cantrip'))
+      .map((choice) => choice.selected_spell_name).sort()).toEqual([...D385_WIZARD_CANTRIPS].sort());
+    expect(wizardSpellChoices.filter((choice) => choice.label.includes('spellbook spell'))
+      .map((choice) => choice.selected_spell_name).sort()).toEqual([...D385_WIZARD_SPELLBOOK].sort());
+    expect(wizardSpellChoices.filter((choice) => choice.label.includes('prepared spell'))
+      .map((choice) => choice.selected_spell_name).sort()).toEqual([...D385_WIZARD_PREPARED].sort());
+    // Wizard 5: four cantrips, nine prepared spells, and 4/3/2 slots:
+    // docs/srd/full/srd-5.2.1.txt:4615-4695; docs/srd/source/class-level-tables.txt:116-138.
+    const brann = sample.party.members.find((member) =>
+      member.source.classes.some((entry) => entry.classId === 'Fighter'));
+    if (brann === undefined) throw new Error('D385 Fighter fixture is missing.');
+    expect(brann.source.abilities.strength).toBe(19);
+    expect(brann.attacks.map((attack) => attack.mastery)).toEqual([
+      { property: 'Topple', saveDc: 15 },
+      { property: 'Slow' },
+    ]);
+    // Fighter 5 has four mastery choices: class-level-tables.txt:99-111.
   }, 20_000);
 
   it('dungeon_monster_unregistered: validates all four rooms against the registry and names a missing monster field', () => {

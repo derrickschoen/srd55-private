@@ -63,7 +63,7 @@ export function mountD365SampleDungeon(
     }
     load.disabled = true;
     seed.disabled = true;
-    status.value = 'Authoring four characters through RPC…';
+    status.value = 'Authoring five characters through RPC…';
     void loadD365SampleParty(rpc).then((sample) => {
       if (closed) return;
       const partyState = createD365SurvivalPartySessionState(sample.party.members).state;

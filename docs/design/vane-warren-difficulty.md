@@ -2,7 +2,7 @@
 
 The Vane Warren is one original stronghold containing three **separate** leader
 fight manifests. Their rosters are never concatenated. The figures below are
-structural action-economy judgments for a four-PC party, not simulation results
+structural action-economy judgments for a five-PC party, not simulation results
 and not encounter-building XP claims.
 
 ## Action-economy ruler
@@ -13,19 +13,20 @@ places one Legendary Action immediately after another creature's turn and gives
 the monster a limited pool that refreshes at the start of its turn
 (`docs/srd/full/srd-5.2.1.txt:16703-16716`). Delayed waves and conditional
 joiners count only in the fight that can activate them. The denominator is the
-four PCs' four ordinary turn opportunities.
+five PCs' five ordinary turn opportunities.
 
 | Separate fight | Counted hostile opportunities | Computation | Recorded ratio | Structural purpose |
 |---|---:|---:|---:|---|
-| The Cinder Rite | 4 | Ashmaw + one standing drummer + one first-beat minion + one second-beat warrior | 4 / 4 = **1.0x** | Brute-priest pressure plus two subsequent-round alarm waves; the alarm and both wave classes remain intact. |
-| The Iron Voice | 2 | Marshal Kett's ordinary turn + 1 Legendary Action use | 2 / 4 = **0.5x** | A coherent solo warlord with its between-turn decision and Legendary Resistance intact. |
-| The Last Muster | 2 | Commander Sablehook + one leader-Bloodied conditional Goblin Warrior | 2 / 4 = **0.5x** | A command fight whose reserve still enters only when its leader is Bloodied. |
+| The Cinder Rite | 4 | Ashmaw + one standing drummer + one first-beat minion + one second-beat warrior | 4 / 5 = **0.8x** | Brute-priest pressure plus two subsequent-round alarm waves; the alarm and both wave classes remain intact. |
+| The Iron Voice | 2 | Marshal Kett's ordinary turn + 1 Legendary Action use | 2 / 5 = **0.4x** | A coherent solo warlord with its between-turn decision and Legendary Resistance intact. |
+| The Last Muster | 2 | Commander Sablehook + one leader-Bloodied conditional Goblin Warrior | 2 / 5 = **0.4x** | A command fight whose reserve still enters only when its leader is Bloodied. |
 
 These numbers deliberately measure maximum listed pressure, not simultaneous
 round-one bodies: Cinder adds arrive only after the war drum is used, and Last
 Muster reserves are absent until their typed condition is satisfied.
 
-These are the post-D382 detune values. The replaced record was 3.5x, 2.0x, and
+These are the unchanged post-D382 rosters remeasured for D385's fifth PC; every
+ratio drops, and no encounter was tuned upward. The pre-D382 record was 3.5x, 2.0x, and
 1.5x respectively. Adds were trimmed before leaders: Cinder retains Ashmaw and
 both one-member alarm waves; Iron Voice retains Marshal Kett (58 HP, one attack
 per action, one Legendary Action) while removing the four retainers; Last Muster
