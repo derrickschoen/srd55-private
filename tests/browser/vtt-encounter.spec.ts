@@ -104,6 +104,7 @@ test('DM composes stored builder characters and each PC defaults to human contro
   await expect(page.locator('.player-encounter')).toHaveCount(0);
   for (const name of names) {
     await expect(page.getByLabel(`${name} controller`)).toHaveValue('human');
+    await expect(page.getByLabel(`${name} controller`)).toBeEnabled();
     await expect(
       page.locator('.encounter-token[data-kind="player_character"]', { hasText: name }),
     ).toBeVisible();
@@ -117,6 +118,7 @@ test('DM composes stored builder characters and each PC defaults to human contro
   await expect(page.locator('.adventuring-day-status')).toHaveAttribute('data-room', '2');
   for (const name of names) {
     await expect(page.getByLabel(`${name} controller`)).toHaveValue('human');
+    await expect(page.getByLabel(`${name} controller`)).toBeEnabled();
   }
 });
 

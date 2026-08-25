@@ -17,11 +17,23 @@ function syncAttributes(live: HTMLElement, draft: HTMLElement): void {
   }
 }
 
-function syncState(live: HTMLElement, draft: HTMLElement): void {
-  for (const property of ['disabled', 'hidden', 'checked', 'selected', 'value'] as const) {
-    if (property in live && property in draft) {
-      Reflect.set(live, property, Reflect.get(draft, property));
-    }
+const MUTABLE_STATE_PROPERTIES = ['disabled', 'hidden', 'checked', 'selected', 'value'] as const;
+type MutableStateProperty = (typeof MUTABLE_STATE_PROPERTIES)[number];
+
+function mutableState(element: HTMLElement): ReadonlyMap<MutableStateProperty, unknown> {
+  const state = new Map<MutableStateProperty, unknown>();
+  for (const property of MUTABLE_STATE_PROPERTIES) {
+    if (property in element) state.set(property, Reflect.get(element, property));
+  }
+  return state;
+}
+
+function syncState(
+  live: HTMLElement,
+  desired: ReadonlyMap<MutableStateProperty, unknown>,
+): void {
+  for (const [property, value] of desired) {
+    if (property in live) Reflect.set(live, property, value);
   }
 }
 
@@ -31,30 +43,91 @@ function isHtmlElement(value: unknown): value is HTMLElement {
     typeof Reflect.get(value, 'append') === 'function';
 }
 
-function renderKey(element: HTMLElement): string | null {
-  return element.dataset.renderKey ?? null;
+declare const stableRenderKeyBrand: unique symbol;
+
+/** A globally unique identity for one logical element in a stable render tree. */
+export type StableRenderKey = string & { readonly [stableRenderKeyBrand]: true };
+
+export class StableRenderKeyFormatError extends Error {
+  override readonly name = 'StableRenderKeyFormatError' as const;
+  readonly code = 'invalid_stable_render_key' as const;
+
+  constructor(readonly key: string) {
+    super(`Stable render key ${key} must contain a namespace and logical identity.`);
+  }
 }
 
-function keyedChildren(element: HTMLElement): ReadonlyMap<string, HTMLElement> {
-  const keyed = new Map<string, HTMLElement>();
+export class StableRenderKeyCollisionError extends Error {
+  override readonly name = 'StableRenderKeyCollisionError' as const;
+  readonly code = 'duplicate_stable_render_key' as const;
+
+  constructor(
+    readonly key: StableRenderKey,
+    readonly tree: 'live' | 'draft',
+  ) {
+    super(`Stable render key ${key} is duplicated in the ${tree} tree.`);
+  }
+}
+
+export function stableRenderKey(
+  ...segments: readonly [namespace: string, identity: string, ...path: string[]]
+): StableRenderKey {
+  if (segments.some((segment) => segment.length === 0)) {
+    throw new StableRenderKeyFormatError(segments.join(':'));
+  }
+  return segments.map((segment) => encodeURIComponent(segment)).join(':') as StableRenderKey;
+}
+
+function renderKey(element: HTMLElement): StableRenderKey | null {
+  const key = element.dataset.renderKey;
+  if (key === undefined) return null;
+  if (!key.includes(':')) throw new StableRenderKeyFormatError(key);
+  return key as StableRenderKey;
+}
+
+function assertUniqueRenderKeys(
+  root: HTMLElement,
+  tree: 'live' | 'draft',
+): void {
+  const keyed = new Map<StableRenderKey, HTMLElement>();
+  const visit = (parent: HTMLElement): void => {
+    for (const child of Array.from(parent.children)) {
+      if (!isHtmlElement(child)) continue;
+      const key = renderKey(child);
+      if (key !== null) {
+        if (keyed.has(key)) throw new StableRenderKeyCollisionError(key, tree);
+        keyed.set(key, child);
+      }
+      visit(child);
+    }
+  };
+  visit(root);
+}
+
+function keyedChildren(element: HTMLElement): ReadonlyMap<StableRenderKey, HTMLElement> {
+  const keyed = new Map<StableRenderKey, HTMLElement>();
   for (const child of Array.from(element.children)) {
     if (!isHtmlElement(child)) continue;
     const key = renderKey(child);
     if (key === null) continue;
-    if (keyed.has(key)) throw new Error(`Stable render key ${key} is duplicated.`);
+    if (keyed.has(key)) throw new StableRenderKeyCollisionError(key, 'live');
     keyed.set(key, child);
   }
   return keyed;
 }
 
 function syncElement(live: HTMLElement, draft: HTMLElement): void {
+  const desiredState = mutableState(draft);
   syncAttributes(live, draft);
-  syncState(live, draft);
   if (draft.children.length === 0) {
     live.textContent = draft.textContent;
-    return;
+  } else {
+    reconcileStableRenderedChildren(live, draft);
   }
-  reconcileStableRenderedChildren(live, draft);
+  // A select's value is derived from its option children. Restore mutable DOM
+  // state only after those children have been reconciled so option insertion
+  // cannot overwrite the intended selection.
+  syncState(live, desiredState);
 }
 
 /**
@@ -63,6 +136,8 @@ function syncElement(live: HTMLElement, draft: HTMLElement): void {
  * listener installed for that semantic decision.
  */
 export function reconcileStableRenderedChildren(live: HTMLElement, draft: HTMLElement): void {
+  assertUniqueRenderKeys(live, 'live');
+  assertUniqueRenderKeys(draft, 'draft');
   const existing = Array.from(live.children).filter(
     isHtmlElement,
   );
