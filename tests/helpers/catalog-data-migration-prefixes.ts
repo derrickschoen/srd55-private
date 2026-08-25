@@ -67,6 +67,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0055_vtt_session_branch_rng_state',
   '0056_vtt_session_death_moment',
   '0057_vtt_session_hidden_rolls',
+  '0058_vtt_session_encounter_phase',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';

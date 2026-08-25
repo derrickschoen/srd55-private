@@ -4,7 +4,12 @@ import { starterArtDataUri } from '../assets/starter-art-resolver';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
-import { MOVEMENT_PATH_DANGER_KINDS, REACTION_KINDS, type PendingDecision } from '../combat/encounter';
+import {
+  MOVEMENT_PATH_DANGER_KINDS,
+  REACTION_KINDS,
+  type EncounterPhase,
+  type PendingDecision,
+} from '../combat/encounter';
 import { HIDDEN_ROLL_CATEGORIES, type HiddenRollCategory } from '../combat/roll-visibility';
 import { previewAffectedCells } from '../combat/templates';
 import { encounterSessionId, type CombatantId } from '../combat/values';
@@ -68,6 +73,24 @@ function element<K extends keyof HTMLElementTagNameMap>(
   if (options.className !== undefined) node.className = options.className;
   if (options.text !== undefined) node.textContent = options.text;
   return node;
+}
+
+export function renderDmEncounterOutcome(
+  conclusion: Extract<EncounterPhase, { readonly kind: 'concluded' }>,
+): HTMLElement {
+  const side = conclusion.survivingSide === 'player_character'
+    ? 'Player characters survive'
+    : conclusion.survivingSide === 'monster'
+      ? 'Monsters survive'
+      : 'No side survives';
+  const banner = element('section', {
+    className: 'dm-encounter-outcome',
+    text: `${conclusion.outcome[0]?.toUpperCase() ?? ''}${conclusion.outcome.slice(1)} — ${side}. Choose the room boundary or rest control to continue.`,
+  });
+  banner.dataset.encounterOutcome = conclusion.outcome;
+  banner.dataset.survivingSide = conclusion.survivingSide ?? 'none';
+  banner.setAttribute('role', 'status');
+  return banner;
 }
 
 function decisionHeading(decision: PendingDecision): string {
@@ -1091,12 +1114,17 @@ class DmEncounterView {
       this.#shell.append(error);
     }
     const status = element('p', {
-      text: projection.coordinator.pause === null
-        ? 'Encounter running'
-        : `Paused: ${projection.coordinator.pause.kind}`,
+      text: projection.encounter.phase.kind === 'concluded'
+        ? `Encounter concluded: ${projection.encounter.phase.outcome}`
+        : projection.coordinator.pause === null
+          ? 'Encounter running'
+          : `Paused: ${projection.coordinator.pause.kind}`,
     });
     status.dataset.pause = projection.coordinator.pause?.kind ?? 'none';
     this.#shell.append(status);
+    if (projection.encounter.phase.kind === 'concluded') {
+      this.#shell.append(renderDmEncounterOutcome(projection.encounter.phase));
+    }
     this.#shell.append(this.#renderSaveManager());
     if (projection.partySession !== null) {
       const dayEnded = projection.partySession.state.adventuringDayStatus === 'ended_by_long_rest';
@@ -1125,7 +1153,7 @@ class DmEncounterView {
     undo.addEventListener('click', () => void this.#host.undoLast());
     const skip = element('button', { text: 'Skip turn' });
     skip.type = 'button';
-    skip.disabled = projection.timeline.currentCombatant === null;
+    skip.disabled = projection.timeline.currentCombatant === null || projection.timeline.phase.kind === 'concluded';
     skip.addEventListener('click', () => {
       void this.#host.skipTurn().catch((error: unknown) => {
         this.#channelError = error instanceof Error ? error.message : 'Skip turn failed.';
@@ -1139,7 +1167,7 @@ class DmEncounterView {
     const later = projection.timeline.initiative.filter(
       (entry) => currentPosition !== undefined && entry.position > currentPosition && entry.life !== 'dead',
     );
-    if (later.length > 0) {
+    if (later.length > 0 && projection.timeline.phase.kind === 'active') {
       const delay = element('form', { className: 'dm-delay-turn' });
       const target = element('select');
       target.setAttribute('aria-label', 'Delay current turn until after');
@@ -1264,8 +1292,11 @@ class DmEncounterView {
 
     const timeline = element('section', { className: 'dm-initiative-timeline' });
     timeline.dataset.round = String(projection.timeline.round);
+    timeline.dataset.encounterStatus = projection.timeline.phase.kind;
     timeline.append(element('h2', { text: `Initiative timeline — round ${String(projection.timeline.round)}` }));
     const strip = element('ol', { className: 'dm-initiative-strip' });
+    strip.dataset.encounterStatus = projection.timeline.phase.kind;
+    strip.dataset.concluded = String(projection.timeline.phase.kind === 'concluded');
     for (const entry of projection.timeline.initiative) {
       const item = element('li', {
         text: `${entry.name}${entry.delayedThisRound ? ' (delayed)' : ''}`,

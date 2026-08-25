@@ -6,7 +6,9 @@ import type {
   PersistedCoordinatorState,
 } from '../combat/coordinator';
 import {
+  encounterConclusionAfter,
   isEncounterConfig,
+  isEncounterPhase,
   reduceEncounter,
   type EncounterState,
   type ReactionKind,
@@ -59,7 +61,7 @@ import { deriveSessionRecord, type SessionRecord } from './session-record';
 import { isHiddenRollCategory } from '../combat/roll-visibility';
 import { reduceSessionEncounter } from './session-encounter-reducer';
 
-export const VTT_SESSION_SCHEMA_VERSION = 6 as const;
+export const VTT_SESSION_SCHEMA_VERSION = 7 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export type SessionTransition =
@@ -610,6 +612,7 @@ function decodeRevision(value: unknown): SessionRevision {
     !isRecord(value.transition) ||
     !isRecord(value.encounterState) ||
     !isEncounterConfig(value.encounterState.config) ||
+    !isEncounterPhase(value.encounterState.phase) ||
     !Array.isArray(value.encounterState.hiddenRolls) ||
     !value.encounterState.hiddenRolls.every(isHiddenRollCategory) ||
     new Set(value.encounterState.hiddenRolls).size !== value.encounterState.hiddenRolls.length ||
@@ -1684,6 +1687,7 @@ const V2_TO_V3_SOURCE = 'vtt-session-v2-to-v3:add-party-session-state-null-and-r
 const V3_TO_V4_SOURCE = 'vtt-session-v3-to-v4:add-persisted-branch-rng-state-fingerprint';
 const V4_TO_V5_SOURCE = 'vtt-session-v4-to-v5:add-typed-combatant-death-moment-and-rehash-revisions';
 const V5_TO_V6_SOURCE = 'vtt-session-v5-to-v6:replace-hide-death-save-rolls-with-hidden-roll-categories';
+const V6_TO_V7_SOURCE = 'vtt-session-v6-to-v7:add-typed-encounter-phase-and-rehash-revisions';
 
 export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
   Object.freeze([
@@ -1862,6 +1866,60 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
           ...oldBundle,
           format: 'vtt-session-revisions' as const,
           schemaVersion: 6 as const,
+          revisions,
+        };
+        return { ...body, fingerprint: sha256(canonicalJson(body)) };
+      },
+    }),
+    Object.freeze({
+      id: 'vtt_session_v6_to_v7',
+      from: 6,
+      to: 7,
+      source: V6_TO_V7_SOURCE,
+      checksum: '523db2c861ce38aeeec95824f4d73de203fa98a475ffaf3ad488e79696beaa2e',
+      migrate: (bundle: Readonly<Record<string, unknown>>) => {
+        if (!Array.isArray(bundle.revisions)) {
+          throw new TypeError('VTT session v6 revisions are malformed.');
+        }
+        const migratedByRevision = new Map<number, EncounterState>();
+        const revisions = bundle.revisions.map((revision) => {
+          if (
+            !isRecord(revision) ||
+            !Number.isSafeInteger(revision.revision) ||
+            !isRecord(revision.encounterState)
+          ) {
+            throw new TypeError('VTT session v6 revision is malformed.');
+          }
+          const activeEncounterState = {
+            ...revision.encounterState,
+            phase: { kind: 'active' as const },
+          } as unknown as EncounterState;
+          const parent = typeof revision.parentRevision === 'number'
+            ? migratedByRevision.get(revision.parentRevision)
+            : undefined;
+          const startsNewEncounter = isRecord(revision.transition) &&
+            revision.transition.kind === 'room_composed';
+          const phase = parent?.phase.kind === 'concluded' && !startsNewEncounter
+            ? parent.phase
+            : parent === undefined
+              ? activeEncounterState.phase
+              : encounterConclusionAfter(parent, activeEncounterState) ?? activeEncounterState.phase;
+          const migratedEncounterState = { ...activeEncounterState, phase };
+          migratedByRevision.set(revision.revision as number, migratedEncounterState);
+          const { checksum: _oldChecksum, ...oldBody } = revision;
+          const body = {
+            ...oldBody,
+            schemaVersion: 7 as const,
+            encounterState: migratedEncounterState,
+            branchRngStateFingerprint: branchRngStateFingerprint(migratedEncounterState),
+          };
+          return { ...body, checksum: sha256(canonicalJson(body)) };
+        });
+        const { fingerprint: _oldFingerprint, ...oldBundle } = bundle;
+        const body = {
+          ...oldBundle,
+          format: 'vtt-session-revisions' as const,
+          schemaVersion: 7 as const,
           revisions,
         };
         return { ...body, fingerprint: sha256(canonicalJson(body)) };

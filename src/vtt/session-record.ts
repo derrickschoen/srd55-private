@@ -1,4 +1,5 @@
 import type { EncounterEvent } from '../combat/events';
+import type { EncounterPhase } from '../combat/encounter';
 import type { CombatantId, LimitedResourcePoolId } from '../combat/values';
 import type { SessionRevision } from './session-persistence';
 
@@ -44,7 +45,7 @@ export interface SessionRecordRulingCard {
   readonly consequence: Extract<EncounterEvent, { readonly type: 'adjudicated' }>['consequence'];
 }
 
-export interface SessionEncounterRecord {
+interface SessionEncounterRecordBase {
   readonly encounter: number;
   readonly room: number | null;
   readonly roundsElapsed: number;
@@ -53,6 +54,19 @@ export interface SessionEncounterRecord {
   readonly deathSaves: readonly SessionRecordDeathSave[];
   readonly dmRulings: readonly SessionRecordRulingCard[];
 }
+
+export type SessionEncounterRecord = SessionEncounterRecordBase & (
+  | {
+      readonly status: 'open';
+      readonly conclusion: null;
+    }
+  | {
+      readonly status: 'closed';
+      readonly conclusion: Extract<EncounterPhase, { readonly kind: 'concluded' }> & {
+        readonly journalRevision: number;
+      };
+    }
+);
 
 export interface SessionRecord {
   readonly kind: 'end_of_session_summary';
@@ -213,7 +227,11 @@ export function deriveSessionRecord(revisions: readonly SessionRevision[]): Sess
       }
     }
     const last = segment.at(-1);
-    return {
+    const concluded = segment.find((revision) => revision.encounterState.phase.kind === 'concluded');
+    const conclusion = concluded?.encounterState.phase.kind === 'concluded'
+      ? { ...concluded.encounterState.phase, journalRevision: concluded.revision }
+      : null;
+    const base: SessionEncounterRecordBase = {
       encounter,
       room: last?.partyState?.room ?? null,
       roundsElapsed: segment.reduce(
@@ -242,6 +260,9 @@ export function deriveSessionRecord(revisions: readonly SessionRevision[]): Sess
       deathSaves,
       dmRulings,
     };
+    return conclusion === null
+      ? { ...base, status: 'open', conclusion: null }
+      : { ...base, status: 'closed', conclusion };
   });
   return {
     kind: 'end_of_session_summary',

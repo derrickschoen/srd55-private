@@ -558,22 +558,13 @@ async function roundOf(page: Page): Promise<number> {
   return Number.isSafeInteger(round) ? round : 0;
 }
 
-async function encounterSideState(
+async function visibleEncounterOutcome(
   page: Page,
-  monsterIdFragment: string,
-): Promise<{ readonly playersAlive: number; readonly monstersAlive: number }> {
-  const entries = page.locator('.dm-initiative li[data-combatant-id]');
-  let playersAlive = 0;
-  let monstersAlive = 0;
-  for (let index = 0; index < await entries.count(); index += 1) {
-    const entry = entries.nth(index);
-    const id = await entry.getAttribute('data-combatant-id') ?? '';
-    const life = await entry.getAttribute('data-life');
-    if (life === 'dead') continue;
-    if (id.includes(monsterIdFragment)) monstersAlive += 1;
-    else playersAlive += 1;
-  }
-  return { playersAlive, monstersAlive };
+): Promise<'victory' | 'defeat' | 'mutual' | null> {
+  const value = await page.locator('[data-encounter-outcome]')
+    .getAttribute('data-encounter-outcome')
+    .catch(() => null);
+  return value === 'victory' || value === 'defeat' || value === 'mutual' ? value : null;
 }
 
 async function observeTimelinePreview(
@@ -604,18 +595,17 @@ async function playEncounter(
   page: Page,
   recorder: FindingsRecorder,
   phase: string,
-  monsterIdFragment: string,
 ): Promise<EncounterOutcome> {
   let lastRound = await roundOf(page);
   let unchangedAttempts = 0;
   for (let attempt = 1; attempt <= MAX_TURN_ATTEMPTS; attempt += 1) {
     await captureRefusals(page, recorder, phase);
     await resolveDecisionTray(page, recorder, phase);
-    const side = await encounterSideState(page, monsterIdFragment);
-    if (side.monstersAlive === 0 && side.playersAlive > 0) {
+    const outcome = await visibleEncounterOutcome(page);
+    if (outcome === 'victory') {
       return { kind: 'victory', round: await roundOf(page), attempts: attempt - 1 };
     }
-    if (side.playersAlive === 0 && side.monstersAlive > 0) {
+    if (outcome === 'defeat' || outcome === 'mutual') {
       return { kind: 'defeat', round: await roundOf(page), attempts: attempt - 1 };
     }
     try {
@@ -822,13 +812,13 @@ async function transitionToNextDungeonRoom(
   completedRoom: number,
 ): Promise<boolean> {
   const phase = `dungeon room ${String(completedRoom)}`;
-  const side = await encounterSideState(page, `d365-room-${String(completedRoom)}-monster`);
-  if (side.monstersAlive !== 0 || side.playersAlive === 0) {
+  const outcome = await visibleEncounterOutcome(page);
+  if (outcome !== 'victory') {
     recorder.add(
       'scripted_nudge',
       phase,
       `refuse room boundary after room ${String(completedRoom)}`,
-      `Room-boundary control was not clicked because initiative still had ${String(side.monstersAlive)} non-dead enemies and ${String(side.playersAlive)} non-dead player characters.`,
+      `Room-boundary control was not clicked because the encounter outcome was ${outcome ?? 'not concluded'}.`,
     );
     return false;
   }
@@ -1110,13 +1100,13 @@ async function transitionToNextVaneWarrenFight(
   phase: string,
   completedFight: number,
 ): Promise<boolean> {
-  const side = await encounterSideState(page, 'vane-warren');
-  if (side.monstersAlive !== 0 || side.playersAlive === 0) {
+  const outcome = await visibleEncounterOutcome(page);
+  if (outcome !== 'victory') {
     recorder.add(
       'scripted_nudge',
       phase,
       `refuse fight boundary after Vane Warren fight ${String(completedFight)}`,
-      `Room-boundary control was not clicked because initiative still had ${String(side.monstersAlive)} non-dead enemies and ${String(side.playersAlive)} non-dead player characters.`,
+      `Room-boundary control was not clicked because the encounter outcome was ${outcome ?? 'not concluded'}.`,
     );
     return false;
   }
@@ -1237,7 +1227,7 @@ async function main(): Promise<void> {
       currentPhase = `dungeon room ${String(room)}`;
       await runIsolatedPhase(preview, recorder, currentPhase, async () => {
         if (!await advanceDungeonRoom(page, recorder, room)) return;
-        const outcome = await playEncounter(page, recorder, currentPhase, `d365-room-${String(room)}-monster`);
+        const outcome = await playEncounter(page, recorder, currentPhase);
         recorder.phase(currentPhase, outcome.kind === 'victory' ? 'completed' : 'aborted',
           `${outcome.kind} at round ${String(outcome.round)} after ${String(outcome.attempts)} driver pulses.`);
         if (room === 4) return;
@@ -1304,7 +1294,7 @@ async function main(): Promise<void> {
           recorder.phase(currentPhase, 'aborted', 'Could not assign every combatant to the algorithm controller.');
           return;
         }
-        const outcome = await playEncounter(page, recorder, currentPhase, 'vane-warren');
+        const outcome = await playEncounter(page, recorder, currentPhase);
         recorder.phase(currentPhase, outcome.kind === 'victory' ? 'completed' : 'aborted',
           `${outcome.kind} at round ${String(outcome.round)} after ${String(outcome.attempts)} driver pulses.`);
         if (fightNumber === fights.length) return;

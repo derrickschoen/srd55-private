@@ -1,4 +1,5 @@
 import type { EncounterSessionId } from '../combat/values';
+import { encounterConclusionAfter } from '../combat/encounter';
 import {
   decodeSavedSessionFingerprint,
   MemoryBrowserSessionStore,
@@ -486,13 +487,9 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
       triggers.push('rest_interruption');
     }
     if (previous !== undefined) {
-      const undefeatedSides = (state: SessionRevision['encounterState']) => new Set(state.combatants
-        .filter((combatant) => combatant.life !== 'dead')
-        .map((combatant) => combatant.profile.kind));
-      const before = undefeatedSides(previous.encounterState);
-      const after = undefeatedSides(revision.encounterState);
-      if (before.has('player_character') && before.has('monster') &&
-        (!after.has('player_character') || !after.has('monster'))) triggers.push('encounter_end');
+      if (encounterConclusionAfter(previous.encounterState, revision.encounterState) !== null) {
+        triggers.push('encounter_end');
+      }
     }
     return [...new Set(triggers)];
   }

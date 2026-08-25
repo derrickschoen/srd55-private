@@ -162,6 +162,33 @@ import {
 
 export type LifeState = 'living' | 'dying' | 'stable' | 'dead';
 
+export type EncounterOutcome = 'victory' | 'defeat' | 'mutual';
+
+export type EncounterPhase =
+  | { readonly kind: 'active' }
+  | {
+      readonly kind: 'concluded';
+      readonly outcome: EncounterOutcome;
+      readonly survivingSide: 'player_character' | 'monster' | null;
+      readonly round: number;
+      readonly revision: number;
+    };
+
+export function isEncounterPhase(value: unknown): value is EncounterPhase {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const kind = Reflect.get(value, 'kind');
+  if (kind === 'active') return Object.keys(value).length === 1;
+  if (kind !== 'concluded' || Object.keys(value).length !== 5) return false;
+  const outcome = Reflect.get(value, 'outcome');
+  const survivingSide = Reflect.get(value, 'survivingSide');
+  return (
+    (outcome === 'victory' || outcome === 'defeat' || outcome === 'mutual') &&
+    (survivingSide === 'player_character' || survivingSide === 'monster' || survivingSide === null) &&
+    Number.isSafeInteger(Reflect.get(value, 'round')) &&
+    Number.isSafeInteger(Reflect.get(value, 'revision'))
+  );
+}
+
 export interface DeathSaveState {
   readonly successes: number;
   readonly failures: number;
@@ -211,6 +238,20 @@ export class PendingDecisionRuleError extends EncounterRuleError {
     super(code === 'turn_boundary_blocked' ? 'pending_decision_boundary' : 'pending_decision_validation', code === 'turn_boundary_blocked'
       ? 'The turn cannot advance while a Reaction offer for this boundary is unresolved.'
       : 'The pending decision does not exist.');
+  }
+}
+
+export class EncounterConcludedBoundaryError extends EncounterRuleError {
+  override readonly name = 'EncounterConcludedBoundaryError' as const;
+
+  constructor(
+    readonly code: 'encounter_concluded',
+    readonly conclusion: Extract<EncounterPhase, { readonly kind: 'concluded' }>,
+  ) {
+    super(
+      'encounter_concluded_boundary',
+      `The encounter concluded with ${conclusion.outcome}; turn advancement is unavailable.`,
+    );
   }
 }
 
@@ -455,6 +496,7 @@ export function isEncounterConfig(value: unknown): value is EncounterConfig {
 
 export interface EncounterState {
   readonly config: EncounterConfig;
+  readonly phase: EncounterPhase;
   readonly rulesEdition: DetectionRulesEdition;
   /** DM-controlled projection policy; raw events always retain their rolls. */
   readonly hiddenRolls: readonly HiddenRollCategory[];
@@ -597,6 +639,42 @@ export type EncounterCommandReducer = (
 ) => EncounterReduction;
 
 export { combatantSide, combatantsAreAllies, EncounterRuleError };
+
+/** Dying and stable combatants remain on their side; only `dead` removes one. */
+export function nonDeadEncounterSides(
+  state: EncounterState,
+): ReadonlySet<'player_character' | 'monster'> {
+  return new Set(state.combatants
+    .filter((subject) => subject.life !== 'dead')
+    .map((subject) => combatantSide(state, subject.profile.id)));
+}
+
+export function encounterConclusionAfter(
+  before: EncounterState,
+  after: EncounterState,
+): Extract<EncounterPhase, { readonly kind: 'concluded' }> | null {
+  if (before.phase.kind === 'concluded') return null;
+  const beforeSides = nonDeadEncounterSides(before);
+  const afterSides = nonDeadEncounterSides(after);
+  if (!beforeSides.has('player_character') || !beforeSides.has('monster')) return null;
+  if (afterSides.has('player_character') && afterSides.has('monster')) return null;
+  const survivingSide = afterSides.has('player_character')
+    ? 'player_character' as const
+    : afterSides.has('monster')
+      ? 'monster' as const
+      : null;
+  return {
+    kind: 'concluded',
+    outcome: survivingSide === 'player_character'
+      ? 'victory'
+      : survivingSide === 'monster'
+        ? 'defeat'
+        : 'mutual',
+    survivingSide,
+    round: after.round,
+    revision: after.revision,
+  };
+}
 
 export type TargetSelectionRefusalRule =
   | 'fixed_count'
@@ -897,6 +975,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
 
   return {
     config: { ...config },
+    phase: { kind: 'active' },
     rulesEdition: setup.rulesEdition ?? '2024',
     hiddenRolls: setup.hiddenRolls === undefined
       ? setup.hideDeathSaveRolls === true ? ['death_saves'] : []
@@ -10911,6 +10990,9 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       endConcentration(context, command.actor, 'concentration_ended');
       return;
     case 'end_turn': {
+      if (context.state.phase.kind === 'concluded') {
+        throw new EncounterConcludedBoundaryError('encounter_concluded', context.state.phase);
+      }
       if (context.state.activeCombatant !== command.actor) {
         throw new EncounterRuleError('validation', `Combatant ${command.actor} is not the active combatant.`);
       }
@@ -10953,5 +11035,7 @@ export function reduceEncounter(
     reactionDecision: options.reactionDecision ?? null,
   };
   processCommand(context, command);
+  const conclusion = encounterConclusionAfter(state, context.state);
+  if (conclusion !== null) context.state = { ...context.state, phase: conclusion };
   return { state: context.state, events: context.events };
 }

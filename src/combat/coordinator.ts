@@ -12,6 +12,7 @@ import {
 } from './controllers';
 import {
   combatantsAreAllies,
+  EncounterConcludedBoundaryError,
   encounterMovementWorld,
   EncounterRuleError,
   PendingDecisionRuleError,
@@ -20,6 +21,7 @@ import {
   type EncounterCommandReducer,
   type ReactionDecisionHook,
   type EncounterState,
+  type EncounterPhase,
 } from './encounter';
 import type { EncounterCommand, EncounterEvent } from './events';
 import type { NonBoundaryRefusalClass } from './encounter-rule-error';
@@ -141,6 +143,8 @@ export type CoordinatorStep =
       readonly kind: 'refused';
       readonly state: EncounterState;
       readonly reason: string;
+      readonly encounterConclusionCode?: EncounterConcludedBoundaryError['code'];
+      readonly conclusion?: Extract<EncounterPhase, { readonly kind: 'concluded' }>;
       readonly pendingDecisionCode?: PendingDecisionRuleError['code'];
       readonly actionRefusal?: NonBoundaryActionRefusal;
     };
@@ -736,6 +740,19 @@ export class TurnCoordinator {
       if (this.#pause !== null) {
         return { kind: 'refused', state: this.#state, reason: 'Coordinator is paused.' };
       }
+      if (this.#state.phase.kind === 'concluded') {
+        const error = new EncounterConcludedBoundaryError(
+          'encounter_concluded',
+          this.#state.phase,
+        );
+        return {
+          kind: 'refused',
+          state: this.#state,
+          reason: error.message,
+          encounterConclusionCode: error.code,
+          conclusion: error.conclusion,
+        };
+      }
       if (this.#continuation.kind === 'movement') return await this.#continueMovement();
       if (this.#continuation.kind === 'turn') return await this.#continueTurn();
       if (this.#state.initiative.length === 0) {
@@ -777,6 +794,15 @@ export class TurnCoordinator {
       };
       return await this.#continueTurn();
     } catch (error: unknown) {
+      if (error instanceof EncounterConcludedBoundaryError) {
+        return {
+          kind: 'refused',
+          state: this.#state,
+          reason: error.message,
+          encounterConclusionCode: error.code,
+          conclusion: error.conclusion,
+        };
+      }
       if (error instanceof PendingDecisionRuleError) {
         return {
           kind: 'refused',
@@ -794,7 +820,11 @@ export class TurnCoordinator {
         const refusalClass = error instanceof StaleControllerResponseError
           ? 'validation'
           : error.refusalClass;
-        if (refusalClass === 'pending_decision_boundary' || refusalClass === 'pending_decision_validation') {
+        if (
+          refusalClass === 'encounter_concluded_boundary' ||
+          refusalClass === 'pending_decision_boundary' ||
+          refusalClass === 'pending_decision_validation'
+        ) {
           return { kind: 'refused', state: this.#state, reason: error.message };
         }
         return {
