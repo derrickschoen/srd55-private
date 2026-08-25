@@ -726,6 +726,19 @@ export type EncounterEvent =
       readonly targets: readonly CombatantId[];
     })
   | (SequencedEvent & {
+      readonly type: 'spell_component_consumed';
+      readonly caster: CombatantId;
+      readonly spellId: 'revivify';
+      readonly component: {
+        readonly kind: 'material';
+        readonly description: 'a diamond worth 300+ GP';
+        readonly minimumGoldPieceValue: 300;
+        readonly quantity: 1;
+      };
+      readonly inventoryTracking: 'recorded_untracked_inventory';
+      readonly citation: 'docs/srd/full/srd-5.2.1.txt:10145-10146';
+    })
+  | (SequencedEvent & {
       readonly type: 'sustained_effect_activated';
       readonly caster: CombatantId;
       readonly effectId: EncounterEffectId;

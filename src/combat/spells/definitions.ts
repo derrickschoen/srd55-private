@@ -1088,7 +1088,13 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'revivify', name: 'Revivify', level: 3,
     source: 'docs/srd/source/spell-descriptions.txt:6604', castingTime: 'action', components: material('a diamond worth 300+ GP', true),
     targeting: { kind: 'single', rangeFeet: 5, willing: false, allowDead: true },
-    operation: { kind: 'revive', hitPoints: 1, maximumDeathAgeRounds: 10 },
+    operation: {
+      kind: 'revive',
+      hitPoints: 1,
+      maximumDeathAgeRounds: 10,
+      oldAgeEligible: false,
+      restoresMissingBodyParts: false,
+    },
   },
   {
     id: 'sending', name: 'Sending', level: 3,

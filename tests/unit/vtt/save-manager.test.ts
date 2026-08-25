@@ -4,7 +4,9 @@ import { combatantId, encounterSessionId } from '../../../src/combat/values';
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
 import { LocalStorageBrowserSessionStore } from '../../../src/vtt/local-session-store';
 import {
+  AutosavePoolManager,
   SaveManagerController,
+  autosavePoolForTrigger,
   buildSaveManagerViewModel,
   type SaveManagerEntry,
   type SaveManagerOperations,
@@ -59,11 +61,16 @@ function browserFixture(): {
   ] as const) {
     const host = new DmEncounterHost(session, store, { initialPartyState: PARTY_STATE });
     host.close();
-    store.rename(encounterSessionId(session), name);
-    storage.setItem(
-      `srd55:vtt-session-metadata:${session}`,
-      JSON.stringify({ name, updatedAt }),
-    );
+    const created = store.savedSessions().find((save) => save.sessionId === encounterSessionId(session));
+    if (created === undefined) throw new Error(`Missing start-boundary autosave for ${session}.`);
+    const key = `srd55:vtt-autosave:${created.storageId}`;
+    const raw = storage.getItem(key);
+    if (raw === null) throw new Error(`Missing autosave storage record for ${session}.`);
+    const record: unknown = JSON.parse(raw);
+    if (typeof record !== 'object' || record === null || Array.isArray(record)) {
+      throw new Error(`Malformed autosave storage record for ${session}.`);
+    }
+    storage.setItem(key, JSON.stringify({ ...record, name, updatedAt }));
   }
   return {
     store,
@@ -139,6 +146,114 @@ describe('DM save manager', () => {
       ['Folder copy', 'folder'],
       [source.name, 'browser'],
     ]);
+    expect(model.rows.map((row) => row.poolLabel)).toEqual([
+      'File save',
+      'Encounter-boundary autosave',
+    ]);
+  });
+
+  it('migrates legacy single-pool browser autosave metadata into the per-round pool', () => {
+    const fixture = browserFixture();
+    const legacy = fixture.saves.map((save): SaveManagerEntry => ({
+      id: save.id,
+      source: save.source,
+      name: save.name,
+      updatedAt: save.updatedAt,
+      sessionId: save.sessionId,
+      fingerprint: save.fingerprint,
+      revisionCount: save.revisionCount,
+      room: save.room,
+      round: save.round,
+      bytes: save.bytes,
+    }));
+    const model = buildSaveManagerViewModel({
+      browser: legacy,
+      folder: [],
+      mode: { kind: 'fallback', reason: 'not_selected' },
+    });
+
+    expect(model.rows.map((row) => row.retention)).toEqual([
+      { kind: 'autosave', pool: 'per_round' },
+      { kind: 'autosave', pool: 'per_round' },
+    ]);
+    expect(model.rows.every((row) => row.poolLabel === 'Per-round autosave')).toBe(true);
+  });
+
+  it('autosave pools prune independently at exactly 10', () => {
+    const source = browserFixture().saves[0];
+    if (source === undefined) throw new Error('Browser save fixture is incomplete.');
+    const manager = new AutosavePoolManager();
+    for (let index = 0; index < 25; index += 1) {
+      manager.capture('round_boundary', {
+        ...source,
+        id: `per-round:${String(index).padStart(2, '0')}`,
+        updatedAt: new Date(Date.UTC(2042, 7, 24, 0, 0, index)).toISOString(),
+      });
+      manager.capture('encounter_start', {
+        ...source,
+        id: `encounter-boundary:${String(index).padStart(2, '0')}`,
+        updatedAt: new Date(Date.UTC(2042, 7, 25, 0, 0, index)).toISOString(),
+      });
+    }
+
+    const entries = manager.entries();
+    expect(entries.filter((save) => save.retention?.kind === 'autosave' && save.retention.pool === 'per_round')).toHaveLength(10);
+    expect(entries.filter((save) => save.retention?.kind === 'autosave' && save.retention.pool === 'encounter_boundary')).toHaveLength(10);
+    expect(entries.map((save) => save.id).sort()).toEqual([
+      ...Array.from({ length: 10 }, (_unused, offset) => `encounter-boundary:${String(offset + 15).padStart(2, '0')}`),
+      ...Array.from({ length: 10 }, (_unused, offset) => `per-round:${String(offset + 15).padStart(2, '0')}`),
+    ]);
+  });
+
+  it('autosave_prunes_named: named and file saves survive 25 autosaves', () => {
+    const source = browserFixture().saves[0];
+    if (source === undefined) throw new Error('Browser save fixture is incomplete.');
+    const manager = new AutosavePoolManager();
+    manager.keep({ ...source, id: 'named:campaign', name: 'Campaign checkpoint', retention: { kind: 'named' } });
+    manager.keep({ ...source, id: 'folder:campaign', source: 'folder', name: 'Campaign file', retention: { kind: 'file' } });
+    for (let index = 0; index < 25; index += 1) {
+      manager.capture('round_boundary', {
+        ...source,
+        id: `round:${String(index)}`,
+        updatedAt: new Date(Date.UTC(2042, 7, 24, 0, 0, index)).toISOString(),
+      });
+    }
+
+    expect(manager.entries().map((save) => save.id).sort()).toEqual([
+      'folder:campaign',
+      'named:campaign',
+      ...Array.from({ length: 10 }, (_unused, offset) => `round:${String(offset + 15)}`).sort(),
+    ].sort());
+  });
+
+  it('encounter-boundary saves fire at start, end, and rest boundaries but not per round', () => {
+    const boundaryTriggers = [
+      'encounter_start',
+      'encounter_end',
+      'short_rest_boundary',
+      'long_rest_boundary',
+    ] as const;
+    expect(boundaryTriggers.map((trigger) => autosavePoolForTrigger(trigger))).toEqual([
+      'encounter_boundary',
+      'encounter_boundary',
+      'encounter_boundary',
+      'encounter_boundary',
+    ]);
+    expect(autosavePoolForTrigger('round_boundary')).toBe('per_round');
+
+    const source = browserFixture().saves[0];
+    if (source === undefined) throw new Error('Browser save fixture is incomplete.');
+    const manager = new AutosavePoolManager();
+    for (const trigger of boundaryTriggers) {
+      manager.capture(trigger, { ...source, id: trigger });
+    }
+    manager.capture('round_boundary', { ...source, id: 'round_boundary' });
+    expect(manager.entries().filter(
+      (save) => save.retention?.kind === 'autosave' && save.retention.pool === 'encounter_boundary',
+    ).map((save) => save.id).sort()).toEqual([...boundaryTriggers].sort());
+    expect(manager.entries().filter(
+      (save) => save.retention?.kind === 'autosave' && save.retention.pool === 'per_round',
+    ).map((save) => save.id)).toEqual(['round_boundary']);
   });
 
   it('dispatches load, rename, export, and typed-confirmed delete to their store operations', async () => {

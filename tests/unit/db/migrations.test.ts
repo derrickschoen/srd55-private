@@ -314,6 +314,15 @@ const SCHEMA_BEFORE_VTT_SESSION_BRANCH_RNG_STATE = DATABASE_MIGRATIONS
   .join('\n');
 const VTT_SESSION_BRANCH_RNG_STATE_MIGRATION =
   DATABASE_MIGRATIONS[VTT_SESSION_BRANCH_RNG_STATE_INDEX]!;
+const VTT_SESSION_DEATH_MOMENT_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0056_vtt_session_death_moment',
+);
+const SCHEMA_BEFORE_VTT_SESSION_DEATH_MOMENT = DATABASE_MIGRATIONS
+  .slice(0, VTT_SESSION_DEATH_MOMENT_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const VTT_SESSION_DEATH_MOMENT_MIGRATION =
+  DATABASE_MIGRATIONS[VTT_SESSION_DEATH_MOMENT_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -4019,6 +4028,44 @@ describe('database migration chain', () => {
       `);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         VTT_SESSION_BRANCH_RNG_STATE_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(
+        schemaSignature(SCHEMA_BEFORE_VTT_SESSION_DEATH_MOMENT),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0056 admits typed-death-moment revision schema five without losing prior revisions', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_VTT_SESSION_DEATH_MOMENT);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES ('session:death-moment-survivor', 1, 4, '{"state":"kept"}', '${'ab'.repeat(32)}')
+      `);
+
+      db.exec(VTT_SESSION_DEATH_MOMENT_MIGRATION.sql);
+
+      expect(db.selectObjects(
+        `SELECT session_id, revision, schema_version, payload_json, payload_checksum
+         FROM vtt_session_revisions`,
+      )).toEqual([{
+        session_id: 'session:death-moment-survivor',
+        revision: 1,
+        schema_version: 4,
+        payload_json: '{"state":"kept"}',
+        payload_checksum: 'ab'.repeat(32),
+      }]);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES ('session:death-moment', 1, 5, '{"deathAt":null}', '${'cd'.repeat(32)}')
+      `);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        VTT_SESSION_DEATH_MOMENT_MIGRATION.resultSchemaChecksum,
       );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {
