@@ -8,6 +8,7 @@ import type {
   TurnResources,
 } from './encounter';
 import { canCombatantSee, combatantSide, effectiveCombatRules } from './encounter';
+import type { HiddenRollCategory } from './roll-visibility';
 import type { EncounterEvent } from './events';
 import type { GridCell } from './grid';
 import type { CombatantId } from './values';
@@ -18,7 +19,7 @@ export type EncounterViewClassification = 'dm_only' | 'player_visible' | 'per_se
 export const ENCOUNTER_VIEW_CLASSIFICATION = {
   config: 'player_visible',
   rulesEdition: 'player_visible',
-  hideDeathSaveRolls: 'dm_only',
+  hiddenRolls: 'dm_only',
   revision: 'player_visible',
   nextEventSequence: 'dm_only',
   nextDecisionSequence: 'dm_only',
@@ -113,6 +114,8 @@ export interface DmVisibleCombatant extends PlayerVisibleCombatant {
 }
 
 type DeathSaveResolvedEvent = Extract<EncounterEvent, { readonly type: 'death_save_resolved' }>;
+type AttackResolvedEvent = Extract<EncounterEvent, { readonly type: 'attack_resolved' }>;
+type SaveResolvedEvent = Extract<EncounterEvent, { readonly type: 'save_resolved' }>;
 
 export type DeathSaveEventFieldClassification =
   | EncounterViewClassification
@@ -135,11 +138,37 @@ export type PlayerVisibleDeathSaveEvent =
   | (DeathSaveResolvedEvent & { readonly rollVisibility: 'player_visible' })
   | (Omit<DeathSaveResolvedEvent, 'roll'> & { readonly rollVisibility: 'dm_only' });
 
+export type PlayerVisibleAttackEvent =
+  | (AttackResolvedEvent & { readonly rollVisibility: 'player_visible' })
+  | {
+      readonly sequence: number;
+      readonly type: 'attack_resolved';
+      readonly actor: CombatantId;
+      readonly target: CombatantId;
+      readonly outcome: AttackResolvedEvent['attack']['outcome'];
+      readonly rollVisibility: 'dm_only';
+    };
+
+export type PlayerVisibleSaveEvent =
+  | (SaveResolvedEvent & { readonly rollVisibility: 'player_visible' })
+  | {
+      readonly sequence: number;
+      readonly type: 'save_resolved';
+      readonly source: CombatantId;
+      readonly target: CombatantId;
+      readonly ability: SaveResolvedEvent['ability'];
+      readonly effectId: SaveResolvedEvent['effectId'];
+      readonly outcome: SaveResolvedEvent['save']['outcome'];
+      readonly rollVisibility: 'dm_only';
+    };
+
 export type PlayerVisibleEncounterEvent =
   | Exclude<EncounterEvent,
-      | { readonly type: 'adjudicated' | 'death_save_resolved' }
+      | { readonly type: 'adjudicated' | 'attack_resolved' | 'save_resolved' | 'death_save_resolved' }
       | { readonly visibility: 'dm_only' }
     >
+  | PlayerVisibleAttackEvent
+  | PlayerVisibleSaveEvent
   | PlayerVisibleDeathSaveEvent
   | {
       readonly sequence: number;
@@ -172,6 +201,7 @@ export interface DmVisibleEncounterState {
   readonly revision: number;
   readonly round: number;
   readonly activeCombatant: CombatantId | null;
+  readonly hiddenRolls: readonly HiddenRollCategory[];
   readonly bounds: EncounterState['bounds'];
   readonly blockedCells: readonly GridCell[];
   readonly worldObjects: EncounterState['worldObjects'];
@@ -285,12 +315,13 @@ function isDmOnlyEvent(
 function playerEvents(
   events: readonly EncounterEvent[],
   visibleIds: ReadonlySet<CombatantId>,
-  hideDeathSaveRolls: boolean,
+  hiddenRolls: ReadonlySet<HiddenRollCategory>,
+  monsterIds: ReadonlySet<CombatantId>,
 ): readonly PlayerVisibleEncounterEvent[] {
   return events.flatMap((event): readonly PlayerVisibleEncounterEvent[] => {
     if (event.type === 'death_save_resolved') {
       if (!visibleIds.has(event.combatant)) return [];
-      return hideDeathSaveRolls
+      return hiddenRolls.has('death_saves')
         ? [{
             sequence: event.sequence,
             type: event.type,
@@ -300,6 +331,34 @@ function playerEvents(
             failures: event.failures,
             lifeState: event.lifeState,
             stableRecovery: event.stableRecovery,
+            rollVisibility: 'dm_only',
+          }]
+        : [{ ...event, rollVisibility: 'player_visible' }];
+    }
+    if (event.type === 'attack_resolved') {
+      if (!eventCombatants(event).every((id) => visibleIds.has(id))) return [];
+      return hiddenRolls.has('monster_attack_rolls') && monsterIds.has(event.actor)
+        ? [{
+            sequence: event.sequence,
+            type: event.type,
+            actor: event.actor,
+            target: event.target,
+            outcome: event.attack.outcome,
+            rollVisibility: 'dm_only',
+          }]
+        : [{ ...event, rollVisibility: 'player_visible' }];
+    }
+    if (event.type === 'save_resolved') {
+      if (!eventCombatants(event).every((id) => visibleIds.has(id))) return [];
+      return hiddenRolls.has('monster_saving_throws') && monsterIds.has(event.target)
+        ? [{
+            sequence: event.sequence,
+            type: event.type,
+            source: event.source,
+            target: event.target,
+            ability: event.ability,
+            effectId: event.effectId,
+            outcome: event.save.outcome,
             rollVisibility: 'dm_only',
           }]
         : [{ ...event, rollVisibility: 'player_visible' }];
@@ -335,7 +394,7 @@ export function projectDmView(state: EncounterState): DmView {
     state: {
       config: structuredClone(state.config),
       rulesEdition: state.rulesEdition,
-      hideDeathSaveRolls: state.hideDeathSaveRolls,
+      hiddenRolls: [...state.hiddenRolls],
       revision: state.revision,
       nextEventSequence: state.nextEventSequence,
       nextDecisionSequence: state.nextDecisionSequence,
@@ -402,6 +461,8 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
     }];
   });
   const visibleIds = new Set(combatants.map((subject) => subject.id));
+  const monsterIds = new Set(state.combatants.flatMap((subject) =>
+    subject.profile.kind === 'monster' ? [subject.profile.id] : []));
   return {
     audience: 'player',
     seat: {
@@ -428,7 +489,7 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
         turn: structuredClone(subject.turn),
         wildShapeUses: structuredClone(subject.wildShapeUses),
       })),
-    recentEvents: playerEvents(state.eventLog, visibleIds, state.hideDeathSaveRolls),
+    recentEvents: playerEvents(state.eventLog, visibleIds, new Set(state.hiddenRolls), monsterIds),
   };
 }
 
@@ -441,6 +502,7 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
     revision: state.revision,
     round: state.round,
     activeCombatant: state.activeCombatant,
+    hiddenRolls: [...state.hiddenRolls],
     bounds: { ...state.bounds },
     blockedCells: state.blockedCells.map((cell) => ({ ...cell })),
     worldObjects: structuredClone(state.worldObjects),

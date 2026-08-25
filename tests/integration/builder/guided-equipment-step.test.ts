@@ -37,6 +37,7 @@ import {
   createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 /**
  * THE EQUIPMENT STEP (plan `docs/design/2026-07-29-starting-equipment.md`
@@ -242,14 +243,14 @@ describe('the equipment step read (E-B)', () => {
         | { readonly type: 'choose_fighting_style'; readonly feat_content_key: string }
         | { readonly type: 'set_weapon_mastery'; readonly weapon_id: number; readonly selected: boolean },
     ): Promise<void> => {
-      await executor.execute({
+      expectOkOutcome(await executor.execute({
         character_id: characterId,
         operation_uuid: crypto.randomUUID(),
         expected_revision: Number(
           db.scalar('SELECT revision FROM characters WHERE id = ?', [characterId]),
         ),
         command,
-      });
+      }));
     };
     const style = before.fighter.fighting_style.options[0];
     if (style === undefined) throw new Error('No Fighting Style is installed.');

@@ -4,7 +4,8 @@ import { starterArtDataUri } from '../assets/starter-art-resolver';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
 import type { EncounterCommand } from '../combat/events';
-import { REACTION_KINDS, type PendingDecision } from '../combat/encounter';
+import { MOVEMENT_PATH_DANGER_KINDS, REACTION_KINDS, type PendingDecision } from '../combat/encounter';
+import { HIDDEN_ROLL_CATEGORIES, type HiddenRollCategory } from '../combat/roll-visibility';
 import { previewAffectedCells } from '../combat/templates';
 import { encounterSessionId, type CombatantId } from '../combat/values';
 import { DmEncounterHost } from './dm-encounter-host';
@@ -14,6 +15,7 @@ import {
 } from './encounter-board';
 import type {
   DmBoardProjection,
+  DmMovementPathPreview,
   PlayerBoardProjection,
   ProjectedControllerRequest,
 } from './encounter-projections';
@@ -41,6 +43,11 @@ import {
   type LongRestBenefit,
   type RestInterruptionOutcome,
 } from './party-session-state';
+import {
+  REFUSAL_CATEGORIES,
+  handlingModesForCategory,
+  type RefusalHandlingMode,
+} from './refusal-handling';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -61,6 +68,7 @@ function decisionHeading(decision: PendingDecision): string {
     case 'death_save': return 'death saving throw';
     case 'legendary_action_window': return 'legendary action';
     case 'legendary_resistance': return 'legendary resistance';
+    case 'adjudication_prompt': return 'adjudication required';
     default: {
       const exhaustive: never = decision;
       throw new Error(`Unhandled pending decision kind: ${String(exhaustive)}`);
@@ -86,7 +94,7 @@ function actionLabel(action: EncounterCommand): string {
     case 'search': return 'Search';
     case 'reveal_hidden': return 'Reveal';
     case 'resolve_pending_decision': return action.optionId === 'roll' ? 'Roll death save' : 'Resolve reaction';
-    case 'set_hide_death_save_rolls': return action.hidden ? 'Hide death-save rolls' : 'Show death-save rolls';
+    case 'set_hidden_roll_category': return `${action.hidden ? 'Hide' : 'Show'} ${action.category.replaceAll('_', ' ')}`;
     case 'dm_stabilize': return 'DM: Stabilize';
     case 'dm_revive_at_one_hit_point': return 'DM: Revive at 1 HP';
     case 'dm_set_death_save_counts': return 'DM: Set death-save counts';
@@ -159,6 +167,7 @@ function actionKey(action: EncounterCommand): string {
 function renderBoard(
   projection: EncounterBoardProjectionShape,
   preview: ReadonlySet<string> = new Set(),
+  movementDangerPreview: DmMovementPathPreview | null = null,
 ): HTMLDivElement {
   const pcFallback = REFERENCE_ENCOUNTER_ART.combatantTokens['combatant:fighter'];
   const monsterFallback = REFERENCE_ENCOUNTER_ART.combatantTokens['combatant:training-brute'];
@@ -183,6 +192,9 @@ function renderBoard(
   const board = element('div', { className: 'encounter-board' });
   board.style.setProperty('--encounter-columns', String(projection.bounds.columns));
   board.dataset.artPackage = art.id;
+  const dangersByCell = new Map<string, DmMovementPathPreview['annotations'][number]['dangers']>(movementDangerPreview?.annotations.map(
+    (annotation) => [`${String(annotation.cell.column)},${String(annotation.cell.row)}`, annotation.dangers] as const,
+  ) ?? []);
   for (const model of models) {
     const cell = element('div', { className: 'encounter-cell' });
     cell.dataset.cell = model.key;
@@ -215,6 +227,12 @@ function renderBoard(
       overlay.dataset.shape = area.shape.kind;
       overlay.title = `${area.kind === 'persistent' ? 'Persistent area' : 'Movement region'} — owner: ${area.ownerName}`;
       cell.append(overlay);
+    }
+    for (const danger of dangersByCell.get(model.key) ?? []) {
+      const marker = element('span', { className: `encounter-path-danger encounter-path-danger-${danger}` });
+      marker.dataset.danger = danger;
+      marker.setAttribute('aria-label', danger.replaceAll('_', ' '));
+      cell.append(marker);
     }
     for (const object of model.worldObjects) {
       const placed = element('div', { className: 'encounter-world-object' });
@@ -304,6 +322,37 @@ function renderBoard(
     board.append(svg);
   }
   return board;
+}
+
+const MOVEMENT_DANGER_LABELS: Readonly<Record<
+  DmMovementPathPreview['annotations'][number]['dangers'][number],
+  string
+>> = {
+  opportunity_attack: 'Leaving provokes an Opportunity Attack',
+  burning_surface: 'Entering a burning surface',
+  persistent_area_damage: 'Entering persistent-area damage',
+  difficult_terrain: 'Entering Difficult Terrain',
+};
+
+const HIDDEN_ROLL_LABELS: Readonly<Record<HiddenRollCategory, string>> = {
+  death_saves: 'Death saves',
+  monster_attack_rolls: 'Monster attack rolls',
+  monster_saving_throws: 'Monster saving throws',
+};
+
+function renderMovementDangerLegend(preview: DmMovementPathPreview): HTMLElement {
+  const legend = element('section', { className: 'encounter-path-danger-legend' });
+  legend.append(element('h2', { text: 'Movement path dangers' }));
+  const kinds = new Set(preview.annotations.flatMap((annotation) => annotation.dangers));
+  const list = element('ul');
+  for (const kind of MOVEMENT_PATH_DANGER_KINDS) {
+    if (!kinds.has(kind)) continue;
+    const item = element('li', { text: MOVEMENT_DANGER_LABELS[kind] });
+    item.dataset.danger = kind;
+    list.append(item);
+  }
+  legend.append(list);
+  return legend;
 }
 
 function projectedAction(
@@ -519,10 +568,15 @@ class PlayerEncounterView {
 
     const log = element('ol', { className: 'encounter-log' });
     for (const event of projection.events.slice(-12)) {
+      const eventText = event.type === 'adjudicated'
+        ? `ADJUDICATED — visible consequence: ${event.consequence.kind}`
+        : event.type === 'attack_resolved' && event.rollVisibility === 'dm_only'
+          ? `Monster attack roll hidden — ${event.outcome}`
+          : event.type === 'save_resolved' && event.rollVisibility === 'dm_only'
+            ? `Monster saving throw hidden — ${event.outcome}`
+            : event.type.replaceAll('_', ' ');
       const item = element('li', {
-        text: event.type === 'adjudicated'
-          ? `ADJUDICATED — visible consequence: ${event.consequence.kind}`
-          : event.type.replaceAll('_', ' '),
+        text: eventText,
       });
       item.dataset.eventType = event.type;
       log.append(item);
@@ -552,6 +606,7 @@ class DmEncounterView {
   #folderSaves: readonly SaveManagerEntry[] = [];
   #pendingDelete: SaveManagerViewModel['pendingDelete'] = null;
   #saveManagerController: SaveManagerController | null = null;
+  #movementPreviewKey: string | null = null;
   readonly #heartbeat: number;
   readonly #unsubscribe: () => void;
   readonly #onBeforeUnload = (): void => this.#host.close();
@@ -580,6 +635,9 @@ class DmEncounterView {
     this.#channel.addEventListener('message', this.#onMessage);
     this.#unsubscribe = this.#host.subscribe((snapshot) => {
       this.#projection = snapshot.dm;
+      if (!snapshot.dm.movementPreviews.some(
+        (preview) => preview.commandKey === this.#movementPreviewKey,
+      )) this.#movementPreviewKey = null;
       this.#sendPlayerProjection(snapshot.player);
       this.#render();
     });
@@ -658,11 +716,18 @@ class DmEncounterView {
       (identity) => identity.combatantId === pending.actorId,
     );
     if (controller?.kind !== 'human') return;
+    this.#movementPreviewKey = null;
     this.#host.submitHumanDecision(pending.actorId, {
       requestId: pending.requestId,
       encounterRevision: pending.encounterRevision,
       action,
     });
+  }
+
+  #setMovementPreview(commandKey: string | null): void {
+    if (this.#movementPreviewKey === commandKey) return;
+    this.#movementPreviewKey = commandKey;
+    this.#render();
   }
 
   #browserSaves(): readonly SaveManagerEntry[] {
@@ -1276,7 +1341,14 @@ class DmEncounterView {
     )) {
       throw new Error('DM board omitted encounter fog.');
     }
-    this.#shell.append(renderBoard(projection.board));
+    const movementPreview = projection.movementPreviews.find(
+      (preview) => preview.commandKey === this.#movementPreviewKey,
+    ) ?? null;
+    const previewCells = new Set(movementPreview?.path.map(
+      (cell) => `${String(cell.column)},${String(cell.row)}`,
+    ) ?? []);
+    this.#shell.append(renderBoard(projection.board, previewCells, movementPreview));
+    if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
 
     const tray = element('section', { className: 'dm-decision-tray' });
     tray.append(element('h2', { text: 'Decision tray' }));
@@ -1288,6 +1360,15 @@ class DmEncounterView {
       });
       refusal.setAttribute('role', 'alert');
       refusal.dataset.refusalCode = projection.decisionTray.boundaryRefusal.code;
+      tray.append(refusal);
+    }
+    if (projection.decisionTray.actionRefusal !== null) {
+      const refusal = element('p', {
+        className: 'dm-decision-refusal',
+        text: `${projection.decisionTray.actionRefusal.reason} (${projection.decisionTray.actionRefusal.citation})`,
+      });
+      refusal.setAttribute('role', 'alert');
+      refusal.dataset.refusalCategory = projection.decisionTray.actionRefusal.category;
       tray.append(refusal);
     }
     if (projection.decisionTray.entries.length === 0) {
@@ -1304,6 +1385,26 @@ class DmEncounterView {
           }),
           element('p', { text: entry.triggerContext }),
         );
+        if (entry.decision.kind === 'adjudication_prompt') {
+          const amount = element('input');
+          amount.type = 'number';
+          amount.value = '0';
+          amount.setAttribute('aria-label', 'DM override hit point delta');
+          const button = element('button', { text: `Apply DM override for ${entry.combatantName}` });
+          button.type = 'button';
+          button.addEventListener('click', () => {
+            const parsed = Number(amount.value);
+            if (!Number.isSafeInteger(parsed)) return;
+            this.#host.resolveRefusalPrompt(
+              entry.decision.id,
+              { kind: 'hit_point_delta', amount: parsed },
+              'DM manually resolved the refused action.',
+            );
+          });
+          row.append(amount, button);
+          tray.append(row);
+          continue;
+        }
         for (const option of entry.decision.options) {
           const button = element('button', { text: `${option.label} for ${entry.combatantName}` });
           button.type = 'button';
@@ -1328,6 +1429,33 @@ class DmEncounterView {
     this.#shell.append(tray);
 
     if (projection.partySession !== null) {
+      const refusalSettings = element('section', { className: 'dm-refusal-settings' });
+      refusalSettings.append(element('h2', { text: 'Refusal handling' }));
+      for (const category of REFUSAL_CATEGORIES) {
+        const label = element('label');
+        label.append(document.createTextNode(category.replaceAll('_', ' ')));
+        const select = element('select');
+        select.setAttribute('aria-label', `${category} refusal handling`);
+        for (const mode of handlingModesForCategory(category)) {
+          const option = element('option', { text: mode });
+          option.value = mode;
+          option.selected = projection.partySession.state.refusalHandling[category] === mode;
+          select.append(option);
+        }
+        select.addEventListener('change', () => {
+          const mode = handlingModesForCategory(category).find((candidate) => candidate === select.value);
+          if (mode === undefined) return;
+          select.disabled = true;
+          void this.#host.setRefusalHandling(category, mode as RefusalHandlingMode).catch((error: unknown) => {
+            this.#channelError = error instanceof Error ? error.message : 'Refusal setting update failed.';
+            this.#render();
+          });
+        });
+        label.append(select);
+        refusalSettings.append(label);
+      }
+      this.#shell.append(refusalSettings);
+
       const preferences = element('section', { className: 'dm-reaction-preferences' });
       preferences.append(element('h2', { text: 'Reaction preferences' }));
       for (const character of projection.partySession.state.characters) {
@@ -1365,6 +1493,26 @@ class DmEncounterView {
       this.#shell.append(preferences);
     }
 
+    const hiddenRollSettings = element('section', { className: 'dm-hidden-roll-settings' });
+    hiddenRollSettings.append(element('h2', { text: 'Hidden rolls' }));
+    for (const category of HIDDEN_ROLL_CATEGORIES) {
+      const label = element('label');
+      const checkbox = element('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = projection.encounter.hiddenRolls.includes(category);
+      checkbox.setAttribute('aria-label', `Hide ${HIDDEN_ROLL_LABELS[category].toLowerCase()}`);
+      checkbox.addEventListener('change', () => {
+        checkbox.disabled = true;
+        void this.#host.setHiddenRollCategory(category, checkbox.checked).catch((error: unknown) => {
+          this.#channelError = error instanceof Error ? error.message : 'Hidden-roll setting failed.';
+          this.#render();
+        });
+      });
+      label.append(checkbox, document.createTextNode(HIDDEN_ROLL_LABELS[category]));
+      hiddenRollSettings.append(label);
+    }
+    this.#shell.append(hiddenRollSettings);
+
     const initiative = element('section', { className: 'dm-initiative' });
     initiative.append(element('h2', { text: `Initiative — round ${String(projection.board.round)}` }));
     const initiativeList = element('ol');
@@ -1393,6 +1541,13 @@ class DmEncounterView {
         for (const action of projection.humanCommandActions) {
           const button = element('button', { text: actionLabel(action) });
           button.type = 'button';
+          if (action.type === 'move') {
+            const key = actionKey(action);
+            button.addEventListener('pointerenter', () => this.#setMovementPreview(key));
+            button.addEventListener('pointerleave', () => this.#setMovementPreview(null));
+            button.addEventListener('focus', () => this.#setMovementPreview(key));
+            button.addEventListener('blur', () => this.#setMovementPreview(null));
+          }
           button.addEventListener('click', () => this.#submitDm(action));
           pending.append(button);
         }

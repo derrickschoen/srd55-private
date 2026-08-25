@@ -13,6 +13,7 @@ import {
 import { openSeededTestDatabase } from '../../helpers/open-db';
 import { registerAssertedFixtureContentIdentity } from '../../helpers/content-identity';
 import { GrantRuleSlotGenerator } from '../../../src/grants/grant-rule-slot-generator';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 describe('shared multiclass primary-ability query seam', () => {
   let connection: Database;
@@ -35,11 +36,11 @@ describe('shared multiclass primary-ability query seam', () => {
   }
 
   function enterClass(name: string): void {
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       { type: 'update_class', class_definition_id: classId(name) },
       new CharacterCommandIntegrity('multiclass-primary-ability-test-key'),
-    ).apply(characterId);
+    ).apply(characterId));
   }
 
   beforeEach(async () => {

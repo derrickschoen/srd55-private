@@ -48,6 +48,7 @@ import { eligibilityInvalidReasons } from '../../../src/eligibility/spell-select
 import { SheetContentLookup } from '../../../src/rules/sheet-content-lookup';
 import { attacksPerAction } from '../../../src/rules/sheet';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
+import { expectOkOutcome } from '../../helpers/outcome';
 import { openTestDatabase } from '../../helpers/open-db';
 
 const connections: Database[] = [];
@@ -1126,11 +1127,11 @@ describe('HA-5 subclass publisher', () => {
     });
     for (const [level, attackCount] of [[6, 2], [13, 2], [14, 3]] as const) {
       raiseClassLevelForTest(db, character.characterId, character.classId, level);
-      new UpdateClassCommand(
+      expectOkOutcome(new UpdateClassCommand(
         db,
         { type: 'update_class', class_definition_id: character.classId, subclass_definition_id: character.subclassId },
         new CharacterCommandIntegrity(`ha5-threshold-${String(level)}`),
-      ).apply(character.characterId);
+      ).apply(character.characterId));
       expect(sheet(), `Bard ${String(level)}`).toMatchObject({
         attacks_per_action: { count: attackCount, unresolved: [] },
         damage_resistances: ['Void'],

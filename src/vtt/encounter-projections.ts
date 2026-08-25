@@ -6,6 +6,10 @@ import type {
 } from '../combat/coordinator';
 import type { TurnResources } from '../combat/encounter';
 import type { PendingDecision, ReactionPolicy } from '../combat/encounter';
+import {
+  previewMovementPathDangers,
+  type MovementPathDangerPreview,
+} from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
 import type { GridCell } from '../combat/grid';
 import {
@@ -69,6 +73,8 @@ export interface DmBoardProjection {
   readonly pendingRequest: ControllerRequest | null;
   /** Exact legal commands exposed to the DM only when the pending actor uses a human controller. */
   readonly humanCommandActions: readonly EncounterCommand[];
+  /** DM-only previews keyed by the exact legal move command. */
+  readonly movementPreviews: readonly DmMovementPathPreview[];
   /** Optional batch-planning action domains, populated when one request plans for several actors. */
   readonly turnProgramLegalActions?: readonly {
     readonly actorId: CombatantId;
@@ -82,6 +88,10 @@ export interface DmBoardProjection {
   readonly partySession: DmPartySessionView | null;
   readonly decisionTray: DmDecisionTrayProjection;
   readonly timeline: EncounterTimelineProjection;
+}
+
+export interface DmMovementPathPreview extends MovementPathDangerPreview {
+  readonly commandKey: string;
 }
 
 export type DmDecisionTrayEntry =
@@ -106,11 +116,14 @@ export type DmDecisionTrayEntry =
 
 export interface DmDecisionTrayProjection {
   readonly entries: readonly DmDecisionTrayEntry[];
+  readonly actionRefusal: NonBoundaryActionRefusal | null;
   readonly boundaryRefusal: null | {
     readonly code: 'turn_boundary_blocked';
     readonly message: string;
   };
 }
+
+import type { NonBoundaryActionRefusal } from './refusal-handling';
 
 function decisionTriggerContext(
   decision: PendingDecision,
@@ -125,6 +138,8 @@ function decisionTriggerContext(
       return `end of ${names.get(decision.boundary.activeCombatant) ?? String(decision.boundary.activeCombatant)}'s turn in round ${String(decision.boundary.round)}`;
     case 'legendary_resistance':
       return `${decision.failedSave.ability} save failed against ${names.get(decision.failedSave.source) ?? String(decision.failedSave.source)} in round ${String(decision.boundary.round)}`;
+    case 'adjudication_prompt':
+      return `${decision.refusal.reason} (${decision.refusal.citation})`;
     default: {
       const exhaustive: never = decision;
       throw new Error(`Unhandled pending decision kind: ${String(exhaustive)}`);
@@ -213,16 +228,24 @@ export function projectDmBoard(input: {
   readonly history: readonly SessionHistoryEntry[];
   readonly partyState?: PartySessionState | null;
   readonly boundaryRefusal?: DmDecisionTrayProjection['boundaryRefusal'];
+  readonly actionRefusal?: NonBoundaryActionRefusal | null;
+  readonly adjudicationPrompts?: readonly Extract<PendingDecision, { readonly kind: 'adjudication_prompt' }>[];
 }): DmBoardProjection {
   const targets = adjudicatedTargets(input.view.state.eventLog, input.coordinator.pause);
   const pending = input.coordinator.pendingRequest;
   const pendingController = pending === null
     ? undefined
     : input.controllers.find((identity) => identity.combatantId === pending.actorId);
+  const humanCommandActions = pendingController?.kind === 'human'
+    ? pending?.legalActions.actions ?? []
+    : [];
   const names = new Map(input.view.state.combatants.map(
     (subject) => [subject.profile.id, subject.profile.name] as const,
   ));
-  const pendingEntries: readonly DmDecisionTrayEntry[] = input.view.state.pendingDecisions.map((decision) => ({
+  const pendingEntries: readonly DmDecisionTrayEntry[] = [
+    ...input.view.state.pendingDecisions,
+    ...(input.adjudicationPrompts ?? []),
+  ].map((decision) => ({
     kind: 'pending',
     decision: structuredClone(decision),
     combatantName: names.get(decision.combatant) ?? String(decision.combatant),
@@ -250,9 +273,11 @@ export function projectDmBoard(input: {
     board: projectEncounterBoard(input.view, input.coordinator.pendingRequest, targets),
     coordinator: input.coordinator,
     pendingRequest: input.coordinator.pendingRequest,
-    humanCommandActions: pendingController?.kind === 'human'
-      ? pending?.legalActions.actions ?? []
-      : [],
+    humanCommandActions,
+    movementPreviews: humanCommandActions.flatMap((action): readonly DmMovementPathPreview[] =>
+      action.type === 'move'
+        ? [{ commandKey: canonicalJson(action), ...previewMovementPathDangers(input.view.state, action) }]
+        : []),
     controllers: input.controllers,
     history: input.history,
     adjudicatedTargets: targets,
@@ -261,6 +286,7 @@ export function projectDmBoard(input: {
       : projectDmPartySession(input.partyState),
     decisionTray: {
       entries: [...pendingEntries, ...autoFireEntries],
+      actionRefusal: input.actionRefusal ?? null,
       boundaryRefusal: input.boundaryRefusal ?? null,
     },
     timeline: projectEncounterTimeline(input.view.state, input.history),

@@ -323,6 +323,13 @@ const SCHEMA_BEFORE_VTT_SESSION_DEATH_MOMENT = DATABASE_MIGRATIONS
   .join('\n');
 const VTT_SESSION_DEATH_MOMENT_MIGRATION =
   DATABASE_MIGRATIONS[VTT_SESSION_DEATH_MOMENT_INDEX]!;
+const VTT_SESSION_HIDDEN_ROLLS_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0057_vtt_session_hidden_rolls',
+);
+const SCHEMA_BEFORE_VTT_SESSION_HIDDEN_ROLLS = DATABASE_MIGRATIONS
+  .slice(0, VTT_SESSION_HIDDEN_ROLLS_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -4067,7 +4074,9 @@ describe('database migration chain', () => {
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         VTT_SESSION_DEATH_MOMENT_MIGRATION.resultSchemaChecksum,
       );
-      expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
+      expect(databaseSchemaSignature(db)).toBe(
+        schemaSignature(SCHEMA_BEFORE_VTT_SESSION_HIDDEN_ROLLS),
+      );
     } finally {
       db.close();
     }

@@ -183,7 +183,7 @@ async function applyRestore(
     undefined,
     clock(timestamp),
   );
-  command.apply(characterId);
+  expectOkOutcome(command.apply(characterId));
   return command;
 }
 
@@ -204,7 +204,7 @@ describe('update_ability command', () => {
       clock(changedTimestamp),
     );
 
-    command.apply(test.characterId);
+    expectOkOutcome(command.apply(test.characterId));
     const after = state.capture(test.characterId);
 
     expect(
@@ -242,7 +242,7 @@ describe('update_ability command', () => {
       inversePayload,
       clock(restoredTimestamp),
     );
-    inverse.apply(test.characterId);
+    expectOkOutcome(inverse.apply(test.characterId));
     expect(
       test.db.oneRaw(
         `SELECT wisdom, ability_allocation_method, updated_at
@@ -359,7 +359,7 @@ describe('set_slot select and inverse', () => {
       clock(changedTimestamp),
     );
 
-    command.apply(test.characterId);
+    expectOkOutcome(command.apply(test.characterId));
     const after = state.capture(test.characterId);
 
     expect(storedSlot(test.db, test.slotId)).toEqual({
@@ -460,7 +460,7 @@ describe('set_slot clear and keep_override', () => {
       undefined,
       clock(changedTimestamp),
     );
-    clear.apply(test.characterId);
+    expectOkOutcome(clear.apply(test.characterId));
     expect(storedSlot(test.db, test.slotId)).toEqual({
       current_spell_version_id: null,
       selection_acquired_at_class_level: null,
@@ -506,7 +506,7 @@ describe('set_slot clear and keep_override', () => {
       undefined,
       clock(changedTimestamp),
     );
-    keep.apply(test.characterId);
+    expectOkOutcome(keep.apply(test.characterId));
     expect(storedSlot(test.db, test.slotId)).toEqual({
       current_spell_version_id: test.originalSpellId,
       selection_acquired_at_class_level: null,
@@ -537,7 +537,7 @@ describe('set_slot clear and keep_override', () => {
       { type: 'set_slot', slot_id: test.slotId, mode: 'clear' },
       test.integrity,
     );
-    discard.apply(test.characterId);
+    expectOkOutcome(discard.apply(test.characterId));
     expect(
       test.db.oneRaw(
         `SELECT current_spell_version_id, state, selection_eligibility
@@ -566,7 +566,7 @@ describe('set_slot restore revalidation', () => {
       { type: 'set_slot', slot_id: test.slotId, mode: 'clear' },
       test.integrity,
     );
-    clear.apply(test.characterId);
+    expectOkOutcome(clear.apply(test.characterId));
     const inverse = await clear.inverse();
     test.db.exec(
       'UPDATE characters SET allow_legacy = 0 WHERE id = ?',

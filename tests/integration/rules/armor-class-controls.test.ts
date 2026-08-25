@@ -27,6 +27,7 @@ import {
   openSeededTestDatabase,
   openTestDatabase,
 } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 const connections: Database[] = [];
 const integrity = new CharacterCommandIntegrity(
@@ -176,7 +177,7 @@ describe('Armor Class mutation controls', () => {
        WHERE character_id = ? AND class_definition_id = ?`,
       [characterId, sorcererId],
     );
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       {
         type: 'update_class',
@@ -184,22 +185,22 @@ describe('Armor Class mutation controls', () => {
         subclass_definition_id: draconicId,
       },
       integrity,
-    ).apply(characterId);
-    new UpdateClassCommand(
+    ).apply(characterId));
+    expectOkOutcome(new UpdateClassCommand(
       db,
       { type: 'update_class', class_definition_id: warlockId },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     db.exec(
       `UPDATE character_class_levels SET level = 2
        WHERE character_id = ? AND class_definition_id = ?`,
       [characterId, warlockId],
     );
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       { type: 'update_class', class_definition_id: warlockId },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
 
     const builder = new CharacterSheetBuilder(db);
     const levelThree = builder.build(characterId);
@@ -285,7 +286,7 @@ describe('Armor Class mutation controls', () => {
        WHERE character_id = ? AND class_definition_id = ?`,
       [characterId, sorcererId],
     );
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       {
         type: 'update_class',
@@ -293,7 +294,7 @@ describe('Armor Class mutation controls', () => {
         subclass_definition_id: draconicId,
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     const levelFour = builder.build(characterId);
     expect(levelFour.class_hit_points_subtotal.value).toBe(34);
     expect(levelFour.species_hit_points?.value).toBe(4);
@@ -468,14 +469,14 @@ describe('Armor Class mutation controls', () => {
       [barbarianId, 'Barbarian'],
       [monkId, 'Monk'],
     ] as const) {
-      new UpdateClassCommand(
+      expectOkOutcome(new UpdateClassCommand(
         db,
         {
           type: 'update_class',
           class_definition_id: classId(db, className),
         },
         integrity,
-      ).apply(characterId);
+      ).apply(characterId));
       expect(
         db.allRaw(
           `SELECT effect.label, effect.template_ref

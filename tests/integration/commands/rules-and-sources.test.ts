@@ -13,6 +13,7 @@ import type {
 } from '../../../src/domain/command-contracts';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { openTestDatabase } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 import { ConfiguredSpellListResolutionError } from '../../../src/grants/grant-rule-planner';
 
 type SourceType = 'class' | 'feat' | 'species' | 'background';
@@ -179,7 +180,7 @@ describe('character rule and source commands', () => {
 
   function add(characterId: number, payload: AddSourcePayload): AddSourceCommand {
     const command = new AddSourceCommand(db, payload, integrity);
-    command.apply(characterId);
+    expectOkOutcome(command.apply(characterId));
     return command;
   }
 
@@ -188,7 +189,7 @@ describe('character rule and source commands', () => {
     payload: UpdateSourceConfigPayload,
   ): UpdateSourceConfigCommand {
     const command = new UpdateSourceConfigCommand(db, payload, integrity);
-    command.apply(characterId);
+    expectOkOutcome(command.apply(characterId));
     return command;
   }
 
@@ -221,7 +222,7 @@ describe('character rule and source commands', () => {
       type: 'update_character_rules',
       allow_legacy: true,
     });
-    enabled.apply(characterId);
+    expectOkOutcome(enabled.apply(characterId));
 
     expect(
       db.oneRaw(
@@ -243,7 +244,7 @@ describe('character rule and source commands', () => {
     });
 
     const disabled = new UpdateCharacterRulesCommand(db, enabled.inverse());
-    disabled.apply(characterId);
+    expectOkOutcome(disabled.apply(characterId));
     expect(
       db.oneRaw(
         `SELECT allow_legacy FROM characters WHERE id = ?`,
@@ -974,7 +975,7 @@ describe('character rule and source commands', () => {
       },
       integrity,
     );
-    removed.apply(characterId);
+    expectOkOutcome(removed.apply(characterId));
 
     expect(
       db.allRaw(
@@ -1045,11 +1046,11 @@ describe('character rule and source commands', () => {
        ) VALUES (?, 3, 'hp_modifier', 2, ?, 'Background effect')`,
       [characterId, backgroundSourceId],
     );
-    new RemoveSourceCommand(
+    expectOkOutcome(new RemoveSourceCommand(
       db,
       { type: 'remove_source', source_instance_id: backgroundSourceId },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     expect(
       db.scalar(
         'SELECT count(*) FROM character_effects WHERE source_instance_id = ?',

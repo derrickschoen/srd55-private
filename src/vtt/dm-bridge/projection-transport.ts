@@ -38,6 +38,7 @@ export type ProjectionTransfer =
         readonly coordinator: Omit<DmBoardProjection['coordinator'], 'pendingRequest'>;
         readonly pendingRequest: DmBoardProjection['pendingRequest'];
         readonly humanCommandActions: DmBoardProjection['humanCommandActions'];
+        readonly movementPreviews: DmBoardProjection['movementPreviews'];
         readonly turnProgramLegalActions?: DmBoardProjection['turnProgramLegalActions'];
         readonly controllers: DmBoardProjection['controllers'];
         readonly adjudicatedTargets: DmBoardProjection['adjudicatedTargets'];
@@ -173,6 +174,7 @@ export class ProjectionTransferSender {
         coordinator: structuredClone(coordinator),
         pendingRequest: structuredClone(projection.pendingRequest),
         humanCommandActions: structuredClone(projection.humanCommandActions),
+        movementPreviews: structuredClone(projection.movementPreviews),
         ...(projection.turnProgramLegalActions === undefined
           ? {}
           : { turnProgramLegalActions: structuredClone(projection.turnProgramLegalActions) }),
@@ -219,6 +221,7 @@ export class ProjectionTransferReceiver {
         },
         pendingRequest: structuredClone(transfer.view.pendingRequest),
         humanCommandActions: structuredClone(transfer.view.humanCommandActions),
+        movementPreviews: structuredClone(transfer.view.movementPreviews),
         ...(transfer.view.turnProgramLegalActions === undefined
           ? {}
           : { turnProgramLegalActions: structuredClone(transfer.view.turnProgramLegalActions) }),

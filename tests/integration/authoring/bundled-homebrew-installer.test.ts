@@ -42,6 +42,7 @@ import { CharacterSheetBuilder } from '../../../src/queries/character-sheet-buil
 import { eligibilityInvalidReasons } from '../../../src/eligibility/spell-selection-eligibility';
 import { sha256 } from '../../../src/crypto/sha256';
 import { CatalogQueries } from '../../../src/queries/catalog-queries';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 const connections: Database[] = [];
 
@@ -982,7 +983,7 @@ describe('bundled authored-kind installer', () => {
       [oldKey.contentKey],
     );
     if (oldClassId === null) throw new Error('Spell Student v1 parent is missing.');
-    new LevelUpClassCommand(
+    expectOkOutcome(new LevelUpClassCommand(
       db,
       {
         type: 'level_up_class',
@@ -996,7 +997,7 @@ describe('bundled authored-kind installer', () => {
         },
       },
       new CharacterCommandIntegrity('bundled-superseded-subclass-level-up'),
-    ).apply(oldCharacterId);
+    ).apply(oldCharacterId));
     expect(db.oneRaw(
       `SELECT level, subclass.content_key AS subclass_content_key
        FROM character_class_levels AS level

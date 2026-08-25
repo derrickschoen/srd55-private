@@ -14,6 +14,7 @@ import { seedClassProgressions } from '../../../src/rules/class-progression-look
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { openTestDatabase } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 /**
  * THE SKILL-GRANT LIFECYCLE, AGAINST A REAL DATABASE AND THE REAL COMMAND
@@ -93,7 +94,7 @@ describe('the skill-grant lifecycle: tombstone, reactivate, and the projection',
     // at 1, removal is `remove: true`, and a higher fixture level is a
     // direct fixture write — see `raiseClassLevelForTest`.
     if (level === null) {
-      new UpdateClassCommand(
+      expectOkOutcome(new UpdateClassCommand(
         db,
         {
           type: 'update_class',
@@ -101,14 +102,14 @@ describe('the skill-grant lifecycle: tombstone, reactivate, and the projection',
           remove: true,
         },
         integrity,
-      ).apply(characterId);
+      ).apply(characterId));
       return;
     }
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       { type: 'update_class', class_definition_id: classDefinitionId },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     if (level > 1) {
       raiseClassLevelForTest(db, characterId, classDefinitionId, level);
     }

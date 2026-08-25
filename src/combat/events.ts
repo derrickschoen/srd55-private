@@ -17,6 +17,7 @@ import type { CombatantId, EncounterEffectId, Feet, ItemId, LimitedResourcePoolI
 import type { LightLevel, WorldObject, WorldOperation } from './world-objects';
 import type { WildShapeEquipmentDisposition, WildShapeReversionReason } from './wild-shape';
 import type { StatblockId } from './values';
+import type { HiddenRollCategory } from './roll-visibility';
 
 export type ActionCost = 'action' | 'bonus_action' | 'reaction' | 'none';
 
@@ -61,7 +62,8 @@ export type EncounterCommand =
       readonly reasoning: string;
       readonly consequence:
         | { readonly kind: 'hit_point_delta'; readonly amount: number }
-        | { readonly kind: 'relocate'; readonly to: GridCell };
+        | { readonly kind: 'relocate'; readonly to: GridCell }
+        | { readonly kind: 'no_effect' };
     }
   | {
       readonly type: 'move';
@@ -90,7 +92,8 @@ export type EncounterCommand =
       readonly optionId: string;
     }
   | {
-      readonly type: 'set_hide_death_save_rolls';
+      readonly type: 'set_hidden_roll_category';
+      readonly category: HiddenRollCategory;
       readonly hidden: boolean;
     }
   | {
@@ -316,6 +319,7 @@ export type EncounterEvent =
             readonly from: GridCell;
             readonly to: GridCell;
           }
+        | { readonly kind: 'no_effect' }
         | {
             readonly kind: 'death_override';
             readonly override: 'stabilize' | 'revive_at_one_hit_point' | 'set_death_save_counts' | 'mark_dead';

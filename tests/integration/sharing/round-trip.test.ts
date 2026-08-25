@@ -64,6 +64,7 @@ import {
   type RpcHarness,
 } from '../../helpers/rpc-harness';
 import { openTestDatabase } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import {
   readMulticlassPrerequisiteHouseRule,
@@ -1403,7 +1404,7 @@ describe('minimal character sharing', () => {
     // `update_class` no longer carries a level (level-up plan §3): entry is
     // at 1, and the fixture levels are direct writes — this file's subject
     // is share transport, not the guarded levelling path.
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       source,
       {
         type: 'update_class',
@@ -1411,9 +1412,9 @@ describe('minimal character sharing', () => {
         subclass_definition_id: null,
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     raiseClassLevelForTest(source, characterId, catalog.otherClassId, 2);
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       source,
       {
         type: 'update_class',
@@ -1421,12 +1422,12 @@ describe('minimal character sharing', () => {
         subclass_definition_id: null,
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     raiseClassLevelForTest(source, characterId, catalog.classId, 5);
     // The subclass is taken AT level 5 — a second `update_class` once the
     // level stands, so its source's acquisition timing (5) is the same fact
     // the import re-derives from the class row on the other side.
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       source,
       {
         type: 'update_class',
@@ -1434,7 +1435,7 @@ describe('minimal character sharing', () => {
         subclass_definition_id: catalog.subclassId,
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
 
     const target = await database();
     seedTimingCatalog(target);
@@ -2368,7 +2369,7 @@ describe('an effect knows which source granted it, across a link', () => {
       "INSERT INTO characters (name) VALUES ('Provenance Hero')",
     ).lastInsertId;
     const integrity = new CharacterCommandIntegrity('sharing-provenance-key');
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       origin,
       {
         type: 'update_class',
@@ -2376,9 +2377,9 @@ describe('an effect knows which source granted it, across a link', () => {
         subclass_definition_id: catalog.subclassId,
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     raiseClassLevelForTest(origin, characterId, catalog.classId, 5);
-    new AddSourceCommand(
+    expectOkOutcome(new AddSourceCommand(
       origin,
       {
         type: 'add_source',
@@ -2387,7 +2388,7 @@ describe('an effect knows which source granted it, across a link', () => {
         config: {},
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
 
     const sourceId = (type: string, definitionId: number): number =>
       Number(
@@ -2461,11 +2462,11 @@ describe('an effect knows which source granted it, across a link', () => {
     raiseClassLevelForTest(origin, characterId, catalog.classId, 3);
     // Case 4: the feat is removed outright, so nothing in the document can name
     // it.
-    new RemoveSourceCommand(
+    expectOkOutcome(new RemoveSourceCommand(
       origin,
       { type: 'remove_source', source_instance_id: takenFeatSource },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     expect(
       origin.scalar(
         'SELECT state FROM character_source_instances WHERE id = ?',
@@ -2552,7 +2553,7 @@ describe('an effect knows which source granted it, across a link', () => {
     const characterId = origin.exec(
       "INSERT INTO characters (name) VALUES ('No Subclass')",
     ).lastInsertId;
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       origin,
       {
         type: 'update_class',
@@ -2560,7 +2561,7 @@ describe('an effect knows which source granted it, across a link', () => {
         subclass_definition_id: null,
       },
       new CharacterCommandIntegrity('sharing-provenance-key'),
-    ).apply(characterId);
+    ).apply(characterId));
     raiseClassLevelForTest(origin, characterId, catalog.classId, 3);
     const document = exportCharacterShare(origin, characterId);
     // Hand-written, because the exporter cannot produce it: the flag is set

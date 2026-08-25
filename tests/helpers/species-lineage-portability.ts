@@ -24,6 +24,7 @@ import {
 } from '../../src/catalog/stored-content-projector-v2';
 import type { DatabaseContext } from '../../src/db/database';
 import type { ContentKey } from '../../src/domain/ids';
+import { expectOkOutcome } from './outcome';
 import { speciesRuleSemanticCountFromJson } from './species-rule-census';
 
 export const PORTABLE_ELF_KEY =
@@ -122,7 +123,7 @@ export async function createLevelFiveHighElf(
     name,
     class_content_key: classOption.content_key,
   }, integrity).id;
-  new AllocateAbilitiesCommand(db, {
+  expectOkOutcome(new AllocateAbilitiesCommand(db, {
     type: 'allocate_abilities',
     method: 'standard_array',
     scores: {
@@ -133,7 +134,7 @@ export async function createLevelFiveHighElf(
       wisdom: 10,
       charisma: 8,
     },
-  }).apply(characterId);
+  }).apply(characterId));
   applyGuidedOrigin(db, {
     character_id: characterId,
     kind: 'species',
@@ -147,7 +148,7 @@ export async function createLevelFiveHighElf(
   if (classDefinitionId === null) {
     throw new Error('The production class option has no definition row.');
   }
-  await executor.execute({
+  expectOkOutcome(await executor.execute({
     character_id: characterId,
     operation_uuid: operation(1),
     expected_revision: 0,
@@ -157,9 +158,9 @@ export async function createLevelFiveHighElf(
       spellcasting_ability: 'intelligence',
       replaceable_spell_version_key: CHOSEN_HIGH_ELF_CANTRIP_KEY,
     },
-  });
+  }));
   for (const targetLevel of [2, 3, 4, 5] as const) {
-    await executor.execute({
+    expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: operation(targetLevel),
       expected_revision: targetLevel - 1,
@@ -181,7 +182,7 @@ export async function createLevelFiveHighElf(
             }
           : {}),
       },
-    });
+    }));
   }
   return characterId;
 }

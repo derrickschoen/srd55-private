@@ -78,6 +78,37 @@
   pointer-events: none;
 }
 
+.encounter-path-danger {
+  position: relative;
+  z-index: 9;
+  display: inline-grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  margin: 0.08rem;
+  border: 1px solid #fff4d1;
+  border-radius: 50%;
+  color: #11131a;
+  background: #ffcf57;
+  font: 700 0.7rem/1 system-ui, sans-serif;
+}
+
+.encounter-path-danger::before { content: '!'; }
+.encounter-path-danger-opportunity_attack { background: #ff7b68; }
+.encounter-path-danger-burning_surface { background: #ff9b42; }
+.encounter-path-danger-persistent_area_damage { background: #dc7bff; }
+.encounter-path-danger-difficult_terrain { background: #d8b36a; }
+
+.encounter-path-danger-legend {
+  width: fit-content;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #78839d;
+  background: #1b1f29;
+}
+
+.encounter-path-danger-legend h2 { margin: 0 0 0.35rem; font-size: 1rem; }
+.encounter-path-danger-legend ul { margin: 0; padding-left: 1.25rem; }
+
 .encounter-token {
   position: absolute;
   z-index: 5;

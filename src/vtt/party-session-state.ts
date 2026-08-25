@@ -19,6 +19,14 @@ import {
 } from '../combat/values';
 import { hitDieSizes, type HitDieSize } from '../domain/enums';
 import type { LoadedPartyMember } from './party-pack';
+import {
+  DEFAULT_REFUSAL_HANDLING_SETTINGS,
+  REFUSAL_CATEGORIES,
+  handlingModesForCategory,
+  type RefusalCategory,
+  type RefusalHandlingMode,
+  type RefusalHandlingSettings,
+} from './refusal-handling';
 
 export const PARTY_SESSION_SCHEMA_VERSION = 1 as const;
 export const ADVENTURING_DAY_ROOM_COUNT = 4 as const;
@@ -98,6 +106,7 @@ export interface PartySessionState {
   readonly adventuringDayStatus: AdventuringDayStatus;
   readonly characters: readonly PartyCharacterSessionState[];
   readonly reactionPolicies: readonly CombatantReactionPolicy[];
+  readonly refusalHandling: RefusalHandlingSettings;
 }
 
 export const PARTY_SESSION_VIEW_CLASSIFICATION = {
@@ -107,6 +116,7 @@ export const PARTY_SESSION_VIEW_CLASSIFICATION = {
   adventuringDayStatus: 'player_visible',
   characters: 'per_seat',
   reactionPolicies: 'per_seat',
+  refusalHandling: 'dm_only',
 } as const satisfies Readonly<Record<keyof PartySessionState, PartySessionViewClassification>>;
 
 export const PARTY_CHARACTER_VIEW_CLASSIFICATION = {
@@ -397,6 +407,21 @@ export function createPartySessionState(
       reactionKind,
       policy: 'ask' as const,
     }))),
+    refusalHandling: { ...DEFAULT_REFUSAL_HANDLING_SETTINGS },
+  };
+}
+
+export function setPartyRefusalHandling(
+  state: PartySessionState,
+  category: RefusalCategory,
+  mode: RefusalHandlingMode,
+): PartySessionState {
+  if (!handlingModesForCategory(category).includes(mode)) {
+    throw new TypeError(`${category} does not support ${mode}.`);
+  }
+  return {
+    ...state,
+    refusalHandling: { ...state.refusalHandling, [category]: mode },
   };
 }
 
@@ -958,7 +983,7 @@ function decodePartyCharacter(value: unknown): PartyCharacterSessionState {
 export function decodePartySessionState(value: unknown): PartySessionState {
   if (
     !isRecord(value) ||
-    !exactKeys(value, ['schemaVersion', 'rulesEdition', 'room', 'adventuringDayStatus', 'characters', 'reactionPolicies']) ||
+    !exactKeys(value, ['schemaVersion', 'rulesEdition', 'room', 'adventuringDayStatus', 'characters', 'reactionPolicies', 'refusalHandling']) ||
     value.schemaVersion !== PARTY_SESSION_SCHEMA_VERSION ||
     value.rulesEdition !== '2024' ||
     !([1, 2, 3, 4] as const).includes(Number(value.room) as AdventuringDayRoom) ||
@@ -993,6 +1018,17 @@ export function decodePartySessionState(value: unknown): PartySessionState {
     reactionPolicies.length !== characters.length * REACTION_KINDS.length) {
     throw new TypeError('Party reaction policies must cover every character and reaction kind exactly once.');
   }
+  const refusalHandlingValue = value.refusalHandling;
+  if (!isRecord(refusalHandlingValue) || !exactKeys(refusalHandlingValue, REFUSAL_CATEGORIES)) {
+    throw new TypeError('Party refusal handling settings are malformed.');
+  }
+  const refusalHandling = Object.fromEntries(REFUSAL_CATEGORIES.map((category) => {
+    const mode = refusalHandlingValue[category];
+    if (typeof mode !== 'string' || !handlingModesForCategory(category).includes(mode as RefusalHandlingMode)) {
+      throw new TypeError('Party refusal handling settings are malformed.');
+    }
+    return [category, mode];
+  })) as RefusalHandlingSettings;
   return {
     schemaVersion: PARTY_SESSION_SCHEMA_VERSION,
     rulesEdition: '2024',
@@ -1000,5 +1036,6 @@ export function decodePartySessionState(value: unknown): PartySessionState {
     adventuringDayStatus: value.adventuringDayStatus,
     characters,
     reactionPolicies,
+    refusalHandling,
   };
 }

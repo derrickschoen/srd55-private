@@ -15,6 +15,7 @@ import { CharacterCompletenessQueries } from '../../../src/queries/character-com
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { openTestDatabase } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 describe('GF-2 Expertise grants', () => {
   let connection: Database | undefined;
@@ -41,11 +42,11 @@ describe('GF-2 Expertise grants', () => {
     const rogueId = Number(
       db.scalar(`SELECT id FROM class_definitions WHERE name = 'Rogue'`),
     );
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       { type: 'update_class', class_definition_id: rogueId },
       new CharacterCommandIntegrity('test-secret'),
-    ).apply(characterId);
+    ).apply(characterId));
     return { db, characterId };
   }
 

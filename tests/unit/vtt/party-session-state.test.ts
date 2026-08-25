@@ -712,13 +712,16 @@ describe('adventuring-day party session state', () => {
       store,
       mirror: new MemoryMirrorSink(),
     });
-    session.apply({
+    const damaged = session.apply({
       type: 'adjudicate',
       target: combatantId('combatant:advday-1'),
       subject: 'test:crash-probe-damage',
       reasoning: 'Damage before persistence crash probe.',
       consequence: { kind: 'hit_point_delta', amount: -8 },
     });
+    expect(damaged.combatants.find(
+      (subject) => subject.profile.id === combatantId('combatant:advday-1'),
+    )?.hitPoints).toBe(12);
     session.captureRoom();
     session.shortRest([{
       combatantId: combatantId('combatant:advday-1'),

@@ -303,7 +303,7 @@ describe('one-time non-SRD bundled subclass retirement', () => {
       old.database,
       new CharacterCommandIntegrity('retirement-history-test-key'),
     );
-    await survivorExecutor.execute({
+    expectOkOutcome(await survivorExecutor.execute({
       character_id: survivorId as never,
       operation_uuid: '11111111-1111-4111-8111-111111111111',
       expected_revision: 0 as never,
@@ -312,9 +312,9 @@ describe('one-time non-SRD bundled subclass retirement', () => {
         class_definition_id: fighterId as never,
         subclass_definition_id: retiredEKId as never,
       },
-    });
+    }));
     const retiringSnapshot = new CharacterState(old.database).capture(survivorId);
-    await survivorExecutor.execute({
+    expectOkOutcome(await survivorExecutor.execute({
       character_id: survivorId as never,
       operation_uuid: '22222222-2222-4222-8222-222222222222',
       expected_revision: 1 as never,
@@ -323,9 +323,9 @@ describe('one-time non-SRD bundled subclass retirement', () => {
         class_definition_id: fighterId as never,
         subclass_definition_id: championId as never,
       },
-    });
+    }));
     const championSnapshot = new CharacterState(old.database).capture(survivorId);
-    await survivorExecutor.execute({
+    expectOkOutcome(await survivorExecutor.execute({
       character_id: survivorId as never,
       operation_uuid: '33333333-3333-4333-8333-333333333333',
       expected_revision: 2 as never,
@@ -334,8 +334,8 @@ describe('one-time non-SRD bundled subclass retirement', () => {
         class_definition_id: fighterId as never,
         subclass_definition_id: championId as never,
       },
-    });
-    await survivorExecutor.execute({
+    }));
+    expectOkOutcome(await survivorExecutor.execute({
       character_id: survivorId as never,
       operation_uuid: '44444444-4444-4444-8444-444444444444',
       expected_revision: 3 as never,
@@ -346,7 +346,7 @@ describe('one-time non-SRD bundled subclass retirement', () => {
         backstory: null,
         notes: 'After safe history entry',
       },
-    });
+    }));
     expect(old.database.allRaw(
       `SELECT source.state, subclass.content_key
          FROM character_source_instances AS source

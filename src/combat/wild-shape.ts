@@ -3,6 +3,7 @@ import type { CombatRulesProfile } from './combatant';
 import type { ChallengeRating, MonsterAction, MonsterStatblock, MonsterMovementSpeed } from './statblock';
 import { BUNDLED_MONSTER_ROSTER } from './statblocks/roster';
 import { statblockId, type StatblockId } from './values';
+import { EncounterRuleError } from './encounter-rule-error';
 
 export type WildShapeDruidLevel =
   | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11
@@ -83,7 +84,7 @@ export type WildShapeRefusalCode =
   | 'fly_speed_gate'
   | 'not_wildshaped';
 
-export class WildShapeRuleError extends Error {
+export class WildShapeRuleError extends EncounterRuleError {
   override readonly name = 'WildShapeRuleError' as const;
 
   constructor(
@@ -91,7 +92,7 @@ export class WildShapeRuleError extends Error {
     readonly gate: WildShapeGate | null,
     message: string,
   ) {
-    super(message);
+    super('wild_shape_validation', message);
   }
 }
 
