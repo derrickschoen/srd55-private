@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  StableInteractivePathError,
   StableRenderKeyCollisionError,
   reconcileStableRenderedChildren,
   stableRenderKey,
@@ -159,6 +160,67 @@ describe('stable VTT control rendering', () => {
     expect(interactiveElement(liveButton).getAttribute('data-revision')).toBe('9');
     interactiveElement(liveButton).click();
     expect(clicked).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a keyed control whose unkeyed wrapper would still replace it', () => {
+    const live = document.createElement('main');
+    const draft = document.createElement('main');
+    const form = document.createElement('form');
+    const button = document.createElement('button');
+    button.dataset.renderKey = stableRenderKey('dm', 'short-rest', 'submit');
+    form.append(button);
+    draft.append(form);
+
+    expect(() => reconcileStableRenderedChildren(live, draft)).toThrowError(
+      expect.objectContaining<Partial<StableInteractivePathError>>({
+        name: 'StableInteractivePathError',
+        code: 'unstable_interactive_render_path',
+        interactiveTag: 'BUTTON',
+        unkeyedTag: 'FORM',
+        tree: 'draft',
+      }),
+    );
+    expect(live.children).toHaveLength(0);
+  });
+
+  it('keeps every short-rest control connected through its keyed form and labels', () => {
+    const renderRest = (room: number, submit?: HTMLElement): HTMLElement => {
+      const roomKey = `room-${String(room)}`;
+      const rest = document.createElement('form');
+      rest.dataset.renderKey = stableRenderKey('dm', 'short-rest', roomKey);
+      const label = document.createElement('label');
+      label.dataset.renderKey = stableRenderKey('dm', 'short-rest', roomKey, 'mirel', 'd8', 'label');
+      const input = document.createElement('input');
+      input.dataset.renderKey = stableRenderKey('dm', 'short-rest', roomKey, 'mirel', 'd8', 'input');
+      label.append(input);
+      const button = submit ?? document.createElement('button');
+      button.dataset.renderKey = stableRenderKey('dm', 'short-rest', roomKey, 'submit');
+      rest.append(label, button);
+      return rest;
+    };
+    const clicked = vi.fn();
+    const liveButton = document.createElement('button');
+    liveButton.addEventListener('click', clicked);
+    const live = document.createElement('main');
+    live.append(renderRest(2, liveButton));
+    document.body.append(live);
+    const draft = document.createElement('main');
+    draft.append(renderRest(2));
+
+    reconcileStableRenderedChildren(live, draft);
+
+    const rendered = interactiveElement(live).querySelector(
+      `[data-render-key="${stableRenderKey('dm', 'short-rest', 'room-2', 'submit')}"]`,
+    );
+    expect(rendered).toBe(interactiveElement(liveButton));
+    expect(interactiveElement(liveButton).isConnected).toBe(true);
+    interactiveElement(liveButton).click();
+    expect(clicked).toHaveBeenCalledOnce();
+
+    const nextRoom = document.createElement('main');
+    nextRoom.append(renderRest(3));
+    reconcileStableRenderedChildren(live, nextRoom);
+    expect(interactiveElement(liveButton).isConnected).toBe(false);
   });
 
   it('rejects colliding logical identities before mutating the live tree', () => {

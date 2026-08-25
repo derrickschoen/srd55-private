@@ -33,6 +33,7 @@ import {
 import {
   regretReactionLegalActions,
 } from '../../../src/vtt/regret/legal-actions';
+import { composeVaneWarrenFight } from '../../../src/vtt/vane-warren';
 import type { HandlerContext } from '../../../src/worker/handler';
 import { monsterProfile, placedToken, playerProfile } from '../../unit/combat/fixtures';
 import {
@@ -678,6 +679,24 @@ describe('player-character AlgorithmController policy', () => {
     ]);
     expect(outcomes.every((room) => room.round <= 20)).toBe(true);
     expect(outcomes.every((room) => room.partyHitPoints.some((hitPoints) => hitPoints > 0))).toBe(true);
+  });
+
+  it('vane-cinder-rite-terminates: both sides receive combat actions and conclude within 20 rounds', async () => {
+    const encounter = composeVaneWarrenFight(
+      'cinder-rite',
+      sample.party.members,
+      sample.displayNames,
+      createPartySessionState(sample.party.members),
+    );
+    const result = await runRoom(encounter, mulberry32(20_260_824));
+
+    expect(result.round).toBeLessThanOrEqual(20);
+    expect(['victory', 'defeat']).toContain(result.outcome);
+    expect(result.eventTypes).toContain('attack_resolved');
+    expect(result.state.eventLog.some((event) =>
+      event.type === 'attack_resolved' &&
+      result.state.combatants.some((candidate) =>
+        candidate.profile.id === event.actor && candidate.profile.kind === 'monster'))).toBe(true);
   });
 
   it('nondeterministic_pick: canonical tie-breaking is independent of legal-action input order', async () => {

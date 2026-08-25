@@ -525,6 +525,7 @@ function attachPageFindingCapture(page: Page, recorder: FindingsRecorder): void 
 }
 
 async function captureRefusals(page: Page, recorder: FindingsRecorder, phase: string): Promise<void> {
+  recorder.track(phase, 'scan refusal notices after turn pulse');
   const refusals = page.locator('.dm-decision-refusal');
   for (let index = 0; index < await refusals.count(); index += 1) {
     const refusal = refusals.nth(index);
@@ -544,6 +545,7 @@ async function captureRefusals(page: Page, recorder: FindingsRecorder, phase: st
 }
 
 async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase: string): Promise<number> {
+  recorder.track(phase, 'resolve decision tray after turn pulse');
   let resolved = 0;
   for (let guard = 0; guard < 20; guard += 1) {
     const pending = page.locator('.dm-decision-entry[data-entry-kind="pending"]');
@@ -728,6 +730,7 @@ async function playEncounter(
       recorder.add('scripted_nudge', phase, 'turn pulse through DM controls', errorDetail(error));
       return { kind: 'aborted', round: lastRound, attempts: attempt };
     }
+    recorder.track(phase, 'read encounter round after turn pulse');
     const round = await roundOf(page);
     if (round === lastRound) unchangedAttempts += 1;
     else {

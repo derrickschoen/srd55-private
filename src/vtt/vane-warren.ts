@@ -43,6 +43,7 @@ import {
 } from '../combat/world-object-actions';
 import { loadedPartyTurnLegalActions, type LoadedPartyMember } from './party-pack';
 import { preloadPartySessionState, type PartySessionState } from './party-session-state';
+import { regretTurnLegalActions } from './regret/legal-actions';
 import {
   storedPartyControllerIdentities,
   type StoredCharacterEncounter,
@@ -830,7 +831,7 @@ export function composeVaneWarrenFight(
     turnLegalActions: (current, actor) => {
       const member = members.find((candidate) => candidate.profile.id === actor);
       const base = member === undefined
-        ? [{ type: 'end_turn', actor } as const]
+        ? regretTurnLegalActions(current, actor).actions
         : partyActions(current, actor).actions;
       return { actions: [...worldObjectClassActionCommands(current, actor).actions, ...base] };
     },

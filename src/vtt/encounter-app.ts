@@ -403,7 +403,7 @@ function projectedAction(
 
 class PlayerEncounterView {
   readonly #channel: BroadcastChannel;
-  readonly #shell = element('main', { className: 'encounter-shell player-encounter' });
+  #shell = element('main', { className: 'encounter-shell player-encounter' });
   #projection: PlayerBoardProjection | null = null;
   #staged: EncounterCommand | null = null;
   #aimingSpell = false;
@@ -514,14 +514,28 @@ class PlayerEncounterView {
   }
 
   #render(): void {
+    const live = this.#shell;
+    const draft = element('main', { className: 'encounter-shell player-encounter' });
+    this.#shell = draft;
+    try {
+      this.#renderFresh();
+    } finally {
+      this.#shell = live;
+    }
+    reconcileStableRenderedChildren(live, draft);
+  }
+
+  #renderFresh(): void {
     this.#shell.replaceChildren();
     const header = element('header');
+    header.dataset.renderKey = stableRenderKey('player', 'header');
     header.append(
       element('p', { className: 'vtt-kicker', text: 'Player-primary board' }),
       element('h1', { text: 'Reference encounter' }),
     );
     const openDm = element('button', { text: 'Open local DM window' });
     openDm.type = 'button';
+    openDm.dataset.renderKey = stableRenderKey('player', 'header', 'open-dm');
     openDm.addEventListener('click', () => this.#openDm());
     header.append(openDm);
     this.#shell.append(header);
@@ -561,6 +575,7 @@ class PlayerEncounterView {
     this.#shell.append(board);
 
     const controls = element('section', { className: 'encounter-controls' });
+    controls.dataset.renderKey = stableRenderKey('player', 'controls');
     controls.append(element('h2', { text: 'Legal choices' }));
     const request = projection.pendingRequest;
     if (!connected) {
@@ -571,6 +586,9 @@ class PlayerEncounterView {
       for (const action of request.legalActions) {
         const button = element('button', { text: actionLabel(action) });
         button.type = 'button';
+        button.dataset.renderKey = stableRenderKey(
+          'player', 'controls', request.requestId, actionKey(action),
+        );
         button.addEventListener('click', () => this.#submit(action));
         controls.append(button);
       }
@@ -583,6 +601,9 @@ class PlayerEncounterView {
       for (const [label, action] of firstByLabel) {
         const button = element('button', { text: label });
         button.type = 'button';
+        button.dataset.renderKey = stableRenderKey(
+          'player', 'controls', request.requestId, actionKey(action),
+        );
         button.addEventListener('click', () => {
           if (action.type === 'cast_spell' && action.spellId === 'shatter') {
             this.#aimingSpell = true;
@@ -597,6 +618,9 @@ class PlayerEncounterView {
       }
       const confirm = element('button', { text: 'Confirm choice' });
       confirm.type = 'button';
+      confirm.dataset.renderKey = stableRenderKey(
+        'player', 'controls', request.requestId, 'confirm',
+      );
       confirm.disabled = this.#staged === null;
       confirm.addEventListener('click', () => {
         if (this.#staged !== null) this.#submit(this.#staged);
@@ -648,6 +672,8 @@ class DmEncounterView {
   #movementPreviewKey: string | null = null;
   readonly #sessionFlow: StoredCharacterSessionFlow | null;
   #endSessionExported = false;
+  #pendingSnapshot: DmEncounterHostSnapshot | null = null;
+  #acknowledgingSnapshots = false;
   readonly #heartbeat: number;
   readonly #unsubscribe: () => void;
   readonly #onBeforeUnload = (): void => this.#host.close();
@@ -679,14 +705,14 @@ class DmEncounterView {
         });
     this.#channel = new BroadcastChannel(`srd55:vtt:${sessionId}`);
     this.#channel.addEventListener('message', this.#onMessage);
-    this.#unsubscribe = this.#host.subscribe((snapshot) => void this.#acknowledge(snapshot));
+    this.#unsubscribe = this.#host.subscribe((snapshot) => this.#queueSnapshot(snapshot));
     this.#heartbeat = window.setInterval(() => {
       const snapshot = this.#host.snapshot();
       const dmChanged =
         this.#projection === null ||
         canonicalJson(this.#projection) !== canonicalJson(snapshot.dm);
       if (dmChanged) {
-        void this.#acknowledge(snapshot);
+        this.#queueSnapshot(snapshot);
       }
     }, HEARTBEAT_INTERVAL_MS);
     window.addEventListener('beforeunload', this.#onBeforeUnload);
@@ -705,21 +731,39 @@ class DmEncounterView {
     return view;
   }
 
-  async #acknowledge(snapshot: DmEncounterHostSnapshot): Promise<void> {
+  #queueSnapshot(snapshot: DmEncounterHostSnapshot): void {
+    this.#pendingSnapshot = snapshot;
+    if (this.#acknowledgingSnapshots) return;
+    this.#acknowledgingSnapshots = true;
+    void this.#drainSnapshots();
+  }
+
+  async #drainSnapshots(): Promise<void> {
     try {
-      await this.#store.flush();
-      this.#projection = snapshot.dm;
-      if (!snapshot.dm.movementPreviews.some(
-        (preview) => preview.commandKey === this.#movementPreviewKey,
-      )) this.#movementPreviewKey = null;
-      this.#sendPlayerProjection(snapshot.player);
-      this.#saveManagerError = null;
-      this.#render();
+      while (this.#pendingSnapshot !== null) {
+        const snapshot = this.#pendingSnapshot;
+        this.#pendingSnapshot = null;
+        await this.#store.flush();
+        // The coordinator can publish many transitions while IndexedDB is
+        // flushing. Render only the newest projection instead of replaying a
+        // stale DOM render for every intermediate transition.
+        if (this.#pendingSnapshot !== null) continue;
+        this.#projection = snapshot.dm;
+        if (!snapshot.dm.movementPreviews.some(
+          (preview) => preview.commandKey === this.#movementPreviewKey,
+        )) this.#movementPreviewKey = null;
+        this.#sendPlayerProjection(snapshot.player);
+        this.#saveManagerError = null;
+        this.#render();
+      }
     } catch (error: unknown) {
       this.#saveManagerError = error instanceof Error
         ? error.message
         : 'Browser session storage failed.';
       this.#render();
+    } finally {
+      this.#acknowledgingSnapshots = false;
+      if (this.#pendingSnapshot !== null) this.#queueSnapshot(this.#pendingSnapshot);
     }
   }
 
@@ -1070,11 +1114,20 @@ class DmEncounterView {
           text: `Type ${model.pendingDelete.requiredText} to delete this save.`,
         }));
         const typedName = element('input');
+        typedName.dataset.renderKey = stableRenderKey(
+          'dm', 'save-manager', 'save', row.id, 'delete-confirmation', 'name',
+        );
         typedName.setAttribute('aria-label', `Type ${row.name} to confirm deletion`);
         const confirm = element('button', { text: 'Confirm delete' });
         confirm.type = 'submit';
+        confirm.dataset.renderKey = stableRenderKey(
+          'dm', 'save-manager', 'save', row.id, 'delete-confirmation', 'confirm',
+        );
         const cancel = element('button', { text: 'Cancel delete' });
         cancel.type = 'button';
+        cancel.dataset.renderKey = stableRenderKey(
+          'dm', 'save-manager', 'save', row.id, 'delete-confirmation', 'cancel',
+        );
         cancel.addEventListener('click', () => {
           void this.#runSaveManagerAction(async () => {
             await controller.dispatch({ kind: 'cancel_delete' });
@@ -1243,8 +1296,15 @@ class DmEncounterView {
       controls.append(longRest);
 
       const interruption = element('form', { className: 'dm-rest-interruption' });
+      interruption.dataset.renderKey = stableRenderKey('dm', 'controls', 'rest-interruption');
       const outcomeLabel = element('label', { text: 'Interruption outcome' });
+      outcomeLabel.dataset.renderKey = stableRenderKey(
+        'dm', 'controls', 'rest-interruption', 'outcome-label',
+      );
       const outcomeSelect = element('select');
+      outcomeSelect.dataset.renderKey = stableRenderKey(
+        'dm', 'controls', 'rest-interruption', 'outcome',
+      );
       outcomeSelect.setAttribute('aria-label', 'Rest interruption outcome');
       for (const outcome of REST_INTERRUPTION_DM_CONTROL.outcomes) {
         const option = element('option', { text: outcome.replaceAll('_', ' ') });
@@ -1255,8 +1315,14 @@ class DmEncounterView {
       interruption.append(outcomeLabel);
       const benefitInputs = REST_INTERRUPTION_DM_CONTROL.partialBenefitChecklist.map((benefit) => {
         const label = element('label', { text: benefit.replaceAll('_', ' ') });
+        label.dataset.renderKey = stableRenderKey(
+          'dm', 'controls', 'rest-interruption', 'benefit', benefit, 'label',
+        );
         const input = element('input');
         input.type = 'checkbox';
+        input.dataset.renderKey = stableRenderKey(
+          'dm', 'controls', 'rest-interruption', 'benefit', benefit, 'input',
+        );
         input.value = benefit;
         input.setAttribute('aria-label', `Apply ${benefit.replaceAll('_', ' ')}`);
         label.prepend(input);
@@ -1265,6 +1331,9 @@ class DmEncounterView {
       });
       const interrupted = element('button', { text: REST_INTERRUPTION_DM_CONTROL.label });
       interrupted.type = 'submit';
+      interrupted.dataset.renderKey = stableRenderKey(
+        'dm', 'controls', 'rest-interruption', 'submit',
+      );
       interruption.append(interrupted);
       interruption.addEventListener('submit', (event) => {
         event.preventDefault();
@@ -1423,8 +1492,10 @@ class DmEncounterView {
 
     if (projection.partySession !== null &&
       projection.partySession.state.adventuringDayStatus === 'active' &&
-      projection.partySession.state.room < 4) {
+      projection.partySession.state.room < (this.#sessionFlow?.encounterCount ?? 4)) {
+      const roomKey = `room-${String(projection.partySession.state.room)}`;
       const rest = element('form', { className: 'dm-short-rest' });
+      rest.dataset.renderKey = stableRenderKey('dm', 'short-rest', roomKey);
       rest.append(element('h2', { text: 'Short Rest before next room' }));
       const requested: Array<{
         readonly combatantId: CombatantId;
@@ -1437,11 +1508,17 @@ class DmEncounterView {
         )?.name ?? character.combatantId;
         for (const pool of character.hitDice) {
           const label = element('label');
+          label.dataset.renderKey = stableRenderKey(
+            'dm', 'short-rest', roomKey, character.combatantId, `d${String(pool.sides)}`, 'label',
+          );
           label.append(document.createTextNode(
             `${name}: spend d${String(pool.sides)} Hit Point Dice (${String(pool.remaining)} remaining)`,
           ));
           const input = element('input');
           input.type = 'number';
+          input.dataset.renderKey = stableRenderKey(
+            'dm', 'short-rest', roomKey, character.combatantId, `d${String(pool.sides)}`, 'input',
+          );
           input.min = '0';
           input.max = String(pool.remaining);
           input.value = '0';
@@ -1454,6 +1531,7 @@ class DmEncounterView {
       }
       const finishRest = element('button', { text: 'Take Short Rest and enter next room' });
       finishRest.type = 'submit';
+      finishRest.dataset.renderKey = stableRenderKey('dm', 'short-rest', roomKey, 'submit');
       rest.append(finishRest);
       rest.addEventListener('submit', (event) => {
         event.preventDefault();
@@ -1567,6 +1645,9 @@ class DmEncounterView {
         if (entry.decision.kind === 'adjudication_prompt') {
           const amount = element('input');
           amount.type = 'number';
+          amount.dataset.renderKey = stableRenderKey(
+            'dm', 'decision-tray', 'decision', entry.decision.id, 'override-amount',
+          );
           amount.value = '0';
           amount.setAttribute('aria-label', 'DM override hit point delta');
           const button = element('button', { text: `Apply DM override for ${entry.combatantName}` });
@@ -1631,11 +1712,14 @@ class DmEncounterView {
 
     if (projection.partySession !== null) {
       const refusalSettings = element('section', { className: 'dm-refusal-settings' });
+      refusalSettings.dataset.renderKey = stableRenderKey('dm', 'refusal-settings');
       refusalSettings.append(element('h2', { text: 'Refusal handling' }));
       for (const category of REFUSAL_CATEGORIES) {
         const label = element('label');
+        label.dataset.renderKey = stableRenderKey('dm', 'refusal-settings', category, 'label');
         label.append(document.createTextNode(category.replaceAll('_', ' ')));
         const select = element('select');
+        select.dataset.renderKey = stableRenderKey('dm', 'refusal-settings', category, 'select');
         select.setAttribute('aria-label', `${category} refusal handling`);
         for (const mode of handlingModesForCategory(category)) {
           const option = element('option', { text: mode });
@@ -1658,6 +1742,7 @@ class DmEncounterView {
       this.#shell.append(refusalSettings);
 
       const preferences = element('section', { className: 'dm-reaction-preferences' });
+      preferences.dataset.renderKey = stableRenderKey('dm', 'reaction-preferences');
       preferences.append(element('h2', { text: 'Reaction preferences' }));
       for (const character of projection.partySession.state.characters) {
         const name = projection.encounter.combatants.find(
@@ -1669,8 +1754,14 @@ class DmEncounterView {
           );
           if (current === undefined) throw new Error('Party reaction preference coverage is incomplete.');
           const label = element('label');
+          label.dataset.renderKey = stableRenderKey(
+            'dm', 'reaction-preferences', character.combatantId, reactionKind, 'label',
+          );
           label.append(document.createTextNode(`${name} — ${reactionKind.replaceAll('_', ' ')}`));
           const select = element('select');
+          select.dataset.renderKey = stableRenderKey(
+            'dm', 'reaction-preferences', character.combatantId, reactionKind, 'select',
+          );
           select.setAttribute('aria-label', `${name} ${reactionKind} reaction policy`);
           for (const policy of ['ask', 'always', 'never'] as const) {
             const option = element('option', { text: policy });
@@ -1695,11 +1786,16 @@ class DmEncounterView {
     }
 
     const hiddenRollSettings = element('section', { className: 'dm-hidden-roll-settings' });
+    hiddenRollSettings.dataset.renderKey = stableRenderKey('dm', 'hidden-roll-settings');
     hiddenRollSettings.append(element('h2', { text: 'Hidden rolls' }));
     for (const category of HIDDEN_ROLL_CATEGORIES) {
       const label = element('label');
+      label.dataset.renderKey = stableRenderKey('dm', 'hidden-roll-settings', category, 'label');
       const checkbox = element('input');
       checkbox.type = 'checkbox';
+      checkbox.dataset.renderKey = stableRenderKey(
+        'dm', 'hidden-roll-settings', category, 'checkbox',
+      );
       checkbox.checked = projection.encounter.hiddenRolls.includes(category);
       checkbox.setAttribute('aria-label', `Hide ${HIDDEN_ROLL_LABELS[category].toLowerCase()}`);
       checkbox.addEventListener('change', () => {
@@ -1728,6 +1824,7 @@ class DmEncounterView {
     this.#shell.append(initiative);
 
     const pending = element('section', { className: 'dm-pending-request' });
+    pending.dataset.renderKey = stableRenderKey('dm', 'pending-request');
     pending.append(element('h2', { text: 'Pending request' }));
     if (projection.pendingRequest === null) {
       pending.append(element('p', { text: 'None' }));
@@ -1742,6 +1839,12 @@ class DmEncounterView {
         for (const action of projection.humanCommandActions) {
           const button = element('button', { text: actionLabel(action) });
           button.type = 'button';
+          button.dataset.renderKey = stableRenderKey(
+            'dm',
+            'pending-request',
+            projection.pendingRequest.requestId,
+            actionKey(action),
+          );
           if (action.type === 'move') {
             const key = actionKey(action);
             button.addEventListener('pointerenter', () => this.#setMovementPreview(key));
@@ -1757,6 +1860,7 @@ class DmEncounterView {
     this.#shell.append(pending);
 
     const objectControls = element('section', { className: 'dm-world-object-controls' });
+    objectControls.dataset.renderKey = stableRenderKey('dm', 'world-object-controls');
     objectControls.append(element('h2', { text: 'World-object controls' }));
     if (projection.worldObjectControls.length === 0) {
       objectControls.append(element('p', { text: 'No available object overrides.' }));
@@ -1764,6 +1868,9 @@ class DmEncounterView {
       for (const control of projection.worldObjectControls) {
         const button = element('button', { text: `${control.label} — ${control.objectName}` });
         button.type = 'button';
+        button.dataset.renderKey = stableRenderKey(
+          'dm', 'world-object-controls', control.objectId, actionKey(control.command),
+        );
         button.dataset.objectId = control.objectId;
         button.addEventListener('click', () => this.#host.dmUseWorldObject(control.command));
         objectControls.append(button);
@@ -1772,7 +1879,9 @@ class DmEncounterView {
     this.#shell.append(objectControls);
 
     const adjudication = element('form', { className: 'dm-adjudication' });
+    adjudication.dataset.renderKey = stableRenderKey('dm', 'adjudication');
     const target = element('select');
+    target.dataset.renderKey = stableRenderKey('dm', 'adjudication', 'target');
     target.setAttribute('aria-label', 'Adjudication target');
     for (const combatant of projection.encounter.combatants) {
       const option = element('option', { text: combatant.name });
@@ -1781,12 +1890,15 @@ class DmEncounterView {
     }
     const delta = element('input');
     delta.type = 'number';
+    delta.dataset.renderKey = stableRenderKey('dm', 'adjudication', 'delta');
     delta.value = '-1';
     delta.setAttribute('aria-label', 'Hit Point delta');
     const reasoning = element('textarea');
+    reasoning.dataset.renderKey = stableRenderKey('dm', 'adjudication', 'reasoning');
     reasoning.setAttribute('aria-label', 'DM reasoning');
     const apply = element('button', { text: 'Apply ADJUDICATED override' });
     apply.type = 'submit';
+    apply.dataset.renderKey = stableRenderKey('dm', 'adjudication', 'apply');
     adjudication.append(
       element('h2', { text: 'Adjudication' }),
       target,
@@ -1882,7 +1994,10 @@ class DmEncounterView {
     this.#shell.append(dice);
 
     const details = element('details');
-    details.append(element('summary', { text: 'Full revision history' }));
+    details.dataset.renderKey = stableRenderKey('dm', 'revision-history');
+    const summary = element('summary', { text: 'Full revision history' });
+    summary.dataset.renderKey = stableRenderKey('dm', 'revision-history', 'summary');
+    details.append(summary);
     const history = element('ol');
     for (const entry of projection.history) {
       const item = element('li', {
