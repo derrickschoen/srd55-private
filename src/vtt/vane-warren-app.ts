@@ -3,10 +3,8 @@ import { mountEncounterVtt, type EncounterVttMount } from './encounter-app';
 import { loadD365SampleParty } from './d365-sample-party';
 import { createPartySessionState } from './party-session-state';
 import {
-  VANE_WARREN_FIGHTS,
-  VANE_WARREN_ID,
-  composeVaneWarrenFight,
-  type VaneWarrenFightId,
+  VANE_WARREN_SESSION_ID,
+  composeVaneWarrenSessionEncounter,
 } from './vane-warren';
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -29,7 +27,7 @@ export function mountVaneWarren(root: HTMLElement, rpc: RpcClient): VaneWarrenMo
     element('p', { className: 'vtt-kicker', text: 'Bundled flagship encounter' }),
     element('h1', { text: 'The Vane Warren' }),
     element('p', {
-      text: 'Choose one leader fight. Each selection loads a separate roster, pre-placed tokens, fog, light, surfaces, hazards, and stronghold objects for the representative four-character party.',
+      text: 'Play all three leader fights as one continuous session. Party Hit Points and resources carry between encounters, followed by one final session export.',
     }),
   );
   const choices = element('div', { className: 'vtt-actions' });
@@ -39,22 +37,21 @@ export function mountVaneWarren(root: HTMLElement, rpc: RpcClient): VaneWarrenMo
   let closed = false;
   let loading = false;
 
-  const loadFight = (fightId: VaneWarrenFightId): void => {
+  const loadSession = (): void => {
     if (loading) return;
     loading = true;
     choices.querySelectorAll('button').forEach((button) => { button.disabled = true; });
     status.value = 'Authoring the bundled four-character party through RPC…';
     void loadD365SampleParty(rpc).then((sample) => {
       if (closed) return;
-      const encounter = composeVaneWarrenFight(
-        fightId,
+      const encounter = composeVaneWarrenSessionEncounter(
         sample.party.members,
         sample.displayNames,
         createPartySessionState(sample.party.members),
       );
       encounterMount = mountEncounterVtt(root, {
         view: 'dm',
-        sessionId: `${VANE_WARREN_ID}:${fightId}`,
+        sessionId: VANE_WARREN_SESSION_ID,
         encounter,
       });
     }).catch((error: unknown) => {
@@ -65,13 +62,10 @@ export function mountVaneWarren(root: HTMLElement, rpc: RpcClient): VaneWarrenMo
     });
   };
 
-  for (const fight of VANE_WARREN_FIGHTS) {
-    const button = element('button', { text: `Load ${fight.name}` });
-    button.type = 'button';
-    button.dataset.fightId = fight.id;
-    button.addEventListener('click', () => loadFight(fight.id));
-    choices.append(button);
-  }
+  const button = element('button', { text: 'Start the Vane Warren' });
+  button.type = 'button';
+  button.addEventListener('click', loadSession);
+  choices.append(button);
   shell.append(choices, status);
   root.replaceChildren(shell);
 

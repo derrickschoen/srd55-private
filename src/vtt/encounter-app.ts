@@ -8,7 +8,7 @@ import { MOVEMENT_PATH_DANGER_KINDS, REACTION_KINDS, type PendingDecision } from
 import { HIDDEN_ROLL_CATEGORIES, type HiddenRollCategory } from '../combat/roll-visibility';
 import { previewAffectedCells } from '../combat/templates';
 import { encounterSessionId, type CombatantId } from '../combat/values';
-import { DmEncounterHost } from './dm-encounter-host';
+import { DmEncounterHost, type DmEncounterHostSnapshot } from './dm-encounter-host';
 import {
   encounterBoardRenderModel,
   type EncounterBoardProjectionShape,
@@ -24,7 +24,7 @@ import {
   isHostWindowMessage,
   playerDecisionMessage,
 } from './local-window-channel';
-import { LocalStorageBrowserSessionStore } from './local-session-store';
+import { IndexedDbBrowserSessionStore } from './local-session-store';
 import {
   IndexedDbDirectoryHandlePersistence,
   SaveFolderRepository,
@@ -36,8 +36,11 @@ import {
   type SaveManagerViewModel,
 } from './save-manager';
 import { REFERENCE_ENCOUNTER_ART } from './reference-encounter-art';
+import { VANE_WARREN_ART } from './vane-warren-art';
 import { decodeSavedSessionFingerprint } from './session-persistence';
+import type { EncounterSeed } from './session-seed';
 import type { StoredCharacterEncounter } from './stored-character-encounter';
+import type { StoredCharacterSessionFlow } from './stored-character-encounter';
 import {
   REST_INTERRUPTION_DM_CONTROL,
   type LongRestBenefit,
@@ -169,25 +172,29 @@ function renderBoard(
   preview: ReadonlySet<string> = new Set(),
   movementDangerPreview: DmMovementPathPreview | null = null,
 ): HTMLDivElement {
-  const pcFallback = REFERENCE_ENCOUNTER_ART.combatantTokens['combatant:fighter'];
-  const monsterFallback = REFERENCE_ENCOUNTER_ART.combatantTokens['combatant:training-brute'];
+  const packageForBounds = projection.bounds.columns === VANE_WARREN_ART.room.columns &&
+    projection.bounds.rows === VANE_WARREN_ART.room.rows
+    ? VANE_WARREN_ART
+    : REFERENCE_ENCOUNTER_ART;
+  const pcFallback = packageForBounds.combatantTokens['combatant:fighter'];
+  const monsterFallback = packageForBounds.combatantTokens['combatant:training-brute'];
   if (pcFallback === undefined || monsterFallback === undefined) {
     throw new Error('Reference encounter token art is incomplete.');
   }
   const combatantTokens: Record<string, AssetId> = {};
   for (const combatant of projection.combatants) {
     combatantTokens[combatant.id] =
-      REFERENCE_ENCOUNTER_ART.combatantTokens[combatant.id] ??
+      packageForBounds.combatantTokens[combatant.id] ??
       (combatant.kind === 'player_character' ? pcFallback : monsterFallback);
   }
   const hasReferenceArt = projection.combatants.every(
-    (combatant) => REFERENCE_ENCOUNTER_ART.combatantTokens[combatant.id] !== undefined,
+    (combatant) => packageForBounds.combatantTokens[combatant.id] !== undefined,
   );
   const art = hasReferenceArt
-    ? REFERENCE_ENCOUNTER_ART
-    : { ...REFERENCE_ENCOUNTER_ART, combatantTokens };
+    ? packageForBounds
+    : { ...packageForBounds, combatantTokens };
   const models = hasReferenceArt
-    ? encounterBoardRenderModel(projection, REFERENCE_ENCOUNTER_ART)
+    ? encounterBoardRenderModel(projection, packageForBounds)
     : encounterBoardRenderModel(projection, art);
   const board = element('div', { className: 'encounter-board' });
   board.style.setProperty('--encounter-columns', String(projection.bounds.columns));
@@ -592,7 +599,7 @@ class PlayerEncounterView {
 }
 
 class DmEncounterView {
-  readonly #store = new LocalStorageBrowserSessionStore(localStorage);
+  readonly #store: IndexedDbBrowserSessionStore;
   readonly #folder = new SaveFolderRepository(
     new IndexedDbDirectoryHandlePersistence(indexedDB),
     window,
@@ -607,6 +614,8 @@ class DmEncounterView {
   #pendingDelete: SaveManagerViewModel['pendingDelete'] = null;
   #saveManagerController: SaveManagerController | null = null;
   #movementPreviewKey: string | null = null;
+  readonly #sessionFlow: StoredCharacterSessionFlow | null;
+  #endSessionExported = false;
   readonly #heartbeat: number;
   readonly #unsubscribe: () => void;
   readonly #onBeforeUnload = (): void => this.#host.close();
@@ -614,12 +623,17 @@ class DmEncounterView {
   constructor(
     private readonly root: HTMLElement,
     private readonly sessionId: string,
+    store: IndexedDbBrowserSessionStore,
     encounter?: StoredCharacterEncounter,
+    initialSeed?: EncounterSeed,
   ) {
+    this.#store = store;
+    this.#sessionFlow = encounter?.sessionFlow ?? null;
     this.#host = new DmEncounterHost(sessionId, this.#store, encounter === undefined
-      ? {}
+      ? (initialSeed === undefined ? {} : { initialSeed })
       : {
           initialState: encounter.state,
+          ...(initialSeed === undefined ? {} : { initialSeed }),
           ...(encounter.partyState === null ? {} : { initialPartyState: encounter.partyState }),
           partyMembers: encounter.members,
           partyDisplayNames: encounter.displayNames,
@@ -633,27 +647,48 @@ class DmEncounterView {
         });
     this.#channel = new BroadcastChannel(`srd55:vtt:${sessionId}`);
     this.#channel.addEventListener('message', this.#onMessage);
-    this.#unsubscribe = this.#host.subscribe((snapshot) => {
-      this.#projection = snapshot.dm;
-      if (!snapshot.dm.movementPreviews.some(
-        (preview) => preview.commandKey === this.#movementPreviewKey,
-      )) this.#movementPreviewKey = null;
-      this.#sendPlayerProjection(snapshot.player);
-      this.#render();
-    });
+    this.#unsubscribe = this.#host.subscribe((snapshot) => void this.#acknowledge(snapshot));
     this.#heartbeat = window.setInterval(() => {
       const snapshot = this.#host.snapshot();
       const dmChanged =
         this.#projection === null ||
         canonicalJson(this.#projection) !== canonicalJson(snapshot.dm);
       if (dmChanged) {
-        this.#projection = snapshot.dm;
-        this.#render();
+        void this.#acknowledge(snapshot);
       }
-      this.#sendPlayerProjection(snapshot.player);
     }, HEARTBEAT_INTERVAL_MS);
     window.addEventListener('beforeunload', this.#onBeforeUnload);
     void this.#restoreSaveFolder();
+  }
+
+  static async create(
+    root: HTMLElement,
+    sessionId: string,
+    encounter?: StoredCharacterEncounter,
+    initialSeed?: EncounterSeed,
+  ): Promise<DmEncounterView> {
+    const store = await IndexedDbBrowserSessionStore.open(indexedDB, localStorage);
+    const view = new DmEncounterView(root, sessionId, store, encounter, initialSeed);
+    await store.flush();
+    return view;
+  }
+
+  async #acknowledge(snapshot: DmEncounterHostSnapshot): Promise<void> {
+    try {
+      await this.#store.flush();
+      this.#projection = snapshot.dm;
+      if (!snapshot.dm.movementPreviews.some(
+        (preview) => preview.commandKey === this.#movementPreviewKey,
+      )) this.#movementPreviewKey = null;
+      this.#sendPlayerProjection(snapshot.player);
+      this.#saveManagerError = null;
+      this.#render();
+    } catch (error: unknown) {
+      this.#saveManagerError = error instanceof Error
+        ? error.message
+        : 'Browser session storage failed.';
+      this.#render();
+    }
   }
 
   async #restoreSaveFolder(): Promise<void> {
@@ -706,7 +741,10 @@ class DmEncounterView {
   mount(): void {
     this.root.replaceChildren(this.#shell);
     this.#render();
-    this.#host.start();
+    void this.#host.start().catch((error: unknown) => {
+      this.#saveManagerError = error instanceof Error ? error.message : 'Browser session storage failed.';
+      this.#render();
+    });
   }
 
   #submitDm(action: EncounterCommand): void {
@@ -745,7 +783,7 @@ class DmEncounterView {
         load: (save) => this.#loadSave(save),
         rename: async (save, name) => {
           if (save.source === 'browser') {
-            this.#store.renameStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId, name);
+            await this.#store.renameStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId, name);
           } else {
             await this.#folder.rename(save, name);
             await this.#refreshFolderSaves();
@@ -758,7 +796,7 @@ class DmEncounterView {
             const storageId = save.storageId ?? `session:${save.sessionId}`;
             const deletingLiveSession = deletingActiveSession && storageId.startsWith('session:');
             if (deletingLiveSession) this.close();
-            this.#store.removeStored(storageId, save.sessionId);
+            await this.#store.removeStored(storageId, save.sessionId);
             if (deletingLiveSession) {
               const url = new URL(location.href);
               url.searchParams.set('encounter', 'reference');
@@ -773,8 +811,15 @@ class DmEncounterView {
           }
           this.#render();
         },
-        exportCopy: (save) => this.#download(save.name, save.bytes),
+        exportCopy: (save) => {
+          const bytes = save.source === 'browser'
+            ? this.#store.exportedStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId)
+            : save.bytes;
+          if (bytes === undefined) throw new Error('Folder save has no file contents.');
+          this.#download(save.name, bytes);
+        },
         saveNow: async () => {
+          await this.#store.flush();
           const sessionId = encounterSessionId(this.sessionId);
           const bytes = this.#store.exported(sessionId);
           const browser = this.#store.savedSessions().find(
@@ -799,12 +844,14 @@ class DmEncounterView {
 
   async #loadSave(save: SaveManagerEntry): Promise<void> {
     if (save.source === 'browser') {
-      this.#store.restoreStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId);
+      await this.#store.restoreStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId);
     }
     if (save.source === 'folder') {
       const existing = this.#store.revisions(save.sessionId);
       if (existing.length === 0) {
+        if (save.bytes === undefined) throw new Error('Folder save has no file contents.');
         this.#store.import(save.bytes);
+        await this.#store.flush();
       } else {
         const browserFingerprint = decodeSavedSessionFingerprint(
           this.#store.exported(save.sessionId),
@@ -1033,9 +1080,11 @@ class DmEncounterView {
     if (projection.partySession !== null) {
       const dayEnded = projection.partySession.state.adventuringDayStatus === 'ended_by_long_rest';
       const adventuringDay = element('p', {
-        text: dayEnded
-          ? `Adventuring day ended by Long Rest · room ${String(projection.partySession.state.room)} · 2024 rules`
-          : `Adventuring day — room ${String(projection.partySession.state.room)} of 4 · 2024 rules`,
+        text: this.#sessionFlow === null
+          ? dayEnded
+            ? `Adventuring day ended by Long Rest · room ${String(projection.partySession.state.room)} · 2024 rules`
+            : `Adventuring day — room ${String(projection.partySession.state.room)} of 4 · 2024 rules`
+          : `${this.#sessionFlow.name} — encounter ${String(projection.partySession.state.room)} of ${String(this.#sessionFlow.encounterCount)} · 2024 rules`,
       });
       adventuringDay.className = 'adventuring-day-status';
       adventuringDay.dataset.room = String(projection.partySession.state.room);
@@ -1151,7 +1200,7 @@ class DmEncounterView {
     }
     if (projection.partySession !== null &&
       projection.partySession.state.adventuringDayStatus === 'active' &&
-      projection.partySession.state.room < 4) {
+      projection.partySession.state.room < (this.#sessionFlow?.encounterCount ?? 4)) {
       const nextRoom = element('button', { text: 'End room and enter next room' });
       nextRoom.type = 'button';
       nextRoom.addEventListener('click', () => {
@@ -1161,6 +1210,34 @@ class DmEncounterView {
         });
       });
       controls.append(nextRoom);
+    }
+    if (projection.partySession !== null && this.#sessionFlow !== null &&
+      projection.partySession.state.room === this.#sessionFlow.encounterCount) {
+      const endSession = element('button', { text: this.#sessionFlow.endControlLabel });
+      endSession.type = 'button';
+      endSession.dataset.intent = 'end_session';
+      endSession.disabled = this.#endSessionExported || this.#host.sessionEnded();
+      endSession.addEventListener('click', () => {
+        endSession.disabled = true;
+        void this.#runSaveManagerAction(async () => {
+          await this.#host.endSession();
+          const sessionId = encounterSessionId(this.sessionId);
+          const bytes = this.#store.exported(sessionId);
+          decodeSavedSessionFingerprint(bytes);
+          this.#download(sessionId, bytes);
+          this.#endSessionExported = true;
+          this.#render();
+        });
+      });
+      controls.append(endSession);
+      if (this.#endSessionExported || this.#host.sessionEnded()) {
+        const routed = element('p', {
+          className: 'dm-end-session-export-status',
+          text: 'Session finalized. The complete session export is ready in the save manager and was downloaded.',
+        });
+        routed.setAttribute('role', 'status');
+        controls.append(routed);
+      }
     }
     this.#shell.append(controls);
 
@@ -1680,6 +1757,7 @@ class DmEncounterView {
     this.#channel.removeEventListener('message', this.#onMessage);
     this.#host.close();
     this.#channel.close();
+    void this.#store.flush().finally(() => this.#store.close());
   }
 }
 
@@ -1693,11 +1771,34 @@ export function mountEncounterVtt(
     readonly view: 'player' | 'dm';
     readonly sessionId: string;
     readonly encounter?: StoredCharacterEncounter;
+    readonly initialSeed?: EncounterSeed;
   },
 ): EncounterVttMount {
-  const mounted = options.view === 'dm'
-    ? new DmEncounterView(root, options.sessionId, options.encounter)
-    : new PlayerEncounterView(root, options.sessionId);
-  mounted.mount();
-  return { close: () => mounted.close() };
+  if (options.view === 'player') {
+    const mounted = new PlayerEncounterView(root, options.sessionId);
+    mounted.mount();
+    return { close: () => mounted.close() };
+  }
+  let mounted: DmEncounterView | null = null;
+  let closed = false;
+  root.replaceChildren(element('p', { className: 'dm-save-loading', text: 'Opening browser saves…' }));
+  void DmEncounterView.create(root, options.sessionId, options.encounter, options.initialSeed).then((view) => {
+    if (closed) {
+      view.close();
+      return;
+    }
+    mounted = view;
+    view.mount();
+  }).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : 'Browser session storage failed.';
+    const alert = element('p', { className: 'dm-save-error', text: message });
+    alert.setAttribute('role', 'alert');
+    root.replaceChildren(alert);
+  });
+  return {
+    close: () => {
+      closed = true;
+      mounted?.close();
+    },
+  };
 }

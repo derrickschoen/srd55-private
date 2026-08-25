@@ -88,6 +88,17 @@ export interface PlayerSeatBinding {
   readonly ownedCombatantIds?: readonly CombatantId[];
 }
 
+export class UnknownPlayerSeatCombatantError extends Error {
+  override readonly name = 'UnknownPlayerSeatCombatantError' as const;
+
+  constructor(
+    readonly seatId: string,
+    readonly combatantId: CombatantId,
+  ) {
+    super(`Player seat ${seatId} is bound to an unknown combatant ${combatantId}.`);
+  }
+}
+
 export interface PlayerVisibleCombatant {
   readonly id: CombatantId;
   readonly name: string;
@@ -432,7 +443,7 @@ export function projectDmView(state: EncounterState): DmView {
 /** The only canonical EncounterState -> player projection function. */
 export function projectPlayerView(state: EncounterState, binding: PlayerSeatBinding): PlayerView {
   if (!state.combatants.some((subject) => subject.profile.id === binding.combatantId)) {
-    throw new Error(`Player seat ${binding.seatId} is bound to an unknown combatant.`);
+    throw new UnknownPlayerSeatCombatantError(binding.seatId, binding.combatantId);
   }
   const ownedIds = new Set(binding.ownedCombatantIds ?? [binding.combatantId]);
   if (!ownedIds.has(binding.combatantId)) {

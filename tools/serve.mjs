@@ -44,8 +44,8 @@ function readPort(argv, environment) {
     fail(`unknown argument ${JSON.stringify(argument)}.`);
   }
   const port = rawPort === undefined ? DEFAULT_PORT : Number(rawPort);
-  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
-    fail(`port must be an integer from 1 to 65535; received ${JSON.stringify(rawPort)}.`);
+  if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
+    fail(`port must be an integer from 0 to 65535; received ${JSON.stringify(rawPort)}.`);
   }
   return port;
 }
@@ -166,8 +166,12 @@ function serve(port) {
     fail(`could not listen on http://${HOST}:${String(port)}: ${error.message}`);
   });
   server.listen(port, HOST, () => {
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      fail('could not resolve the bound preview address.');
+    }
     process.stdout.write(
-      `serve: fresh dist/ available at http://${HOST}:${String(port)}\n`,
+      `serve: fresh dist/ available at http://${HOST}:${String(address.port)}\n`,
     );
   });
 }

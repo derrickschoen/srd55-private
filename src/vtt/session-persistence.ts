@@ -63,6 +63,7 @@ export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export type SessionTransition =
   | { readonly kind: 'session_started' }
+  | { readonly kind: 'session_ended' }
   | DurableCoordinatorTransition
   | {
       readonly kind: 'party_state_captured';
@@ -119,6 +120,7 @@ export type SessionTransition =
 
 export const SESSION_TRANSITION_KINDS = [
   'session_started',
+  'session_ended',
   'party_state_captured',
   'reaction_preference_changed',
   'refusal_handling_changed',
@@ -477,6 +479,9 @@ function decodeTransition(value: unknown): SessionTransition {
   switch (value.kind as SessionTransition['kind']) {
     case 'session_started':
       if (hasExactlyKeys(value, ['kind'])) return { kind: 'session_started' };
+      break;
+    case 'session_ended':
+      if (hasExactlyKeys(value, ['kind'])) return { kind: 'session_ended' };
       break;
     case 'party_state_captured':
     case 'room_composed':
@@ -907,6 +912,15 @@ export function replaySessionRevisions(
           throw new Error('session_started may only be the first revision.');
         }
         break;
+      case 'session_ended':
+        if (parent === null || parent === undefined) {
+          throw new Error('session_ended requires a parent revision.');
+        }
+        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'ended-session encounter state');
+        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'ended-session coordinator state');
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'ended-session party state');
+        requireCanonicalEqual(revision.rngState, parent.rngState, 'ended-session RNG state');
+        break;
       case 'party_state_captured': {
         if (parent === null || parent === undefined || parent.partyState === null) {
           throw new Error('Party capture requires an existing party session state.');
@@ -1185,6 +1199,31 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
 
   partyState(): PartySessionState | null {
     return structuredClone(this.#latest().partyState);
+  }
+
+  ended(): boolean {
+    return this.#latest().transition.kind === 'session_ended';
+  }
+
+  endSession(): void {
+    const latest = this.#latest();
+    if (latest.transition.kind === 'session_ended') {
+      throw new Error('Encounter session has already ended.');
+    }
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: { kind: 'session_ended' },
+      encounterState: latest.encounterState,
+      partyState: latest.partyState,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      codexSessionId: latest.codexSessionId,
+    });
+  }
+
+  export(): string {
+    return exportSavedSession(this.store, this.sessionId);
   }
 
   record(input: {

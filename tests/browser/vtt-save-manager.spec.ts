@@ -59,21 +59,27 @@ test('DM sees browser and folder saves and loads through the resumable encounter
   if (perRoundSaveId === null) throw new Error('Per-round autosave row has no save ID.');
   const perRoundRevisionCount = await page.evaluate((saveId) => {
     const storageId = saveId.replace(/^browser:/u, '');
-    const stored = localStorage.getItem(`srd55:vtt-autosave:${storageId}`);
-    if (stored === null) throw new Error('Per-round autosave is missing from browser storage.');
-    const snapshot: unknown = JSON.parse(stored);
-    if (typeof snapshot !== 'object' || snapshot === null) {
-      throw new Error('Per-round autosave snapshot is malformed.');
-    }
-    const bytes = Reflect.get(snapshot, 'bytes');
-    if (typeof bytes !== 'string') throw new Error('Per-round autosave has no bundle.');
-    const bundle: unknown = JSON.parse(bytes);
-    if (typeof bundle !== 'object' || bundle === null) {
-      throw new Error('Per-round autosave bundle is malformed.');
-    }
-    const revisions = Reflect.get(bundle, 'revisions');
-    if (!Array.isArray(revisions)) throw new Error('Per-round autosave has no revision history.');
-    return revisions.length;
+    return new Promise<number>((resolve, reject) => {
+      const opening = indexedDB.open('srd55-vtt-sessions', 1);
+      opening.addEventListener('error', () => reject(opening.error), { once: true });
+      opening.addEventListener('success', () => {
+        const database = opening.result;
+        const request = database.transaction('snapshots', 'readonly').objectStore('snapshots').get(storageId);
+        request.addEventListener('error', () => reject(request.error), { once: true });
+        request.addEventListener('success', () => {
+          const snapshot: unknown = request.result;
+          database.close();
+          const revisionCount = snapshot === null || typeof snapshot !== 'object'
+            ? undefined
+            : Reflect.get(snapshot, 'revisionCount');
+          if (typeof revisionCount !== 'number') {
+            reject(new Error('Per-round autosave snapshot is malformed.'));
+            return;
+          }
+          resolve(revisionCount);
+        }, { once: true });
+      }, { once: true });
+    });
   }, perRoundSaveId);
 
   await perRoundSaves.getByRole('button', { name: 'Load', exact: true }).click();

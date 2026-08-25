@@ -50,6 +50,7 @@ import type {
   DmBridgeModelConfig,
 } from './dm-bridge/contracts';
 import type { SteeringCoordinatorMode, SteeringTelemetry } from './dm-bridge/steering';
+import { DEFAULT_ENCOUNTER_SEED, type EncounterSeed } from './session-seed';
 import {
   enterNextRoom as advancePartyRoom,
   type LongRestResult,
@@ -176,6 +177,12 @@ export interface DmEncounterHostSnapshot {
 
 export interface DmBridgeConnection extends DmBridgeExchange, MirrorSink {}
 
+function hasDurableFlush(
+  store: BrowserSessionStore,
+): store is BrowserSessionStore & { flush(): Promise<void> } {
+  return typeof Reflect.get(store, 'flush') === 'function';
+}
+
 export class DmEncounterHost {
   readonly sessionId: EncounterSessionId;
   readonly #store: BrowserSessionStore;
@@ -211,6 +218,7 @@ export class DmEncounterHost {
     store: BrowserSessionStore,
     options: {
       readonly initialState?: EncounterState;
+      readonly initialSeed?: EncounterSeed;
       readonly initialPartyState?: PartySessionState;
       readonly partyMembers?: readonly LoadedPartyMember[];
       readonly partyDisplayNames?: ReadonlyMap<number, string>;
@@ -264,7 +272,7 @@ export class DmEncounterHost {
       const built = registryFromIdentities(identities, agentController);
       this.#registry = built.registry;
       this.#humans = built.humans;
-      this.#rng = mulberry32(0x315006);
+      this.#rng = mulberry32(options.initialSeed ?? DEFAULT_ENCOUNTER_SEED);
       this.#journal = EncounterSessionJournal.create({
         sessionId: this.sessionId,
         branchId: encounterBranchId('branch:reference-main'),
@@ -288,6 +296,14 @@ export class DmEncounterHost {
       });
     } else {
       const resumed = EncounterSessionJournal.resume(this.sessionId, store, this.#mirror);
+      if (
+        options.initialSeed !== undefined &&
+        resumed.rng.snapshot().initialSeed !== options.initialSeed
+      ) {
+        throw new Error(
+          `Encounter session ${this.sessionId} already uses seed ${String(resumed.rng.snapshot().initialSeed)}.`,
+        );
+      }
       const built = registryFromIdentities(resumed.controllers, agentController);
       this.#registry = built.registry;
       this.#humans = built.humans;
@@ -359,6 +375,10 @@ export class DmEncounterHost {
     };
   }
 
+  sessionEnded(): boolean {
+    return this.#journal.ended();
+  }
+
   subscribe(listener: (snapshot: DmEncounterHostSnapshot) => void): () => void {
     this.#listeners.add(listener);
     listener(this.snapshot());
@@ -370,8 +390,8 @@ export class DmEncounterHost {
     for (const listener of this.#listeners) listener(snapshot);
   }
 
-  start(): void {
-    void this.#pumpCoordinator();
+  start(): Promise<void> {
+    return this.#pumpCoordinator();
   }
 
   connectBridgeMirror(sink: MirrorSink): void {
@@ -428,6 +448,8 @@ export class DmEncounterHost {
         if (this.#closed || this.#coordinator.pauseState() !== null) return;
         const step = this.#coordinator.step();
         await Promise.resolve();
+        const preStepFlush = this.#flushStore();
+        if (preStepFlush !== null) await preStepFlush;
         this.#publish();
         let result;
         try {
@@ -436,6 +458,8 @@ export class DmEncounterHost {
           if (this.#bridgeFailureGuard?.report() !== null) return;
           throw error;
         }
+        const postStepFlush = this.#flushStore();
+        if (postStepFlush !== null) await postStepFlush;
         this.#publish();
         if (result.kind === 'refused') {
           this.#boundaryRefusal = result.pendingDecisionCode === 'turn_boundary_blocked'
@@ -451,6 +475,10 @@ export class DmEncounterHost {
       this.#pump = null;
     });
     return this.#pump;
+  }
+
+  #flushStore(): Promise<void> | null {
+    return hasDurableFlush(this.#store) ? this.#store.flush() : null;
   }
 
   #routeActionRefusal(refusal: NonBoundaryActionRefusal): void {
@@ -652,6 +680,7 @@ export class DmEncounterHost {
     ));
     this.#boundaryRefusal = null;
     this.#publish();
+    if (this.#coordinator.pauseState() === null) void this.#pumpCoordinator();
   }
 
   #replaceFromResume(resumed: SessionResume): void {
@@ -715,6 +744,18 @@ export class DmEncounterHost {
     this.#partyStateHasBoundaryRuling = false;
     this.#publish();
     return structuredClone(rested);
+  }
+
+  async endSession(): Promise<void> {
+    if (this.#journal.ended()) throw new Error('Encounter session has already ended.');
+    this.#coordinator.interrupt();
+    await this.#pump;
+    if (this.#journal.partyState() !== null && !this.#partyStateHasBoundaryRuling) {
+      this.#journal.capturePartyState();
+    }
+    this.#journal.endSession();
+    this.#partyStateHasBoundaryRuling = false;
+    this.#publish();
   }
 
   async resolveRestInterruption(outcome: RestInterruptionOutcome): Promise<RestInterruptionResult> {
