@@ -37,6 +37,7 @@ import {
 } from './save-manager';
 import { REFERENCE_ENCOUNTER_ART } from './reference-encounter-art';
 import { decodeSavedSessionFingerprint } from './session-persistence';
+import type { EncounterSeed } from './session-seed';
 import type { StoredCharacterEncounter } from './stored-character-encounter';
 import {
   REST_INTERRUPTION_DM_CONTROL,
@@ -615,11 +616,13 @@ class DmEncounterView {
     private readonly root: HTMLElement,
     private readonly sessionId: string,
     encounter?: StoredCharacterEncounter,
+    initialSeed?: EncounterSeed,
   ) {
     this.#host = new DmEncounterHost(sessionId, this.#store, encounter === undefined
-      ? {}
+      ? (initialSeed === undefined ? {} : { initialSeed })
       : {
           initialState: encounter.state,
+          ...(initialSeed === undefined ? {} : { initialSeed }),
           ...(encounter.partyState === null ? {} : { initialPartyState: encounter.partyState }),
           partyMembers: encounter.members,
           partyDisplayNames: encounter.displayNames,
@@ -1693,10 +1696,11 @@ export function mountEncounterVtt(
     readonly view: 'player' | 'dm';
     readonly sessionId: string;
     readonly encounter?: StoredCharacterEncounter;
+    readonly initialSeed?: EncounterSeed;
   },
 ): EncounterVttMount {
   const mounted = options.view === 'dm'
-    ? new DmEncounterView(root, options.sessionId, options.encounter)
+    ? new DmEncounterView(root, options.sessionId, options.encounter, options.initialSeed)
     : new PlayerEncounterView(root, options.sessionId);
   mounted.mount();
   return { close: () => mounted.close() };

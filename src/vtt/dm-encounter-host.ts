@@ -50,6 +50,7 @@ import type {
   DmBridgeModelConfig,
 } from './dm-bridge/contracts';
 import type { SteeringCoordinatorMode, SteeringTelemetry } from './dm-bridge/steering';
+import { DEFAULT_ENCOUNTER_SEED, type EncounterSeed } from './session-seed';
 import {
   enterNextRoom as advancePartyRoom,
   type LongRestResult,
@@ -211,6 +212,7 @@ export class DmEncounterHost {
     store: BrowserSessionStore,
     options: {
       readonly initialState?: EncounterState;
+      readonly initialSeed?: EncounterSeed;
       readonly initialPartyState?: PartySessionState;
       readonly partyMembers?: readonly LoadedPartyMember[];
       readonly partyDisplayNames?: ReadonlyMap<number, string>;
@@ -264,7 +266,7 @@ export class DmEncounterHost {
       const built = registryFromIdentities(identities, agentController);
       this.#registry = built.registry;
       this.#humans = built.humans;
-      this.#rng = mulberry32(0x315006);
+      this.#rng = mulberry32(options.initialSeed ?? DEFAULT_ENCOUNTER_SEED);
       this.#journal = EncounterSessionJournal.create({
         sessionId: this.sessionId,
         branchId: encounterBranchId('branch:reference-main'),
@@ -288,6 +290,14 @@ export class DmEncounterHost {
       });
     } else {
       const resumed = EncounterSessionJournal.resume(this.sessionId, store, this.#mirror);
+      if (
+        options.initialSeed !== undefined &&
+        resumed.rng.snapshot().initialSeed !== options.initialSeed
+      ) {
+        throw new Error(
+          `Encounter session ${this.sessionId} already uses seed ${String(resumed.rng.snapshot().initialSeed)}.`,
+        );
+      }
       const built = registryFromIdentities(resumed.controllers, agentController);
       this.#registry = built.registry;
       this.#humans = built.humans;
@@ -652,6 +662,7 @@ export class DmEncounterHost {
     ));
     this.#boundaryRefusal = null;
     this.#publish();
+    if (this.#coordinator.pauseState() === null) void this.#pumpCoordinator();
   }
 
   #replaceFromResume(resumed: SessionResume): void {

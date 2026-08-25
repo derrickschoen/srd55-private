@@ -17,13 +17,13 @@ import {
 import { resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
-const DEFAULT_PORT = 4173;
+const REHEARSAL_SEED = 20_260_824;
 const APP_READY_TIMEOUT_MS = 180_000;
 const UI_TIMEOUT_MS = 65_000;
 const TURN_PULSE_MS = 35;
 const ROUND_STALL_ATTEMPTS = 24;
 const MAX_TURN_ATTEMPTS = 600;
-const previewReadiness = new WeakMap<ChildProcess, Promise<void>>();
+const previewReadiness = new WeakMap<ChildProcess, Promise<string>>();
 
 const FINDING_CLASSES = [
   'page_console_error',
@@ -44,6 +44,7 @@ interface Finding {
   readonly step: string;
   readonly detail: string;
   readonly screenshot: string | null;
+  readonly count: number;
 }
 
 interface PhaseResult {
@@ -66,6 +67,7 @@ interface SessionExport {
   readonly hasSessionRecord: boolean;
   readonly hasAlarm: boolean;
   readonly hasIgnition: boolean;
+  readonly seed: number | null;
 }
 
 interface EncounterOutcome {
@@ -132,11 +134,10 @@ async function parseOptions(argv: readonly string[]): Promise<ParsedOptions> {
   const run = rawRun === undefined
     ? await nextRunIndex(date)
     : positiveInteger('run', rawRun, 1);
-  const port = positiveInteger(
-    'PORT',
-    optionValue(argv, '--port') ?? process.env.PORT,
-    DEFAULT_PORT,
-  );
+  const requestedPort = optionValue(argv, '--port') ?? process.env.PORT;
+  const port = requestedPort === undefined
+    ? 0
+    : positiveInteger('PORT', requestedPort, 1);
   if (port > 65_535) throw new Error(`PORT must not exceed 65535; received ${String(port)}.`);
   return { date, run, port };
 }
@@ -146,6 +147,7 @@ class FindingsRecorder {
   readonly phases: PhaseResult[] = [];
   readonly seenRefusals = new Set<string>();
   readonly exports: SessionExport[] = [];
+  screenshotCount = 0;
 
   constructor(
     readonly date: string,
@@ -161,6 +163,18 @@ class FindingsRecorder {
     detail: string,
     screenshot: string | null = null,
   ): void {
+    const duplicate = this.findings.findIndex((finding) =>
+      finding.class === findingClass && finding.detail === detail);
+    if (duplicate !== -1) {
+      const existing = this.findings[duplicate];
+      if (existing === undefined) throw new Error('Finding dedupe index is missing.');
+      this.findings.splice(duplicate, 1, {
+        ...existing,
+        screenshot: existing.screenshot ?? screenshot,
+        count: existing.count + 1,
+      });
+      return;
+    }
     this.findings.push({
       sequence: this.findings.length + 1,
       class: findingClass,
@@ -168,6 +182,7 @@ class FindingsRecorder {
       step,
       detail,
       screenshot,
+      count: 1,
     });
   }
 
@@ -181,7 +196,9 @@ class FindingsRecorder {
   counts(): Readonly<Record<FindingClass, number>> {
     return Object.fromEntries(FINDING_CLASSES.map((findingClass) => [
       findingClass,
-      this.findings.filter((finding) => finding.class === findingClass).length,
+      this.findings
+        .filter((finding) => finding.class === findingClass)
+        .reduce((total, finding) => total + finding.count, 0),
     ])) as unknown as Readonly<Record<FindingClass, number>>;
   }
 
@@ -220,12 +237,13 @@ class FindingsRecorder {
           `- Phase: ${finding.phase}`,
           `- Step: ${finding.step}`,
           `- Detail: ${finding.detail}`,
+          ...(finding.count === 1 ? [] : [`- Count: ${String(finding.count)}`]),
           ...(finding.screenshot === null ? [] : [`- Screenshot: \`${finding.screenshot}\``]),
         ].join('\n')).join('\n\n');
     const exportRows = this.exports.length === 0
-      ? '| (none) | false | false | 0 |'
+      ? '| (none) | false | false | 0 | (unknown) |'
       : this.exports.map((entry) =>
-          `| ${escapeTable(entry.filename)} | ${String(entry.parsed)} | ${String(entry.hasSessionRecord)} | ${String(entry.encounterCount)} |`).join('\n');
+          `| ${escapeTable(entry.filename)} | ${String(entry.parsed)} | ${String(entry.hasSessionRecord)} | ${String(entry.encounterCount)} | ${entry.seed === null ? '(unknown)' : String(entry.seed)} |`).join('\n');
     const markdown = [
       `# Rehearsal run ${this.date} / ${String(this.run)}`,
       '',
@@ -241,8 +259,8 @@ class FindingsRecorder {
       '',
       '## Session exports',
       '',
-      '| File | Parses | Structured record | Encounters |',
-      '|---|---:|---:|---:|',
+      '| File | Parses | Structured record | Encounters | Seed |',
+      '|---|---:|---:|---:|---:|',
       exportRows,
       '',
       '## Findings',
@@ -267,9 +285,9 @@ function errorDetail(error: unknown): string {
 
 async function startPreview(port: number, logPath: string): Promise<ChildProcess> {
   let readyOutput = '';
-  let markReady: (() => void) | null = null;
+  let markReady: ((baseUrl: string) => void) | null = null;
   let markFailed: ((error: Error) => void) | null = null;
-  const ready = new Promise<void>((complete, reject) => {
+  const ready = new Promise<string>((complete, reject) => {
     markReady = complete;
     markFailed = reject;
   });
@@ -285,9 +303,8 @@ async function startPreview(port: number, logPath: string): Promise<ChildProcess
     void appendFile(logPath, chunk);
     process.stdout.write(chunk);
     readyOutput += chunk.toString('utf8');
-    if (readyOutput.includes(`serve: fresh dist/ available at http://127.0.0.1:${String(port)}`)) {
-      markReady?.();
-    }
+    const match = /serve: fresh dist\/ available at (http:\/\/127\.0\.0\.1:\d+)/u.exec(readyOutput);
+    if (match?.[1] !== undefined) markReady?.(match[1]);
   });
   child.stderr?.on('data', (chunk: Buffer) => {
     void appendFile(logPath, chunk);
@@ -303,13 +320,13 @@ async function startPreview(port: number, logPath: string): Promise<ChildProcess
   return child;
 }
 
-async function waitForPreview(baseUrl: string, child: ChildProcess): Promise<void> {
+async function waitForPreview(child: ChildProcess): Promise<string> {
   const ready = previewReadiness.get(child);
   if (ready === undefined) throw new Error('Preview readiness was not registered.');
-  await Promise.race([
+  return Promise.race([
     ready,
     wait(APP_READY_TIMEOUT_MS).then(() => {
-      throw new Error(`Preview did not become ready at ${baseUrl}.`);
+      throw new Error('Preview did not become ready before the startup timeout.');
     }),
   ]);
 }
@@ -328,7 +345,8 @@ async function screenshot(
   label: string,
 ): Promise<string | null> {
   const safe = label.toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-|-$/gu, '').slice(0, 70);
-  const path = resolve(recorder.runDirectory, `${String(recorder.findings.length + 1).padStart(3, '0')}-${safe || 'finding'}.png`);
+  recorder.screenshotCount += 1;
+  const path = resolve(recorder.runDirectory, `${String(recorder.screenshotCount).padStart(3, '0')}-${safe || 'finding'}.png`);
   try {
     await page.screenshot({ path, fullPage: true });
     return path;
@@ -511,10 +529,7 @@ async function tryTimelineControls(
   phase: string,
   progress: TimelineProgress,
 ): Promise<void> {
-  if (!progress.previewListed) {
-    const actualEvents = page.locator('.dm-next-event-preview [data-event-kind]');
-    if (await actualEvents.count() > 0) progress.previewListed = true;
-  }
+  await observeTimelinePreview(page, progress);
   if (!progress.delayUsed) {
     const delay = page.getByRole('button', { name: 'Delay turn', exact: true });
     if (await delay.count() > 0) {
@@ -546,6 +561,19 @@ async function tryTimelineControls(
   if (progress.rewindUsed && !progress.continuedForward && await roundOf(page) >= 2) {
     progress.continuedForward = true;
   }
+}
+
+async function observeTimelinePreview(
+  page: Page,
+  progress: TimelineProgress,
+  waitMs = 0,
+): Promise<void> {
+  if (progress.previewListed) return;
+  const actualEvents = page.locator('.dm-next-event-preview [data-event-kind]');
+  if (waitMs > 0) {
+    await actualEvents.first().waitFor({ state: 'attached', timeout: waitMs }).catch(() => undefined);
+  }
+  if (await actualEvents.count() > 0) progress.previewListed = true;
 }
 
 async function pulseTurn(page: Page): Promise<void> {
@@ -654,6 +682,7 @@ async function loadDungeon(
     recorder.phase(phase, 'aborted', 'Bundled dungeon loader was unavailable.');
     return false;
   }
+  await page.getByLabel('Encounter seed', { exact: true }).fill(String(REHEARSAL_SEED));
   await loader.click();
   if (!await waitVisible(page, recorder, phase, 'author representative party and mount DM controls', page.getByRole('heading', { name: 'DM controls' }))) {
     recorder.phase(phase, 'aborted', 'Representative party did not load.');
@@ -666,13 +695,11 @@ async function loadDungeon(
     recorder.phase(phase, 'aborted', 'Representative party roster was incomplete.');
     return false;
   }
-  recorder.add(
-    'scripted_nudge',
+  recorder.phase(
     phase,
-    'select deterministic seed',
-    'The start flow offers no seed control. The local host uses its fixed internal seed, but the session cannot select or disclose it through the UI.',
+    'completed',
+    `Loaded Mirel Ash, Orin Reed, Brann Vale, and Sera Dawn with seed ${String(REHEARSAL_SEED)}.`,
   );
-  recorder.phase(phase, 'completed', 'Loaded Mirel Ash, Orin Reed, Brann Vale, and Sera Dawn through the bundled start flow.');
   return true;
 }
 
@@ -789,6 +816,15 @@ async function downloadExport(
       ? value.sessionRecord
       : null;
     const encounters = sessionRecord === null ? null : sessionRecord.encounters;
+    const revisions = isRecord(value) && Array.isArray(value.revisions) ? value.revisions : [];
+    const firstRevision = revisions[0];
+    const rngState = isRecord(firstRevision) && isRecord(firstRevision.rngState)
+      ? firstRevision.rngState
+      : null;
+    const seed = rngState !== null && typeof rngState.initialSeed === 'number' &&
+      Number.isSafeInteger(rngState.initialSeed)
+      ? rngState.initialSeed
+      : null;
     const result: SessionExport = {
       phase,
       filename,
@@ -797,6 +833,7 @@ async function downloadExport(
       hasSessionRecord: Array.isArray(encounters),
       hasAlarm: bytes.includes('cinder-wave-1-a') || bytes.includes('alarm_used'),
       hasIgnition: bytes.includes('surface_ignited') || /"burningCells":\[(?!\])/u.test(bytes),
+      seed,
     };
     recorder.exports.push(result);
     return result;
@@ -810,6 +847,7 @@ async function downloadExport(
       hasSessionRecord: false,
       hasAlarm: false,
       hasIgnition: false,
+      seed: null,
     });
     return null;
   }
@@ -856,9 +894,10 @@ async function saveManagerRoundTrip(
       );
     }
   }
-  const complete = poolsPresent && mounted && exported?.parsed === true && exported.hasSessionRecord;
+  const complete = poolsPresent && mounted && exported?.parsed === true &&
+    exported.hasSessionRecord && exported.seed === REHEARSAL_SEED;
   recorder.phase(phase, complete ? 'completed' : 'aborted', complete
-    ? `Found both autosave pools, created and loaded a manual file save, and parsed ${String(exported.encounterCount)} exported encounter records.`
+    ? `Found both autosave pools, created and loaded a manual file save, and parsed ${String(exported.encounterCount)} exported encounter records with seed ${String(exported.seed)}.`
     : 'One or more save-manager checks did not complete.');
   return exported;
 }
@@ -948,14 +987,16 @@ async function main(): Promise<void> {
   const reportPath = resolve('docs/rehearsal', `${options.date}-run-${String(options.run)}.md`);
   await mkdir(runDirectory, { recursive: true });
   const recorder = new FindingsRecorder(options.date, options.run, runDirectory, reportPath);
-  const baseUrl = `http://127.0.0.1:${String(options.port)}`;
+  let baseUrl = options.port === 0
+    ? 'http://127.0.0.1:(ephemeral)'
+    : `http://127.0.0.1:${String(options.port)}`;
   let currentPhase = 'preview startup';
   let preview: ChildProcess | null = null;
   let browser: Browser | null = null;
 
   try {
     preview = await startPreview(options.port, resolve(runDirectory, 'preview.log'));
-    await waitForPreview(baseUrl, preview);
+    baseUrl = await waitForPreview(preview);
     recorder.phase('preview startup', 'completed', 'Fresh npm build passed and the built preview accepted requests.');
 
     browser = await chromium.launch({ headless: true });
@@ -1014,10 +1055,12 @@ async function main(): Promise<void> {
         continue;
       }
       if (!await openVaneFight(page, baseUrl, recorder, fight.name)) continue;
+      await observeTimelinePreview(page, timeline, fight.slug === 'iron-voice' ? 2_000 : 0);
       if (!await assignAlgorithms(page, recorder, currentPhase)) {
         recorder.phase(currentPhase, 'aborted', 'Could not assign every combatant to the algorithm controller.');
         continue;
       }
+      await observeTimelinePreview(page, timeline, fight.slug === 'iron-voice' ? 2_000 : 0);
       const outcome = await playEncounter(page, recorder, currentPhase, 'vane-warren', timeline);
       const exported = await exportCurrentFight(page, recorder, currentPhase, `vane-${fight.slug}`);
       if (fight.slug === 'cinder-rite' && exported?.hasAlarm !== true) {
