@@ -48,9 +48,14 @@ Owner directives, 2026-08-25:
    the spell and slots remaining) cast Cure Wounds on wounded allies
    between fights.
 3. **Casting while resting is ALLOWED**: casting spells during a Short
-   Rest does not break or restart the rest. Owner ruling; where the
-   2024 "nothing more strenuous" short-rest text could be read
-   stricter, this ruling binds for this table.
+   Rest does not break or restart the rest. Recharacterized 2026-08-25
+   (round-4 Q1): this is plain ENGINE LEGALITY — the SRD's only
+   constraint is "nothing more strenuous than reading, talking, eating,
+   or standing watch" (srd:12036-12039), which is silent on casting; no
+   rule forbids it. Owner: "Where in the rules can't you do a 1 action
+   cast during a short rest?" Not an optional rule, no D373.10 register
+   entry. Hit-die thrift and overheal prevention remain PARTY POLICY
+   (algorithm choices), not engine rules.
 
 ## D382 — OWNER: survival analysis + potions + Aid/Bless + encounter detune (2026-08-25)
 
