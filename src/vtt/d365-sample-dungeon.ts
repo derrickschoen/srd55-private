@@ -34,6 +34,7 @@ export interface D365DungeonRoom {
   readonly monsters: readonly D365DungeonMonster[];
   readonly blockedCells: readonly GridCell[];
   readonly designSignals: readonly string[];
+  readonly recordedActionEconomyRatio: 0.25 | 0.5 | 0.75 | 1;
 }
 
 export interface D365DungeonManifest {
@@ -62,6 +63,7 @@ export const D365_SAMPLE_DUNGEON: D365DungeonManifest = {
       ],
       blockedCells: [{ column: 5, row: 3 }],
       designSignals: ['pack_tactics', 'distributed_targets'],
+      recordedActionEconomyRatio: 1,
     },
     {
       room: 2,
@@ -73,6 +75,7 @@ export const D365_SAMPLE_DUNGEON: D365DungeonManifest = {
       ],
       blockedCells: [{ column: 5, row: 1 }, { column: 5, row: 5 }],
       designSignals: ['bear_hug', 'ongoing_squeeze', 'web', 'venom', 'spider_climb'],
+      recordedActionEconomyRatio: 0.5,
     },
     {
       room: 3,
@@ -80,24 +83,23 @@ export const D365_SAMPLE_DUNGEON: D365DungeonManifest = {
       purpose: 'ranged_mobile',
       monsters: [
         { statblockId: 'statblock:scout', position: { column: 8, row: 1 } },
-        { statblockId: 'statblock:scout', position: { column: 8, row: 5 } },
         { statblockId: 'statblock:homebrew-beast/ridgewing-hunter', position: { column: 7, row: 2 } },
         { statblockId: 'statblock:homebrew-beast/storm-raptor', position: { column: 7, row: 4 } },
       ],
       blockedCells: [{ column: 4, row: 2 }, { column: 4, row: 4 }],
       designSignals: ['longbow', 'fly_speed', 'raking_pass', 'talon_rake', 'nimble_escape'],
+      recordedActionEconomyRatio: 0.75,
     },
     {
       room: 4,
       name: 'Ironweb Crown',
       purpose: 'boss',
       monsters: [
-        { statblockId: 'statblock:homebrew-beast/dreadweb-weaver', position: { column: 8, row: 3 } },
-        { statblockId: 'statblock:bugbear-stalker', position: { column: 7, row: 1 } },
-        { statblockId: 'statblock:bugbear-stalker', position: { column: 7, row: 5 } },
+        { statblockId: 'statblock:homebrew-beast/ironweb-weaver', position: { column: 8, row: 3 } },
       ],
       blockedCells: [{ column: 5, row: 2 }, { column: 5, row: 4 }],
       designSignals: ['boss_web_control', 'venom', 'ambush_support'],
+      recordedActionEconomyRatio: 0.25,
     },
   ],
 };
@@ -194,6 +196,7 @@ export function composeD365Room(
   members: readonly LoadedPartyMember[],
   displayNames: ReadonlyMap<number, string>,
   partyState: PartySessionState,
+  policy?: Parameters<typeof loadedPartyTurnLegalActions>[1],
 ): StoredCharacterEncounter {
   const room = roomAt(partyState.room);
   const players = members.map((member) => ({
@@ -230,7 +233,11 @@ export function composeD365Room(
     ],
   });
   const state = preloadPartySessionState(fresh, partyState);
-  const partyActions = loadedPartyTurnLegalActions(members);
+  const partyActions = loadedPartyTurnLegalActions(members, policy ?? {
+    useHealingPotions: true,
+    openWithBless: true,
+    reserveClericSlotsForBless: true,
+  });
   return {
     rulesEdition: '2024',
     partyState,

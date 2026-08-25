@@ -17,13 +17,21 @@ four PCs' four ordinary turn opportunities.
 
 | Separate fight | Counted hostile opportunities | Computation | Recorded ratio | Structural purpose |
 |---|---:|---:|---:|---|
-| The Cinder Rite | 14 | 6 standing (including Ashmaw) + 4 first-beat adds + 4 second-beat adds | 14 / 4 = **3.5x** | Brute-priest pressure plus two subsequent-round alarm waves. |
-| The Iron Voice | 8 | Marshal Kett's ordinary turn + 3 Legendary Action uses + 4 standing retainers | 8 / 4 = **2.0x** | Warlord with a complete standing retinue and repeated between-turn decisions. |
-| The Last Muster | 6 | Commander Sablehook + 3 standing guards + 2 leader-Bloodied conditional joiners | 6 / 4 = **1.5x** | A smaller command fight whose reserve enters only when its leader is Bloodied. |
+| The Cinder Rite | 4 | Ashmaw + one standing drummer + one first-beat minion + one second-beat warrior | 4 / 4 = **1.0x** | Brute-priest pressure plus two subsequent-round alarm waves; the alarm and both wave classes remain intact. |
+| The Iron Voice | 2 | Marshal Kett's ordinary turn + 1 Legendary Action use | 2 / 4 = **0.5x** | A coherent solo warlord with its between-turn decision and Legendary Resistance intact. |
+| The Last Muster | 2 | Commander Sablehook + one leader-Bloodied conditional Goblin Warrior | 2 / 4 = **0.5x** | A command fight whose reserve still enters only when its leader is Bloodied. |
 
 These numbers deliberately measure maximum listed pressure, not simultaneous
 round-one bodies: Cinder adds arrive only after the war drum is used, and Last
 Muster reserves are absent until their typed condition is satisfied.
+
+These are the post-D382 detune values. The replaced record was 3.5x, 2.0x, and
+1.5x respectively. Adds were trimmed before leaders: Cinder retains Ashmaw and
+both one-member alarm waves; Iron Voice retains Marshal Kett (58 HP, one attack
+per action, one Legendary Action) while removing the four retainers; Last Muster
+retains Commander Sablehook and a one-warrior Bloodied reserve. The fixed-seed
+evidence and the full before/after compositions are recorded in
+`docs/design/2026-08-25-survival-analysis.md`.
 
 ## Terrain and object vocabulary
 

@@ -281,6 +281,10 @@ function playerCharacterAlgorithmRank(
   command: EncounterCommand,
   actor: VisibleEncounterState['combatants'][number],
 ): readonly [number, number, number, string] {
+  if (command.type === 'drink_healing_potion') {
+    const hitPoints = lastKnownHitPoints(request, actor.id);
+    return [1, hitPoints?.current ?? 0, 0, commandKey(command)];
+  }
   if (command.type === 'opportunity_attack') {
     const target = visibleHostile(request, actor.kind, command.target);
     if (target !== null) {
@@ -289,6 +293,7 @@ function playerCharacterAlgorithmRank(
     }
   }
   if (command.type === 'cast_spell') {
+    if (command.spellId === 'bless') return [0, -1, 0, commandKey(command)];
     if (TACTICAL_HEALING_SPELL_IDS.has(command.spellId)) {
       const ally = command.targets
         .map((id) => visibleAlly(request, actor.kind, id))

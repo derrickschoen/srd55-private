@@ -1216,6 +1216,7 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'attack_roll_mode_modifier':
     case 'faerie_fire':
     case 'consumable_healing_pool':
+    case 'healing_potion':
     case 'cannot_regain_hit_points':
     case 'creature_type_protection':
     case 'd20_test_modifier':
@@ -4866,6 +4867,7 @@ function cloneEffectApplication(
       case 'attack_roll_mode_modifier':
       case 'faerie_fire':
       case 'consumable_healing_pool':
+      case 'healing_potion':
       case 'cannot_regain_hit_points':
       case 'creature_type_protection':
       case 'd20_test_modifier':
@@ -6914,6 +6916,7 @@ function resolvedSpellEffectPayload(
     case 'attack_roll_mode_modifier':
     case 'faerie_fire':
     case 'consumable_healing_pool':
+    case 'healing_potion':
     case 'creature_type_protection':
     case 'sanctuary':
     case 'magic_missile_immunity':
@@ -10983,6 +10986,37 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         type: 'healing_pool_consumed',
         combatant: command.actor,
         effectId: pool.id,
+        remaining,
+      });
+      return;
+    }
+    case 'drink_healing_potion': {
+      assertActiveActor(context, command.actor);
+      const potion = context.state.effects.find((effect) => effect.id === command.effectId);
+      if (potion === undefined || potion.payload.kind !== 'healing_potion') {
+        throw new EncounterRuleError('validation', `Effect ${command.effectId} is not a healing potion.`);
+      }
+      if (potion.payload.remainingUses < 1) {
+        throw new EncounterRuleError('validation', `Healing potion ${command.effectId} is empty.`);
+      }
+      spendCost(context, command.actor, potion.payload.activation, 'Drink Potion of Healing');
+      const remaining = potion.payload.remainingUses - 1;
+      context.state = {
+        ...context.state,
+        effects: context.state.effects.map((effect) => effect.id === potion.id
+          ? { ...effect, payload: { ...potion.payload, remainingUses: remaining } }
+          : effect),
+      };
+      let healing = potion.payload.dice.modifier;
+      for (let index = 0; index < potion.payload.dice.count; index += 1) {
+        healing += Math.floor(context.rng() * potion.payload.dice.sides) + 1;
+      }
+      applyHealing(context, command.actor, command.actor, healing);
+      emit(context, {
+        type: 'healing_potion_consumed',
+        combatant: command.actor,
+        effectId: potion.id,
+        itemId: potion.payload.itemId,
         remaining,
       });
       return;

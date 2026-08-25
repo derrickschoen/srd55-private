@@ -179,11 +179,11 @@ export function vaneWarlordStatblock(legendaryActionPool: number): MonsterStatbl
     id: 'statblock:vane-warren/marshal-kett',
     name: 'Marshal Kett, the Iron Voice',
     armorClass: 17,
-    hitPointMaximum: 88,
+    hitPointMaximum: 58,
     speedFeet: 30,
     initiativeBonus: 4,
     savingThrowBonuses: savingThrowBonuses(warlordAbilities),
-    attacksPerAction: 2,
+    attacksPerAction: 1,
     usesDeathSaves: false,
     provenance: warlordProvenance,
     sourceDetails: {
@@ -191,7 +191,7 @@ export function vaneWarlordStatblock(legendaryActionPool: number): MonsterStatbl
         [HOBGOBLIN_CAPTAIN_SOURCE, LEGENDARY_ACTION_SOURCE, UNICORN_LEGENDARY_SOURCE],
         { sizes: ['Medium'], type: 'Fey', subtype: 'Goblinoid', alignment: 'Lawful Evil' },
         { rating: 5, experiencePoints: 1_800, proficiencyBonus: 3 },
-        { count: 13, sides: 8, modifier: 30 },
+        { count: 8, sides: 8, modifier: 22 },
         30,
         warlordAbilities,
       ),
@@ -215,7 +215,7 @@ export function vaneWarlordStatblock(legendaryActionPool: number): MonsterStatbl
         {
           kind: 'multiattack',
           id: 'multiattack',
-          count: 2,
+          count: 1,
           actionIds: ['iron-greatsword', 'longbow'],
           combination: 'any',
         },
@@ -267,7 +267,7 @@ export function vaneWarlordStatblock(legendaryActionPool: number): MonsterStatbl
   });
 }
 
-export const VANE_WARLORD = vaneWarlordStatblock(3);
+export const VANE_WARLORD = vaneWarlordStatblock(1);
 
 export interface VaneWarrenMonsterRosterRow {
   readonly id: `statblock:${typeof VANE_WARREN_MONSTER_NAMESPACE}/${string}`;

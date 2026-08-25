@@ -180,6 +180,8 @@ function actionLabel(action: EncounterCommand): string {
       return 'Heal';
     case 'consume_healing_pool':
       return 'Consume healing resource';
+    case 'drink_healing_potion':
+      return 'Drink Potion of Healing';
     case 'apply_effect':
       return 'Apply effect';
     case 'grant_temporary_hit_points':

@@ -44,6 +44,7 @@ import {
   deduplicateGapReports,
   type GapReport,
 } from './srd-gap-report';
+import { shouldDrinkHealingPotion } from './survival-policy';
 
 export const EXTERNAL_PARTY_PACK_SCHEMA_VERSION = 2 as const;
 export const EXTERNAL_PARTY_PACK_MINIMUM_SCHEMA_VERSION = 1 as const;
@@ -2145,7 +2146,9 @@ function healingSpellCommands(
   member: LoadedPartyMember,
   state: Parameters<TurnLegalActions>[0],
   actor: ReturnType<typeof combatantId>,
+  allowLeveledHealing = true,
 ): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  if (!allowLeveledHealing) return [];
   const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
   if (acting === undefined) throw new Error(`Loaded party combatant ${actor} is absent from the encounter.`);
   const allies = state.combatants.filter((candidate) =>
@@ -2192,9 +2195,75 @@ function healingSpellCommands(
   });
 }
 
+function healingPotionCommands(
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+): readonly Extract<EncounterCommand, { readonly type: 'drink_healing_potion' }>[] {
+  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  if (acting === undefined || !acting.turn.bonusActionAvailable) return [];
+  const hitPointMaximum = state.effects.reduce((maximum, effect) =>
+    effect.targets.includes(actor) && effect.payload.kind === 'hit_point_maximum_modifier'
+      ? maximum + effect.payload.amount
+      : maximum,
+  acting.profile.rules.hitPointMaximum);
+  // The coordinator requests one immediate action at a time; it has no queued
+  // ally cast, so an action not yet taken cannot be "incoming" here.
+  if (!shouldDrinkHealingPotion({
+    currentHitPoints: acting.hitPoints,
+    hitPointMaximum,
+    allyCastHealingIncoming: false,
+  })) return [];
+  return state.effects.flatMap((effect) =>
+    effect.source === actor && effect.payload.kind === 'healing_potion' && effect.payload.remainingUses > 0
+      ? [{ type: 'drink_healing_potion' as const, actor, effectId: effect.id }]
+      : []);
+}
+
+function blessSpellCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  if (acting === undefined || acting.turn.action.kind !== 'available') return [];
+  if (state.eventLog.some((event) =>
+    event.type === 'spell_cast' && event.caster === actor && event.spellId === 'bless')) return [];
+  const definition = spellDefinition('bless');
+  if (definition === null || !member.spells.some((spell) => spell.id === 'bless')) return [];
+  const slot = acting.spellSlots
+    .filter((candidate) => candidate.remaining > 0 && candidate.level >= definition.level)
+    .sort((left, right) => left.level - right.level)[0];
+  if (slot === undefined) return [];
+  const targets = state.combatants
+    .filter((candidate) =>
+      candidate.life !== 'dead' &&
+      combatantsAreAllies(state, candidate.profile.id, actor) &&
+      gridDistance(loadedMemberPosition(state, actor), loadedMemberPosition(state, candidate.profile.id)) <= 30)
+    .sort((left, right) =>
+      right.profile.rules.attacksPerAction - left.profile.rules.attacksPerAction ||
+      Number(right.profile.id === actor) - Number(left.profile.id === actor) ||
+      left.profile.id.localeCompare(right.profile.id))
+    .slice(0, 3)
+    .map((candidate) => candidate.profile.id);
+  if (targets.length === 0) return [];
+  return [loadedPartySpellCastCommand(member, 'bless', {
+    slotLevel: slot.level as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
+    castAsRitual: false,
+    targets,
+    area: null,
+    weaponAttack: null,
+    selectedOption: null,
+  })];
+}
+
 /** Enumerates reducer-valid attacks and feature actions for loaded v2 party members. */
 export function loadedPartyTurnLegalActions(
   members: readonly LoadedPartyMember[],
+  policy: {
+    readonly useHealingPotions: boolean;
+    readonly openWithBless: boolean;
+    readonly reserveClericSlotsForBless?: boolean;
+  } = { useHealingPotions: false, openWithBless: false, reserveClericSlotsForBless: false },
 ): TurnLegalActions {
   const byId = new Map(members.map((member) => [member.profile.id, member] as const));
   return (state, actor) => {
@@ -2271,14 +2340,18 @@ export function loadedPartyTurnLegalActions(
       }));
 
     const actions: EncounterCommand[] = [...loadedPartyMovementActions(state, actor)];
+    if (policy.useHealingPotions) actions.push(...healingPotionCommands(state, actor));
     if (acting.turn.action.kind !== 'spent') actions.push(...commands());
     if (acting.turn.action.kind === 'available') {
+      if (policy.openWithBless) actions.push(...blessSpellCommands(member, state, actor));
       actions.push(...basicDamageCantripCommands(member, state, actor, targets));
       // Dash grants extra movement equal to Speed for the current turn.
       // SRD 5.2.1: docs/srd/full/srd-5.2.1.txt:11589-11596.
       actions.push({ type: 'dash', actor });
     }
-    actions.push(...healingSpellCommands(member, state, actor));
+    const reservesClericSlots = policy.reserveClericSlotsForBless === true &&
+      member.source.classes.some((entry) => entry.classId === 'Cleric');
+    actions.push(...healingSpellCommands(member, state, actor, !reservesClericSlots));
     for (const effect of member.effects) {
       if (effect.payload.kind === 'bonus_action_attack_grant') {
         const pool = effect.resourcePoolId === null

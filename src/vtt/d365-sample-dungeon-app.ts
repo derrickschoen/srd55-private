@@ -2,7 +2,7 @@ import type { RpcClient } from '../rpc/client';
 import { mountEncounterVtt, type EncounterVttMount } from './encounter-app';
 import { composeD365Room, D365_SAMPLE_DUNGEON } from './d365-sample-dungeon';
 import { loadD365SampleParty } from './d365-sample-party';
-import { createPartySessionState } from './party-session-state';
+import { createD365SurvivalPartySessionState } from './survival-policy';
 import {
   MAX_ENCOUNTER_SEED,
   parseOptionalEncounterSeed,
@@ -66,7 +66,7 @@ export function mountD365SampleDungeon(
     status.value = 'Authoring four characters through RPC…';
     void loadD365SampleParty(rpc).then((sample) => {
       if (closed) return;
-      const partyState = createPartySessionState(sample.party.members);
+      const partyState = createD365SurvivalPartySessionState(sample.party.members).state;
       const encounter = composeD365Room(
         sample.party.members,
         sample.displayNames,

@@ -37,6 +37,7 @@ const PARTY_STATE: PartySessionState = {
     limitedResources: [],
     hitDice: [{ sides: 8, maximum: 1, remaining: 1 }],
     consumables: [],
+    aid: null,
     equipment: null,
   })),
   reactionPolicies: PARTY_COMBATANTS.flatMap((combatant) =>

@@ -276,6 +276,11 @@ export type EncounterCommand =
       readonly effectId: EncounterEffectId;
     }
   | {
+      readonly type: 'drink_healing_potion';
+      readonly actor: CombatantId;
+      readonly effectId: EncounterEffectId;
+    }
+  | {
       readonly type: 'apply_effect';
       readonly actor: CombatantId;
       readonly effect: EffectApplication;
@@ -315,6 +320,13 @@ export type EncounterEvent =
       readonly waveId: string;
       readonly calledBy: CombatantId;
       readonly combatants: readonly CombatantId[];
+      readonly round: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'conditional_joiners_deployed';
+      readonly leader: CombatantId;
+      readonly combatants: readonly CombatantId[];
+      readonly condition: 'leader_bloodied';
       readonly round: number;
     })
   | (SequencedEvent & {
@@ -693,6 +705,13 @@ export type EncounterEvent =
       readonly type: 'healing_pool_consumed';
       readonly combatant: CombatantId;
       readonly effectId: EncounterEffectId;
+      readonly remaining: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'healing_potion_consumed';
+      readonly combatant: CombatantId;
+      readonly effectId: EncounterEffectId;
+      readonly itemId: ItemId;
       readonly remaining: number;
     })
   | (SequencedEvent & {
