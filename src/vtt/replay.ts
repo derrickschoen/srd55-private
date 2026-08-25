@@ -22,6 +22,7 @@ import {
 } from './generated-encounter-fixtures';
 import {
   deriveBranchRng,
+  replayPacingTransition,
   sessionHistory,
   type SessionRevision,
 } from './session-persistence';
@@ -808,6 +809,21 @@ export function replayBundle(
         const rng = restoreMulberry32(replayRecord.rng.pre);
         const reduction = reduceEncounter(parent.state, revision.transition.command, rng);
         expectedState = reduction.state;
+        expectedRng = rng.snapshot();
+        assertEqual('event', index, 'transition.events', reduction.events, revision.transition.events);
+        reducerRevisionCount += 1;
+        eventCount += reduction.events.length;
+        break;
+      }
+      case 'turn_skipped':
+      case 'turn_delayed': {
+        if (parent === null || parent === undefined) {
+          throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'existing pacing parent', revision.parentRevision);
+        }
+        assertEqual('rng', index, 'rng.pre', parent.rng, replayRecord.rng.pre);
+        const rng = restoreMulberry32(replayRecord.rng.pre);
+        const reduction = replayPacingTransition(parent.state, revision.transition, rng);
+        expectedState = reduction.encounterState;
         expectedRng = rng.snapshot();
         assertEqual('event', index, 'transition.events', reduction.events, revision.transition.events);
         reducerRevisionCount += 1;

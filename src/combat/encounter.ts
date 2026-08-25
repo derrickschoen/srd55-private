@@ -442,6 +442,11 @@ export interface EncounterState {
   readonly activeCombatant: CombatantId | null;
   readonly activeInitiativeIndex: number | null;
   readonly round: number;
+  /** Original order for the current round while one or more DM delays are active. */
+  readonly initiativeBeforeDelays?: {
+    readonly round: number;
+    readonly order: readonly CombatantId[];
+  };
   readonly effects: readonly EncounterEffect[];
   /** Creation-sequenced areas; reducers never depend on insertion order. */
   readonly persistentAreas: readonly PersistentArea[];
@@ -9450,6 +9455,21 @@ function nextLivingInitiativeIndex(state: EncounterState, current: number): numb
   throw new EncounterRuleError('No living combatant remains in initiative.');
 }
 
+function restoreInitiativeAfterDelayedRound(state: EncounterState): EncounterState {
+  const delayed = state.initiativeBeforeDelays;
+  if (delayed === undefined) return state;
+  const byCombatant = new Map(state.initiative.map((entry) => [entry.combatant, entry] as const));
+  const restored = delayed.order.flatMap((combatant): readonly InitiativeEntry[] => {
+    const entry = byCombatant.get(combatant);
+    if (entry === undefined) return [];
+    byCombatant.delete(combatant);
+    return [entry];
+  });
+  const initiative = [...restored, ...byCombatant.values()];
+  const { initiativeBeforeDelays: _completedDelay, ...withoutDelay } = state;
+  return { ...withoutDelay, initiative };
+}
+
 type InitiativeEntryDraft = Omit<InitiativeEntry, 'slot'>;
 
 interface InitiativeSlotDraft {
@@ -10568,10 +10588,15 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       if (currentIndex === null) throw new EncounterRuleError('Initiative is not active.');
       processBoundary(context, command.actor, 'end');
       emit(context, { type: 'turn_ended', combatant: command.actor, round: context.state.round });
-      const nextIndex = nextLivingInitiativeIndex(context.state, currentIndex);
+      let nextIndex = nextLivingInitiativeIndex(context.state, currentIndex);
+      const startsNewRound = nextIndex <= currentIndex;
+      if (startsNewRound) {
+        context.state = restoreInitiativeAfterDelayedRound(context.state);
+        nextIndex = nextLivingInitiativeIndex(context.state, context.state.initiative.length - 1);
+      }
       const next = context.state.initiative[nextIndex];
       if (next === undefined) throw new EncounterRuleError('Next initiative entry is missing.');
-      const round = nextIndex <= currentIndex ? context.state.round + 1 : context.state.round;
+      const round = startsNewRound ? context.state.round + 1 : context.state.round;
       context.state = { ...context.state, activeInitiativeIndex: nextIndex };
       startTurn(context, next.combatant, round);
       return;

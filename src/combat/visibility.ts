@@ -37,6 +37,7 @@ export const ENCOUNTER_VIEW_CLASSIFICATION = {
   activeCombatant: 'player_visible',
   activeInitiativeIndex: 'dm_only',
   round: 'player_visible',
+  initiativeBeforeDelays: 'dm_only',
   effects: 'dm_only',
   persistentAreas: 'dm_only',
   nextPersistentAreaSequence: 'dm_only',
