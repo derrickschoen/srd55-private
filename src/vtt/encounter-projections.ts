@@ -6,6 +6,10 @@ import type {
 } from '../combat/coordinator';
 import type { TurnResources } from '../combat/encounter';
 import type { PendingDecision, ReactionPolicy } from '../combat/encounter';
+import {
+  previewMovementPathDangers,
+  type MovementPathDangerPreview,
+} from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
 import type { GridCell } from '../combat/grid';
 import {
@@ -69,6 +73,8 @@ export interface DmBoardProjection {
   readonly pendingRequest: ControllerRequest | null;
   /** Exact legal commands exposed to the DM only when the pending actor uses a human controller. */
   readonly humanCommandActions: readonly EncounterCommand[];
+  /** DM-only previews keyed by the exact legal move command. */
+  readonly movementPreviews: readonly DmMovementPathPreview[];
   /** Optional batch-planning action domains, populated when one request plans for several actors. */
   readonly turnProgramLegalActions?: readonly {
     readonly actorId: CombatantId;
@@ -82,6 +88,10 @@ export interface DmBoardProjection {
   readonly partySession: DmPartySessionView | null;
   readonly decisionTray: DmDecisionTrayProjection;
   readonly timeline: EncounterTimelineProjection;
+}
+
+export interface DmMovementPathPreview extends MovementPathDangerPreview {
+  readonly commandKey: string;
 }
 
 export type DmDecisionTrayEntry =
@@ -219,6 +229,9 @@ export function projectDmBoard(input: {
   const pendingController = pending === null
     ? undefined
     : input.controllers.find((identity) => identity.combatantId === pending.actorId);
+  const humanCommandActions = pendingController?.kind === 'human'
+    ? pending?.legalActions.actions ?? []
+    : [];
   const names = new Map(input.view.state.combatants.map(
     (subject) => [subject.profile.id, subject.profile.name] as const,
   ));
@@ -250,9 +263,11 @@ export function projectDmBoard(input: {
     board: projectEncounterBoard(input.view, input.coordinator.pendingRequest, targets),
     coordinator: input.coordinator,
     pendingRequest: input.coordinator.pendingRequest,
-    humanCommandActions: pendingController?.kind === 'human'
-      ? pending?.legalActions.actions ?? []
-      : [],
+    humanCommandActions,
+    movementPreviews: humanCommandActions.flatMap((action): readonly DmMovementPathPreview[] =>
+      action.type === 'move'
+        ? [{ commandKey: canonicalJson(action), ...previewMovementPathDangers(input.view.state, action) }]
+        : []),
     controllers: input.controllers,
     history: input.history,
     adjudicatedTargets: targets,

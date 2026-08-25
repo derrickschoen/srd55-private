@@ -511,10 +511,10 @@ describe('SRD death-save reducer flow', () => {
     const resolved = startPatientTurn(fixture.state, fixture.attacker, 9).state;
     const dm = projectDmView(resolved);
     const shownState = reduceEncounter(resolved, {
-      type: 'set_hide_death_save_rolls', hidden: false,
+      type: 'set_hidden_roll_category', category: 'death_saves', hidden: false,
     }, fixedD20(11)).state;
     const hiddenState = reduceEncounter(resolved, {
-      type: 'set_hide_death_save_rolls', hidden: true,
+      type: 'set_hidden_roll_category', category: 'death_saves', hidden: true,
     }, fixedD20(11)).state;
     const shown = projectPlayerView(shownState, {
       seatId: 'seat:death-save',

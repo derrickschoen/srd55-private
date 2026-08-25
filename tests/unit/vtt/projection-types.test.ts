@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EncounterState } from '../../../src/combat/encounter';
 import type { DmView, PlayerView } from '../../../src/combat/visibility';
+import type { PlayerBoardProjection } from '../../../src/vtt/encounter-projections';
 
 type AssertTrue<Value extends true> = Value;
 type IsAbsent<Shape, Field extends PropertyKey> = Field extends keyof Shape ? false : true;
@@ -24,6 +25,12 @@ const visibleDeathSaveRollIsNumber: AssertTrue<
     ? true
     : false
 > = true;
+type PlayerHiddenMonsterAttack = Extract<
+  Extract<PlayerEvent, { readonly type: 'attack_resolved' }>,
+  { readonly rollVisibility: 'dm_only' }
+>;
+const hiddenMonsterAttackNumberIsAbsent: AssertTrue<IsAbsent<PlayerHiddenMonsterAttack, 'attack'>> = true;
+const movementDangerPreviewIsAbsent: AssertTrue<IsAbsent<PlayerBoardProjection, 'movementPreviews'>> = true;
 const playerViewIsNotCanonicalState: AssertTrue<IsNotAssignable<PlayerView, EncounterState>> = true;
 const canonicalStateIsNotDmView: AssertTrue<IsNotAssignable<EncounterState, DmView>> = true;
 
@@ -38,8 +45,10 @@ describe('D359 compile-time view boundary', () => {
       hitPointsAreAbsentFromObservedCombatants,
       hiddenDeathSaveRollIsAbsent,
       visibleDeathSaveRollIsNumber,
+      hiddenMonsterAttackNumberIsAbsent,
+      movementDangerPreviewIsAbsent,
       playerViewIsNotCanonicalState,
       canonicalStateIsNotDmView,
-    ]).toEqual([true, true, true, true, true, true, true, true, true, true]);
+    ]).toEqual([true, true, true, true, true, true, true, true, true, true, true, true]);
   });
 });

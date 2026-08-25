@@ -71,6 +71,7 @@ import {
   type PersistentAreaOptionalRule,
 } from './persistent-areas';
 import { rollDice, rollDie, transactionalRng, type Rng, type TransactionalRng } from './random';
+import type { HiddenRollCategory } from './roll-visibility';
 import {
   applyDamageResponse,
   resolveAttackRoll,
@@ -448,8 +449,8 @@ export function isEncounterConfig(value: unknown): value is EncounterConfig {
 export interface EncounterState {
   readonly config: EncounterConfig;
   readonly rulesEdition: DetectionRulesEdition;
-  /** DM-controlled projection policy; the raw event always retains the roll. */
-  readonly hideDeathSaveRolls: boolean;
+  /** DM-controlled projection policy; raw events always retain their rolls. */
+  readonly hiddenRolls: readonly HiddenRollCategory[];
   readonly revision: number;
   readonly nextEventSequence: number;
   readonly nextDecisionSequence: number;
@@ -504,6 +505,8 @@ interface ReevaluatedSpellBranch {
 export interface EncounterSetup {
   readonly config?: EncounterConfig;
   readonly rulesEdition?: DetectionRulesEdition;
+  readonly hiddenRolls?: readonly HiddenRollCategory[];
+  /** Legacy construction input retained only to preserve the existing death-save behavior. */
   readonly hideDeathSaveRolls?: boolean;
   readonly bounds: GridBounds;
   readonly blockedCells?: readonly GridCell[];
@@ -879,7 +882,9 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   return {
     config: { ...config },
     rulesEdition: setup.rulesEdition ?? '2024',
-    hideDeathSaveRolls: setup.hideDeathSaveRolls ?? false,
+    hiddenRolls: setup.hiddenRolls === undefined
+      ? setup.hideDeathSaveRolls === true ? ['death_saves'] : []
+      : [...new Set(setup.hiddenRolls)],
     revision: 0,
     nextEventSequence: 1,
     nextDecisionSequence: 1,
@@ -3298,6 +3303,97 @@ function persistentAreaAnchorCell(state: EncounterState, area: PersistentArea): 
       : null;
 }
 
+export const MOVEMENT_PATH_DANGER_KINDS = [
+  'opportunity_attack',
+  'burning_surface',
+  'persistent_area_damage',
+  'difficult_terrain',
+] as const;
+
+export type MovementPathDangerKind = (typeof MOVEMENT_PATH_DANGER_KINDS)[number];
+
+export interface MovementPathDangerAnnotation {
+  readonly cell: GridCell;
+  readonly dangers: readonly MovementPathDangerKind[];
+}
+
+export interface MovementPathDangerPreview {
+  readonly actor: CombatantId;
+  /** Start cell followed by each entered cell in travel order. */
+  readonly path: readonly GridCell[];
+  readonly annotations: readonly MovementPathDangerAnnotation[];
+}
+
+function persistentAreaHasDamage(area: PersistentArea): boolean {
+  return area.hooks.some((hook) => hook.effect.payload.kind === 'damage');
+}
+
+/**
+ * DM-only movement preview derived by the same movement/OA eligibility used by
+ * the reducer. It does not mutate state or consume RNG.
+ */
+export function previewMovementPathDangers(
+  state: EncounterState,
+  command: Extract<EncounterCommand, { readonly type: 'move' }>,
+): MovementPathDangerPreview {
+  const mover = combatant(state, command.actor);
+  const start = token(state, command.actor).position;
+  const plan = planMovement(encounterMovementWorld(state), {
+    actorId: command.actor,
+    start,
+    path: command.path,
+    budgetRemaining: mover.turn.movement.remaining,
+    cause: effectiveMovementCause(state, command),
+    reachSources: opportunityAttackReachSources(state, command.actor),
+  });
+  if (plan.kind === 'illegal') {
+    throw new EncounterRuleError(`Illegal movement preview: ${plan.reason} at step ${String(plan.stepIndex)}.`);
+  }
+
+  const dangersByCell = new Map<string, {
+    readonly cell: GridCell;
+    readonly dangers: Set<MovementPathDangerKind>;
+  }>();
+  const add = (cell: GridCell, danger: MovementPathDangerKind): void => {
+    const key = cellKey(cell);
+    const existing = dangersByCell.get(key);
+    if (existing === undefined) {
+      dangersByCell.set(key, { cell: { ...cell }, dangers: new Set([danger]) });
+    } else {
+      existing.dangers.add(danger);
+    }
+  };
+
+  for (const step of plan.steps) {
+    if (step.beforeLeaving.some((window) => opportunityAttackWindowEligible(
+      state,
+      command.actor,
+      window.reactorId,
+    ))) add(step.from, 'opportunity_attack');
+
+    if (state.persistentAreas.some((area) => area.burningCells.some(
+      (burning) => cellKey(burning.cell) === cellKey(step.to),
+    ))) add(step.to, 'burning_surface');
+
+    if (state.persistentAreas.some((area) =>
+      persistentAreaHasDamage(area) &&
+      persistentAreaContains(area, step.to, persistentAreaAnchorCell(state, area), state))) {
+      add(step.to, 'persistent_area_damage');
+    }
+
+    if (step.cost > feet(5)) add(step.to, 'difficult_terrain');
+  }
+
+  return {
+    actor: command.actor,
+    path: [{ ...start }, ...plan.steps.map((step) => ({ ...step.to }))],
+    annotations: [...dangersByCell.values()].map((annotation) => ({
+      cell: annotation.cell,
+      dangers: MOVEMENT_PATH_DANGER_KINDS.filter((danger) => annotation.dangers.has(danger)),
+    })),
+  };
+}
+
 function effectiveIgnitionRule(
   state: EncounterState,
   area: PersistentArea,
@@ -3856,6 +3952,48 @@ interface OpportunityAttackTrigger {
   readonly to: GridCell;
 }
 
+function opportunityAttackReachSources(
+  state: EncounterState,
+  mover: CombatantId,
+): readonly import('./movement').ReachSource<CombatantId>[] {
+  return state.combatants
+    .filter((candidate) =>
+      candidate.life === 'living' &&
+      !combatantsAreAllies(state, candidate.profile.id, mover) &&
+      candidate.profile.id !== mover)
+    .map((candidate) => ({
+      reactorId: candidate.profile.id,
+      cell: token(state, candidate.profile.id).position,
+      reach: effectiveCombatRules(state, candidate.profile.id).reach,
+      reactionAvailable: candidate.turn.reactionAvailable,
+      hostile: true,
+    }));
+}
+
+function effectiveMovementCause(
+  state: EncounterState,
+  command: Extract<EncounterCommand, { readonly type: 'move' }>,
+): import('./movement').MovementCause {
+  const subject = combatant(state, command.actor);
+  return (command.cause === 'voluntary' && subject.turn.disengaging) ||
+    command.cause === 'reactions_resolved'
+    ? 'disengaged'
+    : command.cause;
+}
+
+function opportunityAttackWindowEligible(
+  state: EncounterState,
+  mover: CombatantId,
+  reactor: CombatantId,
+): boolean {
+  // Opportunity Attack trigger, sight gate, timing, and exemptions:
+  // docs/srd/full/srd-5.2.1.txt:933-956.
+  return !effectiveCombatRules(state, mover).detectionTraits.includes('flyby') &&
+    canCombatantSee(state, reactor, mover) &&
+    !state.effects.some((effect) =>
+      effect.targets.includes(reactor) && effect.payload.kind === 'opportunity_attacks_disabled');
+}
+
 function queueOpportunityAttack(
   context: ReductionContext,
   reactor: CombatantId,
@@ -4038,32 +4176,13 @@ function processMove(
   const subject = assertActiveActor(context, command.actor);
   assertCanUseActions(context, command.actor);
   const actorToken = token(context.state, command.actor);
-  const reachSources = context.state.combatants
-    .filter(
-      (candidate) =>
-        candidate.life === 'living' &&
-        !combatantsAreAllies(context.state, candidate.profile.id, command.actor) &&
-        candidate.profile.id !== command.actor,
-    )
-    .map((candidate) => ({
-      reactorId: candidate.profile.id,
-      cell: token(context.state, candidate.profile.id).position,
-      reach: effectiveCombatRules(context.state, candidate.profile.id).reach,
-      reactionAvailable: candidate.turn.reactionAvailable,
-      hostile: true,
-    }));
-  const cause =
-    (command.cause === 'voluntary' && subject.turn.disengaging) ||
-    command.cause === 'reactions_resolved'
-      ? 'disengaged'
-      : command.cause;
   const plan = planMovement(encounterMovementWorld(context.state), {
     actorId: command.actor,
     start: actorToken.position,
     path: command.path,
     budgetRemaining: subject.turn.movement.remaining,
-    cause,
-    reachSources,
+    cause: effectiveMovementCause(context.state, command),
+    reachSources: opportunityAttackReachSources(context.state, command.actor),
   });
   if (plan.kind === 'illegal') {
     throw new EncounterRuleError(`Illegal movement: ${plan.reason} at step ${plan.stepIndex}.`);
@@ -4073,13 +4192,11 @@ function processMove(
   for (const step of plan.steps) {
     for (const window of step.beforeLeaving) {
       const reactor = combatant(context.state, window.reactorId);
-      const mover = combatant(context.state, command.actor);
-      if (
-        effectiveCombatRules(context.state, mover.profile.id).detectionTraits.includes('flyby') ||
-        !canCombatantSee(context.state, window.reactorId, command.actor) ||
-        context.state.effects.some((effect) =>
-          effect.targets.includes(window.reactorId) && effect.payload.kind === 'opportunity_attacks_disabled')
-      ) continue;
+      if (!opportunityAttackWindowEligible(
+        context.state,
+        command.actor,
+        window.reactorId,
+      )) continue;
       const trigger: OpportunityAttackTrigger = {
         mover: command.actor, from: { ...step.from }, to: { ...step.to },
       };
@@ -10133,8 +10250,13 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       reevaluatePersistentAreaMembership(context);
       return;
     }
-    case 'set_hide_death_save_rolls':
-      context.state = { ...context.state, hideDeathSaveRolls: command.hidden };
+    case 'set_hidden_roll_category':
+      context.state = {
+        ...context.state,
+        hiddenRolls: command.hidden
+          ? [...new Set([...context.state.hiddenRolls, command.category])]
+          : context.state.hiddenRolls.filter((category) => category !== command.category),
+      };
       return;
     case 'dm_stabilize':
     case 'dm_revive_at_one_hit_point':

@@ -17,6 +17,7 @@ import type { CombatantId, EncounterEffectId, Feet, ItemId, LimitedResourcePoolI
 import type { LightLevel, WorldObject, WorldOperation } from './world-objects';
 import type { WildShapeEquipmentDisposition, WildShapeReversionReason } from './wild-shape';
 import type { StatblockId } from './values';
+import type { HiddenRollCategory } from './roll-visibility';
 
 export type ActionCost = 'action' | 'bonus_action' | 'reaction' | 'none';
 
@@ -90,7 +91,8 @@ export type EncounterCommand =
       readonly optionId: string;
     }
   | {
-      readonly type: 'set_hide_death_save_rolls';
+      readonly type: 'set_hidden_roll_category';
+      readonly category: HiddenRollCategory;
       readonly hidden: boolean;
     }
   | {
