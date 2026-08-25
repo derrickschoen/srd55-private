@@ -34,7 +34,22 @@ test('DM Long Rest ends the adventuring day and logs a cited autosaved summary',
   await expect(card).toContainText('Interruption handling is deferred.');
   await expect(page.getByRole('button', { name: 'End room and enter next room' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Short Rest before next room' })).toHaveCount(0);
-  await expect(page.locator('.dm-save-row[data-source="browser"]')).toHaveCount(1);
+  const browserSaves = page.locator('.dm-save-row[data-source="browser"]');
+  const browserPoolLabels = browserSaves.locator('.dm-save-pool');
+  const perRoundSaves = browserSaves.filter({
+    has: page.locator('.dm-save-pool').filter({ hasText: /^Per-round autosave$/u }),
+  });
+  const encounterBoundarySaves = browserSaves.filter({
+    has: page.locator('.dm-save-pool').filter({ hasText: /^Encounter-boundary autosave$/u }),
+  });
+  await expect(browserSaves).toHaveCount(3);
+  await expect(browserPoolLabels).toHaveText([
+    /^(?:Per-round autosave|Encounter-boundary autosave)$/u,
+    /^(?:Per-round autosave|Encounter-boundary autosave)$/u,
+    /^(?:Per-round autosave|Encounter-boundary autosave)$/u,
+  ]);
+  await expect(perRoundSaves).toHaveCount(1);
+  await expect(encounterBoundarySaves).toHaveCount(2);
 
   await page.getByText('Full revision history').click();
   await expect(page.getByText(/long_rest_completed/u)).toBeVisible();
