@@ -15,9 +15,10 @@ import {
   type EffectApplication,
 } from '../combat/effects';
 import type { EncounterCommand } from '../combat/events';
-import { gridDistance } from '../combat/grid';
+import { adjacentCells, gridDistance } from '../combat/grid';
 import type { PersistentAreaEffectSpec, PersistentAreaShape } from '../combat/persistent-areas';
-import type { SpellCastCommand } from '../combat/spells/types';
+import { spellDefinition } from '../combat/spells/definitions';
+import type { SpellCastCommand, SpellTargeting } from '../combat/spells/types';
 import { SPELL_MANIFEST, type SpellManifestRow } from '../combat/spells/manifest';
 import {
   armorClass,
@@ -2063,6 +2064,83 @@ function loadedMemberPosition(state: Parameters<TurnLegalActions>[0], id: Return
   return found.position;
 }
 
+function loadedPartyMovementActions(
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+): readonly Extract<EncounterCommand, { readonly type: 'move' }>[] {
+  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  if (acting === undefined || acting.turn.movement.remaining < 5) return [];
+  const occupied = new Set(state.tokens
+    .filter((token) => token.combatantId !== actor)
+    .map((token) => `${String(token.position.column)},${String(token.position.row)}`));
+  return adjacentCells(state.bounds, loadedMemberPosition(state, actor))
+    .filter((cell) =>
+      !occupied.has(`${String(cell.column)},${String(cell.row)}`) &&
+      !state.blockedCells.some((blocked) =>
+        blocked.column === cell.column && blocked.row === cell.row))
+    .map((cell) => ({ type: 'move', actor, path: [cell], cause: 'voluntary' }));
+}
+
+function effectiveSingleTargetRange(
+  targeting: SpellTargeting,
+  casterLevel: number,
+): number | null {
+  if (targeting.kind !== 'single' && targeting.kind !== 'multiple') return null;
+  if (targeting.kind === 'multiple' || targeting.rangeByCasterLevel === undefined) {
+    return targeting.rangeFeet;
+  }
+  return [...targeting.rangeByCasterLevel]
+    .filter((tier) => tier.minimumLevel <= casterLevel)
+    .sort((left, right) => right.minimumLevel - left.minimumLevel)[0]?.rangeFeet ?? targeting.rangeFeet;
+}
+
+function basicDamageCantripCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+  targets: Parameters<TurnLegalActions>[0]['combatants'],
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  const damagingOperations: ReadonlySet<NonNullable<ReturnType<typeof spellDefinition>>['operation']['kind']> =
+    new Set(['attack_damage', 'attack_beams', 'save_damage']);
+  return member.spells.flatMap((spell) => {
+    const definition = spellDefinition(spell.id);
+    if (
+      definition === null ||
+      definition.level !== 0 ||
+      definition.castingTime !== 'action' ||
+      !damagingOperations.has(definition.operation.kind)
+    ) {
+      return [];
+    }
+    const source = member.spellcasting.find((candidate) =>
+      candidate.preparedSpells.some((prepared) => prepared.id === spell.id) ||
+      candidate.knownSpells.some((known) => known.id === spell.id) ||
+      candidate.grants.some((grant) => grant.spell.id === spell.id));
+    if (source === undefined) return [];
+    const range = effectiveSingleTargetRange(definition.targeting, source.casterLevel);
+    if (range === null) return [];
+    const targetCount = definition.operation.kind === 'attack_beams'
+      ? definition.operation.baseBeams + definition.operation.additionalBeamLevels
+        .filter((level) => level <= source.casterLevel).length
+      : 1;
+    return targets.flatMap((target) => {
+      const distance = gridDistance(
+        loadedMemberPosition(state, actor),
+        loadedMemberPosition(state, target.profile.id),
+      );
+      if (distance > range) return [];
+      return [loadedPartySpellCastCommand(member, spell.id, {
+        slotLevel: null,
+        castAsRitual: false,
+        targets: Array.from({ length: targetCount }, () => target.profile.id),
+        area: null,
+        weaponAttack: null,
+        selectedOption: null,
+      })];
+    });
+  });
+}
+
 /** Enumerates reducer-valid attacks and feature actions for loaded v2 party members. */
 export function loadedPartyTurnLegalActions(
   members: readonly LoadedPartyMember[],
@@ -2141,8 +2219,14 @@ export function loadedPartyTurnLegalActions(
             ])));
       }));
 
-    const actions: EncounterCommand[] = [];
+    const actions: EncounterCommand[] = [...loadedPartyMovementActions(state, actor)];
     if (acting.turn.action.kind !== 'spent') actions.push(...commands());
+    if (acting.turn.action.kind === 'available') {
+      actions.push(...basicDamageCantripCommands(member, state, actor, targets));
+      // Dash grants extra movement equal to Speed for the current turn.
+      // SRD 5.2.1: docs/srd/full/srd-5.2.1.txt:11589-11596.
+      actions.push({ type: 'dash', actor });
+    }
     for (const effect of member.effects) {
       if (effect.payload.kind === 'bonus_action_attack_grant') {
         const pool = effect.resourcePoolId === null

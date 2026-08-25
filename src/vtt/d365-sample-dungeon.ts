@@ -18,6 +18,7 @@ import {
   storedPartyControllerIdentities,
   type StoredCharacterEncounter,
 } from './stored-character-encounter';
+import { regretTurnLegalActions } from './regret/legal-actions';
 
 export const D365_SAMPLE_DUNGEON_ID = 'dungeon:d365-four-room-proof' as const;
 
@@ -242,7 +243,7 @@ export function composeD365Room(
     turnLegalActions: (current, actor) => {
       const member = members.find((candidate) => candidate.profile.id === actor);
       return member === undefined
-        ? { actions: [{ type: 'end_turn', actor }] }
+        ? regretTurnLegalActions(current, actor)
         : partyActions(current, actor);
     },
   };
