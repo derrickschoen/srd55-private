@@ -35,6 +35,7 @@ import {
   LONG_REST_CITATIONS,
   restInterruptionRuling,
   setPartyReactionPolicy,
+  setPartyRefusalHandling,
   takeLongRest,
   takeShortRest,
   type LongRestResult,
@@ -48,6 +49,12 @@ import {
   type ShortRestHitDieSpend,
   type ShortRestResult,
 } from './party-session-state';
+import {
+  REFUSAL_CATEGORIES,
+  handlingModesForCategory,
+  type RefusalCategory,
+  type RefusalHandlingMode,
+} from './refusal-handling';
 import { deriveSessionRecord, type SessionRecord } from './session-record';
 import { isHiddenRollCategory } from '../combat/roll-visibility';
 
@@ -70,6 +77,11 @@ export type SessionTransition =
       readonly combatant: import('../combat/values').CombatantId;
       readonly reactionKind: ReactionKind;
       readonly policy: ReactionPolicy;
+    }
+  | {
+      readonly kind: 'refusal_handling_changed';
+      readonly category: RefusalCategory;
+      readonly mode: RefusalHandlingMode;
     }
   | {
       readonly kind: 'short_rest_completed';
@@ -109,6 +121,7 @@ export const SESSION_TRANSITION_KINDS = [
   'session_started',
   'party_state_captured',
   'reaction_preference_changed',
+  'refusal_handling_changed',
   'short_rest_completed',
   'long_rest_completed',
   'room_composed',
@@ -493,6 +506,15 @@ function decodeTransition(value: unknown): SessionTransition {
         typeof value.combatant === 'string' &&
         ['hit_by_attack', 'damaged_by_creature', 'taking_damage_of_type', 'creature_casts_spell', 'opportunity_attack'].includes(String(value.reactionKind)) &&
         (value.policy === 'ask' || value.policy === 'always' || value.policy === 'never')
+      ) return value as unknown as SessionTransition;
+      break;
+    case 'refusal_handling_changed':
+      if (
+        hasExactlyKeys(value, ['kind', 'category', 'mode']) &&
+        typeof value.category === 'string' &&
+        REFUSAL_CATEGORIES.includes(value.category as RefusalCategory) &&
+        typeof value.mode === 'string' &&
+        handlingModesForCategory(value.category as RefusalCategory).includes(value.mode as RefusalHandlingMode)
       ) return value as unknown as SessionTransition;
       break;
     case 'short_rest_completed':
@@ -1385,6 +1407,34 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       branchId: latest.branchId,
       transition: { kind: 'reaction_preference_changed', combatant, reactionKind, policy },
       encounterState,
+      partyState,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      codexSessionId: latest.codexSessionId,
+    });
+    return {
+      journal: this,
+      encounterState: appended.encounterState,
+      partyState: appended.partyState,
+      coordinatorState: appended.coordinatorState,
+      controllers: appended.controllers,
+      codexSessionId: appended.codexSessionId,
+      rng: this.#rng,
+    };
+  }
+
+  updateRefusalHandling(
+    category: RefusalCategory,
+    mode: RefusalHandlingMode,
+  ): SessionResume {
+    const latest = this.#latest();
+    if (latest.partyState === null) throw new Error('Encounter session has no party state for refusal handling.');
+    const partyState = setPartyRefusalHandling(latest.partyState, category, mode);
+    const appended = this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: { kind: 'refusal_handling_changed', category, mode },
+      encounterState: latest.encounterState,
       partyState,
       coordinatorState: latest.coordinatorState,
       controllers: latest.controllers,

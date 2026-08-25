@@ -131,7 +131,7 @@ describe('CAP-IMP-007 imported choice and branch operations', () => {
       encounter(pack, caster, target, () => 0),
       command(caster, target, 'chromatic-choice', 'outside-declared-set'),
       () => 0,
-    )).toThrowError(new EncounterRuleError('chromatic-choice requires one of its declared caster modes.'));
+    )).toThrowError(new EncounterRuleError('validation', 'chromatic-choice requires one of its declared caster modes.'));
   });
 
   it('branch_table_gap_ignored refuses both a gap and an overlap instead of loading either table', () => {

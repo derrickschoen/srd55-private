@@ -8,7 +8,7 @@ function profileKind(
   id: CombatantId,
 ): CombatantProfile['kind'] {
   const subject = state.combatants.find((candidate) => candidate.profile.id === id);
-  if (subject === undefined) throw new EncounterRuleError(`Unknown combatant ${id}.`);
+  if (subject === undefined) throw new EncounterRuleError('validation', `Unknown combatant ${id}.`);
   return subject.profile.kind;
 }
 
@@ -21,7 +21,7 @@ export function combatantSide(
   const visited = new Set<CombatantId>();
   for (;;) {
     if (visited.has(current)) {
-      throw new EncounterRuleError('Summon ownership cannot contain a cycle.');
+      throw new EncounterRuleError('validation', 'Summon ownership cannot contain a cycle.');
     }
     visited.add(current);
     const owner = state.effects.find(

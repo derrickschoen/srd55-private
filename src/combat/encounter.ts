@@ -185,7 +185,7 @@ export class RevivifyRuleError extends EncounterRuleError {
     readonly code: 'death_time_unknown' | 'target_dead_too_long',
     readonly citation: typeof REVIVIFY_CITATIONS.deathWindowAndHitPoints,
   ) {
-    super(code === 'death_time_unknown'
+    super('revivify_validation', code === 'death_time_unknown'
       ? `Revivify requires a recorded time of death (${citation}).`
       : `Revivify requires a creature that died within the last minute (${citation}).`);
   }
@@ -199,7 +199,7 @@ export class VisionTargetingRuleError extends EncounterRuleError {
     readonly actor: CombatantId,
     readonly target: CombatantId,
   ) {
-    super(`Combatant ${actor} cannot select unseen target ${target} for an effect that requires sight.`);
+    super('vision_targeting_validation', `Combatant ${actor} cannot select unseen target ${target} for an effect that requires sight.`);
   }
 }
 
@@ -207,7 +207,7 @@ export class PendingDecisionRuleError extends EncounterRuleError {
   override readonly name = 'PendingDecisionRuleError' as const;
 
   constructor(readonly code: 'turn_boundary_blocked' | 'unknown_decision') {
-    super(code === 'turn_boundary_blocked'
+    super(code === 'turn_boundary_blocked' ? 'pending_decision_boundary' : 'pending_decision_validation', code === 'turn_boundary_blocked'
       ? 'The turn cannot advance while a Reaction offer for this boundary is unresolved.'
       : 'The pending decision does not exist.');
   }
@@ -412,6 +412,11 @@ export type PendingDecision =
         readonly tokenPosition: GridCell | null;
         readonly effects: readonly EncounterEffect[];
       };
+    })
+  | (PendingDecisionBase & {
+      readonly kind: 'adjudication_prompt';
+      readonly options: readonly [PendingDecisionOption & { readonly id: 'rule_manually' }];
+      readonly refusal: import('../vtt/refusal-handling').NonBoundaryActionRefusal;
     });
 
 export interface CombatantReactionPolicy {
@@ -600,7 +605,7 @@ export class TargetSelectionRuleError extends EncounterRuleError {
   override readonly name = 'TargetSelectionRuleError' as const;
 
   constructor(readonly rule: TargetSelectionRefusalRule, reason: string) {
-    super(reason);
+    super('target_selection_validation', reason);
   }
 }
 
@@ -608,7 +613,7 @@ export class EquipmentRuleError extends EncounterRuleError {
   override readonly name = 'EquipmentRuleError' as const;
 
   constructor(readonly code: EquipmentRefusalCode, reason: string) {
-    super(reason);
+    super('equipment_validation', reason);
   }
 }
 
@@ -622,8 +627,10 @@ export type SustainedActivationRefusalCode =
 
 /** Runtime identities make bound-target misuse a typed refusal rather than a representable success. */
 export class SustainedActivationRuleError extends EncounterRuleError {
+  override readonly name = 'SustainedActivationRuleError' as const;
+
   constructor(readonly code: SustainedActivationRefusalCode, reason: string) {
-    super(reason);
+    super('sustained_activation_validation', reason);
   }
 }
 
@@ -642,7 +649,7 @@ function cellKey(cell: GridCell): string {
 
 function assertUnique<T>(values: readonly T[], label: string): void {
   if (new Set(values).size !== values.length) {
-    throw new EncounterRuleError(`${label} must be unique.`);
+    throw new EncounterRuleError('validation', `${label} must be unique.`);
   }
 }
 
@@ -673,7 +680,7 @@ function normalizedEquipment(setup: EncounterSetup): readonly CombatantEquipment
   const registry = itemRegistry(setup.contentPacks);
   const combatantIds = new Set(setup.combatants.map((profile) => profile.id));
   if (supplied.some((entry) => !combatantIds.has(entry.combatant))) {
-    throw new EncounterRuleError('Equipment cannot name an unknown combatant.');
+    throw new EncounterRuleError('validation', 'Equipment cannot name an unknown combatant.');
   }
   const result = setup.combatants.map((profile): CombatantEquipment => {
     const entry = supplied.find((candidate) => candidate.combatant === profile.id) ?? {
@@ -710,7 +717,7 @@ function normalizedEquipment(setup: EncounterSetup): readonly CombatantEquipment
   for (const ground of groundItems) {
     setupItemDefinition(registry, ground.item);
     if (!isCellInside(setup.bounds, ground.position)) {
-      throw new EncounterRuleError(`Ground item ${ground.item} is outside the encounter grid.`);
+      throw new EncounterRuleError('validation', `Ground item ${ground.item} is outside the encounter grid.`);
     }
   }
   assertUnique([
@@ -724,10 +731,10 @@ function normalizedEquipment(setup: EncounterSetup): readonly CombatantEquipment
 export function createEncounter(setup: EncounterSetup): EncounterState {
   const config = setup.config ?? DEFAULT_ENCOUNTER_CONFIG;
   if (!isEncounterConfig(config)) {
-    throw new EncounterRuleError('Encounter configuration has an invalid initiative mode.');
+    throw new EncounterRuleError('validation', 'Encounter configuration has an invalid initiative mode.');
   }
   if (setup.rulesEdition !== undefined && setup.rulesEdition !== '2014' && setup.rulesEdition !== '2024') {
-    throw new EncounterRuleError('Encounter detection rules edition must be 2014 or 2024.');
+    throw new EncounterRuleError('validation', 'Encounter detection rules edition must be 2014 or 2024.');
   }
   if (
     !Number.isSafeInteger(setup.bounds.columns) ||
@@ -735,10 +742,10 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     setup.bounds.columns < 1 ||
     setup.bounds.rows < 1
   ) {
-    throw new EncounterRuleError('Encounter bounds must be positive safe integers.');
+    throw new EncounterRuleError('validation', 'Encounter bounds must be positive safe integers.');
   }
   if (setup.combatants.length === 0) {
-    throw new EncounterRuleError('An encounter requires at least one combatant.');
+    throw new EncounterRuleError('validation', 'An encounter requires at least one combatant.');
   }
 
   assertUnique(setup.combatants.map((profile) => profile.id), 'Combatant ids');
@@ -756,17 +763,17 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     [...profileIds].some((id) => !tokenCombatantIds.has(id)) ||
     [...profileTokenIds].some((id) => !tokenIds.has(id))
   ) {
-    throw new EncounterRuleError(
+    throw new EncounterRuleError('validation', 
       'Every combatant must have exactly one matching board token.',
     );
   }
   for (const token of setup.tokens) {
     const profile = setup.combatants.find((candidate) => candidate.id === token.combatantId);
     if (profile?.tokenId !== token.id) {
-      throw new EncounterRuleError('A token must match its profile token identity.');
+      throw new EncounterRuleError('validation', 'A token must match its profile token identity.');
     }
     if (!isCellInside(setup.bounds, token.position)) {
-      throw new EncounterRuleError(`Token ${token.id} is outside the encounter grid.`);
+      throw new EncounterRuleError('validation', `Token ${token.id} is outside the encounter grid.`);
     }
   }
 
@@ -777,7 +784,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   );
   for (const policy of reactionPolicies) {
     if (!profileIds.has(policy.combatant) || !DECISION_POLICY_KINDS.includes(policy.reactionKind)) {
-      throw new EncounterRuleError('A decision policy must name a combatant and closed policy kind in this encounter.');
+      throw new EncounterRuleError('validation', 'A decision policy must name a combatant and closed policy kind in this encounter.');
     }
   }
 
@@ -785,10 +792,10 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   assertUnique(blockedCells.map(cellKey), 'Blocked cells');
   for (const cell of blockedCells) {
     if (!isCellInside(setup.bounds, cell)) {
-      throw new EncounterRuleError('Blocked cells must be inside the encounter grid.');
+      throw new EncounterRuleError('validation', 'Blocked cells must be inside the encounter grid.');
     }
     if (setup.tokens.some((token) => cellKey(token.position) === cellKey(cell))) {
-      throw new EncounterRuleError('A token cannot start in a blocked cell.');
+      throw new EncounterRuleError('validation', 'A token cannot start in a blocked cell.');
     }
   }
   const worldObjects = setup.worldObjects ?? [];
@@ -797,11 +804,11 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     try {
       assertWorldObjectInput(setup.bounds, object);
     } catch (error) {
-      throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid world object.');
+      throw new EncounterRuleError('validation', error instanceof Error ? error.message : 'Invalid world object.');
     }
     if (object.blocking.movement && setup.tokens.some((token) =>
       object.footprint.some((cell) => cellKey(cell) === cellKey(token.position)))) {
-      throw new EncounterRuleError('A token cannot start in a movement-blocking world object.');
+      throw new EncounterRuleError('validation', 'A token cannot start in a movement-blocking world object.');
     }
   }
   const environment = setup.environment ?? EMPTY_ENCOUNTER_ENVIRONMENT;
@@ -813,18 +820,18 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     for (const region of environment.difficultTerrainRegions) assertEnvironmentRegion(setup.bounds, region);
     for (const region of environment.obscurementRegions) assertEnvironmentRegion(setup.bounds, region);
   } catch (error) {
-    throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid environment region.');
+    throw new EncounterRuleError('validation', error instanceof Error ? error.message : 'Invalid environment region.');
   }
   const foggedCells = setup.foggedCells ?? [];
   assertUnique(foggedCells.map(cellKey), 'Fogged cells');
   for (const cell of foggedCells) {
     if (!isCellInside(setup.bounds, cell)) {
-      throw new EncounterRuleError('Fogged cells must be inside the encounter grid.');
+      throw new EncounterRuleError('validation', 'Fogged cells must be inside the encounter grid.');
     }
   }
   for (const note of setup.dmNotes ?? []) {
     if (note.trim().length === 0) {
-      throw new EncounterRuleError('DM notes must be non-empty.');
+      throw new EncounterRuleError('validation', 'DM notes must be non-empty.');
     }
   }
 
@@ -833,7 +840,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
   assertUnique(contacts.map((contact) => `${String(contact.item)}:${String(contact.combatant)}`), 'Item contacts');
   for (const contact of contacts) {
     setupItemDefinition(itemRegistry(setup.contentPacks), contact.item);
-    if (!profileIds.has(contact.combatant)) throw new EncounterRuleError('Item contact names an unknown combatant.');
+    if (!profileIds.has(contact.combatant)) throw new EncounterRuleError('validation', 'Item contact names an unknown combatant.');
   }
 
   for (const profile of setup.combatants) {
@@ -841,13 +848,13 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     assertUnique(limitedResources.map((pool) => pool.id), `Resource pool ids for ${profile.id}`);
     for (const pool of limitedResources) {
       if (!Number.isSafeInteger(pool.maximum) || pool.maximum < 1) {
-        throw new EncounterRuleError(`Resource pool ${pool.id} maximum must be a positive safe integer.`);
+        throw new EncounterRuleError('validation', `Resource pool ${pool.id} maximum must be a positive safe integer.`);
       }
     }
     const resourceIds = new Set(limitedResources.map((pool) => pool.id));
     for (const effect of profile.rules.featureEffects ?? []) {
       if (effect.resourcePoolId !== null && !resourceIds.has(effect.resourcePoolId)) {
-        throw new EncounterRuleError(`Effect ${effect.id} references unknown resource pool ${effect.resourcePoolId}.`);
+        throw new EncounterRuleError('validation', `Effect ${effect.id} references unknown resource pool ${effect.resourcePoolId}.`);
       }
     }
   }
@@ -961,13 +968,13 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
 
 function combatant(state: EncounterState, id: CombatantId): EncounterCombatantState {
   const found = state.combatants.find((candidate) => candidate.profile.id === id);
-  if (found === undefined) throw new EncounterRuleError(`Unknown combatant ${id}.`);
+  if (found === undefined) throw new EncounterRuleError('validation', `Unknown combatant ${id}.`);
   return found;
 }
 
 function token(state: EncounterState, id: CombatantId): CombatToken {
   const found = state.tokens.find((candidate) => candidate.combatantId === id);
-  if (found === undefined) throw new EncounterRuleError(`Combatant ${id} has no token.`);
+  if (found === undefined) throw new EncounterRuleError('validation', `Combatant ${id} has no token.`);
   return found;
 }
 
@@ -999,7 +1006,7 @@ function replaceCombatant(
   replacement: EncounterCombatantState,
 ): EncounterState {
   const prior = state.combatants.find((candidate) => candidate.profile.id === replacement.profile.id);
-  if (prior === undefined) throw new EncounterRuleError(`Unknown combatant ${replacement.profile.id}.`);
+  if (prior === undefined) throw new EncounterRuleError('validation', `Unknown combatant ${replacement.profile.id}.`);
   const normalized: EncounterCombatantState = replacement.life === 'dead'
     ? {
         ...replacement,
@@ -1021,7 +1028,7 @@ function replaceCombatant(
 
 function combatantEquipment(state: EncounterState, id: CombatantId): CombatantEquipment {
   const found = state.equipment?.find((candidate) => candidate.combatant === id);
-  if (found === undefined) throw new EncounterRuleError(`Combatant ${id} has no equipment state.`);
+  if (found === undefined) throw new EncounterRuleError('validation', `Combatant ${id} has no equipment state.`);
   return found;
 }
 
@@ -1926,14 +1933,14 @@ function activateRecklessAttack(
   if (command.recklessAttackEffectId === undefined) return;
   const declared = featureEffect(context.state, command.actor, command.recklessAttackEffectId);
   if (declared.payload.kind !== 'reckless_attack_mode') {
-    throw new EncounterRuleError(`Effect ${declared.id} is not a Reckless Attack mode.`);
+    throw new EncounterRuleError('validation', `Effect ${declared.id} is not a Reckless Attack mode.`);
   }
   if (
     !wasFirstAttack ||
     command.attackId === undefined ||
     !declared.payload.strengthBasedMeleeAttackIds.includes(command.attackId)
   ) {
-    throw new EncounterRuleError('Reckless Attack must be chosen for the first declared Strength-based melee attack on the turn.');
+    throw new EncounterRuleError('validation', 'Reckless Attack must be chosen for the first declared Strength-based melee attack on the turn.');
   }
   const ownRollsIdentity = effectStackingIdentity(`feature:${declared.id}:own-rolls`);
   applyEffect(context, command.actor, {
@@ -2302,7 +2309,7 @@ function nearestReturnPosition(state: EncounterState, origin: GridCell): GridCel
     left.row - right.row ||
     left.column - right.column)[0];
   if (selected === undefined) {
-    throw new EncounterRuleError('A banished combatant has no unoccupied return space.');
+    throw new EncounterRuleError('validation', 'A banished combatant has no unoccupied return space.');
   }
   return selected;
 }
@@ -2494,7 +2501,7 @@ function applyDamage(
   critical = false,
 ): void {
   if (!Number.isSafeInteger(amount) || amount < 0) {
-    throw new EncounterRuleError('Damage must be a non-negative safe integer.');
+    throw new EncounterRuleError('validation', 'Damage must be a non-negative safe integer.');
   }
   const before = combatant(context.state, target);
   const hitPointMaximum = effectiveHitPointMaximum(context.state, target);
@@ -2920,21 +2927,21 @@ function concentrationCheck(
 
 function assertActiveActor(context: ReductionContext, actor: CombatantId): EncounterCombatantState {
   if (context.state.activeCombatant !== actor) {
-    throw new EncounterRuleError(`Combatant ${actor} is not the active combatant.`);
+    throw new EncounterRuleError('validation', `Combatant ${actor} is not the active combatant.`);
   }
   const subject = combatant(context.state, actor);
   if (subject.life !== 'living') {
-    throw new EncounterRuleError(`Combatant ${actor} cannot act while ${subject.life}.`);
+    throw new EncounterRuleError('validation', `Combatant ${actor} cannot act while ${subject.life}.`);
   }
   if (!isCombatantOnBoard(context.state, actor)) {
-    throw new EncounterRuleError(`Combatant ${actor} is absent from the board.`);
+    throw new EncounterRuleError('validation', `Combatant ${actor} is absent from the board.`);
   }
   return subject;
 }
 
 function assertCanUseActions(context: ReductionContext, actor: CombatantId): void {
   if (isIncapacitated(combatantConditions(context.state, actor))) {
-    throw new EncounterRuleError(`Combatant ${actor} is Incapacitated.`);
+    throw new EncounterRuleError('validation', `Combatant ${actor} is Incapacitated.`);
   }
 }
 
@@ -2946,7 +2953,7 @@ function spendAction(
   assertCanUseActions(context, actor);
   const subject = combatant(context.state, actor);
   if (subject.turn.action.kind !== 'available') {
-    throw new EncounterRuleError(`Combatant ${actor} has no action available.`);
+    throw new EncounterRuleError('validation', `Combatant ${actor} has no action available.`);
   }
   context.state = replaceCombatant(context.state, {
     ...subject,
@@ -2972,7 +2979,7 @@ function spendCost(
       assertCanUseActions(context, actor);
       const subject = combatant(context.state, actor);
       if (!subject.turn.bonusActionAvailable) {
-        throw new EncounterRuleError(`Combatant ${actor} has no Bonus Action available.`);
+        throw new EncounterRuleError('validation', `Combatant ${actor} has no Bonus Action available.`);
       }
       context.state = replaceCombatant(context.state, {
         ...subject,
@@ -2984,10 +2991,10 @@ function spendCost(
     case 'reaction': {
       const subject = combatant(context.state, actor);
       if (subject.life !== 'living' || isIncapacitated(combatantConditions(context.state, actor))) {
-        throw new EncounterRuleError(`Combatant ${actor} cannot react.`);
+        throw new EncounterRuleError('validation', `Combatant ${actor} cannot react.`);
       }
       if (!subject.turn.reactionAvailable) {
-        throw new EncounterRuleError(`Combatant ${actor} has no Reaction available.`);
+        throw new EncounterRuleError('validation', `Combatant ${actor} has no Reaction available.`);
       }
       context.state = replaceCombatant(context.state, {
         ...subject,
@@ -3133,10 +3140,10 @@ function spendLimitedResource(
   const limitedResources = subject.limitedResources ?? [];
   const pool = limitedResources.find((candidate) => candidate.id === resourcePoolId);
   if (pool === undefined) {
-    throw new EncounterRuleError(`Combatant ${actor} has no resource pool ${resourcePoolId}.`);
+    throw new EncounterRuleError('validation', `Combatant ${actor} has no resource pool ${resourcePoolId}.`);
   }
   if (pool.remaining < 1) {
-    throw new EncounterRuleError(`Resource pool ${resourcePoolId} is empty.`);
+    throw new EncounterRuleError('validation', `Resource pool ${resourcePoolId} is empty.`);
   }
   const remaining = pool.remaining - 1;
   context.state = replaceCombatant(context.state, {
@@ -3161,7 +3168,7 @@ function featureEffect(
   const effect = (combatant(state, actor).profile.rules.featureEffects ?? [])
     .find((candidate) => candidate.id === effectId);
   if (effect === undefined) {
-    throw new EncounterRuleError(`Combatant ${actor} has no feature effect ${effectId}.`);
+    throw new EncounterRuleError('validation', `Combatant ${actor} has no feature effect ${effectId}.`);
   }
   return effect;
 }
@@ -3186,11 +3193,11 @@ function beginAttack(
   if (command.bonusActionGrantEffectId !== undefined) {
     const grant = featureEffect(context.state, actor, command.bonusActionGrantEffectId);
     if (grant.payload.kind !== 'bonus_action_attack_grant') {
-      throw new EncounterRuleError(`Effect ${grant.id} does not grant Bonus Action attacks.`);
+      throw new EncounterRuleError('validation', `Effect ${grant.id} does not grant Bonus Action attacks.`);
     }
     if ((subject.turn.bonusAttacksRemaining ?? 0) > 0) {
       if (subject.turn.bonusAttackGrantEffectId !== grant.id) {
-        throw new EncounterRuleError(`Combatant ${actor} is already resolving another Bonus Action attack grant.`);
+        throw new EncounterRuleError('validation', `Combatant ${actor} is already resolving another Bonus Action attack grant.`);
       }
       context.state = replaceCombatant(context.state, {
         ...subject,
@@ -3249,7 +3256,7 @@ function beginAttack(
       return;
     }
     case 'spent':
-      throw new EncounterRuleError(`Combatant ${actor} has no attack available.`);
+      throw new EncounterRuleError('validation', `Combatant ${actor} has no attack available.`);
   }
 }
 
@@ -3347,7 +3354,7 @@ export function previewMovementPathDangers(
     reachSources: opportunityAttackReachSources(state, command.actor),
   });
   if (plan.kind === 'illegal') {
-    throw new EncounterRuleError(`Illegal movement preview: ${plan.reason} at step ${String(plan.stepIndex)}.`);
+    throw new EncounterRuleError('validation', `Illegal movement preview: ${plan.reason} at step ${String(plan.stepIndex)}.`);
   }
 
   const dangersByCell = new Map<string, {
@@ -3592,7 +3599,7 @@ function applyPersistentAreaEffect(
   if (saveSucceeded) return;
   const lifetime = spec.payload.lifetime;
   if (lifetime.kind === 'save_ends' && spec.kind !== 'save_gated') {
-    throw new EncounterRuleError('A save-ends area effect requires a save gate.');
+    throw new EncounterRuleError('validation', 'A save-ends area effect requires a save gate.');
   }
   const duration = lifetime.kind === 'fixed_rounds'
     ? {
@@ -3684,21 +3691,21 @@ function reevaluatePersistentAreaMembership(context: ReductionContext): void {
 }
 
 function validatePersistentAreaInput(state: EncounterState, actor: CombatantId, input: PersistentAreaInput): void {
-  if (input.owner !== actor) throw new EncounterRuleError('A persistent area must be owned by its acting combatant.');
+  if (input.owner !== actor) throw new EncounterRuleError('validation', 'A persistent area must be owned by its acting combatant.');
   combatant(state, input.owner);
   if (!Number.isSafeInteger(input.duration.remaining) || input.duration.remaining < 1) {
-    throw new EncounterRuleError('Persistent-area duration must be a positive number of rounds.');
+    throw new EncounterRuleError('validation', 'Persistent-area duration must be a positive number of rounds.');
   }
   if (input.origin.kind === 'anchored') {
     token(state, input.origin.combatant);
-    if (input.movable !== null) throw new EncounterRuleError('An anchored persistent area cannot also be moved independently.');
+    if (input.movable !== null) throw new EncounterRuleError('validation', 'An anchored persistent area cannot also be moved independently.');
   }
   if (input.origin.kind === 'anchored_to_object') {
     const anchorObjectId = input.origin.object;
     if (!state.worldObjects.some((object) => object.id === anchorObjectId)) {
-      throw new EncounterRuleError(`Persistent-area anchor object ${anchorObjectId} does not exist.`);
+      throw new EncounterRuleError('validation', `Persistent-area anchor object ${anchorObjectId} does not exist.`);
     }
-    if (input.movable !== null) throw new EncounterRuleError('An object-anchored persistent area cannot also be moved independently.');
+    if (input.movable !== null) throw new EncounterRuleError('validation', 'An object-anchored persistent area cannot also be moved independently.');
   }
   if (input.targetFilter.kind === 'selected') {
     assertUnique(input.targetFilter.combatants, 'Persistent-area selected targets');
@@ -3707,7 +3714,7 @@ function validatePersistentAreaInput(state: EncounterState, actor: CombatantId, 
   for (const hook of input.hooks) {
     if (hook.effect.payload.kind === 'effect' && hook.effect.payload.lifetime.kind === 'fixed_rounds' &&
       (!Number.isSafeInteger(hook.effect.payload.lifetime.rounds) || hook.effect.payload.lifetime.rounds < 1)) {
-      throw new EncounterRuleError('A fixed persistent-area effect duration must be positive.');
+      throw new EncounterRuleError('validation', 'A fixed persistent-area effect duration must be positive.');
     }
     if (hook.effect.kind === 'save_gated') difficultyClass(hook.effect.dc);
   }
@@ -4061,7 +4068,7 @@ function moveForLegendaryAction(
   const path = candidates[0];
   if (gridDistance(start, targetPosition) <= effectiveCombatRules(context.state, actor).reach) return;
   if (path === undefined || path.kind !== 'found') {
-    throw new EncounterRuleError(`Legendary Action ${action.id} cannot reach an enemy.`);
+    throw new EncounterRuleError('validation', `Legendary Action ${action.id} cannot reach an enemy.`);
   }
   for (const step of path.cells) {
     context.state = {
@@ -4119,10 +4126,10 @@ function executeLegendaryAction(
     return;
   }
   const target = legendaryActionTarget(context.state, actor);
-  if (target === null) throw new EncounterRuleError(`Legendary Action ${action.id} has no enemy target.`);
+  if (target === null) throw new EncounterRuleError('validation', `Legendary Action ${action.id} has no enemy target.`);
   moveForLegendaryAction(context, actor, target, action);
   const attack = declaredMonsterAction(context.state, actor, action.attackId);
-  if (attack.kind !== 'attack') throw new EncounterRuleError(`Legendary Action ${action.id} must reference an attack.`);
+  if (attack.kind !== 'attack') throw new EncounterRuleError('validation', `Legendary Action ${action.id} must reference an attack.`);
   processAttack(context, monsterAttackCommand(attack, actor, target), null, 'legendary');
 }
 
@@ -4185,7 +4192,7 @@ function processMove(
     reachSources: opportunityAttackReachSources(context.state, command.actor),
   });
   if (plan.kind === 'illegal') {
-    throw new EncounterRuleError(`Illegal movement: ${plan.reason} at step ${plan.stepIndex}.`);
+    throw new EncounterRuleError('validation', `Illegal movement: ${plan.reason} at step ${plan.stepIndex}.`);
   }
   const traversed: GridCell[] = [];
   let spent = feet(0);
@@ -4362,7 +4369,7 @@ function sustainedDefinitionForEffect(
   const definition = spellDefinition(effect.payload.spellId) ??
     importedSpellDefinition(state.contentPacks, effect.payload.spellId);
   if (definition === null || definition.operation.kind !== 'sustained_effect') {
-    throw new EncounterRuleError(`Sustained spell ${effect.payload.spellId} is not implemented.`);
+    throw new EncounterRuleError('rule_gap', `Sustained spell ${effect.payload.spellId} is not implemented.`);
   }
   return definition as SustainedSpellDefinition;
 }
@@ -4451,7 +4458,7 @@ function processBoundary(
     if (scheduled === undefined || scheduled.target !== subjectId || scheduled.hook !== branchHook) continue;
     const definition = spellDefinition(scheduled.spellId) ??
       importedSpellDefinition(context.state.contentPacks, scheduled.spellId);
-    if (definition === null) throw new EncounterRuleError(`Scheduled spell ${scheduled.spellId} is not implemented.`);
+    if (definition === null) throw new EncounterRuleError('rule_gap', `Scheduled spell ${scheduled.spellId} is not implemented.`);
     executeSpellOperation(
       context,
       definition,
@@ -4496,7 +4503,7 @@ function processBoundary(
           if (sourceBoundary) {
             const remaining = effect.payload.delayedRoundsRemaining;
             if (remaining === null || remaining < 1) {
-              throw new EncounterRuleError(`${definition.name} has an invalid delayed one-shot clock.`);
+              throw new EncounterRuleError('validation', `${definition.name} has an invalid delayed one-shot clock.`);
             }
             const next = remaining - 1;
             context.state = {
@@ -4624,26 +4631,26 @@ function validateEffectApplication(
   state: EncounterState,
   effect: EffectApplication,
 ): void {
-  if (effect.targets.length === 0) throw new EncounterRuleError('An effect requires a target.');
+  if (effect.targets.length === 0) throw new EncounterRuleError('validation', 'An effect requires a target.');
   assertUnique(effect.targets, 'Effect targets');
   for (const target of effect.targets) combatant(state, target);
   if (effect.duration.kind === 'turn_boundaries') {
     combatant(state, effect.duration.timing.combatant);
     if (!Number.isSafeInteger(effect.duration.remaining) || effect.duration.remaining < 1) {
-      throw new EncounterRuleError('Effect duration remaining must be a positive safe integer.');
+      throw new EncounterRuleError('validation', 'Effect duration remaining must be a positive safe integer.');
     }
     if (effect.duration.timing.source.trim().length === 0) {
-      throw new EncounterRuleError('Effect duration timing requires a source locator.');
+      throw new EncounterRuleError('validation', 'Effect duration timing requires a source locator.');
     }
   }
   if (effect.repeatedSave !== null) {
     combatant(state, effect.repeatedSave.timing.combatant);
     if (!effect.targets.includes(effect.repeatedSave.timing.combatant)) {
-      throw new EncounterRuleError('Repeated-save timing must name an effect target.');
+      throw new EncounterRuleError('validation', 'Repeated-save timing must name an effect target.');
     }
     difficultyClass(effect.repeatedSave.dc);
     if (effect.repeatedSave.timing.source.trim().length === 0) {
-      throw new EncounterRuleError('Repeated-save timing requires a source locator.');
+      throw new EncounterRuleError('validation', 'Repeated-save timing requires a source locator.');
     }
   }
   if (effect.escapeCheck !== undefined) {
@@ -4651,9 +4658,9 @@ function validateEffectApplication(
   }
   if (effect.parentEffectId !== undefined) {
     const parent = state.effects.find((candidate) => candidate.id === effect.parentEffectId);
-    if (parent === undefined) throw new EncounterRuleError('A dependent effect requires a live parent effect.');
+    if (parent === undefined) throw new EncounterRuleError('validation', 'A dependent effect requires a live parent effect.');
     if (effect.targets.some((target) => !parent.targets.includes(target))) {
-      throw new EncounterRuleError('A dependent effect target must belong to its parent effect.');
+      throw new EncounterRuleError('validation', 'A dependent effect target must belong to its parent effect.');
     }
   }
   if (
@@ -4661,7 +4668,7 @@ function validateEffectApplication(
     (!effect.targets.includes(effect.payload.timing.combatant) ||
       effect.payload.timing.source.trim().length === 0)
   ) {
-    throw new EncounterRuleError(
+    throw new EncounterRuleError('validation', 
       'Ongoing-damage timing requires a target and source locator.',
     );
   }
@@ -4670,7 +4677,7 @@ function validateEffectApplication(
     (!effect.targets.includes(effect.payload.timing.combatant) ||
       effect.payload.timing.source.trim().length === 0)
   ) {
-    throw new EncounterRuleError(
+    throw new EncounterRuleError('validation', 
       'Recurring-damage timing requires a target and source locator.',
     );
   }
@@ -5025,12 +5032,12 @@ function applyEffect(
   }
   if (owned.payload.kind === 'temporary_banishment') {
     if (targets.length !== 1) {
-      throw new EncounterRuleError('Temporary banishment requires exactly one target.');
+      throw new EncounterRuleError('validation', 'Temporary banishment requires exactly one target.');
     }
     const target = targets[0];
-    if (target === undefined) throw new EncounterRuleError('Temporary banishment requires a target.');
+    if (target === undefined) throw new EncounterRuleError('validation', 'Temporary banishment requires a target.');
     const removed = context.state.tokens.find((candidate) => candidate.combatantId === target);
-    if (removed === undefined) throw new EncounterRuleError(`Combatant ${target} is already absent from the board.`);
+    if (removed === undefined) throw new EncounterRuleError('validation', `Combatant ${target} is already absent from the board.`);
     context.state = {
       ...context.state,
       tokens: context.state.tokens.filter((candidate) => candidate.combatantId !== target),
@@ -5133,7 +5140,7 @@ function selectedSlotLevel(
 ): 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | null {
   const selections = command.riderSelections ?? [];
   if (new Set(selections.map((selection) => selection.effectId)).size !== selections.length) {
-    throw new EncounterRuleError('Attack rider selections must name unique effects.');
+    throw new EncounterRuleError('validation', 'Attack rider selections must name unique effects.');
   }
   return selections.find((selection) => selection.effectId === effectId)?.slotLevel ?? null;
 }
@@ -5148,7 +5155,7 @@ function spendRiderSpellSlot(
   const slot = subject.spellSlots.find((candidate) =>
     candidate.level === slotLevel && (candidate.recharge ?? 'long_rest') === 'long_rest');
   if (slot === undefined || slot.remaining < 1) {
-    throw new EncounterRuleError(`Combatant ${actor} has no level-${String(slotLevel)} spell slot remaining.`);
+    throw new EncounterRuleError('validation', `Combatant ${actor} has no level-${String(slotLevel)} spell slot remaining.`);
   }
   const remaining = slot.remaining - 1;
   context.state = replaceCombatant(context.state, {
@@ -5282,7 +5289,7 @@ function attackDamageTypeSelection(
         effect.payload.kind === 'attack_damage_type_choice' &&
         effect.payload.attackId === command.attackId);
     if (requiresSelection) {
-      throw new EncounterRuleError('This attack requires a declared damage-type selection.');
+      throw new EncounterRuleError('validation', 'This attack requires a declared damage-type selection.');
     }
     return null;
   }
@@ -5292,7 +5299,7 @@ function attackDamageTypeSelection(
     command.attackId !== effect.payload.attackId ||
     !effect.payload.options.includes(command.damageTypeSelection.damageType)
   ) {
-    throw new EncounterRuleError('Attack damage-type selection is not declared for this attack.');
+    throw new EncounterRuleError('validation', 'Attack damage-type selection is not declared for this attack.');
   }
   return effect.payload;
 }
@@ -5304,7 +5311,7 @@ function selectedManeuver(
   if (command.maneuverEffectId === undefined) return null;
   const effect = featureEffect(state, command.actor, command.maneuverEffectId);
   if (effect.payload.kind !== 'resource_die_maneuver' || effect.resourcePoolId === null) {
-    throw new EncounterRuleError(`Effect ${effect.id} is not a resource-die maneuver.`);
+    throw new EncounterRuleError('validation', `Effect ${effect.id} is not a resource-die maneuver.`);
   }
   return effect;
 }
@@ -5437,7 +5444,7 @@ function monsterTriggerApplies(
       return true;
     case 'attack_roll_advantage':
       if (attackRollMode === null) {
-        throw new EncounterRuleError('An attack-roll-advantage monster effect requires an attack roll.');
+        throw new EncounterRuleError('validation', 'An attack-roll-advantage monster effect requires an attack roll.');
       }
       return attackRollMode === 'advantage';
     case 'replaces_base_when_target_bloodied': {
@@ -5445,7 +5452,7 @@ function monsterTriggerApplies(
       return subject.hitPoints < effectiveHitPointMaximum(context.state, target);
     }
     case 'charge':
-      throw new EncounterRuleError(
+      throw new EncounterRuleError('validation', 
         'A charge-triggered monster on-hit effect cannot execute until straight-line movement is reducer-owned.',
       );
   }
@@ -5459,12 +5466,12 @@ function monsterEffectTargetIsEligible(
   const rules = effectiveCombatRules(context.state, target);
   if (effect.target.maximumSize !== null) {
     if (rules.sizeCategory === undefined) {
-      throw new EncounterRuleError(`Monster on-hit size eligibility requires a known size for ${target}.`);
+      throw new EncounterRuleError('validation', `Monster on-hit size eligibility requires a known size for ${target}.`);
     }
     const targetIndex = creatureSizes.indexOf(rules.sizeCategory);
     const maximumIndex = creatureSizes.findIndex((size) => size === effect.target.maximumSize);
     if (maximumIndex < 0) {
-      throw new EncounterRuleError(`Monster on-hit maximum size ${effect.target.maximumSize} is not mechanically known.`);
+      throw new EncounterRuleError('validation', `Monster on-hit maximum size ${effect.target.maximumSize} is not mechanically known.`);
     }
     if (targetIndex > maximumIndex) return false;
   }
@@ -5472,14 +5479,14 @@ function monsterEffectTargetIsEligible(
     switch (excluded) {
       case 'Undead':
         if (rules.creatureType === undefined) {
-          throw new EncounterRuleError(`Monster on-hit creature-type eligibility requires a known type for ${target}.`);
+          throw new EncounterRuleError('validation', `Monster on-hit creature-type eligibility requires a known type for ${target}.`);
         }
         if (rules.creatureType === 'Undead') return false;
         break;
       case 'Elf':
         if (rules.creatureType === 'Elf') return false;
         if (rules.creatureType === undefined || rules.creatureType === 'Humanoid') {
-          throw new EncounterRuleError('The Elf monster-effect exclusion has no landed target discriminator.');
+          throw new EncounterRuleError('unmodeled_interaction', 'The Elf monster-effect exclusion has no landed target discriminator.');
         }
         break;
     }
@@ -5519,7 +5526,7 @@ function applyMonsterOnHitEffects(
       !effects.some((candidate) =>
         candidate.kind === 'condition' && candidate.condition === effect.boundCondition)
     ) {
-      throw new EncounterRuleError(
+      throw new EncounterRuleError('validation', 
         `Monster ongoing damage names ${effect.boundCondition} without declaring that condition on the action.`,
       );
     }
@@ -5619,12 +5626,12 @@ function applyMonsterOnHitEffects(
         });
         return;
       case 'raises_as_zombie':
-        throw new EncounterRuleError(
+        throw new EncounterRuleError('unmodeled_interaction',
           'The raises_as_zombie monster effect has no landed delayed out-of-combat lifecycle.',
         );
     }
     const unhandled: never = effect;
-    throw new EncounterRuleError(`Declared monster effect ${String(unhandled)} was not executed.`);
+    throw new EncounterRuleError('rule_gap', `Declared monster effect ${String(unhandled)} was not executed.`);
   };
 
   effects.forEach((effect, index) => {
@@ -5644,15 +5651,15 @@ function declaredMonsterAction(
   const wildShapeAction = subject.wildShape?.physical.actions.find((candidate) => candidate.id === actionId);
   if (wildShapeAction !== undefined) return wildShapeAction;
   if (subject.wildShape !== undefined) {
-    throw new EncounterRuleError(`Combatant ${actor} must use an attack from Wild Shape form ${subject.wildShape.formId}.`);
+    throw new EncounterRuleError('validation', `Combatant ${actor} must use an attack from Wild Shape form ${subject.wildShape.formId}.`);
   }
   const formAction = subject.form?.availableActions.find((candidate) => candidate.id === actionId);
   if (formAction !== undefined) return formAction;
   if (subject.form !== undefined) {
-    throw new EncounterRuleError(`Combatant ${actor} must use an attack from form ${subject.form.formId}.`);
+    throw new EncounterRuleError('validation', `Combatant ${actor} must use an attack from form ${subject.form.formId}.`);
   }
   if (subject.profile.kind !== 'monster') {
-    throw new EncounterRuleError(`Combatant ${actor} has no monster action ${actionId}.`);
+    throw new EncounterRuleError('validation', `Combatant ${actor} has no monster action ${actionId}.`);
   }
   const statblockId = subject.profile.statblockId;
   for (const pack of state.contentPacks ?? []) {
@@ -5668,7 +5675,7 @@ function declaredMonsterAction(
       : undefined;
     if (action !== undefined) return action;
   }
-  throw new EncounterRuleError(`Combatant ${actor} has no declared monster action ${actionId}.`);
+  throw new EncounterRuleError('validation', `Combatant ${actor} has no declared monster action ${actionId}.`);
 }
 
 function declaredMonsterDamage(
@@ -5704,16 +5711,16 @@ function processAttack(
   if (activeForm !== undefined || activeWildShape !== undefined || command.monsterOnHit !== undefined) {
     if (command.attackId === undefined) {
       if (activeForm !== undefined) {
-        throw new EncounterRuleError(`Combatant ${command.actor} must use an attack from form ${activeForm.formId}.`);
+        throw new EncounterRuleError('validation', `Combatant ${command.actor} must use an attack from form ${activeForm.formId}.`);
       }
       if (activeWildShape !== undefined) {
-        throw new EncounterRuleError(`Combatant ${command.actor} must use an attack from Wild Shape form ${activeWildShape.formId}.`);
+        throw new EncounterRuleError('validation', `Combatant ${command.actor} must use an attack from Wild Shape form ${activeWildShape.formId}.`);
       }
-      throw new EncounterRuleError('A declared monster attack requires its action id.');
+      throw new EncounterRuleError('validation', 'A declared monster attack requires its action id.');
     }
     const declared = declaredMonsterAction(context.state, command.actor, command.attackId);
     if (declared.kind !== 'attack') {
-      throw new EncounterRuleError(`Monster action ${command.attackId} is not an attack.`);
+      throw new EncounterRuleError('validation', `Monster action ${command.attackId} is not an attack.`);
     }
     if (
       command.attackBonus !== declared.attackBonus ||
@@ -5721,14 +5728,14 @@ function processAttack(
       canonicalJson(command.damage) !== canonicalJson(declaredMonsterDamage(declared.damage)) ||
       canonicalJson(command.monsterOnHit ?? []) !== canonicalJson(declared.onHit)
     ) {
-      throw new EncounterRuleError(`Combatant ${command.actor}'s monster attack declaration was altered.`);
+      throw new EncounterRuleError('validation', `Combatant ${command.actor}'s monster attack declaration was altered.`);
     }
   }
   if (!isCombatantOnBoard(context.state, command.actor)) {
-    throw new EncounterRuleError(`Combatant ${command.actor} is absent from the board.`);
+    throw new EncounterRuleError('validation', `Combatant ${command.actor} is absent from the board.`);
   }
   if (!isCombatantOnBoard(context.state, command.target)) {
-    throw new EncounterRuleError(`Combatant ${command.target} is absent from the board.`);
+    throw new EncounterRuleError('validation', `Combatant ${command.target} is absent from the board.`);
   }
   if (
     opportunityTrigger === null && command.requiresSight === true &&
@@ -5756,17 +5763,17 @@ function processAttack(
       reactor.life !== 'living' ||
       isIncapacitated(combatantConditions(context.state, command.actor))
     ) {
-      throw new EncounterRuleError(`Combatant ${command.actor} cannot react.`);
+      throw new EncounterRuleError('validation', `Combatant ${command.actor} cannot react.`);
     }
     if (!reactor.turn.reactionAvailable) {
-      throw new EncounterRuleError(`Combatant ${command.actor} has no Reaction available.`);
+      throw new EncounterRuleError('validation', `Combatant ${command.actor} has no Reaction available.`);
     }
     if (context.state.effects.some((effect) =>
       effect.targets.includes(command.actor) && effect.payload.kind === 'opportunity_attacks_disabled')) {
-      throw new EncounterRuleError(`Combatant ${command.actor} cannot make Opportunity Attacks.`);
+      throw new EncounterRuleError('validation', `Combatant ${command.actor} cannot make Opportunity Attacks.`);
     }
     if (context.state.activeCombatant !== command.target) {
-      throw new EncounterRuleError('An Opportunity Attack must target the active mover.');
+      throw new EncounterRuleError('validation', 'An Opportunity Attack must target the active mover.');
     }
     if (
       opportunityTrigger === null &&
@@ -5775,7 +5782,7 @@ function processAttack(
         token(context.state, command.target).position,
       ) > effectiveCombatRules(context.state, reactor.profile.id).reach
     ) {
-      throw new EncounterRuleError('An Opportunity Attack reactor is out of reach.');
+      throw new EncounterRuleError('validation', 'An Opportunity Attack reactor is out of reach.');
     }
     context.state = replaceCombatant(context.state, {
       ...reactor,
@@ -5789,10 +5796,10 @@ function processAttack(
     });
   }
   if (combatant(context.state, command.target).life === 'dead') {
-    throw new EncounterRuleError('A dead combatant cannot be attacked.');
+    throw new EncounterRuleError('validation', 'A dead combatant cannot be attacked.');
   }
   if (cannotHarmTarget(context.state, command.actor, command.target)) {
-    throw new EncounterRuleError('The Charmed condition prohibits harming this target.');
+    throw new EncounterRuleError('validation', 'The Charmed condition prohibits harming this target.');
   }
   const actorPosition = token(context.state, command.actor).position;
   const targetPosition = token(context.state, command.target).position;
@@ -5801,7 +5808,7 @@ function processAttack(
     (!hasLineOfSight(context.state, actorPosition, targetPosition) ||
       coverTierBetween(context.state, actorPosition, targetPosition) === 'total')
   ) {
-    throw new EncounterRuleError('The target has Total Cover or is outside line of sight.');
+    throw new EncounterRuleError('validation', 'The target has Total Cover or is outside line of sight.');
   }
   const madeModes = rollDefenseModes(
     context.state, 'attack_rolls_made', command.actor, command.target, 'other',
@@ -5924,10 +5931,10 @@ function processAttack(
       const gating = rider.payload.gating ?? { kind: 'unconditional' as const };
       if (gating.kind === 'slot_spend') {
         if (command.type !== 'attack') {
-          throw new EncounterRuleError('An Opportunity Attack cannot select a slot-spend rider.');
+          throw new EncounterRuleError('validation', 'An Opportunity Attack cannot select a slot-spend rider.');
         }
         const slotLevel = selectedSlotLevel(command, rider.id);
-        if (slotLevel === null) throw new EncounterRuleError(`Effect ${rider.id} requires a selected spell slot.`);
+        if (slotLevel === null) throw new EncounterRuleError('validation', `Effect ${rider.id} requires a selected spell slot.`);
         spendRiderSpellSlot(context, command.actor, slotLevel, rider.id);
       } else if (gating.kind === 'once_per_turn' || gating.kind === 'first_hit_this_turn') {
         const current = combatant(context.state, command.actor);
@@ -5972,7 +5979,7 @@ function processAttack(
     });
     const primaryDamageType = baseTerms[0]?.type;
     if (maneuver !== null && primaryDamageType === undefined) {
-      throw new EncounterRuleError('A resource-die maneuver requires primary attack damage.');
+      throw new EncounterRuleError('validation', 'A resource-die maneuver requires primary attack damage.');
     }
     const maneuverTerms = maneuver?.payload.kind === 'resource_die_maneuver' && primaryDamageType !== undefined
       ? [{
@@ -6013,7 +6020,7 @@ function processAttack(
     applySaveGatedBanishments(context, command.actor, command.target);
     if (command.monsterOnHit !== undefined) {
       if (command.attackId === undefined) {
-        throw new EncounterRuleError('A monster on-hit declaration requires its attack id.');
+        throw new EncounterRuleError('validation', 'A monster on-hit declaration requires its attack id.');
       }
       applyMonsterOnHitEffects(
         context,
@@ -6037,7 +6044,7 @@ function processAttack(
 
 function cantripUpgradeCount(casterLevel: number): number {
   if (!Number.isSafeInteger(casterLevel) || casterLevel < 1 || casterLevel > 20) {
-    throw new EncounterRuleError('Caster level must be an integer from 1 through 20.');
+    throw new EncounterRuleError('validation', 'Caster level must be an integer from 1 through 20.');
   }
   if (casterLevel >= 17) return 3;
   if (casterLevel >= 11) return 2;
@@ -6127,8 +6134,8 @@ function spendSpellCastingCost(
 ): void {
   const actor = command.actor;
   if (command.castAsRitual) {
-    if (definition.ritual !== true) throw new EncounterRuleError(`${definition.name} cannot be cast as a ritual.`);
-    if (context.state.activeCombatant !== null) throw new EncounterRuleError('A ritual cannot resolve as a turn action.');
+    if (definition.ritual !== true) throw new EncounterRuleError('validation', `${definition.name} cannot be cast as a ritual.`);
+    if (context.state.activeCombatant !== null) throw new EncounterRuleError('validation', 'A ritual cannot resolve as a turn action.');
     return;
   }
   switch (definition.castingTime) {
@@ -6155,7 +6162,7 @@ function spendSpellCastingCost(
         });
         return;
       }
-      throw new EncounterRuleError(`Combatant ${actor} has no spell action available.`);
+      throw new EncounterRuleError('validation', `Combatant ${actor} has no spell action available.`);
     case 'bonus_action':
       assertActiveActor(context, actor);
       spendCost(context, actor, 'bonus_action', `Cast ${definition.name}`);
@@ -6163,10 +6170,10 @@ function spendSpellCastingCost(
     case 'reaction': {
       const subject = combatant(context.state, actor);
       if (subject.life !== 'living' || isIncapacitated(combatantConditions(context.state, actor))) {
-        throw new EncounterRuleError(`Combatant ${actor} cannot cast a Reaction spell.`);
+        throw new EncounterRuleError('validation', `Combatant ${actor} cannot cast a Reaction spell.`);
       }
       if (!subject.turn.reactionAvailable) {
-        throw new EncounterRuleError(`Combatant ${actor} has no Reaction available.`);
+        throw new EncounterRuleError('validation', `Combatant ${actor} has no Reaction available.`);
       }
       context.state = replaceCombatant(context.state, {
         ...subject,
@@ -6179,7 +6186,7 @@ function spendSpellCastingCost(
     case 'ten_minutes':
     case 'hour':
       if (context.state.activeCombatant !== null) {
-        throw new EncounterRuleError(`${definition.name} has a long casting time and cannot resolve as a turn action.`);
+        throw new EncounterRuleError('validation', `${definition.name} has a long casting time and cannot resolve as a turn action.`);
       }
       return;
   }
@@ -6192,13 +6199,13 @@ function spendSpellSlot(
 ): void {
   if (command.castAsRitual) {
     if (command.resourcePoolId !== undefined) {
-      throw new EncounterRuleError('A ritual cast cannot spend a limited resource pool.');
+      throw new EncounterRuleError('validation', 'A ritual cast cannot spend a limited resource pool.');
     }
-    if (command.slotLevel !== null) throw new EncounterRuleError('A ritual cast does not expend a spell slot.');
+    if (command.slotLevel !== null) throw new EncounterRuleError('validation', 'A ritual cast does not expend a spell slot.');
     return;
   }
   if (definition.level === 0) {
-    if (command.slotLevel !== null) throw new EncounterRuleError('Cantrips do not expend spell slots.');
+    if (command.slotLevel !== null) throw new EncounterRuleError('validation', 'Cantrips do not expend spell slots.');
     if (command.resourcePoolId !== undefined) {
       spendLimitedResource(context, command.actor, command.resourcePoolId, `Cast ${definition.name}`);
     }
@@ -6210,7 +6217,7 @@ function spendSpellSlot(
     command.slotLevel < definition.level ||
     command.slotLevel > 9
   ) {
-    throw new EncounterRuleError(`${definition.name} requires a slot of level ${definition.level} or higher.`);
+    throw new EncounterRuleError('validation', `${definition.name} requires a slot of level ${definition.level} or higher.`);
   }
   if (command.resourcePoolId !== undefined) {
     spendLimitedResource(context, command.actor, command.resourcePoolId, `Cast ${definition.name}`);
@@ -6221,7 +6228,7 @@ function spendSpellSlot(
     candidate.level === command.slotLevel &&
     (candidate.recharge ?? 'long_rest') === (command.slotRecharge ?? 'long_rest'));
   if (slot === undefined || slot.remaining < 1) {
-    throw new EncounterRuleError(`Combatant ${command.actor} has no level-${command.slotLevel} spell slot remaining.`);
+    throw new EncounterRuleError('validation', `Combatant ${command.actor} has no level-${command.slotLevel} spell slot remaining.`);
   }
   const remaining = slot.remaining - 1;
   context.state = replaceCombatant(context.state, {
@@ -6251,10 +6258,10 @@ function placedAreaTargets(
   expectedSecondarySizeFeet: number | null = null,
 ): readonly CombatantId[] {
   if (command.area === null) {
-    throw new EncounterRuleError(`${spellName} requires an area placement.`);
+    throw new EncounterRuleError('validation', `${spellName} requires an area placement.`);
   }
   if (command.area.shape !== shape) {
-    throw new EncounterRuleError(`${spellName} requires a ${shape} template.`);
+    throw new EncounterRuleError('validation', `${spellName} requires a ${shape} template.`);
   }
   const submittedSize = command.area.shape === 'sphere'
     ? command.area.template.radius
@@ -6268,7 +6275,7 @@ function placedAreaTargets(
             ? command.area.template.radius
             : command.area.template.radius;
   if (submittedSize !== expectedSizeFeet) {
-    throw new EncounterRuleError(`${spellName} requires a ${expectedSizeFeet}-foot ${shape} template.`);
+    throw new EncounterRuleError('validation', `${spellName} requires a ${expectedSizeFeet}-foot ${shape} template.`);
   }
   if (expectedSecondarySizeFeet !== null) {
     const submittedSecondary = command.area.shape === 'line'
@@ -6277,7 +6284,7 @@ function placedAreaTargets(
         ? command.area.template.height
         : null;
     if (submittedSecondary !== expectedSecondarySizeFeet) {
-      throw new EncounterRuleError(`${spellName} requires a ${expectedSecondarySizeFeet}-foot secondary ${shape} dimension.`);
+      throw new EncounterRuleError('validation', `${spellName} requires a ${expectedSecondarySizeFeet}-foot secondary ${shape} dimension.`);
     }
   }
   const actorCell = token(state, command.actor).position;
@@ -6289,7 +6296,7 @@ function placedAreaTargets(
   const horizontal = Math.max(minimumX - origin.x, 0, origin.x - maximumX);
   const vertical = Math.max(minimumY - origin.y, 0, origin.y - maximumY);
   if (Math.max(horizontal, vertical) > rangeFeet) {
-    throw new EncounterRuleError(`${spellName} area origin is out of range.`);
+    throw new EncounterRuleError('validation', `${spellName} area origin is out of range.`);
   }
   const cells = affectedCells(
     { bounds: state.bounds, blockedCells: templateBlockedCells(state) },
@@ -6308,7 +6315,7 @@ function areaTargets(
   command: SpellCastCommand,
 ): readonly CombatantId[] {
   if (definition.targeting.kind !== 'area' && definition.targeting.kind !== 'area_selected') {
-    throw new EncounterRuleError(`${definition.name} does not use area targeting.`);
+    throw new EncounterRuleError('validation', `${definition.name} does not use area targeting.`);
   }
   return placedAreaTargets(
     state,
@@ -6330,13 +6337,13 @@ function validateTargetRange(
   allowDead = false,
 ): void {
   if (!isCombatantOnBoard(state, actor) || !isCombatantOnBoard(state, target)) {
-    throw new EncounterRuleError('Spell caster and target must be present on the board.');
+    throw new EncounterRuleError('validation', 'Spell caster and target must be present on the board.');
   }
   if (!allowDead && combatant(state, target).life === 'dead') {
-    throw new EncounterRuleError('A dead combatant is not a legal spell target.');
+    throw new EncounterRuleError('validation', 'A dead combatant is not a legal spell target.');
   }
   if (gridDistance(token(state, actor).position, token(state, target).position) > rangeFeet) {
-    throw new EncounterRuleError(`Spell target ${target} is out of range.`);
+    throw new EncounterRuleError('validation', `Spell target ${target} is out of range.`);
   }
 }
 
@@ -6348,10 +6355,10 @@ function selectedSpellTargets(
   const targeting = definition.targeting;
   switch (targeting.kind) {
     case 'self':
-      if (command.targets.length !== 0) throw new EncounterRuleError('A Self spell does not select targets.');
+      if (command.targets.length !== 0) throw new EncounterRuleError('validation', 'A Self spell does not select targets.');
       return [command.actor];
     case 'single':
-      if (command.targets.length !== 1) throw new EncounterRuleError(`${definition.name} requires one target.`);
+      if (command.targets.length !== 1) throw new EncounterRuleError('validation', `${definition.name} requires one target.`);
       validateTargetRange(state, command.actor, command.targets[0] as CombatantId, targeting.rangeFeet, targeting.allowDead === true);
       return command.targets;
     case 'multiple': {
@@ -6364,10 +6371,10 @@ function selectedSpellTargets(
         operation.kind === 'attack_rays' ||
         operation.kind === 'attack_beams';
       if (command.targets.length < 1 || command.targets.length > maximum) {
-        throw new EncounterRuleError(`${definition.name} allows at most ${maximum} targets.`);
+        throw new EncounterRuleError('validation', `${definition.name} allows at most ${maximum} targets.`);
       }
       if (requiresEveryDart && command.targets.length !== maximum) {
-        throw new EncounterRuleError(`${definition.name} requires one target allocation per projectile.`);
+        throw new EncounterRuleError('validation', `${definition.name} requires one target allocation per projectile.`);
       }
       if (!requiresEveryDart) assertUnique(command.targets, 'Spell targets');
       for (const target of command.targets) validateTargetRange(state, command.actor, target, targeting.rangeFeet);
@@ -6381,33 +6388,33 @@ function selectedSpellTargets(
       return command.targets;
     }
     case 'area':
-      if (command.targets.length !== 0) throw new EncounterRuleError('Area spell targets come from its exact template.');
+      if (command.targets.length !== 0) throw new EncounterRuleError('validation', 'Area spell targets come from its exact template.');
       return areaTargets(state, definition, command);
     case 'area_selected': {
       const inArea = areaTargets(state, definition, command);
       const slotDelta = (command.slotLevel as number) - definition.level;
       const maximum = targeting.baseMaximum + targeting.additionalPerSlot * slotDelta;
       if (command.targets.length < 1 || command.targets.length > maximum) {
-        throw new EncounterRuleError(`${definition.name} allows at most ${maximum} selected area targets.`);
+        throw new EncounterRuleError('validation', `${definition.name} allows at most ${maximum} selected area targets.`);
       }
       assertUnique(command.targets, 'Spell targets');
       if (command.targets.some((target) => !inArea.includes(target))) {
-        throw new EncounterRuleError(`${definition.name} selected targets must occupy its exact template.`);
+        throw new EncounterRuleError('validation', `${definition.name} selected targets must occupy its exact template.`);
       }
       return command.targets;
     }
     case 'all_in_range':
-      if (command.targets.length < 1) throw new EncounterRuleError(`${definition.name} requires at least one target.`);
+      if (command.targets.length < 1) throw new EncounterRuleError('validation', `${definition.name} requires at least one target.`);
       assertUnique(command.targets, 'Spell targets');
       for (const target of command.targets) validateTargetRange(state, command.actor, target, targeting.rangeFeet);
       return command.targets;
     case 'remote':
-      if (command.targets.length !== 1) throw new EncounterRuleError(`${definition.name} requires one remote target.`);
-      if (combatant(state, command.targets[0] as CombatantId).life === 'dead') throw new EncounterRuleError('A dead combatant is not a legal spell target.');
-      if (!isCombatantOnBoard(state, command.targets[0] as CombatantId)) throw new EncounterRuleError('An absent combatant is not a legal spell target.');
+      if (command.targets.length !== 1) throw new EncounterRuleError('validation', `${definition.name} requires one remote target.`);
+      if (combatant(state, command.targets[0] as CombatantId).life === 'dead') throw new EncounterRuleError('validation', 'A dead combatant is not a legal spell target.');
+      if (!isCombatantOnBoard(state, command.targets[0] as CombatantId)) throw new EncounterRuleError('validation', 'An absent combatant is not a legal spell target.');
       return command.targets;
     case 'utility':
-      if (command.targets.length !== 0) throw new EncounterRuleError('This utility spell does not target a combatant.');
+      if (command.targets.length !== 0) throw new EncounterRuleError('validation', 'This utility spell does not target a combatant.');
       return [command.actor];
   }
 }
@@ -6571,7 +6578,7 @@ function resolvedSpellEffectPayload(
   payload: EffectPayload,
 ): EffectPayload {
   const selectedArea = (): AreaTemplate => {
-    if (command.area === null) throw new EncounterRuleError(`${definition.name} requires an area placement.`);
+    if (command.area === null) throw new EncounterRuleError('validation', `${definition.name} requires an area placement.`);
     return cloneAreaTemplate(command.area);
   };
   const slotDelta = definition.level === 0 || command.castAsRitual
@@ -6607,10 +6614,10 @@ function resolvedSpellEffectPayload(
     case 'condition_choice': {
       const selected = command.selectedOption;
       if (selected !== 'Blinded' && selected !== 'Deafened') {
-        throw new EncounterRuleError(`${definition.name} requires Blinded or Deafened selection.`);
+        throw new EncounterRuleError('validation', `${definition.name} requires Blinded or Deafened selection.`);
       }
       if (!payload.conditions.includes(selected)) {
-        throw new EncounterRuleError(`${definition.name} does not allow ${selected}.`);
+        throw new EncounterRuleError('validation', `${definition.name} does not allow ${selected}.`);
       }
       return { kind: 'condition', condition: selected };
     }
@@ -6678,7 +6685,7 @@ function resolvedSpellEffectPayload(
     case 'energy_protection': {
       const selected = command.selectedOption;
       if (selected === null || !payload.damageTypes.includes(selected as 'Acid' | 'Cold' | 'Fire' | 'Lightning' | 'Thunder')) {
-        throw new EncounterRuleError(`${definition.name} requires a listed energy damage type.`);
+        throw new EncounterRuleError('validation', `${definition.name} requires a listed energy damage type.`);
       }
       return { ...payload, selectedDamageType: selected };
     }
@@ -6888,7 +6895,7 @@ function applyHealing(
   amount: number,
 ): void {
   const before = combatant(context.state, target);
-  if (before.life === 'dead') throw new EncounterRuleError('A dead creature cannot regain Hit Points.');
+  if (before.life === 'dead') throw new EncounterRuleError('validation', 'A dead creature cannot regain Hit Points.');
   if (context.state.effects.some((candidate) =>
     candidate.targets.includes(target) && candidate.payload.kind === 'cannot_regain_hit_points')) return;
   const hitPoints = Math.min(effectiveHitPointMaximum(context.state, target), before.hitPoints + amount);
@@ -6911,7 +6918,7 @@ function grantTemporaryHitPoints(
   amount: number,
 ): void {
   if (!Number.isSafeInteger(amount) || amount < 0) {
-    throw new EncounterRuleError('Temporary Hit Points must be a non-negative safe integer.');
+    throw new EncounterRuleError('validation', 'Temporary Hit Points must be a non-negative safe integer.');
   }
   const subject = combatant(context.state, target);
   const after = Math.max(subject.temporaryHitPoints, amount);
@@ -6976,7 +6983,7 @@ function rollSpellAttack(
   if (
     !hasLineOfSight(context.state, actorPosition, targetPosition) ||
     coverTierBetween(context.state, actorPosition, targetPosition) === 'total'
-  ) throw new EncounterRuleError('The spell target has Total Cover or is outside line of sight.');
+  ) throw new EncounterRuleError('validation', 'The spell target has Total Cover or is outside line of sight.');
   const rollModeEffects = context.state.effects.filter((effect) => {
     if (effect.payload.kind === 'faerie_fire') return effect.targets.includes(target);
     if (effect.payload.kind === 'attacks_against_target_roll_mode') {
@@ -7061,11 +7068,11 @@ function selectedSpellDamageType(
 ): DamageType {
   if (!Array.isArray(configured)) return configured as DamageType;
   if (command.selectedOption === null) {
-    throw new EncounterRuleError(`${definition.name} requires a damage type selection.`);
+    throw new EncounterRuleError('validation', `${definition.name} requires a damage type selection.`);
   }
   const selected = damageType(command.selectedOption);
   if (!configured.includes(selected)) {
-    throw new EncounterRuleError(`${definition.name} does not allow ${command.selectedOption} damage.`);
+    throw new EncounterRuleError('validation', `${definition.name} does not allow ${command.selectedOption} damage.`);
   }
   return selected;
 }
@@ -7078,7 +7085,7 @@ function selectedModifierSkill(
   if (typeof configured === 'string') return configured;
   const selected = skills.find((skill) => skill === command.selectedOption);
   if (selected === undefined || !configured.options.includes(selected)) {
-    throw new EncounterRuleError(`${definition.name} requires one of its declared skill choices.`);
+    throw new EncounterRuleError('validation', `${definition.name} requires one of its declared skill choices.`);
   }
   return selected;
 }
@@ -7091,7 +7098,7 @@ function selectedModifierDamageType(
   if (typeof configured === 'string') return configured;
   const selected = configured.options.find((candidate) => candidate === command.selectedOption);
   if (selected === undefined) {
-    throw new EncounterRuleError(`${definition.name} requires one of its declared damage-type choices.`);
+    throw new EncounterRuleError('validation', `${definition.name} requires one of its declared damage-type choices.`);
   }
   return selected;
 }
@@ -7151,7 +7158,7 @@ function operationDiceExpression(
       case 'target_size': {
         const size = effectiveCombatRules(state, subject.profile.id).sizeCategory;
         if (size === undefined) {
-          throw new EncounterRuleError(`Damage scaling requires a known size for ${target}.`);
+          throw new EncounterRuleError('validation', `Damage scaling requires a known size for ${target}.`);
         }
         return scaling.additionalDiceBySize[size];
       }
@@ -7274,7 +7281,7 @@ function applyDamageOperation(
   identity: string,
   cast: DamageScalingContext,
 ): SpellOperationOutcome {
-  if (targets.length === 0) throw new EncounterRuleError('A damage operation requires at least one target.');
+  if (targets.length === 0) throw new EncounterRuleError('validation', 'A damage operation requires at least one target.');
   const resolveNow = operation.timing.kind === 'immediate' || operation.timing.initial === 'immediate';
   const immediateOutcomes: SpellOperationOutcome[] = [];
   if (resolveNow) {
@@ -7438,7 +7445,7 @@ function heatMetalRange(definition: SpellDefinition): number {
     case 'area_selected':
     case 'all_in_range':
     case 'remote':
-      throw new EncounterRuleError(`${definition.name} has incompatible item targeting.`);
+      throw new EncounterRuleError('validation', `${definition.name} has incompatible item targeting.`);
   }
 }
 
@@ -7449,7 +7456,7 @@ function executeHeatMetal(
   operation: Extract<BranchSpellOperation, { readonly kind: 'heat_metal' }>,
 ): SpellOperationOutcome {
   const selected = command.objectTargets ?? [];
-  if (selected.length !== 1) throw new EncounterRuleError(`${definition.name} requires exactly one item target.`);
+  if (selected.length !== 1) throw new EncounterRuleError('validation', `${definition.name} requires exactly one item target.`);
   const id = selected[0] as ItemId;
   const item = encounterItem(context.state, id);
   if (!item.materials.some((material) => material.kind === 'known' && material.name === operation.requiredMaterial)) {
@@ -7460,7 +7467,7 @@ function executeHeatMetal(
   if (
     gridDistance(casterPosition, position) > heatMetalRange(definition) ||
     !hasLineOfSight(context.state, casterPosition, position)
-  ) throw new EncounterRuleError(`${definition.name} item target is out of range or not visible.`);
+  ) throw new EncounterRuleError('validation', `${definition.name} item target is out of range or not visible.`);
 
   const contacts = itemContacts(context.state, id);
   const rolled = resolveDamage({
@@ -7519,7 +7526,7 @@ function extendLifecycleDuration(
 ): boolean {
   if (operation.stacking.kind !== 'extend_duration') return false;
   if (operation.duration.kind !== 'fixed_rounds') {
-    throw new EncounterRuleError('Only a fixed-round condition lifecycle can extend duration.');
+    throw new EncounterRuleError('validation', 'Only a fixed-round condition lifecycle can extend duration.');
   }
   const stackingSources = operation.stacking.sources;
   const existing = context.state.effects.find((effect) =>
@@ -7527,7 +7534,7 @@ function extendLifecycleDuration(
     (stackingSources === 'any_source' || effect.source === source));
   if (existing === undefined) return false;
   if (existing.duration.kind !== 'turn_boundaries') {
-    throw new EncounterRuleError('A condition lifecycle cannot extend a permanent effect.');
+    throw new EncounterRuleError('validation', 'A condition lifecycle cannot extend a permanent effect.');
   }
   const remaining = existing.duration.remaining + operation.duration.rounds;
   context.state = {
@@ -7767,7 +7774,7 @@ function offerReaction(
   const selected = candidates.find(({ reactor, definition }) =>
     reactor === command.actor && definition.id === command.spellId);
   if (selected === undefined) {
-    throw new EncounterRuleError('The controller selected a Reaction that was not offered for this trigger.');
+    throw new EncounterRuleError('validation', 'The controller selected a Reaction that was not offered for this trigger.');
   }
   const availability = reactionAvailability(context.state, selected.reactor, selected.definition);
   if (availability !== 'available') {
@@ -7784,7 +7791,7 @@ function offerReaction(
     (event.kind === 'hit_by_attack' && command.modifierSource !== event.attacker) ||
     (event.kind !== 'hit_by_attack' && command.modifierSource !== undefined)
   ) {
-    throw new EncounterRuleError('The controller altered the offered Reaction target or trigger binding.');
+    throw new EncounterRuleError('validation', 'The controller altered the offered Reaction target or trigger binding.');
   }
   if (
     selected.definition.level > 0 &&
@@ -7809,7 +7816,7 @@ function offerReaction(
   let cancelledTrigger = false;
   if (selected.operation.response.kind === 'reaction_save_cancel') {
     const target = targets[0];
-    if (target === undefined) throw new EncounterRuleError('A cancelling Reaction requires one triggering caster.');
+    if (target === undefined) throw new EncounterRuleError('validation', 'A cancelling Reaction requires one triggering caster.');
     cancelledTrigger = resolveTargetSave(
       context, command.actor, target, selected.operation.response.ability,
       command.saveDc, 'normal', null,
@@ -7829,24 +7836,24 @@ function offerReaction(
 
 function processSpellCast(context: ReductionContext, command: SpellCastCommand): void {
   if (combatant(context.state, command.actor).form?.spellcasting === 'prohibited') {
-    throw new EncounterRuleError(`Combatant ${command.actor} cannot cast spells in its current form.`);
+    throw new EncounterRuleError('validation', `Combatant ${command.actor} cannot cast spells in its current form.`);
   }
   const wildShape = combatant(context.state, command.actor).wildShape;
   if (wildShape !== undefined && wildShape.druidLevel < 18) {
-    throw new EncounterRuleError(`Combatant ${command.actor} cannot cast spells while using Wild Shape before Druid level 18.`);
+    throw new EncounterRuleError('validation', `Combatant ${command.actor} cannot cast spells while using Wild Shape before Druid level 18.`);
   }
   const definition = spellDefinition(command.spellId) ??
     importedSpellDefinition(context.state.contentPacks, command.spellId);
-  if (definition === null) throw new EncounterRuleError(`Spell ${command.spellId} is not implemented.`);
+  if (definition === null) throw new EncounterRuleError('rule_gap', `Spell ${command.spellId} is not implemented.`);
   if (definition.operation.kind === 'reaction') {
-    throw new EncounterRuleError(`${definition.name} can be cast only through its declared Reaction trigger.`);
+    throw new EncounterRuleError('validation', `${definition.name} can be cast only through its declared Reaction trigger.`);
   }
   const targets = selectedSpellTargets(context.state, definition, command);
   if (definition.operation.kind === 'revive') {
     for (const target of targets) {
       const subject = combatant(context.state, target);
       if (subject.life !== 'dead') {
-        throw new EncounterRuleError(`${definition.name} requires a dead creature.`);
+        throw new EncounterRuleError('validation', `${definition.name} requires a dead creature.`);
       }
       if (subject.deathAt === null) {
         throw new RevivifyRuleError('death_time_unknown', REVIVIFY_CITATIONS.deathWindowAndHitPoints);
@@ -8000,7 +8007,7 @@ function sharedOutcomeDamageAmount(
     operation.packets.length !== 1 ||
     packet.thresholdRider !== null
   ) {
-    throw new EncounterRuleError('A shared outcome damage reference requires one immediate automatic damage packet without a threshold rider.');
+    throw new EncounterRuleError('validation', 'A shared outcome damage reference requires one immediate automatic damage packet without a threshold rider.');
   }
   const rolled = resolveDamage({ ...instance.damage, critical, responses: [] }, context.rng);
   const rawAmount = transform === 'half_round_down' ? Math.floor(rolled.total / 2) : rolled.total;
@@ -8029,7 +8036,7 @@ function executeSharedOutcomeBranch(
     if (operation.kind === 'shared_outcome_damage_reference') {
       const referenced = failureBranch[operation.source.operationIndex];
       if (referenced?.kind !== 'damage_operation') {
-        throw new EncounterRuleError('A shared outcome damage reference did not identify failure-branch damage.');
+        throw new EncounterRuleError('validation', 'A shared outcome damage reference did not identify failure-branch damage.');
       }
       outcomes.push(sharedOutcomeDamageAmount(
         context, definition, command, target, referenced, false, operation.transform,
@@ -8124,7 +8131,7 @@ function summonMonster(
       candidate.sourceId === spell.sourceId && candidate.recordId === monsterId);
     if (monster !== undefined) return monster;
   }
-  throw new EncounterRuleError(
+  throw new EncounterRuleError('validation', 
     `${definition.name} references monster ${monsterId}, which is absent from its content pack.`,
   );
 }
@@ -8135,7 +8142,7 @@ function formReplacementRules(
   monster: LoadedContentPack['monsters'][number] | null,
 ): { readonly formId: string; readonly formName: string; readonly rules: CombatRulesProfile; readonly actions: readonly MonsterAction[] } {
   if (operation.form.kind === 'pack_monster') {
-    if (monster === null) throw new EncounterRuleError('A pack-monster form did not resolve its statblock.');
+    if (monster === null) throw new EncounterRuleError('validation', 'A pack-monster form did not resolve its statblock.');
     const projected = importedMonsterProfile(monster, {
       combatantId: `form:${String(original.id)}`,
       tokenId: `form:${String(original.tokenId)}`,
@@ -8300,13 +8307,13 @@ function validateSummonDestinations(
   const casterPosition = token(state, command.actor).position;
   for (const destination of destinations) {
     if (!isCellInside(state.bounds, destination) || movementBlocked(state, destination)) {
-      throw new EncounterRuleError(`${definition.name} summon destination is not an occupiable cell.`);
+      throw new EncounterRuleError('validation', `${definition.name} summon destination is not an occupiable cell.`);
     }
     if (state.tokens.some((placed) => cellKey(placed.position) === cellKey(destination))) {
-      throw new EncounterRuleError(`${definition.name} summon destination must be unoccupied.`);
+      throw new EncounterRuleError('validation', `${definition.name} summon destination must be unoccupied.`);
     }
     if (gridDistance(casterPosition, destination) > rangeFeet) {
-      throw new EncounterRuleError(`${definition.name} summon destination is out of range.`);
+      throw new EncounterRuleError('validation', `${definition.name} summon destination is out of range.`);
     }
   }
   return destinations.map((destination) => ({ ...destination }));
@@ -8379,7 +8386,7 @@ function resolveSummon(
   const summonerIndex = context.state.initiative.findIndex((entry) => entry.combatant === command.actor);
   const summonerEntry = context.state.initiative[summonerIndex];
   if (summonerIndex < 0 || summonerEntry === undefined) {
-    throw new EncounterRuleError(`${definition.name} requires active initiative before summoning.`);
+    throw new EncounterRuleError('validation', `${definition.name} requires active initiative before summoning.`);
   }
   const summonEntries = summonIds.map((combatant) => ({ ...summonerEntry, combatant }));
   context.state = {
@@ -8407,7 +8414,7 @@ function executeSpellOperation(
 ): SpellOperationOutcome {
   switch (operation.kind) {
     case 'reaction':
-      throw new EncounterRuleError(`${definition.name} requires an event interception window.`);
+      throw new EncounterRuleError('validation', `${definition.name} requires an event interception window.`);
     case 'composition': {
       const compositionState = context.state;
       const compositionEventCount = context.events.length;
@@ -8415,7 +8422,7 @@ function executeSpellOperation(
       const outcomes: SpellOperationOutcome[] = [];
       for (const stepIndex of compositionOrder(operation)) {
         const step = operation.steps[stepIndex];
-        if (step === undefined) throw new EncounterRuleError('A composition order referenced a missing step.');
+        if (step === undefined) throw new EncounterRuleError('validation', 'A composition order referenced a missing step.');
         const resolution = executeCompositionStep(context, definition, command, targets, step);
         outcomes.push(resolution.outcome);
         if (resolution.outcome !== 'refused') {
@@ -8451,7 +8458,7 @@ function executeSpellOperation(
     case 'caster_choice': {
       const mode = operation.modes.find((candidate) => candidate.mode === command.selectedOption);
       if (mode === undefined) {
-        throw new EncounterRuleError(`${definition.name} requires one of its declared caster modes.`);
+        throw new EncounterRuleError('validation', `${definition.name} requires one of its declared caster modes.`);
       }
       return executeSpellOperation(context, definition, command, targets, mode.operation);
     }
@@ -8464,14 +8471,14 @@ function executeSpellOperation(
           branch.minimum < 1 ||
           branch.maximum > operation.dieSides ||
           branch.minimum > branch.maximum
-        ) throw new EncounterRuleError(`${definition.name} has an invalid random-branch range.`);
+        ) throw new EncounterRuleError('validation', `${definition.name} has an invalid random-branch range.`);
         for (let face = branch.minimum; face <= branch.maximum; face += 1) {
-          if (covered.has(face)) throw new EncounterRuleError(`${definition.name} has overlapping random-branch ranges.`);
+          if (covered.has(face)) throw new EncounterRuleError('validation', `${definition.name} has overlapping random-branch ranges.`);
           covered.add(face);
         }
       }
       if (covered.size !== operation.dieSides) {
-        throw new EncounterRuleError(`${definition.name} has a gap in its random-branch table.`);
+        throw new EncounterRuleError('validation', `${definition.name} has a gap in its random-branch table.`);
       }
       const subjects = targets.length === 0 ? [command.actor] : targets;
       const outcomes: SpellOperationOutcome[] = [];
@@ -8479,7 +8486,7 @@ function executeSpellOperation(
         const rolled = rollDie(context.rng, dieSides(operation.dieSides));
         const branch = operation.branches.find((candidate) =>
           rolled >= candidate.minimum && rolled <= candidate.maximum);
-        if (branch === undefined) throw new EncounterRuleError(`${definition.name} has no branch for roll ${String(rolled)}.`);
+        if (branch === undefined) throw new EncounterRuleError('validation', `${definition.name} has no branch for roll ${String(rolled)}.`);
         outcomes.push(executeSpellOperation(context, definition, { ...command, targets: [target] }, [target], branch.operation));
       }
       return combinedSpellOperationOutcome(outcomes);
@@ -8597,7 +8604,7 @@ function executeSpellOperation(
     }
     case 'targeted_defense_modifier': {
       if (command.modifierSource === undefined) {
-        throw new EncounterRuleError(`${definition.name} requires a selected attacker for its targeted defense.`);
+        throw new EncounterRuleError('validation', `${definition.name} requires a selected attacker for its targeted defense.`);
       }
       combatant(context.state, command.modifierSource);
       applySpellEffect(context, definition, command, modifierEffectData({
@@ -8610,7 +8617,7 @@ function executeSpellOperation(
       return executeHeatMetal(context, definition, command, operation);
     case 'sustained_effect': {
       if (operation.establishment?.kind === 'sustained_effect' || operation.sequence.operation.kind === 'sustained_effect') {
-        throw new EncounterRuleError(`${definition.name} cannot nest a sustained effect.`);
+        throw new EncounterRuleError('validation', `${definition.name} cannot nest a sustained effect.`);
       }
       const objectIdsBefore = new Set(context.state.worldObjects.map((object) => object.id));
       const areaIdsBefore = new Set(context.state.persistentAreas.map((area) => area.id));
@@ -8641,31 +8648,31 @@ function executeSpellOperation(
             (targetBinding === 'bound_combatants' && boundCombatants.length === 0) ||
             (targetBinding === 'bound_objects' && boundObjects.length === 0) ||
             (targetBinding === 'bound_owned_objects' && createdObjects.length === 0)
-          ) throw new EncounterRuleError(`${definition.name} did not establish its declared bound target.`);
+          ) throw new EncounterRuleError('validation', `${definition.name} did not establish its declared bound target.`);
           break;
         case 'automatic_tick':
-          if (targets.length === 0) throw new EncounterRuleError(`${definition.name} automatic ticks require cast targets.`);
+          if (targets.length === 0) throw new EncounterRuleError('validation', `${definition.name} automatic ticks require cast targets.`);
           if (operation.lifecycle.durationRounds !== operation.sequence.ticks) {
-            throw new EncounterRuleError(`${definition.name} automatic tick duration must equal its tick count.`);
+            throw new EncounterRuleError('validation', `${definition.name} automatic tick duration must equal its tick count.`);
           }
           targetBinding = 'bound_combatants';
           boundCombatants = targets;
           break;
         case 'event_trigger':
-          if (createdAreas.length !== 1) throw new EncounterRuleError(`${definition.name} must establish exactly one event-owned area.`);
+          if (createdAreas.length !== 1) throw new EncounterRuleError('validation', `${definition.name} must establish exactly one event-owned area.`);
           targetBinding = 'reselect';
           break;
         case 'delayed_one_shot':
-          if (targets.length === 0) throw new EncounterRuleError(`${definition.name} delayed one-shot requires cast targets.`);
+          if (targets.length === 0) throw new EncounterRuleError('validation', `${definition.name} delayed one-shot requires cast targets.`);
           if (operation.lifecycle.durationRounds !== null) {
-            throw new EncounterRuleError(`${definition.name} delayed one-shot cannot also declare a duration clock.`);
+            throw new EncounterRuleError('validation', `${definition.name} delayed one-shot cannot also declare a duration clock.`);
           }
           targetBinding = 'bound_combatants';
           boundCombatants = targets;
           break;
         case 'instance_group_activation':
           if (createdObjects.length !== operation.sequence.instanceCount) {
-            throw new EncounterRuleError(`${definition.name} must establish exactly ${String(operation.sequence.instanceCount)} owned instances.`);
+            throw new EncounterRuleError('validation', `${definition.name} must establish exactly ${String(operation.sequence.instanceCount)} owned instances.`);
           }
           targetBinding = 'bound_owned_objects';
           break;
@@ -8725,7 +8732,7 @@ function executeSpellOperation(
     case 'armed_weapon_hit_rider': {
       const packet = operation.damage;
       if (packet !== null && (packet.scaling.kind !== 'none' || packet.thresholdRider !== null)) {
-        throw new EncounterRuleError('An armed weapon-hit rider cannot defer target scaling or a damage-threshold rider.');
+        throw new EncounterRuleError('validation', 'An armed weapon-hit rider cannot defer target scaling or a damage-threshold rider.');
       }
       const damage: DamageRequest = {
         terms: packet === null
@@ -8778,10 +8785,10 @@ function executeSpellOperation(
         ? { kind: 'selected' as const, combatants: selected }
         : { kind: operation.targetFilter };
       if (operation.origin === 'selected_when_cast' && command.area === null) {
-        throw new EncounterRuleError(`${definition.name} requires an area placement.`);
+        throw new EncounterRuleError('validation', `${definition.name} requires an area placement.`);
       }
       if (operation.origin === 'anchored_to_caster' && operation.shape === null) {
-        throw new EncounterRuleError(`${definition.name} requires an anchored area shape.`);
+        throw new EncounterRuleError('validation', `${definition.name} requires an anchored area shape.`);
       }
       const input: PersistentAreaInput = {
         owner: command.actor,
@@ -8825,7 +8832,7 @@ function executeSpellOperation(
     case 'world_operations': {
       const areaCells = (): readonly GridCell[] => {
         if (command.area === null) {
-          throw new EncounterRuleError(`${definition.name} requires an area placement for its environment operation.`);
+          throw new EncounterRuleError('validation', `${definition.name} requires an area placement for its environment operation.`);
         }
         return affectedCells(
           { bounds: context.state.bounds, blockedCells: templateBlockedCells(context.state) },
@@ -8839,10 +8846,10 @@ function executeSpellOperation(
               ? token(context.state, command.actor).position
               : (() => {
                   if (command.area === null) {
-                    throw new EncounterRuleError(`${definition.name} requires an object placement area.`);
+                    throw new EncounterRuleError('validation', `${definition.name} requires an object placement area.`);
                   }
                   const origin = fixedOrigin(command.area);
-                  if (origin.kind !== 'fixed') throw new EncounterRuleError('Object placement did not resolve to a fixed point.');
+                  if (origin.kind !== 'fixed') throw new EncounterRuleError('validation', 'Object placement did not resolve to a fixed point.');
                   return { column: Math.floor(origin.point.x / 5), row: Math.floor(origin.point.y / 5) };
                 })();
             let sequence = context.state.nextWorldObjectSequence;
@@ -8891,7 +8898,7 @@ function executeSpellOperation(
           case 'remove_objects': {
             const objectTargets = command.objectTargets ?? [];
             if (objectTargets.length === 0) {
-              throw new EncounterRuleError(`${definition.name} requires at least one world-object target.`);
+              throw new EncounterRuleError('validation', `${definition.name} requires at least one world-object target.`);
             }
             for (const objectId of objectTargets) {
               processWorldOperation(context, command.actor, {
@@ -8903,7 +8910,7 @@ function executeSpellOperation(
           case 'modify_objects': {
             const objectTargets = command.objectTargets ?? [];
             if (objectTargets.length === 0) {
-              throw new EncounterRuleError(`${definition.name} requires at least one world-object target.`);
+              throw new EncounterRuleError('validation', `${definition.name} requires at least one world-object target.`);
             }
             for (const objectId of objectTargets) {
               processWorldOperation(context, command.actor, {
@@ -8917,11 +8924,11 @@ function executeSpellOperation(
               definition.operation.kind !== 'sustained_effect' ||
               definition.operation.sequence.kind !== 'activation'
             ) {
-              throw new EncounterRuleError('Owned world-object movement is only available to a sustained effect activation.');
+              throw new EncounterRuleError('validation', 'Owned world-object movement is only available to a sustained effect activation.');
             }
             const objectTargets = command.ownedObjectTargets ?? [];
             if (objectTargets.length !== 1 || command.spatialPoint === undefined) {
-              throw new EncounterRuleError(`${definition.name} requires one owned object and one destination.`);
+              throw new EncounterRuleError('validation', `${definition.name} requires one owned object and one destination.`);
             }
             const objectId = objectTargets[0] as WorldObjectId;
             const existing = worldObject(context.state, objectId);
@@ -8930,7 +8937,7 @@ function executeSpellOperation(
               !isCellInside(context.state.bounds, destination) ||
               gridDistance(existing.position, destination) > declared.maximumDistanceFeet
             ) {
-              throw new EncounterRuleError(`${definition.name} object destination is outside its declared movement range.`);
+              throw new EncounterRuleError('validation', `${definition.name} object destination is outside its declared movement range.`);
             }
             const columnDelta = destination.column - existing.position.column;
             const rowDelta = destination.row - existing.position.row;
@@ -8952,7 +8959,7 @@ function executeSpellOperation(
               definition.operation.kind !== 'sustained_effect' ||
               definition.operation.sequence.kind !== 'instance_group_activation'
             ) {
-              throw new EncounterRuleError('Owned world-object group movement is only available to a sustained effect activation.');
+              throw new EncounterRuleError('validation', 'Owned world-object group movement is only available to a sustained effect activation.');
             }
             const objectTargets = command.ownedObjectTargets ?? [];
             const destinations = command.ownedObjectDestinations ?? [];
@@ -8960,7 +8967,7 @@ function executeSpellOperation(
               destinations.length !== objectTargets.length ||
               !sameIdentitySet(destinations.map((entry) => entry.objectId), objectTargets)
             ) {
-              throw new EncounterRuleError(`${definition.name} requires one destination for every owned instance.`);
+              throw new EncounterRuleError('validation', `${definition.name} requires one destination for every owned instance.`);
             }
             const moves = [...destinations]
               .sort((left, right) => String(left.objectId).localeCompare(String(right.objectId)))
@@ -8970,7 +8977,7 @@ function executeSpellOperation(
                   !isCellInside(context.state.bounds, entry.destination) ||
                   gridDistance(existing.position, entry.destination) > declared.maximumDistanceFeet
                 ) {
-                  throw new EncounterRuleError(`${definition.name} group destination is outside its declared movement range.`);
+                  throw new EncounterRuleError('validation', `${definition.name} group destination is outside its declared movement range.`);
                 }
                 const columnDelta = entry.destination.column - existing.position.column;
                 const rowDelta = entry.destination.row - existing.position.row;
@@ -8994,7 +9001,7 @@ function executeSpellOperation(
           case 'damage_objects': {
             const objectTargets = command.objectTargets ?? [];
             if (objectTargets.length === 0) {
-              throw new EncounterRuleError(`${definition.name} requires at least one world-object target.`);
+              throw new EncounterRuleError('validation', `${definition.name} requires at least one world-object target.`);
             }
             for (const objectId of objectTargets) {
               processWorldOperation(context, command.actor, {
@@ -9015,7 +9022,7 @@ function executeSpellOperation(
       const destinations = declaredDestinations === undefined
         ? command.spatialPoint === undefined ? [] : movers.map((mover) => ({ target: mover, destination: command.spatialPoint as GridCell }))
         : declaredDestinations;
-      if (destinations.length !== movers.length) throw new EncounterRuleError(`${definition.name} requires one destination per teleported creature.`);
+      if (destinations.length !== movers.length) throw new EncounterRuleError('validation', `${definition.name} requires one destination per teleported creature.`);
       for (const [index, mover] of movers.entries()) {
         const declared = destinations[index];
         if (declared === undefined || declared.target !== mover) {
@@ -9031,7 +9038,7 @@ function executeSpellOperation(
           movementBlocked(context.state, destination) ||
           occupied ||
           (operation.destination.requireLineOfSight && !hasLineOfSight(context.state, casterPosition, destination))
-        ) throw new EncounterRuleError(`${definition.name} requires an unoccupied, occupiable destination satisfying its declared constraint.`);
+        ) throw new EncounterRuleError('validation', `${definition.name} requires an unoccupied, occupiable destination satisfying its declared constraint.`);
         context.state = {
           ...context.state,
           tokens: context.state.tokens.map((placed) => placed.combatantId === mover
@@ -9049,7 +9056,7 @@ function executeSpellOperation(
       const origin = operation.origin === 'caster'
         ? token(context.state, command.actor).position
         : command.spatialPoint;
-      if (origin === undefined) throw new EncounterRuleError(`${definition.name} requires a forced-movement origin point.`);
+      if (origin === undefined) throw new EncounterRuleError('validation', `${definition.name} requires a forced-movement origin point.`);
       for (const target of targets) {
         if (operation.save !== null) {
           const save = resolveTargetSave(
@@ -9163,7 +9170,7 @@ function executeSpellOperation(
         command,
       );
       if (!burstTargets.includes(primary)) {
-        throw new EncounterRuleError(`${definition.name} burst must include its primary target.`);
+        throw new EncounterRuleError('validation', `${definition.name} burst must include its primary target.`);
       }
       resolveSpellAttack(
         context,
@@ -9389,7 +9396,7 @@ function executeSpellOperation(
     case 'remove_condition': {
       const selected = command.selectedOption;
       if (selected === null || !operation.conditions.includes(selected as 'Blinded' | 'Deafened' | 'Paralyzed' | 'Poisoned')) {
-        throw new EncounterRuleError(`${definition.name} requires a removable condition selection.`);
+        throw new EncounterRuleError('validation', `${definition.name} requires a removable condition selection.`);
       }
       for (const target of targets) removeSpellConditions(context, target, [selected]);
       return 'applied';
@@ -9438,7 +9445,7 @@ function executeSpellOperation(
     case 'revive':
       for (const target of targets) {
         const subject = combatant(context.state, target);
-        if (subject.life !== 'dead') throw new EncounterRuleError(`${definition.name} requires a dead creature.`);
+        if (subject.life !== 'dead') throw new EncounterRuleError('validation', `${definition.name} requires a dead creature.`);
         context.state = replaceCombatant(context.state, {
           ...subject, life: 'living', hitPoints: operation.hitPoints, deathSaves: null,
         });
@@ -9493,15 +9500,15 @@ function executeSpellOperation(
       return 'applied';
     case 'stabilize': {
       const target = combatant(context.state, targets[0] as CombatantId);
-      if (target.hitPoints !== 0 || target.life === 'dead') throw new EncounterRuleError('Spare the Dying requires a living creature at 0 Hit Points.');
+      if (target.hitPoints !== 0 || target.life === 'dead') throw new EncounterRuleError('validation', 'Spare the Dying requires a living creature at 0 Hit Points.');
       context.state = replaceCombatant(context.state, { ...target, life: 'stable', deathSaves: null });
       return 'applied';
     }
     case 'weapon_attack_augmentation': {
       if (operation.timing === 'during_cast') {
-        if (command.weaponAttack === null) throw new EncounterRuleError('True Strike requires a weapon attack profile.');
+        if (command.weaponAttack === null) throw new EncounterRuleError('validation', 'True Strike requires a weapon attack profile.');
         if (command.selectedOption !== null && command.selectedOption !== 'Radiant') {
-          throw new EncounterRuleError('True Strike damage must use the weapon type or Radiant.');
+          throw new EncounterRuleError('validation', 'True Strike damage must use the weapon type or Radiant.');
         }
         const target = targets[0] as CombatantId;
         const advantageEffects = context.state.effects.filter((effect) => {
@@ -9646,7 +9653,7 @@ function nextLivingInitiativeIndex(state: EncounterState, current: number): numb
     const entry = state.initiative[index];
     if (entry !== undefined && combatant(state, entry.combatant).life !== 'dead') return index;
   }
-  throw new EncounterRuleError('No living combatant remains in initiative.');
+  throw new EncounterRuleError('validation', 'No living combatant remains in initiative.');
 }
 
 function restoreInitiativeAfterDelayedRound(state: EncounterState): EncounterState {
@@ -9791,7 +9798,7 @@ function rollInitiativeSlots(context: ReductionContext): readonly InitiativeSlot
 
 function worldObject(state: EncounterState, id: WorldObjectId): WorldObject {
   const found = state.worldObjects.find((object) => object.id === id);
-  if (found === undefined) throw new EncounterRuleError(`Unknown world object ${id}.`);
+  if (found === undefined) throw new EncounterRuleError('validation', `Unknown world object ${id}.`);
   return found;
 }
 
@@ -9803,14 +9810,14 @@ function validateWorldObjectForState(
   try {
     assertWorldObjectInput(state.bounds, object);
   } catch (error) {
-    throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid world object.');
+    throw new EncounterRuleError('validation', error instanceof Error ? error.message : 'Invalid world object.');
   }
   if (state.worldObjects.some((candidate) => candidate.id === object.id && candidate.id !== replacing)) {
-    throw new EncounterRuleError(`World object ${object.id} already exists.`);
+    throw new EncounterRuleError('validation', `World object ${object.id} already exists.`);
   }
   if (object.blocking.movement && state.tokens.some((placed) =>
     object.footprint.some((cell) => cellKey(cell) === cellKey(placed.position)))) {
-    throw new EncounterRuleError('A movement-blocking world object cannot overlap a combatant.');
+    throw new EncounterRuleError('validation', 'A movement-blocking world object cannot overlap a combatant.');
   }
 }
 
@@ -9856,7 +9863,7 @@ function processWorldOperation(
     case 'modify_object': {
       const existing = worldObject(context.state, operation.objectId);
       if (Object.keys(operation.changes).length === 0) {
-        throw new EncounterRuleError('A world-object modification must change at least one field.');
+        throw new EncounterRuleError('validation', 'A world-object modification must change at least one field.');
       }
       const modified: WorldObject = {
         ...existing,
@@ -9880,7 +9887,7 @@ function processWorldOperation(
     case 'damage_object': {
       const existing = worldObject(context.state, operation.objectId);
       if (existing.durability.kind === 'indestructible') {
-        throw new EncounterRuleError(`World object ${existing.id} is indestructible.`);
+        throw new EncounterRuleError('validation', `World object ${existing.id} is indestructible.`);
       }
       const attack = operation.delivery.kind === 'attack'
         ? resolveAttackRoll({
@@ -9916,7 +9923,7 @@ function processWorldOperation(
       try {
         assertEnvironmentRegion(context.state.bounds, operation.region);
       } catch (error) {
-        throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid terrain region.');
+        throw new EncounterRuleError('validation', error instanceof Error ? error.message : 'Invalid terrain region.');
       }
       const retained = context.state.environment.difficultTerrainRegions
         .filter((region) => region.id !== operation.region.id);
@@ -9939,7 +9946,7 @@ function processWorldOperation(
       try {
         assertEnvironmentRegion(context.state.bounds, operation.region);
       } catch (error) {
-        throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid light region.');
+        throw new EncounterRuleError('validation', error instanceof Error ? error.message : 'Invalid light region.');
       }
       context.state = {
         ...context.state,
@@ -9961,7 +9968,7 @@ function processWorldOperation(
       try {
         assertEnvironmentRegion(context.state.bounds, operation.region);
       } catch (error) {
-        throw new EncounterRuleError(error instanceof Error ? error.message : 'Invalid obscurement region.');
+        throw new EncounterRuleError('validation', error instanceof Error ? error.message : 'Invalid obscurement region.');
       }
       const retained = context.state.environment.obscurementRegions
         .filter((region) => region.id !== operation.region.id);
@@ -10113,7 +10120,7 @@ function applyDmDeathOverride(context: ReductionContext, command: DmDeathOverrid
       command.failures < 0 || command.failures >= DEATH_SAVE_RESOLUTION_COUNT
     )
   ) {
-    throw new EncounterRuleError('DM death-save counts must be safe integers from 0 through 2.');
+    throw new EncounterRuleError('validation', 'DM death-save counts must be safe integers from 0 through 2.');
   }
   const override = command.type === 'dm_stabilize'
     ? 'stabilize' as const
@@ -10176,15 +10183,25 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       return;
     case 'adjudicate': {
       if (command.reasoning.trim().length === 0) {
-        throw new EncounterRuleError('An adjudication requires DM reasoning.');
+        throw new EncounterRuleError('validation', 'An adjudication requires DM reasoning.');
       }
       if (command.subject.trim().length === 0 || command.subject.length > 200) {
-        throw new EncounterRuleError('An adjudication subject must be non-empty and at most 200 characters.');
+        throw new EncounterRuleError('validation', 'An adjudication subject must be non-empty and at most 200 characters.');
       }
       const subject = combatant(context.state, command.target);
+      if (command.consequence.kind === 'no_effect') {
+        emit(context, {
+          type: 'adjudicated',
+          target: command.target,
+          subject: command.subject,
+          reasoning: command.reasoning.trim(),
+          consequence: { kind: 'no_effect' },
+        });
+        return;
+      }
       if (command.consequence.kind === 'hit_point_delta') {
         if (!Number.isSafeInteger(command.consequence.amount)) {
-          throw new EncounterRuleError('An adjudicated Hit Point delta must be a safe integer.');
+          throw new EncounterRuleError('validation', 'An adjudicated Hit Point delta must be a safe integer.');
         }
         const before = subject.hitPoints;
         const after = Math.max(
@@ -10215,7 +10232,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       }
       const consequence = command.consequence;
       if (!isCellInside(context.state.bounds, consequence.to)) {
-        throw new EncounterRuleError('An adjudicated destination is outside the encounter grid.');
+        throw new EncounterRuleError('validation', 'An adjudicated destination is outside the encounter grid.');
       }
       if (
         movementBlocked(context.state, consequence.to) ||
@@ -10225,7 +10242,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
             cellKey(candidate.position) === cellKey(consequence.to),
         )
       ) {
-        throw new EncounterRuleError('An adjudicated destination must be unoccupied and unblocked.');
+        throw new EncounterRuleError('validation', 'An adjudicated destination must be unoccupied and unblocked.');
       }
       const existing = token(context.state, command.target);
       context.state = {
@@ -10272,7 +10289,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       return;
     case 'roll_initiative': {
       if (context.state.initiative.length > 0) {
-        throw new EncounterRuleError('Initiative has already been rolled.');
+        throw new EncounterRuleError('validation', 'Initiative has already been rolled.');
       }
       const slots = rollInitiativeSlots(context);
       const initiative = slots.flatMap((slot, slotIndex) =>
@@ -10300,7 +10317,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         slots: slots.map((slot) => slot.entries.map((entry) => entry.combatant)),
       });
       const first = initiative[0];
-      if (first === undefined) throw new EncounterRuleError('Initiative order is empty.');
+      if (first === undefined) throw new EncounterRuleError('validation', 'Initiative order is empty.');
       startTurn(context, first.combatant, 1);
       return;
     }
@@ -10323,6 +10340,8 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       if (!decision.options.some((option) => option.id === command.optionId)) {
         throw new PendingDecisionRuleError('unknown_decision');
       }
+      // Host-owned refusal prompts resolve through a typed DM override, never this reducer command.
+      if (decision.kind === 'adjudication_prompt') throw new PendingDecisionRuleError('unknown_decision');
       context.state = {
         ...context.state,
         pendingDecisions: context.state.pendingDecisions.filter((candidate) => candidate.id !== decision.id),
@@ -10373,7 +10392,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       if (command.featureEffectId !== undefined) {
         const feature = featureEffect(context.state, command.actor, command.featureEffectId);
         if (feature.payload.kind !== 'persistent_area') {
-          throw new EncounterRuleError(`Effect ${command.featureEffectId} does not create a persistent area.`);
+          throw new EncounterRuleError('validation', `Effect ${command.featureEffectId} does not create a persistent area.`);
         }
         if (feature.resourcePoolId !== null) {
           spendLimitedResource(context, command.actor, feature.resourcePoolId, `Effect ${feature.id}`);
@@ -10386,7 +10405,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
             (submittedOrigin.kind !== 'anchored' || submittedOrigin.combatant !== command.actor)) ||
           (declaredOrigin === 'selected' && submittedOrigin.kind !== 'fixed')
         ) {
-          throw new EncounterRuleError(`Effect ${command.featureEffectId} persistent-area declaration was altered.`);
+          throw new EncounterRuleError('validation', `Effect ${command.featureEffectId} persistent-area declaration was altered.`);
         }
       }
       createPersistentArea(context, command.actor, command.area);
@@ -10395,16 +10414,16 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     case 'move_persistent_area': {
       assertActiveActor(context, command.actor);
       const area = context.state.persistentAreas.find((candidate) => candidate.id === command.areaId);
-      if (area === undefined) throw new EncounterRuleError(`Unknown persistent area ${command.areaId}.`);
+      if (area === undefined) throw new EncounterRuleError('validation', `Unknown persistent area ${command.areaId}.`);
       if (area.owner !== command.actor || area.origin.kind !== 'fixed' || area.movable === null) {
-        throw new EncounterRuleError(`Persistent area ${command.areaId} is not movable by ${command.actor}.`);
+        throw new EncounterRuleError('validation', `Persistent area ${command.areaId} is not movable by ${command.actor}.`);
       }
       const distance = Math.hypot(
         command.origin.point.x - area.origin.point.x,
         command.origin.point.y - area.origin.point.y,
       );
       if (distance > area.movable.maximumFeet) {
-        throw new EncounterRuleError(`Persistent area ${command.areaId} moved farther than allowed.`);
+        throw new EncounterRuleError('validation', `Persistent area ${command.areaId} moved farther than allowed.`);
       }
       spendAction(context, command.actor, `Move persistent area ${command.areaId}`);
       context.state = {
@@ -10420,7 +10439,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     case 'world_operation': {
       if (command.actor === null) {
         if (command.cost !== 'none') {
-          throw new EncounterRuleError('An encounter-authored world operation cannot spend a combatant resource.');
+          throw new EncounterRuleError('validation', 'An encounter-authored world operation cannot spend a combatant resource.');
         }
       } else {
         if (command.cost !== 'reaction') assertActiveActor(context, command.actor);
@@ -10437,10 +10456,10 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     case 'decline_reaction': {
       const reactor = combatant(context.state, command.actor);
       if (reactor.life !== 'living' || !reactor.turn.reactionAvailable) {
-        throw new EncounterRuleError(`Combatant ${command.actor} cannot decline this Reaction.`);
+        throw new EncounterRuleError('validation', `Combatant ${command.actor} cannot decline this Reaction.`);
       }
       if (context.state.activeCombatant !== command.mover) {
-        throw new EncounterRuleError('A declined Reaction must name the active mover.');
+        throw new EncounterRuleError('validation', 'A declined Reaction must name the active mover.');
       }
       emit(context, {
         type: 'reaction_declined',
@@ -10452,7 +10471,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     case 'force_save': {
       if (command.monsterFailureEffects !== undefined) {
         if (command.monsterActionId === undefined) {
-          throw new EncounterRuleError('Declared monster failure effects require their action id.');
+          throw new EncounterRuleError('validation', 'Declared monster failure effects require their action id.');
         }
         const declared = declaredMonsterAction(context.state, command.actor, command.monsterActionId);
         if (
@@ -10463,7 +10482,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
           canonicalJson(command.damage) !== canonicalJson(declaredMonsterDamage(declared.failure.damage)) ||
           canonicalJson(command.monsterFailureEffects) !== canonicalJson(declared.failure.effects)
         ) {
-          throw new EncounterRuleError(`Combatant ${command.actor}'s monster save declaration was altered.`);
+          throw new EncounterRuleError('validation', `Combatant ${command.actor}'s monster save declaration was altered.`);
         }
       }
       assertActiveActor(context, command.actor);
@@ -10511,7 +10530,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
           !candidate.targets.includes(command.actor) ||
           candidate.escapeCheck === undefined
         ) {
-          throw new EncounterRuleError(`Effect ${command.escapeEffectId} is not escapable by ${command.actor}.`);
+          throw new EncounterRuleError('validation', `Effect ${command.escapeEffectId} is not escapable by ${command.actor}.`);
         }
         escapeEffect = candidate;
         if (
@@ -10519,11 +10538,11 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
           command.skill !== candidate.escapeCheck.skill ||
           command.dc !== candidate.escapeCheck.dc
         ) {
-          throw new EncounterRuleError('An escape check must use the condition effect\'s declared ability, skill, and DC.');
+          throw new EncounterRuleError('validation', 'An escape check must use the condition effect\'s declared ability, skill, and DC.');
         }
       }
       spendCost(context, command.actor, command.cost, 'Ability check');
-      if (!Number.isFinite(command.bonus)) throw new EncounterRuleError('Ability check bonus must be finite.');
+      if (!Number.isFinite(command.bonus)) throw new EncounterRuleError('validation', 'Ability check bonus must be finite.');
       const modifier = effectDiceModifier(
         context.state, command.actor, 'ability_check', context.rng, command.skill,
       ) + rollDefenseTotalModifier(
@@ -10596,10 +10615,10 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     case 'spend_reaction': {
       const subject = combatant(context.state, command.actor);
       if (subject.life !== 'living' || isIncapacitated(combatantConditions(context.state, command.actor))) {
-        throw new EncounterRuleError(`Combatant ${command.actor} cannot react.`);
+        throw new EncounterRuleError('validation', `Combatant ${command.actor} cannot react.`);
       }
       if (!subject.turn.reactionAvailable) {
-        throw new EncounterRuleError(`Combatant ${command.actor} has no Reaction available.`);
+        throw new EncounterRuleError('validation', `Combatant ${command.actor} has no Reaction available.`);
       }
       context.state = replaceCombatant(context.state, {
         ...subject,
@@ -10618,10 +10637,10 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       assertCanUseActions(context, command.actor);
       const effect = featureEffect(context.state, command.actor, command.effectId);
       if (effect.payload.kind !== 'action_surge' || effect.resourcePoolId === null) {
-        throw new EncounterRuleError(`Effect ${effect.id} does not grant a resource-fueled extra action.`);
+        throw new EncounterRuleError('validation', `Effect ${effect.id} does not grant a resource-fueled extra action.`);
       }
       if (subject.turn.action.kind !== 'spent') {
-        throw new EncounterRuleError(`Combatant ${command.actor} must spend its current action before gaining another.`);
+        throw new EncounterRuleError('validation', `Combatant ${command.actor} must spend its current action before gaining another.`);
       }
       spendLimitedResource(context, command.actor, effect.resourcePoolId, `Effect ${effect.id}`);
       const refreshed = combatant(context.state, command.actor);
@@ -10640,10 +10659,10 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         effect.resourcePoolId === null ||
         effect.trigger !== 'bonus_action'
       ) {
-        throw new EncounterRuleError(`Effect ${effect.id} is not a resource-fueled timed spellcasting mode.`);
+        throw new EncounterRuleError('validation', `Effect ${effect.id} is not a resource-fueled timed spellcasting mode.`);
       }
       if (subject.turn.additionalLeveledSpellActionsRemaining === 1) {
-        throw new EncounterRuleError('The timed spellcasting mode is already active this turn.');
+        throw new EncounterRuleError('validation', 'The timed spellcasting mode is already active this turn.');
       }
       spendCost(context, command.actor, 'bonus_action', `Effect ${effect.id}`);
       spendLimitedResource(context, command.actor, effect.resourcePoolId, `Effect ${effect.id}`);
@@ -10661,10 +10680,10 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       assertActiveActor(context, command.actor);
       const effect = featureEffect(context.state, command.actor, command.effectId);
       if (effect.payload.kind !== 'damage_operation') {
-        throw new EncounterRuleError(`Effect ${effect.id} is not a damage operation.`);
+        throw new EncounterRuleError('validation', `Effect ${effect.id} is not a damage operation.`);
       }
       if (effect.trigger !== 'action' && effect.trigger !== 'bonus_action') {
-        throw new EncounterRuleError(`Effect ${effect.id} has no activatable damage cost.`);
+        throw new EncounterRuleError('validation', `Effect ${effect.id} has no activatable damage cost.`);
       }
       spendCost(context, command.actor, effect.trigger, `Effect ${effect.id}`);
       if (effect.resourcePoolId !== null) {
@@ -10689,7 +10708,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         effect.payload.arming === undefined ||
         (effect.trigger !== 'action' && effect.trigger !== 'bonus_action')
       ) {
-        throw new EncounterRuleError(`Effect ${effect.id} is not an armed weapon-hit rider.`);
+        throw new EncounterRuleError('validation', `Effect ${effect.id} is not an armed weapon-hit rider.`);
       }
       spendCost(context, command.actor, effect.trigger, `Effect ${effect.id}`);
       if (effect.resourcePoolId !== null) {
@@ -10718,7 +10737,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       assertActiveActor(context, command.actor);
       spendCost(context, command.actor, command.cost, 'Heal');
       if (!Number.isSafeInteger(command.amount) || command.amount < 0) {
-        throw new EncounterRuleError('Healing must be a non-negative safe integer.');
+        throw new EncounterRuleError('validation', 'Healing must be a non-negative safe integer.');
       }
       applyHealing(context, command.actor, command.target, command.amount);
       return;
@@ -10727,10 +10746,10 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       assertActiveActor(context, command.actor);
       const pool = context.state.effects.find((effect) => effect.id === command.effectId);
       if (pool === undefined || pool.payload.kind !== 'consumable_healing_pool') {
-        throw new EncounterRuleError(`Effect ${command.effectId} is not a consumable healing pool.`);
+        throw new EncounterRuleError('validation', `Effect ${command.effectId} is not a consumable healing pool.`);
       }
       if (pool.payload.remainingUses < 1) {
-        throw new EncounterRuleError(`Healing pool ${command.effectId} is empty.`);
+        throw new EncounterRuleError('validation', `Healing pool ${command.effectId} is empty.`);
       }
       spendCost(context, command.actor, pool.payload.activation, 'Consume healing resource');
       const remaining = pool.payload.remainingUses - 1;
@@ -10776,7 +10795,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       return;
     case 'end_turn': {
       if (context.state.activeCombatant !== command.actor) {
-        throw new EncounterRuleError(`Combatant ${command.actor} is not the active combatant.`);
+        throw new EncounterRuleError('validation', `Combatant ${command.actor} is not the active combatant.`);
       }
       if (context.state.pendingDecisions.some((decision) =>
         decision.boundary.activeCombatant === command.actor && decision.boundary.round === context.state.round)) {
@@ -10784,7 +10803,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       }
       if (queueLegendaryActionWindows(context, command.actor)) return;
       const currentIndex = context.state.activeInitiativeIndex;
-      if (currentIndex === null) throw new EncounterRuleError('Initiative is not active.');
+      if (currentIndex === null) throw new EncounterRuleError('validation', 'Initiative is not active.');
       processBoundary(context, command.actor, 'end');
       emit(context, { type: 'turn_ended', combatant: command.actor, round: context.state.round });
       let nextIndex = nextLivingInitiativeIndex(context.state, currentIndex);
@@ -10794,7 +10813,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         nextIndex = nextLivingInitiativeIndex(context.state, context.state.initiative.length - 1);
       }
       const next = context.state.initiative[nextIndex];
-      if (next === undefined) throw new EncounterRuleError('Next initiative entry is missing.');
+      if (next === undefined) throw new EncounterRuleError('validation', 'Next initiative entry is missing.');
       const round = startsNewRound ? context.state.round + 1 : context.state.round;
       context.state = { ...context.state, activeInitiativeIndex: nextIndex };
       startTurn(context, next.combatant, round);

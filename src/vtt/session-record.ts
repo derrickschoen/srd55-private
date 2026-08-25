@@ -79,6 +79,7 @@ function eventsOf(revision: SessionRevision): readonly EncounterEvent[] {
     case 'session_started':
     case 'party_state_captured':
     case 'reaction_preference_changed':
+    case 'refusal_handling_changed':
     case 'short_rest_completed':
     case 'long_rest_completed':
     case 'room_composed':

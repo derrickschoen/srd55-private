@@ -15,6 +15,7 @@ import {
 import {
   createEncounter,
   type EncounterState,
+  type PendingDecision,
   type ReactionKind,
   type ReactionPolicy,
 } from '../combat/encounter';
@@ -56,6 +57,13 @@ import {
   type RestInterruptionOutcome,
   type RestInterruptionResult,
 } from './party-session-state';
+import {
+  DEFAULT_REFUSAL_HANDLING_SETTINGS,
+  routeActionRefusal,
+  type NonBoundaryActionRefusal,
+  type RefusalCategory,
+  type RefusalHandlingMode,
+} from './refusal-handling';
 import type { ShortRestHitDieSpend } from './party-session-state';
 import type { LoadedPartyMember } from './party-pack';
 import {
@@ -186,6 +194,8 @@ export class DmEncounterHost {
     readonly code: 'turn_boundary_blocked';
     readonly message: string;
   } = null;
+  #actionRefusal: NonBoundaryActionRefusal | null = null;
+  #adjudicationPrompts: Extract<PendingDecision, { readonly kind: 'adjudication_prompt' }>[] = [];
   #partyStateHasBoundaryRuling = false;
   readonly #steeringMode: SteeringCoordinatorMode;
   readonly #onSteeringTelemetry: (telemetry: SteeringTelemetry) => void;
@@ -342,6 +352,8 @@ export class DmEncounterHost {
         history,
         partyState: this.#journal.partyState(),
         boundaryRefusal: this.#boundaryRefusal,
+        actionRefusal: this.#actionRefusal,
+        adjudicationPrompts: this.#adjudicationPrompts,
       }),
       player: this.#closed ? { ...player, authorityStatus: 'hard_paused' } : player,
     };
@@ -429,6 +441,7 @@ export class DmEncounterHost {
           this.#boundaryRefusal = result.pendingDecisionCode === 'turn_boundary_blocked'
             ? { code: result.pendingDecisionCode, message: result.reason }
             : null;
+          if (result.actionRefusal !== undefined) this.#routeActionRefusal(result.actionRefusal);
           this.#publish();
           return;
         }
@@ -438,6 +451,60 @@ export class DmEncounterHost {
       this.#pump = null;
     });
     return this.#pump;
+  }
+
+  #routeActionRefusal(refusal: NonBoundaryActionRefusal): void {
+    const settings = this.#journal.partyState()?.refusalHandling
+      ?? DEFAULT_REFUSAL_HANDLING_SETTINGS;
+    const route = routeActionRefusal(settings, refusal);
+    this.#actionRefusal = null;
+    if (route.kind === 'hard_refusal') {
+      this.#actionRefusal = structuredClone(refusal);
+      return;
+    }
+    this.#coordinator.settleActionRefusal();
+    if (route.kind === 'fiat_prompt') {
+      const state = this.#coordinator.state();
+      this.#adjudicationPrompts.push({
+        kind: 'adjudication_prompt',
+        id: `adjudication:${String(state.revision)}:${String(this.#adjudicationPrompts.length + 1)}`,
+        combatant: refusal.combatant,
+        boundary: {
+          activeCombatant: state.activeCombatant ?? refusal.combatant,
+          round: state.round,
+        },
+        options: [{ id: 'rule_manually', label: 'Rule manually' }],
+        refusal: structuredClone(refusal),
+      });
+      return;
+    }
+    this.#coordinator.adjudicate({
+      type: 'adjudicate',
+      target: refusal.combatant,
+      subject: `dm-override:refusal-default:${refusal.category}`,
+      reasoning: `${route.documentation} Refusal: ${refusal.reason} (${refusal.citation}).`,
+      consequence: route.outcome,
+    });
+  }
+
+  resolveRefusalPrompt(
+    decisionId: string,
+    consequence: Extract<EncounterCommand, { readonly type: 'adjudicate' }>['consequence'],
+    reasoning: string,
+  ): void {
+    const index = this.#adjudicationPrompts.findIndex((entry) => entry.id === decisionId);
+    const prompt = this.#adjudicationPrompts[index];
+    if (prompt === undefined) throw new Error('The adjudication prompt does not exist.');
+    this.#adjudicationPrompts.splice(index, 1);
+    this.#coordinator.adjudicate({
+      type: 'adjudicate',
+      target: prompt.refusal.combatant,
+      subject: `dm-override:refusal:${prompt.refusal.category}`,
+      reasoning: `${reasoning.trim()} Refusal: ${prompt.refusal.reason} (${prompt.refusal.citation}).`,
+      consequence,
+    });
+    this.#coordinator.resume();
+    this.#publish();
   }
 
   submitHumanDecision(actor: CombatantId, decision: Parameters<HumanController['submit']>[0]): void {
@@ -503,6 +570,18 @@ export class DmEncounterHost {
       this.#publish();
       void this.#pumpCoordinator();
     }
+  }
+
+  async setRefusalHandling(category: RefusalCategory, mode: RefusalHandlingMode): Promise<void> {
+    const resumeAfter = this.#coordinator.pauseState() === null;
+    if (resumeAfter) this.#coordinator.interrupt();
+    await this.#pump;
+    const resumed = this.#journal.updateRefusalHandling(category, mode);
+    this.#replaceFromResume(resumed);
+    this.#actionRefusal = null;
+    if (resumeAfter) this.#coordinator.resume();
+    this.#publish();
+    if (resumeAfter) void this.#pumpCoordinator();
   }
 
   interrupt(): void {
