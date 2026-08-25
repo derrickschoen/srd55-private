@@ -176,6 +176,12 @@ export interface DmEncounterHostSnapshot {
 
 export interface DmBridgeConnection extends DmBridgeExchange, MirrorSink {}
 
+function hasDurableFlush(
+  store: BrowserSessionStore,
+): store is BrowserSessionStore & { flush(): Promise<void> } {
+  return typeof Reflect.get(store, 'flush') === 'function';
+}
+
 export class DmEncounterHost {
   readonly sessionId: EncounterSessionId;
   readonly #store: BrowserSessionStore;
@@ -370,8 +376,8 @@ export class DmEncounterHost {
     for (const listener of this.#listeners) listener(snapshot);
   }
 
-  start(): void {
-    void this.#pumpCoordinator();
+  start(): Promise<void> {
+    return this.#pumpCoordinator();
   }
 
   connectBridgeMirror(sink: MirrorSink): void {
@@ -428,6 +434,7 @@ export class DmEncounterHost {
         if (this.#closed || this.#coordinator.pauseState() !== null) return;
         const step = this.#coordinator.step();
         await Promise.resolve();
+        await this.#flushStore();
         this.#publish();
         let result;
         try {
@@ -436,6 +443,7 @@ export class DmEncounterHost {
           if (this.#bridgeFailureGuard?.report() !== null) return;
           throw error;
         }
+        await this.#flushStore();
         this.#publish();
         if (result.kind === 'refused') {
           this.#boundaryRefusal = result.pendingDecisionCode === 'turn_boundary_blocked'
@@ -451,6 +459,10 @@ export class DmEncounterHost {
       this.#pump = null;
     });
     return this.#pump;
+  }
+
+  async #flushStore(): Promise<void> {
+    if (hasDurableFlush(this.#store)) await this.#store.flush();
   }
 
   #routeActionRefusal(refusal: NonBoundaryActionRefusal): void {

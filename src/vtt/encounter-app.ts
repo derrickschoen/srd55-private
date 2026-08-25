@@ -8,7 +8,7 @@ import { MOVEMENT_PATH_DANGER_KINDS, REACTION_KINDS, type PendingDecision } from
 import { HIDDEN_ROLL_CATEGORIES, type HiddenRollCategory } from '../combat/roll-visibility';
 import { previewAffectedCells } from '../combat/templates';
 import { encounterSessionId, type CombatantId } from '../combat/values';
-import { DmEncounterHost } from './dm-encounter-host';
+import { DmEncounterHost, type DmEncounterHostSnapshot } from './dm-encounter-host';
 import {
   encounterBoardRenderModel,
   type EncounterBoardProjectionShape,
@@ -24,7 +24,7 @@ import {
   isHostWindowMessage,
   playerDecisionMessage,
 } from './local-window-channel';
-import { LocalStorageBrowserSessionStore } from './local-session-store';
+import { IndexedDbBrowserSessionStore } from './local-session-store';
 import {
   IndexedDbDirectoryHandlePersistence,
   SaveFolderRepository,
@@ -592,7 +592,7 @@ class PlayerEncounterView {
 }
 
 class DmEncounterView {
-  readonly #store = new LocalStorageBrowserSessionStore(localStorage);
+  readonly #store: IndexedDbBrowserSessionStore;
   readonly #folder = new SaveFolderRepository(
     new IndexedDbDirectoryHandlePersistence(indexedDB),
     window,
@@ -614,8 +614,10 @@ class DmEncounterView {
   constructor(
     private readonly root: HTMLElement,
     private readonly sessionId: string,
+    store: IndexedDbBrowserSessionStore,
     encounter?: StoredCharacterEncounter,
   ) {
+    this.#store = store;
     this.#host = new DmEncounterHost(sessionId, this.#store, encounter === undefined
       ? {}
       : {
@@ -633,27 +635,47 @@ class DmEncounterView {
         });
     this.#channel = new BroadcastChannel(`srd55:vtt:${sessionId}`);
     this.#channel.addEventListener('message', this.#onMessage);
-    this.#unsubscribe = this.#host.subscribe((snapshot) => {
-      this.#projection = snapshot.dm;
-      if (!snapshot.dm.movementPreviews.some(
-        (preview) => preview.commandKey === this.#movementPreviewKey,
-      )) this.#movementPreviewKey = null;
-      this.#sendPlayerProjection(snapshot.player);
-      this.#render();
-    });
+    this.#unsubscribe = this.#host.subscribe((snapshot) => void this.#acknowledge(snapshot));
     this.#heartbeat = window.setInterval(() => {
       const snapshot = this.#host.snapshot();
       const dmChanged =
         this.#projection === null ||
         canonicalJson(this.#projection) !== canonicalJson(snapshot.dm);
       if (dmChanged) {
-        this.#projection = snapshot.dm;
-        this.#render();
+        void this.#acknowledge(snapshot);
       }
-      this.#sendPlayerProjection(snapshot.player);
     }, HEARTBEAT_INTERVAL_MS);
     window.addEventListener('beforeunload', this.#onBeforeUnload);
     void this.#restoreSaveFolder();
+  }
+
+  static async create(
+    root: HTMLElement,
+    sessionId: string,
+    encounter?: StoredCharacterEncounter,
+  ): Promise<DmEncounterView> {
+    const store = await IndexedDbBrowserSessionStore.open(indexedDB, localStorage);
+    const view = new DmEncounterView(root, sessionId, store, encounter);
+    await store.flush();
+    return view;
+  }
+
+  async #acknowledge(snapshot: DmEncounterHostSnapshot): Promise<void> {
+    try {
+      await this.#store.flush();
+      this.#projection = snapshot.dm;
+      if (!snapshot.dm.movementPreviews.some(
+        (preview) => preview.commandKey === this.#movementPreviewKey,
+      )) this.#movementPreviewKey = null;
+      this.#sendPlayerProjection(snapshot.player);
+      this.#saveManagerError = null;
+      this.#render();
+    } catch (error: unknown) {
+      this.#saveManagerError = error instanceof Error
+        ? error.message
+        : 'Browser session storage failed.';
+      this.#render();
+    }
   }
 
   async #restoreSaveFolder(): Promise<void> {
@@ -706,7 +728,10 @@ class DmEncounterView {
   mount(): void {
     this.root.replaceChildren(this.#shell);
     this.#render();
-    this.#host.start();
+    void this.#host.start().catch((error: unknown) => {
+      this.#saveManagerError = error instanceof Error ? error.message : 'Browser session storage failed.';
+      this.#render();
+    });
   }
 
   #submitDm(action: EncounterCommand): void {
@@ -745,7 +770,7 @@ class DmEncounterView {
         load: (save) => this.#loadSave(save),
         rename: async (save, name) => {
           if (save.source === 'browser') {
-            this.#store.renameStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId, name);
+            await this.#store.renameStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId, name);
           } else {
             await this.#folder.rename(save, name);
             await this.#refreshFolderSaves();
@@ -758,7 +783,7 @@ class DmEncounterView {
             const storageId = save.storageId ?? `session:${save.sessionId}`;
             const deletingLiveSession = deletingActiveSession && storageId.startsWith('session:');
             if (deletingLiveSession) this.close();
-            this.#store.removeStored(storageId, save.sessionId);
+            await this.#store.removeStored(storageId, save.sessionId);
             if (deletingLiveSession) {
               const url = new URL(location.href);
               url.searchParams.set('encounter', 'reference');
@@ -773,8 +798,15 @@ class DmEncounterView {
           }
           this.#render();
         },
-        exportCopy: (save) => this.#download(save.name, save.bytes),
+        exportCopy: (save) => {
+          const bytes = save.source === 'browser'
+            ? this.#store.exportedStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId)
+            : save.bytes;
+          if (bytes === undefined) throw new Error('Folder save has no file contents.');
+          this.#download(save.name, bytes);
+        },
         saveNow: async () => {
+          await this.#store.flush();
           const sessionId = encounterSessionId(this.sessionId);
           const bytes = this.#store.exported(sessionId);
           const browser = this.#store.savedSessions().find(
@@ -799,12 +831,14 @@ class DmEncounterView {
 
   async #loadSave(save: SaveManagerEntry): Promise<void> {
     if (save.source === 'browser') {
-      this.#store.restoreStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId);
+      await this.#store.restoreStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId);
     }
     if (save.source === 'folder') {
       const existing = this.#store.revisions(save.sessionId);
       if (existing.length === 0) {
+        if (save.bytes === undefined) throw new Error('Folder save has no file contents.');
         this.#store.import(save.bytes);
+        await this.#store.flush();
       } else {
         const browserFingerprint = decodeSavedSessionFingerprint(
           this.#store.exported(save.sessionId),
@@ -1680,6 +1714,7 @@ class DmEncounterView {
     this.#channel.removeEventListener('message', this.#onMessage);
     this.#host.close();
     this.#channel.close();
+    void this.#store.flush().finally(() => this.#store.close());
   }
 }
 
@@ -1695,9 +1730,31 @@ export function mountEncounterVtt(
     readonly encounter?: StoredCharacterEncounter;
   },
 ): EncounterVttMount {
-  const mounted = options.view === 'dm'
-    ? new DmEncounterView(root, options.sessionId, options.encounter)
-    : new PlayerEncounterView(root, options.sessionId);
-  mounted.mount();
-  return { close: () => mounted.close() };
+  if (options.view === 'player') {
+    const mounted = new PlayerEncounterView(root, options.sessionId);
+    mounted.mount();
+    return { close: () => mounted.close() };
+  }
+  let mounted: DmEncounterView | null = null;
+  let closed = false;
+  root.replaceChildren(element('p', { className: 'dm-save-loading', text: 'Opening browser saves…' }));
+  void DmEncounterView.create(root, options.sessionId, options.encounter).then((view) => {
+    if (closed) {
+      view.close();
+      return;
+    }
+    mounted = view;
+    view.mount();
+  }).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : 'Browser session storage failed.';
+    const alert = element('p', { className: 'dm-save-error', text: message });
+    alert.setAttribute('role', 'alert');
+    root.replaceChildren(alert);
+  });
+  return {
+    close: () => {
+      closed = true;
+      mounted?.close();
+    },
+  };
 }

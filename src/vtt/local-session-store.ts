@@ -11,25 +11,36 @@ import {
 import type { SaveRetention } from './save-manager';
 import { autosavePoolForTrigger, type AutosavePool, type AutosaveTrigger } from './save-manager';
 
-const STORAGE_PREFIX = 'srd55:vtt-session:';
-const METADATA_PREFIX = 'srd55:vtt-session-metadata:';
-const AUTOSAVE_PREFIX = 'srd55:vtt-autosave:';
+const DATABASE_NAME = 'srd55-vtt-sessions';
+const DATABASE_VERSION = 1;
+const REVISION_STORE = 'revisions';
+const SESSION_STORE = 'sessions';
+const SNAPSHOT_STORE = 'snapshots';
+
+const LEGACY_SESSION_PREFIX = 'srd55:vtt-session:';
+const LEGACY_METADATA_PREFIX = 'srd55:vtt-session-metadata:';
+const LEGACY_AUTOSAVE_PREFIX = 'srd55:vtt-autosave:';
+const LEGACY_TRUNCATED_PREFIX = 'srd55:vtt-session-truncated:';
+const LIKELY_LOCAL_STORAGE_LIMIT_BYTES = 4 * 1024 * 1024;
 
 interface BrowserSaveMetadata {
+  readonly sessionId: EncounterSessionId;
   readonly name: string;
   readonly updatedAt: string;
   readonly retention: SaveRetention;
+  readonly migrationStatus: 'native' | 'complete' | 'truncated';
 }
 
-export interface StoredBrowserSave extends DecodedSavedSessionFingerprint {
+interface StoredAutosaveSnapshot extends DecodedSavedSessionFingerprint {
   readonly storageId: string;
+  readonly trigger: AutosaveTrigger;
+  readonly pool: AutosavePool;
   readonly name: string;
   readonly updatedAt: string;
-  readonly bytes: string;
   readonly retention: SaveRetention;
 }
 
-interface StoredAutosaveSnapshot {
+interface LegacyAutosaveSnapshot {
   readonly storageId: string;
   readonly sessionId: EncounterSessionId;
   readonly trigger: AutosaveTrigger;
@@ -40,127 +51,413 @@ interface StoredAutosaveSnapshot {
   readonly retention: SaveRetention;
 }
 
+export interface StoredBrowserSave extends DecodedSavedSessionFingerprint {
+  readonly storageId: string;
+  readonly name: string;
+  readonly updatedAt: string;
+  readonly retention: SaveRetention;
+  readonly migrationStatus: BrowserSaveMetadata['migrationStatus'];
+}
+
+export class BrowserSessionWriteError extends Error {
+  readonly kind = 'browser_session_write_failed';
+
+  constructor(
+    readonly operation: 'open' | 'migration' | 'write' | 'delete' | 'rename' | 'restore',
+    readonly quotaExceeded: boolean,
+    options?: ErrorOptions,
+  ) {
+    super(
+      quotaExceeded
+        ? 'Browser session storage is full. This revision was not saved; export a copy before continuing.'
+        : 'Browser session storage failed. This revision was not saved; export a copy before continuing.',
+      options,
+    );
+    this.name = 'BrowserSessionWriteError';
+  }
+}
+
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Durable browser adapter over increment 5's checked revision bundle codec. */
-export class LocalStorageBrowserSessionStore implements BrowserSessionStore {
+function isQuotaError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'QuotaExceededError';
+}
+
+function storageError(
+  operation: BrowserSessionWriteError['operation'],
+  error: unknown,
+): BrowserSessionWriteError {
+  return error instanceof BrowserSessionWriteError
+    ? error
+    : new BrowserSessionWriteError(operation, isQuotaError(error), { cause: error });
+}
+
+function transactionComplete(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.addEventListener('complete', () => resolve(), { once: true });
+    transaction.addEventListener('abort', () => reject(transaction.error), { once: true });
+    transaction.addEventListener('error', () => reject(transaction.error), { once: true });
+  });
+}
+
+function requestResult<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.addEventListener('success', () => resolve(request.result), { once: true });
+    request.addEventListener('error', () => reject(request.error), { once: true });
+  });
+}
+
+function openDatabase(indexedDb: IDBFactory, databaseName: string): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const opening = indexedDb.open(databaseName, DATABASE_VERSION);
+    opening.addEventListener('upgradeneeded', () => {
+      for (const storeName of [REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE]) {
+        if (!opening.result.objectStoreNames.contains(storeName)) {
+          opening.result.createObjectStore(storeName);
+        }
+      }
+    });
+    opening.addEventListener('success', () => resolve(opening.result), { once: true });
+    opening.addEventListener('error', () => reject(opening.error), { once: true });
+  });
+}
+
+function revisionKey(sessionId: EncounterSessionId, revision: number): string {
+  return `${sessionId}\u0000${String(revision).padStart(12, '0')}`;
+}
+
+function retention(value: unknown): SaveRetention {
+  if (isRecord(value) && value.kind === 'named') return { kind: 'named' };
+  if (isRecord(value) && value.kind === 'autosave' &&
+    (value.pool === 'per_round' || value.pool === 'encounter_boundary')) {
+    return { kind: 'autosave', pool: value.pool };
+  }
+  return { kind: 'autosave', pool: 'per_round' };
+}
+
+function legacyMetadata(value: string | null, sessionId: EncounterSessionId): BrowserSaveMetadata | null {
+  if (value === null) return null;
+  const parsed: unknown = JSON.parse(value);
+  if (!isRecord(parsed) || typeof parsed.name !== 'string' || typeof parsed.updatedAt !== 'string') {
+    return null;
+  }
+  return {
+    sessionId,
+    name: parsed.name,
+    updatedAt: parsed.updatedAt,
+    retention: retention(parsed.retention),
+    migrationStatus: 'complete',
+  };
+}
+
+function legacySnapshot(value: string): LegacyAutosaveSnapshot | null {
+  const parsed: unknown = JSON.parse(value);
+  if (!isRecord(parsed) || typeof parsed.storageId !== 'string' ||
+    typeof parsed.sessionId !== 'string' || typeof parsed.trigger !== 'string' ||
+    typeof parsed.pool !== 'string' || typeof parsed.name !== 'string' ||
+    typeof parsed.updatedAt !== 'string' || typeof parsed.bytes !== 'string') return null;
+  if (!['round_boundary', 'encounter_start', 'encounter_end', 'short_rest_boundary', 'long_rest_boundary'].includes(parsed.trigger)) return null;
+  if (parsed.pool !== 'per_round' && parsed.pool !== 'encounter_boundary') return null;
+  const decodedRetention = retention(parsed.retention);
+  if (decodedRetention.kind !== 'named' &&
+    (decodedRetention.kind !== 'autosave' || decodedRetention.pool !== parsed.pool)) return null;
+  return {
+    storageId: parsed.storageId,
+    sessionId: parsed.sessionId as EncounterSessionId,
+    trigger: parsed.trigger as AutosaveTrigger,
+    pool: parsed.pool,
+    name: parsed.name,
+    updatedAt: parsed.updatedAt,
+    bytes: parsed.bytes,
+    retention: decodedRetention,
+  };
+}
+
+/**
+ * Browser-authoritative VTT store. Rules-engine reads use the cache populated by
+ * open(); flush() is the acknowledgement boundary for queued IndexedDB writes.
+ */
+export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
   #memory = new MemoryBrowserSessionStore();
-  readonly #loaded = new Set<EncounterSessionId>();
+  readonly #metadata = new Map<EncounterSessionId, BrowserSaveMetadata>();
+  readonly #snapshots = new Map<string, StoredAutosaveSnapshot>();
+  readonly #pending = new Set<Promise<void>>();
+  #failure: BrowserSessionWriteError | null = null;
 
-  constructor(private readonly storage: Storage) {}
+  private constructor(
+    private readonly database: IDBDatabase,
+    private readonly legacyStorage: Storage,
+  ) {}
 
-  #key(sessionId: EncounterSessionId): string {
-    return `${STORAGE_PREFIX}${sessionId}`;
-  }
-
-  #metadataKey(sessionId: EncounterSessionId): string {
-    return `${METADATA_PREFIX}${sessionId}`;
-  }
-
-  #metadata(sessionId: EncounterSessionId): BrowserSaveMetadata | null {
-    const raw = this.storage.getItem(this.#metadataKey(sessionId));
-    if (raw === null) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-    const name = Reflect.get(parsed, 'name');
-    const updatedAt = Reflect.get(parsed, 'updatedAt');
-    const retention = Reflect.get(parsed, 'retention');
-    const decodedRetention: SaveRetention = typeof retention === 'object' && retention !== null &&
-      (Reflect.get(retention, 'kind') === 'named' ||
-        (Reflect.get(retention, 'kind') === 'autosave' &&
-          (Reflect.get(retention, 'pool') === 'per_round' || Reflect.get(retention, 'pool') === 'encounter_boundary')))
-      ? retention as SaveRetention
-      : { kind: 'autosave', pool: 'per_round' };
-    return typeof name === 'string' && typeof updatedAt === 'string'
-      ? { name, updatedAt, retention: decodedRetention }
-      : null;
-  }
-
-  #writeMetadata(sessionId: EncounterSessionId, metadata: BrowserSaveMetadata): void {
-    this.storage.setItem(this.#metadataKey(sessionId), JSON.stringify(metadata));
-  }
-
-  #load(sessionId: EncounterSessionId): void {
-    if (this.#loaded.has(sessionId)) return;
-    this.#loaded.add(sessionId);
-    const saved = this.storage.getItem(this.#key(sessionId));
-    if (saved === null) return;
-    const imported = importSavedSession(this.#memory, saved);
-    if (imported !== sessionId) {
-      throw new Error('Stored VTT session identity does not match its storage key.');
+  static async open(
+    indexedDb: IDBFactory,
+    legacyStorage: Storage,
+    options: { readonly databaseName?: string } = {},
+  ): Promise<IndexedDbBrowserSessionStore> {
+    let database: IDBDatabase;
+    try {
+      database = await openDatabase(indexedDb, options.databaseName ?? DATABASE_NAME);
+    } catch (error: unknown) {
+      throw storageError('open', error);
+    }
+    const store = new IndexedDbBrowserSessionStore(database, legacyStorage);
+    try {
+      await store.#migrateLegacy();
+      await store.#preload();
+      const removed = store.#pruneAutosaves();
+      if (removed.length > 0) {
+        const transaction = database.transaction(SNAPSHOT_STORE, 'readwrite');
+        for (const storageId of removed) transaction.objectStore(SNAPSHOT_STORE).delete(storageId);
+        await transactionComplete(transaction);
+      }
+      return store;
+    } catch (error: unknown) {
+      database.close();
+      throw storageError('migration', error);
     }
   }
 
-  #flush(sessionId: EncounterSessionId): void {
-    this.storage.setItem(
-      this.#key(sessionId),
-      exportSavedSession(this.#memory, sessionId),
-    );
-    const current = this.#metadata(sessionId);
-    this.#writeMetadata(sessionId, {
-      name: current?.name ?? sessionId,
+  append(revision: SessionRevision): void {
+    this.#requireWritable();
+    const previous = this.#memory.revisions(revision.sessionId).at(-1);
+    this.#memory.append(revision);
+    const current = this.#metadata.get(revision.sessionId);
+    const metadata: BrowserSaveMetadata = {
+      sessionId: revision.sessionId,
+      name: current?.name ?? revision.sessionId,
       updatedAt: new Date().toISOString(),
       retention: current?.retention ?? { kind: 'autosave', pool: 'per_round' },
+      migrationStatus: current?.migrationStatus ?? 'native',
+    };
+    this.#metadata.set(revision.sessionId, metadata);
+
+    const added: StoredAutosaveSnapshot[] = [];
+    for (const trigger of this.#autosaveTriggers(previous, revision)) {
+      const snapshot = this.#captureAutosave(revision, trigger);
+      this.#snapshots.set(snapshot.storageId, snapshot);
+      added.push(snapshot);
+    }
+    const removed = this.#pruneAutosaves();
+    this.#enqueue('write', async () => {
+      const transaction = this.database.transaction(
+        [REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE],
+        'readwrite',
+      );
+      transaction.objectStore(REVISION_STORE).put(revision, revisionKey(revision.sessionId, revision.revision));
+      transaction.objectStore(SESSION_STORE).put(metadata, revision.sessionId);
+      for (const snapshot of added) transaction.objectStore(SNAPSHOT_STORE).put(snapshot, snapshot.storageId);
+      for (const storageId of removed) transaction.objectStore(SNAPSHOT_STORE).delete(storageId);
+      await transactionComplete(transaction);
     });
   }
 
-  #autosaveSnapshot(value: unknown): StoredAutosaveSnapshot | null {
-    if (!isRecord(value) || typeof value.storageId !== 'string' ||
-      typeof value.sessionId !== 'string' || typeof value.trigger !== 'string' ||
-      typeof value.pool !== 'string' || typeof value.name !== 'string' ||
-      typeof value.updatedAt !== 'string' || typeof value.bytes !== 'string') return null;
-    if (!['round_boundary', 'encounter_start', 'encounter_end', 'short_rest_boundary', 'long_rest_boundary'].includes(value.trigger)) return null;
-    if (value.pool !== 'per_round' && value.pool !== 'encounter_boundary') return null;
-    const retention = value.retention;
-    if (!isRecord(retention) ||
-      !((retention.kind === 'named') ||
-        (retention.kind === 'autosave' && retention.pool === value.pool))) return null;
-    return value as unknown as StoredAutosaveSnapshot;
+  appendAll(revisions: readonly SessionRevision[]): void {
+    const first = revisions[0];
+    if (first === undefined) return;
+    this.#requireWritable();
+    this.#memory.appendAll(revisions);
+    const current = this.#metadata.get(first.sessionId);
+    const metadata: BrowserSaveMetadata = {
+      sessionId: first.sessionId,
+      name: current?.name ?? first.sessionId,
+      updatedAt: new Date().toISOString(),
+      retention: current?.retention ?? { kind: 'autosave', pool: 'per_round' },
+      migrationStatus: current?.migrationStatus ?? 'native',
+    };
+    this.#metadata.set(first.sessionId, metadata);
+    this.#enqueue('write', async () => {
+      const transaction = this.database.transaction([REVISION_STORE, SESSION_STORE], 'readwrite');
+      for (const revision of revisions) {
+        transaction.objectStore(REVISION_STORE).put(revision, revisionKey(revision.sessionId, revision.revision));
+      }
+      transaction.objectStore(SESSION_STORE).put(metadata, first.sessionId);
+      await transactionComplete(transaction);
+    });
   }
 
-  #snapshots(): readonly StoredAutosaveSnapshot[] {
-    const snapshots: StoredAutosaveSnapshot[] = [];
-    for (let index = 0; index < this.storage.length; index += 1) {
-      const key = this.storage.key(index);
-      if (key === null || !key.startsWith(AUTOSAVE_PREFIX)) continue;
-      const raw = this.storage.getItem(key);
-      if (raw === null) continue;
-      const snapshot = this.#autosaveSnapshot(JSON.parse(raw));
-      if (snapshot !== null) snapshots.push(snapshot);
+  revisions(sessionId: EncounterSessionId): readonly SessionRevision[] {
+    return this.#memory.revisions(sessionId);
+  }
+
+  async flush(): Promise<void> {
+    while (this.#pending.size > 0) await Promise.all([...this.#pending]);
+    if (this.#failure !== null) throw this.#failure;
+  }
+
+  close(): void {
+    this.database.close();
+  }
+
+  async remove(sessionId: EncounterSessionId): Promise<void> {
+    this.#requireWritable();
+    const revisionCount = this.#memory.revisions(sessionId).length;
+    const snapshotIds = [...this.#snapshots.values()]
+      .filter((snapshot) => snapshot.sessionId === sessionId)
+      .map((snapshot) => snapshot.storageId);
+    await this.#directWrite('delete', async () => {
+      const transaction = this.database.transaction(
+        [REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE],
+        'readwrite',
+      );
+      for (let revision = 1; revision <= revisionCount; revision += 1) {
+        transaction.objectStore(REVISION_STORE).delete(revisionKey(sessionId, revision));
+      }
+      transaction.objectStore(SESSION_STORE).delete(sessionId);
+      for (const storageId of snapshotIds) transaction.objectStore(SNAPSHOT_STORE).delete(storageId);
+      await transactionComplete(transaction);
+    });
+    await this.#preload();
+  }
+
+  async removeStored(storageId: string, sessionId: EncounterSessionId): Promise<void> {
+    if (storageId.startsWith('session:')) {
+      await this.remove(sessionId);
+      return;
     }
-    return snapshots;
+    await this.#directWrite('delete', async () => {
+      const transaction = this.database.transaction(SNAPSHOT_STORE, 'readwrite');
+      transaction.objectStore(SNAPSHOT_STORE).delete(storageId);
+      await transactionComplete(transaction);
+    });
+    this.#snapshots.delete(storageId);
   }
 
-  #pruneAutosaves(): void {
+  async renameStored(storageId: string, sessionId: EncounterSessionId, name: string): Promise<void> {
+    const trimmed = name.trim();
+    if (trimmed.length === 0) throw new Error('A save name cannot be empty.');
+    if (storageId.startsWith('session:')) {
+      const existing = this.#metadata.get(sessionId);
+      if (existing === undefined) throw new Error('Browser save does not exist.');
+      const metadata: BrowserSaveMetadata = { ...existing, name: trimmed, retention: { kind: 'named' } };
+      await this.#directWrite('rename', async () => {
+        const transaction = this.database.transaction(SESSION_STORE, 'readwrite');
+        transaction.objectStore(SESSION_STORE).put(metadata, sessionId);
+        await transactionComplete(transaction);
+      });
+      this.#metadata.set(sessionId, metadata);
+      return;
+    }
+    const existing = this.#snapshots.get(storageId);
+    if (existing === undefined || existing.sessionId !== sessionId) {
+      throw new Error('Browser autosave does not exist.');
+    }
+    const snapshot: StoredAutosaveSnapshot = { ...existing, name: trimmed, retention: { kind: 'named' } };
+    await this.#directWrite('rename', async () => {
+      const transaction = this.database.transaction(SNAPSHOT_STORE, 'readwrite');
+      transaction.objectStore(SNAPSHOT_STORE).put(snapshot, storageId);
+      await transactionComplete(transaction);
+    });
+    this.#snapshots.set(storageId, snapshot);
+  }
+
+  async restoreStored(storageId: string, sessionId: EncounterSessionId): Promise<void> {
+    if (storageId.startsWith('session:')) return;
+    const snapshot = this.#snapshots.get(storageId);
+    if (snapshot === undefined || snapshot.sessionId !== sessionId) {
+      throw new Error('Browser autosave does not exist.');
+    }
+    const retained = this.#memory.revisions(sessionId).slice(0, snapshot.revisionCount);
+    const currentCount = this.#memory.revisions(sessionId).length;
+    const metadata: BrowserSaveMetadata = {
+      sessionId,
+      name: sessionId,
+      updatedAt: snapshot.updatedAt,
+      retention: { kind: 'autosave', pool: snapshot.pool },
+      migrationStatus: this.#metadata.get(sessionId)?.migrationStatus ?? 'native',
+    };
+    await this.#directWrite('restore', async () => {
+      const transaction = this.database.transaction([REVISION_STORE, SESSION_STORE], 'readwrite');
+      for (let revision = snapshot.revisionCount + 1; revision <= currentCount; revision += 1) {
+        transaction.objectStore(REVISION_STORE).delete(revisionKey(sessionId, revision));
+      }
+      transaction.objectStore(SESSION_STORE).put(metadata, sessionId);
+      await transactionComplete(transaction);
+    });
+    this.#memory = new MemoryBrowserSessionStore();
+    this.#memory.appendAll(retained);
+    this.#metadata.set(sessionId, metadata);
+  }
+
+  savedSessions(): readonly StoredBrowserSave[] {
+    const saves: StoredBrowserSave[] = [];
+    for (const snapshot of this.#snapshots.values()) {
+      saves.push({
+        ...snapshot,
+        migrationStatus: this.#metadata.get(snapshot.sessionId)?.migrationStatus ?? 'native',
+      });
+    }
+    const sessionsWithSnapshots = new Set([...this.#snapshots.values()].map((snapshot) => snapshot.sessionId));
+    for (const [sessionId, metadata] of this.#metadata) {
+      if (sessionsWithSnapshots.has(sessionId) && metadata.retention.kind !== 'named') continue;
+      const bytes = this.exported(sessionId);
+      saves.push({
+        ...decodeSavedSessionFingerprint(bytes),
+        storageId: `session:${sessionId}`,
+        name: metadata.name,
+        updatedAt: metadata.updatedAt,
+        retention: metadata.retention,
+        migrationStatus: metadata.migrationStatus,
+      });
+    }
+    return saves;
+  }
+
+  import(bytes: string): EncounterSessionId {
+    return importSavedSession(this, bytes);
+  }
+
+  exported(sessionId: EncounterSessionId): string {
+    return exportSavedSession(this, sessionId);
+  }
+
+  exportedStored(storageId: string, sessionId: EncounterSessionId): string {
+    if (storageId.startsWith('session:')) return this.exported(sessionId);
+    const snapshot = this.#snapshots.get(storageId);
+    if (snapshot === undefined || snapshot.sessionId !== sessionId) {
+      throw new Error('Browser autosave does not exist.');
+    }
+    return this.#exportPrefix(sessionId, snapshot.revisionCount);
+  }
+
+  #captureAutosave(revision: SessionRevision, trigger: AutosaveTrigger): StoredAutosaveSnapshot {
+    const pool = autosavePoolForTrigger(trigger);
+    const storageId = `${pool}:${revision.sessionId}:${String(revision.revision).padStart(12, '0')}:${trigger}`;
+    const decoded = decodeSavedSessionFingerprint(this.#exportPrefix(revision.sessionId, revision.revision));
+    return {
+      ...decoded,
+      storageId,
+      trigger,
+      pool,
+      name: `${pool === 'per_round' ? 'Round' : 'Encounter boundary'} — ${trigger.replaceAll('_', ' ')} — r${String(revision.encounterState.round)}`,
+      updatedAt: new Date().toISOString(),
+      retention: { kind: 'autosave', pool },
+    };
+  }
+
+  #exportPrefix(sessionId: EncounterSessionId, revisionCount: number): string {
+    const prefix = new MemoryBrowserSessionStore();
+    prefix.appendAll(this.#memory.revisions(sessionId).slice(0, revisionCount));
+    return exportSavedSession(prefix, sessionId);
+  }
+
+  #pruneAutosaves(): readonly string[] {
+    const removed: string[] = [];
     for (const pool of ['per_round', 'encounter_boundary'] as const) {
-      const expired = this.#snapshots()
+      const expired = [...this.#snapshots.values()]
         .filter((snapshot) => snapshot.retention.kind === 'autosave' && snapshot.pool === pool)
         .sort((left, right) => {
           const newest = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
           return newest === 0 ? right.storageId.localeCompare(left.storageId) : newest;
         })
         .slice(10);
-      for (const snapshot of expired) this.storage.removeItem(`${AUTOSAVE_PREFIX}${snapshot.storageId}`);
+      for (const snapshot of expired) {
+        this.#snapshots.delete(snapshot.storageId);
+        removed.push(snapshot.storageId);
+      }
     }
-  }
-
-  #captureAutosave(sessionId: EncounterSessionId, revision: SessionRevision, trigger: AutosaveTrigger): void {
-    const pool = autosavePoolForTrigger(trigger);
-    const storageId = `${pool}:${sessionId}:${String(revision.revision).padStart(12, '0')}:${trigger}`;
-    const snapshot: StoredAutosaveSnapshot = {
-      storageId,
-      sessionId,
-      trigger,
-      pool,
-      name: `${pool === 'per_round' ? 'Round' : 'Encounter boundary'} — ${trigger.replaceAll('_', ' ')} — r${String(revision.encounterState.round)}`,
-      updatedAt: new Date().toISOString(),
-      bytes: exportSavedSession(this.#memory, sessionId),
-      retention: { kind: 'autosave', pool },
-    };
-    this.storage.setItem(`${AUTOSAVE_PREFIX}${storageId}`, JSON.stringify(snapshot));
-    this.#pruneAutosaves();
+    return removed;
   }
 
   #autosaveTriggers(previous: SessionRevision | undefined, revision: SessionRevision): readonly AutosaveTrigger[] {
@@ -169,9 +466,7 @@ export class LocalStorageBrowserSessionStore implements BrowserSessionStore {
     if (previous !== undefined && revision.encounterState.round > previous.encounterState.round) {
       triggers.push('round_boundary');
     }
-    if (revision.transition.kind === 'room_composed') {
-      triggers.push('encounter_end', 'encounter_start');
-    }
+    if (revision.transition.kind === 'room_composed') triggers.push('encounter_end', 'encounter_start');
     if (revision.transition.kind === 'short_rest_completed') triggers.push('short_rest_boundary');
     if (revision.transition.kind === 'long_rest_completed' ||
       (revision.transition.kind === 'party_state_captured' && revision.transition.restInterruption !== undefined)) {
@@ -184,135 +479,135 @@ export class LocalStorageBrowserSessionStore implements BrowserSessionStore {
       const before = livingSides(previous.encounterState);
       const after = livingSides(revision.encounterState);
       if (before.has('player_character') && before.has('monster') &&
-        (!after.has('player_character') || !after.has('monster'))) {
-        triggers.push('encounter_end');
-      }
+        (!after.has('player_character') || !after.has('monster'))) triggers.push('encounter_end');
     }
     return [...new Set(triggers)];
   }
 
-  append(revision: SessionRevision): void {
-    this.#load(revision.sessionId);
-    const previous = this.#memory.revisions(revision.sessionId).at(-1);
-    this.#memory.append(revision);
-    this.#flush(revision.sessionId);
-    for (const trigger of this.#autosaveTriggers(previous, revision)) {
-      this.#captureAutosave(revision.sessionId, revision, trigger);
-    }
-  }
-
-  appendAll(revisions: readonly SessionRevision[]): void {
-    const first = revisions[0];
-    if (first === undefined) return;
-    this.#load(first.sessionId);
-    this.#memory.appendAll(revisions);
-    this.#flush(first.sessionId);
-  }
-
-  revisions(sessionId: EncounterSessionId): readonly SessionRevision[] {
-    this.#load(sessionId);
-    return this.#memory.revisions(sessionId);
-  }
-
-  remove(sessionId: EncounterSessionId): void {
-    this.storage.removeItem(this.#key(sessionId));
-    this.storage.removeItem(this.#metadataKey(sessionId));
-    this.#memory = new MemoryBrowserSessionStore();
-    this.#loaded.clear();
-  }
-
-  removeStored(storageId: string, sessionId: EncounterSessionId): void {
-    if (storageId.startsWith('session:')) {
-      this.remove(sessionId);
-      return;
-    }
-    this.storage.removeItem(`${AUTOSAVE_PREFIX}${storageId}`);
-  }
-
-  rename(sessionId: EncounterSessionId, name: string): void {
-    const trimmed = name.trim();
-    if (trimmed.length === 0) throw new Error('A save name cannot be empty.');
-    const existing = this.#metadata(sessionId);
-    if (existing === null && this.storage.getItem(this.#key(sessionId)) === null) {
-      throw new Error('Browser save does not exist.');
-    }
-    this.#writeMetadata(sessionId, {
-      name: trimmed,
-      updatedAt: existing?.updatedAt ?? new Date().toISOString(),
-      retention: { kind: 'named' },
+  #enqueue(operation: BrowserSessionWriteError['operation'], write: () => Promise<void>): void {
+    const pending = write().catch((error: unknown) => {
+      this.#failure ??= storageError(operation, error);
     });
+    this.#pending.add(pending);
+    void pending.finally(() => this.#pending.delete(pending));
   }
 
-  renameStored(storageId: string, sessionId: EncounterSessionId, name: string): void {
-    const trimmed = name.trim();
-    if (trimmed.length === 0) throw new Error('A save name cannot be empty.');
-    if (storageId.startsWith('session:')) {
-      this.rename(sessionId, trimmed);
-      return;
+  async #directWrite(operation: BrowserSessionWriteError['operation'], write: () => Promise<void>): Promise<void> {
+    await this.flush();
+    try {
+      await write();
+    } catch (error: unknown) {
+      this.#failure ??= storageError(operation, error);
+      throw this.#failure;
     }
-    const key = `${AUTOSAVE_PREFIX}${storageId}`;
-    const raw = this.storage.getItem(key);
-    const snapshot = raw === null ? null : this.#autosaveSnapshot(JSON.parse(raw));
-    if (snapshot === null) throw new Error('Browser autosave does not exist.');
-    this.storage.setItem(key, JSON.stringify({ ...snapshot, name: trimmed, retention: { kind: 'named' } }));
   }
 
-  restoreStored(storageId: string, sessionId: EncounterSessionId): void {
-    if (storageId.startsWith('session:')) return;
-    const raw = this.storage.getItem(`${AUTOSAVE_PREFIX}${storageId}`);
-    const snapshot = raw === null ? null : this.#autosaveSnapshot(JSON.parse(raw));
-    if (snapshot === null || snapshot.sessionId !== sessionId) {
-      throw new Error('Browser autosave does not exist.');
-    }
-    this.storage.setItem(this.#key(sessionId), snapshot.bytes);
-    this.#writeMetadata(sessionId, {
-      name: sessionId,
-      updatedAt: snapshot.updatedAt,
-      retention: { kind: 'autosave', pool: snapshot.pool },
-    });
-    this.#memory = new MemoryBrowserSessionStore();
-    this.#loaded.clear();
+  #requireWritable(): void {
+    if (this.#failure !== null) throw this.#failure;
   }
 
-  savedSessions(): readonly StoredBrowserSave[] {
-    const saves: StoredBrowserSave[] = [];
-    const snapshots = this.#snapshots();
-    for (const snapshot of snapshots) {
-      saves.push({
-        ...decodeSavedSessionFingerprint(snapshot.bytes),
-        storageId: snapshot.storageId,
-        name: snapshot.name,
-        updatedAt: snapshot.updatedAt,
-        bytes: snapshot.bytes,
-        retention: snapshot.retention,
-      });
+  async #preload(): Promise<void> {
+    const transaction = this.database.transaction([REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE], 'readonly');
+    const [revisions, metadata, snapshots] = await Promise.all([
+      requestResult(transaction.objectStore(REVISION_STORE).getAll()),
+      requestResult(transaction.objectStore(SESSION_STORE).getAll()),
+      requestResult(transaction.objectStore(SNAPSHOT_STORE).getAll()),
+    ]);
+    await transactionComplete(transaction);
+    const nextMemory = new MemoryBrowserSessionStore();
+    const bySession = new Map<EncounterSessionId, SessionRevision[]>();
+    for (const revision of revisions as SessionRevision[]) {
+      const current = bySession.get(revision.sessionId) ?? [];
+      current.push(revision);
+      bySession.set(revision.sessionId, current);
     }
-    const sessionsWithSnapshots = new Set(snapshots.map((snapshot) => snapshot.sessionId));
-    for (let index = 0; index < this.storage.length; index += 1) {
-      const key = this.storage.key(index);
-      if (key === null || !key.startsWith(STORAGE_PREFIX)) continue;
-      const bytes = this.storage.getItem(key);
+    for (const stream of bySession.values()) {
+      stream.sort((left, right) => left.revision - right.revision);
+      nextMemory.appendAll(stream);
+    }
+    this.#memory = nextMemory;
+    this.#metadata.clear();
+    for (const value of metadata as BrowserSaveMetadata[]) this.#metadata.set(value.sessionId, value);
+    this.#snapshots.clear();
+    for (const value of snapshots as StoredAutosaveSnapshot[]) this.#snapshots.set(value.storageId, value);
+  }
+
+  async #migrateLegacy(): Promise<void> {
+    const keys = Array.from({ length: this.legacyStorage.length }, (_unused, index) => this.legacyStorage.key(index))
+      .filter((key): key is string => key !== null);
+    for (const key of keys.filter((candidate) => candidate.startsWith(LEGACY_SESSION_PREFIX))) {
+      const bytes = this.legacyStorage.getItem(key);
       if (bytes === null) continue;
-      const decoded = decodeSavedSessionFingerprint(bytes);
-      const metadata = this.#metadata(decoded.sessionId);
-      if (sessionsWithSnapshots.has(decoded.sessionId) && metadata?.retention.kind !== 'named') continue;
-      saves.push({
-        ...decoded,
-        storageId: `session:${decoded.sessionId}`,
-        name: metadata?.name ?? decoded.sessionId,
-        updatedAt: metadata?.updatedAt ?? new Date(0).toISOString(),
-        retention: metadata?.retention ?? { kind: 'autosave', pool: 'per_round' },
-        bytes,
-      });
+      const sessionId = key.slice(LEGACY_SESSION_PREFIX.length) as EncounterSessionId;
+      const imported = new MemoryBrowserSessionStore();
+      const decodedSessionId = importSavedSession(imported, bytes);
+      if (decodedSessionId !== sessionId) throw new Error('Stored VTT session identity does not match its storage key.');
+      const storedMetadata = legacyMetadata(
+        this.legacyStorage.getItem(`${LEGACY_METADATA_PREFIX}${sessionId}`),
+        sessionId,
+      );
+      const explicitlyTruncated = this.legacyStorage.getItem(`${LEGACY_TRUNCATED_PREFIX}${sessionId}`) !== null;
+      const metadata: BrowserSaveMetadata = {
+        sessionId,
+        name: storedMetadata?.name ?? sessionId,
+        updatedAt: storedMetadata?.updatedAt ?? new Date(0).toISOString(),
+        retention: storedMetadata?.retention ?? { kind: 'autosave', pool: 'per_round' },
+        migrationStatus: explicitlyTruncated || bytes.length >= LIKELY_LOCAL_STORAGE_LIMIT_BYTES
+          ? 'truncated'
+          : 'complete',
+      };
+      const transaction = this.database.transaction([REVISION_STORE, SESSION_STORE], 'readwrite');
+      for (const revision of imported.revisions(sessionId)) {
+        transaction.objectStore(REVISION_STORE).put(revision, revisionKey(sessionId, revision.revision));
+      }
+      transaction.objectStore(SESSION_STORE).put(metadata, sessionId);
+      await transactionComplete(transaction);
+      this.legacyStorage.removeItem(key);
+      this.legacyStorage.removeItem(`${LEGACY_METADATA_PREFIX}${sessionId}`);
+      this.legacyStorage.removeItem(`${LEGACY_TRUNCATED_PREFIX}${sessionId}`);
     }
-    return saves;
+
+    for (const key of keys.filter((candidate) => candidate.startsWith(LEGACY_AUTOSAVE_PREFIX))) {
+      const raw = this.legacyStorage.getItem(key);
+      if (raw === null) continue;
+      const legacy = legacySnapshot(raw);
+      if (legacy === null) throw new Error('Stored browser autosave is malformed.');
+      const imported = new MemoryBrowserSessionStore();
+      importSavedSession(imported, legacy.bytes);
+      const decoded = decodeSavedSessionFingerprint(legacy.bytes);
+      const snapshot: StoredAutosaveSnapshot = {
+        ...decoded,
+        storageId: legacy.storageId,
+        trigger: legacy.trigger,
+        pool: legacy.pool,
+        name: legacy.name,
+        updatedAt: legacy.updatedAt,
+        retention: legacy.retention,
+      };
+      const existingMetadata = await this.#readMetadata(legacy.sessionId);
+      const transaction = this.database.transaction([REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE], 'readwrite');
+      for (const revision of imported.revisions(legacy.sessionId)) {
+        transaction.objectStore(REVISION_STORE).put(revision, revisionKey(legacy.sessionId, revision.revision));
+      }
+      if (existingMetadata === null) {
+        transaction.objectStore(SESSION_STORE).put({
+          sessionId: legacy.sessionId,
+          name: legacy.sessionId,
+          updatedAt: legacy.updatedAt,
+          retention: { kind: 'autosave', pool: legacy.pool },
+          migrationStatus: legacy.bytes.length >= LIKELY_LOCAL_STORAGE_LIMIT_BYTES ? 'truncated' : 'complete',
+        } satisfies BrowserSaveMetadata, legacy.sessionId);
+      }
+      transaction.objectStore(SNAPSHOT_STORE).put(snapshot, snapshot.storageId);
+      await transactionComplete(transaction);
+      this.legacyStorage.removeItem(key);
+    }
   }
 
-  import(bytes: string): EncounterSessionId {
-    return importSavedSession(this, bytes);
-  }
-
-  exported(sessionId: EncounterSessionId): string {
-    return exportSavedSession(this, sessionId);
+  async #readMetadata(sessionId: EncounterSessionId): Promise<BrowserSaveMetadata | null> {
+    const transaction = this.database.transaction(SESSION_STORE, 'readonly');
+    const value: unknown = await requestResult(transaction.objectStore(SESSION_STORE).get(sessionId));
+    await transactionComplete(transaction);
+    return value === undefined ? null : value as BrowserSaveMetadata;
   }
 }
