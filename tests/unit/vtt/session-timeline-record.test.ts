@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { monsterCombatantProfile } from '../../../src/combat/combatant';
+import type { ControllerIdentity } from '../../../src/combat/controllers';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { WEB_MATERIAL, type PersistentArea } from '../../../src/combat/persistent-areas';
 import { mulberry32 } from '../../../src/combat/random';
 import { UNICORN } from '../../../src/combat/statblocks/monsters';
 import { feetPoint } from '../../../src/combat/templates';
+import { projectDmView } from '../../../src/combat/visibility';
 import {
   codexSessionId,
   damageType,
@@ -18,6 +20,12 @@ import {
   persistentAreaId,
 } from '../../../src/combat/values';
 import { deriveSessionRecord } from '../../../src/vtt/session-record';
+import {
+  DmEncounterHost,
+  type DmEncounterHostSnapshot,
+} from '../../../src/vtt/dm-encounter-host';
+import { projectDmBoard } from '../../../src/vtt/encounter-projections';
+import { parseOptionalEncounterSeed } from '../../../src/vtt/session-seed';
 import { projectEncounterTimeline } from '../../../src/vtt/session-timeline';
 import {
   EncounterSessionJournal,
@@ -64,6 +72,51 @@ function journalFixture(key: string, state = pacedState()) {
     mirror: new MemoryMirrorSink(),
   });
   return { store, sessionId, journal };
+}
+
+function humanIdentities(state: EncounterState): readonly ControllerIdentity[] {
+  return state.combatants.map((subject): ControllerIdentity => ({
+    combatantId: subject.profile.id,
+    controllerId: `${subject.profile.id}:human:timeline-test`,
+    kind: 'human',
+    generation: 0,
+  })).sort((left, right) => left.combatantId.localeCompare(right.combatantId));
+}
+
+async function waitForHostSnapshot(
+  host: DmEncounterHost,
+  predicate: (snapshot: DmEncounterHostSnapshot) => boolean,
+): Promise<DmEncounterHostSnapshot> {
+  const current = host.snapshot();
+  if (predicate(current)) return current;
+  return new Promise<DmEncounterHostSnapshot>((complete, reject) => {
+    let matched = false;
+    let unsubscribe = (): void => undefined;
+    const timeout = setTimeout(() => {
+      unsubscribe();
+      reject(new Error('DM host did not reach the expected state within one second.'));
+    }, 1_000);
+    unsubscribe = host.subscribe((snapshot) => {
+      if (!predicate(snapshot)) return;
+      matched = true;
+      clearTimeout(timeout);
+      unsubscribe();
+      complete(snapshot);
+    });
+    if (matched) unsubscribe();
+  });
+}
+
+async function endCurrentHumanTurn(host: DmEncounterHost): Promise<void> {
+  const snapshot = await waitForHostSnapshot(host, (candidate) =>
+    candidate.dm.pendingRequest !== null);
+  const pending = snapshot.dm.pendingRequest;
+  if (pending === null) throw new Error('Expected human turn request is missing.');
+  host.submitHumanDecision(pending.actorId, {
+    requestId: pending.requestId,
+    encounterRevision: pending.encounterRevision,
+    action: { type: 'end_turn', actor: pending.actorId },
+  });
 }
 
 function previewState(): { readonly state: EncounterState; readonly playerId: ReturnType<typeof playerProfile>['id'] } {
@@ -130,12 +183,17 @@ function previewState(): { readonly state: EncounterState; readonly playerId: Re
 }
 
 describe('D377.3 session timeline and pacing controls', () => {
-  it('preview_off_by_one_round: previews the legendary window and Web burn-away at exact rounds, then drops each once fired', () => {
+  it('preview_source_detached: a live DM projection previews the legendary window and Web burn-away at exact rounds', () => {
     // Legendary window: docs/srd/full/srd-5.2.1.txt:16703-16716.
     // A fire-exposed Web cube burns away in one round: docs/srd/full/srd-5.2.1.txt:11162-11165.
     const fixture = previewState();
     let state = fixture.state;
-    const initial = projectEncounterTimeline(state, []);
+    const initial = projectDmBoard({
+      view: projectDmView(state),
+      coordinator: IDLE,
+      controllers: [],
+      history: [],
+    }).timeline;
     expect(initial.upcoming).toContainEqual(expect.objectContaining({
       kind: 'legendary_action_window',
       boundary: { round: 1, combatant: fixture.playerId, boundary: 'end' },
@@ -243,6 +301,66 @@ describe('D377.3 session timeline and pacing controls', () => {
     expect(projectEncounterTimeline(rewound.encounterState, history).branchPoints).toContainEqual(
       expect.objectContaining({ targetRevision: boundary.revision, round: 2 }),
     );
+  });
+
+  it('forward_after_rewind_blocked: advances a full round and appends the new branch after a round rewind', async () => {
+    const state = pacedState();
+    const store = new MemoryBrowserSessionStore();
+    const playerIds = state.combatants.flatMap((subject) =>
+      subject.profile.kind === 'player_character' ? [subject.profile.id] : []);
+    const host = new DmEncounterHost('session:rewind-forward', store, {
+      initialState: state,
+      initialControllers: humanIdentities(state),
+      playerIds,
+      turnLegalActions: (_current, actor) => ({ actions: [{ type: 'end_turn', actor }] }),
+    });
+    host.start();
+    for (let turn = 0; turn < state.initiative.length * 2; turn += 1) {
+      await endCurrentHumanTurn(host);
+    }
+    await waitForHostSnapshot(host, (snapshot) => snapshot.dm.timeline.round === 3);
+    const revisionsBeforeRewind = store.revisions(host.sessionId).length;
+    await host.rewindToRound(2);
+    await waitForHostSnapshot(host, (snapshot) =>
+      snapshot.dm.timeline.round === 2 && snapshot.dm.pendingRequest !== null);
+    for (let turn = 0; turn < state.initiative.length; turn += 1) {
+      await endCurrentHumanTurn(host);
+    }
+    await waitForHostSnapshot(host, (snapshot) => snapshot.dm.timeline.round === 3);
+
+    const revisions = store.revisions(host.sessionId);
+    const headMoveIndex = revisions.findIndex((revision) =>
+      revision.revision > revisionsBeforeRewind && revision.transition.kind === 'head_moved');
+    expect(headMoveIndex).toBeGreaterThanOrEqual(0);
+    expect(revisions.at(-1)?.encounterState.round).toBe(3);
+    expect(revisions.slice(headMoveIndex + 1).filter((revision) =>
+      revision.transition.kind === 'reducer_applied' &&
+      revision.transition.command.type === 'end_turn',
+    )).toHaveLength(state.initiative.length);
+
+    host.close();
+  });
+
+  it('seed_not_persisted: chosen start seed survives session state, export, import, and resume', () => {
+    const chosenSeed = parseOptionalEncounterSeed('424242');
+    const store = new MemoryBrowserSessionStore();
+    const host = new DmEncounterHost('session:chosen-seed', store, {
+      initialSeed: chosenSeed,
+    });
+    const first = store.revisions(host.sessionId)[0];
+    expect(first?.rngState.initialSeed).toBe(chosenSeed);
+
+    const bytes = exportSavedSession(store, host.sessionId);
+    expect(bytes).toContain('"initialSeed":424242');
+    const imported = new MemoryBrowserSessionStore();
+    const importedSessionId = importSavedSession(imported, bytes);
+    const resumed = EncounterSessionJournal.resume(
+      importedSessionId,
+      imported,
+      new MemoryMirrorSink(),
+    );
+    expect(resumed.rng.snapshot().initialSeed).toBe(chosenSeed);
+    host.close();
   });
 });
 

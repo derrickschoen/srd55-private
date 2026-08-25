@@ -38,6 +38,7 @@ import {
 import { REFERENCE_ENCOUNTER_ART } from './reference-encounter-art';
 import { VANE_WARREN_ART } from './vane-warren-art';
 import { decodeSavedSessionFingerprint } from './session-persistence';
+import type { EncounterSeed } from './session-seed';
 import type { StoredCharacterEncounter } from './stored-character-encounter';
 import type { StoredCharacterSessionFlow } from './stored-character-encounter';
 import {
@@ -624,13 +625,15 @@ class DmEncounterView {
     private readonly sessionId: string,
     store: IndexedDbBrowserSessionStore,
     encounter?: StoredCharacterEncounter,
+    initialSeed?: EncounterSeed,
   ) {
     this.#store = store;
     this.#sessionFlow = encounter?.sessionFlow ?? null;
     this.#host = new DmEncounterHost(sessionId, this.#store, encounter === undefined
-      ? {}
+      ? (initialSeed === undefined ? {} : { initialSeed })
       : {
           initialState: encounter.state,
+          ...(initialSeed === undefined ? {} : { initialSeed }),
           ...(encounter.partyState === null ? {} : { initialPartyState: encounter.partyState }),
           partyMembers: encounter.members,
           partyDisplayNames: encounter.displayNames,
@@ -662,9 +665,10 @@ class DmEncounterView {
     root: HTMLElement,
     sessionId: string,
     encounter?: StoredCharacterEncounter,
+    initialSeed?: EncounterSeed,
   ): Promise<DmEncounterView> {
     const store = await IndexedDbBrowserSessionStore.open(indexedDB, localStorage);
-    const view = new DmEncounterView(root, sessionId, store, encounter);
+    const view = new DmEncounterView(root, sessionId, store, encounter, initialSeed);
     await store.flush();
     return view;
   }
@@ -1767,6 +1771,7 @@ export function mountEncounterVtt(
     readonly view: 'player' | 'dm';
     readonly sessionId: string;
     readonly encounter?: StoredCharacterEncounter;
+    readonly initialSeed?: EncounterSeed;
   },
 ): EncounterVttMount {
   if (options.view === 'player') {
@@ -1777,7 +1782,7 @@ export function mountEncounterVtt(
   let mounted: DmEncounterView | null = null;
   let closed = false;
   root.replaceChildren(element('p', { className: 'dm-save-loading', text: 'Opening browser saves…' }));
-  void DmEncounterView.create(root, options.sessionId, options.encounter).then((view) => {
+  void DmEncounterView.create(root, options.sessionId, options.encounter, options.initialSeed).then((view) => {
     if (closed) {
       view.close();
       return;

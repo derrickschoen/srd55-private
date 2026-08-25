@@ -3,6 +3,11 @@ import { mountEncounterVtt, type EncounterVttMount } from './encounter-app';
 import { composeD365Room, D365_SAMPLE_DUNGEON } from './d365-sample-dungeon';
 import { loadD365SampleParty } from './d365-sample-party';
 import { createPartySessionState } from './party-session-state';
+import {
+  MAX_ENCOUNTER_SEED,
+  parseOptionalEncounterSeed,
+  type EncounterSeed,
+} from './session-seed';
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -32,15 +37,32 @@ export function mountD365SampleDungeon(
   );
   const load = element('button', { text: 'Load bundled dungeon and party' });
   load.type = 'button';
+  const seedLabel = element('label', { text: 'Encounter seed (optional)' });
+  const seed = element('input');
+  seed.type = 'number';
+  seed.min = '0';
+  seed.max = String(MAX_ENCOUNTER_SEED);
+  seed.step = '1';
+  seed.placeholder = 'Default seed';
+  seed.setAttribute('aria-label', 'Encounter seed');
+  seedLabel.append(seed);
   const status = element('output', { className: 'd365-sample-loader-status' });
   status.setAttribute('role', 'status');
-  shell.append(load, status);
+  shell.append(seedLabel, load, status);
   root.replaceChildren(shell);
 
   let encounterMount: EncounterVttMount | null = null;
   let closed = false;
   load.addEventListener('click', () => {
+    let chosenSeed: EncounterSeed;
+    try {
+      chosenSeed = parseOptionalEncounterSeed(seed.value);
+    } catch (error: unknown) {
+      status.value = error instanceof Error ? error.message : 'Encounter seed is invalid.';
+      return;
+    }
     load.disabled = true;
+    seed.disabled = true;
     status.value = 'Authoring four characters through RPC…';
     void loadD365SampleParty(rpc).then((sample) => {
       if (closed) return;
@@ -54,11 +76,13 @@ export function mountD365SampleDungeon(
         view: 'dm',
         sessionId: `${D365_SAMPLE_DUNGEON.dungeonId}-room-1`,
         encounter,
+        initialSeed: chosenSeed,
       });
     }).catch((error: unknown) => {
       if (closed) return;
       status.value = error instanceof Error ? error.message : 'D365 sample loading failed.';
       load.disabled = false;
+      seed.disabled = false;
     });
   });
 
