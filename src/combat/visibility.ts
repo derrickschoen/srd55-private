@@ -113,6 +113,7 @@ export interface PlayerVisibleCombatant {
 export interface PlayerOwnedCombatant {
   readonly id: CombatantId;
   readonly hitPoints: number;
+  readonly hitPointMaximum: number;
   readonly turn: TurnResources;
   readonly wildShapeUses: EncounterCombatantState['wildShapeUses'];
 }
@@ -502,6 +503,7 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
       .map((subject) => ({
         id: subject.profile.id,
         hitPoints: subject.hitPoints,
+        hitPointMaximum: effectiveCombatRules(state, subject.profile.id).hitPointMaximum,
         turn: structuredClone(subject.turn),
         wildShapeUses: structuredClone(subject.wildShapeUses),
       })),

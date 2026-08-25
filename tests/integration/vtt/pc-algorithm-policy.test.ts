@@ -24,7 +24,12 @@ import type { RpcRequest, RpcResponse } from '../../../src/rpc/protocol';
 import { rpcRegistry } from '../../../src/worker/registry';
 import { composeD365Room } from '../../../src/vtt/d365-sample-dungeon';
 import { loadD365SampleParty, type D365SamplePartyLoad } from '../../../src/vtt/d365-sample-party';
-import { createPartySessionState } from '../../../src/vtt/party-session-state';
+import {
+  capturePartySessionState,
+  createPartySessionState,
+  enterNextRoom,
+  takeShortRest,
+} from '../../../src/vtt/party-session-state';
 import {
   regretReactionLegalActions,
 } from '../../../src/vtt/regret/legal-actions';
@@ -99,6 +104,53 @@ function attack(
       responses: [],
     },
     attackId,
+  };
+}
+
+function spell(
+  actor: CombatantId,
+  target: CombatantId,
+  spellId: 'cure-wounds' | 'healing-word',
+): Extract<EncounterCommand, { readonly type: 'cast_spell' }> {
+  return {
+    type: 'cast_spell', actor, spellId, slotLevel: 1, castAsRitual: false,
+    casterLevel: 5, attackBonus: 5, saveDc: 13, spellcastingModifier: 3,
+    targets: [target], area: null, weaponAttack: null, selectedOption: null,
+  };
+}
+
+function withHitPointEvent(
+  state: EncounterState,
+  source: CombatantId,
+  target: CombatantId,
+  hitPointsAfter: number,
+): EncounterState {
+  const subject = state.combatants.find((candidate) => candidate.profile.id === target);
+  if (subject === undefined) throw new Error(`Missing hit-point event target ${target}.`);
+  const hitPointsBefore = subject.hitPoints;
+  const lifeState = hitPointsAfter === 0 ? 'dying' as const : 'living' as const;
+  return {
+    ...state,
+    nextEventSequence: state.nextEventSequence + 1,
+    combatants: state.combatants.map((candidate) => candidate.profile.id === target
+      ? {
+          ...candidate,
+          hitPoints: hitPointsAfter,
+          life: lifeState,
+          deathSaves: lifeState === 'dying' ? { successes: 0, failures: 0 } : null,
+        }
+      : candidate),
+    eventLog: [...state.eventLog, {
+      sequence: state.nextEventSequence,
+      type: 'damage_applied',
+      source,
+      target,
+      amount: hitPointsBefore - hitPointsAfter,
+      hitPointsBefore,
+      hitPointsAfter,
+      lifeState,
+      massiveDamage: false,
+    }],
   };
 }
 
@@ -222,6 +274,7 @@ interface RoomRun {
   readonly journal: string;
   readonly eventTypes: readonly string[];
   readonly spellSlotLevels: readonly (number | null)[];
+  readonly state: EncounterState;
 }
 
 describe('player-character AlgorithmController policy', () => {
@@ -285,6 +338,141 @@ describe('player-character AlgorithmController policy', () => {
     expect(canonicalJson(candidates)).not.toContain(String(ally.id));
   });
 
+  it('focus_fire_inverted: prefers the already-damaged enemy over a healthier closer target', async () => {
+    const actor = playerProfile('pc-policy-focus', { initiativeBonus: 20 });
+    const wounded = monsterProfile('pc-policy-wounded', { hitPoints: 20, initiativeBonus: -10 });
+    const healthy = monsterProfile('pc-policy-healthy', { hitPoints: 20, initiativeBonus: -20 });
+    const initial = startedState(
+      [actor, wounded, healthy],
+      [placedToken(actor, 0, 1), placedToken(wounded, 8, 1), placedToken(healthy, 3, 1)],
+    );
+    const woundedState = withHitPointEvent(initial, actor.id, wounded.id, 6);
+    const state = withHitPointEvent(woundedState, actor.id, healthy.id, 20);
+    const decision = await new AlgorithmController().choose(
+      requestFor(state, actor.id, [
+        attack(actor.id, healthy.id, 'attack:test-bow'),
+        attack(actor.id, wounded.id, 'attack:test-bow'),
+      ]),
+      new AbortController().signal,
+    );
+    expect(decision.action).toMatchObject({ type: 'attack', target: wounded.id });
+  });
+
+  it('heals_enemies: heals a dying ally rather than a dying enemy', async () => {
+    const healer = playerProfile('pc-policy-healer', { initiativeBonus: 20 });
+    const ally = playerProfile('pc-policy-dying-ally', { hitPoints: 20, initiativeBonus: 0 });
+    const enemy = monsterProfile('pc-policy-heal-enemy', { hitPoints: 20, initiativeBonus: -20 });
+    const initial = startedState(
+      [healer, ally, enemy],
+      [placedToken(healer, 0, 1), placedToken(ally, 1, 1), placedToken(enemy, 4, 1)],
+    );
+    const allyDown = withHitPointEvent(initial, enemy.id, ally.id, 0);
+    const state = withHitPointEvent(allyDown, healer.id, enemy.id, 0);
+    const decision = await new AlgorithmController().choose(
+      requestFor(state, healer.id, [
+        attack(healer.id, enemy.id, 'attack:test-mace'),
+        spell(healer.id, enemy.id, 'healing-word'),
+        spell(healer.id, ally.id, 'healing-word'),
+      ]),
+      new AbortController().signal,
+    );
+    expect(decision.action).toMatchObject({
+      type: 'cast_spell', spellId: 'healing-word', targets: [ally.id],
+    });
+  });
+
+  it('heal_never_chosen: heals a dying ally before damaging an enemy', async () => {
+    const healer = playerProfile('pc-policy-rescue-healer', { initiativeBonus: 20 });
+    const ally = playerProfile('pc-policy-rescue-ally', { hitPoints: 20, initiativeBonus: 0 });
+    const enemy = monsterProfile('pc-policy-rescue-enemy', { hitPoints: 20, initiativeBonus: -20 });
+    const initial = startedState(
+      [healer, ally, enemy],
+      [placedToken(healer, 0, 1), placedToken(ally, 1, 1), placedToken(enemy, 4, 1)],
+    );
+    const state = withHitPointEvent(initial, enemy.id, ally.id, 0);
+    const decision = await new AlgorithmController().choose(
+      requestFor(state, healer.id, [
+        attack(healer.id, enemy.id, 'attack:test-mace'),
+        spell(healer.id, ally.id, 'healing-word'),
+      ]),
+      new AbortController().signal,
+    );
+    expect(decision.action).toMatchObject({
+      type: 'cast_spell', spellId: 'healing-word', targets: [ally.id],
+    });
+  });
+
+  it('heal_below_threshold: heals an ally at half of its last-known maximum before attacking', async () => {
+    const healer = playerProfile('pc-policy-threshold-healer', { initiativeBonus: 20 });
+    const ally = playerProfile('pc-policy-threshold-ally', { hitPoints: 20, initiativeBonus: 0 });
+    const enemy = monsterProfile('pc-policy-threshold-enemy', { hitPoints: 20, initiativeBonus: -20 });
+    const initial = startedState(
+      [healer, ally, enemy],
+      [placedToken(healer, 0, 1), placedToken(ally, 1, 1), placedToken(enemy, 4, 1)],
+    );
+    const state = withHitPointEvent(initial, enemy.id, ally.id, 10);
+    const decision = await new AlgorithmController().choose(
+      requestFor(state, healer.id, [
+        attack(healer.id, enemy.id, 'attack:test-mace'),
+        spell(healer.id, ally.id, 'cure-wounds'),
+      ]),
+      new AbortController().signal,
+    );
+    expect(decision.action).toMatchObject({
+      type: 'cast_spell', spellId: 'cure-wounds', targets: [ally.id],
+    });
+  });
+
+  it('ranged_hugs_melee: after shooting at range, moves farther away and stays put rather than provoking when adjacent', async () => {
+    const archer = playerProfile('pc-policy-kiting-archer', { initiativeBonus: 20 });
+    const enemy = monsterProfile('pc-policy-kiting-enemy', { hitPoints: 20, initiativeBonus: -20 });
+    const initial = startedState(
+      [archer, enemy],
+      [placedToken(archer, 4, 1), placedToken(enemy, 7, 1)],
+      10,
+    );
+    const rangedState: EncounterState = {
+      ...initial,
+      nextEventSequence: initial.nextEventSequence + 1,
+      eventLog: [...initial.eventLog, {
+        sequence: initial.nextEventSequence,
+        type: 'spell_cast', caster: archer.id, spellId: 'eldritch-blast',
+        slotLevel: null, targets: [enemy.id],
+      }],
+    };
+    const away = { type: 'move' as const, actor: archer.id, path: [{ column: 3, row: 1 }], cause: 'voluntary' as const };
+    const toward = { type: 'move' as const, actor: archer.id, path: [{ column: 5, row: 1 }], cause: 'voluntary' as const };
+    const controller = new AlgorithmController();
+    const kiting = await controller.choose(
+      requestFor(rangedState, archer.id, [toward, away, { type: 'end_turn', actor: archer.id }]),
+      new AbortController().signal,
+    );
+    expect(kiting.action).toEqual(away);
+
+    const adjacent = startedState(
+      [archer, enemy],
+      [placedToken(archer, 4, 1), placedToken(enemy, 5, 1)],
+      10,
+    );
+    const adjacentAfterShot: EncounterState = {
+      ...adjacent,
+      nextEventSequence: adjacent.nextEventSequence + 1,
+      eventLog: [...adjacent.eventLog, {
+        sequence: adjacent.nextEventSequence,
+        type: 'spell_cast', caster: archer.id, spellId: 'eldritch-blast',
+        slotLevel: null, targets: [enemy.id],
+      }],
+    };
+    const doesNotProvoke = await controller.choose(
+      requestFor(adjacentAfterShot, archer.id, [
+        { type: 'move', actor: archer.id, path: [{ column: 3, row: 1 }], cause: 'voluntary' },
+        { type: 'end_turn', actor: archer.id },
+      ]),
+      new AbortController().signal,
+    );
+    expect(doesNotProvoke.action).toEqual({ type: 'end_turn', actor: archer.id });
+  });
+
   it('never_closes_distance: an out-of-reach melee PC dashes, closes, and attacks on its next turn', async () => {
     const melee = playerProfile('pc-policy-melee', { initiativeBonus: 20 });
     const enemy = monsterProfile('pc-policy-melee-target', { initiativeBonus: -20 });
@@ -323,12 +511,10 @@ describe('player-character AlgorithmController policy', () => {
     });
   });
 
-  async function runRoomOne(seed: number): Promise<RoomRun> {
-    const encounter = composeD365Room(
-      sample.party.members,
-      sample.displayNames,
-      createPartySessionState(sample.party.members),
-    );
+  async function runRoom(
+    encounter: ReturnType<typeof composeD365Room>,
+    rng: ReturnType<typeof mulberry32>,
+  ): Promise<RoomRun> {
     const registry = new ControllerRegistry(encounter.state.combatants.map((candidate) => ({
       combatantId: candidate.profile.id,
       controller: new AlgorithmController(),
@@ -336,7 +522,7 @@ describe('player-character AlgorithmController policy', () => {
     const coordinator = new TurnCoordinator(
       encounter.state,
       registry,
-      mulberry32(seed),
+      rng,
       {
         turnLegalActions: encounter.turnLegalActions,
         reactionLegalActions: regretReactionLegalActions,
@@ -361,7 +547,16 @@ describe('player-character AlgorithmController policy', () => {
       eventTypes: state.eventLog.map((event) => event.type),
       spellSlotLevels: state.eventLog.flatMap((event) =>
         event.type === 'spell_cast' ? [event.slotLevel] : []),
+      state,
     };
+  }
+
+  async function runRoomOne(seed: number): Promise<RoomRun> {
+    return runRoom(composeD365Room(
+      sample.party.members,
+      sample.displayNames,
+      createPartySessionState(sample.party.members),
+    ), mulberry32(seed));
   }
 
   it('room-1-terminates: four algorithm PCs versus the bundled pack reaches an end state within 4 rounds', async () => {
@@ -370,8 +565,9 @@ describe('player-character AlgorithmController policy', () => {
     expect(['victory', 'defeat']).toContain(result.outcome);
     expect(result.eventTypes).toContain('attack_resolved');
     expect(result.eventTypes).toContain('spell_cast');
+    expect(result.eventTypes).toContain('healing_applied');
     expect(result.spellSlotLevels.length).toBeGreaterThan(0);
-    expect(result.spellSlotLevels.every((slotLevel) => slotLevel === null)).toBe(true);
+    expect(result.spellSlotLevels.some((slotLevel) => slotLevel !== null)).toBe(true);
   });
 
   it('large-board-terminates: a 14x10 fight clips approach paths, advances rounds, and terminates', async () => {
@@ -415,6 +611,40 @@ describe('player-character AlgorithmController policy', () => {
     const first = await runRoomOne(20_260_824);
     const second = await runRoomOne(20_260_824);
     expect(second).toEqual(first);
+  });
+
+  it('fixed-seed-room-outcomes: the algorithm party wins rooms 1, 2, 3, and 4 in the live adventuring-day sequence', async () => {
+    const rng = mulberry32(20_260_824);
+    let partyState = createPartySessionState(sample.party.members);
+    const outcomes: Array<{
+      readonly room: number;
+      readonly outcome: RoomRun['outcome'];
+      readonly round: number;
+      readonly partyHitPoints: readonly number[];
+    }> = [];
+    for (let room = 1; room <= 4; room += 1) {
+      const encounter = composeD365Room(sample.party.members, sample.displayNames, partyState);
+      const result = await runRoom(encounter, rng);
+      outcomes.push({
+        room,
+        outcome: result.outcome,
+        round: result.round,
+        partyHitPoints: result.state.combatants.flatMap((candidate) =>
+          candidate.profile.kind === 'player_character' ? [candidate.hitPoints] : []),
+      });
+      if (room < 4) {
+        const captured = capturePartySessionState(partyState, result.state);
+        partyState = enterNextRoom(takeShortRest(captured, [], rng).state);
+      }
+    }
+    expect(outcomes).toEqual([
+      expect.objectContaining({ room: 1, outcome: 'victory' }),
+      expect.objectContaining({ room: 2, outcome: 'victory' }),
+      expect.objectContaining({ room: 3, outcome: 'victory' }),
+      expect.objectContaining({ room: 4, outcome: 'victory' }),
+    ]);
+    expect(outcomes.every((room) => room.round <= 20)).toBe(true);
+    expect(outcomes.every((room) => room.partyHitPoints.some((hitPoints) => hitPoints > 0))).toBe(true);
   });
 
   it('nondeterministic_pick: canonical tie-breaking is independent of legal-action input order', async () => {

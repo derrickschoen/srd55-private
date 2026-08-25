@@ -1334,6 +1334,7 @@ class DmEncounterView {
     this.#shell.append(controls);
 
     const timeline = element('section', { className: 'dm-initiative-timeline' });
+    timeline.dataset.renderKey = stableRenderKey('dm', 'initiative-timeline');
     timeline.dataset.round = String(projection.timeline.round);
     timeline.dataset.encounterStatus = projection.timeline.phase.kind;
     timeline.append(element('h2', { text: `Initiative timeline — round ${String(projection.timeline.round)}` }));
@@ -1380,11 +1381,15 @@ class DmEncounterView {
     }
     timeline.append(element('h3', { text: 'Next-event preview' }), preview);
     const rewind = element('div', { className: 'dm-round-rewind' });
+    rewind.dataset.renderKey = stableRenderKey('dm', 'initiative-timeline', 'rewind');
     rewind.append(element('h3', { text: 'Rewind to round boundary' }));
     for (const boundary of projection.timeline.roundBoundaries) {
       if (boundary.current) continue;
       const button = element('button', { text: `Rewind to round ${String(boundary.round)}` });
       button.type = 'button';
+      button.dataset.renderKey = stableRenderKey(
+        'dm', 'initiative-timeline', 'rewind', `round-${String(boundary.round)}`,
+      );
       button.dataset.revision = String(boundary.revision);
       button.addEventListener('click', () => {
         void this.#host.rewindToRound(boundary.round).catch((error: unknown) => {

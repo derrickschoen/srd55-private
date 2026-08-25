@@ -2141,6 +2141,57 @@ function basicDamageCantripCommands(
   });
 }
 
+function healingSpellCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  if (acting === undefined) throw new Error(`Loaded party combatant ${actor} is absent from the encounter.`);
+  const allies = state.combatants.filter((candidate) =>
+    combatantsAreAllies(state, candidate.profile.id, actor) &&
+    candidate.life !== 'dead' &&
+    candidate.hitPoints < candidate.profile.rules.hitPointMaximum &&
+    state.tokens.some((token) => token.combatantId === candidate.profile.id));
+  return member.spells.flatMap((spell) => {
+    const definition = spellDefinition(spell.id);
+    if (
+      definition === null ||
+      definition.level === 0 ||
+      definition.operation.kind !== 'healing' ||
+      (definition.targeting.kind !== 'single' && definition.targeting.kind !== 'multiple')
+    ) return [];
+    const costAvailable = definition.castingTime === 'action'
+      ? acting.turn.action.kind === 'available' ||
+        acting.turn.additionalLeveledSpellActionsRemaining === 1
+      : definition.castingTime === 'bonus_action'
+        ? acting.turn.bonusActionAvailable
+        : false;
+    if (!costAvailable) return [];
+    const range = effectiveSingleTargetRange(definition.targeting, 1);
+    if (range === null) return [];
+    const slots = acting.spellSlots.filter((slot) =>
+      slot.remaining > 0 && slot.level >= definition.level);
+    return slots.flatMap((slot) => allies.flatMap((target) => {
+      if (gridDistance(
+        loadedMemberPosition(state, actor),
+        loadedMemberPosition(state, target.profile.id),
+      ) > range) return [];
+      // Cure Wounds is an Action with Touch range, and Healing Word is a Bonus
+      // Action with 60-foot range: docs/srd/source/spell-descriptions.txt:1182,735.
+      return [loadedPartySpellCastCommand(member, spell.id, {
+        slotLevel: slot.level as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
+        ...(slot.recharge === 'short_rest' ? { slotRecharge: 'short_rest' as const } : {}),
+        castAsRitual: false,
+        targets: [target.profile.id],
+        area: null,
+        weaponAttack: null,
+        selectedOption: null,
+      })];
+    }));
+  });
+}
+
 /** Enumerates reducer-valid attacks and feature actions for loaded v2 party members. */
 export function loadedPartyTurnLegalActions(
   members: readonly LoadedPartyMember[],
@@ -2227,6 +2278,7 @@ export function loadedPartyTurnLegalActions(
       // SRD 5.2.1: docs/srd/full/srd-5.2.1.txt:11589-11596.
       actions.push({ type: 'dash', actor });
     }
+    actions.push(...healingSpellCommands(member, state, actor));
     for (const effect of member.effects) {
       if (effect.payload.kind === 'bonus_action_attack_grant') {
         const pool = effect.resourcePoolId === null

@@ -175,38 +175,161 @@ function visibleHostile(
     : null;
 }
 
+const TACTICAL_HEALING_SPELL_IDS: ReadonlySet<string> = new Set([
+  'cure-wounds',
+  'healing-word',
+]);
+
+const TACTICAL_RANGED_SPELL_IDS: ReadonlySet<string> = new Set([
+  'eldritch-blast',
+]);
+
+function visibleAlly(
+  request: ControllerRequest,
+  actorKind: VisibleEncounterState['combatants'][number]['kind'],
+  id: CombatantId,
+) {
+  const target = request.visibleState.combatants.find((candidate) => candidate.id === id);
+  return target !== undefined && target.kind === actorKind && target.life !== 'dead'
+    ? target
+    : null;
+}
+
+function lastKnownHitPoints(
+  request: ControllerRequest,
+  id: CombatantId,
+): { readonly current: number; readonly maximumKnown: number } | null {
+  if ('viewer' in request.visibleState && request.visibleState.viewer === 'dm') {
+    const target = request.visibleState.combatants.find((candidate) => candidate.id === id);
+    return target === undefined
+      ? null
+      : { current: target.hitPoints, maximumKnown: target.rules.hitPointMaximum };
+  }
+  if ('ownedCombatants' in request.visibleState) {
+    const owned = request.visibleState.ownedCombatants.find((candidate) => candidate.id === id);
+    if (owned !== undefined) {
+      return { current: owned.hitPoints, maximumKnown: owned.hitPointMaximum };
+    }
+  }
+  const hitPointEvents: Array<{
+    readonly hitPointsBefore: number;
+    readonly hitPointsAfter: number;
+  }> = [];
+  for (const event of request.visibleState.recentEvents) {
+    if (
+      (event.type === 'damage_applied' || event.type === 'healing_applied') &&
+      event.target === id
+    ) hitPointEvents.push(event);
+  }
+  const latest = hitPointEvents.at(-1);
+  if (latest === undefined) return null;
+  return {
+    current: latest.hitPointsAfter,
+    maximumKnown: Math.max(...hitPointEvents.flatMap((event) => [
+      event.hitPointsBefore,
+      event.hitPointsAfter,
+    ])),
+  };
+}
+
+function healingPriority(
+  request: ControllerRequest,
+  target: VisibleEncounterState['combatants'][number],
+): 0 | 1 | null {
+  if (target.life === 'dying') return 0;
+  const hitPoints = lastKnownHitPoints(request, target.id);
+  return hitPoints !== null && hitPoints.current * 4 <= hitPoints.maximumKnown * 3 ? 1 : null;
+}
+
+function focusRank(
+  request: ControllerRequest,
+  actor: VisibleEncounterState['combatants'][number],
+  target: VisibleEncounterState['combatants'][number],
+): readonly [number, number] {
+  return [
+    lastKnownHitPoints(request, target.id)?.current ?? Number.POSITIVE_INFINITY,
+    gridDistance(actor.position, target.position),
+  ];
+}
+
+function usedRangedActionThisTurn(
+  request: ControllerRequest,
+  actor: VisibleEncounterState['combatants'][number],
+): boolean {
+  let lastTurnStart = -1;
+  for (const [index, event] of request.visibleState.recentEvents.entries()) {
+    if (event.type === 'turn_started' && event.combatant === actor.id) lastTurnStart = index;
+  }
+  return request.visibleState.recentEvents.slice(lastTurnStart + 1).some((event) => {
+    if (event.type === 'attack_resolved' && event.actor === actor.id) {
+      const target = visibleHostile(request, actor.kind, event.target);
+      return target !== null && gridDistance(actor.position, target.position) > 5;
+    }
+    if (event.type === 'spell_cast' && event.caster === actor.id) {
+      if (TACTICAL_RANGED_SPELL_IDS.has(event.spellId)) return true;
+      return event.targets.some((id) => {
+        const target = visibleHostile(request, actor.kind, id);
+        return target !== null && gridDistance(actor.position, target.position) > 5;
+      });
+    }
+    return false;
+  });
+}
+
 function playerCharacterAlgorithmRank(
   request: ControllerRequest,
   command: EncounterCommand,
   actor: VisibleEncounterState['combatants'][number],
-): readonly [number, number, string] {
+): readonly [number, number, number, string] {
   if (command.type === 'opportunity_attack') {
     const target = visibleHostile(request, actor.kind, command.target);
     if (target !== null) {
-      return [0, gridDistance(actor.position, target.position), commandKey(command)];
+      const [hitPoints, distance] = focusRank(request, actor, target);
+      return [0, hitPoints, distance, commandKey(command)];
     }
   }
   if (command.type === 'cast_spell') {
+    if (TACTICAL_HEALING_SPELL_IDS.has(command.spellId)) {
+      const ally = command.targets
+        .map((id) => visibleAlly(request, actor.kind, id))
+        .filter((candidate) => candidate !== null)
+        .sort((left, right) => {
+          const leftPriority = healingPriority(request, left) ?? Number.POSITIVE_INFINITY;
+          const rightPriority = healingPriority(request, right) ?? Number.POSITIVE_INFINITY;
+          return leftPriority - rightPriority || left.id.localeCompare(right.id);
+        })[0];
+      const priority = ally === undefined ? null : healingPriority(request, ally);
+      if (ally !== undefined && priority !== null) {
+        return [priority, lastKnownHitPoints(request, ally.id)?.current ?? 0, 0, commandKey(command)];
+      }
+      return [8, 0, 0, commandKey(command)];
+    }
     const target = command.targets
       .map((id) => visibleHostile(request, actor.kind, id))
       .filter((candidate) => candidate !== null)
-      .sort((left, right) =>
-        gridDistance(actor.position, left.position) - gridDistance(actor.position, right.position) ||
-        left.id.localeCompare(right.id))[0];
+      .sort((left, right) => {
+        const [leftHitPoints, leftDistance] = focusRank(request, actor, left);
+        const [rightHitPoints, rightDistance] = focusRank(request, actor, right);
+        return leftHitPoints - rightHitPoints || leftDistance - rightDistance ||
+          left.id.localeCompare(right.id);
+      })[0];
     if (target !== undefined) {
-      return [1, gridDistance(actor.position, target.position), commandKey(command)];
+      const [hitPoints, distance] = focusRank(request, actor, target);
+      return [2, hitPoints, distance, commandKey(command)];
     }
   }
   if (command.type === 'attack') {
     const target = visibleHostile(request, actor.kind, command.target);
     if (target !== null) {
-      return [2, gridDistance(actor.position, target.position), commandKey(command)];
+      const [hitPoints, distance] = focusRank(request, actor, target);
+      return [3, hitPoints, distance, commandKey(command)];
     }
   }
   if (command.type === 'force_save') {
     const target = visibleHostile(request, actor.kind, command.target);
     if (target !== null) {
-      return [2, gridDistance(actor.position, target.position), commandKey(command)];
+      const [hitPoints, distance] = focusRank(request, actor, target);
+      return [3, hitPoints, distance, commandKey(command)];
     }
   }
   if (command.type === 'move') {
@@ -216,18 +339,31 @@ function playerCharacterAlgorithmRank(
         .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
         .map((candidate) => gridDistance(destination, candidate.position)),
     );
-    return [3, nearest, commandKey(command)];
+    if (usedRangedActionThisTurn(request, actor)) {
+      const currentlyAdjacent = request.visibleState.combatants.some((candidate) =>
+        candidate.kind !== actor.kind && candidate.life !== 'dead' &&
+        gridDistance(actor.position, candidate.position) <= 5);
+      const currentNearest = Math.min(
+        ...request.visibleState.combatants
+          .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
+          .map((candidate) => gridDistance(actor.position, candidate.position)),
+      );
+      return currentlyAdjacent || nearest <= currentNearest
+        ? [10, 0, 0, commandKey(command)]
+        : [4, -nearest, 0, commandKey(command)];
+    }
+    return [4, nearest, 0, commandKey(command)];
   }
-  if (command.type === 'dash') return [4, 0, commandKey(command)];
-  if (command.type === 'decline_reaction') return [5, 0, commandKey(command)];
-  if (command.type === 'end_turn') return [9, 0, commandKey(command)];
-  return [8, 0, commandKey(command)];
+  if (command.type === 'dash') return [5, 0, 0, commandKey(command)];
+  if (command.type === 'decline_reaction') return [6, 0, 0, commandKey(command)];
+  if (command.type === 'end_turn') return [9, 0, 0, commandKey(command)];
+  return [8, 0, 0, commandKey(command)];
 }
 
 function algorithmRank(
   request: ControllerRequest,
   command: EncounterCommand,
-): readonly [number, number, string] {
+): readonly [number, number, number, string] {
   const actor = request.visibleState.combatants.find(
     (candidate) => candidate.id === request.actorId,
   );
@@ -239,7 +375,7 @@ function algorithmRank(
     return actor !== undefined && target !== undefined && actor.kind !== target.kind;
   };
   if (command.type === 'opportunity_attack' && hostile(command.target)) {
-    return [0, 0, commandKey(command)];
+    return [0, 0, 0, commandKey(command)];
   }
   if (command.type === 'attack' && hostile(command.target)) {
     const target = request.visibleState.combatants.find(
@@ -249,7 +385,7 @@ function algorithmRank(
       actor === undefined || target === undefined
         ? Number.POSITIVE_INFINITY
         : gridDistance(actor.position, target.position);
-    return [1, distance, commandKey(command)];
+    return [1, distance, 0, commandKey(command)];
   }
   if (command.type === 'move') {
     const destination = command.path.at(-1) ?? actor?.position;
@@ -260,11 +396,11 @@ function algorithmRank(
             .filter((candidate) => hostile(candidate.id))
             .map((candidate) => gridDistance(destination, candidate.position)),
         );
-    return [2, nearest, commandKey(command)];
+    return [2, nearest, 0, commandKey(command)];
   }
-  if (command.type === 'decline_reaction') return [3, 0, commandKey(command)];
-  if (command.type === 'end_turn') return [5, 0, commandKey(command)];
-  return [4, 0, commandKey(command)];
+  if (command.type === 'decline_reaction') return [3, 0, 0, commandKey(command)];
+  if (command.type === 'end_turn') return [5, 0, 0, commandKey(command)];
+  return [4, 0, 0, commandKey(command)];
 }
 
 export class AlgorithmController implements Controller {
@@ -482,7 +618,8 @@ export class AlgorithmController implements Controller {
         return (
           leftRank[0] - rightRank[0] ||
           leftRank[1] - rightRank[1] ||
-          leftRank[2].localeCompare(rightRank[2])
+          leftRank[2] - rightRank[2] ||
+          leftRank[3].localeCompare(rightRank[3])
         );
       })[0];
     if (action === undefined) throw new Error('Controller request has no legal actions.');
@@ -679,6 +816,12 @@ export class ControllerRegistry {
     const entry = this.#entries.get(combatantId);
     if (entry === undefined) throw new Error(`No controller assigned to ${combatantId}.`);
     return entry.generation;
+  }
+
+  kindFor(combatantId: CombatantId): ControllerKind {
+    const entry = this.#entries.get(combatantId);
+    if (entry === undefined) throw new Error(`No controller assigned to ${combatantId}.`);
+    return entry.kind;
   }
 
   identities(): readonly ControllerIdentity[] {

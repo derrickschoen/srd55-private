@@ -123,6 +123,44 @@ describe('stable VTT control rendering', () => {
     expect(changed).toHaveBeenCalledOnce();
   });
 
+  it('timeline_rewind_control_replaced: keeps the live rewind button connected while the timeline republishes', () => {
+    const timeline = (revision: number, button?: HTMLElement): HTMLElement => {
+      const section = document.createElement('section');
+      section.dataset.renderKey = stableRenderKey('dm', 'initiative-timeline');
+      const rewind = document.createElement('div');
+      rewind.dataset.renderKey = stableRenderKey('dm', 'initiative-timeline', 'rewind');
+      const control = button ?? document.createElement('button');
+      control.dataset.renderKey = stableRenderKey(
+        'dm', 'initiative-timeline', 'rewind', 'round-1',
+      );
+      control.setAttribute('data-revision', String(revision));
+      rewind.append(control);
+      section.append(rewind);
+      return section;
+    };
+    const clicked = vi.fn();
+    const liveButton = document.createElement('button');
+    liveButton.addEventListener('click', clicked);
+    const live = document.createElement('main');
+    live.append(timeline(2, liveButton));
+    document.body.append(live);
+    const draft = document.createElement('main');
+    draft.append(timeline(9));
+
+    reconcileStableRenderedChildren(live, draft);
+
+    const rendered = interactiveElement(live).querySelector(
+      `[data-render-key="${stableRenderKey(
+        'dm', 'initiative-timeline', 'rewind', 'round-1',
+      )}"]`,
+    );
+    expect(rendered).toBe(interactiveElement(liveButton));
+    expect(interactiveElement(liveButton).isConnected).toBe(true);
+    expect(interactiveElement(liveButton).getAttribute('data-revision')).toBe('9');
+    interactiveElement(liveButton).click();
+    expect(clicked).toHaveBeenCalledOnce();
+  });
+
   it('rejects colliding logical identities before mutating the live tree', () => {
     const live = document.createElement('main');
     const draft = document.createElement('main');

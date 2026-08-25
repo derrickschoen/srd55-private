@@ -446,6 +446,11 @@ export class TurnCoordinator {
       ) {
         request = resumed;
       } else {
+        const algorithmParty = this.registry.kindFor(actor) === 'algorithm' &&
+          combatant(this.#state, actor).profile.kind === 'player_character'
+          ? this.#state.combatants.flatMap((candidate) =>
+              candidate.profile.kind === 'player_character' ? [candidate.profile.id] : [])
+          : undefined;
         const common = {
           requestId: this.#nextRequestId(kind, actor),
           encounterRevision: this.#state.revision,
@@ -453,6 +458,7 @@ export class TurnCoordinator {
           visibleState: projectPlayerView(this.#state, {
             seatId: String(actor),
             combatantId: actor,
+            ...(algorithmParty === undefined ? {} : { ownedCombatantIds: algorithmParty }),
           }),
           legalActions,
         };
