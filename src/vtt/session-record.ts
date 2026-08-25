@@ -77,6 +77,7 @@ function eventsOf(revision: SessionRevision): readonly EncounterEvent[] {
     case 'turn_delayed':
       return revision.transition.events;
     case 'session_started':
+    case 'session_ended':
     case 'party_state_captured':
     case 'reaction_preference_changed':
     case 'refusal_handling_changed':

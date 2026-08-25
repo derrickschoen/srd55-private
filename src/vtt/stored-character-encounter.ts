@@ -29,6 +29,13 @@ export interface StoredCharacterEncounter {
   readonly controllers: readonly ControllerIdentity[];
   readonly turnLegalActions: TurnLegalActions;
   readonly composeNextRoom?: StoredCharacterRoomComposer;
+  readonly sessionFlow?: StoredCharacterSessionFlow;
+}
+
+export interface StoredCharacterSessionFlow {
+  readonly name: string;
+  readonly encounterCount: 2 | 3 | 4;
+  readonly endControlLabel: string;
 }
 
 export type StoredCharacterRoomComposer = (

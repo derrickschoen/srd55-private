@@ -39,6 +39,7 @@ import {
 } from './stored-character-encounter';
 
 export const VANE_WARREN_ID = 'encounter:vane-warren' as const;
+export const VANE_WARREN_SESSION_ID = 'session:vane-warren-flagship' as const;
 export const VANE_WARREN_FIGHT_IDS = [
   'cinder-rite',
   'iron-voice',
@@ -715,6 +716,26 @@ export function composeVaneWarrenFight(
       return member === undefined
         ? { actions: [{ type: 'end_turn', actor }] }
         : partyActions(current, actor);
+    },
+  };
+}
+
+export function composeVaneWarrenSessionEncounter(
+  members: readonly LoadedPartyMember[],
+  displayNames: ReadonlyMap<number, string>,
+  partyState: PartySessionState,
+): StoredCharacterEncounter {
+  const fightId = VANE_WARREN_FIGHT_IDS[partyState.room - 1];
+  if (fightId === undefined) {
+    throw new Error('The three-encounter Vane Warren session is complete.');
+  }
+  return {
+    ...composeVaneWarrenFight(fightId, members, displayNames, partyState),
+    composeNextRoom: composeVaneWarrenSessionEncounter,
+    sessionFlow: {
+      name: 'The Vane Warren',
+      encounterCount: 3,
+      endControlLabel: 'End Session and export',
     },
   };
 }
