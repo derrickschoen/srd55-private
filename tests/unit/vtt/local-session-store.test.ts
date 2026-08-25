@@ -51,6 +51,12 @@ function putLegacySession(storage: Storage, session: ReturnType<typeof legacySes
   }));
 }
 
+function padSavedSession(bytes: string, length: number): string {
+  const paddingPropertyLength = ',"padding":""'.length;
+  if (bytes.length + paddingPropertyLength > length) throw new Error('Saved session exceeds target length.');
+  return `${bytes.slice(0, -1)},"padding":"${'x'.repeat(length - bytes.length - paddingPropertyLength)}"}`;
+}
+
 describe('IndexedDB durable VTT session adapter', () => {
   it('starts empty and isolates session keys', async () => {
     const store = await IndexedDbBrowserSessionStore.open(new IDBFactory(), new MemoryStorage());
@@ -176,6 +182,42 @@ describe('IndexedDB durable VTT session adapter', () => {
       expect.objectContaining({ migrationStatus: 'truncated' }),
     ]);
     expect(storage.getItem(`srd55:vtt-session-truncated:${legacy.id}`)).toBeNull();
+    migrated.close();
+  });
+
+  it('flags legacy autosaves at the localStorage truncation boundary but not just below it', async () => {
+    const storage = new MemoryStorage();
+    const truncationBoundary = 4 * 1024 * 1024;
+    const atBoundary = legacySession('session:autosave-at-truncation-boundary');
+    const belowBoundary = legacySession('session:autosave-below-truncation-boundary');
+    const atBoundaryBytes = padSavedSession(atBoundary.bytes, truncationBoundary);
+    const belowBoundaryBytes = padSavedSession(belowBoundary.bytes, truncationBoundary - 1);
+
+    for (const [session, bytes, label] of [
+      [atBoundary, atBoundaryBytes, 'at-boundary'],
+      [belowBoundary, belowBoundaryBytes, 'below-boundary'],
+    ] as const) {
+      const storageId = `per_round:${session.id}:${label}`;
+      storage.setItem(`srd55:vtt-autosave:${storageId}`, JSON.stringify({
+        storageId,
+        sessionId: session.id,
+        trigger: 'round_boundary',
+        pool: 'per_round',
+        name: label,
+        updatedAt: '2042-08-24T12:00:00.000Z',
+        bytes,
+        retention: { kind: 'autosave', pool: 'per_round' },
+      }));
+    }
+
+    expect(atBoundaryBytes).toHaveLength(truncationBoundary);
+    expect(belowBoundaryBytes).toHaveLength(truncationBoundary - 1);
+
+    const migrated = await IndexedDbBrowserSessionStore.open(new IDBFactory(), storage);
+    expect(migrated.savedSessions()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'at-boundary', migrationStatus: 'truncated' }),
+      expect.objectContaining({ name: 'below-boundary', migrationStatus: 'complete' }),
+    ]));
     migrated.close();
   });
 
