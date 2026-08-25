@@ -126,6 +126,34 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
     expect(vaneWarrenWorldObjectLegalActions(state, drummer)).toEqual([]);
   });
 
+  it('refuses the typed war-drum action from exactly two cells away', () => {
+    let state = fight('cinder-rite');
+    const drummer = combatantIdFor(state, 'cinder-guard-b');
+    state = activeTurn(state, drummer);
+    const action = vaneWarrenWorldObjectLegalActions(state, drummer)[0];
+    if (action?.type !== 'use_world_object') throw new Error('The adjacent drummer has no use-object action.');
+    const warDrum = state.encounter.worldObjects.find((object) => object.id === action.objectId);
+    if (warDrum === undefined) throw new Error('The war drum is missing.');
+    state = {
+      ...state,
+      encounter: {
+        ...state.encounter,
+        tokens: state.encounter.tokens.map((token) => token.combatantId === drummer
+          ? {
+              ...token,
+              position: { column: warDrum.position.column + 2, row: warDrum.position.row },
+            }
+          : token),
+      },
+    };
+
+    expect(() => reduceVaneWarrenEncounter(state.encounter, action, faceOne)).toThrowError(expect.objectContaining({
+      name: 'EncounterRuleError',
+      refusalClass: 'validation',
+      reason: 'Sound the war drum requires adjacency to Vane Warren War Drum.',
+    }));
+  });
+
   it('drum_double_trigger: taking the adjacent class action sounds the alarm once and cannot queue it again', () => {
     let state = fight('cinder-rite');
     const drummer = combatantIdFor(state, 'cinder-guard-b');
