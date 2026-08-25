@@ -12,6 +12,7 @@ import {
 } from './controllers';
 import {
   combatantsAreAllies,
+  encounterMovementWorld,
   EncounterRuleError,
   PendingDecisionRuleError,
   reduceEncounter,
@@ -23,10 +24,10 @@ import {
 import type { EncounterCommand, EncounterEvent } from './events';
 import type { NonBoundaryRefusalClass } from './encounter-rule-error';
 import type { GridCell } from './grid';
-import { planMovement, type MovementWorld } from './movement';
+import { planMovement } from './movement';
 import type { Rng } from './random';
 import type { HiddenRollCategory } from './roll-visibility';
-import { feet, type CombatantId } from './values';
+import type { CombatantId } from './values';
 import { projectPlayerView } from './visibility';
 import {
   REFUSAL_CLASS_CATEGORIES,
@@ -144,32 +145,45 @@ export type CoordinatorStep =
       readonly actionRefusal?: NonBoundaryActionRefusal;
     };
 
-function cellKey(cell: GridCell): string {
-  return `${cell.column},${cell.row}`;
-}
-
 function combatant(state: EncounterState, id: CombatantId) {
   const found = state.combatants.find((candidate) => candidate.profile.id === id);
   if (found === undefined) throw new EncounterRuleError('validation', `Unknown combatant ${id}.`);
   return found;
 }
 
-function movementWorld(state: EncounterState): MovementWorld<CombatantId> {
+function movementCause(
+  state: EncounterState,
+  command: Extract<EncounterCommand, { readonly type: 'move' }>,
+) {
+  return (command.cause === 'voluntary' && combatant(state, command.actor).turn.disengaging) ||
+    command.cause === 'reactions_resolved'
+    ? 'disengaged' as const
+    : command.cause;
+}
+
+function legalizeTurnActions(
+  state: EncounterState,
+  actor: CombatantId,
+  legalActions: LegalActionSummary,
+): LegalActionSummary {
+  const subject = combatant(state, actor);
+  const actorToken = state.tokens.find((token) => token.combatantId === actor);
+  if (actorToken === undefined) throw new EncounterRuleError('validation', 'Active combatant has no token.');
   return {
-    bounds: state.bounds,
-    canTraverseStep: () => true,
-    traversal: (actor, _from, to) => {
-      if (state.blockedCells.some((cell) => cellKey(cell) === cellKey(to))) {
-        return { kind: 'blocked', reason: 'blocked cell' };
-      }
-      const occupied = state.tokens.some(
-        (token) =>
-          token.combatantId !== actor &&
-          combatant(state, token.combatantId).life !== 'dead' &&
-          cellKey(token.position) === cellKey(to),
-      );
-      return { kind: 'enterable', cost: feet(5), canEnd: !occupied };
-    },
+    actions: legalActions.actions.flatMap((command): readonly EncounterCommand[] => {
+      if (command.type !== 'move' || command.actor !== actor) return [command];
+      const plan = planMovement(encounterMovementWorld(state), {
+        actorId: actor,
+        start: actorToken.position,
+        path: command.path,
+        budgetRemaining: subject.turn.movement.remaining,
+        cause: movementCause(state, command),
+        reachSources: [],
+      });
+      if (plan.kind === 'legal' || plan.reason !== 'over_budget') return [command];
+      if (plan.stepIndex === 0) return [];
+      return [{ ...command, path: command.path.slice(0, plan.stepIndex) }];
+    }),
   };
 }
 
@@ -201,12 +215,12 @@ function coordinatedMovementSteps(
         hostile: true,
       };
     });
-  const plan = planMovement(movementWorld(state), {
+  const plan = planMovement(encounterMovementWorld(state), {
     actorId: command.actor,
     start: actorToken.position,
     path: command.path,
     budgetRemaining: actor.turn.movement.remaining,
-    cause: actor.turn.disengaging ? 'disengaged' : 'voluntary',
+    cause: movementCause(state, command),
     reachSources,
   });
   if (plan.kind === 'illegal') return [];
@@ -751,7 +765,11 @@ export class TurnCoordinator {
       this.#continuation = {
         kind: 'turn',
         actor,
-        legalActions: this.#turnLegalActions(this.#state, actor),
+        legalActions: legalizeTurnActions(
+          this.#state,
+          actor,
+          this.#turnLegalActions(this.#state, actor),
+        ),
       };
       return await this.#continueTurn();
     } catch (error: unknown) {

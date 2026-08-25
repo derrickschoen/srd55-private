@@ -4146,6 +4146,29 @@ function executeLegendaryAction(
   processAttack(context, monsterAttackCommand(attack, actor, target), null, 'legendary');
 }
 
+function legendaryActionAvailable(
+  state: EncounterState,
+  actor: CombatantId,
+  action: MonsterLegendaryAction,
+): boolean {
+  if (action.kind === 'temporary_defense') return true;
+  const target = legendaryActionTarget(state, actor);
+  if (target === null) return false;
+  const start = token(state, actor).position;
+  const targetPosition = token(state, target).position;
+  if (gridDistance(start, targetPosition) <= effectiveCombatRules(state, actor).reach) return true;
+  const maximumCost = feet(action.movement === 'half_speed'
+    ? Math.floor(effectiveCombatRules(state, actor).speed / 2)
+    : effectiveCombatRules(state, actor).speed);
+  return adjacentCells(state.bounds, targetPosition)
+    .filter((cell) => !state.tokens.some((candidate) =>
+      candidate.combatantId !== actor && cellKey(candidate.position) === cellKey(cell)))
+    .some((goal) => findPath(
+      encounterMovementWorld(state),
+      { actorId: actor, start, goal, maximumCost },
+    ).kind === 'found');
+}
+
 function queueLegendaryActionWindows(context: ReductionContext, activeCombatant: CombatantId): boolean {
   let queued = false;
   for (const subject of context.state.combatants) {
@@ -4164,7 +4187,9 @@ function queueLegendaryActionWindows(context: ReductionContext, activeCombatant:
       decision.kind === 'legendary_action_window' && decision.combatant === actor &&
       decision.boundary.activeCombatant === activeCombatant && decision.boundary.round === context.state.round);
     if (alreadyHandled || alreadyPending) continue;
-    const affordable = actions.filter((action) => action.cost <= pool.actionUsesRemaining);
+    const affordable = actions.filter((action) =>
+      action.cost <= pool.actionUsesRemaining &&
+      legendaryActionAvailable(context.state, actor, action));
     if (affordable.length === 0) continue;
     const id = `decision:${String(context.state.nextDecisionSequence)}`;
     const options: Extract<PendingDecision, { readonly kind: 'legendary_action_window' }>['options'] = [

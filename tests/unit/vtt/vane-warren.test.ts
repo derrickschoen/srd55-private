@@ -341,7 +341,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
     expect(state.transitions).toEqual([]);
   });
 
-  it('legendary_pool_wrong: gives the warlord three landed windows and one Legendary Resistance', () => {
+  it('legendary_pool_wrong: offers only executable landed actions and one Legendary Resistance', () => {
     const bundled = fight('iron-voice');
     const warlord = bundled.encounter.combatants.find((subject) =>
       subject.profile.kind === 'monster' &&
@@ -367,7 +367,6 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
     const window = state.pendingDecisions.find((decision) =>
       decision.kind === 'legendary_action_window' && decision.combatant === warlord.profile.id);
     expect(window?.options.map((option) => option.id)).toEqual([
-      'legendary_action:press-the-line',
       'legendary_action:shielding-order',
       'pass',
     ]);
