@@ -7,6 +7,13 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D381 — OWNER: ignore codex limits (2026-08-25)
+
+Owner verbatim: "Ignore codex limits. The plan I have has plenty of".
+Codex token spend is not a constraint on dispatch cadence or depth; the
+supervisor stops flagging it. The codex-out-of-credits-stop-loudly rule
+still applies if the provider actually refuses.
+
 ## D380 — OWNER: winning-run standard is STRENGTHEN THE POLICY on the fixed seed (2026-08-25)
 
 When the algorithm party loses a winnable rehearsal fight, the sanctioned
