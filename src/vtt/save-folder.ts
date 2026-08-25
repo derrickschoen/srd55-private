@@ -162,6 +162,7 @@ export class SaveFolderRepository {
 
   async rename(save: SaveManagerEntry, name: string): Promise<void> {
     if (save.source !== 'folder') throw new Error('Only folder saves can be renamed here.');
+    if (save.bytes === undefined) throw new Error('Folder save has no file contents.');
     const oldFilename = save.id.slice('folder:'.length);
     const requestedFilename = this.#filename(name);
     if (requestedFilename !== oldFilename && await this.#fileExists(requestedFilename)) {

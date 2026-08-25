@@ -46,7 +46,8 @@ export interface SaveManagerEntry {
   readonly revisionCount: number;
   readonly room: number | null;
   readonly round: number;
-  readonly bytes: string;
+  /** Folder saves carry bytes; browser saves export their immutable revision prefix on demand. */
+  readonly bytes?: string;
   /** Missing browser retention is the pre-D377.9 single autosave pool. */
   readonly retention?: SaveRetention;
 }

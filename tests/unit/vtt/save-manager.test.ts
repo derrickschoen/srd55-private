@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { REACTION_KINDS } from '../../../src/combat/encounter';
 import { combatantId, encounterSessionId } from '../../../src/combat/values';
 import { DmEncounterHost } from '../../../src/vtt/dm-encounter-host';
-import { LocalStorageBrowserSessionStore } from '../../../src/vtt/local-session-store';
+import {
+  MemoryBrowserSessionStore,
+  decodeSavedSessionFingerprint,
+  exportSavedSession,
+} from '../../../src/vtt/session-persistence';
 import {
   AutosavePoolManager,
   SaveManagerController,
@@ -13,17 +17,6 @@ import {
 } from '../../../src/vtt/save-manager';
 import type { PartySessionState } from '../../../src/vtt/party-session-state';
 import { DEFAULT_REFUSAL_HANDLING_SETTINGS } from '../../../src/vtt/refusal-handling';
-
-class MemoryStorage implements Storage {
-  readonly #values = new Map<string, string>();
-
-  get length(): number { return this.#values.size; }
-  clear(): void { this.#values.clear(); }
-  getItem(key: string): string | null { return this.#values.get(key) ?? null; }
-  key(index: number): string | null { return [...this.#values.keys()][index] ?? null; }
-  removeItem(key: string): void { this.#values.delete(key); }
-  setItem(key: string, value: string): void { this.#values.set(key, value); }
-}
 
 const PARTY_COMBATANTS = [1, 2, 3].map((index) => combatantId(`combatant:save-${String(index)}`));
 const PARTY_STATE: PartySessionState = {
@@ -52,36 +45,30 @@ const PARTY_STATE: PartySessionState = {
 };
 
 function browserFixture(): {
-  readonly store: LocalStorageBrowserSessionStore;
   readonly saves: readonly SaveManagerEntry[];
 } {
-  const storage = new MemoryStorage();
-  const store = new LocalStorageBrowserSessionStore(storage);
+  const store = new MemoryBrowserSessionStore();
+  const saves: SaveManagerEntry[] = [];
   for (const [session, name, updatedAt] of [
     ['session:browser-old', 'Browser old', '2042-08-24T10:00:00.000Z'],
     ['session:browser-new', 'Browser new', '2042-08-24T12:00:00.000Z'],
   ] as const) {
     const host = new DmEncounterHost(session, store, { initialPartyState: PARTY_STATE });
     host.close();
-    const created = store.savedSessions().find((save) => save.sessionId === encounterSessionId(session));
-    if (created === undefined) throw new Error(`Missing start-boundary autosave for ${session}.`);
-    const key = `srd55:vtt-autosave:${created.storageId}`;
-    const raw = storage.getItem(key);
-    if (raw === null) throw new Error(`Missing autosave storage record for ${session}.`);
-    const record: unknown = JSON.parse(raw);
-    if (typeof record !== 'object' || record === null || Array.isArray(record)) {
-      throw new Error(`Malformed autosave storage record for ${session}.`);
-    }
-    storage.setItem(key, JSON.stringify({ ...record, name, updatedAt }));
-  }
-  return {
-    store,
-    saves: store.savedSessions().map((save) => ({
-      ...save,
-      id: `browser:${save.sessionId}`,
+    const sessionId = encounterSessionId(session);
+    const bytes = exportSavedSession(store, sessionId);
+    saves.push({
+      ...decodeSavedSessionFingerprint(bytes),
+      id: `browser:encounter_boundary:${session}`,
+      storageId: `encounter_boundary:${session}`,
       source: 'browser',
-    })),
-  };
+      name,
+      updatedAt,
+      bytes,
+      retention: { kind: 'autosave', pool: 'encounter_boundary' },
+    });
+  }
+  return { saves };
 }
 
 function folderSave(
@@ -166,7 +153,6 @@ describe('DM save manager', () => {
       revisionCount: save.revisionCount,
       room: save.room,
       round: save.round,
-      bytes: save.bytes,
     }));
     const model = buildSaveManagerViewModel({
       browser: legacy,
