@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D385 — OWNER: fifth PC — a wizard joins the representative party (2026-08-25)
+
+The representative party had NO wizard (Warlock/Druid/Fighter/Cleric),
+so D384's wizard directives (Slow, Ray of Frost) had no legal caster.
+Owner: **add a 5th PC wizard**. Party becomes five; every encounter's
+action-economy ratio and the D382 two-thirds survival measurement are
+re-baselined for a 5-PC party. Correction to the D377.17 record: the
+supervisor's question that produced "keep the druid tests to the private
+repo" wrongly claimed the roster had no druid — Orin Reed (Circle of the
+Land) was already in it; the parenthetical "roster stays druid-free" in
+that entry is void, Orin stays as-is.
+
 ## D384 — OWNER: overheal prevention on cast heals; Slow/Spirit Guardians; caster positioning; fighter defender kit (2026-08-25)
 
 Owner directives, 2026-08-25:
