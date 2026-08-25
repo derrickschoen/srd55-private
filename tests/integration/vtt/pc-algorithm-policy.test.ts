@@ -402,6 +402,39 @@ describe('player-character AlgorithmController policy', () => {
     });
   });
 
+  it('healing_priority: heals a dying ally before an ally at half hit points', async () => {
+    const healer = playerProfile('pc-policy-priority-healer', { initiativeBonus: 20 });
+    const dyingAlly = playerProfile('pc-policy-priority-dying', {
+      hitPoints: 20,
+      initiativeBonus: 0,
+    });
+    const woundedAlly = playerProfile('pc-policy-priority-wounded', {
+      hitPoints: 20,
+      initiativeBonus: -10,
+    });
+    const initial = startedState(
+      [healer, dyingAlly, woundedAlly],
+      [
+        placedToken(healer, 1, 1),
+        placedToken(dyingAlly, 0, 1),
+        placedToken(woundedAlly, 2, 1),
+      ],
+    );
+    const dyingState = withHitPointEvent(initial, healer.id, dyingAlly.id, 0);
+    const state = withHitPointEvent(dyingState, healer.id, woundedAlly.id, 10);
+    const decision = await new AlgorithmController().choose(
+      requestFor(state, healer.id, [
+        spell(healer.id, woundedAlly.id, 'healing-word'),
+        spell(healer.id, dyingAlly.id, 'healing-word'),
+      ]),
+      new AbortController().signal,
+    );
+
+    expect(decision.action).toMatchObject({
+      type: 'cast_spell', spellId: 'healing-word', targets: [dyingAlly.id],
+    });
+  });
+
   it('heal_below_threshold: heals an ally at half of its last-known maximum before attacking', async () => {
     const healer = playerProfile('pc-policy-threshold-healer', { initiativeBonus: 20 });
     const ally = playerProfile('pc-policy-threshold-ally', { hitPoints: 20, initiativeBonus: 0 });
