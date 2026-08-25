@@ -36,6 +36,7 @@ function players() {
     playerProfile('vane-player-b', { initiativeBonus: 20, hitPoints: 40 }),
     playerProfile('vane-player-c', { initiativeBonus: 10, hitPoints: 40 }),
     playerProfile('vane-player-d', { initiativeBonus: 5, hitPoints: 40 }),
+    playerProfile('vane-player-e', { initiativeBonus: 0, hitPoints: 40 }),
   ] as const;
 }
 
@@ -180,7 +181,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       type: 'set_hidden_roll_category', category: 'death_saves', hidden: true,
     }, faceOne).state;
     expect(state.eventLog.filter((event) => event.type === 'reinforcement_wave_deployed')).toHaveLength(1);
-    expect(state.combatants.filter((subject) => String(subject.profile.id).includes(':cinder-wave-1-'))).toHaveLength(4);
+    expect(state.combatants.filter((subject) => String(subject.profile.id).includes(':cinder-wave-1-'))).toHaveLength(1);
     state = reduceVaneWarrenEncounter(state, {
       type: 'set_hidden_roll_category', category: 'death_saves', hidden: false,
     }, faceOne).state;
@@ -190,7 +191,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       type: 'set_hidden_roll_category', category: 'death_saves', hidden: true,
     }, faceOne).state;
     expect(state.eventLog.filter((event) => event.type === 'reinforcement_wave_deployed')).toHaveLength(2);
-    expect(state.combatants.filter((subject) => String(subject.profile.id).includes(':cinder-wave-'))).toHaveLength(8);
+    expect(state.combatants.filter((subject) => String(subject.profile.id).includes(':cinder-wave-'))).toHaveLength(2);
   });
 
   it('dm_trigger_unlogged: exposes the object fallback and records its ruling card while sounding the same alarm once', () => {
@@ -217,9 +218,16 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
   });
 
   it('loads each separate fight with pre-placed tokens, fog, light, surfaces, and at least six landed terrain or hazard elements', () => {
+    expect(players().map((player) => player.id)).toEqual([
+      'combatant:vane-player-a',
+      'combatant:vane-player-b',
+      'combatant:vane-player-c',
+      'combatant:vane-player-d',
+      'combatant:vane-player-e',
+    ]);
     for (const manifest of VANE_WARREN_FIGHTS) {
       const loaded = fight(manifest.id);
-      expect(loaded.encounter.combatants).toHaveLength(4 + manifest.standing.length);
+      expect(loaded.encounter.combatants).toHaveLength(5 + manifest.standing.length);
       expect(loaded.encounter.tokens).toHaveLength(loaded.encounter.combatants.length);
       expect(loaded.encounter.foggedCells.length).toBeGreaterThan(0);
       expect(loaded.encounter.environment.lightRegions.length).toBeGreaterThan(0);
@@ -236,15 +244,15 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
     expect(new Set(allDeployedIds.flat()).size).toBe(allDeployedIds.flat().length);
   });
 
-  it('ratio_drift: derives 3.5x, 2.0x, and 1.5x from each fight roster instead of a copied expectation', () => {
+  it('ratio_drift: detune_ratio_stale: derives every detuned ratio from its live roster instead of a copied expectation', () => {
     expect(VANE_WARREN_FIGHTS.map((manifest) => ({
       id: manifest.id,
       ...vaneWarrenActionEconomy(manifest),
       recorded: manifest.targetActionEconomyRatio,
     }))).toEqual([
-      { id: 'cinder-rite', enemyOpportunities: 14, partyOpportunities: 4, ratio: 3.5, recorded: 3.5 },
-      { id: 'iron-voice', enemyOpportunities: 8, partyOpportunities: 4, ratio: 2, recorded: 2 },
-      { id: 'last-muster', enemyOpportunities: 6, partyOpportunities: 4, ratio: 1.5, recorded: 1.5 },
+      { id: 'cinder-rite', enemyOpportunities: 4, partyOpportunities: 5, ratio: 0.8, recorded: 0.8 },
+      { id: 'iron-voice', enemyOpportunities: 2, partyOpportunities: 5, ratio: 0.4, recorded: 0.4 },
+      { id: 'last-muster', enemyOpportunities: 2, partyOpportunities: 5, ratio: 0.4, recorded: 0.4 },
     ]);
   });
 
@@ -253,18 +261,18 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
     const drummer = combatantIdFor(state, 'cinder-guard-b');
     state = useVaneWarrenWarDrum(state, drummer);
     expect(state.alarm).toMatchObject({ kind: 'sounded', usedAtRound: 1 });
-    expect(state.deployedRosterIds).toHaveLength(6);
+    expect(state.deployedRosterIds).toHaveLength(2);
 
     state = advanceVaneWarrenAlarm(state, 1);
-    expect(state.deployedRosterIds).toHaveLength(6);
+    expect(state.deployedRosterIds).toHaveLength(2);
     state = advanceVaneWarrenAlarm(state, 2);
-    expect(state.deployedRosterIds).toHaveLength(10);
+    expect(state.deployedRosterIds).toHaveLength(3);
     state = advanceVaneWarrenAlarm(state, 2);
-    expect(state.deployedRosterIds).toHaveLength(10);
+    expect(state.deployedRosterIds).toHaveLength(3);
     state = advanceVaneWarrenAlarm(state, 3);
-    expect(state.deployedRosterIds).toHaveLength(14);
+    expect(state.deployedRosterIds).toHaveLength(4);
     state = advanceVaneWarrenAlarm(state, 20);
-    expect(state.deployedRosterIds).toHaveLength(14);
+    expect(state.deployedRosterIds).toHaveLength(4);
     expect(state.alarm).toEqual({
       kind: 'complete',
       usedBy: drummer,
@@ -273,7 +281,7 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
     });
     expect(state.transitions.filter((transition) => transition.kind === 'alarm_wave_deployed')).toHaveLength(2);
     expect(state.encounter.combatants.filter((subject) =>
-      String(subject.profile.id).includes(':cinder-wave-')).map((subject) => subject.profile.id)).toHaveLength(8);
+      String(subject.profile.id).includes(':cinder-wave-')).map((subject) => subject.profile.id)).toHaveLength(2);
   });
 
   it('alarm_wave_timing: keeps every Cinder Rite reinforcement off-board until its exact arrival round', () => {
@@ -348,8 +356,8 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       subject.profile.statblockId === 'statblock:vane-warren/marshal-kett');
     if (warlord === undefined) throw new Error('The Iron Voice has no warlord.');
     expect(warlord.legendary).toEqual({
-      actionUsesMaximum: 3,
-      actionUsesRemaining: 3,
+      actionUsesMaximum: 1,
+      actionUsesRemaining: 1,
       resistanceUsesMaximum: 1,
       resistanceUsesRemaining: 1,
     });

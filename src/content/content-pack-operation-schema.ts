@@ -83,7 +83,7 @@ const EFFECT_PAYLOAD_KINDS = [
   'damage_reduction', 'damage_resistances', 'damage_rider', 'darkvision', 'daylight_area',
   'death_ward', 'detect_thoughts', 'detection_sense', 'dimension_door', 'divination',
   'energy_protection', 'ensnaring_strike',
-  'environmental_water', 'exhaustion', 'extra_attack_count_override', 'faerie_fire',
+  'environmental_water', 'exhaustion', 'extra_attack_count_override', 'faerie_fire', 'healing_potion',
   'fabricate', 'faithful_hound', 'falling_protection', 'fear', 'fire_shield', 'flaming_sphere', 'flight', 'floating_disk',
   'food_purification', 'form_alteration', 'freedom_of_movement', 'gaseous_form',
   'glyph_of_warding', 'granted_breath', 'guardian_of_faith', 'gust_of_wind_area',

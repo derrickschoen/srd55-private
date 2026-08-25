@@ -1,7 +1,7 @@
 import type { RpcClient } from '../rpc/client';
 import { mountEncounterVtt, type EncounterVttMount } from './encounter-app';
 import { loadD365SampleParty } from './d365-sample-party';
-import { createPartySessionState } from './party-session-state';
+import { createD365SurvivalPartySessionState } from './survival-policy';
 import {
   VANE_WARREN_SESSION_ID,
   composeVaneWarrenSessionEncounter,
@@ -41,13 +41,13 @@ export function mountVaneWarren(root: HTMLElement, rpc: RpcClient): VaneWarrenMo
     if (loading) return;
     loading = true;
     choices.querySelectorAll('button').forEach((button) => { button.disabled = true; });
-    status.value = 'Authoring the bundled four-character party through RPC…';
+    status.value = 'Authoring the bundled five-character party through RPC…';
     void loadD365SampleParty(rpc).then((sample) => {
       if (closed) return;
       const encounter = composeVaneWarrenSessionEncounter(
         sample.party.members,
         sample.displayNames,
-        createPartySessionState(sample.party.members),
+        createD365SurvivalPartySessionState(sample.party.members).state,
       );
       encounterMount = mountEncounterVtt(root, {
         view: 'dm',

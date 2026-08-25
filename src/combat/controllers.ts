@@ -5,6 +5,7 @@ import type { VisibleEncounterState } from './visibility';
 import type { DmVisibleEncounterState } from './visibility';
 import type { DecisionProgram } from '../vtt/dm-bridge/round-plan-contract';
 import { canonicalJson } from '../commands/canonical-json';
+import { coverTierBetweenObjects } from './encounter';
 
 export interface LegalActionSummary {
   readonly actions: readonly EncounterCommand[];
@@ -182,7 +183,18 @@ const TACTICAL_HEALING_SPELL_IDS: ReadonlySet<string> = new Set([
 
 const TACTICAL_RANGED_SPELL_IDS: ReadonlySet<string> = new Set([
   'eldritch-blast',
+  'ray-of-frost',
+  'slow',
+  'spirit-guardians',
+  'command',
 ]);
+
+const COVER_RANK = {
+  none: 0,
+  half: 1,
+  three_quarters: 2,
+  total: 3,
+} as const;
 
 function visibleAlly(
   request: ControllerRequest,
@@ -281,6 +293,14 @@ function playerCharacterAlgorithmRank(
   command: EncounterCommand,
   actor: VisibleEncounterState['combatants'][number],
 ): readonly [number, number, number, string] {
+  const isWeaponMasteryDefender = request.legalActions.actions.some((action) =>
+    action.type === 'attack' && action.weaponMastery !== undefined);
+  const hasToppleTarget = request.legalActions.actions.some((action) =>
+    action.type === 'attack' && action.weaponMastery?.property === 'Topple');
+  if (command.type === 'drink_healing_potion') {
+    const hitPoints = lastKnownHitPoints(request, actor.id);
+    return [1, hitPoints?.current ?? 0, 0, commandKey(command)];
+  }
   if (command.type === 'opportunity_attack') {
     const target = visibleHostile(request, actor.kind, command.target);
     if (target !== null) {
@@ -289,6 +309,11 @@ function playerCharacterAlgorithmRank(
     }
   }
   if (command.type === 'cast_spell') {
+    if (command.spellId === 'bless') return [0, -1, 0, commandKey(command)];
+    if (command.spellId === 'slow' || command.spellId === 'spirit-guardians') {
+      return [0, -2, 0, commandKey(command)];
+    }
+    if (command.spellId === 'command') return [1, -1, 0, commandKey(command)];
     if (TACTICAL_HEALING_SPELL_IDS.has(command.spellId)) {
       const ally = command.targets
         .map((id) => visibleAlly(request, actor.kind, id))
@@ -322,7 +347,9 @@ function playerCharacterAlgorithmRank(
     const target = visibleHostile(request, actor.kind, command.target);
     if (target !== null) {
       const [hitPoints, distance] = focusRank(request, actor, target);
-      return [3, hitPoints, distance, commandKey(command)];
+      return command.weaponMastery?.property === 'Topple'
+        ? [2, hitPoints, distance, commandKey(command)]
+        : [3, hitPoints, distance, commandKey(command)];
     }
   }
   if (command.type === 'force_save') {
@@ -339,6 +366,13 @@ function playerCharacterAlgorithmRank(
         .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
         .map((candidate) => gridDistance(destination, candidate.position)),
     );
+    if (isWeaponMasteryDefender) {
+      // The defender advances between the nearest hostile and the ranged
+      // casters, preferring a legal Topple attack once melee is reached. The
+      // grid has no occupied-cell path reservation, so nearest-hostile
+      // interposition is the movement model's concrete body-block primitive.
+      return hasToppleTarget ? [4, nearest, 0, commandKey(command)] : [2, nearest, 0, commandKey(command)];
+    }
     if (usedRangedActionThisTurn(request, actor)) {
       const currentlyAdjacent = request.visibleState.combatants.some((candidate) =>
         candidate.kind !== actor.kind && candidate.life !== 'dead' &&
@@ -348,9 +382,16 @@ function playerCharacterAlgorithmRank(
           .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
           .map((candidate) => gridDistance(actor.position, candidate.position)),
       );
+      const cover = Math.max(0, ...request.visibleState.combatants
+        .filter((candidate) => candidate.kind !== actor.kind && candidate.life !== 'dead')
+        .map((candidate) => COVER_RANK[coverTierBetweenObjects(
+          request.visibleState.worldObjects,
+          destination,
+          candidate.position,
+        )]));
       return currentlyAdjacent || nearest <= currentNearest
         ? [10, 0, 0, commandKey(command)]
-        : [4, -nearest, 0, commandKey(command)];
+        : [4, -nearest, -cover, commandKey(command)];
     }
     return [4, nearest, 0, commandKey(command)];
   }

@@ -1216,6 +1216,7 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'attack_roll_mode_modifier':
     case 'faerie_fire':
     case 'consumable_healing_pool':
+    case 'healing_potion':
     case 'cannot_regain_hit_points':
     case 'creature_type_protection':
     case 'd20_test_modifier':
@@ -1775,9 +1776,17 @@ export function coverTierBetween(
   from: GridCell,
   to: GridCell,
 ): CoverTier {
+  return coverTierBetweenObjects(state.worldObjects, from, to);
+}
+
+export function coverTierBetweenObjects(
+  objects: readonly WorldObject[],
+  from: GridCell,
+  to: GridCell,
+): CoverTier {
   let cover: CoverTier = 'none';
   for (const cell of interveningCells(from, to)) {
-    for (const object of state.worldObjects) {
+    for (const object of objects) {
       if (
         worldObjectOccupiesCell(object, cell) &&
         COVER_ORDER[object.blocking.cover] > COVER_ORDER[cover]
@@ -4866,6 +4875,7 @@ function cloneEffectApplication(
       case 'attack_roll_mode_modifier':
       case 'faerie_fire':
       case 'consumable_healing_pool':
+      case 'healing_potion':
       case 'cannot_regain_hit_points':
       case 'creature_type_protection':
       case 'd20_test_modifier':
@@ -5508,6 +5518,69 @@ function applyManeuverCondition(
     repeatedSave: null,
     payload: { kind: 'condition', condition: effect.payload.condition },
   });
+}
+
+function applyWeaponMastery(
+  context: ReductionContext,
+  source: CombatantId,
+  target: CombatantId,
+  mastery: NonNullable<Extract<EncounterCommand, { readonly type: 'attack' }>['weaponMastery']>,
+  damageTaken: number,
+): void {
+  if (combatant(context.state, target).life === 'dead') return;
+  switch (mastery.property) {
+    case 'Slow':
+      // Slow reduces Speed by 10 feet until the start of the attacker's next
+      // turn, and repeated Slow properties never exceed that reduction:
+      // docs/srd/full/srd-5.2.1.txt:766; weapon table at :12807.
+      if (damageTaken === 0) return;
+      applyEffect(context, source, {
+        targets: [target],
+        duration: {
+          kind: 'turn_boundaries',
+          timing: { combatant: source, boundary: 'start', source: 'weapon-mastery:slow' },
+          remaining: 1,
+        },
+        concentration: false,
+        stackingIdentity: effectStackingIdentity(`weapon-mastery:slow:${String(target)}`),
+        stacking: 'replace_any_source',
+        repeatedSave: null,
+        payload: {
+          kind: 'movement_modifier',
+          speedChange: { kind: 'reduce', reduction: { kind: 'feet', feet: 10 } },
+          modeGrants: [],
+          difficultTerrainImmunity: false,
+          magicalSpeedReductionImmunity: false,
+        },
+      });
+      return;
+    case 'Topple': {
+      // Topple forces a Constitution save at DC 8 + the attack ability
+      // modifier + Proficiency Bonus and applies Prone on failure:
+      // docs/srd/full/srd-5.2.1.txt:12807.
+      const save = resolveTargetSave(
+        context,
+        source,
+        target,
+        'constitution',
+        mastery.saveDc,
+        'normal',
+        null,
+        'other',
+      );
+      if (save.outcome === 'success') return;
+      applyEffect(context, source, {
+        targets: [target],
+        duration: { kind: 'permanent' },
+        concentration: false,
+        stackingIdentity: effectStackingIdentity(`weapon-mastery:topple:${String(target)}`),
+        stacking: 'replace_any_source',
+        repeatedSave: null,
+        payload: { kind: 'condition', condition: 'Prone' },
+      });
+      return;
+    }
+  }
 }
 
 function applySaveGatedBanishments(
@@ -6164,6 +6237,9 @@ function processAttack(
     );
     concentrationCheck(context, command.target, damageResult.total);
     if (maneuver !== null) applyManeuverCondition(context, command.actor, command.target, maneuver);
+    if (command.type === 'attack' && command.weaponMastery !== undefined) {
+      applyWeaponMastery(context, command.actor, command.target, command.weaponMastery, damageResult.total);
+    }
     for (const rider of triggeredRiders) {
       if (rider.encounterEffect === null) continue;
       if (rider.payload.consumeOnHit === true) {
@@ -6914,6 +6990,7 @@ function resolvedSpellEffectPayload(
     case 'attack_roll_mode_modifier':
     case 'faerie_fire':
     case 'consumable_healing_pool':
+    case 'healing_potion':
     case 'creature_type_protection':
     case 'sanctuary':
     case 'magic_missile_immunity':
@@ -10983,6 +11060,37 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         type: 'healing_pool_consumed',
         combatant: command.actor,
         effectId: pool.id,
+        remaining,
+      });
+      return;
+    }
+    case 'drink_healing_potion': {
+      assertActiveActor(context, command.actor);
+      const potion = context.state.effects.find((effect) => effect.id === command.effectId);
+      if (potion === undefined || potion.payload.kind !== 'healing_potion') {
+        throw new EncounterRuleError('validation', `Effect ${command.effectId} is not a healing potion.`);
+      }
+      if (potion.payload.remainingUses < 1) {
+        throw new EncounterRuleError('validation', `Healing potion ${command.effectId} is empty.`);
+      }
+      spendCost(context, command.actor, potion.payload.activation, 'Drink Potion of Healing');
+      const remaining = potion.payload.remainingUses - 1;
+      context.state = {
+        ...context.state,
+        effects: context.state.effects.map((effect) => effect.id === potion.id
+          ? { ...effect, payload: { ...potion.payload, remainingUses: remaining } }
+          : effect),
+      };
+      let healing = potion.payload.dice.modifier;
+      for (let index = 0; index < potion.payload.dice.count; index += 1) {
+        healing += Math.floor(context.rng() * potion.payload.dice.sides) + 1;
+      }
+      applyHealing(context, command.actor, command.actor, healing);
+      emit(context, {
+        type: 'healing_potion_consumed',
+        combatant: command.actor,
+        effectId: potion.id,
+        itemId: potion.payload.itemId,
         remaining,
       });
       return;

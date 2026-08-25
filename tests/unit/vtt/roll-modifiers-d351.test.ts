@@ -380,7 +380,7 @@ describe('D351 imported roll/defense modifier lever', () => {
     expect(outside.events).toContainEqual(expect.objectContaining({ type: 'damage_applied', amount: 4 }));
   });
 
-  it('concentration_drop_and_same_spell_refresh: concentration ends modifiers mid-duration and same-name castings never add 2d4', () => {
+  it('bless_without_concentration: concentration ends Bless mid-duration and same-name castings never add 2d4', () => {
     const pack = packWithSpells([{ id: 'bless-shape', operation: bless }]);
     const first = playerProfile('d351-stack-first', { initiativeBonus: 40 });
     const second = playerProfile('d351-stack-second', { initiativeBonus: 30 });

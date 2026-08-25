@@ -255,6 +255,7 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'resource_spent':
     case 'limited_resource_spent':
     case 'healing_pool_consumed':
+    case 'healing_potion_consumed':
     case 'spell_slot_spent':
     case 'temporary_hit_points_changed':
     case 'stance_started':
@@ -314,6 +315,7 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
       return 'actor' in event && event.actor !== null ? [event.actor] : [];
     case 'world_object_used': return [event.actor];
     case 'reinforcement_wave_deployed': return [event.calledBy, ...event.combatants];
+    case 'conditional_joiners_deployed': return [event.leader, ...event.combatants];
     case 'persistent_area_created':
     case 'persistent_area_moved': return [event.owner];
     case 'persistent_area_membership_changed': return [...event.entered, ...event.exited];
