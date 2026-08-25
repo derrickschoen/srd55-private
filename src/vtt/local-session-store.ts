@@ -158,7 +158,19 @@ function legacySnapshot(value: string): LegacyAutosaveSnapshot | null {
     typeof parsed.sessionId !== 'string' || typeof parsed.trigger !== 'string' ||
     typeof parsed.pool !== 'string' || typeof parsed.name !== 'string' ||
     typeof parsed.updatedAt !== 'string' || typeof parsed.bytes !== 'string') return null;
-  if (!['round_boundary', 'encounter_start', 'encounter_end', 'short_rest_boundary', 'long_rest_boundary'].includes(parsed.trigger)) return null;
+  const trigger: AutosaveTrigger | null = (() => {
+    switch (parsed.trigger) {
+      case 'round_boundary':
+      case 'encounter_start':
+      case 'encounter_end':
+      case 'rest_boundary':
+      case 'rest_interruption': return parsed.trigger;
+      case 'short_rest_boundary':
+      case 'long_rest_boundary': return 'rest_boundary';
+      default: return null;
+    }
+  })();
+  if (trigger === null) return null;
   if (parsed.pool !== 'per_round' && parsed.pool !== 'encounter_boundary') return null;
   const decodedRetention = retention(parsed.retention);
   if (decodedRetention.kind !== 'named' &&
@@ -166,7 +178,7 @@ function legacySnapshot(value: string): LegacyAutosaveSnapshot | null {
   return {
     storageId: parsed.storageId,
     sessionId: parsed.sessionId as EncounterSessionId,
-    trigger: parsed.trigger as AutosaveTrigger,
+    trigger,
     pool: parsed.pool,
     name: parsed.name,
     updatedAt: parsed.updatedAt,
@@ -466,18 +478,19 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     if (previous !== undefined && revision.encounterState.round > previous.encounterState.round) {
       triggers.push('round_boundary');
     }
-    if (revision.transition.kind === 'room_composed') triggers.push('encounter_end', 'encounter_start');
-    if (revision.transition.kind === 'short_rest_completed') triggers.push('short_rest_boundary');
-    if (revision.transition.kind === 'long_rest_completed' ||
-      (revision.transition.kind === 'party_state_captured' && revision.transition.restInterruption !== undefined)) {
-      triggers.push('long_rest_boundary');
+    if (revision.transition.kind === 'room_composed') triggers.push('encounter_start');
+    if (revision.transition.kind === 'short_rest_completed' || revision.transition.kind === 'long_rest_completed') {
+      triggers.push('rest_boundary');
+    }
+    if (revision.transition.kind === 'party_state_captured' && revision.transition.restInterruption !== undefined) {
+      triggers.push('rest_interruption');
     }
     if (previous !== undefined) {
-      const livingSides = (state: SessionRevision['encounterState']) => new Set(state.combatants
-        .filter((combatant) => combatant.life === 'living')
+      const undefeatedSides = (state: SessionRevision['encounterState']) => new Set(state.combatants
+        .filter((combatant) => combatant.life !== 'dead')
         .map((combatant) => combatant.profile.kind));
-      const before = livingSides(previous.encounterState);
-      const after = livingSides(revision.encounterState);
+      const before = undefeatedSides(previous.encounterState);
+      const after = undefeatedSides(revision.encounterState);
       if (before.has('player_character') && before.has('monster') &&
         (!after.has('player_character') || !after.has('monster'))) triggers.push('encounter_end');
     }

@@ -500,6 +500,16 @@ async function pauseEncounter(page: Page): Promise<void> {
   }
 }
 
+async function resumeEncounter(page: Page): Promise<void> {
+  const pause = await page.locator('[data-pause]').first().getAttribute('data-pause');
+  if (pause === 'none') return;
+  const resume = page.locator('.dm-controls').getByRole('button', { name: 'Resume', exact: true });
+  if (await resume.count() > 0) {
+    await resume.click({ timeout: 5_000 });
+    await page.locator('[data-pause="none"]').waitFor({ state: 'visible', timeout: 5_000 });
+  }
+}
+
 async function assignAlgorithms(
   page: Page,
   recorder: FindingsRecorder,
@@ -527,6 +537,7 @@ async function assignAlgorithms(
       );
       return false;
     }
+    await resumeEncounter(page);
     return true;
   } catch (error: unknown) {
     const image = await screenshot(page, recorder, 'assign-algorithm-controllers');
@@ -578,28 +589,15 @@ async function observeTimelinePreview(
   if (await actualEvents.count() > 0) progress.previewListed = true;
 }
 
-const TURN_PULSE_CONTROLS = {
-  interrupt: 'Interrupt',
-  resume: 'Resume',
-} as const;
-
-function turnPulseControl(page: Page, control: keyof typeof TURN_PULSE_CONTROLS): Locator {
-  return page.locator('.dm-controls').getByRole('button', {
-    name: TURN_PULSE_CONTROLS[control],
+async function pulseTurn(page: Page): Promise<void> {
+  const endTurn = page.locator('.dm-pending-request').getByRole('button', {
+    name: 'End turn',
     exact: true,
   });
-}
-
-async function pulseTurn(page: Page): Promise<void> {
-  const pause = await page.locator('[data-pause]').first().getAttribute('data-pause');
-  if (pause !== 'none') {
-    const resume = turnPulseControl(page, 'resume');
-    if (await resume.count() > 0) await resume.click({ timeout: 5_000 });
+  if (await endTurn.count() > 0 && await endTurn.first().isVisible()) {
+    await endTurn.first().click({ timeout: 5_000 });
   }
   await wait(TURN_PULSE_MS);
-  const interrupt = turnPulseControl(page, 'interrupt');
-  if (await interrupt.count() > 0) await interrupt.click({ timeout: 5_000 });
-  await wait(10);
 }
 
 async function playEncounter(
@@ -824,6 +822,16 @@ async function transitionToNextDungeonRoom(
   completedRoom: number,
 ): Promise<boolean> {
   const phase = `dungeon room ${String(completedRoom)}`;
+  const side = await encounterSideState(page, `d365-room-${String(completedRoom)}-monster`);
+  if (side.monstersAlive !== 0 || side.playersAlive === 0) {
+    recorder.add(
+      'scripted_nudge',
+      phase,
+      `refuse room boundary after room ${String(completedRoom)}`,
+      `Room-boundary control was not clicked because initiative still had ${String(side.monstersAlive)} non-dead enemies and ${String(side.playersAlive)} non-dead player characters.`,
+    );
+    return false;
+  }
   const shortRest = page.getByRole('button', { name: 'Take Short Rest and enter next room', exact: true });
   const direct = page.getByRole('button', { name: 'End room and enter next room', exact: true });
   const control = await shortRest.count() > 0 ? shortRest : direct;
@@ -1102,6 +1110,16 @@ async function transitionToNextVaneWarrenFight(
   phase: string,
   completedFight: number,
 ): Promise<boolean> {
+  const side = await encounterSideState(page, 'vane-warren');
+  if (side.monstersAlive !== 0 || side.playersAlive === 0) {
+    recorder.add(
+      'scripted_nudge',
+      phase,
+      `refuse fight boundary after Vane Warren fight ${String(completedFight)}`,
+      `Room-boundary control was not clicked because initiative still had ${String(side.monstersAlive)} non-dead enemies and ${String(side.playersAlive)} non-dead player characters.`,
+    );
+    return false;
+  }
   const control = page.getByRole('button', { name: 'End room and enter next room', exact: true });
   if (!await waitVisible(
     page,
@@ -1220,17 +1238,10 @@ async function main(): Promise<void> {
       await runIsolatedPhase(preview, recorder, currentPhase, async () => {
         if (!await advanceDungeonRoom(page, recorder, room)) return;
         const outcome = await playEncounter(page, recorder, currentPhase, `d365-room-${String(room)}-monster`);
-        recorder.phase(currentPhase, outcome.kind === 'aborted' ? 'aborted' : 'completed',
+        recorder.phase(currentPhase, outcome.kind === 'victory' ? 'completed' : 'aborted',
           `${outcome.kind} at round ${String(outcome.round)} after ${String(outcome.attempts)} driver pulses.`);
         if (room === 4) return;
-        if (outcome.kind === 'aborted') {
-          recorder.add(
-            'scripted_nudge',
-            currentPhase,
-            'leave an aborted dungeon room',
-            'The turn phase stalled; the driver attempted the offered room-boundary control so later rooms could still be rehearsed.',
-          );
-        }
+        if (outcome.kind !== 'victory') return;
         if (!await transitionToNextDungeonRoom(page, recorder, room)) {
           recorder.phase(currentPhase, 'aborted', 'Could not cross the room boundary; later phases continued.');
         }
@@ -1294,9 +1305,10 @@ async function main(): Promise<void> {
           return;
         }
         const outcome = await playEncounter(page, recorder, currentPhase, 'vane-warren');
-        recorder.phase(currentPhase, outcome.kind === 'aborted' ? 'aborted' : 'completed',
+        recorder.phase(currentPhase, outcome.kind === 'victory' ? 'completed' : 'aborted',
           `${outcome.kind} at round ${String(outcome.round)} after ${String(outcome.attempts)} driver pulses.`);
         if (fightNumber === fights.length) return;
+        if (outcome.kind !== 'victory') return;
         if (!await transitionToNextVaneWarrenFight(page, recorder, currentPhase, fightNumber)) {
           recorder.phase(currentPhase, 'aborted', 'Could not cross the Vane Warren room boundary.');
         }

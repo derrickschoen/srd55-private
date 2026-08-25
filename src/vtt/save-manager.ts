@@ -11,16 +11,16 @@ export type AutosaveTrigger =
   | 'round_boundary'
   | 'encounter_start'
   | 'encounter_end'
-  | 'short_rest_boundary'
-  | 'long_rest_boundary';
+  | 'rest_boundary'
+  | 'rest_interruption';
 
 export function autosavePoolForTrigger(trigger: AutosaveTrigger): AutosavePool {
   switch (trigger) {
     case 'round_boundary': return 'per_round';
     case 'encounter_start':
     case 'encounter_end':
-    case 'short_rest_boundary':
-    case 'long_rest_boundary': return 'encounter_boundary';
+    case 'rest_boundary':
+    case 'rest_interruption': return 'encounter_boundary';
   }
 }
 
