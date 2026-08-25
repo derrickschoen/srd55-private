@@ -31,6 +31,13 @@ const TURN_PULSE_MS = 35;
 const ROUND_STALL_ATTEMPTS = 24;
 const MAX_TURN_ATTEMPTS = 600;
 const previewReadiness = new WeakMap<ChildProcess, Promise<string>>();
+const REPRESENTATIVE_PARTY_NAMES = [
+  'Mirel Ash',
+  'Orin Reed',
+  'Brann Vale',
+  'Sera Dawn',
+  'Tamsin Quill',
+] as const;
 
 const FINDING_CLASSES = [
   'page_console_error',
@@ -715,6 +722,7 @@ async function assignAlgorithms(
   page: Page,
   recorder: FindingsRecorder,
   phase: string,
+  requiredCombatantNames: readonly string[] = [],
 ): Promise<boolean> {
   try {
     recorder.track(phase, 'assign algorithm controllers through UI');
@@ -738,6 +746,20 @@ async function assignAlgorithms(
         image,
       );
       return false;
+    }
+    for (const name of requiredCombatantNames) {
+      const controller = page.getByLabel(`${name} controller`, { exact: true });
+      if (await controller.count() !== 1 || await controller.inputValue() !== 'algorithm') {
+        const image = await screenshot(page, recorder, 'assign-algorithm-controllers');
+        recorder.add(
+          'selector_timeout',
+          phase,
+          'assign algorithm controllers through UI',
+          `${name} was not uniquely assigned to the algorithm controller.`,
+          image,
+        );
+        return false;
+      }
     }
     await resumeEncounter(page);
     return true;
@@ -1014,16 +1036,26 @@ async function loadDungeon(
     return false;
   }
   const players = page.locator('.encounter-token[data-kind="player_character"]');
-  if (await players.count() !== 4) {
+  const loadedNames = (await players.locator('.encounter-token-label').allTextContents())
+    .map((name) => name.trim())
+    .sort();
+  const expectedNames = [...REPRESENTATIVE_PARTY_NAMES].sort();
+  if (JSON.stringify(loadedNames) !== JSON.stringify(expectedNames)) {
     const image = await screenshot(page, recorder, 'representative-party-count');
-    recorder.add('selector_timeout', phase, 'load representative party', `Expected 4 player tokens; found ${String(await players.count())}.`, image);
+    recorder.add(
+      'selector_timeout',
+      phase,
+      'load representative party',
+      `Expected ${expectedNames.join(', ')}; found ${loadedNames.join(', ') || 'no player characters'}.`,
+      image,
+    );
     recorder.phase(phase, 'aborted', 'Representative party roster was incomplete.');
     return false;
   }
   recorder.phase(
     phase,
     'completed',
-    `Loaded Mirel Ash, Orin Reed, Brann Vale, and Sera Dawn with seed ${String(REHEARSAL_SEED)}.`,
+    `Loaded ${REPRESENTATIVE_PARTY_NAMES.join(', ')} with seed ${String(REHEARSAL_SEED)}.`,
   );
   return true;
 }
@@ -1039,7 +1071,7 @@ async function advanceDungeonRoom(
     recorder.phase(phase, 'aborted', 'Room status did not match the requested room.');
     return false;
   }
-  if (!await assignAlgorithms(page, recorder, phase)) {
+  if (!await assignAlgorithms(page, recorder, phase, REPRESENTATIVE_PARTY_NAMES)) {
     recorder.phase(phase, 'aborted', 'Could not assign every combatant to the algorithm controller.');
     return false;
   }

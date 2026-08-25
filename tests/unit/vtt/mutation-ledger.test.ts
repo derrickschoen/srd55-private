@@ -958,7 +958,7 @@ describe('phase-2 mutation ledger manifest', () => {
       'rider_precomputed: two qualifying rolls draw observably different d4 faces instead of reusing a cast-time value',
       'guidance_consumed_on_first_use: the first distinguishing check gets d4, the second gets nothing, and the instance ends',
       'moving_aura_roll_time_membership: exact 30 feet gets advantage and no half damage; after moving to 35 feet neither applies',
-      'concentration_drop_and_same_spell_refresh: concentration ends modifiers mid-duration and same-name castings never add 2d4',
+      'bless_without_concentration: concentration ends Bless mid-duration and same-name castings never add 2d4',
       'bane_save_negates_and_penalty_sign: success creates no modifier; failure subtracts d4 across the attack threshold',
     ];
     for (const mutation of mutations) expect(ledger).toContain(`\`${mutation}\``);

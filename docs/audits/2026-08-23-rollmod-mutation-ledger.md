@@ -9,7 +9,7 @@ Each production mutation below was applied alone, its named test was run, and th
 | `rider_precomputed` | Rolled a die rider while creating the effect and stored a flat value. | `rider_precomputed: two qualifying rolls draw observably different d4 faces instead of reusing a cast-time value` | exit 1 |
 | `consumed_effect_lingers` | Refused to consume a first-qualifying-roll die rider. | `guidance_consumed_on_first_use: the first distinguishing check gets d4, the second gets nothing, and the instance ends` | exit 1 |
 | `aura_membership_stale` | Reused allegiance without checking the current token distance. | `moving_aura_roll_time_membership: exact 30 feet gets advantage and no half damage; after moving to 35 feet neither applies` | exit 1 |
-| `same_spell_stacks` | Changed roll/defense effects from replacement to coexistence. | `concentration_drop_and_same_spell_refresh: concentration ends modifiers mid-duration and same-name castings never add 2d4` | exit 1 |
+| `same_spell_stacks` | Changed roll/defense effects from replacement to coexistence. | `bless_without_concentration: concentration ends Bless mid-duration and same-name castings never add 2d4` | exit 1 |
 | `penalty_sign_flip` | Applied the absolute value of Bane's die sign. | `bane_save_negates_and_penalty_sign: success creates no modifier; failure subtracts d4 across the attack threshold` | exit 1 |
 | `modifier_expires_one_round_late` | Added one to the effect's declared turn-boundary count. | `modifier_duration_first_and_final_round: a two-round AC bonus protects the first and final rounds, then expires` | exit 1 |
 
