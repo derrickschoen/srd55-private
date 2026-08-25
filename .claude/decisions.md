@@ -7,6 +7,25 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D384 — OWNER: overheal prevention on cast heals; Slow/Spirit Guardians; caster positioning; fighter defender kit (2026-08-25)
+
+Owner directives, 2026-08-25:
+1. **Overheal prevention on cast heals**: the D383 hit-die thrift logic
+   applies to healing spells too — do not cast a heal whose average
+   healing exceeds the target's missing HP.
+2. **Wizard casts Slow** when multiple enemies are bunched up (needs
+   Slow prepared; SRD spell).
+3. **Cleric fallback concentration**: if Bless concentration breaks,
+   the cleric casts Spirit Guardians (needs 3rd-level slots and the
+   spell prepared).
+4. **Caster positioning**: wizard and cleric stay out of enemy range
+   where possible and use cover to protect concentration; Ray of Frost
+   (wizard) and Command (cleric) as keep-away tools.
+5. **Fighter defender kit**: the fighter keeps enemies off the others —
+   carries a ranged Slow-mastery weapon and a melee Topple-mastery
+   weapon (2024 weapon masteries), and maxes his grappling ability
+   score (STR) via ASIs.
+
 ## D383 — OWNER: hit-die thrift, Cure Wounds between fights, casting allowed while resting (2026-08-25)
 
 Owner directives, 2026-08-25:
