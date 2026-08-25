@@ -1,5 +1,21 @@
 import { expect, test } from './fixtures/parallel-test';
 
+test('fallback manual save downloads when no directory handle is selected', async ({ page }) => {
+  await page.goto('/vtt?encounter=reference&view=dm&session=savemgr-fallback');
+  await expect(page.getByRole('heading', { name: 'DM controls' })).toBeVisible({ timeout: 60_000 });
+
+  const manager = page.locator('.dm-save-manager');
+  await expect(manager).toHaveAttribute('data-mode', 'fallback');
+  const pendingDownload = page.waitForEvent('download');
+  await manager.getByRole('button', { name: 'Download save now', exact: true }).click();
+  const download = await pendingDownload;
+
+  expect(download.suggestedFilename()).toMatch(/\.vtt\.json$/u);
+  expect(await download.failure()).toBeNull();
+  await expect(manager.getByRole('button', { name: 'Upload save file', exact: true })).toBeVisible();
+  await expect(manager.locator('.dm-save-row[data-source="folder"]')).toHaveCount(0);
+});
+
 test('DM sees browser and folder saves and loads through the resumable encounter path', async ({
   page,
 }) => {

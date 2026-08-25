@@ -42,7 +42,10 @@ import type {
   TurnBoundary,
 } from './effects';
 import type { EncounterCommand, EncounterEvent } from './events';
-import { monsterAttackCommand } from './monster-commands';
+import {
+  executableMonsterOnHitEffects,
+  monsterAttackCommand,
+} from './monster-commands';
 import {
   adjacentCells,
   gridDistance,
@@ -5857,7 +5860,9 @@ function processAttack(
       command.attackBonus !== declared.attackBonus ||
       command.criticalFloor !== 20 ||
       canonicalJson(command.damage) !== canonicalJson(declaredMonsterDamage(declared.damage)) ||
-      canonicalJson(command.monsterOnHit ?? []) !== canonicalJson(declared.onHit)
+      canonicalJson(command.monsterOnHit ?? []) !== canonicalJson(
+        executableMonsterOnHitEffects(declared.onHit),
+      )
     ) {
       throw new EncounterRuleError('validation', `Combatant ${command.actor}'s monster attack declaration was altered.`);
     }

@@ -49,4 +49,55 @@ describe('stable VTT control rendering', () => {
     interactiveElement(liveButton).click();
     expect(clicked).toHaveBeenCalledOnce();
   });
+
+  it('keeps controller controls connected while adding a deferred roster member', () => {
+    const assignment = (
+      combatantId: string,
+      kind: 'human' | 'algorithm',
+      changed?: () => void,
+    ): HTMLElement => {
+      const row = document.createElement('label');
+      row.dataset.renderKey = `controller:${combatantId}`;
+      const select = document.createElement('select');
+      select.dataset.renderKey = 'kind';
+      select.value = kind;
+      if (changed !== undefined) select.addEventListener('change', changed);
+      row.append(select);
+      return row;
+    };
+    const section = (rows: readonly HTMLElement[]): HTMLElement => {
+      const assignments = document.createElement('section');
+      assignments.dataset.renderKey = 'controller-assignments';
+      assignments.append(...rows);
+      return assignments;
+    };
+
+    const changed = vi.fn();
+    const live = document.createElement('main');
+    const originalRow = assignment('combatant:cinder-guard-a', 'human', changed);
+    const originalSelect = originalRow.children[0];
+    if (originalSelect === undefined) throw new Error('Controller select fixture is missing.');
+    live.append(section([originalRow]));
+    document.body.append(live);
+
+    const draft = document.createElement('main');
+    draft.append(section([
+      assignment('combatant:cinder-guard-a', 'algorithm'),
+      assignment('combatant:cinder-wave-1-a', 'human'),
+    ]));
+    reconcileStableRenderedChildren(live, draft);
+
+    const renderedRow = interactiveElement(live).querySelector(
+      '[data-render-key="controller:combatant:cinder-guard-a"]',
+    );
+    if (renderedRow === null) throw new Error('Original controller row was not reconciled.');
+    const renderedOriginal = renderedRow.querySelector('[data-render-key="kind"]');
+    expect(renderedOriginal).toBe(interactiveElement(originalSelect as HTMLElement));
+    expect(interactiveElement(originalSelect as HTMLElement).isConnected).toBe(true);
+    expect(Reflect.get(originalSelect, 'value')).toBe('algorithm');
+    const renderedSection = interactiveElement(live).querySelector('[data-render-key="controller-assignments"]');
+    expect(renderedSection?.children).toHaveLength(2);
+    interactiveElement(originalSelect as HTMLElement).dispatchEvent(new Event('change'));
+    expect(changed).toHaveBeenCalledOnce();
+  });
 });

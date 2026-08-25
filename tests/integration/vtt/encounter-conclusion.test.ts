@@ -11,11 +11,21 @@ import {
 import { TurnCoordinator } from '../../../src/combat/coordinator';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { damageType, dieSides } from '../../../src/combat/values';
+import { RpcClient, type RpcTransport } from '../../../src/rpc/client';
+import type { RpcRequest, RpcResponse } from '../../../src/rpc/protocol';
+import { composeD365Room } from '../../../src/vtt/d365-sample-dungeon';
+import { loadD365SampleParty } from '../../../src/vtt/d365-sample-party';
 import { DmEncounterHost, type DmEncounterHostSnapshot } from '../../../src/vtt/dm-encounter-host';
 import { renderDmEncounterOutcome } from '../../../src/vtt/encounter-app';
 import { IndexedDbBrowserSessionStore } from '../../../src/vtt/local-session-store';
+import { createPartySessionState } from '../../../src/vtt/party-session-state';
 import { deriveSessionRecord } from '../../../src/vtt/session-record';
+import { encounterSeed } from '../../../src/vtt/session-seed';
+import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence';
+import { rpcRegistry } from '../../../src/worker/registry';
+import type { HandlerContext } from '../../../src/worker/handler';
 import { installInteractiveDocument } from '../../fixtures/interactive-dom';
+import { createSeededRpcHarness } from '../../helpers/rpc-harness';
 import { monsterProfile, placedToken, playerProfile } from '../../unit/combat/fixtures';
 
 class MemoryStorage implements Storage {
@@ -27,6 +37,41 @@ class MemoryStorage implements Storage {
   key(index: number): string | null { return [...this.#values.keys()][index] ?? null; }
   removeItem(key: string): void { this.#values.delete(key); }
   setItem(key: string, value: string): void { this.#values.set(key, value); }
+}
+
+class RegistryTransport implements RpcTransport {
+  readonly #messages = new Set<(event: MessageEvent<RpcResponse>) => void>();
+  readonly #errors = new Set<(event: ErrorEvent) => void>();
+
+  constructor(private readonly context: HandlerContext) {}
+
+  postMessage(message: RpcRequest): void {
+    void rpcRegistry.dispatch(message, this.context).then((response) => {
+      const event = new MessageEvent<RpcResponse>('message', { data: response });
+      for (const listener of this.#messages) listener(event);
+    }).catch((error: unknown) => {
+      const event = new ErrorEvent('error', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      for (const listener of this.#errors) listener(event);
+    });
+  }
+
+  addEventListener(
+    type: 'message' | 'error',
+    listener: ((event: MessageEvent<RpcResponse>) => void) | ((event: ErrorEvent) => void),
+  ): void {
+    if (type === 'message') this.#messages.add(listener as (event: MessageEvent<RpcResponse>) => void);
+    else this.#errors.add(listener as (event: ErrorEvent) => void);
+  }
+
+  removeEventListener(
+    type: 'message' | 'error',
+    listener: ((event: MessageEvent<RpcResponse>) => void) | ((event: ErrorEvent) => void),
+  ): void {
+    if (type === 'message') this.#messages.delete(listener as (event: MessageEvent<RpcResponse>) => void);
+    else this.#errors.delete(listener as (event: ErrorEvent) => void);
+  }
 }
 
 function lethalAttack(actor: ReturnType<typeof playerProfile>['id'], target: ReturnType<typeof monsterProfile>['id']): EncounterCommand {
@@ -65,13 +110,22 @@ function victoryFixture(): {
   return { state, player, monster };
 }
 
-function hostUntilConcluded(host: DmEncounterHost): Promise<DmEncounterHostSnapshot> {
+function hostUntilConcluded(
+  host: DmEncounterHost,
+  timeoutMilliseconds = 1_000,
+): Promise<DmEncounterHostSnapshot> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       unsubscribe();
       host.interrupt();
-      reject(new Error('Host did not conclude the encounter.'));
-    }, 1_000);
+      const snapshot = host.snapshot().dm;
+      reject(new Error(
+        `Host did not conclude the encounter: round=${String(snapshot.encounter.round)} ` +
+        `active=${String(snapshot.encounter.activeCombatant)} ` +
+        `pause=${snapshot.coordinator.pause?.kind ?? 'none'} ` +
+        `refusal=${snapshot.decisionTray.actionRefusal?.reason ?? 'none'}.`,
+      ));
+    }, timeoutMilliseconds);
     const unsubscribe = host.subscribe((snapshot) => {
       if (snapshot.dm.encounter.phase.kind !== 'concluded') return;
       clearTimeout(timeout);
@@ -141,6 +195,47 @@ describe('typed encounter conclusion', () => {
     host.close();
     store.close();
   });
+
+  it('room-3-composition-concludes: all algorithm controllers finish the Ridgewing Gallery without a charge refusal', async () => {
+    const harness = await createSeededRpcHarness([]);
+    const rpc = new RpcClient(new RegistryTransport(harness.context));
+    try {
+      const sample = await loadD365SampleParty(rpc);
+      const partyState = { ...createPartySessionState(sample.party.members), room: 3 as const };
+      const encounter = composeD365Room(sample.party.members, sample.displayNames, partyState);
+      const identities = encounter.controllers.map((identity) => ({
+        ...identity,
+        controllerId: `${identity.combatantId}:algorithm:room-3-conclusion`,
+        kind: 'algorithm' as const,
+        generation: 0,
+      }));
+      const store = new MemoryBrowserSessionStore();
+      const host = new DmEncounterHost('session:room-3-conclusion', store, {
+        initialState: encounter.state,
+        initialSeed: encounterSeed(20_260_824),
+        initialPartyState: partyState,
+        partyMembers: encounter.members,
+        partyDisplayNames: encounter.displayNames,
+        initialControllers: identities,
+        playerIds: encounter.playerIds,
+        turnLegalActions: encounter.turnLegalActions,
+        reactionLegalActions: () => [],
+      });
+      try {
+        const concluded = await hostUntilConcluded(host, 10_000);
+        expect(concluded.dm.encounter.phase).toMatchObject({ kind: 'concluded' });
+        expect(concluded.dm.decisionTray.actionRefusal).toBeNull();
+        expect(concluded.dm.encounter.recentEvents).toContainEqual(expect.objectContaining({
+          type: 'attack_resolved',
+        }));
+      } finally {
+        host.close();
+      }
+    } finally {
+      rpc.close();
+      harness.close();
+    }
+  }, 20_000);
 
   it('refuses further turn advancement with typed reducer and coordinator boundaries', async () => {
     const fixture = victoryFixture();

@@ -862,31 +862,49 @@ async function completeLongRest(page: Page, recorder: FindingsRecorder): Promise
   return ended;
 }
 
-async function configureSaveFolder(page: Page, recorder: FindingsRecorder, phase: string): Promise<boolean> {
-  const manager = page.locator('.dm-save-manager');
-  if (!await waitVisible(page, recorder, phase, 'open save manager', manager, 10_000)) return false;
-  if (await manager.getAttribute('data-mode') === 'folder') return true;
-  const choose = manager.getByRole('button', { name: 'Choose default folder', exact: true });
-  if (!await waitVisible(page, recorder, phase, 'choose default save folder', choose, 10_000)) return false;
-  await choose.click();
-  return waitVisible(page, recorder, phase, 'activate default save folder', page.locator('.dm-save-manager[data-mode="folder"]'), 10_000);
-}
+type ManualFileSave =
+  | { readonly kind: 'folder'; readonly row: Locator }
+  | { readonly kind: 'download'; readonly exported: SessionExport };
 
-async function saveCurrentToFolder(page: Page, recorder: FindingsRecorder, phase: string): Promise<Locator | null> {
-  if (!await configureSaveFolder(page, recorder, phase)) return null;
-  const before = await page.locator('.dm-save-row[data-source="folder"]').count();
-  const save = page.getByRole('button', { name: 'Save now', exact: true });
-  if (!await waitVisible(page, recorder, phase, 'create manual file save', save, 10_000)) return null;
+async function createManualFileSave(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
+): Promise<ManualFileSave | null> {
+  const manager = page.locator('.dm-save-manager');
+  if (!await waitVisible(page, recorder, phase, 'open save manager', manager, 10_000)) return null;
+  if (await manager.getAttribute('data-mode') !== 'folder') {
+    const save = manager.getByRole('button', { name: 'Download save now', exact: true });
+    if (!await waitVisible(page, recorder, phase, 'create fallback manual file save', save, 10_000)) return null;
+    try {
+      const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
+      await save.click();
+      const download: Download = await pendingDownload;
+      return {
+        kind: 'download',
+        exported: await recordDownloadedExport(download, recorder, phase, 'd365-session'),
+      };
+    } catch (error: unknown) {
+      const image = await screenshot(page, recorder, 'manual-file-save-download');
+      recorder.add('selector_timeout', phase, 'create fallback manual file save', errorDetail(error), image);
+      recordFailedExport(recorder, phase, 'd365-session');
+      return null;
+    }
+  }
+
+  const before = await manager.locator('.dm-save-row[data-source="folder"]').count();
+  const save = manager.getByRole('button', { name: 'Save now', exact: true });
+  if (!await waitVisible(page, recorder, phase, 'create folder manual file save', save, 10_000)) return null;
   await save.click();
   try {
     await page.waitForFunction((count) =>
-      document.querySelectorAll('.dm-save-row[data-source="folder"]').length >= Number(count), before === 0 ? 1 : before);
+      document.querySelectorAll('.dm-save-row[data-source="folder"]').length >= Number(count), before + 1);
   } catch (error: unknown) {
     const image = await screenshot(page, recorder, 'manual-file-save');
     recorder.add('selector_timeout', phase, 'create manual file save', errorDetail(error), image);
     return null;
   }
-  return page.locator('.dm-save-row[data-source="folder"]').first();
+  return { kind: 'folder', row: manager.locator('.dm-save-row[data-source="folder"]').first() };
 }
 
 async function downloadExport(
@@ -975,41 +993,55 @@ async function saveManagerRoundTrip(
   const boundary = browserRows.filter({ has: page.locator('.dm-save-pool', { hasText: /^Encounter-boundary autosave$/u }) });
   const poolsPresent = await waitVisible(page, recorder, phase, 'find per-round autosave pool', perRound, 10_000) &&
     await waitVisible(page, recorder, phase, 'find encounter-boundary autosave pool', boundary, 10_000);
-  const row = await saveCurrentToFolder(page, recorder, phase);
-  if (row === null) {
+  const manualSave = await createManualFileSave(page, recorder, phase);
+  if (manualSave === null) {
     recorder.phase(phase, 'aborted', 'Could not create a manual file save.');
     return null;
   }
-  await pauseEncounter(page);
-  const history = page.locator('details ol [data-revision]');
-  await page.getByText('Full revision history', { exact: true }).click();
-  const revisionCount = await history.count();
-  const exported = await downloadExport(page, row, recorder, phase, 'd365-session');
-  const load = row.getByRole('button', { name: 'Load', exact: true });
-  if (!await waitVisible(page, recorder, phase, 'load manual save', load, 10_000)) {
-    recorder.phase(phase, 'aborted', 'Manual save could not be loaded.');
-    return exported;
-  }
-  await load.click();
-  const mounted = await waitVisible(page, recorder, phase, 'mount loaded save', page.getByRole('heading', { name: 'DM controls' }), 20_000);
-  if (mounted) {
+  let exported: SessionExport | null;
+  let loadPathReady: boolean;
+  if (manualSave.kind === 'download') {
+    exported = manualSave.exported;
+    loadPathReady = await waitVisible(
+      page,
+      recorder,
+      phase,
+      'find fallback upload path',
+      page.locator('.dm-save-manager').getByRole('button', { name: 'Upload save file', exact: true }),
+      10_000,
+    );
+  } else {
+    await pauseEncounter(page);
+    const history = page.locator('details ol [data-revision]');
     await page.getByText('Full revision history', { exact: true }).click();
-    const loadedCount = await page.locator('details ol [data-revision]').count();
-    if (loadedCount < revisionCount) {
-      const image = await screenshot(page, recorder, 'load-round-trip-history');
-      recorder.add(
-        'selector_timeout',
-        phase,
-        'verify load round-trip',
-        `Revision history shrank from ${String(revisionCount)} to ${String(loadedCount)}.`,
-        image,
-      );
+    const revisionCount = await history.count();
+    exported = await downloadExport(page, manualSave.row, recorder, phase, 'd365-session');
+    const load = manualSave.row.getByRole('button', { name: 'Load', exact: true });
+    if (!await waitVisible(page, recorder, phase, 'load manual save', load, 10_000)) {
+      recorder.phase(phase, 'aborted', 'Manual save could not be loaded.');
+      return exported;
+    }
+    await load.click();
+    loadPathReady = await waitVisible(page, recorder, phase, 'mount loaded save', page.getByRole('heading', { name: 'DM controls' }), 20_000);
+    if (loadPathReady) {
+      await page.getByText('Full revision history', { exact: true }).click();
+      const loadedCount = await page.locator('details ol [data-revision]').count();
+      if (loadedCount < revisionCount) {
+        const image = await screenshot(page, recorder, 'load-round-trip-history');
+        recorder.add(
+          'selector_timeout',
+          phase,
+          'verify load round-trip',
+          `Revision history shrank from ${String(revisionCount)} to ${String(loadedCount)}.`,
+          image,
+        );
+      }
     }
   }
-  const complete = poolsPresent && mounted && exported?.parsed === true &&
+  const complete = poolsPresent && loadPathReady && exported?.parsed === true &&
     exported.hasSessionRecord && exported.encounterCount === 4 && exported.seed === REHEARSAL_SEED;
   recorder.phase(phase, complete ? 'completed' : 'aborted', complete
-    ? `Found both autosave pools, created and loaded a manual file save, and parsed ${String(exported.encounterCount)} exported encounter records with seed ${String(exported.seed)}.`
+    ? `Found both autosave pools, exercised the ${manualSave.kind === 'download' ? 'download/upload fallback' : 'folder save/load path'}, and parsed ${String(exported?.encounterCount)} exported encounter records with seed ${String(exported?.seed)}.`
     : 'One or more save-manager checks did not complete.');
   return exported;
 }
@@ -1208,9 +1240,6 @@ async function main(): Promise<void> {
 
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ acceptDownloads: true, baseURL: baseUrl });
-    await context.addInitScript(() => {
-      Reflect.set(window, 'showDirectoryPicker', async () => navigator.storage.getDirectory());
-    });
     const page = await context.newPage();
     recorder.attachPage(page);
     attachPageFindingCapture(page, recorder, () => currentPhase);

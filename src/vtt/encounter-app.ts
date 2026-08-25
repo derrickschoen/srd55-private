@@ -960,6 +960,7 @@ class DmEncounterView {
       pendingDelete: this.#pendingDelete,
     });
     const manager = element('section', { className: 'dm-save-manager' });
+    manager.dataset.renderKey = 'save-manager';
     manager.dataset.mode = model.mode.kind;
     manager.append(element('h2', { text: 'Save manager' }));
     manager.append(element('p', {
@@ -980,10 +981,12 @@ class DmEncounterView {
       manager.append(error);
     }
     const toolbar = element('div', { className: 'dm-save-toolbar' });
+    toolbar.dataset.renderKey = 'save-toolbar';
     const saveNow = element('button', {
       text: model.primarySaveIntent === 'save_now_to_folder' ? 'Save now' : 'Download save now',
     });
     saveNow.type = 'button';
+    saveNow.dataset.renderKey = 'save-now';
     saveNow.dataset.intent = model.primarySaveIntent;
     saveNow.addEventListener('click', () => {
       void this.#runSaveManagerAction(() => controller.dispatch({ kind: 'save_now' }));
@@ -994,6 +997,7 @@ class DmEncounterView {
         text: intent === 'choose_folder' ? 'Choose default folder' : 'Upload save file',
       });
       button.type = 'button';
+      button.dataset.renderKey = `transfer:${intent}`;
       button.dataset.intent = intent;
       button.addEventListener('click', () => {
         void this.#runSaveManagerAction(() => controller.dispatch({
@@ -1005,8 +1009,10 @@ class DmEncounterView {
     manager.append(toolbar);
 
     const list = element('div', { className: 'dm-save-list' });
+    list.dataset.renderKey = 'save-list';
     for (const row of model.rows) {
       const item = element('article', { className: 'dm-save-row' });
+      item.dataset.renderKey = `save:${row.id}`;
       item.dataset.saveId = row.id;
       item.dataset.source = row.badge;
       item.append(
@@ -1017,11 +1023,13 @@ class DmEncounterView {
         element('p', { className: 'dm-save-summary', text: row.summary }),
       );
       const actions = element('div', { className: 'dm-save-row-actions' });
+      actions.dataset.renderKey = 'actions';
       for (const action of row.actions) {
         const button = element('button', {
           text: action === 'export_copy' ? 'Export copy' : `${action[0]!.toUpperCase()}${action.slice(1)}`,
         });
         button.type = 'button';
+        button.dataset.renderKey = `action:${action}`;
         button.dataset.intent = action;
         button.addEventListener('click', () => {
           if (action === 'rename') {
@@ -1051,6 +1059,7 @@ class DmEncounterView {
       item.append(actions);
       if (model.pendingDelete?.saveId === row.id) {
         const confirmation = element('form', { className: 'dm-save-delete-confirmation' });
+        confirmation.dataset.renderKey = 'delete-confirmation';
         confirmation.append(element('p', {
           text: `Type ${model.pendingDelete.requiredText} to delete this save.`,
         }));
@@ -1142,17 +1151,22 @@ class DmEncounterView {
     }
 
     const controls = element('div', { className: 'encounter-controls dm-controls' });
+    controls.dataset.renderKey = 'dm-controls';
     const interrupt = element('button', { text: 'Interrupt' });
     interrupt.type = 'button';
+    interrupt.dataset.renderKey = 'interrupt';
     interrupt.addEventListener('click', () => this.#host.interrupt());
     const resume = element('button', { text: 'Resume' });
     resume.type = 'button';
+    resume.dataset.renderKey = 'resume';
     resume.addEventListener('click', () => this.#host.resume());
     const undo = element('button', { text: 'Undo last' });
     undo.type = 'button';
+    undo.dataset.renderKey = 'undo-last';
     undo.addEventListener('click', () => void this.#host.undoLast());
     const skip = element('button', { text: 'Skip turn' });
     skip.type = 'button';
+    skip.dataset.renderKey = 'skip-turn';
     skip.disabled = projection.timeline.currentCombatant === null || projection.timeline.phase.kind === 'concluded';
     skip.addEventListener('click', () => {
       void this.#host.skipTurn().catch((error: unknown) => {
@@ -1169,7 +1183,9 @@ class DmEncounterView {
     );
     if (later.length > 0 && projection.timeline.phase.kind === 'active') {
       const delay = element('form', { className: 'dm-delay-turn' });
+      delay.dataset.renderKey = `delay-turn:${projection.timeline.currentCombatant ?? 'none'}`;
       const target = element('select');
+      target.dataset.renderKey = 'delay-target';
       target.setAttribute('aria-label', 'Delay current turn until after');
       for (const entry of later) {
         const option = element('option', { text: `After ${entry.name}` });
@@ -1178,6 +1194,7 @@ class DmEncounterView {
       }
       const submit = element('button', { text: 'Delay turn' });
       submit.type = 'submit';
+      submit.dataset.renderKey = 'delay-submit';
       delay.append(target, submit);
       delay.addEventListener('submit', (event) => {
         event.preventDefault();
@@ -1193,6 +1210,7 @@ class DmEncounterView {
     if (projection.partySession !== null && projection.partySession.state.adventuringDayStatus === 'active') {
       const longRest = element('button', { text: 'Complete Long Rest and end adventuring day' });
       longRest.type = 'button';
+      longRest.dataset.renderKey = 'long-rest';
       longRest.addEventListener('click', () => {
         void this.#host.finishAdventuringDay().catch((error: unknown) => {
           this.#channelError = error instanceof Error ? error.message : 'Long Rest failed.';
@@ -1252,6 +1270,7 @@ class DmEncounterView {
       projection.partySession.state.room < (this.#sessionFlow?.encounterCount ?? 4)) {
       const nextRoom = element('button', { text: 'End room and enter next room' });
       nextRoom.type = 'button';
+      nextRoom.dataset.renderKey = 'next-room';
       nextRoom.addEventListener('click', () => {
         void this.#host.finishRoom(null).catch((error: unknown) => {
           this.#channelError = error instanceof Error ? error.message : 'Room transition failed.';
@@ -1264,6 +1283,7 @@ class DmEncounterView {
       projection.partySession.state.room === this.#sessionFlow.encounterCount) {
       const endSession = element('button', { text: this.#sessionFlow.endControlLabel });
       endSession.type = 'button';
+      endSession.dataset.renderKey = 'end-session';
       endSession.dataset.intent = 'end_session';
       endSession.disabled = this.#endSessionExported || this.#host.sessionEnded();
       endSession.addEventListener('click', () => {
@@ -1740,14 +1760,17 @@ class DmEncounterView {
     this.#shell.append(adjudication);
 
     const assignments = element('section', { className: 'dm-controller-assignments' });
+    assignments.dataset.renderKey = 'controller-assignments';
     assignments.append(element('h2', { text: 'Controller assignment' }));
     for (const identity of projection.controllers) {
       const row = element('label');
+      row.dataset.renderKey = `controller:${identity.combatantId}`;
       const name = projection.encounter.combatants.find(
         (combatant) => combatant.id === identity.combatantId,
       )?.name ?? identity.combatantId;
       row.append(document.createTextNode(name));
       const select = element('select');
+      select.dataset.renderKey = 'kind';
       select.setAttribute('aria-label', `${name} controller`);
       for (const kind of ['human', 'algorithm'] as const) {
         const option = element('option', { text: kind });
