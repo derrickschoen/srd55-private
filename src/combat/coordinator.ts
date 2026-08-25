@@ -22,6 +22,7 @@ import type { EncounterCommand, EncounterEvent } from './events';
 import type { GridCell } from './grid';
 import { planMovement, type MovementWorld } from './movement';
 import type { Rng } from './random';
+import type { HiddenRollCategory } from './roll-visibility';
 import { feet, type CombatantId } from './values';
 import { projectPlayerView } from './visibility';
 
@@ -351,6 +352,13 @@ export class TurnCoordinator {
       }
       throw error;
     }
+  }
+
+  setHiddenRollCategory(category: HiddenRollCategory, hidden: boolean): CoordinatorStep {
+    const reduction = this.#apply({
+      type: 'set_hidden_roll_category', category, hidden,
+    }, this.#continuation);
+    return { kind: 'applied', state: this.#state, events: reduction.events };
   }
 
   setStandingReactionPolicy(

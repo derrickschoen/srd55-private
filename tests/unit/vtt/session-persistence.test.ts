@@ -511,7 +511,7 @@ describe('event-sourced encounter persistence', () => {
       hiddenRollSource,
       new MemoryMirrorSink(),
       registry,
-      { ...fixture.state, hideDeathSaveRolls: true },
+      { ...fixture.state, hiddenRolls: ['death_saves'] },
     );
     const hiddenRoll = EncounterSessionJournal.resume(
       encounterSessionId('session:persistence-test'),
@@ -800,11 +800,11 @@ describe('event-sourced encounter persistence', () => {
          ORDER BY revision`,
       );
       expect(rows).toEqual([
-        { revision: 1, schema_version: 5 },
-        { revision: 2, schema_version: 5 },
-        { revision: 3, schema_version: 5 },
-        { revision: 4, schema_version: 5 },
-        { revision: 5, schema_version: 5 },
+        { revision: 1, schema_version: 6 },
+        { revision: 2, schema_version: 6 },
+        { revision: 3, schema_version: 6 },
+        { revision: 4, schema_version: 6 },
+        { revision: 5, schema_version: 6 },
       ]);
       expect(
         EncounterSessionJournal.resume(

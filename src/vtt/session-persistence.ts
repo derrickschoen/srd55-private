@@ -49,8 +49,9 @@ import {
   type ShortRestResult,
 } from './party-session-state';
 import { deriveSessionRecord, type SessionRecord } from './session-record';
+import { isHiddenRollCategory } from '../combat/roll-visibility';
 
-export const VTT_SESSION_SCHEMA_VERSION = 5 as const;
+export const VTT_SESSION_SCHEMA_VERSION = 6 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export type SessionTransition =
@@ -581,6 +582,9 @@ function decodeRevision(value: unknown): SessionRevision {
     !isRecord(value.transition) ||
     !isRecord(value.encounterState) ||
     !isEncounterConfig(value.encounterState.config) ||
+    !Array.isArray(value.encounterState.hiddenRolls) ||
+    !value.encounterState.hiddenRolls.every(isHiddenRollCategory) ||
+    new Set(value.encounterState.hiddenRolls).size !== value.encounterState.hiddenRolls.length ||
     typeof value.branchRngStateFingerprint !== 'string' ||
     !(value.partyState === null || isRecord(value.partyState)) ||
     !isRecord(value.rngState) ||
@@ -644,7 +648,7 @@ function decodeRevision(value: unknown): SessionRevision {
 function mechanicalBranchState(encounterState: EncounterState): unknown {
   const {
     config: _config,
-    hideDeathSaveRolls: _hideDeathSaveRolls,
+    hiddenRolls: _hiddenRolls,
     persistentAreas,
     nextPersistentAreaSequence,
     worldObjects,
@@ -1589,6 +1593,7 @@ const V1_TO_V2_SOURCE = 'vtt-session-v1-to-v2:add-format-and-sha-fingerprint=vtt
 const V2_TO_V3_SOURCE = 'vtt-session-v2-to-v3:add-party-session-state-null-and-rehash-revisions';
 const V3_TO_V4_SOURCE = 'vtt-session-v3-to-v4:add-persisted-branch-rng-state-fingerprint';
 const V4_TO_V5_SOURCE = 'vtt-session-v4-to-v5:add-typed-combatant-death-moment-and-rehash-revisions';
+const V5_TO_V6_SOURCE = 'vtt-session-v5-to-v6:replace-hide-death-save-rolls-with-hidden-roll-categories';
 
 export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
   Object.freeze([
@@ -1731,6 +1736,47 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
+    Object.freeze({
+      id: 'vtt_session_v5_to_v6',
+      from: 5,
+      to: 6,
+      source: V5_TO_V6_SOURCE,
+      checksum: '29795e2183f7e7c3831d4d233722a51ba2beee75e124abd434976499132ef174',
+      migrate: (bundle: Readonly<Record<string, unknown>>) => {
+        if (!Array.isArray(bundle.revisions)) {
+          throw new TypeError('VTT session v5 revisions are malformed.');
+        }
+        const revisions = bundle.revisions.map((revision) => {
+          if (!isRecord(revision) || !isRecord(revision.encounterState)) {
+            throw new TypeError('VTT session v5 revision is malformed.');
+          }
+          if (typeof revision.encounterState.hideDeathSaveRolls !== 'boolean') {
+            throw new TypeError('VTT session v5 death-save visibility setting is malformed.');
+          }
+          const { hideDeathSaveRolls, ...legacyEncounterState } = revision.encounterState;
+          const migratedEncounterState = {
+            ...legacyEncounterState,
+            hiddenRolls: hideDeathSaveRolls ? ['death_saves'] : [],
+          } as unknown as EncounterState;
+          const { checksum: _oldChecksum, ...oldBody } = revision;
+          const body = {
+            ...oldBody,
+            schemaVersion: 6 as const,
+            encounterState: migratedEncounterState,
+            branchRngStateFingerprint: branchRngStateFingerprint(migratedEncounterState),
+          };
+          return { ...body, checksum: sha256(canonicalJson(body)) };
+        });
+        const { fingerprint: _oldFingerprint, ...oldBundle } = bundle;
+        const body = {
+          ...oldBundle,
+          format: 'vtt-session-revisions' as const,
+          schemaVersion: 6 as const,
+          revisions,
+        };
+        return { ...body, fingerprint: sha256(canonicalJson(body)) };
+      },
+    }),
   ]);
 
 export function validateVttSessionMigrationRegistry(): void {
@@ -1854,9 +1900,18 @@ export function exportSavedSessionV1ForMigrationTest(
       checksum: _checksum,
       partyState: _partyState,
       branchRngStateFingerprint: _branchRngStateFingerprint,
+      encounterState,
       ...currentBody
     } = revision;
-    const body = { ...currentBody, schemaVersion: 2 as const };
+    const { hiddenRolls, ...legacyEncounterState } = encounterState;
+    const body = {
+      ...currentBody,
+      schemaVersion: 2 as const,
+      encounterState: {
+        ...legacyEncounterState,
+        hideDeathSaveRolls: hiddenRolls.includes('death_saves'),
+      },
+    };
     return { ...body, checksum: sha256(canonicalJson(body)) };
   });
   const bundle: SavedSessionBundleV1 = {
@@ -1865,6 +1920,32 @@ export function exportSavedSessionV1ForMigrationTest(
     revisions,
   };
   return canonicalJson(bundle);
+}
+
+export function exportSavedSessionV5ForMigrationTest(
+  store: BrowserSessionStore,
+  sessionId: EncounterSessionId,
+): string {
+  const revisions = store.revisions(sessionId).map((revision) => {
+    const { checksum: _checksum, encounterState, ...currentBody } = revision;
+    const { hiddenRolls, ...legacyEncounterState } = encounterState;
+    const body = {
+      ...currentBody,
+      schemaVersion: 5 as const,
+      encounterState: {
+        ...legacyEncounterState,
+        hideDeathSaveRolls: hiddenRolls.includes('death_saves'),
+      },
+    };
+    return { ...body, checksum: sha256(canonicalJson(body)) };
+  });
+  const body = {
+    format: 'vtt-session-revisions' as const,
+    schemaVersion: 5 as const,
+    sessionId,
+    revisions,
+  };
+  return canonicalJson({ ...body, fingerprint: sha256(canonicalJson(body)) });
 }
 
 export function nextBranchId(value: string): EncounterBranchId {

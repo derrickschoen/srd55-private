@@ -19,6 +19,7 @@ import {
   type ReactionPolicy,
 } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
+import type { HiddenRollCategory } from '../combat/roll-visibility';
 import { projectDmView, projectPlayerView } from '../combat/visibility';
 import { mulberry32, type SerializableRng } from '../combat/random';
 import {
@@ -488,6 +489,20 @@ export class DmEncounterHost {
     if (resumeAfter) this.#coordinator.resume();
     this.#publish();
     if (resumeAfter) void this.#pumpCoordinator();
+  }
+
+  async setHiddenRollCategory(category: HiddenRollCategory, hidden: boolean): Promise<void> {
+    const resumeAfter = this.#coordinator.pauseState() === null;
+    if (resumeAfter) this.#coordinator.interrupt();
+    await this.#pump;
+    this.#coordinator.setHiddenRollCategory(category, hidden);
+    this.#boundaryRefusal = null;
+    this.#publish();
+    if (resumeAfter) {
+      this.#coordinator.resume();
+      this.#publish();
+      void this.#pumpCoordinator();
+    }
   }
 
   interrupt(): void {

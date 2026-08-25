@@ -57,6 +57,7 @@ import vttSessionPartyState from '../../drizzle/0053_vtt_session_party_state.sql
 import optionalFeatureSelections from '../../drizzle/0054_optional_feature_selections.sql?raw';
 import vttSessionBranchRngState from '../../drizzle/0055_vtt_session_branch_rng_state.sql?raw';
 import vttSessionDeathMoment from '../../drizzle/0056_vtt_session_death_moment.sql?raw';
+import vttSessionHiddenRolls from '../../drizzle/0057_vtt_session_hidden_rolls.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -616,6 +617,12 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     sql: vttSessionDeathMoment,
     checksum: '348bb72c942c200297dcc99c590b609b7beb21ca32ef6fb8c7000c1ccb2eb8dd',
     resultSchemaChecksum: '9de67a77414e4ad8325ef19c57ea72c16dee0dd6604ffd1cdcff73b137dced71',
+  }),
+  Object.freeze({
+    id: '0057_vtt_session_hidden_rolls',
+    sql: vttSessionHiddenRolls,
+    checksum: '4e87d654d4fb2a2737b380a9af68d358c688bc9f6118cc01ab2c93cda58ada64',
+    resultSchemaChecksum: '264853e0eb7abf2e68b6961f7fba26729220f3ac14cab74ec1b4122b664b9fd9',
   }),
 ]);
 
