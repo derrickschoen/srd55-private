@@ -7,6 +7,25 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D382 — OWNER: survival analysis + potions + Aid/Bless + encounter detune (2026-08-25)
+
+Owner directives, 2026-08-25:
+1. **Survival analysis deliverable**: an MD file explaining why the PCs
+   are not surviving, with the details of the PC builds, the NPCs, and
+   the encounters.
+2. **Potions**: each PC gets 2 level-appropriate healing potions.
+3. **Cleric buffs**: the cleric casts Aid on all PCs (RAW: three targets
+   per casting — two castings to cover four PCs) and opens fights with
+   Bless.
+4. **Detune the encounters** so the PCs get through the LAST encounter
+   at least 2/3 of the time (measured across seeds, headless). Where
+   this touches D380: D380's strengthen-the-policy rule stands for
+   policy quality, but owner-sanctioned encounter detuning is now also
+   in scope to hit the 2/3 survival target.
+Also noted with the ruling: between-fight healing had NOT been happening
+in live rehearsals (the short-rest step never completed in runs 8-26);
+the fix was already in flight when this ruling landed.
+
 ## D381 — OWNER: ignore codex limits (2026-08-25)
 
 Owner verbatim: "Ignore codex limits. The plan I have has plenty of".
