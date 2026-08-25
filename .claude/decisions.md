@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D383 — OWNER: hit-die thrift, Cure Wounds between fights, casting allowed while resting (2026-08-25)
+
+Owner directives, 2026-08-25:
+1. **Hit-die thrift**: a PC does not spend a Hit Point Die if their
+   missing HP is less than the average that die roll would heal
+   (die average + CON modifier).
+2. **Cure Wounds between fights**: eligible PCs (prepared casters with
+   the spell and slots remaining) cast Cure Wounds on wounded allies
+   between fights.
+3. **Casting while resting is ALLOWED**: casting spells during a Short
+   Rest does not break or restart the rest. Owner ruling; where the
+   2024 "nothing more strenuous" short-rest text could be read
+   stricter, this ruling binds for this table.
+
 ## D382 — OWNER: survival analysis + potions + Aid/Bless + encounter detune (2026-08-25)
 
 Owner directives, 2026-08-25:
