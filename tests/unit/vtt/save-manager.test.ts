@@ -12,6 +12,7 @@ import {
   type SaveManagerOperations,
 } from '../../../src/vtt/save-manager';
 import type { PartySessionState } from '../../../src/vtt/party-session-state';
+import { DEFAULT_REFUSAL_HANDLING_SETTINGS } from '../../../src/vtt/refusal-handling';
 
 class MemoryStorage implements Storage {
   readonly #values = new Map<string, string>();
@@ -47,6 +48,7 @@ const PARTY_STATE: PartySessionState = {
   })),
   reactionPolicies: PARTY_COMBATANTS.flatMap((combatant) =>
     REACTION_KINDS.map((reactionKind) => ({ combatant, reactionKind, policy: 'ask' as const }))),
+  refusalHandling: DEFAULT_REFUSAL_HANDLING_SETTINGS,
 };
 
 function browserFixture(): {

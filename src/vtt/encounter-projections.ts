@@ -106,11 +106,14 @@ export type DmDecisionTrayEntry =
 
 export interface DmDecisionTrayProjection {
   readonly entries: readonly DmDecisionTrayEntry[];
+  readonly actionRefusal: NonBoundaryActionRefusal | null;
   readonly boundaryRefusal: null | {
     readonly code: 'turn_boundary_blocked';
     readonly message: string;
   };
 }
+
+import type { NonBoundaryActionRefusal } from './refusal-handling';
 
 function decisionTriggerContext(
   decision: PendingDecision,
@@ -125,6 +128,8 @@ function decisionTriggerContext(
       return `end of ${names.get(decision.boundary.activeCombatant) ?? String(decision.boundary.activeCombatant)}'s turn in round ${String(decision.boundary.round)}`;
     case 'legendary_resistance':
       return `${decision.failedSave.ability} save failed against ${names.get(decision.failedSave.source) ?? String(decision.failedSave.source)} in round ${String(decision.boundary.round)}`;
+    case 'adjudication_prompt':
+      return `${decision.refusal.reason} (${decision.refusal.citation})`;
     default: {
       const exhaustive: never = decision;
       throw new Error(`Unhandled pending decision kind: ${String(exhaustive)}`);
@@ -213,6 +218,8 @@ export function projectDmBoard(input: {
   readonly history: readonly SessionHistoryEntry[];
   readonly partyState?: PartySessionState | null;
   readonly boundaryRefusal?: DmDecisionTrayProjection['boundaryRefusal'];
+  readonly actionRefusal?: NonBoundaryActionRefusal | null;
+  readonly adjudicationPrompts?: readonly Extract<PendingDecision, { readonly kind: 'adjudication_prompt' }>[];
 }): DmBoardProjection {
   const targets = adjudicatedTargets(input.view.state.eventLog, input.coordinator.pause);
   const pending = input.coordinator.pendingRequest;
@@ -222,7 +229,10 @@ export function projectDmBoard(input: {
   const names = new Map(input.view.state.combatants.map(
     (subject) => [subject.profile.id, subject.profile.name] as const,
   ));
-  const pendingEntries: readonly DmDecisionTrayEntry[] = input.view.state.pendingDecisions.map((decision) => ({
+  const pendingEntries: readonly DmDecisionTrayEntry[] = [
+    ...input.view.state.pendingDecisions,
+    ...(input.adjudicationPrompts ?? []),
+  ].map((decision) => ({
     kind: 'pending',
     decision: structuredClone(decision),
     combatantName: names.get(decision.combatant) ?? String(decision.combatant),
@@ -261,6 +271,7 @@ export function projectDmBoard(input: {
       : projectDmPartySession(input.partyState),
     decisionTray: {
       entries: [...pendingEntries, ...autoFireEntries],
+      actionRefusal: input.actionRefusal ?? null,
       boundaryRefusal: input.boundaryRefusal ?? null,
     },
     timeline: projectEncounterTimeline(input.view.state, input.history),

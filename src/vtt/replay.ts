@@ -835,6 +835,7 @@ export function replayBundle(
       case 'controller_request_cancelled':
       case 'controller_replaced':
       case 'reaction_policy_resolved':
+      case 'refusal_handling_changed':
       case 'controller_response_refused':
       case 'coordinator_paused':
       case 'coordinator_resumed':

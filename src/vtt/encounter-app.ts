@@ -41,6 +41,11 @@ import {
   type LongRestBenefit,
   type RestInterruptionOutcome,
 } from './party-session-state';
+import {
+  REFUSAL_CATEGORIES,
+  handlingModesForCategory,
+  type RefusalHandlingMode,
+} from './refusal-handling';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -61,6 +66,7 @@ function decisionHeading(decision: PendingDecision): string {
     case 'death_save': return 'death saving throw';
     case 'legendary_action_window': return 'legendary action';
     case 'legendary_resistance': return 'legendary resistance';
+    case 'adjudication_prompt': return 'adjudication required';
     default: {
       const exhaustive: never = decision;
       throw new Error(`Unhandled pending decision kind: ${String(exhaustive)}`);
@@ -1290,6 +1296,15 @@ class DmEncounterView {
       refusal.dataset.refusalCode = projection.decisionTray.boundaryRefusal.code;
       tray.append(refusal);
     }
+    if (projection.decisionTray.actionRefusal !== null) {
+      const refusal = element('p', {
+        className: 'dm-decision-refusal',
+        text: `${projection.decisionTray.actionRefusal.reason} (${projection.decisionTray.actionRefusal.citation})`,
+      });
+      refusal.setAttribute('role', 'alert');
+      refusal.dataset.refusalCategory = projection.decisionTray.actionRefusal.category;
+      tray.append(refusal);
+    }
     if (projection.decisionTray.entries.length === 0) {
       tray.append(element('p', { text: 'No queued or automatic decisions.' }));
     }
@@ -1304,6 +1319,26 @@ class DmEncounterView {
           }),
           element('p', { text: entry.triggerContext }),
         );
+        if (entry.decision.kind === 'adjudication_prompt') {
+          const amount = element('input');
+          amount.type = 'number';
+          amount.value = '0';
+          amount.setAttribute('aria-label', 'DM override hit point delta');
+          const button = element('button', { text: `Apply DM override for ${entry.combatantName}` });
+          button.type = 'button';
+          button.addEventListener('click', () => {
+            const parsed = Number(amount.value);
+            if (!Number.isSafeInteger(parsed)) return;
+            this.#host.resolveRefusalPrompt(
+              entry.decision.id,
+              { kind: 'hit_point_delta', amount: parsed },
+              'DM manually resolved the refused action.',
+            );
+          });
+          row.append(amount, button);
+          tray.append(row);
+          continue;
+        }
         for (const option of entry.decision.options) {
           const button = element('button', { text: `${option.label} for ${entry.combatantName}` });
           button.type = 'button';
@@ -1328,6 +1363,33 @@ class DmEncounterView {
     this.#shell.append(tray);
 
     if (projection.partySession !== null) {
+      const refusalSettings = element('section', { className: 'dm-refusal-settings' });
+      refusalSettings.append(element('h2', { text: 'Refusal handling' }));
+      for (const category of REFUSAL_CATEGORIES) {
+        const label = element('label');
+        label.append(document.createTextNode(category.replaceAll('_', ' ')));
+        const select = element('select');
+        select.setAttribute('aria-label', `${category} refusal handling`);
+        for (const mode of handlingModesForCategory(category)) {
+          const option = element('option', { text: mode });
+          option.value = mode;
+          option.selected = projection.partySession.state.refusalHandling[category] === mode;
+          select.append(option);
+        }
+        select.addEventListener('change', () => {
+          const mode = handlingModesForCategory(category).find((candidate) => candidate === select.value);
+          if (mode === undefined) return;
+          select.disabled = true;
+          void this.#host.setRefusalHandling(category, mode as RefusalHandlingMode).catch((error: unknown) => {
+            this.#channelError = error instanceof Error ? error.message : 'Refusal setting update failed.';
+            this.#render();
+          });
+        });
+        label.append(select);
+        refusalSettings.append(label);
+      }
+      this.#shell.append(refusalSettings);
+
       const preferences = element('section', { className: 'dm-reaction-preferences' });
       preferences.append(element('h2', { text: 'Reaction preferences' }));
       for (const character of projection.partySession.state.characters) {
