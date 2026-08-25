@@ -102,6 +102,14 @@ function initiativeState(): EncounterState {
 }
 
 describe('D377.10 refusal handling', () => {
+  it('owner_ruled_defaults: every refusal category defaults to hard refusal with citation', () => {
+    expect(DEFAULT_REFUSAL_HANDLING_SETTINGS).toEqual({
+      rule_gap: 'refuse_with_citation',
+      unmodeled_interaction: 'refuse_with_citation',
+      validation: 'refuse_with_citation',
+    });
+  });
+
   it('unmapped_refusal_class_fails_to_compile: the class inventory maps exhaustively onto the closed categories', () => {
     expectTypeOf(REFUSAL_CLASS_CATEGORIES).toMatchTypeOf<Readonly<Record<NonBoundaryRefusalClass, RefusalCategory>>>();
     expect(Object.keys(REFUSAL_CLASS_CATEGORIES).length).toBe(9);
@@ -148,6 +156,25 @@ describe('D377.10 refusal handling', () => {
       subject: 'dm-override:refusal:rule_gap',
       consequence: { kind: 'no_effect' },
     }));
+    host.close();
+  });
+
+  it('untouched_settings_hard_refuse: a rule gap keeps its citation out of the tray', async () => {
+    const action = unknownSpell();
+    const host = new DmEncounterHost('session:refusal-untouched-defaults', new MemoryBrowserSessionStore(), {
+      initialState: initiativeState(),
+      initialPartyState: party(),
+      turnLegalActions: () => ({ actions: [action] }),
+    });
+    await submitOnlyAction(host, action);
+    const after = host.snapshot();
+    expect(after.dm.decisionTray.actionRefusal).toEqual(expect.objectContaining({
+      category: 'rule_gap',
+      citation: 'engine:rule_gap',
+    }));
+    expect(after.dm.decisionTray.entries.some(
+      (candidate) => candidate.kind === 'pending' && candidate.decision.kind === 'adjudication_prompt',
+    )).toBe(false);
     host.close();
   });
 
