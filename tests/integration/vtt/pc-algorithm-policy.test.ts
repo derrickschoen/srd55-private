@@ -599,7 +599,10 @@ describe('player-character AlgorithmController policy', () => {
     expect(['victory', 'defeat']).toContain(result.outcome);
     expect(result.eventTypes).toContain('attack_resolved');
     expect(result.eventTypes).toContain('spell_cast');
-    expect(result.eventTypes).toContain('healing_applied');
+    expect(result.eventTypes).not.toContain('healing_applied');
+    expect(result.state.combatants.filter((candidate) =>
+      candidate.profile.kind === 'player_character').every((candidate) =>
+      candidate.hitPoints * 4 >= candidate.profile.rules.hitPointMaximum * 3)).toBe(true);
     expect(result.spellSlotLevels.length).toBeGreaterThan(0);
     expect(result.spellSlotLevels.some((slotLevel) => slotLevel !== null)).toBe(true);
   });
