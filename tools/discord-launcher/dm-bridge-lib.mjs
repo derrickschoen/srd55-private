@@ -42,6 +42,21 @@ function projectionHash(projection) {
   return createHash('sha256').update(canonical(projection)).digest('hex');
 }
 
+function assertProjectionFields(projection, expectedFields) {
+  const fields = array(expectedFields, 'compact projection field manifest');
+  if (!fields.every((field) => typeof field === 'string')) {
+    throw new TypeError('compact projection field manifest must contain strings');
+  }
+  const actualFields = Object.keys(projection);
+  const missing = fields.filter((field) => !(field in projection));
+  const unexpected = actualFields.filter((field) => !fields.includes(field));
+  if (missing.length === 0 && unexpected.length === 0) return;
+  throw new TypeError(
+    `Compact projection field mismatch; missing: ${missing.join(', ') || 'none'}; ` +
+    `unexpected: ${unexpected.join(', ') || 'none'}.`,
+  );
+}
+
 function applyProjectionOperation(root, operation) {
   const input = object(operation, 'projection delta operation');
   if (!Array.isArray(input.path) || input.path.length === 0 || !input.path.every((entry) => typeof entry === 'string')) {
@@ -77,27 +92,25 @@ export class ProjectionReconstructor {
     } else if (transfer.kind === 'compact_projection') {
       const view = object(transfer.view, 'compact projection view');
       const coordinator = object(view.coordinator, 'compact projection coordinator');
-      const turnProgramLegalActions = 'turnProgramLegalActions' in view
-        ? array(view.turnProgramLegalActions, 'compact projection turn-program legal actions')
-        : undefined;
       projection = {
+        ...structuredClone(view),
         audience: 'dm',
-        encounter: structuredClone(object(view.encounter, 'compact projection encounter')),
-        board: structuredClone(object(view.board, 'compact projection board')),
         coordinator: { ...structuredClone(coordinator), pendingRequest: structuredClone(view.pendingRequest) },
-        pendingRequest: structuredClone(view.pendingRequest),
-        humanCommandActions: structuredClone(array(view.humanCommandActions, 'compact projection human commands')),
-        movementPreviews: structuredClone(array(view.movementPreviews, 'compact projection movement previews')),
-        ...(turnProgramLegalActions === undefined
-          ? {}
-          : { turnProgramLegalActions: structuredClone(turnProgramLegalActions) }),
-        controllers: structuredClone(array(view.controllers, 'compact projection controllers')),
         history: structuredClone(array(request.history, 'request.history')),
-        adjudicatedTargets: structuredClone(array(view.adjudicatedTargets, 'compact projection adjudicated targets')),
-        partySession: structuredClone(view.partySession),
-        decisionTray: structuredClone(object(view.decisionTray, 'compact projection decision tray')),
-        timeline: structuredClone(object(view.timeline, 'compact projection timeline')),
       };
+      assertProjectionFields(projection, transfer.projectionFields);
+      object(projection.encounter, 'compact projection encounter');
+      object(projection.board, 'compact projection board');
+      array(projection.humanCommandActions, 'compact projection human commands');
+      array(projection.movementPreviews, 'compact projection movement previews');
+      if ('turnProgramLegalActions' in projection) {
+        array(projection.turnProgramLegalActions, 'compact projection turn-program legal actions');
+      }
+      array(projection.controllers, 'compact projection controllers');
+      array(projection.adjudicatedTargets, 'compact projection adjudicated targets');
+      object(projection.decisionTray, 'compact projection decision tray');
+      object(projection.timeline, 'compact projection timeline');
+      array(projection.worldObjectControls, 'compact projection world-object controls');
     } else if (transfer.kind === 'projection_delta') {
       const previous = this.snapshots.get(request.encounterId);
       if (

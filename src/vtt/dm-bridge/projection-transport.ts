@@ -21,6 +21,11 @@ export type ProjectionDeltaOperation =
       readonly path: readonly string[];
     };
 
+type CompactProjectionView =
+  Omit<DmBoardProjection, 'audience' | 'history' | 'coordinator'> & {
+    readonly coordinator: Omit<DmBoardProjection['coordinator'], 'pendingRequest'>;
+  };
+
 export type ProjectionTransfer =
   | {
       readonly kind: 'full_projection';
@@ -32,21 +37,8 @@ export type ProjectionTransfer =
       readonly kind: 'compact_projection';
       readonly revision: number;
       readonly stateHash: string;
-      readonly view: {
-        readonly encounter: DmBoardProjection['encounter'];
-        readonly board: DmBoardProjection['board'];
-        readonly coordinator: Omit<DmBoardProjection['coordinator'], 'pendingRequest'>;
-        readonly pendingRequest: DmBoardProjection['pendingRequest'];
-        readonly humanCommandActions: DmBoardProjection['humanCommandActions'];
-        readonly movementPreviews: DmBoardProjection['movementPreviews'];
-        readonly turnProgramLegalActions?: DmBoardProjection['turnProgramLegalActions'];
-        readonly controllers: DmBoardProjection['controllers'];
-        readonly adjudicatedTargets: DmBoardProjection['adjudicatedTargets'];
-        readonly partySession: DmBoardProjection['partySession'];
-        readonly decisionTray: DmBoardProjection['decisionTray'];
-        readonly timeline: DmBoardProjection['timeline'];
-        readonly worldObjectControls: DmBoardProjection['worldObjectControls'];
-      };
+      readonly projectionFields: readonly string[];
+      readonly view: CompactProjectionView;
     }
   | {
       readonly kind: 'projection_delta';
@@ -78,6 +70,20 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 
 function projectionHash(projection: DmBoardProjection): string {
   return sha256(canonicalJson(projection));
+}
+
+function assertProjectionFields(
+  projection: DmBoardProjection,
+  expectedFields: readonly string[],
+): void {
+  const actualFields = Object.keys(projection);
+  const missing = expectedFields.filter((field) => !(field in projection));
+  const unexpected = actualFields.filter((field) => !expectedFields.includes(field));
+  if (missing.length === 0 && unexpected.length === 0) return;
+  throw new TypeError(
+    `Compact projection field mismatch; missing: ${missing.join(', ') || 'none'}; ` +
+    `unexpected: ${unexpected.join(', ') || 'none'}.`,
+  );
 }
 
 function delta(
@@ -169,22 +175,10 @@ export class ProjectionTransferSender {
       kind: 'compact_projection',
       revision: projection.encounter.revision,
       stateHash: projectionHash(request.projection),
+      projectionFields: Object.keys(request.projection).sort(),
       view: {
-        encounter: structuredClone(projection.encounter),
-        board: structuredClone(projection.board),
+        ...structuredClone(projection),
         coordinator: structuredClone(coordinator),
-        pendingRequest: structuredClone(projection.pendingRequest),
-        humanCommandActions: structuredClone(projection.humanCommandActions),
-        movementPreviews: structuredClone(projection.movementPreviews),
-        ...(projection.turnProgramLegalActions === undefined
-          ? {}
-          : { turnProgramLegalActions: structuredClone(projection.turnProgramLegalActions) }),
-        controllers: structuredClone(projection.controllers),
-        adjudicatedTargets: structuredClone(projection.adjudicatedTargets),
-        partySession: structuredClone(projection.partySession),
-        decisionTray: structuredClone(projection.decisionTray),
-        timeline: structuredClone(projection.timeline),
-        worldObjectControls: structuredClone(projection.worldObjectControls),
       },
     };
     const { projection: _projection, ...rest } = request;
@@ -213,28 +207,17 @@ export class ProjectionTransferReceiver {
     if (transfer.kind === 'full_projection') {
       projection = structuredClone(transfer.projection);
     } else if (transfer.kind === 'compact_projection') {
+      const view = structuredClone(transfer.view);
       projection = {
+        ...view,
         audience: 'dm',
-        encounter: structuredClone(transfer.view.encounter),
-        board: structuredClone(transfer.view.board),
         coordinator: {
-          ...structuredClone(transfer.view.coordinator),
-          pendingRequest: structuredClone(transfer.view.pendingRequest),
+          ...view.coordinator,
+          pendingRequest: view.pendingRequest,
         },
-        pendingRequest: structuredClone(transfer.view.pendingRequest),
-        humanCommandActions: structuredClone(transfer.view.humanCommandActions),
-        movementPreviews: structuredClone(transfer.view.movementPreviews),
-        ...(transfer.view.turnProgramLegalActions === undefined
-          ? {}
-          : { turnProgramLegalActions: structuredClone(transfer.view.turnProgramLegalActions) }),
-        controllers: structuredClone(transfer.view.controllers),
         history: structuredClone(request.history),
-        adjudicatedTargets: structuredClone(transfer.view.adjudicatedTargets),
-        partySession: structuredClone(transfer.view.partySession),
-        decisionTray: structuredClone(transfer.view.decisionTray),
-        timeline: structuredClone(transfer.view.timeline),
-        worldObjectControls: structuredClone(transfer.view.worldObjectControls),
       };
+      assertProjectionFields(projection, transfer.projectionFields);
     } else {
       const previous = this.#received.get(request.encounterId);
       if (
@@ -279,4 +262,9 @@ export class ProjectionTransferReceiver {
   }
 }
 
-export const projectionTransportInternals = { applyOperation, delta, projectionHash };
+export const projectionTransportInternals = {
+  applyOperation,
+  assertProjectionFields,
+  delta,
+  projectionHash,
+};

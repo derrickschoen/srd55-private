@@ -8,7 +8,11 @@ import { MOVEMENT_PATH_DANGER_KINDS, REACTION_KINDS, type PendingDecision } from
 import { HIDDEN_ROLL_CATEGORIES, type HiddenRollCategory } from '../combat/roll-visibility';
 import { previewAffectedCells } from '../combat/templates';
 import { encounterSessionId, type CombatantId } from '../combat/values';
-import { DmEncounterHost, type DmEncounterHostSnapshot } from './dm-encounter-host';
+import {
+  ControllerAssignmentError,
+  DmEncounterHost,
+  type DmEncounterHostSnapshot,
+} from './dm-encounter-host';
 import {
   encounterBoardRenderModel,
   type EncounterBoardProjectionShape,
@@ -1706,7 +1710,14 @@ class DmEncounterView {
       select.disabled = projection.pendingRequest !== null;
       select.addEventListener('change', () => {
         if (select.value === 'human' || select.value === 'algorithm') {
-          this.#host.replaceController(identity.combatantId, select.value);
+          try {
+            this.#host.replaceController(identity.combatantId, select.value);
+            this.#channelError = null;
+          } catch (error: unknown) {
+            if (!(error instanceof ControllerAssignmentError)) throw error;
+            this.#channelError = error.message;
+            this.#render();
+          }
         }
       });
       row.append(select);

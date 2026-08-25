@@ -108,6 +108,35 @@ describe('E04 revision-addressed projection transport', () => {
     expect(canonicalJson(result.request.projection)).toBe(canonicalJson(input.projection));
   });
 
+  it('COMPACT-FIELD-MANIFEST names a projection field omitted by a receiver', () => {
+    const sender = new ProjectionTransferSender();
+    const receiver = new ProjectionTransferReceiver();
+    const wire = sender.encodeCompact(request(state(1, 4)));
+    if (wire.projectionTransfer.kind !== 'compact_projection') {
+      throw new Error('Expected a compact projection transfer.');
+    }
+    Reflect.deleteProperty(wire.projectionTransfer.view, 'worldObjectControls');
+
+    expect(() => receiver.reconstruct(wire)).toThrow(
+      'Compact projection field mismatch; missing: worldObjectControls; unexpected: none.',
+    );
+  });
+
+  it('COMPACT-FIELD-ITERATION carries a future projection field without another allowlist edit', () => {
+    const sender = new ProjectionTransferSender();
+    const receiver = new ProjectionTransferReceiver();
+    const input = request(state(1, 4));
+    Reflect.set(input.projection, 'futureProjectionField', { sentinel: 'preserved' });
+
+    const result = receiver.reconstruct(sender.encodeCompact(input));
+
+    expect(result.kind).toBe('reconstructed');
+    if (result.kind !== 'reconstructed') throw new Error('Expected reconstructed compact projection.');
+    expect(Reflect.get(result.request.projection, 'futureProjectionField')).toEqual({
+      sentinel: 'preserved',
+    });
+  });
+
   it('delta_skips_hash_refusal: requests a full snapshot when corrupted delta bytes miss the full-projection hash', () => {
     const sender = new ProjectionTransferSender();
     const receiver = new ProjectionTransferReceiver();

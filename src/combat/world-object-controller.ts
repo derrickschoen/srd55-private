@@ -7,6 +7,7 @@ import {
 
 /** Gives authored class actions an explicit priority without coupling scenario policy to controllers.ts. */
 export class WorldObjectAlgorithmController implements Controller {
+  readonly controllerKind = 'algorithm' as const;
   readonly #fallback = new AlgorithmController();
 
   async choose(request: ControllerRequest, signal: AbortSignal): Promise<ControllerDecision> {
