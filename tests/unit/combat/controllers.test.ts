@@ -68,6 +68,65 @@ describe('one Controller contract and stale response rejection', () => {
     expect(first).toEqual(second);
   });
 
+  it('path_not_clipped: clips a movement candidate to the actor remaining movement budget', async () => {
+    const actor = playerProfile('path-budget-controller', { initiativeBonus: 20 });
+    const target = monsterProfile('path-budget-target', { initiativeBonus: -20 });
+    const initial = createEncounter({
+      bounds: { columns: 14, rows: 10 },
+      combatants: [actor, target],
+      tokens: [placedToken(actor, 0, 5), placedToken(target, 13, 5)],
+    });
+    const state = reduceEncounter(initial, { type: 'roll_initiative' }, () => 0.5).state;
+    const fullPath = Array.from({ length: 12 }, (_, index) => ({ column: index + 1, row: 5 }));
+    const request: ControllerRequest = {
+      kind: 'turn',
+      requestId: 'request:path-budget',
+      encounterRevision: state.revision,
+      actorId: actor.id,
+      visibleState: projectPlayerView(state, { seatId: String(actor.id), combatantId: actor.id }),
+      legalActions: { actions: [{ type: 'move', actor: actor.id, path: fullPath, cause: 'voluntary' }] },
+    };
+
+    const decision = await new AlgorithmController().choose(request, new AbortController().signal);
+
+    expect(decision.action).toEqual({
+      type: 'move',
+      actor: actor.id,
+      path: fullPath.slice(0, 6),
+      cause: 'voluntary',
+    });
+  });
+
+  it('dash_budget_ignored: Dash extends the movement-candidate clipping budget by the actor Speed', async () => {
+    const actor = playerProfile('dash-budget-controller', { initiativeBonus: 20 });
+    const target = monsterProfile('dash-budget-target', { initiativeBonus: -20 });
+    const initial = createEncounter({
+      bounds: { columns: 14, rows: 10 },
+      combatants: [actor, target],
+      tokens: [placedToken(actor, 0, 5), placedToken(target, 13, 5)],
+    });
+    const started = reduceEncounter(initial, { type: 'roll_initiative' }, () => 0.5).state;
+    const state = reduceEncounter(started, { type: 'dash', actor: actor.id }, () => 0.5).state;
+    const fullPath = Array.from({ length: 12 }, (_, index) => ({ column: index + 1, row: 5 }));
+    const request: ControllerRequest = {
+      kind: 'turn',
+      requestId: 'request:dash-budget',
+      encounterRevision: state.revision,
+      actorId: actor.id,
+      visibleState: projectPlayerView(state, { seatId: String(actor.id), combatantId: actor.id }),
+      legalActions: { actions: [{ type: 'move', actor: actor.id, path: fullPath, cause: 'voluntary' }] },
+    };
+
+    const decision = await new AlgorithmController().choose(request, new AbortController().signal);
+
+    expect(decision.action).toEqual({
+      type: 'move',
+      actor: actor.id,
+      path: fullPath,
+      cause: 'voluntary',
+    });
+  });
+
   it('AgentController refuses a response tied to a superseded request id', async () => {
     const fixture = endTurnRequest();
     const controller: Controller = new AgentController({

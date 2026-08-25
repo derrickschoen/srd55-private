@@ -110,6 +110,60 @@ function commandKey(command: EncounterCommand): string {
   return canonicalJson(command);
 }
 
+function movementRemaining(
+  request: ControllerRequest,
+  actorId: CombatantId,
+): number | null {
+  if ('viewer' in request.visibleState && request.visibleState.viewer === 'dm') {
+    return request.visibleState.combatants.find((candidate) => candidate.id === actorId)
+      ?.turn.movement.remaining ?? null;
+  }
+  if ('ownedCombatants' in request.visibleState) {
+    return request.visibleState.ownedCombatants.find((candidate) => candidate.id === actorId)
+      ?.turn.movement.remaining ?? null;
+  }
+  return null;
+}
+
+function clipMovementCandidate(
+  request: ControllerRequest,
+  command: EncounterCommand,
+): EncounterCommand | null {
+  if (command.type !== 'move') return command;
+  const actor = request.visibleState.combatants.find((candidate) => candidate.id === command.actor);
+  const budget = movementRemaining(request, command.actor);
+  if (actor === undefined || budget === null) return command;
+  const path: Array<(typeof command.path)[number]> = [];
+  let previous = actor.position;
+  let spent = 0;
+  for (const cell of command.path) {
+    const cost = gridDistance(previous, cell);
+    if (spent + cost > budget) break;
+    path.push(cell);
+    spent += cost;
+    previous = cell;
+  }
+  return path.length === 0 ? null : { ...command, path };
+}
+
+export function isListedControllerAction(
+  command: EncounterCommand,
+  legalActions: LegalActionSummary,
+): boolean {
+  return legalActions.actions.some((candidate) => {
+    if (commandKey(candidate) === commandKey(command)) return true;
+    if (
+      command.type !== 'move' || candidate.type !== 'move' ||
+      command.actor !== candidate.actor || command.cause !== candidate.cause ||
+      command.path.length === 0 || command.path.length >= candidate.path.length
+    ) return false;
+    return command.path.every((cell, index) => {
+      const listed = candidate.path[index];
+      return listed !== undefined && listed.column === cell.column && listed.row === cell.row;
+    });
+  });
+}
+
 function visibleHostile(
   request: ControllerRequest,
   actorKind: VisibleEncounterState['combatants'][number]['kind'],
@@ -419,15 +473,18 @@ export class AlgorithmController implements Controller {
     if (signal.aborted) {
       throw new ControllerRequestCancelledError('Controller request was cancelled.');
     }
-    const action = [...request.legalActions.actions].sort((left, right) => {
-      const leftRank = algorithmRank(request, left);
-      const rightRank = algorithmRank(request, right);
-      return (
-        leftRank[0] - rightRank[0] ||
-        leftRank[1] - rightRank[1] ||
-        leftRank[2].localeCompare(rightRank[2])
-      );
-    })[0];
+    const action = request.legalActions.actions
+      .map((candidate) => clipMovementCandidate(request, candidate))
+      .filter((candidate) => candidate !== null)
+      .sort((left, right) => {
+        const leftRank = algorithmRank(request, left);
+        const rightRank = algorithmRank(request, right);
+        return (
+          leftRank[0] - rightRank[0] ||
+          leftRank[1] - rightRank[1] ||
+          leftRank[2].localeCompare(rightRank[2])
+        );
+      })[0];
     if (action === undefined) throw new Error('Controller request has no legal actions.');
     return {
       requestId: request.requestId,

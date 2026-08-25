@@ -4006,6 +4006,11 @@ function queueOpportunityAttack(
   reactor: CombatantId,
   trigger: OpportunityAttackTrigger,
 ): void {
+  if (context.state.eventLog.some((event) =>
+    event.type === 'pending_decision_resolved' &&
+    event.kind === 'reaction_offer' && event.reactionKind === 'opportunity_attack' &&
+    event.combatant === reactor &&
+    event.boundary.activeCombatant === trigger.mover && event.boundary.round === context.state.round)) return;
   if (context.state.pendingDecisions.some((decision) =>
     decision.kind === 'reaction_offer' &&
     decision.combatant === reactor && decision.reactionKind === 'opportunity_attack' &&
@@ -10349,6 +10354,8 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       emit(context, {
         type: 'pending_decision_resolved', decisionId: decision.id,
         combatant: decision.combatant, kind: decision.kind, optionId: command.optionId,
+        boundary: { ...decision.boundary },
+        reactionKind: decision.kind === 'reaction_offer' ? decision.reactionKind : null,
       });
       switch (decision.kind) {
         case 'reaction_offer':

@@ -2,6 +2,7 @@ import {
   ControllerRequestCancelledError,
   StaleControllerResponseError,
   evaluateOpportunityAttackPolicy,
+  isListedControllerAction,
   type ControllerDecision,
   type ControllerIdentity,
   type ControllerRegistry,
@@ -143,10 +144,6 @@ export type CoordinatorStep =
 
 function cellKey(cell: GridCell): string {
   return `${cell.column},${cell.row}`;
-}
-
-function commandKey(command: EncounterCommand): string {
-  return JSON.stringify(command);
 }
 
 function combatant(state: EncounterState, id: CombatantId) {
@@ -498,9 +495,7 @@ export class TurnCoordinator {
     command: EncounterCommand,
     legalActions: LegalActionSummary,
   ): boolean {
-    return legalActions.actions.some(
-      (candidate) => commandKey(candidate) === commandKey(command),
-    );
+    return isListedControllerAction(command, legalActions);
   }
 
   #refuseAccepted(command: EncounterCommand, reason: string): CoordinatorStep {
