@@ -22,6 +22,7 @@ import {
   GrantSourceDefinitionResolutionError,
 } from '../../../src/grants/grant-rule-slot-generator-errors';
 import { GrantRulePendingChoiceError } from '../../../src/grants/grant-rule-errors';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 function thrown(run: () => unknown): unknown {
   try {
@@ -91,7 +92,7 @@ describe('Champion level 7 additional Fighting Style', () => {
     subclassDefinitionId: number | null,
     level: number,
   ): void {
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       {
         type: 'update_class',
@@ -101,7 +102,7 @@ describe('Champion level 7 additional Fighting Style', () => {
           : { subclass_definition_id: subclassDefinitionId }),
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     raiseClassLevelForTest(db, characterId, classId('Fighter'), level);
   }
 
@@ -114,11 +115,11 @@ describe('Champion level 7 additional Fighting Style', () => {
   }
 
   function chooseStyle(featContentKey: string): void {
-    new ChooseFightingStyleCommand(
+    expectOkOutcome(new ChooseFightingStyleCommand(
       db,
       { type: 'choose_fighting_style', feat_content_key: featContentKey },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
   }
 
   /** The level-1 Fighting Style, recorded first so the extra one is next. */
@@ -320,7 +321,7 @@ describe('Champion level 7 additional Fighting Style', () => {
       state: 'not_entitled',
     });
 
-    new LevelUpClassCommand(
+    expectOkOutcome(new LevelUpClassCommand(
       db,
       {
         type: 'level_up_class',
@@ -328,7 +329,7 @@ describe('Champion level 7 additional Fighting Style', () => {
         target_level: 7,
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
 
     // The transaction committed: the level really moved, nothing rolled back.
     expect(

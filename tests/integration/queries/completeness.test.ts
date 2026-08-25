@@ -13,6 +13,7 @@ import { seedClassProgressions } from '../../../src/rules/class-progression-look
 import { seedSheetContent } from '../../../src/rules/sheet-srd';
 import { openTestDatabase } from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import { expectOkOutcome } from '../../helpers/outcome';
 import { assignSpellSelection } from '../../../src/eligibility/spell-selection-assignment';
 import {
   addClassLevel,
@@ -83,7 +84,7 @@ function addMagicInitiate(
   definitionId: number,
   chosenList: string,
 ): void {
-  new AddSourceCommand(
+  expectOkOutcome(new AddSourceCommand(
     db,
     {
       type: 'add_source',
@@ -95,7 +96,7 @@ function addMagicInitiate(
       },
     },
     new CharacterCommandIntegrity('completeness-fixture'),
-  ).apply(characterId);
+  ).apply(characterId));
 }
 
 function listSpell(
@@ -126,7 +127,7 @@ describe('completeness detection', () => {
   it('surfaces six initial Wizard book entries and preserves an out-of-book preparation with addressed repairs', async () => {
     const db = await context();
     const characterId = createCharacter(db, 'Spellbook Repair');
-    new AddSourceCommand(
+    expectOkOutcome(new AddSourceCommand(
       db,
       {
         type: 'add_source',
@@ -135,7 +136,7 @@ describe('completeness detection', () => {
         config: { level: 1 },
       },
       new CharacterCommandIntegrity('completeness-fixture'),
-    ).apply(characterId);
+    ).apply(characterId));
     const inBookId = listSpell(db, 'In Book Ward', 1, 'Wizard');
     const outOfBookId = listSpell(db, 'Out of Book Ward', 1, 'Wizard');
     const acquisitions = db.allRaw(
@@ -531,7 +532,7 @@ describe('completeness detection', () => {
       ['Druid', { level: 1, primal_order: { chosen_option: 'Warden' } }],
       ['Wizard', { level: 1 }],
     ] as const) {
-      new AddSourceCommand(
+      expectOkOutcome(new AddSourceCommand(
         db,
         {
           type: 'add_source',
@@ -540,7 +541,7 @@ describe('completeness detection', () => {
           config,
         },
         integrity,
-      ).apply(characterId);
+      ).apply(characterId));
     }
 
     const result = new CharacterCompletenessQueries(db).build(characterId);

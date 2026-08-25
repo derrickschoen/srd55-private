@@ -30,6 +30,7 @@ import {
   createSeededRpcHarness,
   type RpcHarness,
 } from '../../helpers/rpc-harness';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 /**
  * THE S-B PRODUCERS (skills-with-provenance §4 S-B), against the full
@@ -315,7 +316,7 @@ describe('the background producer', () => {
       );
     })();
 
-    await new CharacterCommandExecutor(db, integrity()).execute({
+    expectOkOutcome(await new CharacterCommandExecutor(db, integrity()).execute({
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
       expected_revision: 0,
@@ -324,7 +325,7 @@ describe('the background producer', () => {
         grant_id: fighterGrant.grant_id,
         skill: collision.skill,
       },
-    });
+    }));
 
     let refusal: SkillGrantRefusal | null = null;
     try {
@@ -444,7 +445,7 @@ describe('the species producers', () => {
       ),
     );
     expect(keenSenses).toBeDefined();
-    await new CharacterCommandExecutor(db, integrity()).execute({
+    expectOkOutcome(await new CharacterCommandExecutor(db, integrity()).execute({
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
       expected_revision: 0,
@@ -453,7 +454,7 @@ describe('the species producers', () => {
         grant_id: grantId,
         skill: 'perception',
       },
-    });
+    }));
     expect(projectionSkills(db, characterId)).toEqual(['perception']);
 
     applySpecies(db, characterId, 'Human');
@@ -494,11 +495,11 @@ describe('the species producers', () => {
     // `update_class` no longer carries a level (level-up plan §3); the
     // subject here is the generator re-run over the class source, which a
     // subclass-preserving re-apply triggers just the same.
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       { type: 'update_class', class_definition_id: fighterId },
       integrity(),
-    ).apply(characterId);
+    ).apply(characterId));
 
     expect(backgroundSkillGrants(db, characterId)).toHaveLength(2);
     expect(

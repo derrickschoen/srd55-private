@@ -16,6 +16,7 @@ import { SavePointQueries } from '../../../src/queries/save-points';
 import { openTestDatabase } from '../../helpers/open-db';
 import type { ContentKey } from '../../../src/domain/ids';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 function digest(db: DatabaseContext, tables: readonly string[]): string {
   const rows = tables.map((table) =>
@@ -151,7 +152,7 @@ describe('character CRUD, catalog, save points, and operation history', () => {
       new CharacterCommandIntegrity('Q60-history-integrity'),
       { clock: () => '2026-07-23T12:00:00.000Z' },
     );
-    await executor.execute({
+    expectOkOutcome(await executor.execute({
       character_id: characterId,
       operation_uuid: '60606060-6060-4060-8060-606060606060',
       expected_revision: 0,
@@ -161,7 +162,7 @@ describe('character CRUD, catalog, save points, and operation history', () => {
         score: 18,
         reason: 'Query history',
       },
-    });
+    }));
 
     const history = new OperationHistoryQueries(db).read(characterId);
     expect(history.operations).toEqual([

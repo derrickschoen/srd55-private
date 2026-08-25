@@ -21,6 +21,7 @@ import { SpellSelectionService } from '../../../src/eligibility/spell-selection-
 import { openTestDatabase } from '../../helpers/open-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 const integrityKey = 'C43-test-integrity-key';
 
@@ -211,7 +212,7 @@ describe('warning, class, and snapshot commands', () => {
       { type: 'update_class', ...payload } as UpdateClassPayload,
       integrity,
     );
-    command.apply(characterId);
+    expectOkOutcome(command.apply(characterId));
     return command;
   }
 
@@ -238,7 +239,7 @@ describe('warning, class, and snapshot commands', () => {
       integrity,
     );
 
-    await acknowledge.apply(characterId);
+    expectOkOutcome(await acknowledge.apply(characterId));
 
     expect(
       db.oneRaw(
@@ -267,7 +268,7 @@ describe('warning, class, and snapshot commands', () => {
       deletePayload,
       integrity,
     );
-    await deletion.apply(characterId);
+    expectOkOutcome(await deletion.apply(characterId));
     expect(
       db.scalar(
         `SELECT count(*) FROM warning_acknowledgements
@@ -287,7 +288,7 @@ describe('warning, class, and snapshot commands', () => {
       restore,
       integrity,
     );
-    await restored.apply(characterId);
+    expectOkOutcome(await restored.apply(characterId));
     db.exec(
       `UPDATE warning_acknowledgements
        SET invalidated_at = '2000-01-01 00:00:00'
@@ -303,7 +304,7 @@ describe('warning, class, and snapshot commands', () => {
       },
       integrity,
     );
-    await update.apply(characterId);
+    expectOkOutcome(await update.apply(characterId));
     expect(
       db.oneRaw(
         `SELECT note, invalidated_at
@@ -745,7 +746,7 @@ describe('warning, class, and snapshot commands', () => {
       integrity,
     );
 
-    await restore.apply(characterId);
+    expectOkOutcome(await restore.apply(characterId));
 
     expect(state.capture(characterId)).toEqual(snapshot);
     const redoPayload = await restore.inverse();
@@ -757,7 +758,7 @@ describe('warning, class, and snapshot commands', () => {
       redoPayload,
       integrity,
     );
-    await redo.apply(characterId);
+    expectOkOutcome(await redo.apply(characterId));
     expect(state.capture(characterId)).toEqual(changed);
 
     db.exec(

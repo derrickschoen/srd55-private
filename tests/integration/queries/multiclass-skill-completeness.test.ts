@@ -12,6 +12,7 @@ import {
 import { openSeededTestDatabase } from '../../helpers/open-db';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import { expectOkOutcome } from '../../helpers/outcome';
 
 /**
  * Hand-transcribed from `docs/srd/source/skills-table.txt`, not produced by the
@@ -104,14 +105,14 @@ describe('skill grants as outstanding items', () => {
     // `update_class` no longer carries a level (level-up plan §3): entry is
     // at 1, and a higher fixture level is a direct fixture write — see
     // `raiseClassLevelForTest`.
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       db,
       {
         type: 'update_class',
         class_definition_id: classId(name),
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     if (level > 1) {
       raiseClassLevelForTest(db, characterId, classId(name), level);
     }
@@ -121,12 +122,12 @@ describe('skill grants as outstanding items', () => {
     const revision = Number(
       db.scalar('SELECT revision FROM characters WHERE id = ?', [characterId]),
     );
-    await new CharacterCommandExecutor(db, integrity).execute({
+    expectOkOutcome(await new CharacterCommandExecutor(db, integrity).execute({
       character_id: characterId,
       operation_uuid: crypto.randomUUID(),
       expected_revision: revision,
       command: { type: 'fill_skill_grant', grant_id: grantId, skill },
-    });
+    }));
   }
 
   function items() {
@@ -343,7 +344,7 @@ describe('skill grants as outstanding items', () => {
       addClass(className, 1);
       expect(skillItemFor(`${className} 1`), className).toBeUndefined();
       // Remove again so the next class enters as a multiclass too.
-      new UpdateClassCommand(
+      expectOkOutcome(new UpdateClassCommand(
         db,
         {
           type: 'update_class',
@@ -351,7 +352,7 @@ describe('skill grants as outstanding items', () => {
           remove: true,
         },
         integrity,
-      ).apply(characterId);
+      ).apply(characterId));
     }
   });
 

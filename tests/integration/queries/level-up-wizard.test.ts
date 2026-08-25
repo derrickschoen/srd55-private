@@ -31,6 +31,7 @@ import {
 import { rpcRegistry } from '../../../src/worker/registry';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
+import { expectOkOutcome } from '../../helpers/outcome';
 import {
   createRpcHarness,
   createSeededRpcHarness,
@@ -309,7 +310,7 @@ describe('level-up wizard state RPC', () => {
         definitionId,
         2,
       );
-      new LevelUpClassCommand(
+      expectOkOutcome(new LevelUpClassCommand(
         harness.context.db,
         {
           type: 'level_up_class',
@@ -318,7 +319,7 @@ describe('level-up wizard state RPC', () => {
           subclass_content_key: contentKey,
         },
         integrity,
-      ).apply(characterId);
+      ).apply(characterId));
     };
 
     const wizardCharacterId = createCharacter('Stored Evoker Arrivals');
@@ -465,11 +466,11 @@ describe('level-up wizard state RPC', () => {
         [characterId],
       );
     }
-    new UpdateClassCommand(
+    expectOkOutcome(new UpdateClassCommand(
       harness.context.db,
       { type: 'update_class', class_definition_id: id },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     if (abilitiesAllocated) {
       harness.context.db.exec(
         `UPDATE characters
@@ -1233,7 +1234,7 @@ describe('level-up wizard state RPC', () => {
       fighterId,
       18,
     );
-    new LevelUpClassCommand(
+    expectOkOutcome(new LevelUpClassCommand(
       harness.context.db,
       {
         type: 'level_up_class',
@@ -1242,7 +1243,7 @@ describe('level-up wizard state RPC', () => {
         feat_choice: { kind: 'defer_epic_boon' },
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     harness.context.db.exec(
       'DELETE FROM class_sheet_traits WHERE class_definition_id = ?',
       [fighterId],
@@ -1361,7 +1362,7 @@ describe('level-up wizard state RPC', () => {
       fighterId,
       18,
     );
-    new LevelUpClassCommand(
+    expectOkOutcome(new LevelUpClassCommand(
       harness.context.db,
       {
         type: 'level_up_class',
@@ -1370,7 +1371,7 @@ describe('level-up wizard state RPC', () => {
         feat_choice: { kind: 'defer_epic_boon' },
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
 
     const transport = new RegistryTransport();
     const rpc = new RpcClient(transport);
@@ -1412,7 +1413,7 @@ describe('level-up wizard state RPC', () => {
       ),
     ).toBe(true);
 
-    new LevelUpClassCommand(
+    expectOkOutcome(new LevelUpClassCommand(
       harness.context.db,
       {
         type: 'level_up_class',
@@ -1420,7 +1421,7 @@ describe('level-up wizard state RPC', () => {
         target_level: 20,
       },
       integrity,
-    ).apply(characterId);
+    ).apply(characterId));
     const proceeded = await client.levelUpState(characterId);
     expect(proceeded).toMatchObject({
       kind: 'maximum_level',
@@ -1439,7 +1440,7 @@ describe('level-up wizard state RPC', () => {
       throw new Error('Proceeding hid the durable Boon resolution option.');
     }
 
-    await new CharacterCommandExecutor(
+    expectOkOutcome(await new CharacterCommandExecutor(
       harness.context.db,
       integrity,
     ).execute({
@@ -1453,7 +1454,7 @@ describe('level-up wizard state RPC', () => {
             .character_level_feat_choice_id,
         feat_choice: boonChoice('2024:feat:boon-of-fate'),
       },
-    });
+    }));
 
     const resolved = await client.levelUpState(characterId);
     expect(resolved).toMatchObject({

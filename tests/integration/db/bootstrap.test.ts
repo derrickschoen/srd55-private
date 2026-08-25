@@ -240,7 +240,7 @@ describe('application database bootstrap', () => {
     const characterId = db.exec(
       "INSERT INTO characters (name) VALUES ('Fresh Install')",
     ).lastInsertId;
-    new AddSourceCommand(
+    expectOkOutcome(new AddSourceCommand(
       db,
       {
         type: 'add_source',
@@ -249,7 +249,7 @@ describe('application database bootstrap', () => {
         config: { level: 1 },
       },
       new CharacterCommandIntegrity('bootstrap-fixture'),
-    ).apply(characterId);
+    ).apply(characterId));
 
     const result = new CharacterCompletenessQueries(db).build(characterId);
 
@@ -1013,7 +1013,7 @@ describe('application database bootstrap', () => {
       `INSERT INTO characters (name, dexterity, wisdom)
        VALUES ('Monk shield lifecycle', 16, 16)`,
     ).lastInsertId;
-    new AddSourceCommand(
+    expectOkOutcome(new AddSourceCommand(
       fixture.database,
       {
         type: 'add_source',
@@ -1022,7 +1022,7 @@ describe('application database bootstrap', () => {
         config: { level: 1 },
       },
       new CharacterCommandIntegrity('monk-shield-source'),
-    ).apply(characterId);
+    ).apply(characterId));
     const sourceId = Number(
       fixture.database.scalar(
         `SELECT id FROM character_source_instances

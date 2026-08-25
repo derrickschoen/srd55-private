@@ -32,6 +32,7 @@ import {
 } from '../../../src/sharing/character-share';
 import { assertContentImportPlan } from '../../helpers/content-import-plan';
 import { openTestDatabase } from '../../helpers/open-db';
+import { expectOkOutcome } from '../../helpers/outcome';
 import {
   positionalToShareDocument,
   shareDocumentToReferencePositional,
@@ -106,7 +107,7 @@ function walker(db: DatabaseContext, subclassId: number): number {
       '2024:class:bard',
     ]),
   );
-  new UpdateClassCommand(
+  expectOkOutcome(new UpdateClassCommand(
     db,
     {
       type: 'update_class',
@@ -114,7 +115,7 @@ function walker(db: DatabaseContext, subclassId: number): number {
       subclass_definition_id: subclassId,
     },
     new CharacterCommandIntegrity('subclass-provenance-test-key'),
-  ).apply(characterId);
+  ).apply(characterId));
   raiseClassLevelForTest(db, characterId, bardId, 6);
   return characterId;
 }

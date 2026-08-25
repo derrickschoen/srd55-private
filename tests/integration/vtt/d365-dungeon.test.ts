@@ -91,13 +91,15 @@ function partyCharacter(
 
 function advanceToActor(session: AdventuringDaySession, actor: CombatantId): void {
   if (session.encounter().initiative.length === 0) {
-    session.apply({ type: 'roll_initiative' });
+    const rolled = session.apply({ type: 'roll_initiative' });
+    expect(rolled.activeCombatant).not.toBeNull();
   }
   let guard = session.encounter().initiative.length + 1;
   while (session.encounter().activeCombatant !== actor && guard > 0) {
     const active = session.encounter().activeCombatant;
     if (active === null) throw new Error('D365 encounter lost its active combatant.');
-    session.apply({ type: 'end_turn', actor: active });
+    const advanced = session.apply({ type: 'end_turn', actor: active });
+    expect(advanced.activeCombatant).not.toBe(active);
     guard -= 1;
   }
   if (session.encounter().activeCombatant !== actor) {
@@ -212,15 +214,18 @@ describe('D365 bundled dungeon acceptance', () => {
     const clericInitial = partyCharacter(initial, sample.characterIds.prepared_caster);
 
     expect(session.encounter().dmNotes[0]).toContain('room 1: Briar Gate Pack');
-    session.apply({
+    const roomOneDamage = session.apply({
       type: 'adjudicate',
       target: warlock.profile.id,
       subject: 'd365:room-1-pack-damage',
       reasoning: 'Deterministic warmup damage.',
       consequence: { kind: 'hit_point_delta', amount: -6 },
     });
+    expect(roomOneDamage.combatants.find(
+      (subject) => subject.profile.id === warlock.profile.id,
+    )?.hitPoints).toBe(warlock.profile.rules.hitPointMaximum - 6);
     advanceToActor(session, warlock.profile.id);
-    session.apply(loadedPartySpellCastCommand(warlock, 'burning-hands', {
+    const roomOneCast = session.apply(loadedPartySpellCastCommand(warlock, 'burning-hands', {
       slotLevel: 3,
       slotRecharge: 'short_rest',
       castAsRitual: false,
@@ -236,6 +241,12 @@ describe('D365 bundled dungeon acceptance', () => {
       },
       weaponAttack: null,
       selectedOption: null,
+    }));
+    expect(roomOneCast.eventLog).toContainEqual(expect.objectContaining({
+      type: 'spell_cast',
+      caster: warlock.profile.id,
+      spellId: 'burning-hands',
+      slotLevel: 3,
     }));
     const afterRoomOne = session.captureRoom();
     const warlockAfterOne = partyCharacter(afterRoomOne, sample.characterIds.pact_caster);
@@ -250,15 +261,18 @@ describe('D365 bundled dungeon acceptance', () => {
     session.enterNextRoom(composeD365Room);
     expect(session.party()).toEqual({ ...afterRoomOne, room: 2 });
     expect(session.encounter().dmNotes[0]).toContain('room 2: Webbed Bear Den');
-    session.apply({
+    const roomTwoDamage = session.apply({
       type: 'adjudicate',
       target: fighter.profile.id,
       subject: 'd365:room-2-control-damage',
       reasoning: 'Deterministic control-room damage.',
       consequence: { kind: 'hit_point_delta', amount: -7 },
     });
+    expect(roomTwoDamage.combatants.find(
+      (subject) => subject.profile.id === fighter.profile.id,
+    )?.hitPoints).toBe(fighter.profile.rules.hitPointMaximum - 7);
     advanceToActor(session, warlock.profile.id);
-    session.apply(loadedPartySpellCastCommand(warlock, 'burning-hands', {
+    const roomTwoWarlockCast = session.apply(loadedPartySpellCastCommand(warlock, 'burning-hands', {
       slotLevel: 3,
       slotRecharge: 'short_rest',
       castAsRitual: false,
@@ -275,8 +289,14 @@ describe('D365 bundled dungeon acceptance', () => {
       weaponAttack: null,
       selectedOption: null,
     }));
+    expect(roomTwoWarlockCast.eventLog).toContainEqual(expect.objectContaining({
+      type: 'spell_cast',
+      caster: warlock.profile.id,
+      spellId: 'burning-hands',
+      slotLevel: 3,
+    }));
     advanceToActor(session, druid.profile.id);
-    session.apply(loadedPartySpellCastCommand(druid, 'cure-wounds', {
+    const druidCast = session.apply(loadedPartySpellCastCommand(druid, 'cure-wounds', {
       slotLevel: 1,
       castAsRitual: false,
       targets: [druid.profile.id],
@@ -284,14 +304,26 @@ describe('D365 bundled dungeon acceptance', () => {
       weaponAttack: null,
       selectedOption: null,
     }));
+    expect(druidCast.eventLog).toContainEqual(expect.objectContaining({
+      type: 'spell_cast',
+      caster: druid.profile.id,
+      spellId: 'cure-wounds',
+      slotLevel: 1,
+    }));
     advanceToActor(session, cleric.profile.id);
-    session.apply(loadedPartySpellCastCommand(cleric, 'cure-wounds', {
+    const clericCast = session.apply(loadedPartySpellCastCommand(cleric, 'cure-wounds', {
       slotLevel: 1,
       castAsRitual: false,
       targets: [cleric.profile.id],
       area: null,
       weaponAttack: null,
       selectedOption: null,
+    }));
+    expect(clericCast.eventLog).toContainEqual(expect.objectContaining({
+      type: 'spell_cast',
+      caster: cleric.profile.id,
+      spellId: 'cure-wounds',
+      slotLevel: 1,
     }));
     const afterRoomTwo = session.captureRoom();
     const warlockAfterTwo = partyCharacter(afterRoomTwo, sample.characterIds.pact_caster);
@@ -333,13 +365,16 @@ describe('D365 bundled dungeon acceptance', () => {
     session.enterNextRoom(composeD365Room);
     expect(session.party()).toEqual({ ...rested.state, room: 3 });
     expect(session.encounter().dmNotes[0]).toContain('room 3: Ridgewing Gallery');
-    session.apply({
+    const roomThreeDamage = session.apply({
       type: 'adjudicate',
       target: druid.profile.id,
       subject: 'd365:room-3-ranged-damage',
       reasoning: 'Deterministic ranged-room damage.',
       consequence: { kind: 'hit_point_delta', amount: -4 },
     });
+    expect(roomThreeDamage.combatants.find(
+      (subject) => subject.profile.id === druid.profile.id,
+    )?.hitPoints).toBe(druid.profile.rules.hitPointMaximum - 4);
     const afterRoomThree = session.captureRoom();
     expect(partyCharacter(afterRoomThree, sample.characterIds.land_druid).currentHitPoints)
       .toBe(druidInitial.hitPointMaximum - 4);
@@ -347,13 +382,16 @@ describe('D365 bundled dungeon acceptance', () => {
     session.enterNextRoom(composeD365Room);
     expect(session.party()).toEqual({ ...afterRoomThree, room: 4 });
     expect(session.encounter().dmNotes[0]).toContain('room 4: Ironweb Crown');
-    session.apply({
+    const roomFourDamage = session.apply({
       type: 'adjudicate',
       target: cleric.profile.id,
       subject: 'd365:room-4-boss-damage',
       reasoning: 'Deterministic boss-room damage.',
       consequence: { kind: 'hit_point_delta', amount: -5 },
     });
+    expect(roomFourDamage.combatants.find(
+      (subject) => subject.profile.id === cleric.profile.id,
+    )?.hitPoints).toBe(cleric.profile.rules.hitPointMaximum - 5);
     const afterRoomFour = session.captureRoom();
     expect(partyCharacter(afterRoomFour, sample.characterIds.prepared_caster).currentHitPoints)
       .toBe(clericInitial.hitPointMaximum - 5);
