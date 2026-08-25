@@ -109,6 +109,56 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       String(subject.profile.id).includes(':cinder-wave-')).map((subject) => subject.profile.id)).toHaveLength(8);
   });
 
+  it('alarm_wave_timing: keeps every Cinder Rite reinforcement off-board until its exact arrival round', () => {
+    let state = fight('cinder-rite');
+    const drummer = combatantIdFor(state, 'cinder-guard-b');
+    state = {
+      ...state,
+      encounter: reduceEncounter(state.encounter, { type: 'roll_initiative' }, faceOne).state,
+    };
+    state = useVaneWarrenWarDrum(state, drummer);
+
+    const expectedWaves = [
+      { id: 'cinder-first-beat', delayRounds: 1 },
+      { id: 'cinder-second-beat', delayRounds: 2 },
+    ] as const;
+    const isOnBoard = (rosterId: string): boolean => state.encounter.tokens.some((token) =>
+      String(token.combatantId).endsWith(`:${rosterId}`));
+    const advanceOneRound = (): void => {
+      const startingRound = state.encounter.round;
+      while (state.encounter.round === startingRound) {
+        const active = state.encounter.activeCombatant;
+        if (active === null) throw new Error('The Cinder Rite lost its active turn.');
+        state = {
+          ...state,
+          encounter: reduceEncounter(state.encounter, { type: 'end_turn', actor: active }, faceOne).state,
+        };
+      }
+      state = advanceVaneWarrenAlarm(state, state.encounter.round);
+    };
+
+    for (const expected of expectedWaves) {
+      const wave = state.fight.alarmWaves.find((candidate) => candidate.id === expected.id);
+      if (wave === undefined) throw new Error(`Missing alarm wave ${expected.id}.`);
+      expect(wave.delayRounds).toBe(expected.delayRounds);
+      for (const member of wave.adds) {
+        expect(member.activation).toEqual({
+          kind: 'alarm_wave',
+          waveId: expected.id,
+          delayRounds: expected.delayRounds,
+        });
+      }
+
+      const roundBeforeArrival = 1 + expected.delayRounds - 1;
+      while (state.encounter.round < roundBeforeArrival) advanceOneRound();
+      expect(wave.adds.every((member) => !isOnBoard(member.id))).toBe(true);
+
+      advanceOneRound();
+      expect(state.encounter.round).toBe(1 + expected.delayRounds);
+      expect(wave.adds.every((member) => isOnBoard(member.id))).toBe(true);
+    }
+  });
+
   it('alarm reached-but-not-used does nothing', () => {
     const state = fight('cinder-rite');
     const drummer = combatantIdFor(state, 'cinder-guard-b');
