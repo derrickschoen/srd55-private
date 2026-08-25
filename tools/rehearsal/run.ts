@@ -674,14 +674,14 @@ async function advanceTimelineToRound(
     try {
       await pulseTurn(page);
     } catch (error: unknown) {
-      recorder.add('scripted_nudge', phase, 'advance dedicated timeline exercise', errorDetail(error));
+      recorder.add('scripted_nudge', phase, 'advance in-session timeline exercise', errorDetail(error));
     }
   }
   const image = await screenshot(page, recorder, 'timeline-forward-stall');
   recorder.add(
     'turn_advance_stall',
     phase,
-    'advance dedicated timeline exercise',
+    'advance in-session timeline exercise',
     `Timeline exercise did not reach round ${String(targetRound)} after ${String(MAX_TURN_ATTEMPTS)} pulses.`,
     image,
   );
@@ -743,7 +743,7 @@ async function exerciseTimelineControls(
   }
   recorder.phase(phase, complete ? 'completed' : 'aborted', complete
     ? `Listed scheduled events, delayed and skipped once, rewound to round ${String(progress.rewindRound)}, and advanced forward again.`
-    : 'One or more required timeline controls could not be exercised in the dedicated timeline phase.');
+    : 'One or more required timeline controls could not be exercised on the live session board.');
 }
 
 async function resetApplication(page: Page, baseUrl: string, recorder: FindingsRecorder): Promise<boolean> {
@@ -904,50 +904,67 @@ async function downloadExport(
     const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
     await button.click();
     const download: Download = await pendingDownload;
-    const filename = `${label}.vtt.json`;
-    const path = resolve(recorder.runDirectory, filename);
-    await download.saveAs(path);
-    const bytes = await readFile(path, 'utf8');
-    const value: unknown = JSON.parse(bytes);
-    const sessionRecord = isRecord(value) && isRecord(value.sessionRecord)
-      ? value.sessionRecord
-      : null;
-    const encounters = sessionRecord === null ? null : sessionRecord.encounters;
-    const revisions = isRecord(value) && Array.isArray(value.revisions) ? value.revisions : [];
-    const firstRevision = revisions[0];
-    const rngState = isRecord(firstRevision) && isRecord(firstRevision.rngState)
-      ? firstRevision.rngState
-      : null;
-    const seed = rngState !== null && typeof rngState.initialSeed === 'number' &&
-      Number.isSafeInteger(rngState.initialSeed)
-      ? rngState.initialSeed
-      : null;
-    const result: SessionExport = {
-      phase,
-      filename,
-      encounterCount: Array.isArray(encounters) ? encounters.length : 0,
-      parsed: true,
-      hasSessionRecord: Array.isArray(encounters),
-      hasAlarm: bytes.includes('cinder-wave-1-a') || bytes.includes('alarm_used'),
-      hasIgnition: bytes.includes('surface_ignited') || /"burningCells":\[(?!\])/u.test(bytes),
-      seed,
-    };
-    recorder.exports.push(result);
-    return result;
+    return await recordDownloadedExport(download, recorder, phase, label);
   } catch (error: unknown) {
     recorder.add('scripted_nudge', phase, `export ${label} session record`, errorDetail(error));
-    recorder.exports.push({
-      phase,
-      filename: `${label}.vtt.json`,
-      encounterCount: 0,
-      parsed: false,
-      hasSessionRecord: false,
-      hasAlarm: false,
-      hasIgnition: false,
-      seed: null,
-    });
+    recordFailedExport(recorder, phase, label);
     return null;
   }
+}
+
+async function recordDownloadedExport(
+  download: Download,
+  recorder: FindingsRecorder,
+  phase: string,
+  label: string,
+): Promise<SessionExport> {
+  const filename = `${label}.vtt.json`;
+  const path = resolve(recorder.runDirectory, filename);
+  await download.saveAs(path);
+  const bytes = await readFile(path, 'utf8');
+  const value: unknown = JSON.parse(bytes);
+  const sessionRecord = isRecord(value) && isRecord(value.sessionRecord)
+    ? value.sessionRecord
+    : null;
+  const encounters = sessionRecord === null ? null : sessionRecord.encounters;
+  const revisions = isRecord(value) && Array.isArray(value.revisions) ? value.revisions : [];
+  const firstRevision = revisions[0];
+  const rngState = isRecord(firstRevision) && isRecord(firstRevision.rngState)
+    ? firstRevision.rngState
+    : null;
+  const seed = rngState !== null && typeof rngState.initialSeed === 'number' &&
+    Number.isSafeInteger(rngState.initialSeed)
+    ? rngState.initialSeed
+    : null;
+  const result: SessionExport = {
+    phase,
+    filename,
+    encounterCount: Array.isArray(encounters) ? encounters.length : 0,
+    parsed: true,
+    hasSessionRecord: Array.isArray(encounters),
+    hasAlarm: bytes.includes('cinder-wave-1-a') || bytes.includes('alarm_used'),
+    hasIgnition: bytes.includes('surface_ignited') || /"burningCells":\[(?!\])/u.test(bytes),
+    seed,
+  };
+  recorder.exports.push(result);
+  return result;
+}
+
+function recordFailedExport(
+  recorder: FindingsRecorder,
+  phase: string,
+  label: string,
+): void {
+  recorder.exports.push({
+    phase,
+    filename: `${label}.vtt.json`,
+    encounterCount: 0,
+    parsed: false,
+    hasSessionRecord: false,
+    hasAlarm: false,
+    hasIgnition: false,
+    seed: null,
+  });
 }
 
 async function saveManagerRoundTrip(
@@ -992,49 +1009,50 @@ async function saveManagerRoundTrip(
     }
   }
   const complete = poolsPresent && mounted && exported?.parsed === true &&
-    exported.hasSessionRecord && exported.seed === REHEARSAL_SEED;
+    exported.hasSessionRecord && exported.encounterCount === 4 && exported.seed === REHEARSAL_SEED;
   recorder.phase(phase, complete ? 'completed' : 'aborted', complete
     ? `Found both autosave pools, created and loaded a manual file save, and parsed ${String(exported.encounterCount)} exported encounter records with seed ${String(exported.seed)}.`
     : 'One or more save-manager checks did not complete.');
   return exported;
 }
 
-async function openVaneFight(
+async function openVaneWarrenSession(
   page: Page,
   baseUrl: string,
   recorder: FindingsRecorder,
-  fightName: string,
-  phase = `Vane Warren — ${fightName}`,
+  phase: string,
 ): Promise<boolean> {
   await page.goto(`${baseUrl}/vtt?encounter=vane-warren`);
-  const load = page.getByRole('button', { name: `Load ${fightName}`, exact: true });
-  if (!await waitVisible(page, recorder, phase, `load ${fightName}`, load)) {
-    recorder.phase(phase, 'aborted', 'Fight loader was unavailable.');
+  const start = page.getByRole('button', { name: 'Start the Vane Warren', exact: true });
+  if (!await waitVisible(page, recorder, phase, 'open Vane Warren start flow', start)) {
+    recorder.phase(phase, 'aborted', 'Vane Warren session start flow was unavailable.');
     return false;
   }
-  await load.click();
+  await start.click();
   const heading = page.getByRole('heading', { name: 'DM controls' });
   const status = page.locator('.vane-warren-loader-status');
   const deadline = Date.now() + UI_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (await heading.count() > 0 && await heading.isVisible()) return true;
-    const message = await status.evaluate((node) =>
-      node instanceof HTMLOutputElement ? node.value.trim() : node.textContent?.trim() ?? '');
+    const message = await status.count() === 0
+      ? ''
+      : await status.evaluate((node) =>
+          node instanceof HTMLOutputElement ? node.value.trim() : node.textContent?.trim() ?? '');
     if (message !== '' && !message.startsWith('Authoring the bundled')) {
-      const image = await screenshot(page, recorder, `mount-${fightName}`);
-      recorder.add('selector_timeout', phase, `mount ${fightName}`, `Loader stopped before DM controls mounted: ${message}`, image);
-      recorder.phase(phase, 'aborted', 'Fight loader surfaced a terminal UI dead end.');
+      const image = await screenshot(page, recorder, 'mount-vane-warren-session');
+      recorder.add('selector_timeout', phase, 'mount Vane Warren session', `Start flow stopped before DM controls mounted: ${message}`, image);
+      recorder.phase(phase, 'aborted', 'Vane Warren start flow surfaced a terminal UI dead end.');
       return false;
     }
     await wait(100);
   }
-  const image = await screenshot(page, recorder, `mount-${fightName}`);
-  recorder.add('selector_timeout', phase, `mount ${fightName}`, 'DM controls did not mount before the loader timeout.', image);
-  recorder.phase(phase, 'aborted', 'Fight did not mount.');
+  const image = await screenshot(page, recorder, 'mount-vane-warren-session');
+  recorder.add('selector_timeout', phase, 'mount Vane Warren session', 'DM controls did not mount before the start-flow timeout.', image);
+  recorder.phase(phase, 'aborted', 'Vane Warren session did not mount.');
   return false;
 }
 
-async function resetCharacterDatabaseForVaneFight(
+async function prepareVaneWarrenSession(
   page: Page,
   baseUrl: string,
   recorder: FindingsRecorder,
@@ -1054,28 +1072,78 @@ async function resetCharacterDatabaseForVaneFight(
     await page.evaluate(async () => window.staticApp.reset());
     await page.reload();
     await page.locator('#status[data-ready="true"]').waitFor({ state: 'visible', timeout: UI_TIMEOUT_MS });
-    recorder.add(
-      'scripted_nudge',
-      phase,
-      'prepare representative party for separate fight loader',
-      'Each Vane Warren loader authors the same fixed representative party again and uses a separate session ID; the driver exported prior work, then reset character and VTT browser storage so duplicate-operation and quota failures would not prevent the next loader from mounting.',
-    );
     return true;
   } catch (error: unknown) {
-    const image = await screenshot(page, recorder, 'reset-vane-character-database');
-    recorder.add('selector_timeout', phase, 'reset character database for fight loader', errorDetail(error), image);
+    const image = await screenshot(page, recorder, 'prepare-vane-warren-session');
+    recorder.add('selector_timeout', phase, 'prepare separate Vane Warren session', errorDetail(error), image);
     return false;
   }
 }
 
-async function exportCurrentFight(
+async function waitForVaneWarrenFight(
   page: Page,
   recorder: FindingsRecorder,
   phase: string,
-  slug: string,
+  fightNumber: number,
+): Promise<boolean> {
+  return waitVisible(
+    page,
+    recorder,
+    phase,
+    `enter Vane Warren fight ${String(fightNumber)}`,
+    page.locator(`.adventuring-day-status[data-room="${String(fightNumber)}"]`),
+    10_000,
+  );
+}
+
+async function transitionToNextVaneWarrenFight(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
+  completedFight: number,
+): Promise<boolean> {
+  const control = page.getByRole('button', { name: 'End room and enter next room', exact: true });
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    `cross boundary after Vane Warren fight ${String(completedFight)}`,
+    control,
+    10_000,
+  )) return false;
+  await control.click();
+  return waitForVaneWarrenFight(page, recorder, phase, completedFight + 1);
+}
+
+async function endVaneWarrenSession(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
 ): Promise<SessionExport | null> {
-  const row = await saveCurrentToFolder(page, recorder, phase);
-  return row === null ? null : downloadExport(page, row, recorder, phase, slug);
+  const label = 'vane-warren-session';
+  const control = page.getByRole('button', { name: 'End Session and export', exact: true });
+  if (!await waitVisible(page, recorder, phase, 'end chained Vane Warren session', control, 10_000)) {
+    return null;
+  }
+  try {
+    const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
+    await control.click();
+    const download: Download = await pendingDownload;
+    const exported = await recordDownloadedExport(download, recorder, phase, label);
+    await waitVisible(
+      page,
+      recorder,
+      phase,
+      'confirm finalized Vane Warren session',
+      page.locator('.dm-end-session-export-status'),
+      10_000,
+    );
+    return exported;
+  } catch (error: unknown) {
+    recorder.add('scripted_nudge', phase, 'end chained Vane Warren session', errorDetail(error));
+    recordFailedExport(recorder, phase, label);
+    return null;
+  }
 }
 
 class PreviewInfrastructureError extends Error {}
@@ -1177,56 +1245,19 @@ async function main(): Promise<void> {
     await runIsolatedPhase(preview, recorder, currentPhase, async () =>
       saveManagerRoundTrip(page, recorder));
 
-    const fights = [
-      { name: 'The Cinder Rite', slug: 'cinder-rite' },
-      { name: 'The Iron Voice', slug: 'iron-voice' },
-      { name: 'The Last Muster', slug: 'last-muster' },
-    ] as const;
-    for (const [index, fight] of fights.entries()) {
-      currentPhase = `Vane Warren — ${fight.name}`;
-      await runIsolatedPhase(preview, recorder, currentPhase, async () => {
-        if (!await resetCharacterDatabaseForVaneFight(page, baseUrl, recorder, currentPhase)) {
-          recorder.phase(currentPhase, 'aborted', 'Could not prepare the fixed representative-party loader.');
-          return;
-        }
-        if (!await openVaneFight(page, baseUrl, recorder, fight.name)) return;
-        if (!await assignAlgorithms(page, recorder, currentPhase)) {
-          recorder.phase(currentPhase, 'aborted', 'Could not assign every combatant to the algorithm controller.');
-          return;
-        }
-        const outcome = await playEncounter(page, recorder, currentPhase, 'vane-warren');
-        const exported = await exportCurrentFight(page, recorder, currentPhase, `vane-${fight.slug}`);
-        if (fight.slug === 'cinder-rite' && exported?.hasAlarm !== true) {
-          recorder.add(
-            'scripted_nudge',
-            currentPhase,
-            'sound Cinder Rite alarm',
-            'The board renders the war drum, but controller legal actions and DM tools expose no alarm interaction; the exported encounter contains no deployed alarm wave.',
-          );
-        }
-        if (exported?.hasIgnition !== true) {
-          recorder.add(
-            'scripted_nudge',
-            currentPhase,
-            'ignite a surface from the brazier',
-            'The board renders braziers and flammable surfaces, but no controller action or DM tool can place fire or invoke the ignition chain.',
-          );
-        }
-        recorder.phase(currentPhase, outcome.kind === 'aborted' ? 'aborted' : 'completed',
-          `${outcome.kind} at round ${String(outcome.round)}; export parsed ${String(exported?.encounterCount ?? 0)} encounter record(s).`);
-        if (index < fights.length - 1) {
-          const nextControl = page.getByRole('button', { name: /Load The (?:Iron Voice|Last Muster)/u });
-          if (await nextControl.count() === 0) {
-            recorder.add(
-              'scripted_nudge',
-              currentPhase,
-              'continue to the next Vane Warren fight',
-              'The completed fight offers no in-session next-fight path; the driver returned to the bundle selector by URL.',
-            );
-          }
-        }
-      });
-    }
+    currentPhase = 'dungeon → Vane Warren seam';
+    const vaneSessionReady = await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+      if (!await prepareVaneWarrenSession(page, baseUrl, recorder, currentPhase)) {
+        recorder.phase(currentPhase, 'aborted', 'Could not prepare the separately exported Vane Warren session.');
+        return false;
+      }
+      if (!await openVaneWarrenSession(page, baseUrl, recorder, currentPhase)) return false;
+      const entered = await waitForVaneWarrenFight(page, recorder, currentPhase, 1);
+      recorder.phase(currentPhase, entered ? 'completed' : 'aborted', entered
+        ? 'Named two-export deviation: after the four-room dungeon export, reset browser session state and entered the separate three-fight Vane Warren chain once through its start flow.'
+        : 'The Vane Warren chain did not enter its first fight.');
+      return entered;
+    });
 
     currentPhase = 'timeline';
     await runIsolatedPhase(preview, recorder, currentPhase, async () => {
@@ -1238,43 +1269,67 @@ async function main(): Promise<void> {
         continuedForward: false,
         rewindRound: null,
       };
-      if (!await resetCharacterDatabaseForVaneFight(page, baseUrl, recorder, currentPhase)) {
-        recorder.phase(currentPhase, 'aborted', 'Could not prepare the dedicated timeline encounter.');
+      if (vaneSessionReady !== true) {
+        recorder.phase(currentPhase, 'aborted', 'The chained Vane Warren board was unavailable for timeline controls.');
         return;
       }
-      if (!await openVaneFight(page, baseUrl, recorder, 'The Iron Voice', currentPhase)) return;
       if (!await assignAlgorithms(page, recorder, currentPhase)) {
-        recorder.phase(currentPhase, 'aborted', 'Could not assign controllers for the dedicated timeline exercise.');
+        recorder.phase(currentPhase, 'aborted', 'Could not assign controllers for the in-session timeline exercise.');
         return;
       }
       await exerciseTimelineControls(page, recorder, timeline);
     });
 
+    const fights = ['The Cinder Rite', 'The Iron Voice', 'The Last Muster'] as const;
+    for (const [index, fightName] of fights.entries()) {
+      currentPhase = `Vane Warren — ${fightName}`;
+      await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+        const fightNumber = index + 1;
+        if (!await waitForVaneWarrenFight(page, recorder, currentPhase, fightNumber)) {
+          recorder.phase(currentPhase, 'aborted', 'The chained session was not at the requested fight.');
+          return;
+        }
+        if (!await assignAlgorithms(page, recorder, currentPhase)) {
+          recorder.phase(currentPhase, 'aborted', 'Could not assign every combatant to the algorithm controller.');
+          return;
+        }
+        const outcome = await playEncounter(page, recorder, currentPhase, 'vane-warren');
+        recorder.phase(currentPhase, outcome.kind === 'aborted' ? 'aborted' : 'completed',
+          `${outcome.kind} at round ${String(outcome.round)} after ${String(outcome.attempts)} driver pulses.`);
+        if (fightNumber === fights.length) return;
+        if (!await transitionToNextVaneWarrenFight(page, recorder, currentPhase, fightNumber)) {
+          recorder.phase(currentPhase, 'aborted', 'Could not cross the Vane Warren room boundary.');
+        }
+      });
+    }
+
     currentPhase = 'end session and export coverage';
     await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+      const vaneExport = await endVaneWarrenSession(page, recorder, currentPhase);
+      if (vaneExport?.hasAlarm !== true) {
+        recorder.add(
+          'scripted_nudge',
+          currentPhase,
+          'sound Cinder Rite alarm',
+          'The board renders the war drum, but controller legal actions and DM tools expose no alarm interaction; the chained session export contains no deployed alarm wave.',
+        );
+      }
+      if (vaneExport?.hasIgnition !== true) {
+        recorder.add(
+          'scripted_nudge',
+          currentPhase,
+          'ignite a surface from the brazier',
+          'The board renders braziers and flammable surfaces, but no controller action or DM tool can place fire or invoke the ignition chain.',
+        );
+      }
+      const dungeonExport = recorder.exports.find((entry) => entry.filename === 'd365-session.vtt.json');
+      const coverage = recorder.exports.length === 2 &&
+        dungeonExport?.parsed === true && dungeonExport.hasSessionRecord && dungeonExport.encounterCount === 4 &&
+        vaneExport?.parsed === true && vaneExport.hasSessionRecord && vaneExport.encounterCount === 3;
       const totalEncounters = recorder.exports.reduce((total, entry) => total + entry.encounterCount, 0);
-      const allParsed = recorder.exports.length === 4 && recorder.exports.every((entry) => entry.parsed && entry.hasSessionRecord);
-      const endSessionControl = page.getByRole('button', { name: /End session/u });
-      if (await endSessionControl.count() === 0) {
-        recorder.add(
-          'scripted_nudge',
-          currentPhase,
-          'end session',
-          'No end-session control exists. The driver paused at the final encounter and exported through the save manager.',
-        );
-      }
-      if (recorder.exports.length > 1) {
-        recorder.add(
-          'scripted_nudge',
-          currentPhase,
-          'verify one export covers everything played',
-          'The dungeon and each Vane Warren fight use separate session IDs, so no single application export can contain all seven played encounters; coverage was verified across four parsed exports.',
-        );
-      }
-      const coverage = allParsed && totalEncounters === 7;
       recorder.phase(currentPhase, coverage ? 'completed' : 'aborted', coverage
-        ? 'Four application exports parsed and their structured encounter lists cover all seven played encounters.'
-        : `Parsed export coverage was ${String(totalEncounters)} encounters across ${String(recorder.exports.length)} files; expected seven across four files.`);
+        ? 'The final control exported one three-encounter Vane Warren session; with the four-encounter dungeon export, two structured files cover all seven fights.'
+        : `Parsed export coverage was ${String(totalEncounters)} encounters across ${String(recorder.exports.length)} files; expected a four-encounter dungeon export and one three-encounter Vane Warren export.`);
     });
 
     await recorder.flushScreenshots();
