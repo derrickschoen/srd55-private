@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D379 — OWNER: rehearsal bar accepts the session seam; requires a winning run AND a TPK run (2026-08-25)
+
+1. **Dungeon→Vane seam SATISFIES the v1 bar.** Two back-to-back chained
+   sessions with two exports count as "a full mock session"; unifying
+   them is post-v1.
+2. **Outcome coverage, owner verbatim: "Need the party to win to
+   exercise the most surface. Also exercise a tpk. The intent is testing
+   as many different ways as possible."** The clean-rehearsal bar
+   (D377.6) therefore requires BOTH: (a) a run where the party wins
+   every encounter cleanly (maximum machinery exercised), and (b) a
+   deliberate TPK run where the party loses and the defeat path — death
+   saves, conclusion, session record — flows without dead ends.
+   Supervisor operationalization: the rehearsal driver gains a doomed
+   scenario configuration (e.g. Cinder Rite with the alarm pre-sounded
+   and waves stacked) for the TPK leg.
+
 ## D378 — OWNER: optional-rules sweep ratified; rehearsal is supervisor-only until clean (2026-08-24)
 
 1. **Optional-rules sweep (per D377.13) RATIFIED AS-IS.** flammable_grease
