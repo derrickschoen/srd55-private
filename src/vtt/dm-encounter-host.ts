@@ -365,6 +365,10 @@ export class DmEncounterHost {
     };
   }
 
+  sessionEnded(): boolean {
+    return this.#journal.ended();
+  }
+
   subscribe(listener: (snapshot: DmEncounterHostSnapshot) => void): () => void {
     this.#listeners.add(listener);
     listener(this.snapshot());
@@ -727,6 +731,18 @@ export class DmEncounterHost {
     this.#partyStateHasBoundaryRuling = false;
     this.#publish();
     return structuredClone(rested);
+  }
+
+  async endSession(): Promise<void> {
+    if (this.#journal.ended()) throw new Error('Encounter session has already ended.');
+    this.#coordinator.interrupt();
+    await this.#pump;
+    if (this.#journal.partyState() !== null && !this.#partyStateHasBoundaryRuling) {
+      this.#journal.capturePartyState();
+    }
+    this.#journal.endSession();
+    this.#partyStateHasBoundaryRuling = false;
+    this.#publish();
   }
 
   async resolveRestInterruption(outcome: RestInterruptionOutcome): Promise<RestInterruptionResult> {

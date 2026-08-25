@@ -794,6 +794,13 @@ export function replayBundle(
         expectedState = parent.state;
         expectedRng = parent.rng;
         break;
+      case 'session_ended':
+        if (parent === null || parent === undefined) {
+          throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'existing session parent', revision.parentRevision);
+        }
+        expectedState = parent.state;
+        expectedRng = parent.rng;
+        break;
       case 'room_composed':
         if (parent === null || parent === undefined) {
           throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'existing room parent', revision.parentRevision);

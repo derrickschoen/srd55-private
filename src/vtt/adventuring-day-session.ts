@@ -140,6 +140,13 @@ export class AdventuringDaySession {
     return structuredClone(result);
   }
 
+  endSession(): string {
+    if (this.journal.ended()) throw new Error('Encounter session has already ended.');
+    this.#partyState = this.journal.capturePartyState();
+    this.journal.endSession();
+    return this.journal.export();
+  }
+
   enterNextRoom(composeRoom: DmRoomComposer = composeStoredCharacterEncounter): StoredCharacterEncounter {
     const nextPartyState = advancePartyRoom(this.#partyState);
     const encounter = composeRoom(this.members, this.displayNames, nextPartyState);
