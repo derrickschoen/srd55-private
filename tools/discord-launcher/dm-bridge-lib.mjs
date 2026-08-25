@@ -95,6 +95,7 @@ export class ProjectionReconstructor {
         adjudicatedTargets: structuredClone(array(view.adjudicatedTargets, 'compact projection adjudicated targets')),
         partySession: structuredClone(view.partySession),
         decisionTray: structuredClone(object(view.decisionTray, 'compact projection decision tray')),
+        timeline: structuredClone(object(view.timeline, 'compact projection timeline')),
       };
     } else if (transfer.kind === 'projection_delta') {
       const previous = this.snapshots.get(request.encounterId);
