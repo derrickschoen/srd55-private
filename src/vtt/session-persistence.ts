@@ -30,25 +30,38 @@ import {
   capturePartySessionState,
   decodePartySessionState,
   enterNextRoom,
+  interruptLongRest,
   LONG_REST_CITATIONS,
+  restInterruptionRuling,
   setPartyReactionPolicy,
   takeLongRest,
   takeShortRest,
   type LongRestResult,
+  type LongRestBenefit,
   type LongRestSummaryCard,
   type PartySessionState,
+  type RestInterruptionOutcome,
+  type RestInterruptionResult,
+  type RestInterruptionRulingCard,
   type ShortRestHitDieRoll,
   type ShortRestHitDieSpend,
   type ShortRestResult,
 } from './party-session-state';
 
-export const VTT_SESSION_SCHEMA_VERSION = 4 as const;
+export const VTT_SESSION_SCHEMA_VERSION = 5 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export type SessionTransition =
   | { readonly kind: 'session_started' }
   | DurableCoordinatorTransition
-  | { readonly kind: 'party_state_captured'; readonly room: number }
+  | {
+      readonly kind: 'party_state_captured';
+      readonly room: number;
+      readonly restInterruption?: {
+        readonly outcome: RestInterruptionOutcome;
+        readonly ruling: RestInterruptionRulingCard;
+      };
+    }
   | {
       readonly kind: 'reaction_preference_changed';
       readonly combatant: import('../combat/values').CombatantId;
@@ -344,6 +357,25 @@ function validRoom(value: unknown): boolean {
   return value === 1 || value === 2 || value === 3 || value === 4;
 }
 
+function decodeRestInterruptionOutcome(value: unknown): RestInterruptionOutcome | null {
+  if (!isRecord(value) || typeof value.kind !== 'string') return null;
+  if ((value.kind === 'no_benefit' || value.kind === 'resumed') && hasExactlyKeys(value, ['kind'])) {
+    return { kind: value.kind };
+  }
+  if (
+    value.kind === 'partial_per_dm' &&
+    hasExactlyKeys(value, ['kind', 'benefits']) &&
+    Array.isArray(value.benefits) &&
+    value.benefits.every((benefit) => typeof benefit === 'string' && [
+      'hit_points', 'hit_dice', 'spell_slots', 'exhaustion', 'limited_resources',
+    ].includes(benefit)) &&
+    new Set(value.benefits).size === value.benefits.length
+  ) {
+    return { kind: 'partial_per_dm', benefits: value.benefits as readonly LongRestBenefit[] };
+  }
+  return null;
+}
+
 function validShortRestSpends(value: unknown): value is readonly ShortRestHitDieSpend[] {
   return Array.isArray(value) && value.every((spend) =>
     isRecord(spend) && hasExactlyKeys(spend, ['combatantId', 'dice']) &&
@@ -417,6 +449,22 @@ function decodeTransition(value: unknown): SessionTransition {
     case 'room_composed':
       if (hasExactlyKeys(value, ['kind', 'room']) && validRoom(value.room)) {
         return value as unknown as SessionTransition;
+      }
+      if (
+        value.kind === 'party_state_captured' &&
+        hasExactlyKeys(value, ['kind', 'room', 'restInterruption']) &&
+        validRoom(value.room) &&
+        isRecord(value.restInterruption) &&
+        hasExactlyKeys(value.restInterruption, ['outcome', 'ruling'])
+      ) {
+        const outcome = decodeRestInterruptionOutcome(value.restInterruption.outcome);
+        if (outcome !== null && canonicalJson(value.restInterruption.ruling) === canonicalJson(restInterruptionRuling(outcome))) {
+          return {
+            kind: 'party_state_captured',
+            room: value.room as PartySessionState['room'],
+            restInterruption: { outcome, ruling: restInterruptionRuling(outcome) },
+          };
+        }
       }
       break;
     case 'reaction_preference_changed':
@@ -515,6 +563,19 @@ function decodeRevision(value: unknown): SessionRevision {
     if (!isRecord(combatant)) throw new TypeError('Persisted encounter combatant is malformed.');
     if (!Object.hasOwn(combatant, 'wildShapeUses')) {
       throw new TypeError('Persisted encounter combatant lacks Wild Shape use state.');
+    }
+    if (!Object.hasOwn(combatant, 'deathAt')) {
+      throw new TypeError('Persisted encounter combatant lacks a typed time of death.');
+    }
+    if (combatant.deathAt !== null && (
+      !isRecord(combatant.deathAt) ||
+      !hasExactlyKeys(combatant.deathAt, ['round', 'initiativeIndex']) ||
+      !Number.isSafeInteger(combatant.deathAt.round) ||
+      !Number.isSafeInteger(combatant.deathAt.initiativeIndex) ||
+      (combatant.deathAt.round as number) < 0 ||
+      (combatant.deathAt.initiativeIndex as number) < 0
+    )) {
+      throw new TypeError('Persisted encounter combatant time of death is malformed.');
     }
     const wildShapeUses = combatant.wildShapeUses === null
       ? null
@@ -704,11 +765,12 @@ export function replaySessionRevisions(
         requireCanonicalEqual(revision.encounterState, parent.encounterState, 'party-capture encounter state');
         requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'party-capture coordinator state');
         requireCanonicalEqual(revision.rngState, parent.rngState, 'party-capture RNG state');
-        requireCanonicalEqual(
-          revision.partyState,
-          capturePartySessionState(parent.partyState, parent.encounterState),
-          'captured party state',
-        );
+        const expectedPartyState = transition.restInterruption === undefined
+          ? capturePartySessionState(parent.partyState, parent.encounterState)
+          : interruptLongRest(parent.partyState, transition.restInterruption.outcome).state;
+        requireCanonicalEqual(revision.partyState, expectedPartyState, transition.restInterruption === undefined
+          ? 'captured party state'
+          : 'rest-interruption party state');
         break;
       }
       case 'short_rest_completed': {
@@ -1007,6 +1069,27 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     return partyState;
   }
 
+  resolveRestInterruption(outcome: RestInterruptionOutcome): RestInterruptionResult {
+    const latest = this.#latest();
+    if (latest.partyState === null) throw new Error('Encounter session has no party state to interrupt a rest.');
+    const result = interruptLongRest(latest.partyState, outcome);
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: {
+        kind: 'party_state_captured',
+        room: result.state.room,
+        restInterruption: { outcome: result.outcome, ruling: result.ruling },
+      },
+      encounterState: latest.encounterState,
+      partyState: result.state,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      codexSessionId: latest.codexSessionId,
+    });
+    return result;
+  }
+
   takeShortRest(spends: readonly ShortRestHitDieSpend[]): ShortRestResult {
     const latest = this.#latest();
     if (latest.partyState === null) throw new Error('Encounter session has no party state to rest.');
@@ -1225,6 +1308,7 @@ export interface VttSessionMigration {
 const V1_TO_V2_SOURCE = 'vtt-session-v1-to-v2:add-format-and-sha-fingerprint=vtt-session-revisions';
 const V2_TO_V3_SOURCE = 'vtt-session-v2-to-v3:add-party-session-state-null-and-rehash-revisions';
 const V3_TO_V4_SOURCE = 'vtt-session-v3-to-v4:add-persisted-branch-rng-state-fingerprint';
+const V4_TO_V5_SOURCE = 'vtt-session-v4-to-v5:add-typed-combatant-death-moment-and-rehash-revisions';
 
 export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
   Object.freeze([
@@ -1302,6 +1386,66 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
           ...oldBundle,
           format: 'vtt-session-revisions' as const,
           schemaVersion: 4 as const,
+          revisions,
+        };
+        return { ...body, fingerprint: sha256(canonicalJson(body)) };
+      },
+    }),
+    Object.freeze({
+      id: 'vtt_session_v4_to_v5',
+      from: 4,
+      to: 5,
+      source: V4_TO_V5_SOURCE,
+      checksum: '2b0d139e3b2c7c9c5491fe09a103cc667beb246f8d199f093c058b0835cb9c3d',
+      migrate: (bundle: Readonly<Record<string, unknown>>) => {
+        if (!Array.isArray(bundle.revisions)) {
+          throw new TypeError('VTT session v4 revisions are malformed.');
+        }
+        const priorDeathMoments = new Map<string, unknown>();
+        const revisions = bundle.revisions.map((revision, revisionIndex) => {
+          if (!isRecord(revision) || !isRecord(revision.encounterState)) {
+            throw new TypeError('VTT session v4 revision is malformed.');
+          }
+          const encounterState = revision.encounterState;
+          const rawCombatants = encounterState.combatants;
+          if (!Array.isArray(rawCombatants)) {
+            throw new TypeError('VTT session v4 combatants are malformed.');
+          }
+          const round = Number.isSafeInteger(encounterState.round) ? encounterState.round as number : 0;
+          const initiativeIndex = Number.isSafeInteger(encounterState.activeInitiativeIndex)
+            ? encounterState.activeInitiativeIndex as number
+            : 0;
+          const combatants = rawCombatants.map((combatant: unknown) => {
+            if (!isRecord(combatant) || !isRecord(combatant.profile) || typeof combatant.profile.id !== 'string') {
+              throw new TypeError('VTT session v4 combatant is malformed.');
+            }
+            const id = combatant.profile.id;
+            const existing = Reflect.get(combatant, 'deathAt');
+            const deathAt = combatant.life === 'dead'
+              ? existing ?? (priorDeathMoments.has(id)
+                  ? priorDeathMoments.get(id) ?? null
+                  : revisionIndex === 0
+                    ? null
+                    : { round, initiativeIndex })
+              : null;
+            priorDeathMoments.set(id, deathAt);
+            return { ...combatant, deathAt };
+          });
+          const migratedEncounterState = { ...encounterState, combatants } as unknown as EncounterState;
+          const { checksum: _oldChecksum, ...oldBody } = revision;
+          const body = {
+            ...oldBody,
+            schemaVersion: 5 as const,
+            encounterState: migratedEncounterState,
+            branchRngStateFingerprint: branchRngStateFingerprint(migratedEncounterState),
+          };
+          return { ...body, checksum: sha256(canonicalJson(body)) };
+        });
+        const { fingerprint: _oldFingerprint, ...oldBundle } = bundle;
+        const body = {
+          ...oldBundle,
+          format: 'vtt-session-revisions' as const,
+          schemaVersion: 5 as const,
           revisions,
         };
         return { ...body, fingerprint: sha256(canonicalJson(body)) };

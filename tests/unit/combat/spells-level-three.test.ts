@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SpellSlotLevel } from '../../../src/combat/combatant';
 import type { EffectPayload } from '../../../src/combat/effects';
-import { createEncounter, reduceEncounter } from '../../../src/combat/encounter';
+import { createEncounter, reduceEncounter, RevivifyRuleError } from '../../../src/combat/encounter';
 import { IMPLEMENTED_SPELL_DEFINITIONS, spellDefinition } from '../../../src/combat/spells/definitions';
 import { referencePartySpellSlots } from '../../../src/combat/spells/resources';
 import type { EffectData, ScaledDice, SpellCastCommand, SpellDefinition } from '../../../src/combat/spells/types';
@@ -62,7 +62,7 @@ const LEVEL_THREE_PINS: readonly LevelThreePin[] = [
   { id: 'phantom-steed', source: 'spell-descriptions.txt:5758', targeting: { kind: 'utility', rangeFeet: 30 }, operation: { kind: 'utility', effect: { kind: 'phantom_steed', speedFeet: 100, travelMilesPerHour: 13, equipmentVanishDistanceFeet: 10, fadeRounds: 10 }, concentration: false, durationRounds: 600 } },
   { id: 'protection-from-energy', source: 'spell-descriptions.txt:6322', targeting: { kind: 'single', rangeFeet: 5, willing: true }, operation: { kind: 'effect', effect: effect({ kind: 'energy_protection', damageTypes: ['Acid', 'Cold', 'Fire', 'Lightning', 'Thunder'], selectedDamageType: 'chosen_when_cast' }, { concentration: true, durationRounds: 600 }) } },
   { id: 'remove-curse', source: 'spell-descriptions.txt:6499', targeting: { kind: 'single', rangeFeet: 5, willing: false }, operation: { kind: 'remove_curse' } },
-  { id: 'revivify', source: 'spell-descriptions.txt:6604', targeting: { kind: 'single', rangeFeet: 5, willing: false, allowDead: true }, operation: { kind: 'revive', hitPoints: 1, maximumDeathAgeRounds: 10 } },
+  { id: 'revivify', source: 'spell-descriptions.txt:6604', targeting: { kind: 'single', rangeFeet: 5, willing: false, allowDead: true }, operation: { kind: 'revive', hitPoints: 1, maximumDeathAgeRounds: 10, oldAgeEligible: false, restoresMissingBodyParts: false } },
   { id: 'sending', source: 'spell-descriptions.txt:6825', targeting: { kind: 'remote', range: 'unlimited' }, operation: { kind: 'utility', effect: { kind: 'sending', maximumWords: 25, crossPlaneFailurePercent: 5, recipientBlockRounds: 4800 }, concentration: false, durationRounds: null } },
   { id: 'sleet-storm', source: 'spell-descriptions.txt:7119', targeting: { kind: 'area', rangeFeet: 150, shape: 'cylinder', baseSizeFeet: 20, sizePerSlotFeet: 0, secondarySizeFeet: 40 }, operation: { kind: 'utility', effect: { kind: 'sleet_storm_area', placement: 'selected_when_cast', radiusFeet: 20, heightFeet: 40, obscurement: 'heavy', difficultTerrain: true, saveAbility: 'dexterity', failureCondition: 'Prone', failureBreaksConcentration: true }, concentration: true, durationRounds: 10 } },
   { id: 'slow', source: 'spell-descriptions.txt:7140', targeting: { kind: 'area_selected', rangeFeet: 120, shape: 'cube', baseSizeFeet: 40, sizePerSlotFeet: 0, baseMaximum: 6, additionalPerSlot: 0 }, operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'slow', speedMultiplier: 0.5, armorClassPenalty: 2, dexteritySavePenalty: 2, reactionsAllowed: false, actionOrBonusOnly: true, attacksPerAction: 1, somaticSpellFailurePercent: 25 }, { concentration: true, durationRounds: 10, expiresAt: 'target_end', repeatedSave: { ability: 'wisdom', rollMode: 'normal', timing: 'target_end' } }) } },
@@ -165,7 +165,7 @@ describe('level-3 spell mechanics pins', () => {
       state = { ...state, combatants: state.combatants.map((subject) => subject.profile.id === target.id ? { ...subject, hitPoints: 1 } : subject) };
     }
     if (definition.operation.kind === 'revive') {
-      state = { ...state, combatants: state.combatants.map((subject) => subject.profile.id === target.id ? { ...subject, hitPoints: 0, life: 'dead', deathSaves: null } : subject) };
+      state = reduceEncounter(state, { type: 'dm_mark_dead', target: target.id }, () => 0.5).state;
     }
     const selectedTarget = definition.targeting.kind === 'single' || definition.targeting.kind === 'multiple' ||
       definition.targeting.kind === 'all_in_range' || definition.targeting.kind === 'remote' || definition.targeting.kind === 'area_selected';
@@ -178,6 +178,92 @@ describe('level-3 spell mechanics pins', () => {
     const result = reduceEncounter(state, command, () => 0.5);
     expect(result.events.some((event) => event.type === 'spell_cast' && event.spellId === pin.id)).toBe(true);
     expect(result.state.combatants.find((subject) => subject.profile.id === caster.id)?.spellSlots.find((slot) => slot.level === 3)?.remaining).toBe(2);
+  });
+
+  it.each([
+    { name: 'inside the window', round: 10, initiativeIndex: 1 },
+    { name: 'exactly one minute at the same initiative boundary', round: 11, initiativeIndex: 0 },
+  ])('revivify_full_hp: Revivify returns the target at exactly 1 HP $name and consumes one recorded diamond', ({ round, initiativeIndex }) => {
+    const caster = playerProfile('revivify-caster', {
+      initiativeBonus: 20,
+      spellSlots: referencePartySpellSlots('Cleric'),
+    });
+    const target = monsterProfile('revivify-target', { hitPoints: 47, initiativeBonus: 0 });
+    let state = createEncounter({
+      bounds: { columns: 5, rows: 5 },
+      combatants: [caster, target],
+      tokens: [placedToken(caster, 0, 0), placedToken(target, 1, 0)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = reduceEncounter(state, { type: 'dm_mark_dead', target: target.id }, () => 0.5).state;
+    expect(state.combatants.find((subject) => subject.profile.id === target.id)?.deathAt).toEqual({
+      round: 1,
+      initiativeIndex: 0,
+    });
+    state = { ...state, round, activeInitiativeIndex: initiativeIndex };
+
+    const result = reduceEncounter(state, {
+      type: 'cast_spell', actor: caster.id, spellId: 'revivify', slotLevel: 3,
+      castAsRitual: false, casterLevel: 7, attackBonus: 5, saveDc: 13,
+      spellcastingModifier: 3, targets: [target.id], area: null,
+      weaponAttack: null, selectedOption: null,
+    }, () => 0.5);
+
+    expect(result.state.combatants.find((subject) => subject.profile.id === target.id)).toMatchObject({
+      hitPoints: 1,
+      life: 'living',
+      deathAt: null,
+    });
+    const consumed = result.events.filter((event) => event.type === 'spell_component_consumed');
+    expect(consumed).toEqual([expect.objectContaining({
+      caster: caster.id,
+      spellId: 'revivify',
+      component: {
+        kind: 'material', description: 'a diamond worth 300+ GP',
+        minimumGoldPieceValue: 300, quantity: 1,
+      },
+      inventoryTracking: 'recorded_untracked_inventory',
+      citation: 'docs/srd/full/srd-5.2.1.txt:10145-10146',
+    })]);
+  });
+
+  it('revivify_window_off_by_one: refuses the next initiative boundary after exactly one minute with the cited typed refusal', () => {
+    const caster = playerProfile('late-revivify-caster', {
+      initiativeBonus: 20,
+      spellSlots: referencePartySpellSlots('Cleric'),
+    });
+    const target = monsterProfile('late-revivify-target', { hitPoints: 47, initiativeBonus: 0 });
+    let state = createEncounter({
+      bounds: { columns: 5, rows: 5 }, combatants: [caster, target],
+      tokens: [placedToken(caster, 0, 0), placedToken(target, 1, 0)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = reduceEncounter(state, { type: 'dm_mark_dead', target: target.id }, () => 0.5).state;
+    state = { ...state, round: 11, activeInitiativeIndex: 1 };
+    const cast = () => reduceEncounter(state, {
+      type: 'cast_spell', actor: caster.id, spellId: 'revivify', slotLevel: 3,
+      castAsRitual: false, casterLevel: 7, attackBonus: 5, saveDc: 13,
+      spellcastingModifier: 3, targets: [target.id], area: null,
+      weaponAttack: null, selectedOption: null,
+    }, () => 0.5);
+
+    expect(cast).toThrow(RevivifyRuleError);
+    try {
+      cast();
+    } catch (error: unknown) {
+      expect(error).toMatchObject({
+        code: 'target_dead_too_long',
+        citation: 'docs/srd/full/srd-5.2.1.txt:10148-10150',
+      });
+    }
+  });
+
+  it('Revivify definition fixes revival at 1 HP rather than the target maximum', () => {
+    const definition = spellDefinition('revivify');
+    expect(definition?.operation).toMatchObject({ kind: 'revive', hitPoints: 1 });
+    expect(IMPLEMENTED_SPELL_DEFINITIONS.filter(
+      (candidate) => candidate.operation.kind === 'revive',
+    ).map((candidate) => candidate.id)).toEqual(['revivify']);
   });
 
   it.each([

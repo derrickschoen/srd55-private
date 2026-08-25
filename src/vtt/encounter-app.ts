@@ -36,6 +36,11 @@ import {
 import { REFERENCE_ENCOUNTER_ART } from './reference-encounter-art';
 import { decodeSavedSessionFingerprint } from './session-persistence';
 import type { StoredCharacterEncounter } from './stored-character-encounter';
+import {
+  REST_INTERRUPTION_DM_CONTROL,
+  type LongRestBenefit,
+  type RestInterruptionOutcome,
+} from './party-session-state';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -663,7 +668,7 @@ class DmEncounterView {
   #browserSaves(): readonly SaveManagerEntry[] {
     return this.#store.savedSessions().map((save) => ({
       ...save,
-      id: `browser:${save.sessionId}`,
+      id: `browser:${save.storageId}`,
       source: 'browser',
     }));
   }
@@ -675,7 +680,7 @@ class DmEncounterView {
         load: (save) => this.#loadSave(save),
         rename: async (save, name) => {
           if (save.source === 'browser') {
-            this.#store.rename(save.sessionId, name);
+            this.#store.renameStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId, name);
           } else {
             await this.#folder.rename(save, name);
             await this.#refreshFolderSaves();
@@ -685,9 +690,11 @@ class DmEncounterView {
         delete: async (save) => {
           if (save.source === 'browser') {
             const deletingActiveSession = save.sessionId === encounterSessionId(this.sessionId);
-            if (deletingActiveSession) this.close();
-            this.#store.remove(save.sessionId);
-            if (deletingActiveSession) {
+            const storageId = save.storageId ?? `session:${save.sessionId}`;
+            const deletingLiveSession = deletingActiveSession && storageId.startsWith('session:');
+            if (deletingLiveSession) this.close();
+            this.#store.removeStored(storageId, save.sessionId);
+            if (deletingLiveSession) {
               const url = new URL(location.href);
               url.searchParams.set('encounter', 'reference');
               url.searchParams.set('view', 'dm');
@@ -726,6 +733,9 @@ class DmEncounterView {
   }
 
   async #loadSave(save: SaveManagerEntry): Promise<void> {
+    if (save.source === 'browser') {
+      this.#store.restoreStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId);
+    }
     if (save.source === 'folder') {
       const existing = this.#store.revisions(save.sessionId);
       if (existing.length === 0) {
@@ -858,6 +868,7 @@ class DmEncounterView {
       item.append(
         element('h3', { text: row.name }),
         element('span', { className: 'dm-save-badge', text: row.badge }),
+        element('span', { className: 'dm-save-pool', text: row.poolLabel }),
         element('time', { text: row.timestampLabel }),
         element('p', { className: 'dm-save-summary', text: row.summary }),
       );
@@ -988,6 +999,52 @@ class DmEncounterView {
         });
       });
       controls.append(longRest);
+
+      const interruption = element('form', { className: 'dm-rest-interruption' });
+      const outcomeLabel = element('label', { text: 'Interruption outcome' });
+      const outcomeSelect = element('select');
+      outcomeSelect.setAttribute('aria-label', 'Rest interruption outcome');
+      for (const outcome of REST_INTERRUPTION_DM_CONTROL.outcomes) {
+        const option = element('option', { text: outcome.replaceAll('_', ' ') });
+        option.value = outcome;
+        outcomeSelect.append(option);
+      }
+      outcomeLabel.append(outcomeSelect);
+      interruption.append(outcomeLabel);
+      const benefitInputs = REST_INTERRUPTION_DM_CONTROL.partialBenefitChecklist.map((benefit) => {
+        const label = element('label', { text: benefit.replaceAll('_', ' ') });
+        const input = element('input');
+        input.type = 'checkbox';
+        input.value = benefit;
+        input.setAttribute('aria-label', `Apply ${benefit.replaceAll('_', ' ')}`);
+        label.prepend(input);
+        interruption.append(label);
+        return { benefit, input };
+      });
+      const interrupted = element('button', { text: REST_INTERRUPTION_DM_CONTROL.label });
+      interrupted.type = 'submit';
+      interruption.append(interrupted);
+      interruption.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const selected = outcomeSelect.value;
+        let outcome: RestInterruptionOutcome;
+        if (selected === 'no_benefit') outcome = { kind: 'no_benefit' };
+        else if (selected === 'resumed') outcome = { kind: 'resumed' };
+        else if (selected === 'partial_per_dm') {
+          outcome = {
+            kind: 'partial_per_dm',
+            benefits: benefitInputs.flatMap(({ benefit, input }): readonly LongRestBenefit[] =>
+              input.checked ? [benefit] : []),
+          };
+        } else {
+          throw new Error(`Unknown Rest interruption outcome ${selected}.`);
+        }
+        void this.#host.resolveRestInterruption(outcome).catch((error: unknown) => {
+          this.#channelError = error instanceof Error ? error.message : 'Rest interruption failed.';
+          this.#render();
+        });
+      });
+      controls.append(interruption);
     }
     if (projection.partySession !== null &&
       projection.partySession.state.adventuringDayStatus === 'active' &&
@@ -1003,6 +1060,19 @@ class DmEncounterView {
       controls.append(nextRoom);
     }
     this.#shell.append(controls);
+
+    for (const entry of projection.history) {
+      if (entry.void || entry.transition.kind !== 'party_state_captured' ||
+        entry.transition.restInterruption === undefined) continue;
+      const card = element('section', { className: 'rest-interruption-ruling-card' });
+      card.dataset.revision = String(entry.revision);
+      card.dataset.choice = entry.transition.restInterruption.ruling.choice;
+      card.append(
+        element('h2', { text: `Rest interrupted — ${entry.transition.restInterruption.ruling.choice.replaceAll('_', ' ')}` }),
+        element('p', { text: entry.transition.restInterruption.ruling.reasoning }),
+      );
+      this.#shell.append(card);
+    }
 
     if (projection.partySession !== null &&
       projection.partySession.state.adventuringDayStatus === 'active' &&

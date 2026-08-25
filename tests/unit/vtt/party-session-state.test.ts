@@ -23,11 +23,14 @@ import {
   createPartySessionState,
   decodePartySessionState,
   enterNextRoom,
+  interruptLongRest,
+  REST_INTERRUPTION_DM_CONTROL,
   preloadPartySessionState,
   projectPlayerPartySession,
   setPartyReactionPolicy,
   takeLongRest,
   takeShortRest,
+  type RestInterruptionOutcome,
   type PartySessionState,
 } from '../../../src/vtt/party-session-state';
 import { composeStoredCharacterEncounter } from '../../../src/vtt/stored-character-encounter';
@@ -437,6 +440,126 @@ describe('adventuring-day party session state', () => {
     expect(rested.summary.characters[0]?.limitedResourcesRestored).toEqual([
       { id: limitedResourcePoolId('resource:long-rest-feature'), count: 2 },
     ]);
+  });
+
+  it.each([
+    { outcome: { kind: 'no_benefit' } as const, choice: 'no_benefit', reasoning: 'DM fiat: no Long Rest benefits apply.' },
+    { outcome: { kind: 'partial_per_dm', benefits: ['hit_points'] } as const, choice: 'partial_per_dm', reasoning: 'DM fiat: partial benefits (hit_points).' },
+    { outcome: { kind: 'resumed' } as const, choice: 'resumed', reasoning: 'DM fiat: the Long Rest resumes.' },
+  ])('Rest interrupted produces the typed $choice outcome and D357-style ruling card', ({ outcome, choice, reasoning }) => {
+    const initial = createPartySessionState(loadedParty());
+    const result = interruptLongRest(initial, outcome);
+
+    expect(result.outcome).toEqual(outcome);
+    expect(result.ruling).toEqual({
+      kind: 'adjudicated_ruling',
+      subject: 'Rest interrupted',
+      choice,
+      checkedBenefits: outcome.kind === 'partial_per_dm' ? outcome.benefits : [],
+      reasoning,
+    });
+  });
+
+  it('exposes the DM Rest interrupted button contract with only the closed outcomes and typed checklist', () => {
+    expect(REST_INTERRUPTION_DM_CONTROL).toEqual({
+      label: 'Rest interrupted',
+      outcomes: ['no_benefit', 'partial_per_dm', 'resumed'],
+      partialBenefitChecklist: [
+        'hit_points', 'hit_dice', 'spell_slots', 'exhaustion', 'limited_resources',
+      ],
+    });
+  });
+
+  it('partial_applies_all: partial_per_dm applies exactly the checked benefits', () => {
+    const initial = createPartySessionState(loadedParty());
+    const depleted: PartySessionState = {
+      ...initial,
+      characters: initial.characters.map((entry, index) => index === 0
+        ? {
+            ...entry,
+            currentHitPoints: 3,
+            exhaustionLevel: 2,
+            hitDice: entry.hitDice.map((pool) => ({ ...pool, remaining: 0 })),
+            spellSlots: entry.spellSlots.map((slot) => ({ ...slot, remaining: 0 })),
+            limitedResources: [
+              { id: limitedResourcePoolId('resource:partial-long'), maximum: 3, remaining: 0, recharge: 'long_rest' },
+              { id: limitedResourcePoolId('resource:partial-short'), maximum: 2, remaining: 0, recharge: 'short_rest' },
+            ],
+          }
+        : entry),
+    };
+    const outcome: RestInterruptionOutcome = {
+      kind: 'partial_per_dm',
+      benefits: ['hit_points', 'limited_resources'],
+    };
+
+    const result = interruptLongRest(depleted, outcome);
+    const wizard = character(result.state, 'combatant:advday-1');
+    expect(wizard).toMatchObject({
+      currentHitPoints: 20,
+      exhaustionLevel: 2,
+      hitDice: [{ sides: 6, maximum: 2, remaining: 0 }],
+      spellSlots: [{ pool: 'shared', level: 1, maximum: 3, remaining: 0, recharge: 'long_rest' }],
+      limitedResources: [
+        { id: limitedResourcePoolId('resource:partial-long'), maximum: 3, remaining: 3, recharge: 'long_rest' },
+        { id: limitedResourcePoolId('resource:partial-short'), maximum: 2, remaining: 0, recharge: 'short_rest' },
+      ],
+    });
+    expect(result.ruling.checkedBenefits).toEqual(['hit_points', 'limited_resources']);
+    expect(result.state.adventuringDayStatus).toBe('active');
+  });
+
+  it('persists the Rest interrupted choice and ruling card without inventing a RAW interruption threshold', () => {
+    const members = loadedParty();
+    const room = composeStoredCharacterEncounter(members);
+    if (room.partyState === null) throw new Error('Rest interruption fixture has no party state.');
+    const depleted: PartySessionState = {
+      ...room.partyState,
+      characters: room.partyState.characters.map((entry, index) => index === 0
+        ? { ...entry, currentHitPoints: 2 }
+        : entry),
+    };
+    const sessionId = encounterSessionId('session:rest-interruption-save');
+    const store = new MemoryBrowserSessionStore();
+    const journal = EncounterSessionJournal.create({
+      sessionId,
+      branchId: encounterBranchId('branch:rest-interruption-save'),
+      encounterState: room.state,
+      partyState: depleted,
+      coordinatorState: {
+        requestSequence: 1, pendingRequest: null, pendingCommand: null,
+        continuation: { kind: 'idle' }, pause: null,
+      },
+      controllers: room.controllers,
+      codexSessionId: codexSessionId('codex:rest-interruption-save'),
+      rng: mulberry32(3777),
+      store,
+      mirror: new MemoryMirrorSink(),
+    });
+    const result = journal.resolveRestInterruption({
+      kind: 'partial_per_dm', benefits: ['hit_points'],
+    });
+    const bytes = exportSavedSession(store, sessionId);
+    const imported = new MemoryBrowserSessionStore();
+    importSavedSession(imported, bytes);
+    const resumed = EncounterSessionJournal.resume(sessionId, imported, new MemoryMirrorSink());
+
+    expect(character(result.state, 'combatant:advday-1').currentHitPoints).toBe(20);
+    expect(resumed.partyState).toEqual(result.state);
+    expect(resumed.journal.history().at(-1)?.transition).toEqual({
+      kind: 'party_state_captured',
+      room: 1,
+      restInterruption: {
+        outcome: { kind: 'partial_per_dm', benefits: ['hit_points'] },
+        ruling: {
+          kind: 'adjudicated_ruling',
+          subject: 'Rest interrupted',
+          choice: 'partial_per_dm',
+          checkedBenefits: ['hit_points'],
+          reasoning: 'DM fiat: partial benefits (hit_points).',
+        },
+      },
+    });
   });
 
   it('campaign save round-trips the post-rest state and cited summary transition', () => {
