@@ -76,12 +76,16 @@ function roomState(initial: PartySessionState, room: 1 | 2 | 3): PartySessionSta
 }
 
 function advanceToActor(session: AdventuringDaySession, actor: CombatantId): void {
-  if (session.encounter().initiative.length === 0) session.apply({ type: 'roll_initiative' });
+  if (session.encounter().initiative.length === 0) {
+    const rolled = session.apply({ type: 'roll_initiative' });
+    expect(rolled.activeCombatant).not.toBeNull();
+  }
   let remaining = session.encounter().initiative.length + 1;
   while (session.encounter().activeCombatant !== actor && remaining > 0) {
     const active = session.encounter().activeCombatant;
     if (active === null) throw new Error('Vane Warren encounter lost its active combatant.');
-    session.apply({ type: 'end_turn', actor: active });
+    const advanced = session.apply({ type: 'end_turn', actor: active });
+    expect(advanced.activeCombatant).not.toBe(active);
     remaining -= 1;
   }
   if (session.encounter().activeCombatant !== actor) {
@@ -168,15 +172,18 @@ describe('Vane Warren loader, chaining, seats, and end-session export', () => {
     });
     const warlock = sample.party.members[0];
     if (warlock === undefined) throw new Error('The representative Warlock is missing.');
-    session.apply({
+    const damaged = session.apply({
       type: 'adjudicate',
       target: warlock.profile.id,
       subject: 'vane-warren:carry-hp',
       reasoning: 'Deterministic cross-encounter carry test.',
       consequence: { kind: 'hit_point_delta', amount: -6 },
     });
+    expect(damaged.combatants.find(
+      (combatant) => combatant.profile.id === warlock.profile.id,
+    )?.hitPoints).toBe(warlock.profile.rules.hitPointMaximum - 6);
     advanceToActor(session, warlock.profile.id);
-    session.apply(loadedPartySpellCastCommand(warlock, 'burning-hands', {
+    const cast = session.apply(loadedPartySpellCastCommand(warlock, 'burning-hands', {
       slotLevel: 3,
       slotRecharge: 'short_rest',
       castAsRitual: false,
@@ -192,6 +199,12 @@ describe('Vane Warren loader, chaining, seats, and end-session export', () => {
       },
       weaponAttack: null,
       selectedOption: null,
+    }));
+    expect(cast.eventLog).toContainEqual(expect.objectContaining({
+      type: 'spell_cast',
+      caster: warlock.profile.id,
+      spellId: 'burning-hands',
+      slotLevel: 3,
     }));
     const afterFirst = session.captureRoom();
     const carriedWarlock = afterFirst.characters.find(

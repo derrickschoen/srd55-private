@@ -448,7 +448,8 @@ export class DmEncounterHost {
         if (this.#closed || this.#coordinator.pauseState() !== null) return;
         const step = this.#coordinator.step();
         await Promise.resolve();
-        await this.#flushStore();
+        const preStepFlush = this.#flushStore();
+        if (preStepFlush !== null) await preStepFlush;
         this.#publish();
         let result;
         try {
@@ -457,7 +458,8 @@ export class DmEncounterHost {
           if (this.#bridgeFailureGuard?.report() !== null) return;
           throw error;
         }
-        await this.#flushStore();
+        const postStepFlush = this.#flushStore();
+        if (postStepFlush !== null) await postStepFlush;
         this.#publish();
         if (result.kind === 'refused') {
           this.#boundaryRefusal = result.pendingDecisionCode === 'turn_boundary_blocked'
@@ -475,8 +477,8 @@ export class DmEncounterHost {
     return this.#pump;
   }
 
-  async #flushStore(): Promise<void> {
-    if (hasDurableFlush(this.#store)) await this.#store.flush();
+  #flushStore(): Promise<void> | null {
+    return hasDurableFlush(this.#store) ? this.#store.flush() : null;
   }
 
   #routeActionRefusal(refusal: NonBoundaryActionRefusal): void {

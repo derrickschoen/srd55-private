@@ -81,7 +81,8 @@ describe('encounter package asset-id consumption', () => {
       `${repositoryRoot}src/vtt/encounter-app.ts`,
       'utf8',
     );
-    expect(source).toContain('encounterBoardRenderModel(projection, REFERENCE_ENCOUNTER_ART)');
+    expect(source).toContain('projection.bounds.columns === VANE_WARREN_ART.room.columns');
+    expect(source).toContain('encounterBoardRenderModel(projection, packageForBounds)');
     expect(source).toContain('starterArtDataUri(layer.assetId)');
     expect(source).toContain('starterArtDataUri(model.token.assetId)');
     expect(source).toContain('projection.encounter.dmOnly.foggedCells');
