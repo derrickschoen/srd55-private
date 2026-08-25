@@ -21,6 +21,7 @@ import {
   type PlayerVisibleEncounterEvent,
 } from '../combat/visibility';
 import type { CombatantId } from '../combat/values';
+import { dmWorldObjectOverrideCommand } from '../combat/world-object-actions';
 import type { SessionHistoryEntry } from './session-persistence';
 import {
   projectEncounterTimeline,
@@ -88,6 +89,12 @@ export interface DmBoardProjection {
   readonly partySession: DmPartySessionView | null;
   readonly decisionTray: DmDecisionTrayProjection;
   readonly timeline: EncounterTimelineProjection;
+  readonly worldObjectControls: readonly {
+    readonly objectId: string;
+    readonly objectName: string;
+    readonly label: string;
+    readonly command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>;
+  }[];
 }
 
 export interface DmMovementPathPreview extends MovementPathDangerPreview {
@@ -239,6 +246,13 @@ export function projectDmBoard(input: {
   const humanCommandActions = pendingController?.kind === 'human'
     ? pending?.legalActions.actions ?? []
     : [];
+  const worldObjectControls = input.view.state.worldObjects.flatMap((object) =>
+    (object.classActions ?? []).flatMap((action) => {
+      const command = dmWorldObjectOverrideCommand(input.view.state, object.id, action.id);
+      return command === null ? [] : [{
+        objectId: String(object.id), objectName: object.name, label: action.label, command,
+      }];
+    }));
   const names = new Map(input.view.state.combatants.map(
     (subject) => [subject.profile.id, subject.profile.name] as const,
   ));
@@ -290,6 +304,7 @@ export function projectDmBoard(input: {
       boundaryRefusal: input.boundaryRefusal ?? null,
     },
     timeline: projectEncounterTimeline(input.view.state, input.history),
+    worldObjectControls,
   };
 }
 

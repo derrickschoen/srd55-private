@@ -160,6 +160,10 @@ function actionLabel(action: EncounterCommand): string {
       return 'End concentration';
     case 'adjudicate':
       return 'ADJUDICATED';
+    case 'use_world_object':
+      return action.actionId.replaceAll('_', ' ');
+    case 'dm_use_world_object':
+      return `DM override: ${action.actionId.replaceAll('_', ' ')}`;
   }
 }
 
@@ -643,6 +647,7 @@ class DmEncounterView {
           initialControllers: encounter.controllers,
           playerIds: encounter.playerIds,
           turnLegalActions: encounter.turnLegalActions,
+          ...(encounter.commandReducer === undefined ? {} : { commandReducer: encounter.commandReducer }),
           reactionLegalActions: () => [],
         });
     this.#channel = new BroadcastChannel(`srd55:vtt:${sessionId}`);
@@ -1631,6 +1636,21 @@ class DmEncounterView {
       }
     }
     this.#shell.append(pending);
+
+    const objectControls = element('section', { className: 'dm-world-object-controls' });
+    objectControls.append(element('h2', { text: 'World-object controls' }));
+    if (projection.worldObjectControls.length === 0) {
+      objectControls.append(element('p', { text: 'No available object overrides.' }));
+    } else {
+      for (const control of projection.worldObjectControls) {
+        const button = element('button', { text: `${control.label} — ${control.objectName}` });
+        button.type = 'button';
+        button.dataset.objectId = control.objectId;
+        button.addEventListener('click', () => this.#host.dmUseWorldObject(control.command));
+        objectControls.append(button);
+      }
+    }
+    this.#shell.append(objectControls);
 
     const adjudication = element('form', { className: 'dm-adjudication' });
     const target = element('select');

@@ -134,6 +134,18 @@ export type EncounterCommand =
       readonly operation: WorldOperation;
     }
   | {
+      readonly type: 'use_world_object';
+      readonly actor: CombatantId;
+      readonly objectId: WorldObjectId;
+      readonly actionId: string;
+    }
+  | {
+      readonly type: 'dm_use_world_object';
+      readonly actor: CombatantId;
+      readonly objectId: WorldObjectId;
+      readonly actionId: string;
+    }
+  | {
       readonly type: 'attack';
       readonly actor: CombatantId;
       readonly target: CombatantId;
@@ -285,6 +297,22 @@ interface SequencedEvent {
 
 export type EncounterEvent =
   | (SequencedEvent & {
+      readonly type: 'world_object_used';
+      readonly actor: CombatantId;
+      readonly objectId: WorldObjectId;
+      readonly actionId: string;
+      readonly round: number;
+      readonly authority: 'combatant_action' | 'dm_override';
+    })
+  | (SequencedEvent & {
+      readonly type: 'reinforcement_wave_deployed';
+      readonly objectId: WorldObjectId;
+      readonly waveId: string;
+      readonly calledBy: CombatantId;
+      readonly combatants: readonly CombatantId[];
+      readonly round: number;
+    })
+  | (SequencedEvent & {
       readonly type: 'object_interaction_spent';
       readonly combatant: CombatantId;
       readonly mode: ObjectInteractionMode;
@@ -320,6 +348,11 @@ export type EncounterEvent =
             readonly to: GridCell;
           }
         | { readonly kind: 'no_effect' }
+        | {
+            readonly kind: 'world_object_interaction';
+            readonly objectId: WorldObjectId;
+            readonly actionId: string;
+          }
         | {
             readonly kind: 'death_override';
             readonly override: 'stabilize' | 'revive_at_one_hit_point' | 'set_death_save_counts' | 'mark_dead';

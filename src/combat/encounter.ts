@@ -142,6 +142,7 @@ import {
   environmentLightAt,
   environmentObscurementAt,
   isEnvironmentDifficultTerrain,
+  type WorldObjectClassAction,
   type CoverTier,
   type EncounterEnvironment,
   type WorldObject,
@@ -586,6 +587,13 @@ export type ReactionDecisionHook = (
 export interface EncounterReductionOptions {
   readonly reactionDecision?: ReactionDecisionHook;
 }
+
+export type EncounterCommandReducer = (
+  state: EncounterState,
+  command: EncounterCommand,
+  rng: Rng,
+  options?: EncounterReductionOptions,
+) => EncounterReduction;
 
 export { combatantSide, combatantsAreAllies, EncounterRuleError };
 
@@ -9986,6 +9994,63 @@ function processWorldOperation(
   }
 }
 
+function worldObjectClassActionFor(
+  state: EncounterState,
+  objectId: WorldObjectId,
+  actionId: string,
+): { readonly object: WorldObject; readonly action: WorldObjectClassAction } {
+  const object = worldObject(state, objectId);
+  const action = object.classActions?.find((candidate) => candidate.id === actionId);
+  if (action === undefined) {
+    throw new EncounterRuleError('validation', `World object ${objectId} has no class action ${actionId}.`);
+  }
+  if (action.uses === 'once' && state.eventLog.some((event) =>
+    event.type === 'world_object_used' && event.objectId === objectId && event.actionId === actionId)) {
+    throw new EncounterRuleError('validation', `${action.label} has already been used.`);
+  }
+  return { object, action };
+}
+
+function useWorldObject(
+  context: ReductionContext,
+  command: Extract<EncounterCommand, { readonly type: 'use_world_object' }>,
+): void {
+  const subject = assertActiveActor(context, command.actor);
+  const { object, action } = worldObjectClassActionFor(context.state, command.objectId, command.actionId);
+  if (action.eligibleActor !== 'either' && action.eligibleActor !== subject.profile.kind) {
+    throw new EncounterRuleError('validation', `${action.label} is unavailable to ${subject.profile.kind}.`);
+  }
+  if (action.reach === 'adjacent' && gridDistance(token(context.state, command.actor).position, object.position) > 5) {
+    throw new EncounterRuleError('validation', `${action.label} requires adjacency to ${object.name}.`);
+  }
+  spendCost(context, command.actor, action.cost, action.label);
+  emit(context, {
+    type: 'world_object_used', actor: command.actor, objectId: object.id,
+    actionId: action.id, round: Math.max(1, context.state.round), authority: 'combatant_action',
+  });
+}
+
+function overrideWorldObjectUse(
+  context: ReductionContext,
+  command: Extract<EncounterCommand, { readonly type: 'dm_use_world_object' }>,
+): void {
+  const { object, action } = worldObjectClassActionFor(context.state, command.objectId, command.actionId);
+  if (action.dmOverride === undefined || action.dmOverride.actor !== command.actor) {
+    throw new EncounterRuleError('validation', `${action.label} has no matching DM override control.`);
+  }
+  combatant(context.state, command.actor);
+  emit(context, {
+    type: 'adjudicated', target: command.actor,
+    subject: `dm-override:world-object:${action.id}`,
+    reasoning: action.dmOverride.reasoning,
+    consequence: { kind: 'world_object_interaction', objectId: object.id, actionId: action.id },
+  });
+  emit(context, {
+    type: 'world_object_used', actor: command.actor, objectId: object.id,
+    actionId: action.id, round: Math.max(1, context.state.round), authority: 'dm_override',
+  });
+}
+
 function sameIdentitySet<T>(left: readonly T[], right: readonly T[]): boolean {
   return left.length === right.length &&
     new Set(left).size === left.length &&
@@ -10163,6 +10228,12 @@ function applyDmDeathOverride(context: ReductionContext, command: DmDeathOverrid
 
 function processCommand(context: ReductionContext, command: EncounterCommand): void {
   switch (command.type) {
+    case 'use_world_object':
+      useWorldObject(context, command);
+      return;
+    case 'dm_use_world_object':
+      overrideWorldObjectUse(context, command);
+      return;
     case 'assume_wild_shape':
       assumeWildShape(context, command);
       return;
