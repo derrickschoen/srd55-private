@@ -7,6 +7,7 @@ import {
   TOUGH, UNICORN, WARHORSE_SKELETON, WIGHT, WOLF, ZOMBIE,
 } from './monsters';
 import { HOMEBREW_BEAST_ROSTER, type HomebrewBeastRosterRow } from './homebrew-beast-families';
+import { VANE_WARREN_MONSTER_ROSTER, type VaneWarrenMonsterRosterRow } from './vane-warren';
 
 export type StarterMonsterFamily = 'goblinoid_warband' | 'undead_crypt' | 'mercenary_company' | 'wild_beasts';
 
@@ -104,11 +105,12 @@ export const LEGENDARY_MONSTER_ROSTER: readonly LegendaryMonsterRosterRow[] = [{
   statblock: { ...UNICORN, provenance: { kind: 'srd_5_2_1_decoded', source: UNICORN_SOURCE } },
 }];
 
-export type BundledMonsterRosterRow = StarterMonsterRosterRow | LegendaryMonsterRosterRow | HomebrewBeastRosterRow;
+export type BundledMonsterRosterRow = StarterMonsterRosterRow | LegendaryMonsterRosterRow | HomebrewBeastRosterRow | VaneWarrenMonsterRosterRow;
 
 /** SRD-decoded and clean-room homebrew rows share one bundled lookup surface. */
 export const BUNDLED_MONSTER_ROSTER: readonly BundledMonsterRosterRow[] = [
   ...STARTER_MONSTER_ROSTER,
   ...LEGENDARY_MONSTER_ROSTER,
   ...HOMEBREW_BEAST_ROSTER,
+  ...VANE_WARREN_MONSTER_ROSTER,
 ];

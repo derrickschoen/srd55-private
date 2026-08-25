@@ -5,6 +5,11 @@ export const screen = defineScreen({
   id: 'vtt',
   matches: (route) => route.path === '/vtt',
   render: async ({ root, route, rpc }) => {
+    if (route.query.get('encounter') === 'vane-warren') {
+      const { mountVaneWarren } = await import('../../../vtt/vane-warren-app');
+      const mounted = mountVaneWarren(root, rpc);
+      return () => mounted.close();
+    }
     if (route.query.get('encounter') === 'd365') {
       const { mountD365SampleDungeon } = await import(
         '../../../vtt/d365-sample-dungeon-app'
