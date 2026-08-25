@@ -52,6 +52,8 @@ import {
   enterNextRoom as advancePartyRoom,
   type LongRestResult,
   type PartySessionState,
+  type RestInterruptionOutcome,
+  type RestInterruptionResult,
 } from './party-session-state';
 import type { ShortRestHitDieSpend } from './party-session-state';
 import type { LoadedPartyMember } from './party-pack';
@@ -183,6 +185,7 @@ export class DmEncounterHost {
     readonly code: 'turn_boundary_blocked';
     readonly message: string;
   } = null;
+  #partyStateHasBoundaryRuling = false;
   readonly #steeringMode: SteeringCoordinatorMode;
   readonly #onSteeringTelemetry: (telemetry: SteeringTelemetry) => void;
   readonly #playerIds: readonly CombatantId[];
@@ -525,13 +528,58 @@ export class DmEncounterHost {
     void this.#pumpCoordinator();
   }
 
+  async skipTurn(): Promise<void> {
+    const resumeAfter = this.#coordinator.pauseState() === null;
+    if (resumeAfter) this.#coordinator.interrupt();
+    await this.#pump;
+    this.#replaceFromResume(this.#journal.skipTurn());
+    if (resumeAfter) this.#coordinator.resume();
+    this.#publish();
+    if (resumeAfter) void this.#pumpCoordinator();
+  }
+
+  async delayTurn(afterCombatant: CombatantId): Promise<void> {
+    const resumeAfter = this.#coordinator.pauseState() === null;
+    if (resumeAfter) this.#coordinator.interrupt();
+    await this.#pump;
+    this.#replaceFromResume(this.#journal.delayTurn(afterCombatant));
+    if (resumeAfter) this.#coordinator.resume();
+    this.#publish();
+    if (resumeAfter) void this.#pumpCoordinator();
+  }
+
+  async rewindToRound(round: number): Promise<void> {
+    this.#coordinator.interrupt();
+    await this.#pump;
+    const historyLength = this.#journal.history().length;
+    this.#replaceFromResume(this.#journal.rewindToRound(
+      round,
+      encounterBranchId(`branch:rewind-round:${String(round)}:${String(historyLength + 1)}`),
+    ));
+    this.#boundaryRefusal = null;
+    this.#publish();
+  }
+
+  #replaceFromResume(resumed: SessionResume): void {
+    const built = registryFromIdentities(
+      resumed.controllers,
+      this.#roundPlanSession === null ? undefined : (id) => this.#agentController(id),
+    );
+    this.#registry = built.registry;
+    this.#humans = built.humans;
+    this.#rng = resumed.rng;
+    this.#coordinator = this.#coordinatorFor(resumed);
+  }
+
   async finishRoom(shortRestSpends: readonly ShortRestHitDieSpend[] | null): Promise<void> {
     if (this.#partyMembers === null || this.#journal.partyState() === null) {
       throw new Error('This encounter is not part of a stored-character adventuring day.');
     }
     this.#coordinator.interrupt();
     await this.#pump;
-    let partyState = this.#journal.capturePartyState();
+    let partyState = this.#partyStateHasBoundaryRuling
+      ? this.#journal.partyState()!
+      : this.#journal.capturePartyState();
     if (shortRestSpends !== null) {
       partyState = this.#journal.takeShortRest(shortRestSpends).state;
     }
@@ -557,6 +605,7 @@ export class DmEncounterHost {
       codexSessionId: this.#journal.codexSessionId(),
       rng: this.#rng,
     });
+    this.#partyStateHasBoundaryRuling = false;
     this.#publish();
     void this.#pumpCoordinator();
   }
@@ -567,10 +616,24 @@ export class DmEncounterHost {
     }
     this.#coordinator.interrupt();
     await this.#pump;
-    this.#journal.capturePartyState();
+    if (!this.#partyStateHasBoundaryRuling) this.#journal.capturePartyState();
     const rested = this.#journal.takeLongRest();
+    this.#partyStateHasBoundaryRuling = false;
     this.#publish();
     return structuredClone(rested);
+  }
+
+  async resolveRestInterruption(outcome: RestInterruptionOutcome): Promise<RestInterruptionResult> {
+    if (this.#partyMembers === null || this.#journal.partyState() === null) {
+      throw new Error('This encounter is not part of a stored-character adventuring day.');
+    }
+    this.#coordinator.interrupt();
+    await this.#pump;
+    if (!this.#partyStateHasBoundaryRuling) this.#journal.capturePartyState();
+    const result = this.#journal.resolveRestInterruption(outcome);
+    this.#partyStateHasBoundaryRuling = true;
+    this.#publish();
+    return structuredClone(result);
   }
 
   replaceController(combatantId: CombatantId, kind: 'human' | 'algorithm'): void {

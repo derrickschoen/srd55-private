@@ -165,6 +165,31 @@ export interface DeathSaveState {
   readonly failures: number;
 }
 
+export interface EncounterDeathMoment {
+  readonly round: number;
+  readonly initiativeIndex: number;
+}
+
+export const REVIVIFY_CITATIONS = {
+  castingTime: 'docs/srd/full/srd-5.2.1.txt:10141',
+  component: 'docs/srd/full/srd-5.2.1.txt:10145-10146',
+  deathWindowAndHitPoints: 'docs/srd/full/srd-5.2.1.txt:10148-10150',
+  exclusions: 'docs/srd/full/srd-5.2.1.txt:10150-10151',
+} as const;
+
+export class RevivifyRuleError extends EncounterRuleError {
+  override readonly name = 'RevivifyRuleError' as const;
+
+  constructor(
+    readonly code: 'death_time_unknown' | 'target_dead_too_long',
+    readonly citation: typeof REVIVIFY_CITATIONS.deathWindowAndHitPoints,
+  ) {
+    super(code === 'death_time_unknown'
+      ? `Revivify requires a recorded time of death (${citation}).`
+      : `Revivify requires a creature that died within the last minute (${citation}).`);
+  }
+}
+
 export class VisionTargetingRuleError extends EncounterRuleError {
   override readonly name = 'VisionTargetingRuleError' as const;
 
@@ -213,6 +238,7 @@ export interface EncounterCombatantState {
   readonly hitPoints: number;
   readonly life: LifeState;
   readonly deathSaves: DeathSaveState | null;
+  readonly deathAt: EncounterDeathMoment | null;
   readonly turn: TurnResources;
   readonly temporaryHitPoints: number;
   readonly wildShapeUses: WildShapeUseState | null;
@@ -241,6 +267,7 @@ export const WILD_SHAPE_COMBATANT_TRANSFER = {
   hitPoints: 'true_form_retained',
   life: 'true_form_retained',
   deathSaves: 'true_form_retained',
+  deathAt: 'true_form_retained',
   turn: 'true_form_retained',
   temporaryHitPoints: 'true_form_retained',
   wildShapeUses: 'feature_resource',
@@ -442,6 +469,11 @@ export interface EncounterState {
   readonly activeCombatant: CombatantId | null;
   readonly activeInitiativeIndex: number | null;
   readonly round: number;
+  /** Original order for the current round while one or more DM delays are active. */
+  readonly initiativeBeforeDelays?: {
+    readonly round: number;
+    readonly order: readonly CombatantId[];
+  };
   readonly effects: readonly EncounterEffect[];
   /** Creation-sequenced areas; reducers never depend on insertion order. */
   readonly persistentAreas: readonly PersistentArea[];
@@ -864,6 +896,7 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
       hitPoints: profile.rules.hitPointMaximum,
       life: 'living',
       deathSaves: null,
+      deathAt: null,
       turn: EMPTY_TURN,
       temporaryHitPoints: Math.max(0, ...(profile.rules.featureEffects ?? [])
         .filter((effect) => effect.trigger === 'always_on' && effect.payload.kind === 'temporary_hit_points')
@@ -960,10 +993,23 @@ function replaceCombatant(
   state: EncounterState,
   replacement: EncounterCombatantState,
 ): EncounterState {
+  const prior = state.combatants.find((candidate) => candidate.profile.id === replacement.profile.id);
+  if (prior === undefined) throw new EncounterRuleError(`Unknown combatant ${replacement.profile.id}.`);
+  const normalized: EncounterCombatantState = replacement.life === 'dead'
+    ? {
+        ...replacement,
+        deathAt: prior.life === 'dead' && prior.deathAt !== null
+          ? prior.deathAt
+          : {
+              round: state.round,
+              initiativeIndex: state.activeInitiativeIndex ?? 0,
+            },
+      }
+    : { ...replacement, deathAt: null };
   return {
     ...state,
     combatants: state.combatants.map((candidate) =>
-      candidate.profile.id === replacement.profile.id ? replacement : candidate,
+      candidate.profile.id === normalized.profile.id ? normalized : candidate,
     ),
   };
 }
@@ -7679,6 +7725,26 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
     throw new EncounterRuleError(`${definition.name} can be cast only through its declared Reaction trigger.`);
   }
   const targets = selectedSpellTargets(context.state, definition, command);
+  if (definition.operation.kind === 'revive') {
+    for (const target of targets) {
+      const subject = combatant(context.state, target);
+      if (subject.life !== 'dead') {
+        throw new EncounterRuleError(`${definition.name} requires a dead creature.`);
+      }
+      if (subject.deathAt === null) {
+        throw new RevivifyRuleError('death_time_unknown', REVIVIFY_CITATIONS.deathWindowAndHitPoints);
+      }
+      const roundDelta = context.state.round - subject.deathAt.round;
+      const withinWindow = roundDelta >= 0 && (
+        roundDelta < definition.operation.maximumDeathAgeRounds ||
+        (roundDelta === definition.operation.maximumDeathAgeRounds &&
+          (context.state.activeInitiativeIndex ?? 0) <= subject.deathAt.initiativeIndex)
+      );
+      if (!withinWindow) {
+        throw new RevivifyRuleError('target_dead_too_long', REVIVIFY_CITATIONS.deathWindowAndHitPoints);
+      }
+    }
+  }
   if (
     definition.targeting.kind !== 'self' &&
     definition.targeting.kind !== 'area' &&
@@ -7710,6 +7776,21 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
   emit(context, { type: 'spell_cast', caster: command.actor, spellId: definition.id, slotLevel: command.slotLevel, targets });
 
   executeSpellOperation(context, definition, command, targets, definition.operation);
+  if (definition.id === 'revivify') {
+    emit(context, {
+      type: 'spell_component_consumed',
+      caster: command.actor,
+      spellId: 'revivify',
+      component: {
+        kind: 'material',
+        description: 'a diamond worth 300+ GP',
+        minimumGoldPieceValue: 300,
+        quantity: 1,
+      },
+      inventoryTracking: 'recorded_untracked_inventory',
+      citation: REVIVIFY_CITATIONS.component,
+    });
+  }
 }
 
 export type SpellOperationOutcome = 'applied' | 'refused' | 'no_op';
@@ -8136,6 +8217,7 @@ function resolveSummon(
     hitPoints: profile.rules.hitPointMaximum,
     life: 'living',
     deathSaves: null,
+    deathAt: null,
     turn: EMPTY_TURN,
     temporaryHitPoints: 0,
     wildShapeUses: null,
@@ -9450,6 +9532,21 @@ function nextLivingInitiativeIndex(state: EncounterState, current: number): numb
   throw new EncounterRuleError('No living combatant remains in initiative.');
 }
 
+function restoreInitiativeAfterDelayedRound(state: EncounterState): EncounterState {
+  const delayed = state.initiativeBeforeDelays;
+  if (delayed === undefined) return state;
+  const byCombatant = new Map(state.initiative.map((entry) => [entry.combatant, entry] as const));
+  const restored = delayed.order.flatMap((combatant): readonly InitiativeEntry[] => {
+    const entry = byCombatant.get(combatant);
+    if (entry === undefined) return [];
+    byCombatant.delete(combatant);
+    return [entry];
+  });
+  const initiative = [...restored, ...byCombatant.values()];
+  const { initiativeBeforeDelays: _completedDelay, ...withoutDelay } = state;
+  return { ...withoutDelay, initiative };
+}
+
 type InitiativeEntryDraft = Omit<InitiativeEntry, 'slot'>;
 
 interface InitiativeSlotDraft {
@@ -10568,10 +10665,15 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       if (currentIndex === null) throw new EncounterRuleError('Initiative is not active.');
       processBoundary(context, command.actor, 'end');
       emit(context, { type: 'turn_ended', combatant: command.actor, round: context.state.round });
-      const nextIndex = nextLivingInitiativeIndex(context.state, currentIndex);
+      let nextIndex = nextLivingInitiativeIndex(context.state, currentIndex);
+      const startsNewRound = nextIndex <= currentIndex;
+      if (startsNewRound) {
+        context.state = restoreInitiativeAfterDelayedRound(context.state);
+        nextIndex = nextLivingInitiativeIndex(context.state, context.state.initiative.length - 1);
+      }
       const next = context.state.initiative[nextIndex];
       if (next === undefined) throw new EncounterRuleError('Next initiative entry is missing.');
-      const round = nextIndex <= currentIndex ? context.state.round + 1 : context.state.round;
+      const round = startsNewRound ? context.state.round + 1 : context.state.round;
       context.state = { ...context.state, activeInitiativeIndex: nextIndex };
       startTurn(context, next.combatant, round);
       return;

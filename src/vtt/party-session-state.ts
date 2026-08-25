@@ -208,6 +208,117 @@ export interface LongRestResult {
   readonly summary: LongRestSummaryCard;
 }
 
+export const LONG_REST_BENEFITS = [
+  'hit_points',
+  'hit_dice',
+  'spell_slots',
+  'exhaustion',
+  'limited_resources',
+] as const;
+
+export type LongRestBenefit = (typeof LONG_REST_BENEFITS)[number];
+
+export type RestInterruptionOutcome =
+  | { readonly kind: 'no_benefit' }
+  | { readonly kind: 'partial_per_dm'; readonly benefits: readonly LongRestBenefit[] }
+  | { readonly kind: 'resumed' };
+
+export const REST_INTERRUPTION_DM_CONTROL = {
+  label: 'Rest interrupted',
+  outcomes: ['no_benefit', 'partial_per_dm', 'resumed'],
+  partialBenefitChecklist: LONG_REST_BENEFITS,
+} as const satisfies {
+  readonly label: 'Rest interrupted';
+  readonly outcomes: readonly RestInterruptionOutcome['kind'][];
+  readonly partialBenefitChecklist: readonly LongRestBenefit[];
+};
+
+export interface RestInterruptionRulingCard {
+  readonly kind: 'adjudicated_ruling';
+  readonly subject: 'Rest interrupted';
+  readonly choice: RestInterruptionOutcome['kind'];
+  readonly checkedBenefits: readonly LongRestBenefit[];
+  readonly reasoning: string;
+}
+
+export interface RestInterruptionResult {
+  readonly state: PartySessionState;
+  readonly outcome: RestInterruptionOutcome;
+  readonly ruling: RestInterruptionRulingCard;
+}
+
+export function restInterruptionRuling(
+  outcome: RestInterruptionOutcome,
+): RestInterruptionRulingCard {
+  const benefits = outcome.kind === 'partial_per_dm' ? [...outcome.benefits] : [];
+  return {
+    kind: 'adjudicated_ruling',
+    subject: 'Rest interrupted',
+    choice: outcome.kind,
+    checkedBenefits: benefits,
+    reasoning: outcome.kind === 'partial_per_dm'
+      ? `DM fiat: partial benefits (${benefits.join(', ') || 'none'}).`
+      : outcome.kind === 'no_benefit'
+        ? 'DM fiat: no Long Rest benefits apply.'
+        : 'DM fiat: the Long Rest resumes.',
+  };
+}
+
+function applyDmSelectedLongRestBenefits(
+  character: PartyCharacterSessionState,
+  selected: ReadonlySet<LongRestBenefit>,
+): PartyCharacterSessionState {
+  if (character.life !== 'living' || character.currentHitPoints < 1) return character;
+  return {
+    ...character,
+    currentHitPoints: selected.has('hit_points')
+      ? character.hitPointMaximum
+      : character.currentHitPoints,
+    hitDice: selected.has('hit_dice')
+      ? character.hitDice.map((pool) => ({ ...pool, remaining: pool.maximum }))
+      : character.hitDice,
+    spellSlots: selected.has('spell_slots')
+      ? character.spellSlots.map((slot) => ({ ...slot, remaining: slot.maximum }))
+      : character.spellSlots,
+    exhaustionLevel: selected.has('exhaustion')
+      ? Math.max(0, character.exhaustionLevel - 1) as PartyExhaustionLevel
+      : character.exhaustionLevel,
+    limitedResources: selected.has('limited_resources')
+      ? character.limitedResources.map((resource) => resource.recharge === 'long_rest'
+          ? { ...resource, remaining: resource.maximum }
+          : resource)
+      : character.limitedResources,
+  };
+}
+
+/** D377.7: interruption is deliberately DM fiat; no elapsed-hour rule is enforced. */
+export function interruptLongRest(
+  state: PartySessionState,
+  outcome: RestInterruptionOutcome,
+): RestInterruptionResult {
+  if (state.adventuringDayStatus !== 'active') {
+    throw new Error('A completed Long Rest cannot be interrupted.');
+  }
+  const benefits = outcome.kind === 'partial_per_dm' ? [...outcome.benefits] : [];
+  if (new Set(benefits).size !== benefits.length) {
+    throw new Error('A partial Long Rest interruption repeats a benefit.');
+  }
+  const unknown = benefits.find((benefit) => !LONG_REST_BENEFITS.includes(benefit));
+  if (unknown !== undefined) throw new Error(`Unknown Long Rest benefit ${unknown}.`);
+  const next = outcome.kind === 'partial_per_dm'
+    ? {
+        ...state,
+        characters: state.characters.map((character) =>
+          applyDmSelectedLongRestBenefits(character, new Set(benefits))),
+      }
+    : state;
+  return {
+    state: next,
+    outcome: structuredClone(outcome),
+    ruling: restInterruptionRuling(outcome),
+  };
+}
+
 function abilityModifier(score: number): number {
   return Math.floor((score - 10) / 2);
 }

@@ -1,6 +1,28 @@
 import type { EncounterSessionId } from '../combat/values';
 
 export type SaveSource = 'browser' | 'folder';
+export type AutosavePool = 'per_round' | 'encounter_boundary';
+export type SaveRetention =
+  | { readonly kind: 'autosave'; readonly pool: AutosavePool }
+  | { readonly kind: 'named' }
+  | { readonly kind: 'file' };
+
+export type AutosaveTrigger =
+  | 'round_boundary'
+  | 'encounter_start'
+  | 'encounter_end'
+  | 'short_rest_boundary'
+  | 'long_rest_boundary';
+
+export function autosavePoolForTrigger(trigger: AutosaveTrigger): AutosavePool {
+  switch (trigger) {
+    case 'round_boundary': return 'per_round';
+    case 'encounter_start':
+    case 'encounter_end':
+    case 'short_rest_boundary':
+    case 'long_rest_boundary': return 'encounter_boundary';
+  }
+}
 
 export type SaveManagerMode =
   | {
@@ -15,6 +37,7 @@ export type SaveManagerMode =
 
 export interface SaveManagerEntry {
   readonly id: string;
+  readonly storageId?: string;
   readonly source: SaveSource;
   readonly name: string;
   readonly updatedAt: string;
@@ -24,6 +47,8 @@ export interface SaveManagerEntry {
   readonly room: number | null;
   readonly round: number;
   readonly bytes: string;
+  /** Missing browser retention is the pre-D377.9 single autosave pool. */
+  readonly retention?: SaveRetention;
 }
 
 export interface SaveManagerRow extends SaveManagerEntry {
@@ -31,6 +56,86 @@ export interface SaveManagerRow extends SaveManagerEntry {
   readonly summary: string;
   readonly timestampLabel: string;
   readonly actions: readonly ['load', 'rename', 'delete', 'export_copy'];
+  readonly retention: SaveRetention;
+  readonly poolLabel: 'Per-round autosave' | 'Encounter-boundary autosave' | 'Named save' | 'File save';
+}
+
+function normalizedRetention(save: SaveManagerEntry): SaveRetention {
+  if (save.source === 'folder') return { kind: 'file' };
+  return save.retention ?? { kind: 'autosave', pool: 'per_round' };
+}
+
+function poolLabel(retention: SaveRetention): SaveManagerRow['poolLabel'] {
+  switch (retention.kind) {
+    case 'autosave': return retention.pool === 'per_round'
+      ? 'Per-round autosave'
+      : 'Encounter-boundary autosave';
+    case 'named': return 'Named save';
+    case 'file': return 'File save';
+  }
+}
+
+export function retainNewestAutosaves(
+  saves: readonly SaveManagerEntry[],
+  maximumPerPool = 10,
+): readonly SaveManagerEntry[] {
+  if (!Number.isSafeInteger(maximumPerPool) || maximumPerPool < 1) {
+    throw new RangeError('Autosave retention must be a positive safe integer.');
+  }
+  const retainedIds = new Set<string>();
+  for (const pool of ['per_round', 'encounter_boundary'] as const) {
+    saves
+      .filter((save) => {
+        const retention = normalizedRetention(save);
+        return retention.kind === 'autosave' && retention.pool === pool;
+      })
+      .sort((left, right) => {
+        const newest = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+        return newest === 0 ? right.id.localeCompare(left.id) : newest;
+      })
+      .slice(0, maximumPerPool)
+      .forEach((save) => retainedIds.add(save.id));
+  }
+  return saves.filter((save) => normalizedRetention(save).kind !== 'autosave' || retainedIds.has(save.id));
+}
+
+export class AutosavePoolManager {
+  #entries: SaveManagerEntry[];
+
+  constructor(
+    initial: readonly SaveManagerEntry[] = [],
+    private readonly maximumPerPool = 10,
+  ) {
+    this.#entries = [...retainNewestAutosaves(initial, maximumPerPool)];
+  }
+
+  capture(trigger: AutosaveTrigger, save: SaveManagerEntry): void {
+    const entry: SaveManagerEntry = {
+      ...save,
+      retention: { kind: 'autosave', pool: autosavePoolForTrigger(trigger) },
+    };
+    this.#entries = [
+      ...retainNewestAutosaves(
+        [...this.#entries.filter((candidate) => candidate.id !== entry.id), entry],
+        this.maximumPerPool,
+      ),
+    ];
+  }
+
+  keep(save: SaveManagerEntry): void {
+    const retention = normalizedRetention(save);
+    if (retention.kind === 'autosave') {
+      throw new Error('Autosaves must be captured with their boundary trigger.');
+    }
+    this.#entries = [...this.#entries.filter((candidate) => candidate.id !== save.id), {
+      ...save,
+      retention,
+    }];
+  }
+
+  entries(): readonly SaveManagerEntry[] {
+    return structuredClone(this.#entries);
+  }
 }
 
 export interface SaveManagerViewModel {
@@ -56,16 +161,22 @@ export function buildSaveManagerViewModel(input: {
       const newest = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
       return newest === 0 ? left.id.localeCompare(right.id) : newest;
     })
-    .map((save): SaveManagerRow => ({
-      ...save,
-      badge: save.source,
-      summary: save.room === null
-        ? `Round ${String(save.round)}`
-        : `Room ${String(save.room)} · Round ${String(save.round)}`,
-      timestampLabel: new Date(save.updatedAt).toLocaleString('en-US'),
-      actions: ['load', 'rename', 'delete', 'export_copy'],
-    }));
+    .map((save): SaveManagerRow => {
+      const retention = normalizedRetention(save);
+      return {
+        ...save,
+        retention,
+        poolLabel: poolLabel(retention),
+        badge: save.source,
+        summary: save.room === null
+          ? `Round ${String(save.round)}`
+          : `Room ${String(save.room)} · Round ${String(save.round)}`,
+        timestampLabel: new Date(save.updatedAt).toLocaleString('en-US'),
+        actions: ['load', 'rename', 'delete', 'export_copy'],
+      };
+    });
   const lastAutosaveAt = input.browser
+    .filter((save) => normalizedRetention(save).kind === 'autosave')
     .map((save) => save.updatedAt)
     .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
   return {

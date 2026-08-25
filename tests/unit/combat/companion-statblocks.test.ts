@@ -42,15 +42,25 @@ const caster = (overrides: Partial<CasterContext> = {}): CasterContext => ({
 });
 
 describe('D364 SRD companion monster registry', () => {
-  it('exposes 48 SRD rows, including the D371.3 Unicorn legendary exemplar, with 48 homebrew rows and three parameterized entries through one registry', () => {
+  it('exposes 48 SRD rows, including the D371.3 Unicorn legendary exemplar, with 50 homebrew rows and three parameterized entries through one registry', () => {
     expect(STARTER_MONSTER_ROSTER).toHaveLength(47);
-    expect(BUNDLED_MONSTER_REGISTRY).toHaveLength(99);
-    expect(BUNDLED_MONSTER_REGISTRY.filter((entry) => entry.kind === 'static')).toHaveLength(96);
+    expect(BUNDLED_MONSTER_REGISTRY).toHaveLength(101);
+    expect(BUNDLED_MONSTER_REGISTRY.filter((entry) => entry.kind === 'static')).toHaveLength(98);
     expect(BUNDLED_MONSTER_REGISTRY.filter((entry) => entry.kind === 'parameterized')).toHaveLength(3);
     expect(BUNDLED_MONSTER_REGISTRY.find((entry) => entry.id === 'statblock:unicorn')).toMatchObject({
       kind: 'static',
       id: 'statblock:unicorn',
       statblock: { provenance: { kind: 'srd_5_2_1_decoded' } },
+    });
+    expect(BUNDLED_MONSTER_REGISTRY.find((entry) => entry.id === 'statblock:vane-warren/ashmaw-brute-priest')).toMatchObject({
+      kind: 'static',
+      id: 'statblock:vane-warren/ashmaw-brute-priest',
+      statblock: { provenance: { kind: 'original_homebrew' } },
+    });
+    expect(BUNDLED_MONSTER_REGISTRY.find((entry) => entry.id === 'statblock:vane-warren/marshal-kett')).toMatchObject({
+      kind: 'static',
+      id: 'statblock:vane-warren/marshal-kett',
+      statblock: { provenance: { kind: 'original_homebrew' } },
     });
     expect(STARTER_MONSTER_ROSTER.every((row) => row.statblock.id === row.id)).toBe(true);
   });

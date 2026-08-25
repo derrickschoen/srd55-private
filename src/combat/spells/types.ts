@@ -1011,6 +1011,8 @@ export type BranchSpellOperation =
       readonly kind: 'revive';
       readonly hitPoints: number;
       readonly maximumDeathAgeRounds: number;
+      readonly oldAgeEligible: false;
+      readonly restoresMissingBodyParts: false;
     }
   | { readonly kind: 'remove_curse' }
   | {

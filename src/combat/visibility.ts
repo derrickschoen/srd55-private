@@ -37,6 +37,7 @@ export const ENCOUNTER_VIEW_CLASSIFICATION = {
   activeCombatant: 'player_visible',
   activeInitiativeIndex: 'dm_only',
   round: 'player_visible',
+  initiativeBeforeDelays: 'dm_only',
   effects: 'dm_only',
   persistentAreas: 'dm_only',
   nextPersistentAreaSequence: 'dm_only',
@@ -57,6 +58,7 @@ export const COMBATANT_VIEW_CLASSIFICATION = {
   hitPoints: 'per_seat',
   life: 'player_visible',
   deathSaves: 'dm_only',
+  deathAt: 'dm_only',
   turn: 'per_seat',
   temporaryHitPoints: 'per_seat',
   wildShapeUses: 'per_seat',
@@ -234,6 +236,7 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'legendary_action_window_closed':
     case 'legendary_resistance_used': return [event.combatant];
     case 'initiative_block_rolled': return event.combatants;
+    case 'spell_component_consumed': return [event.caster];
     case 'spell_cast':
     case 'sustained_effect_activated':
     case 'sustained_effect_triggered': return [event.caster, ...event.targets];

@@ -161,7 +161,11 @@ class VttApplication {
     );
     const compose = element('a', { text: 'Compose a rules encounter from stored characters' });
     compose.href = '/vtt?compose=stored';
-    header.append(compose);
+    const sampleDungeon = element('a', { text: 'Load the bundled sample dungeon' });
+    sampleDungeon.href = '/vtt?encounter=d365';
+    const vaneWarren = element('a', { text: 'Choose a Vane Warren leader fight' });
+    vaneWarren.href = '/vtt?encounter=vane-warren';
+    header.append(compose, sampleDungeon, vaneWarren);
     this.#buildConnectionPanel();
     this.#buildWorkspace();
     this.#workspace.hidden = true;

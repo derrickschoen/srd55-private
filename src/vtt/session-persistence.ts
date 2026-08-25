@@ -12,6 +12,7 @@ import {
   type ReactionKind,
   type ReactionPolicy,
 } from '../combat/encounter';
+import type { EncounterEvent } from '../combat/events';
 import {
   restoreMulberry32,
   type SerializableRng,
@@ -30,25 +31,39 @@ import {
   capturePartySessionState,
   decodePartySessionState,
   enterNextRoom,
+  interruptLongRest,
   LONG_REST_CITATIONS,
+  restInterruptionRuling,
   setPartyReactionPolicy,
   takeLongRest,
   takeShortRest,
   type LongRestResult,
+  type LongRestBenefit,
   type LongRestSummaryCard,
   type PartySessionState,
+  type RestInterruptionOutcome,
+  type RestInterruptionResult,
+  type RestInterruptionRulingCard,
   type ShortRestHitDieRoll,
   type ShortRestHitDieSpend,
   type ShortRestResult,
 } from './party-session-state';
+import { deriveSessionRecord, type SessionRecord } from './session-record';
 
-export const VTT_SESSION_SCHEMA_VERSION = 4 as const;
+export const VTT_SESSION_SCHEMA_VERSION = 5 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export type SessionTransition =
   | { readonly kind: 'session_started' }
   | DurableCoordinatorTransition
-  | { readonly kind: 'party_state_captured'; readonly room: number }
+  | {
+      readonly kind: 'party_state_captured';
+      readonly room: number;
+      readonly restInterruption?: {
+        readonly outcome: RestInterruptionOutcome;
+        readonly ruling: RestInterruptionRulingCard;
+      };
+    }
   | {
       readonly kind: 'reaction_preference_changed';
       readonly combatant: import('../combat/values').CombatantId;
@@ -68,6 +83,21 @@ export type SessionTransition =
     }
   | { readonly kind: 'room_composed'; readonly room: number }
   | {
+      readonly kind: 'turn_skipped';
+      readonly combatant: import('../combat/values').CombatantId;
+      readonly round: number;
+      readonly events: readonly EncounterEvent[];
+    }
+  | {
+      readonly kind: 'turn_delayed';
+      readonly combatant: import('../combat/values').CombatantId;
+      readonly afterCombatant: import('../combat/values').CombatantId;
+      readonly round: number;
+      readonly fromIndex: number;
+      readonly toIndex: number;
+      readonly events: readonly EncounterEvent[];
+    }
+  | {
       readonly kind: 'head_moved';
       readonly operation: 'undo' | 'redo';
       readonly sourceRevision: number;
@@ -81,6 +111,8 @@ export const SESSION_TRANSITION_KINDS = [
   'short_rest_completed',
   'long_rest_completed',
   'room_composed',
+  'turn_skipped',
+  'turn_delayed',
   'head_moved',
   'controller_request_issued',
   'controller_response_received',
@@ -344,6 +376,25 @@ function validRoom(value: unknown): boolean {
   return value === 1 || value === 2 || value === 3 || value === 4;
 }
 
+function decodeRestInterruptionOutcome(value: unknown): RestInterruptionOutcome | null {
+  if (!isRecord(value) || typeof value.kind !== 'string') return null;
+  if ((value.kind === 'no_benefit' || value.kind === 'resumed') && hasExactlyKeys(value, ['kind'])) {
+    return { kind: value.kind };
+  }
+  if (
+    value.kind === 'partial_per_dm' &&
+    hasExactlyKeys(value, ['kind', 'benefits']) &&
+    Array.isArray(value.benefits) &&
+    value.benefits.every((benefit) => typeof benefit === 'string' && [
+      'hit_points', 'hit_dice', 'spell_slots', 'exhaustion', 'limited_resources',
+    ].includes(benefit)) &&
+    new Set(value.benefits).size === value.benefits.length
+  ) {
+    return { kind: 'partial_per_dm', benefits: value.benefits as readonly LongRestBenefit[] };
+  }
+  return null;
+}
+
 function validShortRestSpends(value: unknown): value is readonly ShortRestHitDieSpend[] {
   return Array.isArray(value) && value.every((spend) =>
     isRecord(spend) && hasExactlyKeys(spend, ['combatantId', 'dice']) &&
@@ -418,6 +469,22 @@ function decodeTransition(value: unknown): SessionTransition {
       if (hasExactlyKeys(value, ['kind', 'room']) && validRoom(value.room)) {
         return value as unknown as SessionTransition;
       }
+      if (
+        value.kind === 'party_state_captured' &&
+        hasExactlyKeys(value, ['kind', 'room', 'restInterruption']) &&
+        validRoom(value.room) &&
+        isRecord(value.restInterruption) &&
+        hasExactlyKeys(value.restInterruption, ['outcome', 'ruling'])
+      ) {
+        const outcome = decodeRestInterruptionOutcome(value.restInterruption.outcome);
+        if (outcome !== null && canonicalJson(value.restInterruption.ruling) === canonicalJson(restInterruptionRuling(outcome))) {
+          return {
+            kind: 'party_state_captured',
+            room: value.room as PartySessionState['room'],
+            restInterruption: { outcome, ruling: restInterruptionRuling(outcome) },
+          };
+        }
+      }
       break;
     case 'reaction_preference_changed':
       if (
@@ -448,6 +515,26 @@ function decodeTransition(value: unknown): SessionTransition {
         (value.operation === 'undo' || value.operation === 'redo') &&
         Number.isSafeInteger(value.sourceRevision) && Number.isSafeInteger(value.targetRevision)
       ) return value as unknown as Extract<SessionTransition, { readonly kind: 'head_moved' }>;
+      break;
+    case 'turn_skipped':
+      if (
+        hasExactlyKeys(value, ['kind', 'combatant', 'round', 'events']) &&
+        typeof value.combatant === 'string' &&
+        Number.isSafeInteger(value.round) && typeof value.round === 'number' && value.round >= 1 &&
+        Array.isArray(value.events)
+      ) return value as unknown as Extract<SessionTransition, { readonly kind: 'turn_skipped' }>;
+      break;
+    case 'turn_delayed':
+      if (
+        hasExactlyKeys(value, [
+          'kind', 'combatant', 'afterCombatant', 'round', 'fromIndex', 'toIndex', 'events',
+        ]) &&
+        typeof value.combatant === 'string' && typeof value.afterCombatant === 'string' &&
+        Number.isSafeInteger(value.round) && typeof value.round === 'number' && value.round >= 1 &&
+        Number.isSafeInteger(value.fromIndex) && typeof value.fromIndex === 'number' && value.fromIndex >= 0 &&
+        Number.isSafeInteger(value.toIndex) && typeof value.toIndex === 'number' && value.toIndex > value.fromIndex &&
+        Array.isArray(value.events)
+      ) return value as unknown as Extract<SessionTransition, { readonly kind: 'turn_delayed' }>;
       break;
     case 'controller_request_issued':
       if (hasExactlyKeys(value, ['kind', 'request']) && isRecord(value.request)) return value as unknown as SessionTransition;
@@ -515,6 +602,19 @@ function decodeRevision(value: unknown): SessionRevision {
     if (!isRecord(combatant)) throw new TypeError('Persisted encounter combatant is malformed.');
     if (!Object.hasOwn(combatant, 'wildShapeUses')) {
       throw new TypeError('Persisted encounter combatant lacks Wild Shape use state.');
+    }
+    if (!Object.hasOwn(combatant, 'deathAt')) {
+      throw new TypeError('Persisted encounter combatant lacks a typed time of death.');
+    }
+    if (combatant.deathAt !== null && (
+      !isRecord(combatant.deathAt) ||
+      !hasExactlyKeys(combatant.deathAt, ['round', 'initiativeIndex']) ||
+      !Number.isSafeInteger(combatant.deathAt.round) ||
+      !Number.isSafeInteger(combatant.deathAt.initiativeIndex) ||
+      (combatant.deathAt.round as number) < 0 ||
+      (combatant.deathAt.initiativeIndex as number) < 0
+    )) {
+      throw new TypeError('Persisted encounter combatant time of death is malformed.');
     }
     const wildShapeUses = combatant.wildShapeUses === null
       ? null
@@ -619,6 +719,90 @@ export function deriveBranchRng(
   });
 }
 
+export interface PacingAdvance {
+  readonly encounterState: EncounterState;
+  readonly events: readonly EncounterEvent[];
+}
+
+function pacingCoordinatorState(state: PersistedCoordinatorState): PersistedCoordinatorState {
+  return {
+    ...state,
+    pendingRequest: null,
+    pendingCommand: null,
+    continuation: { kind: 'idle' },
+  };
+}
+
+function advanceSkippedTurn(
+  state: EncounterState,
+  rng: SerializableRng,
+): PacingAdvance {
+  const actor = state.activeCombatant;
+  if (actor === null || state.round < 1) throw new Error('A turn can only be skipped during initiative.');
+  const reduction = reduceEncounter(state, { type: 'end_turn', actor }, rng);
+  if (reduction.state.activeCombatant === actor) {
+    throw new Error('Resolve the current turn-boundary decision before skipping or delaying.');
+  }
+  return { encounterState: reduction.state, events: reduction.events };
+}
+
+function advanceDelayedTurn(
+  state: EncounterState,
+  afterCombatant: import('../combat/values').CombatantId,
+  rng: SerializableRng,
+): PacingAdvance & { readonly fromIndex: number; readonly toIndex: number } {
+  const actor = state.activeCombatant;
+  const fromIndex = state.activeInitiativeIndex;
+  if (actor === null || fromIndex === null || state.round < 1) {
+    throw new Error('A turn can only be delayed during initiative.');
+  }
+  const toIndex = state.initiative.findIndex((entry) => entry.combatant === afterCombatant);
+  if (toIndex <= fromIndex) {
+    throw new Error('A delayed combatant must move after a later initiative entry this round.');
+  }
+  const advanced = advanceSkippedTurn(state, rng);
+  const moved = state.initiative[fromIndex];
+  if (moved === undefined || moved.combatant !== actor) {
+    throw new Error('Active combatant and initiative index disagree.');
+  }
+  const withoutActor = state.initiative.filter((entry) => entry.combatant !== actor);
+  const targetIndex = withoutActor.findIndex((entry) => entry.combatant === afterCombatant);
+  if (targetIndex < 0) throw new Error('Delay target is absent from initiative.');
+  const initiative = [
+    ...withoutActor.slice(0, targetIndex + 1),
+    moved,
+    ...withoutActor.slice(targetIndex + 1),
+  ];
+  const nextActiveIndex = initiative.findIndex(
+    (entry) => entry.combatant === advanced.encounterState.activeCombatant,
+  );
+  if (nextActiveIndex < 0) throw new Error('Delayed initiative lost the next active combatant.');
+  return {
+    encounterState: {
+      ...advanced.encounterState,
+      initiative,
+      activeInitiativeIndex: nextActiveIndex,
+      initiativeBeforeDelays: state.initiativeBeforeDelays ?? {
+        round: state.round,
+        order: state.initiative.map((entry) => entry.combatant),
+      },
+    },
+    events: advanced.events,
+    fromIndex,
+    toIndex,
+  };
+}
+
+export function replayPacingTransition(
+  state: EncounterState,
+  transition: Extract<SessionTransition, { readonly kind: 'turn_skipped' | 'turn_delayed' }>,
+  rng: SerializableRng,
+): PacingAdvance {
+  return transition.kind === 'turn_skipped'
+    ? advanceSkippedTurn(state, rng)
+    : advanceDelayedTurn(state, transition.afterCombatant, rng);
+}
+
 function requireCanonicalEqual(
   actual: unknown,
   expected: unknown,
@@ -704,11 +888,12 @@ export function replaySessionRevisions(
         requireCanonicalEqual(revision.encounterState, parent.encounterState, 'party-capture encounter state');
         requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'party-capture coordinator state');
         requireCanonicalEqual(revision.rngState, parent.rngState, 'party-capture RNG state');
-        requireCanonicalEqual(
-          revision.partyState,
-          capturePartySessionState(parent.partyState, parent.encounterState),
-          'captured party state',
-        );
+        const expectedPartyState = transition.restInterruption === undefined
+          ? capturePartySessionState(parent.partyState, parent.encounterState)
+          : interruptLongRest(parent.partyState, transition.restInterruption.outcome).state;
+        requireCanonicalEqual(revision.partyState, expectedPartyState, transition.restInterruption === undefined
+          ? 'captured party state'
+          : 'rest-interruption party state');
         break;
       }
       case 'short_rest_completed': {
@@ -745,6 +930,53 @@ export function replaySessionRevisions(
         requireCanonicalEqual(revision.rngState, parent.rngState, 'room-composition RNG state');
         if (transition.room !== advanced.room) throw new Error('Room transition ordinal disagrees with party state.');
         requireEncounterMatchesParty(revision.encounterState, advanced);
+        break;
+      }
+      case 'turn_skipped': {
+        if (parent === null || parent === undefined) throw new Error('A skipped turn requires a parent.');
+        if (
+          parent.encounterState.activeCombatant !== transition.combatant ||
+          parent.encounterState.round !== transition.round
+        ) throw new Error('Skipped-turn metadata disagrees with its parent state.');
+        const replayRng = restoreMulberry32(parent.rngState);
+        const replayed = advanceSkippedTurn(parent.encounterState, replayRng);
+        requireCanonicalEqual(revision.encounterState, replayed.encounterState, 'skipped-turn state');
+        requireCanonicalEqual(transition.events, replayed.events, 'skipped-turn events');
+        requireCanonicalEqual(revision.rngState, replayRng.snapshot(), 'skipped-turn RNG state');
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'skipped-turn party state');
+        requireCanonicalEqual(
+          revision.coordinatorState,
+          pacingCoordinatorState(parent.coordinatorState),
+          'skipped-turn coordinator state',
+        );
+        break;
+      }
+      case 'turn_delayed': {
+        if (parent === null || parent === undefined) throw new Error('A delayed turn requires a parent.');
+        if (
+          parent.encounterState.activeCombatant !== transition.combatant ||
+          parent.encounterState.round !== transition.round
+        ) throw new Error('Delayed-turn metadata disagrees with its parent state.');
+        const replayRng = restoreMulberry32(parent.rngState);
+        const replayed = advanceDelayedTurn(
+          parent.encounterState,
+          transition.afterCombatant,
+          replayRng,
+        );
+        requireCanonicalEqual(
+          { fromIndex: transition.fromIndex, toIndex: transition.toIndex },
+          { fromIndex: replayed.fromIndex, toIndex: replayed.toIndex },
+          'delayed-turn reposition',
+        );
+        requireCanonicalEqual(revision.encounterState, replayed.encounterState, 'delayed-turn state');
+        requireCanonicalEqual(transition.events, replayed.events, 'delayed-turn events');
+        requireCanonicalEqual(revision.rngState, replayRng.snapshot(), 'delayed-turn RNG state');
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'delayed-turn party state');
+        requireCanonicalEqual(
+          revision.coordinatorState,
+          pacingCoordinatorState(parent.coordinatorState),
+          'delayed-turn coordinator state',
+        );
         break;
       }
       case 'head_moved': {
@@ -986,8 +1218,65 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     };
   }
 
+  skipTurn(): SessionResume {
+    const latest = this.#latest();
+    const actor = latest.encounterState.activeCombatant;
+    if (actor === null) throw new Error('A turn can only be skipped during initiative.');
+    const advanced = advanceSkippedTurn(latest.encounterState, this.#rng);
+    return this.#appendPacing({
+      latest,
+      transition: {
+        kind: 'turn_skipped',
+        combatant: actor,
+        round: latest.encounterState.round,
+        events: advanced.events,
+      },
+      encounterState: advanced.encounterState,
+    });
+  }
+
+  delayTurn(afterCombatant: import('../combat/values').CombatantId): SessionResume {
+    const latest = this.#latest();
+    const actor = latest.encounterState.activeCombatant;
+    if (actor === null) throw new Error('A turn can only be delayed during initiative.');
+    const advanced = advanceDelayedTurn(latest.encounterState, afterCombatant, this.#rng);
+    return this.#appendPacing({
+      latest,
+      transition: {
+        kind: 'turn_delayed',
+        combatant: actor,
+        afterCombatant,
+        round: latest.encounterState.round,
+        fromIndex: advanced.fromIndex,
+        toIndex: advanced.toIndex,
+        events: advanced.events,
+      },
+      encounterState: advanced.encounterState,
+    });
+  }
+
   history(): readonly SessionHistoryEntry[] {
     return sessionHistory(this.store.revisions(this.sessionId));
+  }
+
+  roundBoundaries(): readonly SessionRoundBoundary[] {
+    const history = this.history();
+    const currentEncounter = history.at(-1)?.encounterOrdinal;
+    if (currentEncounter === undefined) return [];
+    return history.flatMap((entry): readonly SessionRoundBoundary[] =>
+      !entry.void && entry.encounterOrdinal === currentEncounter && entry.roundBoundary
+        ? [{
+            round: entry.encounterRound,
+            revision: entry.revision,
+            branchId: entry.branchId,
+          }]
+        : []);
+  }
+
+  rewindToRound(round: number, requestedBranchId: EncounterBranchId): SessionResume {
+    const boundary = this.roundBoundaries().find((candidate) => candidate.round === round);
+    if (boundary === undefined) throw new Error(`Round ${String(round)} has no active boundary snapshot.`);
+    return this.moveHead('undo', boundary.revision, requestedBranchId);
   }
 
   capturePartyState(): PartySessionState {
@@ -1005,6 +1294,27 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       codexSessionId: latest.codexSessionId,
     });
     return partyState;
+  }
+
+  resolveRestInterruption(outcome: RestInterruptionOutcome): RestInterruptionResult {
+    const latest = this.#latest();
+    if (latest.partyState === null) throw new Error('Encounter session has no party state to interrupt a rest.');
+    const result = interruptLongRest(latest.partyState, outcome);
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: {
+        kind: 'party_state_captured',
+        room: result.state.room,
+        restInterruption: { outcome: result.outcome, ruling: result.ruling },
+      },
+      encounterState: latest.encounterState,
+      partyState: result.state,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      codexSessionId: latest.codexSessionId,
+    });
+    return result;
   }
 
   takeShortRest(spends: readonly ShortRestHitDieSpend[]): ShortRestResult {
@@ -1115,6 +1425,32 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     return latest;
   }
 
+  #appendPacing(input: {
+    readonly latest: SessionRevision;
+    readonly transition: Extract<SessionTransition, { readonly kind: 'turn_skipped' | 'turn_delayed' }>;
+    readonly encounterState: EncounterState;
+  }): SessionResume {
+    const appended = this.#append({
+      parentRevision: input.latest.revision,
+      branchId: input.latest.branchId,
+      transition: input.transition,
+      encounterState: input.encounterState,
+      partyState: input.latest.partyState,
+      coordinatorState: pacingCoordinatorState(input.latest.coordinatorState),
+      controllers: input.latest.controllers,
+      codexSessionId: input.latest.codexSessionId,
+    });
+    return {
+      journal: this,
+      encounterState: appended.encounterState,
+      partyState: appended.partyState,
+      coordinatorState: appended.coordinatorState,
+      controllers: appended.controllers,
+      codexSessionId: appended.codexSessionId,
+      rng: this.#rng,
+    };
+  }
+
   #append(input: {
     readonly parentRevision: number | null;
     readonly branchId: EncounterBranchId;
@@ -1158,6 +1494,15 @@ export interface SessionHistoryEntry {
   readonly branchId: EncounterBranchId;
   readonly transition: SessionTransition;
   readonly void: boolean;
+  readonly encounterOrdinal: number;
+  readonly encounterRound: number;
+  readonly roundBoundary: boolean;
+}
+
+export interface SessionRoundBoundary {
+  readonly round: number;
+  readonly revision: number;
+  readonly branchId: EncounterBranchId;
 }
 
 export function sessionHistory(
@@ -1175,12 +1520,29 @@ export function sessionHistory(
     if (revision === undefined) throw new Error('Session ancestry is incomplete.');
     cursor = revision.parentRevision;
   }
+  const encounterOrdinals = new Map<number, number>();
+  for (const revision of revisions) {
+    const parentOrdinal = revision.parentRevision === null
+      ? 1
+      : encounterOrdinals.get(revision.parentRevision);
+    if (parentOrdinal === undefined) throw new Error('Session encounter ancestry is incomplete.');
+    encounterOrdinals.set(
+      revision.revision,
+      revision.transition.kind === 'room_composed' ? parentOrdinal + 1 : parentOrdinal,
+    );
+  }
   return revisions.map((revision) => ({
     revision: revision.revision,
     parentRevision: revision.parentRevision,
     branchId: revision.branchId,
     transition: revision.transition,
     void: !active.has(revision.revision),
+    encounterOrdinal: encounterOrdinals.get(revision.revision) ?? 1,
+    encounterRound: revision.encounterState.round,
+    roundBoundary: revision.encounterState.round > 0 && (
+      revision.parentRevision === null ||
+      byRevision.get(revision.parentRevision)?.encounterState.round !== revision.encounterState.round
+    ),
   }));
 }
 
@@ -1199,6 +1561,7 @@ interface SavedSessionBundleV2Body {
 
 interface SavedSessionBundleV2 extends SavedSessionBundleV2Body {
   readonly fingerprint: string;
+  readonly sessionRecord?: SessionRecord;
 }
 
 export interface DecodedSavedSessionFingerprint {
@@ -1225,6 +1588,7 @@ export interface VttSessionMigration {
 const V1_TO_V2_SOURCE = 'vtt-session-v1-to-v2:add-format-and-sha-fingerprint=vtt-session-revisions';
 const V2_TO_V3_SOURCE = 'vtt-session-v2-to-v3:add-party-session-state-null-and-rehash-revisions';
 const V3_TO_V4_SOURCE = 'vtt-session-v3-to-v4:add-persisted-branch-rng-state-fingerprint';
+const V4_TO_V5_SOURCE = 'vtt-session-v4-to-v5:add-typed-combatant-death-moment-and-rehash-revisions';
 
 export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
   Object.freeze([
@@ -1302,6 +1666,66 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
           ...oldBundle,
           format: 'vtt-session-revisions' as const,
           schemaVersion: 4 as const,
+          revisions,
+        };
+        return { ...body, fingerprint: sha256(canonicalJson(body)) };
+      },
+    }),
+    Object.freeze({
+      id: 'vtt_session_v4_to_v5',
+      from: 4,
+      to: 5,
+      source: V4_TO_V5_SOURCE,
+      checksum: '2b0d139e3b2c7c9c5491fe09a103cc667beb246f8d199f093c058b0835cb9c3d',
+      migrate: (bundle: Readonly<Record<string, unknown>>) => {
+        if (!Array.isArray(bundle.revisions)) {
+          throw new TypeError('VTT session v4 revisions are malformed.');
+        }
+        const priorDeathMoments = new Map<string, unknown>();
+        const revisions = bundle.revisions.map((revision, revisionIndex) => {
+          if (!isRecord(revision) || !isRecord(revision.encounterState)) {
+            throw new TypeError('VTT session v4 revision is malformed.');
+          }
+          const encounterState = revision.encounterState;
+          const rawCombatants = encounterState.combatants;
+          if (!Array.isArray(rawCombatants)) {
+            throw new TypeError('VTT session v4 combatants are malformed.');
+          }
+          const round = Number.isSafeInteger(encounterState.round) ? encounterState.round as number : 0;
+          const initiativeIndex = Number.isSafeInteger(encounterState.activeInitiativeIndex)
+            ? encounterState.activeInitiativeIndex as number
+            : 0;
+          const combatants = rawCombatants.map((combatant: unknown) => {
+            if (!isRecord(combatant) || !isRecord(combatant.profile) || typeof combatant.profile.id !== 'string') {
+              throw new TypeError('VTT session v4 combatant is malformed.');
+            }
+            const id = combatant.profile.id;
+            const existing = Reflect.get(combatant, 'deathAt');
+            const deathAt = combatant.life === 'dead'
+              ? existing ?? (priorDeathMoments.has(id)
+                  ? priorDeathMoments.get(id) ?? null
+                  : revisionIndex === 0
+                    ? null
+                    : { round, initiativeIndex })
+              : null;
+            priorDeathMoments.set(id, deathAt);
+            return { ...combatant, deathAt };
+          });
+          const migratedEncounterState = { ...encounterState, combatants } as unknown as EncounterState;
+          const { checksum: _oldChecksum, ...oldBody } = revision;
+          const body = {
+            ...oldBody,
+            schemaVersion: 5 as const,
+            encounterState: migratedEncounterState,
+            branchRngStateFingerprint: branchRngStateFingerprint(migratedEncounterState),
+          };
+          return { ...body, checksum: sha256(canonicalJson(body)) };
+        });
+        const { fingerprint: _oldFingerprint, ...oldBundle } = bundle;
+        const body = {
+          ...oldBundle,
+          format: 'vtt-session-revisions' as const,
+          schemaVersion: 5 as const,
           revisions,
         };
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
@@ -1386,7 +1810,11 @@ export function exportSavedSession(
     sessionId,
     revisions,
   };
-  return canonicalJson({ ...body, fingerprint: sessionFingerprint(body) } satisfies SavedSessionBundleV2);
+  return canonicalJson({
+    ...body,
+    fingerprint: sessionFingerprint(body),
+    sessionRecord: deriveSessionRecord(revisions),
+  } satisfies SavedSessionBundleV2);
 }
 
 /** Decodes, fingerprints, and replays a save without importing it. */

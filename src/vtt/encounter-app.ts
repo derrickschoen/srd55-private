@@ -36,6 +36,11 @@ import {
 import { REFERENCE_ENCOUNTER_ART } from './reference-encounter-art';
 import { decodeSavedSessionFingerprint } from './session-persistence';
 import type { StoredCharacterEncounter } from './stored-character-encounter';
+import {
+  REST_INTERRUPTION_DM_CONTROL,
+  type LongRestBenefit,
+  type RestInterruptionOutcome,
+} from './party-session-state';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -663,7 +668,7 @@ class DmEncounterView {
   #browserSaves(): readonly SaveManagerEntry[] {
     return this.#store.savedSessions().map((save) => ({
       ...save,
-      id: `browser:${save.sessionId}`,
+      id: `browser:${save.storageId}`,
       source: 'browser',
     }));
   }
@@ -675,7 +680,7 @@ class DmEncounterView {
         load: (save) => this.#loadSave(save),
         rename: async (save, name) => {
           if (save.source === 'browser') {
-            this.#store.rename(save.sessionId, name);
+            this.#store.renameStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId, name);
           } else {
             await this.#folder.rename(save, name);
             await this.#refreshFolderSaves();
@@ -685,9 +690,11 @@ class DmEncounterView {
         delete: async (save) => {
           if (save.source === 'browser') {
             const deletingActiveSession = save.sessionId === encounterSessionId(this.sessionId);
-            if (deletingActiveSession) this.close();
-            this.#store.remove(save.sessionId);
-            if (deletingActiveSession) {
+            const storageId = save.storageId ?? `session:${save.sessionId}`;
+            const deletingLiveSession = deletingActiveSession && storageId.startsWith('session:');
+            if (deletingLiveSession) this.close();
+            this.#store.removeStored(storageId, save.sessionId);
+            if (deletingLiveSession) {
               const url = new URL(location.href);
               url.searchParams.set('encounter', 'reference');
               url.searchParams.set('view', 'dm');
@@ -726,6 +733,9 @@ class DmEncounterView {
   }
 
   async #loadSave(save: SaveManagerEntry): Promise<void> {
+    if (save.source === 'browser') {
+      this.#store.restoreStored(save.storageId ?? `session:${save.sessionId}`, save.sessionId);
+    }
     if (save.source === 'folder') {
       const existing = this.#store.revisions(save.sessionId);
       if (existing.length === 0) {
@@ -858,6 +868,7 @@ class DmEncounterView {
       item.append(
         element('h3', { text: row.name }),
         element('span', { className: 'dm-save-badge', text: row.badge }),
+        element('span', { className: 'dm-save-pool', text: row.poolLabel }),
         element('time', { text: row.timestampLabel }),
         element('p', { className: 'dm-save-summary', text: row.summary }),
       );
@@ -977,7 +988,45 @@ class DmEncounterView {
     const undo = element('button', { text: 'Undo last' });
     undo.type = 'button';
     undo.addEventListener('click', () => void this.#host.undoLast());
-    controls.append(interrupt, resume, undo);
+    const skip = element('button', { text: 'Skip turn' });
+    skip.type = 'button';
+    skip.disabled = projection.timeline.currentCombatant === null;
+    skip.addEventListener('click', () => {
+      void this.#host.skipTurn().catch((error: unknown) => {
+        this.#channelError = error instanceof Error ? error.message : 'Skip turn failed.';
+        this.#render();
+      });
+    });
+    controls.append(interrupt, resume, undo, skip);
+    const currentPosition = projection.timeline.initiative.find(
+      (entry) => entry.current,
+    )?.position;
+    const later = projection.timeline.initiative.filter(
+      (entry) => currentPosition !== undefined && entry.position > currentPosition && entry.life !== 'dead',
+    );
+    if (later.length > 0) {
+      const delay = element('form', { className: 'dm-delay-turn' });
+      const target = element('select');
+      target.setAttribute('aria-label', 'Delay current turn until after');
+      for (const entry of later) {
+        const option = element('option', { text: `After ${entry.name}` });
+        option.value = entry.combatant;
+        target.append(option);
+      }
+      const submit = element('button', { text: 'Delay turn' });
+      submit.type = 'submit';
+      delay.append(target, submit);
+      delay.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const selected = later.find((entry) => entry.combatant === target.value);
+        if (selected === undefined) return;
+        void this.#host.delayTurn(selected.combatant).catch((error: unknown) => {
+          this.#channelError = error instanceof Error ? error.message : 'Delay turn failed.';
+          this.#render();
+        });
+      });
+      controls.append(delay);
+    }
     if (projection.partySession !== null && projection.partySession.state.adventuringDayStatus === 'active') {
       const longRest = element('button', { text: 'Complete Long Rest and end adventuring day' });
       longRest.type = 'button';
@@ -988,6 +1037,52 @@ class DmEncounterView {
         });
       });
       controls.append(longRest);
+
+      const interruption = element('form', { className: 'dm-rest-interruption' });
+      const outcomeLabel = element('label', { text: 'Interruption outcome' });
+      const outcomeSelect = element('select');
+      outcomeSelect.setAttribute('aria-label', 'Rest interruption outcome');
+      for (const outcome of REST_INTERRUPTION_DM_CONTROL.outcomes) {
+        const option = element('option', { text: outcome.replaceAll('_', ' ') });
+        option.value = outcome;
+        outcomeSelect.append(option);
+      }
+      outcomeLabel.append(outcomeSelect);
+      interruption.append(outcomeLabel);
+      const benefitInputs = REST_INTERRUPTION_DM_CONTROL.partialBenefitChecklist.map((benefit) => {
+        const label = element('label', { text: benefit.replaceAll('_', ' ') });
+        const input = element('input');
+        input.type = 'checkbox';
+        input.value = benefit;
+        input.setAttribute('aria-label', `Apply ${benefit.replaceAll('_', ' ')}`);
+        label.prepend(input);
+        interruption.append(label);
+        return { benefit, input };
+      });
+      const interrupted = element('button', { text: REST_INTERRUPTION_DM_CONTROL.label });
+      interrupted.type = 'submit';
+      interruption.append(interrupted);
+      interruption.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const selected = outcomeSelect.value;
+        let outcome: RestInterruptionOutcome;
+        if (selected === 'no_benefit') outcome = { kind: 'no_benefit' };
+        else if (selected === 'resumed') outcome = { kind: 'resumed' };
+        else if (selected === 'partial_per_dm') {
+          outcome = {
+            kind: 'partial_per_dm',
+            benefits: benefitInputs.flatMap(({ benefit, input }): readonly LongRestBenefit[] =>
+              input.checked ? [benefit] : []),
+          };
+        } else {
+          throw new Error(`Unknown Rest interruption outcome ${selected}.`);
+        }
+        void this.#host.resolveRestInterruption(outcome).catch((error: unknown) => {
+          this.#channelError = error instanceof Error ? error.message : 'Rest interruption failed.';
+          this.#render();
+        });
+      });
+      controls.append(interruption);
     }
     if (projection.partySession !== null &&
       projection.partySession.state.adventuringDayStatus === 'active' &&
@@ -1003,6 +1098,86 @@ class DmEncounterView {
       controls.append(nextRoom);
     }
     this.#shell.append(controls);
+
+    const timeline = element('section', { className: 'dm-initiative-timeline' });
+    timeline.dataset.round = String(projection.timeline.round);
+    timeline.append(element('h2', { text: `Initiative timeline — round ${String(projection.timeline.round)}` }));
+    const strip = element('ol', { className: 'dm-initiative-strip' });
+    for (const entry of projection.timeline.initiative) {
+      const item = element('li', {
+        text: `${entry.name}${entry.delayedThisRound ? ' (delayed)' : ''}`,
+      });
+      item.dataset.combatantId = entry.combatant;
+      item.dataset.current = String(entry.current);
+      item.dataset.delayed = String(entry.delayedThisRound);
+      strip.append(item);
+    }
+    timeline.append(strip);
+    const preview = element('ol', { className: 'dm-next-event-preview' });
+    for (const upcoming of projection.timeline.upcoming) {
+      const boundaryName = projection.timeline.initiative.find(
+        (entry) => entry.combatant === upcoming.boundary.combatant,
+      )?.name ?? upcoming.boundary.combatant;
+      let text: string;
+      switch (upcoming.kind) {
+        case 'legendary_action_window':
+          text = `Round ${String(upcoming.boundary.round)}, after ${boundaryName}: legendary-action window`;
+          break;
+        case 'effect_expiry':
+          text = `Round ${String(upcoming.boundary.round)}, ${boundaryName} ${upcoming.boundary.boundary}: effect ${upcoming.effectId} expires`;
+          break;
+        case 'burn_away':
+          text = `Round ${String(upcoming.boundary.round)}, ${boundaryName} start: ${String(upcoming.cells.length)} burning surface cell(s) burn away`;
+          break;
+        case 'repeated_save_prompt':
+          text = `Round ${String(upcoming.boundary.round)}, ${boundaryName} ${upcoming.boundary.boundary}: ${upcoming.ability} save DC ${String(upcoming.dc)}`;
+          break;
+      }
+      const item = element('li', { text });
+      item.dataset.eventKind = upcoming.kind;
+      item.dataset.round = String(upcoming.boundary.round);
+      preview.append(item);
+    }
+    if (projection.timeline.upcoming.length === 0) {
+      preview.append(element('li', { text: 'No mechanically scheduled events.' }));
+    }
+    timeline.append(element('h3', { text: 'Next-event preview' }), preview);
+    const rewind = element('div', { className: 'dm-round-rewind' });
+    rewind.append(element('h3', { text: 'Rewind to round boundary' }));
+    for (const boundary of projection.timeline.roundBoundaries) {
+      if (boundary.current) continue;
+      const button = element('button', { text: `Rewind to round ${String(boundary.round)}` });
+      button.type = 'button';
+      button.dataset.revision = String(boundary.revision);
+      button.addEventListener('click', () => {
+        void this.#host.rewindToRound(boundary.round).catch((error: unknown) => {
+          this.#channelError = error instanceof Error ? error.message : 'Round rewind failed.';
+          this.#render();
+        });
+      });
+      rewind.append(button);
+    }
+    for (const branch of projection.timeline.branchPoints) {
+      const marker = element('p', {
+        text: `Branch at round ${String(branch.round)}: revision ${String(branch.sourceRevision)} → ${String(branch.targetRevision)}`,
+      });
+      marker.dataset.branchRevision = String(branch.revision);
+      rewind.append(marker);
+    }
+    timeline.append(rewind);
+    this.#shell.append(timeline);
+    for (const entry of projection.history) {
+      if (entry.void || entry.transition.kind !== 'party_state_captured' ||
+        entry.transition.restInterruption === undefined) continue;
+      const card = element('section', { className: 'rest-interruption-ruling-card' });
+      card.dataset.revision = String(entry.revision);
+      card.dataset.choice = entry.transition.restInterruption.ruling.choice;
+      card.append(
+        element('h2', { text: `Rest interrupted — ${entry.transition.restInterruption.ruling.choice.replaceAll('_', ' ')}` }),
+        element('p', { text: entry.transition.restInterruption.ruling.reasoning }),
+      );
+      this.#shell.append(card);
+    }
 
     if (projection.partySession !== null &&
       projection.partySession.state.adventuringDayStatus === 'active' &&

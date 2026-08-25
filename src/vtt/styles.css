@@ -540,6 +540,49 @@
   font-variant-numeric: tabular-nums;
 }
 
+.dm-initiative-timeline {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--vtt-border);
+  background: #f7f1e7;
+}
+
+.dm-initiative-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dm-initiative-strip li {
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--vtt-border);
+  border-radius: 999px;
+}
+
+.dm-initiative-strip li[data-current='true'] {
+  border-color: var(--vtt-rust);
+  background: #e5af4a;
+  font-weight: 700;
+}
+
+.dm-next-event-preview {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.dm-round-rewind,
+.dm-delay-turn {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 @media (max-width: 1050px) {
   .vtt-board-layout {
     grid-template-columns: 1fr;

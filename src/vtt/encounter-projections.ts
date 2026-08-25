@@ -19,6 +19,10 @@ import {
 import type { CombatantId } from '../combat/values';
 import type { SessionHistoryEntry } from './session-persistence';
 import {
+  projectEncounterTimeline,
+  type EncounterTimelineProjection,
+} from './session-timeline';
+import {
   projectEncounterBoard,
   type DmEncounterBoardModel,
 } from './encounter-board';
@@ -77,6 +81,7 @@ export interface DmBoardProjection {
   readonly adjudicatedTargets: readonly CombatantId[];
   readonly partySession: DmPartySessionView | null;
   readonly decisionTray: DmDecisionTrayProjection;
+  readonly timeline: EncounterTimelineProjection;
 }
 
 export type DmDecisionTrayEntry =
@@ -258,6 +263,7 @@ export function projectDmBoard(input: {
       entries: [...pendingEntries, ...autoFireEntries],
       boundaryRefusal: input.boundaryRefusal ?? null,
     },
+    timeline: projectEncounterTimeline(input.view.state, input.history),
   };
 }
 
