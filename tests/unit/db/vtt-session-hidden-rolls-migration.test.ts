@@ -15,7 +15,7 @@ function schemaSignature(db: Database): string {
 }
 
 describe('VTT hidden-roll session migration', () => {
-  it('preserves v5 revisions and admits v6 revisions', async () => {
+  it('preserves v5 revisions and admits v6 revisions through the full chain', async () => {
     const sqlite3 = await getSqlite3();
     const migrationIndex = DATABASE_MIGRATIONS.findIndex(
       (entry) => entry.id === '0057_vtt_session_hidden_rolls',
@@ -23,6 +23,10 @@ describe('VTT hidden-roll session migration', () => {
     const migration = DATABASE_MIGRATIONS[migrationIndex];
     if (migration === undefined) {
       throw new Error('Missing 0057_vtt_session_hidden_rolls migration.');
+    }
+    const latestMigration = DATABASE_MIGRATIONS.at(-1);
+    if (latestMigration === undefined) {
+      throw new Error('Missing database migrations.');
     }
 
     const db = new sqlite3.oo1.DB(':memory:', 'c');
@@ -41,7 +45,10 @@ describe('VTT hidden-roll session migration', () => {
         )
       `);
 
-      db.exec(migration.sql);
+      db.exec(DATABASE_MIGRATIONS
+        .slice(migrationIndex)
+        .map((entry) => entry.sql)
+        .join('\n'));
 
       expect(db.selectObjects(
         `SELECT session_id, revision, schema_version, payload_json, payload_checksum
@@ -65,7 +72,7 @@ describe('VTT hidden-roll session migration', () => {
       fresh.exec(schema);
       expect(schemaSignature(db)).toBe(schemaSignature(fresh));
       expect(databaseSchemaChecksum(schemaSignature(db))).toBe(
-        migration.resultSchemaChecksum,
+        latestMigration.resultSchemaChecksum,
       );
     } finally {
       db.close();

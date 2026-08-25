@@ -658,8 +658,14 @@ export function encounterConclusionAfter(
 ): Extract<EncounterPhase, { readonly kind: 'concluded' }> | null {
   if (before.phase.kind === 'concluded') return null;
   const beforeSides = nonDeadEncounterSides(before);
-  const afterSides = nonDeadEncounterSides(after);
   if (!beforeSides.has('player_character') || !beforeSides.has('monster')) return null;
+  return encounterConclusionFromCurrentState(after);
+}
+
+function encounterConclusionFromCurrentState(
+  state: EncounterState,
+): Extract<EncounterPhase, { readonly kind: 'concluded' }> | null {
+  const afterSides = nonDeadEncounterSides(state);
   if (afterSides.has('player_character') && afterSides.has('monster')) return null;
   const survivingSide = afterSides.has('player_character')
     ? 'player_character' as const
@@ -674,9 +680,21 @@ export function encounterConclusionAfter(
         ? 'defeat'
         : 'mutual',
     survivingSide,
-    round: after.round,
-    revision: after.revision,
+    round: state.round,
+    revision: state.revision,
   };
+}
+
+function resumesLegendaryTurnBoundary(
+  state: EncounterState,
+  actor: CombatantId,
+): boolean {
+  const closedWindow = state.eventLog.some((event) =>
+    event.type === 'legendary_action_window_closed' &&
+    event.activeCombatant === actor && event.round === state.round);
+  const completedBoundary = state.eventLog.some((event) =>
+    event.type === 'turn_ended' && event.combatant === actor && event.round === state.round);
+  return closedWindow && !completedBoundary;
 }
 
 export type TargetSelectionRefusalRule =
@@ -11039,8 +11057,19 @@ export function reduceEncounter(
     events: [],
     reactionDecision: options.reactionDecision ?? null,
   };
+  const resolvedDecision = command.type === 'resolve_pending_decision'
+    ? state.pendingDecisions.find((decision) => decision.id === command.decisionId)
+    : undefined;
+  const deferredLegendaryBoundary = resolvedDecision?.kind === 'legendary_action_window';
+  const resumedLegendaryBoundary = command.type === 'end_turn' &&
+    resumesLegendaryTurnBoundary(state, command.actor);
   processCommand(context, command);
-  const conclusion = encounterConclusionAfter(state, context.state);
+  const conclusion = deferredLegendaryBoundary
+    ? null
+    : encounterConclusionAfter(state, context.state) ??
+      (resumedLegendaryBoundary
+        ? encounterConclusionFromCurrentState(context.state)
+        : null);
   if (conclusion !== null) context.state = { ...context.state, phase: conclusion };
   return { state: context.state, events: context.events };
 }
