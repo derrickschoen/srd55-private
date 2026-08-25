@@ -17,6 +17,7 @@ import {
 } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
+import type { PendingDecision } from '../../src/combat/encounter';
 
 const REHEARSAL_SEED = 20_260_824;
 const APP_READY_TIMEOUT_MS = 180_000;
@@ -92,6 +93,13 @@ interface TimelineProgress {
   rewindUsed: boolean;
   continuedForward: boolean;
   rewindRound: number | null;
+}
+
+interface PendingDecisionSurface {
+  readonly decisionId: string;
+  readonly decisionKind: PendingDecision['kind'];
+  readonly heading: string;
+  readonly optionCount: number;
 }
 
 async function withTimeout<T>(
@@ -470,8 +478,37 @@ async function retryClick(locator: () => Locator, label: string): Promise<void> 
   );
 }
 
-async function locatorCount(locator: () => Locator, label: string): Promise<number> {
-  return withTimeout(locator().count(), CLICK_ATTEMPT_TIMEOUT_MS, label);
+async function retryClickUntil(
+  locator: () => Locator,
+  completed: () => Promise<boolean>,
+  label: string,
+): Promise<void> {
+  const deadline = Date.now() + CLICK_STEP_BUDGET_MS;
+  let attempts = 0;
+  let lastError: unknown = new Error(`${label} was not attempted.`);
+  while (Date.now() < deadline) {
+    if (await completed()) return;
+    attempts += 1;
+    const remaining = deadline - Date.now();
+    const attemptTimeout = Math.min(CLICK_ATTEMPT_TIMEOUT_MS, remaining);
+    const playwrightTimeout = Math.max(1, attemptTimeout - 250);
+    try {
+      await withTimeout(
+        locator().click({ timeout: playwrightTimeout }),
+        attemptTimeout,
+        `${label} click attempt ${String(attempts)}`,
+      );
+      return;
+    } catch (error: unknown) {
+      lastError = error;
+      if (await completed()) return;
+      const delay = Math.min(CLICK_RETRY_DELAY_MS, deadline - Date.now());
+      if (delay > 0) await wait(delay);
+    }
+  }
+  throw new Error(
+    `${label} did not reach its expected state within ${String(CLICK_STEP_BUDGET_MS)}ms after ${String(attempts)} attempts. Last error: ${errorDetail(lastError)}`,
+  );
 }
 
 async function locatorIsVisible(locator: () => Locator, label: string): Promise<boolean> {
@@ -548,37 +585,54 @@ async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase
   recorder.track(phase, 'resolve decision tray after turn pulse');
   let resolved = 0;
   for (let guard = 0; guard < 20; guard += 1) {
-    const pending = page.locator('.dm-decision-entry[data-entry-kind="pending"]');
-    if (await pending.count() === 0) return resolved;
-    const entry = pending.first();
-    const heading = (await entry.locator('h3').textContent())?.trim() ?? 'unnamed tray entry';
-    const options = entry.getByRole('button');
-    if (await options.count() === 0) {
-      const image = await screenshot(page, recorder, `tray-${heading}`);
+    const surface = await pendingDecisionSurface(page);
+    if (surface === null) return resolved;
+    const entry = page.locator(
+      `.dm-decision-entry[data-entry-kind="pending"][data-decision-id=${JSON.stringify(surface.decisionId)}]`,
+    );
+    if (surface.optionCount === 0) {
+      const image = await screenshot(page, recorder, `tray-${surface.heading}`);
       recorder.add(
         'tray_unresolved',
         phase,
         'resolve decision tray entry',
-        `${heading} had no offered option.`,
+        `${surface.heading} had no offered option.`,
         image,
       );
       return resolved;
     }
     try {
-      await retryClick(
-        () => page.locator('.dm-decision-entry[data-entry-kind="pending"]').first()
-          .getByRole('button').first(),
-        `resolve decision tray entry ${heading}`,
+      switch (surface.decisionKind) {
+        case 'adjudication_prompt':
+          await entry.getByLabel('DM override hit point delta').fill('0');
+          break;
+        case 'reaction_offer':
+        case 'death_save':
+        case 'legendary_action_window':
+        case 'legendary_resistance':
+          break;
+        default: {
+          const exhaustive: never = surface.decisionKind;
+          throw new Error(`Unhandled pending-decision kind ${String(exhaustive)}.`);
+        }
+      }
+      await retryClickUntil(
+        () => entry.getByRole('button').first(),
+        async () => await page.evaluate((expectedDecisionId) =>
+          Array.from(document.querySelectorAll<HTMLElement>(
+            '.dm-decision-entry[data-entry-kind="pending"]',
+          )).every((candidate) => candidate.dataset.decisionId !== expectedDecisionId), surface.decisionId),
+        `resolve decision tray entry ${surface.heading}`,
       );
       resolved += 1;
       await wait(20);
     } catch (error: unknown) {
-      const image = await screenshot(page, recorder, `tray-${heading}`);
+      const image = await screenshot(page, recorder, `tray-${surface.heading}`);
       recorder.add(
         'tray_unresolved',
         phase,
         'resolve decision tray entry',
-        `${heading}: ${errorDetail(error)}`,
+        `${surface.heading}: ${errorDetail(error)}`,
         image,
       );
       return resolved;
@@ -591,6 +645,44 @@ async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase
     'Decision tray still had pending entries after 20 first-option resolutions.',
   );
   return resolved;
+}
+
+function decodePendingDecisionKind(kind: string | null): PendingDecision['kind'] {
+  switch (kind) {
+    case 'reaction_offer':
+    case 'death_save':
+    case 'legendary_action_window':
+    case 'legendary_resistance':
+    case 'adjudication_prompt':
+      return kind;
+    default:
+      throw new Error(`Decision tray entry exposed unknown pending-decision kind ${JSON.stringify(kind)}.`);
+  }
+}
+
+async function pendingDecisionSurface(page: Page): Promise<PendingDecisionSurface | null> {
+  const raw = await withTimeout(page.evaluate(() => {
+    const entry = document.querySelector<HTMLElement>(
+      '.dm-decision-entry[data-entry-kind="pending"]',
+    );
+    if (entry === null) return null;
+    return {
+      decisionId: entry.dataset.decisionId ?? null,
+      decisionKind: entry.dataset.decisionKind ?? null,
+      heading: entry.querySelector('h3')?.textContent?.trim() ?? 'unnamed tray entry',
+      optionCount: entry.querySelectorAll('button').length,
+    };
+  }), CLICK_ATTEMPT_TIMEOUT_MS, 'read pending-decision surface');
+  if (raw === null) return null;
+  if (raw.decisionId === null) {
+    throw new Error('Decision tray entry omitted its decision id.');
+  }
+  return {
+    decisionId: raw.decisionId,
+    decisionKind: decodePendingDecisionKind(raw.decisionKind),
+    heading: raw.heading,
+    optionCount: raw.optionCount,
+  };
 }
 
 async function pauseEncounter(page: Page): Promise<void> {
@@ -690,17 +782,27 @@ async function observeTimelinePreview(
   if (await actualEvents.count() > 0) progress.previewListed = true;
 }
 
-async function pulseTurn(page: Page): Promise<void> {
+async function pulseTurn(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
+): Promise<void> {
   const endTurn = (): Locator => page.locator('.dm-pending-request').getByRole('button', {
     name: 'End turn',
     exact: true,
   }).first();
-  if (await locatorCount(endTurn, 'find end-turn control') > 0 &&
-    await locatorIsVisible(endTurn, 'check end-turn control visibility')) {
-    await retryClick(
-      endTurn,
-      'end current turn',
-    );
+  for (let guard = 0; guard < 20; guard += 1) {
+    let endTurnVisible = false;
+    try {
+      endTurnVisible = await locatorIsVisible(endTurn, 'check end-turn control visibility');
+    } catch {
+      // A decision surface can replace the pending request during a locator read.
+    }
+    if (endTurnVisible) {
+      await retryClick(endTurn, 'end current turn');
+      break;
+    }
+    if (await resolveDecisionTray(page, recorder, phase) === 0) break;
   }
   await wait(TURN_PULSE_MS);
 }
@@ -725,7 +827,7 @@ async function playEncounter(
     }
     try {
       recorder.track(phase, 'turn pulse through DM controls');
-      await pulseTurn(page);
+      await pulseTurn(page, recorder, phase);
     } catch (error: unknown) {
       recorder.add('scripted_nudge', phase, 'turn pulse through DM controls', errorDetail(error));
       return { kind: 'aborted', round: lastRound, attempts: attempt };
@@ -779,7 +881,7 @@ async function advanceTimelineToRound(
     if (await roundOf(page) >= targetRound) return true;
     try {
       recorder.track(phase, 'advance in-session timeline exercise');
-      await pulseTurn(page);
+      await pulseTurn(page, recorder, phase);
     } catch (error: unknown) {
       recorder.add('scripted_nudge', phase, 'advance in-session timeline exercise', errorDetail(error));
       return false;
@@ -960,20 +1062,28 @@ async function transitionToNextDungeonRoom(
     );
     return false;
   }
+  const takeScheduledShortRest = completedRoom === 2;
   const shortRest = page.getByRole('button', { name: 'Take Short Rest and enter next room', exact: true });
   const direct = page.getByRole('button', { name: 'End room and enter next room', exact: true });
-  const control = await shortRest.count() > 0 ? shortRest : direct;
-  const label = await shortRest.count() > 0 ? 'short rest' : 'room transition';
+  const control = takeScheduledShortRest ? shortRest : direct;
+  const label = takeScheduledShortRest ? 'short rest' : 'room transition';
   if (!await waitVisible(page, recorder, phase, `${label} after room ${String(completedRoom)}`, control, 10_000)) {
     return false;
   }
-  await retryClick(
+  if (takeScheduledShortRest) await fillSensibleShortRestSpends(page);
+  const nextRoom = page.locator(
+    `.adventuring-day-status[data-room="${String(completedRoom + 1)}"]`,
+  );
+  await retryClickUntil(
     () => page.getByRole('button', {
-      name: label === 'short rest'
+      name: takeScheduledShortRest
         ? 'Take Short Rest and enter next room'
         : 'End room and enter next room',
       exact: true,
     }),
+    async () => await page.evaluate((expectedRoom) =>
+      document.querySelector('.adventuring-day-status')?.getAttribute('data-room') === expectedRoom,
+    String(completedRoom + 1)),
     `${label} after room ${String(completedRoom)}`,
   );
   return waitVisible(
@@ -981,9 +1091,33 @@ async function transitionToNextDungeonRoom(
     recorder,
     phase,
     `enter room ${String(completedRoom + 1)}`,
-    page.locator(`.adventuring-day-status[data-room="${String(completedRoom + 1)}"]`),
+    nextRoom,
     10_000,
   );
+}
+
+async function fillSensibleShortRestSpends(page: Page): Promise<void> {
+  const inputs = page.locator('.dm-short-rest input[type="number"][data-combatant-id]');
+  const spending = new Set<string>();
+  for (let index = 0; index < await inputs.count(); index += 1) {
+    const input = inputs.nth(index);
+    const combatantId = await input.getAttribute('data-combatant-id');
+    const currentHitPointsRaw = await input.getAttribute('data-current-hit-points');
+    const hitPointMaximumRaw = await input.getAttribute('data-hit-point-maximum');
+    const diceRemainingRaw = await input.getAttribute('max');
+    const currentHitPoints = Number(currentHitPointsRaw);
+    const hitPointMaximum = Number(hitPointMaximumRaw);
+    const diceRemaining = Number(diceRemainingRaw);
+    if (combatantId === null || currentHitPointsRaw === null || hitPointMaximumRaw === null ||
+      diceRemainingRaw === null || !Number.isSafeInteger(currentHitPoints) ||
+      !Number.isSafeInteger(hitPointMaximum) || !Number.isSafeInteger(diceRemaining)) {
+      throw new Error('Short Rest Hit Point Dice input omitted its typed party-state metadata.');
+    }
+    const spendOne = !await input.isDisabled() && currentHitPoints < hitPointMaximum &&
+      diceRemaining > 0 && !spending.has(combatantId);
+    await input.fill(spendOne ? '1' : '0');
+    if (spendOne) spending.add(combatantId);
+  }
 }
 
 async function completeLongRest(page: Page, recorder: FindingsRecorder): Promise<boolean> {

@@ -1512,7 +1512,7 @@ class DmEncounterView {
             'dm', 'short-rest', roomKey, character.combatantId, `d${String(pool.sides)}`, 'label',
           );
           label.append(document.createTextNode(
-            `${name}: spend d${String(pool.sides)} Hit Point Dice (${String(pool.remaining)} remaining)`,
+            `${name}: spend d${String(pool.sides)} Hit Point Dice (${String(pool.remaining)} remaining; ${String(character.currentHitPoints)} of ${String(character.hitPointMaximum)} HP)`,
           ));
           const input = element('input');
           input.type = 'number';
@@ -1522,6 +1522,9 @@ class DmEncounterView {
           input.min = '0';
           input.max = String(pool.remaining);
           input.value = '0';
+          input.dataset.combatantId = character.combatantId;
+          input.dataset.currentHitPoints = String(character.currentHitPoints);
+          input.dataset.hitPointMaximum = String(character.hitPointMaximum);
           input.disabled = character.currentHitPoints < 1 || character.life !== 'living';
           input.setAttribute('aria-label', `${name} d${String(pool.sides)} Hit Point Dice to spend`);
           label.append(input);
@@ -1635,6 +1638,7 @@ class DmEncounterView {
       row.dataset.entryKind = entry.kind;
       if (entry.kind === 'pending') {
         row.dataset.decisionId = entry.decision.id;
+        row.dataset.decisionKind = entry.decision.kind;
         row.dataset.renderKey = stableRenderKey('dm', 'decision-tray', 'decision', entry.decision.id);
         row.append(
           element('h3', {
