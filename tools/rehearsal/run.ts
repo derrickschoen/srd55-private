@@ -79,9 +79,19 @@ interface EncounterOutcome {
 interface TimelineProgress {
   previewListed: boolean;
   delayUsed: boolean;
+  skipUsed: boolean;
   rewindUsed: boolean;
   continuedForward: boolean;
   rewindRound: number | null;
+}
+
+function findingDedupeKey(
+  findingClass: FindingClass,
+  phase: string,
+  step: string,
+  detail: string,
+): string {
+  return JSON.stringify([findingClass, phase, step, detail.slice(0, 120)]);
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -147,7 +157,9 @@ class FindingsRecorder {
   readonly phases: PhaseResult[] = [];
   readonly seenRefusals = new Set<string>();
   readonly exports: SessionExport[] = [];
+  readonly pendingScreenshots = new Map<string, Promise<void>>();
   screenshotCount = 0;
+  page: Page | null = null;
 
   constructor(
     readonly date: string,
@@ -156,6 +168,16 @@ class FindingsRecorder {
     readonly reportPath: string,
   ) {}
 
+  attachPage(page: Page): void {
+    this.page = page;
+  }
+
+  async flushScreenshots(): Promise<void> {
+    while (this.pendingScreenshots.size > 0) {
+      await Promise.allSettled([...this.pendingScreenshots.values()]);
+    }
+  }
+
   add(
     findingClass: FindingClass,
     phase: string,
@@ -163,8 +185,9 @@ class FindingsRecorder {
     detail: string,
     screenshot: string | null = null,
   ): void {
+    const key = findingDedupeKey(findingClass, phase, step, detail);
     const duplicate = this.findings.findIndex((finding) =>
-      finding.class === findingClass && finding.detail === detail);
+      findingDedupeKey(finding.class, finding.phase, finding.step, finding.detail) === key);
     if (duplicate !== -1) {
       const existing = this.findings[duplicate];
       if (existing === undefined) throw new Error('Finding dedupe index is missing.');
@@ -173,6 +196,7 @@ class FindingsRecorder {
         screenshot: existing.screenshot ?? screenshot,
         count: existing.count + 1,
       });
+      if (existing.screenshot === null && screenshot === null) this.captureFindingScreenshot(key, step);
       return;
     }
     this.findings.push({
@@ -184,6 +208,24 @@ class FindingsRecorder {
       screenshot,
       count: 1,
     });
+    if (screenshot === null) this.captureFindingScreenshot(key, step);
+  }
+
+  private captureFindingScreenshot(key: string, label: string): void {
+    if (this.page === null || this.pendingScreenshots.has(key)) return;
+    const capture = screenshot(this.page, this, label)
+      .then((path) => {
+        if (path === null) return;
+        const index = this.findings.findIndex((finding) =>
+          findingDedupeKey(finding.class, finding.phase, finding.step, finding.detail) === key);
+        const finding = this.findings[index];
+        if (finding === undefined || finding.screenshot !== null) return;
+        this.findings.splice(index, 1, { ...finding, screenshot: path });
+      })
+      .finally(() => {
+        this.pendingScreenshots.delete(key);
+      });
+    this.pendingScreenshots.set(key, capture);
   }
 
   phase(name: string, status: PhaseStatus, detail: string): void {
@@ -500,7 +542,7 @@ async function assignAlgorithms(
 }
 
 async function roundOf(page: Page): Promise<number> {
-  const raw = await page.locator('.dm-initiative-timeline').getAttribute('data-round');
+  const raw = await page.locator('.dm-initiative-timeline').getAttribute('data-round', { timeout: 5_000 });
   const round = Number(raw);
   return Number.isSafeInteger(round) ? round : 0;
 }
@@ -523,46 +565,6 @@ async function encounterSideState(
   return { playersAlive, monstersAlive };
 }
 
-async function tryTimelineControls(
-  page: Page,
-  recorder: FindingsRecorder,
-  phase: string,
-  progress: TimelineProgress,
-): Promise<void> {
-  await observeTimelinePreview(page, progress);
-  if (!progress.delayUsed) {
-    const delay = page.getByRole('button', { name: 'Delay turn', exact: true });
-    if (await delay.count() > 0) {
-      try {
-        await delay.click({ timeout: 5_000 });
-        progress.delayUsed = true;
-      } catch (error: unknown) {
-        recorder.add('scripted_nudge', phase, 'delay one turn', errorDetail(error));
-      }
-    }
-  }
-  if (!progress.rewindUsed && await roundOf(page) >= 2) {
-    const rewind = page.getByRole('button', { name: /^Rewind to round 1$/u });
-    if (await rewind.count() > 0) {
-      try {
-        await rewind.first().click({ timeout: 5_000 });
-        await wait(30);
-        progress.rewindUsed = true;
-        progress.rewindRound = await roundOf(page);
-        // Rewind restores the controller identities captured at that boundary.
-        // The driver must therefore re-apply its UI assignment before asking
-        // the restored branch to continue.
-        await assignAlgorithms(page, recorder, phase);
-      } catch (error: unknown) {
-        recorder.add('scripted_nudge', phase, 'rewind to round 1', errorDetail(error));
-      }
-    }
-  }
-  if (progress.rewindUsed && !progress.continuedForward && await roundOf(page) >= 2) {
-    progress.continuedForward = true;
-  }
-}
-
 async function observeTimelinePreview(
   page: Page,
   progress: TimelineProgress,
@@ -576,14 +578,26 @@ async function observeTimelinePreview(
   if (await actualEvents.count() > 0) progress.previewListed = true;
 }
 
+const TURN_PULSE_CONTROLS = {
+  interrupt: 'Interrupt',
+  resume: 'Resume',
+} as const;
+
+function turnPulseControl(page: Page, control: keyof typeof TURN_PULSE_CONTROLS): Locator {
+  return page.locator('.dm-controls').getByRole('button', {
+    name: TURN_PULSE_CONTROLS[control],
+    exact: true,
+  });
+}
+
 async function pulseTurn(page: Page): Promise<void> {
   const pause = await page.locator('[data-pause]').first().getAttribute('data-pause');
   if (pause !== 'none') {
-    const resume = page.getByRole('button', { name: 'Resume', exact: true });
+    const resume = turnPulseControl(page, 'resume');
     if (await resume.count() > 0) await resume.click({ timeout: 5_000 });
   }
   await wait(TURN_PULSE_MS);
-  const interrupt = page.getByRole('button', { name: 'Interrupt', exact: true });
+  const interrupt = turnPulseControl(page, 'interrupt');
   if (await interrupt.count() > 0) await interrupt.click({ timeout: 5_000 });
   await wait(10);
 }
@@ -593,7 +607,6 @@ async function playEncounter(
   recorder: FindingsRecorder,
   phase: string,
   monsterIdFragment: string,
-  timeline: TimelineProgress,
 ): Promise<EncounterOutcome> {
   let lastRound = await roundOf(page);
   let unchangedAttempts = 0;
@@ -607,7 +620,6 @@ async function playEncounter(
     if (side.playersAlive === 0 && side.monstersAlive > 0) {
       return { kind: 'defeat', round: await roundOf(page), attempts: attempt - 1 };
     }
-    await tryTimelineControls(page, recorder, phase, timeline);
     try {
       await pulseTurn(page);
     } catch (error: unknown) {
@@ -647,6 +659,91 @@ async function playEncounter(
     image,
   );
   return { kind: 'aborted', round: lastRound, attempts: MAX_TURN_ATTEMPTS };
+}
+
+async function advanceTimelineToRound(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
+  targetRound: number,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= MAX_TURN_ATTEMPTS; attempt += 1) {
+    await captureRefusals(page, recorder, phase);
+    await resolveDecisionTray(page, recorder, phase);
+    if (await roundOf(page) >= targetRound) return true;
+    try {
+      await pulseTurn(page);
+    } catch (error: unknown) {
+      recorder.add('scripted_nudge', phase, 'advance dedicated timeline exercise', errorDetail(error));
+    }
+  }
+  const image = await screenshot(page, recorder, 'timeline-forward-stall');
+  recorder.add(
+    'turn_advance_stall',
+    phase,
+    'advance dedicated timeline exercise',
+    `Timeline exercise did not reach round ${String(targetRound)} after ${String(MAX_TURN_ATTEMPTS)} pulses.`,
+    image,
+  );
+  return false;
+}
+
+async function exerciseTimelineControls(
+  page: Page,
+  recorder: FindingsRecorder,
+  progress: TimelineProgress,
+): Promise<void> {
+  const phase = 'timeline';
+  await observeTimelinePreview(page, progress, 2_000);
+
+  const controls = page.locator('.dm-controls');
+  const delay = controls.getByRole('button', { name: 'Delay turn', exact: true });
+  if (await waitVisible(page, recorder, phase, 'delay one turn', delay, 10_000)) {
+    await delay.click({ timeout: 5_000 });
+    progress.delayUsed = true;
+    await wait(30);
+  }
+
+  const skip = controls.getByRole('button', { name: 'Skip turn', exact: true });
+  if (await waitVisible(page, recorder, phase, 'skip one turn', skip, 10_000)) {
+    await skip.click({ timeout: 5_000 });
+    progress.skipUsed = true;
+    await wait(30);
+  }
+
+  const reachedRoundTwo = await advanceTimelineToRound(page, recorder, phase, 2);
+  if (reachedRoundTwo) {
+    const rewind = page.locator('.dm-round-rewind').getByRole('button', {
+      name: 'Rewind to round 1',
+      exact: true,
+    });
+    if (await waitVisible(page, recorder, phase, 'rewind to round 1', rewind, 10_000)) {
+      await rewind.click({ timeout: 5_000 });
+      await page.locator('.dm-initiative-timeline[data-round="1"]').waitFor({
+        state: 'visible',
+        timeout: 10_000,
+      });
+      progress.rewindUsed = true;
+      progress.rewindRound = await roundOf(page);
+      if (await assignAlgorithms(page, recorder, phase)) {
+        progress.continuedForward = await advanceTimelineToRound(page, recorder, phase, 2);
+      }
+    }
+  }
+
+  const complete = progress.previewListed && progress.delayUsed && progress.skipUsed &&
+    progress.rewindUsed && progress.continuedForward;
+  if (!complete) {
+    recorder.add(
+      'scripted_nudge',
+      phase,
+      'complete timeline exercise',
+      `Timeline coverage was preview=${String(progress.previewListed)}, delay=${String(progress.delayUsed)}, skip=${String(progress.skipUsed)}, rewind=${String(progress.rewindUsed)}, forward=${String(progress.continuedForward)}.`,
+    );
+  }
+  recorder.phase(phase, complete ? 'completed' : 'aborted', complete
+    ? `Listed scheduled events, delayed and skipped once, rewound to round ${String(progress.rewindRound)}, and advanced forward again.`
+    : 'One or more required timeline controls could not be exercised in the dedicated timeline phase.');
 }
 
 async function resetApplication(page: Page, baseUrl: string, recorder: FindingsRecorder): Promise<boolean> {
@@ -907,8 +1004,8 @@ async function openVaneFight(
   baseUrl: string,
   recorder: FindingsRecorder,
   fightName: string,
+  phase = `Vane Warren — ${fightName}`,
 ): Promise<boolean> {
-  const phase = `Vane Warren — ${fightName}`;
   await page.goto(`${baseUrl}/vtt?encounter=vane-warren`);
   const load = page.getByRole('button', { name: `Load ${fightName}`, exact: true });
   if (!await waitVisible(page, recorder, phase, `load ${fightName}`, load)) {
@@ -981,6 +1078,40 @@ async function exportCurrentFight(
   return row === null ? null : downloadExport(page, row, recorder, phase, slug);
 }
 
+class PreviewInfrastructureError extends Error {}
+
+function assertPreviewRunning(preview: ChildProcess): void {
+  if (preview.exitCode === null && preview.signalCode === null) return;
+  throw new PreviewInfrastructureError(
+    `Built preview stopped unexpectedly (exit=${String(preview.exitCode)}, signal=${String(preview.signalCode)}).`,
+  );
+}
+
+async function runIsolatedPhase<T>(
+  preview: ChildProcess,
+  recorder: FindingsRecorder,
+  phase: string,
+  task: () => Promise<T>,
+): Promise<T | null> {
+  assertPreviewRunning(preview);
+  try {
+    const result = await task();
+    assertPreviewRunning(preview);
+    await recorder.flushScreenshots();
+    return result;
+  } catch (error: unknown) {
+    assertPreviewRunning(preview);
+    recorder.add('selector_timeout', phase, 'phase abort', errorDetail(error));
+    recorder.phase(
+      phase,
+      'aborted',
+      'Phase aborted after an unexpected UI or driver error; the rehearsal continued to the next phase.',
+    );
+    await recorder.flushScreenshots();
+    return null;
+  }
+}
+
 async function main(): Promise<void> {
   const options = await parseOptions(process.argv.slice(2));
   const runDirectory = resolve('.tmp-rehearsal', `${options.date}-run-${String(options.run)}`);
@@ -1005,28 +1136,25 @@ async function main(): Promise<void> {
       Reflect.set(window, 'showDirectoryPicker', async () => navigator.storage.getDirectory());
     });
     const page = await context.newPage();
+    recorder.attachPage(page);
     attachPageFindingCapture(page, recorder, () => currentPhase);
 
     currentPhase = 'new session';
-    const reset = await resetApplication(page, baseUrl, recorder);
-    currentPhase = 'representative party';
-    const dungeonLoaded = reset && await loadDungeon(page, baseUrl, recorder);
-    const timeline: TimelineProgress = {
-      previewListed: false,
-      delayUsed: false,
-      rewindUsed: false,
-      continuedForward: false,
-      rewindRound: null,
-    };
+    await runIsolatedPhase(preview, recorder, currentPhase, async () =>
+      resetApplication(page, baseUrl, recorder));
 
-    if (dungeonLoaded) {
-      for (let room = 1; room <= 4; room += 1) {
-        currentPhase = `dungeon room ${String(room)}`;
-        if (!await advanceDungeonRoom(page, recorder, room)) continue;
-        const outcome = await playEncounter(page, recorder, currentPhase, `d365-room-${String(room)}-monster`, timeline);
+    currentPhase = 'representative party';
+    await runIsolatedPhase(preview, recorder, currentPhase, async () =>
+      loadDungeon(page, baseUrl, recorder));
+
+    for (let room = 1; room <= 4; room += 1) {
+      currentPhase = `dungeon room ${String(room)}`;
+      await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+        if (!await advanceDungeonRoom(page, recorder, room)) return;
+        const outcome = await playEncounter(page, recorder, currentPhase, `d365-room-${String(room)}-monster`);
         recorder.phase(currentPhase, outcome.kind === 'aborted' ? 'aborted' : 'completed',
           `${outcome.kind} at round ${String(outcome.round)} after ${String(outcome.attempts)} driver pulses.`);
-        if (room === 4) continue;
+        if (room === 4) return;
         if (outcome.kind === 'aborted') {
           recorder.add(
             'scripted_nudge',
@@ -1035,13 +1163,19 @@ async function main(): Promise<void> {
             'The turn phase stalled; the driver attempted the offered room-boundary control so later rooms could still be rehearsed.',
           );
         }
-        await transitionToNextDungeonRoom(page, recorder, room);
-      }
-      currentPhase = 'long rest';
-      await completeLongRest(page, recorder);
-      currentPhase = 'save manager';
-      await saveManagerRoundTrip(page, recorder);
+        if (!await transitionToNextDungeonRoom(page, recorder, room)) {
+          recorder.phase(currentPhase, 'aborted', 'Could not cross the room boundary; later phases continued.');
+        }
+      });
     }
+
+    currentPhase = 'long rest';
+    await runIsolatedPhase(preview, recorder, currentPhase, async () =>
+      completeLongRest(page, recorder));
+
+    currentPhase = 'save manager';
+    await runIsolatedPhase(preview, recorder, currentPhase, async () =>
+      saveManagerRoundTrip(page, recorder));
 
     const fights = [
       { name: 'The Cinder Rite', slug: 'cinder-rite' },
@@ -1050,95 +1184,108 @@ async function main(): Promise<void> {
     ] as const;
     for (const [index, fight] of fights.entries()) {
       currentPhase = `Vane Warren — ${fight.name}`;
-      if (!await resetCharacterDatabaseForVaneFight(page, baseUrl, recorder, currentPhase)) {
-        recorder.phase(currentPhase, 'aborted', 'Could not prepare the fixed representative-party loader.');
-        continue;
-      }
-      if (!await openVaneFight(page, baseUrl, recorder, fight.name)) continue;
-      await observeTimelinePreview(page, timeline, fight.slug === 'iron-voice' ? 2_000 : 0);
-      if (!await assignAlgorithms(page, recorder, currentPhase)) {
-        recorder.phase(currentPhase, 'aborted', 'Could not assign every combatant to the algorithm controller.');
-        continue;
-      }
-      await observeTimelinePreview(page, timeline, fight.slug === 'iron-voice' ? 2_000 : 0);
-      const outcome = await playEncounter(page, recorder, currentPhase, 'vane-warren', timeline);
-      const exported = await exportCurrentFight(page, recorder, currentPhase, `vane-${fight.slug}`);
-      if (fight.slug === 'cinder-rite' && exported?.hasAlarm !== true) {
-        recorder.add(
-          'scripted_nudge',
-          currentPhase,
-          'sound Cinder Rite alarm',
-          'The board renders the war drum, but controller legal actions and DM tools expose no alarm interaction; the exported encounter contains no deployed alarm wave.',
-        );
-      }
-      if (exported?.hasIgnition !== true) {
-        recorder.add(
-          'scripted_nudge',
-          currentPhase,
-          'ignite a surface from the brazier',
-          'The board renders braziers and flammable surfaces, but no controller action or DM tool can place fire or invoke the ignition chain.',
-        );
-      }
-      recorder.phase(currentPhase, outcome.kind === 'aborted' ? 'aborted' : 'completed',
-        `${outcome.kind} at round ${String(outcome.round)}; export parsed ${String(exported?.encounterCount ?? 0)} encounter record(s).`);
-      if (index < fights.length - 1) {
-        const nextControl = page.getByRole('button', { name: /Load The (?:Iron Voice|Last Muster)/u });
-        if (await nextControl.count() === 0) {
+      await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+        if (!await resetCharacterDatabaseForVaneFight(page, baseUrl, recorder, currentPhase)) {
+          recorder.phase(currentPhase, 'aborted', 'Could not prepare the fixed representative-party loader.');
+          return;
+        }
+        if (!await openVaneFight(page, baseUrl, recorder, fight.name)) return;
+        if (!await assignAlgorithms(page, recorder, currentPhase)) {
+          recorder.phase(currentPhase, 'aborted', 'Could not assign every combatant to the algorithm controller.');
+          return;
+        }
+        const outcome = await playEncounter(page, recorder, currentPhase, 'vane-warren');
+        const exported = await exportCurrentFight(page, recorder, currentPhase, `vane-${fight.slug}`);
+        if (fight.slug === 'cinder-rite' && exported?.hasAlarm !== true) {
           recorder.add(
             'scripted_nudge',
             currentPhase,
-            'continue to the next Vane Warren fight',
-            'The completed fight offers no in-session next-fight path; the driver returned to the bundle selector by URL.',
+            'sound Cinder Rite alarm',
+            'The board renders the war drum, but controller legal actions and DM tools expose no alarm interaction; the exported encounter contains no deployed alarm wave.',
           );
         }
-      }
+        if (exported?.hasIgnition !== true) {
+          recorder.add(
+            'scripted_nudge',
+            currentPhase,
+            'ignite a surface from the brazier',
+            'The board renders braziers and flammable surfaces, but no controller action or DM tool can place fire or invoke the ignition chain.',
+          );
+        }
+        recorder.phase(currentPhase, outcome.kind === 'aborted' ? 'aborted' : 'completed',
+          `${outcome.kind} at round ${String(outcome.round)}; export parsed ${String(exported?.encounterCount ?? 0)} encounter record(s).`);
+        if (index < fights.length - 1) {
+          const nextControl = page.getByRole('button', { name: /Load The (?:Iron Voice|Last Muster)/u });
+          if (await nextControl.count() === 0) {
+            recorder.add(
+              'scripted_nudge',
+              currentPhase,
+              'continue to the next Vane Warren fight',
+              'The completed fight offers no in-session next-fight path; the driver returned to the bundle selector by URL.',
+            );
+          }
+        }
+      });
     }
 
     currentPhase = 'timeline';
-    const timelineComplete = timeline.previewListed && timeline.delayUsed &&
-      timeline.rewindUsed && timeline.continuedForward;
-    if (!timelineComplete) {
-      recorder.add(
-        'scripted_nudge',
-        currentPhase,
-        'complete timeline exercise',
-        `Timeline coverage was preview=${String(timeline.previewListed)}, delay=${String(timeline.delayUsed)}, rewind=${String(timeline.rewindUsed)}, forward=${String(timeline.continuedForward)}.`,
-      );
-    }
-    recorder.phase(currentPhase, timelineComplete ? 'completed' : 'aborted', timelineComplete
-      ? `Listed scheduled events, delayed once, rewound to round ${String(timeline.rewindRound)}, and advanced forward again.`
-      : 'One or more required timeline controls could not be exercised during the played encounters.');
+    await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+      const timeline: TimelineProgress = {
+        previewListed: false,
+        delayUsed: false,
+        skipUsed: false,
+        rewindUsed: false,
+        continuedForward: false,
+        rewindRound: null,
+      };
+      if (!await resetCharacterDatabaseForVaneFight(page, baseUrl, recorder, currentPhase)) {
+        recorder.phase(currentPhase, 'aborted', 'Could not prepare the dedicated timeline encounter.');
+        return;
+      }
+      if (!await openVaneFight(page, baseUrl, recorder, 'The Iron Voice', currentPhase)) return;
+      if (!await assignAlgorithms(page, recorder, currentPhase)) {
+        recorder.phase(currentPhase, 'aborted', 'Could not assign controllers for the dedicated timeline exercise.');
+        return;
+      }
+      await exerciseTimelineControls(page, recorder, timeline);
+    });
 
     currentPhase = 'end session and export coverage';
-    const totalEncounters = recorder.exports.reduce((total, entry) => total + entry.encounterCount, 0);
-    const allParsed = recorder.exports.length === 4 && recorder.exports.every((entry) => entry.parsed && entry.hasSessionRecord);
-    const endSessionControl = page.getByRole('button', { name: /End session/u });
-    if (await endSessionControl.count() === 0) {
-      recorder.add(
-        'scripted_nudge',
-        currentPhase,
-        'end session',
-        'No end-session control exists. The driver paused at the final encounter and exported through the save manager.',
-      );
-    }
-    if (recorder.exports.length > 1) {
-      recorder.add(
-        'scripted_nudge',
-        currentPhase,
-        'verify one export covers everything played',
-        'The dungeon and each Vane Warren fight use separate session IDs, so no single application export can contain all seven played encounters; coverage was verified across four parsed exports.',
-      );
-    }
-    const coverage = allParsed && totalEncounters === 7;
-    recorder.phase(currentPhase, coverage ? 'completed' : 'aborted', coverage
-      ? 'Four application exports parsed and their structured encounter lists cover all seven played encounters.'
-      : `Parsed export coverage was ${String(totalEncounters)} encounters across ${String(recorder.exports.length)} files; expected seven across four files.`);
+    await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+      const totalEncounters = recorder.exports.reduce((total, entry) => total + entry.encounterCount, 0);
+      const allParsed = recorder.exports.length === 4 && recorder.exports.every((entry) => entry.parsed && entry.hasSessionRecord);
+      const endSessionControl = page.getByRole('button', { name: /End session/u });
+      if (await endSessionControl.count() === 0) {
+        recorder.add(
+          'scripted_nudge',
+          currentPhase,
+          'end session',
+          'No end-session control exists. The driver paused at the final encounter and exported through the save manager.',
+        );
+      }
+      if (recorder.exports.length > 1) {
+        recorder.add(
+          'scripted_nudge',
+          currentPhase,
+          'verify one export covers everything played',
+          'The dungeon and each Vane Warren fight use separate session IDs, so no single application export can contain all seven played encounters; coverage was verified across four parsed exports.',
+        );
+      }
+      const coverage = allParsed && totalEncounters === 7;
+      recorder.phase(currentPhase, coverage ? 'completed' : 'aborted', coverage
+        ? 'Four application exports parsed and their structured encounter lists cover all seven played encounters.'
+        : `Parsed export coverage was ${String(totalEncounters)} encounters across ${String(recorder.exports.length)} files; expected seven across four files.`);
+    });
 
+    await recorder.flushScreenshots();
+    recorder.page = null;
     await context.close();
   } catch (error: unknown) {
     recorder.add('page_console_error', currentPhase, 'driver infrastructure', errorDetail(error));
     recorder.phase(currentPhase, 'aborted', 'Driver infrastructure stopped this phase.');
   } finally {
+    await recorder.flushScreenshots().catch(() => undefined);
+    recorder.page = null;
     await browser?.close().catch(() => undefined);
     if (preview !== null) await stopPreview(preview);
     await recorder.write(baseUrl);
