@@ -6,7 +6,8 @@ tmp/
 dist/
 test-results/
 playwright-report/
-reports/
+reports/*
+!reports/module-state-census.json
 .stryker-tmp*/
 *.tsbuildinfo
 .build-lock/
