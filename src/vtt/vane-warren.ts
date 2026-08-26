@@ -190,6 +190,7 @@ function encounterObject(
   const durability = objectClass === 'brazier'
     ? { kind: 'indestructible' as const }
     : { kind: 'hit_points' as const, hitPoints: objectClass === 'war_drum' ? 12 : 8, maximumHitPoints: objectClass === 'war_drum' ? 12 : 8 };
+  const cover = objectClass === 'war_drum' ? 'three_quarters' as const : 'half' as const;
   return {
     class: objectClass,
     object: {
@@ -201,7 +202,7 @@ function encounterObject(
       durability,
       armorClass: armorClass(objectClass === 'oil_cask' ? 10 : 12),
       damageResponses: [],
-      blocking: { movement: false, lineOfSight: false, cover: 'none' },
+      blocking: { movement: false, lineOfSight: false, cover },
       ...(objectClass === 'war_drum'
         ? {
             classActions: [{

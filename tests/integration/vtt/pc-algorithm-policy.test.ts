@@ -8,11 +8,16 @@ import {
   type LegalActionSummary,
 } from '../../../src/combat/controllers';
 import { TurnCoordinator } from '../../../src/combat/coordinator';
-import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import {
+  coverTierBetweenObjects,
+  createEncounter,
+  reduceEncounter,
+  type EncounterState,
+} from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { gridDistance } from '../../../src/combat/grid';
 import { mulberry32 } from '../../../src/combat/random';
-import { damageType, dieSides, type CombatantId } from '../../../src/combat/values';
+import { damageType, dieSides, feet, type CombatantId } from '../../../src/combat/values';
 import {
   dmVisibleEncounter,
   projectDmView,
@@ -22,7 +27,7 @@ import { canonicalJson } from '../../../src/commands/canonical-json';
 import { RpcClient, type RpcTransport } from '../../../src/rpc/client';
 import type { RpcRequest, RpcResponse } from '../../../src/rpc/protocol';
 import { rpcRegistry } from '../../../src/worker/registry';
-import { composeD365Room } from '../../../src/vtt/d365-sample-dungeon';
+import { D365_SAMPLE_DUNGEON, composeD365Room } from '../../../src/vtt/d365-sample-dungeon';
 import { loadD365SampleParty, type D365SamplePartyLoad } from '../../../src/vtt/d365-sample-party';
 import {
   capturePartySessionState,
@@ -505,6 +510,101 @@ describe('player-character AlgorithmController policy', () => {
       new AbortController().signal,
     );
     expect(doesNotProvoke.action).toEqual({ type: 'end_turn', actor: archer.id });
+  });
+
+  it('all four D365 rooms expose two fiction-anchored cover cells on live enemy firing lines', () => {
+    const expected = [
+      { room: 1, cells: ['4,1:three_quarters', '4,5:three_quarters'] },
+      { room: 2, cells: ['5,1:half', '5,5:half'] },
+      { room: 3, cells: ['4,2:three_quarters', '4,4:three_quarters'] },
+      { room: 4, cells: ['5,2:half', '5,4:half'] },
+    ] as const;
+    for (const anchor of expected) {
+      const partyState = { ...createPartySessionState(sample.party.members), room: anchor.room };
+      const composed = composeD365Room(sample.party.members, sample.displayNames, partyState);
+      const room = D365_SAMPLE_DUNGEON.rooms[anchor.room - 1];
+      if (room === undefined) throw new Error(`D365 room ${String(anchor.room)} is missing.`);
+      const coverObjects = composed.state.worldObjects.filter((object) => object.kind === 'cover');
+      expect(coverObjects.map((object) =>
+        `${String(object.position.column)},${String(object.position.row)}:${object.blocking.cover}`,
+      )).toEqual(anchor.cells);
+      expect(coverObjects).toHaveLength(2);
+      for (const placement of room.coverPlacements) {
+        expect(placement.shelteredCells.some((sheltered) => room.monsters.some((enemy) =>
+          coverTierBetweenObjects(composed.state.worldObjects, sheltered, enemy.position) === placement.tier,
+        ))).toBe(true);
+      }
+    }
+  });
+
+  it.each([
+    { classId: 'Warlock', spellId: 'eldritch-blast', cover: { column: 3, row: 5 }, open: { column: 3, row: 4 } },
+    { classId: 'Cleric', spellId: 'command', cover: { column: 3, row: 5 }, open: { column: 3, row: 4 } },
+    { classId: 'Wizard', spellId: 'slow', cover: { column: 3, row: 5 }, open: { column: 3, row: 4 } },
+  ] as const)('policy_ignores_cover: $classId caster selects reachable cover after $spellId', async (scenario) => {
+    const composed = composeD365Room(
+      sample.party.members,
+      sample.displayNames,
+      createPartySessionState(sample.party.members),
+    );
+    const caster = sample.party.members.find((member) =>
+      member.source.classes.some((entry) => entry.classId === scenario.classId));
+    const enemy = composed.state.combatants.find((candidate) => candidate.profile.kind === 'monster');
+    if (caster === undefined || enemy === undefined) throw new Error(`${scenario.classId} cover policy fixture is incomplete.`);
+    const firingLineEnemy = composed.state.combatants.find((candidate) =>
+      candidate.profile.kind === 'monster' &&
+      coverTierBetweenObjects(
+        composed.state.worldObjects,
+        scenario.cover,
+        combatantPosition(composed.state, candidate.profile.id),
+      ) !== 'none');
+    if (firingLineEnemy === undefined) throw new Error(`${scenario.classId} has no enemy across the cover placement.`);
+    const state: EncounterState = {
+      ...composed.state,
+      nextEventSequence: composed.state.nextEventSequence + 1,
+      combatants: composed.state.combatants.map((candidate) => candidate.profile.id === caster.profile.id
+        ? {
+            ...candidate,
+            turn: {
+              ...candidate.turn,
+              movement: { speed: caster.profile.rules.speed, spent: feet(0), remaining: caster.profile.rules.speed },
+            },
+          }
+        : candidate),
+      tokens: composed.state.tokens.map((token) => token.combatantId === caster.profile.id
+        ? { ...token, position: { column: 4, row: 6 } }
+        : token),
+      eventLog: [...composed.state.eventLog, {
+        sequence: composed.state.nextEventSequence,
+        type: 'spell_cast',
+        caster: caster.profile.id,
+        spellId: scenario.spellId,
+        slotLevel: scenario.spellId === 'eldritch-blast' ? null : 3,
+        targets: [firingLineEnemy.profile.id],
+      }],
+    };
+    const coverMove = {
+      type: 'move' as const,
+      actor: caster.profile.id,
+      path: [scenario.cover],
+      cause: 'voluntary' as const,
+    };
+    const openMove = {
+      type: 'move' as const,
+      actor: caster.profile.id,
+      path: [scenario.open],
+      cause: 'voluntary' as const,
+    };
+    const decision = await new AlgorithmController().choose(
+      requestFor(state, caster.profile.id, [openMove, coverMove, { type: 'end_turn', actor: caster.profile.id }]),
+      new AbortController().signal,
+    );
+    expect(coverTierBetweenObjects(
+      state.worldObjects,
+      scenario.cover,
+      combatantPosition(state, firingLineEnemy.profile.id),
+    )).not.toBe('none');
+    expect(decision.action).toEqual(coverMove);
   });
 
   it('never_closes_distance: an out-of-reach melee PC dashes, closes, and attacks on its next turn', async () => {

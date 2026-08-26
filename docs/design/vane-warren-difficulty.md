@@ -47,6 +47,17 @@ verticality rule. The playable setup contains:
 - a dim-light region and a lightly obscured smoke region;
 - a flat ember-bed movement hazard positioned for forced-movement plays.
 
+Each fight also has two anchored half-cover obstacle cells: the brazier at
+(7,4) and oil cask at (7,7), sheltering the west-side approach around (6,4)
+and (6,8) from the leaders' likely east-side positions. The Cinder Rite adds
+the war drum at (11,5) as a third, three-quarters-cover obstacle. These are
+reachable from the party entry within one normal move and remain within the
+representative casters' ranges. Per SRD 5.2.1, Half Cover grants +2 and
+Three-Quarters Cover grants +5 to both AC and Dexterity saving throws
+(`docs/srd/full/srd-5.2.1.txt:270,371`). Cover changes are recorded without
+re-tuning any roster or action-economy ratio; difficulty is remeasured after
+the encounter lanes merge.
+
 The bundled encounter explicitly enables the named `flammable_grease` optional
 rule. This is a disclosed SRD deviation: SRD Grease is nonflammable and creates
 Difficult Terrain (`docs/srd/full/srd-5.2.1.txt:8631-8646`). Its ignition and
