@@ -23,7 +23,7 @@ import {
   validatePortableContent,
 } from '../../../src/backup/portable-content';
 import { DatabaseContext } from '../../../src/db/database';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openFreshSchemaTestDatabase } from '../../helpers/open-db';
 
 function minimalCharacterBackup(): CharacterBackupDocument {
   return {
@@ -877,8 +877,8 @@ describe('portable character validation', () => {
     const grandfatheredNotes = '🧙'.repeat(25_000);
     expect([...grandfatheredNotes]).toHaveLength(25_000);
 
-    const sourceConnection = await openTestDatabase();
-    const targetConnection = await openTestDatabase();
+    const sourceConnection = await openFreshSchemaTestDatabase();
+    const targetConnection = await openFreshSchemaTestDatabase();
     try {
       const source = new DatabaseContext(sourceConnection);
       const sourceCharacterId = source.exec(

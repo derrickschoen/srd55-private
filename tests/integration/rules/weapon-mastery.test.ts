@@ -8,20 +8,51 @@ import {
   seedWeaponContent,
 } from '../../../src/rules/weapons-srd';
 import { WeaponMasteryLookup } from '../../../src/rules/weapon-mastery-lookup';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openFreshSchemaTestDatabase } from '../../helpers/open-db';
+import { acquireSharedDb, type SharedDbLease } from '../../helpers/shared-db';
+
+const SEED_TEST_NAMES = new Set([
+  'seeds all 38 templates with their reference values intact',
+  'writes 40 count rows — Barbarian and Fighter only',
+  'gives every seeded class a grant row, including the ones that grant nothing',
+  'is idempotent and reports when it has nothing to do',
+]);
+
+const READ_ONLY_TEST_NAMES = new Set([
+  'resolves the Fighter progression at every step',
+  'resolves the Barbarian progression at every step',
+  'says "unsourced" for the three classes whose counts are not bundled',
+  'says "not granted" for a class that has no such feature',
+]);
 
 describe('weapon content seeding and the mastery allowance lookup', () => {
   let connection: Database;
+  let lease: SharedDbLease | null;
   let db: DatabaseContext;
 
-  beforeEach(async () => {
-    connection = await openTestDatabase();
-    db = new DatabaseContext(connection);
-    seedClassProgressions(db);
-    seedWeaponContent(db);
+  beforeEach(async ({ task }) => {
+    lease = null;
+    if (SEED_TEST_NAMES.has(task.name)) {
+      connection = await openFreshSchemaTestDatabase();
+      db = new DatabaseContext(connection);
+      seedClassProgressions(db);
+      seedWeaponContent(db);
+    } else {
+      lease = await acquireSharedDb({
+        mode: READ_ONLY_TEST_NAMES.has(task.name) ? 'ro' : 'rw',
+      });
+      connection = lease.connection;
+      db = lease.db;
+    }
   });
 
-  afterEach(() => connection.close());
+  afterEach(async () => {
+    if (lease === null) {
+      connection.close();
+    } else {
+      await lease.release();
+    }
+  });
 
   function classId(name: string): number {
     return Number(
