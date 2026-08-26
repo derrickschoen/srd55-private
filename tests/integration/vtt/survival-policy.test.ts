@@ -538,7 +538,7 @@ describe('D382 survival package', () => {
       SURVIVAL_MEASUREMENT_SEEDS,
       'survival_package',
     );
-    expect({ successes: measurement.successes, total: measurement.total }).toEqual({ successes: 29, total: 30 });
+    expect({ successes: measurement.successes, total: measurement.total }).toEqual({ successes: 30, total: 30 });
     expect(measurement.fraction).toBeGreaterThanOrEqual(2 / 3);
   }, 120_000);
 

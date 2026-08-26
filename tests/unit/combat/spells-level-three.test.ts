@@ -67,7 +67,20 @@ const LEVEL_THREE_PINS: readonly LevelThreePin[] = [
   { id: 'sleet-storm', source: 'spell-descriptions.txt:7119', targeting: { kind: 'area', rangeFeet: 150, shape: 'cylinder', baseSizeFeet: 20, sizePerSlotFeet: 0, secondarySizeFeet: 40 }, operation: { kind: 'utility', effect: { kind: 'sleet_storm_area', placement: 'selected_when_cast', radiusFeet: 20, heightFeet: 40, obscurement: 'heavy', difficultTerrain: true, saveAbility: 'dexterity', failureCondition: 'Prone', failureBreaksConcentration: true }, concentration: true, durationRounds: 10 } },
   { id: 'slow', source: 'spell-descriptions.txt:7140', targeting: { kind: 'area_selected', rangeFeet: 120, shape: 'cube', baseSizeFeet: 40, sizePerSlotFeet: 0, baseMaximum: 6, additionalPerSlot: 0 }, operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'slow', speedMultiplier: 0.5, armorClassPenalty: 2, dexteritySavePenalty: 2, reactionsAllowed: false, actionOrBonusOnly: true, attacksPerAction: 1, somaticSpellFailurePercent: 25 }, { concentration: true, durationRounds: 10, expiresAt: 'target_end', repeatedSave: { ability: 'wisdom', rollMode: 'normal', timing: 'target_end' } }) } },
   { id: 'speak-with-dead', source: 'spell-descriptions.txt:7214', targeting: { kind: 'utility', rangeFeet: 10 }, operation: { kind: 'utility', effect: { kind: 'speak_with_dead', maximumQuestions: 5, sameCorpseLockoutRounds: 144000 }, concentration: false, durationRounds: 100 } },
-  { id: 'spirit-guardians', source: 'spell-descriptions.txt:7324', targeting: { kind: 'area', rangeFeet: 0, shape: 'emanation', baseSizeFeet: 15, sizePerSlotFeet: 0 }, operation: { kind: 'utility', effect: { kind: 'spirit_guardians_area', placement: 'selected_when_cast', radiusFeet: 15, speedMultiplier: 0.5, damageTypeByCasterAlignment: { goodOrNeutral: 'Radiant', evil: 'Necrotic' }, damageCount: 3, damageSides: 8, damagePerSlotCount: 1, saveAbility: 'wisdom', onSuccess: 'half', oncePerTurn: true }, concentration: true, durationRounds: 100 } },
+  { id: 'spirit-guardians', source: 'spell-descriptions.txt:7324', targeting: { kind: 'area', rangeFeet: 0, shape: 'emanation', baseSizeFeet: 15, sizePerSlotFeet: 0 }, operation: {
+    kind: 'persistent_area', origin: 'anchored_to_caster', shape: { kind: 'emanation', radius: feet(15) },
+    durationRounds: 100, concentration: true, targetFilter: 'enemies', includeOwner: false,
+    difficultTerrain: false, movableFeet: null, initialEffects: [],
+    hooks: [
+      ...(['on_enter', 'on_end_of_turn_inside'] as const).map((hook) => ({ hook, frequency: 'once_per_turn' as const, effect: {
+        kind: 'save_gated' as const, ability: 'wisdom' as const, rollMode: 'normal' as const, onSuccess: 'half' as const,
+        payload: { kind: 'damage' as const, damageType: 'spirit_guardians_alignment' as const, dice: dice(3, 8, { perSlotCount: 1 }) },
+      } })),
+      { hook: 'on_enter', frequency: 'every_trigger', effect: { kind: 'automatic', payload: {
+        kind: 'effect', payload: { kind: 'movement_modifier', speedChange: { kind: 'reduce', reduction: { kind: 'multiplier', multiplier: 0.5 } }, modeGrants: [], difficultTerrainImmunity: false, magicalSpeedReductionImmunity: false }, lifetime: { kind: 'while_inside' },
+      } } },
+    ],
+  } },
   { id: 'stinking-cloud', source: 'spell-descriptions.txt:7391', targeting: { kind: 'area', rangeFeet: 90, shape: 'sphere', baseSizeFeet: 20, sizePerSlotFeet: 0 }, operation: { kind: 'utility', effect: { kind: 'stinking_cloud_area', placement: 'selected_when_cast', radiusFeet: 20, obscurement: 'heavy', dispersedByStrongWind: true, saveAbility: 'constitution', failureCondition: 'Poisoned', actionsAllowedOnFailure: false }, concentration: true, durationRounds: 10 } },
   { id: 'tiny-hut', source: 'spell-descriptions.txt:7908', targeting: { kind: 'area', rangeFeet: 0, shape: 'emanation', baseSizeFeet: 10, sizePerSlotFeet: 0 }, operation: { kind: 'utility', effect: { kind: 'tiny_hut', placement: 'selected_when_cast', radiusFeet: 10, blocksOutsideCreaturesAndObjects: true, blocksSpellLevelAtMost: 3, opaqueFromOutside: true, transparentFromInside: true }, concentration: false, durationRounds: 4800 } },
   { id: 'tongues', source: 'spell-descriptions.txt:7932', targeting: { kind: 'single', rangeFeet: 5, willing: false }, operation: { kind: 'effect', effect: effect({ kind: 'universal_language', understandsSpokenAndSigned: true, understoodByAnyLanguageSpeaker: true }, { durationRounds: 600 }) } },
@@ -173,7 +186,9 @@ describe('level-3 spell mechanics pins', () => {
       type: 'cast_spell', actor: caster.id, spellId: definition.id, slotLevel: 3, castAsRitual: false,
       casterLevel: 7, attackBonus: 100, saveDc: 100, spellcastingModifier: 3,
       targets: selectedTarget ? [target.id] : [], area: levelThreeArea(definition), weaponAttack: null,
-      selectedOption: definition.id === 'protection-from-energy' ? 'Fire' : null,
+      selectedOption: definition.id === 'protection-from-energy'
+        ? 'Fire'
+        : definition.id === 'spirit-guardians' ? 'Radiant' : null,
     };
     const result = reduceEncounter(state, command, () => 0.5);
     expect(result.events.some((event) => event.type === 'spell_cast' && event.spellId === pin.id)).toBe(true);
@@ -289,11 +304,17 @@ describe('level-3 spell mechanics pins', () => {
   it.each([
     { id: 'animate-dead', kind: 'summoned_undead', expected: { createdCreatures: 3, reassertedCreatures: 6 } },
     { id: 'glyph-of-warding', kind: 'glyph_of_warding', expected: { explosiveDamageCount: 6, storedSpellMaximumLevel: 4 } },
-    { id: 'spirit-guardians', kind: 'spirit_guardians_area', expected: { damageCount: 4 } },
   ] as const)('$id level-4 upcast resolves its payload scaling', ({ id, kind, expected }) => {
     const result = castLevelFour(id);
     const payload = result.state.effects.find((candidate) => candidate.payload.kind === kind)?.payload;
     expect(payload).toMatchObject(expected);
+  });
+
+  it('Spirit Guardians level-4 upcast resolves exactly 4d8 through its persistent-area damage hook', () => {
+    // Upcast damage: docs/srd/source/spell-descriptions.txt:7351.
+    const area = castLevelFour('spirit-guardians').state.persistentAreas[0];
+    const damage = area?.hooks.find((hook) => hook.effect.payload.kind === 'damage')?.effect.payload;
+    expect(damage?.kind === 'damage' ? damage.damage.terms[0]?.dice : null).toMatchObject({ count: 4, sides: 8 });
   });
 
   it('level-4 Bestow Curse and Magic Circle pin their distinct duration steps', () => {
@@ -346,7 +367,8 @@ function castLevelFour(id: string): ReturnType<typeof reduceEncounter> {
   return reduceEncounter(state, {
     type: 'cast_spell', actor: caster.id, spellId: id, slotLevel: 4, castAsRitual: false,
     casterLevel: 7, attackBonus: 100, saveDc: 100, spellcastingModifier: 3,
-    targets: selectsTarget ? [target.id] : [], area: levelThreeArea(definition), weaponAttack: null, selectedOption: null,
+    targets: selectsTarget ? [target.id] : [], area: levelThreeArea(definition), weaponAttack: null,
+    selectedOption: id === 'spirit-guardians' ? 'Radiant' : null,
   }, () => 0.5);
 }
 

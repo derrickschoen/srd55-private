@@ -281,7 +281,8 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'legendary_action_window_closed':
     case 'legendary_resistance_used': return [event.combatant];
     case 'initiative_block_rolled': return event.combatants;
-    case 'spell_component_consumed': return [event.caster];
+    case 'spell_component_consumed':
+    case 'slow_spellcasting_checked': return [event.caster];
     case 'spell_cast':
     case 'sustained_effect_activated':
     case 'sustained_effect_triggered': return [event.caster, ...event.targets];

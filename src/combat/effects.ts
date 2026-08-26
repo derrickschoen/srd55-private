@@ -484,6 +484,7 @@ export type EffectPayload =
   | {
       readonly kind: 'commanded_action';
       readonly options: readonly ('approach' | 'drop' | 'flee' | 'grovel' | 'halt')[];
+      readonly selectedOption: 'selected_when_cast' | 'approach' | 'drop' | 'flee' | 'grovel' | 'halt';
     }
   | {
       readonly kind: 'language_comprehension';

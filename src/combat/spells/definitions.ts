@@ -378,7 +378,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     source: 'docs/srd/source/spell-descriptions.txt:1209',
     castingTime: 'action', components: V,
     targeting: { kind: 'multiple', rangeFeet: 60, baseMaximum: 1, additionalPerSlot: 1, requiresSight: true },
-    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'commanded_action', options: ['approach', 'drop', 'flee', 'grovel', 'halt'] }, { durationRounds: 1, expiresAt: 'target_end' }) },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: effect({ kind: 'commanded_action', options: ['approach', 'drop', 'flee', 'grovel', 'halt'], selectedOption: 'selected_when_cast' }, { durationRounds: 1, expiresAt: 'target_end' }) },
   },
   {
     id: 'comprehend-languages', name: 'Comprehend Languages', level: 1,
@@ -1124,7 +1124,43 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     id: 'spirit-guardians', name: 'Spirit Guardians', level: 3,
     source: 'docs/srd/source/spell-descriptions.txt:7324', castingTime: 'action', components: material('a prayer scroll'),
     targeting: { kind: 'area', rangeFeet: 0, shape: 'emanation', baseSizeFeet: 15, sizePerSlotFeet: 0 },
-    operation: { kind: 'utility', effect: { kind: 'spirit_guardians_area', placement: 'selected_when_cast', radiusFeet: 15, speedMultiplier: 0.5, damageTypeByCasterAlignment: { goodOrNeutral: 'Radiant', evil: 'Necrotic' }, damageCount: 3, damageSides: 8, damagePerSlotCount: 1, saveAbility: 'wisdom', onSuccess: 'half', oncePerTurn: true }, concentration: true, durationRounds: 100 },
+    operation: {
+      kind: 'persistent_area', origin: 'anchored_to_caster', shape: { kind: 'emanation', radius: feet(15) },
+      durationRounds: 100, concentration: true, targetFilter: 'enemies', includeOwner: false,
+      difficultTerrain: false, movableFeet: null, initialEffects: [],
+      hooks: [
+        ...(['on_enter', 'on_end_of_turn_inside'] as const).map((hook) => ({
+          hook,
+          frequency: 'once_per_turn' as const,
+          effect: {
+            kind: 'save_gated' as const,
+            ability: 'wisdom' as const,
+            rollMode: 'normal' as const,
+            onSuccess: 'half' as const,
+            payload: {
+              kind: 'damage' as const,
+              damageType: 'spirit_guardians_alignment' as const,
+              dice: dice(3, 8, { perSlotCount: 1 }),
+            },
+          },
+        })),
+        {
+          hook: 'on_enter', frequency: 'every_trigger',
+          effect: {
+            kind: 'automatic',
+            payload: {
+              kind: 'effect',
+              payload: {
+                kind: 'movement_modifier',
+                speedChange: { kind: 'reduce', reduction: { kind: 'multiplier', multiplier: 0.5 } },
+                modeGrants: [], difficultTerrainImmunity: false, magicalSpeedReductionImmunity: false,
+              },
+              lifetime: { kind: 'while_inside' },
+            },
+          },
+        },
+      ],
+    },
   },
   {
     id: 'stinking-cloud', name: 'Stinking Cloud', level: 3,

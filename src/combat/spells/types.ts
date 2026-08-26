@@ -149,7 +149,7 @@ export type SpellPersistentAreaEffectSpec =
   | {
       readonly kind: 'automatic';
       readonly payload:
-        | { readonly kind: 'damage'; readonly damageType: DamageType; readonly dice: ScaledDice }
+        | { readonly kind: 'damage'; readonly damageType: DamageType | 'spirit_guardians_alignment'; readonly dice: ScaledDice }
         | { readonly kind: 'effect'; readonly payload: PersistentAreaAppliedPayload; readonly lifetime: PersistentAreaEffectLifetime };
     }
   | {
@@ -158,7 +158,7 @@ export type SpellPersistentAreaEffectSpec =
       readonly rollMode: 'normal' | 'advantage' | 'disadvantage';
       readonly onSuccess: 'none' | 'half';
       readonly payload:
-        | { readonly kind: 'damage'; readonly damageType: DamageType; readonly dice: ScaledDice }
+        | { readonly kind: 'damage'; readonly damageType: DamageType | 'spirit_guardians_alignment'; readonly dice: ScaledDice }
         | { readonly kind: 'effect'; readonly payload: PersistentAreaAppliedPayload; readonly lifetime: PersistentAreaEffectLifetime };
     };
 
