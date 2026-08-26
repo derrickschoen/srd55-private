@@ -372,7 +372,9 @@ function persistedCharacter(db: DatabaseContext, characterId: number) {
       [characterId],
     ),
     savePoints: db.allRaw(
-      'SELECT * FROM character_save_points WHERE character_id = ?',
+      // Explicit order: the (character_id, id DESC) index would otherwise
+      // decide row order for this unordered dump.
+      'SELECT * FROM character_save_points WHERE character_id = ? ORDER BY id',
       [characterId],
     ),
     loadouts: db.allRaw(
