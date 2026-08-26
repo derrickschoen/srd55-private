@@ -18,7 +18,7 @@
     "test:unit": "vitest run --configLoader runner tests/unit",
     "test:live": "AI_BRIDGE_LIVE=1 vitest run --configLoader runner tests/live",
     "test:browser": "playwright test",
-    "test:mutation": "node scripts/patch-stryker-vitest-runner.mjs && stryker run",
+    "test:mutation": "node scripts/patch-stryker-vitest-runner.mjs && node scripts/mutation-loud.mjs",
     "test:mutation:sharded": "node scripts/patch-stryker-vitest-runner.mjs && node scripts/mutation-shard.mjs run-all --shards 8",
     "vtt:replay": "vite-node tools/vtt-replay.ts --",
     "vtt:soak": "vite-node tools/vtt-soak.ts --",

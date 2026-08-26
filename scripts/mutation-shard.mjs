@@ -11,6 +11,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -1129,7 +1130,14 @@ async function main() {
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch((error) => {
-    console.error(error instanceof Error ? error.message : error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    // Loud failure: the supervisor loop polls this sentinel instead of
+    // scanning megabyte logs for a buried shard failure.
+    writeFileSync(
+      resolve(PROJECT_ROOT, '.tmp-mutation-FAILED'),
+      `when: ${new Date().toISOString()}\ncommand: mutation-shard ${process.argv.slice(2).join(' ')}\n${message}\naction: supervisor — fix and restart the run.\n`,
+    );
     process.exitCode = 1;
   });
 }
