@@ -439,6 +439,11 @@ export const catalog_content_aliases = sqliteTable(
       table.content_kind,
       table.alias_key,
     ),
+    index('catalog_content_aliases_target_index').on(
+      table.content_kind,
+      table.content_key,
+      table.alias_key,
+    ),
   ],
 );
 
@@ -492,5 +497,9 @@ export const catalog_content_match_decisions = sqliteTable(
         table.incoming_fingerprint_digest,
       ],
     }),
+    index('catalog_match_decisions_target_index').on(
+      table.content_kind,
+      table.target_content_key,
+    ),
   ],
 );

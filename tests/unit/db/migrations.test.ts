@@ -339,6 +339,15 @@ const SCHEMA_BEFORE_VTT_SESSION_ENCOUNTER_PHASE = DATABASE_MIGRATIONS
   .join('\n');
 const VTT_SESSION_ENCOUNTER_PHASE_MIGRATION =
   DATABASE_MIGRATIONS[VTT_SESSION_ENCOUNTER_PHASE_INDEX]!;
+const SAFE_QUERY_INDEXES_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0059_safe_query_indexes',
+);
+const SCHEMA_BEFORE_SAFE_QUERY_INDEXES = DATABASE_MIGRATIONS
+  .slice(0, SAFE_QUERY_INDEXES_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const SAFE_QUERY_INDEXES_MIGRATION =
+  DATABASE_MIGRATIONS[SAFE_QUERY_INDEXES_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -4120,6 +4129,53 @@ describe('database migration chain', () => {
       `);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         VTT_SESSION_ENCOUNTER_PHASE_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(
+        schemaSignature(SCHEMA_BEFORE_SAFE_QUERY_INDEXES),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0059 adds the safe query indexes without removing prior indexes', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_SAFE_QUERY_INDEXES);
+      const indexNames = [
+        'background_templates_default_origin_feat_index',
+        'catalog_content_aliases_target_index',
+        'catalog_match_decisions_target_index',
+        'character_effects_source_character_index',
+        'character_items_source_character_index',
+        'character_level_feat_choices_source_character_index',
+        'character_save_points_character_id_id_index',
+        'spell_identity_aliases_identity_alias_index',
+      ];
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE name IN (${indexNames.map(() => '?').join(', ')})`,
+        indexNames,
+      )).toEqual([]);
+
+      const priorIndexCount = Number(db.selectValue(
+        `SELECT count(*) FROM sqlite_schema
+         WHERE type = 'index' AND name NOT LIKE 'sqlite_%'`,
+      ));
+      db.exec(SAFE_QUERY_INDEXES_MIGRATION.sql);
+
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE name IN (${indexNames.map(() => '?').join(', ')})
+         ORDER BY name`,
+        indexNames,
+      )).toEqual(indexNames);
+      expect(Number(db.selectValue(
+        `SELECT count(*) FROM sqlite_schema
+         WHERE type = 'index' AND name NOT LIKE 'sqlite_%'`,
+      ))).toBe(priorIndexCount + indexNames.length);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        SAFE_QUERY_INDEXES_MIGRATION.resultSchemaChecksum,
       );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {

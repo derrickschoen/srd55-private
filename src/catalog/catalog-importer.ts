@@ -1002,26 +1002,35 @@ export class CatalogImporter {
   }
 
   #isReferenced(versionId: number): boolean {
-    return (
-      Number(
-        this.db.scalar(
-          `SELECT EXISTS (
-             SELECT 1 FROM spell_selection_slots
-              WHERE fixed_spell_version_id = ?
-                 OR current_spell_version_id = ?
-             UNION ALL
-             SELECT 1 FROM wizard_spellbook_entries
-              WHERE spell_version_id = ?
-             UNION ALL
-             SELECT 1 FROM spell_loadout_entries
-              WHERE spell_version_id = ?
-             UNION ALL
-             SELECT 1 FROM character_spell_preferences
-              WHERE spell_version_id = ?
-           )`,
-          [versionId, versionId, versionId, versionId, versionId],
-        ) ?? 0,
-      ) === 1
+    const probes: readonly (readonly [string, readonly BindableValue[]])[] = [
+      [
+        `SELECT 1 FROM spell_selection_slots
+         WHERE fixed_spell_version_id = ? LIMIT 1`,
+        [versionId],
+      ],
+      [
+        `SELECT 1 FROM spell_selection_slots
+         WHERE current_spell_version_id = ? LIMIT 1`,
+        [versionId],
+      ],
+      [
+        `SELECT 1 FROM wizard_spellbook_entries
+         WHERE spell_version_id = ? LIMIT 1`,
+        [versionId],
+      ],
+      [
+        `SELECT 1 FROM spell_loadout_entries
+         WHERE spell_version_id = ? LIMIT 1`,
+        [versionId],
+      ],
+      [
+        `SELECT 1 FROM character_spell_preferences
+         WHERE spell_version_id = ? LIMIT 1`,
+        [versionId],
+      ],
+    ];
+    return probes.some(([sql, bindings]) =>
+      this.db.scalar(sql, bindings) !== null
     );
   }
 

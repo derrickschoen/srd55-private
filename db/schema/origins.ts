@@ -937,6 +937,9 @@ export const character_effects = sqliteTable(
     index('character_effects_character_weapon_id_index').on(
       table.character_weapon_id,
     ),
+    index('character_effects_source_character_index')
+      .on(table.source_instance_id, table.character_id)
+      .where(sql`source_instance_id IS NOT NULL`),
     foreignKey({
       columns: [table.source_instance_id, table.character_id],
       foreignColumns: [
@@ -1065,6 +1068,9 @@ export const background_templates = sqliteTable(
       table.name,
       table.rules_edition,
     ),
+    index('background_templates_default_origin_feat_index')
+      .on(table.default_origin_feat_content_key)
+      .where(sql`default_origin_feat_content_key IS NOT NULL`),
   ],
 );
 

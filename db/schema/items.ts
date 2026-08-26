@@ -188,6 +188,9 @@ export const character_items = sqliteTable(
       table.id,
       table.character_id,
     ),
+    index('character_items_source_character_index')
+      .on(table.source_instance_id, table.character_id)
+      .where(sql`source_instance_id IS NOT NULL`),
     foreignKey({
       columns: [table.source_instance_id, table.character_id],
       foreignColumns: [

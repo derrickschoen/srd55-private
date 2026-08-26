@@ -90,6 +90,11 @@ export const spell_identity_aliases = sqliteTable(
     uniqueIndex('spell_identity_aliases_normalized_alias_unique').on(
       table.normalized_alias,
     ),
+    index('spell_identity_aliases_identity_alias_index').on(
+      table.spell_identity_id,
+      table.normalized_alias,
+      table.alias,
+    ),
   ],
 );
 
