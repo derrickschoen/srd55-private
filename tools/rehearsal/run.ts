@@ -735,15 +735,18 @@ async function captureBrowserRuntimeTimings(page: Page, recorder: FindingsRecord
 
 async function captureRefusals(page: Page, recorder: FindingsRecorder, phase: string): Promise<void> {
   recorder.track(phase, 'scan refusal notices after turn pulse');
-  const refusals = page.locator('.dm-decision-refusal');
-  for (let index = 0; index < await refusals.count(); index += 1) {
-    const refusal = refusals.nth(index);
-    const text = (await refusal.textContent())?.trim() ?? '(empty refusal)';
-    const code = await refusal.getAttribute('data-refusal-code');
-    const category = await refusal.getAttribute('data-refusal-category');
+  const refusals = await withTimeout(page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('.dm-decision-refusal')).map((refusal) => ({
+      text: refusal.textContent?.trim() ?? '(empty refusal)',
+      code: refusal.dataset.refusalCode ?? null,
+      category: refusal.dataset.refusalCategory ?? null,
+    }))), CLICK_ATTEMPT_TIMEOUT_MS, 'read refusal surfaces');
+  let capturedFinding = false;
+  for (const { text, code, category } of refusals) {
     const key = `${phase}:${code ?? ''}:${category ?? ''}:${text}`;
     if (recorder.seenRefusals.has(key)) continue;
     recorder.seenRefusals.add(key);
+    capturedFinding = true;
     recorder.add(
       'refusal',
       phase,
@@ -751,6 +754,7 @@ async function captureRefusals(page: Page, recorder: FindingsRecorder, phase: st
       `${code === null ? '' : `boundary ${code}: `}${category === null ? '' : `category ${category}: `}${text}`,
     );
   }
+  if (capturedFinding) await recorder.flushScreenshots();
 }
 
 async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase: string): Promise<number | null> {
@@ -871,11 +875,41 @@ async function resumeEncounter(page: Page): Promise<void> {
   if (pause === 'none') return;
   const resume = page.locator('.dm-controls').getByRole('button', { name: 'Resume', exact: true });
   if (await resume.count() > 0) {
+    const revision = await renderedSessionRevision(page);
     await retryClick(
       () => page.locator('.dm-controls').getByRole('button', { name: 'Resume', exact: true }),
       'resume encounter',
     );
+    await waitForRenderedRevisionAfter(page, revision, 'encounter resume');
+    const renderedPause = await page.evaluate(() =>
+      document.querySelector<HTMLElement>('[data-pause]')?.dataset.pause ?? null);
+    if (renderedPause !== 'none') {
+      throw new Error(`Encounter resume published pause state ${JSON.stringify(renderedPause)}.`);
+    }
   }
+}
+
+async function renderedSessionRevision(page: Page): Promise<number> {
+  const raw = await page.locator('.dm-encounter').first().getAttribute('data-session-revision');
+  const revision = Number(raw);
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    throw new Error(`DM surface exposed invalid session revision ${JSON.stringify(raw)}.`);
+  }
+  return revision;
+}
+
+async function waitForRenderedRevisionAfter(
+  page: Page,
+  revision: number,
+  label: string,
+): Promise<void> {
+  await page.waitForFunction((previous) => {
+    const raw = document.querySelector<HTMLElement>('.dm-encounter')?.dataset.sessionRevision;
+    const current = Number(raw);
+    return Number.isSafeInteger(current) && current > previous;
+  }, revision, { timeout: CLICK_ATTEMPT_TIMEOUT_MS }).catch((error: unknown) => {
+    throw new Error(`${label} did not publish a newer durable DM surface: ${errorDetail(error)}`);
+  });
 }
 
 async function assignAlgorithms(
@@ -890,8 +924,9 @@ async function assignAlgorithms(
     for (let guard = 0; guard < 40; guard += 1) {
       const human = page.locator('.dm-controller-assignments select').filter({ has: page.locator('option:checked[value="human"]') });
       if (await human.count() === 0) break;
+      const revision = await renderedSessionRevision(page);
       await human.first().selectOption('algorithm', { timeout: 5_000 });
-      await wait(10);
+      await waitForRenderedRevisionAfter(page, revision, 'controller assignment');
     }
     const selects = page.locator('.dm-controller-assignments select');
     const values = await selects.evaluateAll((nodes) => nodes.map((node) =>

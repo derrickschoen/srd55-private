@@ -162,6 +162,55 @@ describe('stable VTT control rendering', () => {
     expect(clicked).toHaveBeenCalledOnce();
   });
 
+  it('keeps the encounter pause acknowledgement connected while its state changes', () => {
+    const status = (pause: 'none' | 'interrupted'): HTMLElement => {
+      const node = document.createElement('p');
+      node.dataset.renderKey = stableRenderKey('dm', 'encounter-status');
+      node.dataset.pause = pause;
+      node.textContent = pause === 'none' ? 'Encounter running' : 'Paused: interrupted';
+      return node;
+    };
+    const live = document.createElement('main');
+    const liveStatus = status('interrupted');
+    live.append(liveStatus);
+    document.body.append(live);
+    const draft = document.createElement('main');
+    draft.append(status('none'));
+
+    reconcileStableRenderedChildren(live, draft);
+
+    const rendered = interactiveElement(live).querySelector(
+      `[data-render-key="${stableRenderKey('dm', 'encounter-status')}"]`,
+    );
+    expect(rendered).toBe(interactiveElement(liveStatus));
+    expect(interactiveElement(liveStatus).getAttribute('data-pause')).toBe('none');
+    expect(interactiveElement(liveStatus).textContent).toBe('Encounter running');
+  });
+
+  it('keeps a boundary-refusal surface connected while its message republishes', () => {
+    const refusal = (text: string): HTMLElement => {
+      const node = document.createElement('p');
+      node.dataset.renderKey = stableRenderKey('dm', 'decision-tray', 'boundary-refusal');
+      node.dataset.refusalCode = 'turn_boundary_blocked';
+      node.textContent = text;
+      return node;
+    };
+    const live = document.createElement('main');
+    const liveRefusal = refusal('first boundary message');
+    live.append(liveRefusal);
+    document.body.append(live);
+    const draft = document.createElement('main');
+    draft.append(refusal('current boundary message'));
+
+    reconcileStableRenderedChildren(live, draft);
+
+    const rendered = interactiveElement(live).querySelector(
+      `[data-render-key="${stableRenderKey('dm', 'decision-tray', 'boundary-refusal')}"]`,
+    );
+    expect(rendered).toBe(interactiveElement(liveRefusal));
+    expect(interactiveElement(liveRefusal).textContent).toBe('current boundary message');
+  });
+
   it('rejects a keyed control whose unkeyed wrapper would still replace it', () => {
     const live = document.createElement('main');
     const draft = document.createElement('main');

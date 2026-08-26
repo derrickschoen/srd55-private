@@ -1195,6 +1195,7 @@ class DmEncounterView {
     live.dataset.renderTotalMs = String(this.#renderTotalMs);
     live.dataset.renderMaximumMs = String(this.#renderMaximumMs);
     live.dataset.coalescedSnapshotCount = String(this.#coalescedSnapshotCount);
+    live.dataset.sessionRevision = String(this.#projection?.history.at(-1)?.revision ?? 0);
   }
 
   #renderFresh(): void {
@@ -1217,6 +1218,7 @@ class DmEncounterView {
           ? 'Encounter running'
           : `Paused: ${projection.coordinator.pause.kind}`,
     });
+    status.dataset.renderKey = stableRenderKey('dm', 'encounter-status');
     status.dataset.pause = projection.coordinator.pause?.kind ?? 'none';
     this.#shell.append(status);
     if (projection.encounter.phase.kind === 'concluded') {
@@ -1646,6 +1648,7 @@ class DmEncounterView {
         className: 'dm-decision-refusal',
         text: projection.decisionTray.boundaryRefusal.message,
       });
+      refusal.dataset.renderKey = stableRenderKey('dm', 'decision-tray', 'boundary-refusal');
       refusal.setAttribute('role', 'alert');
       refusal.dataset.refusalCode = projection.decisionTray.boundaryRefusal.code;
       tray.append(refusal);
@@ -1655,6 +1658,7 @@ class DmEncounterView {
         className: 'dm-decision-refusal',
         text: `${projection.decisionTray.actionRefusal.reason} (${projection.decisionTray.actionRefusal.citation})`,
       });
+      refusal.dataset.renderKey = stableRenderKey('dm', 'decision-tray', 'action-refusal');
       refusal.setAttribute('role', 'alert');
       refusal.dataset.refusalCategory = projection.decisionTray.actionRefusal.category;
       tray.append(refusal);
