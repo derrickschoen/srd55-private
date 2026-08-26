@@ -7,6 +7,16 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D392 — OWNER: main advances at checkpoints; ngrok tunnel for session zero (2026-08-26)
+
+1. **Main (and the :4173 preview) advance at clean checkpoint
+   boundaries** — sweep harvest, player-board lane, five-tab pass —
+   with a rebuild each time. The v1 LABEL still attaches only to the
+   merged two-track tree (D391.1); intermediate merges are progress,
+   not v1.
+2. **Session zero's tunnel reuses the existing ngrok domain** (D228);
+   the tunnel path gets rehearsed on it before session zero.
+
 ## D391 — OWNER: brainstorm round 7 — 16 rulings (v1 bar, refactor, presentation, future) (2026-08-26)
 
 Fifth three-model brainstorm (codex + opus + fable; raw lists and
