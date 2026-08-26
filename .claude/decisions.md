@@ -23,6 +23,9 @@ synthesis in the job tmp dir as brainstorm4-*). Rulings, in ask order:
 4. **Tuning ships as THREE TIERS**: Easy (further detuned) / Standard
    (current detune) / Hard (original), selectable at encounter start,
    each with honest difficulty records; tier data seeds the ruler.
+   Follow-up ruling (same round): the D382 two-thirds floor binds
+   STANDARD; Easy targets ~90%+ measured survival; Hard is the original
+   tuning with NO floor — allowed to TPK optimal play.
 5. **NO survival regression gate, NO build freeze** — the fixed-seed
    winning leg is the only bar; fractions stay informational; builds
    and policy may evolve.
