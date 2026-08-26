@@ -1,9 +1,6 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "vitest",
-  "vitest": {
-    "configFile": "reports/stryker/vitest.config.mjs"
-  },
   "checkers": [
     "typescript"
   ],
