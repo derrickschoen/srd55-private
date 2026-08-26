@@ -246,12 +246,13 @@ Ownership rules:
 
 ## Working tree and sequencing
 
-Implementation happens on branch `wt/vtt` in this worktree. Stage 0 starts only
-after the running consolidated VTT mutation sweep is harvested and committed
-and the batch merge of `wt/vtt` to `main` lands, so `main` holds the v1-bar
-checkpoint before this refactor begins. The player-board lane (D386.7–D386.9)
-follows the engine merge rather than running concurrently with it: one heavy
-lane at a time under the quiet-machine rule.
+After the running consolidated VTT mutation sweep is harvested and committed,
+create a separate worktree on branch `wt/engine-merge` off `wt/vtt` and run this
+refactor there. In parallel, the v1-bar track continues on `wt/vtt`'s stable
+foundation: the player-board lane (D386.7–D386.9) followed by the five-tab leg
+(D386.10). Merge the two tracks only when both are complete. The supervisor
+serializes their full-suite gates so only one heavy gate runs at a time under
+the quiet-machine rule.
 
 ## Staged implementation
 
@@ -394,7 +395,7 @@ analysis, source-evidence, and tools/sim tests. Boundary full gate:
 gate. The tree is not merged if any semantic assertion or private measurement
 gate is silently weakened.
 
-### Stage 6 — fresh measurement, documented re-pins, then SIM mutation sweep
+### Stage 6 — fresh measurement, documented re-pins, and post-merge audit
 
 - On a quiet machine, run the preregistered unified-engine samples. Produce a
   per-row old-reference/new-measurement table with CI, semantic delta reason,
@@ -407,15 +408,20 @@ gate is silently weakened.
   the methodology; an invented convention never closes it (D238).
 - Re-pin only measurement-backed values with fresh live evidence and D239
   justification. Do not re-create deleted golden outputs or draw counts.
-- After the merge is complete, run the SIM mutation sweep against the unified
-  engine plus analysis importer, as required by D388.2. The already-running
-  consolidated VTT mutation sweep lands before this plan; it is not repeated or
-  interleaved. Any survivor in shared combat semantics is an engine survivor,
-  not assigned to a separate sim implementation.
+- Migrate and keep the existing tests green throughout the refactor, but run no
+  mutation testing on the refactor track. After both the engine-refactor and
+  v1-bar tracks are complete and merged, run the full audit and mutation pass
+  against the combined tree, including the D388.2 SIM mutation sweep over the
+  unified engine plus analysis importer. The already-running consolidated VTT
+  mutation sweep is the pre-branch baseline; it is not repeated or interleaved
+  with the refactor. Any survivor in shared combat semantics is an engine
+  survivor, not assigned to a separate sim implementation.
 
-Gate: both tsc commands, all targeted/full gates above, private docx gate,
-fresh measurement report review, then the post-merge SIM Stryker campaign with
-zero unexplained survivors under D280/D388.2.
+Refactor-track gate: both tsc commands, all targeted/full gates above, private
+docx gate, and fresh measurement report review; no mutation command. Post-merge
+gate: repeat the full audit on the combined two-track tree, then run the full
+mutation pass, including the D388.2 SIM Stryker campaign, with zero unexplained
+survivors under D280/D388.2.
 
 ## Completion criteria
 
