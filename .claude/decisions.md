@@ -7,6 +7,24 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D389 — OWNER: engine refactor runs PARALLEL to the v1 bar, in a separate worktree (2026-08-26)
+
+Owner, on D388-vs-bar sequencing: "Work on the refactoring in a separate
+worktree in parallel (migrate existing tests, but no mutation). Finish
+the v1 bar on the current stable foundation separately from the
+refactoring. Then we can merge when both are done and then do a full
+audit and mutation pass after."
+
+1. **Two parallel tracks.** The D388 engine merge proceeds in its own
+   worktree; the v1 bar (player board D386.7-9, solo five-tab leg
+   D386.10) finishes on the current stable wt/vtt foundation.
+2. **Refactor track migrates existing tests but runs NO mutation
+   testing** during the refactor.
+3. **Merge when both are done**, then a FULL AUDIT + MUTATION PASS runs
+   after the merge of the two tracks. This supersedes the frozen plan's
+   "player board follows the engine merge" sequencing and moves the
+   D388.2 sim sweep to after the two-track merge.
+
 ## D388 — OWNER: MERGE the VTT and sim engines — one engine, both import it (2026-08-26)
 
 Owner, verbatim: "Merge the vtt code and the sim engine. We should not
