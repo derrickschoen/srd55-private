@@ -35,7 +35,6 @@ import {
 import { portableSubclassContentImportNode } from '../../../src/backup/portable-content';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
 import { UpdateClassCommand } from '../../../src/commands/update-class';
-import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import { damageType, type CharacterLevel } from '../../../src/domain/enums';
 import type { CharacterId, ContentKey } from '../../../src/domain/ids';
@@ -49,7 +48,7 @@ import { SheetContentLookup } from '../../../src/rules/sheet-content-lookup';
 import { attacksPerAction } from '../../../src/rules/sheet';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { expectOkOutcome } from '../../helpers/outcome';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 
 const connections: Database[] = [];
 let uuidSequence = 0;
@@ -60,11 +59,9 @@ afterEach(() => {
 });
 
 async function database(): Promise<DatabaseContext> {
-  const connection = await openTestDatabase();
+  const connection = await openSeededTestDatabase();
   connections.push(connection);
-  const db = new DatabaseContext(connection);
-  applicationSeed(db);
-  return db;
+  return new DatabaseContext(connection);
 }
 
 function service(db: DatabaseContext): CatalogAuthoringService {

@@ -1,5 +1,5 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   BUNDLED_HOMEBREW_CATALOG,
   type BundledHomebrewCatalogEntry,
@@ -10,9 +10,8 @@ import {
 } from '../../../src/authoring/bundled-homebrew-installer';
 import type { SubclassAuthoringDraft } from '../../../src/authoring/contracts';
 import type { ContentKey } from '../../../src/domain/ids';
-import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 import {
   exportCharacterBackup,
   importCharacterBackup,
@@ -51,11 +50,9 @@ afterEach(() => {
 });
 
 async function database(): Promise<DatabaseContext> {
-  const connection = await openTestDatabase();
+  const connection = await openSeededTestDatabase();
   connections.push(connection);
-  const db = new DatabaseContext(connection);
-  applicationSeed(db);
-  return db;
+  return new DatabaseContext(connection);
 }
 
 function spellStudent(): SubclassAuthoringDraft {
@@ -168,6 +165,59 @@ const v3MechanicsCards = Object.freeze([
   },
 ] as const);
 
+const v3MechanicsCatalogKeys = new Set<string>(
+  v3MechanicsCards.flatMap(({ fixtures }) =>
+    fixtures.map(({ catalogKey }) => catalogKey),
+  ),
+);
+const v3MechanicsCatalog = BUNDLED_HOMEBREW_CATALOG.filter(({ catalog_key }) =>
+  v3MechanicsCatalogKeys.has(catalog_key),
+);
+let v3MechanicsConnection: Database | undefined;
+let v3MechanicsDatabase: DatabaseContext | undefined;
+let v3MechanicsPlan:
+  | ReturnType<typeof planBundledHomebrewInstall>
+  | undefined;
+let v3MechanicsCommit:
+  | ReturnType<typeof commitBundledHomebrewInstall>
+  | undefined;
+
+beforeAll(async () => {
+  v3MechanicsConnection = await openSeededTestDatabase();
+  v3MechanicsDatabase = new DatabaseContext(v3MechanicsConnection);
+  v3MechanicsPlan = planBundledHomebrewInstall(
+    v3MechanicsDatabase,
+    v3MechanicsCatalog,
+  );
+  v3MechanicsCommit = commitBundledHomebrewInstall(
+    v3MechanicsDatabase,
+    v3MechanicsPlan.token,
+    v3MechanicsCatalog,
+  );
+  if (v3MechanicsCommit.kind !== 'committed') {
+    throw new Error('The combined v3 mechanics-card fixture did not install.');
+  }
+});
+
+afterAll(() => {
+  v3MechanicsConnection?.close();
+});
+
+function installedV3Mechanics() {
+  if (
+    v3MechanicsDatabase === undefined ||
+    v3MechanicsPlan === undefined ||
+    v3MechanicsCommit?.kind !== 'committed'
+  ) {
+    throw new Error('The combined v3 mechanics-card fixture is unavailable.');
+  }
+  return {
+    db: v3MechanicsDatabase,
+    plan: v3MechanicsPlan,
+    committed: v3MechanicsCommit,
+  };
+}
+
 it('keeps ui-hidden bundled content loadable while excluding it from user-facing catalogs', async () => {
   const db = await database();
   const hiddenCatalog = Object.freeze([Object.freeze({
@@ -212,9 +262,9 @@ it('keeps ui-hidden bundled content loadable while excluding it from user-facing
 
 it.each(v3MechanicsCards)(
   'loads the $card card programmatically without exposing its fixtures in user-facing surfaces',
-  async ({ card, fixtures }) => {
-    const db = await database();
-    const catalog = BUNDLED_HOMEBREW_CATALOG.filter((entry) =>
+  ({ fixtures }) => {
+    const { db, plan, committed } = installedV3Mechanics();
+    const catalog = v3MechanicsCatalog.filter((entry) =>
       fixtures.some((fixture) => fixture.catalogKey === entry.catalog_key)
     );
     expect(catalog.map((entry) => entry.catalog_key)).toEqual(
@@ -222,19 +272,23 @@ it.each(v3MechanicsCards)(
     );
     expect(catalog.every((entry) => entry.visibility === 'ui_hidden')).toBe(true);
 
-    const plan = planBundledHomebrewInstall(db, catalog);
     expect(plan.entries).toEqual([]);
     expect(plan.incomingContent).toEqual([]);
-    expect(plan.outcomes).toHaveLength(fixtures.length);
-    const committed = commitBundledHomebrewInstall(db, plan.token, catalog);
-    if (committed.kind !== 'committed') {
-      throw new Error(`${card} fixtures did not install.`);
-    }
-    expect(committed.outcomes).toHaveLength(fixtures.length);
+    const cardIndexes = catalog.map((entry) =>
+      v3MechanicsCatalog.findIndex(
+        (candidate) => candidate.catalog_key === entry.catalog_key,
+      ),
+    );
+    expect(cardIndexes.map((index) => plan.outcomes[index])).toHaveLength(
+      fixtures.length,
+    );
+    expect(cardIndexes.map((index) => committed.outcomes[index])).toHaveLength(
+      fixtures.length,
+    );
 
     const installedKeys: ContentKey[] = [];
     for (const [index, fixture] of fixtures.entries()) {
-      const outcome = committed.outcomes[index];
+      const outcome = committed.outcomes[cardIndexes[index]!];
       if (outcome?.kind !== 'create') {
         throw new Error(`${fixture.name} was not created.`);
       }

@@ -44,7 +44,6 @@ import {
 import { deriveContentIdentityV1 } from '../../../src/catalog/content-identity';
 import { projectStoredContentV1 } from '../../../src/catalog/stored-content-projector-v1';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
-import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import { damageType, skills } from '../../../src/domain/enums';
 import type { CharacterId, ContentKey } from '../../../src/domain/ids';
@@ -60,7 +59,10 @@ import {
   portableElfLibraryDocument,
   PORTABLE_ELF_KEY,
 } from '../../helpers/species-lineage-portability';
-import { openTestDatabase } from '../../helpers/open-db';
+import {
+  openSeededTestDatabase,
+  openTestDatabase,
+} from '../../helpers/open-db';
 
 const opened: Database[] = [];
 let uuidSequence = 0;
@@ -71,11 +73,11 @@ afterEach(() => {
 });
 
 async function database(seed = false): Promise<DatabaseContext> {
-  const connection = await openTestDatabase();
+  const connection = seed
+    ? await openSeededTestDatabase()
+    : await openTestDatabase();
   opened.push(connection);
-  const db = new DatabaseContext(connection);
-  if (seed) applicationSeed(db);
-  return db;
+  return new DatabaseContext(connection);
 }
 
 function service(db: DatabaseContext): CatalogAuthoringService {
