@@ -7,6 +7,25 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D388 — OWNER: MERGE the VTT and sim engines — one engine, both import it (2026-08-26)
+
+Owner, verbatim: "Merge the vtt code and the sim engine. We should not
+need both to be separate code. Both should import the same engine. Keep
+the mutation testing on vtt and after the merge, then do the sim."
+
+1. **One rules engine.** The sim and the VTT stop carrying separate
+   combat/rules code; both become importers of the same engine modules.
+   This executes the D312 "if it works out, merge back" clause and
+   subsumes the D386.17 post-bar sim back-merge — pulled forward and
+   widened from "movement + policy" to the whole engine.
+2. **Mutation-testing order:** the running consolidated VTT sweep
+   (D387) continues to completion and its bar-critical survivors are
+   fixed as dispatched; the SIM-side mutation sweep runs AFTER the
+   engine merge, against the unified engine — not against code about to
+   be deleted. (This also resolves the supervisor's pending question:
+   legacy sim-scope survivors from the consolidated baseline do not
+   block the v1 bar; they are re-measured post-merge.)
+
 ## D387 — OWNER: mutation-testing cadence — per-lane continues, consolidated sweep at the bar (2026-08-25)
 
 Per-lane mutation ledgers and supervisor harvest controls continue
