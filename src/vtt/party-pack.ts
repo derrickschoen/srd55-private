@@ -45,7 +45,7 @@ import {
   deduplicateGapReports,
   type GapReport,
 } from './srd-gap-report';
-import { shouldDrinkHealingPotion } from './survival-policy';
+import { shouldDrinkHealingPotion } from './healing-potion-policy';
 
 export const EXTERNAL_PARTY_PACK_SCHEMA_VERSION = 2 as const;
 export const EXTERNAL_PARTY_PACK_MINIMUM_SCHEMA_VERSION = 1 as const;

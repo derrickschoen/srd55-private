@@ -10,7 +10,11 @@ import {
   type CombatantId,
 } from '../combat/values';
 
-export const HEALING_POTION_DRINK_THRESHOLD = 0.4;
+export {
+  HEALING_POTION_DRINK_THRESHOLD,
+  shouldDrinkHealingPotion,
+} from './healing-potion-policy';
+
 export const D365_HEALING_POTIONS_PER_CHARACTER = 2;
 export const AID_HIT_POINT_BONUS = 5 as const;
 
@@ -37,19 +41,6 @@ export interface AidPreparationResult {
   readonly castings: readonly AidPreparationCasting[];
   readonly levelTwoSlotsBefore: number;
   readonly levelTwoSlotsAfter: number;
-}
-
-export function shouldDrinkHealingPotion(input: {
-  readonly currentHitPoints: number;
-  readonly hitPointMaximum: number;
-  readonly allyCastHealingIncoming: boolean;
-}): boolean {
-  if (input.hitPointMaximum < 1 || input.currentHitPoints < 0) {
-    throw new RangeError('Healing-potion policy requires nonnegative Hit Points and a positive maximum.');
-  }
-  return !input.allyCastHealingIncoming &&
-    input.currentHitPoints > 0 &&
-    input.currentHitPoints / input.hitPointMaximum < HEALING_POTION_DRINK_THRESHOLD;
 }
 
 export function equipD365HealingPotions(state: PartySessionState): PartySessionState {
