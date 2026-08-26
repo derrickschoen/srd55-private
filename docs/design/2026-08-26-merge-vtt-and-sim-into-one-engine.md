@@ -234,9 +234,10 @@ Ownership rules:
 3. The old `prevented` channel combines prevention, healing, control, and
    off-target amplification. Splitting it changes reports and may uncover that
    old comparisons were dimensionally invalid.
-4. Reducer-backed Monte Carlo will be slower. Optimize only the importer
-   (fixture reuse, projection caching, worker partitioning, event-summary mode)
-   after measurement; never introduce a second fast resolver.
+4. Reducer-backed Monte Carlo will be slower. That is accepted: all importer
+   optimization (fixture reuse, projection caching, worker partitioning,
+   event-summary mode) is deferred beyond this refactor (D391.11 — overnight
+   batch is fine); never introduce a second fast resolver.
 5. Moving evidence/parser files can silently weaken D226 digests or the D245
    refusal boundary. Inventory transitive imports and rebind checksums before
    deleting old paths.
@@ -253,6 +254,37 @@ foundation: the player-board lane (D386.7–D386.9) followed by the five-tab leg
 (D386.10). Merge the two tracks only when both are complete. The supervisor
 serializes their full-suite gates so only one heavy gate runs at a time under
 the quiet-machine rule.
+
+## D391 amendments (2026-08-26, supervisor-authored, pending codex review)
+
+- **v1 gate (D391.1):** the two-track merge plus the full audit + mutation pass
+  IS the v1 declaration. No separate bar-met label exists.
+- **New Stage 4b — engine-backed in-app DPR with composable modes (D391.9,
+  D391.10):** between Stage 4 and Stage 5, rebuild the in-app DPR surface on
+  the unified engine and make sim modes USER-COMPOSABLE configuration data —
+  termination rule, movement on/off, controller assignment per side, enemy
+  set, trial count — with two shipped presets: **Colby-compatible**
+  (fixed-window semantics preserved; the legacy SIM/DPR measurement-backed
+  pins — docx scorecard, homebrew-board rows — bind this preset and stay
+  comparable; VTT survival and perf pins are separate and unaffected) and
+  **full-fight** (real movement + CC, algorithm-driven PCs and NPCs, simple
+  controlled enemies, party-contribution metrics for support/heal/protection
+  builds; fresh baselines, no inherited pins). Stage 4b gate: both presets
+  produce verified numbers through the app surface, and a test composes a
+  custom mode from configuration alone. The SURFACE must be operational
+  before Stage 5 deletes `src/simulation` — no page-level "unavailable"
+  placeholder; individual unsupported mechanics still produce typed gaps per
+  D245 as in Stages 3/6.
+- **Runtime (D391.11):** overnight batch runs are acceptable; no worker or
+  performance work in this refactor (the importer-optimization list in risk 4
+  loses worker partitioning — deferred beyond this refactor).
+- **Post-merge sweep bar (D391.2):** the post-merge mutation pass requires
+  ZERO survivors in the seven bar-critical VTT modules — each killed or
+  proven equivalent with a one-line proof; D280 exclusion categories do not
+  apply to those modules. Legacy-scope survivors remain non-blocking
+  (D388.2) outside them.
+- **Implementer (D390):** Claude (Fable) writes this refactor's code; codex
+  reviews frozen diffs at stage gates.
 
 ## Staged implementation
 
@@ -376,8 +408,9 @@ Vitest, build/dist-clean, and browser suite on a quiet machine.
   and all old-control-flow-only tests. Keep/move scenario fixtures and semantic
   tests under names that describe policy or analysis, not an engine.
 - Delete all of `src/simulation`. Do not leave barrels, deprecated exports,
-  forwarding modules, aliases, or path mappings. Delete its unused request/
-  route/headline surface; relocate only independently justified evidence and
+  forwarding modules, aliases, or path mappings. Its request/route/headline
+  surface is deleted only after the Stage 4b engine-backed replacement is
+  live (D391.9); relocate only independently justified evidence and
   analysis contracts.
 - Replace `docs/type-probes/dpr-simulation.probe.ts` with two probes: valid
   programs import only the new engine/analysis types, while a deliberately
@@ -421,7 +454,9 @@ Refactor-track gate: both tsc commands, all targeted/full gates above, private
 docx gate, and fresh measurement report review; no mutation command. Post-merge
 gate: repeat the full audit on the combined two-track tree, then run the full
 mutation pass, including the D388.2 SIM Stryker campaign, with zero unexplained
-survivors under D280/D388.2.
+survivors under D280/D388.2 — and, stricter, ZERO survivors in the seven
+bar-critical VTT modules, each killed or proven equivalent with a one-line
+proof (D391.2; D280 exclusion categories do not apply there).
 
 ## Completion criteria
 
