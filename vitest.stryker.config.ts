@@ -12,6 +12,10 @@ import rootConfig from './vitest.config';
  * Current exclusions and why:
  * - tests/unit/vtt/soak-runner.test.ts — subprocess soak tables with 75ms
  *   request/table deadlines and abort-reason assertions.
+ * - tests/unit/vtt/experiment-orchestrator.test.ts — synthetic E02-E04 tables
+ *   executed in setup under requestTimeoutMs 2000 / tableTimeoutMs 15000;
+ *   instrumented runs blow the table budget and flip status to aborted. The
+ *   orchestrator is not in the mutate scope, so no kill signal is lost.
  */
 export default mergeConfig(
   rootConfig,
@@ -19,7 +23,11 @@ export default mergeConfig(
     test: {
       // Spread the defaults: a bare override REPLACES them and would pull
       // node_modules into the run.
-      exclude: [...configDefaults.exclude, 'tests/unit/vtt/soak-runner.test.ts'],
+      exclude: [
+        ...configDefaults.exclude,
+        'tests/unit/vtt/soak-runner.test.ts',
+        'tests/unit/vtt/experiment-orchestrator.test.ts',
+      ],
     },
   }),
 );
