@@ -24,11 +24,6 @@
     "json"
   ],
   "mutate": [
-    "src/access/**/*.ts",
-    "src/eligibility/**/*.ts",
-    "src/grants/**/*.ts",
-    "src/rules/**/*.ts",
-    "!src/rules/**/*-srd.ts",
     "src/vtt/survival-policy.ts",
     "src/vtt/party-pack.ts",
     "src/combat/controllers.ts",
