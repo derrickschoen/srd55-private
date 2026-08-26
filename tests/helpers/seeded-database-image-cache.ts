@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import {
   mkdirSync,
   readFileSync,
-  realpathSync,
   renameSync,
   writeFileSync,
 } from 'node:fs';
@@ -15,6 +14,8 @@ import {
   applicationSeed,
 } from '../../src/db/bootstrap';
 import type { ApplicationSeedProfile } from '../../src/db/application-seed-profile';
+import { DATABASE_MIGRATIONS } from '../../src/db/migrations';
+import { TEST_CORE_SPELL_CONTENT_KEYS } from '../../src/db/test-core-spell-content-keys.generated';
 import { DatabaseContext } from '../../src/db/database';
 import { registerSqliteQueryEngine } from '../../src/db/query';
 
@@ -35,16 +36,30 @@ function cacheKey(profile: ApplicationSeedProfile): string {
     format: CACHE_FORMAT,
     profile,
     build: applicationBootVerificationBuildKey(),
+    // The build key pins the target schema checksum, catalog data migrations,
+    // and full bundled corpus. Hash the live schema and whole schema-migration
+    // registry too: both are inputs to the image lifecycle, while the build
+    // key intentionally carries only the final schema target. This also makes
+    // an un-repinned local schema edit miss instead of trusting a stale pin.
+    schema: sha256(schema),
+    schemaMigrations: sha256(JSON.stringify(DATABASE_MIGRATIONS.map(
+      (migration) => [
+        migration.id,
+        migration.checksum,
+        sha256(migration.sql),
+        migration.resultSchemaChecksum,
+        migration.replayPolicy ?? null,
+      ],
+    ))),
+    // The generated subset is the remaining input unique to test-core images.
+    profileContent: profile === 'test-core'
+      ? sha256(JSON.stringify(TEST_CORE_SPELL_CONTENT_KEYS))
+      : null,
   }));
 }
 
-function cacheFile(root: string, profile: ApplicationSeedProfile): string {
-  const checkout = sha256(realpathSync(root)).slice(0, 16);
-  const directory = join(
-    tmpdir(),
-    'dnd-seeded-test-database-cache',
-    checkout,
-  );
+function cacheFile(profile: ApplicationSeedProfile): string {
+  const directory = join(tmpdir(), 'dnd-seeded-test-database-cache');
   mkdirSync(directory, { recursive: true });
   return join(directory, `${profile}-${cacheKey(profile)}.sqlite3`);
 }
@@ -60,6 +75,9 @@ function reusableImage(file: string, key: string): Uint8Array | null {
 }
 
 function writeImage(file: string, key: string, bytes: Uint8Array): void {
+  // Keep both the sidecar SHA-256 and the atomic renames: readers reject every
+  // incomplete pairing, while concurrent writers from different worktrees can
+  // safely converge on the same content-addressed image.
   const imageTemporary = `${file}.${String(process.pid)}.partial`;
   const stampTemporary = `${file}.${String(process.pid)}.sha256.partial`;
   writeFileSync(imageTemporary, bytes);
@@ -71,14 +89,14 @@ function writeImage(file: string, key: string, bytes: Uint8Array): void {
 /**
  * Builds each schema-and-seed image once in Vitest's main process, then gives
  * every worker the immutable file through an environment variable. The cache
- * key binds the image to the checkout, seed profile, schema/migration build
- * key, and pinned bundled-content digest. A sidecar digest rejects incomplete
- * or corrupted writes before any worker can restore them.
+ * key binds the image only to its seed profile and content: the schema and
+ * complete migration registries, pinned bundled-content digest, and the
+ * test-core subset when applicable. A sidecar digest rejects incomplete or
+ * corrupted writes before any worker can restore them.
  */
 export async function prepareSeededDatabaseImageCaches(
   profiles: readonly ApplicationSeedProfile[],
 ): Promise<void> {
-  const root = process.cwd();
   const misses: {
     readonly profile: ApplicationSeedProfile;
     readonly file: string;
@@ -87,7 +105,7 @@ export async function prepareSeededDatabaseImageCaches(
 
   for (const profile of profiles) {
     const key = cacheKey(profile);
-    const file = cacheFile(root, profile);
+    const file = cacheFile(profile);
     if (reusableImage(file, key) === null) {
       misses.push({ profile, file, key });
     }

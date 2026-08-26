@@ -26,22 +26,21 @@ const statsBySql: Map<string, QueryStats> | undefined =
 // threads share a pid — the instance suffix keeps files distinct.
 const instanceId = `${String(typeof process === 'object' ? process.pid : 0)}-${Math.random().toString(36).slice(2, 8)}`;
 
-let fsModule: typeof import('node:fs') | undefined;
-let pathModule: typeof import('node:path') | undefined;
-let lastFlushAtMs = 0;
-
-if (statsBySql !== undefined) {
-  // The guarded dynamic import keeps node:fs out of the browser graph. Flush
-  // as soon as the modules land so even sub-second runs leave a file.
-  void Promise.all([
-    import(/* @vite-ignore */ 'node:fs'),
-    import(/* @vite-ignore */ 'node:path'),
-  ]).then(([fs, path]) => {
-    fsModule = fs;
-    pathModule = path;
-    flush();
-  });
-}
+// process.getBuiltinModule loads Node built-ins without an import statement,
+// so the bundler never sees node:fs/node:path (a dynamic import here forced
+// code-splitting, which the iife worker build forbids). Browser: process is
+// absent and profiling is inert.
+const fsModule =
+  statsBySql === undefined
+    ? undefined
+    : (process.getBuiltinModule('node:fs') as typeof import('node:fs'));
+const pathModule =
+  statsBySql === undefined
+    ? undefined
+    : (process.getBuiltinModule('node:path') as typeof import('node:path'));
+// Negative infinity so the very first record flushes — sub-second runs still
+// leave a file; the 2s throttle applies from then on.
+let lastFlushAtMs = Number.NEGATIVE_INFINITY;
 
 function flush(): void {
   if (statsBySql === undefined || logDirectory === undefined) return;

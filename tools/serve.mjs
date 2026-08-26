@@ -52,18 +52,18 @@ function readPort(argv, environment) {
 
 function build() {
   process.stdout.write(
-    'serve: building dist/ and running its existing freshness/digest gates...\n',
+    'serve: restoring or building verified dist/...\n',
   );
-  const result = spawnSync('npm', ['run', 'build'], {
+  const result = spawnSync(process.execPath, ['tools/dist-build-cache.mjs'], {
     cwd: process.cwd(),
     env: process.env,
     stdio: 'inherit',
   });
   if (result.error !== undefined) {
-    fail(`could not run npm run build: ${result.error.message}`);
+    fail(`could not prepare dist/: ${result.error.message}`);
   }
   if (result.status !== 0) {
-    fail(`npm run build failed with exit code ${String(result.status)}; dist/ will not be served.`);
+    fail(`dist preparation failed with exit code ${String(result.status)}; dist/ will not be served.`);
   }
 }
 
