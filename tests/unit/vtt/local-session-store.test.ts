@@ -159,6 +159,38 @@ describe('IndexedDB durable VTT session adapter', () => {
     store.close();
   });
 
+  it('stores a large synchronous journal burst durably in one transaction', async () => {
+    const indexedDb = new IDBFactory();
+    const storage = new MemoryStorage();
+    const store = await IndexedDbBrowserSessionStore.open(indexedDb, storage);
+    const transactions = vi.spyOn(IDBDatabase.prototype, 'transaction');
+    const puts = vi.spyOn(IDBObjectStore.prototype, 'put');
+    const host = new DmEncounterHost('session:bounded-write-batches', store);
+    for (let index = 0; index < 65; index += 1) {
+      host.adjudicate({
+        type: 'adjudicate',
+        target: REFERENCE_MONSTER_ID,
+        subject: `bounded-batch-${String(index)}`,
+        reasoning: 'Prepared durable encodings should retain synchronous transaction coalescing.',
+        consequence: { kind: 'hit_point_delta', amount: 0 },
+      });
+    }
+
+    await store.flush();
+    expect(transactions).toHaveBeenCalledTimes(1);
+    expect(puts.mock.calls.filter(([value]) => value instanceof ArrayBuffer)).toHaveLength(66);
+    expect(store.revisions(encounterSessionId('session:bounded-write-batches'))).toHaveLength(66);
+    transactions.mockRestore();
+    puts.mockRestore();
+    host.close();
+    await store.flush();
+    store.close();
+
+    const reopened = await IndexedDbBrowserSessionStore.open(indexedDb, storage);
+    expect(reopened.revisions(encounterSessionId('session:bounded-write-batches'))).toHaveLength(66);
+    reopened.close();
+  });
+
   it('LARGE-REVISION-ROUNDTRIP stores a journal larger than 5MB and reloads its compact export', async () => {
     const indexedDb = new IDBFactory();
     const storage = new MemoryStorage();

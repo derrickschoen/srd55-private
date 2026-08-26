@@ -28,9 +28,17 @@ const CLEANUP_TIMEOUT_MS = 10_000;
 const CLICK_STEP_BUDGET_MS = 30_000;
 const CLICK_ATTEMPT_TIMEOUT_MS = 5_000;
 const CLICK_RETRY_DELAY_MS = 25;
+const TRANSITION_STEP_BUDGET_MS = 30_000;
+const ASSIGNMENT_STEP_BUDGET_MS = 30_000;
+const TRAY_READ_STEP_BUDGET_MS = 30_000;
+const ENCOUNTER_STATE_READ_BUDGET_MS = 30_000;
+const TIMELINE_STEP_BUDGET_MS = 30_000;
+const FORM_STEP_BUDGET_MS = 30_000;
+const SAVE_MANAGER_STEP_BUDGET_MS = 30_000;
+const EXPORT_STEP_BUDGET_MS = 60_000;
 const DEFAULT_RUN_WATCHDOG_MS = 40 * 60 * 1_000;
 const TURN_PULSE_MS = 10;
-const ROUND_STALL_ATTEMPTS = 24;
+const ROUND_STALL_BUDGET_MS = 30_000;
 const MAX_TURN_ATTEMPTS = 600;
 const previewReadiness = new WeakMap<ChildProcess, Promise<string>>();
 const REPRESENTATIVE_PARTY_NAMES = [
@@ -460,7 +468,7 @@ async function stopPreview(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null) return;
   child.kill('SIGTERM');
   const exited = new Promise<void>((complete) => child.once('exit', () => complete()));
-  await Promise.race([exited, wait(5_000)]);
+  await Promise.race([exited, wait(CLEANUP_TIMEOUT_MS)]);
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
@@ -517,8 +525,9 @@ async function retryClickUntil(
   locator: () => Locator,
   completed: () => Promise<boolean>,
   label: string,
+  budgetMs = CLICK_STEP_BUDGET_MS,
 ): Promise<void> {
-  const deadline = Date.now() + CLICK_STEP_BUDGET_MS;
+  const deadline = Date.now() + budgetMs;
   let attempts = 0;
   let lastError: unknown = new Error(`${label} was not attempted.`);
   while (Date.now() < deadline) {
@@ -554,23 +563,36 @@ async function retryClickUntil(
     }
   }
   throw new Error(
-    `${label} did not reach its expected state within ${String(CLICK_STEP_BUDGET_MS)}ms after ${String(attempts)} attempts. Last error: ${errorDetail(lastError)}`,
+    `${label} did not reach its expected state within ${String(budgetMs)}ms after ${String(attempts)} attempts. Last error: ${errorDetail(lastError)}`,
   );
+}
+
+function remainingStepBudget(deadline: number, label: string): number {
+  const remaining = deadline - Date.now();
+  if (remaining < 1) throw new Error(`${label} exceeded its hard step budget.`);
+  return remaining;
 }
 
 async function readAdventuringDayMarker(
   page: Page,
   flow: AdventuringDayFlow,
 ): Promise<AdventuringDayMarker> {
-  const statuses = page.locator('.adventuring-day-status:visible');
-  const count = await statuses.count();
-  if (count !== 1) {
+  const surface = await withTimeout(page.evaluate(() => {
+    const statuses = Array.from(document.querySelectorAll<HTMLElement>('.adventuring-day-status'))
+      .filter((status) => status.checkVisibility());
+    const status = statuses[0];
+    return {
+      count: statuses.length,
+      rawRoom: status?.dataset.room ?? null,
+      text: status?.innerText.trim() ?? '',
+    };
+  }), TRANSITION_STEP_BUDGET_MS, 'read adventuring-day marker');
+  if (surface.count !== 1) {
     throw new Error(
-      `Driver DOM contract violation: expected exactly one visible .adventuring-day-status, found ${String(count)}.`,
+      `Driver DOM contract violation: expected exactly one visible .adventuring-day-status, found ${String(surface.count)}.`,
     );
   }
-  const status = statuses.first();
-  const rawRoom = await status.getAttribute('data-room');
+  const { rawRoom, text } = surface;
   if (rawRoom === null) {
     throw new Error(
       'Driver DOM contract violation: visible .adventuring-day-status is missing data-room.',
@@ -582,7 +604,6 @@ async function readAdventuringDayMarker(
     );
   }
   const room = Number(rawRoom);
-  const text = (await status.innerText()).trim();
   const expectedText = flow.kind === 'dungeon'
     ? `Adventuring day — room ${String(room)} of ${String(flow.roomCount)} · 2024 rules`
     : `${flow.name} — encounter ${String(room)} of ${String(flow.roomCount)} · 2024 rules`;
@@ -622,7 +643,7 @@ async function waitForAdventuringDayRoom(
     phase,
     step,
     page.locator('.adventuring-day-status'),
-    10_000,
+    TRANSITION_STEP_BUDGET_MS,
   )) return false;
   try {
     const marker = await readAdventuringDayMarker(page, flow);
@@ -644,7 +665,7 @@ async function waitForAdventuringDayRoom(
 }
 
 async function locatorIsVisible(locator: () => Locator, label: string): Promise<boolean> {
-  return withTimeout(locator().isVisible(), CLICK_ATTEMPT_TIMEOUT_MS, label);
+  return withTimeout(locator().isVisible(), ENCOUNTER_STATE_READ_BUDGET_MS, label);
 }
 
 function skipDependency(
@@ -740,7 +761,7 @@ async function captureRefusals(page: Page, recorder: FindingsRecorder, phase: st
       text: refusal.textContent?.trim() ?? '(empty refusal)',
       code: refusal.dataset.refusalCode ?? null,
       category: refusal.dataset.refusalCategory ?? null,
-    }))), CLICK_ATTEMPT_TIMEOUT_MS, 'read refusal surfaces');
+    }))), TRAY_READ_STEP_BUDGET_MS, 'read refusal surfaces');
   let capturedFinding = false;
   for (const { text, code, category } of refusals) {
     const key = `${phase}:${code ?? ''}:${category ?? ''}:${text}`;
@@ -844,7 +865,7 @@ async function pendingDecisionSurface(page: Page): Promise<PendingDecisionSurfac
       heading: entry.querySelector('h3')?.textContent?.trim() ?? 'unnamed tray entry',
       optionCount: entry.querySelectorAll('button').length,
     };
-  }), CLICK_ATTEMPT_TIMEOUT_MS, 'read pending-decision surface');
+  }), TRAY_READ_STEP_BUDGET_MS, 'read pending-decision surface');
   if (raw === null) return null;
   if (raw.decisionId === null) {
     throw new Error('Decision tray entry omitted its decision id.');
@@ -857,30 +878,47 @@ async function pendingDecisionSurface(page: Page): Promise<PendingDecisionSurfac
   };
 }
 
-async function pauseEncounter(page: Page): Promise<void> {
-  const pause = await page.locator('[data-pause]').first().getAttribute('data-pause');
+async function pauseEncounter(page: Page, deadline: number): Promise<void> {
+  const pause = await page.locator('[data-pause]').first().getAttribute('data-pause', {
+    timeout: remainingStepBudget(deadline, 'assign algorithm controllers'),
+  });
   if (pause === 'interrupted') return;
   const interrupt = page.getByRole('button', { name: 'Interrupt', exact: true });
-  if (await interrupt.count() > 0) {
-    await retryClick(
-      () => page.getByRole('button', { name: 'Interrupt', exact: true }),
-      'interrupt encounter',
-    );
-    await page.locator('[data-pause="interrupted"]').waitFor({ state: 'visible', timeout: 5_000 });
+  if (await withTimeout(
+    interrupt.count(),
+    remainingStepBudget(deadline, 'find interrupt control'),
+    'find interrupt control',
+  ) > 0) {
+    await interrupt.click({ timeout: remainingStepBudget(deadline, 'interrupt encounter') });
+    await page.locator('[data-pause="interrupted"]').waitFor({
+      state: 'visible',
+      timeout: remainingStepBudget(deadline, 'interrupt encounter'),
+    });
   }
 }
 
-async function resumeEncounter(page: Page): Promise<void> {
-  const pause = await page.locator('[data-pause]').first().getAttribute('data-pause');
+async function resumeEncounter(page: Page, deadline: number): Promise<void> {
+  const pause = await page.locator('[data-pause]').first().getAttribute('data-pause', {
+    timeout: remainingStepBudget(deadline, 'assign algorithm controllers'),
+  });
   if (pause === 'none') return;
   const resume = page.locator('.dm-controls').getByRole('button', { name: 'Resume', exact: true });
-  if (await resume.count() > 0) {
-    const revision = await renderedSessionRevision(page);
-    await retryClick(
-      () => page.locator('.dm-controls').getByRole('button', { name: 'Resume', exact: true }),
-      'resume encounter',
+  if (await withTimeout(
+    resume.count(),
+    remainingStepBudget(deadline, 'find resume control'),
+    'find resume control',
+  ) > 0) {
+    const revision = await renderedSessionRevision(
+      page,
+      remainingStepBudget(deadline, 'read revision before encounter resume'),
     );
-    await waitForRenderedRevisionAfter(page, revision, 'encounter resume');
+    await resume.click({ timeout: remainingStepBudget(deadline, 'resume encounter') });
+    await waitForRenderedRevisionAfter(
+      page,
+      revision,
+      'encounter resume',
+      remainingStepBudget(deadline, 'resume encounter'),
+    );
     const renderedPause = await page.evaluate(() =>
       document.querySelector<HTMLElement>('[data-pause]')?.dataset.pause ?? null);
     if (renderedPause !== 'none') {
@@ -889,8 +927,13 @@ async function resumeEncounter(page: Page): Promise<void> {
   }
 }
 
-async function renderedSessionRevision(page: Page): Promise<number> {
-  const raw = await page.locator('.dm-encounter').first().getAttribute('data-session-revision');
+async function renderedSessionRevision(
+  page: Page,
+  timeoutMs = ENCOUNTER_STATE_READ_BUDGET_MS,
+): Promise<number> {
+  const raw = await page.locator('.dm-encounter').first().getAttribute('data-session-revision', {
+    timeout: timeoutMs,
+  });
   const revision = Number(raw);
   if (!Number.isSafeInteger(revision) || revision < 1) {
     throw new Error(`DM surface exposed invalid session revision ${JSON.stringify(raw)}.`);
@@ -902,12 +945,13 @@ async function waitForRenderedRevisionAfter(
   page: Page,
   revision: number,
   label: string,
+  timeoutMs = ENCOUNTER_STATE_READ_BUDGET_MS,
 ): Promise<void> {
   await page.waitForFunction((previous) => {
     const raw = document.querySelector<HTMLElement>('.dm-encounter')?.dataset.sessionRevision;
     const current = Number(raw);
     return Number.isSafeInteger(current) && current > previous;
-  }, revision, { timeout: CLICK_ATTEMPT_TIMEOUT_MS }).catch((error: unknown) => {
+  }, revision, { timeout: timeoutMs }).catch((error: unknown) => {
     throw new Error(`${label} did not publish a newer durable DM surface: ${errorDetail(error)}`);
   });
 }
@@ -920,17 +964,36 @@ async function assignAlgorithms(
 ): Promise<boolean> {
   try {
     recorder.track(phase, 'assign algorithm controllers through UI');
-    await pauseEncounter(page);
+    const deadline = Date.now() + ASSIGNMENT_STEP_BUDGET_MS;
+    await pauseEncounter(page, deadline);
     for (let guard = 0; guard < 40; guard += 1) {
       const human = page.locator('.dm-controller-assignments select').filter({ has: page.locator('option:checked[value="human"]') });
-      if (await human.count() === 0) break;
-      const revision = await renderedSessionRevision(page);
-      await human.first().selectOption('algorithm', { timeout: 5_000 });
-      await waitForRenderedRevisionAfter(page, revision, 'controller assignment');
+      if (await withTimeout(
+        human.count(),
+        remainingStepBudget(deadline, 'read human controller assignments'),
+        'read human controller assignments',
+      ) === 0) break;
+      const revision = await renderedSessionRevision(
+        page,
+        remainingStepBudget(deadline, 'read revision before controller assignment'),
+      );
+      await human.first().selectOption('algorithm', {
+        timeout: remainingStepBudget(deadline, 'controller assignment'),
+      });
+      await waitForRenderedRevisionAfter(
+        page,
+        revision,
+        'controller assignment',
+        remainingStepBudget(deadline, 'controller assignment'),
+      );
     }
     const selects = page.locator('.dm-controller-assignments select');
-    const values = await selects.evaluateAll((nodes) => nodes.map((node) =>
-      node instanceof HTMLSelectElement ? node.value : 'not-a-select'));
+    const values = await withTimeout(
+      selects.evaluateAll((nodes) => nodes.map((node) =>
+        node instanceof HTMLSelectElement ? node.value : 'not-a-select')),
+      remainingStepBudget(deadline, 'read assigned controller values'),
+      'read assigned controller values',
+    );
     if (values.length === 0 || values.some((value) => value !== 'algorithm')) {
       const image = await screenshot(page, recorder, 'assign-algorithm-controllers');
       recorder.add(
@@ -944,7 +1007,13 @@ async function assignAlgorithms(
     }
     for (const name of requiredCombatantNames) {
       const controller = page.getByLabel(`${name} controller`, { exact: true });
-      if (await controller.count() !== 1 || await controller.inputValue() !== 'algorithm') {
+      if (await withTimeout(
+        controller.count(),
+        remainingStepBudget(deadline, `find ${name} controller`),
+        `find ${name} controller`,
+      ) !== 1 || await controller.inputValue({
+        timeout: remainingStepBudget(deadline, `read ${name} controller`),
+      }) !== 'algorithm') {
         const image = await screenshot(page, recorder, 'assign-algorithm-controllers');
         recorder.add(
           'selector_timeout',
@@ -956,7 +1025,7 @@ async function assignAlgorithms(
         return false;
       }
     }
-    await resumeEncounter(page);
+    await resumeEncounter(page, deadline);
     return true;
   } catch (error: unknown) {
     const image = await screenshot(page, recorder, 'assign-algorithm-controllers');
@@ -972,7 +1041,9 @@ async function assignAlgorithms(
 }
 
 async function roundOf(page: Page): Promise<number> {
-  const raw = await page.locator('.dm-initiative-timeline').getAttribute('data-round', { timeout: 5_000 });
+  const raw = await page.locator('.dm-initiative-timeline').getAttribute('data-round', {
+    timeout: ENCOUNTER_STATE_READ_BUDGET_MS,
+  });
   const round = Number(raw);
   return Number.isSafeInteger(round) ? round : 0;
 }
@@ -980,9 +1051,12 @@ async function roundOf(page: Page): Promise<number> {
 async function visibleEncounterOutcome(
   page: Page,
 ): Promise<'victory' | 'defeat' | 'mutual' | null> {
-  const value = await page.locator('[data-encounter-outcome]')
-    .getAttribute('data-encounter-outcome')
-    .catch(() => null);
+  const value = await withTimeout(
+    page.evaluate(() => document.querySelector<HTMLElement>('[data-encounter-outcome]')
+      ?.dataset.encounterOutcome ?? null),
+    ENCOUNTER_STATE_READ_BUDGET_MS,
+    'read encounter outcome',
+  );
   return value === 'victory' || value === 'defeat' || value === 'mutual' ? value : null;
 }
 
@@ -1033,7 +1107,8 @@ async function playEncounter(
 ): Promise<EncounterOutcome> {
   recorder.track(phase, 'initialize encounter driver');
   let lastRound = await roundOf(page);
-  let unchangedAttempts = 0;
+  let lastRevision = await renderedSessionRevision(page);
+  let lastProgressAt = Date.now();
   for (let attempt = 1; attempt <= MAX_TURN_ATTEMPTS; attempt += 1) {
     if (await resolveDecisionTray(page, recorder, phase) === null) {
       return { kind: 'aborted', round: lastRound, attempts: attempt - 1 };
@@ -1055,20 +1130,23 @@ async function playEncounter(
     }
     recorder.track(phase, 'read encounter round after turn pulse');
     const round = await roundOf(page);
-    if (round === lastRound) unchangedAttempts += 1;
-    else {
+    const revision = await renderedSessionRevision(page);
+    if (round !== lastRound || revision !== lastRevision) {
       lastRound = round;
-      unchangedAttempts = 0;
+      lastRevision = revision;
+      lastProgressAt = Date.now();
     }
-    if (unchangedAttempts < ROUND_STALL_ATTEMPTS) continue;
+    if (Date.now() - lastProgressAt < ROUND_STALL_BUDGET_MS) continue;
     if (await resolveDecisionTray(page, recorder, phase) === null) {
       return { kind: 'aborted', round: lastRound, attempts: attempt };
     }
     await captureRefusals(page, recorder, phase);
     const afterResolution = await roundOf(page);
-    if (afterResolution !== lastRound) {
+    const revisionAfterResolution = await renderedSessionRevision(page);
+    if (afterResolution !== lastRound || revisionAfterResolution !== lastRevision) {
       lastRound = afterResolution;
-      unchangedAttempts = 0;
+      lastRevision = revisionAfterResolution;
+      lastProgressAt = Date.now();
       continue;
     }
     const image = await screenshot(page, recorder, `${phase}-round-stall`);
@@ -1076,7 +1154,7 @@ async function playEncounter(
       'turn_advance_stall',
       phase,
       'advance algorithm-controlled turns',
-      `Round ${String(lastRound)} did not change after ${String(ROUND_STALL_ATTEMPTS)} attempts.`,
+      `Round ${String(lastRound)} and its rendered revision did not progress for ${String(ROUND_STALL_BUDGET_MS)}ms.`,
       image,
     );
     return { kind: 'aborted', round: lastRound, attempts: attempt };
@@ -1127,11 +1205,11 @@ async function exerciseTimelineControls(
   progress: TimelineProgress,
 ): Promise<void> {
   const phase = 'timeline';
-  await observeTimelinePreview(page, progress, 2_000);
+  await observeTimelinePreview(page, progress, TIMELINE_STEP_BUDGET_MS);
 
   const controls = page.locator('.dm-controls');
   const delay = controls.getByRole('button', { name: 'Delay turn', exact: true });
-  if (await waitVisible(page, recorder, phase, 'delay one turn', delay, 10_000)) {
+  if (await waitVisible(page, recorder, phase, 'delay one turn', delay, TIMELINE_STEP_BUDGET_MS)) {
     await retryClick(
       () => page.locator('.dm-controls').getByRole('button', { name: 'Delay turn', exact: true }),
       'delay one turn',
@@ -1141,7 +1219,7 @@ async function exerciseTimelineControls(
   }
 
   const skip = controls.getByRole('button', { name: 'Skip turn', exact: true });
-  if (await waitVisible(page, recorder, phase, 'skip one turn', skip, 10_000)) {
+  if (await waitVisible(page, recorder, phase, 'skip one turn', skip, TIMELINE_STEP_BUDGET_MS)) {
     await retryClick(
       () => page.locator('.dm-controls').getByRole('button', { name: 'Skip turn', exact: true }),
       'skip one turn',
@@ -1156,7 +1234,7 @@ async function exerciseTimelineControls(
       name: 'Rewind to round 1',
       exact: true,
     });
-    if (await waitVisible(page, recorder, phase, 'rewind to round 1', rewind, 10_000)) {
+    if (await waitVisible(page, recorder, phase, 'rewind to round 1', rewind, TIMELINE_STEP_BUDGET_MS)) {
       await retryClick(
         () => page.locator('.dm-round-rewind').getByRole('button', {
           name: 'Rewind to round 1',
@@ -1166,7 +1244,7 @@ async function exerciseTimelineControls(
       );
       await page.locator('.dm-initiative-timeline[data-round="1"]').waitFor({
         state: 'visible',
-        timeout: 10_000,
+        timeout: TIMELINE_STEP_BUDGET_MS,
       });
       progress.rewindUsed = true;
       progress.rewindRound = await roundOf(page);
@@ -1227,7 +1305,9 @@ async function loadDungeon(
     recorder.phase(phase, 'aborted', 'Bundled dungeon loader was unavailable.');
     return false;
   }
-  await page.getByLabel('Encounter seed', { exact: true }).fill(String(REHEARSAL_SEED), { timeout: 5_000 });
+  await page.getByLabel('Encounter seed', { exact: true }).fill(String(REHEARSAL_SEED), {
+    timeout: FORM_STEP_BUDGET_MS,
+  });
   await retryClick(
     () => page.getByRole('button', { name: 'Load bundled dungeon and party', exact: true }),
     'load bundled dungeon and party',
@@ -1306,7 +1386,15 @@ async function transitionToNextDungeonRoom(
   const direct = page.getByRole('button', { name: 'End room and enter next room', exact: true });
   const control = takeScheduledShortRest ? shortRest : direct;
   const label = takeScheduledShortRest ? 'short rest' : 'room transition';
-  if (!await waitVisible(page, recorder, phase, `${label} after room ${String(completedRoom)}`, control, 10_000)) {
+  const deadline = Date.now() + TRANSITION_STEP_BUDGET_MS;
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    `${label} after room ${String(completedRoom)}`,
+    control,
+    remainingStepBudget(deadline, `${label} after room ${String(completedRoom)}`),
+  )) {
     return false;
   }
   if (takeScheduledShortRest) await fillSensibleShortRestSpends(page);
@@ -1324,6 +1412,7 @@ async function transitionToNextDungeonRoom(
       nextRoom,
     ),
     `${label} after room ${String(completedRoom)}`,
+    remainingStepBudget(deadline, `${label} after room ${String(completedRoom)}`),
   );
   return waitForAdventuringDayRoom(
     page,
@@ -1362,7 +1451,14 @@ async function fillSensibleShortRestSpends(page: Page): Promise<void> {
 async function completeLongRest(page: Page, recorder: FindingsRecorder): Promise<boolean> {
   const phase = 'long rest';
   const button = page.getByRole('button', { name: 'Complete Long Rest and end adventuring day', exact: true });
-  if (!await waitVisible(page, recorder, phase, 'trigger DM long-rest flow', button, 10_000)) {
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    'trigger DM long-rest flow',
+    button,
+    TRANSITION_STEP_BUDGET_MS,
+  )) {
     recorder.phase(phase, 'aborted', 'DM long-rest control was unavailable.');
     return false;
   }
@@ -1379,7 +1475,7 @@ async function completeLongRest(page: Page, recorder: FindingsRecorder): Promise
     phase,
     'wait for completed long rest',
     page.locator('.adventuring-day-status[data-status="ended_by_long_rest"]'),
-    10_000,
+    TRANSITION_STEP_BUDGET_MS,
   );
   recorder.phase(phase, ended ? 'completed' : 'aborted', ended
     ? 'DM long-rest flow ended the adventuring day and rendered its summary card.'
@@ -1397,14 +1493,28 @@ async function createManualFileSave(
   phase: string,
 ): Promise<ManualFileSave | null> {
   const manager = page.locator('.dm-save-manager');
-  if (!await waitVisible(page, recorder, phase, 'open save manager', manager, 10_000)) return null;
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    'open save manager',
+    manager,
+    SAVE_MANAGER_STEP_BUDGET_MS,
+  )) return null;
   recorder.track(phase, 'detect save-manager mode');
-  if (await manager.getAttribute('data-mode', { timeout: 5_000 }) !== 'folder') {
+  if (await manager.getAttribute('data-mode', { timeout: SAVE_MANAGER_STEP_BUDGET_MS }) !== 'folder') {
     const save = manager.getByRole('button', { name: 'Download save now', exact: true });
-    if (!await waitVisible(page, recorder, phase, 'create fallback manual file save', save, 10_000)) return null;
+    if (!await waitVisible(
+      page,
+      recorder,
+      phase,
+      'create fallback manual file save',
+      save,
+      SAVE_MANAGER_STEP_BUDGET_MS,
+    )) return null;
     try {
       recorder.track(phase, 'wait for fallback manual-save download');
-      const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
+      const pendingDownload = page.waitForEvent('download', { timeout: EXPORT_STEP_BUDGET_MS });
       await retryClick(
         () => page.locator('.dm-save-manager')
           .getByRole('button', { name: 'Download save now', exact: true }),
@@ -1425,7 +1535,14 @@ async function createManualFileSave(
 
   const before = await manager.locator('.dm-save-row[data-source="folder"]').count();
   const save = manager.getByRole('button', { name: 'Save now', exact: true });
-  if (!await waitVisible(page, recorder, phase, 'create folder manual file save', save, 10_000)) return null;
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    'create folder manual file save',
+    save,
+    SAVE_MANAGER_STEP_BUDGET_MS,
+  )) return null;
   await retryClick(
     () => page.locator('.dm-save-manager')
       .getByRole('button', { name: 'Save now', exact: true }),
@@ -1435,7 +1552,7 @@ async function createManualFileSave(
     recorder.track(phase, 'wait for folder save row');
     await page.waitForFunction((count) =>
       document.querySelectorAll('.dm-save-row[data-source="folder"]').length >= Number(count), before + 1, {
-        timeout: 10_000,
+        timeout: SAVE_MANAGER_STEP_BUDGET_MS,
       });
   } catch (error: unknown) {
     const image = await screenshot(page, recorder, 'manual-file-save');
@@ -1456,10 +1573,17 @@ async function downloadExport(
   label: string,
 ): Promise<SessionExport | null> {
   const button = row().getByRole('button', { name: 'Export copy', exact: true });
-  if (!await waitVisible(page, recorder, phase, `export ${label} session record`, button, 10_000)) return null;
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    `export ${label} session record`,
+    button,
+    EXPORT_STEP_BUDGET_MS,
+  )) return null;
   try {
     recorder.track(phase, `wait for ${label} export download`);
-    const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
+    const pendingDownload = page.waitForEvent('download', { timeout: EXPORT_STEP_BUDGET_MS });
     await retryClick(
       () => row().getByRole('button', { name: 'Export copy', exact: true }),
       `export ${label} session record`,
@@ -1482,8 +1606,12 @@ async function recordDownloadedExport(
   const filename = `${label}.vtt.json`;
   const path = resolve(recorder.runDirectory, filename);
   recorder.track(phase, `save ${label} export download`);
-  await withTimeout(download.saveAs(path), 10_000, `save ${label} export download`);
-  const bytes = await withTimeout(readFile(path, 'utf8'), 10_000, `read ${label} export download`);
+  await withTimeout(download.saveAs(path), EXPORT_STEP_BUDGET_MS, `save ${label} export download`);
+  const bytes = await withTimeout(
+    readFile(path, 'utf8'),
+    EXPORT_STEP_BUDGET_MS,
+    `read ${label} export download`,
+  );
   const value: unknown = JSON.parse(bytes);
   const sessionRecord = isRecord(value) && isRecord(value.sessionRecord)
     ? value.sessionRecord
@@ -1535,8 +1663,21 @@ async function saveManagerRoundTrip(
   const browserRows = page.locator('.dm-save-row[data-source="browser"]');
   const perRound = browserRows.filter({ has: page.locator('.dm-save-pool', { hasText: /^Per-round autosave$/u }) });
   const boundary = browserRows.filter({ has: page.locator('.dm-save-pool', { hasText: /^Encounter-boundary autosave$/u }) });
-  const poolsPresent = await waitVisible(page, recorder, phase, 'find per-round autosave pool', perRound, 10_000) &&
-    await waitVisible(page, recorder, phase, 'find encounter-boundary autosave pool', boundary, 10_000);
+  const poolsPresent = await waitVisible(
+    page,
+    recorder,
+    phase,
+    'find per-round autosave pool',
+    perRound,
+    SAVE_MANAGER_STEP_BUDGET_MS,
+  ) && await waitVisible(
+    page,
+    recorder,
+    phase,
+    'find encounter-boundary autosave pool',
+    boundary,
+    SAVE_MANAGER_STEP_BUDGET_MS,
+  );
   const manualSave = await createManualFileSave(page, recorder, phase);
   if (manualSave === null) {
     recorder.phase(phase, 'aborted', 'Could not create a manual file save.');
@@ -1552,10 +1693,10 @@ async function saveManagerRoundTrip(
       phase,
       'find fallback upload path',
       page.locator('.dm-save-manager').getByRole('button', { name: 'Upload save file', exact: true }),
-      10_000,
+      SAVE_MANAGER_STEP_BUDGET_MS,
     );
   } else {
-    await pauseEncounter(page);
+    await pauseEncounter(page, Date.now() + SAVE_MANAGER_STEP_BUDGET_MS);
     const history = page.locator('details ol [data-revision]');
     await retryClick(
       () => page.getByText('Full revision history', { exact: true }),
@@ -1564,7 +1705,14 @@ async function saveManagerRoundTrip(
     const revisionCount = await history.count();
     exported = await downloadExport(page, manualSave.row, recorder, phase, 'd365-session');
     const load = manualSave.row().getByRole('button', { name: 'Load', exact: true });
-    if (!await waitVisible(page, recorder, phase, 'load manual save', load, 10_000)) {
+    if (!await waitVisible(
+      page,
+      recorder,
+      phase,
+      'load manual save',
+      load,
+      SAVE_MANAGER_STEP_BUDGET_MS,
+    )) {
       recorder.phase(phase, 'aborted', 'Manual save could not be loaded.');
       return exported;
     }
@@ -1572,7 +1720,14 @@ async function saveManagerRoundTrip(
       () => manualSave.row().getByRole('button', { name: 'Load', exact: true }),
       'load manual save',
     );
-    loadPathReady = await waitVisible(page, recorder, phase, 'mount loaded save', page.getByRole('heading', { name: 'DM controls' }), 20_000);
+    loadPathReady = await waitVisible(
+      page,
+      recorder,
+      phase,
+      'mount loaded save',
+      page.getByRole('heading', { name: 'DM controls' }),
+      SAVE_MANAGER_STEP_BUDGET_MS,
+    );
     if (loadPathReady) {
       await retryClick(
         () => page.getByText('Full revision history', { exact: true }),
@@ -1701,13 +1856,14 @@ async function transitionToNextVaneWarrenFight(
     return false;
   }
   const control = page.getByRole('button', { name: 'End room and enter next room', exact: true });
+  const deadline = Date.now() + TRANSITION_STEP_BUDGET_MS;
   if (!await waitVisible(
     page,
     recorder,
     phase,
     `cross boundary after Vane Warren fight ${String(completedFight)}`,
     control,
-    10_000,
+    remainingStepBudget(deadline, `cross boundary after Vane Warren fight ${String(completedFight)}`),
   )) return false;
   await retryClickUntil(
     () => page.getByRole('button', { name: 'End room and enter next room', exact: true }),
@@ -1717,6 +1873,7 @@ async function transitionToNextVaneWarrenFight(
       completedFight + 1,
     ),
     `cross boundary after Vane Warren fight ${String(completedFight)}`,
+    remainingStepBudget(deadline, `cross boundary after Vane Warren fight ${String(completedFight)}`),
   );
   return waitForVaneWarrenFight(page, recorder, phase, completedFight + 1);
 }
@@ -1728,15 +1885,29 @@ async function endVaneWarrenSession(
 ): Promise<SessionExport | null> {
   const label = 'vane-warren-session';
   const control = page.getByRole('button', { name: 'End Session and export', exact: true });
-  if (!await waitVisible(page, recorder, phase, 'end chained Vane Warren session', control, 10_000)) {
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    'end chained Vane Warren session',
+    control,
+    EXPORT_STEP_BUDGET_MS,
+  )) {
     return null;
   }
   try {
     recorder.track(phase, 'wait for final Vane Warren export download');
-    const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
-    await retryClick(
-      () => page.getByRole('button', { name: 'End Session and export', exact: true }),
-      'end chained Vane Warren session',
+    const pendingDownload = page.waitForEvent('download', { timeout: EXPORT_STEP_BUDGET_MS });
+    await withTimeout(
+      page.getByRole('button', { name: 'End Session and export', exact: true })
+        .evaluate((button) => {
+          if (!(button instanceof HTMLButtonElement)) {
+            throw new TypeError('End-session control is not a button.');
+          }
+          button.click();
+        }),
+      EXPORT_STEP_BUDGET_MS,
+      'dispatch end chained Vane Warren session',
     );
     const download: Download = await pendingDownload;
     const exported = await recordDownloadedExport(download, recorder, phase, label);
@@ -1746,7 +1917,7 @@ async function endVaneWarrenSession(
       phase,
       'confirm finalized Vane Warren session',
       page.locator('.dm-end-session-export-status'),
-      10_000,
+      EXPORT_STEP_BUDGET_MS,
     );
     return exported;
   } catch (error: unknown) {
