@@ -1929,13 +1929,35 @@ function canCombatantPierceVisualIllusion(
     (sense.kind === 'blindsight' || sense.kind === 'truesight') && distance <= sense.rangeFeet);
 }
 
-function coverArmorClassBonus(tier: CoverTier): number {
+/**
+ * SRD 5.2.1 Cover grants the same bonus to AC and Dexterity saves:
+ * half +2, three-quarters +5 (docs/srd/full/srd-5.2.1.txt:270,371).
+ */
+function coverDefenseBonus(tier: CoverTier): number {
   switch (tier) {
     case 'none': return 0;
     case 'half': return 2;
     case 'three_quarters': return 5;
     case 'total': return 0;
   }
+}
+
+function coverSavingThrowBonus(
+  state: EncounterState,
+  source: CombatantId,
+  target: CombatantId,
+  ability: Ability,
+): number {
+  if (
+    ability !== 'dexterity' ||
+    !isCombatantOnBoard(state, source) ||
+    !isCombatantOnBoard(state, target)
+  ) return 0;
+  return coverDefenseBonus(coverTierBetween(
+    state,
+    token(state, source).position,
+    token(state, target).position,
+  ));
 }
 
 function coverAdjustedArmorClass(
@@ -1948,7 +1970,7 @@ function coverAdjustedArmorClass(
     token(state, attacker).position,
     token(state, target).position,
   );
-  return armorClass(effectiveArmorClass(state, target, attacker) + coverArmorClassBonus(tier));
+  return armorClass(effectiveArmorClass(state, target, attacker) + coverDefenseBonus(tier));
 }
 
 function attackRollMode(
@@ -2911,6 +2933,7 @@ function resolveTargetSave(
         {
           bonus:
             effectiveCombatRules(context.state, target).savingThrowBonuses[ability] +
+            coverSavingThrowBonus(context.state, source, target, ability) +
             exhaustionPenalty(combatantConditions(context.state, target)) +
             effectDiceModifier(context.state, target, 'saving_throw', context.rng) +
             rollDefenseTotalModifier(

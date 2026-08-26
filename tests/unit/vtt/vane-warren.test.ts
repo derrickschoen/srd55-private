@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  coverTierBetweenObjects,
   reduceEncounter,
   type EncounterState,
 } from '../../../src/combat/encounter';
@@ -242,6 +243,44 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
     const allDeployedIds = VANE_WARREN_FIGHTS.map((manifest) =>
       fight(manifest.id).deployedRosterIds);
     expect(new Set(allDeployedIds.flat()).size).toBe(allDeployedIds.flat().length);
+  });
+
+  it('all three Vane Warren fights expose anchored brazier and cask cover, with Cinder Rite adding its war drum', () => {
+    for (const manifest of VANE_WARREN_FIGHTS) {
+      const loaded = fight(manifest.id);
+      const cover = loaded.encounter.worldObjects.map((object) => ({
+        name: object.name,
+        position: object.position,
+        tier: object.blocking.cover,
+        movement: object.blocking.movement,
+      }));
+      expect(cover).toContainEqual({
+        name: 'Coal-Red Brazier', position: { column: 7, row: 4 }, tier: 'half', movement: false,
+      });
+      expect(cover).toContainEqual({
+        name: 'Pitch-Oil Cask', position: { column: 7, row: 7 }, tier: 'half', movement: false,
+      });
+      expect(cover).toHaveLength(manifest.id === 'cinder-rite' ? 3 : 2);
+      if (manifest.id === 'cinder-rite') {
+        expect(cover).toContainEqual({
+          name: 'Vane Warren War Drum', position: { column: 11, row: 5 },
+          tier: 'three_quarters', movement: false,
+        });
+      }
+      const leader = combatantIdFor(loaded, manifest.leaderRosterId);
+      const leaderPosition = loaded.encounter.tokens.find((token) => token.combatantId === leader)?.position;
+      if (leaderPosition === undefined) throw new Error(`${manifest.name} has no leader token.`);
+      expect(coverTierBetweenObjects(
+        loaded.encounter.worldObjects,
+        { column: 6, row: 4 },
+        leaderPosition,
+      )).toBe('half');
+      expect(coverTierBetweenObjects(
+        loaded.encounter.worldObjects,
+        { column: 6, row: 8 },
+        leaderPosition,
+      )).toBe('half');
+    }
   });
 
   it('ratio_drift: detune_ratio_stale: derives every detuned ratio from its live roster instead of a copied expectation', () => {
