@@ -287,18 +287,84 @@ class PlanRollback extends Error {
   }
 }
 
+const registryGraphRevisionTable = '__dnd_registry_graph_revision';
+const registryGraphTables = [
+  'catalog_content_identities',
+  'catalog_content_fingerprints',
+  'catalog_content_aliases',
+  'catalog_content_match_decisions',
+] as const;
+
+interface RegistryGraphHashCacheEntry {
+  readonly revision: number;
+  readonly hash: string;
+}
+
+const registryGraphHashCache = new WeakMap<
+  DatabaseContext['connection'],
+  RegistryGraphHashCacheEntry
+>();
+const preparedRegistryGraphConnections = new WeakSet<
+  DatabaseContext['connection']
+>();
+
+/**
+ * Installs connection-local, transactional invalidation before planning opens
+ * its rollback-only transaction. TEMP trigger writes roll back with simulated
+ * catalog writes, while a committed write advances the revision. Direct SQL
+ * mutations are covered because invalidation lives in SQLite, not in a
+ * DatabaseContext wrapper.
+ */
+function prepareRegistryGraphHashCache(db: DatabaseContext): void {
+  if (preparedRegistryGraphConnections.has(db.connection)) return;
+  db.exec(
+    `CREATE TEMP TABLE IF NOT EXISTS ${registryGraphRevisionTable} (
+       revision INTEGER NOT NULL
+     );
+     INSERT INTO ${registryGraphRevisionTable} (revision)
+     SELECT 0 WHERE NOT EXISTS (
+       SELECT 1 FROM ${registryGraphRevisionTable}
+     );
+     ${registryGraphTables.flatMap((table) =>
+       ['INSERT', 'UPDATE', 'DELETE'].map((operation) =>
+         `CREATE TEMP TRIGGER IF NOT EXISTS __dnd_registry_graph_${table}_${operation.toLowerCase()}
+          AFTER ${operation} ON ${table}
+          BEGIN
+            UPDATE ${registryGraphRevisionTable}
+            SET revision = revision + 1;
+          END;`
+       )
+     ).join('\n')}`,
+  );
+  preparedRegistryGraphConnections.add(db.connection);
+}
+
 function registryGraphHash(db: DatabaseContext): string {
-  const tables = [
-    'catalog_content_identities',
-    'catalog_content_fingerprints',
-    'catalog_content_aliases',
-    'catalog_content_match_decisions',
-  ] as const;
-  const graph = tables.map((table) => ({
+  let revision: number;
+  try {
+    revision = Number(db.scalar(
+      `SELECT revision FROM ${registryGraphRevisionTable}`,
+    ));
+  } catch {
+    // A caller can wrap first use in a transaction which later rolls back the
+    // TEMP setup along with its own work. Recover on the next use rather than
+    // trusting module-local connection state over SQLite's actual state.
+    preparedRegistryGraphConnections.delete(db.connection);
+    prepareRegistryGraphHashCache(db);
+    revision = Number(db.scalar(
+      `SELECT revision FROM ${registryGraphRevisionTable}`,
+    ));
+  }
+  const cached = registryGraphHashCache.get(db.connection);
+  if (cached?.revision === revision) return cached.hash;
+
+  const graph = registryGraphTables.map((table) => ({
     table,
     rows: db.allRaw(`SELECT * FROM ${table} ORDER BY rowid`),
   }));
-  return sha256(canonicalJson(graph));
+  const hash = sha256(canonicalJson(graph));
+  registryGraphHashCache.set(db.connection, { revision, hash });
+  return hash;
 }
 
 function inputHash(nodes: readonly ContentImportNode[]): string {
@@ -1501,6 +1567,7 @@ export function planContentImport(
   spellActivityChanges: readonly ContentImportSpellActivityChange[] = Object.freeze([]),
   operationIdentity: string | null = null,
 ): ContentImportPlan {
+  prepareRegistryGraphHashCache(db);
   try {
     db.transaction(() => {
       throw new PlanRollback(evaluate(
@@ -1557,6 +1624,7 @@ export function commitContentImport(
     readonly afterInstall?: (db: DatabaseContext) => void;
   },
 ): ContentImportCommitResult {
+  prepareRegistryGraphHashCache(db);
   const choices = input.choices ?? Object.freeze({});
   const spellActivityChanges = input.spellActivityChanges ?? Object.freeze([]);
   const operationIdentity = input.operationIdentity ?? null;
