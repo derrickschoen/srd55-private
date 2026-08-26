@@ -14,6 +14,7 @@
     "check:command-outcomes": "scripts/check-command-outcomes.sh",
     "typecheck:fast": "tsgo -p tsconfig.app.json --noEmit && tsgo -p tsconfig.node.json --noEmit",
     "test": "vitest run --configLoader runner",
+    "test:affected": "node scripts/test-affected.mjs",
     "census:modules": "node scripts/module-state-census.mjs",
     "test:shuffled": "vitest run --configLoader runner --sequence.shuffle --sequence.seed=20260825",
     "test:unit": "vitest run --configLoader runner tests/unit",
