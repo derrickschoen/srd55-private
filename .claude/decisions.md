@@ -7,6 +7,26 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D390 — OWNER: FABLE writes the refactored code (engine-merge track) (2026-08-26)
+
+Owner, verbatim: "Have fable write the refactored code. Fable is better
+about not putting in too many of checks and try catch and tests that
+aren't really valuable"
+
+1. **Role inversion for the refactor track.** Claude (Fable) is the
+   IMPLEMENTER of the D388/D389 engine-merge refactor in
+   `wt/engine-merge` — it writes the refactored code directly, not via
+   codex dispatch. Overrides the global codex-implements default for
+   this track only.
+2. **Codex becomes the independent reviewer** for refactor increments
+   (Claude never reviews an artifact it authored). Review via
+   `codex review` / `codex exec --sandbox read-only` on the frozen
+   diff at stage gates.
+3. **Rationale recorded:** avoid defensive over-engineering — redundant
+   checks, try/catch wrapping, and low-value tests.
+4. Other lanes (v1-bar track on wt/vtt, sweep harvests) keep the
+   standing codex-implements binding unless the owner says otherwise.
+
 ## D389 — OWNER: engine refactor runs PARALLEL to the v1 bar, in a separate worktree (2026-08-26)
 
 Owner, on D388-vs-bar sequencing: "Work on the refactoring in a separate
