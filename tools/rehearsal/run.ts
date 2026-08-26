@@ -109,6 +109,15 @@ interface PendingDecisionSurface {
   readonly optionCount: number;
 }
 
+type AdventuringDayFlow =
+  | { readonly kind: 'dungeon'; readonly roomCount: 4 }
+  | { readonly kind: 'vane_warren'; readonly name: 'The Vane Warren'; readonly roomCount: 3 };
+
+interface AdventuringDayMarker {
+  readonly room: number;
+  readonly text: string;
+}
+
 async function withTimeout<T>(
   operation: Promise<T>,
   timeoutMs: number,
@@ -505,17 +514,114 @@ async function retryClickUntil(
         attemptTimeout,
         `${label} click attempt ${String(attempts)}`,
       );
-      return;
+      lastError = new Error(`${label} was clicked, but its expected state was not observed.`);
+      while (Date.now() < deadline) {
+        if (await completed()) return;
+        const delay = Math.min(CLICK_RETRY_DELAY_MS, deadline - Date.now());
+        if (delay > 0) await wait(delay);
+      }
+      break;
     } catch (error: unknown) {
       lastError = error;
-      if (await completed()) return;
-      const delay = Math.min(CLICK_RETRY_DELAY_MS, deadline - Date.now());
-      if (delay > 0) await wait(delay);
+      const observationDeadline = Math.min(
+        deadline,
+        Date.now() + CLICK_ATTEMPT_TIMEOUT_MS,
+      );
+      while (Date.now() < observationDeadline) {
+        if (await completed()) return;
+        const delay = Math.min(CLICK_RETRY_DELAY_MS, observationDeadline - Date.now());
+        if (delay > 0) await wait(delay);
+      }
     }
   }
   throw new Error(
     `${label} did not reach its expected state within ${String(CLICK_STEP_BUDGET_MS)}ms after ${String(attempts)} attempts. Last error: ${errorDetail(lastError)}`,
   );
+}
+
+async function readAdventuringDayMarker(
+  page: Page,
+  flow: AdventuringDayFlow,
+): Promise<AdventuringDayMarker> {
+  const statuses = page.locator('.adventuring-day-status:visible');
+  const count = await statuses.count();
+  if (count !== 1) {
+    throw new Error(
+      `Driver DOM contract violation: expected exactly one visible .adventuring-day-status, found ${String(count)}.`,
+    );
+  }
+  const status = statuses.first();
+  const rawRoom = await status.getAttribute('data-room');
+  if (rawRoom === null) {
+    throw new Error(
+      'Driver DOM contract violation: visible .adventuring-day-status is missing data-room.',
+    );
+  }
+  if (!/^[1-9]\d*$/u.test(rawRoom)) {
+    throw new Error(
+      `Driver DOM contract violation: .adventuring-day-status data-room=${JSON.stringify(rawRoom)} is not a positive integer.`,
+    );
+  }
+  const room = Number(rawRoom);
+  const text = (await status.innerText()).trim();
+  const expectedText = flow.kind === 'dungeon'
+    ? `Adventuring day — room ${String(room)} of ${String(flow.roomCount)} · 2024 rules`
+    : `${flow.name} — encounter ${String(room)} of ${String(flow.roomCount)} · 2024 rules`;
+  if (text !== expectedText) {
+    throw new Error(
+      `Driver DOM contract violation: data-room=${rawRoom}, but the visible status was ${JSON.stringify(text)}; expected ${JSON.stringify(expectedText)}.`,
+    );
+  }
+  return { room, text };
+}
+
+async function adventuringDayReachedRoom(
+  page: Page,
+  flow: AdventuringDayFlow,
+  expectedRoom: number,
+): Promise<boolean> {
+  const marker = await readAdventuringDayMarker(page, flow);
+  if (marker.room > expectedRoom) {
+    throw new Error(
+      `Driver room-transition violation: expected room ${String(expectedRoom)}, but the visible status advanced to room ${String(marker.room)}.`,
+    );
+  }
+  return marker.room === expectedRoom;
+}
+
+async function waitForAdventuringDayRoom(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
+  step: string,
+  flow: AdventuringDayFlow,
+  expectedRoom: number,
+): Promise<boolean> {
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    step,
+    page.locator('.adventuring-day-status'),
+    10_000,
+  )) return false;
+  try {
+    const marker = await readAdventuringDayMarker(page, flow);
+    if (marker.room === expectedRoom) return true;
+    const image = await screenshot(page, recorder, step);
+    recorder.add(
+      'selector_timeout',
+      phase,
+      step,
+      `Driver room-state mismatch: expected room ${String(expectedRoom)}, found room ${String(marker.room)} in ${JSON.stringify(marker.text)}.`,
+      image,
+    );
+    return false;
+  } catch (error: unknown) {
+    const image = await screenshot(page, recorder, step);
+    recorder.add('selector_timeout', phase, step, errorDetail(error), image);
+    return false;
+  }
 }
 
 async function locatorIsVisible(locator: () => Locator, label: string): Promise<boolean> {
@@ -1066,8 +1172,14 @@ async function advanceDungeonRoom(
   room: number,
 ): Promise<boolean> {
   const phase = `dungeon room ${String(room)}`;
-  const roomStatus = page.locator(`.adventuring-day-status[data-room="${String(room)}"]`);
-  if (!await waitVisible(page, recorder, phase, `enter dungeon room ${String(room)}`, roomStatus, 10_000)) {
+  if (!await waitForAdventuringDayRoom(
+    page,
+    recorder,
+    phase,
+    `enter dungeon room ${String(room)}`,
+    { kind: 'dungeon', roomCount: 4 },
+    room,
+  )) {
     recorder.phase(phase, 'aborted', 'Room status did not match the requested room.');
     return false;
   }
@@ -1103,9 +1215,7 @@ async function transitionToNextDungeonRoom(
     return false;
   }
   if (takeScheduledShortRest) await fillSensibleShortRestSpends(page);
-  const nextRoom = page.locator(
-    `.adventuring-day-status[data-room="${String(completedRoom + 1)}"]`,
-  );
+  const nextRoom = completedRoom + 1;
   await retryClickUntil(
     () => page.getByRole('button', {
       name: takeScheduledShortRest
@@ -1113,18 +1223,20 @@ async function transitionToNextDungeonRoom(
         : 'End room and enter next room',
       exact: true,
     }),
-    async () => await page.evaluate((expectedRoom) =>
-      document.querySelector('.adventuring-day-status')?.getAttribute('data-room') === expectedRoom,
-    String(completedRoom + 1)),
+    async () => adventuringDayReachedRoom(
+      page,
+      { kind: 'dungeon', roomCount: 4 },
+      nextRoom,
+    ),
     `${label} after room ${String(completedRoom)}`,
   );
-  return waitVisible(
+  return waitForAdventuringDayRoom(
     page,
     recorder,
     phase,
-    `enter room ${String(completedRoom + 1)}`,
+    `enter room ${String(nextRoom)}`,
+    { kind: 'dungeon', roomCount: 4 },
     nextRoom,
-    10_000,
   );
 }
 
@@ -1469,13 +1581,13 @@ async function waitForVaneWarrenFight(
   phase: string,
   fightNumber: number,
 ): Promise<boolean> {
-  return waitVisible(
+  return waitForAdventuringDayRoom(
     page,
     recorder,
     phase,
     `enter Vane Warren fight ${String(fightNumber)}`,
-    page.locator(`.adventuring-day-status[data-room="${String(fightNumber)}"]`),
-    10_000,
+    { kind: 'vane_warren', name: 'The Vane Warren', roomCount: 3 },
+    fightNumber,
   );
 }
 
@@ -1506,9 +1618,11 @@ async function transitionToNextVaneWarrenFight(
   )) return false;
   await retryClickUntil(
     () => page.getByRole('button', { name: 'End room and enter next room', exact: true }),
-    async () => await page.evaluate((expectedFight) =>
-      document.querySelector('.adventuring-day-status')?.getAttribute('data-room') === expectedFight,
-    String(completedFight + 1)),
+    async () => adventuringDayReachedRoom(
+      page,
+      { kind: 'vane_warren', name: 'The Vane Warren', roomCount: 3 },
+      completedFight + 1,
+    ),
     `cross boundary after Vane Warren fight ${String(completedFight)}`,
   );
   return waitForVaneWarrenFight(page, recorder, phase, completedFight + 1);
