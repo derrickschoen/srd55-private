@@ -2237,6 +2237,47 @@ function healingSpellCommands(
   });
 }
 
+function revivifySpellCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  const definition = spellDefinition('revivify');
+  if (
+    acting === undefined || acting.turn.action.kind !== 'available' ||
+    definition === null || definition.operation.kind !== 'revive' ||
+    !member.spells.some((spell) => spell.id === 'revivify')
+  ) return [];
+  const maximumDeathAgeRounds = definition.operation.maximumDeathAgeRounds;
+  const slot = acting.spellSlots
+    .filter((candidate) => candidate.remaining > 0 && candidate.level >= definition.level)
+    .sort((left, right) => left.level - right.level)[0];
+  if (slot === undefined) return [];
+  const deadAllies = state.combatants
+    .filter((candidate) =>
+      combatantsAreAllies(state, candidate.profile.id, actor) &&
+      candidate.life === 'dead' &&
+      candidate.deathAt !== null &&
+      state.round - candidate.deathAt.round <= maximumDeathAgeRounds &&
+      gridDistance(
+        loadedMemberPosition(state, actor),
+        loadedMemberPosition(state, candidate.profile.id),
+      ) <= 5)
+    .sort((left, right) => left.profile.id.localeCompare(right.profile.id));
+  // Revivify has Touch range, returns an eligible creature dead no longer than
+  // one minute with 1 HP, and consumes its diamond component.
+  // docs/srd/source/spell-descriptions.txt:6604-6623.
+  return deadAllies.map((target) => loadedPartySpellCastCommand(member, 'revivify', {
+    slotLevel: slot.level as 3 | 4 | 5 | 6 | 7 | 8 | 9,
+    castAsRitual: false,
+    targets: [target.profile.id],
+    area: null,
+    weaponAttack: null,
+    selectedOption: null,
+  }));
+}
+
 function healingPotionCommands(
   state: Parameters<TurnLegalActions>[0],
   actor: ReturnType<typeof combatantId>,
@@ -2403,6 +2444,7 @@ function spiritGuardiansSpellCommands(
   member: LoadedPartyMember,
   state: Parameters<TurnLegalActions>[0],
   actor: ReturnType<typeof combatantId>,
+  reserveThirdLevelSlot = false,
 ): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
   const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
   if (
@@ -2413,6 +2455,13 @@ function spiritGuardiansSpellCommands(
   ) return [];
   const slot = sharedSpellSlot(state, actor, 3);
   if (slot === undefined) return [];
+  if (
+    reserveThirdLevelSlot &&
+    (acting.spellSlots.reduce(
+      (remaining, candidate) => remaining + (candidate.level >= 3 ? candidate.remaining : 0),
+      0,
+    ) <= 1)
+  ) return [];
   const position = loadedMemberPosition(state, actor);
   // Spirit Guardians is a 15-foot self Emanation, concentration, and requires
   // a level-3 slot: docs/srd/source/spell-descriptions.txt:7324-7344.
@@ -2473,6 +2522,7 @@ export function loadedPartyTurnLegalActions(
     readonly reserveClericSlotsForBless?: boolean;
     readonly useWizardTactics?: boolean;
     readonly useClericContingency?: boolean;
+    readonly reserveClericSlotForRevivify?: boolean;
   } = { useHealingPotions: false, openWithBless: false, reserveClericSlotsForBless: false },
 ): TurnLegalActions {
   const byId = new Map(members.map((member) => [member.profile.id, member] as const));
@@ -2558,7 +2608,13 @@ export function loadedPartyTurnLegalActions(
         actions.push(...slowSpellCommands(member, state, actor, targets));
       }
       if (policy.useClericContingency === true) {
-        actions.push(...spiritGuardiansSpellCommands(member, state, actor));
+        actions.push(...revivifySpellCommands(member, state, actor));
+        actions.push(...spiritGuardiansSpellCommands(
+          member,
+          state,
+          actor,
+          policy.reserveClericSlotForRevivify === true,
+        ));
         actions.push(...commandKeepAwaySpellCommands(member, state, actor, targets));
       }
       actions.push(...basicDamageCantripCommands(member, state, actor, targets));

@@ -84,6 +84,7 @@ interface ParsedOptions {
   readonly run: number;
   readonly port: number;
   readonly watchdogMs: number;
+  readonly scenario: 'default' | 'tpk-clean' | 'tpk-recovery';
 }
 
 interface SessionExport {
@@ -98,6 +99,12 @@ interface SessionExport {
   readonly payloadBytes: number;
   readonly revisionCount: number;
   readonly format: string;
+  readonly defeatConclusionCount: number;
+  readonly deathSaveCount: number;
+  readonly deathCount: number;
+  readonly revivifyCount: number;
+  readonly dmRevivalCount: number;
+  readonly recoveryRedeathCount: number;
 }
 
 interface EncounterOutcome {
@@ -115,6 +122,11 @@ interface TimelineProgress {
   rewindRound: number | null;
 }
 
+interface TpkRecoveryProgress {
+  revivifyObserved: boolean;
+  overrideTarget: string | null;
+}
+
 interface PendingDecisionSurface {
   readonly decisionId: string;
   readonly decisionKind: PendingDecision['kind'];
@@ -124,7 +136,7 @@ interface PendingDecisionSurface {
 
 type AdventuringDayFlow =
   | { readonly kind: 'dungeon'; readonly roomCount: 4 }
-  | { readonly kind: 'vane_warren'; readonly name: 'The Vane Warren'; readonly roomCount: 3 };
+  | { readonly kind: 'vane_warren'; readonly name: string; readonly roomCount: 1 | 3 };
 
 interface AdventuringDayMarker {
   readonly room: number;
@@ -160,6 +172,14 @@ function findingDedupeKey(
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function recordList(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): readonly Readonly<Record<string, unknown>>[] {
+  const value = record[key];
+  return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
 function positiveInteger(name: string, raw: string | undefined, fallback: number): number {
@@ -218,7 +238,15 @@ async function parseOptions(argv: readonly string[]): Promise<ParsedOptions> {
     process.env.REHEARSAL_WATCHDOG_MS,
     DEFAULT_RUN_WATCHDOG_MS,
   );
-  return { date, run, port, watchdogMs };
+  const requestedScenario = optionValue(argv, '--scenario') ?? 'default';
+  if (
+    requestedScenario !== 'default' &&
+    requestedScenario !== 'tpk-clean' &&
+    requestedScenario !== 'tpk-recovery'
+  ) {
+    throw new Error(`Unknown rehearsal scenario ${JSON.stringify(requestedScenario)}.`);
+  }
+  return { date, run, port, watchdogMs, scenario: requestedScenario };
 }
 
 class FindingsRecorder {
@@ -335,7 +363,9 @@ class FindingsRecorder {
     const aborted = this.phases.filter((phase) => phase.status === 'aborted');
     const skipped = this.phases.filter((phase) => phase.status === 'skipped_dependency');
     const counts = this.counts();
-    const clean = counts.page_console_error === 0 &&
+    const clean = aborted.length === 0 &&
+      skipped.length === 0 &&
+      counts.page_console_error === 0 &&
       counts.selector_timeout === 0 &&
       counts.turn_advance_stall === 0 &&
       counts.tray_unresolved === 0 &&
@@ -372,9 +402,9 @@ class FindingsRecorder {
           ...(finding.screenshot === null ? [] : [`- Screenshot: \`${finding.screenshot}\``]),
         ].join('\n')).join('\n\n');
     const exportRows = this.exports.length === 0
-      ? '| (none) | false | false | 0 | 0 | 0 | (unknown) | (unknown) |'
+      ? '| (none) | false | false | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | (unknown) | (unknown) |'
       : this.exports.map((entry) =>
-          `| ${escapeTable(entry.filename)} | ${String(entry.parsed)} | ${String(entry.hasSessionRecord)} | ${String(entry.encounterCount)} | ${String(entry.revisionCount)} | ${String(entry.payloadBytes)} | ${entry.seed === null ? '(unknown)' : String(entry.seed)} | ${escapeTable(entry.format)} |`).join('\n');
+          `| ${escapeTable(entry.filename)} | ${String(entry.parsed)} | ${String(entry.hasSessionRecord)} | ${String(entry.encounterCount)} | ${String(entry.defeatConclusionCount)} | ${String(entry.deathSaveCount)} | ${String(entry.deathCount)} | ${String(entry.revivifyCount)} | ${String(entry.dmRevivalCount)} | ${String(entry.recoveryRedeathCount)} | ${String(entry.revisionCount)} | ${String(entry.payloadBytes)} | ${entry.seed === null ? '(unknown)' : String(entry.seed)} | ${escapeTable(entry.format)} |`).join('\n');
     const markdown = [
       `# Rehearsal run ${this.date} / ${String(this.run)}`,
       '',
@@ -390,8 +420,8 @@ class FindingsRecorder {
       '',
       '## Session exports',
       '',
-      '| File | Parses | Structured record | Encounters | Revisions | Bytes | Seed | Format |',
-      '|---|---:|---:|---:|---:|---:|---:|---|',
+      '| File | Parses | Structured record | Encounters | Defeats | Death saves | Deaths | Revivify | DM revivals | Re-deaths | Revisions | Bytes | Seed | Format |',
+      '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|',
       exportRows,
       '',
       this.timingBlock(),
@@ -1077,6 +1107,7 @@ async function pulseTurn(
   page: Page,
   recorder: FindingsRecorder,
   phase: string,
+  waitMs = TURN_PULSE_MS,
 ): Promise<void> {
   const endTurn = (): Locator => page.locator('.dm-pending-request').getByRole('button', {
     name: 'End turn',
@@ -1097,13 +1128,16 @@ async function pulseTurn(
     if (resolution === null) throw new Error('A decision tray entry remained unresolved.');
     if (resolution === 0) break;
   }
-  await wait(TURN_PULSE_MS);
+  await wait(waitMs);
 }
 
 async function playEncounter(
   page: Page,
   recorder: FindingsRecorder,
   phase: string,
+  observeProgress?: () => Promise<void>,
+  turnPulseMs = TURN_PULSE_MS,
+  stallBudgetMs = ROUND_STALL_BUDGET_MS,
 ): Promise<EncounterOutcome> {
   recorder.track(phase, 'initialize encounter driver');
   let lastRound = await roundOf(page);
@@ -1114,6 +1148,7 @@ async function playEncounter(
       return { kind: 'aborted', round: lastRound, attempts: attempt - 1 };
     }
     await captureRefusals(page, recorder, phase);
+    if (observeProgress !== undefined) await observeProgress();
     const outcome = await visibleEncounterOutcome(page);
     if (outcome === 'victory') {
       return { kind: 'victory', round: await roundOf(page), attempts: attempt - 1 };
@@ -1123,7 +1158,7 @@ async function playEncounter(
     }
     try {
       recorder.track(phase, 'turn pulse through DM controls');
-      await pulseTurn(page, recorder, phase);
+      await pulseTurn(page, recorder, phase, turnPulseMs);
     } catch (error: unknown) {
       recorder.add('scripted_nudge', phase, 'turn pulse through DM controls', errorDetail(error));
       return { kind: 'aborted', round: lastRound, attempts: attempt };
@@ -1136,7 +1171,7 @@ async function playEncounter(
       lastRevision = revision;
       lastProgressAt = Date.now();
     }
-    if (Date.now() - lastProgressAt < ROUND_STALL_BUDGET_MS) continue;
+    if (Date.now() - lastProgressAt < stallBudgetMs) continue;
     if (await resolveDecisionTray(page, recorder, phase) === null) {
       return { kind: 'aborted', round: lastRound, attempts: attempt };
     }
@@ -1154,7 +1189,7 @@ async function playEncounter(
       'turn_advance_stall',
       phase,
       'advance algorithm-controlled turns',
-      `Round ${String(lastRound)} and its rendered revision did not progress for ${String(ROUND_STALL_BUDGET_MS)}ms.`,
+      `Round ${String(lastRound)} and its rendered revision did not progress for ${String(stallBudgetMs)}ms.`,
       image,
     );
     return { kind: 'aborted', round: lastRound, attempts: attempt };
@@ -1168,6 +1203,67 @@ async function playEncounter(
     image,
   );
   return { kind: 'aborted', round: lastRound, attempts: MAX_TURN_ATTEMPTS };
+}
+
+async function observeTpkRecovery(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
+  progress: TpkRecoveryProgress,
+): Promise<void> {
+  if (!progress.revivifyObserved) {
+    progress.revivifyObserved = await page.locator(
+      '.dm-log [data-event-type="spell_cast"][data-spell-id="revivify"]',
+    ).count() > 0;
+  }
+  if (progress.overrideTarget !== null) return;
+  const dead = await page.locator('.dm-initiative li[data-life="dead"]').evaluateAll((items) =>
+    items.flatMap((item) => {
+      const combatantId = item.dataset.combatantId;
+      return combatantId === undefined
+        ? []
+        : [{ combatantId, label: item.textContent?.trim() ?? combatantId }];
+    }));
+  if (dead.length < 2) return;
+  const cleric = dead.find((candidate) => candidate.label.startsWith('Sera Dawn'));
+  const target = cleric ?? dead[0];
+  if (target === undefined) return;
+
+  const deadline = Date.now() + FORM_STEP_BUDGET_MS;
+  await pauseEncounter(page, deadline);
+  const form = page.locator('.dm-adjudication');
+  await form.getByLabel('Adjudication target').selectOption(target.combatantId, {
+    timeout: remainingStepBudget(deadline, 'select dead PC for DM override'),
+  });
+  await form.getByLabel('Hit Point delta').fill('1', {
+    timeout: remainingStepBudget(deadline, 'set DM override hit points'),
+  });
+  await form.getByLabel('DM reasoning').fill(
+    'TPK recovery rehearsal: exercise the explicit DM authority un-kill and ruling-card path.',
+    { timeout: remainingStepBudget(deadline, 'document DM override reasoning') },
+  );
+  await retryClick(
+    () => page.locator('.dm-adjudication').getByRole('button', {
+      name: 'Apply ADJUDICATED override',
+      exact: true,
+    }),
+    'apply required TPK recovery DM override',
+  );
+  await page.waitForFunction((combatantId) => {
+    const entry = Array.from(document.querySelectorAll<HTMLElement>('.dm-initiative li'))
+      .find((candidate) => candidate.dataset.combatantId === combatantId);
+    return entry?.dataset.life === 'living';
+  }, target.combatantId, {
+    timeout: remainingStepBudget(deadline, 'confirm DM override un-killed the PC'),
+  });
+  progress.overrideTarget = target.combatantId;
+  recorder.add(
+    'scripted_nudge',
+    phase,
+    'un-kill one dead PC through DM adjudication',
+    `Expected recovery-variant nudge: ${target.label} received +1 HP through the rendered ADJUDICATED override form; Revivify remains controller-policy driven.`,
+  );
+  await resumeEncounter(page, deadline);
 }
 
 async function advanceTimelineToRound(
@@ -1617,6 +1713,24 @@ async function recordDownloadedExport(
     ? value.sessionRecord
     : null;
   const encounters = sessionRecord === null ? null : sessionRecord.encounters;
+  const encounterRecords = Array.isArray(encounters) ? encounters.filter(isRecord) : [];
+  const deaths = encounterRecords.flatMap((encounter) => recordList(encounter, 'deaths'));
+  const deathSaves = encounterRecords.flatMap((encounter) => recordList(encounter, 'deathSaves'));
+  const revivals = encounterRecords.flatMap((encounter) => recordList(encounter, 'revivals'));
+  const defeatConclusionCount = encounterRecords.filter((encounter) => {
+    const conclusion = encounter.conclusion;
+    return isRecord(conclusion) && conclusion.outcome === 'defeat';
+  }).length;
+  const revivifyCount = revivals.filter((revival) => revival.cause === 'revivify').length;
+  const dmRevivalCount = revivals.filter((revival) => revival.cause === 'dm_override').length;
+  const recoveryRedeathCount = revivals.filter((revival) => {
+    const combatant = revival.combatant;
+    const eventSequence = revival.eventSequence;
+    return typeof combatant === 'string' && typeof eventSequence === 'number' && deaths.some((death) =>
+      death.combatant === combatant &&
+      typeof death.eventSequence === 'number' &&
+      death.eventSequence > eventSequence);
+  }).length;
   const decoded = decodeSavedSessionFingerprint(bytes);
   const result: SessionExport = {
     phase,
@@ -1630,6 +1744,12 @@ async function recordDownloadedExport(
     payloadBytes: new TextEncoder().encode(bytes).byteLength,
     revisionCount: decoded.revisionCount,
     format: isRecord(value) && typeof value.format === 'string' ? value.format : '(unknown)',
+    defeatConclusionCount,
+    deathSaveCount: deathSaves.length,
+    deathCount: deaths.length,
+    revivifyCount,
+    dmRevivalCount,
+    recoveryRedeathCount,
   };
   recorder.exports.push(result);
   return result;
@@ -1652,6 +1772,12 @@ function recordFailedExport(
     payloadBytes: 0,
     revisionCount: 0,
     format: '(unknown)',
+    defeatConclusionCount: 0,
+    deathSaveCount: 0,
+    deathCount: 0,
+    revivifyCount: 0,
+    dmRevivalCount: 0,
+    recoveryRedeathCount: 0,
   });
 }
 
@@ -1759,16 +1885,19 @@ async function openVaneWarrenSession(
   baseUrl: string,
   recorder: FindingsRecorder,
   phase: string,
+  scenario: ParsedOptions['scenario'] = 'default',
 ): Promise<boolean> {
   recorder.track(phase, 'navigate to Vane Warren');
-  await page.goto(`${baseUrl}/vtt?encounter=vane-warren`, { timeout: UI_TIMEOUT_MS });
-  const start = page.getByRole('button', { name: 'Start the Vane Warren', exact: true });
+  const scenarioQuery = scenario === 'default' ? '' : `&scenario=${scenario}`;
+  await page.goto(`${baseUrl}/vtt?encounter=vane-warren${scenarioQuery}`, { timeout: UI_TIMEOUT_MS });
+  const startLabel = scenario === 'default' ? 'Start the Vane Warren' : 'Start the doomed rehearsal';
+  const start = page.getByRole('button', { name: startLabel, exact: true });
   if (!await waitVisible(page, recorder, phase, 'open Vane Warren start flow', start)) {
     recorder.phase(phase, 'aborted', 'Vane Warren session start flow was unavailable.');
     return false;
   }
   await retryClick(
-    () => page.getByRole('button', { name: 'Start the Vane Warren', exact: true }),
+    () => page.getByRole('button', { name: startLabel, exact: true }),
     'start the Vane Warren',
   );
   const heading = page.getByRole('heading', { name: 'DM controls' });
@@ -1828,13 +1957,19 @@ async function waitForVaneWarrenFight(
   recorder: FindingsRecorder,
   phase: string,
   fightNumber: number,
+  scenario: ParsedOptions['scenario'] = 'default',
 ): Promise<boolean> {
+  const name = scenario === 'tpk-clean'
+    ? 'The Cinder Rite — doomed clean wipe'
+    : scenario === 'tpk-recovery'
+      ? 'The Cinder Rite — doomed partial recovery'
+      : 'The Vane Warren';
   return waitForAdventuringDayRoom(
     page,
     recorder,
     phase,
     `enter Vane Warren fight ${String(fightNumber)}`,
-    { kind: 'vane_warren', name: 'The Vane Warren', roomCount: 3 },
+    { kind: 'vane_warren', name, roomCount: scenario === 'default' ? 3 : 1 },
     fightNumber,
   );
 }
@@ -2040,6 +2175,109 @@ async function main(): Promise<void> {
     currentPhase = 'new session';
     const newSessionReady = await runIsolatedPhase(preview, recorder, currentPhase, async () =>
       resetApplication(page, baseUrl, recorder));
+
+    if (options.scenario !== 'default') {
+      currentPhase = `${options.scenario} setup`;
+      const tpkReady = newSessionReady === true
+        ? await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+            if (!await prepareVaneWarrenSession(page, baseUrl, recorder, currentPhase)) {
+              recorder.phase(currentPhase, 'aborted', 'Could not clear prior state for the doomed scenario.');
+              return false;
+            }
+            if (!await openVaneWarrenSession(
+              page,
+              baseUrl,
+              recorder,
+              currentPhase,
+              options.scenario,
+            )) return false;
+            const entered = await waitForVaneWarrenFight(
+              page,
+              recorder,
+              currentPhase,
+              1,
+              options.scenario,
+            );
+            recorder.phase(
+              currentPhase,
+              entered ? 'completed' : 'aborted',
+              entered
+                ? `Loaded ${options.scenario} with the pre-sounded alarm, both waves, and unchanged-statblock doomed reinforcements stacked at encounter start.`
+                : 'The doomed scenario did not enter The Cinder Rite.',
+            );
+            return entered;
+          })
+        : (skipDependency(recorder, currentPhase, 'new session'), false);
+
+      currentPhase = `${options.scenario} defeat flow`;
+      let defeatReached = false;
+      const recovery: TpkRecoveryProgress = {
+        revivifyObserved: false,
+        overrideTarget: null,
+      };
+      if (tpkReady === true) {
+        await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+          if (!await assignAlgorithms(page, recorder, currentPhase)) {
+            recorder.phase(currentPhase, 'aborted', 'Could not assign the doomed combatants to algorithm controllers.');
+            return;
+          }
+          const outcome = await playEncounter(
+            page,
+            recorder,
+            currentPhase,
+            options.scenario === 'tpk-recovery'
+              ? async () => observeTpkRecovery(page, recorder, currentPhase, recovery)
+              : undefined,
+            250,
+            120_000,
+          );
+          defeatReached = outcome.kind === 'defeat';
+          const recoveryComplete = options.scenario === 'tpk-clean' ||
+            (recovery.revivifyObserved && recovery.overrideTarget !== null);
+          const completed = defeatReached && recoveryComplete;
+          recorder.phase(
+            currentPhase,
+            completed ? 'completed' : 'aborted',
+            `${outcome.kind} at round ${String(outcome.round)} after ${String(outcome.attempts)} driver pulses; ` +
+              (options.scenario === 'tpk-clean'
+                ? 'the defeat conclusion banner was recognized as the scenario completion boundary.'
+                : `normal controller policy Revivify observed=${String(recovery.revivifyObserved)}; rendered DM adjudication override target=${recovery.overrideTarget ?? 'none'}; defeat recognized as completion=${String(defeatReached)}.`),
+          );
+        });
+      } else {
+        skipDependency(recorder, currentPhase, `${options.scenario} setup`);
+      }
+
+      currentPhase = `${options.scenario} session record and export`;
+      if (defeatReached) {
+        await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+          const exported = await endVaneWarrenSession(page, recorder, currentPhase);
+          const commonCoverage = exported?.parsed === true &&
+            exported.hasSessionRecord &&
+            exported.encounterCount === 1 &&
+            exported.defeatConclusionCount === 1 &&
+            exported.deathSaveCount > 0 &&
+            exported.deathCount >= REPRESENTATIVE_PARTY_NAMES.length;
+          const recoveryCoverage = options.scenario === 'tpk-clean' || (
+            exported !== null &&
+            exported.revivifyCount >= 1 &&
+            exported.dmRevivalCount >= 1 &&
+            exported.recoveryRedeathCount >= 2
+          );
+          const complete = commonCoverage && recoveryCoverage;
+          recorder.phase(
+            currentPhase,
+            complete ? 'completed' : 'aborted',
+            exported === null
+              ? 'The defeated session did not produce an export.'
+              : `Parsed ${String(exported.encounterCount)} closed encounter with ${String(exported.defeatConclusionCount)} defeat conclusion, ${String(exported.deathSaveCount)} death saves, ${String(exported.deathCount)} deaths, ${String(exported.revivifyCount)} Revivify revival, ${String(exported.dmRevivalCount)} DM revival, and ${String(exported.recoveryRedeathCount)} post-revival deaths.`,
+          );
+        });
+      } else {
+        skipDependency(recorder, currentPhase, `${options.scenario} defeat flow`);
+      }
+      return;
+    }
 
     currentPhase = 'representative party';
     const representativePartyReady = newSessionReady === true

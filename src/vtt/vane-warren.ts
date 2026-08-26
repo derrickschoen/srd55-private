@@ -154,6 +154,75 @@ export const VANE_WARREN_FIGHTS = [
   },
 ] as const satisfies readonly VaneWarrenFight[];
 
+export type VaneWarrenRehearsalScenario = 'default' | 'tpk-clean' | 'tpk-recovery';
+
+export interface VaneWarrenTpkScenarioConfig {
+  readonly id: Exclude<VaneWarrenRehearsalScenario, 'default'>;
+  readonly sessionId: string;
+  readonly sessionName: string;
+  readonly recovery: 'none' | 'revivify_and_dm_override';
+  readonly startingReinforcements: readonly VaneWarrenRosterEntry[];
+  readonly playerPositions: readonly GridCell[];
+  readonly enemyPositions: Readonly<Record<string, GridCell>>;
+}
+
+const TPK_INITIAL_REINFORCEMENTS = [
+  ...cinderWaveOne,
+  ...cinderWaveTwo,
+  roster('doomed-crocodile', 'statblock:giant-crocodile', 'Cinder Maw', 3, 4),
+  roster('doomed-crocodile-second', 'statblock:giant-crocodile', 'Second Cinder Maw', 3, 5),
+  roster('doomed-crocodile-third', 'statblock:giant-crocodile', 'Third Cinder Maw', 3, 1),
+  roster('doomed-crocodile-fourth', 'statblock:giant-crocodile', 'Fourth Cinder Maw', 3, 2),
+  roster('doomed-crocodile-fifth', 'statblock:giant-crocodile', 'Fifth Cinder Maw', 3, 6),
+  roster('doomed-crocodile-sixth', 'statblock:giant-crocodile', 'Sixth Cinder Maw', 3, 7),
+] as const;
+
+const TPK_PLAYER_POSITIONS = [
+  { column: 1, row: 3 },
+  { column: 1, row: 4 },
+  { column: 1, row: 5 },
+  { column: 2, row: 4 },
+  { column: 2, row: 5 },
+] as const;
+
+const TPK_ENEMY_POSITIONS: Readonly<Record<string, GridCell>> = {
+  ashmaw: { column: 4, row: 3 },
+  'cinder-guard-b': { column: 4, row: 4 },
+  'cinder-wave-1-a': { column: 4, row: 5 },
+  'cinder-wave-2-a': { column: 4, row: 6 },
+  'doomed-crocodile': { column: 3, row: 4 },
+  'doomed-crocodile-second': { column: 3, row: 5 },
+  'doomed-crocodile-third': { column: 3, row: 1 },
+  'doomed-crocodile-fourth': { column: 3, row: 2 },
+  'doomed-crocodile-fifth': { column: 3, row: 6 },
+  'doomed-crocodile-sixth': { column: 3, row: 7 },
+};
+
+/** Rehearsal-only composition variants. Every combatant uses an existing statblock unchanged. */
+export const VANE_WARREN_TPK_SCENARIOS = {
+  'tpk-clean': {
+    id: 'tpk-clean',
+    sessionId: 'session:vane-warren-tpk-clean',
+    sessionName: 'The Cinder Rite — doomed clean wipe',
+    recovery: 'none',
+    startingReinforcements: TPK_INITIAL_REINFORCEMENTS,
+    playerPositions: TPK_PLAYER_POSITIONS,
+    enemyPositions: TPK_ENEMY_POSITIONS,
+  },
+  'tpk-recovery': {
+    id: 'tpk-recovery',
+    sessionId: 'session:vane-warren-tpk-recovery',
+    sessionName: 'The Cinder Rite — doomed partial recovery',
+    recovery: 'revivify_and_dm_override',
+    startingReinforcements: TPK_INITIAL_REINFORCEMENTS,
+    playerPositions: TPK_PLAYER_POSITIONS,
+    enemyPositions: TPK_ENEMY_POSITIONS,
+  },
+} as const satisfies Readonly<Record<
+  Exclude<VaneWarrenRehearsalScenario, 'default'>,
+  VaneWarrenTpkScenarioConfig
+>>;
+
 export interface VaneWarrenActionEconomy {
   readonly enemyOpportunities: number;
   readonly partyOpportunities: 5;
@@ -384,7 +453,8 @@ function fightById(id: VaneWarrenFightId): VaneWarrenFight {
   return fight;
 }
 
-function playerPositions(): readonly GridCell[] {
+function playerPositions(scenario: VaneWarrenRehearsalScenario): readonly GridCell[] {
+  if (scenario !== 'default') return VANE_WARREN_TPK_SCENARIOS[scenario].playerPositions;
   return [
     { column: 1, row: 2 },
     { column: 1, row: 4 },
@@ -397,12 +467,21 @@ function playerPositions(): readonly GridCell[] {
 export function createVaneWarrenFight(
   fightId: VaneWarrenFightId,
   players: readonly CombatantProfile[],
+  scenario: VaneWarrenRehearsalScenario = 'default',
 ): VaneWarrenEncounterState {
   if (players.length !== 5 || players.some((profile) => profile.kind !== 'player_character')) {
     throw new RangeError('The Vane Warren is bundled for exactly five player characters.');
   }
   const fight = fightById(fightId);
-  const standingProfiles = fight.standing.map((entry) => profileFor(fightId, entry));
+  if (scenario !== 'default' && fightId !== 'cinder-rite') {
+    throw new Error(`${scenario} is configured only for The Cinder Rite.`);
+  }
+  const scenarioConfig = scenario === 'default' ? null : VANE_WARREN_TPK_SCENARIOS[scenario];
+  const startingRoster = [
+    ...fight.standing,
+    ...(scenarioConfig?.startingReinforcements ?? []),
+  ];
+  const standingProfiles = startingRoster.map((entry) => profileFor(fightId, entry));
   const leaderIndex = fight.standing.findIndex((entry) => entry.id === fight.leaderRosterId);
   const leader = standingProfiles[leaderIndex];
   if (leader === undefined) throw new Error(`${fight.name} has no leader profile.`);
@@ -424,12 +503,13 @@ export function createVaneWarrenFight(
       ...players.map((profile, index) => ({
         id: profile.tokenId,
         combatantId: profile.id,
-        position: playerPositions()[index] as GridCell,
+        position: playerPositions(scenario)[index] as GridCell,
       })),
       ...standingProfiles.map((profile, index) => ({
         id: profile.tokenId,
         combatantId: profile.id,
-        position: fight.standing[index]?.position ?? { column: 9, row: index + 1 },
+        position: scenarioConfig?.enemyPositions[startingRoster[index]?.id ?? ''] ??
+          startingRoster[index]?.position ?? { column: 9, row: index + 1 },
       })),
     ],
     blockedCells: [{ column: 4, row: 1 }, { column: 4, row: 8 }],
@@ -443,10 +523,39 @@ export function createVaneWarrenFight(
       `${VANE_WARREN_ID}: ${fight.name}.`,
       'Flat stronghold floor only: no elevation, falls, or chasms.',
       'Forced movement can drive creatures into the ember-bed movement hazard.',
+      ...(scenarioConfig === null ? [] : [
+        `${scenarioConfig.id}: the alarm was pre-sounded and both authored waves plus the doomed reinforcement composition begin on the board.`,
+      ]),
     ],
   });
+  const alarmCaller = combatantId(`combatant:vane-warren:${fightId}:cinder-guard-b`);
+  const alarmObjectId = worldObjectId(`world-object:vane-warren:${fightId}:war_drum`);
+  const configuredEvents: readonly EncounterEvent[] = scenarioConfig === null
+    ? []
+    : [
+        {
+          sequence: 1,
+          type: 'world_object_used',
+          actor: alarmCaller,
+          objectId: alarmObjectId,
+          actionId: VANE_WARREN_SOUND_DRUM_ACTION_ID,
+          round: 1,
+          authority: 'dm_override',
+        },
+        ...fight.alarmWaves.map((wave, index): EncounterEvent => ({
+          sequence: index + 2,
+          type: 'reinforcement_wave_deployed',
+          objectId: alarmObjectId,
+          waveId: wave.id,
+          calledBy: alarmCaller,
+          combatants: wave.adds.map((entry) => combatantId(`combatant:vane-warren:${fightId}:${entry.id}`)),
+          round: 1,
+        })),
+      ];
   const withAreas: EncounterState = {
     ...encounter,
+    eventLog: configuredEvents,
+    nextEventSequence: configuredEvents.length + 1,
     persistentAreas: [grease, web],
     nextPersistentAreaSequence: 3,
   };
@@ -466,8 +575,15 @@ export function createVaneWarrenFight(
     encounter: withAreas,
     objects,
     terrainFeatures,
-    alarm: { kind: 'ready' },
-    deployedRosterIds: fight.standing.map((entry) => entry.id),
+    alarm: scenarioConfig === null
+      ? { kind: 'ready' }
+      : {
+          kind: 'complete',
+          usedBy: alarmCaller,
+          usedAtRound: 1,
+          deployedWaveIds: fight.alarmWaves.map((wave) => wave.id),
+        },
+    deployedRosterIds: startingRoster.map((entry) => entry.id),
     transitions: [],
   };
 }
@@ -820,12 +936,13 @@ export function composeVaneWarrenFight(
   displayNames: ReadonlyMap<number, string>,
   partyState: PartySessionState,
   policy?: Parameters<typeof loadedPartyTurnLegalActions>[1],
+  scenario: VaneWarrenRehearsalScenario = 'default',
 ): StoredCharacterEncounter {
   const players = members.map((member) => ({
     ...member.profile,
     name: displayNames.get(member.profile.characterId) ?? member.profile.name,
   }));
-  const bundle = createVaneWarrenFight(fightId, players);
+  const bundle = createVaneWarrenFight(fightId, players, scenario);
   const state = preloadPartySessionState(bundle.encounter, partyState);
   const partyActions = loadedPartyTurnLegalActions(members, policy ?? {
     useHealingPotions: true,
@@ -856,7 +973,40 @@ export function composeVaneWarrenSessionEncounter(
   members: readonly LoadedPartyMember[],
   displayNames: ReadonlyMap<number, string>,
   partyState: PartySessionState,
+  scenario: VaneWarrenRehearsalScenario = 'default',
 ): StoredCharacterEncounter {
+  if (scenario !== 'default') {
+    const config = VANE_WARREN_TPK_SCENARIOS[scenario];
+    const encounter = composeVaneWarrenFight(
+      'cinder-rite',
+      members,
+      displayNames,
+      partyState,
+      {
+        useHealingPotions: true,
+        openWithBless: true,
+        reserveClericSlotsForBless: true,
+        useWizardTactics: true,
+        useClericContingency: true,
+        reserveClericSlotForRevivify: scenario === 'tpk-recovery',
+      },
+      scenario,
+    );
+    return {
+      ...encounter,
+      controllers: encounter.controllers.map((identity) => ({
+        ...identity,
+        controllerId: `${identity.combatantId}:algorithm:rehearsal`,
+        kind: 'algorithm' as const,
+      })),
+      startPaused: true,
+      sessionFlow: {
+        name: config.sessionName,
+        encounterCount: 1,
+        endControlLabel: 'End Session and export',
+      },
+    };
+  }
   const fightId = VANE_WARREN_FIGHT_IDS[partyState.room - 1];
   if (fightId === undefined) {
     throw new Error('The three-encounter Vane Warren session is complete.');

@@ -446,4 +446,85 @@ describe('D377.14 structured session record export', () => {
     expect(exported).toContain('"sessionRecord":{"encounters"');
     expect(exported).toContain('The cracked ward yields to the stated plan.');
   });
+
+  it('records Revivify and DM un-kill ruling cards as distinct revivals before later deaths', () => {
+    const state = pacedState();
+    const revivedBySpell = state.combatants[0]?.profile.id;
+    const revivedByDm = state.combatants[1]?.profile.id;
+    const attacker = state.combatants[2]?.profile.id;
+    if (revivedBySpell === undefined || revivedByDm === undefined || attacker === undefined) {
+      throw new Error('Recovery record fixture is incomplete.');
+    }
+    const fixture = journalFixture('recovery-record', state);
+    fixture.journal.record({
+      transition: {
+        kind: 'reducer_applied',
+        command: {
+          type: 'adjudicate',
+          target: revivedByDm,
+          subject: 'engine:manual-adjudication',
+          reasoning: 'Recovery record fixture.',
+          consequence: { kind: 'hit_point_delta', amount: 1 },
+        },
+        events: [
+          {
+            sequence: 1,
+            type: 'spell_cast',
+            caster: revivedByDm,
+            spellId: 'revivify',
+            slotLevel: 3,
+            targets: [revivedBySpell],
+          },
+          {
+            sequence: 2,
+            type: 'adjudicated',
+            target: revivedByDm,
+            subject: 'engine:manual-adjudication',
+            reasoning: 'Recovery record fixture.',
+            consequence: { kind: 'hit_points', before: 0, after: 1, lifeState: 'living' },
+          },
+          {
+            sequence: 3,
+            type: 'damage_applied',
+            source: attacker,
+            target: revivedBySpell,
+            amount: 1,
+            hitPointsBefore: 1,
+            hitPointsAfter: 0,
+            lifeState: 'dead',
+            massiveDamage: false,
+          },
+          {
+            sequence: 4,
+            type: 'damage_applied',
+            source: attacker,
+            target: revivedByDm,
+            amount: 1,
+            hitPointsBefore: 1,
+            hitPointsAfter: 0,
+            lifeState: 'dead',
+            massiveDamage: false,
+          },
+        ],
+      },
+      encounterState: state,
+      coordinatorState: IDLE,
+      controllers: [],
+    });
+
+    const record = deriveSessionRecord(fixture.store.revisions(fixture.sessionId)).encounters[0];
+    expect(record?.revivals).toEqual([
+      { combatant: revivedBySpell, eventSequence: 1, cause: 'revivify', source: revivedByDm },
+      { combatant: revivedByDm, eventSequence: 2, cause: 'dm_override', source: null },
+    ]);
+    expect(record?.deaths).toEqual([
+      { combatant: revivedBySpell, eventSequence: 3, cause: 'damage' },
+      { combatant: revivedByDm, eventSequence: 4, cause: 'damage' },
+    ]);
+    const serializedRecord = JSON.stringify(deriveSessionRecord(
+      fixture.store.revisions(fixture.sessionId),
+    ));
+    expect(serializedRecord).toContain('"cause":"revivify"');
+    expect(serializedRecord).toContain('"cause":"dm_override"');
+  });
 });

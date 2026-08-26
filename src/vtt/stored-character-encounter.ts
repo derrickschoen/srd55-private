@@ -28,13 +28,14 @@ export interface StoredCharacterEncounter {
   readonly playerIds: readonly CombatantId[];
   readonly controllers: readonly ControllerIdentity[];
   readonly turnLegalActions: TurnLegalActions;
+  readonly startPaused?: boolean;
   readonly composeNextRoom?: StoredCharacterRoomComposer;
   readonly sessionFlow?: StoredCharacterSessionFlow;
 }
 
 export interface StoredCharacterSessionFlow {
   readonly name: string;
-  readonly encounterCount: 2 | 3 | 4;
+  readonly encounterCount: 1 | 2 | 3 | 4;
   readonly endControlLabel: string;
 }
 

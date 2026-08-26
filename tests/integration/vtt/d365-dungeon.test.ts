@@ -142,7 +142,7 @@ describe('D365 bundled dungeon acceptance', () => {
       { name: 'Mirel Ash', class: 'Warlock', level: 5, attacksPerAction: 1, spells: expect.arrayContaining(['Eldritch Blast', 'Burning Hands']) },
       { name: 'Orin Reed', class: 'Druid', level: 5, attacksPerAction: 1, spells: expect.arrayContaining(['Cure Wounds']) },
       { name: 'Brann Vale', class: 'Fighter', level: 5, attacksPerAction: 2, spells: [] },
-      { name: 'Sera Dawn', class: 'Cleric', level: 5, attacksPerAction: 1, spells: expect.arrayContaining(['Cure Wounds', 'Command', 'Spirit Guardians']) },
+      { name: 'Sera Dawn', class: 'Cleric', level: 5, attacksPerAction: 1, spells: expect.arrayContaining(['Cure Wounds', 'Command', 'Spirit Guardians', 'Revivify']) },
       { name: 'Tamsin Quill', class: 'Wizard', level: 5, attacksPerAction: 1, spells: expect.arrayContaining(['Ray of Frost', 'Slow']) },
     ]);
 

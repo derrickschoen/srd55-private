@@ -802,6 +802,56 @@ describe('player-character AlgorithmController policy', () => {
         candidate.profile.id === event.actor && candidate.profile.kind === 'monster'))).toBe(true);
   });
 
+  it('vane-tpk-clean-terminates: the doomed composition defeats the party after death saves', async () => {
+    const encounter = composeVaneWarrenFight(
+      'cinder-rite',
+      sample.party.members,
+      sample.displayNames,
+      createPartySessionState(sample.party.members),
+      undefined,
+      'tpk-clean',
+    );
+    const coordinator = new TurnCoordinator(
+      encounter.state,
+      new ControllerRegistry(encounter.state.combatants.map((candidate) => ({
+        combatantId: candidate.profile.id,
+        controller: new AlgorithmController(),
+      }))),
+      mulberry32(20_260_824),
+      {
+        turnLegalActions: encounter.turnLegalActions,
+        reactionLegalActions: regretReactionLegalActions,
+      },
+    );
+    for (let steps = 0; !combatResolved(coordinator.state()) && steps < 2_000; steps += 1) {
+      const pending = coordinator.state().pendingDecisions[0];
+      if (pending !== undefined && pending.kind !== 'adjudication_prompt') {
+        const option = pending.options.find((candidate) => candidate.id === (
+          pending.kind === 'death_save' ? 'roll' :
+            pending.kind === 'reaction_offer' ? 'decline' :
+              pending.kind === 'legendary_resistance' ? 'suffer' : 'pass'
+        ));
+        if (option === undefined) throw new Error(`No test policy for ${pending.kind}.`);
+        const resolved = coordinator.resolvePendingDecision({
+          type: 'resolve_pending_decision',
+          decisionId: pending.id,
+          optionId: option.id,
+        });
+        if (resolved.kind === 'refused') throw new Error(resolved.reason);
+      } else {
+        const step = await coordinator.step();
+        if (step.kind === 'refused') throw new Error(step.reason);
+      }
+    }
+    const state = coordinator.state();
+
+    expect(state.phase).toMatchObject({ kind: 'concluded', outcome: 'defeat' });
+    expect(state.round).toBeLessThanOrEqual(4);
+    expect(state.eventLog.some((event) => event.type === 'death_save_resolved')).toBe(true);
+    expect(state.combatants.filter((candidate) =>
+      candidate.profile.kind === 'player_character' && candidate.life === 'dead')).toHaveLength(5);
+  });
+
   it('nondeterministic_pick: canonical tie-breaking is independent of legal-action input order', async () => {
     const actor = playerProfile('pc-policy-tie', { initiativeBonus: 20 });
     const alpha = monsterProfile('pc-policy-alpha', { initiativeBonus: -10 });

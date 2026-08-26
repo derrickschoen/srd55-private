@@ -712,6 +712,7 @@ class DmEncounterView {
           turnLegalActions: encounter.turnLegalActions,
           reactionLegalActions: () => [],
         });
+    if (encounter?.startPaused === true) this.#host.interrupt();
     this.#channel = new BroadcastChannel(`srd55:vtt:${sessionId}`);
     this.#channel.addEventListener('message', this.#onMessage);
     this.#unsubscribe = this.#host.subscribe((snapshot) => this.#queueSnapshot(snapshot));
@@ -2055,6 +2056,14 @@ class DmEncounterView {
           : event.type.replaceAll('_', ' '),
       });
       item.dataset.eventType = event.type;
+      if (event.type === 'spell_cast') {
+        item.dataset.spellId = event.spellId;
+        item.dataset.targets = event.targets.join(',');
+      }
+      if (event.type === 'adjudicated') {
+        item.dataset.adjudicationSubject = event.subject;
+        item.dataset.target = event.target;
+      }
       log.append(item);
     }
     this.#shell.append(log);

@@ -309,6 +309,7 @@ function playerCharacterAlgorithmRank(
     }
   }
   if (command.type === 'cast_spell') {
+    if (command.spellId === 'revivify') return [0, -3, 0, commandKey(command)];
     if (command.spellId === 'bless') return [0, -1, 0, commandKey(command)];
     if (command.spellId === 'slow' || command.spellId === 'spirit-guardians') {
       return [0, -2, 0, commandKey(command)];

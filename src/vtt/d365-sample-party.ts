@@ -25,7 +25,7 @@ export interface D365SamplePartyBuild {
   readonly originFeatContentKey: '2024:feat:alert';
   readonly abilities: Readonly<Record<Ability, number>>;
   readonly levelFourAbility: Ability;
-  readonly requiredCombatSpells: readonly ('Eldritch Blast' | 'Burning Hands' | 'Cure Wounds' | 'Aid' | 'Bless' | 'Command' | 'Spirit Guardians' | 'Ray of Frost' | 'Slow')[];
+  readonly requiredCombatSpells: readonly ('Eldritch Blast' | 'Burning Hands' | 'Cure Wounds' | 'Aid' | 'Bless' | 'Command' | 'Spirit Guardians' | 'Revivify' | 'Ray of Frost' | 'Slow')[];
 }
 
 export const D365_SAMPLE_PARTY_BUILDS = [
@@ -63,7 +63,7 @@ export const D365_SAMPLE_PARTY_BUILDS = [
     speciesContentKey: '2024:species:human', backgroundName: 'Acolyte',
     backgroundContentKey: '2024:background:acolyte', originFeatContentKey: '2024:feat:alert',
     abilities: { strength: 10, dexterity: 12, constitution: 14, intelligence: 8, wisdom: 15, charisma: 13 },
-    levelFourAbility: 'wisdom', requiredCombatSpells: ['Bless', 'Cure Wounds', 'Command', 'Spirit Guardians'],
+    levelFourAbility: 'wisdom', requiredCombatSpells: ['Bless', 'Cure Wounds', 'Command', 'Spirit Guardians', 'Revivify'],
   },
   {
     role: 'arcane_controller', name: 'Tamsin Quill', className: 'Wizard',

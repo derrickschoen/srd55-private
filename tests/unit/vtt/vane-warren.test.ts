@@ -13,6 +13,7 @@ import {
   VANE_WARREN_DRUMMER_PRIORITY,
   VANE_WARREN_FIGHTS,
   VANE_WARREN_SOUND_DRUM_ACTION_ID,
+  VANE_WARREN_TPK_SCENARIOS,
   advanceVaneWarrenAlarm,
   createVaneWarrenFight,
   igniteVaneWarrenSurfaceFromBrazier,
@@ -82,6 +83,52 @@ function activeTurn(
 }
 
 describe('D377.5 The Vane Warren flagship bundle', () => {
+  it('tpk_rehearsal_configs: keeps the default fight unchanged and stacks both doomed variants from existing roster content', () => {
+    const ordinary = createVaneWarrenFight('cinder-rite', players());
+    const clean = createVaneWarrenFight('cinder-rite', players(), 'tpk-clean');
+    const recovery = createVaneWarrenFight('cinder-rite', players(), 'tpk-recovery');
+
+    expect(ordinary.encounter.combatants).toHaveLength(7);
+    expect(ordinary.alarm).toEqual({ kind: 'ready' });
+    expect(ordinary.encounter.eventLog).toEqual([]);
+    for (const configured of [clean, recovery]) {
+      expect(configured.encounter.combatants).toHaveLength(15);
+      expect(configured.alarm).toEqual(expect.objectContaining({
+        kind: 'complete',
+        deployedWaveIds: ['cinder-first-beat', 'cinder-second-beat'],
+      }));
+      expect(configured.encounter.eventLog.map((event) => event.type)).toEqual([
+        'world_object_used',
+        'reinforcement_wave_deployed',
+        'reinforcement_wave_deployed',
+      ]);
+      expect(configured.encounter.combatants.map((subject) => String(subject.profile.id)))
+        .toEqual(expect.arrayContaining([
+          'combatant:vane-warren:cinder-rite:cinder-wave-1-a',
+          'combatant:vane-warren:cinder-rite:cinder-wave-2-a',
+          'combatant:vane-warren:cinder-rite:doomed-crocodile',
+          'combatant:vane-warren:cinder-rite:doomed-crocodile-second',
+          'combatant:vane-warren:cinder-rite:doomed-crocodile-third',
+          'combatant:vane-warren:cinder-rite:doomed-crocodile-fourth',
+          'combatant:vane-warren:cinder-rite:doomed-crocodile-fifth',
+          'combatant:vane-warren:cinder-rite:doomed-crocodile-sixth',
+        ]));
+      expect(configured.encounter.tokens
+        .filter((token) => String(token.combatantId).startsWith('combatant:vane-player-'))
+        .map((token) => token.position)).toEqual([
+          { column: 1, row: 3 },
+          { column: 1, row: 4 },
+          { column: 1, row: 5 },
+          { column: 2, row: 4 },
+          { column: 2, row: 5 },
+        ]);
+    }
+    expect(VANE_WARREN_TPK_SCENARIOS['tpk-clean'].startingReinforcements)
+      .toEqual(VANE_WARREN_TPK_SCENARIOS['tpk-recovery'].startingReinforcements);
+    expect(VANE_WARREN_TPK_SCENARIOS['tpk-clean'].recovery).toBe('none');
+    expect(VANE_WARREN_TPK_SCENARIOS['tpk-recovery'].recovery).toBe('revivify_and_dm_override');
+  });
+
   it('drum_from_anywhere: exposes the typed alarm action only to adjacent enemies and gives the designated drummer highest algorithm priority', async () => {
     let state = fight('cinder-rite');
     const drummer = combatantIdFor(state, 'cinder-guard-b');
