@@ -12,6 +12,7 @@ import {
   encounterSessionId,
 } from '../../../src/combat/values';
 import {
+  externalPartyPackFeatureEffectSchema,
   externalPartyPackSchema,
   loadExternalPartyPack,
   loadExternalPartyPackBytes,
@@ -53,14 +54,45 @@ function jsonStringArray(value: unknown, path: string): readonly string[] {
   });
 }
 
-function zodFeatureEffectKinds(source: string): readonly string[] {
-  const declaration = /const featureEffectSchema = z\.discriminatedUnion\('kind', \[([\s\S]*?)\]\)\.superRefine/u.exec(source);
-  const unionBody = declaration?.[1];
-  if (unionBody === undefined) throw new TypeError('Could not find the feature-effect Zod union.');
-  return [...unionBody.matchAll(/\bkind:\s*z\.literal\('([^']+)'\)/gu)].map((match) => {
-    const kind = match[1];
-    if (kind === undefined) throw new TypeError('Feature-effect kind capture was empty.');
-    return kind;
+function zodFeatureEffectKinds(schema: unknown): readonly string[] {
+  let unwrapped = schema;
+  while (
+    typeof unwrapped === 'object' &&
+    unwrapped !== null &&
+    'innerType' in unwrapped &&
+    typeof unwrapped.innerType === 'function'
+  ) {
+    unwrapped = unwrapped.innerType();
+  }
+  if (
+    typeof unwrapped !== 'object' ||
+    unwrapped === null ||
+    !('options' in unwrapped) ||
+    !Array.isArray(unwrapped.options)
+  ) {
+    throw new TypeError('Expected a Zod discriminated union with options.');
+  }
+  return unwrapped.options.map((option, index) => {
+    if (
+      typeof option !== 'object' ||
+      option === null ||
+      !('shape' in option) ||
+      typeof option.shape !== 'object' ||
+      option.shape === null ||
+      !('kind' in option.shape)
+    ) {
+      throw new TypeError(`Expected feature-effect option ${String(index)} to have a kind shape.`);
+    }
+    const kindSchema = option.shape.kind;
+    if (
+      typeof kindSchema !== 'object' ||
+      kindSchema === null ||
+      !('value' in kindSchema) ||
+      typeof kindSchema.value !== 'string'
+    ) {
+      throw new TypeError(`Expected feature-effect option ${String(index)} kind to be a string literal.`);
+    }
+    return kindSchema.value;
   });
 }
 
@@ -2069,7 +2101,7 @@ describe('external party-pack boundary', () => {
       },
     });
 
-    const zodKinds = zodFeatureEffectKinds(readFileSync('src/vtt/party-pack.ts', 'utf8'));
+    const zodKinds = zodFeatureEffectKinds(externalPartyPackFeatureEffectSchema);
     const definitions = jsonObject(schema.$defs, 'schema.$defs');
     const featureEffect = jsonObject(definitions.featureEffect, 'schema.$defs.featureEffect');
     const featureEffectProperties = jsonObject(
