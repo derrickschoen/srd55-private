@@ -1504,8 +1504,11 @@ async function transitionToNextVaneWarrenFight(
     control,
     10_000,
   )) return false;
-  await retryClick(
+  await retryClickUntil(
     () => page.getByRole('button', { name: 'End room and enter next room', exact: true }),
+    async () => await page.evaluate((expectedFight) =>
+      document.querySelector('.adventuring-day-status')?.getAttribute('data-room') === expectedFight,
+    String(completedFight + 1)),
     `cross boundary after Vane Warren fight ${String(completedFight)}`,
   );
   return waitForVaneWarrenFight(page, recorder, phase, completedFight + 1);

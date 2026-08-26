@@ -516,9 +516,15 @@ export class TurnCoordinator {
         this.registry.assignFrom(event.combatant, event.summoner);
       } else if (event.type === 'summoned_combatant_despawned') {
         this.registry.remove(event.combatant);
-      } else if (event.type === 'reinforcement_wave_deployed') {
+      } else if (
+        event.type === 'reinforcement_wave_deployed' ||
+        event.type === 'conditional_joiners_deployed'
+      ) {
+        const source = event.type === 'reinforcement_wave_deployed'
+          ? event.calledBy
+          : event.leader;
         for (const combatantId of event.combatants) {
-          this.registry.assignFrom(combatantId, event.calledBy);
+          this.registry.assignFrom(combatantId, source);
         }
       }
     }
