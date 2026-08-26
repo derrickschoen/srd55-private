@@ -155,6 +155,7 @@ CREATE TABLE `background_templates` (
 
 CREATE UNIQUE INDEX `background_templates_content_key_unique` ON `background_templates` (`content_key`);
 CREATE INDEX `background_templates_name_rules_edition_index` ON `background_templates` (`name`,`rules_edition`);
+CREATE INDEX `background_templates_default_origin_feat_index` ON `background_templates` (`default_origin_feat_content_key`) WHERE default_origin_feat_content_key IS NOT NULL;
 CREATE TABLE `catalog_content_aliases` (
 	`content_kind` VARCHAR NOT NULL,
 	`alias_key` VARCHAR NOT NULL,
@@ -168,6 +169,7 @@ CREATE TABLE `catalog_content_aliases` (
 );
 
 CREATE INDEX `catalog_content_aliases_resolution_index` ON `catalog_content_aliases` (`content_kind`,`alias_key`);
+CREATE INDEX `catalog_content_aliases_target_index` ON `catalog_content_aliases` (`content_kind`,`content_key`,`alias_key`);
 CREATE TABLE `catalog_content_archive_members` (
 	`content_kind` VARCHAR NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -330,6 +332,7 @@ CREATE TABLE `catalog_content_match_decisions` (
 	CONSTRAINT "catalog_content_match_decisions_decision_check" CHECK("catalog_content_match_decisions"."decision" IN ('match', 'clone'))
 );
 
+CREATE INDEX `catalog_match_decisions_target_index` ON `catalog_content_match_decisions` (`content_kind`,`target_content_key`);
 CREATE TABLE `catalog_content_provenance` (
 	`content_kind` VARCHAR NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -560,6 +563,7 @@ CREATE TABLE `character_effects` (
 CREATE INDEX `character_effects_character_id_index` ON `character_effects` (`character_id`);
 CREATE INDEX `character_effects_character_item_id_index` ON `character_effects` (`character_item_id`);
 CREATE INDEX `character_effects_character_weapon_id_index` ON `character_effects` (`character_weapon_id`);
+CREATE INDEX `character_effects_source_character_index` ON `character_effects` (`source_instance_id`,`character_id`) WHERE source_instance_id IS NOT NULL;
 CREATE TABLE `character_hit_point_rolls` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -590,6 +594,7 @@ CREATE TABLE `character_items` (
 
 CREATE INDEX `character_items_character_id_index` ON `character_items` (`character_id`);
 CREATE UNIQUE INDEX `character_items_id_character_id_unique` ON `character_items` (`id`,`character_id`);
+CREATE INDEX `character_items_source_character_index` ON `character_items` (`source_instance_id`,`character_id`) WHERE source_instance_id IS NOT NULL;
 CREATE TABLE `character_level_feat_choices` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -608,6 +613,7 @@ CREATE TABLE `character_level_feat_choices` (
 
 CREATE UNIQUE INDEX `character_level_feat_choices_class_level_kind_unique` ON `character_level_feat_choices` (`character_class_level_id`,`class_level`,`choice_kind`);
 CREATE INDEX `character_level_feat_choices_character_id_index` ON `character_level_feat_choices` (`character_id`);
+CREATE INDEX `character_level_feat_choices_source_character_index` ON `character_level_feat_choices` (`feat_source_instance_id`,`character_id`) WHERE feat_source_instance_id IS NOT NULL;
 CREATE TABLE `character_operations` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -645,6 +651,7 @@ CREATE TABLE `character_save_points` (
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade
 );
 
+CREATE INDEX `character_save_points_character_id_id_index` ON `character_save_points` (`character_id`,"id" desc);
 CREATE TABLE `character_share_receipts` (
 	`character_id` integer PRIMARY KEY NOT NULL,
 	`local_document_id` VARCHAR NOT NULL,
@@ -1571,6 +1578,7 @@ CREATE TABLE `spell_identity_aliases` (
 );
 
 CREATE UNIQUE INDEX `spell_identity_aliases_normalized_alias_unique` ON `spell_identity_aliases` (`normalized_alias`);
+CREATE INDEX `spell_identity_aliases_identity_alias_index` ON `spell_identity_aliases` (`spell_identity_id`,`normalized_alias`,`alias`);
 CREATE TABLE `spell_list_memberships` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`spell_version_id` integer NOT NULL,

@@ -513,6 +513,9 @@ export const character_level_feat_choices = sqliteTable(
     index('character_level_feat_choices_character_id_index').on(
       table.character_id,
     ),
+    index('character_level_feat_choices_source_character_index')
+      .on(table.feat_source_instance_id, table.character_id)
+      .where(sql`feat_source_instance_id IS NOT NULL`),
   ],
 );
 
@@ -1023,18 +1026,27 @@ export const change_log = sqliteTable(
   ],
 );
 
-export const character_save_points = sqliteTable('character_save_points', {
-  id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
-  character_id: integer('character_id')
-    .notNull()
-    .$type<CharacterId>()
-    .references(() => characters.id, { onDelete: 'cascade' }),
-  label: varchar()('label').notNull(),
-  snapshot: sqlText()('snapshot').notNull(),
-  schema_version: varchar()('schema_version').notNull(),
-  created_at: datetime()('created_at'),
-  updated_at: datetime()('updated_at'),
-});
+export const character_save_points = sqliteTable(
+  'character_save_points',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+    character_id: integer('character_id')
+      .notNull()
+      .$type<CharacterId>()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    label: varchar()('label').notNull(),
+    snapshot: sqlText()('snapshot').notNull(),
+    schema_version: varchar()('schema_version').notNull(),
+    created_at: datetime()('created_at'),
+    updated_at: datetime()('updated_at'),
+  },
+  (table) => [
+    index('character_save_points_character_id_id_index').on(
+      table.character_id,
+      sql`${table.id} desc`,
+    ),
+  ],
+);
 
 export const warning_acknowledgements = sqliteTable(
   'warning_acknowledgements',

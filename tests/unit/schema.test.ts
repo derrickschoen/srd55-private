@@ -1098,6 +1098,10 @@ const expectedNamedIndexes: Record<string, string> = {
     'catalog_content_fingerprints:content_kind,fingerprint_scheme,fingerprint_digest',
   catalog_content_aliases_resolution_index:
     'catalog_content_aliases:content_kind,alias_key',
+  catalog_content_aliases_target_index:
+    'catalog_content_aliases:content_kind,content_key,alias_key',
+  catalog_match_decisions_target_index:
+    'catalog_content_match_decisions:content_kind,target_content_key',
   catalog_content_drafts_kind_updated_index:
     'catalog_content_drafts:content_kind,updated_at,draft_uuid',
   catalog_content_drafts_base_content_index:
@@ -1159,6 +1163,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'background_templates:content_key:unique',
   background_templates_name_rules_edition_index:
     'background_templates:name,rules_edition',
+  background_templates_default_origin_feat_index:
+    'background_templates:default_origin_feat_content_key',
   background_template_effects_template_sort_unique:
     'background_template_effects:background_template_id,sort_order:unique',
   background_template_effects_background_template_id_index:
@@ -1182,9 +1188,13 @@ const expectedNamedIndexes: Record<string, string> = {
     'character_effects:character_item_id',
   character_effects_character_weapon_id_index:
     'character_effects:character_weapon_id',
+  character_effects_source_character_index:
+    'character_effects:source_instance_id,character_id',
   character_items_character_id_index: 'character_items:character_id',
   character_items_id_character_id_unique:
     'character_items:id,character_id:unique',
+  character_items_source_character_index:
+    'character_items:source_instance_id,character_id',
   character_weapons_id_character_id_unique:
     'character_weapons:id,character_id:unique',
   // --- THE FOUR STORED SHEET INPUTS ---------------------------------------
@@ -1221,6 +1231,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'character_level_feat_choices:character_class_level_id,class_level,choice_kind:unique',
   character_level_feat_choices_character_id_index:
     'character_level_feat_choices:character_id',
+  character_level_feat_choices_source_character_index:
+    'character_level_feat_choices:feat_source_instance_id,character_id',
   character_sheet_adjustments_character_id_unique:
     'character_sheet_adjustments:character_id:unique',
   // --- SHEET CORE (D11/D12) -----------------------------------------------
@@ -1297,6 +1309,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'spell_list_memberships:spell_list_key',
   spell_identity_aliases_normalized_alias_unique:
     'spell_identity_aliases:normalized_alias:unique',
+  spell_identity_aliases_identity_alias_index:
+    'spell_identity_aliases:spell_identity_id,normalized_alias,alias',
   spell_list_memberships_spell_version_id_spell_list_key_unique:
     'spell_list_memberships:spell_version_id,spell_list_key:unique',
   spell_loadout_entries_spell_loadout_id_spell_version_id_role_unique:
@@ -1359,6 +1373,8 @@ const expectedNamedIndexes: Record<string, string> = {
     'subclass_progressions:subclass_definition_id,class_level:unique',
   warning_acknowledgements_character_id_warning_fingerprint_unique:
     'warning_acknowledgements:character_id,warning_fingerprint:unique',
+  character_save_points_character_id_id_index:
+    'character_save_points:character_id,id',
   wizard_spellbook_entries_character_id_spell_version_id_unique:
     'wizard_spellbook_entries:character_id,spell_version_id:unique',
 };
@@ -2060,6 +2076,57 @@ describe(`schema (${sourceLabel})`, () => {
       {
         name: 'spell_selection_slots_source_state_index',
         sql: 'CREATE INDEX `spell_selection_slots_source_state_index` ON `spell_selection_slots` (`source_instance_id`,`state`)',
+      },
+    ]);
+  });
+
+  it('declares the safe query indexes with exact columns, order, and predicates', () => {
+    const db = openDb(schemaSql);
+    expect(db.selectObjects(
+      `SELECT name, sql FROM sqlite_schema
+       WHERE name IN (
+         'background_templates_default_origin_feat_index',
+         'catalog_content_aliases_target_index',
+         'catalog_match_decisions_target_index',
+         'character_effects_source_character_index',
+         'character_items_source_character_index',
+         'character_level_feat_choices_source_character_index',
+         'character_save_points_character_id_id_index',
+         'spell_identity_aliases_identity_alias_index'
+       )
+       ORDER BY name`,
+    )).toEqual([
+      {
+        name: 'background_templates_default_origin_feat_index',
+        sql: 'CREATE INDEX `background_templates_default_origin_feat_index` ON `background_templates` (`default_origin_feat_content_key`) WHERE default_origin_feat_content_key IS NOT NULL',
+      },
+      {
+        name: 'catalog_content_aliases_target_index',
+        sql: 'CREATE INDEX `catalog_content_aliases_target_index` ON `catalog_content_aliases` (`content_kind`,`content_key`,`alias_key`)',
+      },
+      {
+        name: 'catalog_match_decisions_target_index',
+        sql: 'CREATE INDEX `catalog_match_decisions_target_index` ON `catalog_content_match_decisions` (`content_kind`,`target_content_key`)',
+      },
+      {
+        name: 'character_effects_source_character_index',
+        sql: 'CREATE INDEX `character_effects_source_character_index` ON `character_effects` (`source_instance_id`,`character_id`) WHERE source_instance_id IS NOT NULL',
+      },
+      {
+        name: 'character_items_source_character_index',
+        sql: 'CREATE INDEX `character_items_source_character_index` ON `character_items` (`source_instance_id`,`character_id`) WHERE source_instance_id IS NOT NULL',
+      },
+      {
+        name: 'character_level_feat_choices_source_character_index',
+        sql: 'CREATE INDEX `character_level_feat_choices_source_character_index` ON `character_level_feat_choices` (`feat_source_instance_id`,`character_id`) WHERE feat_source_instance_id IS NOT NULL',
+      },
+      {
+        name: 'character_save_points_character_id_id_index',
+        sql: 'CREATE INDEX `character_save_points_character_id_id_index` ON `character_save_points` (`character_id`,"id" desc)',
+      },
+      {
+        name: 'spell_identity_aliases_identity_alias_index',
+        sql: 'CREATE INDEX `spell_identity_aliases_identity_alias_index` ON `spell_identity_aliases` (`spell_identity_id`,`normalized_alias`,`alias`)',
       },
     ]);
   });

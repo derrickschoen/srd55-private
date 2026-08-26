@@ -628,7 +628,16 @@ export class SpellAccessBuilder {
               version.display_name AS spell_name,
               version.content_key AS spell_content_key,
               version.rules_edition AS spell_rules_edition,
-              version.level AS spell_level, version.ritual,
+              version.level AS spell_level,
+              CASE
+                WHEN version.ritual = 1 OR EXISTS (
+                  SELECT 1
+                  FROM spell_version_tags AS ritual_tag
+                  WHERE ritual_tag.spell_version_id = version.id
+                    AND ritual_tag.tag = 'ritual'
+                ) THEN 1
+                ELSE 0
+              END AS ritual,
               identity.canonical_name AS identity_name,
               spell_catalog_identity.catalog_layer AS spell_catalog_layer
        FROM wizard_spellbook_entries AS entry
@@ -661,18 +670,7 @@ export class SpellAccessBuilder {
 
     const routes: SpellAccessRoute[] = [];
     for (const entry of entries) {
-      const ritual =
-        entry.ritual ||
-        Number(
-          this.db.scalar(
-            `SELECT EXISTS (
-               SELECT 1 FROM spell_version_tags
-               WHERE spell_version_id = ? AND tag = 'ritual'
-             )`,
-            [entry.spellVersionId],
-          ) ?? 0,
-        ) === 1;
-      if (preparedVersionIds.has(entry.spellVersionId) || !ritual) {
+      if (preparedVersionIds.has(entry.spellVersionId) || !entry.ritual) {
         continue;
       }
 
