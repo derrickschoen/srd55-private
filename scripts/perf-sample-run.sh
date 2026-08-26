@@ -14,7 +14,7 @@ SQL_QUERY_LOG="$out/sql" npx vitest run --configLoader runner $(tr '\n' ' ' < sc
 end=$(date +%s.%N)
 
 node - "$out" <<'EOF'
-const [dir] = process.argv.slice(1);
+const dir = process.argv[2];
 const fs = require('node:fs');
 const merged = new Map();
 for (const f of fs.existsSync(`${dir}/sql`) ? fs.readdirSync(`${dir}/sql`) : []) {
