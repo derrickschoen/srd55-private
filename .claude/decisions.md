@@ -7,6 +7,55 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D386 — OWNER: brainstorm round 4 — 18 rulings (2026-08-25)
+
+Fourth three-model brainstorm (codex + opus + fable; raw lists and
+synthesis in the job tmp dir as brainstorm4-*). Rulings, in ask order:
+
+1. **Casting during a Short Rest is plain ENGINE LEGALITY** (recorded as
+   the D383.3 recharacterization, commit d25dec5a): SRD is silent, no
+   optional-rule register entry. Thrift/overheal stay party policy.
+2. **Enforcement gaps: CLOSE ALL FOUR before the v1 bar** (Slow riders,
+   Spirit Guardians recurring damage, Command flee, path-reservation
+   body-blocking); survival remeasured on honest mechanics after.
+3. **Cover: ADD TO ALL BUNDLED MAPS + REMEASURE** — dungeon rooms and
+   Vane fights get real cover placements; 30-seed fraction re-run.
+4. **Tuning ships as THREE TIERS**: Easy (further detuned) / Standard
+   (current detune) / Hard (original), selectable at encounter start,
+   each with honest difficulty records; tier data seeds the ruler.
+5. **NO survival regression gate, NO build freeze** — the fixed-seed
+   winning leg is the only bar; fractions stay informational; builds
+   and policy may evolve.
+6. **TPK leg: TWO VARIANTS** — a clean wipe AND a near-miss
+   partial-recovery run (Revivify + DM override un-kill).
+7. **Player board: FULL CASTING ON DEVICE** (supersedes D377.4's
+   move+attack): players cast anything they have; reactions and tray
+   decisions stay DM-clicked.
+8. **Manual dice: DM session toggle + range validation**, logged as
+   manual, no per-roll DM confirmation.
+9. **Device disconnect: DM TAKES OVER SEAMLESSLY**; seat resumes on
+   reconnect. No pause, no algorithm fallback.
+10. **Multi-device leg: SOLO TABS FIRST** — supervisor drives all five
+    seats for the bar; session zero with real players comes after v1.
+11. **Real PCs: PLAYERS SELF-BUILD via the share-link flow**; owner
+    reviews before session one.
+12. **First real session content: THE REHEARSED MATERIAL** — dungeon
+    day + Vane flagship exactly.
+13. **Consumables: FINITE, DM RESTOCKS** — counts persist across
+    sessions; only an explicit DM grant (ruling card) adds more; no
+    gold/loot layer yet.
+14. **Publication: HOLD until after the first real session**; then the
+    owner decides. (Supervisor never pushes/publishes regardless.)
+15. **Post-v1 lane one: SESSION-SEAM UNIFICATION** (one continuous
+    session, one export).
+16. **Live tuning at the table: the DM may optionally REDUCE ENEMY HIT
+    POINTS mid-fight** — that is the only live lever; no roster edits
+    or tier swaps mid-encounter. (Ruling-card logged.)
+17. **Sim back-merge (movement + tuned policy): AFTER THE BAR**, one
+    lane, one engine/actor model.
+18. **Difficulty ruler: FORECAST + RETROSPECTIVE** — pre-session
+    prediction from seeded runs plus post-session comparison.
+
 ## D385 — OWNER: fifth PC — a wizard joins the representative party (2026-08-25)
 
 The representative party had NO wizard (Warlock/Druid/Fighter/Cleric),
