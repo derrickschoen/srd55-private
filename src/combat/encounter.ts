@@ -4278,6 +4278,38 @@ function queueOpportunityAttack(
   });
 }
 
+function resolveMootOpportunityAttacks(
+  context: ReductionContext,
+  mover: CombatantId,
+): void {
+  const moot = context.state.pendingDecisions.filter((decision): decision is Extract<
+    PendingDecision,
+    { readonly kind: 'reaction_offer' }
+  > =>
+    decision.kind === 'reaction_offer' &&
+    decision.reactionKind === 'opportunity_attack' &&
+    decision.opportunityAttack.mover === mover);
+  if (moot.length === 0) return;
+  const mootIds = new Set(moot.map((decision) => decision.id));
+  context.state = {
+    ...context.state,
+    pendingDecisions: context.state.pendingDecisions.filter(
+      (decision) => !mootIds.has(decision.id),
+    ),
+  };
+  for (const decision of moot) {
+    emit(context, {
+      type: 'pending_decision_resolved',
+      decisionId: decision.id,
+      combatant: decision.combatant,
+      kind: decision.kind,
+      optionId: 'moot',
+      boundary: { ...decision.boundary },
+      reactionKind: decision.reactionKind,
+    });
+  }
+}
+
 function legendaryActionTarget(state: EncounterState, actor: CombatantId): CombatantId | null {
   if (!isCombatantOnBoard(state, actor)) return null;
   const origin = token(state, actor).position;
@@ -4512,7 +4544,10 @@ function processMove(
     traversed.push({ ...step.to });
     spent = feet(spent + step.cost);
     processEnteredCell(context, command.actor);
-    if (combatant(context.state, command.actor).life !== 'living') break;
+    if (combatant(context.state, command.actor).life !== 'living') {
+      resolveMootOpportunityAttacks(context, command.actor);
+      break;
+    }
   }
   const movement = spendMovement(subject.turn.movement, spent);
   context.state = replaceCombatant(context.state, {
@@ -10980,6 +11015,9 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
               decision.opportunityAttack.command,
               decision.opportunityAttack,
             );
+            if (combatant(context.state, decision.opportunityAttack.mover).life !== 'living') {
+              resolveMootOpportunityAttacks(context, decision.opportunityAttack.mover);
+            }
           }
           return;
         case 'death_save':

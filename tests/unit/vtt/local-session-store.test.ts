@@ -1,4 +1,4 @@
-import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
+import { IDBDatabase, IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { describe, expect, it, vi } from 'vitest';
 import { encounterSessionId } from '../../../src/combat/values';
 import { REFERENCE_MONSTER_ID } from '../../../src/vtt/reference-encounter';
@@ -136,7 +136,30 @@ describe('IndexedDB durable VTT session adapter', () => {
     reopenedStore.close();
   });
 
-  it('LARGE-REVISION-ROUNDTRIP stores and reloads a revision stream larger than 5MB', async () => {
+  it('batches synchronous journal appends into one IndexedDB transaction before flush acknowledgement', async () => {
+    const store = await IndexedDbBrowserSessionStore.open(new IDBFactory(), new MemoryStorage());
+    const transactions = vi.spyOn(IDBDatabase.prototype, 'transaction');
+    const host = new DmEncounterHost('session:batched-writes', store);
+    for (let index = 0; index < 5; index += 1) {
+      host.adjudicate({
+        type: 'adjudicate',
+        target: REFERENCE_MONSTER_ID,
+        subject: `batch-${String(index)}`,
+        reasoning: 'One synchronous pulse should share one durable transaction.',
+        consequence: { kind: 'hit_point_delta', amount: 0 },
+      });
+    }
+
+    await store.flush();
+    expect(transactions).toHaveBeenCalledTimes(1);
+    expect(store.revisions(encounterSessionId('session:batched-writes'))).toHaveLength(6);
+    transactions.mockRestore();
+    host.close();
+    await store.flush();
+    store.close();
+  });
+
+  it('LARGE-REVISION-ROUNDTRIP stores a journal larger than 5MB and reloads its compact export', async () => {
     const indexedDb = new IDBFactory();
     const storage = new MemoryStorage();
     const store = await IndexedDbBrowserSessionStore.open(indexedDb, storage);
@@ -153,7 +176,12 @@ describe('IndexedDB durable VTT session adapter', () => {
     }
     await store.flush();
     const expected = store.exported(encounterSessionId('session:large'));
-    expect(new TextEncoder().encode(expected).byteLength).toBeGreaterThan(5 * 1024 * 1024);
+    const journalBytes = new TextEncoder().encode(JSON.stringify(
+      store.revisions(encounterSessionId('session:large')),
+    )).byteLength;
+    const exportBytes = new TextEncoder().encode(expected).byteLength;
+    expect(journalBytes).toBeGreaterThan(5 * 1024 * 1024);
+    expect(exportBytes).toBeLessThan(journalBytes);
     host.close();
     store.close();
 

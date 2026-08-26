@@ -476,8 +476,14 @@ export class DmEncounterHost {
         if (this.#closed || this.#coordinator.pauseState() !== null) return;
         const step = this.#coordinator.step();
         await Promise.resolve();
-        const preStepFlush = this.#flushStore();
-        if (preStepFlush !== null) await preStepFlush;
+        const pendingRequest = this.#coordinator.coordinatorState().pendingRequest;
+        if (
+          pendingRequest !== null &&
+          this.#registry.kindFor(pendingRequest.actorId) !== 'algorithm'
+        ) {
+          const preStepFlush = this.#flushStore();
+          if (preStepFlush !== null) await preStepFlush;
+        }
         this.#publish();
         let result;
         try {

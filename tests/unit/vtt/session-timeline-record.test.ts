@@ -32,6 +32,7 @@ import {
   MemoryBrowserSessionStore,
   MemoryMirrorSink,
   deriveBranchRng,
+  decodeSavedSessionFingerprint,
   exportSavedSession,
   importSavedSession,
 } from '../../../src/vtt/session-persistence';
@@ -351,7 +352,7 @@ describe('D377.3 session timeline and pacing controls', () => {
     expect(first?.rngState.initialSeed).toBe(chosenSeed);
 
     const bytes = exportSavedSession(store, host.sessionId);
-    expect(bytes).toContain('"initialSeed":424242');
+    expect(decodeSavedSessionFingerprint(bytes).initialSeed).toBe(chosenSeed);
     const imported = new MemoryBrowserSessionStore();
     const importedSessionId = importSavedSession(imported, bytes);
     const resumed = EncounterSessionJournal.resume(

@@ -676,6 +676,13 @@ class DmEncounterView {
   #endSessionExported = false;
   #pendingSnapshot: DmEncounterHostSnapshot | null = null;
   #acknowledgingSnapshots = false;
+  #flushCount = 0;
+  #flushTotalMs = 0;
+  #flushMaximumMs = 0;
+  #renderCount = 0;
+  #renderTotalMs = 0;
+  #renderMaximumMs = 0;
+  #coalescedSnapshotCount = 0;
   readonly #heartbeat: number;
   readonly #unsubscribe: () => void;
   readonly #onBeforeUnload = (): void => this.#host.close();
@@ -745,11 +752,19 @@ class DmEncounterView {
       while (this.#pendingSnapshot !== null) {
         const snapshot = this.#pendingSnapshot;
         this.#pendingSnapshot = null;
+        const flushStartedAt = performance.now();
         await this.#store.flush();
+        const flushMs = performance.now() - flushStartedAt;
+        this.#flushCount += 1;
+        this.#flushTotalMs += flushMs;
+        this.#flushMaximumMs = Math.max(this.#flushMaximumMs, flushMs);
         // The coordinator can publish many transitions while IndexedDB is
         // flushing. Render only the newest projection instead of replaying a
         // stale DOM render for every intermediate transition.
-        if (this.#pendingSnapshot !== null) continue;
+        if (this.#pendingSnapshot !== null) {
+          this.#coalescedSnapshotCount += 1;
+          continue;
+        }
         this.#projection = snapshot.dm;
         if (!snapshot.dm.movementPreviews.some(
           (preview) => preview.commandKey === this.#movementPreviewKey,
@@ -1159,6 +1174,7 @@ class DmEncounterView {
   }
 
   #render(): void {
+    const startedAt = performance.now();
     const live = this.#shell;
     const draft = element('main', { className: 'encounter-shell dm-encounter' });
     this.#shell = draft;
@@ -1168,6 +1184,17 @@ class DmEncounterView {
       this.#shell = live;
     }
     reconcileStableRenderedChildren(live, draft);
+    const renderMs = performance.now() - startedAt;
+    this.#renderCount += 1;
+    this.#renderTotalMs += renderMs;
+    this.#renderMaximumMs = Math.max(this.#renderMaximumMs, renderMs);
+    live.dataset.persistenceFlushCount = String(this.#flushCount);
+    live.dataset.persistenceFlushTotalMs = String(this.#flushTotalMs);
+    live.dataset.persistenceFlushMaximumMs = String(this.#flushMaximumMs);
+    live.dataset.renderCount = String(this.#renderCount);
+    live.dataset.renderTotalMs = String(this.#renderTotalMs);
+    live.dataset.renderMaximumMs = String(this.#renderMaximumMs);
+    live.dataset.coalescedSnapshotCount = String(this.#coalescedSnapshotCount);
   }
 
   #renderFresh(): void {

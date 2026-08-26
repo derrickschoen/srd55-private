@@ -197,6 +197,8 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
   readonly #metadata = new Map<EncounterSessionId, BrowserSaveMetadata>();
   readonly #snapshots = new Map<string, StoredAutosaveSnapshot>();
   readonly #pending = new Set<Promise<void>>();
+  readonly #queuedWrites: Array<(transaction: IDBTransaction) => void> = [];
+  #scheduledWrite: Promise<void> | null = null;
   #failure: BrowserSessionWriteError | null = null;
 
   private constructor(
@@ -253,16 +255,11 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
       added.push(snapshot);
     }
     const removed = this.#pruneAutosaves();
-    this.#enqueue('write', async () => {
-      const transaction = this.database.transaction(
-        [REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE],
-        'readwrite',
-      );
+    this.#enqueue('write', (transaction) => {
       transaction.objectStore(REVISION_STORE).put(revision, revisionKey(revision.sessionId, revision.revision));
       transaction.objectStore(SESSION_STORE).put(metadata, revision.sessionId);
       for (const snapshot of added) transaction.objectStore(SNAPSHOT_STORE).put(snapshot, snapshot.storageId);
       for (const storageId of removed) transaction.objectStore(SNAPSHOT_STORE).delete(storageId);
-      await transactionComplete(transaction);
     });
   }
 
@@ -280,13 +277,11 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
       migrationStatus: current?.migrationStatus ?? 'native',
     };
     this.#metadata.set(first.sessionId, metadata);
-    this.#enqueue('write', async () => {
-      const transaction = this.database.transaction([REVISION_STORE, SESSION_STORE], 'readwrite');
+    this.#enqueue('write', (transaction) => {
       for (const revision of revisions) {
         transaction.objectStore(REVISION_STORE).put(revision, revisionKey(revision.sessionId, revision.revision));
       }
       transaction.objectStore(SESSION_STORE).put(metadata, first.sessionId);
-      await transactionComplete(transaction);
     });
   }
 
@@ -494,12 +489,41 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     return [...new Set(triggers)];
   }
 
-  #enqueue(operation: BrowserSessionWriteError['operation'], write: () => Promise<void>): void {
-    const pending = write().catch((error: unknown) => {
+  #enqueue(
+    operation: BrowserSessionWriteError['operation'],
+    write: (transaction: IDBTransaction) => void,
+  ): void {
+    this.#queuedWrites.push(write);
+    this.#scheduleQueuedWrite(operation);
+  }
+
+  #scheduleQueuedWrite(operation: BrowserSessionWriteError['operation']): void {
+    if (this.#scheduledWrite !== null) return;
+    let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+    const pending = new Promise<void>((resolve) => {
+      timer = globalThis.setTimeout(resolve, 0);
+    }).then(async () => {
+      if (timer !== undefined) globalThis.clearTimeout(timer);
+      const writes = this.#queuedWrites.splice(0);
+      if (writes.length === 0) return;
+      const transaction = this.database.transaction(
+        [REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE],
+        'readwrite',
+      );
+      for (const queued of writes) queued(transaction);
+      await transactionComplete(transaction);
+    }).catch((error: unknown) => {
       this.#failure ??= storageError(operation, error);
     });
+    this.#scheduledWrite = pending;
     this.#pending.add(pending);
-    void pending.finally(() => this.#pending.delete(pending));
+    void pending.finally(() => {
+      this.#pending.delete(pending);
+      this.#scheduledWrite = null;
+      if (this.#queuedWrites.length > 0 && this.#failure === null) {
+        this.#scheduleQueuedWrite(operation);
+      }
+    });
   }
 
   async #directWrite(operation: BrowserSessionWriteError['operation'], write: () => Promise<void>): Promise<void> {

@@ -18,6 +18,8 @@ import {
 import { resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import type { PendingDecision } from '../../src/combat/encounter';
+import { decodeSavedSessionFingerprint } from '../../src/vtt/session-persistence';
+import { RehearsalTimings, rehearsalTimingBlock } from './timing';
 
 const REHEARSAL_SEED = 20_260_824;
 const APP_READY_TIMEOUT_MS = 180_000;
@@ -25,9 +27,9 @@ const UI_TIMEOUT_MS = 65_000;
 const CLEANUP_TIMEOUT_MS = 10_000;
 const CLICK_STEP_BUDGET_MS = 30_000;
 const CLICK_ATTEMPT_TIMEOUT_MS = 5_000;
-const CLICK_RETRY_DELAY_MS = 100;
+const CLICK_RETRY_DELAY_MS = 25;
 const DEFAULT_RUN_WATCHDOG_MS = 40 * 60 * 1_000;
-const TURN_PULSE_MS = 35;
+const TURN_PULSE_MS = 10;
 const ROUND_STALL_ATTEMPTS = 24;
 const MAX_TURN_ATTEMPTS = 600;
 const previewReadiness = new WeakMap<ChildProcess, Promise<string>>();
@@ -85,6 +87,9 @@ interface SessionExport {
   readonly hasAlarm: boolean;
   readonly hasIgnition: boolean;
   readonly seed: number | null;
+  readonly payloadBytes: number;
+  readonly revisionCount: number;
+  readonly format: string;
 }
 
 interface EncounterOutcome {
@@ -214,6 +219,7 @@ class FindingsRecorder {
   readonly seenRefusals = new Set<string>();
   readonly exports: SessionExport[] = [];
   readonly pendingScreenshots = new Map<string, Promise<void>>();
+  readonly timings = new RehearsalTimings();
   screenshotCount = 0;
   page: Page | null = null;
   currentPhase = 'driver startup';
@@ -231,8 +237,17 @@ class FindingsRecorder {
   }
 
   track(phase: string, step: string): void {
+    this.timings.track(phase, step);
     this.currentPhase = phase;
     this.currentStep = step;
+  }
+
+  timingBlock(): string {
+    return rehearsalTimingBlock(this.timings.rows());
+  }
+
+  outputBlock(): string {
+    return `${this.timingBlock()}\n\n${this.summaryBlock()}`;
   }
 
   async flushScreenshots(): Promise<void> {
@@ -349,9 +364,9 @@ class FindingsRecorder {
           ...(finding.screenshot === null ? [] : [`- Screenshot: \`${finding.screenshot}\``]),
         ].join('\n')).join('\n\n');
     const exportRows = this.exports.length === 0
-      ? '| (none) | false | false | 0 | (unknown) |'
+      ? '| (none) | false | false | 0 | 0 | 0 | (unknown) | (unknown) |'
       : this.exports.map((entry) =>
-          `| ${escapeTable(entry.filename)} | ${String(entry.parsed)} | ${String(entry.hasSessionRecord)} | ${String(entry.encounterCount)} | ${entry.seed === null ? '(unknown)' : String(entry.seed)} |`).join('\n');
+          `| ${escapeTable(entry.filename)} | ${String(entry.parsed)} | ${String(entry.hasSessionRecord)} | ${String(entry.encounterCount)} | ${String(entry.revisionCount)} | ${String(entry.payloadBytes)} | ${entry.seed === null ? '(unknown)' : String(entry.seed)} | ${escapeTable(entry.format)} |`).join('\n');
     const markdown = [
       `# Rehearsal run ${this.date} / ${String(this.run)}`,
       '',
@@ -367,9 +382,11 @@ class FindingsRecorder {
       '',
       '## Session exports',
       '',
-      '| File | Parses | Structured record | Encounters | Seed |',
-      '|---|---:|---:|---:|---:|',
+      '| File | Parses | Structured record | Encounters | Revisions | Bytes | Seed | Format |',
+      '|---|---:|---:|---:|---:|---:|---:|---|',
       exportRows,
+      '',
+      this.timingBlock(),
       '',
       '## Findings',
       '',
@@ -454,13 +471,15 @@ async function screenshot(
 ): Promise<string | null> {
   const safe = label.toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-|-$/gu, '').slice(0, 70);
   recorder.screenshotCount += 1;
-  const path = resolve(recorder.runDirectory, `${String(recorder.screenshotCount).padStart(3, '0')}-${safe || 'finding'}.png`);
+  const path = resolve(recorder.runDirectory, `${String(recorder.screenshotCount).padStart(3, '0')}-${safe || 'finding'}.jpg`);
   try {
+    const startedAt = performance.now();
     await withTimeout(
-      page.screenshot({ path, fullPage: true, timeout: CLEANUP_TIMEOUT_MS }),
+      page.screenshot({ path, fullPage: true, type: 'jpeg', quality: 55, timeout: CLEANUP_TIMEOUT_MS }),
       CLEANUP_TIMEOUT_MS,
       `capture ${label} screenshot`,
     );
+    recorder.timings.record('browser runtime', 'finding screenshot capture', performance.now() - startedAt);
     return path;
   } catch {
     return null;
@@ -674,6 +693,46 @@ function attachPageFindingCapture(page: Page, recorder: FindingsRecorder): void 
   });
 }
 
+async function captureBrowserRuntimeTimings(page: Page, recorder: FindingsRecorder): Promise<void> {
+  const telemetry = await page.locator('.dm-encounter').first().evaluate((node) => ({
+    flushCount: Number(node.dataset.persistenceFlushCount ?? 0),
+    flushTotalMs: Number(node.dataset.persistenceFlushTotalMs ?? 0),
+    flushMaximumMs: Number(node.dataset.persistenceFlushMaximumMs ?? 0),
+    renderCount: Number(node.dataset.renderCount ?? 0),
+    renderTotalMs: Number(node.dataset.renderTotalMs ?? 0),
+    renderMaximumMs: Number(node.dataset.renderMaximumMs ?? 0),
+    coalescedSnapshotCount: Number(node.dataset.coalescedSnapshotCount ?? 0),
+  })).catch(() => null);
+  if (telemetry === null) return;
+  if (Number.isSafeInteger(telemetry.flushCount) && telemetry.flushCount > 0) {
+    recorder.timings.record(
+      'browser runtime',
+      'IndexedDB flush acknowledgement',
+      telemetry.flushTotalMs,
+      telemetry.flushCount,
+      telemetry.flushMaximumMs,
+    );
+  }
+  if (Number.isSafeInteger(telemetry.renderCount) && telemetry.renderCount > 0) {
+    recorder.timings.record(
+      'browser runtime',
+      'stable DOM render',
+      telemetry.renderTotalMs,
+      telemetry.renderCount,
+      telemetry.renderMaximumMs,
+    );
+  }
+  if (Number.isSafeInteger(telemetry.coalescedSnapshotCount) && telemetry.coalescedSnapshotCount > 0) {
+    recorder.timings.record(
+      'browser runtime',
+      'snapshots coalesced before render',
+      0,
+      telemetry.coalescedSnapshotCount,
+      0,
+    );
+  }
+}
+
 async function captureRefusals(page: Page, recorder: FindingsRecorder, phase: string): Promise<void> {
   recorder.track(phase, 'scan refusal notices after turn pulse');
   const refusals = page.locator('.dm-decision-refusal');
@@ -694,7 +753,7 @@ async function captureRefusals(page: Page, recorder: FindingsRecorder, phase: st
   }
 }
 
-async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase: string): Promise<number> {
+async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase: string): Promise<number | null> {
   recorder.track(phase, 'resolve decision tray after turn pulse');
   let resolved = 0;
   for (let guard = 0; guard < 20; guard += 1) {
@@ -704,15 +763,13 @@ async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase
       `.dm-decision-entry[data-entry-kind="pending"][data-decision-id=${JSON.stringify(surface.decisionId)}]`,
     );
     if (surface.optionCount === 0) {
-      const image = await screenshot(page, recorder, `tray-${surface.heading}`);
       recorder.add(
         'tray_unresolved',
         phase,
         'resolve decision tray entry',
         `${surface.heading} had no offered option.`,
-        image,
       );
-      return resolved;
+      return null;
     }
     try {
       switch (surface.decisionKind) {
@@ -740,15 +797,13 @@ async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase
       resolved += 1;
       await wait(20);
     } catch (error: unknown) {
-      const image = await screenshot(page, recorder, `tray-${surface.heading}`);
       recorder.add(
         'tray_unresolved',
         phase,
         'resolve decision tray entry',
         `${surface.heading}: ${errorDetail(error)}`,
-        image,
       );
-      return resolved;
+      return null;
     }
   }
   recorder.add(
@@ -757,7 +812,7 @@ async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase
     'resolve decision tray entry',
     'Decision tray still had pending entries after 20 first-option resolutions.',
   );
-  return resolved;
+  return null;
 }
 
 function decodePendingDecisionKind(kind: string | null): PendingDecision['kind'] {
@@ -820,7 +875,6 @@ async function resumeEncounter(page: Page): Promise<void> {
       () => page.locator('.dm-controls').getByRole('button', { name: 'Resume', exact: true }),
       'resume encounter',
     );
-    await page.locator('[data-pause="none"]').waitFor({ state: 'visible', timeout: 5_000 });
   }
 }
 
@@ -930,7 +984,9 @@ async function pulseTurn(
       await retryClick(endTurn, 'end current turn');
       break;
     }
-    if (await resolveDecisionTray(page, recorder, phase) === 0) break;
+    const resolution = await resolveDecisionTray(page, recorder, phase);
+    if (resolution === null) throw new Error('A decision tray entry remained unresolved.');
+    if (resolution === 0) break;
   }
   await wait(TURN_PULSE_MS);
 }
@@ -944,8 +1000,10 @@ async function playEncounter(
   let lastRound = await roundOf(page);
   let unchangedAttempts = 0;
   for (let attempt = 1; attempt <= MAX_TURN_ATTEMPTS; attempt += 1) {
+    if (await resolveDecisionTray(page, recorder, phase) === null) {
+      return { kind: 'aborted', round: lastRound, attempts: attempt - 1 };
+    }
     await captureRefusals(page, recorder, phase);
-    await resolveDecisionTray(page, recorder, phase);
     const outcome = await visibleEncounterOutcome(page);
     if (outcome === 'victory') {
       return { kind: 'victory', round: await roundOf(page), attempts: attempt - 1 };
@@ -968,8 +1026,10 @@ async function playEncounter(
       unchangedAttempts = 0;
     }
     if (unchangedAttempts < ROUND_STALL_ATTEMPTS) continue;
+    if (await resolveDecisionTray(page, recorder, phase) === null) {
+      return { kind: 'aborted', round: lastRound, attempts: attempt };
+    }
     await captureRefusals(page, recorder, phase);
-    await resolveDecisionTray(page, recorder, phase);
     const afterResolution = await roundOf(page);
     if (afterResolution !== lastRound) {
       lastRound = afterResolution;
@@ -1004,8 +1064,8 @@ async function advanceTimelineToRound(
   targetRound: number,
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= MAX_TURN_ATTEMPTS; attempt += 1) {
+    if (await resolveDecisionTray(page, recorder, phase) === null) return false;
     await captureRefusals(page, recorder, phase);
-    await resolveDecisionTray(page, recorder, phase);
     if (await roundOf(page) >= targetRound) return true;
     try {
       recorder.track(phase, 'advance in-session timeline exercise');
@@ -1394,15 +1454,7 @@ async function recordDownloadedExport(
     ? value.sessionRecord
     : null;
   const encounters = sessionRecord === null ? null : sessionRecord.encounters;
-  const revisions = isRecord(value) && Array.isArray(value.revisions) ? value.revisions : [];
-  const firstRevision = revisions[0];
-  const rngState = isRecord(firstRevision) && isRecord(firstRevision.rngState)
-    ? firstRevision.rngState
-    : null;
-  const seed = rngState !== null && typeof rngState.initialSeed === 'number' &&
-    Number.isSafeInteger(rngState.initialSeed)
-    ? rngState.initialSeed
-    : null;
+  const decoded = decodeSavedSessionFingerprint(bytes);
   const result: SessionExport = {
     phase,
     filename,
@@ -1411,7 +1463,10 @@ async function recordDownloadedExport(
     hasSessionRecord: Array.isArray(encounters),
     hasAlarm: bytes.includes('cinder-wave-1-a') || bytes.includes('alarm_used'),
     hasIgnition: bytes.includes('surface_ignited') || /"burningCells":\[(?!\])/u.test(bytes),
-    seed,
+    seed: decoded.initialSeed,
+    payloadBytes: new TextEncoder().encode(bytes).byteLength,
+    revisionCount: decoded.revisionCount,
+    format: isRecord(value) && typeof value.format === 'string' ? value.format : '(unknown)',
   };
   recorder.exports.push(result);
   return result;
@@ -1431,6 +1486,9 @@ function recordFailedExport(
     hasAlarm: false,
     hasIgnition: false,
     seed: null,
+    payloadBytes: 0,
+    revisionCount: 0,
+    format: '(unknown)',
   });
 }
 
@@ -1731,9 +1789,10 @@ async function main(): Promise<void> {
         'aborted',
         `Global run watchdog expired during ${stuckStep}; the partial findings report was written before forced exit.`,
       );
+      recorder.timings.finish();
       await recorder.write(baseUrl);
       reportWritten = true;
-      process.stdout.write(`\n${recorder.summaryBlock()}\n\nFindings: ${recorder.reportPath}\n`);
+      process.stdout.write(`\n${recorder.outputBlock()}\n\nFindings: ${recorder.reportPath}\n`);
       if (context !== null) {
         await withTimeout(context.close(), CLEANUP_TIMEOUT_MS, 'watchdog browser-context cleanup')
           .catch(() => undefined);
@@ -1924,6 +1983,10 @@ async function main(): Promise<void> {
     recorder.add('page_console_error', currentPhase, 'driver infrastructure', errorDetail(error));
     recorder.phase(currentPhase, 'aborted', 'Driver infrastructure stopped this phase.');
   } finally {
+    recorder.track('driver cleanup', 'capture browser runtime timing');
+    if (recorder.page !== null) {
+      await captureBrowserRuntimeTimings(recorder.page, recorder).catch(() => undefined);
+    }
     recorder.track('driver cleanup', 'flush pending screenshots');
     await withTimeout(recorder.flushScreenshots(), CLEANUP_TIMEOUT_MS, 'flush pending screenshots')
       .catch(() => undefined);
@@ -1941,10 +2004,11 @@ async function main(): Promise<void> {
     recorder.track('driver cleanup', 'stop built preview');
     if (preview !== null) await stopPreview(preview);
     recorder.track('driver cleanup', 'write findings report');
+    recorder.timings.finish();
     await recorder.write(baseUrl);
     reportWritten = true;
     globalThis.clearTimeout(watchdogTimer);
-    process.stdout.write(`\n${recorder.summaryBlock()}\n\nFindings: ${recorder.reportPath}\n`);
+    process.stdout.write(`\n${recorder.outputBlock()}\n\nFindings: ${recorder.reportPath}\n`);
   }
 }
 

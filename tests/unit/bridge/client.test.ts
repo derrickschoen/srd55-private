@@ -10,7 +10,10 @@ import {
   LocalhostDmBridgeClient,
   type BridgeFetch,
 } from '../../../src/vtt/dm-bridge/client';
-import { MemoryBrowserSessionStore } from '../../../src/vtt/session-persistence';
+import {
+  importSavedSession,
+  MemoryBrowserSessionStore,
+} from '../../../src/vtt/session-persistence';
 import {
   REFERENCE_CLERIC_ID,
   REFERENCE_FIGHTER_ID,
@@ -22,6 +25,12 @@ import type { SessionRevision } from '../../../src/vtt/session-persistence';
 
 function response(ok: boolean, status: number, body: unknown) {
   return { ok, status, json: async () => body };
+}
+
+function exportedTransitionKinds(bytes: string): readonly string[] {
+  const store = new MemoryBrowserSessionStore();
+  const sessionId = importSavedSession(store, bytes);
+  return store.revisions(sessionId).map((revision) => revision.transition.kind);
 }
 
 describe('localhost bridge client and failure containment', () => {
@@ -117,7 +126,7 @@ describe('localhost bridge client and failure containment', () => {
       kind: 'bridge_export_and_abort',
       error: expect.stringContaining('failed after 2 corrections'),
     });
-    expect(host.bridgeFailureReport()?.exportedSession).toContain('"kind":"coordinator_paused"');
+    expect(exportedTransitionKinds(host.bridgeFailureReport()!.exportedSession)).toContain('coordinator_paused');
     expect(host.snapshot().player.authorityStatus).toBe('hard_paused');
     host.close();
   });
@@ -158,8 +167,11 @@ describe('localhost bridge client and failure containment', () => {
       sessionId: host.sessionId,
       error: 'DM bridge mirror failed with HTTP 503.',
     });
-    expect(report?.exportedSession).toContain('"format":"vtt-session-revisions"');
-    expect(report?.exportedSession).toContain('"kind":"coordinator_paused"');
+    expect(report?.exportedSession).toContain('"format":"vtt-session-journal-dag"');
+    expect(exportedTransitionKinds(report!.exportedSession)).toEqual([
+      'session_started',
+      'coordinator_paused',
+    ]);
     expect(host.snapshot().dm.coordinator.pause).toEqual({ kind: 'interrupted' });
     expect(host.snapshot().player.authorityStatus).toBe('hard_paused');
     expect(store.revisions(host.sessionId).map((revision) => revision.transition.kind)).toEqual([

@@ -30,6 +30,7 @@ import {
   composeVaneWarrenSessionEncounter,
 } from '../../../src/vtt/vane-warren';
 import { vaneWarrenArtForCombatants } from '../../../src/vtt/vane-warren-art';
+import { regretReactionLegalActions } from '../../../src/vtt/regret/legal-actions';
 import { rpcRegistry } from '../../../src/worker/registry';
 import type { HandlerContext } from '../../../src/worker/handler';
 import {
@@ -162,13 +163,13 @@ async function driveAlgorithmHostToConclusion(
       );
     }
     const decision = pending.decision;
-    const reactionMoverIsDead = decision.kind === 'reaction_offer' &&
-      snapshot.dm.encounter.combatants.find(
+    if (decision.kind === 'reaction_offer') {
+      const mover = snapshot.dm.encounter.combatants.find(
         (combatant) => combatant.id === decision.opportunityAttack.mover,
-      )?.life === 'dead';
-    const option = reactionMoverIsDead
-      ? decision.options.find((candidate) => candidate.id === 'decline')
-      : decision.options[0];
+      );
+      expect(mover?.life).not.toBe('dead');
+    }
+    const option = decision.options[0];
     if (option === undefined) throw new Error(`Pending ${decision.kind} decision has no option.`);
     await host.resolvePendingDecision(decision.id, option.id);
   }
@@ -304,7 +305,7 @@ describe('Vane Warren loader, chaining, seats, and end-session export', () => {
         })),
         playerIds: encounter.playerIds,
         turnLegalActions: encounter.turnLegalActions,
-        reactionLegalActions: () => [],
+        reactionLegalActions: regretReactionLegalActions,
       },
     );
 
