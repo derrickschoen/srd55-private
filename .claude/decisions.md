@@ -7,6 +7,15 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D387 — OWNER: mutation-testing cadence — per-lane continues, consolidated sweep at the bar (2026-08-25)
+
+Per-lane mutation ledgers and supervisor harvest controls continue
+unchanged through the pre-bar lanes, AND a consolidated Stryker-style
+mutation sweep over the combat/VTT surface runs once at the v1 bar as
+the capstone (survivors fixed before the bar is declared met). The
+wt/simcore Stryker pilot infra is the starting point; the known runner
+patch (vitest import-crash misreport) reapplies after npm install.
+
 ## D386 — OWNER: brainstorm round 4 — 18 rulings (2026-08-25)
 
 Fourth three-model brainstorm (codex + opus + fable; raw lists and
