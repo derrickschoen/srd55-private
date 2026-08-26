@@ -7,6 +7,76 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D391 — OWNER: brainstorm round 7 — 16 rulings (v1 bar, refactor, presentation, future) (2026-08-26)
+
+Fifth three-model brainstorm (codex + opus + fable; raw lists and
+synthesis in the job tmp dir as brainstorm7-*), asked one at a time.
+Rulings, in ask order:
+
+1. **v1 = MERGED TREE ONLY.** No bar-met declaration until both tracks
+   (v1-bar on wt/vtt, engine refactor in wt/engine-merge) merge and the
+   full audit + mutation pass is clean. One milestone, later but
+   stronger. (Also moots any refactor timebox: v1 waits.)
+2. **Sweep bar: ZERO survivors in the 7 bar-critical VTT modules** —
+   each killed or proven equivalent with a one-line proof. Legacy
+   sim-scope survivors stay non-blocking (D388.2).
+3. **Player-board lane pass = one full fight per seat** driven from
+   that device, plus targeted probes for rare paths (Revivify,
+   disconnect mid-turn).
+4. **Five-tab substrate: isolated browser contexts only** (separate
+   profiles, per-seat storage). LAN reachability + touch are a
+   pre-session-zero check, NOT bar scope.
+5. **Player UI: responsive for BOTH phone and laptop**; rehearsal runs
+   some seats at each size.
+6. **Seat takeover is DM-CLICKED only (no auto-trigger); handback is
+   an explicit DM click.** Owner: "Dm click. Figure out how to give
+   control back if the player reconnects" — the DM tray must show each
+   seat's live connection state so the DM sees the reconnect and hands
+   back; the player device shows a waiting-for-handback banner.
+7. **Manual dice: d20s ONLY** (attack/save/check); damage stays
+   app-rolled. Out-of-range entry HARD-REFUSES with the legal range
+   shown. (Refines D386.8.)
+8. **Owner acceptance = owner plays a PC in a player seat
+   (phone-sized) while the supervisor DMs a mini-fight** — the player
+   experience is the thing under test.
+9. **In-app DPR surface: REBUILD ON THE UNIFIED ENGINE BEFORE
+   CUTOVER** — the old src/simulation page is not deleted until its
+   engine-backed replacement exists. No visible gap; refactor absorbs
+   the scope.
+10. **Configurable, user-composable SIM/DPR MODES.** Owner verbatim:
+    "We need different configurable dpr modes. One needs to be Colby
+    compatible so we can compare our numbers to his. Another should
+    have the full ability to cc and move using algorithm only controls
+    of pcs and npcs to get numbers for more types of builds that are
+    support or healing or protection or other non-damage oriented
+    builds to see how one contributes to a party fight with some
+    simple controlled enemies." Follow-up verbatim: "Let users build
+    their own sim modes customizable." Interpretation: modes are DATA
+    (termination rule, movement on/off, controllers per side, enemy
+    set, trials), with Colby-compatible and full-fight shipped as
+    presets; users can compose their own. This also settles the
+    legacy-benchmark question: fixed-window Colby semantics survive AS
+    A MODE; existing pins bind that mode and stay comparable —
+    full-fight mode gets fresh baselines.
+11. **Analysis runtime: OVERNIGHT BATCH IS FINE.** Correctness first;
+    no perf/worker work in the refactor.
+12. **Session zero is reachable via a TUNNEL PER SESSION** from the
+    owner's box (remote play supported; publication still held).
+    Tunnel stability and internet reconnects enter scope — takeover/
+    handback (ruling 6) is the recovery path.
+13. **Onboarding: in-app first-turn COACH MARKS; player devices LIVE
+    FROM FIGHT ONE.**
+14. **Demo artifact: RUN REPORTS ONLY** — no screencast or replay
+    viewer lane.
+15. **Post-v1 lane two: DEFERRED — session one's stumbles rank the
+    queue.** Session-1 export format stays conservative so no
+    candidate (campaign continuity, tiers/ruler, loot) is foreclosed.
+16. **Architecture: DM-browser-authoritative with the transport seam
+    kept swappable** (server possible later, none scheduled).
+    **Published thing when publication day comes: the WHOLE KIT** —
+    app + bundled SRD flagship + stranger-readable guide, static,
+    browser-only. Licensing wall unchanged.
+
 ## D390 — OWNER: FABLE writes the refactored code (engine-merge track) (2026-08-26)
 
 Owner, verbatim: "Have fable write the refactored code. Fable is better
