@@ -7,7 +7,7 @@ import {
   hasBundledSheetContent,
   seedSheetContent,
 } from '../../../src/rules/sheet-srd';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openFreshSchemaTestDatabase } from '../../helpers/open-db';
 
 /**
  * THE SEED, AGAINST A REAL DATABASE AND ITS REAL CONSTRAINTS.
@@ -27,7 +27,7 @@ describe('sheet content seeding', () => {
   let db: DatabaseContext;
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
+    connection = await openFreshSchemaTestDatabase();
     db = new DatabaseContext(connection);
     seedClassProgressions(db);
     seedSheetContent(db);
@@ -249,7 +249,7 @@ describe('sheet content seeding', () => {
   });
 
   it('reports itself unhealthy when the content is missing, and repairs it', async () => {
-    const empty = await openTestDatabase();
+    const empty = await openFreshSchemaTestDatabase();
     try {
       const fresh = new DatabaseContext(empty);
       seedClassProgressions(fresh);
@@ -284,7 +284,7 @@ describe('sheet content seeding', () => {
     // The traits row records that a class was PARSED, so a check that counted
     // only traits rows would call a database with all twelve of them and an
     // emptied `class_skill_options` healthy — and never repair it.
-    const empty = await openTestDatabase();
+    const empty = await openFreshSchemaTestDatabase();
     try {
       const fresh = new DatabaseContext(empty);
       seedClassProgressions(fresh);

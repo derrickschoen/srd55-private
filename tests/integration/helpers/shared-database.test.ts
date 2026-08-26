@@ -63,12 +63,14 @@ describe('the per-worker shared seeded database lease', () => {
     );
     poisoned.connection.exec('COMMIT');
 
-    await poisoned.release();
+    await expect(poisoned.release()).rejects.toThrow(
+      'database lease violated isolation',
+    );
 
     expect(sharedDbRebuildCount()).toBe(before + 1);
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining(
-        `[shared-db] POISONED worker connection; rebuilding from the seeded image ` +
+        `[shared-db] POISONED full worker connection; rebuilding from the seeded image ` +
           `(rebuild #${String(before + 1)})`,
       ),
     );
@@ -92,7 +94,9 @@ describe('the per-worker shared seeded database lease', () => {
     const poisoned = await acquireSharedDb({ mode: 'rw' });
     poisoned.connection.close();
 
-    await poisoned.release();
+    await expect(poisoned.release()).rejects.toThrow(
+      'database lease violated isolation',
+    );
 
     expect(sharedDbRebuildCount()).toBe(before + 1);
     expect(warn).toHaveBeenCalledWith(
@@ -131,12 +135,45 @@ describe('the per-worker shared seeded database lease', () => {
     const poisoned = await acquireSharedDb({ mode: 'rw' });
     poisoned.connection.prepare('SELECT 1');
 
-    await poisoned.release();
+    await expect(poisoned.release()).rejects.toThrow(
+      'database lease violated isolation',
+    );
 
     expect(sharedDbRebuildCount()).toBe(before + 1);
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('connection retained an open statement'),
     );
     warn.mockRestore();
+  });
+
+  it('loudly rebuilds when a read-only lease disables query_only and writes', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const before = sharedDbRebuildCount();
+    const poisoned = await acquireSharedDb({ mode: 'ro' });
+    poisoned.connection.exec('PRAGMA query_only = OFF');
+    poisoned.connection.exec(
+      "INSERT INTO characters (name) VALUES ('Read-only poison')",
+    );
+
+    await expect(poisoned.release()).rejects.toThrow(
+      'read-only lease changed query_only; read-only lease changed 1 rows',
+    );
+
+    expect(sharedDbRebuildCount()).toBe(before + 1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('after lease: read-only lease changed query_only'),
+    );
+    warn.mockRestore();
+
+    const replacement = await acquireSharedDb({ mode: 'ro' });
+    try {
+      expect(
+        replacement.db.scalar<number>(
+          "SELECT count(*) FROM characters WHERE name = 'Read-only poison'",
+        ),
+      ).toBe(0);
+    } finally {
+      await replacement.release();
+    }
   });
 });

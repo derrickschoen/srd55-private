@@ -33,9 +33,11 @@ import { raiseClassLevelForTest } from '../../helpers/class-levels';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 import { expectOkOutcome } from '../../helpers/outcome';
 import {
-  createRpcHarness,
-  createSeededRpcHarness,
+  createFreshSchemaRpcHarness,
+  createFreshSeededRpcHarness,
+  createSharedRpcHarness,
   type RpcHarness,
+  type SharedRpcHarness,
 } from '../../helpers/rpc-harness';
 import {
   commitBundledHomebrewInstall,
@@ -146,6 +148,10 @@ const EXPECTED_SUBCLASS_VARIANTS = [
 
 const SEED_REPAIR_TEST_NAME =
   'names stored subclass arrivals, discloses their layer and text state, and reports then repairs a missing promised row';
+const PRAGMA_EXCEPTION_TEST_NAME =
+  'batches listed and missing-identity feat candidates while excluding hidden, archived, and superseded definitions';
+const READ_ONLY_TEST_NAME =
+  'classifies every schema-allowed subclass effect kind for HP inspection';
 
 /**
  * W-A's three state assertions and their negative-control candidates:
@@ -174,6 +180,7 @@ const SEED_REPAIR_TEST_NAME =
  */
 describe('level-up wizard state RPC', () => {
   let harness: RpcHarness;
+  let sharedHarness: SharedRpcHarness | null;
   let integrity: CharacterCommandIntegrity;
 
   class RegistryTransport implements RpcTransport {
@@ -232,14 +239,26 @@ describe('level-up wizard state RPC', () => {
   }
 
   beforeEach(async ({ task }) => {
-    harness = task.name === SEED_REPAIR_TEST_NAME
-      ? await createRpcHarness(queryHandlers)
-      : await createSeededRpcHarness(queryHandlers);
+    sharedHarness = null;
+    if (task.name === SEED_REPAIR_TEST_NAME) {
+      harness = await createFreshSchemaRpcHarness(queryHandlers);
+    } else if (task.name === PRAGMA_EXCEPTION_TEST_NAME) {
+      harness = await createFreshSeededRpcHarness(queryHandlers);
+    } else {
+      sharedHarness = await createSharedRpcHarness(queryHandlers, {
+        mode: task.name === READ_ONLY_TEST_NAME ? 'ro' : 'rw',
+      });
+      harness = sharedHarness;
+    }
     integrity = new CharacterCommandIntegrity('level-up-state-test-key');
   });
 
-  afterEach(() => {
-    harness.close();
+  afterEach(async () => {
+    if (sharedHarness === null) {
+      harness.close();
+    } else {
+      await sharedHarness.release();
+    }
   });
 
   function classId(name: string): number {

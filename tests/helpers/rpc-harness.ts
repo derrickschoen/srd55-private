@@ -23,12 +23,17 @@ import {
   MemoryDatabaseStorage,
   openSeededTestDatabase,
 } from './open-db';
+import { acquireSharedDb, type SharedDbLease } from './shared-db';
 
 export interface RpcHarness {
   lifecycle: DatabaseLifecycle;
   readonly context: HandlerContext;
   call<P, R>(method: string, params: P): Promise<RpcResponse<R>>;
   close(): void;
+}
+
+export interface SharedRpcHarness extends RpcHarness {
+  release(): Promise<void>;
 }
 
 function rpcHarness(
@@ -99,6 +104,9 @@ export async function createRpcHarness(
   return rpcHarness(lifecycle, handlers, environment);
 }
 
+/** Fresh-schema RPC exception path for boot, seed, and lifecycle subjects. */
+export const createFreshSchemaRpcHarness = createRpcHarness;
+
 class SeededTestDatabaseLifecycle extends DatabaseLifecycle {
   readonly #context: DatabaseContext;
 
@@ -163,4 +171,82 @@ export async function createSeededRpcHarness(
   });
   const lifecycle = new SeededTestDatabaseLifecycle(sqlite3, connection);
   return rpcHarness(lifecycle, handlers, options.environment ?? 'test');
+}
+
+/** Isolated seeded-clone RPC exception path for connection-state subjects. */
+export const createFreshSeededRpcHarness = createSeededRpcHarness;
+
+class SharedTestDatabaseLifecycle extends DatabaseLifecycle {
+  constructor(
+    sqlite3: Awaited<ReturnType<typeof getSqlite3>>,
+    private readonly lease: SharedDbLease,
+  ) {
+    super(sqlite3, new MemoryDatabaseStorage(sqlite3), '');
+  }
+
+  override get database(): DatabaseContext {
+    if (!this.lease.db.isOpen) {
+      throw new Error('Shared database lease is closed.');
+    }
+    return this.lease.db;
+  }
+
+  override get filename(): string {
+    return ':memory-shared-lease:';
+  }
+
+  override get isOpen(): boolean {
+    return this.lease.db.isOpen;
+  }
+
+  override open(
+    _verification: DatabaseVerificationMode = 'full',
+  ): DatabaseContext {
+    return this.database;
+  }
+
+  override close(): void {
+    throw new Error('A shared RPC harness must be released asynchronously.');
+  }
+
+  override reopen(): DatabaseContext {
+    throw new Error('A shared RPC harness cannot reopen its leased database.');
+  }
+
+  override async exportBytes(): Promise<Uint8Array> {
+    throw new Error('A shared RPC harness cannot serialize its leased database.');
+  }
+}
+
+/**
+ * RPC harness over a worker-local shared lease. Its lifecycle deliberately
+ * refuses close/reopen/export: tests of those operations belong on an isolated
+ * seeded clone. Call {@link SharedRpcHarness.release} from an async teardown.
+ */
+export async function createSharedRpcHarness(
+  handlers: readonly RpcHandler[],
+  options: {
+    readonly environment?: RuntimeEnvironment;
+    readonly mode?: 'ro' | 'rw';
+    readonly profile?: ApplicationSeedProfile;
+  } = {},
+): Promise<SharedRpcHarness> {
+  const lease = await acquireSharedDb({
+    mode: options.mode ?? 'rw',
+    profile: options.profile ?? 'full',
+  });
+  const sqlite3 = await getSqlite3();
+  const lifecycle = new SharedTestDatabaseLifecycle(sqlite3, lease);
+  const harness = rpcHarness(
+    lifecycle,
+    handlers,
+    options.environment ?? 'test',
+  );
+  return {
+    ...harness,
+    close: () => {
+      throw new Error('A shared RPC harness must be released asynchronously.');
+    },
+    release: () => lease.release(),
+  };
 }

@@ -69,8 +69,8 @@ import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projec
 import {
   getSqlite3,
   MemoryDatabaseStorage,
-  openSeededTestDatabase,
-  openTestDatabase,
+  openFreshSchemaTestDatabase,
+  openFreshSeededTestDatabase,
 } from '../../helpers/open-db';
 
 const opened: Database[] = [];
@@ -81,13 +81,13 @@ const legacyDoublePlanImportedState = readFileSync(
 ).trim();
 
 async function database(): Promise<DatabaseContext> {
-  const connection = await openTestDatabase();
+  const connection = await openFreshSchemaTestDatabase();
   opened.push(connection);
   return new DatabaseContext(connection);
 }
 
 async function seededDatabase(): Promise<DatabaseContext> {
-  const connection = await openSeededTestDatabase();
+  const connection = await openFreshSeededTestDatabase();
   opened.push(connection);
   return new DatabaseContext(connection);
 }

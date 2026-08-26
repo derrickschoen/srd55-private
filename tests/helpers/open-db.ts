@@ -47,6 +47,16 @@ export async function openTestDatabase(options: {
   return db;
 }
 
+/**
+ * Explicit exception path for tests whose subject is schema, seeding,
+ * migration, or transaction behavior. No seeded image is consulted.
+ */
+export function openFreshSchemaTestDatabase(options: {
+  applySchema?: boolean;
+} = {}): Promise<Database> {
+  return openTestDatabase(options);
+}
+
 async function seededDatabaseImage(
   profile: ApplicationSeedProfile,
 ): Promise<Uint8Array> {
@@ -80,6 +90,17 @@ export async function openSeededTestDatabase(options: {
   prepareConnection(db);
   attachSqlTrace(db, sqlite3);
   return db;
+}
+
+/**
+ * Explicit exception path for tests that need an independently writable,
+ * seeded connection (reopen/serialization, corruption, PRAGMA/DDL, poison,
+ * or simultaneous source/target databases).
+ */
+export function openFreshSeededTestDatabase(options: {
+  profile?: ApplicationSeedProfile;
+} = {}): Promise<Database> {
+  return openSeededTestDatabase(options);
 }
 
 export class MemoryDatabaseStorage implements DatabaseStorage {

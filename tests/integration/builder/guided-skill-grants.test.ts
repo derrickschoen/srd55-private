@@ -27,8 +27,8 @@ import {
 import { skillFromLabel } from '../../../src/rules/skills';
 import { rpcRegistry } from '../../../src/worker/registry';
 import {
-  createSeededRpcHarness,
-  type RpcHarness,
+  createSharedRpcHarness,
+  type SharedRpcHarness,
 } from '../../helpers/rpc-harness';
 import { expectOkOutcome } from '../../helpers/outcome';
 
@@ -49,15 +49,15 @@ import { expectOkOutcome } from '../../helpers/outcome';
  *  - producer-minted grants SURVIVE class-arm regeneration, because the two
  *    arms reconcile disjoint grant-key scopes.
  */
-let harness: RpcHarness | undefined;
+let harness: SharedRpcHarness | undefined;
 
-afterEach(() => {
-  harness?.close();
+afterEach(async () => {
+  await harness?.release();
   harness = undefined;
 });
 
-async function applicationDatabase(): Promise<RpcHarness> {
-  harness = await createSeededRpcHarness([], { profile: 'test-core' });
+async function applicationDatabase(): Promise<SharedRpcHarness> {
+  harness = await createSharedRpcHarness([], { profile: 'test-core' });
   return harness;
 }
 
