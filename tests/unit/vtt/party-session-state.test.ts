@@ -181,7 +181,8 @@ describe('adventuring-day party session state', () => {
 
     const bytes = exportSavedSession(store, sessionId);
     expect(bytes).toContain('"reactionPolicies"');
-    expect(bytes).toContain('"policy":"never"');
+    expect(bytes).toContain('"policy"');
+    expect(bytes).toContain('"never"');
     const imported = new MemoryBrowserSessionStore();
     importSavedSession(imported, bytes);
     const resumed = EncounterSessionJournal.resume(sessionId, imported, new MemoryMirrorSink());

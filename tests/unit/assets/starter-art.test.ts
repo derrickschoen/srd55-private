@@ -21,6 +21,7 @@ import {
   starterArtDataUri,
 } from '../../../src/assets/starter-art-resolver';
 import { STARTER_ART_INPUTS } from '../../../src/assets/starter-art-inputs';
+import starterArtInputsSource from '../../../src/assets/starter-art-inputs.ts?raw';
 import { renderLegalPage } from '../../../src/ui/screens/legal/legal';
 import {
   BUNDLED_LICENSE_FILES,
@@ -107,7 +108,7 @@ describe('procedural starter-art manifest and deterministic outputs', () => {
       expect(entry.output.sha256, entry.id).toBe(expected);
       expect(text(`public/${entry.output.path}`), entry.id).toBe(renderStarterArtSvg(entry.id));
     }
-    expect(sha256(bytes('src/assets/starter-art-inputs.ts'))).toBe(
+    expect(sha256(starterArtInputsSource)).toBe(
       EXPECTED_FIXED_INPUTS_SHA256,
     );
   });

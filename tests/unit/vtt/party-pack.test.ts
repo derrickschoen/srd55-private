@@ -397,7 +397,14 @@ describe('external party-pack boundary', () => {
     );
     expect(canonicalJson(restored.encounterState)).toBe(canonicalJson(replayReduction.state));
     expect(replayBytes).toContain('damage_operation');
-    expect(replayBytes).toContain('"arming":{"concentration":false,"durationRounds":2}');
+    expect(replayBytes).toContain('"arming"');
+    const restoredCaster = restored.encounterState?.combatants[0];
+    if (restoredCaster === undefined) throw new Error('Restored damage-operation caster is missing.');
+    const restoredEffects = restoredCaster.profile.rules.featureEffects;
+    if (restoredEffects === undefined) throw new Error('Restored damage-operation effects are missing.');
+    expect(restoredEffects[1]?.payload).toMatchObject({
+      arming: { concentration: false, durationRounds: 2 },
+    });
 
     const malformed = structuredClone(candidate) as {
       members: Array<{ effects?: Array<{ dice?: { rerollBelow?: { threshold: number } }; packets?: Array<{ dice: { rerollBelow?: { threshold: number } } }> }> }>;

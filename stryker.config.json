@@ -1,10 +1,17 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "vitest",
+  "vitest": {
+    "configFile": "reports/stryker/vitest.config.mjs"
+  },
   "checkers": [
     "typescript"
   ],
   "concurrency": 4,
+  "dryRunTimeoutMinutes": 15,
+  "testRunnerNodeArgs": [
+    "--max-old-space-size=8192"
+  ],
   "incremental": true,
   "inPlace": true,
   "thresholds": {
@@ -21,6 +28,13 @@
     "src/eligibility/**/*.ts",
     "src/grants/**/*.ts",
     "src/rules/**/*.ts",
-    "!src/rules/**/*-srd.ts"
+    "!src/rules/**/*-srd.ts",
+    "src/vtt/survival-policy.ts",
+    "src/vtt/party-pack.ts",
+    "src/combat/controllers.ts",
+    "src/vtt/vane-warren.ts",
+    "src/vtt/session-record.ts",
+    "src/vtt/local-session-store.ts",
+    "src/vtt/stable-dom-render.ts"
   ]
 }

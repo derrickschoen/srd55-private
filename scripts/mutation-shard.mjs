@@ -404,8 +404,12 @@ function stockWorkerAllocation(concurrency, checkerCount) {
 }
 
 async function snapshotRawSourceImports(snapshotPath) {
-  const sourceFiles = (await collectFiles(resolve(PROJECT_ROOT, 'src')))
-    .filter((file) => file.endsWith('.ts'))
+  const importers = [];
+  for (const root of ['src', 'tests', 'tools', 'scripts']) {
+    importers.push(...await collectFiles(resolve(PROJECT_ROOT, root)));
+  }
+  const sourceFiles = importers
+    .filter((file) => /\.(?:[cm]?[jt]s)$/u.test(file))
     .sort();
   const rawSourceFiles = new Set();
   const importPatterns = [
@@ -1130,4 +1134,11 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(p
   });
 }
 
-export { mergeReports, namespaceShardReport, parseArguments, shardPaths };
+export {
+  mergeReports,
+  namespaceShardReport,
+  parseArguments,
+  shardPaths,
+  snapshotRawSourceImports,
+  writeMutationVitestConfig,
+};
