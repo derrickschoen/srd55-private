@@ -156,6 +156,52 @@ describe('Vane Warren loader, chaining, seats, and end-session export', () => {
     }
   });
 
+  it('carries controller assignments across a fight boundary and accepts the new roster member assignment', async () => {
+    const encounter = composeVaneWarrenSessionEncounter(
+      sample.party.members,
+      sample.displayNames,
+      createPartySessionState(sample.party.members),
+    );
+    const composeRoom = encounter.composeNextRoom;
+    if (composeRoom === undefined) throw new Error('Vane Warren encounter chaining is missing.');
+    const initialPartyState = encounter.partyState;
+    if (initialPartyState === null) throw new Error('Vane Warren party state is missing.');
+    const host = new DmEncounterHost(
+      'test:vane-controller-carryover',
+      new MemoryBrowserSessionStore(),
+      {
+        initialState: encounter.state,
+        initialPartyState,
+        partyMembers: encounter.members,
+        partyDisplayNames: encounter.displayNames,
+        composeRoom,
+        initialControllers: encounter.controllers,
+        playerIds: encounter.playerIds,
+        turnLegalActions: encounter.turnLegalActions,
+        reactionLegalActions: () => [],
+      },
+    );
+    for (const identity of host.snapshot().dm.controllers) {
+      host.replaceController(identity.combatantId, 'algorithm');
+    }
+
+    await host.finishRoom(null);
+    host.interrupt();
+    const afterBoundary = host.snapshot().dm.controllers;
+    expect(afterBoundary.filter((identity) => encounter.playerIds.includes(identity.combatantId)))
+      .toHaveLength(encounter.playerIds.length);
+    expect(afterBoundary.filter(
+      (identity) => encounter.playerIds.includes(identity.combatantId) && identity.kind === 'algorithm',
+    )).toHaveLength(encounter.playerIds.length);
+    const newRoster = afterBoundary.filter((identity) => !encounter.playerIds.includes(identity.combatantId));
+    expect(newRoster).toEqual([expect.objectContaining({ kind: 'human' })]);
+    const replacement = newRoster[0];
+    if (replacement === undefined) throw new Error('The Iron Voice roster is missing.');
+    host.replaceController(replacement.combatantId, 'algorithm');
+    expect(host.snapshot().dm.controllers.every((identity) => identity.kind === 'algorithm')).toBe(true);
+    host.close();
+  });
+
   it('session_forked: keeps one session id while HP and a pact slot carry through all three fights', () => {
     const store = new MemoryBrowserSessionStore();
     const sessionId = encounterSessionId('session:vane-warren-chain-test');

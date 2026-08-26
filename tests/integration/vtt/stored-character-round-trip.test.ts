@@ -322,7 +322,7 @@ describe('stored character authoring-to-encounter round trip', () => {
     state = reduceEncounter(state, {
       type: 'move',
       actor: wizardMember.profile.id,
-      path: [{ column: 2, row: 2 }, { column: 3, row: 2 }],
+      path: [{ column: 2, row: 1 }, { column: 3, row: 1 }],
       cause: 'voluntary',
     }, () => 0.5).state;
     const attack = loadedPartyAttackCommand(

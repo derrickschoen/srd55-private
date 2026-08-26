@@ -16,7 +16,7 @@ import {
 } from '../combat/effects';
 import type { EncounterCommand } from '../combat/events';
 import { adjacentCells, gridDistance } from '../combat/grid';
-import { affectedCells, feetPoint } from '../combat/templates';
+import { cubeAffectedCellsAmong, feetPoint } from '../combat/templates';
 import type { PersistentAreaEffectSpec, PersistentAreaShape } from '../combat/persistent-areas';
 import { spellDefinition } from '../combat/spells/definitions';
 import type { SpellCastCommand, SpellTargeting } from '../combat/spells/types';
@@ -2308,6 +2308,8 @@ function sharedSpellSlot(
     .sort((left, right) => left.level - right.level)[0];
 }
 
+type SlowSpellArea = Extract<NonNullable<SpellCastCommand['area']>, { readonly shape: 'cube' }>;
+
 function slowSpellCommands(
   member: LoadedPartyMember,
   state: Parameters<TurnLegalActions>[0],
@@ -2323,35 +2325,44 @@ function slowSpellCommands(
   const slot = sharedSpellSlot(state, actor, 3);
   if (slot === undefined) return [];
   const hostiles = targets.filter((target) => target.life !== 'dead');
-  const templateObstacles = [
-    ...state.blockedCells,
-    ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
-  ];
+  if (hostiles.length < 3) return [];
+  const templateGrid = {
+    bounds: state.bounds,
+    blockedCells: [
+      ...state.blockedCells,
+      ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
+    ],
+  };
+  const positions = new Map(hostiles.map((target) => [
+    target.profile.id,
+    loadedMemberPosition(state, target.profile.id),
+  ] as const));
   const minimumCenterColumn = 4;
   const candidates = Array.from(
     { length: Math.max(0, state.bounds.columns - minimumCenterColumn + 1) },
     (_column, index) => index + minimumCenterColumn,
-  )
-    .flatMap((column) => Array.from({ length: state.bounds.rows + 1 }, (_row, row) => {
-      const center = feetPoint(column * 5, row * 5);
-      const area = {
-        shape: 'cube' as const,
-        template: {
-          origin: feetPoint(column * 5 - 20, row * 5),
-          center,
-          axis: { x: 1, y: 0 },
-          size: feet(40),
-          includeOrigin: false,
-        },
-      };
-      const cells = new Set(affectedCells({ bounds: state.bounds, blockedCells: templateObstacles }, area)
-        .map((cell) => `${String(cell.column)},${String(cell.row)}`));
-      const selected = hostiles.filter((target) => {
-        const position = loadedMemberPosition(state, target.profile.id);
-        return cells.has(`${String(position.column)},${String(position.row)}`);
-      }).slice(0, 6);
-      return { area, selected };
-    }))
+  ).flatMap((column) => Array.from({ length: state.bounds.rows + 1 }, (_row, row) => {
+    const area: SlowSpellArea = {
+      shape: 'cube',
+      template: {
+        origin: feetPoint(column * 5 - 20, row * 5),
+        center: feetPoint(column * 5, row * 5),
+        axis: { x: 1, y: 0 },
+        size: feet(40),
+        includeOrigin: false,
+      },
+    };
+    const affected = new Set(cubeAffectedCellsAmong(
+      templateGrid,
+      area.template,
+      [...positions.values()],
+    ).map((cell) => `${String(cell.column)},${String(cell.row)}`));
+    const selected = hostiles.filter((target) => {
+      const position = positions.get(target.profile.id);
+      return position !== undefined && affected.has(`${String(position.column)},${String(position.row)}`);
+    }).slice(0, 6);
+    return { area, selected };
+  }))
     .filter((candidate) => candidate.selected.length >= 3)
     .sort((left, right) =>
       right.selected.length - left.selected.length ||
@@ -2543,7 +2554,9 @@ export function loadedPartyTurnLegalActions(
     if (acting.turn.action.kind !== 'spent') actions.push(...commands());
     if (acting.turn.action.kind === 'available') {
       if (policy.openWithBless) actions.push(...blessSpellCommands(member, state, actor));
-      if (policy.useWizardTactics === true) actions.push(...slowSpellCommands(member, state, actor, targets));
+      if (policy.useWizardTactics === true) {
+        actions.push(...slowSpellCommands(member, state, actor, targets));
+      }
       if (policy.useClericContingency === true) {
         actions.push(...spiritGuardiansSpellCommands(member, state, actor));
         actions.push(...commandKeepAwaySpellCommands(member, state, actor, targets));

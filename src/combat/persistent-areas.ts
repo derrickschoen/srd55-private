@@ -3,7 +3,7 @@ import type { ConditionName } from './conditions';
 import type { EffectPayload } from './effects';
 import type { GridCell } from './grid';
 import type { DamageRequest, RollMode } from './resolution';
-import { affectedCells, creatureOccupiesAffectedCell, feetPoint, type AreaTemplate, type Direction, type FeetPoint } from './templates';
+import { affectedCellsAmong, feetPoint, type AreaTemplate, type Direction, type FeetPoint } from './templates';
 import {
   damageType,
   dieSides,
@@ -249,10 +249,7 @@ export function persistentAreaContains(
   ) {
     return false;
   }
-  return creatureOccupiesAffectedCell(
-    [cell],
-    affectedCells(grid, template),
-  );
+  return affectedCellsAmong(grid, template, [cell]).length === 1;
 }
 
 export function feetShape(template: AreaTemplate): PersistentAreaShape {

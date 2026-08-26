@@ -481,6 +481,7 @@ function enumerateAffectedCells(
   grid: TemplateGrid,
   origin: Point,
   area: ContinuousArea,
+  candidates?: readonly GridCell[],
 ): readonly GridCell[] {
   const blockedKeys = new Set<string>();
   const obstacles: Rectangle[] = [];
@@ -495,29 +496,33 @@ function enumerateAffectedCells(
     }
   }
 
+  const considered = candidates === undefined
+    ? Array.from({ length: grid.bounds.rows }, (_row, row) =>
+        Array.from({ length: grid.bounds.columns }, (_column, column) => ({ column, row }))).flat()
+    : [...new Map(candidates.map((cell) => [cellKey(cell), cell] as const)).values()];
   const affected: GridCell[] = [];
-  for (let row = 0; row < grid.bounds.rows; row += 1) {
-    for (let column = 0; column < grid.bounds.columns; column += 1) {
-      const cell = { column, row };
-      if (blockedKeys.has(cellKey(cell))) continue;
-      const rectangle = rectangleForCell(cell);
-      const intersections = cellIntersectionPoints(area, rectangle);
-      const excludedPoint = area.excludedPoint;
-      const geometricallyIncluded =
-        area.kind === 'circle'
-          ? circleIntersectsRectangle(area, rectangle) &&
-            intersections.length > 0 &&
-            (excludedPoint === null ||
-              intersections.some((candidate) => !samePoint(candidate, excludedPoint)))
-          : intersections.length > 0 &&
-            (excludedPoint === null ||
-              intersections.some((candidate) => !samePoint(candidate, excludedPoint)));
-      if (
-        geometricallyIncluded &&
-        locationIsVisible(area, rectangle, origin, obstacles)
-      ) {
-        affected.push(cell);
-      }
+  for (const cell of considered) {
+    if (!isCellInside(grid.bounds, cell)) {
+      throw new RangeError('A candidate template cell is outside the grid.');
+    }
+    if (blockedKeys.has(cellKey(cell))) continue;
+    const rectangle = rectangleForCell(cell);
+    const intersections = cellIntersectionPoints(area, rectangle);
+    const excludedPoint = area.excludedPoint;
+    const geometricallyIncluded =
+      area.kind === 'circle'
+        ? circleIntersectsRectangle(area, rectangle) &&
+          intersections.length > 0 &&
+          (excludedPoint === null ||
+            intersections.some((candidate) => !samePoint(candidate, excludedPoint)))
+        : intersections.length > 0 &&
+          (excludedPoint === null ||
+            intersections.some((candidate) => !samePoint(candidate, excludedPoint)));
+    if (
+      geometricallyIncluded &&
+      locationIsVisible(area, rectangle, origin, obstacles)
+    ) {
+      affected.push(cell);
     }
   }
   return affected;
@@ -537,6 +542,7 @@ function polygonArea(
 export function coneAffectedCells(
   grid: TemplateGrid,
   template: ConeTemplate,
+  candidates?: readonly GridCell[],
 ): readonly GridCell[] {
   const origin = point(template.origin);
   const direction = unit(template.direction);
@@ -558,6 +564,7 @@ export function coneAffectedCells(
       ],
       template.includeOrigin ? null : origin,
     ),
+    candidates,
   );
 }
 
@@ -566,10 +573,9 @@ export function coneAffectedCells(
  * the specified size and the origin is optional (SRD 5.2.1 lines 11543-11550).
  * D315.3 PRODUCT RULE: the placeable center snaps to a grid intersection.
  */
-export function cubeAffectedCells(
-  grid: TemplateGrid,
+function cubeContinuousArea(
   template: CubeTemplate,
-): readonly GridCell[] {
+): { readonly origin: Point; readonly area: PolygonArea } {
   assertSnappedCenter(template.center, 'Cube center');
   const center = point(template.center);
   const origin = point(template.origin);
@@ -585,10 +591,9 @@ export function cubeAffectedCells(
   if (!onFace) {
     throw new RangeError('Cube origin must be located on one of the Cube faces.');
   }
-  return enumerateAffectedCells(
-    grid,
+  return {
     origin,
-    polygonArea(
+    area: polygonArea(
       [
         { x: center.x - axis.x * half - perpendicular.x * half, y: center.y - axis.y * half - perpendicular.y * half },
         { x: center.x + axis.x * half - perpendicular.x * half, y: center.y + axis.y * half - perpendicular.y * half },
@@ -597,7 +602,25 @@ export function cubeAffectedCells(
       ],
       template.includeOrigin ? null : origin,
     ),
-  );
+  };
+}
+
+export function cubeAffectedCells(
+  grid: TemplateGrid,
+  template: CubeTemplate,
+): readonly GridCell[] {
+  const continuous = cubeContinuousArea(template);
+  return enumerateAffectedCells(grid, continuous.origin, continuous.area);
+}
+
+/** Exact Cube geometry restricted to named cells; avoids scanning an entire board for target selection. */
+export function cubeAffectedCellsAmong(
+  grid: TemplateGrid,
+  template: CubeTemplate,
+  candidates: readonly GridCell[],
+): readonly GridCell[] {
+  const continuous = cubeContinuousArea(template);
+  return enumerateAffectedCells(grid, continuous.origin, continuous.area, candidates);
 }
 
 /**
@@ -609,6 +632,7 @@ export function cubeAffectedCells(
 export function cylinderAffectedCells(
   grid: TemplateGrid,
   template: CylinderTemplate,
+  candidates?: readonly GridCell[],
 ): readonly GridCell[] {
   assertSnappedCenter(template.origin, 'Cylinder center');
   positive(template.height, 'Cylinder height');
@@ -618,7 +642,7 @@ export function cylinderAffectedCells(
     center: origin,
     radius: positive(template.radius, 'Cylinder radius'),
     excludedPoint: null,
-  });
+  }, candidates);
 }
 
 /**
@@ -628,6 +652,7 @@ export function cylinderAffectedCells(
 export function emanationAffectedCells(
   grid: TemplateGrid,
   template: EmanationTemplate,
+  candidates?: readonly GridCell[],
 ): readonly GridCell[] {
   const origin = point(template.origin);
   const radius = nonNegative(template.radius, 'Emanation distance');
@@ -636,7 +661,7 @@ export function emanationAffectedCells(
     center: origin,
     radius,
     excludedPoint: template.includeOrigin ? null : origin,
-  });
+  }, candidates);
 }
 
 /**
@@ -646,6 +671,7 @@ export function emanationAffectedCells(
 export function lineAffectedCells(
   grid: TemplateGrid,
   template: LineTemplate,
+  candidates?: readonly GridCell[],
 ): readonly GridCell[] {
   const origin = point(template.origin);
   const direction = unit(template.direction);
@@ -668,6 +694,7 @@ export function lineAffectedCells(
       ],
       template.includeOrigin ? null : origin,
     ),
+    candidates,
   );
 }
 
@@ -679,6 +706,7 @@ export function lineAffectedCells(
 export function sphereAffectedCells(
   grid: TemplateGrid,
   template: SphereTemplate,
+  candidates?: readonly GridCell[],
 ): readonly GridCell[] {
   assertSnappedCenter(template.origin, 'Sphere center');
   const origin = point(template.origin);
@@ -687,7 +715,7 @@ export function sphereAffectedCells(
     center: origin,
     radius: positive(template.radius, 'Sphere radius'),
     excludedPoint: null,
-  });
+  }, candidates);
 }
 
 /**
@@ -710,6 +738,22 @@ export function affectedCells(
     case 'emanation': return emanationAffectedCells(grid, area.template);
     case 'line': return lineAffectedCells(grid, area.template);
     case 'sphere': return sphereAffectedCells(grid, area.template);
+  }
+}
+
+/** Exact template geometry restricted to named cells; callers retain the canonical shape implementation. */
+export function affectedCellsAmong(
+  grid: TemplateGrid,
+  area: AreaTemplate,
+  candidates: readonly GridCell[],
+): readonly GridCell[] {
+  switch (area.shape) {
+    case 'cone': return coneAffectedCells(grid, area.template, candidates);
+    case 'cube': return cubeAffectedCellsAmong(grid, area.template, candidates);
+    case 'cylinder': return cylinderAffectedCells(grid, area.template, candidates);
+    case 'emanation': return emanationAffectedCells(grid, area.template, candidates);
+    case 'line': return lineAffectedCells(grid, area.template, candidates);
+    case 'sphere': return sphereAffectedCells(grid, area.template, candidates);
   }
 }
 
