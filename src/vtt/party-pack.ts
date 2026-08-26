@@ -2418,7 +2418,7 @@ function spiritGuardiansSpellCommands(
       },
     },
     weaponAttack: null,
-    selectedOption: null,
+    selectedOption: 'Radiant',
   })];
 }
 

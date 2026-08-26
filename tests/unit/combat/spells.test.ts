@@ -494,7 +494,7 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'command', source: 'spell-descriptions.txt:1209',
     targeting: { kind: 'multiple', rangeFeet: 60, baseMaximum: 1, additionalPerSlot: 1 },
-    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: pinnedEffect({ kind: 'commanded_action', options: ['approach', 'drop', 'flee', 'grovel', 'halt'] }, { durationRounds: 1, expiresAt: 'target_end' }) },
+    operation: { kind: 'save_effect', ability: 'wisdom', rollMode: 'normal', effect: pinnedEffect({ kind: 'commanded_action', options: ['approach', 'drop', 'flee', 'grovel', 'halt'], selectedOption: 'selected_when_cast' }, { durationRounds: 1, expiresAt: 'target_end' }) },
   },
   {
     id: 'comprehend-languages', source: 'spell-descriptions.txt:1304',
@@ -928,8 +928,9 @@ function castCommand(
     selectedOption: definition.id === 'resistance' || definition.id === 'chromatic-orb'
       ? 'Fire'
       : definition.id === 'guidance' ? 'Arcana'
-        : definition.id === 'blindness-deafness' ? 'Blinded'
+          : definition.id === 'blindness-deafness' ? 'Blinded'
           : definition.id === 'lesser-restoration' ? 'Poisoned'
+            : definition.id === 'command' ? 'halt'
             : null,
   };
 }

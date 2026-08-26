@@ -289,7 +289,11 @@ export function planMovement<TActorId extends string>(
     if (traversal.kind === 'blocked') {
       return { kind: 'illegal', reason: 'blocked_step', stepIndex };
     }
-    if (stepIndex === request.path.length - 1 && !traversal.canEnd) {
+    if (
+      stepIndex === request.path.length - 1 &&
+      !traversal.canEnd &&
+      request.cause !== 'forced'
+    ) {
       return {
         kind: 'illegal',
         reason: 'occupied_destination',

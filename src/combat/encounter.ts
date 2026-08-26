@@ -1110,6 +1110,26 @@ export function effectiveCombatRules(
     : wildShapeRulesLens(subject.profile.rules, subject.wildShape);
 }
 
+type SlowEffectPayload = Extract<EffectPayload, { readonly kind: 'slow' }>;
+
+function slowEffects(state: EncounterState, id: CombatantId): readonly SlowEffectPayload[] {
+  return state.effects.flatMap((effect) =>
+    effect.targets.includes(id) && effect.payload.kind === 'slow' ? [effect.payload] : []);
+}
+
+function slowActionOrBonusLimited(state: EncounterState, id: CombatantId): boolean {
+  return slowEffects(state, id).some((effect) => effect.actionOrBonusOnly);
+}
+
+function slowPreventsReactions(state: EncounterState, id: CombatantId): boolean {
+  return slowEffects(state, id).some((effect) => !effect.reactionsAllowed);
+}
+
+function canTakeReaction(state: EncounterState, id: CombatantId): boolean {
+  return combatant(state, id).turn.reactionAvailable &&
+    slowEffects(state, id).every((effect) => effect.reactionsAllowed);
+}
+
 function replaceCombatant(
   state: EncounterState,
   replacement: EncounterCombatantState,
@@ -1502,7 +1522,26 @@ function effectiveSpeed(state: EncounterState, id: CombatantId): number {
       speeds.set(grant.mode, grant.speed.kind === 'fixed' ? grant.speed.feet : walking);
     }
   }
-  return Math.max(0, ...speeds.values());
+  const ordinarySpeed = Math.max(0, ...speeds.values());
+  const slowMultiplier = slowEffects(state, id).reduce(
+    (lowest, effect) => Math.min(lowest, effect.speedMultiplier),
+    1,
+  );
+  return ordinarySpeed * slowMultiplier;
+}
+
+function refreshActiveTurnMovement(context: ReductionContext, id: CombatantId): void {
+  if (context.state.activeCombatant !== id) return;
+  const subject = combatant(context.state, id);
+  const speed = feet(effectiveSpeed(context.state, id));
+  const spent = feet(Math.min(subject.turn.movement.spent, speed));
+  context.state = replaceCombatant(context.state, {
+    ...subject,
+    turn: {
+      ...subject.turn,
+      movement: { speed, spent, remaining: feet(speed - spent) },
+    },
+  });
 }
 
 function ignoresDifficultTerrain(state: EncounterState, id: CombatantId): boolean {
@@ -1536,8 +1575,12 @@ function effectiveArmorClass(
     ) bonus += effect.payload.modifier.amount;
     if (effect.payload.kind === 'shield_defense') bonus += effect.payload.armorClassBonus;
   }
+  const slowPenalty = slowEffects(state, id).reduce(
+    (largest, effect) => Math.max(largest, effect.armorClassPenalty),
+    0,
+  );
   // Barkskin's floor evaluates the completed AC; it is not another additive bonus.
-  return armorClass(Math.max(base + bonus, floor));
+  return armorClass(Math.max(base + bonus - slowPenalty, floor));
 }
 
 /** Dice modifiers consume the encounter RNG before the d20, oldest effect first, then effect id. */
@@ -2390,6 +2433,10 @@ function endEffects(
       }
     }
   }
+  const movementTargets = new Set(context.state.effects
+    .filter((effect) => ending.has(effect.id) && (
+      effect.payload.kind === 'movement_modifier' || effect.payload.kind === 'slow'))
+    .flatMap((effect) => effect.targets));
   for (const effect of context.state.effects) {
     if (!ending.has(effect.id)) continue;
     if (effect.payload.kind === 'temporary_banishment') {
@@ -2410,6 +2457,7 @@ function endEffects(
     ...context.state,
     effects: context.state.effects.filter((effect) => !ending.has(effect.id)),
   };
+  for (const target of movementTargets) refreshActiveTurnMovement(context, target);
 }
 
 function nearestReturnPosition(state: EncounterState, origin: GridCell): GridCell {
@@ -2837,7 +2885,7 @@ function resolveDeathSave(context: ReductionContext, id: CombatantId): void {
           turn: {
             action: { kind: 'available' },
             bonusActionAvailable: true,
-            reactionAvailable: true,
+            reactionAvailable: !slowPreventsReactions(context.state, id),
             movement: startTurnMovement(feet(effectiveSpeed(context.state, id))),
             disengaging: false,
             dodging: false,
@@ -2912,6 +2960,12 @@ function resolveTargetSave(
           bonus:
             effectiveCombatRules(context.state, target).savingThrowBonuses[ability] +
             exhaustionPenalty(combatantConditions(context.state, target)) +
+            (ability === 'dexterity'
+              ? -slowEffects(context.state, target).reduce(
+                  (largest, effect) => Math.max(largest, effect.dexteritySavePenalty),
+                  0,
+                )
+              : 0) +
             effectDiceModifier(context.state, target, 'saving_throw', context.rng) +
             rollDefenseTotalModifier(
               context, 'saving_throws', target, source, cause, selectedEffectIds,
@@ -3073,9 +3127,16 @@ function spendAction(
   if (subject.turn.action.kind !== 'available') {
     throw new EncounterRuleError('validation', `Combatant ${actor} has no action available.`);
   }
+  if (slowActionOrBonusLimited(context.state, actor) && !subject.turn.bonusActionAvailable) {
+    throw new EncounterRuleError('validation', `Combatant ${actor} already used its Slow-limited Bonus Action.`);
+  }
   context.state = replaceCombatant(context.state, {
     ...subject,
-    turn: { ...subject.turn, action: { kind: 'spent' } },
+    turn: {
+      ...subject.turn,
+      action: { kind: 'spent' },
+      bonusActionAvailable: slowActionOrBonusLimited(context.state, actor) ? false : subject.turn.bonusActionAvailable,
+    },
   });
   emit(context, { type: 'resource_spent', combatant: actor, resource: 'action', purpose });
 }
@@ -3099,9 +3160,16 @@ function spendCost(
       if (!subject.turn.bonusActionAvailable) {
         throw new EncounterRuleError('validation', `Combatant ${actor} has no Bonus Action available.`);
       }
+      if (slowActionOrBonusLimited(context.state, actor) && subject.turn.action.kind !== 'available') {
+        throw new EncounterRuleError('validation', `Combatant ${actor} already used its Slow-limited action.`);
+      }
       context.state = replaceCombatant(context.state, {
         ...subject,
-        turn: { ...subject.turn, bonusActionAvailable: false },
+        turn: {
+          ...subject.turn,
+          action: slowActionOrBonusLimited(context.state, actor) ? { kind: 'spent' } : subject.turn.action,
+          bonusActionAvailable: false,
+        },
       });
       emit(context, { type: 'resource_spent', combatant: actor, resource: 'bonus_action', purpose });
       return;
@@ -3111,7 +3179,7 @@ function spendCost(
       if (subject.life !== 'living' || isIncapacitated(combatantConditions(context.state, actor))) {
         throw new EncounterRuleError('validation', `Combatant ${actor} cannot react.`);
       }
-      if (!subject.turn.reactionAvailable) {
+      if (!canTakeReaction(context.state, actor)) {
         throw new EncounterRuleError('validation', `Combatant ${actor} has no Reaction available.`);
       }
       context.state = replaceCombatant(context.state, {
@@ -3291,14 +3359,19 @@ function featureEffect(
   return effect;
 }
 
-function attacksPerAction(subject: EncounterCombatantState): number {
+function attacksPerAction(state: EncounterState, subject: EncounterCombatantState): number {
   const overrides = (subject.profile.rules.featureEffects ?? []).flatMap((effect) =>
     effect.payload.kind === 'extra_attack_count_override'
       ? [effect.payload.attackCount]
       : []);
-  return overrides.length === 0
+  const declared = overrides.length === 0
     ? subject.wildShape?.physical.attacksPerAction ?? subject.profile.rules.attacksPerAction
     : Math.max(...overrides);
+  const slowMaximum = slowEffects(state, subject.profile.id).reduce(
+    (lowest, effect) => Math.min(lowest, effect.attacksPerAction),
+    declared,
+  );
+  return Math.min(declared, slowMaximum);
 }
 
 function beginAttack(
@@ -3345,11 +3418,15 @@ function beginAttack(
   }
   switch (subject.turn.action.kind) {
     case 'available': {
-      const remaining = attacksPerAction(subject) - 1;
+      if (slowActionOrBonusLimited(context.state, actor) && !subject.turn.bonusActionAvailable) {
+        throw new EncounterRuleError('validation', `Combatant ${actor} already used its Slow-limited Bonus Action.`);
+      }
+      const remaining = attacksPerAction(context.state, subject) - 1;
       context.state = replaceCombatant(context.state, {
         ...subject,
         turn: {
           ...subject.turn,
+          bonusActionAvailable: slowActionOrBonusLimited(context.state, actor) ? false : subject.turn.bonusActionAvailable,
           action:
             remaining === 0
               ? { kind: 'spent' }
@@ -3386,13 +3463,28 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
       if (movementBlocked(state, to)) {
         return { kind: 'blocked', reason: 'blocked cell' };
       }
-      const occupied = state.tokens.some(
-        (candidate) =>
+      const occupants = state.tokens
+        .filter((candidate) =>
           candidate.combatantId !== actorId &&
           combatant(state, candidate.combatantId).life !== 'dead' &&
-          cellKey(candidate.position) === cellKey(to),
-      );
-      const difficult = !ignoresDifficultTerrain(state, actorId) && (isEnvironmentDifficultTerrain(state.environment, to) || state.persistentAreas.some((area) => {
+          cellKey(candidate.position) === cellKey(to))
+        .map((candidate) => combatant(state, candidate.combatantId));
+      const actorSize = effectiveCombatRules(state, actorId).sizeCategory;
+      const canPassOccupant = (occupant: EncounterCombatantState): boolean => {
+        if (combatantsAreAllies(state, actorId, occupant.profile.id)) return true;
+        if (isIncapacitated(combatantConditions(state, occupant.profile.id))) return true;
+        const occupantSize = effectiveCombatRules(state, occupant.profile.id).sizeCategory;
+        if (occupantSize === 'Tiny') return true;
+        if (actorSize === undefined || occupantSize === undefined) return false;
+        return Math.abs(creatureSizes.indexOf(actorSize) - creatureSizes.indexOf(occupantSize)) >= 2;
+      };
+      if (occupants.some((occupant) => !canPassOccupant(occupant))) {
+        return { kind: 'blocked', reason: 'creature space cannot be traversed' };
+      }
+      const creatureSpaceIsDifficult = occupants.some((occupant) =>
+        !combatantsAreAllies(state, actorId, occupant.profile.id) &&
+        effectiveCombatRules(state, occupant.profile.id).sizeCategory !== 'Tiny');
+      const difficult = !ignoresDifficultTerrain(state, actorId) && (creatureSpaceIsDifficult || isEnvironmentDifficultTerrain(state.environment, to) || state.persistentAreas.some((area) => {
         if (!area.difficultTerrain) return false;
         const origin = area.origin;
         const anchor = origin.kind === 'anchored'
@@ -3402,7 +3494,7 @@ export function encounterMovementWorld(state: EncounterState): MovementWorld<Com
             : null;
         return persistentAreaContains(area, to, anchor, state);
       }));
-      return { kind: 'enterable', cost: feet(difficult ? 10 : 5), canEnd: !occupied };
+      return { kind: 'enterable', cost: feet(difficult ? 10 : 5), canEnd: occupants.length === 0 };
     },
   };
 }
@@ -4090,7 +4182,7 @@ function opportunityAttackReachSources(
       reactorId: candidate.profile.id,
       cell: token(state, candidate.profile.id).position,
       reach: effectiveCombatRules(state, candidate.profile.id).reach,
-      reactionAvailable: candidate.turn.reactionAvailable,
+      reactionAvailable: canTakeReaction(state, candidate.profile.id),
       hostile: true,
     }));
 }
@@ -4383,7 +4475,7 @@ function processMove(
         if (combatant(context.state, command.actor).life !== 'living') break;
         continue;
       }
-      if (reactor.turn.reactionAvailable) {
+      if (canTakeReaction(context.state, window.reactorId)) {
         queueOpportunityAttack(context, window.reactorId, trigger, executableOpportunityAttack);
       }
     }
@@ -5192,6 +5284,27 @@ function applyEffect(
   if (context.state.effects.some((candidate) => candidate.id === id)) {
     emit(context, { type: 'effect_applied', effectId: id, source, targets });
   }
+  if (owned.payload.kind === 'slow') {
+    for (const target of targets) {
+      const slowed = combatant(context.state, target);
+      context.state = replaceCombatant(context.state, {
+        ...slowed,
+        turn: {
+          ...slowed.turn,
+          action: owned.payload.actionOrBonusOnly && !slowed.turn.bonusActionAvailable
+            ? { kind: 'spent' }
+            : slowed.turn.action,
+          bonusActionAvailable: owned.payload.actionOrBonusOnly && slowed.turn.action.kind !== 'available'
+            ? false
+            : slowed.turn.bonusActionAvailable,
+          reactionAvailable: owned.payload.reactionsAllowed ? slowed.turn.reactionAvailable : false,
+        },
+      });
+    }
+  }
+  if (owned.payload.kind === 'slow' || owned.payload.kind === 'movement_modifier') {
+    for (const target of targets) refreshActiveTurnMovement(context, target);
+  }
   if (owned.payload.kind === 'temporary_banishment') {
     if (targets.length !== 1) {
       throw new EncounterRuleError('validation', 'Temporary banishment requires exactly one target.');
@@ -5244,6 +5357,149 @@ function applyEffect(
   return id;
 }
 
+type CommandedActionEffect = EncounterEffect & {
+  readonly payload: Extract<EffectPayload, { readonly kind: 'commanded_action' }>;
+};
+
+function commandedActionEffect(state: EncounterState, target: CombatantId): CommandedActionEffect | null {
+  return state.effects
+    .filter((effect): effect is CommandedActionEffect =>
+      effect.targets.includes(target) && effect.payload.kind === 'commanded_action')
+    .sort((left, right) =>
+      left.createdRevision - right.createdRevision || String(left.id).localeCompare(String(right.id)))[0] ?? null;
+}
+
+function reachableCommandPaths(
+  state: EncounterState,
+  actor: CombatantId,
+  maximumCost: ReturnType<typeof feet>,
+): readonly Extract<ReturnType<typeof findPath>, { readonly kind: 'found' }>[] {
+  const start = token(state, actor).position;
+  const paths: Extract<ReturnType<typeof findPath>, { readonly kind: 'found' }>[] = [];
+  for (let row = 0; row < state.bounds.rows; row += 1) {
+    for (let column = 0; column < state.bounds.columns; column += 1) {
+      const result = findPath(encounterMovementWorld(state), {
+        actorId: actor,
+        start,
+        goal: { column, row },
+        maximumCost,
+      });
+      if (result.kind === 'found') paths.push(result);
+    }
+  }
+  return paths;
+}
+
+function moveForCommand(
+  context: ReductionContext,
+  actor: CombatantId,
+  path: readonly GridCell[],
+): void {
+  processMove(context, { type: 'move', actor, path, cause: 'voluntary' });
+}
+
+function endCommandedTurnResources(context: ReductionContext, actor: CombatantId): void {
+  const subject = combatant(context.state, actor);
+  context.state = replaceCombatant(context.state, {
+    ...subject,
+    turn: {
+      ...subject.turn,
+      action: { kind: 'spent' },
+      bonusActionAvailable: false,
+      movement: {
+        ...subject.turn.movement,
+        spent: subject.turn.movement.speed,
+        remaining: feet(0),
+      },
+    },
+  });
+}
+
+/** Command options: docs/srd/source/spell-descriptions.txt:1221-1239. */
+function enforceCommandedAction(context: ReductionContext, actor: CombatantId): void {
+  const effect = commandedActionEffect(context.state, actor);
+  if (effect === null) return;
+  const option = effect.payload.selectedOption;
+  if (option === 'selected_when_cast') {
+    throw new EncounterRuleError('validation', 'Command reached a turn without a resolved option.');
+  }
+  const sourceOnBoard = isCombatantOnBoard(context.state, effect.source);
+  const sourcePosition = sourceOnBoard ? token(context.state, effect.source).position : null;
+  switch (option) {
+    case 'approach': {
+      if (sourcePosition === null) return;
+      if (gridDistance(token(context.state, actor).position, sourcePosition) <= 5) {
+        endCommandedTurnResources(context, actor);
+        return;
+      }
+      const paths = reachableCommandPaths(context.state, actor, combatant(context.state, actor).turn.movement.remaining)
+        .filter((path) => path.cells.length > 0)
+        .sort((left, right) => {
+          const leftEnd = left.cells.at(-1) as GridCell;
+          const rightEnd = right.cells.at(-1) as GridCell;
+          return gridDistance(leftEnd, sourcePosition) - gridDistance(rightEnd, sourcePosition) ||
+            left.cost - right.cost || leftEnd.row - rightEnd.row || leftEnd.column - rightEnd.column;
+        });
+      const chosen = paths[0];
+      if (chosen !== undefined) moveForCommand(context, actor, chosen.cells);
+      if (gridDistance(token(context.state, actor).position, sourcePosition) <= 5) {
+        endCommandedTurnResources(context, actor);
+      }
+      return;
+    }
+    case 'drop': {
+      const equipment = context.state.equipment?.find((candidate) => candidate.combatant === actor);
+      if (equipment !== undefined) {
+        for (const item of heldItems(equipment.hands)) forcedDropItem(context, actor, item);
+      }
+      endCommandedTurnResources(context, actor);
+      return;
+    }
+    case 'flee': {
+      spendAction(context, actor, 'Command: Flee by the fastest available means');
+      const dashing = combatant(context.state, actor);
+      const extra = effectiveSpeed(context.state, actor);
+      context.state = replaceCombatant(context.state, {
+        ...dashing,
+        turn: {
+          ...dashing.turn,
+          movement: {
+            speed: feet(dashing.turn.movement.speed + extra),
+            spent: dashing.turn.movement.spent,
+            remaining: feet(dashing.turn.movement.remaining + extra),
+          },
+        },
+      });
+      if (sourcePosition !== null) {
+        const paths = reachableCommandPaths(context.state, actor, combatant(context.state, actor).turn.movement.remaining)
+          .filter((path) => path.cells.length > 0)
+          .sort((left, right) => {
+            const leftEnd = left.cells.at(-1) as GridCell;
+            const rightEnd = right.cells.at(-1) as GridCell;
+            return gridDistance(rightEnd, sourcePosition) - gridDistance(leftEnd, sourcePosition) ||
+              right.cost - left.cost || leftEnd.row - rightEnd.row || leftEnd.column - rightEnd.column;
+          });
+        const chosen = paths[0];
+        if (chosen !== undefined) moveForCommand(context, actor, chosen.cells);
+      }
+      endCommandedTurnResources(context, actor);
+      return;
+    }
+    case 'grovel':
+      applyEffect(context, effect.source, {
+        targets: [actor], duration: { kind: 'permanent' }, concentration: false,
+        stackingIdentity: effectStackingIdentity(`command:grovel:${String(actor)}`),
+        stacking: 'replace_any_source', repeatedSave: null,
+        payload: { kind: 'condition', condition: 'Prone' },
+      });
+      endCommandedTurnResources(context, actor);
+      return;
+    case 'halt':
+      endCommandedTurnResources(context, actor);
+      return;
+  }
+}
+
 function startTurn(context: ReductionContext, id: CombatantId, round: number): void {
   context.state = { ...context.state, activeCombatant: id, round };
   revertExpiredWildShapes(context, round);
@@ -5273,7 +5529,7 @@ function startTurn(context: ReductionContext, id: CombatantId, round: number): v
     turn: {
       action: incapacitated ? { kind: 'spent' } : { kind: 'available' },
       bonusActionAvailable: !incapacitated,
-      reactionAvailable: !incapacitated,
+      reactionAvailable: !incapacitated && !slowPreventsReactions(context.state, id),
       movement: startTurnMovement(speed),
       disengaging: false,
       dodging: false,
@@ -5281,6 +5537,7 @@ function startTurn(context: ReductionContext, id: CombatantId, round: number): v
     },
   });
   emit(context, { type: 'turn_started', combatant: id, round });
+  if (!incapacitated) enforceCommandedAction(context, id);
   queueDeathSave(context, id);
 }
 
@@ -5992,7 +6249,7 @@ function processAttack(
     ) {
       throw new EncounterRuleError('validation', `Combatant ${command.actor} cannot react.`);
     }
-    if (!reactor.turn.reactionAvailable) {
+    if (!canTakeReaction(context.state, command.actor)) {
       throw new EncounterRuleError('validation', `Combatant ${command.actor} has no Reaction available.`);
     }
     if (context.state.effects.some((effect) =>
@@ -6402,7 +6659,7 @@ function spendSpellCastingCost(
       if (subject.life !== 'living' || isIncapacitated(combatantConditions(context.state, actor))) {
         throw new EncounterRuleError('validation', `Combatant ${actor} cannot cast a Reaction spell.`);
       }
-      if (!subject.turn.reactionAvailable) {
+      if (!canTakeReaction(context.state, actor)) {
         throw new EncounterRuleError('validation', `Combatant ${actor} has no Reaction available.`);
       }
       context.state = replaceCombatant(context.state, {
@@ -6919,6 +7176,19 @@ function resolvedSpellEffectPayload(
       }
       return { ...payload, selectedDamageType: selected };
     }
+    case 'commanded_action': {
+      const selected = command.selectedOption;
+      if (
+        selected !== 'approach' && selected !== 'drop' && selected !== 'flee' &&
+        selected !== 'grovel' && selected !== 'halt'
+      ) {
+        throw new EncounterRuleError('validation', `${definition.name} requires a listed command option.`);
+      }
+      if (!payload.options.includes(selected)) {
+        throw new EncounterRuleError('validation', `${definition.name} does not allow the ${selected} command.`);
+      }
+      return { ...payload, selectedOption: selected };
+    }
     case 'condition':
     case 'sustained_effect':
     case 'condition_bundle':
@@ -6943,7 +7213,6 @@ function resolvedSpellEffectPayload(
     case 'conjured_hand':
     case 'communication_link':
     case 'illusion':
-    case 'commanded_action':
     case 'language_comprehension':
     case 'detection_sense':
     case 'appearance_illusion':
@@ -7869,17 +8138,31 @@ function resolvedPersistentAreaSpellEffect(
   spec: SpellPersistentAreaEffectSpec,
 ): PersistentAreaEffectSpec {
   const payload = spec.payload.kind === 'damage'
-    ? {
+    ? (() => {
+        const selectedDamageType = spec.payload.damageType === 'spirit_guardians_alignment'
+          ? command.selectedOption
+          : spec.payload.damageType;
+        if (selectedDamageType !== spec.payload.damageType && selectedDamageType !== 'Radiant' && selectedDamageType !== 'Necrotic') {
+          throw new EncounterRuleError(
+            'validation',
+            `${definition.name} requires Radiant for a good or neutral caster, or Necrotic for an evil caster.`,
+          );
+        }
+        if (selectedDamageType === 'spirit_guardians_alignment' || selectedDamageType === null) {
+          throw new EncounterRuleError('validation', `${definition.name} requires its caster-alignment damage type.`);
+        }
+        return {
         kind: 'damage' as const,
         damage: {
           terms: [{
-            type: spec.payload.damageType,
+            type: damageType(selectedDamageType),
             dice: scaledDiceExpression(definition, spec.payload.dice, command),
           }],
           critical: false,
           responses: [],
         },
-      }
+      };
+      })()
     : {
         kind: 'effect' as const,
         payload: structuredClone(spec.payload.payload),
@@ -7954,7 +8237,7 @@ function reactionAvailability(
   if (subject.life !== 'living' || isIncapacitated(combatantConditions(state, reactor))) {
     return 'incapacitated';
   }
-  if (!subject.turn.reactionAvailable) return 'reaction_spent';
+  if (!canTakeReaction(state, reactor)) return 'reaction_spent';
   if (definition.level > 0 && !subject.spellSlots.some(
     (slot) => slot.level >= definition.level && slot.remaining > 0,
   )) return 'slot_unavailable';
@@ -8129,6 +8412,25 @@ function processSpellCast(context: ReductionContext, command: SpellCastCommand):
   }
   spendSpellSlot(context, definition, command);
   emit(context, { type: 'spell_cast', caster: command.actor, spellId: definition.id, slotLevel: command.slotLevel, targets });
+
+  const somaticSlow = definition.components.somatic
+    ? slowEffects(context.state, command.actor).reduce<SlowEffectPayload | null>(
+        (strongest, effect) => strongest === null || effect.somaticSpellFailurePercent > strongest.somaticSpellFailurePercent
+          ? effect
+          : strongest,
+        null,
+      )
+    : null;
+  if (somaticSlow !== null) {
+    const roll = rollD20(context.rng, 'normal').chosen;
+    const failureMaximum = somaticSlow.somaticSpellFailurePercent / 5;
+    const failed = roll <= failureMaximum;
+    emit(context, {
+      type: 'slow_spellcasting_checked', caster: command.actor, spellId: definition.id,
+      roll, failureMaximum, outcome: failed ? 'spell_failed' : 'spell_succeeded',
+    });
+    if (failed) return;
+  }
 
   executeSpellOperation(context, definition, command, targets, definition.operation);
   if (definition.id === 'revivify') {
@@ -10601,7 +10903,8 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
               subject.life === 'living' &&
               !isIncapacitated(
                 combatantConditions(context.state, subject.profile.id),
-              ),
+              ) &&
+              !slowPreventsReactions(context.state, subject.profile.id),
           },
         })),
       };
@@ -10751,7 +11054,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     }
     case 'decline_reaction': {
       const reactor = combatant(context.state, command.actor);
-      if (reactor.life !== 'living' || !reactor.turn.reactionAvailable) {
+      if (reactor.life !== 'living' || !canTakeReaction(context.state, command.actor)) {
         throw new EncounterRuleError('validation', `Combatant ${command.actor} cannot decline this Reaction.`);
       }
       if (context.state.activeCombatant !== command.mover) {
@@ -10913,7 +11216,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       if (subject.life !== 'living' || isIncapacitated(combatantConditions(context.state, command.actor))) {
         throw new EncounterRuleError('validation', `Combatant ${command.actor} cannot react.`);
       }
-      if (!subject.turn.reactionAvailable) {
+      if (!canTakeReaction(context.state, command.actor)) {
         throw new EncounterRuleError('validation', `Combatant ${command.actor} has no Reaction available.`);
       }
       context.state = replaceCombatant(context.state, {

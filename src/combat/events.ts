@@ -796,6 +796,14 @@ export type EncounterEvent =
       readonly targets: readonly CombatantId[];
     })
   | (SequencedEvent & {
+      readonly type: 'slow_spellcasting_checked';
+      readonly caster: CombatantId;
+      readonly spellId: string;
+      readonly roll: number;
+      readonly failureMaximum: number;
+      readonly outcome: 'spell_failed' | 'spell_succeeded';
+    })
+  | (SequencedEvent & {
       readonly type: 'spell_component_consumed';
       readonly caster: CombatantId;
       readonly spellId: 'revivify';
