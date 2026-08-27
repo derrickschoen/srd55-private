@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D393 — OWNER: index adoption standard — EXPLAIN improvement suffices (2026-08-26)
+
+Owner: "We only need the plan to improve to keep the index. Even if
+infrequent, it could become more frequent. Indexes can improve
+responsiveness in the browser as well."
+
+1. An index candidate is ADOPTED when EXPLAIN QUERY PLAN shows a real
+   improvement (SCAN→SEARCH, covering hit, sort elimination) for any
+   query shape in the corpus — profile frequency prioritizes the work
+   but never vetoes adoption.
+2. The full-suite SQL_QUERY_LOG profile still runs (owner directive,
+   same day) — it discovers query shapes and orders the work.
+3. The one remaining rejection ground: measured endpoint regression
+   (the 2026-08-19 spell_loadouts trial, 4% slower) — a plan
+   "improvement" that measurably hurts in practice did not improve.
+
 ## D392 — OWNER: main advances at checkpoints; ngrok tunnel for session zero (2026-08-26)
 
 1. **Main (and the :4173 preview) advance at clean checkpoint
