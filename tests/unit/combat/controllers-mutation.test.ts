@@ -529,6 +529,26 @@ describe('controller mutation contract: player-character ranking', () => {
     ]))).toBe(ordinary);
   });
 
+  it('does not prioritize dead hostile attacks or dead ally healing', async () => {
+    const actor = playerProfile('dead-target-filter-actor', { initiativeBonus: 20 });
+    const deadAlly = playerProfile('dead-target-filter-ally', { hitPoints: 20, initiativeBonus: 0 });
+    const livingEnemy = monsterProfile('dead-target-filter-living', { initiativeBonus: -5 });
+    const deadEnemy = monsterProfile('dead-target-filter-dead', { hitPoints: 20, initiativeBonus: -20 });
+    let state = startedState([actor, deadAlly, livingEnemy, deadEnemy]);
+    state = withHitPoints(state, deadAlly.id, 0, 'dead');
+    state = withHitPoints(state, deadEnemy.id, 0, 'dead');
+    const liveAttack = attack(actor.id, livingEnemy.id);
+
+    expect(await chooseAction(dmRequest(state, actor.id, [
+      opportunityAttack(actor.id, deadEnemy.id),
+      liveAttack,
+    ]))).toBe(liveAttack);
+    expect(await chooseAction(dmRequest(state, actor.id, [
+      spell(actor.id, 'healing-word', [deadAlly.id]),
+      liveAttack,
+    ]))).toBe(liveAttack);
+  });
+
   it('keeps revivify ahead of an opportunity attack at the mutated negative-rank boundary', async () => {
     const actor = playerProfile('revivify-rank-boundary-actor', { initiativeBonus: 20 });
     const enemy = monsterProfile('revivify-rank-boundary-enemy', { initiativeBonus: -20 });
@@ -614,6 +634,38 @@ describe('controller mutation contract: player-character ranking', () => {
       attack(healer.id, enemy.id),
       heal,
     ]))).toBe(heal);
+  });
+
+  it('uses the latest healing event when it moves an unowned ally above the healing threshold', async () => {
+    const healer = playerProfile('event-healed-healer', { initiativeBonus: 20 });
+    const ally = playerProfile('event-healed-ally', { hitPoints: 20, initiativeBonus: 0 });
+    const enemy = monsterProfile('event-healed-enemy', { initiativeBonus: -20 });
+    const base = startedState([healer, ally, enemy]);
+    const state = withEvents(base, [{
+      sequence: base.nextEventSequence,
+      type: 'damage_applied',
+      source: enemy.id,
+      target: ally.id,
+      amount: 10,
+      hitPointsBefore: 20,
+      hitPointsAfter: 10,
+      lifeState: 'living',
+      massiveDamage: false,
+    }, {
+      sequence: base.nextEventSequence + 1,
+      type: 'healing_applied',
+      source: healer.id,
+      target: ally.id,
+      amount: 6,
+      hitPointsBefore: 10,
+      hitPointsAfter: 16,
+    }]);
+    const ordinary = attack(healer.id, enemy.id);
+
+    expect(await chooseAction(playerRequest(state, healer.id, [
+      spell(healer.id, 'cure-wounds', [ally.id]),
+      ordinary,
+    ]))).toBe(ordinary);
   });
 
   it('sorts hostile spell targets by known HP, then distance, then id', async () => {
@@ -932,6 +984,10 @@ describe('controller mutation contract: player-character ranking', () => {
       { type: 'end_turn', actor: actor.id },
       heal,
     ]))).toBe(heal);
+    expect(await chooseAction(dmRequest(base, actor.id, [
+      { type: 'end_turn', actor: actor.id },
+      { type: 'hide', actor: actor.id },
+    ]))).toEqual({ type: 'hide', actor: actor.id });
   });
 
   it('ignores an adjacent ally when deciding whether ranged repositioning would provoke', async () => {
@@ -1209,6 +1265,10 @@ describe('controller mutation contract: monster ranking', () => {
       { type: 'end_turn', actor: actor.id },
       heal,
     ]))).toBe(heal);
+    expect(await chooseAction(dmRequest(state, actor.id, [
+      { type: 'end_turn', actor: actor.id },
+      { type: 'hide', actor: actor.id },
+    ]))).toEqual({ type: 'hide', actor: actor.id });
   });
 });
 
@@ -1363,6 +1423,33 @@ describe('controller mutation contract: turn-program enumeration', () => {
         },
       },
       { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+    ]);
+  });
+
+  it('retains a legal force-save program only for its exact hostile target', () => {
+    const actor = playerProfile('legal-save-exact-actor', { initiativeBonus: 20 });
+    const first = monsterProfile('legal-save-exact-first', { hitPoints: 2, initiativeBonus: 0 });
+    const target = monsterProfile('legal-save-exact-target', { hitPoints: 8, initiativeBonus: -20 });
+    const state = stateAtPositions([
+      { profile: actor, column: 0 },
+      { profile: first, column: 1 },
+      { profile: target, column: 4 },
+    ]);
+
+    expect(new AlgorithmController().enumerateTurnPrograms(
+      dmVisibleEncounter(projectDmView(state)),
+      actor.id,
+      { actions: [forceSave(actor.id, target.id)] },
+      20,
+    ).map(({ program, score }) => ({ program, score }))).toEqual([
+      {
+        program: {
+          kind: 'action',
+          action: { kind: 'force_save', target: { kind: 'combatant', combatantId: target.id } },
+        },
+        score: 982,
+      },
+      { program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } }, score: 0 },
     ]);
   });
 

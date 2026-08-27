@@ -638,7 +638,7 @@ describe('IndexedDB durable VTT session adapter', () => {
     [{ kind: 'autosave', pool: 'per_round' }, { kind: 'autosave', pool: 'per_round' }],
     [{ kind: 'autosave', pool: 'encounter_boundary' }, { kind: 'autosave', pool: 'encounter_boundary' }],
     [{ kind: 'autosave', pool: 'unknown' }, { kind: 'autosave', pool: 'per_round' }],
-    [{ kind: 'unknown' }, { kind: 'autosave', pool: 'per_round' }],
+    [{ kind: 'unknown', pool: 'encounter_boundary' }, { kind: 'autosave', pool: 'per_round' }],
   ] as const)('decodes legacy retention %# as %#', async (encoded, expected) => {
     const storage = new MemoryStorage();
     const source = legacySession(`session:retention-${JSON.stringify(encoded)}`);
@@ -1326,6 +1326,35 @@ describe('IndexedDB durable VTT session adapter', () => {
     );
     host.close();
     store.close();
+  });
+
+  it('never prunes a named snapshot even when its autosave pool is over capacity', async () => {
+    const storage = new MemoryStorage();
+    const legacy = legacySession('session:named-prune-boundary');
+    for (let index = 0; index < 11; index += 1) {
+      const storageId = `per_round:${legacy.id}:${String(index).padStart(12, '0')}:round_boundary`;
+      storage.setItem(`srd55:vtt-autosave:${storageId}`, JSON.stringify({
+        storageId,
+        sessionId: legacy.id,
+        trigger: 'round_boundary',
+        pool: 'per_round',
+        name: `named-prune-${String(index)}`,
+        updatedAt: new Date(Date.UTC(2042, 7, 24, 0, 0, index)).toISOString(),
+        bytes: legacy.bytes,
+        retention: index === 0 ? { kind: 'named' } : { kind: 'autosave', pool: 'per_round' },
+      }));
+    }
+
+    const indexedDb = new IDBFactory();
+    const store = await IndexedDbBrowserSessionStore.open(indexedDb, storage, {
+      databaseName: 'named-prune-boundary',
+    });
+    expect(store.savedSessions()).toHaveLength(11);
+    expect(store.savedSessions()).toContainEqual(expect.objectContaining({
+      name: 'named-prune-0', retention: { kind: 'named' },
+    }));
+    store.close();
+    expect(await readAllStoredValues(indexedDb, 'named-prune-boundary', 'snapshots')).toHaveLength(11);
   });
 
   it('prune_cross_pool retains exactly 10 snapshots in each IndexedDB autosave pool', async () => {

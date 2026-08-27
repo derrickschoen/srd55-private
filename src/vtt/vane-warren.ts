@@ -482,9 +482,9 @@ export function createVaneWarrenFight(
     ...(scenarioConfig?.startingReinforcements ?? []),
   ];
   const standingProfiles = startingRoster.map((entry) => profileFor(fightId, entry));
-  const leaderIndex = fight.standing.findIndex((entry) => entry.id === fight.leaderRosterId);
-  const leader = standingProfiles[leaderIndex];
-  if (leader === undefined) throw new Error(`${fight.name} has no leader profile.`);
+  const leaderEntry = fight.standing.find((entry) => entry.id === fight.leaderRosterId);
+  if (leaderEntry === undefined) throw new Error(`${fight.name} has no leader profile.`);
+  const leader = profileFor(fightId, leaderEntry);
   const objects = [
     ...(fight.alarmWaves.length === 0
       ? []
@@ -505,12 +505,14 @@ export function createVaneWarrenFight(
         combatantId: profile.id,
         position: playerPositions(scenario)[index] as GridCell,
       })),
-      ...standingProfiles.map((profile, index) => ({
+      ...startingRoster.map((entry) => {
+        const profile = profileFor(fightId, entry);
+        return {
         id: profile.tokenId,
         combatantId: profile.id,
-        position: scenarioConfig?.enemyPositions[startingRoster[index]?.id ?? ''] ??
-          startingRoster[index]?.position ?? { column: 9, row: index + 1 },
-      })),
+        position: scenarioConfig?.enemyPositions[entry.id] ?? entry.position,
+        };
+      }),
     ],
     blockedCells: [{ column: 4, row: 1 }, { column: 4, row: 8 }],
     worldObjects: objects.map((entry) => entry.object),
@@ -944,13 +946,7 @@ export function composeVaneWarrenFight(
   }));
   const bundle = createVaneWarrenFight(fightId, players, scenario);
   const state = preloadPartySessionState(bundle.encounter, partyState);
-  const partyActions = loadedPartyTurnLegalActions(members, policy ?? {
-    useHealingPotions: true,
-    openWithBless: true,
-    reserveClericSlotsForBless: true,
-    useWizardTactics: true,
-    useClericContingency: true,
-  });
+  const partyActions = loadedPartyTurnLegalActions(members, vaneWarrenPartyPolicy('default', policy));
   return {
     rulesEdition: '2024',
     partyState,
@@ -969,6 +965,23 @@ export function composeVaneWarrenFight(
   };
 }
 
+export function vaneWarrenPartyPolicy(
+  scenario: VaneWarrenRehearsalScenario,
+  override?: Parameters<typeof loadedPartyTurnLegalActions>[1],
+): NonNullable<Parameters<typeof loadedPartyTurnLegalActions>[1]> {
+  if (override !== undefined) return override;
+  return {
+    useHealingPotions: true,
+    openWithBless: true,
+    reserveClericSlotsForBless: true,
+    useWizardTactics: true,
+    useClericContingency: true,
+    ...(scenario === 'default'
+      ? {}
+      : { reserveClericSlotForRevivify: scenario === 'tpk-recovery' }),
+  };
+}
+
 export function composeVaneWarrenSessionEncounter(
   members: readonly LoadedPartyMember[],
   displayNames: ReadonlyMap<number, string>,
@@ -982,14 +995,7 @@ export function composeVaneWarrenSessionEncounter(
       members,
       displayNames,
       partyState,
-      {
-        useHealingPotions: true,
-        openWithBless: true,
-        reserveClericSlotsForBless: true,
-        useWizardTactics: true,
-        useClericContingency: true,
-        reserveClericSlotForRevivify: scenario === 'tpk-recovery',
-      },
+      vaneWarrenPartyPolicy(scenario),
       scenario,
     );
     return {
