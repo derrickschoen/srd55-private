@@ -13,5 +13,6 @@
 | `src/combat/controllers.ts` | 845 | For an existing `stableSortKey`, `>=` only replaces an identical program with its identical score, leaving every exported candidate field unchanged. |
 | `src/combat/controllers.ts` | 846 | For an existing `stableSortKey`, `<=` only replaces an identical program with its identical score, leaving every exported candidate field unchanged. |
 | `src/combat/controllers.ts` | 917 | `proposeRoundProgram()` always enumerates a living PC with score-40 Dash or a living monster with score-20 Dodge, so its exported `top` is never zero and forcing the zero-test false selects the original formula for every valid call. |
+| `src/vtt/local-session-store.ts` | 1171 | Database version 1 runs `upgradeneeded` only for a new database whose object-store list is empty, so each unique required store is absent and replacing its absence guard with `true` creates the same three stores. |
 
 The `shouldSpendHitDie` `>=`/`>` boundary mutant (6907) is not ledgered: the exported function accepts finite numeric deficits and modifiers, so `missingHitPoints: 6.5`, `sides: 8`, `constitutionModifier: 2` observably distinguishes `true` from `false`.

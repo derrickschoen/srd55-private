@@ -404,7 +404,6 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     if (snapshot === undefined || snapshot.sessionId !== sessionId) {
       throw new Error('Browser autosave does not exist.');
     }
-    const retained = this.#memory.revisions(sessionId).slice(0, snapshot.revisionCount);
     const currentCount = this.#memory.revisions(sessionId).length;
     const metadata: BrowserSaveMetadata = {
       sessionId,
@@ -421,9 +420,7 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
       transaction.objectStore(SESSION_STORE).put(metadata, sessionId);
       await transactionComplete(transaction);
     });
-    this.#memory = new MemoryBrowserSessionStore();
-    this.#memory.appendAll(retained);
-    this.#metadata.set(sessionId, metadata);
+    await this.#preload();
   }
 
   savedSessions(): readonly StoredBrowserSave[] {
@@ -542,14 +539,11 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
 
   #scheduleQueuedWrite(): void {
     if (this.#scheduledWrite !== null) return;
-    let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
     let writes: QueuedBrowserWrite[] = [];
     const pending = new Promise<void>((resolve) => {
-      timer = globalThis.setTimeout(resolve, 0);
+      globalThis.setTimeout(resolve, 0);
     }).then(async () => {
-      if (timer !== undefined) globalThis.clearTimeout(timer);
       writes = this.#queuedWrites.splice(0);
-      if (writes.length === 0) return;
       const prepared = await Promise.all(writes.map(async (queued) => queued.prepare()));
       const transaction = this.database.transaction(
         [REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE],

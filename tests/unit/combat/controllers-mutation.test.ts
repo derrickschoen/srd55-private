@@ -25,6 +25,7 @@ import {
   damageType,
   dieSides,
   encounterEffectId,
+  feet,
   worldObjectId,
   type CombatantId,
 } from '../../../src/combat/values';
@@ -88,6 +89,25 @@ function withEvents(state: EncounterState, events: readonly EncounterEvent[]): E
     ...state,
     eventLog: [...state.eventLog, ...events],
     nextEventSequence: state.nextEventSequence + events.length,
+  };
+}
+
+function withMovementRemaining(
+  state: EncounterState,
+  id: CombatantId,
+  remaining: number,
+): EncounterState {
+  return {
+    ...state,
+    combatants: state.combatants.map((combatant) => combatant.profile.id === id
+      ? {
+          ...combatant,
+          turn: {
+            ...combatant.turn,
+            movement: { ...combatant.turn.movement, remaining: feet(remaining) },
+          },
+        }
+      : combatant),
   };
 }
 
@@ -324,6 +344,39 @@ describe('controller mutation contract: movement and listed-action validation', 
 
     await expect(new AlgorithmController().choose(request, new AbortController().signal))
       .rejects.toThrow('Controller request has no legal actions.');
+  });
+
+  it('uses the owned player movement budget instead of DM-only combatant fields', async () => {
+    const actor = playerProfile('player-budget', { initiativeBonus: 20 });
+    const enemy = monsterProfile('player-budget-enemy', { initiativeBonus: -20 });
+    const state = stateAtPositions([
+      { profile: actor, column: 0 },
+      { profile: enemy, column: 8 },
+    ]);
+    const request = playerRequest(state, actor.id, [move(actor.id, 1)]);
+
+    await expect(chooseAction(request)).resolves.toEqual(move(actor.id, 1));
+  });
+
+  it('looks up the movement budget for the command actor rather than the first combatant', async () => {
+    const first = playerProfile('budget-first', { initiativeBonus: 20 });
+    const mover = playerProfile('budget-mover', { initiativeBonus: 0 });
+    const enemy = monsterProfile('budget-enemy', { initiativeBonus: -20 });
+    let state = stateAtPositions([
+      { profile: first, column: 0 },
+      { profile: mover, column: 2 },
+      { profile: enemy, column: 8 },
+    ]);
+    state = withMovementRemaining(state, first.id, 30);
+    state = withMovementRemaining(state, mover.id, 5);
+    const request = dmRequest(state, first.id, [{
+      type: 'move',
+      actor: mover.id,
+      path: [{ column: 4, row: 1 }],
+      cause: 'voluntary',
+    }]);
+
+    await expect(chooseAction(request)).rejects.toThrow('Controller request has no legal actions.');
   });
 
   it('accepts exactly listed actions and only strict matching movement prefixes', () => {
@@ -815,6 +868,25 @@ describe('controller mutation contract: player-character ranking', () => {
       { type: 'dodge', actor: actor.id },
       decline,
     ]))).toBe(decline);
+
+    const fallback: EncounterCommand = {
+      type: 'activate_action_surge',
+      actor: actor.id,
+      effectId: encounterEffectId('effect:rank-fallback'),
+    };
+    expect(await chooseAction(dmRequest(base, actor.id, [fallback, decline]))).toBe(decline);
+
+    const heal: EncounterCommand = {
+      type: 'heal',
+      actor: actor.id,
+      target: actor.id,
+      amount: 1,
+      cost: 'action',
+    };
+    expect(await chooseAction(dmRequest(base, actor.id, [
+      { type: 'end_turn', actor: actor.id },
+      heal,
+    ]))).toBe(heal);
   });
 
   it('ignores an adjacent ally when deciding whether ranged repositioning would provoke', async () => {
@@ -977,6 +1049,25 @@ describe('controller mutation contract: monster ranking', () => {
       { type: 'end_turn', actor: actor.id },
       { type: 'dodge', actor: actor.id },
     ]))).toEqual({ type: 'dodge', actor: actor.id });
+
+    const fallback: EncounterCommand = {
+      type: 'activate_action_surge',
+      actor: actor.id,
+      effectId: encounterEffectId('effect:monster-rank-fallback'),
+    };
+    expect(await chooseAction(dmRequest(state, actor.id, [fallback, decline]))).toBe(decline);
+
+    const heal: EncounterCommand = {
+      type: 'heal',
+      actor: actor.id,
+      target: actor.id,
+      amount: 1,
+      cost: 'action',
+    };
+    expect(await chooseAction(dmRequest(state, actor.id, [
+      { type: 'end_turn', actor: actor.id },
+      heal,
+    ]))).toBe(heal);
   });
 });
 
@@ -1092,6 +1183,46 @@ describe('controller mutation contract: turn-program enumeration', () => {
       { program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } }, score: 0 },
     ]);
     expect(canonicalJson(candidates)).not.toContain(String(ally.id));
+  });
+
+  it('uses the specifically targeted hostile when a different enemy is first', () => {
+    const actor = playerProfile('legal-specific-pc', { initiativeBonus: 20 });
+    const first = monsterProfile('legal-specific-first', { hitPoints: 2, initiativeBonus: 0 });
+    const target = monsterProfile('legal-specific-target', { hitPoints: 8, initiativeBonus: -20 });
+    const state = stateAtPositions([
+      { profile: actor, column: 0 },
+      { profile: first, column: 1 },
+      { profile: target, column: 4 },
+    ]);
+    const candidates = new AlgorithmController().enumerateTurnPrograms(
+      dmVisibleEncounter(projectDmView(state)),
+      actor.id,
+      { actions: [
+        attack(actor.id, target.id, 'attack:specific-target'),
+        spell(actor.id, 'ray-of-frost', [target.id]),
+      ] },
+      20,
+    );
+
+    expect(candidates.map((candidate) => candidate.program)).toEqual([
+      {
+        kind: 'action',
+        action: {
+          kind: 'cast_spell',
+          spellId: 'ray-of-frost',
+          target: { kind: 'combatant', combatantId: target.id },
+        },
+      },
+      {
+        kind: 'action',
+        action: {
+          kind: 'attack',
+          target: { kind: 'combatant', combatantId: target.id },
+          attackId: 'attack:specific-target',
+        },
+      },
+      { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+    ]);
   });
 
   it('omits an absent attack id and adds neither move nor dash without matching legal commands', () => {
@@ -1225,6 +1356,14 @@ describe('controller mutation contract: turn-program enumeration', () => {
         .toThrow('Algorithm turn candidate limit must be a positive integer.');
     },
   );
+
+  it('accepts the exact minimum candidate limit', () => {
+    const actor = playerProfile('minimum-program-limit', { initiativeBonus: 20 });
+    const enemy = monsterProfile('minimum-program-limit-enemy', { initiativeBonus: -20 });
+    const visible = dmVisibleEncounter(projectDmView(startedState([actor, enemy])));
+
+    expect(new AlgorithmController().enumerateTurnPrograms(visible, actor.id, 1)).toHaveLength(1);
+  });
 
   it('rejects missing and non-living actors with the exact contract error', () => {
     const actor = playerProfile('invalid-program-actor', { initiativeBonus: 20 });
