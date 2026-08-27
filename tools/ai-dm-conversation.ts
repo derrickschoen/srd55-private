@@ -8,13 +8,12 @@ import type { MonsterAction } from '../src/combat/statblock';
 import { combatantId, type CombatantId } from '../src/combat/values';
 import {
   arenaMonsterActions,
-  arenaTokenPosition,
   declareArenaIntent,
   resolveArenaTarget,
   type ArenaIntent,
 } from '../src/vtt/arena-legality';
 import { mcpRequestMeta } from '../src/vtt/mcp/handler';
-import { decodeArenaIntent, loadArenaFixture } from './engine-mcp-server';
+import { loadArenaFixture } from './engine-mcp-server';
 
 export const CONVERSATION_ARMS = ['M', 'C'] as const;
 export type ConversationArm = (typeof CONVERSATION_ARMS)[number];
@@ -165,8 +164,8 @@ function mcpPrompt(state: EncounterState, round: number, bootstrap: boolean): st
       ? 'You are the persistent Dungeon Master decision process for this fight. Ground every choice through the engine MCP tools.'
       : 'Resume the same persistent fight decision process and use the engine MCP tools again for the new round.',
     `This is experimental round ${String(round)}.`,
-    'Call state_summary, then combatant_options for each living monster. Use reach_check/path_cost as needed.',
-    'Call declare_intent exactly once for each living monster. Choose actions and movement willingness; never emit coordinates.',
+    'Call engine.get_turn_context once, then engine.submit_round_intents once for every required monster.',
+    'Use engine.submit_intent only for a separately controlled single-actor request. Choose semantic targets; never emit coordinates.',
     'After the tool calls, return exactly one JSON object and no prose with the same intents you declared.',
     `Living monsters: ${canonicalJson(livingMonsterIds(state))}`,
     `Reply shape: ${canonicalJson(INTENT_CONTRACT)}`,
@@ -278,7 +277,7 @@ async function runCodexTurn(
     }
     const toolNames = root?.['type'] === 'item.completed' ? eventToolNames(event) : [];
     toolCalls += toolNames.length;
-    if (timeToFirstAction === null && toolNames.some((name) => name.endsWith('declare_intent'))) {
+    if (timeToFirstAction === null && toolNames.some((name) => name.endsWith('submit_intent') || name.endsWith('submit_round_intents'))) {
       timeToFirstAction = performance.now() - started;
     }
     const text = eventAgentText(event);
@@ -317,6 +316,27 @@ function decodeDeclaredIntents(value: unknown, expected: readonly CombatantId[])
   for (const id of expected) if (!actual.includes(id)) throw new TypeError(`${id}: intent is missing.`);
   for (const id of actual) if (!expected.includes(id)) throw new TypeError(`${id}: actor is not a living monster.`);
   return intents;
+}
+
+function decodeArenaIntent(value: unknown): ArenaIntent {
+  const input = asRecord(value);
+  if (input === null) throw new TypeError('intent must be an object.');
+  const action = input['action'];
+  const targetId = input['targetId'];
+  const maxMovementFeet = input['maxMovementFeet'];
+  const acceptMelee = input['acceptMelee'];
+  if (typeof action !== 'string' || typeof targetId !== 'string' ||
+    !Number.isSafeInteger(maxMovementFeet) || typeof acceptMelee !== 'boolean') {
+    throw new TypeError('intent action, targetId, maxMovementFeet, or acceptMelee is invalid.');
+  }
+  const fallback = input['fallback'];
+  return {
+    action,
+    targetId: combatantId(targetId),
+    maxMovementFeet: maxMovementFeet as number,
+    acceptMelee,
+    fallback: fallback === null ? null : decodeArenaIntent({ ...asRecord(fallback), fallback: null }),
+  };
 }
 
 function resolvableAction(actions: readonly MonsterAction[]): MonsterAction | null {
@@ -423,7 +443,7 @@ async function stopMcpClient(client: McpClient): Promise<void> {
 async function scriptedMcpRound(
   config: ConversationConfig,
   fixturePath: string,
-  state: EncounterState,
+  _state: EncounterState,
   intents: readonly DeclaredIntent[],
 ): Promise<{ readonly toolCalls: number; readonly timeToFirstAction: number; readonly wall: number }> {
   const started = performance.now();
@@ -433,35 +453,53 @@ async function scriptedMcpRound(
   try {
     await mcpRequest(client, 'server/discover', {});
     await mcpRequest(client, 'tools/list', {});
-    await mcpRequest(client, 'tools/call', { name: 'state_summary', arguments: {} });
-    toolCalls += 1;
-    for (const declaration of intents) {
-      await mcpRequest(client, 'tools/call', {
-        name: 'combatant_options', arguments: { id: declaration.id },
-      });
-      toolCalls += 1;
-      const targetPosition = arenaTokenPosition(state, combatantId(declaration.intent.targetId));
-      if (targetPosition !== null) {
-        await mcpRequest(client, 'tools/call', {
-          name: 'path_cost', arguments: { id: declaration.id, to: targetPosition },
-        });
-        toolCalls += 1;
-      }
-      await mcpRequest(client, 'tools/call', {
-        name: 'reach_check',
-        arguments: {
-          id: declaration.id,
-          targetId: declaration.intent.targetId,
-          action: declaration.intent.action,
-        },
-      });
-      toolCalls += 1;
-      await mcpRequest(client, 'tools/call', {
-        name: 'declare_intent', arguments: declaration,
-      });
-      toolCalls += 1;
-      if (firstAction === null) firstAction = performance.now() - started;
+    const contextResult = asRecord(await mcpRequest(client, 'tools/call', {
+      name: 'engine.get_turn_context',
+      arguments: {
+        run_id: 'encounter:engine-mcp',
+        expected_revision: 1,
+        scope: 'round',
+      },
+    }));
+    if (contextResult === null || contextResult['isError'] !== false) {
+      throw new Error('engine.get_turn_context failed in the dry-run client.');
     }
+    const context = asRecord(contextResult['structuredContent']);
+    const currentStateRef = context === null ? null : asRecord(context['state_ref']);
+    if (currentStateRef === null) throw new Error('engine.get_turn_context omitted state_ref.');
+    toolCalls += 1;
+    const declaration = intents[0];
+    if (declaration === undefined) throw new Error('The dry-run fixture has no scripted intent.');
+    const intent = {
+      actor_id: declaration.id,
+      choice: {
+        kind: 'attack',
+        action_id: declaration.intent.action,
+        target: { kind: 'combatant', combatant_id: declaration.intent.targetId },
+      },
+      movement: {
+        willingness: declaration.intent.maxMovementFeet === 0 ? 'none' : 'only_if_required',
+        maximum_feet: declaration.intent.maxMovementFeet,
+        opportunity_risk: 'accept_if_needed',
+      },
+      engagement: { stance: declaration.intent.acceptMelee ? 'close_to_melee' : 'maintain_range' },
+      fallback: null,
+    };
+    const submitResult = asRecord(await mcpRequest(client, 'tools/call', {
+      name: 'engine.submit_intent',
+      arguments: {
+        state_ref: currentStateRef,
+        request_id: 'request:engine-mcp',
+        phase: 'initial',
+        idempotency_key: `dry-run-submit-${String(declaration.id)}`.slice(0, 200),
+        intent,
+      },
+    }));
+    toolCalls += 1;
+    if (submitResult === null || submitResult['isError'] !== false) {
+      throw new Error('engine.submit_intent failed in the dry-run client.');
+    }
+    firstAction = performance.now() - started;
   } finally {
     await stopMcpClient(client);
   }

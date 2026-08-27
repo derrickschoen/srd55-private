@@ -27,7 +27,7 @@ describe('AI-DM persistent conversation harness', () => {
     expect(rows.map((row) => [row.arm, row.round])).toEqual([
       ['M', 1], ['M', 2], ['C', 1], ['C', 2],
     ]);
-    expect(rows.filter((row) => row.arm === 'C').every((row) => row.toolCalls > 0)).toBe(true);
+    expect(rows.filter((row) => row.arm === 'C').map((row) => row.toolCalls)).toEqual([2, 2]);
     expect(rows.every((row) => row.tokens.input === 0 && row.tokens.output === 0)).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n')).toHaveLength(4);
   });

@@ -1,5 +1,9 @@
 import { combatantsAreAllies } from '../combat/allies';
 import {
+  canCombatantSee,
+  coverTierBetween,
+  coverTierBetweenObjects,
+  detectCombatant,
   encounterMonsterActions,
   encounterMovementWorld,
   type EncounterCombatantState,
@@ -82,6 +86,16 @@ export interface EngineQueryPort {
   ): CombatantId | null;
   path(state: EncounterState, request: EnginePathRequest): EnginePathResult;
   reach(state: EncounterState, request: EngineReachRequest): EngineReachResult;
+  cover(state: EncounterState, actorId: CombatantId, targetId: CombatantId): {
+    readonly tier: 'none' | 'half' | 'three_quarters' | 'total';
+    readonly sourceIds: readonly string[];
+  } | null;
+  visibility(state: EncounterState, actorId: CombatantId, targetId: CombatantId): {
+    readonly visible: boolean;
+    readonly reciprocal: boolean;
+    readonly sense: 'normal_sight' | 'darkvision' | 'blindsight' | 'truesight' | 'unknown';
+    readonly reason: string | null;
+  } | null;
 }
 
 export function engineAttackRangeFeet(action: MonsterAttackAction): number {
@@ -159,7 +173,9 @@ function resolveTarget(
   if (selector.kind === 'most_injured_visible_ally') {
     return positionedCandidates(
       state,
-      (candidate) => candidate.life !== 'dead' && combatantsAreAllies(state, actorId, candidate.profile.id),
+      (candidate) => candidate.life !== 'dead' &&
+        combatantsAreAllies(state, actorId, candidate.profile.id) &&
+        canCombatantSee(state, actorId, candidate.profile.id),
     ).sort((left, right) =>
       (left.combatant.hitPoints / left.combatant.profile.rules.hitPointMaximum) -
         (right.combatant.hitPoints / right.combatant.profile.rules.hitPointMaximum) ||
@@ -170,7 +186,13 @@ function resolveTarget(
     : origin;
   const enemies = positionedCandidates(
     state,
-    (candidate) => candidate.life !== 'dead' && !combatantsAreAllies(state, actorId, candidate.profile.id),
+    (candidate) => candidate.life !== 'dead' &&
+      !combatantsAreAllies(state, actorId, candidate.profile.id) &&
+      (
+        selector.kind === 'current_threat' ||
+        selector.kind === 'enemy_threatening_ally' ||
+        canCombatantSee(state, actorId, candidate.profile.id)
+      ),
   );
   if (selector.kind === 'lowest_hp_visible_enemy') {
     enemies.sort((left, right) =>
@@ -272,6 +294,33 @@ const engineQueryPort: EngineQueryPort = {
   resolveTarget,
   path,
   reach,
+  cover(state, actorId, targetId) {
+    const from = state.tokens.find((token) => token.combatantId === actorId)?.position;
+    const to = state.tokens.find((token) => token.combatantId === targetId)?.position;
+    if (from === undefined || to === undefined) return null;
+    return {
+      tier: coverTierBetween(state, from, to),
+      sourceIds: state.worldObjects
+        .filter((object) => coverTierBetweenObjects([object], from, to) !== 'none')
+        .map((object) => String(object.id))
+        .sort(),
+    };
+  },
+  visibility(state, actorId, targetId) {
+    if (
+      !state.combatants.some((candidate) => candidate.profile.id === actorId) ||
+      !state.combatants.some((candidate) => candidate.profile.id === targetId) ||
+      !state.tokens.some((token) => token.combatantId === actorId) ||
+      !state.tokens.some((token) => token.combatantId === targetId)
+    ) return null;
+    const detection = detectCombatant(state, actorId, targetId);
+    return {
+      visible: canCombatantSee(state, actorId, targetId),
+      reciprocal: canCombatantSee(state, targetId, actorId),
+      sense: detection.kind === 'seen' ? detection.sense : 'unknown',
+      reason: detection.kind === 'undetected' ? detection.reason : null,
+    };
+  },
 };
 
 export const canonicalEngineQueryPort: EngineQueryPort = Object.freeze(engineQueryPort);

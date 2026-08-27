@@ -47,7 +47,10 @@ describe('engine MCP stdio protocol', () => {
 
     const discovered = await request('server/discover', {});
     const listed = await request('tools/list', {});
-    const called = await request('tools/call', { name: 'state_summary', arguments: {} });
+    const called = await request('tools/call', {
+      name: 'engine.get_turn_context',
+      arguments: { run_id: 'encounter:engine-mcp', expected_revision: 1, scope: 'round' },
+    });
     child.stdin.end();
 
     expect(discovered).toMatchObject({
@@ -71,17 +74,25 @@ describe('engine MCP stdio protocol', () => {
     });
     const tools = listResult['tools'];
     expect(Array.isArray(tools) ? tools.map((tool) => record(tool)['name']) : []).toEqual([
-      'state_summary',
-      'combatant_options',
-      'path_cost',
-      'reach_check',
-      'declare_intent',
+      'engine.get_turn_context',
+      'engine.get_state_summary',
+      'engine.get_combatant_options',
+      'engine.query_path',
+      'engine.query_reach',
+      'engine.query_cover',
+      'engine.query_visibility',
+      'engine.query_dice_expectation',
+      'engine.validate_intent',
+      'engine.submit_round_intents',
+      'engine.submit_intent',
+      'engine.emit_narration',
+      'engine.request_dm_adjudication',
     ]);
     const callResult = record(called['result']);
     expect(callResult).toMatchObject({ resultType: 'complete', isError: false });
     const structured = record(callResult['structuredContent']);
-    expect(structured['round']).toBe(0);
-    expect(Array.isArray(structured['combatants'])).toBe(true);
+    expect(record(structured['summary'])['round']).toBe(0);
+    expect(Array.isArray(structured['actors'])).toBe(true);
     expect(record((callResult['content'] as readonly unknown[])[0])['text'])
       .toBe(JSON.stringify(callResult['structuredContent']));
     expect(await exit).toBe(0);

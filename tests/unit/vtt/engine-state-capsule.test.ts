@@ -22,7 +22,12 @@ import { pureIntentResolver } from '../../../src/vtt/intent-resolver';
 import { generateRoom } from '../../../src/vtt/room-generator';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
-const capsuleEntry = resolve(repoRoot, 'src/vtt/engine-state-capsule.ts');
+const authorityBoundaryEntries = [
+  resolve(repoRoot, 'src/vtt/engine-state-capsule.ts'),
+  resolve(repoRoot, 'src/vtt/mcp/handler.ts'),
+  resolve(repoRoot, 'src/vtt/mcp/schemas.ts'),
+  resolve(repoRoot, 'src/vtt/mcp/engine-server.ts'),
+] as const;
 
 function runtimeModuleSpecifiers(path: string): readonly string[] {
   const source = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.ESNext, false);
@@ -60,11 +65,11 @@ function resolveLocalImport(importer: string, specifier: string): string | null 
 }
 
 function forbiddenCapsuleImportChain(): readonly string[] | null {
-  const forbidden = /(?:session-persistence|session-encounter-reducer|combat\/random|combat\/coordinator)\.ts$/u;
-  const pending: { readonly path: string; readonly chain: readonly string[] }[] = [{
-    path: capsuleEntry,
-    chain: [relative(repoRoot, capsuleEntry)],
-  }];
+  const forbidden = /(?:session-persistence|session-encounter-reducer|combat\/random|combat\/coordinator|save-manager|local-session-store)\.ts$/u;
+  const pending: { readonly path: string; readonly chain: readonly string[] }[] = authorityBoundaryEntries.map((path) => ({
+    path,
+    chain: [relative(repoRoot, path)],
+  }));
   const seen = new Set<string>();
   while (pending.length > 0) {
     const current = pending.shift();
@@ -119,7 +124,7 @@ function capsuleFixture() {
 }
 
 describe('read-only engine state capsule', () => {
-  it('has no reducer, journal, coordinator, or RNG module in its runtime import graph', () => {
+  it('has no reducer, journal, coordinator, store, or RNG module in the capsule or MCP runtime import graphs', () => {
     const chain = forbiddenCapsuleImportChain();
     expect(
       chain,
