@@ -76,3 +76,27 @@ disagreement does not change any ordering.
 
 Raw artifacts: `~/.claude/jobs/c68ffdd0/tmp/model-probe/` (prompt, 18 logs,
 judge packet + key, three judge verdicts, aggregate script).
+
+## Addendum — powered reliability run (2026-08-27, 10 reps/config, same fixture)
+
+Engine-refusal legality over 10 fresh reps (plus the original 3 in parens):
+
+| Config | Clean reps | Refusals per rep | Wall median |
+|---|---|---|---:|
+| terra medium | 5/10 (5/13) | 2,0,0,4,0,0,2,0,2,4 | ~19.4s |
+| terra low | 2/10 (3/13) | 0,1,1,3,1,1,1,2,0,4 | ~19.9s |
+| **luna low** | **0/10 (1/13)** | 1,2,1,5,1,2,1,1,2,1 | ~19.2s |
+
+The owner's correction was right and the original probe's small-n read was
+noise: at n=13 **luna low is the LEAST legal of the three** (1/13 clean) and
+terra medium the most (5/13), consistent with the prior that terra is the
+smarter model. Within terra, the fastest reps (~10s) carry the worst refusal
+counts (3–4) — it trades legality for speed when it answers quickly.
+
+Consequences: (1) the D394.2 game-time-tier choice should be re-tested with
+KB + correction-loop attached before binding to luna — raw legality is not
+final quality once the engine feedback round (8/10 one-round convergence) is
+in the loop; (2) the KB result sharpens: against a baseline where luna low
+is almost never clean, the kitchen-sink arm's 3/3 clean at equal-or-better
+latency is a larger effect than first stated, though still n=3 and one
+fixture.
