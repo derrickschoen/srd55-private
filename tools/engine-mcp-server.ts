@@ -1,6 +1,7 @@
 import { createInterface } from 'node:readline';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { z } from 'zod';
 import type { EncounterState } from '../src/combat/encounter';
 import type { GridCell } from '../src/combat/grid';
 import { combatantId, type CombatantId } from '../src/combat/values';
@@ -12,120 +13,109 @@ import {
   type PrototypeIntent,
   type PrototypeIntentChoice,
 } from '../src/vtt/intent-resolver';
+import {
+  createMcpHandler,
+  jsonRpcParseError,
+  type JsonRpcResponse,
+  type McpHandler,
+  type McpToolBinding,
+  type McpToolDescriptor,
+  type SchemaViolation,
+} from '../src/vtt/mcp/handler';
 
-const MCP_PROTOCOL_VERSION = '2025-03-26';
-
-type JsonRpcId = string | number | null;
-
-interface JsonRpcRequest {
-  readonly jsonrpc: '2.0';
-  readonly id?: JsonRpcId;
-  readonly method: string;
-  readonly params?: unknown;
-}
-
-interface JsonRpcResponse {
-  readonly jsonrpc: '2.0';
-  readonly id: JsonRpcId;
-  readonly result?: unknown;
-  readonly error?: {
-    readonly code: number;
-    readonly message: string;
-  };
-}
-
-interface McpTool {
-  readonly name: string;
-  readonly description: string;
-  readonly inputSchema: Readonly<Record<string, unknown>>;
-}
-
-const CELL_SCHEMA = {
+const EMPTY_ARGUMENTS_SCHEMA = z.object({}).strict();
+const CELL_SCHEMA = z.object({
+  column: z.number().int().nonnegative(),
+  row: z.number().int().nonnegative(),
+}).strict();
+const INTENT_CHOICE_SCHEMA = z.object({
+  action: z.string().min(1),
+  targetId: z.string().min(1),
+  maxMovementFeet: z.number().int().nonnegative().multipleOf(5),
+  acceptMelee: z.boolean(),
+}).strict();
+const ARENA_INTENT_SCHEMA = INTENT_CHOICE_SCHEMA.extend({
+  fallback: z.union([z.null(), INTENT_CHOICE_SCHEMA]),
+}).strict();
+const COMBATANT_ARGUMENTS_SCHEMA = z.object({ id: z.string().min(1) }).strict();
+const PATH_ARGUMENTS_SCHEMA = z.object({
+  id: z.string().min(1),
+  to: CELL_SCHEMA,
+}).strict();
+const REACH_ARGUMENTS_SCHEMA = z.object({
+  id: z.string().min(1),
+  targetId: z.string().min(1),
+  action: z.string().min(1),
+}).strict();
+const INTENT_ARGUMENTS_SCHEMA = z.object({
+  id: z.string().min(1),
+  intent: ARENA_INTENT_SCHEMA,
+}).strict();
+const OUTPUT_OBJECT_SCHEMA = Object.freeze({
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
-  additionalProperties: false,
-  required: ['column', 'row'],
-  properties: {
-    column: { type: 'integer', minimum: 0 },
-    row: { type: 'integer', minimum: 0 },
-  },
-} as const;
+} as const);
 
-const INTENT_CHOICE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['action', 'targetId', 'maxMovementFeet', 'acceptMelee'],
-  properties: {
-    action: { type: 'string', minLength: 1 },
-    targetId: { type: 'string', minLength: 1 },
-    maxMovementFeet: { type: 'integer', minimum: 0, multipleOf: 5 },
-    acceptMelee: { type: 'boolean' },
-  },
-} as const;
+function jsonSchema(schema: z.ZodType<unknown>): Readonly<Record<string, unknown>> {
+  return Object.freeze(z.toJSONSchema(schema, { target: 'draft-2020-12', io: 'input' }));
+}
 
-export const ENGINE_MCP_TOOLS: readonly McpTool[] = [
+interface PrototypeToolSpec {
+  readonly descriptor: McpToolDescriptor;
+  readonly argumentsSchema: z.ZodType<unknown>;
+}
+
+const ENGINE_MCP_TOOL_SPECS: readonly PrototypeToolSpec[] = [
   {
-    name: 'state_summary',
-    description: 'Summarize combatants, hit points, positions, terrain, and the current round.',
-    inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+    descriptor: {
+      name: 'state_summary',
+      description: 'Summarize combatants, hit points, positions, terrain, and the current round.',
+      inputSchema: jsonSchema(EMPTY_ARGUMENTS_SCHEMA),
+      outputSchema: OUTPUT_OBJECT_SCHEMA,
+    },
+    argumentsSchema: EMPTY_ARGUMENTS_SCHEMA,
   },
   {
-    name: 'combatant_options',
-    description: 'List a combatant statblock actions, movement budget, and current constraints.',
-    inputSchema: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['id'],
-      properties: { id: { type: 'string', minLength: 1 } },
+    descriptor: {
+      name: 'combatant_options',
+      description: 'List a combatant statblock actions, movement budget, and current constraints.',
+      inputSchema: jsonSchema(COMBATANT_ARGUMENTS_SCHEMA),
+      outputSchema: OUTPUT_OBJECT_SCHEMA,
     },
+    argumentsSchema: COMBATANT_ARGUMENTS_SCHEMA,
   },
   {
-    name: 'path_cost',
-    description: 'Resolve the terrain- and occupancy-aware path cost to a grid cell.',
-    inputSchema: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['id', 'to'],
-      properties: {
-        id: { type: 'string', minLength: 1 },
-        to: CELL_SCHEMA,
-      },
+    descriptor: {
+      name: 'path_cost',
+      description: 'Resolve the terrain- and occupancy-aware path cost to a grid cell.',
+      inputSchema: jsonSchema(PATH_ARGUMENTS_SCHEMA),
+      outputSchema: OUTPUT_OBJECT_SCHEMA,
     },
+    argumentsSchema: PATH_ARGUMENTS_SCHEMA,
   },
   {
-    name: 'reach_check',
-    description: 'Check whether a named statblock action can reach a hostile target now.',
-    inputSchema: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['id', 'targetId', 'action'],
-      properties: {
-        id: { type: 'string', minLength: 1 },
-        targetId: { type: 'string', minLength: 1 },
-        action: { type: 'string', minLength: 1 },
-      },
+    descriptor: {
+      name: 'reach_check',
+      description: 'Check whether a named statblock action can reach a hostile target now.',
+      inputSchema: jsonSchema(REACH_ARGUMENTS_SCHEMA),
+      outputSchema: OUTPUT_OBJECT_SCHEMA,
     },
+    argumentsSchema: REACH_ARGUMENTS_SCHEMA,
   },
   {
-    name: 'declare_intent',
-    description: 'Validate and geometrically resolve a primary combat intent and declarative fallback without mutating state.',
-    inputSchema: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['id', 'intent'],
-      properties: {
-        id: { type: 'string', minLength: 1 },
-        intent: {
-          ...INTENT_CHOICE_SCHEMA,
-          required: [...INTENT_CHOICE_SCHEMA.required, 'fallback'],
-          properties: {
-            ...INTENT_CHOICE_SCHEMA.properties,
-            fallback: { oneOf: [{ type: 'null' }, INTENT_CHOICE_SCHEMA] },
-          },
-        },
-      },
+    descriptor: {
+      name: 'declare_intent',
+      description: 'Validate and geometrically resolve a primary combat intent and declarative fallback without mutating state.',
+      inputSchema: jsonSchema(INTENT_ARGUMENTS_SCHEMA),
+      outputSchema: OUTPUT_OBJECT_SCHEMA,
     },
+    argumentsSchema: INTENT_ARGUMENTS_SCHEMA,
   },
 ] as const;
+
+export const ENGINE_MCP_TOOLS: readonly McpToolDescriptor[] = Object.freeze(
+  ENGINE_MCP_TOOL_SPECS.map((spec) => spec.descriptor),
+);
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -275,78 +265,51 @@ export function callEngineTool(
   }
 }
 
-function parseRequest(value: unknown): JsonRpcRequest {
-  const candidate = record(value, 'JSON-RPC request');
-  if (candidate['jsonrpc'] !== '2.0') throw new TypeError('jsonrpc must equal 2.0.');
-  const method = stringField(candidate, 'method');
-  const id = candidate['id'];
-  if (id !== undefined && id !== null && typeof id !== 'string' && typeof id !== 'number') {
-    throw new TypeError('JSON-RPC id must be a string, number, or null.');
-  }
-  return {
-    jsonrpc: '2.0',
-    ...(id === undefined ? {} : { id }),
-    method,
-    ...(candidate['params'] === undefined ? {} : { params: candidate['params'] }),
-  };
+function jsonPointer(path: readonly PropertyKey[]): string {
+  if (path.length === 0) return '$';
+  return path.reduce<string>((pointer, segment) => {
+    const escaped = String(segment).replaceAll('~', '~0').replaceAll('/', '~1');
+    return `${pointer}/${escaped}`;
+  }, '');
 }
 
-function toolResult(value: unknown): unknown {
-  return {
-    content: [{ type: 'text', text: JSON.stringify(value) }],
-    structuredContent: value,
-  };
+function validateArguments(
+  schema: z.ZodType<unknown>,
+  value: unknown,
+): readonly SchemaViolation[] {
+  const decoded = schema.safeParse(value);
+  if (decoded.success) return [];
+  return decoded.error.issues.map((issue) => ({
+    path: jsonPointer(issue.path),
+    keyword: issue.code,
+    message: issue.message,
+  }));
 }
 
-export function handleMcpRequest(
+function validateOutput(value: unknown): readonly SchemaViolation[] {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? []
+    : [{ path: '$', keyword: 'type', message: 'must be an object.' }];
+}
+
+export function createEngineMcpHandler(
   state: EncounterState,
-  request: JsonRpcRequest,
-): JsonRpcResponse | null {
-  if (request.id === undefined) return null;
-  switch (request.method) {
-    case 'initialize': {
-      const params = request.params === undefined ? {} : record(request.params, 'initialize params');
-      const requestedVersion = params['protocolVersion'];
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        result: {
-          protocolVersion: typeof requestedVersion === 'string' ? requestedVersion : MCP_PROTOCOL_VERSION,
-          capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'dnd-wt-vtt-engine', version: '1.0.0' },
-        },
-      };
-    }
-    case 'ping': return { jsonrpc: '2.0', id: request.id, result: {} };
-    case 'tools/list': return { jsonrpc: '2.0', id: request.id, result: { tools: ENGINE_MCP_TOOLS } };
-    case 'tools/call': {
-      try {
-        const params = record(request.params, 'tools/call params');
-        const name = stringField(params, 'name');
-        return {
-          jsonrpc: '2.0',
-          id: request.id,
-          result: toolResult(callEngineTool(state, name, params['arguments'] ?? {})),
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          jsonrpc: '2.0',
-          id: request.id,
-          result: {
-            isError: true,
-            content: [{ type: 'text', text: message }],
-          },
-        };
-      }
-    }
-    default:
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        error: { code: -32601, message: `Method not found: ${request.method}` },
-      };
-  }
+  maximumToolResultBytes?: number,
+): McpHandler {
+  const tools: readonly McpToolBinding[] = ENGINE_MCP_TOOL_SPECS.map((spec) => ({
+    descriptor: spec.descriptor,
+    validateArguments: (value: unknown) => validateArguments(spec.argumentsSchema, value),
+    validateOutput,
+    execute: (value: unknown) => callEngineTool(state, spec.descriptor.name, value),
+  }));
+  return createMcpHandler({
+    tools,
+    ...(maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes }),
+  });
+}
+
+export function handleMcpRequest(state: EncounterState, message: unknown): JsonRpcResponse | null {
+  return createEngineMcpHandler(state).handle(message);
 }
 
 export async function loadArenaFixture(path: string): Promise<EncounterState> {
@@ -363,22 +326,18 @@ export async function loadArenaFixture(path: string): Promise<EncounterState> {
 
 export async function runEngineMcpServer(fixturePath: string): Promise<void> {
   const state = await loadArenaFixture(resolve(fixturePath));
+  const handler = createEngineMcpHandler(state);
   const lines = createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY });
   for await (const line of lines) {
     if (line.trim().length === 0) continue;
-    let response: JsonRpcResponse | null;
+    let decoded: unknown;
     try {
-      response = handleMcpRequest(state, parseRequest(JSON.parse(line) as unknown));
-    } catch (error) {
-      response = {
-        jsonrpc: '2.0',
-        id: null,
-        error: {
-          code: -32700,
-          message: error instanceof Error ? error.message : String(error),
-        },
-      };
+      decoded = JSON.parse(line) as unknown;
+    } catch {
+      process.stdout.write(`${JSON.stringify(jsonRpcParseError())}\n`);
+      continue;
     }
+    const response = handler.handle(decoded);
     if (response !== null) process.stdout.write(`${JSON.stringify(response)}\n`);
   }
 }

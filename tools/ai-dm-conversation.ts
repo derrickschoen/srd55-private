@@ -13,6 +13,7 @@ import {
   resolveArenaTarget,
   type ArenaIntent,
 } from '../src/vtt/arena-legality';
+import { mcpRequestMeta } from '../src/vtt/mcp/handler';
 import { decodeArenaIntent, loadArenaFixture } from './engine-mcp-server';
 
 export const CONVERSATION_ARMS = ['M', 'C'] as const;
@@ -393,7 +394,17 @@ function startMcpClient(config: ConversationConfig, fixturePath: string): McpCli
 async function mcpRequest(client: McpClient, method: string, params: unknown): Promise<unknown> {
   const id = client.nextId;
   client.nextId += 1;
-  client.child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+  const requestParams = asRecord(params);
+  if (requestParams === null) throw new TypeError('MCP request params must be an object.');
+  client.child.stdin.write(`${JSON.stringify({
+    jsonrpc: '2.0',
+    id,
+    method,
+    params: {
+      ...requestParams,
+      _meta: mcpRequestMeta({ name: 'ai-dm-conversation-dry-run', version: '1.0.0' }),
+    },
+  })}\n`);
   const line = await client.iterator.next();
   if (line.done) throw new Error(`Engine MCP server closed early: ${client.stderr}`);
   const response = asRecord(JSON.parse(line.value) as unknown);
@@ -420,12 +431,7 @@ async function scriptedMcpRound(
   let toolCalls = 0;
   let firstAction: number | null = null;
   try {
-    await mcpRequest(client, 'initialize', {
-      protocolVersion: '2025-03-26',
-      capabilities: {},
-      clientInfo: { name: 'ai-dm-conversation-dry-run', version: '1.0.0' },
-    });
-    client.child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+    await mcpRequest(client, 'server/discover', {});
     await mcpRequest(client, 'tools/list', {});
     await mcpRequest(client, 'tools/call', { name: 'state_summary', arguments: {} });
     toolCalls += 1;

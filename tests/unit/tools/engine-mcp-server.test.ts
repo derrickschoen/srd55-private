@@ -2,6 +2,11 @@ import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { describe, expect, it } from 'vitest';
+import {
+  MCP_PROTOCOL_VERSION,
+  MCP_STATIC_LIST_TTL_MS,
+  mcpRequestMeta,
+} from '../../../src/vtt/mcp/handler';
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -11,7 +16,7 @@ function record(value: unknown): Readonly<Record<string, unknown>> {
 }
 
 describe('engine MCP stdio protocol', () => {
-  it('initializes, lists tools, and calls a loaded encounter tool', { timeout: 20_000 }, async () => {
+  it('discovers, lists tools, and calls a loaded encounter tool', { timeout: 20_000 }, async () => {
     const child = spawn(process.execPath, [
       resolve('node_modules/vite-node/vite-node.mjs'),
       resolve('tools/engine-mcp-server.ts'),
@@ -26,28 +31,45 @@ describe('engine MCP stdio protocol', () => {
     let id = 0;
     const request = async (method: string, params: unknown): Promise<Readonly<Record<string, unknown>>> => {
       id += 1;
-      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+      child.stdin.write(`${JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method,
+        params: {
+          ...record(params),
+          _meta: mcpRequestMeta({ name: 'vitest', version: '1.0.0' }),
+        },
+      })}\n`);
       const line = await iterator.next();
       if (line.done) throw new Error('MCP server closed before responding.');
       return record(JSON.parse(line.value) as unknown);
     };
 
-    const initialized = await request('initialize', {
-      protocolVersion: '2025-03-26',
-      capabilities: {},
-      clientInfo: { name: 'vitest', version: '1.0.0' },
-    });
-    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+    const discovered = await request('server/discover', {});
     const listed = await request('tools/list', {});
     const called = await request('tools/call', { name: 'state_summary', arguments: {} });
     child.stdin.end();
 
-    expect(initialized).toMatchObject({
+    expect(discovered).toMatchObject({
       jsonrpc: '2.0',
       id: 1,
-      result: { protocolVersion: '2025-03-26' },
+      result: {
+        resultType: 'complete',
+        supportedVersions: [MCP_PROTOCOL_VERSION],
+        capabilities: {
+          tools: { listChanged: false },
+          resources: { subscribe: true, listChanged: true },
+          prompts: { listChanged: true },
+        },
+      },
     });
-    const tools = record(listed['result'])['tools'];
+    const listResult = record(listed['result']);
+    expect(listResult).toMatchObject({
+      resultType: 'complete',
+      ttlMs: MCP_STATIC_LIST_TTL_MS,
+      cacheScope: 'public',
+    });
+    const tools = listResult['tools'];
     expect(Array.isArray(tools) ? tools.map((tool) => record(tool)['name']) : []).toEqual([
       'state_summary',
       'combatant_options',
@@ -56,9 +78,12 @@ describe('engine MCP stdio protocol', () => {
       'declare_intent',
     ]);
     const callResult = record(called['result']);
+    expect(callResult).toMatchObject({ resultType: 'complete', isError: false });
     const structured = record(callResult['structuredContent']);
     expect(structured['round']).toBe(0);
     expect(Array.isArray(structured['combatants'])).toBe(true);
+    expect(record((callResult['content'] as readonly unknown[])[0])['text'])
+      .toBe(JSON.stringify(callResult['structuredContent']));
     expect(await exit).toBe(0);
   });
 });
