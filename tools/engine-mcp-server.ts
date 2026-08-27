@@ -5,15 +5,13 @@ import type { EncounterState } from '../src/combat/encounter';
 import type { GridCell } from '../src/combat/grid';
 import { combatantId, type CombatantId } from '../src/combat/values';
 import {
-  arenaCombatant,
-  arenaMonsterActions,
-  arenaPathCost,
-  arenaReachCheck,
-  arenaTokenPosition,
-  declareArenaIntent,
-  type ArenaIntent,
-  type ArenaIntentChoice,
-} from '../src/vtt/arena-legality';
+  canonicalEngineQueryPort,
+} from '../src/vtt/engine-query-port';
+import {
+  resolvePrototypeIntent,
+  type PrototypeIntent,
+  type PrototypeIntentChoice,
+} from '../src/vtt/intent-resolver';
 
 const MCP_PROTOCOL_VERSION = '2025-03-26';
 
@@ -161,7 +159,7 @@ function decodeCell(value: unknown): GridCell {
   return { column: integerField(candidate, 'column'), row: integerField(candidate, 'row') };
 }
 
-function decodeIntentChoice(value: unknown, label: string): ArenaIntentChoice {
+function decodeIntentChoice(value: unknown, label: string): PrototypeIntentChoice {
   const candidate = record(value, label);
   return {
     action: stringField(candidate, 'action'),
@@ -171,7 +169,7 @@ function decodeIntentChoice(value: unknown, label: string): ArenaIntentChoice {
   };
 }
 
-export function decodeArenaIntent(value: unknown): ArenaIntent {
+export function decodeArenaIntent(value: unknown): PrototypeIntent {
   const candidate = record(value, 'intent');
   const fallback = candidate['fallback'];
   if (fallback === undefined) throw new TypeError('intent.fallback is required.');
@@ -192,7 +190,7 @@ function stateSummary(state: EncounterState): unknown {
       hitPoints: subject.hitPoints,
       hitPointMaximum: subject.profile.rules.hitPointMaximum,
       life: subject.life,
-      position: arenaTokenPosition(state, subject.profile.id),
+      position: canonicalEngineQueryPort.tokenPosition(state, subject.profile.id),
     })),
     terrainFeatures: {
       blockedCells: state.blockedCells,
@@ -209,16 +207,16 @@ function stateSummary(state: EncounterState): unknown {
 }
 
 function combatantOptions(state: EncounterState, id: CombatantId): unknown {
-  const subject = arenaCombatant(state, id);
+  const subject = canonicalEngineQueryPort.combatant(state, id);
   if (subject === null) return { legal: false, refusals: [`${id}: combatant is absent`] };
   return {
     legal: true,
     id,
-    actions: arenaMonsterActions(state, id),
+    actions: canonicalEngineQueryPort.actions(state, id),
     movementBudget: subject.profile.rules.speed,
     currentConstraints: {
       life: subject.life,
-      placed: arenaTokenPosition(state, id) !== null,
+      placed: canonicalEngineQueryPort.tokenPosition(state, id) !== null,
       effects: state.effects
         .filter((effect) => effect.targets.includes(id))
         .map((effect) => ({ id: effect.id, kind: effect.payload.kind })),
@@ -241,20 +239,34 @@ export function callEngineTool(
     case 'path_cost': {
       const id = combatantId(stringField(args, 'id'));
       const destination = decodeCell(args['to']);
-      const path = arenaPathCost(state, id, destination);
-      return path === null
+      const path = canonicalEngineQueryPort.path(state, {
+        actorId: id,
+        destination,
+        movement: 'normal',
+        maximumFeet: state.bounds.columns * state.bounds.rows * 10,
+      });
+      return !path.legal
         ? { legal: false, refusals: [`${id}: destination is blocked, occupied, outside the grid, or unreachable`] }
-        : { legal: true, cost: path.cost, resolvedPath: path.cells };
+        : { legal: true, cost: path.costFeet, resolvedPath: path.cells };
     }
     case 'reach_check':
-      return arenaReachCheck(
-        state,
-        combatantId(stringField(args, 'id')),
-        combatantId(stringField(args, 'targetId')),
-        stringField(args, 'action'),
-      );
+      {
+        const actorId = combatantId(stringField(args, 'id'));
+        const targetId = combatantId(stringField(args, 'targetId'));
+        const actionId = stringField(args, 'action');
+        const result = canonicalEngineQueryPort.reach(state, { actorId, targetId, actionId });
+        return result.legal
+          ? result
+          : {
+              legal: false,
+              refusals: result.codes.map((code) =>
+                code === 'target_out_of_range'
+                  ? `${actorId}: target is outside ${actionId} reach/range`
+                  : `${actorId}: ${code}`),
+            };
+      }
     case 'declare_intent':
-      return declareArenaIntent(
+      return resolvePrototypeIntent(
         state,
         combatantId(stringField(args, 'id')),
         decodeArenaIntent(args['intent']),

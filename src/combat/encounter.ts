@@ -6182,38 +6182,43 @@ function applyMonsterOnHitEffects(
   });
 }
 
+/**
+ * Canonical action registry for a combatant's current physical form.
+ * Consumers must use this instead of rebuilding a statblock from a profile id:
+ * imported monsters and form replacements are authoritative here as well.
+ */
+export function encounterMonsterActions(
+  state: EncounterState,
+  actor: CombatantId,
+): readonly MonsterAction[] {
+  const subject = combatant(state, actor);
+  if (subject.wildShape !== undefined) return subject.wildShape.physical.actions;
+  if (subject.form !== undefined) return subject.form.availableActions;
+  if (subject.profile.kind !== 'monster') return [];
+  const statblockId = subject.profile.statblockId;
+  for (const pack of state.contentPacks ?? []) {
+    const imported = pack.monsters.find((monster) => monster.statblock.id === statblockId);
+    if (imported !== undefined) return imported.actions;
+  }
+  const lookup = lookupBundledMonster(String(statblockId));
+  if (lookup.status !== 'resolved' || lookup.entry.kind !== 'static') return [];
+  const decoded = lookup.entry.statblock.sourceDetails.actions;
+  return decoded.kind === 'present' ? decoded.value : [];
+}
+
 function declaredMonsterAction(
   state: EncounterState,
   actor: CombatantId,
   actionId: string,
 ): MonsterAction {
   const subject = combatant(state, actor);
-  const wildShapeAction = subject.wildShape?.physical.actions.find((candidate) => candidate.id === actionId);
-  if (wildShapeAction !== undefined) return wildShapeAction;
+  const action = encounterMonsterActions(state, actor).find((candidate) => candidate.id === actionId);
+  if (action !== undefined) return action;
   if (subject.wildShape !== undefined) {
     throw new EncounterRuleError('validation', `Combatant ${actor} must use an attack from Wild Shape form ${subject.wildShape.formId}.`);
   }
-  const formAction = subject.form?.availableActions.find((candidate) => candidate.id === actionId);
-  if (formAction !== undefined) return formAction;
   if (subject.form !== undefined) {
     throw new EncounterRuleError('validation', `Combatant ${actor} must use an attack from form ${subject.form.formId}.`);
-  }
-  if (subject.profile.kind !== 'monster') {
-    throw new EncounterRuleError('validation', `Combatant ${actor} has no monster action ${actionId}.`);
-  }
-  const statblockId = subject.profile.statblockId;
-  for (const pack of state.contentPacks ?? []) {
-    const imported = pack.monsters.find((monster) => monster.statblock.id === statblockId);
-    const action = imported?.actions.find((candidate) => candidate.id === actionId);
-    if (action !== undefined) return action;
-  }
-  const lookup = lookupBundledMonster(String(statblockId));
-  if (lookup.status === 'resolved' && lookup.entry.kind === 'static') {
-    const decoded = lookup.entry.statblock.sourceDetails.actions;
-    const action = decoded.kind === 'present'
-      ? decoded.value.find((candidate) => candidate.id === actionId)
-      : undefined;
-    if (action !== undefined) return action;
   }
   throw new EncounterRuleError('validation', `Combatant ${actor} has no declared monster action ${actionId}.`);
 }
