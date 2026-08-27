@@ -37,6 +37,7 @@ import type {
   EncounterEnvironment,
   WorldObject,
 } from '../combat/world-objects';
+import { exactOrder } from '../domain/exact-table';
 import {
   dmWorldObjectOverrideCommand,
   worldObjectClassActionCommands,
@@ -109,8 +110,8 @@ const cinderWaveTwo = [
   roster('cinder-wave-2-a', 'statblock:goblin-warrior', 'Vane Spear', 13, 1, { kind: 'alarm_wave', waveId: 'cinder-second-beat', delayRounds: 2 }),
 ] as const;
 
-export const VANE_WARREN_FIGHTS = [
-  {
+const VANE_WARREN_FIGHTS_BY_ID = {
+  'cinder-rite': {
     id: 'cinder-rite',
     name: 'The Cinder Rite',
     leaderRosterId: 'ashmaw',
@@ -126,7 +127,7 @@ export const VANE_WARREN_FIGHTS = [
     legendaryActionPool: 0,
     targetActionEconomyRatio: 0.8,
   },
-  {
+  'iron-voice': {
     id: 'iron-voice',
     name: 'The Iron Voice',
     leaderRosterId: 'marshal-kett',
@@ -138,7 +139,7 @@ export const VANE_WARREN_FIGHTS = [
     legendaryActionPool: 1,
     targetActionEconomyRatio: 0.4,
   },
-  {
+  'last-muster': {
     id: 'last-muster',
     name: 'The Last Muster',
     leaderRosterId: 'commander-sablehook',
@@ -152,7 +153,12 @@ export const VANE_WARREN_FIGHTS = [
     legendaryActionPool: 0,
     targetActionEconomyRatio: 0.4,
   },
-] as const satisfies readonly VaneWarrenFight[];
+} as const satisfies Readonly<Record<VaneWarrenFightId, VaneWarrenFight>>;
+
+export const VANE_WARREN_FIGHTS = exactOrder(
+  VANE_WARREN_FIGHTS_BY_ID,
+  VANE_WARREN_FIGHT_IDS,
+);
 
 export type VaneWarrenRehearsalScenario = 'default' | 'tpk-clean' | 'tpk-recovery';
 
@@ -163,7 +169,7 @@ export interface VaneWarrenTpkScenarioConfig {
   readonly recovery: 'none' | 'revivify_and_dm_override';
   readonly startingReinforcements: readonly VaneWarrenRosterEntry[];
   readonly playerPositions: readonly GridCell[];
-  readonly enemyPositions: Readonly<Record<string, GridCell>>;
+  readonly enemyPositions: Readonly<Record<VaneWarrenTpkEnemyRosterId, GridCell>>;
 }
 
 const TPK_INITIAL_REINFORCEMENTS = [
@@ -185,7 +191,23 @@ const TPK_PLAYER_POSITIONS = [
   { column: 2, row: 5 },
 ] as const;
 
-const TPK_ENEMY_POSITIONS: Readonly<Record<string, GridCell>> = {
+/** Manually curated completeness oracle; it is not derived from the table. */
+export const VANE_WARREN_TPK_REQUIRED_ENEMY_ROSTER_IDS = [
+  'ashmaw',
+  'cinder-guard-b',
+  'cinder-wave-1-a',
+  'cinder-wave-2-a',
+  'doomed-crocodile',
+  'doomed-crocodile-second',
+  'doomed-crocodile-third',
+  'doomed-crocodile-fourth',
+  'doomed-crocodile-fifth',
+  'doomed-crocodile-sixth',
+] as const;
+export type VaneWarrenTpkEnemyRosterId =
+  (typeof VANE_WARREN_TPK_REQUIRED_ENEMY_ROSTER_IDS)[number];
+
+const TPK_ENEMY_POSITIONS = {
   ashmaw: { column: 4, row: 3 },
   'cinder-guard-b': { column: 4, row: 4 },
   'cinder-wave-1-a': { column: 4, row: 5 },
@@ -196,7 +218,17 @@ const TPK_ENEMY_POSITIONS: Readonly<Record<string, GridCell>> = {
   'doomed-crocodile-fourth': { column: 3, row: 2 },
   'doomed-crocodile-fifth': { column: 3, row: 6 },
   'doomed-crocodile-sixth': { column: 3, row: 7 },
-};
+} as const satisfies Readonly<Record<VaneWarrenTpkEnemyRosterId, GridCell>>;
+
+function tpkEnemyPosition(
+  positions: Readonly<Record<VaneWarrenTpkEnemyRosterId, GridCell>>,
+  rosterId: string,
+): GridCell | undefined {
+  for (const requiredId of VANE_WARREN_TPK_REQUIRED_ENEMY_ROSTER_IDS) {
+    if (requiredId === rosterId) return positions[requiredId];
+  }
+  return undefined;
+}
 
 /** Rehearsal-only composition variants. Every combatant uses an existing statblock unchanged. */
 export const VANE_WARREN_TPK_SCENARIOS = {
@@ -510,7 +542,9 @@ export function createVaneWarrenFight(
         return {
         id: profile.tokenId,
         combatantId: profile.id,
-        position: scenarioConfig?.enemyPositions[entry.id] ?? entry.position,
+        position: scenarioConfig === null
+          ? entry.position
+          : tpkEnemyPosition(scenarioConfig.enemyPositions, entry.id) ?? entry.position,
         };
       }),
     ],

@@ -16,6 +16,7 @@ import {
   VANE_WARREN_FIGHTS,
   VANE_WARREN_SOUND_DRUM_ACTION_ID,
   VANE_WARREN_TPK_SCENARIOS,
+  VANE_WARREN_TPK_REQUIRED_ENEMY_ROSTER_IDS,
   advanceVaneWarrenAlarm,
   breakVaneWarrenOilCask,
   composeVaneWarrenFight,
@@ -214,6 +215,16 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
       .toEqual(VANE_WARREN_TPK_SCENARIOS['tpk-recovery'].startingReinforcements);
     expect(VANE_WARREN_TPK_SCENARIOS['tpk-clean'].recovery).toBe('none');
     expect(VANE_WARREN_TPK_SCENARIOS['tpk-recovery'].recovery).toBe('revivify_and_dm_override');
+    for (const scenario of ['tpk-clean', 'tpk-recovery'] as const) {
+      const positions = VANE_WARREN_TPK_SCENARIOS[scenario].enemyPositions;
+      expect(
+        VANE_WARREN_TPK_REQUIRED_ENEMY_ROSTER_IDS.every((rosterId) =>
+          Object.hasOwn(positions, rosterId)),
+      ).toBe(true);
+      expect(Object.keys(positions)).toHaveLength(
+        VANE_WARREN_TPK_REQUIRED_ENEMY_ROSTER_IDS.length,
+      );
+    }
     expect(VANE_WARREN_TPK_SCENARIOS['tpk-clean'].enemyPositions).toEqual({
       ashmaw: { column: 4, row: 3 },
       'cinder-guard-b': { column: 4, row: 4 },

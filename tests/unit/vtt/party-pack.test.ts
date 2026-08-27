@@ -299,6 +299,92 @@ const REPLAY_COORDINATOR: PersistedCoordinatorState = {
 };
 
 describe('external party-pack boundary', () => {
+  it('consumes returned validation issues in deterministic one-error and multi-error order', () => {
+    const validPacket = {
+      damageType: { kind: 'fixed' as const, damageType: 'Force' as const },
+      dice: {
+        baseCount: 1,
+        sides: 6 as const,
+        modifier: 0,
+        perSlotCount: 0,
+        perSlotModifier: 0,
+        cantripUpgrade: false,
+      },
+      scaling: { kind: 'none' as const },
+      thresholdRider: null,
+    };
+    const effect = {
+      effectId: 'effect:validation-adapter',
+      kind: 'damage_operation' as const,
+      trigger: 'action' as const,
+      saveDc: 14,
+      delivery: {
+        kind: 'save' as const,
+        ability: 'dexterity' as const,
+        rollMode: 'normal' as const,
+        onSuccess: 'none' as const,
+      },
+      instancesPerTarget: 1,
+      packets: [validPacket],
+      timing: { kind: 'immediate' as const },
+    };
+
+    expect(externalPartyPackFeatureEffectSchema.safeParse(effect).success).toBe(true);
+
+    const oneError = structuredClone(effect);
+    oneError.packets[0]!.dice.perSlotCount = 1;
+    const oneErrorResult = externalPartyPackFeatureEffectSchema.safeParse(oneError);
+    expect(oneErrorResult.success).toBe(false);
+    if (oneErrorResult.success) throw new Error('One-error feature unexpectedly parsed.');
+    expect(oneErrorResult.error.issues.map((issue) => ({ path: issue.path, message: issue.message })))
+      .toEqual([{
+        path: [],
+        message: 'Feature damage cannot use spell-slot or cantrip scaling.',
+      }]);
+
+    const multiError = structuredClone(effect);
+    multiError.packets = [
+      { ...validPacket, dice: { ...validPacket.dice, perSlotCount: 1 } },
+      { ...validPacket, dice: { ...validPacket.dice, cantripUpgrade: true } },
+    ];
+    const multiErrorResult = externalPartyPackFeatureEffectSchema.safeParse(multiError);
+    expect(multiErrorResult.success).toBe(false);
+    if (multiErrorResult.success) throw new Error('Multi-error feature unexpectedly parsed.');
+    expect(multiErrorResult.error.issues.map((issue) => ({ path: issue.path, message: issue.message })))
+      .toEqual([
+        { path: [], message: 'Feature damage cannot use spell-slot or cantrip scaling.' },
+        { path: [], message: 'Feature damage cannot use spell-slot or cantrip scaling.' },
+      ]);
+  });
+
+  it('preserves returned rule paths when the loader consumes attack issues', () => {
+    const candidate = structuredClone(pack());
+    const firstAttack = candidate.members[0]!.attacks[0]!;
+    firstAttack.masteryProperty = 'Topple';
+    candidate.members[0]!.attacks.push({
+      ...firstAttack,
+      attackId: 'attack:invalid-slow-save',
+      masteryProperty: 'Slow',
+      masterySaveDc: 12,
+    });
+
+    const result = loadExternalPartyPack(candidate);
+    expect(result.status).toBe('refused');
+    expect(result.gaps.map((gap) => ({
+      featurePath: gap.featurePath,
+      reason: gap.engineRefusalReason,
+    }))).toEqual([
+      {
+        featurePath: 'members.0.attacks.0.masterySaveDc',
+        reason: 'value_not_in_engine_vocabulary',
+      },
+      {
+        featurePath: 'members.0.attacks.1.masterySaveDc',
+        reason: 'value_not_in_engine_vocabulary',
+      },
+    ]);
+  });
+
   it('loads executable party-pack v2 world operations and refuses malformed nested specs', () => {
     const candidate = structuredClone(pack());
     candidate.members[0]!.worldOperations = [{

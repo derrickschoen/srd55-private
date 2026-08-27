@@ -19,6 +19,7 @@ const PROBE_PROJECT = 'tests/fixtures/compiler-probe/tsconfig.json';
 const NEGATIVE_PROBES = [
   'docs/type-probes/homebrew-unions.probe.ts',
   'docs/type-probes/homebrew-effect-registry.probe.ts',
+  'docs/type-probes/party-pack-prevention.probe.ts',
 ] as const;
 
 interface CompilerProbeResult {
@@ -134,8 +135,9 @@ describe('the app has an emit-safe public type surface', () => {
   it('rejects every closed-union and registry probe', () => {
     const compiled = result();
     const expectedDiagnostics = expectedNegativeDiagnosticLocations();
+    const negativeProbeNames = NEGATIVE_PROBES.map((probe) => `${probe}:`);
     const actualDiagnostics = diagnosticLocations(compiled.diagnostics).filter(
-      (location) => location.startsWith('docs/type-probes/homebrew-'),
+      (location) => negativeProbeNames.some((probe) => location.startsWith(probe)),
     );
 
     expect(compiled.status, compiled.diagnostics).not.toBe(0);

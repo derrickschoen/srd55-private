@@ -9,6 +9,7 @@
   "include": [
     "../../../src",
     "../../../docs/type-probes/homebrew-unions.probe.ts",
-    "../../../docs/type-probes/homebrew-effect-registry.probe.ts"
+    "../../../docs/type-probes/homebrew-effect-registry.probe.ts",
+    "../../../docs/type-probes/party-pack-prevention.probe.ts"
   ]
 }

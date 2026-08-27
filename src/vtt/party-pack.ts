@@ -39,6 +39,7 @@ import {
 import type { WorldOperation } from '../combat/world-objects';
 import { abilities, creatureSizes, damageTypes, skills, weaponMasteryProperties, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import { hitDieSizes, type HitDieSize } from '../domain/enums';
+import { exactValues } from '../domain/exact-table';
 import { SRD_CLASS_NAMES } from '../rules/class-traits-srd';
 import {
   createGapReport,
@@ -90,6 +91,59 @@ const PARTY_PACK_PATH_SEPARATOR: '.' = '.';
 const PARTY_PACK_ROOT_ENTRY: 'party-pack:root' = 'party-pack:root';
 const MISSING_EFFECT_KIND: 'missing_effect_kind' = 'missing_effect_kind';
 const EXTERNAL_COMBATANT_ID_PREFIX: 'combatant:' = 'combatant:';
+const ATTACK_KINDS = exactValues<'melee' | 'ranged'>()('melee', 'ranged');
+const WORLD_OBJECT_KINDS = exactValues<
+  'barrier' | 'cover' | 'door' | 'hazard' | 'light-source' | 'summoned-terrain' | 'generic'
+>()('barrier', 'cover', 'door', 'hazard', 'light-source', 'summoned-terrain', 'generic');
+const DAMAGE_RESPONSES = exactValues<
+  'normal' | 'resistant' | 'vulnerable' | 'resistant_and_vulnerable' | 'immune'
+>()('normal', 'resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune');
+const NON_NORMAL_DAMAGE_RESPONSES = exactValues<
+  'resistant' | 'vulnerable' | 'resistant_and_vulnerable' | 'immune'
+>()('resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune');
+const COVER_KINDS = exactValues<'none' | 'half' | 'three_quarters' | 'total'>()(
+  'none', 'half', 'three_quarters', 'total',
+);
+const WORLD_OPERATION_COSTS = exactValues<'action' | 'bonus_action' | 'reaction' | 'none'>()(
+  'action', 'bonus_action', 'reaction', 'none',
+);
+const WORLD_OBJECT_REMOVAL_REASONS = exactValues<'destroyed' | 'dismissed'>()(
+  'destroyed', 'dismissed',
+);
+const ROLL_MODES = exactValues<'normal' | 'advantage' | 'disadvantage'>()(
+  'normal', 'advantage', 'disadvantage',
+);
+const LIGHT_LEVELS = exactValues<'bright' | 'dim' | 'darkness'>()(
+  'bright', 'dim', 'darkness',
+);
+const RESOURCE_RECHARGES = exactValues<'short_rest' | 'long_rest'>()(
+  'short_rest', 'long_rest',
+);
+const ACTIVATED_EFFECT_TRIGGERS = exactValues<
+  'always_on' | 'action' | 'bonus_action' | 'reaction'
+>()('always_on', 'action', 'bonus_action', 'reaction');
+const DAMAGE_RIDER_TRIGGERS = exactValues<'on_hit' | 'on_crit'>()('on_hit', 'on_crit');
+const TURN_BOUNDARIES = exactValues<'start' | 'end'>()('start', 'end');
+const SAVE_SUCCESS_OUTCOMES = exactValues<'none' | 'half'>()('none', 'half');
+const PERSISTENT_AREA_HOOKS = exactValues<
+  'on_enter' | 'on_start_of_turn_inside' | 'on_end_of_turn_inside' | 'on_exit'
+>()('on_enter', 'on_start_of_turn_inside', 'on_end_of_turn_inside', 'on_exit');
+const PERSISTENT_AREA_FREQUENCIES = exactValues<'once_per_turn' | 'every_trigger'>()(
+  'once_per_turn', 'every_trigger',
+);
+const ACTION_OR_BONUS_ACTION = exactValues<'action' | 'bonus_action'>()(
+  'action', 'bonus_action',
+);
+const ACTION_BONUS_OR_REACTION = exactValues<'action' | 'bonus_action' | 'reaction'>()(
+  'action', 'bonus_action', 'reaction',
+);
+const ATTACK_ROLL_MODES = exactValues<'advantage' | 'disadvantage'>()(
+  'advantage', 'disadvantage',
+);
+const PERSISTENT_AREA_ORIGINS = exactValues<'self' | 'selected'>()('self', 'selected');
+const PERSISTENT_AREA_TARGET_FILTERS = exactValues<'all' | 'allies' | 'enemies'>()(
+  'all', 'allies', 'enemies',
+);
 const integerSchema = z.number().int().safe();
 const modifierSchema = integerSchema.min(-30).max(30);
 const classLevelSchema = integerSchema.min(1).max(20);
@@ -136,6 +190,38 @@ function schemaPathFor<T>() {
   return <const Path extends SchemaNestedPaths<T>>(...parts: Path): Path => parts;
 }
 
+export type PartyPackValidationIssue = Parameters<z.RefinementCtx['addIssue']>[0];
+export type PartyPackRule<T> = (value: T) => readonly PartyPackValidationIssue[];
+
+function customValidationIssue(
+  message: string,
+  path?: readonly PropertyKey[],
+): PartyPackValidationIssue {
+  return path === undefined
+    ? { code: 'custom', message }
+    : { code: 'custom', path: [...path], message };
+}
+
+function issueWhen(
+  invalid: boolean,
+  message: string,
+  path?: readonly PropertyKey[],
+): readonly PartyPackValidationIssue[] {
+  return invalid ? [customValidationIssue(message, path)] : [];
+}
+
+/** The sole Zod side-effect adapter; every individual check returns issues. */
+function refinementFromRules<T>(
+  rules: readonly PartyPackRule<T>[],
+): (value: T, context: z.RefinementCtx<T>) => void {
+  return (value: T, context: z.RefinementCtx<T>): void => {
+    const issues = rules.flatMap(
+      (rule): readonly PartyPackValidationIssue[] => rule(value),
+    );
+    for (const issue of issues) context.addIssue(issue);
+  };
+}
+
 const classSchema = z.strictObject({
   classId: z.enum(SRD_CLASS_NAMES),
   level: classLevelSchema,
@@ -143,7 +229,7 @@ const classSchema = z.strictObject({
 
 const attackObjectSchema = z.strictObject({
   attackId: attackIdSchema,
-  kind: z.enum(['melee', 'ranged']),
+  kind: z.enum(ATTACK_KINDS),
   attackBonus: modifierSchema,
   criticalFloor: integerSchema.min(2).max(20),
   reachFeet: distanceSchema,
@@ -158,22 +244,20 @@ const attackObjectSchema = z.strictObject({
   })).min(1).max(20),
 });
 const attackSchemaPath = schemaPathFor<z.infer<typeof attackObjectSchema>>();
-const attackSchema = attackObjectSchema.superRefine((attack, context) => {
-  if (attack.masteryProperty === 'Topple' && attack.masterySaveDc === undefined) {
-    context.addIssue({
-      code: 'custom',
-      path: [...attackSchemaPath('masterySaveDc')],
-      message: 'Topple mastery requires its sourced save DC.',
-    });
-  }
-  if (attack.masteryProperty !== 'Topple' && attack.masterySaveDc !== undefined) {
-    context.addIssue({
-      code: 'custom',
-      path: [...attackSchemaPath('masterySaveDc')],
-      message: 'Only Topple mastery carries a save DC.',
-    });
-  }
-});
+type AttackInput = z.infer<typeof attackObjectSchema>;
+const ATTACK_RULES = [
+  (attack: AttackInput): readonly PartyPackValidationIssue[] => issueWhen(
+    attack.masteryProperty === 'Topple' && attack.masterySaveDc === undefined,
+    'Topple mastery requires its sourced save DC.',
+    attackSchemaPath('masterySaveDc'),
+  ),
+  (attack: AttackInput): readonly PartyPackValidationIssue[] => issueWhen(
+    attack.masteryProperty !== 'Topple' && attack.masterySaveDc !== undefined,
+    'Only Topple mastery carries a save DC.',
+    attackSchemaPath('masterySaveDc'),
+  ),
+] as const satisfies readonly PartyPackRule<AttackInput>[];
+const attackSchema = attackObjectSchema.superRefine(refinementFromRules(ATTACK_RULES));
 
 const gridCellSchema = z.strictObject({
   column: integerSchema.min(0).max(100_000),
@@ -183,7 +267,7 @@ const gridCellSchema = z.strictObject({
 const externalWorldObjectObjectSchema = z.strictObject({
   objectId: worldObjectIdSchema,
   name: z.string().trim().min(1).max(1_000),
-  kind: z.enum(['barrier', 'cover', 'door', 'hazard', 'light-source', 'summoned-terrain', 'generic']),
+  kind: z.enum(WORLD_OBJECT_KINDS),
   position: gridCellSchema,
   footprint: z.array(gridCellSchema).min(1).max(400),
   durability: z.discriminatedUnion('kind', [
@@ -197,24 +281,27 @@ const externalWorldObjectObjectSchema = z.strictObject({
   armorClass: integerSchema.min(0).max(100),
   damageResponses: z.array(z.strictObject({
     damageTypeId: z.enum(damageTypes),
-    response: z.enum(['normal', 'resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune']),
+    response: z.enum(DAMAGE_RESPONSES),
   })).max(damageTypes.length),
   blocking: z.strictObject({
     movement: z.boolean(),
     lineOfSight: z.boolean(),
-    cover: z.enum(['none', 'half', 'three_quarters', 'total']),
+    cover: z.enum(COVER_KINDS),
   }),
 });
 const externalWorldObjectSchemaPath = schemaPathFor<z.infer<typeof externalWorldObjectObjectSchema>>();
-const externalWorldObjectSchema = externalWorldObjectObjectSchema.superRefine((object, context) => {
-  if (object.durability.kind === 'hit_points' && object.durability.hitPoints > object.durability.maximumHitPoints) {
-    context.addIssue({
-      code: 'custom',
-      path: [...externalWorldObjectSchemaPath('durability', 'hitPoints')],
-      message: 'Object Hit Points cannot exceed its maximum.',
-    });
-  }
-});
+type ExternalWorldObjectInput = z.infer<typeof externalWorldObjectObjectSchema>;
+const EXTERNAL_WORLD_OBJECT_RULES = [
+  (object: ExternalWorldObjectInput): readonly PartyPackValidationIssue[] => issueWhen(
+    object.durability.kind === 'hit_points' &&
+      object.durability.hitPoints > object.durability.maximumHitPoints,
+    'Object Hit Points cannot exceed its maximum.',
+    externalWorldObjectSchemaPath('durability', 'hitPoints'),
+  ),
+] as const satisfies readonly PartyPackRule<ExternalWorldObjectInput>[];
+const externalWorldObjectSchema = externalWorldObjectObjectSchema.superRefine(
+  refinementFromRules(EXTERNAL_WORLD_OBJECT_RULES),
+);
 
 const externalDamageRequestSchema = z.strictObject({
   terms: z.array(z.strictObject({
@@ -228,14 +315,14 @@ const externalDamageRequestSchema = z.strictObject({
 
 const externalWorldOperationObjectSchema = z.strictObject({
   operationId: worldOperationIdSchema,
-  cost: z.enum(['action', 'bonus_action', 'reaction', 'none']),
+  cost: z.enum(WORLD_OPERATION_COSTS),
   operation: z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('create_object'), object: externalWorldObjectSchema }),
     z.strictObject({
       kind: z.literal('modify_object'), objectId: worldObjectIdSchema,
       changes: z.strictObject({
         name: z.string().trim().min(1).max(1_000).optional(),
-        kind: z.enum(['barrier', 'cover', 'door', 'hazard', 'light-source', 'summoned-terrain', 'generic']).optional(),
+        kind: z.enum(WORLD_OBJECT_KINDS).optional(),
         position: gridCellSchema.optional(),
         footprint: z.array(gridCellSchema).min(1).max(400).optional(),
         durability: externalWorldObjectSchema.shape.durability.optional(),
@@ -246,7 +333,7 @@ const externalWorldOperationObjectSchema = z.strictObject({
     }),
     z.strictObject({
       kind: z.literal('remove_object'), objectId: worldObjectIdSchema,
-      reason: z.enum(['destroyed', 'dismissed']),
+      reason: z.enum(WORLD_OBJECT_REMOVAL_REASONS),
     }),
     z.strictObject({
       kind: z.literal('damage_object'), objectId: worldObjectIdSchema,
@@ -255,7 +342,7 @@ const externalWorldOperationObjectSchema = z.strictObject({
         z.strictObject({
           kind: z.literal('attack'), attackBonus: modifierSchema,
           criticalFloor: integerSchema.min(2).max(20),
-          rollMode: z.enum(['normal', 'advantage', 'disadvantage']),
+          rollMode: z.enum(ROLL_MODES),
         }),
       ]),
       damage: externalDamageRequestSchema,
@@ -268,44 +355,50 @@ const externalWorldOperationObjectSchema = z.strictObject({
     z.strictObject({
       kind: z.literal('set_light_level'),
       region: z.strictObject({ id: z.string().trim().min(1).max(200), cells: z.array(gridCellSchema).min(1).max(10_000) }),
-      level: z.enum(['bright', 'dim', 'darkness']),
+      level: z.enum(LIGHT_LEVELS),
     }),
   ]),
 });
 const externalWorldOperationSchemaPath = schemaPathFor<
   z.infer<typeof externalWorldOperationObjectSchema>
 >();
-const externalWorldOperationSchema = externalWorldOperationObjectSchema.superRefine((entry, context) => {
-  const operation = entry.operation;
-  if (operation.kind === 'create_object') {
-    const footprintKeys = operation.object.footprint.map((cell) => `${String(cell.column)},${String(cell.row)}`);
-    const positionKey = `${String(operation.object.position.column)},${String(operation.object.position.row)}`;
-    if (new Set(footprintKeys).size !== footprintKeys.length || !footprintKeys.includes(positionKey)) {
-      context.addIssue({
-        code: 'custom',
-        path: [...externalWorldOperationSchemaPath('operation', 'object', 'footprint')],
-        message: 'Object footprint must be unique and include position.',
-      });
-    }
-  }
-  if (operation.kind === 'modify_object' && Object.keys(operation.changes).length === 0) {
-    context.addIssue({
-      code: 'custom',
-      path: [...externalWorldOperationSchemaPath('operation', 'changes')],
-      message: 'Object modifications cannot be empty.',
-    });
-  }
-  if (operation.kind === 'transform_terrain' || operation.kind === 'set_light_level') {
-    const keys = operation.region.cells.map((cell) => `${String(cell.column)},${String(cell.row)}`);
-    if (new Set(keys).size !== keys.length) {
-      context.addIssue({
-        code: 'custom',
-        path: [...externalWorldOperationSchemaPath('operation', 'region', 'cells')],
-        message: 'Environment cells must be unique.',
-      });
-    }
-  }
-});
+type ExternalWorldOperationInput = z.infer<typeof externalWorldOperationObjectSchema>;
+const EXTERNAL_WORLD_OPERATION_RULES = [
+  (entry: ExternalWorldOperationInput): readonly PartyPackValidationIssue[] => {
+    if (entry.operation.kind !== 'create_object') return [];
+    const footprintKeys = entry.operation.object.footprint.map(
+      (cell): string => `${String(cell.column)},${String(cell.row)}`,
+    );
+    const positionKey = `${String(entry.operation.object.position.column)},${String(entry.operation.object.position.row)}`;
+    return issueWhen(
+      new Set(footprintKeys).size !== footprintKeys.length ||
+        !footprintKeys.includes(positionKey),
+      'Object footprint must be unique and include position.',
+      externalWorldOperationSchemaPath('operation', 'object', 'footprint'),
+    );
+  },
+  (entry: ExternalWorldOperationInput): readonly PartyPackValidationIssue[] => issueWhen(
+    entry.operation.kind === 'modify_object' &&
+      Object.keys(entry.operation.changes).length === 0,
+    'Object modifications cannot be empty.',
+    externalWorldOperationSchemaPath('operation', 'changes'),
+  ),
+  (entry: ExternalWorldOperationInput): readonly PartyPackValidationIssue[] => {
+    const operation = entry.operation;
+    if (operation.kind !== 'transform_terrain' && operation.kind !== 'set_light_level') return [];
+    const keys = operation.region.cells.map(
+      (cell): string => `${String(cell.column)},${String(cell.row)}`,
+    );
+    return issueWhen(
+      new Set(keys).size !== keys.length,
+      'Environment cells must be unique.',
+      externalWorldOperationSchemaPath('operation', 'region', 'cells'),
+    );
+  },
+] as const satisfies readonly PartyPackRule<ExternalWorldOperationInput>[];
+const externalWorldOperationSchema = externalWorldOperationObjectSchema.superRefine(
+  refinementFromRules(EXTERNAL_WORLD_OPERATION_RULES),
+);
 
 const spellSlotSchema = z.strictObject({
   level: spellSlotLevelSchema,
@@ -347,15 +440,15 @@ const startingConditionSchema = z.strictObject({
 export const externalPartyPackResourceSchema = z.strictObject({
   resourcePoolId: resourcePoolIdSchema,
   maximum: integerSchema.min(1).max(999),
-  recharge: z.enum(['short_rest', 'long_rest']),
+  recharge: z.enum(RESOURCE_RECHARGES),
 });
 
 const featureEffectBaseShape = {
   effectId: effectIdSchema,
   resourcePoolId: resourcePoolIdSchema.optional(),
 } as const;
-const activatedEffectTriggerSchema = z.enum(['always_on', 'action', 'bonus_action', 'reaction']);
-const damageRiderTriggerSchema = z.enum(['on_hit', 'on_crit']);
+const activatedEffectTriggerSchema = z.enum(ACTIVATED_EFFECT_TRIGGERS);
+const damageRiderTriggerSchema = z.enum(DAMAGE_RIDER_TRIGGERS);
 
 const effectDamageSchema = z.strictObject({
   damageTypeId: z.enum(damageTypes),
@@ -368,7 +461,39 @@ const nonExhaustionConditionNames = conditionNames.filter(
   (condition): condition is Exclude<ConditionName, 'Exhaustion'> => condition !== 'Exhaustion',
 );
 
-export const FEATURE_EFFECT_KINDS = [
+export type FeatureEffectKind =
+  | 'damage_operation'
+  | 'armed_weapon_hit_rider'
+  | 'damage_rider'
+  | 'once_per_turn_damage_rider'
+  | 'slot_spend_damage_rider'
+  | 'first_hit_damage_rider'
+  | 'bonus_action_attack_grant'
+  | 'extra_attack_count_override'
+  | 'action_surge'
+  | 'attack_roll_modifier'
+  | 'attack_roll_mode'
+  | 'reckless_attack_mode'
+  | 'armor_class_modifier'
+  | 'saving_throw_modifier'
+  | 'skill_modifier'
+  | 'temporary_hit_points'
+  | 'condition_application'
+  | 'exhaustion_application'
+  | 'movement_modifier'
+  | 'attack_ability_substitution'
+  | 'attack_damage_die_override'
+  | 'attack_reach_range_override'
+  | 'save_gated_banishment_on_hit'
+  | 'spell_damage_ability_modifier'
+  | 'timed_spellcasting_mode'
+  | 'attack_damage_type_choice'
+  | 'resource_die_maneuver'
+  | 'exploding_spell_damage_die'
+  | 'elemental_fury'
+  | 'persistent_area';
+
+export const FEATURE_EFFECT_KINDS = exactValues<FeatureEffectKind>()(
   'damage_operation',
   'armed_weapon_hit_rider',
   'damage_rider',
@@ -399,7 +524,7 @@ export const FEATURE_EFFECT_KINDS = [
   'exploding_spell_damage_die',
   'elemental_fury',
   'persistent_area',
-] as const;
+);
 
 const persistentAreaShapeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('sphere'), radiusFeet: distanceSchema.min(1) }),
@@ -415,8 +540,8 @@ const persistentAreaShapeSchema = z.discriminatedUnion('kind', [
 const persistentAreaLifetimeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('while_inside') }),
   z.strictObject({ kind: z.literal('area_duration') }),
-  z.strictObject({ kind: z.literal('fixed_rounds'), rounds: integerSchema.min(1).max(1_000_000), boundary: z.enum(['start', 'end']) }),
-  z.strictObject({ kind: z.literal('save_ends'), boundary: z.enum(['start', 'end']) }),
+  z.strictObject({ kind: z.literal('fixed_rounds'), rounds: integerSchema.min(1).max(1_000_000), boundary: z.enum(TURN_BOUNDARIES) }),
+  z.strictObject({ kind: z.literal('save_ends'), boundary: z.enum(TURN_BOUNDARIES) }),
 ]);
 
 const persistentAreaPayloadSchema = z.discriminatedUnion('kind', [
@@ -431,14 +556,14 @@ const persistentAreaEffectSpecSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('automatic'), payload: persistentAreaPayloadSchema }),
   z.strictObject({
     kind: z.literal('save_gated'), ability: z.enum(abilities), saveDc: integerSchema.min(1).max(50),
-    rollMode: z.enum(['normal', 'advantage', 'disadvantage']), onSuccess: z.enum(['none', 'half']),
+    rollMode: z.enum(ROLL_MODES), onSuccess: z.enum(SAVE_SUCCESS_OUTCOMES),
     payload: persistentAreaPayloadSchema,
   }),
 ]);
 
 const persistentAreaHookSchema = z.strictObject({
-  hook: z.enum(['on_enter', 'on_start_of_turn_inside', 'on_end_of_turn_inside', 'on_exit']),
-  frequency: z.enum(['once_per_turn', 'every_trigger']),
+  hook: z.enum(PERSISTENT_AREA_HOOKS),
+  frequency: z.enum(PERSISTENT_AREA_FREQUENCIES),
   effect: persistentAreaEffectSpecSchema,
 });
 
@@ -447,18 +572,22 @@ const persistentAreaDurationSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('concentration'), rounds: integerSchema.min(1).max(1_000_000) }),
 ]);
 
-const featureEffectSchema = z.discriminatedUnion('kind', [
+const ONCE_PER_TURN_QUALIFYING_GATES = exactValues<
+  (typeof damageRiderGates)[0] | (typeof damageRiderGates)[1]
+>()(damageRiderGates[0], damageRiderGates[1]);
+
+const featureEffectObjectSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     ...featureEffectBaseShape,
     kind: z.literal('damage_operation'),
-    trigger: z.enum(['action', 'bonus_action']),
+    trigger: z.enum(ACTION_OR_BONUS_ACTION),
     saveDc: integerSchema.min(1).max(50),
     ...damageOperationSpecSchema.shape,
   }),
   z.strictObject({
     ...featureEffectBaseShape,
     kind: z.literal('armed_weapon_hit_rider'),
-    trigger: z.enum(['action', 'bonus_action']),
+    trigger: z.enum(ACTION_OR_BONUS_ACTION),
     saveDc: integerSchema.min(1).max(50),
     ...armedWeaponHitRiderShape,
   }),
@@ -473,10 +602,7 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     kind: z.literal('once_per_turn_damage_rider'),
     trigger: z.literal('on_hit'),
     oncePerTurnGate: z.literal(damageRiderGates[2]),
-    qualifyingGates: z.array(z.enum([
-      damageRiderGates[0],
-      damageRiderGates[1],
-    ])).min(1).max(2),
+    qualifyingGates: z.array(z.enum(ONCE_PER_TURN_QUALIFYING_GATES)).min(1).max(2),
     damage: z.array(effectDamageSchema).min(1).max(20),
   }),
   z.strictObject({
@@ -528,8 +654,8 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     ...featureEffectBaseShape,
     kind: z.literal('attack_roll_mode'),
-    trigger: z.enum(['action', 'bonus_action', 'reaction']),
-    mode: z.enum(['advantage', 'disadvantage']),
+    trigger: z.enum(ACTION_BONUS_OR_REACTION),
+    mode: z.enum(ATTACK_ROLL_MODES),
   }),
   z.strictObject({
     ...featureEffectBaseShape,
@@ -672,127 +798,142 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     ...featureEffectBaseShape,
     kind: z.literal('persistent_area'),
-    trigger: z.enum(['action', 'bonus_action', 'reaction']),
-    origin: z.enum(['self', 'selected']),
+    trigger: z.enum(ACTION_BONUS_OR_REACTION),
+    origin: z.enum(PERSISTENT_AREA_ORIGINS),
     shape: persistentAreaShapeSchema,
     duration: persistentAreaDurationSchema,
-    targetFilter: z.enum(['all', 'allies', 'enemies']),
+    targetFilter: z.enum(PERSISTENT_AREA_TARGET_FILTERS),
     difficultTerrain: z.boolean(),
     movableFeet: distanceSchema.min(1).nullable(),
     hooks: z.array(persistentAreaHookSchema).max(16),
   }),
-]).superRefine((effect, context) => {
-  if (effect.kind === 'damage_operation') {
-    for (const packet of effect.packets) {
-      if (packet.dice.perSlotCount !== 0 || packet.dice.perSlotModifier !== 0 || packet.dice.cantripUpgrade) {
-        context.addIssue({ code: 'custom', message: 'Feature damage cannot use spell-slot or cantrip scaling.' });
-      }
-    }
-  }
-  if (effect.kind === 'armed_weapon_hit_rider' && effect.damage !== null) {
-    if (effect.damage.scaling.kind !== 'none' || effect.damage.thresholdRider !== null) {
-      context.addIssue({ code: 'custom', message: 'Armed weapon-hit damage cannot defer target scaling or a threshold rider.' });
-    }
-    if (
-      effect.damage.dice.perSlotCount !== 0 ||
-      effect.damage.dice.perSlotModifier !== 0 ||
-      effect.damage.dice.cantripUpgrade
-    ) {
-      context.addIssue({ code: 'custom', message: 'Feature rider damage cannot use spell-slot or cantrip scaling.' });
-    }
-  }
-  if (
+]);
+
+type FeatureEffectInput = z.infer<typeof featureEffectObjectSchema>;
+const FEATURE_EFFECT_RULES = [
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] =>
+    effect.kind === 'damage_operation'
+      ? effect.packets.flatMap(
+          (packet): readonly PartyPackValidationIssue[] => issueWhen(
+            packet.dice.perSlotCount !== 0 ||
+              packet.dice.perSlotModifier !== 0 ||
+              packet.dice.cantripUpgrade,
+            'Feature damage cannot use spell-slot or cantrip scaling.',
+          ),
+        )
+      : [],
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => {
+    if (effect.kind !== 'armed_weapon_hit_rider' || effect.damage === null) return [];
+    return [
+      ...issueWhen(
+        effect.damage.scaling.kind !== 'none' || effect.damage.thresholdRider !== null,
+        'Armed weapon-hit damage cannot defer target scaling or a threshold rider.',
+      ),
+      ...issueWhen(
+        effect.damage.dice.perSlotCount !== 0 ||
+          effect.damage.dice.perSlotModifier !== 0 ||
+          effect.damage.dice.cantripUpgrade,
+        'Feature rider damage cannot use spell-slot or cantrip scaling.',
+      ),
+    ];
+  },
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     'trigger' in effect &&
-    effect.trigger === 'always_on' &&
-    effect.resourcePoolId !== undefined
-  ) {
-    context.addIssue({ code: 'custom', message: 'Always-on effects cannot spend a limited resource.' });
-  }
-  if (
+      effect.trigger === 'always_on' &&
+      effect.resourcePoolId !== undefined,
+    'Always-on effects cannot spend a limited resource.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'extra_attack_count_override' &&
-    (effect.resourcePoolId !== undefined ||
-      new Set(effect.levels.map((level) => level.minimumLevel)).size !== effect.levels.length)
-  ) {
-    context.addIssue({ code: 'custom', message: 'Extra Attack overrides require unique levels and no resource.' });
-  }
-  if (
-    effect.kind === 'slot_spend_damage_rider' &&
-    effect.resourcePoolId !== undefined
-  ) {
-    context.addIssue({ code: 'custom', message: 'Slot-spend riders use spell slots, not limited resources.' });
-  }
-  if (
+      (effect.resourcePoolId !== undefined ||
+        new Set(effect.levels.map((level): number => level.minimumLevel)).size !==
+          effect.levels.length),
+    'Extra Attack overrides require unique levels and no resource.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
+    effect.kind === 'slot_spend_damage_rider' && effect.resourcePoolId !== undefined,
+    'Slot-spend riders use spell slots, not limited resources.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'once_per_turn_damage_rider' &&
-    new Set(effect.qualifyingGates).size !== effect.qualifyingGates.length
-  ) {
-    context.addIssue({ code: 'custom', message: 'Once-per-turn rider gates must be unique.' });
-  }
-  if (
+      new Set(effect.qualifyingGates).size !== effect.qualifyingGates.length,
+    'Once-per-turn rider gates must be unique.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'reckless_attack_mode' &&
-    (effect.resourcePoolId !== undefined ||
-      new Set(effect.strengthBasedMeleeAttackIds).size !== effect.strengthBasedMeleeAttackIds.length)
-  ) {
-    context.addIssue({ code: 'custom', message: 'Reckless Attack requires unique attack ids and no resource.' });
-  }
-  if (
+      (effect.resourcePoolId !== undefined ||
+        new Set(effect.strengthBasedMeleeAttackIds).size !==
+          effect.strengthBasedMeleeAttackIds.length),
+    'Reckless Attack requires unique attack ids and no resource.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     (effect.kind === 'attack_ability_substitution' ||
       effect.kind === 'attack_damage_die_override' ||
       effect.kind === 'attack_reach_range_override') &&
-    effect.resourcePoolId !== undefined
-  ) {
-    context.addIssue({ code: 'custom', message: 'Attack-form substitutions are always-on and cannot spend a resource.' });
-  }
-  if (
+      effect.resourcePoolId !== undefined,
+    'Attack-form substitutions are always-on and cannot spend a resource.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'attack_damage_die_override' &&
-    new Set(effect.levels.map((level) => level.minimumLevel)).size !== effect.levels.length
-  ) {
-    context.addIssue({ code: 'custom', message: 'Damage-die override levels must be unique.' });
-  }
-  if (
+      new Set(effect.levels.map((level): number => level.minimumLevel)).size !==
+        effect.levels.length,
+    'Damage-die override levels must be unique.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'attack_reach_range_override' &&
-    effect.reachFeet === undefined &&
-    effect.rangeFeet === undefined
-  ) {
-    context.addIssue({ code: 'custom', message: 'A reach/range override must replace at least one distance.' });
-  }
-  if (
+      effect.reachFeet === undefined &&
+      effect.rangeFeet === undefined,
+    'A reach/range override must replace at least one distance.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'attack_damage_type_choice' &&
-    new Set(effect.damageTypeIds).size !== effect.damageTypeIds.length
-  ) {
-    context.addIssue({ code: 'custom', message: 'Attack damage-type choices must be unique.' });
-  }
-  if (
+      new Set(effect.damageTypeIds).size !== effect.damageTypeIds.length,
+    'Attack damage-type choices must be unique.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'elemental_fury' &&
-    (new Set(effect.attackIds).size !== effect.attackIds.length ||
-      new Set(effect.damageTypeIds).size !== effect.damageTypeIds.length ||
-      !effect.damageTypeIds.includes(effect.selectedDamageTypeId))
-  ) {
-    context.addIssue({ code: 'custom', message: 'Elemental Fury requires unique attacks and elements plus a declared selection.' });
-  }
-  if (
+      (new Set(effect.attackIds).size !== effect.attackIds.length ||
+        new Set(effect.damageTypeIds).size !== effect.damageTypeIds.length ||
+        !effect.damageTypeIds.includes(effect.selectedDamageTypeId)),
+    'Elemental Fury requires unique attacks and elements plus a declared selection.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     (effect.kind === 'spell_damage_ability_modifier' ||
       effect.kind === 'attack_damage_type_choice' ||
       effect.kind === 'exploding_spell_damage_die' ||
       effect.kind === 'elemental_fury' ||
       effect.kind === 'save_gated_banishment_on_hit') &&
-    effect.resourcePoolId !== undefined
-  ) {
-    context.addIssue({ code: 'custom', message: 'This typed feature is automatic and cannot spend a resource.' });
-  }
-  if (effect.kind === 'persistent_area') {
-    if (effect.origin === 'self' && effect.movableFeet !== null) {
-      context.addIssue({ code: 'custom', message: 'A self-anchored area cannot also move independently.' });
-    }
-    for (const hook of effect.hooks) {
-      if (hook.effect.kind === 'automatic' && hook.effect.payload.kind !== 'damage' && hook.effect.payload.lifetime.kind === 'save_ends') {
-        context.addIssue({ code: 'custom', message: 'A save-ends area payload requires a save gate.' });
-      }
-      if (hook.effect.kind === 'save_gated' && hook.effect.onSuccess === 'half' && hook.effect.payload.kind !== 'damage') {
-        context.addIssue({ code: 'custom', message: 'Only area damage can resolve to half on a successful save.' });
-      }
-    }
-  }
-});
+      effect.resourcePoolId !== undefined,
+    'This typed feature is automatic and cannot spend a resource.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
+    effect.kind === 'persistent_area' &&
+      effect.origin === 'self' &&
+      effect.movableFeet !== null,
+    'A self-anchored area cannot also move independently.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] =>
+    effect.kind === 'persistent_area'
+      ? effect.hooks.flatMap((hook): readonly PartyPackValidationIssue[] => [
+          ...issueWhen(
+            hook.effect.kind === 'automatic' &&
+              hook.effect.payload.kind !== 'damage' &&
+              hook.effect.payload.lifetime.kind === 'save_ends',
+            'A save-ends area payload requires a save gate.',
+          ),
+          ...issueWhen(
+            hook.effect.kind === 'save_gated' &&
+              hook.effect.onSuccess === 'half' &&
+              hook.effect.payload.kind !== 'damage',
+            'Only area damage can resolve to half on a successful save.',
+          ),
+        ])
+      : [],
+] as const satisfies readonly PartyPackRule<FeatureEffectInput>[];
+
+const featureEffectSchema = featureEffectObjectSchema.superRefine(
+  refinementFromRules(FEATURE_EFFECT_RULES),
+);
 
 export const externalPartyPackFeatureEffectSchema = featureEffectSchema;
 
@@ -803,7 +944,7 @@ const passiveSkillSchema = z.strictObject({
 
 const passiveDamageResponseSchema = z.strictObject({
   damageTypeId: z.enum(damageTypes),
-  response: z.enum(['resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune']),
+  response: z.enum(NON_NORMAL_DAMAGE_RESPONSES),
 });
 
 const optionalSaveModifierShape = Object.fromEntries(
@@ -913,15 +1054,17 @@ const v2MemberObjectSchema = z.strictObject({
   worldOperations: z.array(externalWorldOperationSchema).max(100).optional(),
 });
 const v2MemberSchemaPath = schemaPathFor<z.infer<typeof v2MemberObjectSchema>>();
-const v2MemberSchema = v2MemberObjectSchema.superRefine((member, context) => {
-  if (Array.isArray(member.spellcasting) && member.sharedSpellSlots === undefined) {
-    context.addIssue({
-      code: 'custom',
-      path: [...v2MemberSchemaPath('sharedSpellSlots')],
-      message: 'Array-form spellcasting sources require member-level sharedSpellSlots.',
-    });
-  }
-});
+type V2MemberInput = z.infer<typeof v2MemberObjectSchema>;
+const V2_MEMBER_RULES = [
+  (member: V2MemberInput): readonly PartyPackValidationIssue[] => issueWhen(
+    Array.isArray(member.spellcasting) && member.sharedSpellSlots === undefined,
+    'Array-form spellcasting sources require member-level sharedSpellSlots.',
+    v2MemberSchemaPath('sharedSpellSlots'),
+  ),
+] as const satisfies readonly PartyPackRule<V2MemberInput>[];
+const v2MemberSchema = v2MemberObjectSchema.superRefine(
+  refinementFromRules(V2_MEMBER_RULES),
+);
 
 const externalPartyPackV1Schema = z.strictObject({
   schemaVersion: z.literal(EXTERNAL_PARTY_PACK_MINIMUM_SCHEMA_VERSION),
@@ -1331,6 +1474,27 @@ function issueGap(
   });
 }
 
+/**
+ * Centralizes gap accumulation behind a non-void operation. Callers rebind the
+ * returned accumulator, so useful validation work is never a bare array push.
+ */
+class PartyPackGapAccumulator {
+  readonly #values: GapReport[];
+
+  constructor(initial: readonly GapReport[] = []) {
+    this.#values = [...initial];
+  }
+
+  append(...issues: readonly GapReport[]): PartyPackGapAccumulator {
+    this.#values.push(...issues);
+    return this;
+  }
+
+  values(): readonly GapReport[] {
+    return [...this.#values];
+  }
+}
+
 function unexpectedFieldGaps<const Fields extends FieldRecord>(
   value: Readonly<Record<string, unknown>>,
   allowed: Fields,
@@ -1351,11 +1515,11 @@ function sanitizedRecord<const Fields extends FieldRecord>(
   allowed: Fields,
   partyEntry: string,
   prefix: PartyPackPath,
-  gaps: GapReport[],
+  gaps: PartyPackGapAccumulator,
 ): unknown {
   const input = record(value);
   if (input === null) return value;
-  gaps.push(...unexpectedFieldGaps(input, allowed, partyEntry, prefix));
+  gaps = gaps.append(...unexpectedFieldGaps(input, allowed, partyEntry, prefix));
   return Object.fromEntries(
     (Object.keys(allowed) as Array<Extract<keyof Fields, string>>)
       .filter((key) => Object.hasOwn(input, key))
@@ -1368,10 +1532,10 @@ function sanitizedArrayRecords<const Fields extends FieldRecord>(
   allowed: Fields,
   partyEntry: string,
   prefix: PartyPackPath,
-  gaps: GapReport[],
+  gaps: PartyPackGapAccumulator,
 ): unknown {
   if (!Array.isArray(value)) return value;
-  return value.map((entry, index) =>
+  return value.map((entry, index): unknown =>
     sanitizedRecord(entry, allowed, partyEntry, indexedPartyPackPath(prefix, index), gaps));
 }
 
@@ -1379,7 +1543,7 @@ function parsedBase(
   value: Readonly<Record<string, unknown>>,
   partyEntry: string,
   memberIndex: number,
-  gaps: GapReport[],
+  gaps: PartyPackGapAccumulator,
 ): unknown {
   return {
     combatantId: value.combatantId,
@@ -1410,7 +1574,7 @@ function parsedV1Core(
   value: Readonly<Record<string, unknown>>,
   partyEntry: string,
   memberIndex: number,
-  gaps: GapReport[],
+  gaps: PartyPackGapAccumulator,
 ): unknown {
   return {
     ...parsedBase(value, partyEntry, memberIndex, gaps) as Readonly<Record<string, unknown>>,
@@ -1428,7 +1592,7 @@ function parsedV2Core(
   value: Readonly<Record<string, unknown>>,
   partyEntry: string,
   memberIndex: number,
-  gaps: GapReport[],
+  gaps: PartyPackGapAccumulator,
 ): unknown {
   return {
     ...parsedBase(value, partyEntry, memberIndex, gaps) as Readonly<Record<string, unknown>>,
@@ -1453,7 +1617,7 @@ function sanitizedSpellcasting(
   memberIndex: number,
   sourceIndex: number | null,
   legacy: boolean,
-  gaps: GapReport[],
+  gaps: PartyPackGapAccumulator,
 ): unknown {
   const prefix: PartyPackPath = sourceIndex === null
     ? partyPath('members', memberIndex, 'spellcasting')
@@ -1514,7 +1678,7 @@ function sanitizedAttack(
   partyEntry: string,
   memberIndex: number,
   attackIndex: number,
-  gaps: GapReport[],
+  gaps: PartyPackGapAccumulator,
 ): unknown {
   const prefix = ['members', memberIndex, 'attacks', attackIndex] as const;
   const attack = sanitizedRecord(value, ATTACK_FIELDS, partyEntry, prefix, gaps);
@@ -3165,7 +3329,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     return refusal('invalid_structure', gaps);
   }
 
-  const gaps: GapReport[] = [...rootGaps];
+  let gaps = new PartyPackGapAccumulator(rootGaps);
   let unknownSpellId = false;
   let tooManySpellcastingSources = false;
   let unsupportedEffectShape: string | null = null;
@@ -3187,19 +3351,19 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     const entryFallback = `${header.data.partyId}:member-${String(index + 1)}`;
     const memberInput = record(memberValue);
     if (memberInput === null) {
-      gaps.push(issueGap(entryFallback, ['members', index]));
+      gaps = gaps.append(issueGap(entryFallback, ['members', index]));
       continue;
     }
     const entry = typeof memberInput.combatantId === 'string' && combatantIdSchema.safeParse(memberInput.combatantId).success
       ? memberInput.combatantId
       : entryFallback;
     const memberFields = header.data.schemaVersion === 1 ? V1_MEMBER_FIELDS : V2_MEMBER_FIELDS;
-    gaps.push(...unexpectedFieldGaps(memberInput, memberFields, entry, ['members', index]));
+    gaps = gaps.append(...unexpectedFieldGaps(memberInput, memberFields, entry, ['members', index]));
     const core = header.data.schemaVersion === 1
       ? v1MemberCoreSchema.safeParse(parsedV1Core(memberInput, entry, index, gaps))
       : v2MemberCoreSchema.safeParse(parsedV2Core(memberInput, entry, index, gaps));
     if (!core.success) {
-      gaps.push(...core.error.issues.map((issue) => issueGap(
+      gaps = gaps.append(...core.error.issues.map((issue) => issueGap(
         entry,
         parsedPartyPackPath(partyPath('members', index), issue.path),
       )));
@@ -3207,11 +3371,11 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     }
     const totalLevel = core.data.classes.reduce((total, heldClass) => total + heldClass.level, 0);
     if (totalLevel > 20) {
-      gaps.push(issueGap(entry, ['members', index, 'classes'], 'value_not_in_engine_vocabulary'));
+      gaps = gaps.append(issueGap(entry, ['members', index, 'classes'], 'value_not_in_engine_vocabulary'));
       continue;
     }
-    if (new Set(core.data.classes.map((heldClass) => heldClass.classId)).size !== core.data.classes.length) {
-      gaps.push(issueGap(entry, ['members', index, 'classes'], 'value_not_in_engine_vocabulary'));
+    if (new Set(core.data.classes.map((heldClass): string => heldClass.classId)).size !== core.data.classes.length) {
+      gaps = gaps.append(issueGap(entry, ['members', index, 'classes'], 'value_not_in_engine_vocabulary'));
       continue;
     }
     const rawSpellSlots = header.data.schemaVersion === 1
@@ -3220,10 +3384,10 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           maximum: capacity.maximum,
         }))
       : [];
-    let spellSlots = rawSpellSlots.filter((capacity, capacityIndex, capacities) => {
-      const first = capacities.findIndex((candidate) => candidate.level === capacity.level);
+    let spellSlots = rawSpellSlots.filter((capacity, capacityIndex, capacities): boolean => {
+      const first = capacities.findIndex((candidate): boolean => candidate.level === capacity.level);
       if (first === capacityIndex) return true;
-      gaps.push(issueGap(
+      gaps = gaps.append(issueGap(
         entry,
         ['members', index, 'spellSlots', capacityIndex, 'level'],
         'value_not_in_engine_vocabulary',
@@ -3240,7 +3404,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         ))
       : { success: true as const, data: [] };
     if (!parsedPactSlots.success) {
-      gaps.push(...parsedPactSlots.error.issues.map((issue) => issueGap(
+      gaps = gaps.append(...parsedPactSlots.error.issues.map((issue) => issueGap(
         entry,
         parsedPartyPackPath(partyPath('members', index, 'pactSpellSlots'), issue.path),
         issue.code === 'unrecognized_keys'
@@ -3249,10 +3413,10 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
       )));
       continue;
     }
-    const pactSpellSlots = parsedPactSlots.data.filter((capacity, capacityIndex, capacities) => {
-      const first = capacities.findIndex((candidate) => candidate.level === capacity.level);
+    const pactSpellSlots = parsedPactSlots.data.filter((capacity, capacityIndex, capacities): boolean => {
+      const first = capacities.findIndex((candidate): boolean => candidate.level === capacity.level);
       if (first === capacityIndex) return true;
-      gaps.push(issueGap(
+      gaps = gaps.append(issueGap(
         entry,
         ['members', index, 'pactSpellSlots', capacityIndex, 'level'],
         'value_not_in_engine_vocabulary',
@@ -3261,9 +3425,9 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     }).map((capacity) => ({ level: capacity.level, maximum: capacity.count }));
 
     const attacksInput = Array.isArray(memberInput.attacks) ? memberInput.attacks : [];
-    if (!Array.isArray(memberInput.attacks)) gaps.push(issueGap(entry, ['members', index, 'attacks']));
+    if (!Array.isArray(memberInput.attacks)) gaps = gaps.append(issueGap(entry, ['members', index, 'attacks']));
     if (attacksInput.length > 100) {
-      gaps.push(issueGap(entry, ['members', index, 'attacks'], 'value_not_in_engine_vocabulary'));
+      gaps = gaps.append(issueGap(entry, ['members', index, 'attacks'], 'value_not_in_engine_vocabulary'));
     }
     const attacks: ExternalPartyPackAttack[] = [];
     for (const [attackIndex, attackValue] of attacksInput.slice(0, 100).entries()) {
@@ -3275,8 +3439,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         gaps,
       ));
       if (parsed.success) {
-        if (attacks.some((attack) => attack.attackId === parsed.data.attackId)) {
-          gaps.push(issueGap(
+        if (attacks.some((attack): boolean => attack.attackId === parsed.data.attackId)) {
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'attacks', attackIndex, 'attackId'],
             'value_not_in_engine_vocabulary',
@@ -3285,7 +3449,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           attacks.push(parsed.data);
         }
       }
-      else gaps.push(...parsed.error.issues.map((issue) => issueGap(
+      else gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
         entry,
         parsedPartyPackPath(partyPath('members', index, 'attacks', attackIndex), issue.path),
         issue.code === 'unrecognized_keys'
@@ -3301,10 +3465,10 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     if (header.data.schemaVersion === 1) {
       const spellInput = Array.isArray(memberInput.spellSelections) ? memberInput.spellSelections : [];
       if (!Array.isArray(memberInput.spellSelections)) {
-        gaps.push(issueGap(entry, ['members', index, 'spellSelections']));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'spellSelections']));
       }
       if (spellInput.length > SPELL_MANIFEST.length) {
-        gaps.push(issueGap(entry, ['members', index, 'spellSelections'], 'value_not_in_engine_vocabulary'));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'spellSelections'], 'value_not_in_engine_vocabulary'));
       }
       for (const [spellIndex, spellValue] of spellInput.slice(0, SPELL_MANIFEST.length).entries()) {
         const spell = typeof spellValue === 'string'
@@ -3312,19 +3476,19 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           : undefined;
         if (spell === undefined) {
           if (typeof spellValue === 'string') unknownSpellId = true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'spellSelections', spellIndex],
             'value_not_in_engine_vocabulary',
           ));
         } else if (spell.status !== 'implemented') {
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'spellSelections', spellIndex],
             'manifest_spell_not_implemented',
           ));
         } else if (spellIds.includes(spell.id)) {
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'spellSelections', spellIndex],
             'value_not_in_engine_vocabulary',
@@ -3341,7 +3505,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         : [memberInput.spellcasting];
       if (sourceInputs.length > 4) {
         tooManySpellcastingSources = true;
-        gaps.push(issueGap(
+        gaps = gaps.append(issueGap(
           entry,
           ['members', index, 'spellcasting'],
           'value_not_in_engine_vocabulary',
@@ -3349,7 +3513,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         continue;
       }
       if (sourceInputs.length === 0) {
-        gaps.push(issueGap(entry, ['members', index, 'spellcasting']));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'spellcasting']));
         continue;
       }
 
@@ -3358,7 +3522,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           sourceInputs[0], entry, index, null, true, gaps,
         ));
         if (!parsed.success) {
-          gaps.push(...parsed.error.issues.map((issue) => issueGap(
+          gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
             entry,
             parsedPartyPackPath(partyPath('members', index, 'spellcasting'), issue.path),
             issue.code === 'unrecognized_keys'
@@ -3378,10 +3542,10 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             ? {}
             : { resourceSpellUses: parsed.data.resourceSpellUses }),
         }];
-        spellSlots = parsed.data.spellSlots.filter((capacity, capacityIndex, capacities) => {
-          const first = capacities.findIndex((candidate) => candidate.level === capacity.level);
+        spellSlots = parsed.data.spellSlots.filter((capacity, capacityIndex, capacities): boolean => {
+          const first = capacities.findIndex((candidate): boolean => candidate.level === capacity.level);
           if (first === capacityIndex) return true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'spellcasting', 'spellSlots', capacityIndex, 'level'],
             'value_not_in_engine_vocabulary',
@@ -3397,7 +3561,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           gaps,
         ));
         if (!sharedSlots.success) {
-          gaps.push(...sharedSlots.error.issues.map((issue) => issueGap(
+          gaps = gaps.append(...sharedSlots.error.issues.map((issue) => issueGap(
             entry,
             parsedPartyPackPath(partyPath('members', index, 'sharedSpellSlots'), issue.path),
             issue.code === 'unrecognized_keys'
@@ -3406,10 +3570,10 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           )));
           continue;
         }
-        spellSlots = sharedSlots.data.filter((capacity, capacityIndex, capacities) => {
-          const first = capacities.findIndex((candidate) => candidate.level === capacity.level);
+        spellSlots = sharedSlots.data.filter((capacity, capacityIndex, capacities): boolean => {
+          const first = capacities.findIndex((candidate): boolean => candidate.level === capacity.level);
           if (first === capacityIndex) return true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'sharedSpellSlots', capacityIndex, 'level'],
             'value_not_in_engine_vocabulary',
@@ -3422,7 +3586,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             sourceInput, entry, index, sourceIndex, false, gaps,
           ));
           if (!parsed.success) {
-            gaps.push(...parsed.error.issues.map((issue) => issueGap(
+            gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
               entry,
               parsedPartyPackPath(
                 partyPath('members', index, 'spellcasting', sourceIndex),
@@ -3439,7 +3603,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         if (parsedSpellcasting.length !== sourceInputs.length) continue;
       }
     } else if (hasV2MemberField(memberInput, 'sharedSpellSlots')) {
-      gaps.push(issueGap(
+      gaps = gaps.append(issueGap(
         entry,
         ['members', index, 'sharedSpellSlots'],
         'value_not_in_engine_vocabulary',
@@ -3469,11 +3633,11 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           const spell = SPELL_MANIFEST.find((candidate) => candidate.id === reference.value);
           if (spell === undefined) {
             unknownSpellId = true;
-            gaps.push(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
+            gaps = gaps.append(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
           } else if (spell.status !== 'implemented') {
-            gaps.push(issueGap(entry, reference.path, 'manifest_spell_not_implemented'));
+            gaps = gaps.append(issueGap(entry, reference.path, 'manifest_spell_not_implemented'));
           } else if (sourceSpellIds.includes(spell.id)) {
-            gaps.push(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
+            gaps = gaps.append(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
           } else {
             sourceSpellIds.push(spell.id);
             if (!spellIds.includes(spell.id)) {
@@ -3486,33 +3650,33 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         const preparedSpellIds = source.preparedSpellIds.filter((id, preparedIndex, ids) =>
           sourceSpellIds.includes(id) && ids.indexOf(id) === preparedIndex);
         const preparedSet = new Set(preparedSpellIds);
-        const knownSpellIds = source.knownSpellIds.filter((id, knownIndex, ids) => {
+        const knownSpellIds = source.knownSpellIds.filter((id, knownIndex, ids): boolean => {
           if (!sourceSpellIds.includes(id) || ids.indexOf(id) !== knownIndex) return false;
           if (!preparedSet.has(id)) return true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             spellcastingSourcePath(index, pathSourceIndex, 'knownSpellIds', knownIndex),
             'value_not_in_engine_vocabulary',
           ));
           return false;
         });
-        const grants = (source.grants ?? []).filter((grant, grantIndex, candidates) => {
+        const grants = (source.grants ?? []).filter((grant, grantIndex, candidates): boolean => {
           if (!sourceSpellIds.includes(grant.spellId)) return false;
-          if (candidates.findIndex((candidate) => candidate.spellId === grant.spellId) !== grantIndex) {
+          if (candidates.findIndex((candidate): boolean => candidate.spellId === grant.spellId) !== grantIndex) {
             return false;
           }
           if (!preparedSet.has(grant.spellId) && !knownSpellIds.includes(grant.spellId)) return true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             spellcastingSourcePath(index, pathSourceIndex, 'grants', grantIndex, 'spellId'),
             'value_not_in_engine_vocabulary',
           ));
           return false;
         });
-        const resourceSpellUses = (source.resourceSpellUses ?? []).filter((use, useIndex, uses) => {
+        const resourceSpellUses = (source.resourceSpellUses ?? []).filter((use, useIndex, uses): boolean => {
           if (!sourceSpellIds.includes(use.spellId)) {
             if (!SPELL_MANIFEST.some((spell) => spell.id === use.spellId)) unknownSpellId = true;
-            gaps.push(issueGap(
+            gaps = gaps.append(issueGap(
               entry,
               spellcastingSourcePath(
                 index,
@@ -3525,10 +3689,10 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             ));
             return false;
           }
-          const first = uses.findIndex((candidate) =>
+          const first = uses.findIndex((candidate): boolean =>
             candidate.spellId === use.spellId && candidate.resourcePoolId === use.resourcePoolId);
           if (first === useIndex) return true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             spellcastingSourcePath(index, pathSourceIndex, 'resourceSpellUses', useIndex),
             'value_not_in_engine_vocabulary',
@@ -3553,7 +3717,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             spells.filter((spell) => spell.id === id)),
           knownSpells: knownSpellIds.flatMap((id) =>
             spells.filter((spell) => spell.id === id)),
-          grants: grants.flatMap((grant) => {
+          grants: grants.flatMap((grant): readonly LoadedPartySpellcastingSource['grants'][number][] => {
             const spell = spells.find((candidate) => candidate.id === grant.spellId);
             if (spell === undefined) return [];
             const sourceModifier = Math.floor((core.data.abilities[source.ability] - 10) / 2);
@@ -3577,9 +3741,9 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     }
 
     const conditionsInput = Array.isArray(memberInput.startingConditions) ? memberInput.startingConditions : [];
-    if (!Array.isArray(memberInput.startingConditions)) gaps.push(issueGap(entry, ['members', index, 'startingConditions']));
+    if (!Array.isArray(memberInput.startingConditions)) gaps = gaps.append(issueGap(entry, ['members', index, 'startingConditions']));
     if (conditionsInput.length > 100) {
-      gaps.push(issueGap(entry, ['members', index, 'startingConditions'], 'value_not_in_engine_vocabulary'));
+      gaps = gaps.append(issueGap(entry, ['members', index, 'startingConditions'], 'value_not_in_engine_vocabulary'));
     }
     const startingConditions: ExternalPartyPackMember['startingConditions'][number][] = [];
     for (const [conditionIndex, conditionValue] of conditionsInput.slice(0, 100).entries()) {
@@ -3591,8 +3755,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         gaps,
       ));
       if (parsed.success) {
-        if (startingConditions.some((condition) => condition.effectId === parsed.data.effectId)) {
-          gaps.push(issueGap(
+        if (startingConditions.some((condition): boolean => condition.effectId === parsed.data.effectId)) {
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'startingConditions', conditionIndex, 'effectId'],
             'value_not_in_engine_vocabulary',
@@ -3601,7 +3765,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           startingConditions.push(parsed.data);
         }
       }
-      else gaps.push(...parsed.error.issues.map((issue) => issueGap(
+      else gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
         entry,
         parsedPartyPackPath(
           partyPath('members', index, 'startingConditions', conditionIndex),
@@ -3622,14 +3786,14 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         ? memberInput.worldOperations
         : [];
       if (!Array.isArray(worldOperationsInput)) {
-        gaps.push(issueGap(entry, ['members', index, 'worldOperations']));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'worldOperations']));
       } else if (worldOperationsInput.length > 100) {
-        gaps.push(issueGap(entry, ['members', index, 'worldOperations'], 'value_not_in_engine_vocabulary'));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'worldOperations'], 'value_not_in_engine_vocabulary'));
       } else {
         for (const [operationIndex, operationValue] of worldOperationsInput.entries()) {
           const parsed = externalWorldOperationSchema.safeParse(operationValue);
           if (!parsed.success) {
-            gaps.push(...parsed.error.issues.map((issue) => issueGap(
+            gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
               entry,
               parsedPartyPackPath(
                 partyPath('members', index, 'worldOperations', operationIndex),
@@ -3639,8 +3803,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
                 ? 'field_not_in_engine_vocabulary'
                 : 'value_not_in_engine_vocabulary',
             )));
-          } else if (worldOperations.some((operation) => operation.operationId === parsed.data.operationId)) {
-            gaps.push(issueGap(
+          } else if (worldOperations.some((operation): boolean => operation.operationId === parsed.data.operationId)) {
+            gaps = gaps.append(issueGap(
               entry,
               ['members', index, 'worldOperations', operationIndex, 'operationId'],
               'value_not_in_engine_vocabulary',
@@ -3654,9 +3818,9 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         ? memberInput.effects
         : [];
       if (!Array.isArray(effectsInput)) {
-        gaps.push(issueGap(entry, ['members', index, 'effects']));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'effects']));
       } else if (effectsInput.length > 100) {
-        gaps.push(issueGap(entry, ['members', index, 'effects'], 'value_not_in_engine_vocabulary'));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'effects'], 'value_not_in_engine_vocabulary'));
       }
       if (Array.isArray(effectsInput)) {
         for (const [effectIndex, effectValue] of effectsInput.slice(0, 100).entries()) {
@@ -3667,7 +3831,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             !FEATURE_EFFECT_KINDS.includes(shape as (typeof FEATURE_EFFECT_KINDS)[number])
           ) {
             unsupportedEffectShape ??= typeof shape === 'string' ? shape : MISSING_EFFECT_KIND;
-            gaps.push(issueGap(
+            gaps = gaps.append(issueGap(
               entry,
               ['members', index, 'effects', effectIndex, 'kind'],
               'capability_not_implemented',
@@ -3676,7 +3840,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           }
           const parsed = externalPartyPackFeatureEffectSchema.safeParse(effectValue);
           if (!parsed.success) {
-            gaps.push(...parsed.error.issues.map((issue) => issueGap(
+            gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
               entry,
               parsedPartyPackPath(
                 partyPath('members', index, 'effects', effectIndex),
@@ -3686,8 +3850,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
                 ? 'field_not_in_engine_vocabulary'
                 : 'value_not_in_engine_vocabulary',
             )));
-          } else if (effects.some((effect) => effect.effectId === parsed.data.effectId)) {
-            gaps.push(issueGap(
+          } else if (effects.some((effect): boolean => effect.effectId === parsed.data.effectId)) {
+            gaps = gaps.append(issueGap(
               entry,
               ['members', index, 'effects', effectIndex, 'effectId'],
               'value_not_in_engine_vocabulary',
@@ -3702,15 +3866,15 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         ? memberInput.resources
         : [];
       if (!Array.isArray(resourcesInput)) {
-        gaps.push(issueGap(entry, ['members', index, 'resources']));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'resources']));
       } else if (resourcesInput.length > 100) {
-        gaps.push(issueGap(entry, ['members', index, 'resources'], 'value_not_in_engine_vocabulary'));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'resources'], 'value_not_in_engine_vocabulary'));
       }
       if (Array.isArray(resourcesInput)) {
         for (const [resourceIndex, resourceValue] of resourcesInput.slice(0, 100).entries()) {
           const parsed = externalPartyPackResourceSchema.safeParse(resourceValue);
           if (!parsed.success) {
-            gaps.push(...parsed.error.issues.map((issue) => issueGap(
+            gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
               entry,
               parsedPartyPackPath(
                 partyPath('members', index, 'resources', resourceIndex),
@@ -3720,8 +3884,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
                 ? 'field_not_in_engine_vocabulary'
                 : 'value_not_in_engine_vocabulary',
             )));
-          } else if (resources.some((pool) => pool.resourcePoolId === parsed.data.resourcePoolId)) {
-            gaps.push(issueGap(
+          } else if (resources.some((pool): boolean => pool.resourcePoolId === parsed.data.resourcePoolId)) {
+            gaps = gaps.append(issueGap(
               entry,
               ['members', index, 'resources', resourceIndex, 'resourcePoolId'],
               'value_not_in_engine_vocabulary',
@@ -3735,7 +3899,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
       if (hasV2MemberField(memberInput, 'passives')) {
         const parsed = passivesSchema.safeParse(memberInput.passives);
         if (!parsed.success) {
-          gaps.push(...parsed.error.issues.map((issue) => issueGap(
+          gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
             entry,
             parsedPartyPackPath(partyPath('members', index, 'passives'), issue.path),
             issue.code === 'unrecognized_keys'
@@ -3748,11 +3912,11 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           const passiveSpeed = core.data.walkingSpeedFeet + (passives.speedAdjustmentFeet ?? 0);
           let validPassives = true;
           if (passiveAc < 1 || passiveAc > 50) {
-            gaps.push(issueGap(entry, ['members', index, 'passives', 'armorClassBonus'], 'value_not_in_engine_vocabulary'));
+            gaps = gaps.append(issueGap(entry, ['members', index, 'passives', 'armorClassBonus'], 'value_not_in_engine_vocabulary'));
             validPassives = false;
           }
           if (passiveSpeed < 0 || passiveSpeed > 1_000) {
-            gaps.push(issueGap(entry, ['members', index, 'passives', 'speedAdjustmentFeet'], 'value_not_in_engine_vocabulary'));
+            gaps = gaps.append(issueGap(entry, ['members', index, 'passives', 'speedAdjustmentFeet'], 'value_not_in_engine_vocabulary'));
             validPassives = false;
           }
           const passiveCollections = [
@@ -3762,7 +3926,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           ] as const;
           for (const [field, values] of passiveCollections) {
             if (new Set(values).size !== values.length) {
-              gaps.push(issueGap(entry, ['members', index, 'passives', field], 'value_not_in_engine_vocabulary'));
+              gaps = gaps.append(issueGap(entry, ['members', index, 'passives', field], 'value_not_in_engine_vocabulary'));
               validPassives = false;
             }
           }
@@ -3772,7 +3936,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
 
       const resourceIds = new Set(resources.map((pool) => pool.resourcePoolId));
       const attackFormKeys = new Set<string>();
-      effects = effects.filter((effect, effectIndex) => {
+      effects = effects.filter((effect, effectIndex): boolean => {
         const referencedPool = effect.resourcePoolId === undefined
           ? undefined
           : resources.find((pool) => pool.resourcePoolId === effect.resourcePoolId);
@@ -3834,7 +3998,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
                   : attackFormKey !== null && !uniqueAttackForm
                     ? 'kind'
                     : effect.kind === 'extra_attack_count_override' ? 'levels' : 'resourcePoolId';
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'effects', effectIndex, path],
             'value_not_in_engine_vocabulary',
@@ -3844,11 +4008,14 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         }
         return valid;
       });
-      parsedSpellcasting = parsedSpellcasting.map((source, sourceIndex) => {
+      parsedSpellcasting = parsedSpellcasting.map((
+        source,
+        sourceIndex,
+      ): z.infer<typeof spellcastingSourceInputSchema> => {
         const pathSourceIndex = Array.isArray(memberInput.spellcasting) ? sourceIndex : null;
-        const resourceSpellUses = (source.resourceSpellUses ?? []).filter((use, useIndex) => {
+        const resourceSpellUses = (source.resourceSpellUses ?? []).filter((use, useIndex): boolean => {
           if (resourceIds.has(use.resourcePoolId)) return true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             spellcastingSourcePath(
               index,
@@ -3923,18 +4090,18 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     });
   }
 
-  const uniqueCombatants = new Set(mapped.map(({ member }) => member.combatantId));
-  const uniqueTokens = new Set(mapped.map(({ member }) => member.tokenId));
-  const uniqueCharacters = new Set(mapped.map(({ member }) => member.characterId));
+  const uniqueCombatants = new Set(mapped.map(({ member }): ExternalCombatantId => member.combatantId));
+  const uniqueTokens = new Set(mapped.map(({ member }): ExternalTokenId => member.tokenId));
+  const uniqueCharacters = new Set(mapped.map(({ member }): number => member.characterId));
   if (
     uniqueCombatants.size !== mapped.length ||
     uniqueTokens.size !== mapped.length ||
     uniqueCharacters.size !== mapped.length
   ) {
-    gaps.push(issueGap(header.data.partyId, ['members'], 'value_not_in_engine_vocabulary'));
+    gaps = gaps.append(issueGap(header.data.partyId, ['members'], 'value_not_in_engine_vocabulary'));
   }
 
-  const allGaps = deduplicateGapReports(gaps);
+  const allGaps = deduplicateGapReports(gaps.values());
   if (unknownSpellId) return refusal('unknown_spell_id', allGaps);
   if (tooManySpellcastingSources) return refusal('too_many_spellcasting_sources', allGaps);
   if (unsupportedEffectShape !== null) {
