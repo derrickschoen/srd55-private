@@ -19,7 +19,7 @@
 import { execFileSync } from 'node:child_process';
 import { execPath } from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 import coreTraitsExtract from '../../../docs/srd/source/class-core-traits.txt?raw';
 import attackFeaturesExtract from '../../../docs/srd/source/attack-class-features.txt?raw';

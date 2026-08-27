@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { declareTestInputs } from '../../helpers/test-inputs';
 import type { CombatantProfile } from '../../../src/combat/combatant';
 import {
   ROLL_MODIFIER_ORDER,
@@ -13,6 +13,10 @@ import type { ModifierDuration, SpellOperation } from '../../../src/combat/spell
 import { damageType, dieSides } from '../../../src/combat/values';
 import { loadContentPack, type LoadedContentPack } from '../../../src/content/content-pack';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+
+const { readText: readFileSync } = declareTestInputs({
+  fixtures: ['tests/fixtures/content-pack-v1-homebrew.json'],
+}).fixtures;
 
 interface SpellSpec {
   readonly id: string;

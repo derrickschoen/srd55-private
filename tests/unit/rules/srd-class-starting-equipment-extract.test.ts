@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 
 const VERBATIM_ATTRIBUTION = `This work includes material from the System Reference Document 5.2.1

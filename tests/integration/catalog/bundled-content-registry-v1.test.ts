@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   BundledRegistryRootNameError,

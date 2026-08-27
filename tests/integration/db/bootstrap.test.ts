@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { fileURLToPath } from 'node:url';
 import type { Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it, vi } from 'vitest';

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, expect } from 'vitest';
 
@@ -68,6 +68,12 @@ function isWithin(parent, candidate) {
 
 function currentState() {
   return globalThis[stateSymbol]?.current;
+}
+
+function isAllowlistedInfrastructureRead(state, observation) {
+  const testName = relative(repositoryRoot, state.testFile).split(sep).join('/');
+  const snapshotName = `${dirname(testName)}/__snapshots__/${basename(testName)}.snap`;
+  return observation === `path:${snapshotName}`;
 }
 
 function noteWrite(input, directory = false) {
@@ -313,11 +319,36 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  const declaredInputs = fileState.declaredInputs;
+  if (declaredInputs !== undefined) {
+    const undeclared = [...fileState.observed]
+      .filter((input) =>
+        !declaredInputs.has(input) &&
+        !isAllowlistedInfrastructureRead(fileState, input))
+      .sort();
+    const external = [...fileState.external].sort();
+    if (undeclared.length > 0 || external.length > 0) {
+      if (globalThis[stateSymbol].current === fileState) {
+        globalThis[stateSymbol].current = undefined;
+      }
+      const details = [
+        ...undeclared.map((input) => `undeclared repository input: ${input}`),
+        ...external.map((input) => `undeclared external input: ${input}`),
+      ];
+      throw new Error(
+        `Test input audit failed for ${relative(repositoryRoot, fileState.testFile)}:\n` +
+        details.map((detail) => `  - ${detail}`).join('\n'),
+      );
+    }
+  }
   const record = {
     version: 1,
     testFile: relative(repositoryRoot, fileState.testFile).split(sep).join('/'),
     observedInputs: [...fileState.observed].sort(),
     externalInputs: [...fileState.external].sort(),
+    ...(declaredInputs === undefined
+      ? {}
+      : { declaredInputs: [...declaredInputs].sort() }),
   };
   const outputPath = resolve(
     outputDirectory,

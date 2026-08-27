@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { abilities, type Ability } from '../../../src/domain/enums';
 import {
   monsterStatblock,

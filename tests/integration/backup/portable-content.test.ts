@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {

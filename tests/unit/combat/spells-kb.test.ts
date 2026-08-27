@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 import { IMPLEMENTED_SPELL_DEFINITIONS } from '../../../src/combat/spells/definitions';
 import { SPELL_KB_ENTRIES } from '../../../src/combat/spells/kb/entries';

@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
 
-const CACHE_VERSION = 4;
+const CACHE_VERSION = 5;
 const CACHE_ROOT = '/tmp/dnd-verdict-cache';
 const DISABLING_ENVIRONMENT = ['SQL_QUERY_LOG', 'AI_BRIDGE_LIVE'];
 const HASHED_ENVIRONMENT = [
@@ -240,7 +240,11 @@ function fsBindings(source) {
   for (const statement of source.statements) {
     if (!ts.isImportDeclaration(statement)) continue;
     if (!ts.isStringLiteralLike(statement.moduleSpecifier)) continue;
-    if (!['node:fs', 'node:fs/promises'].includes(statement.moduleSpecifier.text)) continue;
+    const moduleName = statement.moduleSpecifier.text;
+    if (
+      !['node:fs', 'node:fs/promises'].includes(moduleName) &&
+      !/(?:^|\/)helpers\/test-filesystem(?:-promises)?$/u.test(moduleName)
+    ) continue;
     const namedBindings = statement.importClause?.namedBindings;
     if (namedBindings === undefined || !ts.isNamedImports(namedBindings)) continue;
     for (const element of namedBindings.elements) {
@@ -559,7 +563,7 @@ function observedInputState(observation) {
   return undefined;
 }
 
-function verdictDigest(testFile, closure, observedInputs, salt) {
+function verdictDigest(testFile, closure, observedInputs, declaredInputs, salt) {
   const parts = [
     `test=${repositoryPath(testFile)}`,
     `test-sha256=${sha256(readFileSync(testFile))}`,
@@ -574,6 +578,11 @@ function verdictDigest(testFile, closure, observedInputs, salt) {
     const state = observedInputState(name);
     if (state === undefined) return undefined;
     parts.push(`observed-input=${name}`, `state=${state}`);
+  }
+  for (const name of declaredInputs) {
+    const state = observedInputState(name);
+    if (state === undefined) return undefined;
+    parts.push(`declared-input=${name}`, `state=${state}`);
   }
   return hashParts(parts);
 }
@@ -607,6 +616,8 @@ function validEntry(value, testFile, digest, closure) {
     value.closure.every((item) => typeof item === 'string') &&
     Array.isArray(value.observedInputs) &&
     value.observedInputs.every((item) => typeof item === 'string') &&
+    Array.isArray(value.declaredInputs) &&
+    value.declaredInputs.every((item) => typeof item === 'string') &&
     (closure === undefined || (
       value.closure.length === closure.length &&
       value.closure.every((item, index) => item === closure[index])
@@ -635,17 +646,31 @@ function cachedVerdict(testFile, salt) {
   // change in the saved closure or changed data content in observedInputs. The
   // former forces a recording run; the latter is hashed directly here. The
   // module-path inventory separately covers a newly resolvable path or glob.
-  const currentDigest = verdictDigest(testFile, entry.closure, entry.observedInputs, salt);
+  const currentDigest = verdictDigest(
+    testFile,
+    entry.closure,
+    entry.observedInputs,
+    entry.declaredInputs,
+    salt,
+  );
   return currentDigest === pointer.digest ? entry : undefined;
 }
 
-function storeVerdict(testFile, closure, observedInputs, digest, testCount) {
+function storeVerdict(
+  testFile,
+  closure,
+  observedInputs,
+  declaredInputs,
+  digest,
+  testCount,
+) {
   const entry = {
     version: CACHE_VERSION,
     testFile: repositoryPath(testFile),
     digest,
     closure,
     observedInputs,
+    declaredInputs,
     testCount,
     recordedAt: new Date().toISOString(),
   };
@@ -700,7 +725,11 @@ function runVitest(files) {
       Array.isArray(record.observedInputs) &&
       record.observedInputs.every((item) => typeof item === 'string') &&
       Array.isArray(record.externalInputs) &&
-      record.externalInputs.every((item) => typeof item === 'string')
+      record.externalInputs.every((item) => typeof item === 'string') &&
+      (record.declaredInputs === undefined || (
+        Array.isArray(record.declaredInputs) &&
+        record.declaredInputs.every((item) => typeof item === 'string')
+      ))
     ) {
       observations.set(record.testFile, record);
     }
@@ -774,7 +803,14 @@ function main() {
       ];
       if (reasons.length > 0) failClosedByFile.set(name, reasons);
       if (graph?.cacheable === true && observation !== undefined && reasons.length === 0 && passed) {
-        const digest = verdictDigest(testFile, graph.closure, observation.observedInputs, salt);
+        const declaredInputs = observation.declaredInputs ?? [];
+        const digest = verdictDigest(
+          testFile,
+          graph.closure,
+          observation.observedInputs,
+          declaredInputs,
+          salt,
+        );
         if (digest === undefined) {
           failClosedByFile.set(name, ['<observed repository input could not be hashed>']);
         } else {
@@ -782,6 +818,7 @@ function main() {
             testFile,
             graph.closure,
             observation.observedInputs,
+            declaredInputs,
             digest,
             assertions.length,
           );

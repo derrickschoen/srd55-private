@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { gunzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { decodeShareFragment } from '../../../src/sharing/codec';

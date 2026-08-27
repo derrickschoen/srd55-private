@@ -287,7 +287,7 @@ describe('chat streaming', () => {
     await frames(await post(AI_BRIDGE_CHAT_ROUTE, chatBody('hello')));
     const cwd = harness.spawns.at(0)?.cwd;
     expect(cwd).toBeDefined();
-    const { existsSync } = await import('node:fs');
+    const { existsSync } = await import('../../helpers/test-filesystem');
     expect(existsSync(cwd ?? '')).toBe(false);
   });
 });

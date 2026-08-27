@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { MonsterAttackAction, MonsterStatblock } from '../../../src/combat/statblock';
 import {

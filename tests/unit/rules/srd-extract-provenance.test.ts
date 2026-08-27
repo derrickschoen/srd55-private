@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from '../../helpers/test-filesystem';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import sourceDocument from '../../../docs/srd/SOURCE.md?raw';

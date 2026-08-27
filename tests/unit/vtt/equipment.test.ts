@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { declareTestInputs } from '../../helpers/test-inputs';
 import type { CombatantProfile } from '../../../src/combat/combatant';
 import {
   createEncounter,
@@ -13,6 +13,10 @@ import type { SpellOperation } from '../../../src/combat/spells/types';
 import { damageType, itemId, type EncounterEffectId, type ItemId } from '../../../src/combat/values';
 import { loadContentPack, type LoadedContentPack } from '../../../src/content/content-pack';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+
+const { readText: readFileSync } = declareTestInputs({
+  fixtures: ['tests/fixtures/content-pack-v1-homebrew.json'],
+}).fixtures;
 
 const SWORD = itemId('greenforge:iron-sword');
 const DAGGER = itemId('greenforge:iron-dagger');

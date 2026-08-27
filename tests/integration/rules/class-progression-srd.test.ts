@@ -1,5 +1,5 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
 import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';

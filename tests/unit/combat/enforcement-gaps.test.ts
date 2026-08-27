@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 import type { CombatantProfile } from '../../../src/combat/combatant';
 import type { EffectApplication, EffectPayload } from '../../../src/combat/effects';

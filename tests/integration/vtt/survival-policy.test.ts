@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { AlgorithmController, type ControllerRequest } from '../../../src/combat/controllers';

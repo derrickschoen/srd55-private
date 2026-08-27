@@ -4,7 +4,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-} from 'node:fs';
+} from '../../helpers/test-filesystem';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';

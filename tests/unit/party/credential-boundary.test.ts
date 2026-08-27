@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from '../../helpers/test-filesystem';
 import {
   basename,
   dirname,

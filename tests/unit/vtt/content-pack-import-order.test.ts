@@ -1,5 +1,9 @@
-import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { declareTestInputs } from '../../helpers/test-inputs';
+
+const { readText: readFileSync } = declareTestInputs({
+  fixtures: ['tests/fixtures/content-pack-v1-homebrew.json'],
+}).fixtures;
 
 afterEach(() => {
   vi.resetModules();
