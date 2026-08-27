@@ -22,6 +22,15 @@ one session-lifecycle abstraction (start / resume / persisted session id)
 with per-CLI adapters; exact CLI flags verified against installed binaries
 at implementation time, never assumed.
 
+**D398.2 (2026-08-27): "I forgot to mention to add Claude code support if
+possible as well."** Ruling: Claude Code is the FOURTH bridge adapter —
+feasible (it supports MCP servers and session resume in headless mode), so
+the abstraction covers codex / opencode / pi / claude-code. Claude Code IS
+installed on this machine, so its adapter is verifiable locally alongside
+codex; opencode and pi remain loud-unverified until installed. Requirement
+enters the design at supervisor review round 1 (the draft lane was already
+in flight when this arrived).
+
 ## D397 — OWNER: conversational AI-DM sessions with the engine as an MCP server (2026-08-27)
 
 Verbatim: "Experiment with ways to have the ai be in conversation quickly
