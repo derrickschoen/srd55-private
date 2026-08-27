@@ -541,6 +541,11 @@ export const character_species_traits = sqliteTable(
      * value.
      */
     index('character_species_traits_character_id_index').on(table.character_id),
+    index('character_species_traits_character_sort_index').on(
+      table.character_id,
+      table.sort_order,
+      table.id,
+    ),
   ],
 );
 
@@ -931,6 +936,11 @@ export const character_effects = sqliteTable(
       integerAtLeast('sort_order', 1),
     ),
     index('character_effects_character_id_index').on(table.character_id),
+    index('character_effects_character_sort_index').on(
+      table.character_id,
+      table.sort_order,
+      table.id,
+    ),
     index('character_effects_character_item_id_index').on(
       table.character_item_id,
     ),
@@ -1244,6 +1254,12 @@ export const background_equipment_items = sqliteTable(
     index('background_equipment_items_background_template_id_index').on(
       table.background_template_id,
     ),
+    index('background_equipment_items_weapon_index')
+      .on(table.weapon_template_id)
+      .where(sql`weapon_template_id IS NOT NULL`),
+    index('background_equipment_items_armor_index')
+      .on(table.armor_template_id)
+      .where(sql`armor_template_id IS NOT NULL`),
   ],
 );
 

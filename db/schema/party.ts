@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   check,
+  index,
   integer,
   primaryKey,
   sqliteTable,
@@ -84,5 +85,8 @@ export const party_document_states = sqliteTable(
       name: 'party_document_states_primary',
       columns: [table.forge, table.repository, table.path],
     }),
+    index('party_document_states_character_index')
+      .on(table.character_id)
+      .where(sql`character_id IS NOT NULL`),
   ],
 );

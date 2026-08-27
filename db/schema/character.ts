@@ -373,6 +373,20 @@ export const character_source_instances = sqliteTable(
     index('character_source_instances_parent_index')
       .on(table.parent_source_instance_id)
       .where(sql`parent_source_instance_id IS NOT NULL`),
+    index('source_instances_active_display_index')
+      .on(
+        table.character_id,
+        table.source_type,
+        table.display_name,
+        table.id,
+      )
+      .where(sql`state = 'active'`),
+    index('source_instances_definition_state_character_index').on(
+      table.source_type,
+      table.source_definition_id,
+      table.state,
+      table.character_id,
+    ),
     // Composite-FK companion: the target of spell_selection_slots'
     // (source_instance_id, character_id) reference, which is what stops a slot
     // from being attached to another character's source instance.
@@ -452,6 +466,17 @@ export const character_class_levels = sqliteTable(
         subclass_definitions.class_definition_id,
       ],
     }),
+    index('character_class_levels_definition_character_index').on(
+      table.class_definition_id,
+      table.character_id,
+    ),
+    index('character_class_levels_subclass_character_index')
+      .on(table.subclass_definition_id, table.character_id)
+      .where(sql`subclass_definition_id IS NOT NULL`),
+    index('character_class_levels_character_id_id_index').on(
+      table.character_id,
+      table.id,
+    ),
   ],
 );
 
@@ -796,6 +821,15 @@ export const character_skill_grants = sqliteTable(
       table.character_id,
       table.state,
     ),
+    index('skill_grants_active_order_index')
+      .on(
+        table.character_id,
+        table.source_instance_id,
+        table.grant_key,
+        table.ordinal,
+        table.id,
+      )
+      .where(sql`state = 'active'`),
   ],
 );
 
@@ -864,6 +898,15 @@ export const character_skill_expertise_grants = sqliteTable(
     index(
       'character_skill_expertise_grants_character_state_index',
     ).on(table.character_id, table.state),
+    index('expertise_grants_active_order_index')
+      .on(
+        table.character_id,
+        table.source_instance_id,
+        table.grant_key,
+        table.ordinal,
+        table.id,
+      )
+      .where(sql`state = 'active'`),
   ],
 );
 
@@ -970,6 +1013,24 @@ export const wizard_spellbook_entries = sqliteTable(
       table.character_id,
       table.state,
     ),
+    index('wizard_spellbook_entries_spell_active_cover')
+      .on(
+        table.spell_version_id,
+        table.state,
+        table.character_id,
+        table.source_instance_id,
+      )
+      .where(sql`spell_version_id IS NOT NULL`),
+    index('wizard_entries_active_order_index')
+      .on(
+        table.character_id,
+        table.source_instance_id,
+        table.rule_key,
+        table.ordinal,
+        table.id,
+        table.spell_version_id,
+      )
+      .where(sql`state = 'active'`),
   ],
 );
 
@@ -1108,6 +1169,10 @@ export const spell_loadout_entries = sqliteTable(
     uniqueIndex(
       'spell_loadout_entries_spell_loadout_id_spell_version_id_role_unique',
     ).on(table.spell_loadout_id, table.spell_version_id, table.role),
+    index('spell_loadout_entries_spell_loadout_index').on(
+      table.spell_version_id,
+      table.spell_loadout_id,
+    ),
   ],
 );
 
@@ -1132,6 +1197,10 @@ export const character_spell_preferences = sqliteTable(
     uniqueIndex(
       'character_spell_preferences_character_id_spell_version_id_unique',
     ).on(table.character_id, table.spell_version_id),
+    index('character_spell_preferences_spell_character_index').on(
+      table.spell_version_id,
+      table.character_id,
+    ),
   ],
 );
 

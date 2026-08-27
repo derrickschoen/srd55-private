@@ -203,6 +203,11 @@ export const catalog_content_identities = sqliteTable(
       table.catalog_layer,
       table.content_kind,
     ),
+    index('catalog_identities_layer_kind_key_index').on(
+      table.catalog_layer,
+      table.content_kind,
+      table.content_key,
+    ),
     index('catalog_content_identities_name_index').on(
       table.content_kind,
       table.normalized_name,
@@ -500,6 +505,11 @@ export const catalog_content_match_decisions = sqliteTable(
     index('catalog_match_decisions_target_index').on(
       table.content_kind,
       table.target_content_key,
+    ),
+    index('catalog_match_decisions_reviewed_kind_digest_index').on(
+      sql`${table.reviewed_at} desc`,
+      table.content_kind,
+      table.incoming_fingerprint_digest,
     ),
   ],
 );

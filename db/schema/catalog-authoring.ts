@@ -135,6 +135,11 @@ export const catalog_content_archive_members = sqliteTable(
       name: 'catalog_content_archive_members_primary',
       columns: [table.content_kind, table.content_key, table.character_id],
     }),
+    index('catalog_archive_members_character_kind_key_index').on(
+      table.character_id,
+      table.content_kind,
+      table.content_key,
+    ),
   ],
 );
 
@@ -200,6 +205,11 @@ export const catalog_content_replacement_choices = sqliteTable(
     index('catalog_content_replacement_choices_character_index').on(
       table.character_id,
       table.content_kind,
+    ),
+    index('catalog_replacement_choices_successor_index').on(
+      table.content_kind,
+      table.successor_content_key,
+      table.character_id,
     ),
   ],
 );

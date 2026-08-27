@@ -1377,6 +1377,54 @@ const expectedNamedIndexes: Record<string, string> = {
     'character_save_points:character_id,id',
   wizard_spellbook_entries_character_id_spell_version_id_unique:
     'wizard_spellbook_entries:character_id,spell_version_id:unique',
+  background_equipment_items_armor_index:
+    'background_equipment_items:armor_template_id',
+  background_equipment_items_weapon_index:
+    'background_equipment_items:weapon_template_id',
+  catalog_archive_members_character_kind_key_index:
+    'catalog_content_archive_members:character_id,content_kind,content_key',
+  catalog_identities_layer_kind_key_index:
+    'catalog_content_identities:catalog_layer,content_kind,content_key',
+  catalog_match_decisions_reviewed_kind_digest_index:
+    'catalog_content_match_decisions:reviewed_at,content_kind,incoming_fingerprint_digest',
+  catalog_replacement_choices_successor_index:
+    'catalog_content_replacement_choices:content_kind,successor_content_key,character_id',
+  character_class_levels_character_id_id_index:
+    'character_class_levels:character_id,id',
+  character_class_levels_definition_character_index:
+    'character_class_levels:class_definition_id,character_id',
+  character_class_levels_subclass_character_index:
+    'character_class_levels:subclass_definition_id,character_id',
+  character_effects_character_sort_index:
+    'character_effects:character_id,sort_order,id',
+  character_items_character_name_index:
+    'character_items:character_id,name,id',
+  character_species_traits_character_sort_index:
+    'character_species_traits:character_id,sort_order,id',
+  character_spell_preferences_spell_character_index:
+    'character_spell_preferences:spell_version_id,character_id',
+  class_equipment_items_armor_index:
+    'class_equipment_items:armor_template_id',
+  class_equipment_items_weapon_index:
+    'class_equipment_items:weapon_template_id',
+  class_feature_effects_definition_level_name_index:
+    'class_feature_effects:class_definition_id,class_level,name',
+  expertise_grants_active_order_index:
+    'character_skill_expertise_grants:character_id,source_instance_id,grant_key,ordinal,id',
+  party_document_states_character_index:
+    'party_document_states:character_id',
+  skill_grants_active_order_index:
+    'character_skill_grants:character_id,source_instance_id,grant_key,ordinal,id',
+  source_instances_active_display_index:
+    'character_source_instances:character_id,source_type,display_name,id',
+  source_instances_definition_state_character_index:
+    'character_source_instances:source_type,source_definition_id,state,character_id',
+  spell_loadout_entries_spell_loadout_index:
+    'spell_loadout_entries:spell_version_id,spell_loadout_id',
+  wizard_entries_active_order_index:
+    'wizard_spellbook_entries:character_id,source_instance_id,rule_key,ordinal,id,spell_version_id',
+  wizard_spellbook_entries_spell_active_cover:
+    'wizard_spellbook_entries:spell_version_id,state,character_id,source_instance_id',
 };
 
 const expectedUniqueGroups: Record<string, string[]> = {
@@ -2128,6 +2176,68 @@ describe(`schema (${sourceLabel})`, () => {
         name: 'spell_identity_aliases_identity_alias_index',
         sql: 'CREATE INDEX `spell_identity_aliases_identity_alias_index` ON `spell_identity_aliases` (`spell_identity_id`,`normalized_alias`,`alias`)',
       },
+    ]);
+  });
+
+  it('declares the profile-proven indexes with exact columns, order, and predicates', () => {
+    const db = openDb(schemaSql);
+    const indexNames = [
+      'background_equipment_items_armor_index',
+      'background_equipment_items_weapon_index',
+      'catalog_archive_members_character_kind_key_index',
+      'catalog_identities_layer_kind_key_index',
+      'catalog_match_decisions_reviewed_kind_digest_index',
+      'catalog_replacement_choices_successor_index',
+      'character_class_levels_character_id_id_index',
+      'character_class_levels_definition_character_index',
+      'character_class_levels_subclass_character_index',
+      'character_effects_character_sort_index',
+      'character_items_character_name_index',
+      'character_species_traits_character_sort_index',
+      'character_spell_preferences_spell_character_index',
+      'class_equipment_items_armor_index',
+      'class_equipment_items_weapon_index',
+      'class_feature_effects_definition_level_name_index',
+      'expertise_grants_active_order_index',
+      'party_document_states_character_index',
+      'skill_grants_active_order_index',
+      'source_instances_active_display_index',
+      'source_instances_definition_state_character_index',
+      'spell_loadout_entries_spell_loadout_index',
+      'wizard_entries_active_order_index',
+      'wizard_spellbook_entries_spell_active_cover',
+    ];
+    const actual = db.selectObjects(
+      `SELECT name, sql FROM sqlite_schema
+       WHERE name IN (${indexNames.map(() => '?').join(', ')})
+       ORDER BY name`,
+      indexNames,
+    );
+    expect(actual).toEqual([
+      { name: 'background_equipment_items_armor_index', sql: 'CREATE INDEX `background_equipment_items_armor_index` ON `background_equipment_items` (`armor_template_id`) WHERE armor_template_id IS NOT NULL' },
+      { name: 'background_equipment_items_weapon_index', sql: 'CREATE INDEX `background_equipment_items_weapon_index` ON `background_equipment_items` (`weapon_template_id`) WHERE weapon_template_id IS NOT NULL' },
+      { name: 'catalog_archive_members_character_kind_key_index', sql: 'CREATE INDEX `catalog_archive_members_character_kind_key_index` ON `catalog_content_archive_members` (`character_id`,`content_kind`,`content_key`)' },
+      { name: 'catalog_identities_layer_kind_key_index', sql: 'CREATE INDEX `catalog_identities_layer_kind_key_index` ON `catalog_content_identities` (`catalog_layer`,`content_kind`,`content_key`)' },
+      { name: 'catalog_match_decisions_reviewed_kind_digest_index', sql: 'CREATE INDEX `catalog_match_decisions_reviewed_kind_digest_index` ON `catalog_content_match_decisions` ("reviewed_at" desc,`content_kind`,`incoming_fingerprint_digest`)' },
+      { name: 'catalog_replacement_choices_successor_index', sql: 'CREATE INDEX `catalog_replacement_choices_successor_index` ON `catalog_content_replacement_choices` (`content_kind`,`successor_content_key`,`character_id`)' },
+      { name: 'character_class_levels_character_id_id_index', sql: 'CREATE INDEX `character_class_levels_character_id_id_index` ON `character_class_levels` (`character_id`,`id`)' },
+      { name: 'character_class_levels_definition_character_index', sql: 'CREATE INDEX `character_class_levels_definition_character_index` ON `character_class_levels` (`class_definition_id`,`character_id`)' },
+      { name: 'character_class_levels_subclass_character_index', sql: 'CREATE INDEX `character_class_levels_subclass_character_index` ON `character_class_levels` (`subclass_definition_id`,`character_id`) WHERE subclass_definition_id IS NOT NULL' },
+      { name: 'character_effects_character_sort_index', sql: 'CREATE INDEX `character_effects_character_sort_index` ON `character_effects` (`character_id`,`sort_order`,`id`)' },
+      { name: 'character_items_character_name_index', sql: 'CREATE INDEX `character_items_character_name_index` ON `character_items` (`character_id`,`name`,`id`)' },
+      { name: 'character_species_traits_character_sort_index', sql: 'CREATE INDEX `character_species_traits_character_sort_index` ON `character_species_traits` (`character_id`,`sort_order`,`id`)' },
+      { name: 'character_spell_preferences_spell_character_index', sql: 'CREATE INDEX `character_spell_preferences_spell_character_index` ON `character_spell_preferences` (`spell_version_id`,`character_id`)' },
+      { name: 'class_equipment_items_armor_index', sql: 'CREATE INDEX `class_equipment_items_armor_index` ON `class_equipment_items` (`armor_template_id`) WHERE armor_template_id IS NOT NULL' },
+      { name: 'class_equipment_items_weapon_index', sql: 'CREATE INDEX `class_equipment_items_weapon_index` ON `class_equipment_items` (`weapon_template_id`) WHERE weapon_template_id IS NOT NULL' },
+      { name: 'class_feature_effects_definition_level_name_index', sql: 'CREATE INDEX `class_feature_effects_definition_level_name_index` ON `class_feature_effects` (`class_definition_id`,`class_level`,`name`)' },
+      { name: 'expertise_grants_active_order_index', sql: 'CREATE INDEX `expertise_grants_active_order_index` ON `character_skill_expertise_grants` (`character_id`,`source_instance_id`,`grant_key`,`ordinal`,`id`) WHERE state = \'active\'' },
+      { name: 'party_document_states_character_index', sql: 'CREATE INDEX `party_document_states_character_index` ON `party_document_states` (`character_id`) WHERE character_id IS NOT NULL' },
+      { name: 'skill_grants_active_order_index', sql: 'CREATE INDEX `skill_grants_active_order_index` ON `character_skill_grants` (`character_id`,`source_instance_id`,`grant_key`,`ordinal`,`id`) WHERE state = \'active\'' },
+      { name: 'source_instances_active_display_index', sql: 'CREATE INDEX `source_instances_active_display_index` ON `character_source_instances` (`character_id`,`source_type`,`display_name`,`id`) WHERE state = \'active\'' },
+      { name: 'source_instances_definition_state_character_index', sql: 'CREATE INDEX `source_instances_definition_state_character_index` ON `character_source_instances` (`source_type`,`source_definition_id`,`state`,`character_id`)' },
+      { name: 'spell_loadout_entries_spell_loadout_index', sql: 'CREATE INDEX `spell_loadout_entries_spell_loadout_index` ON `spell_loadout_entries` (`spell_version_id`,`spell_loadout_id`)' },
+      { name: 'wizard_entries_active_order_index', sql: 'CREATE INDEX `wizard_entries_active_order_index` ON `wizard_spellbook_entries` (`character_id`,`source_instance_id`,`rule_key`,`ordinal`,`id`,`spell_version_id`) WHERE state = \'active\'' },
+      { name: 'wizard_spellbook_entries_spell_active_cover', sql: 'CREATE INDEX `wizard_spellbook_entries_spell_active_cover` ON `wizard_spellbook_entries` (`spell_version_id`,`state`,`character_id`,`source_instance_id`) WHERE spell_version_id IS NOT NULL' },
     ]);
   });
 

@@ -18,6 +18,21 @@ const LOADOUT_ENTRIES = 20;
 const REPETITIONS = 9;
 const WRITE_BATCH_SIZE = 250;
 
+const P14_INDEX_STATEMENTS = [
+  `CREATE INDEX wizard_spellbook_entries_spell_active_cover
+   ON wizard_spellbook_entries
+     (spell_version_id, state, character_id, source_instance_id)
+   WHERE spell_version_id IS NOT NULL`,
+] as const;
+const P15_INDEX_STATEMENTS = [
+  `CREATE INDEX spell_loadout_entries_spell_loadout_index
+   ON spell_loadout_entries (spell_version_id, spell_loadout_id)`,
+] as const;
+const P16_INDEX_STATEMENTS = [
+  `CREATE INDEX character_spell_preferences_spell_character_index
+   ON character_spell_preferences (spell_version_id, character_id)`,
+] as const;
+
 const RANK_2_INDEX_STATEMENTS = [
   'CREATE INDEX spell_selection_slots_fixed_spell_version_index ON spell_selection_slots (fixed_spell_version_id) WHERE fixed_spell_version_id IS NOT NULL',
   'CREATE INDEX spell_selection_slots_current_spell_version_index ON spell_selection_slots (current_spell_version_id) WHERE current_spell_version_id IS NOT NULL',
@@ -32,6 +47,9 @@ const RANK_9_INDEX_STATEMENTS = [
   'CREATE INDEX spell_loadouts_character_index ON spell_loadouts (character_id)',
 ] as const;
 const CANDIDATE_INDEX_STATEMENTS = [
+  ...P14_INDEX_STATEMENTS,
+  ...P15_INDEX_STATEMENTS,
+  ...P16_INDEX_STATEMENTS,
   ...RANK_2_INDEX_STATEMENTS,
   ...RANK_4_INDEX_STATEMENTS,
   ...RANK_6_INDEX_STATEMENTS,
@@ -59,7 +77,7 @@ interface Summary extends ProfileTotals {
 }
 
 interface Candidate {
-  readonly rank: 2 | 4 | 6 | 9;
+  readonly rank: number;
   readonly label: string;
   readonly createIndexes: readonly string[];
   readonly operations: readonly Operation[];
@@ -340,6 +358,19 @@ function seedScaledFixture(db: DatabaseContext): FixtureIds {
         );
       }
 
+      for (let ordinal = 1; ordinal <= 20; ordinal += 1) {
+        const spellVersionId = assignedSpellIds[ordinal];
+        if (spellVersionId === undefined) {
+          throw new Error('Spell preference assignment was missing.');
+        }
+        db.exec(
+          `INSERT INTO character_spell_preferences (
+             character_id, spell_version_id, favourite
+           ) VALUES (?, ?, 1)`,
+          [characterId, spellVersionId],
+        );
+      }
+
       for (let loadoutOrdinal = 1;
         loadoutOrdinal <= LOADOUTS_PER_CHARACTER;
         loadoutOrdinal += 1) {
@@ -389,7 +420,7 @@ function rolledBack(db: DatabaseContext, operation: () => void): void {
 }
 
 function indexName(createIndex: string): string {
-  const match = /^CREATE INDEX ([a-z0-9_]+) ON /u.exec(createIndex);
+  const match = /^CREATE INDEX\s+([a-z0-9_]+)\s+ON\s/u.exec(createIndex);
   const name = match?.[1];
   if (name === undefined) {
     throw new Error(`Cannot parse index name from ${createIndex}`);
@@ -598,6 +629,24 @@ try {
   };
 
   const candidates: readonly Candidate[] = [
+    {
+      rank: 14,
+      label: 'wizard spellbook reverse reference',
+      createIndexes: P14_INDEX_STATEMENTS,
+      operations: [catalogReferenceCheck],
+    },
+    {
+      rank: 15,
+      label: 'spell loadout-entry reverse reference',
+      createIndexes: P15_INDEX_STATEMENTS,
+      operations: [catalogReferenceCheck],
+    },
+    {
+      rank: 16,
+      label: 'spell-preference reverse reference',
+      createIndexes: P16_INDEX_STATEMENTS,
+      operations: [catalogReferenceCheck],
+    },
     {
       rank: 2,
       label: 'spell-slot reverse-reference partial-index pair',
