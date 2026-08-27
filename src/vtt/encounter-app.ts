@@ -1670,6 +1670,41 @@ class DmEncounterView {
     for (const entry of projection.decisionTray.entries) {
       const row = element('article', { className: `dm-decision-entry dm-decision-${entry.kind}` });
       row.dataset.entryKind = entry.kind;
+      if (entry.kind === 'engine_adjudication') {
+        row.dataset.decisionId = entry.request.adjudicationRequestId;
+        row.dataset.decisionKind = 'engine_adjudication';
+        row.dataset.renderKey = stableRenderKey(
+          'dm', 'decision-tray', 'engine-adjudication', entry.request.adjudicationRequestId,
+        );
+        row.append(
+          element('h3', { text: `${entry.combatantName} — DM adjudication requested` }),
+          element('p', { text: `${entry.request.subject}: ${entry.request.reason}` }),
+        );
+        for (const outcome of entry.request.suggestedOutcomes) {
+          row.append(element('p', { text: `Suggested: ${outcome}` }));
+        }
+        const amount = element('input');
+        amount.type = 'number';
+        amount.value = '0';
+        amount.setAttribute('aria-label', 'Engine adjudication hit point delta');
+        const reasoning = element('input');
+        reasoning.value = 'DM verdict for the engine adjudication request.';
+        reasoning.setAttribute('aria-label', 'Engine adjudication reasoning');
+        const apply = element('button', { text: `Apply DM verdict for ${entry.combatantName}` });
+        apply.type = 'button';
+        apply.addEventListener('click', () => {
+          const parsed = Number(amount.value);
+          if (!Number.isSafeInteger(parsed) || reasoning.value.trim().length === 0) return;
+          this.#host.resolveEngineAdjudication(
+            entry.request.adjudicationRequestId,
+            { kind: 'hit_point_delta', amount: parsed },
+            reasoning.value,
+          );
+        });
+        row.append(amount, reasoning, apply);
+        tray.append(row);
+        continue;
+      }
       if (entry.kind === 'pending') {
         row.dataset.decisionId = entry.decision.id;
         row.dataset.decisionKind = entry.decision.kind;

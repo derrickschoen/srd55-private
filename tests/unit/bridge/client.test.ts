@@ -85,7 +85,7 @@ describe('localhost bridge client and failure containment', () => {
     host.close();
   });
 
-  it('HOST-CORRECTION-EXHAUSTION exports and aborts after two malformed same-session corrections', async () => {
+  it('HOST-CORRECTION-EXHAUSTION exports and aborts after one malformed same-session correction', async () => {
     let state = reduceEncounter(
       createEncounter(referenceEncounterSetup()),
       { type: 'roll_initiative' },
@@ -118,13 +118,13 @@ describe('localhost bridge client and failure containment', () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
 
-    expect(requests.map((request) => request.correctionAttempt)).toEqual([0, 1, 2]);
+    expect(requests.map((request) => request.correctionAttempt)).toEqual([0, 1]);
     expect(new Set(requests.map((request) => request.agentSessionId))).toEqual(
       new Set([agentSessionId('019c-correction-session')]),
     );
     expect(host.bridgeFailureReport()).toMatchObject({
       kind: 'bridge_export_and_abort',
-      error: expect.stringContaining('failed after 2 corrections'),
+      error: expect.stringContaining('failed after 1 corrections'),
     });
     expect(exportedTransitionKinds(host.bridgeFailureReport()!.exportedSession)).toContain('coordinator_paused');
     expect(host.snapshot().player.authorityStatus).toBe('hard_paused');

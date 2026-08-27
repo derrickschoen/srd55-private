@@ -241,7 +241,6 @@ describe('typed DM round decision programs', () => {
       replyContract: {
         surface: 'json_ast',
         schemaVersion: 1,
-        maximumCorrectionAttempts: 2,
         jsonSchema: { additionalProperties: false },
       },
     });
@@ -268,7 +267,7 @@ describe('typed DM round decision programs', () => {
       originalRequestId: exchange.requests[0]?.requestId,
       validatorError: 'round plan contains unexpected field commands.',
       requestedMonsterIds: [f.monsterA.id, f.monsterB.id],
-      replyContract: { schemaVersion: 1, maximumCorrectionAttempts: 2 },
+      replyContract: { schemaVersion: 1 },
     });
     expect(exchange.requests.map((request) => request.agentSessionId)).toEqual([
       agentSessionId('codex:persisted-session-77'),
@@ -276,7 +275,7 @@ describe('typed DM round decision programs', () => {
     ]);
   });
 
-  it('EXHAUSTED-CORRECTIONS aborts only after two same-session correction attempts', async () => {
+  it('EXHAUSTED-CORRECTIONS aborts after the one same-session correction attempt', async () => {
     const f = fixture();
     const aborts: RoundPlanCorrectionExhaustedError[] = [];
     const exchange = new FakeExchange((request) => malformedCommandsPlan(request));
@@ -288,8 +287,8 @@ describe('typed DM round decision programs', () => {
 
     await expect(
       session.startRound(context(f.state), new AbortController().signal),
-    ).rejects.toThrow('failed after 2 corrections');
-    expect(exchange.requests.map((request) => request.correctionAttempt)).toEqual([0, 1, 2]);
+    ).rejects.toThrow('failed after 1 corrections');
+    expect(exchange.requests.map((request) => request.correctionAttempt)).toEqual([0, 1]);
     expect(new Set(exchange.requests.map((request) => request.agentSessionId))).toEqual(
       new Set([agentSessionId('codex:persisted-session-77')]),
     );

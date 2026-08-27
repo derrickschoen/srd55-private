@@ -21,6 +21,7 @@ import {
   type PlayerVisibleEncounterEvent,
 } from '../combat/visibility';
 import type { CombatantId } from '../combat/values';
+import type { AdjudicationEnvelope } from './mcp/engine-server';
 import { dmWorldObjectOverrideCommand } from '../combat/world-object-actions';
 import type { SessionHistoryEntry } from './session-persistence';
 import {
@@ -107,6 +108,12 @@ export type DmDecisionTrayEntry =
       readonly decision: PendingDecision;
       readonly combatantName: string;
       readonly triggerContext: string;
+      readonly interactive: true;
+    }
+  | {
+      readonly kind: 'engine_adjudication';
+      readonly request: AdjudicationEnvelope;
+      readonly combatantName: string;
       readonly interactive: true;
     }
   | {
@@ -237,6 +244,7 @@ export function projectDmBoard(input: {
   readonly boundaryRefusal?: DmDecisionTrayProjection['boundaryRefusal'];
   readonly actionRefusal?: NonBoundaryActionRefusal | null;
   readonly adjudicationPrompts?: readonly Extract<PendingDecision, { readonly kind: 'adjudication_prompt' }>[];
+  readonly engineAdjudications?: readonly AdjudicationEnvelope[];
 }): DmBoardProjection {
   const targets = adjudicatedTargets(input.view.state.eventLog, input.coordinator.pause);
   const pending = input.coordinator.pendingRequest;
@@ -281,6 +289,13 @@ export function projectDmBoard(input: {
         }]
       : [],
   );
+  const engineAdjudicationEntries: readonly DmDecisionTrayEntry[] = (input.engineAdjudications ?? [])
+    .map((request) => ({
+      kind: 'engine_adjudication' as const,
+      request: structuredClone(request),
+      combatantName: names.get(request.actorId as CombatantId) ?? request.actorId,
+      interactive: true as const,
+    }));
   return {
     audience: 'dm',
     encounter: dmVisibleEncounter(input.view),
@@ -299,7 +314,7 @@ export function projectDmBoard(input: {
       ? null
       : projectDmPartySession(input.partyState),
     decisionTray: {
-      entries: [...pendingEntries, ...autoFireEntries],
+      entries: [...pendingEntries, ...engineAdjudicationEntries, ...autoFireEntries],
       actionRefusal: input.actionRefusal ?? null,
       boundaryRefusal: input.boundaryRefusal ?? null,
     },

@@ -13,7 +13,6 @@ import {
 
 export const DM_BRIDGE_PROTOCOL_VERSION = 2 as const;
 export const ROUND_PLAN_CONTRACT_SCHEMA_VERSION = 1 as const;
-export const MAX_ROUND_PLAN_CORRECTIONS = 2 as const;
 
 export type StatePredicate =
   | {
@@ -415,7 +414,6 @@ export const ROUND_PLAN_CANONICAL_EXAMPLE: RoundPlan = decodeRoundPlanStructure(
 
 interface RoundPlanReplyContractBase {
   readonly schemaVersion: typeof ROUND_PLAN_CONTRACT_SCHEMA_VERSION;
-  readonly maximumCorrectionAttempts: typeof MAX_ROUND_PLAN_CORRECTIONS;
 }
 
 export interface JsonAstRoundPlanReplyContract extends RoundPlanReplyContractBase {
@@ -535,7 +533,6 @@ export const ROUND_PLAN_REPLY_CONTRACT: JsonAstRoundPlanReplyContract = Object.f
   schemaVersion: ROUND_PLAN_CONTRACT_SCHEMA_VERSION,
   jsonSchema: ROUND_PLAN_REPLY_JSON_SCHEMA,
   canonicalExample: ROUND_PLAN_CANONICAL_EXAMPLE,
-  maximumCorrectionAttempts: MAX_ROUND_PLAN_CORRECTIONS,
 });
 
 export const ROUND_PLAN_JS_REPLY_CONTRACT: JsProgramRoundPlanReplyContract = Object.freeze({
@@ -543,7 +540,6 @@ export const ROUND_PLAN_JS_REPLY_CONTRACT: JsProgramRoundPlanReplyContract = Obj
   schemaVersion: ROUND_PLAN_CONTRACT_SCHEMA_VERSION,
   grammar: JS_TURN_PROGRAM_GRAMMAR,
   workedExamples: JS_ROUND_PLAN_WORKED_EXAMPLES,
-  maximumCorrectionAttempts: MAX_ROUND_PLAN_CORRECTIONS,
 });
 
 /**
@@ -560,7 +556,6 @@ export function e01RoundPlanReplyContract(
   const common = {
     surface: 'json_ast' as const,
     schemaVersion: ROUND_PLAN_CONTRACT_SCHEMA_VERSION,
-    maximumCorrectionAttempts: MAX_ROUND_PLAN_CORRECTIONS,
     contractId: E01_ROUND_PLAN_CONTRACT_ID,
   };
   if (variant === 'compact-grammar') {
@@ -595,7 +590,6 @@ export function e02RoundPlanReplyContract(
   return Object.freeze({
     surface: 'json_ast',
     schemaVersion: ROUND_PLAN_CONTRACT_SCHEMA_VERSION,
-    maximumCorrectionAttempts: MAX_ROUND_PLAN_CORRECTIONS,
     contractId: E01_ROUND_PLAN_CONTRACT_ID,
     promptVariant: variant,
     delivery: 'compact',
@@ -613,7 +607,6 @@ export function e03RoundPlanReplyContract(
   return Object.freeze({
     surface: 'json_ast',
     schemaVersion: ROUND_PLAN_CONTRACT_SCHEMA_VERSION,
-    maximumCorrectionAttempts: MAX_ROUND_PLAN_CORRECTIONS,
     contractId: E01_ROUND_PLAN_CONTRACT_ID,
     promptVariant: variant,
     delivery: 'compact',

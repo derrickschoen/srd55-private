@@ -855,6 +855,17 @@ export function replayBundle(
       case 'controller_response_refused':
       case 'coordinator_paused':
       case 'coordinator_resumed':
+      case 'intent_fallback_resolved':
+      case 'intent_correction_requested':
+      case 'intent_correction_resolved':
+      case 'intent_correction_failed':
+      case 'intent_auto_resolved':
+      case 'intent_auto_resolution_failed':
+      case 'engine_adjudication_requested':
+      case 'engine_adjudication_resolved':
+      case 'dm_takeover_started':
+      case 'dm_handback_requested':
+      case 'dm_handback_completed':
         if (parent === null || parent === undefined) {
           throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'existing coordinator parent', revision.parentRevision);
         }

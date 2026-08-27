@@ -45,6 +45,7 @@ import {
   generateTurnProgramDeclarations,
 } from '../src/vtt/dm-bridge/turn-program-types';
 import { projectDmBoard } from '../src/vtt/encounter-projections';
+import { MAX_INTENT_CORRECTIONS } from '../src/vtt/turn-exhaustion-coordinator';
 import {
   aggregateExperimentRecords,
   computeTacticalRegretFromCaptures,
@@ -1208,7 +1209,7 @@ class RecordingExperimentExchange implements DmBridgeExchange {
       compileErrorCategory: null,
       failedSchemaPath: failedRoundPlanSchemaPath(validationError),
       correctionAttempt: wire.correctionAttempt,
-      correctionBudget: 2,
+      correctionBudget: MAX_INTENT_CORRECTIONS,
       correctionOfCallId: parentCallId,
       reconsultReason: wire.kind === 'monster_reconsult_request' ? wire.invalidation : null,
       invalidationEvent: wire.kind === 'monster_reconsult_request' ? wire.invalidation : null,
@@ -1671,7 +1672,7 @@ export async function runE01Table(
       ? e04ArmDefinition(entry.armId).projectionMode
       : 'full',
     libraryVersion: 'none-v1',
-    correctionBudget: 2,
+    correctionBudget: MAX_INTENT_CORRECTIONS,
     pricingVersion: 'unpriced-v1',
     buildId: telemetry.at(-1)?.buildId ?? null,
     commit: telemetry.at(-1)?.commit ?? null,

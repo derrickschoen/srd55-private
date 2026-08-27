@@ -84,6 +84,12 @@ import {
 } from './reference-encounter';
 import { WorldObjectAlgorithmController } from '../combat/world-object-controller';
 import { reduceSessionEncounter } from './session-encounter-reducer';
+import { canonicalJson } from '../commands/canonical-json';
+import { TurnExhaustionCoordinator } from './turn-exhaustion-coordinator';
+import type {
+  AdjudicationEnvelope,
+  AdjudicationSink,
+} from './mcp/engine-server';
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -226,6 +232,9 @@ export class DmEncounterHost {
   } = null;
   #actionRefusal: NonBoundaryActionRefusal | null = null;
   #adjudicationPrompts: Extract<PendingDecision, { readonly kind: 'adjudication_prompt' }>[] = [];
+  #engineAdjudications: AdjudicationEnvelope[] = [];
+  readonly #takeoverOrigins = new Map<CombatantId, 'agent' | 'algorithm'>();
+  readonly #pendingHandbacks = new Set<CombatantId>();
   #partyStateHasBoundaryRuling = false;
   readonly #steeringMode: SteeringCoordinatorMode;
   readonly #onSteeringTelemetry: (telemetry: SteeringTelemetry) => void;
@@ -337,6 +346,31 @@ export class DmEncounterHost {
       this.#coordinator = this.#coordinatorFor(resumed);
       if (this.#coordinator.pauseState() === null) this.#coordinator.interrupt();
     }
+    this.#restoreHostIntegrationState();
+  }
+
+  #restoreHostIntegrationState(): void {
+    const adjudications = new Map<string, AdjudicationEnvelope>();
+    for (const entry of this.#journal.history()) {
+      if (entry.void) continue;
+      const transition = entry.transition;
+      if (transition.kind === 'engine_adjudication_requested') {
+        adjudications.set(transition.request.adjudicationRequestId, transition.request);
+      } else if (transition.kind === 'engine_adjudication_resolved') {
+        adjudications.delete(transition.adjudicationRequestId);
+      } else if (transition.kind === 'dm_takeover_started') {
+        this.#takeoverOrigins.set(transition.actorId, transition.previousControllerKind);
+        this.#pendingHandbacks.delete(transition.actorId);
+      } else if (transition.kind === 'dm_handback_requested') {
+        this.#takeoverOrigins.set(transition.actorId, transition.controllerKind);
+        this.#pendingHandbacks.add(transition.actorId);
+      } else if (transition.kind === 'dm_handback_completed') {
+        this.#takeoverOrigins.delete(transition.actorId);
+        this.#pendingHandbacks.delete(transition.actorId);
+      }
+    }
+    this.#engineAdjudications = [...adjudications.values()]
+      .sort((left, right) => left.adjudicationRequestId.localeCompare(right.adjudicationRequestId));
   }
 
   #coordinatorFor(resume: SessionResume): TurnCoordinator {
@@ -400,6 +434,7 @@ export class DmEncounterHost {
         boundaryRefusal: this.#boundaryRefusal,
         actionRefusal: this.#actionRefusal,
         adjudicationPrompts: this.#adjudicationPrompts,
+        engineAdjudications: this.#engineAdjudications,
       }),
       player: this.#closed ? { ...player, authorityStatus: 'hard_paused' } : player,
     };
@@ -500,6 +535,7 @@ export class DmEncounterHost {
         }
         const postStepFlush = this.#flushStore();
         if (postStepFlush !== null) await postStepFlush;
+        this.#completeHandbacksAtTransactionBoundary();
         this.#publish();
         if (result.kind === 'refused') {
           this.#boundaryRefusal = result.pendingDecisionCode === 'turn_boundary_blocked'
@@ -581,6 +617,68 @@ export class DmEncounterHost {
       consequence,
     });
     this.#coordinator.resume();
+    this.#publish();
+  }
+
+  engineAdjudicationSink(): AdjudicationSink {
+    return { append: (request) => this.requestEngineAdjudication(request) };
+  }
+
+  turnExhaustionCoordinator(): TurnExhaustionCoordinator {
+    return new TurnExhaustionCoordinator(this.#journal.turnExhaustionPersistence());
+  }
+
+  requestEngineAdjudication(request: AdjudicationEnvelope): void {
+    const latest = [...this.#journal.history()].reverse().find((entry) => !entry.void);
+    if (latest === undefined || request.runId !== this.sessionId || request.branchId !== latest.branchId ||
+      request.expectedRevision !== latest.revision) {
+      throw new Error('Engine adjudication request is stale or belongs to another run.');
+    }
+    if (!this.#coordinator.state().combatants.some((entry) => entry.profile.id === request.actorId)) {
+      throw new Error('Engine adjudication request actor does not exist.');
+    }
+    const existing = this.#engineAdjudications.find((entry) =>
+      entry.adjudicationRequestId === request.adjudicationRequestId);
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(request)) {
+        throw new Error('Engine adjudication request ID was reused with different content.');
+      }
+      return;
+    }
+    this.#journal.recordHostTransition({
+      kind: 'engine_adjudication_requested',
+      request: structuredClone(request),
+    });
+    this.#engineAdjudications.push(structuredClone(request));
+    this.#engineAdjudications.sort((left, right) =>
+      left.adjudicationRequestId.localeCompare(right.adjudicationRequestId));
+    if (request.blocking) this.#coordinator.interrupt();
+    this.#publish();
+  }
+
+  resolveEngineAdjudication(
+    adjudicationRequestId: string,
+    consequence: Extract<EncounterCommand, { readonly type: 'adjudicate' }>['consequence'],
+    reasoning: string,
+  ): void {
+    const index = this.#engineAdjudications.findIndex((entry) =>
+      entry.adjudicationRequestId === adjudicationRequestId);
+    const request = this.#engineAdjudications[index];
+    if (request === undefined) throw new Error('The engine adjudication request does not exist.');
+    const verdictSubject = `engine-mcp-adjudication:${request.adjudicationRequestId}:${request.subject}`;
+    this.#coordinator.adjudicate({
+      type: 'adjudicate',
+      target: request.actorId as CombatantId,
+      subject: verdictSubject,
+      reasoning: reasoning.trim(),
+      consequence,
+    });
+    this.#journal.recordHostTransition({
+      kind: 'engine_adjudication_resolved',
+      adjudicationRequestId: request.adjudicationRequestId,
+      verdictSubject,
+    });
+    this.#engineAdjudications.splice(index, 1);
     this.#publish();
   }
 
@@ -859,6 +957,80 @@ export class DmEncounterHost {
     this.#humans = humans;
     this.#publish();
     void this.#pumpCoordinator();
+  }
+
+  takeOverController(combatantId: CombatantId): void {
+    const previous = this.#registry.identities().find((entry) => entry.combatantId === combatantId);
+    if (previous === undefined) {
+      throw new ControllerAssignmentError('combatant_not_found', `Controller assignment target ${combatantId} does not exist.`);
+    }
+    if (previous.kind !== 'agent' && previous.kind !== 'algorithm') {
+      throw new ControllerAssignmentError('assignment_failed', 'DM takeover requires an AI-controlled combatant.');
+    }
+    const human = new HumanController();
+    this.#takeoverOrigins.set(combatantId, previous.kind);
+    this.#pendingHandbacks.delete(combatantId);
+    this.#coordinator.replaceController(combatantId, human, `${combatantId}:human:dm-takeover`);
+    const humans = new Map(this.#humans);
+    humans.set(combatantId, human);
+    this.#humans = humans;
+    this.#journal.recordHostTransition({
+      kind: 'dm_takeover_started',
+      actorId: combatantId,
+      previousControllerKind: previous.kind,
+    });
+    this.#publish();
+    void this.#pumpCoordinator();
+  }
+
+  handBackController(combatantId: CombatantId): void {
+    const controllerKind = this.#takeoverOrigins.get(combatantId);
+    if (controllerKind === undefined) throw new Error('Combatant is not under DM takeover.');
+    if (this.#atTransactionBoundary()) {
+      this.#applyHandback(combatantId, controllerKind);
+      this.#publish();
+      void this.#pumpCoordinator();
+      return;
+    }
+    if (!this.#pendingHandbacks.has(combatantId)) {
+      this.#pendingHandbacks.add(combatantId);
+      this.#journal.recordHostTransition({
+        kind: 'dm_handback_requested',
+        actorId: combatantId,
+        controllerKind,
+      });
+    }
+    this.#publish();
+  }
+
+  #atTransactionBoundary(): boolean {
+    const state = this.#coordinator.coordinatorState();
+    return state.pendingRequest === null && state.pendingCommand === null && state.continuation.kind === 'idle';
+  }
+
+  #completeHandbacksAtTransactionBoundary(): void {
+    if (!this.#atTransactionBoundary()) return;
+    for (const combatantId of [...this.#pendingHandbacks].sort((left, right) => left.localeCompare(right))) {
+      const kind = this.#takeoverOrigins.get(combatantId);
+      if (kind !== undefined) this.#applyHandback(combatantId, kind);
+    }
+  }
+
+  #applyHandback(combatantId: CombatantId, kind: 'agent' | 'algorithm'): void {
+    const controller = kind === 'agent'
+      ? this.#agentController(combatantId)
+      : new WorldObjectAlgorithmController();
+    this.#coordinator.replaceController(combatantId, controller, `${combatantId}:${kind}:dm-handback`);
+    const humans = new Map(this.#humans);
+    humans.delete(combatantId);
+    this.#humans = humans;
+    this.#takeoverOrigins.delete(combatantId);
+    this.#pendingHandbacks.delete(combatantId);
+    this.#journal.recordHostTransition({
+      kind: 'dm_handback_completed',
+      actorId: combatantId,
+      controllerKind: kind,
+    });
   }
 
   close(): void {

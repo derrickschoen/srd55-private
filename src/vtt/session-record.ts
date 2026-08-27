@@ -103,6 +103,17 @@ function eventsOf(revision: SessionRevision): readonly EncounterEvent[] {
     case 'agent_session_dispatched':
     case 'agent_session_recovered':
     case 'session_ended':
+    case 'intent_fallback_resolved':
+    case 'intent_correction_requested':
+    case 'intent_correction_resolved':
+    case 'intent_correction_failed':
+    case 'intent_auto_resolved':
+    case 'intent_auto_resolution_failed':
+    case 'engine_adjudication_requested':
+    case 'engine_adjudication_resolved':
+    case 'dm_takeover_started':
+    case 'dm_handback_requested':
+    case 'dm_handback_completed':
     case 'party_state_captured':
     case 'reaction_preference_changed':
     case 'refusal_handling_changed':

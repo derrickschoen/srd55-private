@@ -7,13 +7,7 @@ import {
   encounterSessionId,
 } from '../../../src/combat/values';
 import { sha256 } from '../../../src/crypto/sha256';
-import {
-  type AgentFailureClassification,
-  type AgentInvocation,
-  type AgentSessionAdapter,
-  type AgentSessionBinding,
-  type AgentTurnResult,
-} from '../../../src/vtt/agent-session';
+import type { AgentInvocation } from '../../../src/vtt/agent-session';
 import { AgentSessionLifecycle } from '../../../src/vtt/agent-session-lifecycle';
 import { referenceEncounterSetup } from '../../../src/vtt/reference-encounter';
 import {
@@ -23,65 +17,10 @@ import {
   MemoryBrowserSessionStore,
   MemoryMirrorSink,
 } from '../../../src/vtt/session-persistence';
-
-class SIMULATEDResumeFailure extends Error {
-  constructor(readonly classification: AgentFailureClassification) {
-    super(`SIMULATED ${classification}`);
-  }
-}
-
-class SIMULATEDAgentSessionAdapter implements AgentSessionAdapter {
-  readonly kind = 'codex' as const;
-  readonly startInvocations: AgentInvocation[] = [];
-  readonly resumeInvocations: Array<{
-    readonly binding: AgentSessionBinding;
-    readonly invocation: AgentInvocation;
-  }> = [];
-  readonly #startIds: string[];
-  readonly #resumeFailures: SIMULATEDResumeFailure[];
-
-  constructor(input: {
-    readonly startIds: readonly string[];
-    readonly resumeFailures?: readonly SIMULATEDResumeFailure[];
-  }) {
-    this.#startIds = [...input.startIds];
-    this.#resumeFailures = [...(input.resumeFailures ?? [])];
-  }
-
-  async probe() {
-    return { present: true, version: 'SIMULATED' };
-  }
-
-  async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
-    this.startInvocations.push(invocation);
-    const next = this.#startIds.shift();
-    if (next === undefined) throw new Error('SIMULATED start script exhausted.');
-    return completed(next, 'SIMULATED bootstrap');
-  }
-
-  async resume(
-    binding: AgentSessionBinding,
-    invocation: AgentInvocation,
-  ): Promise<AgentTurnResult> {
-    this.resumeInvocations.push({ binding, invocation });
-    const failure = this.#resumeFailures.shift();
-    if (failure !== undefined) throw failure;
-    return completed(binding.sessionId, `SIMULATED resume ${invocation.prompt}`);
-  }
-
-  classifyFailure(error: unknown): AgentFailureClassification {
-    return error instanceof SIMULATEDResumeFailure ? error.classification : 'unknown';
-  }
-}
-
-function completed(sessionId: string, finalText: string): AgentTurnResult {
-  return {
-    sessionId: agentSessionId(sessionId),
-    finalText,
-    usage: null,
-    exit: 'completed',
-  };
-}
+import {
+  SIMULATEDAgentSessionAdapter,
+  SIMULATEDResumeFailure,
+} from '../../fixtures/simulated-agent-session-adapter';
 
 function invocation(runId: ReturnType<typeof encounterSessionId>, prompt: string): AgentInvocation {
   return {
