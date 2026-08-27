@@ -99,6 +99,9 @@ function eventsOf(revision: SessionRevision): readonly EncounterEvent[] {
     case 'turn_delayed':
       return revision.transition.events;
     case 'session_started':
+    case 'agent_session_started':
+    case 'agent_session_dispatched':
+    case 'agent_session_recovered':
     case 'session_ended':
     case 'party_state_captured':
     case 'reaction_preference_changed':

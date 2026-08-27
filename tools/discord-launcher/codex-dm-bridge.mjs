@@ -34,7 +34,7 @@ const sessionExchange = new FileExchangeCache(
   resolve(dataDirectory, 'session-cache'),
   {
     exchange: async (request) => ({
-      codexSessionId: transcriptPath === undefined
+      agentSessionId: transcriptPath === undefined
         ? await rawExchange.createSession(request.model)
         : process.env.DM_BRIDGE_FAKE_SESSION_ID ?? 'codex:scripted-session',
     }),

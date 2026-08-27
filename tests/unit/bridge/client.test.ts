@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEncounter, reduceEncounter } from '../../../src/combat/encounter';
-import { codexSessionId, encounterSessionId } from '../../../src/combat/values';
+import { agentSessionId, encounterSessionId } from '../../../src/combat/values';
 import {
   DM_BRIDGE_PROTOCOL_VERSION,
   type DmBridgeRequest,
@@ -69,7 +69,7 @@ describe('localhost bridge client and failure containment', () => {
     const host = new DmEncounterHost('session:host-dm-controller', new MemoryBrowserSessionStore(), {
       initialState: state,
       bridge,
-      codexSessionId: codexSessionId('019c-host-persisted-thread'),
+      agentSession: { cli: 'codex', sessionId: agentSessionId('019c-host-persisted-thread'), adapterVersion: 1 },
     });
     host.start();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -77,7 +77,7 @@ describe('localhost bridge client and failure containment', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       kind: 'round_plan_request',
-      codexSessionId: '019c-host-persisted-thread',
+      agentSessionId: '019c-host-persisted-thread',
       livingMonsterIds: [REFERENCE_MONSTER_ID],
     });
     expect(host.snapshot().dm.encounter.activeCombatant).toBe(REFERENCE_FIGHTER_ID);
@@ -111,7 +111,7 @@ describe('localhost bridge client and failure containment', () => {
     const host = new DmEncounterHost('session:host-correction-exhaustion', store, {
       initialState: state,
       bridge,
-      codexSessionId: codexSessionId('019c-correction-session'),
+      agentSession: { cli: 'codex', sessionId: agentSessionId('019c-correction-session'), adapterVersion: 1 },
     });
     host.start();
     for (let attempt = 0; attempt < 20 && host.bridgeFailureReport() === null; attempt += 1) {
@@ -119,8 +119,8 @@ describe('localhost bridge client and failure containment', () => {
     }
 
     expect(requests.map((request) => request.correctionAttempt)).toEqual([0, 1, 2]);
-    expect(new Set(requests.map((request) => request.codexSessionId))).toEqual(
-      new Set([codexSessionId('019c-correction-session')]),
+    expect(new Set(requests.map((request) => request.agentSessionId))).toEqual(
+      new Set([agentSessionId('019c-correction-session')]),
     );
     expect(host.bridgeFailureReport()).toMatchObject({
       kind: 'bridge_export_and_abort',
@@ -189,7 +189,7 @@ describe('localhost bridge client and failure containment', () => {
   it('SESSION-BOOTSTRAP decodes the real persisted Codex session id before host creation', async () => {
     const bridgeFetch: BridgeFetch = async (url) => {
       expect(url).toBe('http://127.0.0.1:43173/dm/session');
-      return response(true, 200, { reply: { codexSessionId: '019c-fake-persisted-thread' } });
+      return response(true, 200, { reply: { agentSessionId: '019c-fake-persisted-thread' } });
     };
     const client = new LocalhostDmBridgeClient('http://127.0.0.1:43173', bridgeFetch, () => undefined);
     await expect(client.createSession(

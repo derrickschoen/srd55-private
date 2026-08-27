@@ -6,7 +6,6 @@ import type { PersistedCoordinatorState } from '../../../src/combat/coordinator'
 import { combatantConditions, createEncounter, reduceEncounter } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
 import {
-  codexSessionId,
   encounterBranchId,
   encounterEffectId,
   encounterSessionId,
@@ -502,7 +501,6 @@ describe('external party-pack boundary', () => {
       encounterState: replayInitial,
       coordinatorState: REPLAY_COORDINATOR,
       controllers: [],
-      codexSessionId: codexSessionId('codex:party-damage-operation'),
       rng: replayRng,
       store: sourceStore,
       mirror: new MemoryMirrorSink(),

@@ -5,7 +5,7 @@ import type { EncounterCommand } from '../../../src/combat/events';
 import { projectDmView } from '../../../src/combat/visibility';
 import { damageType, dieSides, feet } from '../../../src/combat/values';
 import {
-  codexSessionId,
+  agentSessionId,
   encounterSessionId,
   type CombatantId,
 } from '../../../src/combat/values';
@@ -118,7 +118,7 @@ function attack(actor: CombatantId, target: CombatantId): Extract<EncounterComma
 function context(state: EncounterState) {
   return {
     encounterId: encounterSessionId('encounter:js-integration'),
-    codexSessionId: codexSessionId('codex:fake-js-exchange'),
+    agentSessionId: agentSessionId('codex:fake-js-exchange'),
     projection: projectDmBoard({ view: projectDmView(state), coordinator: IDLE, controllers: [], history: [] }),
     history: [],
     initiativeMode: state.config.initiativeMode,
@@ -198,7 +198,7 @@ function jsRequest(state: EncounterState, livingMonsterIds: readonly CombatantId
     requestId: 'request:envelope-normalization',
     expectedRevision: state.revision,
     round: state.round,
-    codexSessionId: requestContext.codexSessionId,
+    agentSessionId: requestContext.agentSessionId,
     model: { model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
     projection: requestContext.projection,
     history: [],

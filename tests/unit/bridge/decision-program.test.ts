@@ -25,7 +25,7 @@ import {
   decodeRoundPlan,
 } from '../../../src/vtt/dm-bridge/contracts';
 import {
-  codexSessionId,
+  agentSessionId,
   combatantId,
   encounterEffectId,
   encounterSessionId,
@@ -74,7 +74,7 @@ function board(state: EncounterState) {
 function context(state: EncounterState) {
   return {
     encounterId: encounterSessionId('encounter:bridge-test'),
-    codexSessionId: codexSessionId('codex:persisted-session-77'),
+    agentSessionId: agentSessionId('codex:persisted-session-77'),
     projection: board(state),
     history: [],
     initiativeMode: state.config.initiativeMode,
@@ -229,7 +229,7 @@ describe('typed DM round decision programs', () => {
     expect(exchange.requests).toHaveLength(1);
     expect(exchange.requests[0]).toMatchObject({
       kind: 'round_plan_request',
-      codexSessionId: 'codex:persisted-session-77',
+      agentSessionId: 'codex:persisted-session-77',
       model: { model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
       livingMonsterIds: [f.monsterA.id, f.monsterB.id],
     });
@@ -270,9 +270,9 @@ describe('typed DM round decision programs', () => {
       requestedMonsterIds: [f.monsterA.id, f.monsterB.id],
       replyContract: { schemaVersion: 1, maximumCorrectionAttempts: 2 },
     });
-    expect(exchange.requests.map((request) => request.codexSessionId)).toEqual([
-      codexSessionId('codex:persisted-session-77'),
-      codexSessionId('codex:persisted-session-77'),
+    expect(exchange.requests.map((request) => request.agentSessionId)).toEqual([
+      agentSessionId('codex:persisted-session-77'),
+      agentSessionId('codex:persisted-session-77'),
     ]);
   });
 
@@ -290,8 +290,8 @@ describe('typed DM round decision programs', () => {
       session.startRound(context(f.state), new AbortController().signal),
     ).rejects.toThrow('failed after 2 corrections');
     expect(exchange.requests.map((request) => request.correctionAttempt)).toEqual([0, 1, 2]);
-    expect(new Set(exchange.requests.map((request) => request.codexSessionId))).toEqual(
-      new Set([codexSessionId('codex:persisted-session-77')]),
+    expect(new Set(exchange.requests.map((request) => request.agentSessionId))).toEqual(
+      new Set([agentSessionId('codex:persisted-session-77')]),
     );
     expect(aborts).toHaveLength(1);
     expect(aborts[0]).toBeInstanceOf(RoundPlanCorrectionExhaustedError);
@@ -438,7 +438,7 @@ describe('typed DM round decision programs', () => {
       kind: 'monster_reconsult_request',
       monsterId: f.monsterA.id,
       scope: 'monster_remaining_round',
-      codexSessionId: 'codex:persisted-session-77',
+      agentSessionId: 'codex:persisted-session-77',
     });
   });
 
@@ -469,9 +469,9 @@ describe('typed DM round decision programs', () => {
       context(f.state),
       new AbortController().signal,
     );
-    expect(exchange.requests.map((request) => request.codexSessionId)).toEqual([
-      codexSessionId('codex:persisted-session-77'),
-      codexSessionId('codex:persisted-session-77'),
+    expect(exchange.requests.map((request) => request.agentSessionId)).toEqual([
+      agentSessionId('codex:persisted-session-77'),
+      agentSessionId('codex:persisted-session-77'),
     ]);
   });
 

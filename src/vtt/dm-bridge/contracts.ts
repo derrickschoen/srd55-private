@@ -3,7 +3,7 @@ import type { GridCell } from '../../combat/grid';
 import type { DmVisibleEncounterState } from '../../combat/visibility';
 import {
   combatantId,
-  type CodexSessionId,
+  type AgentSessionId,
   type CombatantId,
   type EncounterSessionId,
 } from '../../combat/values';
@@ -168,7 +168,7 @@ export interface RoundPlanRequest {
   readonly requestId: string;
   readonly expectedRevision: number;
   readonly round: number;
-  readonly codexSessionId: CodexSessionId;
+  readonly agentSessionId: AgentSessionId;
   readonly model: DmBridgeModelConfig;
   readonly projection: DmBoardProjection;
   readonly history: readonly SessionHistoryEntry[];
@@ -186,7 +186,7 @@ export interface MonsterReconsultRequest {
   readonly requestId: string;
   readonly expectedRevision: number;
   readonly round: number;
-  readonly codexSessionId: CodexSessionId;
+  readonly agentSessionId: AgentSessionId;
   readonly model: DmBridgeModelConfig;
   readonly projection: DmBoardProjection;
   readonly history: readonly SessionHistoryEntry[];
@@ -207,7 +207,7 @@ export interface RoundPlanCorrectionRequest {
   readonly originalRequestId: string;
   readonly expectedRevision: number;
   readonly round: number;
-  readonly codexSessionId: CodexSessionId;
+  readonly agentSessionId: AgentSessionId;
   readonly model: DmBridgeModelConfig;
   readonly projection: DmBoardProjection;
   readonly history: readonly SessionHistoryEntry[];
@@ -234,7 +234,7 @@ export interface SteeringRoundRequest {
   readonly requestId: string;
   readonly expectedRevision: number;
   readonly round: number;
-  readonly codexSessionId: CodexSessionId;
+  readonly agentSessionId: AgentSessionId;
   readonly model: DmBridgeModelConfig;
   readonly projection: DmBoardProjection;
   readonly history: readonly SessionHistoryEntry[];

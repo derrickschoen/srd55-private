@@ -11,7 +11,6 @@ import type { GridCell } from '../combat/grid';
 import { mulberry32, type SerializableRng } from '../combat/random';
 import { feetPoint } from '../combat/templates';
 import {
-  codexSessionId,
   combatantId,
   damageType,
   dieSides,
@@ -209,7 +208,6 @@ export function recordScriptedReferenceSkirmish(
     encounterState: state,
     coordinatorState: INITIAL_COORDINATOR,
     controllers,
-    codexSessionId: codexSessionId('codex:increment-10-fake-exchange'),
     rng,
     store,
     mirror,

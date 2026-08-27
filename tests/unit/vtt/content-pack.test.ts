@@ -10,7 +10,6 @@ import { mulberry32 } from '../../../src/combat/random';
 import { spellDefinition } from '../../../src/combat/spells/definitions';
 import { SPELL_OPERATION_KINDS } from '../../../src/combat/spells/types';
 import {
-  codexSessionId,
   damageType,
   dieSides,
   encounterBranchId,
@@ -631,7 +630,6 @@ describe('content-pack v1', () => {
       encounterState: initial,
       coordinatorState: INITIAL_COORDINATOR_STATE,
       controllers: [],
-      codexSessionId: codexSessionId('codex:imported-content'),
       rng,
       store: sourceStore,
       mirror: new MemoryMirrorSink(),

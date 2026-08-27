@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { declareTestInputs } from '../../helpers/test-inputs';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
   AlgorithmController,
@@ -19,7 +20,7 @@ import { projectPlayerView } from '../../../src/combat/visibility';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import {
-  codexSessionId,
+  agentSessionId,
   encounterBranchId,
   encounterSessionId,
   type CombatantId,
@@ -58,6 +59,10 @@ const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   pause: null,
 };
 
+const declaredInputs = declareTestInputs({
+  fixtures: ['tests/fixtures/vtt/pre-agent-binding-v7-save.json'],
+});
+
 function pair() {
   const player = playerProfile('persist-player', { initiativeBonus: 20 });
   const monster = monsterProfile('persist-monster', {
@@ -86,7 +91,6 @@ function createJournal(
     encounterState: state,
     coordinatorState: INITIAL_COORDINATOR_STATE,
     controllers: registry.identities(),
-    codexSessionId: codexSessionId('codex:stable-session'),
     rng,
     store,
     mirror,
@@ -115,7 +119,7 @@ function latestProof(
     rngState: latest.rngState,
     coordinatorState: latest.coordinatorState,
     controllers: latest.controllers,
-    codexSessionId: latest.codexSessionId,
+    agentSession: latest.agentSession,
     history: sessionHistory(revisions),
   });
 }
@@ -135,7 +139,7 @@ function expectEveryRevisionReloads(store: BrowserSessionStore): void {
       prefix.revisions(sessionId).at(-1)?.rngState,
     );
     expect(latestProof(prefix)).toBe(before);
-    expect(resumed.codexSessionId).toBe(codexSessionId('codex:stable-session'));
+    expect(resumed.agentSession).toEqual(prefix.revisions(sessionId).at(-1)?.agentSession);
   }
 }
 
@@ -160,6 +164,52 @@ class CountingController extends HumanController {
 }
 
 describe('event-sourced encounter persistence', () => {
+  it('migrates the literal pre-AgentSessionBinding v7 save without changing unrelated journal bytes', () => {
+    const fixtureBytes = declaredInputs.fixtures
+      .readText('tests/fixtures/vtt/pre-agent-binding-v7-save.json')
+      .trim();
+    const fixture = JSON.parse(fixtureBytes) as Readonly<Record<string, unknown>>;
+    const legacyRevisions = fixture.revisions;
+    if (!Array.isArray(legacyRevisions) || legacyRevisions.length !== 1) {
+      throw new TypeError('Pre-migration fixture must contain exactly one literal revision.');
+    }
+    const legacyRevision = legacyRevisions[0];
+    if (typeof legacyRevision !== 'object' || legacyRevision === null || Array.isArray(legacyRevision)) {
+      throw new TypeError('Pre-migration fixture revision is malformed.');
+    }
+    const {
+      schemaVersion: _legacySchemaVersion,
+      checksum: _legacyChecksum,
+      codexSessionId: _legacySessionId,
+      ...legacyUnrelated
+    } = legacyRevision as Readonly<Record<string, unknown>>;
+    const legacyUnrelatedBytes = new TextEncoder().encode(canonicalJson(legacyUnrelated));
+
+    const store = new MemoryBrowserSessionStore();
+    const importedId = importSavedSession(store, fixtureBytes);
+    const migrated = store.revisions(importedId);
+    expect(migrated).toHaveLength(1);
+    expect(migrated[0]?.agentSession).toEqual({
+      cli: 'codex',
+      sessionId: 'codex:increment-6-local',
+      adapterVersion: 1,
+      recoveryGeneration: 0,
+      predecessorSessionHash: null,
+      startedAtRevision: 1,
+      lastDispatchedRevision: 0,
+      status: 'active',
+    });
+    const migratedRevision = migrated[0]!;
+    const {
+      schemaVersion: _migratedSchemaVersion,
+      checksum: _migratedChecksum,
+      agentSession: _migratedAgentSession,
+      ...migratedUnrelated
+    } = migratedRevision;
+    expect(new TextEncoder().encode(canonicalJson(migratedUnrelated))).toEqual(legacyUnrelatedBytes);
+    expect(exportSavedSession(store, importedId)).not.toContain('codexSessionId');
+  });
+
   it('unknown transition kind refuses the whole session file with a typed refusal naming the kind', () => {
     const source = new MemoryBrowserSessionStore();
     createJournal(source, new MemoryMirrorSink(), new ControllerRegistry([]));
@@ -661,7 +711,6 @@ describe('event-sourced encounter persistence', () => {
       encounterState: refusalState.state,
       coordinatorState: INITIAL_COORDINATOR_STATE,
       controllers: refusalRegistry.identities(),
-      codexSessionId: codexSessionId('codex:stable-session'),
       rng: refusalRng,
       store: refusalStore,
       mirror: new MemoryMirrorSink(),
@@ -776,9 +825,22 @@ describe('event-sourced encounter persistence', () => {
     const imported = new MemoryBrowserSessionStore();
     const importedId = importSavedSession(imported, v1);
     expect(importedId).toBe(encounterSessionId('session:persistence-test'));
-    expect(exportSavedSession(imported, importedId)).toBe(
-      exportSavedSession(store, importedId),
-    );
+    const before = store.revisions(importedId)[0]!;
+    const after = imported.revisions(importedId)[0]!;
+    expect(after.encounterState).toEqual(before.encounterState);
+    expect(after.coordinatorState).toEqual(before.coordinatorState);
+    expect(after.controllers).toEqual(before.controllers);
+    expect(after.rngState).toEqual(before.rngState);
+    expect(after.agentSession).toMatchObject({
+      cli: 'codex',
+      sessionId: agentSessionId('codex:legacy-v1-migration-fixture'),
+      recoveryGeneration: 0,
+      predecessorSessionHash: null,
+      status: 'active',
+    });
+    const reloaded = new MemoryBrowserSessionStore();
+    importSavedSession(reloaded, exportSavedSession(imported, importedId));
+    expect(reloaded.revisions(importedId)).toEqual(imported.revisions(importedId));
   });
 
   it('SQLITE-BROWSER-STORE appends each revision as a separate local database row', async () => {
@@ -809,11 +871,11 @@ describe('event-sourced encounter persistence', () => {
          ORDER BY revision`,
       );
       expect(rows).toEqual([
-        { revision: 1, schema_version: 7 },
-        { revision: 2, schema_version: 7 },
-        { revision: 3, schema_version: 7 },
-        { revision: 4, schema_version: 7 },
-        { revision: 5, schema_version: 7 },
+        { revision: 1, schema_version: 8 },
+        { revision: 2, schema_version: 8 },
+        { revision: 3, schema_version: 8 },
+        { revision: 4, schema_version: 8 },
+        { revision: 5, schema_version: 8 },
       ]);
       expect(
         EncounterSessionJournal.resume(

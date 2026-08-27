@@ -1,0 +1,416 @@
+import { monsterCombatantProfile, type CombatantProfile } from '../combat/combatant';
+import { createEncounter, type EncounterCombatantState, type EncounterState } from '../combat/encounter';
+import type { GridCell } from '../combat/grid';
+import { mulberry32, type Rng } from '../combat/random';
+import type { ChallengeRating } from '../combat/statblock';
+import { STARTER_MONSTER_ROSTER, type StarterMonsterFamily } from '../combat/statblocks/roster';
+import {
+  armorClass,
+  effectStackingIdentity,
+  encounterEffectId,
+  worldObjectId,
+} from '../combat/values';
+import type { LightLevel, WorldObject } from '../combat/world-objects';
+import { referenceEncounterSetup } from './reference-encounter';
+import { encounterIr, type EncounterIr, type EncounterProvenance } from './encounter-ir';
+
+export const ROOM_GRID_DIMENSIONS = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24] as const;
+export type RoomGridDimension = (typeof ROOM_GRID_DIMENSIONS)[number];
+
+export const PARTY_HIT_POINT_FRACTIONS = [1, 0.75, 0.5, 0.25, 0] as const;
+export type PartyHitPointFraction = (typeof PARTY_HIT_POINT_FRACTIONS)[number];
+
+export type RoomTerrainFeature =
+  | {
+      readonly kind: 'difficult-terrain-patch';
+      readonly id: string;
+      readonly cells: readonly GridCell[];
+    }
+  | {
+      readonly kind: 'hazard-object';
+      readonly object: WorldObject & { readonly kind: 'hazard' };
+    }
+  | {
+      readonly kind: 'light-source';
+      readonly object: WorldObject & { readonly kind: 'light-source' };
+      readonly level: LightLevel;
+      readonly cells: readonly GridCell[];
+    };
+
+export interface RoomMonsterRosterEntry {
+  readonly combatantId: `combatant:generated-${string}`;
+  readonly tokenId: `token:generated-${string}`;
+  readonly statblockId: string;
+  readonly challengeRating: ChallengeRating;
+  readonly challengeEighths: number;
+}
+
+export interface SampledSpellSlot {
+  readonly level: number;
+  readonly maximum: number;
+  readonly remaining: number;
+  readonly spent: number;
+}
+
+export interface SampledPartySeat {
+  readonly combatantId: string;
+  readonly hitPointFraction: PartyHitPointFraction;
+  readonly hitPoints: number;
+  readonly life: 'living' | 'dying';
+  readonly deathSaves: null | {
+    readonly successes: number;
+    readonly failures: number;
+  };
+  readonly spellSlots: readonly SampledSpellSlot[];
+  readonly concentrating: boolean;
+}
+
+export interface RoomSpec {
+  readonly seed: number;
+  readonly dimensions: {
+    readonly columns: RoomGridDimension;
+    readonly rows: RoomGridDimension;
+  };
+  readonly terrain: readonly RoomTerrainFeature[];
+  readonly blockedCells: readonly GridCell[];
+  readonly monsterRoster: readonly RoomMonsterRosterEntry[];
+  readonly challengeBudgetEighths: number;
+  readonly challengeSpentEighths: number;
+  readonly partyState: readonly SampledPartySeat[];
+}
+
+export interface GeneratedRoom {
+  readonly spec: RoomSpec;
+  readonly encounter: EncounterIr;
+}
+
+export interface GenerateRoomOptions {
+  readonly dimensions?: {
+    readonly columns: RoomGridDimension;
+    readonly rows: RoomGridDimension;
+  };
+  readonly provenance?: EncounterProvenance;
+}
+
+function integer(rng: Rng, minimum: number, maximum: number): number {
+  return minimum + Math.floor(rng() * (maximum - minimum + 1));
+}
+
+function pick<const Value>(rng: Rng, values: readonly Value[]): Value {
+  const value = values[Math.floor(rng() * values.length)];
+  if (value === undefined) throw new RangeError('Cannot sample an empty vocabulary.');
+  return value;
+}
+
+function challengeEighths(challenge: ChallengeRating): number {
+  switch (challenge) {
+    case '1/8': return 1;
+    case '1/4': return 2;
+    case '1/2': return 4;
+    case 1: return 8;
+    case 2: return 16;
+    case 3: return 24;
+    case 4: return 32;
+    case 5: return 40;
+    case 6: return 48;
+  }
+}
+
+function cellKey(cell: GridCell): string {
+  return `${String(cell.column)},${String(cell.row)}`;
+}
+
+function uniqueCells(cells: readonly GridCell[]): readonly GridCell[] {
+  const seen = new Set<string>();
+  return cells.filter((cell) => {
+    const key = cellKey(cell);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function patchCells(
+  rng: Rng,
+  dimensions: RoomSpec['dimensions'],
+  reserved: ReadonlySet<string>,
+): readonly GridCell[] {
+  const width = integer(rng, 2, 4);
+  const height = integer(rng, 2, 4);
+  const startColumn = integer(rng, 3, dimensions.columns - width - 3);
+  const startRow = integer(rng, 1, dimensions.rows - height - 1);
+  const result: GridCell[] = [];
+  for (let row = startRow; row < startRow + height; row += 1) {
+    for (let column = startColumn; column < startColumn + width; column += 1) {
+      const cell = { column, row };
+      if (!reserved.has(cellKey(cell))) result.push(cell);
+    }
+  }
+  return result;
+}
+
+function unreservedCell(
+  rng: Rng,
+  dimensions: RoomSpec['dimensions'],
+  reserved: Set<string>,
+): GridCell {
+  for (let attempt = 0; attempt < dimensions.columns * dimensions.rows; attempt += 1) {
+    const candidate = {
+      column: integer(rng, 1, dimensions.columns - 2),
+      row: integer(rng, 1, dimensions.rows - 2),
+    };
+    if (!reserved.has(cellKey(candidate))) {
+      reserved.add(cellKey(candidate));
+      return candidate;
+    }
+  }
+  throw new RangeError('Generated room has no unreserved interior cell.');
+}
+
+function generatedWorldObject<const Kind extends 'hazard' | 'light-source'>(
+  seed: number,
+  sequence: number,
+  kind: Kind,
+  position: GridCell,
+): WorldObject & { readonly kind: Kind } {
+  return {
+    id: worldObjectId(`world-object:generated-${String(seed)}-${String(sequence)}`),
+    name: kind === 'hazard' ? 'Unstable Arcane Vent' : 'Runed Brazier',
+    kind,
+    position,
+    footprint: [position],
+    durability: { kind: 'indestructible' },
+    armorClass: armorClass(15),
+    damageResponses: [],
+    blocking: { movement: false, lineOfSight: false, cover: 'none' },
+    createdRevision: 0,
+  };
+}
+
+function sampledRoster(
+  rng: Rng,
+  seed: number,
+): {
+  readonly budget: number;
+  readonly spent: number;
+  readonly entries: readonly RoomMonsterRosterEntry[];
+  readonly profiles: readonly CombatantProfile[];
+} {
+  const budget = integer(rng, 12, 24);
+  const family = pick<StarterMonsterFamily>(rng, [
+    'goblinoid_warband',
+    'undead_crypt',
+    'mercenary_company',
+    'wild_beasts',
+  ]);
+  const familyRows = STARTER_MONSTER_ROSTER.filter((row) =>
+    row.family === family && challengeEighths(row.challengeRating) <= budget);
+  let remaining = budget;
+  const entries: RoomMonsterRosterEntry[] = [];
+  const profiles: CombatantProfile[] = [];
+  while (entries.length < 6) {
+    const affordable = familyRows.filter((row) => challengeEighths(row.challengeRating) <= remaining);
+    if (affordable.length === 0) break;
+    const row = pick(rng, affordable);
+    const sequence = entries.length + 1;
+    const combatantIdentity = `combatant:generated-${String(seed)}-monster-${String(sequence)}` as const;
+    const tokenIdentity = `token:generated-${String(seed)}-monster-${String(sequence)}` as const;
+    const eighths = challengeEighths(row.challengeRating);
+    entries.push({
+      combatantId: combatantIdentity,
+      tokenId: tokenIdentity,
+      statblockId: row.id,
+      challengeRating: row.challengeRating,
+      challengeEighths: eighths,
+    });
+    profiles.push(monsterCombatantProfile(row.statblock, {
+      combatantId: combatantIdentity,
+      tokenId: tokenIdentity,
+    }));
+    remaining -= eighths;
+    if (entries.length >= 2 && rng() < 0.3) break;
+  }
+  return { budget, spent: budget - remaining, entries, profiles };
+}
+
+function samplePartyState(
+  rng: Rng,
+  state: EncounterState,
+): { readonly state: EncounterState; readonly samples: readonly SampledPartySeat[] } {
+  const playerIndexes = state.combatants.flatMap((subject, index) =>
+    subject.profile.kind === 'player_character' ? [index] : []);
+  const downedIndex = rng() < 0.25 ? pick(rng, playerIndexes) : null;
+  const casterIndexes = playerIndexes.filter((index) =>
+    (state.combatants[index]?.spellSlots.length ?? 0) > 0 && index !== downedIndex);
+  const concentratingIndex = casterIndexes.length > 0 && rng() < 0.5
+    ? pick(rng, casterIndexes)
+    : null;
+  const samples: SampledPartySeat[] = [];
+  const combatants = state.combatants.map((subject, index): EncounterCombatantState => {
+    if (subject.profile.kind !== 'player_character') return subject;
+    const downed = index === downedIndex;
+    const fraction = downed ? 0 : pick(rng, PARTY_HIT_POINT_FRACTIONS.slice(0, -1));
+    const spellSlots = subject.spellSlots.map((slot) => ({
+      ...slot,
+      remaining: integer(rng, 0, slot.maximum),
+    }));
+    const deathSaves = downed
+      ? { successes: integer(rng, 0, 2), failures: integer(rng, 0, 2) }
+      : null;
+    const hitPoints = downed
+      ? 0
+      : Math.max(1, Math.ceil(subject.profile.rules.hitPointMaximum * fraction));
+    samples.push({
+      combatantId: subject.profile.id,
+      hitPointFraction: fraction,
+      hitPoints,
+      life: downed ? 'dying' : 'living',
+      deathSaves,
+      spellSlots: spellSlots.map(({ level, maximum, remaining }) => ({
+        level,
+        maximum,
+        remaining,
+        spent: maximum - remaining,
+      })),
+      concentrating: index === concentratingIndex,
+    });
+    return {
+      ...subject,
+      hitPoints,
+      life: downed ? 'dying' : 'living',
+      deathSaves,
+      spellSlots,
+    };
+  });
+  if (concentratingIndex === null) return { state: { ...state, combatants }, samples };
+  const owner = combatants[concentratingIndex];
+  if (owner === undefined) throw new Error('Concentration sampler selected an absent party seat.');
+  const effect = {
+    id: encounterEffectId(`effect:generated-${String(state.revision + 1)}`),
+    source: owner.profile.id,
+    targets: [owner.profile.id],
+    createdRevision: state.revision,
+    duration: { kind: 'permanent' as const },
+    concentrationOwner: owner.profile.id,
+    stackingIdentity: effectStackingIdentity('generated:active-concentration'),
+    stacking: 'replace_same_source' as const,
+    repeatedSave: null,
+    damageBreak: null,
+    payload: { kind: 'armor_class_modifier' as const, amount: 1 },
+  };
+  return {
+    state: {
+      ...state,
+      combatants,
+      effects: [...state.effects, effect],
+      nextEffectSequence: state.nextEffectSequence + 1,
+    },
+    samples,
+  };
+}
+
+export function generateRoom(seed: number, options: GenerateRoomOptions = {}): GeneratedRoom {
+  if (!Number.isSafeInteger(seed)) throw new RangeError('Room seed must be a safe integer.');
+  const normalizedSeed = seed >>> 0;
+  const rng = mulberry32(normalizedSeed);
+  const dimensions = options.dimensions ?? {
+    columns: pick(rng, ROOM_GRID_DIMENSIONS),
+    rows: pick(rng, ROOM_GRID_DIMENSIONS),
+  };
+  const partyProfiles = referenceEncounterSetup().combatants.filter(
+    (profile) => profile.kind === 'player_character',
+  );
+  const roster = sampledRoster(rng, normalizedSeed);
+  const partyPositions = partyProfiles.map((_profile, index) => ({
+    column: 1 + index % 2,
+    row: 2 + index * 2,
+  }));
+  const monsterPositions = roster.profiles.map((_profile, index) => ({
+    column: dimensions.columns - 2 - index % 2,
+    row: 1 + Math.floor(index / 2) * 2,
+  }));
+  const reserved = new Set([...partyPositions, ...monsterPositions].map(cellKey));
+
+  const blockedCells = uniqueCells(Array.from(
+    { length: integer(rng, 2, 5) },
+    () => unreservedCell(rng, dimensions, reserved),
+  ));
+  const terrain: RoomTerrainFeature[] = [];
+  for (let sequence = 1; sequence <= integer(rng, 1, 3); sequence += 1) {
+    terrain.push({
+      kind: 'difficult-terrain-patch',
+      id: `difficult:generated-${String(normalizedSeed)}-${String(sequence)}`,
+      cells: patchCells(rng, dimensions, reserved),
+    });
+  }
+  let objectSequence = 1;
+  for (let sequence = 1; sequence <= integer(rng, 1, 2); sequence += 1) {
+    const object = generatedWorldObject(
+      normalizedSeed,
+      objectSequence++,
+      'hazard',
+      unreservedCell(rng, dimensions, reserved),
+    );
+    terrain.push({ kind: 'hazard-object', object });
+  }
+  for (let sequence = 1; sequence <= integer(rng, 1, 2); sequence += 1) {
+    const object = generatedWorldObject(
+      normalizedSeed,
+      objectSequence++,
+      'light-source',
+      unreservedCell(rng, dimensions, reserved),
+    );
+    terrain.push({
+      kind: 'light-source',
+      object,
+      level: pick(rng, ['bright', 'dim'] as const),
+      cells: patchCells(rng, dimensions, reserved),
+    });
+  }
+  const combatants = [...partyProfiles, ...roster.profiles];
+  const positions = [...partyPositions, ...monsterPositions];
+  const fresh = createEncounter({
+    bounds: dimensions,
+    combatants,
+    tokens: combatants.map((profile, index) => ({
+      id: profile.tokenId,
+      combatantId: profile.id,
+      position: positions[index] ?? { column: 0, row: 0 },
+    })),
+    blockedCells,
+    worldObjects: terrain.flatMap((feature) =>
+      feature.kind === 'difficult-terrain-patch' ? [] : [feature.object]),
+    environment: {
+      difficultTerrainRegions: terrain.flatMap((feature) =>
+        feature.kind === 'difficult-terrain-patch'
+          ? [{ id: feature.id, cells: feature.cells }]
+          : []),
+      lightRegions: terrain.flatMap((feature) =>
+        feature.kind === 'light-source'
+          ? [{ id: `light:${feature.object.id}`, cells: feature.cells, level: feature.level }]
+          : []),
+      obscurementRegions: [],
+      movementRegions: [],
+    },
+    dmNotes: [`Deterministic generated room seed ${String(normalizedSeed)}.`],
+  });
+  const sampled = samplePartyState(rng, fresh);
+  const spec: RoomSpec = {
+    seed: normalizedSeed,
+    dimensions,
+    terrain,
+    blockedCells,
+    monsterRoster: roster.entries,
+    challengeBudgetEighths: roster.budget,
+    challengeSpentEighths: roster.spent,
+    partyState: sampled.samples,
+  };
+  return {
+    spec,
+    encounter: encounterIr(sampled.state, options.provenance ?? {
+      source: 'generated',
+      licenseTag: 'MIT',
+      seed: normalizedSeed,
+    }),
+  };
+}

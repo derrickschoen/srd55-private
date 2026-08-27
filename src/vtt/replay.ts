@@ -747,6 +747,15 @@ export function replayBundle(
           : encounterStateFromApprovedFixture(fixture, bundle.encounterConfig);
         expectedRng = revision.rngState;
         break;
+      case 'agent_session_started':
+      case 'agent_session_dispatched':
+      case 'agent_session_recovered':
+        if (parent === null || parent === undefined) {
+          throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'existing agent-session parent', revision.parentRevision);
+        }
+        expectedState = parent.state;
+        expectedRng = parent.rng;
+        break;
       case 'head_moved': {
         if (parent === null || parent === undefined || revision.parentRevision === null) {
           throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'existing head target', revision.parentRevision);

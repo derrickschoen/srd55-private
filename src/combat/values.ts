@@ -17,7 +17,7 @@ export type EffectStackingIdentity = Brand<string, 'EffectStackingIdentity'>;
 export type LimitedResourcePoolId = Brand<string, 'LimitedResourcePoolId'>;
 export type EncounterSessionId = Brand<string, 'EncounterSessionId'>;
 export type EncounterBranchId = Brand<string, 'EncounterBranchId'>;
-export type CodexSessionId = Brand<string, 'CodexSessionId'>;
+export type AgentSessionId = Brand<string, 'AgentSessionId'>;
 
 const MAX_DAMAGE_TYPE_LENGTH = 100;
 const MAX_IDENTITY_LENGTH = 200;
@@ -106,5 +106,5 @@ export const encounterSessionId = (value: string): EncounterSessionId =>
 export const encounterBranchId = (value: string): EncounterBranchId =>
   identity<EncounterBranchId>(value, 'EncounterBranchId');
 
-export const codexSessionId = (value: string): CodexSessionId =>
-  identity<CodexSessionId>(value, 'CodexSessionId');
+export const agentSessionId = (value: string): AgentSessionId =>
+  identity<AgentSessionId>(value, 'AgentSessionId');

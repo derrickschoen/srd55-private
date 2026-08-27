@@ -4,7 +4,7 @@ import type { EncounterCommand } from '../../combat/events';
 import type { InitiativeMode } from '../../combat/encounter';
 import { gridDistance } from '../../combat/grid';
 import type { DmVisibleCombatant, DmVisibleEncounterState } from '../../combat/visibility';
-import type { CombatantId, EncounterSessionId, CodexSessionId } from '../../combat/values';
+import type { AgentSessionId, CombatantId, EncounterSessionId } from '../../combat/values';
 import type { DmBoardProjection } from '../encounter-projections';
 import type { SessionHistoryEntry } from '../session-persistence';
 import {
@@ -226,7 +226,7 @@ function executeProgram(
 
 export interface RoundPlanContext {
   readonly encounterId: EncounterSessionId;
-  readonly codexSessionId: CodexSessionId;
+  readonly agentSessionId: AgentSessionId;
   readonly projection: DmBoardProjection;
   readonly history: readonly SessionHistoryEntry[];
   readonly initiativeMode: InitiativeMode;
@@ -290,7 +290,7 @@ export class DmRoundPlanSession {
           originalRequestId: request.requestId,
           expectedRevision: request.expectedRevision,
           round: request.round,
-          codexSessionId: request.codexSessionId,
+          agentSessionId: request.agentSessionId,
           model: request.model,
           projection: request.projection,
           history: request.history,
@@ -362,7 +362,7 @@ export class DmRoundPlanSession {
         requestId,
         expectedRevision: projection.revision,
         round: projection.round,
-        codexSessionId: context.codexSessionId,
+        agentSessionId: context.agentSessionId,
         model: this.model,
         projection: context.projection,
         history: context.history,
@@ -388,7 +388,7 @@ export class DmRoundPlanSession {
       requestId: this.#requestId(context.encounterId, projection.round, 'initial'),
       expectedRevision: projection.revision,
       round: projection.round,
-      codexSessionId: context.codexSessionId,
+      agentSessionId: context.agentSessionId,
       model: this.model,
       projection: context.projection,
       history: context.history,
@@ -451,7 +451,7 @@ export class DmRoundPlanSession {
         requestId: this.#requestId(context.encounterId, state.round, `monster:${request.actorId}`),
         expectedRevision: state.revision,
         round: state.round,
-        codexSessionId: context.codexSessionId,
+        agentSessionId: context.agentSessionId,
         model: this.model,
         projection: context.projection,
         history: context.history,

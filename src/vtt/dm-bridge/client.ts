@@ -1,4 +1,4 @@
-import { codexSessionId, type CodexSessionId, type EncounterSessionId } from '../../combat/values';
+import { agentSessionId, type AgentSessionId, type EncounterSessionId } from '../../combat/values';
 import { exportSavedSession, type BrowserSessionStore, type MirrorSink, type SessionRevision } from '../session-persistence';
 import {
   DEFAULT_DM_MODEL_CONFIG,
@@ -168,7 +168,7 @@ export class LocalhostDmBridgeClient implements DmBridgeExchange, MirrorSink {
     encounterId: EncounterSessionId,
     signal: AbortSignal,
     model: DmBridgeModelConfig = DEFAULT_DM_MODEL_CONFIG,
-  ): Promise<CodexSessionId> {
+  ): Promise<AgentSessionId> {
     try {
       const response = await this.fetch(`${this.baseUrl}/dm/session`, {
         method: 'POST',
@@ -186,11 +186,11 @@ export class LocalhostDmBridgeClient implements DmBridgeExchange, MirrorSink {
       if (
         typeof body !== 'object' || body === null || Array.isArray(body) ||
         !('reply' in body) || typeof body.reply !== 'object' || body.reply === null || Array.isArray(body.reply) ||
-        !('codexSessionId' in body.reply) || typeof body.reply.codexSessionId !== 'string'
+        !('agentSessionId' in body.reply) || typeof body.reply.agentSessionId !== 'string'
       ) {
         throw new TypeError('DM bridge session response is malformed.');
       }
-      return codexSessionId(body.reply.codexSessionId);
+      return agentSessionId(body.reply.agentSessionId);
     } catch (error) {
       this.onFailure(error);
       throw error;

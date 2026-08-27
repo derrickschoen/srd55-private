@@ -5,6 +5,7 @@ import {
   MemoryBrowserSessionStore,
   exportSavedSession,
   importSavedSession,
+  migrateStoredSessionRevisions,
   type BrowserSessionStore,
   type DecodedSavedSessionFingerprint,
   type SessionRevision,
@@ -157,7 +158,13 @@ async function encodedStoredRevision(revision: SessionRevision): Promise<ArrayBu
   return new Response(compressed).arrayBuffer();
 }
 
-async function decodedStoredRevision(value: unknown): Promise<SessionRevision> {
+interface StoredRevisionHeader extends Readonly<Record<string, unknown>> {
+  readonly sessionId: EncounterSessionId;
+  readonly revision: number;
+  readonly checksum: string;
+}
+
+async function decodedStoredRevision(value: unknown): Promise<StoredRevisionHeader> {
   const decoded: unknown = value instanceof ArrayBuffer
     ? JSON.parse(await new Response(
         new Blob([value]).stream().pipeThrough(new DecompressionStream('gzip')),
@@ -167,7 +174,7 @@ async function decodedStoredRevision(value: unknown): Promise<SessionRevision> {
     !Number.isSafeInteger(decoded.revision) || typeof decoded.checksum !== 'string') {
     throw new TypeError('Stored VTT session revision is malformed.');
   }
-  return decoded as unknown as SessionRevision;
+  return decoded as StoredRevisionHeader;
 }
 
 function retention(value: unknown): SaveRetention {
@@ -608,7 +615,7 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     ]);
     await transactionComplete(transaction);
     const nextMemory = new MemoryBrowserSessionStore();
-    const bySession = new Map<EncounterSessionId, SessionRevision[]>();
+    const bySession = new Map<EncounterSessionId, StoredRevisionHeader[]>();
     for (const revision of await Promise.all(
       (revisions as unknown[]).map(async (value) => decodedStoredRevision(value)),
     )) {
@@ -616,15 +623,41 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
       current.push(revision);
       bySession.set(revision.sessionId, current);
     }
+    const migratedStreams: SessionRevision[][] = [];
     for (const stream of bySession.values()) {
       stream.sort((left, right) => left.revision - right.revision);
-      nextMemory.appendAll(stream);
+      const migrated = [...migrateStoredSessionRevisions(stream)];
+      nextMemory.appendAll(migrated);
+      if (stream.some((revision, index) => revision.schemaVersion !== migrated[index]?.schemaVersion)) {
+        migratedStreams.push(migrated);
+      }
     }
     this.#memory = nextMemory;
     this.#metadata.clear();
     for (const value of metadata as BrowserSaveMetadata[]) this.#metadata.set(value.sessionId, value);
     this.#snapshots.clear();
     for (const value of snapshots as StoredAutosaveSnapshot[]) this.#snapshots.set(value.storageId, value);
+    if (migratedStreams.length > 0) {
+      const encoded = await Promise.all(migratedStreams.flatMap((stream) =>
+        stream.map(async (revision) => ({
+          key: revisionKey(revision.sessionId, revision.revision),
+          value: await encodedStoredRevision(revision),
+        }))));
+      const migration = this.database.transaction([revisionStoreName(), sessionStoreName()], 'readwrite');
+      for (const revision of encoded) {
+        migration.objectStore(revisionStoreName()).put(revision.value, revision.key);
+      }
+      for (const stream of migratedStreams) {
+        const sessionId = stream[0]?.sessionId;
+        if (sessionId === undefined) continue;
+        const existing = this.#metadata.get(sessionId);
+        if (existing === undefined) continue;
+        const complete: BrowserSaveMetadata = { ...existing, migrationStatus: 'complete' };
+        this.#metadata.set(sessionId, complete);
+        migration.objectStore(sessionStoreName()).put(complete, sessionId);
+      }
+      await transactionComplete(migration);
+    }
   }
 
   async #migrateLegacy(): Promise<void> {
