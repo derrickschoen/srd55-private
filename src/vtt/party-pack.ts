@@ -2826,7 +2826,7 @@ function healingSpellCommands(
   member: LoadedPartyMember,
   state: Parameters<TurnLegalActions>[0],
   actor: ReturnType<typeof combatantId>,
-  allowLeveledHealing = true,
+  allowLeveledHealing: boolean,
 ): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
   if (!allowLeveledHealing) return [];
   const acting = encounterCombatantIndex(state).at(actor);
@@ -3733,12 +3733,6 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             ['members', index, 'spellSelections', spellIndex],
             'value_not_in_engine_vocabulary',
           ));
-        } else if (spell.status !== 'implemented') {
-          gaps = gaps.append(issueGap(
-            entry,
-            ['members', index, 'spellSelections', spellIndex],
-            'manifest_spell_not_implemented',
-          ));
         } else if (spellIds.includes(spell.id)) {
           gaps = gaps.append(issueGap(
             entry,
@@ -3886,8 +3880,6 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           if (spell === undefined) {
             unknownSpellId = true;
             gaps = gaps.append(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
-          } else if (spell.status !== 'implemented') {
-            gaps = gaps.append(issueGap(entry, reference.path, 'manifest_spell_not_implemented'));
           } else if (sourceSpellIds.includes(spell.id)) {
             gaps = gaps.append(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
           } else {

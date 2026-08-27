@@ -57,3 +57,9 @@
 | `src/vtt/vane-warren.ts` | 7943 | Killed by timeout: forcing a found party member down the monster/regret action path corrupts PC turn selection; the all-algorithm Vane chain then fails to make terminating progress and hits Stryker's 5-second bound. |
 
 The `shouldSpendHitDie` `>=`/`>` boundary mutant (6907) is not ledgered: the exported function accepts finite numeric deficits and modifiers, so `missingHitPoints: 6.5`, `sides: 8`, `constitutionModifier: 2` observably distinguishes `true` from `false`.
+
+## Batch 6.1 proposals
+
+| Module | Mutant | One-line proof |
+|---|---:|---|
+| `src/vtt/party-pack.ts` | 4307 | A loaded `timed_spellcasting_mode` can only come from the strict external schema that requires a resource pool, and its mapper always brands that id, so `effect.resourcePoolId === null` is always false in this narrowed branch and replacing the conditional with `false` preserves the selected pool lookup. |
