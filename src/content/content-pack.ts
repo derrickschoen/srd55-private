@@ -590,7 +590,7 @@ function namespaceEffect(effect: ExternalPartyPackEffect, sourceId: string): Ext
     : effect.effectId;
   const resourcePoolId = effect.resourcePoolId === undefined
     ? {}
-    : { resourcePoolId: `resource:${sourceId}:${effect.resourcePoolId.slice('resource:'.length)}` };
+    : { resourcePoolId: `resource:${sourceId}:${effect.resourcePoolId.slice('resource:'.length)}` as const };
   return {
     ...effect,
     effectId: `effect:${sourceId}:${suffix}`,
