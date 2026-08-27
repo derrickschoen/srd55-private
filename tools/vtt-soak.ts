@@ -18,7 +18,7 @@ import { mulberry32 } from '../src/combat/random';
 import { projectDmView } from '../src/combat/visibility';
 import {
   encounterSessionId,
-  type CodexSessionId,
+  type AgentSessionId,
   type EncounterSessionId,
 } from '../src/combat/values';
 import { LocalhostDmBridgeClient, type BridgeFetch } from '../src/vtt/dm-bridge/client';
@@ -141,7 +141,7 @@ function seedForTable(seed: number, tableIndex: number): number {
 interface DmControllerBinding {
   readonly exchange: DmBridgeExchange;
   readonly encounterId: EncounterSessionId;
-  readonly codexSessionId: CodexSessionId;
+  readonly agentSessionId: AgentSessionId;
   readonly model: DmBridgeModelConfig;
 }
 
@@ -186,7 +186,7 @@ function tableCoordinator(
       if (coordinator === null) throw new Error('Soak coordinator is not initialized.');
       return {
         encounterId: dm.encounterId,
-        codexSessionId: dm.codexSessionId,
+        agentSessionId: dm.agentSessionId,
         projection: projectDmBoard({
           view: projectDmView(coordinator.state()),
           coordinator: coordinator.coordinatorState(),
@@ -422,7 +422,7 @@ async function runRealTable(
     coordinator = tableCoordinator(partySource, party, seed, config.initiativeMode, {
       exchange: client,
       encounterId,
-      codexSessionId: sessionId,
+      agentSessionId: sessionId,
       model,
     });
     await runCoordinatorToRoundBound(coordinator, config.rounds);

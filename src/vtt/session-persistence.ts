@@ -22,7 +22,6 @@ import {
 } from '../combat/random';
 import {
   encounterBranchId,
-  type CodexSessionId,
   type EncounterBranchId,
   type EncounterSessionId,
 } from '../combat/values';
@@ -61,12 +60,31 @@ import { deriveSessionRecord, type SessionRecord } from './session-record';
 import { isHiddenRollCategory } from '../combat/roll-visibility';
 import { reduceSessionEncounter } from './session-encounter-reducer';
 import type { JsonValue } from '../domain/models';
+import {
+  isAgentSessionBinding,
+  type AgentFailureClassification,
+  type AgentSessionBinding,
+} from './agent-session';
 
-export const VTT_SESSION_SCHEMA_VERSION = 7 as const;
+export const VTT_SESSION_SCHEMA_VERSION = 8 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export type SessionTransition =
   | { readonly kind: 'session_started' }
+  | {
+      readonly kind: 'agent_session_started';
+      readonly binding: AgentSessionBinding;
+    }
+  | {
+      readonly kind: 'agent_session_dispatched';
+      readonly dispatchedRevision: number;
+    }
+  | {
+      readonly kind: 'agent_session_recovered';
+      readonly failedBinding: AgentSessionBinding;
+      readonly binding: AgentSessionBinding;
+      readonly failure: Extract<AgentFailureClassification, 'resume_not_found' | 'resume_corrupt'>;
+    }
   | { readonly kind: 'session_ended' }
   | DurableCoordinatorTransition
   | {
@@ -124,6 +142,9 @@ export type SessionTransition =
 
 export const SESSION_TRANSITION_KINDS = [
   'session_started',
+  'agent_session_started',
+  'agent_session_dispatched',
+  'agent_session_recovered',
   'session_ended',
   'party_state_captured',
   'reaction_preference_changed',
@@ -183,7 +204,7 @@ interface SessionRevisionBody {
   readonly rngState: SerializableRngState;
   readonly coordinatorState: PersistedCoordinatorState;
   readonly controllers: readonly ControllerIdentity[];
-  readonly codexSessionId: CodexSessionId;
+  readonly agentSession: AgentSessionBinding | null;
 }
 
 export interface SessionRevision extends SessionRevisionBody {
@@ -350,7 +371,7 @@ export class SqliteBrowserSessionStore implements BrowserSessionStore {
   }
 
   revisions(sessionId: EncounterSessionId): readonly SessionRevision[] {
-    return this.db.allRaw(
+    const stored = this.db.allRaw(
       `SELECT schema_version, payload_json, payload_checksum
        FROM vtt_session_revisions
        WHERE session_id = $sessionId
@@ -360,8 +381,9 @@ export class SqliteBrowserSessionStore implements BrowserSessionStore {
       if (typeof row.payload_json !== 'string') {
         throw new TypeError('Stored VTT session payload is not text.');
       }
-      const revision = decodeRevision(JSON.parse(row.payload_json));
+      const revision: unknown = JSON.parse(row.payload_json);
       if (
+        !isRecord(revision) ||
         row.schema_version !== revision.schemaVersion ||
         row.payload_checksum !== revision.checksum
       ) {
@@ -369,6 +391,7 @@ export class SqliteBrowserSessionStore implements BrowserSessionStore {
       }
       return revision;
     });
+    return stored.length === 0 ? [] : migrateStoredSessionRevisions(stored);
   }
 }
 
@@ -483,6 +506,35 @@ function decodeTransition(value: unknown): SessionTransition {
   switch (value.kind as SessionTransition['kind']) {
     case 'session_started':
       if (hasExactlyKeys(value, ['kind'])) return { kind: 'session_started' };
+      break;
+    case 'agent_session_started':
+      if (
+        hasExactlyKeys(value, ['kind', 'binding']) &&
+        isAgentSessionBinding(value.binding)
+      ) return { kind: 'agent_session_started', binding: value.binding };
+      break;
+    case 'agent_session_dispatched':
+      if (
+        hasExactlyKeys(value, ['kind', 'dispatchedRevision']) &&
+        Number.isSafeInteger(value.dispatchedRevision) &&
+        typeof value.dispatchedRevision === 'number' &&
+        value.dispatchedRevision >= 1
+      ) return { kind: 'agent_session_dispatched', dispatchedRevision: value.dispatchedRevision };
+      break;
+    case 'agent_session_recovered':
+      if (
+        hasExactlyKeys(value, ['kind', 'failedBinding', 'binding', 'failure']) &&
+        isAgentSessionBinding(value.failedBinding) &&
+        isAgentSessionBinding(value.binding) &&
+        (value.failure === 'resume_not_found' || value.failure === 'resume_corrupt')
+      ) {
+        return {
+          kind: 'agent_session_recovered',
+          failedBinding: value.failedBinding,
+          binding: value.binding,
+          failure: value.failure,
+        };
+      }
       break;
     case 'session_ended':
       if (hasExactlyKeys(value, ['kind'])) return { kind: 'session_ended' };
@@ -622,7 +674,7 @@ function decodeRevision(value: unknown): SessionRevision {
     !isRecord(value.rngState) ||
     !isRecord(value.coordinatorState) ||
     !Array.isArray(value.controllers) ||
-    typeof value.codexSessionId !== 'string' ||
+    !(value.agentSession === null || isAgentSessionBinding(value.agentSession)) ||
     typeof value.checksum !== 'string'
   ) {
     throw new TypeError('Malformed VTT session revision.');
@@ -916,6 +968,73 @@ export function replaySessionRevisions(
         if (revision.revision !== 1 || parent !== null) {
           throw new Error('session_started may only be the first revision.');
         }
+        if (revision.agentSession !== null && (
+          revision.agentSession.cli !== 'codex' ||
+          revision.agentSession.status !== 'active' ||
+          revision.agentSession.recoveryGeneration !== 0 ||
+          revision.agentSession.predecessorSessionHash !== null ||
+          revision.agentSession.startedAtRevision !== 1
+        )) {
+          throw new Error('Migrated session_started agent binding is malformed.');
+        }
+        break;
+      case 'agent_session_started':
+        if (parent === null || parent === undefined || parent.agentSession !== null) {
+          throw new Error('agent_session_started requires an unbound parent revision.');
+        }
+        requireCanonicalEqual(revision.agentSession, transition.binding, 'started agent binding');
+        if (
+          transition.binding.status !== 'active' ||
+          transition.binding.recoveryGeneration !== 0 ||
+          transition.binding.predecessorSessionHash !== null ||
+          transition.binding.startedAtRevision !== revision.revision ||
+          transition.binding.lastDispatchedRevision !== 0
+        ) throw new Error('Initial agent session binding is malformed.');
+        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'agent-start encounter state');
+        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'agent-start coordinator state');
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'agent-start party state');
+        requireCanonicalEqual(revision.rngState, parent.rngState, 'agent-start RNG state');
+        break;
+      case 'agent_session_dispatched':
+        if (parent === null || parent === undefined || parent.agentSession === null) {
+          throw new Error('agent_session_dispatched requires an active binding.');
+        }
+        if (
+          parent.agentSession.status !== 'active' ||
+          transition.dispatchedRevision !== parent.revision
+        ) throw new Error('Agent dispatch revision does not identify its active parent.');
+        requireCanonicalEqual(
+          revision.agentSession,
+          { ...parent.agentSession, lastDispatchedRevision: transition.dispatchedRevision },
+          'dispatched agent binding',
+        );
+        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'agent-dispatch encounter state');
+        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'agent-dispatch coordinator state');
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'agent-dispatch party state');
+        requireCanonicalEqual(revision.rngState, parent.rngState, 'agent-dispatch RNG state');
+        break;
+      case 'agent_session_recovered':
+        if (parent === null || parent === undefined || parent.agentSession === null) {
+          throw new Error('agent_session_recovered requires a failed active binding.');
+        }
+        requireCanonicalEqual(
+          transition.failedBinding,
+          { ...parent.agentSession, status: 'superseded_after_resume_failure' },
+          'superseded agent binding',
+        );
+        requireCanonicalEqual(revision.agentSession, transition.binding, 'recovery successor binding');
+        if (
+          transition.binding.cli !== parent.agentSession.cli ||
+          transition.binding.status !== 'active' ||
+          transition.binding.recoveryGeneration !== parent.agentSession.recoveryGeneration + 1 ||
+          transition.binding.startedAtRevision !== revision.revision ||
+          transition.binding.lastDispatchedRevision !== 0 ||
+          transition.binding.predecessorSessionHash === null
+        ) throw new Error('Agent recovery successor is malformed.');
+        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'agent-recovery encounter state');
+        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'agent-recovery coordinator state');
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'agent-recovery party state');
+        requireCanonicalEqual(revision.rngState, parent.rngState, 'agent-recovery RNG state');
         break;
       case 'session_ended':
         if (parent === null || parent === undefined) {
@@ -1114,6 +1233,14 @@ export function replaySessionRevisions(
         requireCanonicalEqual(revision.partyState, parent.partyState, 'coordinator party state');
         break;
     }
+    if (
+      parent !== null && parent !== undefined &&
+      transition.kind !== 'agent_session_started' &&
+      transition.kind !== 'agent_session_dispatched' &&
+      transition.kind !== 'agent_session_recovered'
+    ) {
+      requireCanonicalEqual(revision.agentSession, parent.agentSession, 'unchanged agent binding');
+    }
     byRevision.set(revision.revision, revision);
   }
   return revisions.at(-1) ?? first;
@@ -1125,7 +1252,7 @@ export interface SessionResume {
   readonly partyState: PartySessionState | null;
   readonly coordinatorState: PersistedCoordinatorState;
   readonly controllers: readonly ControllerIdentity[];
-  readonly codexSessionId: CodexSessionId;
+  readonly agentSession: AgentSessionBinding | null;
   readonly rng: SerializableRng;
 }
 
@@ -1148,7 +1275,6 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     readonly partyState?: PartySessionState;
     readonly coordinatorState: PersistedCoordinatorState;
     readonly controllers: readonly ControllerIdentity[];
-    readonly codexSessionId: CodexSessionId;
     readonly rng: SerializableRng;
     readonly store: BrowserSessionStore;
     readonly mirror: MirrorSink;
@@ -1170,7 +1296,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: input.partyState ?? null,
       coordinatorState: input.coordinatorState,
       controllers: input.controllers,
-      codexSessionId: input.codexSessionId,
+      agentSession: null,
     });
     return journal;
   }
@@ -1189,7 +1315,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: latest.partyState,
       coordinatorState: latest.coordinatorState,
       controllers: latest.controllers,
-      codexSessionId: latest.codexSessionId,
+      agentSession: latest.agentSession,
       rng,
     };
   }
@@ -1198,8 +1324,133 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     return this.#rng;
   }
 
-  codexSessionId(): CodexSessionId {
-    return this.#latest().codexSessionId;
+  agentSession(): AgentSessionBinding | null {
+    return structuredClone(this.#latest().agentSession);
+  }
+
+  startAgentSession(input: Pick<AgentSessionBinding, 'cli' | 'sessionId' | 'adapterVersion'>): AgentSessionBinding {
+    const latest = this.#latest();
+    if (latest.agentSession !== null) throw new Error('Encounter run already has an agent session.');
+    const binding: AgentSessionBinding = {
+      ...input,
+      recoveryGeneration: 0,
+      predecessorSessionHash: null,
+      startedAtRevision: latest.revision + 1,
+      lastDispatchedRevision: 0,
+      status: 'active',
+    };
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: { kind: 'agent_session_started', binding },
+      encounterState: latest.encounterState,
+      partyState: latest.partyState,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      agentSession: binding,
+    });
+    return binding;
+  }
+
+  recordAgentSessionDispatch(): AgentSessionBinding {
+    const latest = this.#latest();
+    if (latest.agentSession === null || latest.agentSession.status !== 'active') {
+      throw new Error('Encounter run has no active agent session to resume.');
+    }
+    const binding: AgentSessionBinding = {
+      ...latest.agentSession,
+      lastDispatchedRevision: latest.revision,
+    };
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: { kind: 'agent_session_dispatched', dispatchedRevision: latest.revision },
+      encounterState: latest.encounterState,
+      partyState: latest.partyState,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      agentSession: binding,
+    });
+    return binding;
+  }
+
+  recoveryBootstrapPrompt(predecessorSessionHash: string): string {
+    const latest = this.#latest();
+    const activeHistory = this.history().slice(-100).map((entry) => ({
+      ...entry,
+      transition: entry.transition.kind === 'agent_session_started' ||
+        entry.transition.kind === 'agent_session_recovered'
+        ? { kind: entry.transition.kind }
+        : entry.transition,
+    }));
+    return canonicalJson({
+      format: 'recovery_bootstrap',
+      runId: this.sessionId,
+      engineVersion: VTT_SESSION_SCHEMA_VERSION,
+      predecessorSessionHash,
+      current: {
+        revision: latest.revision,
+        branchId: latest.branchId,
+        room: latest.partyState?.room ?? null,
+        round: latest.encounterState.round,
+        phase: latest.encounterState.phase,
+        activeCombatant: latest.encounterState.activeCombatant,
+        pendingRequest: latest.coordinatorState.pendingRequest,
+        pendingCommand: latest.coordinatorState.pendingCommand,
+      },
+      partyResources: latest.partyState,
+      combatants: latest.encounterState.combatants.map((combatant) => ({
+        id: combatant.profile.id,
+        kind: combatant.profile.kind,
+        life: combatant.life,
+        hitPoints: combatant.hitPoints,
+        temporaryHitPoints: combatant.temporaryHitPoints,
+        spellSlots: combatant.spellSlots,
+        limitedResources: combatant.limitedResources ?? [],
+      })),
+      activeHistory,
+    });
+  }
+
+  recoverAgentSession(input: {
+    readonly sessionId: AgentSessionBinding['sessionId'];
+    readonly predecessorSessionHash: string;
+    readonly failure: Extract<AgentFailureClassification, 'resume_not_found' | 'resume_corrupt'>;
+  }): AgentSessionBinding {
+    const latest = this.#latest();
+    if (latest.agentSession === null || latest.agentSession.status !== 'active') {
+      throw new Error('Encounter run has no active failed agent session to recover.');
+    }
+    const failedBinding: AgentSessionBinding = {
+      ...latest.agentSession,
+      status: 'superseded_after_resume_failure',
+    };
+    const binding: AgentSessionBinding = {
+      cli: latest.agentSession.cli,
+      sessionId: input.sessionId,
+      adapterVersion: latest.agentSession.adapterVersion,
+      recoveryGeneration: latest.agentSession.recoveryGeneration + 1,
+      predecessorSessionHash: input.predecessorSessionHash,
+      startedAtRevision: latest.revision + 1,
+      lastDispatchedRevision: 0,
+      status: 'active',
+    };
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: {
+        kind: 'agent_session_recovered',
+        failedBinding,
+        binding,
+        failure: input.failure,
+      },
+      encounterState: latest.encounterState,
+      partyState: latest.partyState,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      agentSession: binding,
+    });
+    return binding;
   }
 
   partyState(): PartySessionState | null {
@@ -1223,7 +1474,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: latest.partyState,
       coordinatorState: latest.coordinatorState,
       controllers: latest.controllers,
-      codexSessionId: latest.codexSessionId,
+      agentSession: latest.agentSession,
     });
   }
 
@@ -1246,7 +1497,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: latest.partyState,
       coordinatorState: input.coordinatorState,
       controllers: input.controllers,
-      codexSessionId: latest.codexSessionId,
+      agentSession: latest.agentSession,
     });
   }
 
@@ -1275,7 +1526,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: target.partyState,
       coordinatorState: target.coordinatorState,
       controllers: target.controllers,
-      codexSessionId: target.codexSessionId,
+      agentSession: target.agentSession,
     });
     return {
       journal: this,
@@ -1283,7 +1534,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: appended.partyState,
       coordinatorState: appended.coordinatorState,
       controllers: appended.controllers,
-      codexSessionId: appended.codexSessionId,
+      agentSession: appended.agentSession,
       rng: this.#rng,
     };
   }
@@ -1361,7 +1612,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState,
       coordinatorState: latest.coordinatorState,
       controllers: latest.controllers,
-      codexSessionId: latest.codexSessionId,
+      agentSession: latest.agentSession,
     });
     return partyState;
   }
@@ -1382,7 +1633,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: result.state,
       coordinatorState: latest.coordinatorState,
       controllers: latest.controllers,
-      codexSessionId: latest.codexSessionId,
+      agentSession: latest.agentSession,
     });
     return result;
   }
@@ -1404,7 +1655,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: rested.state,
       coordinatorState: latest.coordinatorState,
       controllers: latest.controllers,
-      codexSessionId: latest.codexSessionId,
+      agentSession: latest.agentSession,
     });
     return rested;
   }
@@ -1425,7 +1676,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: rested.state,
       coordinatorState: latest.coordinatorState,
       controllers: latest.controllers,
-      codexSessionId: latest.codexSessionId,
+      agentSession: latest.agentSession,
     });
     return rested;
   }
@@ -1454,7 +1705,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState,
       coordinatorState: latest.coordinatorState,
       controllers: latest.controllers,
-      codexSessionId: latest.codexSessionId,
+      agentSession: latest.agentSession,
     });
     return {
       journal: this,
@@ -1462,7 +1713,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: appended.partyState,
       coordinatorState: appended.coordinatorState,
       controllers: appended.controllers,
-      codexSessionId: appended.codexSessionId,
+      agentSession: appended.agentSession,
       rng: this.#rng,
     };
   }
@@ -1482,7 +1733,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState,
       coordinatorState: latest.coordinatorState,
       controllers: latest.controllers,
-      codexSessionId: latest.codexSessionId,
+      agentSession: latest.agentSession,
     });
     return {
       journal: this,
@@ -1490,7 +1741,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: appended.partyState,
       coordinatorState: appended.coordinatorState,
       controllers: appended.controllers,
-      codexSessionId: appended.codexSessionId,
+      agentSession: appended.agentSession,
       rng: this.#rng,
     };
   }
@@ -1512,7 +1763,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState,
       coordinatorState: input.coordinatorState,
       controllers: input.controllers,
-      codexSessionId: latest.codexSessionId,
+      agentSession: latest.agentSession,
     });
     return partyState;
   }
@@ -1536,7 +1787,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: input.latest.partyState,
       coordinatorState: pacingCoordinatorState(input.latest.coordinatorState),
       controllers: input.latest.controllers,
-      codexSessionId: input.latest.codexSessionId,
+      agentSession: input.latest.agentSession,
     });
     return {
       journal: this,
@@ -1544,7 +1795,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       partyState: appended.partyState,
       coordinatorState: appended.coordinatorState,
       controllers: appended.controllers,
-      codexSessionId: appended.codexSessionId,
+      agentSession: appended.agentSession,
       rng: this.#rng,
     };
   }
@@ -1557,7 +1808,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     readonly partyState: PartySessionState | null;
     readonly coordinatorState: PersistedCoordinatorState;
     readonly controllers: readonly ControllerIdentity[];
-    readonly codexSessionId: CodexSessionId;
+    readonly agentSession: AgentSessionBinding | null;
   }): SessionRevision {
     const revision = this.store.revisions(this.sessionId).length + 1;
     const body: SessionRevisionBody = {
@@ -1574,7 +1825,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       rngState: this.#rng.snapshot(),
       coordinatorState: input.coordinatorState,
       controllers: input.controllers,
-      codexSessionId: input.codexSessionId,
+      agentSession: input.agentSession,
     };
     const persisted: SessionRevision = {
       ...body,
@@ -1726,10 +1977,10 @@ function encodeJournalDag(revisions: readonly SessionRevision[]): Pick<JournalDa
   };
 }
 
-function decodeJournalDag(
+function decodeJournalDagValues(
   rawNodes: unknown,
   rawRevisionRoots: unknown,
-): readonly SessionRevision[] {
+): readonly JsonValue[] {
   if (!Array.isArray(rawNodes) || !Array.isArray(rawRevisionRoots) || rawRevisionRoots.length === 0) {
     throw new TypeError('Saved VTT session journal DAG is malformed.');
   }
@@ -1799,8 +2050,15 @@ function decodeJournalDag(
     if (!Number.isSafeInteger(root) || (root as number) < 0 || (root as number) >= values.length) {
       throw new TypeError('Saved VTT session journal DAG has an invalid revision root.');
     }
-    return decodeRevision(values[root as number]);
+    return values[root as number]!;
   });
+}
+
+function decodeJournalDag(
+  rawNodes: unknown,
+  rawRevisionRoots: unknown,
+): readonly SessionRevision[] {
+  return decodeJournalDagValues(rawNodes, rawRevisionRoots).map(decodeRevision);
 }
 
 function decodeJournalDagBundle(value: Readonly<Record<string, unknown>>): SavedSessionBundleV2 {
@@ -1846,6 +2104,7 @@ const V3_TO_V4_SOURCE = 'vtt-session-v3-to-v4:add-persisted-branch-rng-state-fin
 const V4_TO_V5_SOURCE = 'vtt-session-v4-to-v5:add-typed-combatant-death-moment-and-rehash-revisions';
 const V5_TO_V6_SOURCE = 'vtt-session-v5-to-v6:replace-hide-death-save-rolls-with-hidden-roll-categories';
 const V6_TO_V7_SOURCE = 'vtt-session-v6-to-v7:add-typed-encounter-phase-and-rehash-revisions';
+const V7_TO_V8_SOURCE = 'vtt-session-v7-to-v8:replace-codex-session-id-with-agent-session-binding-and-rehash-revisions';
 
 export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
   Object.freeze([
@@ -2083,6 +2342,59 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
+    Object.freeze({
+      id: 'vtt_session_v7_to_v8',
+      from: 7,
+      to: 8,
+      source: V7_TO_V8_SOURCE,
+      checksum: '7438ba7c327f99cfe6eaecedaad97c2e5cd63c0cfdb31b26152eacc9cb2ef5ee',
+      migrate: (bundle: Readonly<Record<string, unknown>>) => {
+        if (!Array.isArray(bundle.revisions)) {
+          throw new TypeError('VTT session v7 revisions are malformed.');
+        }
+        const { fingerprint: legacyFingerprint, ...legacyBundleBody } = bundle;
+        if (
+          typeof legacyFingerprint !== 'string' ||
+          sha256(canonicalJson(legacyBundleBody)) !== legacyFingerprint
+        ) throw new SessionFingerprintMismatchError();
+        const revisions = bundle.revisions.map((revision) => {
+          if (
+            !isRecord(revision) ||
+            typeof revision.codexSessionId !== 'string' ||
+            typeof revision.checksum !== 'string'
+          ) {
+            throw new TypeError('VTT session v7 revision has no Codex session ID.');
+          }
+          const { checksum: _oldChecksum, codexSessionId: legacySessionId, ...oldBody } = revision;
+          if (sha256(canonicalJson({ ...oldBody, codexSessionId: legacySessionId })) !== revision.checksum) {
+            throw new Error('VTT session v7 revision checksum mismatch.');
+          }
+          const body = {
+            ...oldBody,
+            schemaVersion: 8 as const,
+            agentSession: {
+              cli: 'codex' as const,
+              sessionId: legacySessionId,
+              adapterVersion: 1,
+              recoveryGeneration: 0,
+              predecessorSessionHash: null,
+              startedAtRevision: 1,
+              lastDispatchedRevision: 0,
+              status: 'active' as const,
+            },
+          };
+          return { ...body, checksum: sha256(canonicalJson(body)) };
+        });
+        const { fingerprint: _oldFingerprint, ...oldBundle } = bundle;
+        const body = {
+          ...oldBundle,
+          format: 'vtt-session-revisions' as const,
+          schemaVersion: 8 as const,
+          revisions,
+        };
+        return { ...body, fingerprint: sha256(canonicalJson(body)) };
+      },
+    }),
   ]);
 
 export function validateVttSessionMigrationRegistry(): void {
@@ -2108,7 +2420,32 @@ export function validateVttSessionMigrationRegistry(): void {
 function migrateSavedBundle(value: unknown): SavedSessionBundleV2 {
   validateVttSessionMigrationRegistry();
   if (isRecord(value) && value.format === JOURNAL_DAG_FORMAT) {
-    return decodeJournalDagBundle(value);
+    if (value.schemaVersion === VTT_SESSION_SCHEMA_VERSION) return decodeJournalDagBundle(value);
+    if (
+      value.schemaVersion !== 7 ||
+      typeof value.sessionId !== 'string' ||
+      typeof value.fingerprint !== 'string'
+    ) throw new TypeError('Saved VTT session journal DAG header is malformed.');
+    const legacyBody = {
+      format: JOURNAL_DAG_FORMAT,
+      schemaVersion: 7,
+      sessionId: value.sessionId,
+      nodes: value.nodes,
+      revisions: value.revisions,
+    };
+    if (sha256(canonicalJson(legacyBody)) !== value.fingerprint) {
+      throw new SessionFingerprintMismatchError();
+    }
+    const expandedLegacyBody = {
+      format: 'vtt-session-revisions',
+      schemaVersion: 7,
+      sessionId: value.sessionId,
+      revisions: decodeJournalDagValues(value.nodes, value.revisions),
+    };
+    value = {
+      ...expandedLegacyBody,
+      fingerprint: sha256(canonicalJson(expandedLegacyBody)),
+    };
   }
   if (!isRecord(value) || !Number.isSafeInteger(value.schemaVersion)) {
     throw new TypeError('Saved VTT session has no valid schema version.');
@@ -2150,6 +2487,44 @@ function migrateSavedBundle(value: unknown): SavedSessionBundleV2 {
     throw new SessionFingerprintMismatchError();
   }
   return { ...body, fingerprint: migrated.fingerprint };
+}
+
+export function migrateStoredSessionRevisions(
+  revisions: readonly unknown[],
+): readonly SessionRevision[] {
+  const first = revisions[0];
+  if (
+    !isRecord(first) ||
+    typeof first.sessionId !== 'string' ||
+    !Number.isSafeInteger(first.schemaVersion)
+  ) throw new TypeError('Stored VTT session revision stream is malformed.');
+  const groups: Array<{
+    readonly schemaVersion: number;
+    readonly revisions: unknown[];
+  }> = [];
+  for (const revision of revisions) {
+    if (
+      !isRecord(revision) ||
+      revision.sessionId !== first.sessionId ||
+      !Number.isSafeInteger(revision.schemaVersion)
+    ) throw new TypeError('Stored VTT session revision stream is malformed.');
+    const schemaVersion = revision.schemaVersion as number;
+    const current = groups.at(-1);
+    if (current?.schemaVersion === schemaVersion) current.revisions.push(revision);
+    else groups.push({ schemaVersion, revisions: [revision] });
+  }
+  return groups.flatMap((group) => {
+    const body = {
+      format: 'vtt-session-revisions' as const,
+      schemaVersion: group.schemaVersion,
+      sessionId: first.sessionId,
+      revisions: group.revisions,
+    };
+    return migrateSavedBundle({
+      ...body,
+      fingerprint: sha256(canonicalJson(body)),
+    }).revisions;
+  });
 }
 
 export function exportSavedSession(
@@ -2211,6 +2586,7 @@ export function exportSavedSessionV1ForMigrationTest(
       checksum: _checksum,
       partyState: _partyState,
       branchRngStateFingerprint: _branchRngStateFingerprint,
+      agentSession,
       encounterState,
       ...currentBody
     } = revision;
@@ -2218,6 +2594,7 @@ export function exportSavedSessionV1ForMigrationTest(
     const body = {
       ...currentBody,
       schemaVersion: 2 as const,
+      codexSessionId: agentSession?.sessionId ?? 'codex:legacy-v1-migration-fixture',
       encounterState: {
         ...legacyEncounterState,
         hideDeathSaveRolls: hiddenRolls.includes('death_saves'),
@@ -2238,11 +2615,12 @@ export function exportSavedSessionV5ForMigrationTest(
   sessionId: EncounterSessionId,
 ): string {
   const revisions = store.revisions(sessionId).map((revision) => {
-    const { checksum: _checksum, encounterState, ...currentBody } = revision;
+    const { checksum: _checksum, agentSession, encounterState, ...currentBody } = revision;
     const { hiddenRolls, ...legacyEncounterState } = encounterState;
     const body = {
       ...currentBody,
       schemaVersion: 5 as const,
+      codexSessionId: agentSession?.sessionId ?? 'codex:legacy-v5-migration-fixture',
       encounterState: {
         ...legacyEncounterState,
         hideDeathSaveRolls: hiddenRolls.includes('death_saves'),

@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mulberry32 } from '../../../src/combat/random';
 import { feetPoint } from '../../../src/combat/templates';
 import {
-  codexSessionId,
   encounterBranchId,
   encounterSessionId,
   feet,
@@ -351,7 +350,6 @@ describe('Vane Warren loader, chaining, seats, and end-session export', () => {
     const session = AdventuringDaySession.create({
       sessionId,
       branchId: encounterBranchId('branch:vane-warren-main'),
-      codexSessionId: codexSessionId('codex:vane-warren-test'),
       members: sample.party.members,
       displayNames: sample.displayNames,
       rng: mulberry32(377_6),
@@ -463,7 +461,6 @@ describe('Vane Warren loader, chaining, seats, and end-session export', () => {
     const session = AdventuringDaySession.create({
       sessionId,
       branchId: encounterBranchId('branch:vane-warren-export'),
-      codexSessionId: codexSessionId('codex:vane-warren-export'),
       members: sample.party.members,
       displayNames: sample.displayNames,
       rng: mulberry32(377_14),

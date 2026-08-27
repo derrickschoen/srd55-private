@@ -43,13 +43,13 @@ test('scripted exchange resumes one persisted Codex session', async () => {
     { expect: { kind: 'round_plan_request' }, reply: { kind: 'first' } },
     { expect: { kind: 'monster_reconsult_request' }, reply: { kind: 'second' } },
   ]);
-  assert.deepEqual(await exchange.exchange({ kind: 'round_plan_request', codexSessionId: 'session-17' }), { kind: 'first' });
-  assert.deepEqual(await exchange.exchange({ kind: 'monster_reconsult_request', codexSessionId: 'session-17' }), { kind: 'second' });
+  assert.deepEqual(await exchange.exchange({ kind: 'round_plan_request', agentSessionId: 'session-17' }), { kind: 'first' });
+  assert.deepEqual(await exchange.exchange({ kind: 'monster_reconsult_request', agentSessionId: 'session-17' }), { kind: 'second' });
   exchange.assertComplete();
   await assert.rejects(
     new ScriptedCodexExchange([{ expect: { kind: 'round_plan_request' }, reply: {} }]).exchange({
       kind: 'wrong_request',
-      codexSessionId: 'session-17',
+      agentSessionId: 'session-17',
     }),
     /transcript expected/,
   );
@@ -113,7 +113,7 @@ process.stdout.write(JSON.stringify({ type: 'item.completed', item: { type: 'age
     const exchange = new CodexCliExchange({ cwd: process.cwd(), codexBin: fakeCodex, timeoutMs: 5_000 });
     const reply = await exchange.exchange({
       kind: 'round_plan_request',
-      codexSessionId: 'codex:persisted-cli-session',
+      agentSessionId: 'codex:persisted-cli-session',
       model: { model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
       correctionAttempt: 0,
       replyContract: {
@@ -239,7 +239,7 @@ test('file exchange cache survives reconstruction without a second scripted call
       kind: 'round_plan_request',
       encounterId: 'encounter:cache',
       requestId: 'request:stable',
-      codexSessionId: 'codex:stable',
+      agentSessionId: 'codex:stable',
     };
     const firstTranscript = new ScriptedCodexExchange([
       { expect: { kind: 'round_plan_request' }, reply: { marker: 'durable-reply' } },
@@ -304,7 +304,7 @@ test('localhost process uses the fake transcript for exchange and the append-onl
       }),
     });
     assert.equal(created.status, 200);
-    assert.deepEqual(await created.json(), { reply: { codexSessionId: 'codex:scripted-session' } });
+    assert.deepEqual(await created.json(), { reply: { agentSessionId: 'codex:scripted-session' } });
     for (const [kind, requestId, marker] of [
       ['round_plan_request', 'request:1', 'fake-only'],
       ['monster_reconsult_request', 'request:2', 'same-session'],
@@ -316,7 +316,7 @@ test('localhost process uses the fake transcript for exchange and the append-onl
           kind,
           requestId,
           encounterId: 'encounter:process-cache',
-          codexSessionId: 'codex:persisted-process-session',
+          agentSessionId: 'codex:persisted-process-session',
           model: { model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
         }),
       });
@@ -342,7 +342,7 @@ test('localhost process uses the fake transcript for exchange and the append-onl
         kind: 'round_plan_request',
         requestId: 'request:1',
         encounterId: 'encounter:process-cache',
-        codexSessionId: 'codex:persisted-process-session',
+        agentSessionId: 'codex:persisted-process-session',
         model: { model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
       }),
     });

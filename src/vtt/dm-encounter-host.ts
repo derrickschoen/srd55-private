@@ -23,12 +23,12 @@ import type { HiddenRollCategory } from '../combat/roll-visibility';
 import { projectDmView, projectPlayerView } from '../combat/visibility';
 import { mulberry32, type SerializableRng } from '../combat/random';
 import {
-  codexSessionId,
   encounterBranchId,
   encounterSessionId,
   type CombatantId,
   type EncounterSessionId,
 } from '../combat/values';
+import type { AgentSessionBinding } from './agent-session';
 import {
   DeferredMirrorSink,
   EncounterSessionJournal,
@@ -252,7 +252,7 @@ export class DmEncounterHost {
       readonly reactionLegalActions?: ReactionLegalActions;
       readonly bridge?: DmBridgeConnection;
       readonly dmModel?: DmBridgeModelConfig;
-      readonly codexSessionId?: ReturnType<typeof codexSessionId>;
+      readonly agentSession?: Pick<AgentSessionBinding, 'cli' | 'sessionId' | 'adapterVersion'>;
       readonly steeringMode?: SteeringCoordinatorMode;
       readonly onSteeringTelemetry?: (telemetry: SteeringTelemetry) => void;
     } = {},
@@ -303,18 +303,20 @@ export class DmEncounterHost {
         ...(options.initialPartyState === undefined ? {} : { partyState: options.initialPartyState }),
         coordinatorState: INITIAL_COORDINATOR_STATE,
         controllers: this.#registry.identities(),
-        codexSessionId: options.codexSessionId ?? codexSessionId('codex:increment-6-local'),
         rng: this.#rng,
         store,
         mirror: this.#mirror,
       });
+      if (options.agentSession !== undefined) {
+        this.#journal.startAgentSession(options.agentSession);
+      }
       this.#coordinator = this.#coordinatorFor({
         journal: this.#journal,
         encounterState: state,
         partyState: options.initialPartyState ?? null,
         coordinatorState: INITIAL_COORDINATOR_STATE,
         controllers: identities,
-        codexSessionId: options.codexSessionId ?? codexSessionId('codex:increment-6-local'),
+        agentSession: this.#journal.agentSession(),
         rng: this.#rng,
       });
     } else {
@@ -360,9 +362,13 @@ export class DmEncounterHost {
   }
 
   #roundPlanContext(_combatantId: CombatantId) {
+    const binding = this.#journal.agentSession();
+    if (binding === null || binding.cli !== 'codex') {
+      throw new Error('The existing DM bridge path requires a persisted Codex agent binding.');
+    }
     return {
       encounterId: this.sessionId,
-      codexSessionId: this.#journal.codexSessionId(),
+      agentSessionId: binding.sessionId,
       projection: this.snapshot().dm,
       history: this.#journal.history(),
       initiativeMode: this.#coordinator.state().config.initiativeMode,
@@ -778,7 +784,7 @@ export class DmEncounterHost {
       partyState,
       coordinatorState: INITIAL_COORDINATOR_STATE,
       controllers,
-      codexSessionId: this.#journal.codexSessionId(),
+      agentSession: this.#journal.agentSession(),
       rng: this.#rng,
     });
     this.#partyStateHasBoundaryRuling = false;

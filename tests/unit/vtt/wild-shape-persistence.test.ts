@@ -3,7 +3,6 @@ import type { CombatantProfile } from '../../../src/combat/combatant';
 import { createEncounter, reduceEncounter } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
 import {
-  codexSessionId,
   encounterBranchId,
   encounterSessionId,
   statblockId,
@@ -65,7 +64,6 @@ describe('Wild Shape session persistence', () => {
       encounterState: fixture.shaped,
       coordinatorState: COORDINATOR,
       controllers: [],
-      codexSessionId: codexSessionId('codex:wild-shape-session'),
       rng: mulberry32(4242),
       store: source,
       mirror: new MemoryMirrorSink(),

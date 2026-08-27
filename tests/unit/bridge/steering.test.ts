@@ -3,7 +3,7 @@ import { createEncounter, type EncounterState } from '../../../src/combat/encoun
 import type { ControllerRequest } from '../../../src/combat/controllers';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { projectDmView } from '../../../src/combat/visibility';
-import { damageType, dieSides, codexSessionId, encounterEffectId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
+import { damageType, dieSides, agentSessionId, encounterEffectId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { DmRoundPlanSession } from '../../../src/vtt/dm-bridge/decision-program';
 import {
@@ -58,7 +58,7 @@ function board(state: EncounterState) {
 function context(state: EncounterState) {
   return {
     encounterId: encounterSessionId('encounter:steering'),
-    codexSessionId: codexSessionId('codex:steering'),
+    agentSessionId: agentSessionId('codex:steering'),
     projection: board(state),
     history: [],
     initiativeMode: state.config.initiativeMode,
@@ -306,7 +306,7 @@ describe('E06 steering split', () => {
       requestId: 'request:strict-override',
       expectedRevision: f.state.revision,
       round: f.state.round,
-      codexSessionId: codexSessionId('codex:steering'),
+      agentSessionId: agentSessionId('codex:steering'),
       model: { model: 'fake', reasoningEffort: 'low' },
       projection: board(f.state),
       history: [],

@@ -14,7 +14,6 @@ import { mulberry32 } from '../../../src/combat/random';
 import { feetPoint } from '../../../src/combat/templates';
 import { projectDmView, projectPlayerView } from '../../../src/combat/visibility';
 import {
-  codexSessionId,
   damageType,
   dieSides,
   encounterBranchId,
@@ -337,7 +336,6 @@ describe('D377.12 hidden monster rolls', () => {
       encounterState: state,
       coordinatorState: IDLE,
       controllers: registry.identities(),
-      codexSessionId: codexSessionId('codex:hidden-roll-categories'),
       rng,
       store,
       mirror: new MemoryMirrorSink(),
@@ -373,7 +371,6 @@ describe('D377.12 hidden monster rolls', () => {
       encounterState: state,
       coordinatorState: IDLE,
       controllers: registry.identities(),
-      codexSessionId: codexSessionId('codex:legacy-hidden-death-save'),
       rng: mulberry32(45),
       store: source,
       mirror: new MemoryMirrorSink(),

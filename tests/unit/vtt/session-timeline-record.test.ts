@@ -10,7 +10,6 @@ import { feetPoint } from '../../../src/combat/templates';
 import { projectDmView } from '../../../src/combat/visibility';
 import {
   combatantId,
-  codexSessionId,
   damageType,
   dieSides,
   encounterBranchId,
@@ -71,7 +70,6 @@ function journalFixture(key: string, state = pacedState()) {
     encounterState: state,
     coordinatorState: IDLE,
     controllers: [],
-    codexSessionId: codexSessionId('codex:pacing-tests'),
     rng: mulberry32(7319),
     store,
     mirror: new MemoryMirrorSink(),

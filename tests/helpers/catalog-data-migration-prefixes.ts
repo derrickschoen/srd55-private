@@ -70,6 +70,7 @@ export const RECORDED_SCHEMA_PREFIX_IDS = [
   '0058_vtt_session_encounter_phase',
   '0059_safe_query_indexes',
   '0060_profile_proven_indexes',
+  '0061_vtt_agent_session_binding',
 ] as const;
 
 export const PREFIX_MIGRATION_ID = 'test_catalog_prefix_probe';

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { reduceEncounter } from '../../../src/combat/encounter';
 import {
-  codexSessionId,
   combatantId,
   effectStackingIdentity,
   encounterEffectId,
@@ -171,7 +170,6 @@ describe('adventuring-day party session state', () => {
         pause: null,
       },
       controllers: room.controllers,
-      codexSessionId: codexSessionId('codex:reaction-preference-fingerprint'),
       rng: mulberry32(3734),
       store,
       mirror: new MemoryMirrorSink(),
@@ -532,7 +530,6 @@ describe('adventuring-day party session state', () => {
         continuation: { kind: 'idle' }, pause: null,
       },
       controllers: room.controllers,
-      codexSessionId: codexSessionId('codex:rest-interruption-save'),
       rng: mulberry32(3777),
       store,
       mirror: new MemoryMirrorSink(),
@@ -591,7 +588,6 @@ describe('adventuring-day party session state', () => {
         pause: null,
       },
       controllers: room.controllers,
-      codexSessionId: codexSessionId('codex:long-rest-save'),
       rng: mulberry32(3737),
       store,
       mirror: new MemoryMirrorSink(),
@@ -707,7 +703,6 @@ describe('adventuring-day party session state', () => {
     const session = AdventuringDaySession.create({
       sessionId,
       branchId: encounterBranchId('branch:adventuring-day-main'),
-      codexSessionId: codexSessionId('codex:adventuring-day-test'),
       members: loadedParty(),
       rng: mulberry32(3611),
       store,

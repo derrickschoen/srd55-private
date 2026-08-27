@@ -3,7 +3,7 @@ import type { PersistedCoordinatorState } from '../combat/coordinator';
 import { reduceEncounter, type EncounterState } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
 import type { SerializableRng } from '../combat/random';
-import type { CodexSessionId, EncounterBranchId, EncounterSessionId } from '../combat/values';
+import type { EncounterBranchId, EncounterSessionId } from '../combat/values';
 import type { LoadedPartyMember } from './party-pack';
 import {
   createPartySessionState,
@@ -59,7 +59,6 @@ export class AdventuringDaySession {
   static create(input: {
     readonly sessionId: EncounterSessionId;
     readonly branchId: EncounterBranchId;
-    readonly codexSessionId: CodexSessionId;
     readonly members: readonly LoadedPartyMember[];
     readonly displayNames?: ReadonlyMap<number, string>;
     readonly rng: SerializableRng;
@@ -85,7 +84,6 @@ export class AdventuringDaySession {
       partyState,
       coordinatorState: ADVENTURING_DAY_INITIAL_COORDINATOR_STATE,
       controllers: encounter.controllers,
-      codexSessionId: input.codexSessionId,
       rng: input.rng,
       store: input.store,
       mirror: input.mirror,

@@ -5,7 +5,6 @@ import { createQueriesClient } from '../../../src/queries/client';
 import type { RpcRequest, RpcResponse } from '../../../src/rpc/protocol';
 import { feetPoint } from '../../../src/combat/templates';
 import {
-  codexSessionId,
   encounterBranchId,
   encounterSessionId,
   feet,
@@ -253,7 +252,6 @@ describe('D365 bundled dungeon acceptance', () => {
     const session = AdventuringDaySession.create({
       sessionId: encounterSessionId('session:d365-four-room-acceptance'),
       branchId: encounterBranchId('branch:d365-main'),
-      codexSessionId: codexSessionId('codex:d365-scripted-acceptance'),
       members: sample.party.members,
       displayNames: sample.displayNames,
       rng: mulberry32(365_2024),

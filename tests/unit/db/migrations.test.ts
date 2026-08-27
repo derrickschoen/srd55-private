@@ -357,6 +357,15 @@ const SCHEMA_BEFORE_PROFILE_PROVEN_INDEXES = DATABASE_MIGRATIONS
   .join('\n');
 const PROFILE_PROVEN_INDEXES_MIGRATION =
   DATABASE_MIGRATIONS[PROFILE_PROVEN_INDEXES_INDEX]!;
+const VTT_AGENT_SESSION_BINDING_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0061_vtt_agent_session_binding',
+);
+const SCHEMA_BEFORE_VTT_AGENT_SESSION_BINDING = DATABASE_MIGRATIONS
+  .slice(0, VTT_AGENT_SESSION_BINDING_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const VTT_AGENT_SESSION_BINDING_MIGRATION =
+  DATABASE_MIGRATIONS[VTT_AGENT_SESSION_BINDING_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -4248,6 +4257,52 @@ describe('database migration chain', () => {
       ))).toBe(priorIndexCount + indexNames.length);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         PROFILE_PROVEN_INDEXES_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(
+        schemaSignature(SCHEMA_BEFORE_VTT_AGENT_SESSION_BINDING),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0061 preserves schema-seven journal bytes and admits schema-eight bindings', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_VTT_AGENT_SESSION_BINDING);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES (
+          'session:agent-binding-survivor', 1, 7,
+          '{"codexSessionId":"codex:preserved","journal":"unchanged"}',
+          '${'ab'.repeat(32)}'
+        )
+      `);
+
+      db.exec(VTT_AGENT_SESSION_BINDING_MIGRATION.sql);
+
+      expect(db.selectObjects(
+        `SELECT session_id, revision, schema_version, payload_json, payload_checksum
+         FROM vtt_session_revisions`,
+      )).toEqual([{
+        session_id: 'session:agent-binding-survivor',
+        revision: 1,
+        schema_version: 7,
+        payload_json: '{"codexSessionId":"codex:preserved","journal":"unchanged"}',
+        payload_checksum: 'ab'.repeat(32),
+      }]);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES (
+          'session:agent-binding-v8', 1, 8,
+          '{"agentSession":{"cli":"codex"}}',
+          '${'cd'.repeat(32)}'
+        )
+      `);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        VTT_AGENT_SESSION_BINDING_MIGRATION.resultSchemaChecksum,
       );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {

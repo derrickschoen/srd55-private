@@ -23,8 +23,8 @@ function workedExampleInstructions(value) {
 }
 
 function requestSessionId(request) {
-  const sessionId = object(request, 'request').codexSessionId;
-  if (typeof sessionId !== 'string' || sessionId.length === 0) throw new TypeError('request.codexSessionId is required');
+  const sessionId = object(request, 'request').agentSessionId;
+  if (typeof sessionId !== 'string' || sessionId.length === 0) throw new TypeError('request.agentSessionId is required');
   return sessionId;
 }
 

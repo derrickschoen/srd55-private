@@ -18,7 +18,7 @@ import { reduceEncounter } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { feetPoint } from '../../../src/combat/templates';
-import { armorClass, codexSessionId, encounterBranchId, encounterSessionId, feet, worldObjectId } from '../../../src/combat/values';
+import { armorClass, encounterBranchId, encounterSessionId, feet, worldObjectId } from '../../../src/combat/values';
 import { recordScriptedReferenceSkirmish } from '../../../src/vtt/scripted-skirmish';
 import { TEST_APPROVED_FIRST_SKIRMISH_FIXTURE } from '../../../src/vtt/test-approved-first-skirmish';
 import { runVttReplayCommand } from '../../../tools/vtt-replay';
@@ -94,7 +94,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
     if (position === undefined) throw new Error('Replay fixture has no free world-object cell.');
     const journal = EncounterSessionJournal.create({
       sessionId, branchId: encounterBranchId('branch:world-object-replay'), encounterState: state,
-      coordinatorState, controllers: [], codexSessionId: codexSessionId('codex:world-object-replay'),
+      coordinatorState, controllers: [],
       rng, store, mirror,
     });
     const command: EncounterCommand = {
@@ -143,7 +143,7 @@ describe('increment 10 deterministic replay and playable exit', () => {
     let state = encounterStateFromApprovedFixture(TEST_APPROVED_FIRST_SKIRMISH_FIXTURE);
     const journal = EncounterSessionJournal.create({
       sessionId, branchId: encounterBranchId('branch:persistent-area-replay'), encounterState: state,
-      coordinatorState, controllers: [], codexSessionId: codexSessionId('codex:persistent-area-replay'),
+      coordinatorState, controllers: [],
       rng, store, mirror,
     });
     const record = (command: EncounterCommand): void => {

@@ -1479,7 +1479,7 @@ export async function runE01Table(
           });
           return {
             encounterId,
-            codexSessionId: sessionId,
+            agentSessionId: sessionId,
             projection: entry.experimentId === 'E05B'
               ? {
                   ...projection,

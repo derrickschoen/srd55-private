@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { projectDmView } from '../../../src/combat/visibility';
-import { codexSessionId, encounterSessionId } from '../../../src/combat/values';
+import { agentSessionId, encounterSessionId } from '../../../src/combat/values';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { LocalhostDmBridgeClient, type BridgeFetch } from '../../../src/vtt/dm-bridge/client';
 import {
@@ -49,7 +49,7 @@ function request(encounterState: EncounterState): RoundPlanRequest {
     requestId: `request:${encounterState.round}:${encounterState.revision}`,
     expectedRevision: encounterState.revision,
     round: encounterState.round,
-    codexSessionId: codexSessionId('codex:delta'),
+    agentSessionId: agentSessionId('codex:delta'),
     model: { model: 'fake', reasoningEffort: 'low' },
     projection,
     history: [],
