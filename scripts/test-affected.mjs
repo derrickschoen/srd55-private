@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
 
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 4;
 const CACHE_ROOT = '/tmp/dnd-verdict-cache';
 const DISABLING_ENVIRONMENT = ['SQL_QUERY_LOG', 'AI_BRIDGE_LIVE'];
 const HASHED_ENVIRONMENT = [
@@ -39,18 +39,6 @@ const HASHED_ENVIRONMENT = [
   'SHARE_PROPERTY_SEED',
   'STATIC_APP_CACHE_DIR',
   'TZ',
-];
-const GLOBAL_INPUT_ROOTS = ['.ai', '.claude', 'docs', 'public', 'tests'];
-const GLOBAL_INPUT_FILES = [
-  'LICENSE',
-  'README.md',
-  'package.json',
-  'playwright.config.ts',
-  'src/db/schema.sql',
-  'tsconfig.app.json',
-  'tsconfig.json',
-  'tsconfig.node.json',
-  'vite.config.ts',
 ];
 const MODULE_INVENTORY_ROOTS = ['db', 'drizzle', 'scripts', 'src', 'tests', 'tools'];
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs'];
@@ -89,8 +77,14 @@ const MOCK_MODULE_FUNCTIONS = new Set([
   'mock',
   'unmock',
 ]);
-const VALIDATED_RUNTIME_CACHE_READERS = new Set([
-  'tests/helpers/seeded-database-image-cache.ts',
+const EXTERNAL_EFFECT_MODULES = new Set([
+  'node:child_process',
+  'node:dgram',
+  'node:http',
+  'node:http2',
+  'node:https',
+  'node:net',
+  'node:tls',
 ]);
 
 const root = realpathSync(process.cwd());
@@ -268,7 +262,12 @@ function runtimeReferences(path, content) {
   const add = (expression, label) => {
     const specifier = literalText(expression, constants);
     if (specifier === undefined) unresolved.push(label);
-    else specifiers.push(specifier);
+    else {
+      specifiers.push(specifier);
+      if (EXTERNAL_EFFECT_MODULES.has(specifier)) {
+        unresolved.push(`<external behavior via ${specifier}>`);
+      }
+    }
   };
 
   const visit = (node) => {
@@ -281,12 +280,6 @@ function runtimeReferences(path, content) {
         clause.namedBindings.elements.every((element) => element.isTypeOnly);
       if (clause?.isTypeOnly !== true && !allNamedBindingsAreTypes) {
         add(node.moduleSpecifier, '<non-literal import>');
-        if (
-          ts.isStringLiteralLike(node.moduleSpecifier) &&
-          node.moduleSpecifier.text === 'node:child_process'
-        ) {
-          unresolved.push('<external child-process behavior>');
-        }
       }
     } else if (ts.isExportDeclaration(node)) {
       if (!node.isTypeOnly && node.moduleSpecifier !== undefined) {
@@ -378,6 +371,11 @@ function resolvedLocalReference(importer, rawSpecifier) {
   if (specifier === '') return { kind: 'unresolved' };
   const initial = resolve(dirname(importer), specifier);
   if (!initial.startsWith(`${root}${sep}`)) return { kind: 'unresolved' };
+  if (existsSync(initial) && statSync(initial).isFile()) {
+    return SOURCE_EXTENSIONS.includes(extname(initial))
+      ? { kind: 'module', path: initial }
+      : { kind: 'resource', path: initial };
+  }
   if (query.split('&').some((part) => ['raw', 'url', 'worker'].includes(part))) {
     return existsSync(initial) && statSync(initial).isFile()
       ? { kind: 'resource', path: initial }
@@ -425,10 +423,10 @@ function readModule(path) {
   if (previous !== undefined) return previous;
   const content = readFileSync(path, 'utf8');
   const references = runtimeReferences(path, content);
-  const unresolvedReferences = VALIDATED_RUNTIME_CACHE_READERS.has(repositoryPath(path))
-    ? references.unresolved.filter((reason) =>
-      !reason.startsWith('<computed filesystem input'))
-    : references.unresolved;
+  const hasFilesystemBindings = fsBindings(sourceFile(path, content)).size > 0;
+  const unresolvedReferences = references.unresolved.filter((reason) =>
+    !reason.startsWith('<computed filesystem input') &&
+    !(hasFilesystemBindings && reason === '<computed import.meta.url URL>'));
   // These readers consume content-addressed performance caches whose own keys
   // bind every semantic input and whose sidecar hashes reject corrupt bytes.
   // Their filesystem path/content affects speed, not the resulting assertions.
@@ -444,7 +442,14 @@ function readModule(path) {
     const resolved = resolvedLocalReference(path, specifier);
     if (resolved.kind === 'module') record.dependencies.push(resolved.path);
     else if (resolved.kind === 'resource') record.resources.push(resolved.path);
-    else if (resolved.kind === 'unresolved') record.unresolved.push(`${repositoryPath(path)} -> ${specifier}`);
+    else if (resolved.kind === 'unresolved') {
+      const candidate = specifier.startsWith('.')
+        ? resolve(dirname(path), specifier.split(/[?#]/u, 1)[0])
+        : undefined;
+      if (candidate === undefined || !existsSync(candidate) || !statSync(candidate).isDirectory()) {
+        record.unresolved.push(`${repositoryPath(path)} -> ${specifier}`);
+      }
+    }
   }
   for (const dependency of references.globbedPaths) {
     if (SOURCE_EXTENSIONS.includes(extname(dependency))) record.dependencies.push(dependency);
@@ -482,22 +487,7 @@ function buildClosure(testFile) {
   };
 }
 
-function digestFiles(paths) {
-  return hashParts(paths.flatMap((path) => {
-    const name = repositoryPath(path);
-    return [name, sha256(readFileSync(path))];
-  }));
-}
-
 function globalSalt() {
-  const configuredInputs = [
-    ...GLOBAL_INPUT_ROOTS.flatMap((directory) => filesBelow(resolve(root, directory))),
-    ...GLOBAL_INPUT_FILES
-      .map((path) => resolve(root, path))
-      .filter((path) => existsSync(path) && statSync(path).isFile()),
-  ];
-  const uniqueInputs = [...new Set(configuredInputs)]
-    .sort((left, right) => repositoryPath(left).localeCompare(repositoryPath(right)));
   const inventory = MODULE_INVENTORY_ROOTS
     .flatMap((directory) => filesBelow(resolve(root, directory)))
     .map(repositoryPath)
@@ -507,15 +497,69 @@ function globalSalt() {
     `node=${process.version}`,
     `platform=${process.platform}-${process.arch}`,
     `runner=${sha256(readFileSync(runnerPath))}`,
+    `recorder=${sha256(readFileSync(resolve(root, 'tests/helpers/verdict-fs-recorder-setup.mjs')))}`,
     `vitest.config.ts=${sha256(readFileSync(resolve(root, 'vitest.config.ts')))}`,
+    `package.json=${sha256(readFileSync(resolve(root, 'package.json')))}`,
     `package-lock.json=${sha256(readFileSync(resolve(root, 'package-lock.json')))}`,
-    `global-inputs=${digestFiles(uniqueInputs)}`,
     `module-inventory=${hashParts(inventory)}`,
     ...HASHED_ENVIRONMENT.map((name) => `${name}=${process.env[name] ?? '<unset>'}`),
   ]);
 }
 
-function verdictDigest(testFile, closure, salt) {
+function directoryState(directory, recursive) {
+  const parts = [];
+  const visit = (path) => {
+    for (const entry of readdirSync(path, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      const child = resolve(path, entry.name);
+      const name = posixPath(relative(directory, child));
+      if (entry.isDirectory()) {
+        parts.push(`directory=${name}`);
+        if (recursive && entry.name !== 'node_modules') visit(child);
+      } else if (entry.isFile()) {
+        parts.push(`file=${name}`);
+      } else {
+        parts.push(`special=${name}`);
+      }
+    }
+  };
+  visit(directory);
+  return hashParts(parts);
+}
+
+function observedInputState(observation) {
+  const separator = observation.indexOf(':');
+  if (separator < 0) return undefined;
+  const kind = observation.slice(0, separator);
+  const name = observation.slice(separator + 1);
+  const path = resolve(root, name);
+  if (path !== root && !path.startsWith(`${root}${sep}`)) return undefined;
+  if (!existsSync(path)) return '<missing>';
+  const stats = statSync(path);
+  if (stats.isFile()) {
+    return hashParts([
+      'file',
+      `mode=${stats.mode}`,
+      `sha256=${sha256(readFileSync(path))}`,
+    ]);
+  }
+  if (stats.isDirectory()) {
+    if (kind === 'directory' || kind === 'directory-tree') {
+      return hashParts([
+        kind,
+        `mode=${stats.mode}`,
+        `listing=${directoryState(path, kind === 'directory-tree')}`,
+      ]);
+    }
+    return hashParts([
+      'directory',
+      `mode=${stats.mode}`,
+    ]);
+  }
+  return undefined;
+}
+
+function verdictDigest(testFile, closure, observedInputs, salt) {
   const parts = [
     `test=${repositoryPath(testFile)}`,
     `test-sha256=${sha256(readFileSync(testFile))}`,
@@ -525,6 +569,11 @@ function verdictDigest(testFile, closure, salt) {
     const path = resolve(root, name);
     if (!existsSync(path) || !statSync(path).isFile()) return undefined;
     parts.push(`module=${name}`, `sha256=${sha256(readFileSync(path))}`);
+  }
+  for (const name of observedInputs) {
+    const state = observedInputState(name);
+    if (state === undefined) return undefined;
+    parts.push(`observed-input=${name}`, `state=${state}`);
   }
   return hashParts(parts);
 }
@@ -556,6 +605,8 @@ function validEntry(value, testFile, digest, closure) {
     typeof value.recordedAt === 'string' &&
     Array.isArray(value.closure) &&
     value.closure.every((item) => typeof item === 'string') &&
+    Array.isArray(value.observedInputs) &&
+    value.observedInputs.every((item) => typeof item === 'string') &&
     (closure === undefined || (
       value.closure.length === closure.length &&
       value.closure.every((item, index) => item === closure[index])
@@ -580,27 +631,21 @@ function cachedVerdict(testFile, salt) {
   const entry = readJson(entryPath(pointer.digest));
   if (!validEntry(entry, testFile, pointer.digest, undefined)) return undefined;
 
-  // Self-healing invariant: an ordinary new import requires editing a module
-  // already in this saved closure. Hashing that old closure therefore misses
-  // before reuse and rebuilds the closure after the fresh PASS. The global
+  // Self-healing invariant: reading a different path requires either a code
+  // change in the saved closure or changed data content in observedInputs. The
+  // former forces a recording run; the latter is hashed directly here. The
   // module-path inventory separately covers a newly resolvable path or glob.
-  const currentDigest = verdictDigest(testFile, entry.closure, salt);
+  const currentDigest = verdictDigest(testFile, entry.closure, entry.observedInputs, salt);
   return currentDigest === pointer.digest ? entry : undefined;
 }
 
-function contentAddressedVerdict(testFile, closure, digest) {
-  const entry = readJson(entryPath(digest));
-  if (!validEntry(entry, testFile, digest, closure)) return undefined;
-  atomicJson(pointerPath(testFile), { testFile: repositoryPath(testFile), digest });
-  return entry;
-}
-
-function storeVerdict(testFile, closure, digest, testCount) {
+function storeVerdict(testFile, closure, observedInputs, digest, testCount) {
   const entry = {
     version: CACHE_VERSION,
     testFile: repositoryPath(testFile),
     digest,
     closure,
+    observedInputs,
     testCount,
     recordedAt: new Date().toISOString(),
   };
@@ -619,6 +664,7 @@ function testFiles() {
 function runVitest(files) {
   const reportDirectory = mkdtempSync(join(tmpdir(), 'dnd-verdict-report-'));
   const reportPath = join(reportDirectory, 'vitest.json');
+  const observationsDirectory = mkdtempSync(join(tmpdir(), 'dnd-verdict-observations-'));
   const vitest = resolve(root, 'node_modules/vitest/vitest.mjs');
   const result = spawnSync(
     process.execPath,
@@ -632,11 +678,36 @@ function runVitest(files) {
       `--outputFile.json=${reportPath}`,
       ...files.map(repositoryPath),
     ],
-    { cwd: root, env: process.env, stdio: 'inherit' },
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        VERDICT_FS_OBSERVATIONS_DIR: observationsDirectory,
+        VERDICT_REPOSITORY_ROOT: root,
+      },
+      stdio: 'inherit',
+    },
   );
   const report = readJson(reportPath);
+  const observations = new Map();
+  for (const path of filesBelow(observationsDirectory)) {
+    const record = readJson(path);
+    if (
+      record !== null &&
+      typeof record === 'object' &&
+      record.version === 1 &&
+      typeof record.testFile === 'string' &&
+      Array.isArray(record.observedInputs) &&
+      record.observedInputs.every((item) => typeof item === 'string') &&
+      Array.isArray(record.externalInputs) &&
+      record.externalInputs.every((item) => typeof item === 'string')
+    ) {
+      observations.set(record.testFile, record);
+    }
+  }
   rmSync(reportDirectory, { recursive: true, force: true });
-  return { status: result.status ?? 1, report };
+  rmSync(observationsDirectory, { recursive: true, force: true });
+  return { status: result.status ?? 1, report, observations };
 }
 
 function main() {
@@ -657,19 +728,14 @@ function main() {
       continue;
     }
     const graph = buildClosure(testFile);
-    const digest = verdictDigest(testFile, graph.closure, salt);
-    const cacheable = graph.unresolved.length === 0 && digest !== undefined;
-    if (cacheEnabled && cacheable && contentAddressedVerdict(testFile, graph.closure, digest) !== undefined) {
-      cached.push(testFile);
-      continue;
-    }
+    const cacheable = graph.unresolved.length === 0;
     if (!cacheable) {
       uncacheable += 1;
       for (const reason of graph.unresolved) {
         uncacheableReasons.set(reason, (uncacheableReasons.get(reason) ?? 0) + 1);
       }
     }
-    prepared.set(repositoryPath(testFile), { ...graph, cacheable, digest });
+    prepared.set(repositoryPath(testFile), { ...graph, cacheable });
     pending.push(testFile);
   }
 
@@ -690,7 +756,8 @@ function main() {
     return;
   }
 
-  const { status, report } = runVitest(pending);
+  const { status, report, observations } = runVitest(pending);
+  const failClosedByFile = new Map();
   if (cacheEnabled && report !== undefined && Array.isArray(report.testResults)) {
     for (const result of report.testResults) {
       const testFile = realpathSync(result.name);
@@ -700,8 +767,34 @@ function main() {
       const passed = result.status === 'passed' &&
         assertions.length > 0 &&
         assertions.every((assertion) => assertion.status === 'passed');
-      if (graph?.cacheable === true && graph.digest !== undefined && passed) {
-        storeVerdict(testFile, graph.closure, graph.digest, assertions.length);
+      const observation = observations.get(name);
+      const reasons = [
+        ...(graph?.unresolved ?? []),
+        ...(observation?.externalInputs ?? ['<filesystem observation missing>']),
+      ];
+      if (reasons.length > 0) failClosedByFile.set(name, reasons);
+      if (graph?.cacheable === true && observation !== undefined && reasons.length === 0 && passed) {
+        const digest = verdictDigest(testFile, graph.closure, observation.observedInputs, salt);
+        if (digest === undefined) {
+          failClosedByFile.set(name, ['<observed repository input could not be hashed>']);
+        } else {
+          storeVerdict(
+            testFile,
+            graph.closure,
+            observation.observedInputs,
+            digest,
+            assertions.length,
+          );
+        }
+      }
+    }
+  }
+  if (cacheEnabled && failClosedByFile.size > 0) {
+    console.log(`${failClosedByFile.size} test file(s) remain fail-closed after observation`);
+    if (process.env.VERDICT_CACHE_DEBUG === '1') {
+      for (const [name, reasons] of [...failClosedByFile.entries()]
+        .sort((left, right) => left[0].localeCompare(right[0]))) {
+        console.log(`${name} -> ${reasons.join('; ')}`);
       }
     }
   }
