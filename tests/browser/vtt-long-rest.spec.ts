@@ -24,7 +24,8 @@ test('DM Long Rest ends the adventuring day and logs a cited autosaved summary',
   );
   const card = page.locator('.long-rest-summary-card');
   await expect(card.getByRole('heading', { name: 'Long Rest completed — 8 hours' })).toBeVisible();
-  await expect(card.locator('li')).toHaveCount(4);
+  // D385 adds Tamsin Quill to the representative party, making five members.
+  await expect(card.locator('li')).toHaveCount(5);
   await expect(card.locator('.long-rest-citations')).toContainText(
     'docs/srd/full/srd-5.2.1.txt:11901-11913',
   );

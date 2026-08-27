@@ -193,19 +193,32 @@ export function reconcileStableRenderedChildren(live: HTMLElement, draft: HTMLEl
     isHtmlElement,
   );
   const keyed = keyedChildren(live);
-  const retained = new Set<HTMLElement>();
   const desired = Array.from(draft.children).filter(
     isHtmlElement,
   );
-  for (const next of desired) {
+  const rendered = desired.map((next) => {
     const key = renderKey(next);
     const prior = key === null ? undefined : keyed.get(key);
-    const rendered = prior !== undefined && prior.tagName === next.tagName
+    const node = prior !== undefined && prior.tagName === next.tagName
       ? prior
       : next;
-    if (rendered === prior) syncElement(rendered, next);
-    live.append(rendered);
-    retained.add(rendered);
+    if (node === prior) syncElement(node, next);
+    return node;
+  });
+  const retained = new Set(rendered);
+  for (const [index, node] of rendered.entries()) {
+    while (true) {
+      const current = Array.from(live.children).filter(isHtmlElement)[index];
+      if (current === node) break;
+      if (current !== undefined && !retained.has(current)) {
+        current.remove();
+        continue;
+      }
+      // Re-appending a retained node is still a DOM move. Leaving it in place
+      // keeps an active pointer sequence intact when preview siblings change.
+      live.insertBefore(node, current ?? null);
+      break;
+    }
   }
   for (const stale of existing) {
     if (!retained.has(stale)) stale.remove();

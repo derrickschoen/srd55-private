@@ -63,6 +63,50 @@ describe('stable VTT control rendering', () => {
     expect(clicked).toHaveBeenCalledOnce();
   });
 
+  it('does not orphan a pressed tray option when a preview rerenders before click', () => {
+    const tray = (button: HTMLElement): HTMLElement => {
+      const section = document.createElement('section');
+      section.dataset.renderKey = stableRenderKey('dm', 'pending-request');
+      section.append(button);
+      return section;
+    };
+    const actionKey = stableRenderKey('dm', 'pending-request', 'turn-7', 'move-4-3');
+    const clicked = vi.fn();
+    const liveButton = document.createElement('button');
+    liveButton.dataset.renderKey = actionKey;
+    liveButton.addEventListener('click', clicked);
+    const live = document.createElement('main');
+    const liveBoard = document.createElement('div');
+    liveBoard.dataset.preview = 'false';
+    live.append(liveBoard, tray(liveButton));
+    document.body.append(live);
+
+    let pointerIsDown = false;
+    let orphanedWhilePressed = false;
+    const pressedTarget = interactiveElement(liveButton);
+    const remove = pressedTarget.remove.bind(pressedTarget);
+    vi.spyOn(pressedTarget, 'remove').mockImplementation(() => {
+      if (pointerIsDown && pressedTarget.isConnected) orphanedWhilePressed = true;
+      remove();
+    });
+    pressedTarget.dispatchEvent(new Event('pointerdown'));
+    pointerIsDown = true;
+
+    const draft = document.createElement('main');
+    const previewBoard = document.createElement('div');
+    previewBoard.dataset.preview = 'true';
+    const nextButton = document.createElement('button');
+    nextButton.dataset.renderKey = actionKey;
+    draft.append(previewBoard, tray(nextButton));
+    reconcileStableRenderedChildren(live, draft);
+
+    pressedTarget.dispatchEvent(new Event('pointerup'));
+    pointerIsDown = false;
+    if (!orphanedWhilePressed && pressedTarget.isConnected) pressedTarget.click();
+    expect(orphanedWhilePressed).toBe(false);
+    expect(clicked).toHaveBeenCalledOnce();
+  });
+
   it('keeps controller controls connected while adding a deferred roster member', () => {
     const assignment = (
       combatantId: string,
