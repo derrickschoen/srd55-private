@@ -7,6 +7,31 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## F28 — supervisor repeated the F19 checkout mistake on an uncommitted lane (2026-08-27)
+
+During the wave-4+5 harvest, the supervisor (Claude) spot-checked prevention
+proofs by mutating `src/vtt/party-pack.ts` in place and then ran
+`git checkout -- src/vtt/party-pack.ts` to undo the probe — on a file that
+still carried codex's UNCOMMITTED wave-4+5 edits. The checkout restored HEAD
+and destroyed the lane's work on that one file (all other wave files were
+untouched because only that path was named). Detected within one command:
+the next `tsc -b` failed with TS2724 because the lane's new test imports
+`isFeatureEffectKind`, which only existed in the wiped version. Recovered by
+resuming the codex session (rollout replay route,
+`01a043cb-c388-74e0-987b-f9a6479da5f6`) and re-verifying with gates.
+
+This is F19's exact failure repeated after it was written down, and after the
+harvest-order memory ("verify→gate→COMMIT→controls") existed. The binding
+rule, now with two incidents behind it: **on a worktree holding uncommitted
+lane work, `git checkout -- <path>` is forbidden in all forms. Commit the
+lane FIRST, then run destructive probes; undo probe mutations by inverting
+the exact edit or restoring from a scratch copy (`cp` before, `mv` back
+after), never from git.** The two proof spot-checks themselves stand:
+mutant 4010 (spell id → `''`) is a genuine compile error at the production
+call site; mutant 1833 (mastery guard → `false`) still compiles — the probe
+file's TS2322 is prevention of the authoring-shape class, not a
+reclassification of that report mutant.
+
 ## D393 — OWNER: index adoption standard — EXPLAIN improvement suffices (2026-08-26)
 
 Owner: "We only need the plan to improve to keep the index. Even if
