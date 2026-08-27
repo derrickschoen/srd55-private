@@ -1,0 +1,3 @@
+{"type":"thread.started","thread_id":"codex-thread-123"}
+{"type":"item.completed","item":{"id":"item-1","type":"agent_message","text":"{\"intents\":[]}"}}
+{"type":"turn.completed","usage":{"input_tokens":101,"cached_input_tokens":55,"output_tokens":17,"reasoning_tokens":9}}

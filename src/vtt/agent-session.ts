@@ -62,6 +62,13 @@ export interface AgentSessionAdapter {
   classifyFailure(error: unknown): AgentFailureClassification;
 }
 
+export function agentSessionIdFromCli(value: string): AgentSessionId {
+  if (value.length === 0 || value.trim() !== value || value.length > 200) {
+    throw new TypeError('Agent CLI session ID must be a non-empty, trimmed opaque string of at most 200 characters.');
+  }
+  return value as AgentSessionId;
+}
+
 export function isAgentCliKind(value: unknown): value is AgentCliKind {
   return value === 'codex' || value === 'opencode' || value === 'pi' || value === 'claude-code';
 }

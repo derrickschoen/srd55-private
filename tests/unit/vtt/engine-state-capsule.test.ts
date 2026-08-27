@@ -27,7 +27,14 @@ const authorityBoundaryEntries = [
   resolve(repoRoot, 'src/vtt/mcp/handler.ts'),
   resolve(repoRoot, 'src/vtt/mcp/schemas.ts'),
   resolve(repoRoot, 'src/vtt/mcp/engine-server.ts'),
+  resolve(repoRoot, 'src/vtt/agent-adapters/process.ts'),
+  resolve(repoRoot, 'src/vtt/agent-adapters/codex.ts'),
+  resolve(repoRoot, 'src/vtt/agent-adapters/claude-code.ts'),
+  resolve(repoRoot, 'src/vtt/agent-adapters/opencode.ts'),
+  resolve(repoRoot, 'src/vtt/agent-adapters/pi.ts'),
+  resolve(repoRoot, 'src/vtt/agent-adapters/index.ts'),
 ] as const;
+const adapterBoundaryEntries = authorityBoundaryEntries.filter((path) => path.includes('/agent-adapters/'));
 
 function runtimeModuleSpecifiers(path: string): readonly string[] {
   const source = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.ESNext, false);
@@ -87,6 +94,27 @@ function forbiddenCapsuleImportChain(): readonly string[] | null {
   return null;
 }
 
+function forbiddenAdapterImportChain(): readonly string[] | null {
+  const pending: { readonly path: string; readonly chain: readonly string[] }[] = adapterBoundaryEntries.map((path) => ({
+    path,
+    chain: [relative(repoRoot, path)],
+  }));
+  const seen = new Set<string>();
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (current === undefined || seen.has(current.path)) continue;
+    seen.add(current.path);
+    const local = relative(resolve(repoRoot, 'src/vtt'), current.path);
+    const allowed = local === 'agent-session.ts' || local.startsWith('agent-adapters/');
+    if (!allowed) return current.chain;
+    for (const specifier of runtimeModuleSpecifiers(current.path)) {
+      const target = resolveLocalImport(current.path, specifier);
+      if (target !== null) pending.push({ path: target, chain: [...current.chain, relative(repoRoot, target)] });
+    }
+  }
+  return null;
+}
+
 function capsuleFixture() {
   const state = generateRoom(3_943_001).encounter.state;
   const actor = state.combatants.find((candidate) => candidate.profile.kind === 'monster');
@@ -129,6 +157,14 @@ describe('read-only engine state capsule', () => {
     expect(
       chain,
       `capsule runtime graph reaches a forbidden authority module:\n${chain?.join(' -> ') ?? ''}`,
+    ).toBeNull();
+  });
+
+  it('keeps real agent adapters outside every engine runtime import graph except neutral binding types', () => {
+    const chain = forbiddenAdapterImportChain();
+    expect(
+      chain,
+      `agent adapter runtime graph reaches a non-binding VTT/engine module:\n${chain?.join(' -> ') ?? ''}`,
     ).toBeNull();
   });
 

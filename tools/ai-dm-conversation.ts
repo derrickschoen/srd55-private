@@ -5,7 +5,7 @@ import { createInterface, type Interface } from 'node:readline';
 import { canonicalJson } from '../src/commands/canonical-json';
 import type { EncounterState } from '../src/combat/encounter';
 import type { MonsterAction } from '../src/combat/statblock';
-import { combatantId, type CombatantId } from '../src/combat/values';
+import { combatantId, encounterSessionId, type CombatantId } from '../src/combat/values';
 import {
   arenaMonsterActions,
   declareArenaIntent,
@@ -13,6 +13,9 @@ import {
   type ArenaIntent,
 } from '../src/vtt/arena-legality';
 import { mcpRequestMeta } from '../src/vtt/mcp/handler';
+import { agentSessionIdFromCli, type AgentInvocation, type AgentSessionBinding } from '../src/vtt/agent-session';
+import { AGENT_ADAPTER_VERSION, resolveAgentAdapter } from '../src/vtt/agent-adapters';
+import { codexArgv } from '../src/vtt/agent-adapters/codex';
 import { loadArenaFixture } from './engine-mcp-server';
 
 export const CONVERSATION_ARMS = ['M', 'C'] as const;
@@ -198,23 +201,6 @@ function eventToolNames(value: unknown): readonly string[] {
   });
 }
 
-function eventUsage(value: unknown): ConversationTokenCounts | null {
-  for (const candidate of recordsWithin(value)) {
-    const input = candidate['input_tokens'] ?? candidate['inputTokens'];
-    const output = candidate['output_tokens'] ?? candidate['outputTokens'];
-    if (!Number.isSafeInteger(input) || !Number.isSafeInteger(output)) continue;
-    const cached = candidate['cached_input_tokens'] ?? candidate['cachedInputTokens'];
-    const reasoning = candidate['reasoning_tokens'] ?? candidate['reasoningTokens'];
-    return {
-      input: input as number,
-      cachedInput: Number.isSafeInteger(cached) ? cached as number : 0,
-      output: output as number,
-      reasoning: Number.isSafeInteger(reasoning) ? reasoning as number : 0,
-    };
-  }
-  return null;
-}
-
 export function codexConversationArgs(
   config: ConversationConfig,
   arm: ConversationArm,
@@ -223,23 +209,14 @@ export function codexConversationArgs(
 ): readonly string[] {
   const viteNode = resolve(config.cwd, 'node_modules/vite-node/vite-node.mjs');
   const server = resolve(config.cwd, 'tools/engine-mcp-server.ts');
-  const mcpConfig = arm === 'C'
-    ? [
-        '-c', `mcp_servers.engine.command=${JSON.stringify(process.execPath)}`,
-        '-c', `mcp_servers.engine.args=${JSON.stringify([viteNode, server, fixturePath])}`,
-      ]
-    : [];
-  return [
-    'exec',
-    '-C', config.cwd,
-    '--sandbox', 'read-only',
-    '--json',
-    '-m', config.model,
-    '-c', `model_reasoning_effort=${JSON.stringify(config.effort)}`,
-    ...mcpConfig,
-    ...(sessionId === null ? [] : ['resume', sessionId]),
-    '-',
-  ];
+  return codexArgv({
+    cwd: config.cwd,
+    model: config.model,
+    reasoningEffort: config.effort,
+    engineCommand: arm === 'C' ? process.execPath : null,
+    engineArgs: arm === 'C' ? [viteNode, server, fixturePath] : [],
+    sessionId,
+  });
 }
 
 async function runCodexTurn(
@@ -250,54 +227,72 @@ async function runCodexTurn(
   sessionId: string | null,
 ): Promise<CodexTurnResult> {
   const started = performance.now();
-  const child = spawn(
-    config.codexBin,
-    codexConversationArgs(config, arm, fixturePath, sessionId),
-    { cwd: config.cwd, stdio: ['pipe', 'pipe', 'pipe'] },
-  );
-  const exit = new Promise<number | null>((resolvePromise, reject) => {
-    child.once('error', reject);
-    child.once('exit', resolvePromise);
-  });
-  const lines = createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY });
-  let errorOutput = '';
-  child.stderr.on('data', (chunk: Buffer) => { errorOutput += chunk.toString('utf8'); });
-  child.stdin.end(prompt);
-  let persistentSessionId = sessionId;
-  let reply: unknown = null;
-  let tokens: ConversationTokenCounts = { input: 0, cachedInput: 0, output: 0, reasoning: 0 };
   let timeToFirstAction: number | null = null;
   let toolCalls = 0;
-  for await (const line of lines) {
-    if (line.trim().length === 0) continue;
-    const event: unknown = JSON.parse(line);
+  const observeLine = (line: string): void => {
+    if (line.trim().length === 0) return;
+    let event: unknown;
+    try { event = JSON.parse(line) as unknown; }
+    catch { return; }
     const root = asRecord(event);
-    if (root?.['type'] === 'thread.started' && typeof root['thread_id'] === 'string') {
-      persistentSessionId = root['thread_id'];
-    }
     const toolNames = root?.['type'] === 'item.completed' ? eventToolNames(event) : [];
     toolCalls += toolNames.length;
     if (timeToFirstAction === null && toolNames.some((name) => name.endsWith('submit_intent') || name.endsWith('submit_round_intents'))) {
       timeToFirstAction = performance.now() - started;
     }
-    const text = eventAgentText(event);
-    if (text !== null) {
-      if (timeToFirstAction === null) timeToFirstAction = performance.now() - started;
-      reply = JSON.parse(text) as unknown;
-    }
-    tokens = eventUsage(event) ?? tokens;
-  }
-  const exitCode = await exit;
-  if (exitCode !== 0) throw new Error(`codex exec exited ${String(exitCode)}: ${errorOutput}`);
-  if (persistentSessionId === null) throw new Error('Codex output did not contain a persistent session id.');
+    if (timeToFirstAction === null && eventAgentText(event) !== null) timeToFirstAction = performance.now() - started;
+  };
+  const viteNode = resolve(config.cwd, 'node_modules/vite-node/vite-node.mjs');
+  const server = resolve(config.cwd, 'tools/engine-mcp-server.ts');
+  const adapter = resolveAgentAdapter('codex', {
+    binary: config.codexBin,
+    cwd: config.cwd,
+    engineCommand: arm === 'C' ? process.execPath : null,
+    engineArgs: arm === 'C' ? [viteNode, server] : [],
+    onStdoutLine: observeLine,
+  });
+  const invocation: AgentInvocation = {
+    runId: encounterSessionId('encounter:ai-dm-conversation'),
+    prompt,
+    model: config.model,
+    reasoningEffort: config.effort,
+    launcherToken: arm === 'C' ? fixturePath : 'disabled',
+    timeoutMs: null,
+  };
+  const controller = new AbortController();
+  const result = sessionId === null
+    ? await adapter.start(invocation, controller.signal)
+    : await adapter.resume(conversationBinding(sessionId), invocation, controller.signal);
+  const reply: unknown = JSON.parse(result.finalText) as unknown;
+  const tokens: ConversationTokenCounts = result.usage === null
+    ? { input: 0, cachedInput: 0, output: 0, reasoning: 0 }
+    : {
+        input: result.usage.inputTokens,
+        cachedInput: result.usage.cachedInputTokens,
+        output: result.usage.outputTokens,
+        reasoning: result.usage.reasoningTokens,
+      };
   const wall = performance.now() - started;
   return {
-    sessionId: persistentSessionId,
+    sessionId: result.sessionId,
     reply,
     tokens,
     timeToFirstAction: timeToFirstAction ?? wall,
     wall,
     toolCalls,
+  };
+}
+
+function conversationBinding(sessionId: string): AgentSessionBinding {
+  return {
+    cli: 'codex',
+    sessionId: agentSessionIdFromCli(sessionId),
+    adapterVersion: AGENT_ADAPTER_VERSION,
+    recoveryGeneration: 0,
+    predecessorSessionHash: null,
+    startedAtRevision: 1,
+    lastDispatchedRevision: 0,
+    status: 'active',
   };
 }
 
