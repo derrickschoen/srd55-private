@@ -7,6 +7,14 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D399.2 — OWNER: opencode/pi credentials deferred to release gate (2026-08-27)
+
+Both CLIs are installed (opencode 1.18.23, pi 0.73.1) but unauthenticated.
+Ruling: defer provider credentials to the release gate — their adapter rows
+ship loud-UNVERIFIED with `reason: "credentials_absent"` (distinct from
+`cli_absent`) until the owner authenticates when the four-CLI matrix must
+go VERIFIED. Codex and Claude Code rows can go VERIFIED before that.
+
 ## D399 — OWNER: install opencode + pi CLIs; MCP implementation leads (2026-08-27)
 
 Two rulings via AskUserQuestion after the MCP design reached consensus
