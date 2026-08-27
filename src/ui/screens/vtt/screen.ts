@@ -7,7 +7,11 @@ export const screen = defineScreen({
   render: async ({ root, route, rpc }) => {
     if (route.query.get('encounter') === 'vane-warren') {
       const { mountVaneWarren } = await import('../../../vtt/vane-warren-app');
-      const mounted = mountVaneWarren(root, rpc);
+      const requestedScenario = route.query.get('scenario');
+      const scenario = requestedScenario === 'tpk-clean' || requestedScenario === 'tpk-recovery'
+        ? requestedScenario
+        : 'default';
+      const mounted = mountVaneWarren(root, rpc, scenario);
       return () => mounted.close();
     }
     if (route.query.get('encounter') === 'd365') {

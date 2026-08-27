@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 import { SRD_ATTRIBUTION_NOTICE } from '../../../src/rules/srd-attribution';
 import { renderLegalPage } from '../../../src/ui/screens/legal/legal';

@@ -20,6 +20,7 @@ import { encounterBoardRenderModel } from '../../../src/vtt/encounter-board';
 import { loadD365SampleParty, type D365SamplePartyLoad } from '../../../src/vtt/d365-sample-party';
 import { loadedPartySpellCastCommand } from '../../../src/vtt/party-pack';
 import { createPartySessionState, type PartySessionState } from '../../../src/vtt/party-session-state';
+import { createD365SurvivalPartySessionState } from '../../../src/vtt/survival-policy';
 import {
   MemoryBrowserSessionStore,
   MemoryMirrorSink,
@@ -29,6 +30,7 @@ import {
   composeVaneWarrenSessionEncounter,
 } from '../../../src/vtt/vane-warren';
 import { vaneWarrenArtForCombatants } from '../../../src/vtt/vane-warren-art';
+import { regretReactionLegalActions } from '../../../src/vtt/regret/legal-actions';
 import { rpcRegistry } from '../../../src/worker/registry';
 import type { HandlerContext } from '../../../src/worker/handler';
 import {
@@ -101,6 +103,79 @@ function parsedExport(bytes: string): Readonly<Record<string, unknown>> {
   return value as Readonly<Record<string, unknown>>;
 }
 
+async function driveAlgorithmHostToConclusion(
+  host: DmEncounterHost,
+  maximumDecisionBoundaries = 200,
+): Promise<ReturnType<DmEncounterHost['snapshot']>> {
+  for (let boundary = 0; boundary < maximumDecisionBoundaries; boundary += 1) {
+    const snapshot = await new Promise<ReturnType<DmEncounterHost['snapshot']>>((resolve, reject) => {
+      let publications = 0;
+      let unsubscribe = (): void => undefined;
+      let completedBeforeSubscription = false;
+      const timeout = setTimeout(() => {
+        unsubscribe();
+        host.interrupt();
+        const candidate = host.snapshot();
+        const latest = candidate.dm.encounter.recentEvents.at(-1);
+        const active = candidate.dm.encounter.combatants.find(
+          (combatant) => combatant.id === candidate.dm.encounter.activeCombatant,
+        );
+        reject(new Error(
+          `Algorithm host timed out after ${String(publications)} publications at round ` +
+          `${String(candidate.dm.encounter.round)} on ${active?.name ?? 'no actor'} after ${latest?.type ?? 'no event'}.`,
+        ));
+      }, 2_000);
+      unsubscribe = host.subscribe((candidate) => {
+        publications += 1;
+        if (
+          candidate.dm.encounter.phase.kind === 'concluded' ||
+          candidate.dm.decisionTray.actionRefusal !== null ||
+          candidate.dm.decisionTray.entries.some((entry) => entry.kind === 'pending')
+        ) {
+          completedBeforeSubscription = publications === 1;
+          clearTimeout(timeout);
+          unsubscribe();
+          resolve(candidate);
+          return;
+        }
+        if (publications < 1_000) return;
+        unsubscribe();
+        host.interrupt();
+        clearTimeout(timeout);
+        const latest = candidate.dm.encounter.recentEvents.at(-1);
+        reject(new Error(
+          `Algorithm host published 1,000 times at round ${String(candidate.dm.encounter.round)} ` +
+          `after ${latest?.type ?? 'no event'}.`,
+        ));
+      });
+      if (completedBeforeSubscription) unsubscribe();
+      void host.start().catch(reject);
+    });
+    if (snapshot.dm.encounter.phase.kind === 'concluded') return snapshot;
+    if (snapshot.dm.decisionTray.actionRefusal !== null) {
+      throw new Error(`Algorithm host action refused: ${snapshot.dm.decisionTray.actionRefusal.reason}`);
+    }
+    const pending = snapshot.dm.decisionTray.entries.find((entry) => entry.kind === 'pending');
+    if (pending?.kind !== 'pending') {
+      const latest = snapshot.dm.encounter.recentEvents.at(-1);
+      throw new Error(
+        `Algorithm host stalled at round ${String(snapshot.dm.encounter.round)} after ${latest?.type ?? 'no event'}.`,
+      );
+    }
+    const decision = pending.decision;
+    if (decision.kind === 'reaction_offer') {
+      const mover = snapshot.dm.encounter.combatants.find(
+        (combatant) => combatant.id === decision.opportunityAttack.mover,
+      );
+      expect(mover?.life).not.toBe('dead');
+    }
+    const option = decision.options[0];
+    if (option === undefined) throw new Error(`Pending ${decision.kind} decision has no option.`);
+    await host.resolvePendingDecision(decision.id, option.id);
+  }
+  throw new Error(`Algorithm host exceeded ${String(maximumDecisionBoundaries)} decision boundaries.`);
+}
+
 describe('Vane Warren loader, chaining, seats, and end-session export', () => {
   let harness: RpcHarness;
   let rpc: RpcClient;
@@ -155,6 +230,120 @@ describe('Vane Warren loader, chaining, seats, and end-session export', () => {
       host.close();
     }
   });
+
+  it('carries controller assignments across a fight boundary and accepts the new roster member assignment', async () => {
+    const encounter = composeVaneWarrenSessionEncounter(
+      sample.party.members,
+      sample.displayNames,
+      createPartySessionState(sample.party.members),
+    );
+    const composeRoom = encounter.composeNextRoom;
+    if (composeRoom === undefined) throw new Error('Vane Warren encounter chaining is missing.');
+    const initialPartyState = encounter.partyState;
+    if (initialPartyState === null) throw new Error('Vane Warren party state is missing.');
+    const host = new DmEncounterHost(
+      'test:vane-controller-carryover',
+      new MemoryBrowserSessionStore(),
+      {
+        initialState: encounter.state,
+        initialPartyState,
+        partyMembers: encounter.members,
+        partyDisplayNames: encounter.displayNames,
+        composeRoom,
+        initialControllers: encounter.controllers,
+        playerIds: encounter.playerIds,
+        turnLegalActions: encounter.turnLegalActions,
+        reactionLegalActions: () => [],
+      },
+    );
+    for (const identity of host.snapshot().dm.controllers) {
+      host.replaceController(identity.combatantId, 'algorithm');
+    }
+
+    await host.finishRoom(null);
+    host.interrupt();
+    const afterBoundary = host.snapshot().dm.controllers;
+    expect(afterBoundary.filter((identity) => encounter.playerIds.includes(identity.combatantId)))
+      .toHaveLength(encounter.playerIds.length);
+    expect(afterBoundary.filter(
+      (identity) => encounter.playerIds.includes(identity.combatantId) && identity.kind === 'algorithm',
+    )).toHaveLength(encounter.playerIds.length);
+    const newRoster = afterBoundary.filter((identity) => !encounter.playerIds.includes(identity.combatantId));
+    expect(newRoster).toEqual([expect.objectContaining({ kind: 'human' })]);
+    const replacement = newRoster[0];
+    if (replacement === undefined) throw new Error('The Iron Voice roster is missing.');
+    host.replaceController(replacement.combatantId, 'algorithm');
+    expect(host.snapshot().dm.controllers.every((identity) => identity.kind === 'algorithm')).toBe(true);
+    host.close();
+  });
+
+  it('all-algorithm chain concludes Iron Voice and assigns its conditional successor roster', async () => {
+    const encounter = composeVaneWarrenSessionEncounter(
+      sample.party.members,
+      sample.displayNames,
+      createD365SurvivalPartySessionState(sample.party.members).state,
+    );
+    const composeRoom = encounter.composeNextRoom;
+    const initialPartyState = encounter.partyState;
+    if (composeRoom === undefined || initialPartyState === null) {
+      throw new Error('The Vane Warren chained host fixture is incomplete.');
+    }
+    const host = new DmEncounterHost(
+      'test:vane-iron-voice-algorithm-host',
+      new MemoryBrowserSessionStore(),
+      {
+        initialState: encounter.state,
+        initialPartyState,
+        partyMembers: encounter.members,
+        partyDisplayNames: encounter.displayNames,
+        composeRoom,
+        initialControllers: encounter.controllers.map((identity) => ({
+          ...identity,
+          controllerId: `${identity.combatantId}:algorithm:iron-voice-regression`,
+          kind: 'algorithm' as const,
+          generation: 0,
+        })),
+        playerIds: encounter.playerIds,
+        turnLegalActions: encounter.turnLegalActions,
+        reactionLegalActions: regretReactionLegalActions,
+      },
+    );
+
+    const cinder = await driveAlgorithmHostToConclusion(host);
+    expect(cinder.dm.encounter.phase).toEqual(expect.objectContaining({
+      kind: 'concluded',
+      outcome: 'victory',
+    }));
+    await host.finishRoom(null);
+    for (const identity of host.snapshot().dm.controllers) {
+      if (identity.kind === 'human') host.replaceController(identity.combatantId, 'algorithm');
+    }
+
+    const iron = await driveAlgorithmHostToConclusion(host);
+    expect(iron.dm.encounter.dmOnly.notes[0]).toContain('The Iron Voice');
+    expect(iron.dm.encounter.round).toBeGreaterThanOrEqual(2);
+    expect(iron.dm.encounter.phase).toEqual(expect.objectContaining({
+      kind: 'concluded',
+      outcome: 'victory',
+    }));
+    await host.finishRoom(null);
+    for (const identity of host.snapshot().dm.controllers) {
+      if (identity.kind === 'human') host.replaceController(identity.combatantId, 'algorithm');
+    }
+
+    const muster = await driveAlgorithmHostToConclusion(host);
+    expect(muster.dm.encounter.dmOnly.notes[0]).toContain('The Last Muster');
+    expect(muster.dm.encounter.round).toBeGreaterThan(2);
+    expect(muster.dm.controllers).toContainEqual(expect.objectContaining({
+      combatantId: 'combatant:vane-warren:last-muster:muster-joiner-a',
+      kind: 'algorithm',
+    }));
+    expect(muster.dm.encounter.phase).toEqual(expect.objectContaining({
+      kind: 'concluded',
+      outcome: 'victory',
+    }));
+    host.close();
+  }, 20_000);
 
   it('session_forked: keeps one session id while HP and a pact slot carry through all three fights', () => {
     const store = new MemoryBrowserSessionStore();

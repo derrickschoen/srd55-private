@@ -12,11 +12,11 @@ import { loadExternalPartyPack, type LoadedExternalPartyPack } from './party-pac
 export const D365_SAMPLE_PARTY_ID = 'party:d365-representative-level-5' as const;
 
 export interface D365SamplePartyBuild {
-  readonly role: 'pact_caster' | 'land_druid' | 'martial' | 'prepared_caster';
+  readonly role: 'pact_caster' | 'land_druid' | 'martial' | 'prepared_caster' | 'arcane_controller';
   readonly name: string;
-  readonly className: 'Warlock' | 'Druid' | 'Fighter' | 'Cleric';
+  readonly className: 'Warlock' | 'Druid' | 'Fighter' | 'Cleric' | 'Wizard';
   readonly classContentKey: string;
-  readonly subclassName: 'Fiend Patron' | 'Circle of the Land' | 'Champion' | 'Life Domain';
+  readonly subclassName: 'Fiend Patron' | 'Circle of the Land' | 'Champion' | 'Life Domain' | 'Evoker';
   readonly subclassContentKey: string;
   readonly speciesName: 'Human';
   readonly speciesContentKey: '2024:species:human';
@@ -25,7 +25,7 @@ export interface D365SamplePartyBuild {
   readonly originFeatContentKey: '2024:feat:alert';
   readonly abilities: Readonly<Record<Ability, number>>;
   readonly levelFourAbility: Ability;
-  readonly requiredCombatSpells: readonly ('Eldritch Blast' | 'Burning Hands' | 'Cure Wounds')[];
+  readonly requiredCombatSpells: readonly ('Eldritch Blast' | 'Burning Hands' | 'Cure Wounds' | 'Aid' | 'Bless' | 'Command' | 'Spirit Guardians' | 'Revivify' | 'Ray of Frost' | 'Slow')[];
 }
 
 export const D365_SAMPLE_PARTY_BUILDS = [
@@ -45,7 +45,7 @@ export const D365_SAMPLE_PARTY_BUILDS = [
     speciesContentKey: '2024:species:human', backgroundName: 'Sage',
     backgroundContentKey: '2024:background:sage', originFeatContentKey: '2024:feat:alert',
     abilities: { strength: 8, dexterity: 14, constitution: 13, intelligence: 10, wisdom: 15, charisma: 12 },
-    levelFourAbility: 'wisdom', requiredCombatSpells: ['Cure Wounds'],
+    levelFourAbility: 'wisdom', requiredCombatSpells: ['Cure Wounds', 'Aid'],
   },
   {
     role: 'martial', name: 'Brann Vale', className: 'Fighter',
@@ -63,7 +63,16 @@ export const D365_SAMPLE_PARTY_BUILDS = [
     speciesContentKey: '2024:species:human', backgroundName: 'Acolyte',
     backgroundContentKey: '2024:background:acolyte', originFeatContentKey: '2024:feat:alert',
     abilities: { strength: 10, dexterity: 12, constitution: 14, intelligence: 8, wisdom: 15, charisma: 13 },
-    levelFourAbility: 'wisdom', requiredCombatSpells: ['Cure Wounds'],
+    levelFourAbility: 'wisdom', requiredCombatSpells: ['Bless', 'Cure Wounds', 'Command', 'Spirit Guardians', 'Revivify'],
+  },
+  {
+    role: 'arcane_controller', name: 'Tamsin Quill', className: 'Wizard',
+    classContentKey: '2024:class:wizard', subclassName: 'Evoker',
+    subclassContentKey: '2024:subclass:evoker', speciesName: 'Human',
+    speciesContentKey: '2024:species:human', backgroundName: 'Sage',
+    backgroundContentKey: '2024:background:sage', originFeatContentKey: '2024:feat:alert',
+    abilities: { strength: 8, dexterity: 14, constitution: 13, intelligence: 15, wisdom: 12, charisma: 10 },
+    levelFourAbility: 'intelligence', requiredCombatSpells: ['Ray of Frost', 'Slow'],
   },
 ] as const satisfies readonly D365SamplePartyBuild[];
 
@@ -133,15 +142,36 @@ async function execute(
   return queries.getCharacter(character.id);
 }
 
-const LONGSWORD: WeaponFields = {
-  name: 'Longsword', proficiency_category: 'martial', attack_kind: 'melee',
+const BATTLEAXE: WeaponFields = {
+  name: 'Battleaxe', proficiency_category: 'martial', attack_kind: 'melee',
   damage: { kind: 'dice', dice: '1d8' }, damage_type: 'Slashing',
   versatile_damage: { kind: 'dice', dice: '1d10' }, finesse: false,
   heavy: false, light: false, loading: false, reach: false, thrown: false,
   two_handed: false, ammunition: false, ammunition_kind: null,
-  range: { kind: 'none' }, mastery_property: 'Sap', other_properties: null,
-  notes: 'Bundled D365 representative-party equipment choice.',
+  range: { kind: 'none' }, mastery_property: 'Topple', other_properties: null,
+  notes: 'D385 defender melee weapon; Topple is sourced at docs/srd/full/srd-5.2.1.txt:12807.',
 };
+
+const LONGBOW: WeaponFields = {
+  name: 'Longbow', proficiency_category: 'martial', attack_kind: 'ranged',
+  damage: { kind: 'dice', dice: '1d8' }, damage_type: 'Piercing',
+  versatile_damage: { kind: 'not_applicable' }, finesse: false,
+  heavy: true, light: false, loading: false, reach: false, thrown: false,
+  two_handed: true, ammunition: true, ammunition_kind: 'Arrow',
+  range: { kind: 'ranged', near_feet: 150, far_feet: 600 },
+  mastery_property: 'Slow', other_properties: null,
+  notes: 'D385 defender ranged weapon; table source docs/srd/source/weapons-table.txt:0.',
+};
+
+export const D385_WIZARD_CANTRIPS = ['Ray of Frost', 'Fire Bolt', 'Mage Hand', 'Prestidigitation'] as const;
+export const D385_WIZARD_SPELLBOOK = [
+  'Mage Armor', 'Shield', 'Magic Missile', 'Detect Magic', 'Feather Fall', 'Thunderwave',
+  'Sleep', 'Grease', 'Misty Step', 'Web', 'Invisibility', 'Counterspell', 'Fireball', 'Slow',
+] as const;
+export const D385_WIZARD_PREPARED = [
+  'Mage Armor', 'Shield', 'Magic Missile', 'Thunderwave', 'Misty Step', 'Web',
+  'Counterspell', 'Fireball', 'Slow',
+] as const;
 
 async function fillSkills(
   queries: SampleQueries,
@@ -225,6 +255,65 @@ async function assignRequiredCombatSpell(
   return current;
 }
 
+async function assignWizardSpellPlan(
+  queries: SampleQueries,
+  character: CharacterRow,
+  characterOrdinal: number,
+  operationOrdinal: { value: number },
+): Promise<CharacterRow> {
+  const plans = [
+    { label: 'cantrip', spells: D385_WIZARD_CANTRIPS },
+    { label: 'spellbook spell', spells: D385_WIZARD_SPELLBOOK },
+    { label: 'prepared spell', spells: D385_WIZARD_PREPARED },
+  ] as const;
+  let current = character;
+  for (const plan of plans) {
+    for (const spellName of plan.spells) {
+      const state = await queries.spellsStep(current.id);
+      const choices = state.choices.filter((candidate) =>
+        candidate.selected_spell_name === null && candidate.label.includes(plan.label));
+      let assigned = false;
+      for (const choice of choices) {
+        const eligible = await queries.guidedEligibleSpells({
+          character_id: current.id,
+          address: { kind: choice.kind, id: choice.id },
+          query: spellName,
+        });
+        const selected = eligible.find((spell) => spell.name === spellName);
+        if (selected === undefined) continue;
+        operationOrdinal.value += 1;
+        await queries.assignGuidedSpell({
+          character_id: current.id,
+          address: { kind: choice.kind, id: choice.id },
+          spell_version_id: Number(selected.id),
+          operation_uuid: operationUuid(characterOrdinal, operationOrdinal.value),
+          expected_revision: state.revision,
+        });
+        current = await queries.getCharacter(current.id);
+        assigned = true;
+        break;
+      }
+      if (!assigned) {
+        throw new D365SamplePartyCatalogGap(
+          current.name,
+          'wizardSpellPlan',
+          `${spellName} could not fill an empty Wizard ${plan.label} choice.`,
+        );
+      }
+    }
+  }
+  const final = await queries.spellsStep(current.id);
+  const unfilled = final.choices.filter((choice) => choice.selected_spell_name === null);
+  if (unfilled.length > 0) {
+    throw new D365SamplePartyCatalogGap(
+      current.name,
+      'wizardSpellPlan',
+      `The level-5 Wizard plan left choices empty: ${unfilled.map((choice) => choice.label).join(', ')}.`,
+    );
+  }
+  return current;
+}
+
 export async function installD365SamplePartyThroughRpc(
   queries: SampleQueries,
   commands: SampleCommands,
@@ -301,7 +390,9 @@ export async function installD365SamplePartyThroughRpc(
       }, operationUuid(characterOrdinal, operationOrdinal.value));
     }
     character = await fillSkills(queries, character, characterOrdinal, operationOrdinal);
-    character = await assignRequiredCombatSpell(queries, character, build, characterOrdinal, operationOrdinal);
+    character = build.role === 'arcane_controller'
+      ? await assignWizardSpellPlan(queries, character, characterOrdinal, operationOrdinal)
+      : await assignRequiredCombatSpell(queries, character, build, characterOrdinal, operationOrdinal);
     if (build.role === 'martial') {
       operationOrdinal.value += 1;
       character = await execute(queries, commands, character, {
@@ -309,7 +400,11 @@ export async function installD365SamplePartyThroughRpc(
       }, operationUuid(characterOrdinal, operationOrdinal.value));
       operationOrdinal.value += 1;
       character = await execute(queries, commands, character, {
-        type: 'add_weapon', weapon: LONGSWORD,
+        type: 'add_weapon', weapon: BATTLEAXE, mastery_selected: true,
+      }, operationUuid(characterOrdinal, operationOrdinal.value));
+      operationOrdinal.value += 1;
+      character = await execute(queries, commands, character, {
+        type: 'add_weapon', weapon: LONGBOW, mastery_selected: true,
       }, operationUuid(characterOrdinal, operationOrdinal.value));
     }
     const partyMember = await queries.partyPackMember(character.id);

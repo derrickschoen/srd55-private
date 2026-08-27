@@ -446,6 +446,11 @@ export class TurnCoordinator {
       ) {
         request = resumed;
       } else {
+        const algorithmParty = this.registry.kindFor(actor) === 'algorithm' &&
+          combatant(this.#state, actor).profile.kind === 'player_character'
+          ? this.#state.combatants.flatMap((candidate) =>
+              candidate.profile.kind === 'player_character' ? [candidate.profile.id] : [])
+          : undefined;
         const common = {
           requestId: this.#nextRequestId(kind, actor),
           encounterRevision: this.#state.revision,
@@ -453,6 +458,7 @@ export class TurnCoordinator {
           visibleState: projectPlayerView(this.#state, {
             seatId: String(actor),
             combatantId: actor,
+            ...(algorithmParty === undefined ? {} : { ownedCombatantIds: algorithmParty }),
           }),
           legalActions,
         };
@@ -510,9 +516,15 @@ export class TurnCoordinator {
         this.registry.assignFrom(event.combatant, event.summoner);
       } else if (event.type === 'summoned_combatant_despawned') {
         this.registry.remove(event.combatant);
-      } else if (event.type === 'reinforcement_wave_deployed') {
+      } else if (
+        event.type === 'reinforcement_wave_deployed' ||
+        event.type === 'conditional_joiners_deployed'
+      ) {
+        const source = event.type === 'reinforcement_wave_deployed'
+          ? event.calledBy
+          : event.leader;
         for (const combatantId of event.combatants) {
-          this.registry.assignFrom(combatantId, event.calledBy);
+          this.registry.assignFrom(combatantId, source);
         }
       }
     }

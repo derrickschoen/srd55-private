@@ -1,14 +1,14 @@
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseContext } from '../../../src/db/database';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openFreshSchemaTestDatabase } from '../../helpers/open-db';
 
 describe('application transactions', () => {
   let connection: Database;
   let db: DatabaseContext;
 
   beforeEach(async () => {
-    connection = await openTestDatabase({ applySchema: false });
+    connection = await openFreshSchemaTestDatabase({ applySchema: false });
     db = new DatabaseContext(connection);
     connection.exec('CREATE TABLE probe (value TEXT NOT NULL)');
   });

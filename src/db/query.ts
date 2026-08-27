@@ -6,6 +6,7 @@ import type {
   SqlValue,
 } from '@sqlite.org/sqlite-wasm';
 import { cloneSqlRow, type RowCodec, type SqlRow } from './codecs';
+import { recordQuery, sqlQueryLogEnabled } from './query-log';
 
 export type QueryBindings =
   | readonly BindableValue[]
@@ -68,11 +69,13 @@ export function execute(
   sql: string,
   bind?: QueryBindings,
 ): ExecuteResult {
+  const startedAt = sqlQueryLogEnabled ? performance.now() : 0;
   if (bind === undefined) {
     db.exec(sql);
   } else {
     db.exec({ sql, bind: bindings(bind) as BindingSpec });
   }
+  if (sqlQueryLogEnabled) recordQuery(sql, startedAt);
   const pointer = db.pointer;
   const lastInsertId = pointer === undefined
     ? undefined
@@ -101,7 +104,9 @@ export function queryAll<T>(
   bind: QueryBindings | undefined,
   codec: RowCodec<T>,
 ): T[] {
+  const startedAt = sqlQueryLogEnabled ? performance.now() : 0;
   const rows = db.selectObjects(sql, bindings(bind));
+  if (sqlQueryLogEnabled) recordQuery(sql, startedAt);
   return rows.map((row) => codec(cloneSqlRow(row)));
 }
 
@@ -111,7 +116,9 @@ export function queryOne<T>(
   bind: QueryBindings | undefined,
   codec: RowCodec<T>,
 ): T | null {
+  const startedAt = sqlQueryLogEnabled ? performance.now() : 0;
   const row = db.selectObject(sql, bindings(bind));
+  if (sqlQueryLogEnabled) recordQuery(sql, startedAt);
   return row === undefined ? null : codec(cloneSqlRow(row));
 }
 
@@ -129,7 +136,10 @@ export function queryAllRaw(
   sql: string,
   bind?: QueryBindings,
 ): SqlRow[] {
-  return db.selectObjects(sql, bindings(bind)).map(cloneSqlRow);
+  const startedAt = sqlQueryLogEnabled ? performance.now() : 0;
+  const rows = db.selectObjects(sql, bindings(bind));
+  if (sqlQueryLogEnabled) recordQuery(sql, startedAt);
+  return rows.map(cloneSqlRow);
 }
 
 export function queryOneRaw(
@@ -137,7 +147,9 @@ export function queryOneRaw(
   sql: string,
   bind?: QueryBindings,
 ): SqlRow | null {
+  const startedAt = sqlQueryLogEnabled ? performance.now() : 0;
   const row = db.selectObject(sql, bindings(bind));
+  if (sqlQueryLogEnabled) recordQuery(sql, startedAt);
   return row === undefined ? null : cloneSqlRow(row);
 }
 
@@ -146,6 +158,8 @@ export function queryScalar<T extends SqlValue = SqlValue>(
   sql: string,
   bind?: QueryBindings,
 ): T | null {
+  const startedAt = sqlQueryLogEnabled ? performance.now() : 0;
   const value = db.selectValue(sql, bindings(bind));
+  if (sqlQueryLogEnabled) recordQuery(sql, startedAt);
   return value === undefined ? null : (value as T);
 }

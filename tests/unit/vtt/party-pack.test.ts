@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { combatToken } from '../../../src/combat/combatant';
@@ -12,6 +12,7 @@ import {
   encounterSessionId,
 } from '../../../src/combat/values';
 import {
+  externalPartyPackFeatureEffectSchema,
   externalPartyPackSchema,
   loadExternalPartyPack,
   loadExternalPartyPackBytes,
@@ -53,14 +54,45 @@ function jsonStringArray(value: unknown, path: string): readonly string[] {
   });
 }
 
-function zodFeatureEffectKinds(source: string): readonly string[] {
-  const declaration = /const featureEffectSchema = z\.discriminatedUnion\('kind', \[([\s\S]*?)\]\)\.superRefine/u.exec(source);
-  const unionBody = declaration?.[1];
-  if (unionBody === undefined) throw new TypeError('Could not find the feature-effect Zod union.');
-  return [...unionBody.matchAll(/\bkind:\s*z\.literal\('([^']+)'\)/gu)].map((match) => {
-    const kind = match[1];
-    if (kind === undefined) throw new TypeError('Feature-effect kind capture was empty.');
-    return kind;
+function zodFeatureEffectKinds(schema: unknown): readonly string[] {
+  let unwrapped = schema;
+  while (
+    typeof unwrapped === 'object' &&
+    unwrapped !== null &&
+    'innerType' in unwrapped &&
+    typeof unwrapped.innerType === 'function'
+  ) {
+    unwrapped = unwrapped.innerType();
+  }
+  if (
+    typeof unwrapped !== 'object' ||
+    unwrapped === null ||
+    !('options' in unwrapped) ||
+    !Array.isArray(unwrapped.options)
+  ) {
+    throw new TypeError('Expected a Zod discriminated union with options.');
+  }
+  return unwrapped.options.map((option, index) => {
+    if (
+      typeof option !== 'object' ||
+      option === null ||
+      !('shape' in option) ||
+      typeof option.shape !== 'object' ||
+      option.shape === null ||
+      !('kind' in option.shape)
+    ) {
+      throw new TypeError(`Expected feature-effect option ${String(index)} to have a kind shape.`);
+    }
+    const kindSchema = option.shape.kind;
+    if (
+      typeof kindSchema !== 'object' ||
+      kindSchema === null ||
+      !('value' in kindSchema) ||
+      typeof kindSchema.value !== 'string'
+    ) {
+      throw new TypeError(`Expected feature-effect option ${String(index)} kind to be a string literal.`);
+    }
+    return kindSchema.value;
   });
 }
 
@@ -144,6 +176,13 @@ function spellcastingSources(member: ExternalPartyPackV2['members'][number]) {
   const spellcasting = member.spellcasting;
   if (spellcasting === undefined) return [];
   return Array.isArray(spellcasting) ? spellcasting : [spellcasting];
+}
+
+function gapSummary(result: ReturnType<typeof loadExternalPartyPack>) {
+  return result.gaps.map((gap) => ({
+    featurePath: gap.featurePath,
+    reason: gap.engineRefusalReason,
+  }));
 }
 
 function v1Pack(): ExternalPartyPackV1 {
@@ -267,6 +306,94 @@ const REPLAY_COORDINATOR: PersistedCoordinatorState = {
 };
 
 describe('external party-pack boundary', () => {
+  it('consumes returned validation issues in deterministic one-error and multi-error order', () => {
+    const validPacket = {
+      damageType: { kind: 'fixed' as const, damageType: 'Force' as const },
+      dice: {
+        baseCount: 1,
+        sides: 6 as const,
+        modifier: 0,
+        perSlotCount: 0,
+        perSlotModifier: 0,
+        cantripUpgrade: false,
+      },
+      scaling: { kind: 'none' as const },
+      thresholdRider: null,
+    };
+    const effect = {
+      effectId: 'effect:validation-adapter',
+      kind: 'damage_operation' as const,
+      trigger: 'action' as const,
+      saveDc: 14,
+      delivery: {
+        kind: 'save' as const,
+        ability: 'dexterity' as const,
+        rollMode: 'normal' as const,
+        onSuccess: 'none' as const,
+      },
+      instancesPerTarget: 1,
+      packets: [validPacket],
+      timing: { kind: 'immediate' as const },
+    };
+
+    expect(externalPartyPackFeatureEffectSchema.safeParse(effect).success).toBe(true);
+
+    const oneError = structuredClone(effect);
+    oneError.packets[0]!.dice.perSlotCount = 1;
+    const oneErrorResult = externalPartyPackFeatureEffectSchema.safeParse(oneError);
+    expect(oneErrorResult.success).toBe(false);
+    if (oneErrorResult.success) throw new Error('One-error feature unexpectedly parsed.');
+    expect(oneErrorResult.error.issues.map((issue) => ({ path: issue.path, message: issue.message })))
+      .toEqual([{
+        path: [],
+        message: 'Feature damage cannot use spell-slot or cantrip scaling.',
+      }]);
+
+    const multiError = structuredClone(effect);
+    multiError.packets = [
+      { ...validPacket, dice: { ...validPacket.dice, perSlotCount: 1 } },
+      { ...validPacket, dice: { ...validPacket.dice, cantripUpgrade: true } },
+    ];
+    const multiErrorResult = externalPartyPackFeatureEffectSchema.safeParse(multiError);
+    expect(multiErrorResult.success).toBe(false);
+    if (multiErrorResult.success) throw new Error('Multi-error feature unexpectedly parsed.');
+    expect(multiErrorResult.error.issues.map((issue) => ({ path: issue.path, message: issue.message })))
+      .toEqual([
+        { path: [], message: 'Feature damage cannot use spell-slot or cantrip scaling.' },
+        { path: [], message: 'Feature damage cannot use spell-slot or cantrip scaling.' },
+      ]);
+  });
+
+  it('preserves returned rule paths when the loader consumes attack issues', () => {
+    const candidate = structuredClone(pack()) as unknown as {
+      members: Array<{ attacks: Array<Record<string, unknown>> }>;
+    };
+    const firstAttack = candidate.members[0]!.attacks[0]!;
+    firstAttack.masteryProperty = 'Topple';
+    candidate.members[0]!.attacks.push({
+      ...firstAttack,
+      attackId: 'attack:invalid-slow-save',
+      masteryProperty: 'Slow',
+      masterySaveDc: 12,
+    });
+
+    const result = loadExternalPartyPack(candidate);
+    expect(result.status).toBe('refused');
+    expect(result.gaps.map((gap) => ({
+      featurePath: gap.featurePath,
+      reason: gap.engineRefusalReason,
+    }))).toEqual([
+      {
+        featurePath: 'members.0.attacks.0.masterySaveDc',
+        reason: 'value_not_in_engine_vocabulary',
+      },
+      {
+        featurePath: 'members.0.attacks.1.masterySaveDc',
+        reason: 'value_not_in_engine_vocabulary',
+      },
+    ]);
+  });
+
   it('loads executable party-pack v2 world operations and refuses malformed nested specs', () => {
     const candidate = structuredClone(pack());
     candidate.members[0]!.worldOperations = [{
@@ -397,9 +524,16 @@ describe('external party-pack boundary', () => {
     );
     expect(canonicalJson(restored.encounterState)).toBe(canonicalJson(replayReduction.state));
     expect(replayBytes).toContain('damage_operation');
-    expect(replayBytes).toContain('"arming":{"concentration":false,"durationRounds":2}');
+    expect(replayBytes).toContain('"arming"');
+    const restoredCaster = restored.encounterState?.combatants[0];
+    if (restoredCaster === undefined) throw new Error('Restored damage-operation caster is missing.');
+    const restoredEffects = restoredCaster.profile.rules.featureEffects;
+    if (restoredEffects === undefined) throw new Error('Restored damage-operation effects are missing.');
+    expect(restoredEffects[1]?.payload).toMatchObject({
+      arming: { concentration: false, durationRounds: 2 },
+    });
 
-    const malformed = structuredClone(candidate) as {
+    const malformed = structuredClone(candidate) as unknown as {
       members: Array<{ effects?: Array<{ dice?: { rerollBelow?: { threshold: number } }; packets?: Array<{ dice: { rerollBelow?: { threshold: number } } }> }> }>;
     };
     malformed.members[0]!.effects![0]!.packets![0]!.dice.rerollBelow!.threshold = 5;
@@ -429,7 +563,7 @@ describe('external party-pack boundary', () => {
       type: 'create_persistent_area', area: { origin: { kind: 'anchored' } },
     });
 
-    const malformed = structuredClone(candidate) as {
+    const malformed = structuredClone(candidate) as unknown as {
       members: Array<{ effects?: Array<{ hooks: Array<{ effect: { payload: { lifetime?: unknown } } }> }> }>;
     };
     delete malformed.members[0]!.effects![0]!.hooks[0]!.effect.payload.lifetime;
@@ -1942,7 +2076,10 @@ describe('external party-pack boundary', () => {
 
   it('unknown_spell_id_dropped refuses an unknown v2 spell id even when partial loading is allowed', () => {
     const candidate = structuredClone(pack(3, true));
-    objectSpellcasting(candidate.members[0]!).preparedSpellIds = ['not-in-the-181-spell-manifest'];
+    const rawSpellcasting = objectSpellcasting(candidate.members[0]!) as unknown as {
+      preparedSpellIds: string[];
+    };
+    rawSpellcasting.preparedSpellIds = ['not-in-the-181-spell-manifest'];
 
     expect(loadExternalPartyPack(candidate)).toMatchObject({
       status: 'refused',
@@ -2027,6 +2164,1065 @@ describe('external party-pack boundary', () => {
     });
   });
 
+  it('pins collection type, length, and duplicate diagnostics at every loaded-member boundary', () => {
+    const loadWithField = (field: string, value: unknown) => {
+      const candidate = structuredClone(pack(3, true));
+      const member = candidate.members[0] as unknown as Record<string, unknown>;
+      member[field] = value;
+      return loadExternalPartyPack(candidate);
+    };
+
+    for (const field of ['startingConditions', 'worldOperations', 'effects', 'resources']) {
+      const result = loadWithField(field, 'not-an-array');
+      expect(result.status).toBe('loaded');
+      expect(gapSummary(result)).toEqual([{
+        featurePath: `members.0.${field}`,
+        reason: 'invalid_party_pack_structure',
+      }]);
+    }
+
+    const oversizedConditions = Array.from({ length: 101 }, (_value, index) => ({
+      effectId: `effect:condition-${String(index)}`,
+      conditionId: 'Prone',
+    }));
+    expect(gapSummary(loadWithField('startingConditions', oversizedConditions))).toEqual([{
+      featurePath: 'members.0.startingConditions',
+      reason: 'value_not_in_engine_vocabulary',
+    }]);
+
+    const oversizedWorldOperations = Array.from({ length: 101 }, (_value, index) => ({
+      operationId: `world:light-${String(index)}`,
+      cost: 'none',
+      operation: {
+        kind: 'set_light_level',
+        region: { id: `room-${String(index)}`, cells: [{ column: 0, row: 0 }] },
+        level: 'dim',
+      },
+    }));
+    expect(gapSummary(loadWithField('worldOperations', oversizedWorldOperations))).toEqual([{
+      featurePath: 'members.0.worldOperations',
+      reason: 'value_not_in_engine_vocabulary',
+    }]);
+
+    const oversizedEffects = Array.from({ length: 101 }, (_value, index) => ({
+      effectId: `effect:temporary-${String(index)}`,
+      kind: 'temporary_hit_points',
+      trigger: 'bonus_action',
+      amount: 1,
+    }));
+    expect(gapSummary(loadWithField('effects', oversizedEffects))).toEqual([{
+      featurePath: 'members.0.effects',
+      reason: 'value_not_in_engine_vocabulary',
+    }]);
+
+    const oversizedResources = Array.from({ length: 101 }, (_value, index) => ({
+      resourcePoolId: `resource:pool-${String(index)}`,
+      maximum: 1,
+      recharge: 'short_rest',
+    }));
+    expect(gapSummary(loadWithField('resources', oversizedResources))).toEqual([{
+      featurePath: 'members.0.resources',
+      reason: 'value_not_in_engine_vocabulary',
+    }]);
+
+    const duplicateCandidate = structuredClone(pack(3, true));
+    const duplicateMember = duplicateCandidate.members[0]!;
+    duplicateMember.startingConditions = [
+      { effectId: 'effect:duplicate-condition', conditionId: 'Prone' },
+      { effectId: 'effect:distinct-condition', conditionId: 'Invisible' },
+      { effectId: 'effect:duplicate-condition', conditionId: 'Invisible' },
+    ];
+    duplicateMember.worldOperations = [{
+      operationId: 'world:duplicate',
+      cost: 'none',
+      operation: {
+        kind: 'set_light_level', level: 'dim',
+        region: { id: 'room-one', cells: [{ column: 0, row: 0 }] },
+      },
+    }, {
+      operationId: 'world:duplicate',
+      cost: 'none',
+      operation: {
+        kind: 'set_light_level', level: 'darkness',
+        region: { id: 'room-two', cells: [{ column: 1, row: 0 }] },
+      },
+    }];
+    duplicateMember.effects = [
+      { effectId: 'effect:duplicate', kind: 'temporary_hit_points', trigger: 'bonus_action', amount: 2 },
+      { effectId: 'effect:duplicate', kind: 'temporary_hit_points', trigger: 'bonus_action', amount: 3 },
+    ];
+    duplicateMember.resources = [
+      { resourcePoolId: 'resource:duplicate', maximum: 1, recharge: 'short_rest' },
+      { resourcePoolId: 'resource:duplicate', maximum: 2, recharge: 'long_rest' },
+    ];
+    const duplicates = loadExternalPartyPack(duplicateCandidate);
+    expect(duplicates.status).toBe('loaded');
+    if (duplicates.status !== 'loaded') throw new Error('Partial duplicate fixture was refused.');
+    expect(gapSummary(duplicates)).toEqual([
+      { featurePath: 'members.0.startingConditions.2.effectId', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.worldOperations.1.operationId', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.effects.1.effectId', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.resources.1.resourcePoolId', reason: 'value_not_in_engine_vocabulary' },
+    ]);
+    expect(duplicates.party.members[0]).toMatchObject({
+      source: {
+        startingConditions: [
+          { effectId: 'effect:duplicate-condition', conditionId: 'Prone' },
+          { effectId: 'effect:distinct-condition', conditionId: 'Invisible' },
+        ],
+        worldOperations: [{ operationId: 'world:duplicate' }],
+        effects: [{ effectId: 'effect:duplicate', amount: 2 }],
+        resources: [{ resourcePoolId: 'resource:duplicate', maximum: 1 }],
+      },
+    });
+  });
+
+  it('maps structural and value issues to exact nested collection paths', () => {
+    const candidate = structuredClone(pack(3, true)) as unknown as {
+      members: Array<Record<string, unknown>>;
+    };
+    candidate.members[0]!.startingConditions = [
+      { effectId: 'effect:sanitized-condition', conditionId: 'Prone', unsupported: true },
+      { effectId: 'effect:invalid-condition', conditionId: 'NotACondition' },
+    ];
+    candidate.members[0]!.worldOperations = [{
+      operationId: 'world:strict-operation', cost: 'none', unsupported: true,
+      operation: {
+        kind: 'set_light_level', level: 'dim',
+        region: { id: 'strict-room', cells: [{ column: 0, row: 0 }] },
+      },
+    }, {
+      operationId: 'world:invalid-operation', cost: 'invalid',
+      operation: {
+        kind: 'set_light_level', level: 'dim',
+        region: { id: 'invalid-room', cells: [{ column: 0, row: 0 }] },
+      },
+    }];
+    candidate.members[0]!.effects = [
+      {
+        effectId: 'effect:strict-effect', kind: 'temporary_hit_points',
+        trigger: 'bonus_action', amount: 2, unsupported: true,
+      },
+      {
+        effectId: 'effect:invalid-effect', kind: 'temporary_hit_points',
+        trigger: 'bonus_action', amount: -1,
+      },
+    ];
+    candidate.members[0]!.resources = [
+      {
+        resourcePoolId: 'resource:strict', maximum: 1,
+        recharge: 'short_rest', unsupported: true,
+      },
+      { resourcePoolId: 'resource:invalid', maximum: 0, recharge: 'short_rest' },
+    ];
+
+    const result = loadExternalPartyPack(candidate);
+    expect(result.status).toBe('loaded');
+    expect(gapSummary(result)).toEqual([
+      { featurePath: 'members.0.startingConditions.0.unsupported', reason: 'field_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.startingConditions.1.conditionId', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.worldOperations.0', reason: 'field_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.worldOperations.1.cost', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.effects.0', reason: 'field_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.effects.1.amount', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.resources.0', reason: 'field_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.resources.1.maximum', reason: 'value_not_in_engine_vocabulary' },
+    ]);
+  });
+
+  it('rejects passive totals outside their closed ranges and duplicate passive identities', () => {
+    const loadWithPassives = (
+      passives: unknown,
+      base: { readonly armorClass?: number; readonly walkingSpeedFeet?: number } = {},
+    ) => {
+      const candidate = structuredClone(pack(3, true)) as unknown as {
+        members: Array<Record<string, unknown>>;
+      };
+      if (base.armorClass !== undefined) candidate.members[0]!.armorClass = base.armorClass;
+      if (base.walkingSpeedFeet !== undefined) {
+        candidate.members[0]!.walkingSpeedFeet = base.walkingSpeedFeet;
+      }
+      candidate.members[0]!.passives = passives;
+      return loadExternalPartyPack(candidate);
+    };
+
+    expect(gapSummary(loadWithPassives({ unsupported: true }))).toEqual([{
+      featurePath: 'members.0.passives',
+      reason: 'field_not_in_engine_vocabulary',
+    }]);
+    expect(gapSummary(loadWithPassives({ armorClassBonus: 'one' }))).toEqual([{
+      featurePath: 'members.0.passives.armorClassBonus',
+      reason: 'value_not_in_engine_vocabulary',
+    }]);
+    const valid = loadWithPassives({
+      armorClassBonus: 2,
+      speedAdjustmentFeet: 5,
+      skillBonuses: [{ skillId: 'perception', bonus: 3 }],
+      damageResponses: [{ damageTypeId: 'Cold', response: 'resistant' }],
+      conditionImmunities: ['Prone'],
+    });
+    expect(valid.status).toBe('loaded');
+    if (valid.status !== 'loaded') throw new Error('Valid passive fixture was refused.');
+    expect(valid.gaps).toEqual([]);
+    expect(valid.party.members[0]!.profile.rules).toMatchObject({
+      armorClass: 18, speed: 35, passivePerception: 13,
+      damageResponses: [{ type: 'Cold', response: 'resistant' }],
+      conditionImmunities: ['Prone'],
+    });
+    const onlyArmorBelowRange = loadWithPassives(
+      { armorClassBonus: -1 },
+      { armorClass: 1 },
+    );
+    expect(gapSummary(onlyArmorBelowRange)).toEqual([{
+      featurePath: 'members.0.passives.armorClassBonus',
+      reason: 'value_not_in_engine_vocabulary',
+    }]);
+    if (onlyArmorBelowRange.status !== 'loaded') {
+      throw new Error('Partial armor-passive fixture was refused.');
+    }
+    expect('passives' in onlyArmorBelowRange.party.members[0]!.source).toBe(false);
+
+    const belowAndDuplicate = loadWithPassives({
+      armorClassBonus: -1,
+      speedAdjustmentFeet: -6,
+      skillBonuses: [
+        { skillId: 'perception', bonus: 1 },
+        { skillId: 'perception', bonus: 2 },
+      ],
+      damageResponses: [
+        { damageTypeId: 'Fire', response: 'resistant' },
+        { damageTypeId: 'Fire', response: 'immune' },
+      ],
+      conditionImmunities: ['Prone', 'Prone'],
+    }, { armorClass: 1, walkingSpeedFeet: 5 });
+    expect(belowAndDuplicate.status).toBe('loaded');
+    if (belowAndDuplicate.status !== 'loaded') throw new Error('Partial passive fixture was refused.');
+    expect(gapSummary(belowAndDuplicate)).toEqual([
+      { featurePath: 'members.0.passives.armorClassBonus', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.passives.speedAdjustmentFeet', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.passives.skillBonuses', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.passives.damageResponses', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.passives.conditionImmunities', reason: 'value_not_in_engine_vocabulary' },
+    ]);
+    expect('passives' in belowAndDuplicate.party.members[0]!.source).toBe(false);
+
+    const above = loadWithPassives(
+      { armorClassBonus: 1, speedAdjustmentFeet: 1 },
+      { armorClass: 50, walkingSpeedFeet: 1_000 },
+    );
+    expect(gapSummary(above)).toEqual([
+      { featurePath: 'members.0.passives.armorClassBonus', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.passives.speedAdjustmentFeet', reason: 'value_not_in_engine_vocabulary' },
+    ]);
+    if (above.status !== 'loaded') throw new Error('Partial upper passive fixture was refused.');
+    expect('passives' in above.party.members[0]!.source).toBe(false);
+  });
+
+  it('pins every effect referential-integrity failure to its discriminating field', () => {
+    const loadEffects = (effects: readonly unknown[], resources: readonly unknown[] = []) => {
+      const candidate = structuredClone(pack(3, true)) as unknown as {
+        members: Array<Record<string, unknown>>;
+      };
+      candidate.members[0]!.effects = effects;
+      candidate.members[0]!.resources = resources;
+      return loadExternalPartyPack(candidate);
+    };
+    const expectOnlyGap = (
+      effects: readonly unknown[],
+      featurePath: string,
+      resources: readonly unknown[] = [],
+    ) => {
+      const result = loadEffects(effects, resources);
+      expect(result.status).toBe('loaded');
+      expect(gapSummary(result)).toEqual([{
+        featurePath,
+        reason: 'value_not_in_engine_vocabulary',
+      }]);
+      if (result.status !== 'loaded') throw new Error('Partial effect fixture was refused.');
+      expect(result.party.members[0]!.effects).toHaveLength(effects.length === 2 ? 1 : 0);
+    };
+
+    expectOnlyGap([{
+      effectId: 'effect:missing-pool', kind: 'bonus_action_attack_grant',
+      resourcePoolId: 'resource:missing', attackCount: 1,
+    }], 'members.0.effects.0.resourcePoolId');
+    expectOnlyGap([{
+      effectId: 'effect:wrong-surge-recharge', kind: 'action_surge',
+      resourcePoolId: 'resource:wrong-surge-recharge',
+    }], 'members.0.effects.0.resourcePoolId', [{
+      resourcePoolId: 'resource:wrong-surge-recharge', maximum: 1, recharge: 'long_rest',
+    }]);
+    expectOnlyGap([{
+      effectId: 'effect:wrong-mode-recharge', kind: 'timed_spellcasting_mode',
+      trigger: 'bonus_action', resourcePoolId: 'resource:wrong-mode-recharge',
+      additionalLeveledSpellActions: 1, duration: 'this_turn',
+    }], 'members.0.effects.0.resourcePoolId', [{
+      resourcePoolId: 'resource:wrong-mode-recharge', maximum: 1, recharge: 'short_rest',
+    }]);
+    expectOnlyGap([{
+      effectId: 'effect:future-extra-attack', kind: 'extra_attack_count_override',
+      levels: [{ minimumLevel: 8, attackCount: 2 }],
+    }], 'members.0.effects.0.levels');
+    expectOnlyGap([{
+      effectId: 'effect:missing-attack', kind: 'attack_reach_range_override',
+      attackId: 'attack:missing', reachFeet: 10,
+    }], 'members.0.effects.0.attackId');
+    expectOnlyGap([{
+      effectId: 'effect:missing-damage-term', kind: 'attack_ability_substitution',
+      attackId: 'attack:pack-member-1', damageTermIndex: 1,
+      replacesAbility: 'strength', spellcastingAbility: 'intelligence',
+    }], 'members.0.effects.0.damageTermIndex');
+    expectOnlyGap([{
+      effectId: 'effect:missing-spell-ability', kind: 'attack_ability_substitution',
+      attackId: 'attack:pack-member-1', damageTermIndex: 0,
+      replacesAbility: 'strength', spellcastingAbility: 'charisma',
+    }], 'members.0.effects.0.spellcastingAbility');
+    expectOnlyGap([{
+      effectId: 'effect:future-damage-die', kind: 'attack_damage_die_override',
+      attackId: 'attack:pack-member-1', damageTermIndex: 0,
+      levels: [{ minimumLevel: 8, count: 2, sides: 8 }],
+    }], 'members.0.effects.0.levels');
+    expectOnlyGap([{
+      effectId: 'effect:invalid-reckless-list', kind: 'reckless_attack_mode',
+      strengthBasedMeleeAttackIds: ['attack:missing'],
+    }], 'members.0.effects.0.strengthBasedMeleeAttackIds');
+    expectOnlyGap([{
+      effectId: 'effect:invalid-elemental-list', kind: 'elemental_fury',
+      attackIds: ['attack:missing'], damageTypeIds: ['Fire', 'Cold'],
+      selectedDamageTypeId: 'Fire', amount: 2, gate: 'first_hit_this_turn',
+    }], 'members.0.effects.0.attackIds');
+    expectOnlyGap([{
+      effectId: 'effect:undeclared-cantrip', kind: 'spell_damage_ability_modifier',
+      spellId: 'eldritch-blast', application: 'one_damage_roll_per_turn',
+    }], 'members.0.effects.0.spellId');
+    expectOnlyGap([{
+      effectId: 'effect:first-reach', kind: 'attack_reach_range_override',
+      attackId: 'attack:pack-member-1', reachFeet: 10,
+    }, {
+      effectId: 'effect:second-reach', kind: 'attack_reach_range_override',
+      attackId: 'attack:pack-member-1', reachFeet: 15,
+    }], 'members.0.effects.1.kind');
+  });
+
+  it('accepts a cantrip effect through a prepared grant and strips dangling resource spell uses', () => {
+    const grantedCandidate = structuredClone(pack());
+    objectSpellcasting(grantedCandidate.members[0]!).grants = [
+      { spellId: 'guidance', ability: 'wisdom' },
+      { spellId: 'eldritch-blast', ability: 'charisma' },
+    ];
+    grantedCandidate.members[0]!.effects = [{
+      effectId: 'effect:granted-cantrip',
+      kind: 'spell_damage_ability_modifier',
+      spellId: 'eldritch-blast',
+      application: 'one_damage_roll_per_turn',
+    }];
+    const granted = loadExternalPartyPack(grantedCandidate);
+    expect(granted.status).toBe('loaded');
+    if (granted.status !== 'loaded') throw new Error('Granted-cantrip fixture was refused.');
+    expect(granted.gaps).toEqual([]);
+    expect(granted.party.members[0]).toMatchObject({
+      effects: [{ id: 'effect:granted-cantrip' }],
+      spellcasting: [{ grants: [
+        { spell: { id: 'guidance' }, ability: 'wisdom' },
+        { spell: { id: 'eldritch-blast' }, ability: 'charisma' },
+      ] }],
+    });
+
+    const danglingCandidate = structuredClone(pack(3, true));
+    objectSpellcasting(danglingCandidate.members[0]!).resourceSpellUses = [{
+      spellId: 'magic-missile',
+      resourcePoolId: 'resource:missing',
+    }];
+    const dangling = loadExternalPartyPack(danglingCandidate);
+    expect(dangling.status).toBe('loaded');
+    if (dangling.status !== 'loaded') throw new Error('Partial resource-use fixture was refused.');
+    expect(gapSummary(dangling)).toEqual([{
+      featurePath: 'members.0.spellcasting.resourceSpellUses.0.resourcePoolId',
+      reason: 'value_not_in_engine_vocabulary',
+    }]);
+    expect(dangling.party.members[0]!.spellcasting[0]!.resourceSpellUses).toEqual([]);
+  });
+
+  it('maps unmappable members, excessive levels, and duplicate classes to exact member gaps', () => {
+    const expectInvalidFirstMember = (
+      mutate: (candidate: ExternalPartyPackV2) => unknown,
+      featurePath: string,
+      reason: 'invalid_party_pack_structure' | 'value_not_in_engine_vocabulary',
+    ) => {
+      const candidate = structuredClone(pack(3, true));
+      mutate(candidate);
+      const result = loadExternalPartyPack(candidate);
+      expect(result.status).toBe('refused');
+      expect(result).toMatchObject({ refusal: { reason: 'invalid_structure' } });
+      expect(gapSummary(result)).toEqual([{ featurePath, reason }]);
+    };
+
+    expectInvalidFirstMember((candidate) => {
+      (candidate.members as unknown[])[0] = null;
+    }, 'members.0', 'invalid_party_pack_structure');
+    expectInvalidFirstMember((candidate) => {
+      candidate.members[0]!.classes = [{ classId: 'Wizard', level: 20 }, { classId: 'Fighter', level: 1 }];
+    }, 'members.0.classes', 'value_not_in_engine_vocabulary');
+    expectInvalidFirstMember((candidate) => {
+      candidate.members[0]!.classes = [{ classId: 'Wizard', level: 3 }, { classId: 'Wizard', level: 4 }];
+    }, 'members.0.classes', 'value_not_in_engine_vocabulary');
+  });
+
+  it('normalizes duplicate legacy, pact, and shared slots while preserving their first capacities', () => {
+    const legacy = v1Pack();
+    legacy.allowPartial = true;
+    legacy.members[0]!.spellSlots = [
+      { level: 1, maximum: 4 },
+      { level: 1, maximum: 2 },
+    ];
+    const loadedLegacy = loadExternalPartyPack(legacy);
+    expect(loadedLegacy.status).toBe('loaded');
+    if (loadedLegacy.status !== 'loaded') throw new Error('Legacy duplicate-slot fixture was refused.');
+    expect(gapSummary(loadedLegacy)).toEqual([{
+      featurePath: 'members.0.spellSlots.1.level',
+      reason: 'value_not_in_engine_vocabulary',
+    }]);
+    expect(loadedLegacy.party.members[0]!.sharedSpellSlots).toEqual([{
+      level: 1, maximum: 4, recharge: 'long_rest',
+    }]);
+
+    const modern = structuredClone(pack(3, true));
+    const member = modern.members[0]!;
+    member.pactSpellSlots = [
+      { level: 2, count: 2, recharge: 'short_rest' },
+      { level: 2, count: 1, recharge: 'short_rest' },
+    ];
+    const { spellSlots: _legacySlots, ...modernSource } = objectSpellcasting(member);
+    member.spellcasting = [modernSource];
+    member.sharedSpellSlots = [
+      { level: 1, count: 4, recharge: 'long_rest' },
+      { level: 1, count: 2, recharge: 'long_rest' },
+    ];
+    const loadedModern = loadExternalPartyPack(modern);
+    expect(loadedModern.status).toBe('loaded');
+    if (loadedModern.status !== 'loaded') throw new Error('Modern duplicate-slot fixture was refused.');
+    expect(gapSummary(loadedModern)).toEqual([
+      { featurePath: 'members.0.pactSpellSlots.1.level', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.sharedSpellSlots.1.level', reason: 'value_not_in_engine_vocabulary' },
+    ]);
+    expect(loadedModern.party.members[0]).toMatchObject({
+      sharedSpellSlots: [{ level: 1, maximum: 4, recharge: 'long_rest' }],
+      pactSpellSlots: [{ level: 2, maximum: 2, recharge: 'short_rest' }],
+    });
+  });
+
+  it('pins attack collection type, size, nested validation, and identity boundaries', () => {
+    const loadWithAttacks = (attacks: unknown) => {
+      const candidate = structuredClone(pack(3, true)) as unknown as {
+        members: Array<Record<string, unknown>>;
+      };
+      candidate.members[0]!.attacks = attacks;
+      return loadExternalPartyPack(candidate);
+    };
+    expect(gapSummary(loadWithAttacks('not-an-array'))).toEqual([{
+      featurePath: 'members.0.attacks', reason: 'invalid_party_pack_structure',
+    }]);
+
+    const baseAttack = pack().members[0]!.attacks[0]!;
+    const oversized = Array.from({ length: 101 }, (_value, index) => ({
+      ...baseAttack,
+      attackId: `attack:oversized-${String(index)}`,
+    }));
+    const oversizedResult = loadWithAttacks(oversized);
+    expect(gapSummary(oversizedResult)).toEqual([{
+      featurePath: 'members.0.attacks', reason: 'value_not_in_engine_vocabulary',
+    }]);
+    if (oversizedResult.status !== 'loaded') throw new Error('Oversized partial attack fixture was refused.');
+    expect(oversizedResult.party.members[0]!.attacks).toHaveLength(100);
+
+    const nested = loadWithAttacks([
+      { ...baseAttack, unsupported: true },
+      { ...baseAttack, attackId: 'attack:invalid-floor', criticalFloor: 1 },
+      { ...baseAttack },
+    ]);
+    expect(nested.status).toBe('loaded');
+    if (nested.status !== 'loaded') throw new Error('Partial nested-attack fixture was refused.');
+    expect(gapSummary(nested)).toEqual([
+      { featurePath: 'members.0.attacks.0.unsupported', reason: 'field_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.attacks.1.criticalFloor', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.attacks.2.attackId', reason: 'value_not_in_engine_vocabulary' },
+    ]);
+    expect(nested.party.members[0]!.attacks).toHaveLength(1);
+  });
+
+  it('pins spellcasting container failures and shared-slot ownership', () => {
+    const emptySources = structuredClone(pack(3, true)) as unknown as {
+      members: Array<Record<string, unknown>>;
+    };
+    emptySources.members[0]!.spellcasting = [];
+    expect(loadExternalPartyPack(emptySources)).toMatchObject({
+      status: 'refused',
+      refusal: { reason: 'invalid_structure' },
+      gaps: [{ featurePath: 'members.0.spellcasting', engineRefusalReason: 'invalid_party_pack_structure' }],
+    });
+
+    const orphanedSlots = structuredClone(pack(3, true)) as unknown as {
+      members: Array<Record<string, unknown>>;
+    };
+    delete orphanedSlots.members[0]!.spellcasting;
+    orphanedSlots.members[0]!.sharedSpellSlots = [{
+      level: 1, count: 4, recharge: 'long_rest',
+    }];
+    const orphaned = loadExternalPartyPack(orphanedSlots);
+    expect(orphaned.status).toBe('loaded');
+    expect(gapSummary(orphaned)).toEqual([{
+      featurePath: 'members.0.sharedSpellSlots', reason: 'value_not_in_engine_vocabulary',
+    }]);
+
+    const malformedLegacy = structuredClone(pack(3, true)) as unknown as {
+      members: Array<Record<string, unknown>>;
+    };
+    const legacySource = malformedLegacy.members[0]!.spellcasting;
+    if (typeof legacySource !== 'object' || legacySource === null || Array.isArray(legacySource)) {
+      throw new TypeError('Expected object spellcasting source.');
+    }
+    (legacySource as Record<string, unknown>).spellSaveDc = 0;
+    expect(loadExternalPartyPack(malformedLegacy)).toMatchObject({
+      status: 'refused',
+      refusal: { reason: 'invalid_structure' },
+      gaps: [{
+        featurePath: 'members.0.spellcasting.spellSaveDc',
+        engineRefusalReason: 'value_not_in_engine_vocabulary',
+      }],
+    });
+
+    const malformedArray = structuredClone(pack(3, true)) as unknown as {
+      members: Array<Record<string, unknown>>;
+    };
+    const arraySource = malformedArray.members[0]!.spellcasting;
+    if (typeof arraySource !== 'object' || arraySource === null || Array.isArray(arraySource)) {
+      throw new TypeError('Expected object spellcasting source.');
+    }
+    const { spellSlots: _arrayLegacySlots, ...arrayModernSource } = arraySource as Record<string, unknown>;
+    malformedArray.members[0]!.spellcasting = [arrayModernSource, {
+      ability: 'wisdom', spellSaveDc: 0, spellAttackBonus: 4,
+      preparedSpellIds: [], knownSpellIds: [],
+    }];
+    malformedArray.members[0]!.sharedSpellSlots = [{
+      level: 1, count: 4, recharge: 'long_rest',
+    }];
+    expect(loadExternalPartyPack(malformedArray)).toMatchObject({
+      status: 'refused',
+      refusal: { reason: 'invalid_structure' },
+      gaps: [{
+        featurePath: 'members.0.spellcasting.1.spellSaveDc',
+        engineRefusalReason: 'value_not_in_engine_vocabulary',
+      }],
+    });
+  });
+
+  it('normalizes legacy spell-selection containers and refuses unknown manifest identities', () => {
+    const loadLegacySelections = (selections: unknown) => {
+      const candidate = v1Pack() as unknown as Record<string, unknown> & {
+        members: Array<Record<string, unknown>>;
+      };
+      candidate.allowPartial = true;
+      candidate.members[0]!.spellSelections = selections;
+      return loadExternalPartyPack(candidate);
+    };
+
+    const nonArray = loadLegacySelections('magic-missile');
+    expect(nonArray.status).toBe('loaded');
+    if (nonArray.status !== 'loaded') throw new Error('Legacy non-array fixture was refused.');
+    expect(gapSummary(nonArray)).toEqual([{
+      featurePath: 'members.0.spellSelections', reason: 'invalid_party_pack_structure',
+    }]);
+    expect(nonArray.party.members[0]!.spells).toEqual([]);
+
+    const mixed = loadLegacySelections([17, 'magic-missile', 'magic-missile']);
+    expect(mixed.status).toBe('loaded');
+    if (mixed.status !== 'loaded') throw new Error('Legacy mixed-selection fixture was refused.');
+    expect(gapSummary(mixed)).toEqual([
+      { featurePath: 'members.0.spellSelections.0', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.spellSelections.2', reason: 'value_not_in_engine_vocabulary' },
+    ]);
+    expect(mixed.party.members[0]!.spells.map((spell) => spell.id)).toEqual(['magic-missile']);
+
+    const oversized = loadLegacySelections(Array.from({ length: 1_000 }, () => 'magic-missile'));
+    expect(oversized.status).toBe('loaded');
+    expect(gapSummary(oversized)).toContainEqual({
+      featurePath: 'members.0.spellSelections', reason: 'value_not_in_engine_vocabulary',
+    });
+
+    const unknown = loadLegacySelections(['spell:not-in-manifest']);
+    expect(unknown).toMatchObject({
+      status: 'refused',
+      refusal: { reason: 'unknown_spell_id' },
+      gaps: [{
+        featurePath: 'members.0.spellSelections.0',
+        engineRefusalReason: 'value_not_in_engine_vocabulary',
+      }],
+    });
+  });
+
+  it('deduplicates spell source roles, grants, and resource uses by their contract identities', () => {
+    const candidate = structuredClone(pack(3, true));
+    const source = objectSpellcasting(candidate.members[0]!);
+    source.preparedSpellIds = ['magic-missile', 'sacred-flame'];
+    source.knownSpellIds = ['sacred-flame', 'fire-bolt'];
+    source.grants = [
+      { spellId: 'eldritch-blast', ability: 'charisma' },
+      { spellId: 'eldritch-blast', ability: 'wisdom' },
+    ];
+    source.resourceSpellUses = [
+      { spellId: 'magic-missile', resourcePoolId: 'resource:spell-use' },
+      { spellId: 'magic-missile', resourcePoolId: 'resource:spell-use' },
+      { spellId: 'healing-word', resourcePoolId: 'resource:spell-use' },
+    ];
+    candidate.members[0]!.resources = [{
+      resourcePoolId: 'resource:spell-use', maximum: 2, recharge: 'long_rest',
+    }];
+    const result = loadExternalPartyPack(candidate);
+    expect(result.status).toBe('loaded');
+    if (result.status !== 'loaded') throw new Error('Partial spell-role fixture was refused.');
+    expect(gapSummary(result)).toEqual([
+      { featurePath: 'members.0.spellcasting.knownSpellIds.0', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.spellcasting.grants.1.spellId', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.spellcasting.resourceSpellUses.1', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.spellcasting.resourceSpellUses.2.spellId', reason: 'value_not_in_engine_vocabulary' },
+    ]);
+    expect(result.party.members[0]!.spellcasting[0]).toMatchObject({
+      preparedSpells: [{ id: 'magic-missile' }, { id: 'sacred-flame' }],
+      knownSpells: [{ id: 'fire-bolt' }],
+      grants: [{ spell: { id: 'eldritch-blast' }, ability: 'charisma' }],
+      resourceSpellUses: [{ spellId: 'magic-missile', resourcePoolId: 'resource:spell-use' }],
+    });
+  });
+
+  it('enumerates the exact cross-product of smite slots, damage choices, maneuvers, and reckless mode', () => {
+    const candidate = structuredClone(familyPack());
+    const member = candidate.members[0]!;
+    objectSpellcasting(member).spellSlots = [
+      { level: 1, count: 1, recharge: 'long_rest' },
+      { level: 9, count: 1, recharge: 'long_rest' },
+    ];
+    member.resources = [{
+      resourcePoolId: 'resource:maneuver-matrix', maximum: 1, recharge: 'short_rest',
+    }];
+    member.effects = [{
+      effectId: 'effect:smite-matrix', kind: 'slot_spend_damage_rider', trigger: 'on_hit',
+      spendGate: 'slot_spent', criticalGate: 'crit_confirmed', damageTypeId: 'Radiant',
+      baseCount: 1, countPerSlotLevel: 1, sides: 8, modifier: 0,
+    }, {
+      effectId: 'effect:type-matrix', kind: 'attack_damage_type_choice',
+      attackId: 'attack:pack-member-1', damageTermIndex: 0, damageTypeIds: ['Cold', 'Fire'],
+    }, {
+      effectId: 'effect:maneuver-matrix', kind: 'resource_die_maneuver', trigger: 'on_hit',
+      resourcePoolId: 'resource:maneuver-matrix', sides: 6, damageType: 'attack_primary',
+      conditionId: 'Prone', conditionDuration: 'until_end_of_target_next_turn',
+    }, {
+      effectId: 'effect:reckless-matrix', kind: 'reckless_attack_mode',
+      strengthBasedMeleeAttackIds: ['attack:pack-member-1'],
+    }];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Attack-choice matrix was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('choice-matrix-target', { initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 }), placedToken(target, 1)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const legalActions = loadedPartyTurnLegalActions(loaded.party.members);
+    const attacks = legalActions(state, actor.profile.id).actions.filter(
+      (action) => action.type === 'attack',
+    );
+    expect(attacks).toHaveLength(24);
+    expect([...new Set(attacks.map((attack) => attack.riderSelections?.[0]?.slotLevel ?? null))])
+      .toEqual([null, 1, 9]);
+    expect([...new Set(attacks.map((attack) => attack.damageTypeSelection?.damageType ?? null))])
+      .toEqual(['Cold', 'Fire']);
+    expect(attacks.filter((attack) => attack.maneuverEffectId === 'effect:maneuver-matrix')).toHaveLength(12);
+    expect(attacks.filter((attack) => attack.recklessAttackEffectId === 'effect:reckless-matrix')).toHaveLength(12);
+
+    const depletedFirstLevel = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? {
+            ...combatant,
+            spellSlots: combatant.spellSlots.map((slot) => slot.level === 1
+              ? { ...slot, remaining: 0 }
+              : slot),
+          }
+        : combatant),
+    };
+    const depletedAttacks = legalActions(depletedFirstLevel, actor.profile.id).actions.filter(
+      (action) => action.type === 'attack',
+    );
+    expect(depletedAttacks).toHaveLength(16);
+    expect([...new Set(depletedAttacks.map(
+      (attack) => attack.riderSelections?.[0]?.slotLevel ?? null,
+    ))]).toEqual([null, 9]);
+  });
+
+  it('keeps multi-attack grants, timed casting, and self areas legal only at their exact state boundaries', () => {
+    const candidate = typedShapePack([{
+      effectId: 'effect:two-bonus-attacks', kind: 'bonus_action_attack_grant',
+      resourcePoolId: 'resource:two-bonus-attacks', attackCount: 2,
+    }, {
+      effectId: 'effect:timed-mode-legal', kind: 'timed_spellcasting_mode', trigger: 'bonus_action',
+      resourcePoolId: 'resource:timed-mode-legal', additionalLeveledSpellActions: 1,
+      duration: 'this_turn',
+    }, {
+      effectId: 'effect:action-area', kind: 'persistent_area', trigger: 'action', origin: 'self',
+      shape: { kind: 'emanation', radiusFeet: 5 }, duration: { kind: 'rounds', rounds: 2 },
+      targetFilter: 'allies', difficultTerrain: false, movableFeet: null, hooks: [],
+    }, {
+      effectId: 'effect:bonus-area', kind: 'persistent_area', trigger: 'bonus_action', origin: 'self',
+      resourcePoolId: 'resource:bonus-area',
+      shape: { kind: 'emanation', radiusFeet: 10 }, duration: { kind: 'rounds', rounds: 3 },
+      targetFilter: 'enemies', difficultTerrain: true, movableFeet: null, hooks: [],
+    }, {
+      effectId: 'effect:reaction-area', kind: 'persistent_area', trigger: 'reaction', origin: 'self',
+      shape: { kind: 'emanation', radiusFeet: 15 }, duration: { kind: 'rounds', rounds: 1 },
+      targetFilter: 'all', difficultTerrain: false, movableFeet: null, hooks: [],
+    }], [
+      { resourcePoolId: 'resource:two-bonus-attacks', maximum: 1, recharge: 'short_rest' },
+      { resourcePoolId: 'resource:timed-mode-legal', maximum: 1, recharge: 'long_rest' },
+      { resourcePoolId: 'resource:bonus-area', maximum: 1, recharge: 'short_rest' },
+    ]);
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Action-legality fixture was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('feature-legality-target', { hitPoints: 100, initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 }), placedToken(target, 1)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const legalActions = loadedPartyTurnLegalActions(loaded.party.members);
+    const initial = legalActions(state, actor.profile.id).actions;
+    expect(initial.filter((action) => action.type === 'activate_timed_spellcasting_mode')).toEqual([{
+      type: 'activate_timed_spellcasting_mode',
+      actor: actor.profile.id,
+      effectId: 'effect:timed-mode-legal',
+    }]);
+    expect(initial.filter((action) => action.type === 'create_persistent_area').map((action) => ({
+      featureEffectId: action.featureEffectId,
+      cost: action.cost,
+      radius: action.area.shape.kind === 'emanation' ? action.area.shape.radius : null,
+    }))).toEqual([
+      { featureEffectId: 'effect:action-area', cost: 'action', radius: 5 },
+      { featureEffectId: 'effect:bonus-area', cost: 'bonus_action', radius: 10 },
+    ]);
+
+    const openingBonusAttack = initial.find((action) =>
+      action.type === 'attack' && action.bonusActionGrantEffectId === 'effect:two-bonus-attacks');
+    if (openingBonusAttack === undefined) throw new Error('Expected the opening bonus attack.');
+    const continuingState = reduceEncounter(state, openingBonusAttack, () => 0.5).state;
+    const continuing = legalActions(continuingState, actor.profile.id).actions.filter(
+      (action) => action.type === 'attack' && action.bonusActionGrantEffectId === 'effect:two-bonus-attacks',
+    );
+    expect(continuing).toHaveLength(1);
+    expect(legalActions(continuingState, actor.profile.id).actions
+      .filter((action) => action.type === 'create_persistent_area')
+      .map((action) => action.featureEffectId)).toEqual(['effect:action-area']);
+    expect(continuingState.combatants[0]).toMatchObject({
+      turn: {
+        bonusActionAvailable: false,
+        bonusAttacksRemaining: 1,
+        bonusAttackGrantEffectId: 'effect:two-bonus-attacks',
+      },
+      limitedResources: [
+        { id: 'resource:two-bonus-attacks', remaining: 0 },
+        { id: 'resource:timed-mode-legal', remaining: 1 },
+        { id: 'resource:bonus-area', remaining: 1 },
+      ],
+    });
+  });
+
+  it('offers short-rest healing from prepared and granted spell routes with exact cast details', () => {
+    const candidate = structuredClone(pack());
+    const member = candidate.members[0]!;
+    const legacySource = objectSpellcasting(member);
+    const { spellSlots: _legacySpellSlots, ...source } = legacySource;
+    member.spellcasting = [{
+      ...source,
+      preparedSpellIds: ['cure-wounds'],
+      knownSpellIds: [],
+      grants: [{ spellId: 'healing-word', ability: 'wisdom' }],
+    }];
+    member.sharedSpellSlots = [];
+    member.pactSpellSlots = [{ level: 1, count: 2, recharge: 'short_rest' }];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Healing-route fixture was refused.');
+    const healer = loaded.party.members[0]!;
+    const ally = loaded.party.members[2]!;
+    let state = createEncounter({
+      bounds: { columns: 4, rows: 2 },
+      combatants: [healer.profile, ally.profile],
+      tokens: [
+        combatToken(healer.profile, { column: 0, row: 0 }),
+        combatToken(ally.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const wounded = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === ally.profile.id
+        ? { ...combatant, hitPoints: 10 }
+        : combatant),
+    };
+    const healing = loadedPartyTurnLegalActions(loaded.party.members)(wounded, healer.profile.id).actions
+      .flatMap((action) => action.type === 'cast_spell' &&
+        (action.spellId === 'cure-wounds' || action.spellId === 'healing-word') ? [action] : []);
+    expect(healing.map((action) => ({
+      spellId: action.spellId,
+      slotLevel: action.slotLevel,
+      slotRecharge: action.slotRecharge,
+      targets: action.targets,
+      saveDc: action.saveDc,
+      spellcastingModifier: action.spellcastingModifier,
+    }))).toEqual([
+      {
+        spellId: 'cure-wounds', slotLevel: 1, slotRecharge: 'short_rest',
+        targets: [ally.profile.id], saveDc: 15, spellcastingModifier: 3,
+      },
+      {
+        spellId: 'healing-word', slotLevel: 1, slotRecharge: 'short_rest',
+        targets: [ally.profile.id], saveDc: 12, spellcastingModifier: 0,
+      },
+    ]);
+  });
+
+  it('maps every optional object modification field into the executable world command', () => {
+    const candidate = structuredClone(pack());
+    candidate.members[0]!.worldOperations = [{
+      operationId: 'world:modify-every-field',
+      cost: 'action',
+      operation: {
+        kind: 'modify_object',
+        objectId: 'object:mutable-wall',
+        changes: {
+          name: 'Reinforced Wall',
+          kind: 'barrier',
+          position: { column: 2, row: 3 },
+          footprint: [{ column: 2, row: 3 }, { column: 3, row: 3 }],
+          durability: { kind: 'hit_points', hitPoints: 7, maximumHitPoints: 9 },
+          armorClass: 17,
+          damageResponses: [{ damageTypeId: 'Fire', response: 'resistant' }],
+          blocking: { movement: true, lineOfSight: false, cover: 'half' },
+        },
+      },
+    }];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('World modification fixture was refused.');
+    expect(loadedPartyWorldOperationCommand(
+      loaded.party.members[0]!,
+      'world:modify-every-field',
+    )).toEqual({
+      type: 'world_operation',
+      actor: loaded.party.members[0]!.profile.id,
+      cost: 'action',
+      operation: {
+        kind: 'modify_object',
+        objectId: 'object:mutable-wall',
+        changes: {
+          name: 'Reinforced Wall',
+          kind: 'barrier',
+          position: { column: 2, row: 3 },
+          footprint: [{ column: 2, row: 3 }, { column: 3, row: 3 }],
+          durability: { kind: 'hit_points', hitPoints: 7, maximumHitPoints: 9 },
+          armorClass: 17,
+          damageResponses: [{ type: 'Fire', response: 'resistant' }],
+          blocking: { movement: true, lineOfSight: false, cover: 'half' },
+        },
+      },
+    });
+    expect(() => loadedPartyWorldOperationCommand(
+      loaded.party.members[0]!,
+      'world:not-declared',
+    )).toThrow('The party member does not declare world:not-declared.');
+  });
+
+  it('maps bounded damage dice and every persistent-area payload to exact engine values', () => {
+    const boundedDice = {
+      baseCount: 2, sides: 6 as const, modifier: 1,
+      perSlotCount: 0, perSlotModifier: 0, cantripUpgrade: false,
+      minimumTotal: 3, maximumTotal: 11,
+    };
+    const candidate = typedShapePack([{
+      effectId: 'effect:bounded-operation', kind: 'damage_operation', trigger: 'action', saveDc: 14,
+      delivery: { kind: 'save', ability: 'dexterity', rollMode: 'normal', onSuccess: 'half' },
+      instancesPerTarget: 1,
+      packets: [{
+        damageType: { kind: 'fixed', damageType: 'Force' },
+        dice: boundedDice, scaling: { kind: 'none' }, thresholdRider: null,
+      }],
+      timing: { kind: 'immediate' },
+    }, {
+      effectId: 'effect:bounded-rider', kind: 'armed_weapon_hit_rider', trigger: 'bonus_action', saveDc: 14,
+      damage: {
+        damageType: { kind: 'fixed', damageType: 'Fire' },
+        dice: boundedDice, scaling: { kind: 'none' }, thresholdRider: null,
+      },
+      durationRounds: 1, concentration: false, persistence: 'consume_on_hit', saveGatedRider: null,
+    }, {
+      effectId: 'effect:payload-area', kind: 'persistent_area', trigger: 'action', origin: 'self',
+      shape: { kind: 'cube', sizeFeet: 15 }, duration: { kind: 'rounds', rounds: 4 },
+      targetFilter: 'all', difficultTerrain: false, movableFeet: null,
+      hooks: [{
+        hook: 'on_enter', frequency: 'every_trigger',
+        effect: {
+          kind: 'automatic',
+          payload: {
+            kind: 'damage',
+            damage: [{ damageTypeId: 'Cold', count: 1, sides: 4, modifier: 2 }],
+          },
+        },
+      }, {
+        hook: 'on_start_of_turn_inside', frequency: 'once_per_turn',
+        effect: {
+          kind: 'automatic',
+          payload: {
+            kind: 'condition', conditionId: 'Prone', lifetime: { kind: 'while_inside' },
+          },
+        },
+      }, {
+        hook: 'on_end_of_turn_inside', frequency: 'once_per_turn',
+        effect: {
+          kind: 'automatic',
+          payload: {
+            kind: 'movement_modifier', speedDeltaFeet: -5,
+            lifetime: { kind: 'area_duration' },
+          },
+        },
+      }, {
+        hook: 'on_exit', frequency: 'every_trigger',
+        effect: {
+          kind: 'save_gated', ability: 'wisdom', saveDc: 13, rollMode: 'normal', onSuccess: 'none',
+          payload: {
+            kind: 'armor_class_modifier', amount: -2,
+            lifetime: { kind: 'fixed_rounds', rounds: 2, boundary: 'end' },
+          },
+        },
+      }],
+    }]);
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Bounded mapper fixture was refused.');
+    expect(loaded.party.members[0]!.effects[0]!.payload).toMatchObject({
+      kind: 'damage_operation',
+      packets: [{ dice: { baseCount: 2, minimumTotal: 3, maximumTotal: 11 } }],
+    });
+    expect(loaded.party.members[0]!.effects[1]!.payload).toMatchObject({
+      kind: 'damage_rider',
+      damage: { terms: [{ dice: { count: 2, minimumTotal: 3, maximumTotal: 11 } }] },
+    });
+    expect(loaded.party.members[0]!.effects[2]!.payload).toEqual({
+      kind: 'persistent_area',
+      area: {
+        origin: 'self', movable: null,
+        shape: { kind: 'cube', size: 15 },
+        duration: { kind: 'rounds', remaining: 4 },
+        targetFilter: { kind: 'all' }, difficultTerrain: false,
+        hooks: [{
+          hook: 'on_enter', frequency: 'every_trigger',
+          effect: {
+            kind: 'automatic',
+            payload: {
+              kind: 'damage',
+              damage: {
+                terms: [{ type: 'Cold', dice: { count: 1, sides: 4, modifier: 2 } }],
+                critical: false, responses: [],
+              },
+            },
+          },
+        }, {
+          hook: 'on_start_of_turn_inside', frequency: 'once_per_turn',
+          effect: {
+            kind: 'automatic',
+            payload: {
+              kind: 'effect', payload: { kind: 'condition', condition: 'Prone' },
+              lifetime: { kind: 'while_inside' },
+            },
+          },
+        }, {
+          hook: 'on_end_of_turn_inside', frequency: 'once_per_turn',
+          effect: {
+            kind: 'automatic',
+            payload: {
+              kind: 'effect', payload: { kind: 'movement_modifier', speedDeltaFeet: -5 },
+              lifetime: { kind: 'area_duration' },
+            },
+          },
+        }, {
+          hook: 'on_exit', frequency: 'every_trigger',
+          effect: {
+            kind: 'save_gated', ability: 'wisdom', dc: 13, rollMode: 'normal', onSuccess: 'none',
+            payload: {
+              kind: 'effect', payload: { kind: 'armor_class_modifier', amount: -2 },
+              lifetime: { kind: 'fixed_rounds', rounds: 2, boundary: 'end' },
+            },
+          },
+        }],
+      },
+    });
+  });
+
+  it('pins effect-command target, placement, resource, and automatic-trigger boundaries', () => {
+    const candidate = typedShapePack([{
+      effectId: 'effect:resource-temp-hp', kind: 'temporary_hit_points',
+      trigger: 'bonus_action', resourcePoolId: 'resource:temp-hp', amount: 6,
+    }, {
+      effectId: 'effect:manual-condition', kind: 'condition_application',
+      trigger: 'action', conditionId: 'Prone',
+    }, {
+      effectId: 'effect:selected-area', kind: 'persistent_area', trigger: 'action', origin: 'selected',
+      shape: { kind: 'sphere', radiusFeet: 10 }, duration: { kind: 'rounds', rounds: 2 },
+      targetFilter: 'enemies', difficultTerrain: false, movableFeet: 15, hooks: [],
+    }, {
+      effectId: 'effect:armed-boundary', kind: 'armed_weapon_hit_rider', trigger: 'bonus_action', saveDc: 12,
+      damage: null, durationRounds: 1, concentration: false,
+      persistence: 'consume_on_hit', saveGatedRider: null,
+    }], [{ resourcePoolId: 'resource:temp-hp', maximum: 1, recharge: 'short_rest' }]);
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Effect-command boundary fixture was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = loaded.party.members[1]!.profile.id;
+    expect(loadedPartyEffectCommand(actor, 'effect:resource-temp-hp', [target])).toEqual({
+      type: 'grant_temporary_hit_points', actor: actor.profile.id, target, amount: 6,
+      cost: 'bonus_action', resourcePoolId: 'resource:temp-hp',
+    });
+    expect(loadedPartyEffectCommand(actor, 'effect:manual-condition', [target])).toEqual({
+      type: 'apply_effect', actor: actor.profile.id, cost: 'action',
+      effect: {
+        targets: [target], duration: { kind: 'permanent' }, concentration: false,
+        stackingIdentity: 'feature:effect:manual-condition', stacking: 'replace_same_source',
+        repeatedSave: null, payload: { kind: 'condition', condition: 'Prone' },
+      },
+    });
+    expect(() => loadedPartyEffectCommand(actor, 'effect:resource-temp-hp', [])).toThrow(
+      'Temporary Hit Points require exactly one target.',
+    );
+    expect(() => loadedPartyEffectCommand(actor, 'effect:resource-temp-hp', [target, target])).toThrow(
+      'Temporary Hit Points require exactly one target.',
+    );
+    expect(() => loadedPartyEffectCommand(actor, 'effect:selected-area', [])).toThrow(
+      'A selected persistent area requires an explicit board placement command.',
+    );
+    expect(() => loadedPartyEffectCommand(actor, 'effect:armed-boundary', [target])).toThrow(
+      'Arming a weapon-hit rider does not select a target.',
+    );
+    expect(() => loadedPartyEffectCommand(actor, 'effect:not-declared', [])).toThrow(
+      'The requested effect is not referenced by the loaded party member.',
+    );
+    expect(() => loadedPartyEffectCommand(actor, 'effect:manual-condition', [])).not.toThrow();
+    expect(() => loadedPartyEffectCommand(actor, 'effect:armed-boundary', [])).not.toThrow();
+  });
+
   it('schema_missing_variant refuses malformed JSON and pins the complete Zod union in the public schema', () => {
     expect(loadExternalPartyPackBytes('{')).toEqual({
       status: 'refused',
@@ -2062,7 +3258,7 @@ describe('external party-pack boundary', () => {
       },
     });
 
-    const zodKinds = zodFeatureEffectKinds(readFileSync('src/vtt/party-pack.ts', 'utf8'));
+    const zodKinds = zodFeatureEffectKinds(externalPartyPackFeatureEffectSchema);
     const definitions = jsonObject(schema.$defs, 'schema.$defs');
     const featureEffect = jsonObject(definitions.featureEffect, 'schema.$defs.featureEffect');
     const featureEffectProperties = jsonObject(

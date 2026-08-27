@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { declareTestInputs } from '../../helpers/test-inputs';
 import type { CombatantProfile } from '../../../src/combat/combatant';
 import {
   createEncounter,
@@ -20,6 +20,9 @@ import { loadContentPack, type LoadedContentPack } from '../../../src/content/co
 import { placedToken, playerProfile } from '../combat/fixtures';
 
 const BASE_PACK = 'tests/fixtures/content-pack-v1-homebrew.json';
+const { readText: readFileSync } = declareTestInputs({
+  fixtures: [BASE_PACK],
+}).fixtures;
 
 function dice(count: number, sides: 4 | 6 | 8 | 10 | 12 | 20, perSlotCount = 0) {
   return {

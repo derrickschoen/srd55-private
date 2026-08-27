@@ -24,7 +24,7 @@ export default defineConfig({
     // build and preview must run from the repo root or preview serves 404s.
     cwd: repoRoot,
     command:
-      `npm run build && npx vite preview --host 127.0.0.1 --port ${String(port)} ` +
+      `node tools/dist-build-cache.mjs && npx vite preview --host 127.0.0.1 --port ${String(port)} ` +
       '--strictPort --configLoader runner',
     url: origin,
     reuseExistingServer: false,

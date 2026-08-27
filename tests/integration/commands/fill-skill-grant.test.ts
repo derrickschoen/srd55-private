@@ -1,4 +1,3 @@
-import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CharacterCommandExecutor } from '../../../src/commands/character-command-executor';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
@@ -11,10 +10,8 @@ import {
   resolveSkillGrants,
   SkillGrantRefusal,
 } from '../../../src/grants/skill-grants';
-import { seedClassProgressions } from '../../../src/rules/class-progression-lookup';
 import { raiseClassLevelForTest } from '../../helpers/class-levels';
-import { seedSheetContent } from '../../../src/rules/sheet-srd';
-import { openTestDatabase } from '../../helpers/open-db';
+import { acquireSharedDb, type SharedDbLease } from '../../helpers/shared-db';
 import { expectOkOutcome } from '../../helpers/outcome';
 
 /**
@@ -34,7 +31,7 @@ import { expectOkOutcome } from '../../helpers/outcome';
  * BOTH grants.
  */
 describe('fill_skill_grant through the real executor', () => {
-  let connection: Database;
+  let lease: SharedDbLease;
   let db: DatabaseContext;
   let integrity: CharacterCommandIntegrity;
   let characterId: number;
@@ -139,11 +136,9 @@ describe('fill_skill_grant through the real executor', () => {
   }
 
   beforeEach(async () => {
-    connection = await openTestDatabase();
-    db = new DatabaseContext(connection);
+    lease = await acquireSharedDb({ mode: 'rw' });
+    db = lease.db;
     integrity = new CharacterCommandIntegrity('fill-skill-grant-test-key');
-    seedClassProgressions(db);
-    seedSheetContent(db);
     characterId = db.exec(
       `INSERT INTO characters (name, strength, charisma)
        VALUES ('Fill Hero', 15, 13)`,
@@ -151,7 +146,7 @@ describe('fill_skill_grant through the real executor', () => {
     updateClass('Fighter', 5);
   });
 
-  afterEach(() => connection.close());
+  afterEach(async () => lease.release());
 
   it('fills exactly the ADDRESSED grant and leaves overlapping grants of the other class unfilled (S-GRANT-IDENTITY)', async () => {
     updateClass('Bard', 1);

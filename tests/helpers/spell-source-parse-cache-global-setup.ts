@@ -19,6 +19,7 @@ import {
   SPELL_PARSE_CACHE_FILE_ENV,
   SPELL_PARSE_CACHE_KEY_ENV,
 } from '../../src/simulation/spell-source-parse-cache';
+import { prepareSeededDatabaseImageCaches } from './seeded-database-image-cache';
 
 /**
  * ONE SRD PARSE PER SUITE RUN INSTEAD OF ONE PER TEST FILE.
@@ -56,7 +57,7 @@ function cacheFilePath(root: string): string {
   return join(directory, `${checkout}.json`);
 }
 
-export default function setup(): void {
+export default async function setup(): Promise<void> {
   const root = process.cwd();
   const corpusKey = corpusCacheKey(
     sha256Hex,
@@ -97,6 +98,9 @@ export default function setup(): void {
 
   process.env[SPELL_PARSE_CACHE_FILE_ENV] = file;
   process.env[SPELL_PARSE_CACHE_KEY_ENV] = key;
+  // Build immutable seed images before workers fork; every test restores its
+  // own writable clone, so mutations never cross a test boundary.
+  await prepareSeededDatabaseImageCaches(['full', 'test-core']);
 }
 
 /**

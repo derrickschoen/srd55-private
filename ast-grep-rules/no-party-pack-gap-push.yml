@@ -1,0 +1,12 @@
+id: no-party-pack-gap-push
+language: TypeScript
+severity: error
+message: Party-pack gaps must flow through the consumed non-void accumulator result.
+files:
+  - src/vtt/party-pack.ts
+rule:
+  any:
+    - pattern: gaps.push($$$ARGS)
+    - pattern:
+        context: gaps.append($$$ARGS);
+        selector: expression_statement

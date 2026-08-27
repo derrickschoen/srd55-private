@@ -588,14 +588,13 @@ function namespaceEffect(effect: ExternalPartyPackEffect, sourceId: string): Ext
   const suffix = effect.effectId.startsWith('effect:')
     ? effect.effectId.slice('effect:'.length)
     : effect.effectId;
-  const resourcePoolId = effect.resourcePoolId === undefined
-    ? {}
-    : { resourcePoolId: `resource:${sourceId}:${effect.resourcePoolId.slice('resource:'.length)}` };
-  return {
-    ...effect,
-    effectId: `effect:${sourceId}:${suffix}`,
-    ...resourcePoolId,
-  };
+  return effect.resourcePoolId === undefined
+    ? { ...effect, effectId: `effect:${sourceId}:${suffix}` }
+    : {
+        ...effect,
+        effectId: `effect:${sourceId}:${suffix}`,
+        resourcePoolId: `resource:${sourceId}:${effect.resourcePoolId.slice('resource:'.length)}`,
+      };
 }
 
 function namespaceResource(resource: ExternalPartyPackResource, sourceId: string): ExternalPartyPackResource {

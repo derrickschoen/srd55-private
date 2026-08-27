@@ -45,7 +45,7 @@ archive metadata.
 
 `db/schema/origins.ts`:
 
-- `background_templates` (`:988`) stores the printed background template and
+- `background_templates` (`:1001`) stores the printed background template and
   its nullable migrated/default Origin-feat content key. New writers always
   supply the key; null represents only an ambiguous legacy name that migration
   0037 could not bind without guessing.

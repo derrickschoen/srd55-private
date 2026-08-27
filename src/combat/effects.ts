@@ -10,6 +10,7 @@ import type {
   DieSides,
   EffectStackingIdentity,
   EncounterEffectId,
+  ItemId,
   LimitedResourcePoolId,
   ObjectTargetId,
   PersistentAreaId,
@@ -483,6 +484,7 @@ export type EffectPayload =
   | {
       readonly kind: 'commanded_action';
       readonly options: readonly ('approach' | 'drop' | 'flee' | 'grovel' | 'halt')[];
+      readonly selectedOption: 'selected_when_cast' | 'approach' | 'drop' | 'flee' | 'grovel' | 'halt';
     }
   | {
       readonly kind: 'language_comprehension';
@@ -1307,6 +1309,17 @@ export type EffectPayload =
       readonly healingPerUse: 1;
       readonly activation: 'bonus_action';
       readonly encounterExpiry: 'not_tracked_24_hours';
+    }
+  | {
+      /**
+       * Potion of Healing: Bonus Action to drink, restoring 2d4 + 2 HP.
+       * docs/srd/full/srd-5.2.1.txt:6022-6028.
+       */
+      readonly kind: 'healing_potion';
+      readonly itemId: ItemId;
+      readonly remainingUses: number;
+      readonly dice: { readonly count: 2; readonly sides: 4; readonly modifier: 2 };
+      readonly activation: 'bonus_action';
     }
   | {
       readonly kind: 'creature_type_protection';

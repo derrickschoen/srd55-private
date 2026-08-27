@@ -1,0 +1,18 @@
+id: no-raw-fs-in-tests
+language: TypeScript
+severity: error
+message: Test files must read declared repository inputs or use a helper-owned filesystem capability.
+files:
+  - tests/**/*.test.ts
+ignores:
+  - tests/helpers/**
+rule:
+  any:
+    - pattern: import $$$BINDINGS from '$MODULE'
+    - pattern: import '$MODULE'
+    - pattern: require('$MODULE')
+    - pattern: import('$MODULE')
+    - pattern: process.getBuiltinModule('$MODULE')
+constraints:
+  MODULE:
+    regex: ^(?:node:)?fs(?:/promises)?$

@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { declareTestInputs } from '../../helpers/test-inputs';
 import type { CombatantProfile } from '../../../src/combat/combatant';
 import type { EffectPayload } from '../../../src/combat/effects';
 import {
@@ -19,6 +19,10 @@ import { feetPoint } from '../../../src/combat/templates';
 import { damageType, feet } from '../../../src/combat/values';
 import { loadContentPack, type LoadedContentPack } from '../../../src/content/content-pack';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+
+const { readText: readFileSync } = declareTestInputs({
+  fixtures: ['tests/fixtures/content-pack-v1-homebrew.json'],
+}).fixtures;
 
 interface ImportedSpellSpec {
   readonly id: string;

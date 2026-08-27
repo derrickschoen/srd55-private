@@ -1,10 +1,13 @@
 import type { RpcClient } from '../rpc/client';
 import { mountEncounterVtt, type EncounterVttMount } from './encounter-app';
 import { loadD365SampleParty } from './d365-sample-party';
-import { createPartySessionState } from './party-session-state';
+import { createD365SurvivalPartySessionState } from './survival-policy';
+import { encounterSeed } from './session-seed';
 import {
   VANE_WARREN_SESSION_ID,
+  VANE_WARREN_TPK_SCENARIOS,
   composeVaneWarrenSessionEncounter,
+  type VaneWarrenRehearsalScenario,
 } from './vane-warren';
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -21,11 +24,16 @@ export interface VaneWarrenMount {
   close(): void;
 }
 
-export function mountVaneWarren(root: HTMLElement, rpc: RpcClient): VaneWarrenMount {
+export function mountVaneWarren(
+  root: HTMLElement,
+  rpc: RpcClient,
+  scenario: VaneWarrenRehearsalScenario = 'default',
+): VaneWarrenMount {
+  const scenarioConfig = scenario === 'default' ? null : VANE_WARREN_TPK_SCENARIOS[scenario];
   const shell = element('main', { className: 'vane-warren-loader' });
   shell.append(
-    element('p', { className: 'vtt-kicker', text: 'Bundled flagship encounter' }),
-    element('h1', { text: 'The Vane Warren' }),
+    element('p', { className: 'vtt-kicker', text: scenarioConfig === null ? 'Bundled flagship encounter' : 'Doomed rehearsal encounter' }),
+    element('h1', { text: scenarioConfig?.sessionName ?? 'The Vane Warren' }),
     element('p', {
       text: 'Play all three leader fights as one continuous session. Party Hit Points and resources carry between encounters, followed by one final session export.',
     }),
@@ -41,18 +49,20 @@ export function mountVaneWarren(root: HTMLElement, rpc: RpcClient): VaneWarrenMo
     if (loading) return;
     loading = true;
     choices.querySelectorAll('button').forEach((button) => { button.disabled = true; });
-    status.value = 'Authoring the bundled four-character party through RPC…';
+    status.value = 'Authoring the bundled five-character party through RPC…';
     void loadD365SampleParty(rpc).then((sample) => {
       if (closed) return;
       const encounter = composeVaneWarrenSessionEncounter(
         sample.party.members,
         sample.displayNames,
-        createPartySessionState(sample.party.members),
+        createD365SurvivalPartySessionState(sample.party.members).state,
+        scenario,
       );
       encounterMount = mountEncounterVtt(root, {
         view: 'dm',
-        sessionId: VANE_WARREN_SESSION_ID,
+        sessionId: scenarioConfig?.sessionId ?? VANE_WARREN_SESSION_ID,
         encounter,
+        ...(scenarioConfig === null ? {} : { initialSeed: encounterSeed(20_260_824) }),
       });
     }).catch((error: unknown) => {
       if (closed) return;
@@ -62,7 +72,9 @@ export function mountVaneWarren(root: HTMLElement, rpc: RpcClient): VaneWarrenMo
     });
   };
 
-  const button = element('button', { text: 'Start the Vane Warren' });
+  const button = element('button', {
+    text: scenarioConfig === null ? 'Start the Vane Warren' : 'Start the doomed rehearsal',
+  });
   button.type = 'button';
   button.addEventListener('click', loadSession);
   choices.append(button);

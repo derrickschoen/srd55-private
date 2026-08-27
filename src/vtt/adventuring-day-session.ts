@@ -66,9 +66,10 @@ export class AdventuringDaySession {
     readonly store: BrowserSessionStore;
     readonly mirror: MirrorSink;
     readonly composeRoom?: DmRoomComposer;
+    readonly initialPartyState?: PartySessionState;
   }): AdventuringDaySession {
     const displayNames = input.displayNames ?? new Map<number, string>();
-    const partyState = createPartySessionState(input.members);
+    const partyState = input.initialPartyState ?? createPartySessionState(input.members);
     const encounter = (input.composeRoom ?? composeStoredCharacterEncounter)(
       input.members,
       displayNames,

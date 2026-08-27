@@ -12,17 +12,32 @@ import {
 import type { SaveRetention } from './save-manager';
 import { autosavePoolForTrigger, type AutosavePool, type AutosaveTrigger } from './save-manager';
 
-const DATABASE_NAME = 'srd55-vtt-sessions';
 const DATABASE_VERSION = 1;
-const REVISION_STORE = 'revisions';
-const SESSION_STORE = 'sessions';
-const SNAPSHOT_STORE = 'snapshots';
 
 const LEGACY_SESSION_PREFIX = 'srd55:vtt-session:';
 const LEGACY_METADATA_PREFIX = 'srd55:vtt-session-metadata:';
-const LEGACY_AUTOSAVE_PREFIX = 'srd55:vtt-autosave:';
 const LEGACY_TRUNCATED_PREFIX = 'srd55:vtt-session-truncated:';
 const LIKELY_LOCAL_STORAGE_LIMIT_BYTES = 4 * 1024 * 1024;
+
+function defaultDatabaseName(): string {
+  return 'srd55-vtt-sessions';
+}
+
+function revisionStoreName(): string {
+  return 'revisions';
+}
+
+function sessionStoreName(): string {
+  return 'sessions';
+}
+
+function snapshotStoreName(): string {
+  return 'snapshots';
+}
+
+function legacyAutosavePrefix(): string {
+  return 'srd55:vtt-autosave:';
+}
 
 interface BrowserSaveMetadata {
   readonly sessionId: EncounterSessionId;
@@ -50,6 +65,12 @@ interface LegacyAutosaveSnapshot {
   readonly updatedAt: string;
   readonly bytes: string;
   readonly retention: SaveRetention;
+}
+
+interface QueuedBrowserWrite {
+  readonly operation: BrowserSessionWriteError['operation'];
+  readonly prepare: () => Promise<(transaction: IDBTransaction) => void>;
+  readonly acknowledge: () => void;
 }
 
 export interface StoredBrowserSave extends DecodedSavedSessionFingerprint {
@@ -114,7 +135,7 @@ function openDatabase(indexedDb: IDBFactory, databaseName: string): Promise<IDBD
   return new Promise((resolve, reject) => {
     const opening = indexedDb.open(databaseName, DATABASE_VERSION);
     opening.addEventListener('upgradeneeded', () => {
-      for (const storeName of [REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE]) {
+      for (const storeName of [revisionStoreName(), sessionStoreName(), snapshotStoreName()]) {
         if (!opening.result.objectStoreNames.contains(storeName)) {
           opening.result.createObjectStore(storeName);
         }
@@ -127,6 +148,26 @@ function openDatabase(indexedDb: IDBFactory, databaseName: string): Promise<IDBD
 
 function revisionKey(sessionId: EncounterSessionId, revision: number): string {
   return `${sessionId}\u0000${String(revision).padStart(12, '0')}`;
+}
+
+async function encodedStoredRevision(revision: SessionRevision): Promise<ArrayBuffer> {
+  const compressed = new Blob([JSON.stringify(revision)], { type: 'application/json' })
+    .stream()
+    .pipeThrough(new CompressionStream('gzip'));
+  return new Response(compressed).arrayBuffer();
+}
+
+async function decodedStoredRevision(value: unknown): Promise<SessionRevision> {
+  const decoded: unknown = value instanceof ArrayBuffer
+    ? JSON.parse(await new Response(
+        new Blob([value]).stream().pipeThrough(new DecompressionStream('gzip')),
+      ).text())
+    : value;
+  if (!isRecord(decoded) || typeof decoded.sessionId !== 'string' ||
+    !Number.isSafeInteger(decoded.revision) || typeof decoded.checksum !== 'string') {
+    throw new TypeError('Stored VTT session revision is malformed.');
+  }
+  return decoded as unknown as SessionRevision;
 }
 
 function retention(value: unknown): SaveRetention {
@@ -196,7 +237,9 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
   #memory = new MemoryBrowserSessionStore();
   readonly #metadata = new Map<EncounterSessionId, BrowserSaveMetadata>();
   readonly #snapshots = new Map<string, StoredAutosaveSnapshot>();
-  readonly #pending = new Set<Promise<void>>();
+  readonly #queuedWrites: QueuedBrowserWrite[] = [];
+  #scheduledWrite: Promise<void> | null = null;
+  #latestAcknowledgement: Promise<void> = Promise.resolve();
   #failure: BrowserSessionWriteError | null = null;
 
   private constructor(
@@ -211,7 +254,7 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
   ): Promise<IndexedDbBrowserSessionStore> {
     let database: IDBDatabase;
     try {
-      database = await openDatabase(indexedDb, options.databaseName ?? DATABASE_NAME);
+      database = await openDatabase(indexedDb, options.databaseName ?? defaultDatabaseName());
     } catch (error: unknown) {
       throw storageError('open', error);
     }
@@ -221,8 +264,8 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
       await store.#preload();
       const removed = store.#pruneAutosaves();
       if (removed.length > 0) {
-        const transaction = database.transaction(SNAPSHOT_STORE, 'readwrite');
-        for (const storageId of removed) transaction.objectStore(SNAPSHOT_STORE).delete(storageId);
+        const transaction = database.transaction(snapshotStoreName(), 'readwrite');
+        for (const storageId of removed) transaction.objectStore(snapshotStoreName()).delete(storageId);
         await transactionComplete(transaction);
       }
       return store;
@@ -254,15 +297,13 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     }
     const removed = this.#pruneAutosaves();
     this.#enqueue('write', async () => {
-      const transaction = this.database.transaction(
-        [REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE],
-        'readwrite',
-      );
-      transaction.objectStore(REVISION_STORE).put(revision, revisionKey(revision.sessionId, revision.revision));
-      transaction.objectStore(SESSION_STORE).put(metadata, revision.sessionId);
-      for (const snapshot of added) transaction.objectStore(SNAPSHOT_STORE).put(snapshot, snapshot.storageId);
-      for (const storageId of removed) transaction.objectStore(SNAPSHOT_STORE).delete(storageId);
-      await transactionComplete(transaction);
+      const stored = await encodedStoredRevision(revision);
+      return (transaction) => {
+        transaction.objectStore(revisionStoreName()).put(stored, revisionKey(revision.sessionId, revision.revision));
+        transaction.objectStore(sessionStoreName()).put(metadata, revision.sessionId);
+        for (const snapshot of added) transaction.objectStore(snapshotStoreName()).put(snapshot, snapshot.storageId);
+        for (const storageId of removed) transaction.objectStore(snapshotStoreName()).delete(storageId);
+      };
     });
   }
 
@@ -281,12 +322,16 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     };
     this.#metadata.set(first.sessionId, metadata);
     this.#enqueue('write', async () => {
-      const transaction = this.database.transaction([REVISION_STORE, SESSION_STORE], 'readwrite');
-      for (const revision of revisions) {
-        transaction.objectStore(REVISION_STORE).put(revision, revisionKey(revision.sessionId, revision.revision));
-      }
-      transaction.objectStore(SESSION_STORE).put(metadata, first.sessionId);
-      await transactionComplete(transaction);
+      const stored = await Promise.all(revisions.map(async (revision) => ({
+        bytes: await encodedStoredRevision(revision),
+        key: revisionKey(revision.sessionId, revision.revision),
+      })));
+      return (transaction) => {
+        for (const revision of stored) {
+          transaction.objectStore(revisionStoreName()).put(revision.bytes, revision.key);
+        }
+        transaction.objectStore(sessionStoreName()).put(metadata, first.sessionId);
+      };
     });
   }
 
@@ -295,7 +340,10 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
   }
 
   async flush(): Promise<void> {
-    while (this.#pending.size > 0) await Promise.all([...this.#pending]);
+    // Acknowledge the durable high-water mark captured by this call. Writes
+    // published later must not turn one render acknowledgement into an
+    // unbounded drain of a still-moving controller stream.
+    await this.#latestAcknowledgement;
     if (this.#failure !== null) throw this.#failure;
   }
 
@@ -311,14 +359,14 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
       .map((snapshot) => snapshot.storageId);
     await this.#directWrite('delete', async () => {
       const transaction = this.database.transaction(
-        [REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE],
+        [revisionStoreName(), sessionStoreName(), snapshotStoreName()],
         'readwrite',
       );
       for (let revision = 1; revision <= revisionCount; revision += 1) {
-        transaction.objectStore(REVISION_STORE).delete(revisionKey(sessionId, revision));
+        transaction.objectStore(revisionStoreName()).delete(revisionKey(sessionId, revision));
       }
-      transaction.objectStore(SESSION_STORE).delete(sessionId);
-      for (const storageId of snapshotIds) transaction.objectStore(SNAPSHOT_STORE).delete(storageId);
+      transaction.objectStore(sessionStoreName()).delete(sessionId);
+      for (const storageId of snapshotIds) transaction.objectStore(snapshotStoreName()).delete(storageId);
       await transactionComplete(transaction);
     });
     await this.#preload();
@@ -330,8 +378,8 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
       return;
     }
     await this.#directWrite('delete', async () => {
-      const transaction = this.database.transaction(SNAPSHOT_STORE, 'readwrite');
-      transaction.objectStore(SNAPSHOT_STORE).delete(storageId);
+      const transaction = this.database.transaction(snapshotStoreName(), 'readwrite');
+      transaction.objectStore(snapshotStoreName()).delete(storageId);
       await transactionComplete(transaction);
     });
     this.#snapshots.delete(storageId);
@@ -345,8 +393,8 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
       if (existing === undefined) throw new Error('Browser save does not exist.');
       const metadata: BrowserSaveMetadata = { ...existing, name: trimmed, retention: { kind: 'named' } };
       await this.#directWrite('rename', async () => {
-        const transaction = this.database.transaction(SESSION_STORE, 'readwrite');
-        transaction.objectStore(SESSION_STORE).put(metadata, sessionId);
+        const transaction = this.database.transaction(sessionStoreName(), 'readwrite');
+        transaction.objectStore(sessionStoreName()).put(metadata, sessionId);
         await transactionComplete(transaction);
       });
       this.#metadata.set(sessionId, metadata);
@@ -358,8 +406,8 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     }
     const snapshot: StoredAutosaveSnapshot = { ...existing, name: trimmed, retention: { kind: 'named' } };
     await this.#directWrite('rename', async () => {
-      const transaction = this.database.transaction(SNAPSHOT_STORE, 'readwrite');
-      transaction.objectStore(SNAPSHOT_STORE).put(snapshot, storageId);
+      const transaction = this.database.transaction(snapshotStoreName(), 'readwrite');
+      transaction.objectStore(snapshotStoreName()).put(snapshot, storageId);
       await transactionComplete(transaction);
     });
     this.#snapshots.set(storageId, snapshot);
@@ -371,7 +419,6 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     if (snapshot === undefined || snapshot.sessionId !== sessionId) {
       throw new Error('Browser autosave does not exist.');
     }
-    const retained = this.#memory.revisions(sessionId).slice(0, snapshot.revisionCount);
     const currentCount = this.#memory.revisions(sessionId).length;
     const metadata: BrowserSaveMetadata = {
       sessionId,
@@ -381,16 +428,14 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
       migrationStatus: this.#metadata.get(sessionId)?.migrationStatus ?? 'native',
     };
     await this.#directWrite('restore', async () => {
-      const transaction = this.database.transaction([REVISION_STORE, SESSION_STORE], 'readwrite');
+      const transaction = this.database.transaction([revisionStoreName(), sessionStoreName()], 'readwrite');
       for (let revision = snapshot.revisionCount + 1; revision <= currentCount; revision += 1) {
-        transaction.objectStore(REVISION_STORE).delete(revisionKey(sessionId, revision));
+        transaction.objectStore(revisionStoreName()).delete(revisionKey(sessionId, revision));
       }
-      transaction.objectStore(SESSION_STORE).put(metadata, sessionId);
+      transaction.objectStore(sessionStoreName()).put(metadata, sessionId);
       await transactionComplete(transaction);
     });
-    this.#memory = new MemoryBrowserSessionStore();
-    this.#memory.appendAll(retained);
-    this.#metadata.set(sessionId, metadata);
+    await this.#preload();
   }
 
   savedSessions(): readonly StoredBrowserSave[] {
@@ -494,12 +539,47 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     return [...new Set(triggers)];
   }
 
-  #enqueue(operation: BrowserSessionWriteError['operation'], write: () => Promise<void>): void {
-    const pending = write().catch((error: unknown) => {
-      this.#failure ??= storageError(operation, error);
+  #enqueue(
+    operation: BrowserSessionWriteError['operation'],
+    prepare: () => Promise<(transaction: IDBTransaction) => void>,
+  ): void {
+    let acknowledge = (): void => undefined;
+    const acknowledgement = new Promise<void>((resolve) => {
+      acknowledge = resolve;
     });
-    this.#pending.add(pending);
-    void pending.finally(() => this.#pending.delete(pending));
+    this.#latestAcknowledgement = acknowledgement;
+    this.#queuedWrites.push({ operation, prepare, acknowledge });
+    this.#scheduleQueuedWrite();
+  }
+
+  #scheduleQueuedWrite(): void {
+    if (this.#scheduledWrite !== null) return;
+    let writes: QueuedBrowserWrite[] = [];
+    const pending = new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 0);
+    }).then(async () => {
+      writes = this.#queuedWrites.splice(0);
+      const prepared = await Promise.all(writes.map(async (queued) => queued.prepare()));
+      const transaction = this.database.transaction(
+        [revisionStoreName(), sessionStoreName(), snapshotStoreName()],
+        'readwrite',
+      );
+      for (const write of prepared) write(transaction);
+      await transactionComplete(transaction);
+      for (const queued of writes) queued.acknowledge();
+    }).catch((error: unknown) => {
+      const operation = writes[0]?.operation ?? this.#queuedWrites[0]?.operation ?? 'write';
+      this.#failure ??= storageError(operation, error);
+      for (const queued of writes) queued.acknowledge();
+      for (const queued of this.#queuedWrites.splice(0)) queued.acknowledge();
+    });
+    this.#scheduledWrite = pending;
+    void pending.finally(() => {
+      this.#scheduledWrite = null;
+      if (this.#queuedWrites.length > 0 && this.#failure === null) {
+        this.#scheduleQueuedWrite();
+      }
+    });
   }
 
   async #directWrite(operation: BrowserSessionWriteError['operation'], write: () => Promise<void>): Promise<void> {
@@ -517,16 +597,21 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
   }
 
   async #preload(): Promise<void> {
-    const transaction = this.database.transaction([REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE], 'readonly');
+    const transaction = this.database.transaction(
+      [revisionStoreName(), sessionStoreName(), snapshotStoreName()],
+      'readonly',
+    );
     const [revisions, metadata, snapshots] = await Promise.all([
-      requestResult(transaction.objectStore(REVISION_STORE).getAll()),
-      requestResult(transaction.objectStore(SESSION_STORE).getAll()),
-      requestResult(transaction.objectStore(SNAPSHOT_STORE).getAll()),
+      requestResult(transaction.objectStore(revisionStoreName()).getAll()),
+      requestResult(transaction.objectStore(sessionStoreName()).getAll()),
+      requestResult(transaction.objectStore(snapshotStoreName()).getAll()),
     ]);
     await transactionComplete(transaction);
     const nextMemory = new MemoryBrowserSessionStore();
     const bySession = new Map<EncounterSessionId, SessionRevision[]>();
-    for (const revision of revisions as SessionRevision[]) {
+    for (const revision of await Promise.all(
+      (revisions as unknown[]).map(async (value) => decodedStoredRevision(value)),
+    )) {
       const current = bySession.get(revision.sessionId) ?? [];
       current.push(revision);
       bySession.set(revision.sessionId, current);
@@ -566,18 +651,22 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
           ? 'truncated'
           : 'complete',
       };
-      const transaction = this.database.transaction([REVISION_STORE, SESSION_STORE], 'readwrite');
-      for (const revision of imported.revisions(sessionId)) {
-        transaction.objectStore(REVISION_STORE).put(revision, revisionKey(sessionId, revision.revision));
+      const storedRevisions = await Promise.all(imported.revisions(sessionId).map(async (revision) => ({
+        bytes: await encodedStoredRevision(revision),
+        key: revisionKey(sessionId, revision.revision),
+      })));
+      const transaction = this.database.transaction([revisionStoreName(), sessionStoreName()], 'readwrite');
+      for (const revision of storedRevisions) {
+        transaction.objectStore(revisionStoreName()).put(revision.bytes, revision.key);
       }
-      transaction.objectStore(SESSION_STORE).put(metadata, sessionId);
+      transaction.objectStore(sessionStoreName()).put(metadata, sessionId);
       await transactionComplete(transaction);
       this.legacyStorage.removeItem(key);
       this.legacyStorage.removeItem(`${LEGACY_METADATA_PREFIX}${sessionId}`);
       this.legacyStorage.removeItem(`${LEGACY_TRUNCATED_PREFIX}${sessionId}`);
     }
 
-    for (const key of keys.filter((candidate) => candidate.startsWith(LEGACY_AUTOSAVE_PREFIX))) {
+    for (const key of keys.filter((candidate) => candidate.startsWith(legacyAutosavePrefix()))) {
       const raw = this.legacyStorage.getItem(key);
       if (raw === null) continue;
       const legacy = legacySnapshot(raw);
@@ -595,12 +684,19 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
         retention: legacy.retention,
       };
       const existingMetadata = await this.#readMetadata(legacy.sessionId);
-      const transaction = this.database.transaction([REVISION_STORE, SESSION_STORE, SNAPSHOT_STORE], 'readwrite');
-      for (const revision of imported.revisions(legacy.sessionId)) {
-        transaction.objectStore(REVISION_STORE).put(revision, revisionKey(legacy.sessionId, revision.revision));
+      const storedRevisions = await Promise.all(imported.revisions(legacy.sessionId).map(async (revision) => ({
+        bytes: await encodedStoredRevision(revision),
+        key: revisionKey(legacy.sessionId, revision.revision),
+      })));
+      const transaction = this.database.transaction(
+        [revisionStoreName(), sessionStoreName(), snapshotStoreName()],
+        'readwrite',
+      );
+      for (const revision of storedRevisions) {
+        transaction.objectStore(revisionStoreName()).put(revision.bytes, revision.key);
       }
       if (existingMetadata === null) {
-        transaction.objectStore(SESSION_STORE).put({
+        transaction.objectStore(sessionStoreName()).put({
           sessionId: legacy.sessionId,
           name: legacy.sessionId,
           updatedAt: legacy.updatedAt,
@@ -608,15 +704,15 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
           migrationStatus: legacy.bytes.length >= LIKELY_LOCAL_STORAGE_LIMIT_BYTES ? 'truncated' : 'complete',
         } satisfies BrowserSaveMetadata, legacy.sessionId);
       }
-      transaction.objectStore(SNAPSHOT_STORE).put(snapshot, snapshot.storageId);
+      transaction.objectStore(snapshotStoreName()).put(snapshot, snapshot.storageId);
       await transactionComplete(transaction);
       this.legacyStorage.removeItem(key);
     }
   }
 
   async #readMetadata(sessionId: EncounterSessionId): Promise<BrowserSaveMetadata | null> {
-    const transaction = this.database.transaction(SESSION_STORE, 'readonly');
-    const value: unknown = await requestResult(transaction.objectStore(SESSION_STORE).get(sessionId));
+    const transaction = this.database.transaction(sessionStoreName(), 'readonly');
+    const value: unknown = await requestResult(transaction.objectStore(sessionStoreName()).get(sessionId));
     await transactionComplete(transaction);
     return value === undefined ? null : value as BrowserSaveMetadata;
   }

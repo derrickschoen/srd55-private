@@ -9,7 +9,7 @@ import type {
   ReactionPolicy,
 } from '../combat/encounter';
 import { combatantConditions, REACTION_KINDS } from '../combat/encounter';
-import type { CombatantId, EncounterEffectId, LimitedResourcePoolId } from '../combat/values';
+import type { CombatantId, EncounterEffectId, ItemId, LimitedResourcePoolId } from '../combat/values';
 import {
   combatantId,
   effectStackingIdentity,
@@ -78,9 +78,22 @@ export interface PartyLimitedResourceState {
   readonly recharge: 'long_rest' | 'short_rest';
 }
 
-export interface PartyConsumableState {
-  readonly effectId: EncounterEffectId;
-  readonly remainingUses: number;
+export type PartyConsumableState =
+  | {
+      readonly kind: 'goodberries';
+      readonly effectId: EncounterEffectId;
+      readonly remainingUses: number;
+    }
+  | {
+      readonly kind: 'potion_of_healing';
+      readonly effectId: EncounterEffectId;
+      readonly itemId: ItemId;
+      readonly remainingUses: number;
+    };
+
+export interface PartyAidState {
+  readonly source: CombatantId;
+  readonly amount: 5;
 }
 
 export interface PartyCharacterSessionState {
@@ -96,6 +109,7 @@ export interface PartyCharacterSessionState {
   readonly limitedResources: readonly PartyLimitedResourceState[];
   readonly hitDice: readonly PartyHitDiceState[];
   readonly consumables: readonly PartyConsumableState[];
+  readonly aid: PartyAidState | null;
   readonly equipment: CombatantEquipment | null;
 }
 
@@ -132,6 +146,7 @@ export const PARTY_CHARACTER_VIEW_CLASSIFICATION = {
   limitedResources: 'per_seat',
   hitDice: 'per_seat',
   consumables: 'per_seat',
+  aid: 'per_seat',
   equipment: 'per_seat',
 } as const satisfies Readonly<Record<keyof PartyCharacterSessionState, PartySessionViewClassification>>;
 
@@ -154,6 +169,7 @@ export interface PlayerOwnedPartyMember extends PlayerVisiblePartyMemberSummary 
   readonly limitedResources: readonly PartyLimitedResourceState[];
   readonly hitDice: readonly PartyHitDiceState[];
   readonly consumables: readonly PartyConsumableState[];
+  readonly aid: PartyAidState | null;
   readonly equipment: CombatantEquipment | null;
 }
 
@@ -390,6 +406,7 @@ export function createPartySessionState(
       })),
       hitDice: sortedHitDice(member),
       consumables: [],
+      aid: null,
       equipment: null,
     };
   });
@@ -475,17 +492,28 @@ export function capturePartySessionState(
     const equipment = encounter.equipment?.find(
       (entry) => entry.combatant === persisted.combatantId,
     ) ?? null;
-    const consumables = encounter.effects.flatMap((effect): readonly PartyConsumableState[] =>
-      effect.source === persisted.combatantId && effect.payload.kind === 'consumable_healing_pool'
-        ? [{ effectId: effect.id, remainingUses: effect.payload.remainingUses }]
-        : []);
+    const consumables = encounter.effects.flatMap((effect): readonly PartyConsumableState[] => {
+      if (effect.source !== persisted.combatantId) return [];
+      if (effect.payload.kind === 'consumable_healing_pool') {
+        return [{ kind: 'goodberries', effectId: effect.id, remainingUses: effect.payload.remainingUses }];
+      }
+      if (effect.payload.kind === 'healing_potion') {
+        return [{
+          kind: 'potion_of_healing',
+          effectId: effect.id,
+          itemId: effect.payload.itemId,
+          remainingUses: effect.payload.remainingUses,
+        }];
+      }
+      return [];
+    });
     const exhaustion = combatantConditions(encounter, persisted.combatantId).find(
       (condition) => condition.name === 'Exhaustion',
     );
     return {
       ...persisted,
       currentHitPoints: subject.hitPoints,
-      hitPointMaximum: subject.profile.rules.hitPointMaximum,
+      hitPointMaximum: subject.profile.rules.hitPointMaximum + (persisted.aid?.amount ?? 0),
       exhaustionLevel: exhaustion?.name === 'Exhaustion' ? exhaustion.level : 0,
       life: subject.life,
       deathSaves: structuredClone(subject.deathSaves),
@@ -545,19 +573,50 @@ export function preloadPartySessionState(
         createdRevision: encounter.revision,
         duration: { kind: 'permanent' as const },
         concentrationOwner: null,
-        stackingIdentity: effectStackingIdentity('spell:goodberry'),
+        stackingIdentity: effectStackingIdentity(
+          consumable.kind === 'goodberries' ? 'spell:goodberry' : `item:${String(consumable.itemId)}`,
+        ),
         stacking: 'coexist' as const,
         repeatedSave: null,
         damageBreak: null,
-        payload: {
-          kind: 'consumable_healing_pool' as const,
-          remainingUses: consumable.remainingUses,
-          healingPerUse: 1 as const,
-          activation: 'bonus_action' as const,
-          encounterExpiry: 'not_tracked_24_hours' as const,
-        },
+        payload: consumable.kind === 'goodberries'
+          ? {
+              kind: 'consumable_healing_pool' as const,
+              remainingUses: consumable.remainingUses,
+              healingPerUse: 1 as const,
+              activation: 'bonus_action' as const,
+              encounterExpiry: 'not_tracked_24_hours' as const,
+            }
+          : {
+              kind: 'healing_potion' as const,
+              itemId: consumable.itemId,
+              remainingUses: consumable.remainingUses,
+              dice: { count: 2 as const, sides: 4 as const, modifier: 2 as const },
+              activation: 'bonus_action' as const,
+            },
       };
     }));
+  const aidTargets = party.characters.filter((character) => character.aid !== null);
+  const aidSources = new Set(aidTargets.map((character) => character.aid?.source));
+  if (aidSources.size > 1) throw new Error('A party session cannot carry Aid from multiple sources.');
+  const aidSource = aidTargets[0]?.aid?.source;
+  const partyAid = aidSource === undefined ? [] : [{
+    id: encounterEffectId(`effect:${String(nextEffectSequence++)}`),
+    source: aidSource,
+    targets: aidTargets.map((character) => character.combatantId),
+    createdRevision: encounter.revision,
+    duration: {
+      kind: 'turn_boundaries' as const,
+      timing: { combatant: aidSource, boundary: 'start' as const, source: 'spell:aid' },
+      remaining: 4_800,
+    },
+    concentrationOwner: null,
+    stackingIdentity: effectStackingIdentity('spell:aid'),
+    stacking: 'replace_same_source' as const,
+    repeatedSave: null,
+    damageBreak: null,
+    payload: { kind: 'hit_point_maximum_modifier' as const, amount: 5 },
+  }];
   const partyExhaustion = party.characters.flatMap((character) => {
     if (character.exhaustionLevel === 0) return [];
     const id = encounterEffectId(`effect:${String(nextEffectSequence)}`);
@@ -579,7 +638,7 @@ export function preloadPartySessionState(
   return {
     ...encounter,
     combatants,
-    effects: [...encounter.effects, ...partyConsumables, ...partyExhaustion],
+    effects: [...encounter.effects, ...partyConsumables, ...partyAid, ...partyExhaustion],
     nextEffectSequence,
     reactionPolicies: structuredClone(party.reactionPolicies),
     ...((encounter.equipment === undefined && partyEquipment.length === 0)
@@ -692,6 +751,7 @@ export function takeLongRest(state: PartySessionState): LongRestResult {
   // independently a Short-or-Long-Rest pool: docs/srd/full/srd-5.2.1.txt:4290-4295.
   const summaries: LongRestCharacterSummary[] = [];
   const characters = state.characters.map((character): PartyCharacterSessionState => {
+    const postAidMaximum = character.hitPointMaximum - (character.aid?.amount ?? 0);
     if (character.life === 'dead' || character.life === 'dying') {
       summaries.push({
         combatantId: character.combatantId,
@@ -703,7 +763,7 @@ export function takeLongRest(state: PartySessionState): LongRestResult {
         lifeBefore: character.life,
         lifeAfter: character.life,
       });
-      return character;
+      return { ...character, hitPointMaximum: postAidMaximum, aid: null };
     }
 
     // A Stable creature naturally regains 1 HP after 1d4 hours. Since 1d4 is
@@ -748,7 +808,7 @@ export function takeLongRest(state: PartySessionState): LongRestResult {
     const lifeAfter: LifeState = 'living';
     summaries.push({
       combatantId: character.combatantId,
-      hitPointsRestored: character.hitPointMaximum - character.currentHitPoints,
+      hitPointsRestored: Math.max(0, postAidMaximum - character.currentHitPoints),
       hitDiceRestored,
       spellSlotsRestored,
       exhaustionLevelsRemoved,
@@ -758,7 +818,9 @@ export function takeLongRest(state: PartySessionState): LongRestResult {
     });
     return {
       ...restStarter,
-      currentHitPoints: character.hitPointMaximum,
+      currentHitPoints: postAidMaximum,
+      hitPointMaximum: postAidMaximum,
+      aid: null,
       exhaustionLevel: Math.max(0, restStarter.exhaustionLevel - 1) as PartyExhaustionLevel,
       life: lifeAfter,
       deathSaves: null,
@@ -810,6 +872,7 @@ export function projectPlayerPartySession(
       limitedResources: structuredClone(character.limitedResources),
       hitDice: structuredClone(character.hitDice),
       consumables: structuredClone(character.consumables),
+      aid: structuredClone(character.aid),
       equipment: structuredClone(character.equipment),
     })),
     reactionPolicies: state.reactionPolicies
@@ -902,7 +965,7 @@ function decodePartyCharacter(value: unknown): PartyCharacterSessionState {
   const keys = [
     'characterId', 'combatantId', 'currentHitPoints', 'hitPointMaximum',
     'exhaustionLevel', 'constitutionModifier', 'life', 'deathSaves', 'spellSlots',
-    'limitedResources', 'hitDice', 'consumables', 'equipment',
+    'limitedResources', 'hitDice', 'consumables', 'aid', 'equipment',
   ] as const;
   if (!isRecord(value) || !exactKeys(value, keys) ||
     !Number.isSafeInteger(value.characterId) || typeof value.characterId !== 'number' || value.characterId < 1 ||
@@ -913,7 +976,8 @@ function decodePartyCharacter(value: unknown): PartyCharacterSessionState {
     !['living', 'dying', 'stable', 'dead'].includes(String(value.life)) ||
     !(value.deathSaves === null || isRecord(value.deathSaves)) ||
     !Array.isArray(value.spellSlots) || !Array.isArray(value.limitedResources) ||
-    !Array.isArray(value.consumables) || !(value.equipment === null || isRecord(value.equipment))) {
+    !Array.isArray(value.consumables) || !(value.aid === null || isRecord(value.aid)) ||
+    !(value.equipment === null || isRecord(value.equipment))) {
     throw new TypeError('Party character session state is malformed.');
   }
   const combatant = combatantId(value.combatantId);
@@ -953,16 +1017,35 @@ function decodePartyCharacter(value: unknown): PartyCharacterSessionState {
   if (new Set(limitedResources.map((resource) => resource.id)).size !== limitedResources.length) {
     throw new TypeError('Party limited-resource pools must be unique.');
   }
-  const consumables = value.consumables.map((consumable) => {
-    if (!isRecord(consumable) || !exactKeys(consumable, ['effectId', 'remainingUses']) ||
-      typeof consumable.effectId !== 'string' || !safeNonnegativeInteger(consumable.remainingUses)) {
+  const consumables = value.consumables.map((consumable): PartyConsumableState => {
+    if (!isRecord(consumable) || typeof consumable.effectId !== 'string' ||
+      !safeNonnegativeInteger(consumable.remainingUses)) {
       throw new TypeError('Party consumable state is malformed.');
     }
-    return { effectId: encounterEffectId(consumable.effectId), remainingUses: consumable.remainingUses };
+    if (consumable.kind === 'goodberries' && exactKeys(consumable, ['kind', 'effectId', 'remainingUses'])) {
+      return { kind: 'goodberries', effectId: encounterEffectId(consumable.effectId), remainingUses: consumable.remainingUses };
+    }
+    if (consumable.kind === 'potion_of_healing' &&
+      exactKeys(consumable, ['kind', 'effectId', 'itemId', 'remainingUses']) &&
+      typeof consumable.itemId === 'string') {
+      return {
+        kind: 'potion_of_healing',
+        effectId: encounterEffectId(consumable.effectId),
+        itemId: itemId(consumable.itemId),
+        remainingUses: consumable.remainingUses,
+      };
+    }
+    throw new TypeError('Party consumable state is malformed.');
   });
   if (new Set(consumables.map((consumable) => consumable.effectId)).size !== consumables.length) {
     throw new TypeError('Party consumable effects must be unique.');
   }
+  const aid = value.aid === null ? null : (() => {
+    if (!exactKeys(value.aid, ['source', 'amount']) || typeof value.aid.source !== 'string' || value.aid.amount !== 5) {
+      throw new TypeError('Party Aid state is malformed.');
+    }
+    return { source: combatantId(value.aid.source), amount: 5 as const };
+  })();
   return {
     characterId: value.characterId,
     combatantId: combatant,
@@ -976,6 +1059,7 @@ function decodePartyCharacter(value: unknown): PartyCharacterSessionState {
     limitedResources,
     hitDice: decodeHitDice(value.hitDice),
     consumables,
+    aid,
     equipment: decodeEquipment(value.equipment, combatant),
   };
 }

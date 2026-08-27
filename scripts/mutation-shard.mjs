@@ -11,11 +11,12 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const STRYKER_CONFIG_PATH = resolve(PROJECT_ROOT, 'stryker.config.json');
+const STRYKER_CONFIG_PATH = resolve(PROJECT_ROOT, 'stryker.conf.json');
 const ARTIFACT_ROOT = resolve(PROJECT_ROOT, 'reports/mutation-shards');
 const MANIFEST_PATH = resolve(ARTIFACT_ROOT, 'manifest.json');
 const AGGREGATE_PATH = resolve(PROJECT_ROOT, 'mutation-report.json');
@@ -51,7 +52,7 @@ function usage() {
   node scripts/mutation-shard.mjs merge [--shards N] [--rerun]
 
 The default shard count is ${DEFAULT_SHARD_COUNT}. Shard numbers are one-based.
-Run concurrency defaults to stryker.config.json (${BASE_CONCURRENCY} today) and can
+Run concurrency defaults to stryker.conf.json (${BASE_CONCURRENCY} today) and can
 also be set with ${CONCURRENCY_ENV}; --concurrency takes precedence.
 --chunk-files limits each Stryker invocation to N mutate files. Chunked runs
 acquire the shared box lock as class long once per chunk and release it between
@@ -233,7 +234,7 @@ async function collectFiles(path) {
 
 async function resolveMutateFiles(patterns) {
   if (!Array.isArray(patterns) || patterns.length === 0 || patterns.some((entry) => typeof entry !== 'string')) {
-    fail('stryker.config.json must contain a non-empty string array named mutate.');
+    fail('stryker.conf.json must contain a non-empty string array named mutate.');
   }
 
   const positivePatterns = patterns.filter((pattern) => !pattern.startsWith('!'));
@@ -271,7 +272,7 @@ async function createManifest(shardCount) {
   const config = JSON.parse(configText);
   if (config.concurrency !== BASE_CONCURRENCY) {
     fail(
-      `Expected stryker.config.json concurrency ${BASE_CONCURRENCY}; found ${JSON.stringify(config.concurrency)}. ` +
+      `Expected stryker.conf.json concurrency ${BASE_CONCURRENCY}; found ${JSON.stringify(config.concurrency)}. ` +
         'Refusing to run with an unreviewed machine-load setting.',
     );
   }
@@ -296,7 +297,7 @@ async function createManifest(shardCount) {
   const manifestCore = {
     version: 1,
     shardCount,
-    configFile: 'stryker.config.json',
+    configFile: 'stryker.conf.json',
     configHash: sha256(configText),
     mutatePatterns: config.mutate,
     fileListHash: sha256(files.join('\n')),
@@ -317,7 +318,7 @@ function shardPaths(shard, rerun = false, artifactRoot = ARTIFACT_ROOT) {
   return {
     shardDirectory,
     directory,
-    config: resolve(directory, 'stryker.config.json'),
+    config: resolve(directory, 'stryker.conf.json'),
     rawSources: resolve(directory, 'raw-sources.json'),
     report: resolve(directory, 'mutation.json'),
     // Audit and rerun layers intentionally share incremental state (D308).
@@ -333,7 +334,7 @@ function chunkPaths(paths, chunkIndex) {
   return {
     name,
     directory,
-    config: resolve(directory, 'stryker.config.json'),
+    config: resolve(directory, 'stryker.conf.json'),
     report: resolve(directory, 'mutation.json'),
     tempDirName: `.stryker-tmp/${slashPath(relative(ARTIFACT_ROOT, directory))}`,
   };
@@ -404,8 +405,12 @@ function stockWorkerAllocation(concurrency, checkerCount) {
 }
 
 async function snapshotRawSourceImports(snapshotPath) {
-  const sourceFiles = (await collectFiles(resolve(PROJECT_ROOT, 'src')))
-    .filter((file) => file.endsWith('.ts'))
+  const importers = [];
+  for (const root of ['src', 'tests', 'tools', 'scripts']) {
+    importers.push(...await collectFiles(resolve(PROJECT_ROOT, root)));
+  }
+  const sourceFiles = importers
+    .filter((file) => /\.(?:[cm]?[jt]s)$/u.test(file))
     .sort();
   const rawSourceFiles = new Set();
   const importPatterns = [
@@ -529,7 +534,7 @@ async function runShard(
   // skipped. Refuse anything else rather than risk a silent inherit.
   // Stryker 9's schema default is "perTest" (schema/stryker-schema.json).
   if ((config.coverageAnalysis ?? 'perTest') !== 'perTest') {
-    fail('Shard runs require coverageAnalysis "perTest" in stryker.config.json (D308 cache-safety).');
+    fail('Shard runs require coverageAnalysis "perTest" in stryker.conf.json (D308 cache-safety).');
   }
   const concurrency = concurrencyOverride ?? config.concurrency;
   const workers = stockWorkerAllocation(concurrency, config.checkers.length);
@@ -1125,9 +1130,23 @@ async function main() {
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch((error) => {
-    console.error(error instanceof Error ? error.message : error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    // Loud failure: the supervisor loop polls this sentinel instead of
+    // scanning megabyte logs for a buried shard failure.
+    writeFileSync(
+      resolve(PROJECT_ROOT, '.tmp-mutation-FAILED'),
+      `when: ${new Date().toISOString()}\ncommand: mutation-shard ${process.argv.slice(2).join(' ')}\n${message}\naction: supervisor — fix and restart the run.\n`,
+    );
     process.exitCode = 1;
   });
 }
 
-export { mergeReports, namespaceShardReport, parseArguments, shardPaths };
+export {
+  mergeReports,
+  namespaceShardReport,
+  parseArguments,
+  shardPaths,
+  snapshotRawSourceImports,
+  writeMutationVitestConfig,
+};

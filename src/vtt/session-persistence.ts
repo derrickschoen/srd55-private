@@ -1,4 +1,4 @@
-import { canonicalJson } from '../commands/canonical-json';
+import { canonicalizeJson, canonicalJson } from '../commands/canonical-json';
 import type { ControllerIdentity } from '../combat/controllers';
 import type {
   CoordinatorPersistence,
@@ -60,6 +60,7 @@ import {
 import { deriveSessionRecord, type SessionRecord } from './session-record';
 import { isHiddenRollCategory } from '../combat/roll-visibility';
 import { reduceSessionEncounter } from './session-encounter-reducer';
+import type { JsonValue } from '../domain/models';
 
 export const VTT_SESSION_SCHEMA_VERSION = 7 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
@@ -1661,16 +1662,173 @@ interface SavedSessionBundleV2 extends SavedSessionBundleV2Body {
   readonly sessionRecord?: SessionRecord;
 }
 
+const JOURNAL_DAG_FORMAT = 'vtt-session-journal-dag' as const;
+
+type JournalDagNode =
+  | readonly ['n']
+  | readonly ['b', boolean]
+  | readonly ['d', number]
+  | readonly ['s', string]
+  | readonly ['a', readonly number[]]
+  | readonly ['o', readonly (string | number)[]];
+
+interface JournalDagBundleBody {
+  readonly format: typeof JOURNAL_DAG_FORMAT;
+  readonly schemaVersion: typeof VTT_SESSION_SCHEMA_VERSION;
+  readonly sessionId: EncounterSessionId;
+  readonly nodes: readonly JournalDagNode[];
+  /** One content-addressed root per retained journal revision, in stream order. */
+  readonly revisions: readonly number[];
+}
+
+interface JournalDagBundle extends JournalDagBundleBody {
+  readonly fingerprint: string;
+  readonly sessionRecord?: SessionRecord;
+}
+
 export interface DecodedSavedSessionFingerprint {
   readonly sessionId: EncounterSessionId;
   readonly fingerprint: string;
   readonly revisionCount: number;
   readonly room: number | null;
   readonly round: number;
+  readonly initialSeed: number;
 }
 
 function sessionFingerprint(body: SavedSessionBundleV2Body): string {
   return sha256(canonicalJson(body));
+}
+
+function encodeJournalDag(revisions: readonly SessionRevision[]): Pick<JournalDagBundleBody, 'nodes' | 'revisions'> {
+  const nodes: JournalDagNode[] = [];
+  const nodeIds = new Map<string, number>();
+  const encodeNode = (value: JsonValue): number => {
+    let node: JournalDagNode;
+    if (value === null) node = ['n'];
+    else if (typeof value === 'boolean') node = ['b', value];
+    else if (typeof value === 'number') node = ['d', value];
+    else if (typeof value === 'string') node = ['s', value];
+    else if (Array.isArray(value)) node = ['a', value.map(encodeNode)];
+    else {
+      node = ['o', Object.keys(value).sort().flatMap((key) => [key, encodeNode(value[key]!)])];
+    }
+    const key = JSON.stringify(node);
+    const existing = nodeIds.get(key);
+    if (existing !== undefined) return existing;
+    const id = nodes.length;
+    nodes.push(node);
+    nodeIds.set(key, id);
+    return id;
+  };
+  return {
+    nodes,
+    revisions: revisions.map((revision) => encodeNode(canonicalizeJson(revision))),
+  };
+}
+
+function decodeJournalDag(
+  rawNodes: unknown,
+  rawRevisionRoots: unknown,
+): readonly SessionRevision[] {
+  if (!Array.isArray(rawNodes) || !Array.isArray(rawRevisionRoots) || rawRevisionRoots.length === 0) {
+    throw new TypeError('Saved VTT session journal DAG is malformed.');
+  }
+  const values: JsonValue[] = [];
+  const dereference = (reference: unknown, nodeIndex: number): JsonValue => {
+    if (!Number.isSafeInteger(reference) || (reference as number) < 0 || (reference as number) >= nodeIndex) {
+      throw new TypeError('Saved VTT session journal DAG has an invalid child reference.');
+    }
+    const value = values[reference as number];
+    if (value === undefined) throw new TypeError('Saved VTT session journal DAG has a missing child.');
+    return value;
+  };
+  for (const [nodeIndex, rawNode] of rawNodes.entries()) {
+    if (!Array.isArray(rawNode) || typeof rawNode[0] !== 'string') {
+      throw new TypeError('Saved VTT session journal DAG has a malformed node.');
+    }
+    switch (rawNode[0]) {
+      case 'n':
+        if (rawNode.length !== 1) throw new TypeError('Saved VTT session journal DAG has a malformed null node.');
+        values.push(null);
+        break;
+      case 'b':
+        if (rawNode.length !== 2 || typeof rawNode[1] !== 'boolean') {
+          throw new TypeError('Saved VTT session journal DAG has a malformed boolean node.');
+        }
+        values.push(rawNode[1]);
+        break;
+      case 'd':
+        if (rawNode.length !== 2 || typeof rawNode[1] !== 'number' || !Number.isFinite(rawNode[1])) {
+          throw new TypeError('Saved VTT session journal DAG has a malformed number node.');
+        }
+        values.push(rawNode[1]);
+        break;
+      case 's':
+        if (rawNode.length !== 2 || typeof rawNode[1] !== 'string') {
+          throw new TypeError('Saved VTT session journal DAG has a malformed string node.');
+        }
+        values.push(rawNode[1]);
+        break;
+      case 'a':
+        if (rawNode.length !== 2 || !Array.isArray(rawNode[1])) {
+          throw new TypeError('Saved VTT session journal DAG has a malformed array node.');
+        }
+        values.push(rawNode[1].map((reference) => dereference(reference, nodeIndex)));
+        break;
+      case 'o': {
+        if (rawNode.length !== 2 || !Array.isArray(rawNode[1]) || rawNode[1].length % 2 !== 0) {
+          throw new TypeError('Saved VTT session journal DAG has a malformed object node.');
+        }
+        const object = Object.create(null) as Record<string, JsonValue>;
+        for (let index = 0; index < rawNode[1].length; index += 2) {
+          const key = rawNode[1][index];
+          const reference = rawNode[1][index + 1];
+          if (typeof key !== 'string' || Object.hasOwn(object, key)) {
+            throw new TypeError('Saved VTT session journal DAG has a malformed object entry.');
+          }
+          object[key] = dereference(reference, nodeIndex);
+        }
+        values.push(object);
+        break;
+      }
+      default:
+        throw new TypeError(`Saved VTT session journal DAG has unknown node kind ${JSON.stringify(rawNode[0])}.`);
+    }
+  }
+  return rawRevisionRoots.map((root) => {
+    if (!Number.isSafeInteger(root) || (root as number) < 0 || (root as number) >= values.length) {
+      throw new TypeError('Saved VTT session journal DAG has an invalid revision root.');
+    }
+    return decodeRevision(values[root as number]);
+  });
+}
+
+function decodeJournalDagBundle(value: Readonly<Record<string, unknown>>): SavedSessionBundleV2 {
+  if (
+    value.schemaVersion !== VTT_SESSION_SCHEMA_VERSION ||
+    typeof value.sessionId !== 'string' ||
+    typeof value.fingerprint !== 'string'
+  ) {
+    throw new TypeError('Saved VTT session journal DAG header is malformed.');
+  }
+  const body: JournalDagBundleBody = {
+    format: JOURNAL_DAG_FORMAT,
+    schemaVersion: VTT_SESSION_SCHEMA_VERSION,
+    sessionId: value.sessionId as EncounterSessionId,
+    nodes: value.nodes as readonly JournalDagNode[],
+    revisions: value.revisions as readonly number[],
+  };
+  if (sha256(canonicalJson(body)) !== value.fingerprint) {
+    throw new SessionFingerprintMismatchError();
+  }
+  const revisions = decodeJournalDag(value.nodes, value.revisions);
+  const expanded: SavedSessionBundleV2Body = {
+    format: 'vtt-session-revisions',
+    schemaVersion: VTT_SESSION_SCHEMA_VERSION,
+    sessionId: body.sessionId,
+    revisions,
+  };
+  return { ...expanded, fingerprint: value.fingerprint };
 }
 
 export interface VttSessionMigration {
@@ -1949,6 +2107,9 @@ export function validateVttSessionMigrationRegistry(): void {
 
 function migrateSavedBundle(value: unknown): SavedSessionBundleV2 {
   validateVttSessionMigrationRegistry();
+  if (isRecord(value) && value.format === JOURNAL_DAG_FORMAT) {
+    return decodeJournalDagBundle(value);
+  }
   if (!isRecord(value) || !Number.isSafeInteger(value.schemaVersion)) {
     throw new TypeError('Saved VTT session has no valid schema version.');
   }
@@ -1998,17 +2159,18 @@ export function exportSavedSession(
   const revisions = store.revisions(sessionId);
   if (revisions.length === 0) throw new Error('Encounter session does not exist.');
   replaySessionRevisions(revisions);
-  const body: SavedSessionBundleV2Body = {
-    format: 'vtt-session-revisions',
+  const encoded = encodeJournalDag(revisions);
+  const body: JournalDagBundleBody = {
+    format: JOURNAL_DAG_FORMAT,
     schemaVersion: VTT_SESSION_SCHEMA_VERSION,
     sessionId,
-    revisions,
+    ...encoded,
   };
   return canonicalJson({
     ...body,
-    fingerprint: sessionFingerprint(body),
+    fingerprint: sha256(canonicalJson(body)),
     sessionRecord: deriveSessionRecord(revisions),
-  } satisfies SavedSessionBundleV2);
+  } satisfies JournalDagBundle);
 }
 
 /** Decodes, fingerprints, and replays a save without importing it. */
@@ -2023,6 +2185,7 @@ export function decodeSavedSessionFingerprint(
     revisionCount: bundle.revisions.length,
     room: latest.partyState?.room ?? null,
     round: latest.encounterState.round,
+    initialSeed: latest.rngState.initialSeed,
   };
 }
 

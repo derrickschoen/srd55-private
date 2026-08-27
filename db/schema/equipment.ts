@@ -5,6 +5,7 @@ import {
   sqliteTable,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 import type {
   ArmorTemplateId,
   ClassDefinitionId,
@@ -98,5 +99,11 @@ export const class_equipment_items = sqliteTable(
     index('class_equipment_items_class_definition_id_index').on(
       table.class_definition_id,
     ),
+    index('class_equipment_items_weapon_index')
+      .on(table.weapon_template_id)
+      .where(sql`weapon_template_id IS NOT NULL`),
+    index('class_equipment_items_armor_index')
+      .on(table.armor_template_id)
+      .where(sql`armor_template_id IS NOT NULL`),
   ],
 );

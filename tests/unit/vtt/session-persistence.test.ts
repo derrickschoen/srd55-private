@@ -163,7 +163,10 @@ describe('event-sourced encounter persistence', () => {
   it('unknown transition kind refuses the whole session file with a typed refusal naming the kind', () => {
     const source = new MemoryBrowserSessionStore();
     createJournal(source, new MemoryMirrorSink(), new ControllerRegistry([]));
-    const bytes = exportSavedSession(source, encounterSessionId('session:persistence-test'));
+    const bytes = exportSavedSessionV1ForMigrationTest(
+      source,
+      encounterSessionId('session:persistence-test'),
+    );
     const document = JSON.parse(bytes) as {
       revisions: Array<{ transition: { kind: string } }>;
     };
@@ -256,12 +259,18 @@ describe('event-sourced encounter persistence', () => {
       combatantId: fixture.player.id,
     });
     const bytes = exportSavedSession(store, encounterSessionId('session:persistence-test'));
-    const document = JSON.parse(bytes) as { revisions: Array<Record<string, unknown>> };
+    const document = JSON.parse(bytes) as {
+      format: string;
+      nodes: unknown[];
+      revisions: unknown[];
+    };
 
     expect(canonicalJson(playerView)).toContain('seat:persistence-negative-control');
     expect(bytes).not.toContain('seat:persistence-negative-control');
     expect(bytes).not.toContain('"audience":"player"');
-    expect(document.revisions.every((revision) => !('projections' in revision))).toBe(true);
+    expect(document).toMatchObject({ format: 'vtt-session-journal-dag' });
+    expect(document.nodes.length).toBeGreaterThan(document.revisions.length);
+    expect(document.revisions.every((revision) => Number.isSafeInteger(revision))).toBe(true);
   });
 
   it('RESPONSE-CRASH-DOES-NOT-REPEAT applies a persisted accepted response without another side effect', async () => {

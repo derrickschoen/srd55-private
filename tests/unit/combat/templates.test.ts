@@ -1,11 +1,13 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
   affectedCells,
+  affectedCellsAmong,
   coneAffectedCells,
   creatureOccupiesAffectedCell,
   cubeAffectedCells,
+  cubeAffectedCellsAmong,
   cylinderAffectedCells,
   emanationAffectedCells,
   feetPoint,
@@ -388,6 +390,18 @@ describe('template placement contracts and shared consumers', () => {
         origin: feetPoint(0, 5), center: feetPoint(5, 5), axis: { x: 1, y: 0 }, size: feet(10), includeOrigin: false,
       },
     }));
+    const cube = {
+      origin: feetPoint(0, 5), center: feetPoint(5, 5), axis: { x: 1, y: 0 }, size: feet(10), includeOrigin: false,
+    };
+    const candidates = [{ column: 0, row: 0 }, { column: 1, row: 1 }];
+    expect(cubeAffectedCellsAmong(grid, cube, candidates)).toEqual(
+      cubeAffectedCells(grid, cube).filter((cell) => candidates.some(
+        (candidate) => candidate.column === cell.column && candidate.row === cell.row,
+      )),
+    );
+    expect(affectedCellsAmong(grid, { shape: 'cube', template: cube }, candidates)).toEqual(
+      cubeAffectedCellsAmong(grid, cube, candidates),
+    );
     expect(cylinderAffectedCells(grid, {
       origin: feetPoint(5, 5), radius: feet(5), height: feet(10),
     })).toEqual(affectedCells(grid, {

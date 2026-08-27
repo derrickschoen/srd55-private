@@ -2,7 +2,7 @@
 
 The Vane Warren is one original stronghold containing three **separate** leader
 fight manifests. Their rosters are never concatenated. The figures below are
-structural action-economy judgments for a four-PC party, not simulation results
+structural action-economy judgments for a five-PC party, not simulation results
 and not encounter-building XP claims.
 
 ## Action-economy ruler
@@ -13,17 +13,26 @@ places one Legendary Action immediately after another creature's turn and gives
 the monster a limited pool that refreshes at the start of its turn
 (`docs/srd/full/srd-5.2.1.txt:16703-16716`). Delayed waves and conditional
 joiners count only in the fight that can activate them. The denominator is the
-four PCs' four ordinary turn opportunities.
+five PCs' five ordinary turn opportunities.
 
 | Separate fight | Counted hostile opportunities | Computation | Recorded ratio | Structural purpose |
 |---|---:|---:|---:|---|
-| The Cinder Rite | 14 | 6 standing (including Ashmaw) + 4 first-beat adds + 4 second-beat adds | 14 / 4 = **3.5x** | Brute-priest pressure plus two subsequent-round alarm waves. |
-| The Iron Voice | 8 | Marshal Kett's ordinary turn + 3 Legendary Action uses + 4 standing retainers | 8 / 4 = **2.0x** | Warlord with a complete standing retinue and repeated between-turn decisions. |
-| The Last Muster | 6 | Commander Sablehook + 3 standing guards + 2 leader-Bloodied conditional joiners | 6 / 4 = **1.5x** | A smaller command fight whose reserve enters only when its leader is Bloodied. |
+| The Cinder Rite | 4 | Ashmaw + one standing drummer + one first-beat minion + one second-beat warrior | 4 / 5 = **0.8x** | Brute-priest pressure plus two subsequent-round alarm waves; the alarm and both wave classes remain intact. |
+| The Iron Voice | 2 | Marshal Kett's ordinary turn + 1 Legendary Action use | 2 / 5 = **0.4x** | A coherent solo warlord with its between-turn decision and Legendary Resistance intact. |
+| The Last Muster | 2 | Commander Sablehook + one leader-Bloodied conditional Goblin Warrior | 2 / 5 = **0.4x** | A command fight whose reserve still enters only when its leader is Bloodied. |
 
 These numbers deliberately measure maximum listed pressure, not simultaneous
 round-one bodies: Cinder adds arrive only after the war drum is used, and Last
 Muster reserves are absent until their typed condition is satisfied.
+
+These are the unchanged post-D382 rosters remeasured for D385's fifth PC; every
+ratio drops, and no encounter was tuned upward. The pre-D382 record was 3.5x, 2.0x, and
+1.5x respectively. Adds were trimmed before leaders: Cinder retains Ashmaw and
+both one-member alarm waves; Iron Voice retains Marshal Kett (58 HP, one attack
+per action, one Legendary Action) while removing the four retainers; Last Muster
+retains Commander Sablehook and a one-warrior Bloodied reserve. The fixed-seed
+evidence and the full before/after compositions are recorded in
+`docs/design/2026-08-25-survival-analysis.md`.
 
 ## Terrain and object vocabulary
 
@@ -37,6 +46,17 @@ verticality rule. The playable setup contains:
 - rubble difficult terrain;
 - a dim-light region and a lightly obscured smoke region;
 - a flat ember-bed movement hazard positioned for forced-movement plays.
+
+Each fight also has two anchored half-cover obstacle cells: the brazier at
+(7,4) and oil cask at (7,7), sheltering the west-side approach around (6,4)
+and (6,8) from the leaders' likely east-side positions. The Cinder Rite adds
+the war drum at (11,5) as a third, three-quarters-cover obstacle. These are
+reachable from the party entry within one normal move and remain within the
+representative casters' ranges. Per SRD 5.2.1, Half Cover grants +2 and
+Three-Quarters Cover grants +5 to both AC and Dexterity saving throws
+(`docs/srd/full/srd-5.2.1.txt:270,371`). Cover changes are recorded without
+re-tuning any roster or action-economy ratio; difficulty is remeasured after
+the encounter lanes merge.
 
 The bundled encounter explicitly enables the named `flammable_grease` optional
 rule. This is a disclosed SRD deviation: SRD Grease is nonflammable and creates

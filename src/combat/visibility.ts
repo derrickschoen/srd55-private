@@ -113,6 +113,7 @@ export interface PlayerVisibleCombatant {
 export interface PlayerOwnedCombatant {
   readonly id: CombatantId;
   readonly hitPoints: number;
+  readonly hitPointMaximum: number;
   readonly turn: TurnResources;
   readonly wildShapeUses: EncounterCombatantState['wildShapeUses'];
 }
@@ -254,6 +255,7 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'resource_spent':
     case 'limited_resource_spent':
     case 'healing_pool_consumed':
+    case 'healing_potion_consumed':
     case 'spell_slot_spent':
     case 'temporary_hit_points_changed':
     case 'stance_started':
@@ -279,7 +281,8 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
     case 'legendary_action_window_closed':
     case 'legendary_resistance_used': return [event.combatant];
     case 'initiative_block_rolled': return event.combatants;
-    case 'spell_component_consumed': return [event.caster];
+    case 'spell_component_consumed':
+    case 'slow_spellcasting_checked': return [event.caster];
     case 'spell_cast':
     case 'sustained_effect_activated':
     case 'sustained_effect_triggered': return [event.caster, ...event.targets];
@@ -313,6 +316,7 @@ function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
       return 'actor' in event && event.actor !== null ? [event.actor] : [];
     case 'world_object_used': return [event.actor];
     case 'reinforcement_wave_deployed': return [event.calledBy, ...event.combatants];
+    case 'conditional_joiners_deployed': return [event.leader, ...event.combatants];
     case 'persistent_area_created':
     case 'persistent_area_moved': return [event.owner];
     case 'persistent_area_membership_changed': return [...event.entered, ...event.exited];
@@ -502,6 +506,7 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
       .map((subject) => ({
         id: subject.profile.id,
         hitPoints: subject.hitPoints,
+        hitPointMaximum: effectiveCombatRules(state, subject.profile.id).hitPointMaximum,
         turn: structuredClone(subject.turn),
         wildShapeUses: structuredClone(subject.wildShapeUses),
       })),

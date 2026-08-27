@@ -9,6 +9,7 @@ import { UNICORN } from '../../../src/combat/statblocks/monsters';
 import { feetPoint } from '../../../src/combat/templates';
 import { projectDmView } from '../../../src/combat/visibility';
 import {
+  combatantId,
   codexSessionId,
   damageType,
   dieSides,
@@ -17,7 +18,9 @@ import {
   encounterSessionId,
   effectStackingIdentity,
   feet,
+  limitedResourcePoolId,
   persistentAreaId,
+  statblockId,
 } from '../../../src/combat/values';
 import { deriveSessionRecord } from '../../../src/vtt/session-record';
 import {
@@ -27,11 +30,13 @@ import {
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { parseOptionalEncounterSeed } from '../../../src/vtt/session-seed';
 import { projectEncounterTimeline } from '../../../src/vtt/session-timeline';
+import { DEFAULT_REFUSAL_HANDLING_SETTINGS } from '../../../src/vtt/refusal-handling';
 import {
   EncounterSessionJournal,
   MemoryBrowserSessionStore,
   MemoryMirrorSink,
   deriveBranchRng,
+  decodeSavedSessionFingerprint,
   exportSavedSession,
   importSavedSession,
 } from '../../../src/vtt/session-persistence';
@@ -351,7 +356,7 @@ describe('D377.3 session timeline and pacing controls', () => {
     expect(first?.rngState.initialSeed).toBe(chosenSeed);
 
     const bytes = exportSavedSession(store, host.sessionId);
-    expect(bytes).toContain('"initialSeed":424242');
+    expect(decodeSavedSessionFingerprint(bytes).initialSeed).toBe(chosenSeed);
     const imported = new MemoryBrowserSessionStore();
     const importedSessionId = importSavedSession(imported, bytes);
     const resumed = EncounterSessionJournal.resume(
@@ -365,6 +370,14 @@ describe('D377.3 session timeline and pacing controls', () => {
 });
 
 describe('D377.14 structured session record export', () => {
+  it('returns an exact empty record when no journal revisions exist', () => {
+    expect(deriveSessionRecord([])).toEqual({
+      kind: 'end_of_session_summary',
+      journalRevisionCount: 0,
+      encounters: [],
+    });
+  });
+
   it('summary_drops_overrides: totals a hand-computed fixture and retains the DM fiat ruling card', () => {
     const caster = playerProfile('record-caster', {
       initiativeBonus: 30,
@@ -444,5 +457,406 @@ describe('D377.14 structured session record export', () => {
     expect(fixture.store.revisions(fixture.sessionId)).toEqual(revisionsBefore);
     expect(exported).toContain('"sessionRecord":{"encounters"');
     expect(exported).toContain('The cracked ward yields to the stated plan.');
+  });
+
+  it('records Revivify and DM un-kill ruling cards as distinct revivals before later deaths', () => {
+    const state = pacedState();
+    const revivedBySpell = state.combatants[0]?.profile.id;
+    const revivedByDm = state.combatants[1]?.profile.id;
+    const attacker = state.combatants[2]?.profile.id;
+    if (revivedBySpell === undefined || revivedByDm === undefined || attacker === undefined) {
+      throw new Error('Recovery record fixture is incomplete.');
+    }
+    const fixture = journalFixture('recovery-record', state);
+    fixture.journal.record({
+      transition: {
+        kind: 'reducer_applied',
+        command: {
+          type: 'adjudicate',
+          target: revivedByDm,
+          subject: 'engine:manual-adjudication',
+          reasoning: 'Recovery record fixture.',
+          consequence: { kind: 'hit_point_delta', amount: 1 },
+        },
+        events: [
+          {
+            sequence: 1,
+            type: 'spell_cast',
+            caster: revivedByDm,
+            spellId: 'revivify',
+            slotLevel: 3,
+            targets: [revivedBySpell],
+          },
+          {
+            sequence: 2,
+            type: 'adjudicated',
+            target: revivedByDm,
+            subject: 'engine:manual-adjudication',
+            reasoning: 'Recovery record fixture.',
+            consequence: { kind: 'hit_points', before: 0, after: 1, lifeState: 'living' },
+          },
+          {
+            sequence: 3,
+            type: 'damage_applied',
+            source: attacker,
+            target: revivedBySpell,
+            amount: 1,
+            hitPointsBefore: 1,
+            hitPointsAfter: 0,
+            lifeState: 'dead',
+            massiveDamage: false,
+          },
+          {
+            sequence: 4,
+            type: 'damage_applied',
+            source: attacker,
+            target: revivedByDm,
+            amount: 1,
+            hitPointsBefore: 1,
+            hitPointsAfter: 0,
+            lifeState: 'dead',
+            massiveDamage: false,
+          },
+        ],
+      },
+      encounterState: state,
+      coordinatorState: IDLE,
+      controllers: [],
+    });
+
+    const record = deriveSessionRecord(fixture.store.revisions(fixture.sessionId)).encounters[0];
+    expect(record?.revivals).toEqual([
+      { combatant: revivedBySpell, eventSequence: 1, cause: 'revivify', source: revivedByDm },
+      { combatant: revivedByDm, eventSequence: 2, cause: 'dm_override', source: null },
+    ]);
+    expect(record?.deaths).toEqual([
+      { combatant: revivedBySpell, eventSequence: 3, cause: 'damage' },
+      { combatant: revivedByDm, eventSequence: 4, cause: 'damage' },
+    ]);
+    const serializedRecord = JSON.stringify(deriveSessionRecord(
+      fixture.store.revisions(fixture.sessionId),
+    ));
+    expect(serializedRecord).toContain('"cause":"revivify"');
+    expect(serializedRecord).toContain('"cause":"dm_override"');
+  });
+
+  it('summarizes every resource and mortality event while excluding plausible false positives', () => {
+    const state = pacedState();
+    const first = state.combatants[0]?.profile.id;
+    const second = state.combatants[1]?.profile.id;
+    const third = state.combatants[2]?.profile.id;
+    if (first === undefined || second === undefined || third === undefined) {
+      throw new Error('Comprehensive session record fixture is incomplete.');
+    }
+    const unknown = combatantId('combatant:record-unknown');
+    const alphaPool = limitedResourcePoolId('resource:alpha');
+    const zetaPool = limitedResourcePoolId('resource:zeta');
+    const fixture = journalFixture('comprehensive-record', state);
+    fixture.journal.record({
+      transition: {
+        kind: 'reducer_applied',
+        command: { type: 'end_turn', actor: first },
+        events: [
+          {
+            sequence: 1, type: 'damage_applied', source: unknown, target: first,
+            amount: 4, hitPointsBefore: 20, hitPointsAfter: 16,
+            lifeState: 'living', massiveDamage: false,
+          },
+          {
+            sequence: 2, type: 'spell_slot_spent', combatant: first,
+            slotLevel: 3, remaining: 1,
+          },
+          {
+            sequence: 3, type: 'spell_slot_spent', combatant: first,
+            slotLevel: 1, remaining: 2,
+          },
+          {
+            sequence: 4, type: 'spell_slot_spent', combatant: first,
+            slotLevel: 3, remaining: 0,
+          },
+          {
+            sequence: 5, type: 'legendary_action_used', combatant: third,
+            actionId: 'legendary:one', cost: 2, remaining: 1,
+          },
+          {
+            sequence: 6, type: 'legendary_action_used', combatant: third,
+            actionId: 'legendary:two', cost: 1, remaining: 0,
+          },
+          {
+            sequence: 7, type: 'wild_shape_assumed', combatant: second,
+            formId: statblockId('statblock:wolf'), formName: 'Wolf',
+            expiresAtRound: 20, usesRemaining: 1,
+          },
+          {
+            sequence: 8, type: 'wild_shape_assumed', combatant: second,
+            formId: statblockId('statblock:bear'), formName: 'Bear',
+            expiresAtRound: 21, usesRemaining: 0,
+          },
+          {
+            sequence: 9, type: 'limited_resource_spent', combatant: second,
+            resourcePoolId: zetaPool, remaining: 1, purpose: 'zeta use',
+          },
+          {
+            sequence: 10, type: 'limited_resource_spent', combatant: second,
+            resourcePoolId: alphaPool, remaining: 0, purpose: 'alpha use',
+          },
+          {
+            sequence: 11, type: 'limited_resource_spent', combatant: second,
+            resourcePoolId: zetaPool, remaining: 0, purpose: 'zeta use again',
+          },
+          {
+            sequence: 12, type: 'death_save_resolved', combatant: first,
+            roll: 4, outcome: 'failure', successes: 1, failures: 3,
+            lifeState: 'dead', stableRecovery: null,
+          },
+          {
+            sequence: 13, type: 'death_save_resolved', combatant: second,
+            roll: 15, outcome: 'success', successes: 2, failures: 1,
+            lifeState: 'dying', stableRecovery: null,
+          },
+          {
+            sequence: 14, type: 'spell_cast', caster: second, spellId: 'blur',
+            slotLevel: 2, targets: [first],
+          },
+          {
+            sequence: 15, type: 'spell_cast', caster: second, spellId: 'revivify',
+            slotLevel: 3, targets: [first],
+          },
+          {
+            sequence: 16, type: 'adjudicated', target: third,
+            subject: 'mark dead', reasoning: 'Exact negative branch.',
+            consequence: {
+              kind: 'death_override', override: 'mark_dead',
+              before: { hitPoints: 1, lifeState: 'living', successes: 0, failures: 0 },
+              after: { hitPoints: 0, lifeState: 'dead', successes: 0, failures: 3 },
+            },
+          },
+          {
+            sequence: 17, type: 'adjudicated', target: third,
+            subject: 'revive', reasoning: 'Exact positive branch.',
+            consequence: {
+              kind: 'death_override', override: 'revive_at_one_hit_point',
+              before: { hitPoints: 0, lifeState: 'dead', successes: 0, failures: 3 },
+              after: { hitPoints: 1, lifeState: 'living', successes: 0, failures: 0 },
+            },
+          },
+          {
+            sequence: 18, type: 'adjudicated', target: second,
+            subject: 'already living', reasoning: 'Before was not zero.',
+            consequence: { kind: 'hit_points', before: 1, after: 2, lifeState: 'living' },
+          },
+          {
+            sequence: 19, type: 'adjudicated', target: second,
+            subject: 'still down', reasoning: 'After was not positive.',
+            consequence: { kind: 'hit_points', before: 0, after: 0, lifeState: 'stable' },
+          },
+          {
+            sequence: 20, type: 'adjudicated', target: second,
+            subject: 'restored', reasoning: 'Both numeric boundaries match.',
+            consequence: { kind: 'hit_points', before: 0, after: 3, lifeState: 'living' },
+          },
+          {
+            sequence: 21, type: 'initiative_rolled', combatant: first,
+            faces: [11], total: 14,
+          },
+        ],
+      },
+      encounterState: { ...state, round: 3 },
+      coordinatorState: IDLE,
+      controllers: [],
+    });
+
+    const record = deriveSessionRecord(fixture.store.revisions(fixture.sessionId)).encounters[0];
+    expect(record?.roundsElapsed).toBe(3);
+    expect(record?.combatants.map((combatant) => combatant.combatant)).toEqual(
+      [...state.combatants.map((combatant) => combatant.profile.id), unknown].sort(),
+    );
+    expect(record?.combatants.find((combatant) => combatant.combatant === unknown)).toMatchObject({
+      name: String(unknown), damageDealt: 4, damageTaken: 0,
+    });
+    expect(record?.combatants.find((combatant) => combatant.combatant === first)?.name).toBe(
+      state.combatants.find((combatant) => combatant.profile.id === first)?.profile.name,
+    );
+    expect(record?.combatants.find((combatant) => combatant.combatant === first)).toMatchObject({
+      damageDealt: 0,
+      damageTaken: 4,
+      resourcesSpent: {
+        spellSlots: [{ level: 1, count: 1 }, { level: 3, count: 2 }],
+        legendaryActionUses: 0,
+        wildShapeUses: 0,
+        limitedResources: [],
+      },
+    });
+    expect(record?.combatants.find((combatant) => combatant.combatant === second)?.resourcesSpent)
+      .toEqual({
+        spellSlots: [],
+        legendaryActionUses: 0,
+        wildShapeUses: 2,
+        limitedResources: [
+          { resourcePoolId: alphaPool, count: 1 },
+          { resourcePoolId: zetaPool, count: 2 },
+        ],
+      });
+    expect(record?.combatants.find((combatant) => combatant.combatant === third)?.resourcesSpent)
+      .toMatchObject({ legendaryActionUses: 3 });
+    expect(record?.deathSaves).toEqual([
+      {
+        combatant: first, eventSequence: 12, outcome: 'failure',
+        successes: 1, failures: 3, lifeState: 'dead',
+      },
+      {
+        combatant: second, eventSequence: 13, outcome: 'success',
+        successes: 2, failures: 1, lifeState: 'dying',
+      },
+    ]);
+    expect(record?.deaths).toEqual([
+      { combatant: first, eventSequence: 12, cause: 'death_save' },
+      { combatant: third, eventSequence: 16, cause: 'dm_override' },
+    ]);
+    expect(record?.revivals).toEqual([
+      { combatant: first, eventSequence: 15, cause: 'revivify', source: second },
+      { combatant: third, eventSequence: 17, cause: 'dm_override', source: null },
+      { combatant: second, eventSequence: 20, cause: 'dm_override', source: null },
+    ]);
+    expect(record?.dmRulings.map((ruling) => ruling.eventSequence)).toEqual([16, 17, 18, 19, 20]);
+  });
+
+  it('follows only the active ancestry and starts a new ordinal at room composition', () => {
+    const fixture = journalFixture('record-ancestry');
+    const initial = fixture.store.revisions(fixture.sessionId)[0];
+    if (initial === undefined) throw new Error('Ancestry fixture has no initial revision.');
+    const stray = {
+      ...initial,
+      revision: 2,
+      parentRevision: 1,
+      transition: { kind: 'session_ended' as const },
+      encounterState: { ...initial.encounterState, round: 99 },
+    };
+    const partyState = (room: 1 | 2) => ({
+      schemaVersion: 1 as const,
+      rulesEdition: '2024' as const,
+      room,
+      adventuringDayStatus: 'active' as const,
+      characters: [],
+      reactionPolicies: [],
+      refusalHandling: DEFAULT_REFUSAL_HANDLING_SETTINGS,
+    });
+    const continued = {
+      ...initial,
+      revision: 3,
+      parentRevision: 1,
+      transition: { kind: 'session_ended' as const },
+      encounterState: { ...initial.encounterState, round: 2 },
+      partyState: partyState(1),
+    };
+    const nextRoom = {
+      ...initial,
+      revision: 4,
+      parentRevision: 3,
+      transition: { kind: 'room_composed' as const, room: 2 },
+      encounterState: { ...initial.encounterState, round: 4 },
+      partyState: partyState(2),
+    };
+    const concluded = {
+      ...initial,
+      revision: 5,
+      parentRevision: 4,
+      transition: { kind: 'session_ended' as const },
+      encounterState: {
+        ...initial.encounterState,
+        round: 5,
+        phase: {
+          kind: 'concluded' as const,
+          outcome: 'victory' as const,
+          survivingSide: 'player_character' as const,
+          round: 5,
+          revision: 27,
+        },
+      },
+      partyState: partyState(2),
+    };
+
+    const summary = deriveSessionRecord([initial, stray, continued, nextRoom, concluded]);
+    expect(summary.journalRevisionCount).toBe(5);
+    expect(summary.encounters.map((encounter) => ({
+      encounter: encounter.encounter,
+      roundsElapsed: encounter.roundsElapsed,
+      status: encounter.status,
+      room: encounter.room,
+    }))).toEqual([
+      { encounter: 1, roundsElapsed: 2, status: 'open', room: 1 },
+      { encounter: 2, roundsElapsed: 5, status: 'closed', room: 2 },
+    ]);
+    expect(summary.encounters[1]).toMatchObject({
+      conclusion: {
+        outcome: 'victory',
+        survivingSide: 'player_character',
+        round: 5,
+        revision: 27,
+        journalRevision: 5,
+      },
+    });
+  });
+
+  it('uses the latest revision metadata and sorts combatants independently of encounter order', () => {
+    const fixture = journalFixture('record-latest-and-sorted');
+    const initial = fixture.store.revisions(fixture.sessionId)[0];
+    if (initial === undefined) throw new Error('Latest-record fixture has no initial revision.');
+    const encounterState = {
+      ...initial.encounterState,
+      combatants: [...initial.encounterState.combatants].reverse(),
+    };
+    const partyState = (room: 1 | 2) => ({
+      schemaVersion: 1 as const,
+      rulesEdition: '2024' as const,
+      room,
+      adventuringDayStatus: 'active' as const,
+      characters: [],
+      reactionPolicies: [],
+      refusalHandling: DEFAULT_REFUSAL_HANDLING_SETTINGS,
+    });
+    const middle = {
+      ...initial,
+      revision: 2,
+      parentRevision: 1,
+      transition: { kind: 'session_ended' as const },
+      encounterState,
+      partyState: partyState(1),
+    };
+    const latest = {
+      ...initial,
+      revision: 3,
+      parentRevision: 2,
+      transition: { kind: 'session_ended' as const },
+      encounterState,
+      partyState: partyState(2),
+    };
+
+    const record = deriveSessionRecord([
+      { ...initial, encounterState },
+      middle,
+      latest,
+    ]).encounters[0];
+
+    expect(record?.room).toBe(2);
+    expect(record?.combatants.map((combatant) => combatant.combatant)).toEqual(
+      encounterState.combatants.map((combatant) => combatant.profile.id).sort(),
+    );
+  });
+
+  it('rejects missing and out-of-order active ancestry with distinct messages', () => {
+    const fixture = journalFixture('record-invalid-ancestry');
+    const initial = fixture.store.revisions(fixture.sessionId)[0];
+    if (initial === undefined) throw new Error('Invalid ancestry fixture has no initial revision.');
+    const missing = { ...initial, revision: 2, parentRevision: 404 };
+    expect(() => deriveSessionRecord([initial, missing])).toThrowError(
+      'Session record ancestry is incomplete.',
+    );
+
+    const parent = { ...initial, revision: 2, parentRevision: 1 };
+    const child = { ...initial, revision: 3, parentRevision: 2 };
+    expect(() => deriveSessionRecord([parent, initial, child])).toThrowError(
+      'Session record encounter ancestry is incomplete.',
+    );
   });
 });

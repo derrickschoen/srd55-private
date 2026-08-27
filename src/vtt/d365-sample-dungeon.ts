@@ -6,6 +6,8 @@ import { createEncounter } from '../combat/encounter';
 import type { GridCell } from '../combat/grid';
 import { lookupBundledMonster } from '../combat/statblocks/companions';
 import { HOMEBREW_BEAST_ROSTER } from '../combat/statblocks/homebrew-beast-families';
+import { armorClass, worldObjectId } from '../combat/values';
+import type { CoverTier, WorldObject } from '../combat/world-objects';
 import { loadedPartyTurnLegalActions, type LoadedPartyMember } from './party-pack';
 import {
   preloadPartySessionState,
@@ -27,13 +29,23 @@ export interface D365DungeonMonster {
   readonly position: GridCell;
 }
 
+export interface D365CoverPlacement {
+  readonly id: string;
+  readonly name: string;
+  readonly obstacleCells: readonly GridCell[];
+  readonly shelteredCells: readonly GridCell[];
+  readonly tier: Exclude<CoverTier, 'none' | 'total'>;
+}
+
 export interface D365DungeonRoom {
   readonly room: AdventuringDayRoom;
   readonly name: string;
   readonly purpose: 'warmup_pack' | 'control_signatures' | 'ranged_mobile' | 'boss';
   readonly monsters: readonly D365DungeonMonster[];
   readonly blockedCells: readonly GridCell[];
+  readonly coverPlacements: readonly D365CoverPlacement[];
   readonly designSignals: readonly string[];
+  readonly recordedActionEconomyRatio: 0.2 | 0.4 | 0.6 | 0.8;
 }
 
 export interface D365DungeonManifest {
@@ -61,7 +73,24 @@ export const D365_SAMPLE_DUNGEON: D365DungeonManifest = {
         { statblockId: 'statblock:wolf', position: { column: 8, row: 4 } },
       ],
       blockedCells: [{ column: 5, row: 3 }],
+      coverPlacements: [
+        {
+          id: 'north-gate-pillar',
+          name: 'Briar Gate North Pillar',
+          obstacleCells: [{ column: 4, row: 1 }],
+          shelteredCells: [{ column: 3, row: 1 }],
+          tier: 'three_quarters',
+        },
+        {
+          id: 'south-gate-pillar',
+          name: 'Briar Gate South Pillar',
+          obstacleCells: [{ column: 4, row: 5 }],
+          shelteredCells: [{ column: 3, row: 5 }],
+          tier: 'three_quarters',
+        },
+      ],
       designSignals: ['pack_tactics', 'distributed_targets'],
+      recordedActionEconomyRatio: 0.8,
     },
     {
       room: 2,
@@ -72,7 +101,24 @@ export const D365_SAMPLE_DUNGEON: D365DungeonManifest = {
         { statblockId: 'statblock:homebrew-beast/ambush-weaver', position: { column: 7, row: 4 } },
       ],
       blockedCells: [{ column: 5, row: 1 }, { column: 5, row: 5 }],
+      coverPlacements: [
+        {
+          id: 'north-den-casks',
+          name: 'Web-Bound North Casks',
+          obstacleCells: [{ column: 5, row: 1 }],
+          shelteredCells: [{ column: 4, row: 1 }],
+          tier: 'half',
+        },
+        {
+          id: 'south-den-casks',
+          name: 'Web-Bound South Casks',
+          obstacleCells: [{ column: 5, row: 5 }],
+          shelteredCells: [{ column: 4, row: 5 }],
+          tier: 'half',
+        },
+      ],
       designSignals: ['bear_hug', 'ongoing_squeeze', 'web', 'venom', 'spider_climb'],
+      recordedActionEconomyRatio: 0.4,
     },
     {
       room: 3,
@@ -80,24 +126,55 @@ export const D365_SAMPLE_DUNGEON: D365DungeonManifest = {
       purpose: 'ranged_mobile',
       monsters: [
         { statblockId: 'statblock:scout', position: { column: 8, row: 1 } },
-        { statblockId: 'statblock:scout', position: { column: 8, row: 5 } },
         { statblockId: 'statblock:homebrew-beast/ridgewing-hunter', position: { column: 7, row: 2 } },
         { statblockId: 'statblock:homebrew-beast/storm-raptor', position: { column: 7, row: 4 } },
       ],
       blockedCells: [{ column: 4, row: 2 }, { column: 4, row: 4 }],
+      coverPlacements: [
+        {
+          id: 'north-gallery-pillar',
+          name: 'Ridgewing North Gallery Pillar',
+          obstacleCells: [{ column: 4, row: 2 }],
+          shelteredCells: [{ column: 3, row: 2 }],
+          tier: 'three_quarters',
+        },
+        {
+          id: 'south-gallery-pillar',
+          name: 'Ridgewing South Gallery Pillar',
+          obstacleCells: [{ column: 4, row: 4 }],
+          shelteredCells: [{ column: 3, row: 4 }],
+          tier: 'three_quarters',
+        },
+      ],
       designSignals: ['longbow', 'fly_speed', 'raking_pass', 'talon_rake', 'nimble_escape'],
+      recordedActionEconomyRatio: 0.6,
     },
     {
       room: 4,
       name: 'Ironweb Crown',
       purpose: 'boss',
       monsters: [
-        { statblockId: 'statblock:homebrew-beast/dreadweb-weaver', position: { column: 8, row: 3 } },
-        { statblockId: 'statblock:bugbear-stalker', position: { column: 7, row: 1 } },
-        { statblockId: 'statblock:bugbear-stalker', position: { column: 7, row: 5 } },
+        { statblockId: 'statblock:homebrew-beast/ironweb-weaver', position: { column: 8, row: 3 } },
       ],
       blockedCells: [{ column: 5, row: 2 }, { column: 5, row: 4 }],
+      coverPlacements: [
+        {
+          id: 'north-crown-rubble',
+          name: 'Ironweb North Crown Rubble',
+          obstacleCells: [{ column: 5, row: 2 }],
+          shelteredCells: [{ column: 4, row: 2 }],
+          tier: 'half',
+        },
+        {
+          id: 'south-crown-rubble',
+          name: 'Ironweb South Crown Rubble',
+          obstacleCells: [{ column: 5, row: 4 }],
+          shelteredCells: [{ column: 4, row: 4 }],
+          tier: 'half',
+        },
+      ],
       designSignals: ['boss_web_control', 'venom', 'ambush_support'],
+      recordedActionEconomyRatio: 0.2,
     },
   ],
 };
@@ -190,10 +267,30 @@ function monsterProfiles(room: D365DungeonRoom): readonly CombatantProfile[] {
   });
 }
 
+function coverWorldObjects(room: D365DungeonRoom): readonly WorldObject[] {
+  return room.coverPlacements.map((placement) => {
+    const position = placement.obstacleCells[0];
+    if (position === undefined) throw new Error(`${placement.name} has no obstacle cell.`);
+    return {
+      id: worldObjectId(`world-object:d365-room-${String(room.room)}:${placement.id}`),
+      name: placement.name,
+      kind: 'cover',
+      position,
+      footprint: placement.obstacleCells,
+      durability: { kind: 'indestructible' },
+      armorClass: armorClass(15),
+      damageResponses: [],
+      blocking: { movement: false, lineOfSight: false, cover: placement.tier },
+      createdRevision: 0,
+    };
+  });
+}
+
 export function composeD365Room(
   members: readonly LoadedPartyMember[],
   displayNames: ReadonlyMap<number, string>,
   partyState: PartySessionState,
+  policy?: Parameters<typeof loadedPartyTurnLegalActions>[1],
 ): StoredCharacterEncounter {
   const room = roomAt(partyState.room);
   const players = members.map((member) => ({
@@ -206,6 +303,7 @@ export function composeD365Room(
     { column: 1, row: 3 },
     { column: 1, row: 5 },
     { column: 2, row: 3 },
+    { column: 2, row: 5 },
   ];
   const fresh = createEncounter({
     bounds: { columns: 10, rows: 7 },
@@ -223,6 +321,7 @@ export function composeD365Room(
       })),
     ],
     blockedCells: room.blockedCells,
+    worldObjects: coverWorldObjects(room),
     foggedCells: [],
     dmNotes: [
       `${D365_SAMPLE_DUNGEON_ID} room ${String(room.room)}: ${room.name}.`,
@@ -230,7 +329,13 @@ export function composeD365Room(
     ],
   });
   const state = preloadPartySessionState(fresh, partyState);
-  const partyActions = loadedPartyTurnLegalActions(members);
+  const partyActions = loadedPartyTurnLegalActions(members, policy ?? {
+    useHealingPotions: true,
+    openWithBless: true,
+    reserveClericSlotsForBless: true,
+    useWizardTactics: true,
+    useClericContingency: true,
+  });
   return {
     rulesEdition: '2024',
     partyState,

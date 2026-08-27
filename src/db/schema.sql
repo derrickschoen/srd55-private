@@ -76,6 +76,8 @@ CREATE TABLE `background_equipment_items` (
 
 CREATE UNIQUE INDEX `background_equipment_items_template_option_sort_order_unique` ON `background_equipment_items` (`background_template_id`,`option`,`sort_order`);
 CREATE INDEX `background_equipment_items_background_template_id_index` ON `background_equipment_items` (`background_template_id`);
+CREATE INDEX `background_equipment_items_weapon_index` ON `background_equipment_items` (`weapon_template_id`) WHERE weapon_template_id IS NOT NULL;
+CREATE INDEX `background_equipment_items_armor_index` ON `background_equipment_items` (`armor_template_id`) WHERE armor_template_id IS NOT NULL;
 CREATE TABLE `background_template_effects` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`background_template_id` integer NOT NULL,
@@ -155,6 +157,7 @@ CREATE TABLE `background_templates` (
 
 CREATE UNIQUE INDEX `background_templates_content_key_unique` ON `background_templates` (`content_key`);
 CREATE INDEX `background_templates_name_rules_edition_index` ON `background_templates` (`name`,`rules_edition`);
+CREATE INDEX `background_templates_default_origin_feat_index` ON `background_templates` (`default_origin_feat_content_key`) WHERE default_origin_feat_content_key IS NOT NULL;
 CREATE TABLE `catalog_content_aliases` (
 	`content_kind` VARCHAR NOT NULL,
 	`alias_key` VARCHAR NOT NULL,
@@ -168,6 +171,7 @@ CREATE TABLE `catalog_content_aliases` (
 );
 
 CREATE INDEX `catalog_content_aliases_resolution_index` ON `catalog_content_aliases` (`content_kind`,`alias_key`);
+CREATE INDEX `catalog_content_aliases_target_index` ON `catalog_content_aliases` (`content_kind`,`content_key`,`alias_key`);
 CREATE TABLE `catalog_content_archive_members` (
 	`content_kind` VARCHAR NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -183,6 +187,7 @@ CREATE TABLE `catalog_content_archive_members` (
 	CONSTRAINT "catalog_content_archive_members_archived_at_check" CHECK(typeof("catalog_content_archive_members"."archived_at") = 'text')
 );
 
+CREATE INDEX `catalog_archive_members_character_kind_key_index` ON `catalog_content_archive_members` (`character_id`,`content_kind`,`content_key`);
 CREATE TABLE `catalog_content_drafts` (
 	`draft_uuid` VARCHAR PRIMARY KEY NOT NULL,
 	`content_kind` VARCHAR NOT NULL,
@@ -312,6 +317,7 @@ CREATE TABLE `catalog_content_identities` (
 
 CREATE UNIQUE INDEX `catalog_content_identities_kind_key_unique` ON `catalog_content_identities` (`content_kind`,`content_key`);
 CREATE INDEX `catalog_content_identities_layer_kind_index` ON `catalog_content_identities` (`catalog_layer`,`content_kind`);
+CREATE INDEX `catalog_identities_layer_kind_key_index` ON `catalog_content_identities` (`catalog_layer`,`content_kind`,`content_key`);
 CREATE INDEX `catalog_content_identities_name_index` ON `catalog_content_identities` (`content_kind`,`normalized_name`);
 CREATE INDEX `catalog_content_identities_archive_list_index` ON `catalog_content_identities` ("archived_at" desc,`content_kind`,`normalized_name`,`content_key`);
 CREATE TABLE `catalog_content_match_decisions` (
@@ -330,6 +336,8 @@ CREATE TABLE `catalog_content_match_decisions` (
 	CONSTRAINT "catalog_content_match_decisions_decision_check" CHECK("catalog_content_match_decisions"."decision" IN ('match', 'clone'))
 );
 
+CREATE INDEX `catalog_match_decisions_target_index` ON `catalog_content_match_decisions` (`content_kind`,`target_content_key`);
+CREATE INDEX `catalog_match_decisions_reviewed_kind_digest_index` ON `catalog_content_match_decisions` ("reviewed_at" desc,`content_kind`,`incoming_fingerprint_digest`);
 CREATE TABLE `catalog_content_provenance` (
 	`content_kind` VARCHAR NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -371,6 +379,7 @@ CREATE TABLE `catalog_content_replacement_choices` (
 );
 
 CREATE INDEX `catalog_content_replacement_choices_character_index` ON `catalog_content_replacement_choices` (`character_id`,`content_kind`);
+CREATE INDEX `catalog_replacement_choices_successor_index` ON `catalog_content_replacement_choices` (`content_kind`,`successor_content_key`,`character_id`);
 CREATE TABLE `catalog_content_supersessions` (
 	`content_kind` VARCHAR NOT NULL,
 	`superseded_content_key` VARCHAR NOT NULL,
@@ -496,6 +505,9 @@ CREATE TABLE `character_class_levels` (
 
 CREATE UNIQUE INDEX `character_class_levels_character_id_class_definition_id_unique` ON `character_class_levels` (`character_id`,`class_definition_id`);
 CREATE UNIQUE INDEX `character_class_levels_id_character_id_unique` ON `character_class_levels` (`id`,`character_id`);
+CREATE INDEX `character_class_levels_definition_character_index` ON `character_class_levels` (`class_definition_id`,`character_id`);
+CREATE INDEX `character_class_levels_subclass_character_index` ON `character_class_levels` (`subclass_definition_id`,`character_id`) WHERE subclass_definition_id IS NOT NULL;
+CREATE INDEX `character_class_levels_character_id_id_index` ON `character_class_levels` (`character_id`,`id`);
 CREATE TABLE `character_effects` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -558,8 +570,10 @@ CREATE TABLE `character_effects` (
 );
 
 CREATE INDEX `character_effects_character_id_index` ON `character_effects` (`character_id`);
+CREATE INDEX `character_effects_character_sort_index` ON `character_effects` (`character_id`,`sort_order`,`id`);
 CREATE INDEX `character_effects_character_item_id_index` ON `character_effects` (`character_item_id`);
 CREATE INDEX `character_effects_character_weapon_id_index` ON `character_effects` (`character_weapon_id`);
+CREATE INDEX `character_effects_source_character_index` ON `character_effects` (`source_instance_id`,`character_id`) WHERE source_instance_id IS NOT NULL;
 CREATE TABLE `character_hit_point_rolls` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -589,7 +603,9 @@ CREATE TABLE `character_items` (
 );
 
 CREATE INDEX `character_items_character_id_index` ON `character_items` (`character_id`);
+CREATE INDEX `character_items_character_name_index` ON `character_items` (`character_id`,`name`,`id`);
 CREATE UNIQUE INDEX `character_items_id_character_id_unique` ON `character_items` (`id`,`character_id`);
+CREATE INDEX `character_items_source_character_index` ON `character_items` (`source_instance_id`,`character_id`) WHERE source_instance_id IS NOT NULL;
 CREATE TABLE `character_level_feat_choices` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -608,6 +624,7 @@ CREATE TABLE `character_level_feat_choices` (
 
 CREATE UNIQUE INDEX `character_level_feat_choices_class_level_kind_unique` ON `character_level_feat_choices` (`character_class_level_id`,`class_level`,`choice_kind`);
 CREATE INDEX `character_level_feat_choices_character_id_index` ON `character_level_feat_choices` (`character_id`);
+CREATE INDEX `character_level_feat_choices_source_character_index` ON `character_level_feat_choices` (`feat_source_instance_id`,`character_id`) WHERE feat_source_instance_id IS NOT NULL;
 CREATE TABLE `character_operations` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -645,6 +662,7 @@ CREATE TABLE `character_save_points` (
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade
 );
 
+CREATE INDEX `character_save_points_character_id_id_index` ON `character_save_points` (`character_id`,"id" desc);
 CREATE TABLE `character_share_receipts` (
 	`character_id` integer PRIMARY KEY NOT NULL,
 	`local_document_id` VARCHAR NOT NULL,
@@ -702,6 +720,7 @@ CREATE TABLE `character_skill_expertise_grants` (
 CREATE UNIQUE INDEX `character_skill_expertise_grants_source_grant_ordinal_unique` ON `character_skill_expertise_grants` (`source_instance_id`,`grant_key`,`ordinal`);
 CREATE UNIQUE INDEX `character_skill_expertise_grants_character_skill_unique` ON `character_skill_expertise_grants` (`character_id`,`skill`) WHERE skill IS NOT NULL AND state = 'active';
 CREATE INDEX `character_skill_expertise_grants_character_state_index` ON `character_skill_expertise_grants` (`character_id`,`state`);
+CREATE INDEX `expertise_grants_active_order_index` ON `character_skill_expertise_grants` (`character_id`,`source_instance_id`,`grant_key`,`ordinal`,`id`) WHERE state = 'active';
 CREATE TABLE `character_skill_grants` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -724,6 +743,7 @@ CREATE TABLE `character_skill_grants` (
 CREATE UNIQUE INDEX `character_skill_grants_source_grant_ordinal_unique` ON `character_skill_grants` (`source_instance_id`,`grant_key`,`ordinal`);
 CREATE UNIQUE INDEX `character_skill_grants_character_id_skill_unique` ON `character_skill_grants` (`character_id`,`skill`) WHERE skill IS NOT NULL AND state = 'active';
 CREATE INDEX `character_skill_grants_character_id_state_index` ON `character_skill_grants` (`character_id`,`state`);
+CREATE INDEX `skill_grants_active_order_index` ON `character_skill_grants` (`character_id`,`source_instance_id`,`grant_key`,`ordinal`,`id`) WHERE state = 'active';
 CREATE TABLE `character_skill_proficiencies` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -757,6 +777,8 @@ CREATE TABLE `character_source_instances` (
 CREATE UNIQUE INDEX `character_source_instances_instance_uuid_unique` ON `character_source_instances` (`instance_uuid`);
 CREATE INDEX `character_source_instances_character_id_state_index` ON `character_source_instances` (`character_id`,`state`);
 CREATE INDEX `character_source_instances_parent_index` ON `character_source_instances` (`parent_source_instance_id`) WHERE parent_source_instance_id IS NOT NULL;
+CREATE INDEX `source_instances_active_display_index` ON `character_source_instances` (`character_id`,`source_type`,`display_name`,`id`) WHERE state = 'active';
+CREATE INDEX `source_instances_definition_state_character_index` ON `character_source_instances` (`source_type`,`source_definition_id`,`state`,`character_id`);
 CREATE UNIQUE INDEX `character_source_instances_id_character_id_unique` ON `character_source_instances` (`id`,`character_id`);
 CREATE TABLE `character_species` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -787,6 +809,7 @@ CREATE TABLE `character_species_traits` (
 );
 
 CREATE INDEX `character_species_traits_character_id_index` ON `character_species_traits` (`character_id`);
+CREATE INDEX `character_species_traits_character_sort_index` ON `character_species_traits` (`character_id`,`sort_order`,`id`);
 CREATE TABLE `character_spell_preferences` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -800,6 +823,7 @@ CREATE TABLE `character_spell_preferences` (
 );
 
 CREATE UNIQUE INDEX `character_spell_preferences_character_id_spell_version_id_unique` ON `character_spell_preferences` (`character_id`,`spell_version_id`);
+CREATE INDEX `character_spell_preferences_spell_character_index` ON `character_spell_preferences` (`spell_version_id`,`character_id`);
 CREATE TABLE `character_weapons` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -969,6 +993,8 @@ CREATE TABLE `class_equipment_items` (
 
 CREATE UNIQUE INDEX `class_equipment_items_class_option_sort_order_unique` ON `class_equipment_items` (`class_definition_id`,`option`,`sort_order`);
 CREATE INDEX `class_equipment_items_class_definition_id_index` ON `class_equipment_items` (`class_definition_id`);
+CREATE INDEX `class_equipment_items_weapon_index` ON `class_equipment_items` (`weapon_template_id`) WHERE weapon_template_id IS NOT NULL;
+CREATE INDEX `class_equipment_items_armor_index` ON `class_equipment_items` (`armor_template_id`) WHERE armor_template_id IS NOT NULL;
 CREATE TABLE `class_extra_attack_grants` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`class_definition_id` integer NOT NULL,
@@ -1038,6 +1064,7 @@ CREATE TABLE `class_feature_effects` (
 );
 
 CREATE UNIQUE INDEX `class_feature_effects_class_name_level_unique` ON `class_feature_effects` (`class_definition_id`,`name`,`class_level`);
+CREATE INDEX `class_feature_effects_definition_level_name_index` ON `class_feature_effects` (`class_definition_id`,`class_level`,`name`);
 CREATE TABLE `class_feature_value_contributions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`class_definition_id` integer NOT NULL,
@@ -1445,6 +1472,7 @@ CREATE TABLE `party_document_states` (
 	CONSTRAINT "party_document_states_local_revision_check" CHECK(last_published_local_revision IS NULL OR typeof(`last_published_local_revision`) = 'integer' AND `last_published_local_revision` >= 0)
 );
 
+CREATE INDEX `party_document_states_character_index` ON `party_document_states` (`character_id`) WHERE character_id IS NOT NULL;
 CREATE TABLE `species_definitions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`content_key` VARCHAR NOT NULL,
@@ -1571,6 +1599,7 @@ CREATE TABLE `spell_identity_aliases` (
 );
 
 CREATE UNIQUE INDEX `spell_identity_aliases_normalized_alias_unique` ON `spell_identity_aliases` (`normalized_alias`);
+CREATE INDEX `spell_identity_aliases_identity_alias_index` ON `spell_identity_aliases` (`spell_identity_id`,`normalized_alias`,`alias`);
 CREATE TABLE `spell_list_memberships` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`spell_version_id` integer NOT NULL,
@@ -1594,6 +1623,7 @@ CREATE TABLE `spell_loadout_entries` (
 );
 
 CREATE UNIQUE INDEX `spell_loadout_entries_spell_loadout_id_spell_version_id_role_unique` ON `spell_loadout_entries` (`spell_loadout_id`,`spell_version_id`,`role`);
+CREATE INDEX `spell_loadout_entries_spell_loadout_index` ON `spell_loadout_entries` (`spell_version_id`,`spell_loadout_id`);
 CREATE TABLE `spell_loadouts` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`character_id` integer NOT NULL,
@@ -2081,6 +2111,8 @@ CREATE TABLE `wizard_spellbook_entries` (
 CREATE UNIQUE INDEX `wizard_spellbook_entries_source_rule_ordinal_unique` ON `wizard_spellbook_entries` (`source_instance_id`,`rule_key`,`ordinal`);
 CREATE UNIQUE INDEX `wizard_spellbook_entries_character_id_spell_version_id_unique` ON `wizard_spellbook_entries` (`character_id`,`spell_version_id`) WHERE spell_version_id IS NOT NULL AND state = 'active';
 CREATE INDEX `wizard_spellbook_entries_character_id_state_index` ON `wizard_spellbook_entries` (`character_id`,`state`);
+CREATE INDEX `wizard_spellbook_entries_spell_active_cover` ON `wizard_spellbook_entries` (`spell_version_id`,`state`,`character_id`,`source_instance_id`) WHERE spell_version_id IS NOT NULL;
+CREATE INDEX `wizard_entries_active_order_index` ON `wizard_spellbook_entries` (`character_id`,`source_instance_id`,`rule_key`,`ordinal`,`id`,`spell_version_id`) WHERE state = 'active';
 
 -- Browser-product invariants that Drizzle cannot represent: immutable,
 -- acyclic version lineage plus cross-row character/catalog guards.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile } from '../helpers/test-filesystem-promises';
 import { fileURLToPath } from 'node:url';
 
 const schemaDir = fileURLToPath(new URL('../../db/schema/', import.meta.url));

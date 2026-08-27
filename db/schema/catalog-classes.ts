@@ -737,6 +737,11 @@ export const class_feature_effects = sqliteTable(
       table.name,
       table.class_level,
     ),
+    index('class_feature_effects_definition_level_name_index').on(
+      table.class_definition_id,
+      table.class_level,
+      table.name,
+    ),
   ],
 );
 

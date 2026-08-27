@@ -92,6 +92,22 @@ export class InteractiveTestElement {
     }
   }
 
+  insertBefore<T extends InteractiveTestElement>(
+    node: T,
+    child: InteractiveTestElement | null,
+  ): T {
+    if (child === null) {
+      this.append(node);
+      return node;
+    }
+    if (child.parent !== this) throw new DOMException('Reference node is not a child.');
+    node.remove();
+    const index = this.children.indexOf(child);
+    node.parent = this;
+    this.children.splice(index, 0, node);
+    return node;
+  }
+
   replaceChildren(...nodes: (InteractiveTestElement | string)[]): void {
     for (const child of this.children) child.parent = null;
     this.children.splice(0, this.children.length);

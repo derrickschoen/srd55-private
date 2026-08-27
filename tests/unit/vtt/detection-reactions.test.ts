@@ -337,6 +337,58 @@ describe('D368.3 opportunity attacks and fork #18 decisions', () => {
     }, face(10)).state.activeCombatant).toBe(setup.reactor.id);
   });
 
+  it('moots the remaining opportunity-attack offers when the first accepted offer kills their mover', () => {
+    const mover = monsterProfile('oa-moot-mover', { initiativeBonus: 30, hitPoints: 1 });
+    const first = playerProfile('oa-moot-first', { initiativeBonus: 20 });
+    const second = playerProfile('oa-moot-second', { initiativeBonus: 10 });
+    const remainingEnemy = monsterProfile('oa-moot-remaining-enemy', { initiativeBonus: 0 });
+    let state = reduceEncounter(createEncounter({
+      bounds: { columns: 5, rows: 3 },
+      combatants: [mover, first, second, remainingEnemy],
+      tokens: [
+        placedToken(mover, 1, 1),
+        placedToken(first, 0, 1),
+        placedToken(second, 0, 0),
+        placedToken(remainingEnemy, 4, 2),
+      ],
+    }), { type: 'roll_initiative' }, face(10)).state;
+    const opportunityAttack = (
+      reactor: CombatantProfile,
+    ): Extract<EncounterCommand, { readonly type: 'opportunity_attack' }> => ({
+      ...basicAttack(reactor, mover),
+      type: 'opportunity_attack',
+    });
+    state = reduceEncounter(state, {
+      type: 'move',
+      actor: mover.id,
+      path: [{ column: 2, row: 1 }],
+      cause: 'voluntary',
+      executableOpportunityAttacks: [opportunityAttack(first), opportunityAttack(second)],
+    }, face(10)).state;
+    expect(state.pendingDecisions).toHaveLength(2);
+    const accepted = state.pendingDecisions[0];
+    if (accepted === undefined) throw new Error('The first opportunity-attack offer is missing.');
+
+    const resolved = reduceEncounter(state, {
+      type: 'resolve_pending_decision',
+      decisionId: accepted.id,
+      optionId: 'accept',
+    }, face(20));
+
+    expect(resolved.state.combatants.find((combatant) => combatant.profile.id === mover.id)?.life)
+      .toBe('dead');
+    expect(resolved.state.pendingDecisions).toEqual([]);
+    expect(resolved.events.filter((event) => event.type === 'pending_decision_resolved')).toEqual([
+      expect.objectContaining({ decisionId: accepted.id, optionId: 'accept' }),
+      expect.objectContaining({ optionId: 'moot', reactionKind: 'opportunity_attack' }),
+    ]);
+    expect(() => reduceEncounter(
+      resolved.state,
+      { type: 'end_turn', actor: mover.id },
+      face(10),
+    )).not.toThrow();
+  });
+
   it('Flyby suppresses the real movement-triggered opportunity attack', () => {
     // Flyby: docs/srd/full/srd-5.2.1.txt:23236-23237.
     const row = HOMEBREW_BEAST_ROSTER.find((candidate) => candidate.design.family === 'pterosaur');

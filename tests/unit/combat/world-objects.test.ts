@@ -1,3 +1,4 @@
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
@@ -78,6 +79,20 @@ function attack(state: EncounterState): Extract<EncounterCommand, { readonly typ
   };
 }
 
+function attackBy(
+  state: EncounterState,
+  actorKind: 'player_character' | 'monster',
+): Extract<EncounterCommand, { readonly type: 'attack' }> {
+  const actor = state.combatants.find((entry) => entry.profile.kind === actorKind)?.profile;
+  const target = state.combatants.find((entry) => entry.profile.kind !== actorKind)?.profile;
+  if (actor === undefined || target === undefined) throw new Error('Attack fixture is incomplete.');
+  return {
+    ...attack(state),
+    actor: actor.id,
+    target: target.id,
+  };
+}
+
 describe('typed world objects and encounter environment', () => {
   it('wall_ignored_by_pathing: a movement blocker forces a strictly longer route', () => {
     const wall = object('path-wall', [2, 3, 4].flatMap((column) =>
@@ -112,6 +127,81 @@ describe('typed world objects and encounter environment', () => {
     const threeQuarters = started([object('three-cover', [{ column: 3, row: 2 }], { cover: 'three_quarters' })]);
     const threeQuarterMiss = reduceEncounter(threeQuarters, attack(threeQuarters), () => 0.65);
     expect(threeQuarterMiss.events.find((event) => event.type === 'attack_resolved')?.attack.outcome).toBe('miss');
+  });
+
+  it('cover_no_bonus: line-crossing cover grants its cited AC and Dexterity-save bonus', () => {
+    const halfAttack = started([object('half-cover-ac', [{ column: 3, row: 2 }], { cover: 'half' })]);
+    const coveredAttack = reduceEncounter(halfAttack, attack(halfAttack), () => 0.6);
+    expect(coveredAttack.events.find((event) => event.type === 'attack_resolved')?.attack)
+      .toMatchObject({ outcome: 'miss', total: 13 });
+
+    const halfSave = started([object('half-cover-dex', [{ column: 3, row: 2 }], { cover: 'half' })]);
+    const actor = halfSave.activeCombatant;
+    const target = halfSave.combatants.find((entry) => entry.profile.kind === 'monster')?.profile.id;
+    if (actor === null || target === undefined) throw new Error('Cover save fixture is incomplete.');
+    const coveredSave = reduceEncounter(halfSave, {
+      type: 'force_save', actor, target, ability: 'dexterity', dc: 12,
+      rollMode: 'normal', damage: { terms: [], critical: false, responses: [] },
+      onSuccess: 'none', cost: 'none',
+    }, () => 0.45);
+    expect(coveredSave.events.find((event) => event.type === 'save_resolved')?.save)
+      .toMatchObject({ outcome: 'success', total: 12 });
+
+    const threeQuarterSave = started([
+      object('three-quarter-cover-dex', [{ column: 3, row: 2 }], { cover: 'three_quarters' }),
+    ]);
+    const threeQuarterActor = threeQuarterSave.activeCombatant;
+    const threeQuarterTarget = threeQuarterSave.combatants
+      .find((entry) => entry.profile.kind === 'monster')?.profile.id;
+    if (threeQuarterActor === null || threeQuarterTarget === undefined) {
+      throw new Error('Three-quarters cover save fixture is incomplete.');
+    }
+    const threeQuarterCoveredSave = reduceEncounter(threeQuarterSave, {
+      type: 'force_save', actor: threeQuarterActor, target: threeQuarterTarget,
+      ability: 'dexterity', dc: 15, rollMode: 'normal',
+      damage: { terms: [], critical: false, responses: [] }, onSuccess: 'none', cost: 'none',
+    }, () => 0.45);
+    expect(threeQuarterCoveredSave.events.find((event) => event.type === 'save_resolved')?.save)
+      .toMatchObject({ outcome: 'success', total: 15 });
+  });
+
+  it('cover_blocks_allies_only: line-crossing cover protects monster and player targets symmetrically', () => {
+    const coverObject = object('symmetric-half-cover', [{ column: 3, row: 2 }], { cover: 'half' });
+    const player = playerProfile('cover-symmetry-player', { initiativeBonus: 20 });
+    const monster = monsterProfile('cover-symmetry-monster', { initiativeBonus: -20 });
+    const playerAttacks = reduceEncounter(createEncounter({
+      bounds: { columns: 8, rows: 5 },
+      combatants: [player, monster],
+      tokens: [placedToken(player, 0, 2), placedToken(monster, 6, 2)],
+      worldObjects: [coverObject],
+    }), { type: 'roll_initiative' }, () => 0.5).state;
+    expect(reduceEncounter(playerAttacks, attackBy(playerAttacks, 'player_character'), () => 0.6)
+      .events.find((event) => event.type === 'attack_resolved')?.attack.outcome).toBe('miss');
+
+    const monsterActsFirst = monsterProfile('cover-symmetry-first-monster', { initiativeBonus: 20 });
+    const playerActsSecond = playerProfile('cover-symmetry-second-player', { initiativeBonus: -20 });
+    const monsterAttacks = reduceEncounter(createEncounter({
+      bounds: { columns: 8, rows: 5 },
+      combatants: [monsterActsFirst, playerActsSecond],
+      tokens: [placedToken(monsterActsFirst, 0, 2), placedToken(playerActsSecond, 6, 2)],
+      worldObjects: [coverObject],
+    }), { type: 'roll_initiative' }, () => 0.5).state;
+    expect(reduceEncounter(monsterAttacks, attackBy(monsterAttacks, 'monster'), () => 0.7)
+      .events.find((event) => event.type === 'attack_resolved')?.attack.outcome).toBe('miss');
+  });
+
+  it('pins the three applied, killed, and restored cover-map mutations', () => {
+    const ledger = readFileSync('docs/audits/2026-08-25-cover-maps-mutation-ledger.md', 'utf8');
+    const mechanicsTests = readFileSync('tests/unit/combat/world-objects.test.ts', 'utf8');
+    const policyTests = readFileSync('tests/integration/vtt/pc-algorithm-policy.test.ts', 'utf8');
+    for (const mutation of ['cover_no_bonus', 'cover_blocks_allies_only']) {
+      expect(ledger).toContain(`\`${mutation}\``);
+      expect(mechanicsTests).toContain(`${mutation}:`);
+    }
+    expect(ledger).toContain('`policy_ignores_cover`');
+    expect(policyTests).toContain('policy_ignores_cover:');
+    expect(ledger.match(/`exit 1`/gu)).toHaveLength(3);
+    expect(ledger).toContain('All three mutations were restored.');
   });
 
   it('difficult_terrain_not_doubled: difficult terrain doubles entry cost exactly once', () => {

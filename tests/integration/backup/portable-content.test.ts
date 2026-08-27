@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import type { Database } from '@sqlite.org/sqlite-wasm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -54,7 +54,7 @@ import {
   CONTENT_FINGERPRINT_SCHEME_V1,
   type ContentFingerprintDigest,
 } from '../../../src/catalog/content-identity';
-import { applicationSeed, createApplicationLifecycle } from '../../../src/db/bootstrap';
+import { createApplicationLifecycle } from '../../../src/db/bootstrap';
 import { BUNDLED_HOMEBREW_CATALOG } from '../../../src/authoring/bundled-homebrew-catalog';
 import {
   commitBundledHomebrewInstall,
@@ -69,7 +69,8 @@ import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projec
 import {
   getSqlite3,
   MemoryDatabaseStorage,
-  openTestDatabase,
+  openFreshSchemaTestDatabase,
+  openFreshSeededTestDatabase,
 } from '../../helpers/open-db';
 
 const opened: Database[] = [];
@@ -80,7 +81,13 @@ const legacyDoublePlanImportedState = readFileSync(
 ).trim();
 
 async function database(): Promise<DatabaseContext> {
-  const connection = await openTestDatabase();
+  const connection = await openFreshSchemaTestDatabase();
+  opened.push(connection);
+  return new DatabaseContext(connection);
+}
+
+async function seededDatabase(): Promise<DatabaseContext> {
+  const connection = await openFreshSeededTestDatabase();
   opened.push(connection);
   return new DatabaseContext(connection);
 }
@@ -222,7 +229,6 @@ function seedContributionSubclass(
   db: DatabaseContext,
   withContributions = true,
 ): { readonly contentKey: ContentKey; readonly classId: number; readonly subclassId: number } {
-  applicationSeed(db);
   const classKey = '2024:class:fighter' as ContentKey;
   const contentKey = withContributions
     ? contributionSubclassKey
@@ -479,7 +485,7 @@ function emptyHistoricalSpellDefinitions() {
 
 describe('portable content manifests', () => {
   it('carries subclass contributions through library, character backup, and v21 share with exact wire keys', async () => {
-    const source = await database();
+    const source = await seededDatabase();
     const fixture = seedContributionSubclass(source);
     const characterId = seedContributionCharacter(source, fixture);
     const expectedRows = contributionRows(source);
@@ -520,14 +526,12 @@ describe('portable content manifests', () => {
       'display_label', 'fact_key', 'marking_shape',
     ]);
 
-    const libraryTarget = await database();
-    applicationSeed(libraryTarget);
+    const libraryTarget = await seededDatabase();
     importLibraryDocument(libraryTarget, library);
     expect(contributionRows(libraryTarget)).toEqual(expectedRows);
 
     const backup = exportCharacterBackup(source, characterId, exportedAt);
-    const backupTarget = await database();
-    applicationSeed(backupTarget);
+    const backupTarget = await seededDatabase();
     importCharacterBackup(backupTarget, backup);
     expect(contributionRows(backupTarget)).toEqual(expectedRows);
 
@@ -540,14 +544,13 @@ describe('portable content manifests', () => {
       candidate.kind === 'subclass')?.aggregate).toEqual(entry.aggregate);
     const decoded = await decodeShareFragment(await encodeShareFragment(share));
     expect(decoded).toEqual(share);
-    const shareTarget = await database();
-    applicationSeed(shareTarget);
+    const shareTarget = await seededDatabase();
     importCharacterShare(shareTarget, decoded);
     expect(contributionRows(shareTarget)).toEqual(expectedRows);
   }, 20_000);
 
   it('rejects contribution extra keys and still imports an old-format subclass with no contribution field', async () => {
-    const source = await database();
+    const source = await seededDatabase();
     const contributed = seedContributionSubclass(source);
     const library = exportSelectedLibraryContent(source, [contributed.contentKey], exportedAt);
     const hostile = JSON.parse(JSON.stringify(library)) as LibraryExportDocument;
@@ -562,7 +565,7 @@ describe('portable content manifests', () => {
       /future_contribution_field|unknown key|exact/u,
     );
 
-    const plainSource = await database();
+    const plainSource = await seededDatabase();
     const plain = seedContributionSubclass(plainSource, false);
     const oldFormat = exportSelectedLibraryContent(plainSource, [plain.contentKey], exportedAt);
     const plainEntry = oldFormat.content.find((candidate) => candidate.kind === 'subclass');
@@ -570,14 +573,13 @@ describe('portable content manifests', () => {
     const plainAggregate = plainEntry.aggregate;
     if (plainAggregate.kind !== 'subclass') throw new Error('Plain aggregate kind was lost.');
     expect(plainAggregate.features[0]).not.toHaveProperty('contributions');
-    const target = await database();
-    applicationSeed(target);
+    const target = await seededDatabase();
     expect(() => importLibraryDocument(target, oldFormat)).not.toThrow();
     expect(contributionRows(target)).toEqual([]);
   }, 20_000);
 
   it('rejects supersession bands and derived resource keys before portable installation', async () => {
-    const source = await database();
+    const source = await seededDatabase();
     const contributed = seedContributionSubclass(source);
     const library = exportSelectedLibraryContent(source, [contributed.contentKey], exportedAt);
 
@@ -1214,8 +1216,7 @@ describe('portable content manifests', () => {
   });
 
   it('S6-11 discloses pre-contribution Veteran content and marks affected sheet facts UNKNOWN', async () => {
-    const source = await database();
-    applicationSeed(source);
+    const source = await seededDatabase();
     const veteranCatalog = BUNDLED_HOMEBREW_CATALOG.filter(
       (entry) => entry.catalog_key === 'veteran',
     );
@@ -1254,8 +1255,7 @@ describe('portable content manifests', () => {
     delete (historical.character as Record<string, unknown>)
       .optional_feature_selections;
 
-    const target = await database();
-    applicationSeed(target);
+    const target = await seededDatabase();
     const imported = importCharacterBackup(target, historical);
     expect(imported.notices).toContainEqual({
       kind: 'historical_contributions_not_recorded',

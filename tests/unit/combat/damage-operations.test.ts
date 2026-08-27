@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 import { combatantConditions, createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import type { EncounterCommand } from '../../../src/combat/events';

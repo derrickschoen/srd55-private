@@ -1,37 +1,35 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
-  "mutate": [
-    "src/simulation/**/*.ts"
-  ],
   "testRunner": "vitest",
   "vitest": {
-    "configFile": "vitest.config.ts"
+    "configFile": "vitest.stryker.config.ts"
   },
   "checkers": [
     "typescript"
   ],
-  "tsconfigFile": "tsconfig.json",
-  "coverageAnalysis": "perTest",
-  "reporters": [
-    "json",
-    "clear-text",
-    "progress"
+  "concurrency": 4,
+  "dryRunTimeoutMinutes": 15,
+  "testRunnerNodeArgs": [
+    "--max-old-space-size=8192"
   ],
-  "jsonReporter": {
-    "fileName": "reports/stryker-simulation-run2.json"
-  },
+  "incremental": true,
+  "inPlace": true,
   "thresholds": {
-    "high": 90,
-    "low": 70,
     "break": null
   },
-  "timeoutMS": 20000,
-  "concurrency": 12,
-  "tempDirName": ".stryker-tmp",
-  "cleanTempDir": true,
-  "mutator": {
-    "excludedMutations": [
-      "Regex"
-    ]
-  }
+  "reporters": [
+    "clear-text",
+    "progress",
+    "html",
+    "json"
+  ],
+  "mutate": [
+    "src/vtt/survival-policy.ts",
+    "src/vtt/party-pack.ts",
+    "src/combat/controllers.ts",
+    "src/vtt/vane-warren.ts",
+    "src/vtt/session-record.ts",
+    "src/vtt/local-session-store.ts",
+    "src/vtt/stable-dom-render.ts"
+  ]
 }

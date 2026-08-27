@@ -36,6 +36,13 @@ export interface SessionRecordDeathSave {
   readonly lifeState: Extract<EncounterEvent, { readonly type: 'death_save_resolved' }>['lifeState'];
 }
 
+export interface SessionRecordRevival {
+  readonly combatant: CombatantId;
+  readonly eventSequence: number;
+  readonly cause: 'revivify' | 'dm_override';
+  readonly source: CombatantId | null;
+}
+
 export interface SessionRecordRulingCard {
   readonly revision: number;
   readonly eventSequence: number;
@@ -52,6 +59,7 @@ interface SessionEncounterRecordBase {
   readonly combatants: readonly SessionRecordCombatantSummary[];
   readonly deaths: readonly SessionRecordDeath[];
   readonly deathSaves: readonly SessionRecordDeathSave[];
+  readonly revivals: readonly SessionRecordRevival[];
   readonly dmRulings: readonly SessionRecordRulingCard[];
 }
 
@@ -168,6 +176,7 @@ export function deriveSessionRecord(revisions: readonly SessionRevision[]): Sess
     for (const [combatant] of names) mutableCombatant(summaries, combatant, names);
     const deaths: SessionRecordDeath[] = [];
     const deathSaves: SessionRecordDeathSave[] = [];
+    const revivals: SessionRecordRevival[] = [];
     const dmRulings: SessionRecordRulingCard[] = [];
     for (const revision of segment) {
       for (const event of eventsOf(revision)) {
@@ -208,6 +217,16 @@ export function deriveSessionRecord(revisions: readonly SessionRevision[]): Sess
               deaths.push({ combatant: event.combatant, eventSequence: event.sequence, cause: 'death_save' });
             }
             break;
+          case 'spell_cast':
+            if (event.spellId === 'revivify') {
+              revivals.push(...event.targets.map((combatant) => ({
+                combatant,
+                eventSequence: event.sequence,
+                cause: 'revivify' as const,
+                source: event.caster,
+              })));
+            }
+            break;
           case 'adjudicated':
             dmRulings.push({
               revision: revision.revision,
@@ -219,6 +238,18 @@ export function deriveSessionRecord(revisions: readonly SessionRevision[]): Sess
             });
             if (event.consequence.kind === 'death_override' && event.consequence.after.lifeState === 'dead') {
               deaths.push({ combatant: event.target, eventSequence: event.sequence, cause: 'dm_override' });
+            }
+            if (
+              (event.consequence.kind === 'death_override' && event.consequence.after.lifeState === 'living') ||
+              (event.consequence.kind === 'hit_points' &&
+                event.consequence.before === 0 && event.consequence.after > 0)
+            ) {
+              revivals.push({
+                combatant: event.target,
+                eventSequence: event.sequence,
+                cause: 'dm_override',
+                source: null,
+              });
             }
             break;
           default:
@@ -258,6 +289,7 @@ export function deriveSessionRecord(revisions: readonly SessionRevision[]): Sess
       ),
       deaths,
       deathSaves,
+      revivals,
       dmRulings,
     };
     return conclusion === null

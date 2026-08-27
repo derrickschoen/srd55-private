@@ -1,0 +1,8 @@
+id: no-inline-party-pack-super-refine
+language: TypeScript
+severity: error
+message: Party-pack validators must return issues through typed rules before the Zod adapter consumes them.
+files:
+  - src/vtt/party-pack.ts
+rule:
+  pattern: $SCHEMA.superRefine(($$$ARGS) => { $$$BODY })

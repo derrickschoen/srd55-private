@@ -339,6 +339,24 @@ const SCHEMA_BEFORE_VTT_SESSION_ENCOUNTER_PHASE = DATABASE_MIGRATIONS
   .join('\n');
 const VTT_SESSION_ENCOUNTER_PHASE_MIGRATION =
   DATABASE_MIGRATIONS[VTT_SESSION_ENCOUNTER_PHASE_INDEX]!;
+const SAFE_QUERY_INDEXES_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0059_safe_query_indexes',
+);
+const SCHEMA_BEFORE_SAFE_QUERY_INDEXES = DATABASE_MIGRATIONS
+  .slice(0, SAFE_QUERY_INDEXES_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const SAFE_QUERY_INDEXES_MIGRATION =
+  DATABASE_MIGRATIONS[SAFE_QUERY_INDEXES_INDEX]!;
+const PROFILE_PROVEN_INDEXES_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0060_profile_proven_indexes',
+);
+const SCHEMA_BEFORE_PROFILE_PROVEN_INDEXES = DATABASE_MIGRATIONS
+  .slice(0, PROFILE_PROVEN_INDEXES_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const PROFILE_PROVEN_INDEXES_MIGRATION =
+  DATABASE_MIGRATIONS[PROFILE_PROVEN_INDEXES_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -4120,6 +4138,116 @@ describe('database migration chain', () => {
       `);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         VTT_SESSION_ENCOUNTER_PHASE_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(
+        schemaSignature(SCHEMA_BEFORE_SAFE_QUERY_INDEXES),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0059 adds the safe query indexes without removing prior indexes', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_SAFE_QUERY_INDEXES);
+      const indexNames = [
+        'background_templates_default_origin_feat_index',
+        'catalog_content_aliases_target_index',
+        'catalog_match_decisions_target_index',
+        'character_effects_source_character_index',
+        'character_items_source_character_index',
+        'character_level_feat_choices_source_character_index',
+        'character_save_points_character_id_id_index',
+        'spell_identity_aliases_identity_alias_index',
+      ];
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE name IN (${indexNames.map(() => '?').join(', ')})`,
+        indexNames,
+      )).toEqual([]);
+
+      const priorIndexCount = Number(db.selectValue(
+        `SELECT count(*) FROM sqlite_schema
+         WHERE type = 'index' AND name NOT LIKE 'sqlite_%'`,
+      ));
+      db.exec(SAFE_QUERY_INDEXES_MIGRATION.sql);
+
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE name IN (${indexNames.map(() => '?').join(', ')})
+         ORDER BY name`,
+        indexNames,
+      )).toEqual(indexNames);
+      expect(Number(db.selectValue(
+        `SELECT count(*) FROM sqlite_schema
+         WHERE type = 'index' AND name NOT LIKE 'sqlite_%'`,
+      ))).toBe(priorIndexCount + indexNames.length);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        SAFE_QUERY_INDEXES_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(
+        schemaSignature(SCHEMA_BEFORE_PROFILE_PROVEN_INDEXES),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0060 adds every profile-proven index without removing prior indexes', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_PROFILE_PROVEN_INDEXES);
+      const indexNames = [
+        'background_equipment_items_armor_index',
+        'background_equipment_items_weapon_index',
+        'catalog_archive_members_character_kind_key_index',
+        'catalog_identities_layer_kind_key_index',
+        'catalog_match_decisions_reviewed_kind_digest_index',
+        'catalog_replacement_choices_successor_index',
+        'character_class_levels_character_id_id_index',
+        'character_class_levels_definition_character_index',
+        'character_class_levels_subclass_character_index',
+        'character_effects_character_sort_index',
+        'character_items_character_name_index',
+        'character_species_traits_character_sort_index',
+        'character_spell_preferences_spell_character_index',
+        'class_equipment_items_armor_index',
+        'class_equipment_items_weapon_index',
+        'class_feature_effects_definition_level_name_index',
+        'expertise_grants_active_order_index',
+        'party_document_states_character_index',
+        'skill_grants_active_order_index',
+        'source_instances_active_display_index',
+        'source_instances_definition_state_character_index',
+        'spell_loadout_entries_spell_loadout_index',
+        'wizard_entries_active_order_index',
+        'wizard_spellbook_entries_spell_active_cover',
+      ];
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE name IN (${indexNames.map(() => '?').join(', ')})`,
+        indexNames,
+      )).toEqual([]);
+
+      const priorIndexCount = Number(db.selectValue(
+        `SELECT count(*) FROM sqlite_schema
+         WHERE type = 'index' AND name NOT LIKE 'sqlite_%'`,
+      ));
+      db.exec(PROFILE_PROVEN_INDEXES_MIGRATION.sql);
+
+      expect(db.selectValues(
+        `SELECT name FROM sqlite_schema
+         WHERE name IN (${indexNames.map(() => '?').join(', ')})
+         ORDER BY name`,
+        indexNames,
+      )).toEqual(indexNames);
+      expect(Number(db.selectValue(
+        `SELECT count(*) FROM sqlite_schema
+         WHERE type = 'index' AND name NOT LIKE 'sqlite_%'`,
+      ))).toBe(priorIndexCount + indexNames.length);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        PROFILE_PROVEN_INDEXES_MIGRATION.resultSchemaChecksum,
       );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {

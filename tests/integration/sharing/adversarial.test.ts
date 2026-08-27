@@ -41,7 +41,10 @@ import {
   WEAPON_RANGE_MAX_FEET,
   WEAPON_TEXT_LIMITS,
 } from '../../../src/domain/weapon-limits';
-import { getSqlite3, openTestDatabase } from '../../helpers/open-db';
+import {
+  getSqlite3,
+  openFreshSchemaTestDatabase,
+} from '../../helpers/open-db';
 import { registerFixtureContentIdentity } from '../../helpers/content-identity';
 
 const connections: Database[] = [];
@@ -53,7 +56,7 @@ afterEach(() => {
 });
 
 async function database(): Promise<DatabaseContext> {
-  const connection = await openTestDatabase();
+  const connection = await openFreshSchemaTestDatabase();
   connections.push(connection);
   return new DatabaseContext(connection);
 }

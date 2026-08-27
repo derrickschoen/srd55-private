@@ -44,6 +44,7 @@ function party(settings: RefusalHandlingSettings = DEFAULT_REFUSAL_HANDLING_SETT
       limitedResources: [],
       hitDice: [{ sides: 8 as const, maximum: 1, remaining: 1 }],
       consumables: [],
+      aid: null,
       equipment: null,
     })),
     reactionPolicies: REFERENCE_PLAYER_IDS.flatMap((combatant) =>

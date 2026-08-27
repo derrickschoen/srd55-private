@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 import type { Controller, ControllerDecision, ControllerRequest } from '../../../src/combat/controllers';
 import { ControllerRegistry } from '../../../src/combat/controllers';

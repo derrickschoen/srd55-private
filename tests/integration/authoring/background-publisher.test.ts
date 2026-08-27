@@ -41,13 +41,12 @@ import {
 } from '../../../src/catalog/content-registry';
 import { portableSourceContentImportNode } from '../../../src/catalog/source-content-importer';
 import { CharacterCommandIntegrity } from '../../../src/commands/integrity';
-import { applicationSeed } from '../../../src/db/bootstrap';
 import { DatabaseContext } from '../../../src/db/database';
 import type { CharacterId, ContentKey } from '../../../src/domain/ids';
 import { EquipmentGrantRefusal } from '../../../src/grants/equipment-grants';
 import { SavePointQueries } from '../../../src/queries/save-points';
 import { featProjectorV1Vector } from '../../unit/catalog/fixtures/source-projector-v1-vectors';
-import { openTestDatabase } from '../../helpers/open-db';
+import { openSeededTestDatabase } from '../../helpers/open-db';
 
 const opened: Database[] = [];
 let uuidSequence = 0;
@@ -57,12 +56,10 @@ afterEach(() => {
   uuidSequence = 0;
 });
 
-async function database(seed = false): Promise<DatabaseContext> {
-  const connection = await openTestDatabase();
+async function database(): Promise<DatabaseContext> {
+  const connection = await openSeededTestDatabase();
   opened.push(connection);
-  const db = new DatabaseContext(connection);
-  if (seed) applicationSeed(db);
-  return db;
+  return new DatabaseContext(connection);
 }
 
 function service(db: DatabaseContext): CatalogAuthoringService {
@@ -195,7 +192,7 @@ function authoringError(operation: () => unknown): AuthoringServiceError {
 
 describe('HA-4 background publisher', () => {
   it('collects every unresolved semantic field path without touching the catalog', async () => {
-    const db = await database(true);
+    const db = await database();
     const authoring = service(db);
     const draft = savedBackground(db, authoring, ' ', (document) => ({
       ...document,
@@ -260,7 +257,7 @@ describe('HA-4 background publisher', () => {
   });
 
   it('publishes the complete aggregate, generalizes choices/equipment, and keeps D102 text reference-only', async () => {
-    const db = await database(true);
+    const db = await database();
     const authoring = service(db);
     const draft = savedBackground(db, authoring);
     const { preview, result } = publish(authoring, draft);
@@ -407,7 +404,7 @@ describe('HA-4 background publisher', () => {
   }, 20_000);
 
   it('Q1 round-trips authored feat display through export and copy-to-draft', async () => {
-    const db = await database(true);
+    const db = await database();
     const selectedKey = '2024:feat:alert' as ContentKey;
     const selectedName = db.scalar<string>(
       'SELECT name FROM feat_definitions WHERE content_key = ?',
@@ -513,7 +510,7 @@ describe('HA-4 background publisher', () => {
   }, 20_000);
 
   it('Q3 withholds active_if_config external Origin feats while retaining no-config feats', async () => {
-    const db = await database(true);
+    const db = await database();
     const importer = new CatalogImporter(db);
     const passive = {
       ...featProjectorV1Vector.aggregate,
@@ -551,7 +548,7 @@ describe('HA-4 background publisher', () => {
   });
 
   it('refuses a drifted live weapon dependency instead of trusting its registered digest', async () => {
-    const db = await database(true);
+    const db = await database();
     db.exec(
       `UPDATE weapon_templates SET damage_type = 'Drifted Void'
        WHERE content_key = '2024:weapon:club'`,
@@ -577,7 +574,7 @@ describe('HA-4 background publisher', () => {
   });
 
   it('Q2 publishes clean, then refuses typed dependency drift at equipment apply', async () => {
-    const db = await database(true);
+    const db = await database();
     const authoring = service(db);
     const published = publish(
       authoring,
@@ -635,7 +632,7 @@ describe('HA-4 background publisher', () => {
   }, 20_000);
 
   it('surfaces and applies an external background package with external dependencies, and refuses a missing dependency by name', async () => {
-    const db = await database(true);
+    const db = await database();
     const externalWeapon = {
       kind: 'weapon',
       name: 'Storm Pike',
@@ -743,7 +740,7 @@ describe('HA-4 background publisher', () => {
   }, 20_000);
 
   it('silently self-matches byte-identical external content and refuses a typed asserted-key collision', async () => {
-    const db = await database(true);
+    const db = await database();
     const authoring = service(db);
     const first = publish(authoring, savedBackground(db, authoring, 'Convergent Wayfarer'));
     const identityCount = db.scalar<number>('SELECT count(*) FROM catalog_content_identities');
@@ -777,7 +774,7 @@ describe('HA-4 background publisher', () => {
   });
 
   it('requires review despite a remembered alias decision and commits an explicit Match', async () => {
-    const db = await database(true);
+    const db = await database();
     const authoring = service(db);
     const base = publish(authoring, savedBackground(db, authoring, 'Explicit Match Base'));
     const copied = authoring.createDraft({
@@ -865,7 +862,7 @@ describe('HA-4 background publisher', () => {
   });
 
   it('rolls back the last publish step and retains the draft when draft deletion fails', async () => {
-    const db = await database(true);
+    const db = await database();
     const authoring = service(db);
     const draft = savedBackground(db, authoring, 'Rollback Surveyor');
     const countsBefore = db.oneRaw(
@@ -951,7 +948,7 @@ describe('HA-4 background publisher', () => {
 
   // Measured alone at 1.72s: two seeded databases plus a save-point round trip dominate.
   it('regenerates imported background effect refs against target-local child ids', async () => {
-    const source = await database(true);
+    const source = await database();
     const sourceAuthoring = service(source);
     const published = publish(sourceAuthoring, savedBackground(source, sourceAuthoring, 'Portable Surveyor'));
     const guidedClass = listGuidedClassOptions(source)[0];
@@ -987,7 +984,7 @@ describe('HA-4 background publisher', () => {
       }),
     ]));
 
-    const target = await database(true);
+    const target = await database();
     const targetAuthoring = service(target);
     publish(targetAuthoring, savedBackground(target, targetAuthoring, 'Target Background Offset'));
     const plan = planCharacterBackupImport(target, document);
@@ -1028,7 +1025,7 @@ describe('HA-4 background publisher', () => {
   }, 20_000);
 
   it('binds identical effect payloads to the correct background template identity', async () => {
-    const source = await database(true);
+    const source = await database();
     const sourceAuthoring = service(source);
     const selected = publish(
       sourceAuthoring,
@@ -1057,7 +1054,7 @@ describe('HA-4 background publisher', () => {
       '2042-06-09T00:00:00.000Z',
     );
 
-    const target = await database(true);
+    const target = await database();
     const targetAuthoring = service(target);
     const competing = publish(
       targetAuthoring,
@@ -1100,7 +1097,7 @@ describe('HA-4 background publisher', () => {
   }, 20_000);
 
   it('imports an older raw numeric background effect ref as null with a typed notice', async () => {
-    const source = await database(true);
+    const source = await database();
     const sourceAuthoring = service(source);
     const published = publish(
       sourceAuthoring,
@@ -1147,7 +1144,7 @@ describe('HA-4 background publisher', () => {
       },
     };
     expect(replaced).toBe(true);
-    const target = await database(true);
+    const target = await database();
     const plan = planCharacterBackupImport(target, document);
     const committed = commitCharacterBackupImport(target, document, plan.token);
     expect(committed.kind).toBe('committed');
@@ -1172,7 +1169,7 @@ describe('HA-4 background publisher', () => {
   }, 20_000);
 
   it('returns a typed notice when a background effect no longer matches its portable template', async () => {
-    const source = await database(true);
+    const source = await database();
     const sourceAuthoring = service(source);
     const published = publish(sourceAuthoring, savedBackground(source, sourceAuthoring, 'Notice Surveyor'));
     const guidedClass = listGuidedClassOptions(source)[0];
@@ -1203,7 +1200,7 @@ describe('HA-4 background publisher', () => {
       [character.id],
     );
     const document = exportCharacterBackup(source, character.id, '2042-06-09T00:00:00.000Z');
-    const target = await database(true);
+    const target = await database();
     const plan = planCharacterBackupImport(target, document);
     const committed = commitCharacterBackupImport(target, document, plan.token);
     expect(committed.kind).toBe('committed');
@@ -1228,7 +1225,7 @@ describe('HA-4 background publisher', () => {
   }, 20_000);
 
   it('versions background lineage without changing an existing character', async () => {
-    const db = await database(true);
+    const db = await database();
     const authoring = service(db);
     const original = publish(authoring, savedBackground(db, authoring, 'Versioned Surveyor'));
     const guidedClass = listGuidedClassOptions(db)[0];
@@ -1343,7 +1340,7 @@ describe('HA-4 background publisher', () => {
   });
 
   it('rolls background installation and lineage back atomically', async () => {
-    const db = await database(true);
+    const db = await database();
     const authoring = service(db);
     const original = publish(authoring, savedBackground(db, authoring, 'Atomic Surveyor'));
     const copied = authoring.createDraft({

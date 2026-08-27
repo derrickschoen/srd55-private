@@ -134,6 +134,7 @@ describe('DmEncounterHost live algorithm path', () => {
       playerProfile('host-replay-player-b', { initiativeBonus: 20, hitPoints: 40 }),
       playerProfile('host-replay-player-c', { initiativeBonus: 10, hitPoints: 40 }),
       playerProfile('host-replay-player-d', { initiativeBonus: 5, hitPoints: 40 }),
+      playerProfile('host-replay-player-e', { initiativeBonus: 0, hitPoints: 40 }),
     ] as const;
     const bundled = createVaneWarrenFight('cinder-rite', players);
     const soundDrum = vaneWarrenDmWarDrumControl(bundled);

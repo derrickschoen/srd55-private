@@ -15,11 +15,18 @@ import {
   type EffectApplication,
 } from '../combat/effects';
 import type { EncounterCommand } from '../combat/events';
+import type { EncounterCombatantState } from '../combat/encounter';
 import { adjacentCells, gridDistance } from '../combat/grid';
+import { cubeAffectedCellsAmong, feetPoint } from '../combat/templates';
 import type { PersistentAreaEffectSpec, PersistentAreaShape } from '../combat/persistent-areas';
 import { spellDefinition } from '../combat/spells/definitions';
 import type { SpellCastCommand, SpellTargeting } from '../combat/spells/types';
-import { SPELL_MANIFEST, type SpellManifestRow } from '../combat/spells/manifest';
+import {
+  isSpellManifestId,
+  SPELL_MANIFEST,
+  type SpellManifestEntry,
+  type SpellManifestId,
+} from '../combat/spells/manifest';
 import {
   armorClass,
   combatantId,
@@ -31,30 +38,120 @@ import {
   limitedResourcePoolId,
   tokenId,
   worldObjectId,
+  type CombatantId,
   type DamageType,
   type DieSides,
   type EncounterEffectId,
 } from '../combat/values';
 import type { WorldOperation } from '../combat/world-objects';
-import { abilities, creatureSizes, damageTypes, skills, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
+import { abilities, creatureSizes, damageTypes, skills, weaponMasteryProperties, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import { hitDieSizes, type HitDieSize } from '../domain/enums';
+import { exactValues } from '../domain/exact-table';
+import { TotalMap } from '../domain/total-map';
 import { SRD_CLASS_NAMES } from '../rules/class-traits-srd';
 import {
   createGapReport,
   deduplicateGapReports,
   type GapReport,
 } from './srd-gap-report';
+import { shouldDrinkHealingPotion } from './healing-potion-policy';
 
 export const EXTERNAL_PARTY_PACK_SCHEMA_VERSION = 2 as const;
 export const EXTERNAL_PARTY_PACK_MINIMUM_SCHEMA_VERSION = 1 as const;
 
-const partyIdSchema = z.string().regex(/^party:[a-z0-9][a-z0-9-]{0,79}$/u);
-const combatantIdSchema = z.string().regex(/^combatant:[a-z0-9][a-z0-9-]{0,79}$/u);
-const tokenIdSchema = z.string().regex(/^token:[a-z0-9][a-z0-9-]{0,79}$/u);
-const effectIdSchema = z.string().regex(/^effect:[a-z0-9][a-z0-9:-]{0,119}$/u);
-const attackIdSchema = z.string().regex(/^attack:[a-z0-9][a-z0-9-]{0,79}$/u);
-const resourcePoolIdSchema = z.string().regex(/^resource:[a-z0-9][a-z0-9-]{0,79}$/u);
-const worldObjectIdSchema = z.string().regex(/^object:[a-z0-9][a-z0-9:-]{0,119}$/u);
+type PartyPackIdPrefix =
+  | 'party'
+  | 'combatant'
+  | 'token'
+  | 'effect'
+  | 'attack'
+  | 'resource'
+  | 'object'
+  | 'world';
+
+export type PartyPackPrefixedId<Prefix extends PartyPackIdPrefix> = `${Prefix}:${string}`;
+export type ExternalPartyId = PartyPackPrefixedId<'party'>;
+export type ExternalCombatantId = PartyPackPrefixedId<'combatant'>;
+export type ExternalTokenId = PartyPackPrefixedId<'token'>;
+export type ExternalEffectId = PartyPackPrefixedId<'effect'>;
+export type ExternalAttackId = PartyPackPrefixedId<'attack'>;
+export type ExternalResourcePoolId = PartyPackPrefixedId<'resource'>;
+export type ExternalWorldObjectId = PartyPackPrefixedId<'object'>;
+export type ExternalWorldOperationId = PartyPackPrefixedId<'world'>;
+
+function prefixedIdSchema<const Prefix extends PartyPackIdPrefix>(
+  _prefix: Prefix,
+  pattern: RegExp,
+): z.ZodType<PartyPackPrefixedId<Prefix>, string> {
+  return z.string().regex(pattern) as z.ZodType<PartyPackPrefixedId<Prefix>, string>;
+}
+
+const partyIdSchema = prefixedIdSchema('party', /^party:[a-z0-9][a-z0-9-]{0,79}$/u);
+const combatantIdSchema = prefixedIdSchema('combatant', /^combatant:[a-z0-9][a-z0-9-]{0,79}$/u);
+const tokenIdSchema = prefixedIdSchema('token', /^token:[a-z0-9][a-z0-9-]{0,79}$/u);
+const effectIdSchema = prefixedIdSchema('effect', /^effect:[a-z0-9][a-z0-9:-]{0,119}$/u);
+const attackIdSchema = prefixedIdSchema('attack', /^attack:[a-z0-9][a-z0-9-]{0,79}$/u);
+const resourcePoolIdSchema = prefixedIdSchema('resource', /^resource:[a-z0-9][a-z0-9-]{0,79}$/u);
+const worldObjectIdSchema = prefixedIdSchema('object', /^object:[a-z0-9][a-z0-9:-]{0,119}$/u);
+const worldOperationIdSchema = prefixedIdSchema('world', /^world:[a-z0-9][a-z0-9-]{0,79}$/u);
+const PARTY_PACK_PATH_ROOT: 'party-pack' = 'party-pack';
+const PARTY_PACK_PATH_SEPARATOR: '.' = '.';
+const PARTY_PACK_ROOT_ENTRY: 'party-pack:root' = 'party-pack:root';
+const MISSING_EFFECT_KIND: 'missing_effect_kind' = 'missing_effect_kind';
+const EXTERNAL_COMBATANT_ID_PREFIX: 'combatant:' = 'combatant:';
+const ATTACK_KINDS = exactValues<'melee' | 'ranged'>()('melee', 'ranged');
+const WORLD_OBJECT_KINDS = exactValues<
+  'barrier' | 'cover' | 'door' | 'hazard' | 'light-source' | 'summoned-terrain' | 'generic'
+>()('barrier', 'cover', 'door', 'hazard', 'light-source', 'summoned-terrain', 'generic');
+const DAMAGE_RESPONSES = exactValues<
+  'normal' | 'resistant' | 'vulnerable' | 'resistant_and_vulnerable' | 'immune'
+>()('normal', 'resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune');
+const NON_NORMAL_DAMAGE_RESPONSES = exactValues<
+  'resistant' | 'vulnerable' | 'resistant_and_vulnerable' | 'immune'
+>()('resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune');
+const COVER_KINDS = exactValues<'none' | 'half' | 'three_quarters' | 'total'>()(
+  'none', 'half', 'three_quarters', 'total',
+);
+const WORLD_OPERATION_COSTS = exactValues<'action' | 'bonus_action' | 'reaction' | 'none'>()(
+  'action', 'bonus_action', 'reaction', 'none',
+);
+const WORLD_OBJECT_REMOVAL_REASONS = exactValues<'destroyed' | 'dismissed'>()(
+  'destroyed', 'dismissed',
+);
+const ROLL_MODES = exactValues<'normal' | 'advantage' | 'disadvantage'>()(
+  'normal', 'advantage', 'disadvantage',
+);
+const LIGHT_LEVELS = exactValues<'bright' | 'dim' | 'darkness'>()(
+  'bright', 'dim', 'darkness',
+);
+const RESOURCE_RECHARGES = exactValues<'short_rest' | 'long_rest'>()(
+  'short_rest', 'long_rest',
+);
+const ACTIVATED_EFFECT_TRIGGERS = exactValues<
+  'always_on' | 'action' | 'bonus_action' | 'reaction'
+>()('always_on', 'action', 'bonus_action', 'reaction');
+const DAMAGE_RIDER_TRIGGERS = exactValues<'on_hit' | 'on_crit'>()('on_hit', 'on_crit');
+const TURN_BOUNDARIES = exactValues<'start' | 'end'>()('start', 'end');
+const SAVE_SUCCESS_OUTCOMES = exactValues<'none' | 'half'>()('none', 'half');
+const PERSISTENT_AREA_HOOKS = exactValues<
+  'on_enter' | 'on_start_of_turn_inside' | 'on_end_of_turn_inside' | 'on_exit'
+>()('on_enter', 'on_start_of_turn_inside', 'on_end_of_turn_inside', 'on_exit');
+const PERSISTENT_AREA_FREQUENCIES = exactValues<'once_per_turn' | 'every_trigger'>()(
+  'once_per_turn', 'every_trigger',
+);
+const ACTION_OR_BONUS_ACTION = exactValues<'action' | 'bonus_action'>()(
+  'action', 'bonus_action',
+);
+const ACTION_BONUS_OR_REACTION = exactValues<'action' | 'bonus_action' | 'reaction'>()(
+  'action', 'bonus_action', 'reaction',
+);
+const ATTACK_ROLL_MODES = exactValues<'advantage' | 'disadvantage'>()(
+  'advantage', 'disadvantage',
+);
+const PERSISTENT_AREA_ORIGINS = exactValues<'self' | 'selected'>()('self', 'selected');
+const PERSISTENT_AREA_TARGET_FILTERS = exactValues<'all' | 'allies' | 'enemies'>()(
+  'all', 'allies', 'enemies',
+);
 const integerSchema = z.number().int().safe();
 const modifierSchema = integerSchema.min(-30).max(30);
 const classLevelSchema = integerSchema.min(1).max(20);
@@ -87,14 +184,60 @@ const saveRecordShape = Object.fromEntries(
   abilities.map((ability) => [ability, modifierSchema]),
 ) as Record<Ability, typeof modifierSchema>;
 
+type SchemaNestedPaths<T> = T extends readonly (infer Entry)[]
+  ? readonly [number] | readonly [number, ...SchemaNestedPaths<Exclude<Entry, null | undefined>>]
+  : T extends object
+    ? {
+        readonly [Key in Extract<keyof T, string>]:
+          | readonly [Key]
+          | readonly [Key, ...SchemaNestedPaths<Exclude<T[Key], null | undefined>>];
+      }[Extract<keyof T, string>]
+    : never;
+
+function schemaPathFor<T>() {
+  return <const Path extends SchemaNestedPaths<T>>(...parts: Path): Path => parts;
+}
+
+export type PartyPackValidationIssue = Parameters<z.RefinementCtx['addIssue']>[0];
+export type PartyPackRule<T> = (value: T) => readonly PartyPackValidationIssue[];
+
+function customValidationIssue(
+  message: string,
+  path?: readonly PropertyKey[],
+): PartyPackValidationIssue {
+  return path === undefined
+    ? { code: 'custom', message }
+    : { code: 'custom', path: [...path], message };
+}
+
+function issueWhen(
+  invalid: boolean,
+  message: string,
+  path?: readonly PropertyKey[],
+): readonly PartyPackValidationIssue[] {
+  return invalid ? [customValidationIssue(message, path)] : [];
+}
+
+/** The sole Zod side-effect adapter; every individual check returns issues. */
+function refinementFromRules<T>(
+  rules: readonly PartyPackRule<T>[],
+): (value: T, context: z.RefinementCtx<T>) => void {
+  return (value: T, context: z.RefinementCtx<T>): void => {
+    const issues = rules.flatMap(
+      (rule): readonly PartyPackValidationIssue[] => rule(value),
+    );
+    for (const issue of issues) context.addIssue(issue);
+  };
+}
+
 const classSchema = z.strictObject({
   classId: z.enum(SRD_CLASS_NAMES),
   level: classLevelSchema,
 });
 
-const attackSchema = z.strictObject({
+const attackBaseShape = {
   attackId: attackIdSchema,
-  kind: z.enum(['melee', 'ranged']),
+  kind: z.enum(ATTACK_KINDS),
   attackBonus: modifierSchema,
   criticalFloor: integerSchema.min(2).max(20),
   reachFeet: distanceSchema,
@@ -105,17 +248,61 @@ const attackSchema = z.strictObject({
     sides: dieSidesSchema,
     modifier: modifierSchema,
   })).min(1).max(20),
+} as const;
+const attackObjectSchema = z.strictObject({
+  ...attackBaseShape,
+  masteryProperty: z.enum(weaponMasteryProperties).optional(),
+  masterySaveDc: integerSchema.min(1).max(50).optional(),
 });
+const attackSchemaPath = schemaPathFor<z.infer<typeof attackObjectSchema>>();
+type AttackWireInput = z.infer<typeof attackObjectSchema>;
+export type ExternalPartyPackAttack = Omit<
+  AttackWireInput,
+  'masteryProperty' | 'masterySaveDc'
+> & (
+  | {
+      readonly masteryProperty: 'Topple';
+      readonly masterySaveDc: number;
+    }
+  | {
+      readonly masteryProperty: Exclude<(typeof weaponMasteryProperties)[number], 'Topple'>;
+      readonly masterySaveDc?: never;
+    }
+  | {
+      readonly masteryProperty?: never;
+      readonly masterySaveDc?: never;
+    }
+);
+export type ExternalPartyPackAttackMastery = ExternalPartyPackAttack extends infer Attack
+  ? Attack extends unknown
+    ? Pick<Attack, Extract<keyof Attack, 'masteryProperty' | 'masterySaveDc'>>
+    : never
+  : never;
+const ATTACK_RULES = [
+  (attack: AttackWireInput): readonly PartyPackValidationIssue[] => issueWhen(
+    attack.masteryProperty === 'Topple' && attack.masterySaveDc === undefined,
+    'Topple mastery requires its sourced save DC.',
+    attackSchemaPath('masterySaveDc'),
+  ),
+  (attack: AttackWireInput): readonly PartyPackValidationIssue[] => issueWhen(
+    attack.masteryProperty !== 'Topple' && attack.masterySaveDc !== undefined,
+    'Only Topple mastery carries a save DC.',
+    attackSchemaPath('masterySaveDc'),
+  ),
+] as const satisfies readonly PartyPackRule<AttackWireInput>[];
+const attackSchema = attackObjectSchema.superRefine(
+  refinementFromRules(ATTACK_RULES),
+) as unknown as z.ZodType<ExternalPartyPackAttack, AttackWireInput>;
 
 const gridCellSchema = z.strictObject({
   column: integerSchema.min(0).max(100_000),
   row: integerSchema.min(0).max(100_000),
 });
 
-const externalWorldObjectSchema = z.strictObject({
+const externalWorldObjectObjectSchema = z.strictObject({
   objectId: worldObjectIdSchema,
   name: z.string().trim().min(1).max(1_000),
-  kind: z.enum(['barrier', 'cover', 'door', 'hazard', 'light-source', 'summoned-terrain', 'generic']),
+  kind: z.enum(WORLD_OBJECT_KINDS),
   position: gridCellSchema,
   footprint: z.array(gridCellSchema).min(1).max(400),
   durability: z.discriminatedUnion('kind', [
@@ -129,18 +316,27 @@ const externalWorldObjectSchema = z.strictObject({
   armorClass: integerSchema.min(0).max(100),
   damageResponses: z.array(z.strictObject({
     damageTypeId: z.enum(damageTypes),
-    response: z.enum(['normal', 'resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune']),
+    response: z.enum(DAMAGE_RESPONSES),
   })).max(damageTypes.length),
   blocking: z.strictObject({
     movement: z.boolean(),
     lineOfSight: z.boolean(),
-    cover: z.enum(['none', 'half', 'three_quarters', 'total']),
+    cover: z.enum(COVER_KINDS),
   }),
-}).superRefine((object, context) => {
-  if (object.durability.kind === 'hit_points' && object.durability.hitPoints > object.durability.maximumHitPoints) {
-    context.addIssue({ code: 'custom', path: ['durability', 'hitPoints'], message: 'Object Hit Points cannot exceed its maximum.' });
-  }
 });
+const externalWorldObjectSchemaPath = schemaPathFor<z.infer<typeof externalWorldObjectObjectSchema>>();
+type ExternalWorldObjectInput = z.infer<typeof externalWorldObjectObjectSchema>;
+const EXTERNAL_WORLD_OBJECT_RULES = [
+  (object: ExternalWorldObjectInput): readonly PartyPackValidationIssue[] => issueWhen(
+    object.durability.kind === 'hit_points' &&
+      object.durability.hitPoints > object.durability.maximumHitPoints,
+    'Object Hit Points cannot exceed its maximum.',
+    externalWorldObjectSchemaPath('durability', 'hitPoints'),
+  ),
+] as const satisfies readonly PartyPackRule<ExternalWorldObjectInput>[];
+const externalWorldObjectSchema = externalWorldObjectObjectSchema.superRefine(
+  refinementFromRules(EXTERNAL_WORLD_OBJECT_RULES),
+);
 
 const externalDamageRequestSchema = z.strictObject({
   terms: z.array(z.strictObject({
@@ -152,16 +348,16 @@ const externalDamageRequestSchema = z.strictObject({
   critical: z.boolean(),
 });
 
-const externalWorldOperationSchema = z.strictObject({
-  operationId: z.string().regex(/^world:[a-z0-9][a-z0-9-]{0,79}$/u),
-  cost: z.enum(['action', 'bonus_action', 'reaction', 'none']),
+const externalWorldOperationObjectSchema = z.strictObject({
+  operationId: worldOperationIdSchema,
+  cost: z.enum(WORLD_OPERATION_COSTS),
   operation: z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('create_object'), object: externalWorldObjectSchema }),
     z.strictObject({
       kind: z.literal('modify_object'), objectId: worldObjectIdSchema,
       changes: z.strictObject({
         name: z.string().trim().min(1).max(1_000).optional(),
-        kind: z.enum(['barrier', 'cover', 'door', 'hazard', 'light-source', 'summoned-terrain', 'generic']).optional(),
+        kind: z.enum(WORLD_OBJECT_KINDS).optional(),
         position: gridCellSchema.optional(),
         footprint: z.array(gridCellSchema).min(1).max(400).optional(),
         durability: externalWorldObjectSchema.shape.durability.optional(),
@@ -172,7 +368,7 @@ const externalWorldOperationSchema = z.strictObject({
     }),
     z.strictObject({
       kind: z.literal('remove_object'), objectId: worldObjectIdSchema,
-      reason: z.enum(['destroyed', 'dismissed']),
+      reason: z.enum(WORLD_OBJECT_REMOVAL_REASONS),
     }),
     z.strictObject({
       kind: z.literal('damage_object'), objectId: worldObjectIdSchema,
@@ -181,7 +377,7 @@ const externalWorldOperationSchema = z.strictObject({
         z.strictObject({
           kind: z.literal('attack'), attackBonus: modifierSchema,
           criticalFloor: integerSchema.min(2).max(20),
-          rollMode: z.enum(['normal', 'advantage', 'disadvantage']),
+          rollMode: z.enum(ROLL_MODES),
         }),
       ]),
       damage: externalDamageRequestSchema,
@@ -194,28 +390,50 @@ const externalWorldOperationSchema = z.strictObject({
     z.strictObject({
       kind: z.literal('set_light_level'),
       region: z.strictObject({ id: z.string().trim().min(1).max(200), cells: z.array(gridCellSchema).min(1).max(10_000) }),
-      level: z.enum(['bright', 'dim', 'darkness']),
+      level: z.enum(LIGHT_LEVELS),
     }),
   ]),
-}).superRefine((entry, context) => {
-  const operation = entry.operation;
-  if (operation.kind === 'create_object') {
-    const footprintKeys = operation.object.footprint.map((cell) => `${String(cell.column)},${String(cell.row)}`);
-    const positionKey = `${String(operation.object.position.column)},${String(operation.object.position.row)}`;
-    if (new Set(footprintKeys).size !== footprintKeys.length || !footprintKeys.includes(positionKey)) {
-      context.addIssue({ code: 'custom', path: ['operation', 'object', 'footprint'], message: 'Object footprint must be unique and include position.' });
-    }
-  }
-  if (operation.kind === 'modify_object' && Object.keys(operation.changes).length === 0) {
-    context.addIssue({ code: 'custom', path: ['operation', 'changes'], message: 'Object modifications cannot be empty.' });
-  }
-  if (operation.kind === 'transform_terrain' || operation.kind === 'set_light_level') {
-    const keys = operation.region.cells.map((cell) => `${String(cell.column)},${String(cell.row)}`);
-    if (new Set(keys).size !== keys.length) {
-      context.addIssue({ code: 'custom', path: ['operation', 'region', 'cells'], message: 'Environment cells must be unique.' });
-    }
-  }
 });
+const externalWorldOperationSchemaPath = schemaPathFor<
+  z.infer<typeof externalWorldOperationObjectSchema>
+>();
+type ExternalWorldOperationInput = z.infer<typeof externalWorldOperationObjectSchema>;
+const EXTERNAL_WORLD_OPERATION_RULES = [
+  (entry: ExternalWorldOperationInput): readonly PartyPackValidationIssue[] => {
+    if (entry.operation.kind !== 'create_object') return [];
+    const footprintKeys = entry.operation.object.footprint.map(
+      (cell): string => `${String(cell.column)},${String(cell.row)}`,
+    );
+    const positionKey = `${String(entry.operation.object.position.column)},${String(entry.operation.object.position.row)}`;
+    return issueWhen(
+      new Set(footprintKeys).size !== footprintKeys.length ||
+        !footprintKeys.includes(positionKey),
+      'Object footprint must be unique and include position.',
+      externalWorldOperationSchemaPath('operation', 'object', 'footprint'),
+    );
+  },
+  (entry: ExternalWorldOperationInput): readonly PartyPackValidationIssue[] => issueWhen(
+    entry.operation.kind === 'modify_object' &&
+      Object.keys(entry.operation.changes).length === 0,
+    'Object modifications cannot be empty.',
+    externalWorldOperationSchemaPath('operation', 'changes'),
+  ),
+  (entry: ExternalWorldOperationInput): readonly PartyPackValidationIssue[] => {
+    const operation = entry.operation;
+    if (operation.kind !== 'transform_terrain' && operation.kind !== 'set_light_level') return [];
+    const keys = operation.region.cells.map(
+      (cell): string => `${String(cell.column)},${String(cell.row)}`,
+    );
+    return issueWhen(
+      new Set(keys).size !== keys.length,
+      'Environment cells must be unique.',
+      externalWorldOperationSchemaPath('operation', 'region', 'cells'),
+    );
+  },
+] as const satisfies readonly PartyPackRule<ExternalWorldOperationInput>[];
+const externalWorldOperationSchema = externalWorldOperationObjectSchema.superRefine(
+  refinementFromRules(EXTERNAL_WORLD_OPERATION_RULES),
+);
 
 const spellSlotSchema = z.strictObject({
   level: spellSlotLevelSchema,
@@ -257,15 +475,15 @@ const startingConditionSchema = z.strictObject({
 export const externalPartyPackResourceSchema = z.strictObject({
   resourcePoolId: resourcePoolIdSchema,
   maximum: integerSchema.min(1).max(999),
-  recharge: z.enum(['short_rest', 'long_rest']),
+  recharge: z.enum(RESOURCE_RECHARGES),
 });
 
 const featureEffectBaseShape = {
   effectId: effectIdSchema,
   resourcePoolId: resourcePoolIdSchema.optional(),
 } as const;
-const activatedEffectTriggerSchema = z.enum(['always_on', 'action', 'bonus_action', 'reaction']);
-const damageRiderTriggerSchema = z.enum(['on_hit', 'on_crit']);
+const activatedEffectTriggerSchema = z.enum(ACTIVATED_EFFECT_TRIGGERS);
+const damageRiderTriggerSchema = z.enum(DAMAGE_RIDER_TRIGGERS);
 
 const effectDamageSchema = z.strictObject({
   damageTypeId: z.enum(damageTypes),
@@ -278,7 +496,39 @@ const nonExhaustionConditionNames = conditionNames.filter(
   (condition): condition is Exclude<ConditionName, 'Exhaustion'> => condition !== 'Exhaustion',
 );
 
-export const FEATURE_EFFECT_KINDS = [
+export type FeatureEffectKind =
+  | 'damage_operation'
+  | 'armed_weapon_hit_rider'
+  | 'damage_rider'
+  | 'once_per_turn_damage_rider'
+  | 'slot_spend_damage_rider'
+  | 'first_hit_damage_rider'
+  | 'bonus_action_attack_grant'
+  | 'extra_attack_count_override'
+  | 'action_surge'
+  | 'attack_roll_modifier'
+  | 'attack_roll_mode'
+  | 'reckless_attack_mode'
+  | 'armor_class_modifier'
+  | 'saving_throw_modifier'
+  | 'skill_modifier'
+  | 'temporary_hit_points'
+  | 'condition_application'
+  | 'exhaustion_application'
+  | 'movement_modifier'
+  | 'attack_ability_substitution'
+  | 'attack_damage_die_override'
+  | 'attack_reach_range_override'
+  | 'save_gated_banishment_on_hit'
+  | 'spell_damage_ability_modifier'
+  | 'timed_spellcasting_mode'
+  | 'attack_damage_type_choice'
+  | 'resource_die_maneuver'
+  | 'exploding_spell_damage_die'
+  | 'elemental_fury'
+  | 'persistent_area';
+
+export const FEATURE_EFFECT_KINDS = exactValues<FeatureEffectKind>()(
   'damage_operation',
   'armed_weapon_hit_rider',
   'damage_rider',
@@ -309,7 +559,15 @@ export const FEATURE_EFFECT_KINDS = [
   'exploding_spell_damage_die',
   'elemental_fury',
   'persistent_area',
-] as const;
+);
+
+const featureEffectKinds = Object.fromEntries(
+  FEATURE_EFFECT_KINDS.map((kind) => [kind, true]),
+) as Readonly<Record<FeatureEffectKind, true>>;
+
+export function isFeatureEffectKind(value: unknown): value is FeatureEffectKind {
+  return typeof value === 'string' && Object.hasOwn(featureEffectKinds, value);
+}
 
 const persistentAreaShapeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('sphere'), radiusFeet: distanceSchema.min(1) }),
@@ -325,8 +583,8 @@ const persistentAreaShapeSchema = z.discriminatedUnion('kind', [
 const persistentAreaLifetimeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('while_inside') }),
   z.strictObject({ kind: z.literal('area_duration') }),
-  z.strictObject({ kind: z.literal('fixed_rounds'), rounds: integerSchema.min(1).max(1_000_000), boundary: z.enum(['start', 'end']) }),
-  z.strictObject({ kind: z.literal('save_ends'), boundary: z.enum(['start', 'end']) }),
+  z.strictObject({ kind: z.literal('fixed_rounds'), rounds: integerSchema.min(1).max(1_000_000), boundary: z.enum(TURN_BOUNDARIES) }),
+  z.strictObject({ kind: z.literal('save_ends'), boundary: z.enum(TURN_BOUNDARIES) }),
 ]);
 
 const persistentAreaPayloadSchema = z.discriminatedUnion('kind', [
@@ -341,14 +599,14 @@ const persistentAreaEffectSpecSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('automatic'), payload: persistentAreaPayloadSchema }),
   z.strictObject({
     kind: z.literal('save_gated'), ability: z.enum(abilities), saveDc: integerSchema.min(1).max(50),
-    rollMode: z.enum(['normal', 'advantage', 'disadvantage']), onSuccess: z.enum(['none', 'half']),
+    rollMode: z.enum(ROLL_MODES), onSuccess: z.enum(SAVE_SUCCESS_OUTCOMES),
     payload: persistentAreaPayloadSchema,
   }),
 ]);
 
 const persistentAreaHookSchema = z.strictObject({
-  hook: z.enum(['on_enter', 'on_start_of_turn_inside', 'on_end_of_turn_inside', 'on_exit']),
-  frequency: z.enum(['once_per_turn', 'every_trigger']),
+  hook: z.enum(PERSISTENT_AREA_HOOKS),
+  frequency: z.enum(PERSISTENT_AREA_FREQUENCIES),
   effect: persistentAreaEffectSpecSchema,
 });
 
@@ -357,18 +615,22 @@ const persistentAreaDurationSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('concentration'), rounds: integerSchema.min(1).max(1_000_000) }),
 ]);
 
-const featureEffectSchema = z.discriminatedUnion('kind', [
+const ONCE_PER_TURN_QUALIFYING_GATES = exactValues<
+  (typeof damageRiderGates)[0] | (typeof damageRiderGates)[1]
+>()(damageRiderGates[0], damageRiderGates[1]);
+
+const featureEffectObjectSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     ...featureEffectBaseShape,
     kind: z.literal('damage_operation'),
-    trigger: z.enum(['action', 'bonus_action']),
+    trigger: z.enum(ACTION_OR_BONUS_ACTION),
     saveDc: integerSchema.min(1).max(50),
     ...damageOperationSpecSchema.shape,
   }),
   z.strictObject({
     ...featureEffectBaseShape,
     kind: z.literal('armed_weapon_hit_rider'),
-    trigger: z.enum(['action', 'bonus_action']),
+    trigger: z.enum(ACTION_OR_BONUS_ACTION),
     saveDc: integerSchema.min(1).max(50),
     ...armedWeaponHitRiderShape,
   }),
@@ -383,10 +645,7 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
     kind: z.literal('once_per_turn_damage_rider'),
     trigger: z.literal('on_hit'),
     oncePerTurnGate: z.literal(damageRiderGates[2]),
-    qualifyingGates: z.array(z.enum([
-      damageRiderGates[0],
-      damageRiderGates[1],
-    ])).min(1).max(2),
+    qualifyingGates: z.array(z.enum(ONCE_PER_TURN_QUALIFYING_GATES)).min(1).max(2),
     damage: z.array(effectDamageSchema).min(1).max(20),
   }),
   z.strictObject({
@@ -438,8 +697,8 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     ...featureEffectBaseShape,
     kind: z.literal('attack_roll_mode'),
-    trigger: z.enum(['action', 'bonus_action', 'reaction']),
-    mode: z.enum(['advantage', 'disadvantage']),
+    trigger: z.enum(ACTION_BONUS_OR_REACTION),
+    mode: z.enum(ATTACK_ROLL_MODES),
   }),
   z.strictObject({
     ...featureEffectBaseShape,
@@ -582,127 +841,253 @@ const featureEffectSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     ...featureEffectBaseShape,
     kind: z.literal('persistent_area'),
-    trigger: z.enum(['action', 'bonus_action', 'reaction']),
-    origin: z.enum(['self', 'selected']),
+    trigger: z.enum(ACTION_BONUS_OR_REACTION),
+    origin: z.enum(PERSISTENT_AREA_ORIGINS),
     shape: persistentAreaShapeSchema,
     duration: persistentAreaDurationSchema,
-    targetFilter: z.enum(['all', 'allies', 'enemies']),
+    targetFilter: z.enum(PERSISTENT_AREA_TARGET_FILTERS),
     difficultTerrain: z.boolean(),
     movableFeet: distanceSchema.min(1).nullable(),
     hooks: z.array(persistentAreaHookSchema).max(16),
   }),
-]).superRefine((effect, context) => {
-  if (effect.kind === 'damage_operation') {
-    for (const packet of effect.packets) {
-      if (packet.dice.perSlotCount !== 0 || packet.dice.perSlotModifier !== 0 || packet.dice.cantripUpgrade) {
-        context.addIssue({ code: 'custom', message: 'Feature damage cannot use spell-slot or cantrip scaling.' });
+]);
+
+type FeatureEffectInput = z.infer<typeof featureEffectObjectSchema>;
+type EffectWithoutResource<Effect> = Omit<Effect, 'resourcePoolId'> & {
+  readonly resourcePoolId?: never;
+};
+type ResourceForbiddenEffectKind =
+  | 'extra_attack_count_override'
+  | 'slot_spend_damage_rider'
+  | 'reckless_attack_mode'
+  | 'attack_ability_substitution'
+  | 'attack_damage_die_override'
+  | 'attack_reach_range_override'
+  | 'save_gated_banishment_on_hit'
+  | 'spell_damage_ability_modifier'
+  | 'attack_damage_type_choice'
+  | 'exploding_spell_damage_die'
+  | 'elemental_fury';
+type EffectResourceByTrigger<Effect, Trigger> = Trigger extends 'always_on'
+  ? EffectWithoutResource<Omit<Effect, 'trigger'> & { readonly trigger: Trigger }>
+  : Omit<Effect, 'trigger'> & { readonly trigger: Trigger };
+type EffectResourceTypestate<Effect> = Effect extends {
+  readonly kind: ResourceForbiddenEffectKind;
+}
+  ? EffectWithoutResource<Effect>
+  : Effect extends { readonly trigger: infer Trigger }
+    ? Trigger extends unknown
+      ? EffectResourceByTrigger<Effect, Trigger>
+      : never
+    : Effect;
+
+type PersistentAreaWireEffect = Extract<FeatureEffectInput, { readonly kind: 'persistent_area' }>;
+type PersistentAreaWireHook = PersistentAreaWireEffect['hooks'][number];
+type PersistentAreaWireSpec = PersistentAreaWireHook['effect'];
+type PersistentAreaWirePayload = PersistentAreaWireSpec['payload'];
+type PersistentAreaDamagePayload = Extract<PersistentAreaWirePayload, { readonly kind: 'damage' }>;
+type PersistentAreaNonDamagePayload = Exclude<PersistentAreaWirePayload, PersistentAreaDamagePayload>;
+type PersistentAreaNonSaveEndingPayload = PersistentAreaNonDamagePayload extends infer Payload
+  ? Payload extends { readonly lifetime: infer Lifetime }
+    ? Omit<Payload, 'lifetime'> & {
+        readonly lifetime: Exclude<Lifetime, { readonly kind: 'save_ends' }>;
       }
+    : never
+  : never;
+
+export type ExternalPersistentAreaEffectSpec =
+  | {
+      readonly kind: 'automatic';
+      readonly payload: PersistentAreaDamagePayload | PersistentAreaNonSaveEndingPayload;
     }
-  }
-  if (effect.kind === 'armed_weapon_hit_rider' && effect.damage !== null) {
-    if (effect.damage.scaling.kind !== 'none' || effect.damage.thresholdRider !== null) {
-      context.addIssue({ code: 'custom', message: 'Armed weapon-hit damage cannot defer target scaling or a threshold rider.' });
+  | (Omit<
+      Extract<PersistentAreaWireSpec, { readonly kind: 'save_gated' }>,
+      'onSuccess' | 'payload'
+    > & {
+      readonly onSuccess: 'none';
+      readonly payload: PersistentAreaWirePayload;
+    })
+  | (Omit<
+      Extract<PersistentAreaWireSpec, { readonly kind: 'save_gated' }>,
+      'onSuccess' | 'payload'
+    > & {
+      readonly onSuccess: 'half';
+      readonly payload: PersistentAreaDamagePayload;
+    });
+export type ExternalHalfSavePayload = Extract<
+  ExternalPersistentAreaEffectSpec,
+  { readonly kind: 'save_gated'; readonly onSuccess: 'half' }
+>['payload'];
+
+type PersistentAreaHook = Omit<PersistentAreaWireHook, 'effect'> & {
+  readonly effect: ExternalPersistentAreaEffectSpec;
+};
+type PersistentAreaByOrigin<Effect, Origin> = Origin extends 'self'
+  ? Omit<Effect, 'origin' | 'movableFeet' | 'hooks'> & {
+      readonly origin: 'self';
+      readonly movableFeet: null;
+      readonly hooks: readonly PersistentAreaHook[];
     }
-    if (
-      effect.damage.dice.perSlotCount !== 0 ||
-      effect.damage.dice.perSlotModifier !== 0 ||
-      effect.damage.dice.cantripUpgrade
-    ) {
-      context.addIssue({ code: 'custom', message: 'Feature rider damage cannot use spell-slot or cantrip scaling.' });
-    }
-  }
-  if (
+  : Omit<Effect, 'origin' | 'hooks'> & {
+      readonly origin: Origin;
+      readonly hooks: readonly PersistentAreaHook[];
+    };
+type PersistentAreaTypestate<Effect> = Effect extends {
+  readonly kind: 'persistent_area';
+  readonly origin: infer Origin;
+}
+  ? Origin extends unknown
+    ? PersistentAreaByOrigin<Effect, Origin>
+    : never
+  : Effect;
+
+export type ExternalPartyPackEffect = FeatureEffectInput extends infer Effect
+  ? Effect extends unknown
+    ? PersistentAreaTypestate<EffectResourceTypestate<Effect>>
+    : never
+  : never;
+export type ExternalExtraAttackResourceState = Pick<
+  Extract<ExternalPartyPackEffect, { readonly kind: 'extra_attack_count_override' }>,
+  'kind' | 'resourcePoolId'
+>;
+export type ExternalAlwaysOnArmorClassResourceState = Pick<
+  Extract<
+    ExternalPartyPackEffect,
+    { readonly kind: 'armor_class_modifier'; readonly trigger: 'always_on' }
+  >,
+  'kind' | 'trigger' | 'resourcePoolId'
+>;
+type ProjectTypestate<Value, Keys extends PropertyKey> = Value extends unknown
+  ? Pick<Value, Extract<keyof Value, Keys>>
+  : never;
+export type ExternalPersistentAreaPlacement = ProjectTypestate<
+  Extract<ExternalPartyPackEffect, { readonly kind: 'persistent_area' }>,
+  'origin' | 'movableFeet'
+>;
+const FEATURE_EFFECT_RULES = [
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] =>
+    effect.kind === 'damage_operation'
+      ? effect.packets.flatMap(
+          (packet): readonly PartyPackValidationIssue[] => issueWhen(
+            packet.dice.perSlotCount !== 0 ||
+              packet.dice.perSlotModifier !== 0 ||
+              packet.dice.cantripUpgrade,
+            'Feature damage cannot use spell-slot or cantrip scaling.',
+          ),
+        )
+      : [],
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => {
+    if (effect.kind !== 'armed_weapon_hit_rider' || effect.damage === null) return [];
+    return [
+      ...issueWhen(
+        effect.damage.scaling.kind !== 'none' || effect.damage.thresholdRider !== null,
+        'Armed weapon-hit damage cannot defer target scaling or a threshold rider.',
+      ),
+      ...issueWhen(
+        effect.damage.dice.perSlotCount !== 0 ||
+          effect.damage.dice.perSlotModifier !== 0 ||
+          effect.damage.dice.cantripUpgrade,
+        'Feature rider damage cannot use spell-slot or cantrip scaling.',
+      ),
+    ];
+  },
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     'trigger' in effect &&
-    effect.trigger === 'always_on' &&
-    effect.resourcePoolId !== undefined
-  ) {
-    context.addIssue({ code: 'custom', message: 'Always-on effects cannot spend a limited resource.' });
-  }
-  if (
+      effect.trigger === 'always_on' &&
+      effect.resourcePoolId !== undefined,
+    'Always-on effects cannot spend a limited resource.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'extra_attack_count_override' &&
-    (effect.resourcePoolId !== undefined ||
-      new Set(effect.levels.map((level) => level.minimumLevel)).size !== effect.levels.length)
-  ) {
-    context.addIssue({ code: 'custom', message: 'Extra Attack overrides require unique levels and no resource.' });
-  }
-  if (
-    effect.kind === 'slot_spend_damage_rider' &&
-    effect.resourcePoolId !== undefined
-  ) {
-    context.addIssue({ code: 'custom', message: 'Slot-spend riders use spell slots, not limited resources.' });
-  }
-  if (
+      (effect.resourcePoolId !== undefined ||
+        new Set(effect.levels.map((level): number => level.minimumLevel)).size !==
+          effect.levels.length),
+    'Extra Attack overrides require unique levels and no resource.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
+    effect.kind === 'slot_spend_damage_rider' && effect.resourcePoolId !== undefined,
+    'Slot-spend riders use spell slots, not limited resources.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'once_per_turn_damage_rider' &&
-    new Set(effect.qualifyingGates).size !== effect.qualifyingGates.length
-  ) {
-    context.addIssue({ code: 'custom', message: 'Once-per-turn rider gates must be unique.' });
-  }
-  if (
+      new Set(effect.qualifyingGates).size !== effect.qualifyingGates.length,
+    'Once-per-turn rider gates must be unique.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'reckless_attack_mode' &&
-    (effect.resourcePoolId !== undefined ||
-      new Set(effect.strengthBasedMeleeAttackIds).size !== effect.strengthBasedMeleeAttackIds.length)
-  ) {
-    context.addIssue({ code: 'custom', message: 'Reckless Attack requires unique attack ids and no resource.' });
-  }
-  if (
+      (effect.resourcePoolId !== undefined ||
+        new Set(effect.strengthBasedMeleeAttackIds).size !==
+          effect.strengthBasedMeleeAttackIds.length),
+    'Reckless Attack requires unique attack ids and no resource.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     (effect.kind === 'attack_ability_substitution' ||
       effect.kind === 'attack_damage_die_override' ||
       effect.kind === 'attack_reach_range_override') &&
-    effect.resourcePoolId !== undefined
-  ) {
-    context.addIssue({ code: 'custom', message: 'Attack-form substitutions are always-on and cannot spend a resource.' });
-  }
-  if (
+      effect.resourcePoolId !== undefined,
+    'Attack-form substitutions are always-on and cannot spend a resource.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'attack_damage_die_override' &&
-    new Set(effect.levels.map((level) => level.minimumLevel)).size !== effect.levels.length
-  ) {
-    context.addIssue({ code: 'custom', message: 'Damage-die override levels must be unique.' });
-  }
-  if (
+      new Set(effect.levels.map((level): number => level.minimumLevel)).size !==
+        effect.levels.length,
+    'Damage-die override levels must be unique.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'attack_reach_range_override' &&
-    effect.reachFeet === undefined &&
-    effect.rangeFeet === undefined
-  ) {
-    context.addIssue({ code: 'custom', message: 'A reach/range override must replace at least one distance.' });
-  }
-  if (
+      effect.reachFeet === undefined &&
+      effect.rangeFeet === undefined,
+    'A reach/range override must replace at least one distance.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'attack_damage_type_choice' &&
-    new Set(effect.damageTypeIds).size !== effect.damageTypeIds.length
-  ) {
-    context.addIssue({ code: 'custom', message: 'Attack damage-type choices must be unique.' });
-  }
-  if (
+      new Set(effect.damageTypeIds).size !== effect.damageTypeIds.length,
+    'Attack damage-type choices must be unique.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     effect.kind === 'elemental_fury' &&
-    (new Set(effect.attackIds).size !== effect.attackIds.length ||
-      new Set(effect.damageTypeIds).size !== effect.damageTypeIds.length ||
-      !effect.damageTypeIds.includes(effect.selectedDamageTypeId))
-  ) {
-    context.addIssue({ code: 'custom', message: 'Elemental Fury requires unique attacks and elements plus a declared selection.' });
-  }
-  if (
+      (new Set(effect.attackIds).size !== effect.attackIds.length ||
+        new Set(effect.damageTypeIds).size !== effect.damageTypeIds.length ||
+        !effect.damageTypeIds.includes(effect.selectedDamageTypeId)),
+    'Elemental Fury requires unique attacks and elements plus a declared selection.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
     (effect.kind === 'spell_damage_ability_modifier' ||
       effect.kind === 'attack_damage_type_choice' ||
       effect.kind === 'exploding_spell_damage_die' ||
       effect.kind === 'elemental_fury' ||
       effect.kind === 'save_gated_banishment_on_hit') &&
-    effect.resourcePoolId !== undefined
-  ) {
-    context.addIssue({ code: 'custom', message: 'This typed feature is automatic and cannot spend a resource.' });
-  }
-  if (effect.kind === 'persistent_area') {
-    if (effect.origin === 'self' && effect.movableFeet !== null) {
-      context.addIssue({ code: 'custom', message: 'A self-anchored area cannot also move independently.' });
-    }
-    for (const hook of effect.hooks) {
-      if (hook.effect.kind === 'automatic' && hook.effect.payload.kind !== 'damage' && hook.effect.payload.lifetime.kind === 'save_ends') {
-        context.addIssue({ code: 'custom', message: 'A save-ends area payload requires a save gate.' });
-      }
-      if (hook.effect.kind === 'save_gated' && hook.effect.onSuccess === 'half' && hook.effect.payload.kind !== 'damage') {
-        context.addIssue({ code: 'custom', message: 'Only area damage can resolve to half on a successful save.' });
-      }
-    }
-  }
-});
+      effect.resourcePoolId !== undefined,
+    'This typed feature is automatic and cannot spend a resource.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] => issueWhen(
+    effect.kind === 'persistent_area' &&
+      effect.origin === 'self' &&
+      effect.movableFeet !== null,
+    'A self-anchored area cannot also move independently.',
+  ),
+  (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] =>
+    effect.kind === 'persistent_area'
+      ? effect.hooks.flatMap((hook): readonly PartyPackValidationIssue[] => [
+          ...issueWhen(
+            hook.effect.kind === 'automatic' &&
+              hook.effect.payload.kind !== 'damage' &&
+              hook.effect.payload.lifetime.kind === 'save_ends',
+            'A save-ends area payload requires a save gate.',
+          ),
+          ...issueWhen(
+            hook.effect.kind === 'save_gated' &&
+              hook.effect.onSuccess === 'half' &&
+              hook.effect.payload.kind !== 'damage',
+            'Only area damage can resolve to half on a successful save.',
+          ),
+        ])
+      : [],
+] as const satisfies readonly PartyPackRule<FeatureEffectInput>[];
+
+const featureEffectSchema = featureEffectObjectSchema.superRefine(
+  refinementFromRules(FEATURE_EFFECT_RULES),
+) as unknown as z.ZodType<ExternalPartyPackEffect, FeatureEffectInput>;
 
 export const externalPartyPackFeatureEffectSchema = featureEffectSchema;
 
@@ -713,7 +1098,7 @@ const passiveSkillSchema = z.strictObject({
 
 const passiveDamageResponseSchema = z.strictObject({
   damageTypeId: z.enum(damageTypes),
-  response: z.enum(['resistant', 'vulnerable', 'resistant_and_vulnerable', 'immune']),
+  response: z.enum(NON_NORMAL_DAMAGE_RESPONSES),
 });
 
 const optionalSaveModifierShape = Object.fromEntries(
@@ -730,8 +1115,8 @@ const passivesSchema = z.strictObject({
   conditionImmunities: z.array(z.enum(conditionNames)).max(conditionNames.length).optional(),
 });
 
-const manifestSpellIdSchema = z.string().refine(
-  (id) => SPELL_MANIFEST.some((spell) => spell.id === id),
+const manifestSpellIdSchema = z.custom<SpellManifestId>(
+  isSpellManifestId,
   'Spell selection must use a manifest spell id.',
 );
 
@@ -806,7 +1191,7 @@ const v2MemberCoreSchema = z.strictObject({
   hitDice: z.array(hitDicePoolSchema).min(1).max(12).optional(),
 });
 
-const v2MemberSchema = z.strictObject({
+const v2MemberObjectSchema = z.strictObject({
   ...memberBaseShape,
   sizeCategory: z.enum(creatureSizes),
   hitDice: z.array(hitDicePoolSchema).min(1).max(12).optional(),
@@ -821,15 +1206,19 @@ const v2MemberSchema = z.strictObject({
   resources: z.array(externalPartyPackResourceSchema).max(100).optional(),
   passives: passivesSchema.optional(),
   worldOperations: z.array(externalWorldOperationSchema).max(100).optional(),
-}).superRefine((member, context) => {
-  if (Array.isArray(member.spellcasting) && member.sharedSpellSlots === undefined) {
-    context.addIssue({
-      code: 'custom',
-      path: ['sharedSpellSlots'],
-      message: 'Array-form spellcasting sources require member-level sharedSpellSlots.',
-    });
-  }
 });
+const v2MemberSchemaPath = schemaPathFor<z.infer<typeof v2MemberObjectSchema>>();
+type V2MemberInput = z.infer<typeof v2MemberObjectSchema>;
+const V2_MEMBER_RULES = [
+  (member: V2MemberInput): readonly PartyPackValidationIssue[] => issueWhen(
+    Array.isArray(member.spellcasting) && member.sharedSpellSlots === undefined,
+    'Array-form spellcasting sources require member-level sharedSpellSlots.',
+    v2MemberSchemaPath('sharedSpellSlots'),
+  ),
+] as const satisfies readonly PartyPackRule<V2MemberInput>[];
+const v2MemberSchema = v2MemberObjectSchema.superRefine(
+  refinementFromRules(V2_MEMBER_RULES),
+);
 
 const externalPartyPackV1Schema = z.strictObject({
   schemaVersion: z.literal(EXTERNAL_PARTY_PACK_MINIMUM_SCHEMA_VERSION),
@@ -865,8 +1254,6 @@ export type ExternalPartyPack = z.infer<typeof externalPartyPackSchema>;
 export type ExternalPartyPackV1 = z.infer<typeof externalPartyPackV1Schema>;
 export type ExternalPartyPackV2 = z.infer<typeof externalPartyPackV2Schema>;
 export type ExternalPartyPackMember = ExternalPartyPack['members'][number];
-export type ExternalPartyPackAttack = z.infer<typeof attackSchema>;
-export type ExternalPartyPackEffect = z.infer<typeof externalPartyPackFeatureEffectSchema>;
 export type ExternalPartyPackResource = z.infer<typeof externalPartyPackResourceSchema>;
 export type ExternalWorldOperation = z.infer<typeof externalWorldOperationSchema>;
 export type PartySource = z.infer<typeof partySourceSchema>;
@@ -878,6 +1265,10 @@ export interface LoadedPartyAttack {
   readonly criticalFloor: number;
   readonly reach: ReturnType<typeof feet>;
   readonly range: ReturnType<typeof feet>;
+  readonly mastery:
+    | { readonly property: 'Slow' }
+    | { readonly property: 'Topple'; readonly saveDc: number }
+    | null;
   readonly damage: readonly {
     readonly type: DamageType;
     readonly count: number;
@@ -897,17 +1288,17 @@ export interface LoadedPartySpellcastingSource {
   readonly spellAttackBonus: number;
   readonly spellcastingModifier: number;
   readonly casterLevel: number;
-  readonly preparedSpells: readonly SpellManifestRow[];
-  readonly knownSpells: readonly SpellManifestRow[];
+  readonly preparedSpells: readonly SpellManifestEntry[];
+  readonly knownSpells: readonly SpellManifestEntry[];
   readonly grants: readonly {
-    readonly spell: SpellManifestRow;
+    readonly spell: SpellManifestEntry;
     readonly ability: Ability;
     readonly spellSaveDc: number;
     readonly spellAttackBonus: number;
     readonly spellcastingModifier: number;
   }[];
   readonly resourceSpellUses: readonly {
-    readonly spellId: string;
+    readonly spellId: SpellManifestId;
     readonly resourcePoolId: ReturnType<typeof limitedResourcePoolId>;
   }[];
 }
@@ -916,7 +1307,7 @@ export interface LoadedPartyMember {
   readonly source: ExternalPartyPackMember;
   readonly profile: Extract<CombatantProfile, { readonly kind: 'player_character' }>;
   readonly attacks: readonly LoadedPartyAttack[];
-  readonly spells: readonly SpellManifestRow[];
+  readonly spells: readonly SpellManifestEntry[];
   readonly spellcasting: readonly LoadedPartySpellcastingSource[];
   readonly sharedSpellSlots: readonly {
     readonly level: z.infer<typeof spellSlotLevelSchema>;
@@ -935,7 +1326,7 @@ export interface LoadedPartyMember {
   readonly startingConditions: readonly LoadedPartyCondition[];
   readonly effects: readonly CombatFeatureEffect[];
   readonly worldOperations: readonly {
-    readonly operationId: string;
+    readonly operationId: ExternalWorldOperationId;
     readonly cost: Extract<EncounterCommand, { readonly type: 'world_operation' }>['cost'];
     readonly operation: WorldOperation;
   }[];
@@ -999,64 +1390,164 @@ export async function loadPartySource(
   };
 }
 
-const TOP_LEVEL_FIELDS = new Set(['schemaVersion', 'partyId', 'allowPartial', 'members']);
-const SHARED_MEMBER_FIELDS = [
-  'combatantId',
-  'tokenId',
-  'characterId',
-  'classes',
-  'abilities',
-  'armorClass',
-  'hitPointMaximum',
-  'walkingSpeedFeet',
-  'initiativeBonus',
-  'savingThrowBonuses',
-  'attacksPerAction',
-  'attacks',
-  'startingConditions',
-] as const;
-const V1_MEMBER_FIELDS = new Set([
-  ...SHARED_MEMBER_FIELDS,
-  'spellSlots',
-  'spellSelections',
-]);
-const V2_MEMBER_FIELDS = new Set([
-  ...SHARED_MEMBER_FIELDS,
-  'sizeCategory',
-  'hitDice',
-  'spellcasting',
-  'sharedSpellSlots',
-  'pactSpellSlots',
-  'effects',
-  'resources',
-  'passives',
-  'worldOperations',
-]);
-const CLASS_FIELDS = new Set(['classId', 'level']);
-const ABILITY_FIELDS = new Set<string>(abilities);
-const SPELL_SLOT_FIELDS = new Set(['level', 'maximum']);
-const V2_SPELL_SLOT_FIELDS = new Set(['level', 'count', 'recharge']);
-const HIT_DICE_FIELDS = new Set(['sides', 'maximum']);
-const SPELLCASTING_SOURCE_FIELDS = new Set([
-  'ability',
-  'spellSaveDc',
-  'spellAttackBonus',
-  'preparedSpellIds',
-  'knownSpellIds',
-  'grants',
-  'resourceSpellUses',
-]);
-const LEGACY_SPELLCASTING_FIELDS = new Set([
-  ...SPELLCASTING_SOURCE_FIELDS,
-  'spellSlots',
-]);
-const RESOURCE_SPELL_USE_FIELDS = new Set(['spellId', 'resourcePoolId']);
-const PREPARED_SPELL_GRANT_FIELDS = new Set(['spellId', 'ability']);
-const ATTACK_FIELDS = new Set([
-  'attackId', 'kind', 'attackBonus', 'criticalFloor', 'reachFeet', 'rangeFeet', 'damage',
-]);
-const DAMAGE_FIELDS = new Set(['damageTypeId', 'count', 'sides', 'modifier']);
-const CONDITION_FIELDS = new Set(['effectId', 'conditionId']);
+type NonNullish<T> = Exclude<T, null | undefined>;
+type NestedPaths<T> = T extends readonly (infer Entry)[]
+  ? readonly [number] | readonly [number, ...NestedPaths<NonNullish<Entry>>]
+  : T extends object
+    ? {
+        readonly [Key in Extract<keyof T, string>]:
+          | readonly [Key]
+          | readonly [Key, ...NestedPaths<NonNullish<T[Key]>>];
+      }[Extract<keyof T, string>]
+    : never;
+
+export type PartyPackPath = readonly [] | NestedPaths<ExternalPartyPack>;
+
+export type PartyPackExactFields<T> = Readonly<Record<Extract<keyof T, string>, true>>;
+export type PartyPackExactFieldRecord<T, Candidate> =
+  Candidate extends PartyPackExactFields<T>
+    ? Exclude<keyof Candidate, keyof T> extends never
+      ? Candidate
+      : never
+    : never;
+type ExactFields<T> = PartyPackExactFields<T>;
+type FieldRecord = Readonly<Record<string, true>>;
+
+function pathFor<T>() {
+  return <const Path extends NestedPaths<T>>(...parts: Path): Path => parts;
+}
+
+const partyPath = pathFor<ExternalPartyPack>();
+
+function exactAbilityFields(): ExactFields<Record<Ability, number>> {
+  return Object.fromEntries(abilities.map((ability) => [ability, true])) as ExactFields<
+    Record<Ability, number>
+  >;
+}
+
+const TOP_LEVEL_FIELDS = {
+  schemaVersion: true,
+  partyId: true,
+  allowPartial: true,
+  members: true,
+} as const satisfies ExactFields<ExternalPartyPack>;
+const V1_MEMBER_FIELDS = {
+  combatantId: true,
+  tokenId: true,
+  characterId: true,
+  classes: true,
+  abilities: true,
+  armorClass: true,
+  hitPointMaximum: true,
+  walkingSpeedFeet: true,
+  initiativeBonus: true,
+  savingThrowBonuses: true,
+  attacksPerAction: true,
+  attacks: true,
+  startingConditions: true,
+  spellSlots: true,
+  spellSelections: true,
+} as const satisfies ExactFields<ExternalPartyPackV1['members'][number]>;
+const V2_MEMBER_FIELDS = {
+  combatantId: true,
+  tokenId: true,
+  characterId: true,
+  classes: true,
+  abilities: true,
+  armorClass: true,
+  hitPointMaximum: true,
+  walkingSpeedFeet: true,
+  initiativeBonus: true,
+  savingThrowBonuses: true,
+  attacksPerAction: true,
+  attacks: true,
+  startingConditions: true,
+  sizeCategory: true,
+  hitDice: true,
+  spellcasting: true,
+  sharedSpellSlots: true,
+  pactSpellSlots: true,
+  effects: true,
+  resources: true,
+  passives: true,
+  worldOperations: true,
+} as const satisfies ExactFields<ExternalPartyPackV2['members'][number]>;
+const CLASS_FIELDS = {
+  classId: true,
+  level: true,
+} as const satisfies ExactFields<z.infer<typeof classSchema>>;
+const ABILITY_FIELDS = exactAbilityFields();
+const SPELL_SLOT_FIELDS = {
+  level: true,
+  maximum: true,
+} as const satisfies ExactFields<z.infer<typeof spellSlotSchema>>;
+const V2_SPELL_SLOT_FIELDS = {
+  level: true,
+  count: true,
+  recharge: true,
+} as const satisfies ExactFields<z.infer<typeof v2SpellSlotSchema>>;
+const HIT_DICE_FIELDS = {
+  sides: true,
+  maximum: true,
+} as const satisfies ExactFields<z.infer<typeof hitDicePoolSchema>>;
+const SPELLCASTING_SOURCE_FIELDS = {
+  ability: true,
+  spellSaveDc: true,
+  spellAttackBonus: true,
+  preparedSpellIds: true,
+  knownSpellIds: true,
+  grants: true,
+  resourceSpellUses: true,
+} as const satisfies ExactFields<z.infer<typeof spellcastingSourceInputSchema>>;
+const LEGACY_SPELLCASTING_FIELDS = {
+  ability: true,
+  spellSaveDc: true,
+  spellAttackBonus: true,
+  preparedSpellIds: true,
+  knownSpellIds: true,
+  grants: true,
+  resourceSpellUses: true,
+  spellSlots: true,
+} as const satisfies ExactFields<z.infer<typeof legacySpellcastingInputSchema>>;
+const RESOURCE_SPELL_USE_FIELDS = {
+  spellId: true,
+  resourcePoolId: true,
+} as const satisfies ExactFields<z.infer<typeof resourceSpellUseSchema>>;
+const PREPARED_SPELL_GRANT_FIELDS = {
+  spellId: true,
+  ability: true,
+} as const satisfies ExactFields<z.infer<typeof preparedSpellGrantSchema>>;
+const ATTACK_FIELDS = {
+  attackId: true,
+  kind: true,
+  attackBonus: true,
+  criticalFloor: true,
+  reachFeet: true,
+  rangeFeet: true,
+  masteryProperty: true,
+  masterySaveDc: true,
+  damage: true,
+} as const satisfies ExactFields<ExternalPartyPackAttack>;
+const DAMAGE_FIELDS = {
+  damageTypeId: true,
+  count: true,
+  sides: true,
+  modifier: true,
+} as const satisfies ExactFields<ExternalPartyPackAttack['damage'][number]>;
+const CONDITION_FIELDS = {
+  effectId: true,
+  conditionId: true,
+} as const satisfies ExactFields<z.infer<typeof startingConditionSchema>>;
+
+function ownFieldProbe<const Fields extends FieldRecord>(fields: Fields) {
+  return (
+    value: object,
+    field: Extract<keyof Fields, string>,
+  ): boolean => Object.hasOwn(value, field);
+}
+
+const hasV2MemberField = ownFieldProbe(V2_MEMBER_FIELDS);
+const hasSpellcastingSourceField = ownFieldProbe(SPELLCASTING_SOURCE_FIELDS);
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -1064,13 +1555,66 @@ function record(value: unknown): Readonly<Record<string, unknown>> | null {
     : null;
 }
 
-function pathText(path: readonly PropertyKey[]): string {
-  return path.length === 0 ? 'party-pack' : path.map(String).join('.');
+declare const openFieldBrand: unique symbol;
+type OpenPartyPackField = string & { readonly [openFieldBrand]: 'OpenPartyPackField' };
+type ParsedPartyPackPath = readonly PropertyKey[] & {
+  readonly [openFieldBrand]: 'ParsedPartyPackPath';
+};
+type PartyPackDiagnosticPath =
+  | PartyPackPath
+  | readonly [...PartyPackPath, OpenPartyPackField]
+  | ParsedPartyPackPath;
+
+function openPartyPackField(value: string): OpenPartyPackField {
+  return value as OpenPartyPackField;
+}
+
+function parsedPartyPackPath(
+  prefix: PartyPackPath,
+  suffix: readonly PropertyKey[],
+): ParsedPartyPackPath {
+  return [...prefix, ...suffix] as unknown as ParsedPartyPackPath;
+}
+
+function openPartyPackPath(
+  prefix: PartyPackPath,
+  field: string,
+): readonly [...PartyPackPath, OpenPartyPackField] {
+  return [...prefix, openPartyPackField(field)] as readonly [
+    ...PartyPackPath,
+    OpenPartyPackField,
+  ];
+}
+
+function indexedPartyPackPath(prefix: PartyPackPath, index: number): PartyPackPath {
+  return [...prefix, index] as unknown as PartyPackPath;
+}
+
+type SpellcastingSourceInput =
+  | z.infer<typeof spellcastingSourceInputSchema>
+  | z.infer<typeof legacySpellcastingInputSchema>;
+type SpellcastingSourceSuffix = readonly [] | NestedPaths<SpellcastingSourceInput>;
+
+function spellcastingSourcePath<const Suffix extends SpellcastingSourceSuffix>(
+  memberIndex: number,
+  sourceIndex: number | null,
+  ...suffix: Suffix
+): PartyPackPath {
+  const prefix = sourceIndex === null
+    ? partyPath('members', memberIndex, 'spellcasting')
+    : partyPath('members', memberIndex, 'spellcasting', sourceIndex);
+  return [...prefix, ...suffix] as unknown as PartyPackPath;
+}
+
+function pathText(path: PartyPackDiagnosticPath): string {
+  return path.length === 0
+    ? PARTY_PACK_PATH_ROOT
+    : path.map(String).join(PARTY_PACK_PATH_SEPARATOR);
 }
 
 function issueGap(
   partyEntry: string,
-  path: readonly PropertyKey[],
+  path: PartyPackDiagnosticPath,
   reason: GapReport['engineRefusalReason'] = 'invalid_party_pack_structure',
 ): GapReport {
   const featurePath = pathText(path);
@@ -1082,61 +1626,87 @@ function issueGap(
   });
 }
 
-function unexpectedFieldGaps(
+/**
+ * Centralizes gap accumulation behind a non-void operation. Callers rebind the
+ * returned accumulator, so useful validation work is never a bare array push.
+ */
+class PartyPackGapAccumulator {
+  readonly #values: GapReport[];
+
+  constructor(initial: readonly GapReport[] = []) {
+    this.#values = [...initial];
+  }
+
+  append(...issues: readonly GapReport[]): PartyPackGapAccumulator {
+    this.#values.push(...issues);
+    return this;
+  }
+
+  values(): readonly GapReport[] {
+    return [...this.#values];
+  }
+}
+
+function unexpectedFieldGaps<const Fields extends FieldRecord>(
   value: Readonly<Record<string, unknown>>,
-  allowed: ReadonlySet<string>,
+  allowed: Fields,
   partyEntry: string,
-  prefix: readonly PropertyKey[],
+  prefix: PartyPackPath,
 ): readonly GapReport[] {
   return Object.keys(value)
-    .filter((key) => !allowed.has(key))
+    .filter((key) => !Object.hasOwn(allowed, key))
     .map((key) => issueGap(
       partyEntry,
-      [...prefix, key],
+      openPartyPackPath(prefix, key),
       'field_not_in_engine_vocabulary',
     ));
 }
 
-function sanitizedRecord(
+function sanitizedRecord<const Fields extends FieldRecord>(
   value: unknown,
-  allowed: ReadonlySet<string>,
+  allowed: Fields,
   partyEntry: string,
-  prefix: readonly PropertyKey[],
-  gaps: GapReport[],
+  prefix: PartyPackPath,
+  gaps: PartyPackGapAccumulator,
 ): unknown {
   const input = record(value);
   if (input === null) return value;
-  gaps.push(...unexpectedFieldGaps(input, allowed, partyEntry, prefix));
+  gaps = gaps.append(...unexpectedFieldGaps(input, allowed, partyEntry, prefix));
   return Object.fromEntries(
-    [...allowed].filter((key) => Object.hasOwn(input, key)).map((key) => [key, input[key]]),
+    (Object.keys(allowed) as Array<Extract<keyof Fields, string>>)
+      .filter((key) => Object.hasOwn(input, key))
+      .map((key) => [key, input[key]]),
   );
 }
 
-function sanitizedArrayRecords(
+function sanitizedArrayRecords<const Fields extends FieldRecord>(
   value: unknown,
-  allowed: ReadonlySet<string>,
+  allowed: Fields,
   partyEntry: string,
-  prefix: readonly PropertyKey[],
-  gaps: GapReport[],
+  prefix: PartyPackPath,
+  gaps: PartyPackGapAccumulator,
 ): unknown {
   if (!Array.isArray(value)) return value;
-  return value.map((entry, index) =>
-    sanitizedRecord(entry, allowed, partyEntry, [...prefix, index], gaps));
+  return value.map((entry, index): unknown =>
+    sanitizedRecord(entry, allowed, partyEntry, indexedPartyPackPath(prefix, index), gaps));
 }
 
 function parsedBase(
   value: Readonly<Record<string, unknown>>,
   partyEntry: string,
   memberIndex: number,
-  gaps: GapReport[],
+  gaps: PartyPackGapAccumulator,
 ): unknown {
-  const prefix = ['members', memberIndex] as const;
   return {
     combatantId: value.combatantId,
     tokenId: value.tokenId,
     characterId: value.characterId,
-    classes: sanitizedArrayRecords(value.classes, CLASS_FIELDS, partyEntry, [...prefix, 'classes'], gaps),
-    abilities: sanitizedRecord(value.abilities, ABILITY_FIELDS, partyEntry, [...prefix, 'abilities'], gaps),
+    classes: sanitizedArrayRecords(
+      value.classes, CLASS_FIELDS, partyEntry, partyPath('members', memberIndex, 'classes'), gaps,
+    ),
+    abilities: sanitizedRecord(
+      value.abilities, ABILITY_FIELDS, partyEntry, partyPath('members', memberIndex, 'abilities'), gaps,
+    ),
     armorClass: value.armorClass,
     hitPointMaximum: value.hitPointMaximum,
     walkingSpeedFeet: value.walkingSpeedFeet,
@@ -1145,7 +1715,7 @@ function parsedBase(
       value.savingThrowBonuses,
       ABILITY_FIELDS,
       partyEntry,
-      [...prefix, 'savingThrowBonuses'],
+      partyPath('members', memberIndex, 'savingThrowBonuses'),
       gaps,
     ),
     attacksPerAction: value.attacksPerAction,
@@ -1156,16 +1726,15 @@ function parsedV1Core(
   value: Readonly<Record<string, unknown>>,
   partyEntry: string,
   memberIndex: number,
-  gaps: GapReport[],
+  gaps: PartyPackGapAccumulator,
 ): unknown {
-  const prefix = ['members', memberIndex] as const;
   return {
     ...parsedBase(value, partyEntry, memberIndex, gaps) as Readonly<Record<string, unknown>>,
     spellSlots: sanitizedArrayRecords(
       value.spellSlots,
       SPELL_SLOT_FIELDS,
       partyEntry,
-      [...prefix, 'spellSlots'],
+      partyPath('members', memberIndex, 'spellSlots'),
       gaps,
     ),
   };
@@ -1175,12 +1744,12 @@ function parsedV2Core(
   value: Readonly<Record<string, unknown>>,
   partyEntry: string,
   memberIndex: number,
-  gaps: GapReport[],
+  gaps: PartyPackGapAccumulator,
 ): unknown {
   return {
     ...parsedBase(value, partyEntry, memberIndex, gaps) as Readonly<Record<string, unknown>>,
     sizeCategory: value.sizeCategory,
-    ...(Object.hasOwn(value, 'hitDice')
+    ...(hasV2MemberField(value, 'hitDice')
       ? {
           hitDice: sanitizedArrayRecords(
             value.hitDice,
@@ -1200,11 +1769,11 @@ function sanitizedSpellcasting(
   memberIndex: number,
   sourceIndex: number | null,
   legacy: boolean,
-  gaps: GapReport[],
+  gaps: PartyPackGapAccumulator,
 ): unknown {
-  const prefix: readonly PropertyKey[] = sourceIndex === null
-    ? ['members', memberIndex, 'spellcasting']
-    : ['members', memberIndex, 'spellcasting', sourceIndex];
+  const prefix: PartyPackPath = sourceIndex === null
+    ? partyPath('members', memberIndex, 'spellcasting')
+    : partyPath('members', memberIndex, 'spellcasting', sourceIndex);
   const sanitized = sanitizedRecord(
     value,
     legacy ? LEGACY_SPELLCASTING_FIELDS : SPELLCASTING_SOURCE_FIELDS,
@@ -1222,29 +1791,33 @@ function sanitizedSpellcasting(
             input.spellSlots,
             V2_SPELL_SLOT_FIELDS,
             partyEntry,
-            [...prefix, 'spellSlots'],
+            partyPath('members', memberIndex, 'spellcasting', 'spellSlots'),
             gaps,
           ),
         }
       : {}),
-    ...(Object.hasOwn(input, 'resourceSpellUses')
+    ...(hasSpellcastingSourceField(input, 'resourceSpellUses')
       ? {
           resourceSpellUses: sanitizedArrayRecords(
             input.resourceSpellUses,
             RESOURCE_SPELL_USE_FIELDS,
             partyEntry,
-            [...prefix, 'resourceSpellUses'],
+            sourceIndex === null
+              ? partyPath('members', memberIndex, 'spellcasting', 'resourceSpellUses')
+              : partyPath('members', memberIndex, 'spellcasting', sourceIndex, 'resourceSpellUses'),
             gaps,
           ),
         }
       : {}),
-    ...(Object.hasOwn(input, 'grants')
+    ...(hasSpellcastingSourceField(input, 'grants')
       ? {
           grants: sanitizedArrayRecords(
             input.grants,
             PREPARED_SPELL_GRANT_FIELDS,
             partyEntry,
-            [...prefix, 'grants'],
+            sourceIndex === null
+              ? partyPath('members', memberIndex, 'spellcasting', 'grants')
+              : partyPath('members', memberIndex, 'spellcasting', sourceIndex, 'grants'),
             gaps,
           ),
         }
@@ -1257,7 +1830,7 @@ function sanitizedAttack(
   partyEntry: string,
   memberIndex: number,
   attackIndex: number,
-  gaps: GapReport[],
+  gaps: PartyPackGapAccumulator,
 ): unknown {
   const prefix = ['members', memberIndex, 'attacks', attackIndex] as const;
   const attack = sanitizedRecord(value, ATTACK_FIELDS, partyEntry, prefix, gaps);
@@ -1276,6 +1849,23 @@ function sanitizedAttack(
 }
 
 function loadedAttack(attack: ExternalPartyPackAttack): LoadedPartyAttack {
+  const mastery = (() => {
+    switch (attack.masteryProperty) {
+      case 'Topple':
+        return { property: 'Topple' as const, saveDc: attack.masterySaveDc };
+      case 'Slow':
+        return { property: 'Slow' as const };
+      case 'Cleave':
+      case 'Graze':
+      case 'Nick':
+      case 'Push':
+      case 'Sap':
+      case 'Vex':
+      case undefined:
+        return null;
+    }
+    return attack;
+  })();
   return {
     attackId: attack.attackId,
     kind: attack.kind,
@@ -1283,6 +1873,7 @@ function loadedAttack(attack: ExternalPartyPackAttack): LoadedPartyAttack {
     criticalFloor: attack.criticalFloor,
     reach: feet(attack.reachFeet),
     range: feet(attack.rangeFeet),
+    mastery,
     damage: attack.damage.map((term) => ({
       type: damageType(term.damageTypeId),
       count: term.count,
@@ -1363,6 +1954,10 @@ function loadedWorldOperation(operation: ExternalWorldOperation['operation']): W
 }
 
 type ExternalPersistentAreaEffect = Extract<ExternalPartyPackEffect, { readonly kind: 'persistent_area' }>;
+type LoadedPersistentArea = Extract<
+  CombatFeatureEffect['payload'],
+  { readonly kind: 'persistent_area' }
+>['area'];
 
 function loadedPersistentAreaShape(shape: ExternalPersistentAreaEffect['shape']): PersistentAreaShape {
   switch (shape.kind) {
@@ -1379,7 +1974,7 @@ function loadedPersistentAreaShape(shape: ExternalPersistentAreaEffect['shape'])
 function loadedPersistentAreaEffect(
   spec: ExternalPersistentAreaEffect['hooks'][number]['effect'],
 ): PersistentAreaEffectSpec {
-  const payload = (() => {
+  const payload = ((): PersistentAreaEffectSpec['payload'] => {
     switch (spec.payload.kind) {
       case 'damage':
         return {
@@ -1403,12 +1998,77 @@ function loadedPersistentAreaEffect(
         return { kind: 'effect' as const, payload: { kind: 'armor_class_modifier' as const, amount: spec.payload.amount }, lifetime: spec.payload.lifetime };
     }
   })();
-  return spec.kind === 'automatic'
-    ? { kind: 'automatic', payload }
-    : {
-        kind: 'save_gated', ability: spec.ability, dc: spec.saveDc,
-        rollMode: spec.rollMode, onSuccess: spec.onSuccess, payload,
+  switch (spec.kind) {
+    case 'automatic':
+      return { kind: 'automatic', payload };
+    case 'save_gated':
+      switch (spec.onSuccess) {
+        case 'none':
+        case 'half':
+          return {
+            kind: 'save_gated', ability: spec.ability, dc: spec.saveDc,
+            rollMode: spec.rollMode, onSuccess: spec.onSuccess, payload,
+          };
+      }
+  }
+}
+
+function loadedFeatureResourcePoolId(
+  effect: ExternalPartyPackEffect,
+): CombatFeatureEffect['resourcePoolId'] {
+  switch (effect.kind) {
+    case 'extra_attack_count_override':
+    case 'slot_spend_damage_rider':
+    case 'reckless_attack_mode':
+    case 'attack_ability_substitution':
+    case 'attack_damage_die_override':
+    case 'attack_reach_range_override':
+    case 'save_gated_banishment_on_hit':
+    case 'spell_damage_ability_modifier':
+    case 'attack_damage_type_choice':
+    case 'exploding_spell_damage_die':
+    case 'elemental_fury':
+      return null;
+    case 'action_surge':
+    case 'timed_spellcasting_mode':
+    case 'resource_die_maneuver':
+      return limitedResourcePoolId(effect.resourcePoolId);
+    case 'damage_operation':
+    case 'armed_weapon_hit_rider':
+    case 'damage_rider':
+    case 'once_per_turn_damage_rider':
+    case 'first_hit_damage_rider':
+    case 'bonus_action_attack_grant':
+    case 'attack_roll_modifier':
+    case 'attack_roll_mode':
+    case 'armor_class_modifier':
+    case 'saving_throw_modifier':
+    case 'skill_modifier':
+    case 'temporary_hit_points':
+    case 'condition_application':
+    case 'exhaustion_application':
+    case 'movement_modifier':
+    case 'persistent_area':
+      return effect.resourcePoolId === undefined
+        ? null
+        : limitedResourcePoolId(effect.resourcePoolId);
+  }
+}
+
+function loadedPersistentAreaPlacement(
+  effect: ExternalPersistentAreaEffect,
+): Pick<LoadedPersistentArea, 'origin' | 'movable'> {
+  switch (effect.origin) {
+    case 'self':
+      return { origin: 'self', movable: null };
+    case 'selected':
+      return {
+        origin: 'selected',
+        movable: effect.movableFeet === null
+          ? null
+          : { maximumFeet: feet(effect.movableFeet) },
       };
+  }
 }
 
 export function loadedFeatureEffect(
@@ -1418,9 +2078,7 @@ export function loadedFeatureEffect(
   const common = {
     id: encounterEffectId(effect.effectId),
     trigger: 'trigger' in effect ? effect.trigger : 'always_on' as const,
-    resourcePoolId: effect.resourcePoolId === undefined
-      ? null
-      : limitedResourcePoolId(effect.resourcePoolId),
+    resourcePoolId: loadedFeatureResourcePoolId(effect),
   } as const;
   switch (effect.kind) {
     case 'damage_operation':
@@ -1463,6 +2121,22 @@ export function loadedFeatureEffect(
         : packet.damageType.kind === 'fixed'
           ? damageType(packet.damageType.damageType)
           : damageType(packet.damageType.to);
+      const followUp: Required<Pick<
+        Extract<CombatFeatureEffect['payload'], { readonly kind: 'damage_rider' }>,
+        'followUp'
+      >> | null = effect.saveGatedRider === null
+        ? null
+        : {
+            followUp: {
+              kind: 'save_then_condition',
+              saveAbility: effect.saveGatedRider.ability,
+              saveDc: effect.saveDc,
+              rollMode: effect.saveGatedRider.rollMode,
+              condition: effect.saveGatedRider.condition,
+              expiresAt: effect.saveGatedRider.expiresAt,
+              durationRounds: effect.saveGatedRider.durationRounds,
+            },
+          };
       return {
         ...common,
         payload: {
@@ -1487,19 +2161,7 @@ export function loadedFeatureEffect(
           appliesTo: 'weapon_attack_by_target',
           consumeOnHit: effect.persistence === 'consume_on_hit',
           arming: { durationRounds: effect.durationRounds, concentration: effect.concentration },
-          ...(effect.saveGatedRider === null
-            ? {}
-            : {
-                followUp: {
-                  kind: 'save_then_condition' as const,
-                  saveAbility: effect.saveGatedRider.ability,
-                  saveDc: effect.saveDc,
-                  rollMode: effect.saveGatedRider.rollMode,
-                  condition: effect.saveGatedRider.condition,
-                  expiresAt: effect.saveGatedRider.expiresAt,
-                  durationRounds: effect.saveGatedRider.durationRounds,
-                },
-              }),
+          ...(followUp ?? {}),
         },
       };
     }
@@ -1742,7 +2404,7 @@ export function loadedFeatureEffect(
         payload: {
           kind: 'persistent_area',
           area: {
-            origin: effect.origin,
+            ...loadedPersistentAreaPlacement(effect),
             shape: loadedPersistentAreaShape(effect.shape),
             duration: { kind: effect.duration.kind, remaining: effect.duration.rounds },
             targetFilter: { kind: effect.targetFilter },
@@ -1752,7 +2414,6 @@ export function loadedFeatureEffect(
               frequency: hook.frequency,
               effect: loadedPersistentAreaEffect(hook.effect),
             })),
-            movable: effect.movableFeet === null ? null : { maximumFeet: feet(effect.movableFeet) },
           },
         },
       };
@@ -1769,15 +2430,15 @@ function v2MemberExtensions(member: ExternalPartyPackMember): {
   readonly worldOperations: readonly ExternalWorldOperation[];
 } {
   if (
-    !Object.hasOwn(member, 'effects') &&
-    !Object.hasOwn(member, 'resources') &&
-    !Object.hasOwn(member, 'passives') &&
-    !Object.hasOwn(member, 'worldOperations')
+    !hasV2MemberField(member, 'effects') &&
+    !hasV2MemberField(member, 'resources') &&
+    !hasV2MemberField(member, 'passives') &&
+    !hasV2MemberField(member, 'worldOperations')
   ) {
     return {
       effects: [], resources: [], passives: null,
       worldOperations: [],
-      sizeCategory: Object.hasOwn(member, 'sizeCategory')
+      sizeCategory: hasV2MemberField(member, 'sizeCategory')
         ? (member as ExternalPartyPackV2Member).sizeCategory
         : null,
     };
@@ -1794,7 +2455,7 @@ function v2MemberExtensions(member: ExternalPartyPackMember): {
 
 function loadedMember(
   member: ExternalPartyPackMember,
-  spells: readonly SpellManifestRow[],
+  spells: readonly SpellManifestEntry[],
   spellSlots: readonly { readonly level: z.infer<typeof spellSlotLevelSchema>; readonly maximum: number }[],
   pactSpellSlots: readonly { readonly level: z.infer<typeof spellSlotLevelSchema>; readonly maximum: number }[],
   spellcasting: readonly LoadedPartySpellcastingSource[],
@@ -1818,7 +2479,7 @@ function loadedMember(
       kind: 'player_character',
       id: combatantId(member.combatantId),
       tokenId: tokenId(member.tokenId),
-      name: member.combatantId.slice('combatant:'.length),
+      name: member.combatantId.slice(EXTERNAL_COMBATANT_ID_PREFIX.length),
       characterId: member.characterId,
       wildShape: null,
       rules: {
@@ -1853,7 +2514,7 @@ function loadedMember(
             recharge: 'short_rest' as const,
           })),
         ],
-        ...(Object.hasOwn(member, 'resources')
+        ...(hasV2MemberField(member, 'resources')
           ? {
               limitedResources: extensions.resources.map((pool) => ({
                 id: limitedResourcePoolId(pool.resourcePoolId),
@@ -1862,7 +2523,7 @@ function loadedMember(
               })),
             }
           : {}),
-        ...(Object.hasOwn(member, 'effects') ? { featureEffects: effects } : {}),
+        ...(hasV2MemberField(member, 'effects') ? { featureEffects: effects } : {}),
         ...(passive?.skillBonuses === undefined ? {} : { skillBonuses }),
       },
     },
@@ -1877,7 +2538,7 @@ function loadedMember(
       ...capacity,
       recharge: 'short_rest',
     })),
-    hitDice: Object.hasOwn(member, 'hitDice')
+    hitDice: hasV2MemberField(member, 'hitDice')
       ? (member as ExternalPartyPackV2Member).hitDice ?? []
       : [],
     startingConditions: member.startingConditions.map((condition) => ({
@@ -1981,7 +2642,7 @@ function effectiveLoadedPartyAttack(
 /** Builds a standard weapon attack; on-hit/on-crit feature riders stay reducer-owned. */
 export function loadedPartyAttackCommand(
   member: LoadedPartyMember,
-  attackId: string,
+  attackId: ExternalAttackId,
   target: Extract<EncounterCommand, { readonly type: 'attack' }>['target'],
   options: {
     readonly recklessAttackEffectId?: EncounterEffectId;
@@ -2044,6 +2705,7 @@ export function loadedPartyAttackCommand(
       responses: [],
     },
     attackId: attack.attackId,
+    ...(attack.mastery === null ? {} : { weaponMastery: attack.mastery }),
     ...(options.recklessAttackEffectId === undefined
       ? {}
       : { recklessAttackEffectId: options.recklessAttackEffectId }),
@@ -2064,12 +2726,31 @@ function loadedMemberPosition(state: Parameters<TurnLegalActions>[0], id: Return
   return found.position;
 }
 
+const encounterCombatantIndexes = new WeakMap<
+  Parameters<TurnLegalActions>[0],
+  TotalMap<CombatantId, EncounterCombatantState>
+>();
+
+function encounterCombatantIndex(
+  state: Parameters<TurnLegalActions>[0],
+): TotalMap<CombatantId, EncounterCombatantState> {
+  const cached = encounterCombatantIndexes.get(state);
+  if (cached !== undefined) return cached;
+  const index = TotalMap.from(
+    state.combatants,
+    state.combatants.map((combatant) => combatant.profile.id),
+    (combatant) => combatant.profile.id,
+  );
+  encounterCombatantIndexes.set(state, index);
+  return index;
+}
+
 function loadedPartyMovementActions(
   state: Parameters<TurnLegalActions>[0],
   actor: ReturnType<typeof combatantId>,
 ): readonly Extract<EncounterCommand, { readonly type: 'move' }>[] {
-  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
-  if (acting === undefined || acting.turn.movement.remaining < 5) return [];
+  const acting = encounterCombatantIndex(state).at(actor);
+  if (acting.turn.movement.remaining < 5) return [];
   const occupied = new Set(state.tokens
     .filter((token) => token.combatantId !== actor)
     .map((token) => `${String(token.position.column)},${String(token.position.row)}`));
@@ -2141,16 +2822,373 @@ function basicDamageCantripCommands(
   });
 }
 
+function healingSpellCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+  allowLeveledHealing: boolean,
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  if (!allowLeveledHealing) return [];
+  const acting = encounterCombatantIndex(state).at(actor);
+  const effectiveMaximum = (target: typeof state.combatants[number]) => state.effects.reduce((maximum, effect) =>
+    effect.targets.includes(target.profile.id) && effect.payload.kind === 'hit_point_maximum_modifier'
+      ? maximum + effect.payload.amount
+      : maximum,
+  target.profile.rules.hitPointMaximum);
+  const allies = state.combatants.filter((candidate) =>
+    combatantsAreAllies(state, candidate.profile.id, actor) &&
+    candidate.life !== 'dead' &&
+    candidate.hitPoints < effectiveMaximum(candidate) &&
+    state.tokens.some((token) => token.combatantId === candidate.profile.id));
+  return member.spells.flatMap((spell) => {
+    const definition = spellDefinition(spell.id);
+    if (
+      definition === null ||
+      definition.level === 0 ||
+      definition.operation.kind !== 'healing' ||
+      (definition.targeting.kind !== 'single' && definition.targeting.kind !== 'multiple')
+    ) return [];
+    const operation = definition.operation;
+    if (operation.kind !== 'healing') return [];
+    const source = member.spellcasting.find((candidate) =>
+      candidate.preparedSpells.some((prepared) => prepared.id === spell.id) ||
+      candidate.knownSpells.some((known) => known.id === spell.id) ||
+      candidate.grants.some((grant) => grant.spell.id === spell.id));
+    if (source === undefined) return [];
+    const costAvailable = definition.castingTime === 'action'
+      ? acting.turn.action.kind === 'available' ||
+        acting.turn.additionalLeveledSpellActionsRemaining === 1
+      : definition.castingTime === 'bonus_action'
+        ? acting.turn.bonusActionAvailable
+        : false;
+    if (!costAvailable) return [];
+    const range = effectiveSingleTargetRange(definition.targeting, 1);
+    if (range === null) return [];
+    const slots = acting.spellSlots.filter((slot) =>
+      slot.remaining > 0 && slot.level >= definition.level)
+      .sort((left, right) => left.level - right.level);
+    return slots.flatMap((slot) => allies.flatMap((target) => {
+      if (gridDistance(
+        loadedMemberPosition(state, actor),
+        loadedMemberPosition(state, target.profile.id),
+      ) > range) return [];
+      const slotDelta = slot.level - definition.level;
+      const diceCount = operation.dice.baseCount + operation.dice.perSlotCount * slotDelta;
+      const averageHealing = diceCount * (operation.dice.sides + 1) / 2 +
+        operation.dice.modifier + operation.dice.perSlotModifier * slotDelta +
+        (operation.addSpellcastingModifier ? source.spellcastingModifier : 0);
+      // D384.1: a non-emergency spell heal is never offered when its average
+      // would exceed the missing HP. Cure Wounds math is sourced at
+      // docs/srd/source/spell-descriptions.txt:1895-1906.
+      if (averageHealing > effectiveMaximum(target) - target.hitPoints) return [];
+      // Cure Wounds is an Action with Touch range, and Healing Word is a Bonus
+      // Action with 60-foot range: docs/srd/source/spell-descriptions.txt:1182,735.
+      return [loadedPartySpellCastCommand(member, spell.id, {
+        slotLevel: slot.level as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
+        ...(slot.recharge === 'short_rest' ? { slotRecharge: 'short_rest' as const } : {}),
+        castAsRitual: false,
+        targets: [target.profile.id],
+        area: null,
+        weaponAttack: null,
+        selectedOption: null,
+      })];
+    }));
+  });
+}
+
+function revivifySpellCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  const acting = encounterCombatantIndex(state).at(actor);
+  const definition = spellDefinition('revivify');
+  if (
+    acting.turn.action.kind !== 'available' ||
+    definition === null || definition.operation.kind !== 'revive' ||
+    !member.spells.some((spell) => spell.id === 'revivify')
+  ) return [];
+  const maximumDeathAgeRounds = definition.operation.maximumDeathAgeRounds;
+  const slot = acting.spellSlots
+    .filter((candidate) => candidate.remaining > 0 && candidate.level >= definition.level)
+    .sort((left, right) => left.level - right.level)[0];
+  if (slot === undefined) return [];
+  const deadAllies = state.combatants
+    .filter((candidate) =>
+      combatantsAreAllies(state, candidate.profile.id, actor) &&
+      candidate.life === 'dead' &&
+      candidate.deathAt !== null &&
+      state.round - candidate.deathAt.round <= maximumDeathAgeRounds &&
+      gridDistance(
+        loadedMemberPosition(state, actor),
+        loadedMemberPosition(state, candidate.profile.id),
+      ) <= 5)
+    .sort((left, right) => left.profile.id.localeCompare(right.profile.id));
+  // Revivify has Touch range, returns an eligible creature dead no longer than
+  // one minute with 1 HP, and consumes its diamond component.
+  // docs/srd/source/spell-descriptions.txt:6604-6623.
+  return deadAllies.map((target) => loadedPartySpellCastCommand(member, 'revivify', {
+    slotLevel: slot.level as 3 | 4 | 5 | 6 | 7 | 8 | 9,
+    castAsRitual: false,
+    targets: [target.profile.id],
+    area: null,
+    weaponAttack: null,
+    selectedOption: null,
+  }));
+}
+
+function healingPotionCommands(
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+): readonly Extract<EncounterCommand, { readonly type: 'drink_healing_potion' }>[] {
+  const acting = encounterCombatantIndex(state).at(actor);
+  if (!acting.turn.bonusActionAvailable) return [];
+  const hitPointMaximum = state.effects.reduce((maximum, effect) =>
+    effect.targets.includes(actor) && effect.payload.kind === 'hit_point_maximum_modifier'
+      ? maximum + effect.payload.amount
+      : maximum,
+  acting.profile.rules.hitPointMaximum);
+  // The coordinator requests one immediate action at a time; it has no queued
+  // ally cast, so an action not yet taken cannot be "incoming" here.
+  if (!shouldDrinkHealingPotion({
+    currentHitPoints: acting.hitPoints,
+    hitPointMaximum,
+    allyCastHealingIncoming: false,
+  })) return [];
+  return state.effects.flatMap((effect) =>
+    effect.source === actor && effect.payload.kind === 'healing_potion' && effect.payload.remainingUses > 0
+      ? [{ type: 'drink_healing_potion' as const, actor, effectId: effect.id }]
+      : []);
+}
+
+function blessSpellCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  const acting = encounterCombatantIndex(state).at(actor);
+  if (acting.turn.action.kind !== 'available') return [];
+  if (state.eventLog.some((event) =>
+    event.type === 'spell_cast' && event.caster === actor && event.spellId === 'bless')) return [];
+  const definition = spellDefinition('bless');
+  if (definition === null || !member.spells.some((spell) => spell.id === 'bless')) return [];
+  const slot = acting.spellSlots
+    .filter((candidate) => candidate.remaining > 0 && candidate.level >= definition.level)
+    .sort((left, right) => left.level - right.level)[0];
+  if (slot === undefined) return [];
+  const targets = state.combatants
+    .filter((candidate) =>
+      candidate.life !== 'dead' &&
+      combatantsAreAllies(state, candidate.profile.id, actor) &&
+      gridDistance(loadedMemberPosition(state, actor), loadedMemberPosition(state, candidate.profile.id)) <= 30)
+    .sort((left, right) =>
+      right.profile.rules.attacksPerAction - left.profile.rules.attacksPerAction ||
+      Number(right.profile.id === actor) - Number(left.profile.id === actor) ||
+      left.profile.id.localeCompare(right.profile.id))
+    .slice(0, 3)
+    .map((candidate) => candidate.profile.id);
+  if (targets.length === 0) return [];
+  return [loadedPartySpellCastCommand(member, 'bless', {
+    slotLevel: slot.level as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
+    castAsRitual: false,
+    targets,
+    area: null,
+    weaponAttack: null,
+    selectedOption: null,
+  })];
+}
+
+function sharedSpellSlot(
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+  minimumLevel: number,
+) {
+  return encounterCombatantIndex(state).at(actor).spellSlots
+    .filter((slot) => slot.remaining > 0 && slot.level >= minimumLevel)
+    .sort((left, right) => left.level - right.level)[0];
+}
+
+type SlowSpellArea = Extract<NonNullable<SpellCastCommand['area']>, { readonly shape: 'cube' }>;
+
+function slowSpellCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+  targets: Parameters<TurnLegalActions>[0]['combatants'],
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  const acting = encounterCombatantIndex(state).at(actor);
+  if (
+    acting.turn.action.kind !== 'available' ||
+    !member.spells.some((spell) => spell.id === 'slow') ||
+    state.effects.some((effect) => effect.concentrationOwner === actor)
+  ) return [];
+  const slot = sharedSpellSlot(state, actor, 3);
+  if (slot === undefined) return [];
+  const hostiles = targets.filter((target) => target.life !== 'dead');
+  if (hostiles.length < 3) return [];
+  const templateGrid = {
+    bounds: state.bounds,
+    blockedCells: [
+      ...state.blockedCells,
+      ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
+    ],
+  };
+  const positions = new Map(hostiles.map((target) => [
+    target.profile.id,
+    loadedMemberPosition(state, target.profile.id),
+  ] as const));
+  const minimumCenterColumn = 4;
+  const candidates = Array.from(
+    { length: Math.max(0, state.bounds.columns - minimumCenterColumn + 1) },
+    (_column, index) => index + minimumCenterColumn,
+  ).flatMap((column) => Array.from({ length: state.bounds.rows + 1 }, (_row, row) => {
+    const area: SlowSpellArea = {
+      shape: 'cube',
+      template: {
+        origin: feetPoint(column * 5 - 20, row * 5),
+        center: feetPoint(column * 5, row * 5),
+        axis: { x: 1, y: 0 },
+        size: feet(40),
+        includeOrigin: false,
+      },
+    };
+    const affected = new Set(cubeAffectedCellsAmong(
+      templateGrid,
+      area.template,
+      [...positions.values()],
+    ).map((cell) => `${String(cell.column)},${String(cell.row)}`));
+    const selected = hostiles.filter((target) => {
+      const position = positions.get(target.profile.id);
+      return position !== undefined && affected.has(`${String(position.column)},${String(position.row)}`);
+    }).slice(0, 6);
+    return { area, selected };
+  }))
+    .filter((candidate) => candidate.selected.length >= 3)
+    .sort((left, right) =>
+      right.selected.length - left.selected.length ||
+      left.selected.map((target) => target.profile.id).join('|')
+        .localeCompare(right.selected.map((target) => target.profile.id).join('|')));
+  const chosen = candidates[0];
+  if (chosen === undefined) return [];
+  // Slow selects up to six creatures in a 40-foot Cube at 120 feet:
+  // docs/srd/source/spell-descriptions.txt:7140-7163.
+  return [loadedPartySpellCastCommand(member, 'slow', {
+    slotLevel: slot.level as 3 | 4 | 5 | 6 | 7 | 8 | 9,
+    castAsRitual: false,
+    targets: chosen.selected.map((target) => target.profile.id),
+    area: chosen.area,
+    weaponAttack: null,
+    selectedOption: null,
+  })];
+}
+
+function blessConcentrationBroke(
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+): boolean {
+  let lastBless = -1;
+  let lastSpiritGuardians = -1;
+  let lastBreak = -1;
+  for (const [index, event] of state.eventLog.entries()) {
+    if (event.type === 'spell_cast' && event.caster === actor && event.spellId === 'bless') lastBless = index;
+    if (event.type === 'spell_cast' && event.caster === actor && event.spellId === 'spirit-guardians') {
+      lastSpiritGuardians = index;
+    }
+    if (event.type === 'effect_ended' && event.reason === 'concentration_broken') lastBreak = index;
+  }
+  return lastBless >= 0 && lastBreak > lastBless && lastSpiritGuardians < lastBreak;
+}
+
+function spiritGuardiansSpellCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+  reserveThirdLevelSlot = false,
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  const acting = encounterCombatantIndex(state).at(actor);
+  if (
+    acting.turn.action.kind !== 'available' ||
+    !member.spells.some((spell) => spell.id === 'spirit-guardians') ||
+    !blessConcentrationBroke(state, actor) ||
+    state.effects.some((effect) => effect.concentrationOwner === actor)
+  ) return [];
+  const slot = sharedSpellSlot(state, actor, 3);
+  if (slot === undefined) return [];
+  if (
+    reserveThirdLevelSlot &&
+    (acting.spellSlots.reduce(
+      (remaining, candidate) => remaining + (candidate.level >= 3 ? candidate.remaining : 0),
+      0,
+    ) <= 1)
+  ) return [];
+  const position = loadedMemberPosition(state, actor);
+  // Spirit Guardians is a 15-foot self Emanation, concentration, and requires
+  // a level-3 slot: docs/srd/source/spell-descriptions.txt:7324-7344.
+  return [loadedPartySpellCastCommand(member, 'spirit-guardians', {
+    slotLevel: slot.level as 3 | 4 | 5 | 6 | 7 | 8 | 9,
+    castAsRitual: false,
+    targets: [],
+    area: {
+      shape: 'emanation',
+      template: {
+        origin: feetPoint(position.column * 5 + 2.5, position.row * 5 + 2.5),
+        radius: feet(15),
+        includeOrigin: true,
+      },
+    },
+    weaponAttack: null,
+    selectedOption: 'Radiant',
+  })];
+}
+
+function commandKeepAwaySpellCommands(
+  member: LoadedPartyMember,
+  state: Parameters<TurnLegalActions>[0],
+  actor: ReturnType<typeof combatantId>,
+  targets: Parameters<TurnLegalActions>[0]['combatants'],
+): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
+  const acting = encounterCombatantIndex(state).at(actor);
+  if (
+    acting.turn.action.kind !== 'available' ||
+    !member.spells.some((spell) => spell.id === 'command')
+  ) return [];
+  const adjacent = targets
+    .filter((target) => gridDistance(
+      loadedMemberPosition(state, actor),
+      loadedMemberPosition(state, target.profile.id),
+    ) <= 5)
+    .sort((left, right) => left.hitPoints - right.hitPoints || left.profile.id.localeCompare(right.profile.id))[0];
+  const slot = sharedSpellSlot(state, actor, 1);
+  if (adjacent === undefined || slot === undefined) return [];
+  // Flee makes the target spend its turn moving away by the fastest available
+  // means: docs/srd/source/spell-descriptions.txt:1209-1234.
+  return [loadedPartySpellCastCommand(member, 'command', {
+    slotLevel: slot.level as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
+    castAsRitual: false,
+    targets: [adjacent.profile.id],
+    area: null,
+    weaponAttack: null,
+    selectedOption: 'flee',
+  })];
+}
+
 /** Enumerates reducer-valid attacks and feature actions for loaded v2 party members. */
 export function loadedPartyTurnLegalActions(
   members: readonly LoadedPartyMember[],
+  policy: {
+    readonly useHealingPotions: boolean;
+    readonly openWithBless: boolean;
+    readonly reserveClericSlotsForBless?: boolean;
+    readonly useWizardTactics?: boolean;
+    readonly useClericContingency?: boolean;
+    readonly reserveClericSlotForRevivify?: boolean;
+  } = { useHealingPotions: false, openWithBless: false, reserveClericSlotsForBless: false },
 ): TurnLegalActions {
   const byId = new Map(members.map((member) => [member.profile.id, member] as const));
   return (state, actor) => {
     const member = byId.get(actor);
     if (member === undefined) return { actions: [{ type: 'end_turn', actor }] };
-    const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
-    if (acting === undefined) throw new Error(`Loaded party combatant ${actor} is absent from the encounter.`);
+    const acting = encounterCombatantIndex(state).at(actor);
     if (!state.tokens.some((candidate) => candidate.combatantId === actor)) {
       return { actions: [{ type: 'end_turn', actor }] };
     }
@@ -2220,13 +3258,31 @@ export function loadedPartyTurnLegalActions(
       }));
 
     const actions: EncounterCommand[] = [...loadedPartyMovementActions(state, actor)];
+    if (policy.useHealingPotions) actions.push(...healingPotionCommands(state, actor));
     if (acting.turn.action.kind !== 'spent') actions.push(...commands());
     if (acting.turn.action.kind === 'available') {
+      if (policy.openWithBless) actions.push(...blessSpellCommands(member, state, actor));
+      if (policy.useWizardTactics === true) {
+        actions.push(...slowSpellCommands(member, state, actor, targets));
+      }
+      if (policy.useClericContingency === true) {
+        actions.push(...revivifySpellCommands(member, state, actor));
+        actions.push(...spiritGuardiansSpellCommands(
+          member,
+          state,
+          actor,
+          policy.reserveClericSlotForRevivify === true,
+        ));
+        actions.push(...commandKeepAwaySpellCommands(member, state, actor, targets));
+      }
       actions.push(...basicDamageCantripCommands(member, state, actor, targets));
       // Dash grants extra movement equal to Speed for the current turn.
       // SRD 5.2.1: docs/srd/full/srd-5.2.1.txt:11589-11596.
       actions.push({ type: 'dash', actor });
     }
+    const reservesClericSlots = policy.reserveClericSlotsForBless === true &&
+      member.source.classes.some((entry) => entry.classId === 'Cleric');
+    actions.push(...healingSpellCommands(member, state, actor, !reservesClericSlots));
     for (const effect of member.effects) {
       if (effect.payload.kind === 'bonus_action_attack_grant') {
         const pool = effect.resourcePoolId === null
@@ -2268,7 +3324,7 @@ export function loadedPartyTurnLegalActions(
           : effect.trigger === 'bonus_action'
             ? acting.turn.bonusActionAvailable
             : false;
-        if (resourceAvailable && costAvailable) actions.push(loadedPartyEffectCommand(member, String(effect.id), []));
+        if (resourceAvailable && costAvailable) actions.push(loadedPartyEffectCommand(member, effect.id, []));
       }
     }
     actions.push({ type: 'end_turn', actor });
@@ -2279,7 +3335,7 @@ export function loadedPartyTurnLegalActions(
 /** Activates an action-economy feature through existing effect/temp-HP commands. */
 export function loadedPartyWorldOperationCommand(
   member: LoadedPartyMember,
-  operationId: string,
+  operationId: ExternalWorldOperationId,
 ): Extract<EncounterCommand, { readonly type: 'world_operation' }> {
   const declared = member.worldOperations.find((entry) => entry.operationId === operationId);
   if (declared === undefined) throw new RangeError(`The party member does not declare ${operationId}.`);
@@ -2293,7 +3349,7 @@ export function loadedPartyWorldOperationCommand(
 
 export function loadedPartyEffectCommand(
   member: LoadedPartyMember,
-  effectId: string,
+  effectId: ExternalEffectId | EncounterEffectId,
   targets: readonly Extract<EncounterCommand, { readonly type: 'apply_effect' }>['effect']['targets'][number][],
 ): Extract<EncounterCommand, {
   readonly type:
@@ -2405,7 +3461,7 @@ export type LoadedPartySpellCastDetails = Omit<Pick<
 /** Builds the existing resolver command exclusively from a v2 member's referenced spell vocabulary. */
 export function loadedPartySpellCastCommand(
   member: LoadedPartyMember,
-  spellId: string,
+  spellId: SpellManifestId,
   details: LoadedPartySpellCastDetails,
 ): SpellCastCommand {
   if (member.spellcasting.length === 0) throw new PartySpellcastingError('spellcasting_unavailable');
@@ -2483,7 +3539,7 @@ function refusal(
       refusal: {
         kind: 'external_party_pack_refusal',
         reason,
-        unsupportedShape: unsupportedShape ?? 'missing_effect_kind',
+        unsupportedShape: unsupportedShape ?? MISSING_EFFECT_KIND,
       },
       gaps: deduplicateGapReports(gaps),
     };
@@ -2497,9 +3553,9 @@ function refusal(
 
 export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
   const input = record(value);
-  if (input === null) return refusal('invalid_structure', [issueGap('party-pack:root', [])]);
+  if (input === null) return refusal('invalid_structure', [issueGap(PARTY_PACK_ROOT_ENTRY, [])]);
 
-  const rootGaps = unexpectedFieldGaps(input, TOP_LEVEL_FIELDS, 'party-pack:root', []);
+  const rootGaps = unexpectedFieldGaps(input, TOP_LEVEL_FIELDS, PARTY_PACK_ROOT_ENTRY, []);
   const header = z.strictObject({
     schemaVersion: z.union([
       z.literal(EXTERNAL_PARTY_PACK_MINIMUM_SCHEMA_VERSION),
@@ -2517,18 +3573,21 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
   if (!header.success) {
     const gaps = [
       ...rootGaps,
-      ...header.error.issues.map((issue) => issueGap('party-pack:root', issue.path)),
+      ...header.error.issues.map((issue) => issueGap(
+        PARTY_PACK_ROOT_ENTRY,
+        parsedPartyPackPath([], issue.path),
+      )),
     ];
     return refusal('invalid_structure', gaps);
   }
 
-  const gaps: GapReport[] = [...rootGaps];
+  let gaps = new PartyPackGapAccumulator(rootGaps);
   let unknownSpellId = false;
   let tooManySpellcastingSources = false;
   let unsupportedEffectShape: string | null = null;
   const mapped: Array<{
     readonly member: ExternalPartyPackMember;
-    readonly spells: readonly SpellManifestRow[];
+    readonly spells: readonly SpellManifestEntry[];
     readonly spellSlots: readonly {
       readonly level: z.infer<typeof spellSlotLevelSchema>;
       readonly maximum: number;
@@ -2544,28 +3603,31 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     const entryFallback = `${header.data.partyId}:member-${String(index + 1)}`;
     const memberInput = record(memberValue);
     if (memberInput === null) {
-      gaps.push(issueGap(entryFallback, ['members', index]));
+      gaps = gaps.append(issueGap(entryFallback, ['members', index]));
       continue;
     }
     const entry = typeof memberInput.combatantId === 'string' && combatantIdSchema.safeParse(memberInput.combatantId).success
       ? memberInput.combatantId
       : entryFallback;
     const memberFields = header.data.schemaVersion === 1 ? V1_MEMBER_FIELDS : V2_MEMBER_FIELDS;
-    gaps.push(...unexpectedFieldGaps(memberInput, memberFields, entry, ['members', index]));
+    gaps = gaps.append(...unexpectedFieldGaps(memberInput, memberFields, entry, ['members', index]));
     const core = header.data.schemaVersion === 1
       ? v1MemberCoreSchema.safeParse(parsedV1Core(memberInput, entry, index, gaps))
       : v2MemberCoreSchema.safeParse(parsedV2Core(memberInput, entry, index, gaps));
     if (!core.success) {
-      gaps.push(...core.error.issues.map((issue) => issueGap(entry, ['members', index, ...issue.path])));
+      gaps = gaps.append(...core.error.issues.map((issue) => issueGap(
+        entry,
+        parsedPartyPackPath(partyPath('members', index), issue.path),
+      )));
       continue;
     }
     const totalLevel = core.data.classes.reduce((total, heldClass) => total + heldClass.level, 0);
     if (totalLevel > 20) {
-      gaps.push(issueGap(entry, ['members', index, 'classes'], 'value_not_in_engine_vocabulary'));
+      gaps = gaps.append(issueGap(entry, ['members', index, 'classes'], 'value_not_in_engine_vocabulary'));
       continue;
     }
-    if (new Set(core.data.classes.map((heldClass) => heldClass.classId)).size !== core.data.classes.length) {
-      gaps.push(issueGap(entry, ['members', index, 'classes'], 'value_not_in_engine_vocabulary'));
+    if (new Set(core.data.classes.map((heldClass): string => heldClass.classId)).size !== core.data.classes.length) {
+      gaps = gaps.append(issueGap(entry, ['members', index, 'classes'], 'value_not_in_engine_vocabulary'));
       continue;
     }
     const rawSpellSlots = header.data.schemaVersion === 1
@@ -2574,17 +3636,17 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           maximum: capacity.maximum,
         }))
       : [];
-    let spellSlots = rawSpellSlots.filter((capacity, capacityIndex, capacities) => {
-      const first = capacities.findIndex((candidate) => candidate.level === capacity.level);
+    let spellSlots = rawSpellSlots.filter((capacity, capacityIndex, capacities): boolean => {
+      const first = capacities.findIndex((candidate): boolean => candidate.level === capacity.level);
       if (first === capacityIndex) return true;
-      gaps.push(issueGap(
+      gaps = gaps.append(issueGap(
         entry,
         ['members', index, 'spellSlots', capacityIndex, 'level'],
         'value_not_in_engine_vocabulary',
       ));
       return false;
     });
-    const parsedPactSlots = header.data.schemaVersion === 2 && Object.hasOwn(memberInput, 'pactSpellSlots')
+    const parsedPactSlots = header.data.schemaVersion === 2 && hasV2MemberField(memberInput, 'pactSpellSlots')
       ? z.array(pactSpellSlotSchema).max(9).safeParse(sanitizedArrayRecords(
           memberInput.pactSpellSlots,
           V2_SPELL_SLOT_FIELDS,
@@ -2594,19 +3656,19 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         ))
       : { success: true as const, data: [] };
     if (!parsedPactSlots.success) {
-      gaps.push(...parsedPactSlots.error.issues.map((issue) => issueGap(
+      gaps = gaps.append(...parsedPactSlots.error.issues.map((issue) => issueGap(
         entry,
-        ['members', index, 'pactSpellSlots', ...issue.path],
+        parsedPartyPackPath(partyPath('members', index, 'pactSpellSlots'), issue.path),
         issue.code === 'unrecognized_keys'
           ? 'field_not_in_engine_vocabulary'
           : 'value_not_in_engine_vocabulary',
       )));
       continue;
     }
-    const pactSpellSlots = parsedPactSlots.data.filter((capacity, capacityIndex, capacities) => {
-      const first = capacities.findIndex((candidate) => candidate.level === capacity.level);
+    const pactSpellSlots = parsedPactSlots.data.filter((capacity, capacityIndex, capacities): boolean => {
+      const first = capacities.findIndex((candidate): boolean => candidate.level === capacity.level);
       if (first === capacityIndex) return true;
-      gaps.push(issueGap(
+      gaps = gaps.append(issueGap(
         entry,
         ['members', index, 'pactSpellSlots', capacityIndex, 'level'],
         'value_not_in_engine_vocabulary',
@@ -2615,9 +3677,9 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     }).map((capacity) => ({ level: capacity.level, maximum: capacity.count }));
 
     const attacksInput = Array.isArray(memberInput.attacks) ? memberInput.attacks : [];
-    if (!Array.isArray(memberInput.attacks)) gaps.push(issueGap(entry, ['members', index, 'attacks']));
+    if (!Array.isArray(memberInput.attacks)) gaps = gaps.append(issueGap(entry, ['members', index, 'attacks']));
     if (attacksInput.length > 100) {
-      gaps.push(issueGap(entry, ['members', index, 'attacks'], 'value_not_in_engine_vocabulary'));
+      gaps = gaps.append(issueGap(entry, ['members', index, 'attacks'], 'value_not_in_engine_vocabulary'));
     }
     const attacks: ExternalPartyPackAttack[] = [];
     for (const [attackIndex, attackValue] of attacksInput.slice(0, 100).entries()) {
@@ -2629,8 +3691,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         gaps,
       ));
       if (parsed.success) {
-        if (attacks.some((attack) => attack.attackId === parsed.data.attackId)) {
-          gaps.push(issueGap(
+        if (attacks.some((attack): boolean => attack.attackId === parsed.data.attackId)) {
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'attacks', attackIndex, 'attackId'],
             'value_not_in_engine_vocabulary',
@@ -2639,9 +3701,9 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           attacks.push(parsed.data);
         }
       }
-      else gaps.push(...parsed.error.issues.map((issue) => issueGap(
+      else gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
         entry,
-        ['members', index, 'attacks', attackIndex, ...issue.path],
+        parsedPartyPackPath(partyPath('members', index, 'attacks', attackIndex), issue.path),
         issue.code === 'unrecognized_keys'
           ? 'field_not_in_engine_vocabulary'
           : 'value_not_in_engine_vocabulary',
@@ -2650,15 +3712,15 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
 
     let loadedSpellcasting: LoadedPartySpellcastingSource[] = [];
     let parsedSpellcasting: z.infer<typeof spellcastingSourceInputSchema>[] = [];
-    const spells: SpellManifestRow[] = [];
-    const spellIds: string[] = [];
+    const spells: SpellManifestEntry[] = [];
+    const spellIds: SpellManifestId[] = [];
     if (header.data.schemaVersion === 1) {
       const spellInput = Array.isArray(memberInput.spellSelections) ? memberInput.spellSelections : [];
       if (!Array.isArray(memberInput.spellSelections)) {
-        gaps.push(issueGap(entry, ['members', index, 'spellSelections']));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'spellSelections']));
       }
       if (spellInput.length > SPELL_MANIFEST.length) {
-        gaps.push(issueGap(entry, ['members', index, 'spellSelections'], 'value_not_in_engine_vocabulary'));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'spellSelections'], 'value_not_in_engine_vocabulary'));
       }
       for (const [spellIndex, spellValue] of spellInput.slice(0, SPELL_MANIFEST.length).entries()) {
         const spell = typeof spellValue === 'string'
@@ -2666,19 +3728,13 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           : undefined;
         if (spell === undefined) {
           if (typeof spellValue === 'string') unknownSpellId = true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'spellSelections', spellIndex],
             'value_not_in_engine_vocabulary',
           ));
-        } else if (spell.status !== 'implemented') {
-          gaps.push(issueGap(
-            entry,
-            ['members', index, 'spellSelections', spellIndex],
-            'manifest_spell_not_implemented',
-          ));
         } else if (spellIds.includes(spell.id)) {
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'spellSelections', spellIndex],
             'value_not_in_engine_vocabulary',
@@ -2688,14 +3744,14 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           spells.push(spell);
         }
       }
-    } else if (Object.hasOwn(memberInput, 'spellcasting')) {
+    } else if (hasV2MemberField(memberInput, 'spellcasting')) {
       const legacy = !Array.isArray(memberInput.spellcasting);
       const sourceInputs: readonly unknown[] = Array.isArray(memberInput.spellcasting)
         ? memberInput.spellcasting
         : [memberInput.spellcasting];
       if (sourceInputs.length > 4) {
         tooManySpellcastingSources = true;
-        gaps.push(issueGap(
+        gaps = gaps.append(issueGap(
           entry,
           ['members', index, 'spellcasting'],
           'value_not_in_engine_vocabulary',
@@ -2703,7 +3759,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         continue;
       }
       if (sourceInputs.length === 0) {
-        gaps.push(issueGap(entry, ['members', index, 'spellcasting']));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'spellcasting']));
         continue;
       }
 
@@ -2712,9 +3768,9 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           sourceInputs[0], entry, index, null, true, gaps,
         ));
         if (!parsed.success) {
-          gaps.push(...parsed.error.issues.map((issue) => issueGap(
+          gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
             entry,
-            ['members', index, 'spellcasting', ...issue.path],
+            parsedPartyPackPath(partyPath('members', index, 'spellcasting'), issue.path),
             issue.code === 'unrecognized_keys'
               ? 'field_not_in_engine_vocabulary'
               : 'value_not_in_engine_vocabulary',
@@ -2732,10 +3788,10 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             ? {}
             : { resourceSpellUses: parsed.data.resourceSpellUses }),
         }];
-        spellSlots = parsed.data.spellSlots.filter((capacity, capacityIndex, capacities) => {
-          const first = capacities.findIndex((candidate) => candidate.level === capacity.level);
+        spellSlots = parsed.data.spellSlots.filter((capacity, capacityIndex, capacities): boolean => {
+          const first = capacities.findIndex((candidate): boolean => candidate.level === capacity.level);
           if (first === capacityIndex) return true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'spellcasting', 'spellSlots', capacityIndex, 'level'],
             'value_not_in_engine_vocabulary',
@@ -2751,19 +3807,19 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           gaps,
         ));
         if (!sharedSlots.success) {
-          gaps.push(...sharedSlots.error.issues.map((issue) => issueGap(
+          gaps = gaps.append(...sharedSlots.error.issues.map((issue) => issueGap(
             entry,
-            ['members', index, 'sharedSpellSlots', ...issue.path],
+            parsedPartyPackPath(partyPath('members', index, 'sharedSpellSlots'), issue.path),
             issue.code === 'unrecognized_keys'
               ? 'field_not_in_engine_vocabulary'
               : 'value_not_in_engine_vocabulary',
           )));
           continue;
         }
-        spellSlots = sharedSlots.data.filter((capacity, capacityIndex, capacities) => {
-          const first = capacities.findIndex((candidate) => candidate.level === capacity.level);
+        spellSlots = sharedSlots.data.filter((capacity, capacityIndex, capacities): boolean => {
+          const first = capacities.findIndex((candidate): boolean => candidate.level === capacity.level);
           if (first === capacityIndex) return true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'sharedSpellSlots', capacityIndex, 'level'],
             'value_not_in_engine_vocabulary',
@@ -2776,9 +3832,12 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             sourceInput, entry, index, sourceIndex, false, gaps,
           ));
           if (!parsed.success) {
-            gaps.push(...parsed.error.issues.map((issue) => issueGap(
+            gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
               entry,
-              ['members', index, 'spellcasting', sourceIndex, ...issue.path],
+              parsedPartyPackPath(
+                partyPath('members', index, 'spellcasting', sourceIndex),
+                issue.path,
+              ),
               issue.code === 'unrecognized_keys'
                 ? 'field_not_in_engine_vocabulary'
                 : 'value_not_in_engine_vocabulary',
@@ -2789,8 +3848,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         }
         if (parsedSpellcasting.length !== sourceInputs.length) continue;
       }
-    } else if (Object.hasOwn(memberInput, 'sharedSpellSlots')) {
-      gaps.push(issueGap(
+    } else if (hasV2MemberField(memberInput, 'sharedSpellSlots')) {
+      gaps = gaps.append(issueGap(
         entry,
         ['members', index, 'sharedSpellSlots'],
         'value_not_in_engine_vocabulary',
@@ -2798,35 +3857,31 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     }
 
     if (header.data.schemaVersion === 2) {
-      const normalizedSources: z.infer<typeof spellcastingSourceInputSchema>[] = [];
+      const normalizedSources: z.infer<typeof spellcastingSourceSchema>[] = [];
       for (const [sourceIndex, source] of parsedSpellcasting.entries()) {
-        const sourcePrefix: readonly PropertyKey[] = Array.isArray(memberInput.spellcasting)
-          ? ['members', index, 'spellcasting', sourceIndex]
-          : ['members', index, 'spellcasting'];
-        const sourceSpellIds: string[] = [];
+        const pathSourceIndex = Array.isArray(memberInput.spellcasting) ? sourceIndex : null;
+        const sourceSpellIds: SpellManifestId[] = [];
         const references = [
           ...source.preparedSpellIds.map((value, spellIndex) => ({
             value,
-            path: [...sourcePrefix, 'preparedSpellIds', spellIndex],
+            path: spellcastingSourcePath(index, pathSourceIndex, 'preparedSpellIds', spellIndex),
           })),
           ...source.knownSpellIds.map((value, spellIndex) => ({
             value,
-            path: [...sourcePrefix, 'knownSpellIds', spellIndex],
+            path: spellcastingSourcePath(index, pathSourceIndex, 'knownSpellIds', spellIndex),
           })),
           ...(source.grants ?? []).map((grant, grantIndex) => ({
             value: grant.spellId,
-            path: [...sourcePrefix, 'grants', grantIndex, 'spellId'],
+            path: spellcastingSourcePath(index, pathSourceIndex, 'grants', grantIndex, 'spellId'),
           })),
         ];
         for (const reference of references) {
           const spell = SPELL_MANIFEST.find((candidate) => candidate.id === reference.value);
           if (spell === undefined) {
             unknownSpellId = true;
-            gaps.push(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
-          } else if (spell.status !== 'implemented') {
-            gaps.push(issueGap(entry, reference.path, 'manifest_spell_not_implemented'));
+            gaps = gaps.append(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
           } else if (sourceSpellIds.includes(spell.id)) {
-            gaps.push(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
+            gaps = gaps.append(issueGap(entry, reference.path, 'value_not_in_engine_vocabulary'));
           } else {
             sourceSpellIds.push(spell.id);
             if (!spellIds.includes(spell.id)) {
@@ -2836,48 +3891,72 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           }
         }
 
-        const preparedSpellIds = source.preparedSpellIds.filter((id, preparedIndex, ids) =>
-          sourceSpellIds.includes(id) && ids.indexOf(id) === preparedIndex);
+        const preparedSpellIds = source.preparedSpellIds.filter((
+          id,
+          preparedIndex,
+          ids,
+        ): id is SpellManifestId =>
+          isSpellManifestId(id) && sourceSpellIds.includes(id) && ids.indexOf(id) === preparedIndex);
         const preparedSet = new Set(preparedSpellIds);
-        const knownSpellIds = source.knownSpellIds.filter((id, knownIndex, ids) => {
-          if (!sourceSpellIds.includes(id) || ids.indexOf(id) !== knownIndex) return false;
+        const knownSpellIds = source.knownSpellIds.filter((
+          id,
+          knownIndex,
+          ids,
+        ): id is SpellManifestId => {
+          if (!isSpellManifestId(id) || !sourceSpellIds.includes(id) || ids.indexOf(id) !== knownIndex) {
+            return false;
+          }
           if (!preparedSet.has(id)) return true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
-            [...sourcePrefix, 'knownSpellIds', knownIndex],
+            spellcastingSourcePath(index, pathSourceIndex, 'knownSpellIds', knownIndex),
             'value_not_in_engine_vocabulary',
           ));
           return false;
         });
-        const grants = (source.grants ?? []).filter((grant, grantIndex, candidates) => {
-          if (!sourceSpellIds.includes(grant.spellId)) return false;
-          if (candidates.findIndex((candidate) => candidate.spellId === grant.spellId) !== grantIndex) {
+        const grants = (source.grants ?? []).filter((
+          grant,
+          grantIndex,
+          candidates,
+        ): grant is typeof grant & { readonly spellId: SpellManifestId } => {
+          if (!isSpellManifestId(grant.spellId) || !sourceSpellIds.includes(grant.spellId)) return false;
+          if (candidates.findIndex((candidate): boolean => candidate.spellId === grant.spellId) !== grantIndex) {
             return false;
           }
           if (!preparedSet.has(grant.spellId) && !knownSpellIds.includes(grant.spellId)) return true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
-            [...sourcePrefix, 'grants', grantIndex, 'spellId'],
+            spellcastingSourcePath(index, pathSourceIndex, 'grants', grantIndex, 'spellId'),
             'value_not_in_engine_vocabulary',
           ));
           return false;
         });
-        const resourceSpellUses = (source.resourceSpellUses ?? []).filter((use, useIndex, uses) => {
-          if (!sourceSpellIds.includes(use.spellId)) {
-            if (!SPELL_MANIFEST.some((spell) => spell.id === use.spellId)) unknownSpellId = true;
-            gaps.push(issueGap(
+        const resourceSpellUses = (source.resourceSpellUses ?? []).filter((
+          use,
+          useIndex,
+          uses,
+        ): use is typeof use & { readonly spellId: SpellManifestId } => {
+          if (!isSpellManifestId(use.spellId) || !sourceSpellIds.includes(use.spellId)) {
+            if (!isSpellManifestId(use.spellId)) unknownSpellId = true;
+            gaps = gaps.append(issueGap(
               entry,
-              [...sourcePrefix, 'resourceSpellUses', useIndex, 'spellId'],
+              spellcastingSourcePath(
+                index,
+                pathSourceIndex,
+                'resourceSpellUses',
+                useIndex,
+                'spellId',
+              ),
               'value_not_in_engine_vocabulary',
             ));
             return false;
           }
-          const first = uses.findIndex((candidate) =>
+          const first = uses.findIndex((candidate): boolean =>
             candidate.spellId === use.spellId && candidate.resourcePoolId === use.resourcePoolId);
           if (first === useIndex) return true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
-            [...sourcePrefix, 'resourceSpellUses', useIndex],
+            spellcastingSourcePath(index, pathSourceIndex, 'resourceSpellUses', useIndex),
             'value_not_in_engine_vocabulary',
           ));
           return false;
@@ -2900,7 +3979,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             spells.filter((spell) => spell.id === id)),
           knownSpells: knownSpellIds.flatMap((id) =>
             spells.filter((spell) => spell.id === id)),
-          grants: grants.flatMap((grant) => {
+          grants: grants.flatMap((grant): readonly LoadedPartySpellcastingSource['grants'][number][] => {
             const spell = spells.find((candidate) => candidate.id === grant.spellId);
             if (spell === undefined) return [];
             const sourceModifier = Math.floor((core.data.abilities[source.ability] - 10) / 2);
@@ -2924,9 +4003,9 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     }
 
     const conditionsInput = Array.isArray(memberInput.startingConditions) ? memberInput.startingConditions : [];
-    if (!Array.isArray(memberInput.startingConditions)) gaps.push(issueGap(entry, ['members', index, 'startingConditions']));
+    if (!Array.isArray(memberInput.startingConditions)) gaps = gaps.append(issueGap(entry, ['members', index, 'startingConditions']));
     if (conditionsInput.length > 100) {
-      gaps.push(issueGap(entry, ['members', index, 'startingConditions'], 'value_not_in_engine_vocabulary'));
+      gaps = gaps.append(issueGap(entry, ['members', index, 'startingConditions'], 'value_not_in_engine_vocabulary'));
     }
     const startingConditions: ExternalPartyPackMember['startingConditions'][number][] = [];
     for (const [conditionIndex, conditionValue] of conditionsInput.slice(0, 100).entries()) {
@@ -2938,8 +4017,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         gaps,
       ));
       if (parsed.success) {
-        if (startingConditions.some((condition) => condition.effectId === parsed.data.effectId)) {
-          gaps.push(issueGap(
+        if (startingConditions.some((condition): boolean => condition.effectId === parsed.data.effectId)) {
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'startingConditions', conditionIndex, 'effectId'],
             'value_not_in_engine_vocabulary',
@@ -2948,9 +4027,12 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           startingConditions.push(parsed.data);
         }
       }
-      else gaps.push(...parsed.error.issues.map((issue) => issueGap(
+      else gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
         entry,
-        ['members', index, 'startingConditions', conditionIndex, ...issue.path],
+        parsedPartyPackPath(
+          partyPath('members', index, 'startingConditions', conditionIndex),
+          issue.path,
+        ),
         issue.code === 'unrecognized_keys'
           ? 'field_not_in_engine_vocabulary'
           : 'value_not_in_engine_vocabulary',
@@ -2962,26 +4044,29 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     let passives: z.infer<typeof passivesSchema> | undefined;
     const worldOperations: ExternalWorldOperation[] = [];
     if (header.data.schemaVersion === 2) {
-      const worldOperationsInput = Object.hasOwn(memberInput, 'worldOperations')
+      const worldOperationsInput = hasV2MemberField(memberInput, 'worldOperations')
         ? memberInput.worldOperations
         : [];
       if (!Array.isArray(worldOperationsInput)) {
-        gaps.push(issueGap(entry, ['members', index, 'worldOperations']));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'worldOperations']));
       } else if (worldOperationsInput.length > 100) {
-        gaps.push(issueGap(entry, ['members', index, 'worldOperations'], 'value_not_in_engine_vocabulary'));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'worldOperations'], 'value_not_in_engine_vocabulary'));
       } else {
         for (const [operationIndex, operationValue] of worldOperationsInput.entries()) {
           const parsed = externalWorldOperationSchema.safeParse(operationValue);
           if (!parsed.success) {
-            gaps.push(...parsed.error.issues.map((issue) => issueGap(
+            gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
               entry,
-              ['members', index, 'worldOperations', operationIndex, ...issue.path],
+              parsedPartyPackPath(
+                partyPath('members', index, 'worldOperations', operationIndex),
+                issue.path,
+              ),
               issue.code === 'unrecognized_keys'
                 ? 'field_not_in_engine_vocabulary'
                 : 'value_not_in_engine_vocabulary',
             )));
-          } else if (worldOperations.some((operation) => operation.operationId === parsed.data.operationId)) {
-            gaps.push(issueGap(
+          } else if (worldOperations.some((operation): boolean => operation.operationId === parsed.data.operationId)) {
+            gaps = gaps.append(issueGap(
               entry,
               ['members', index, 'worldOperations', operationIndex, 'operationId'],
               'value_not_in_engine_vocabulary',
@@ -2991,13 +4076,13 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           }
         }
       }
-      const effectsInput = Object.hasOwn(memberInput, 'effects')
+      const effectsInput = hasV2MemberField(memberInput, 'effects')
         ? memberInput.effects
         : [];
       if (!Array.isArray(effectsInput)) {
-        gaps.push(issueGap(entry, ['members', index, 'effects']));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'effects']));
       } else if (effectsInput.length > 100) {
-        gaps.push(issueGap(entry, ['members', index, 'effects'], 'value_not_in_engine_vocabulary'));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'effects'], 'value_not_in_engine_vocabulary'));
       }
       if (Array.isArray(effectsInput)) {
         for (const [effectIndex, effectValue] of effectsInput.slice(0, 100).entries()) {
@@ -3007,8 +4092,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
             typeof shape !== 'string' ||
             !FEATURE_EFFECT_KINDS.includes(shape as (typeof FEATURE_EFFECT_KINDS)[number])
           ) {
-            unsupportedEffectShape ??= typeof shape === 'string' ? shape : 'missing_effect_kind';
-            gaps.push(issueGap(
+            unsupportedEffectShape ??= typeof shape === 'string' ? shape : MISSING_EFFECT_KIND;
+            gaps = gaps.append(issueGap(
               entry,
               ['members', index, 'effects', effectIndex, 'kind'],
               'capability_not_implemented',
@@ -3017,15 +4102,18 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           }
           const parsed = externalPartyPackFeatureEffectSchema.safeParse(effectValue);
           if (!parsed.success) {
-            gaps.push(...parsed.error.issues.map((issue) => issueGap(
+            gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
               entry,
-              ['members', index, 'effects', effectIndex, ...issue.path],
+              parsedPartyPackPath(
+                partyPath('members', index, 'effects', effectIndex),
+                issue.path,
+              ),
               issue.code === 'unrecognized_keys'
                 ? 'field_not_in_engine_vocabulary'
                 : 'value_not_in_engine_vocabulary',
             )));
-          } else if (effects.some((effect) => effect.effectId === parsed.data.effectId)) {
-            gaps.push(issueGap(
+          } else if (effects.some((effect): boolean => effect.effectId === parsed.data.effectId)) {
+            gaps = gaps.append(issueGap(
               entry,
               ['members', index, 'effects', effectIndex, 'effectId'],
               'value_not_in_engine_vocabulary',
@@ -3036,27 +4124,30 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         }
       }
 
-      const resourcesInput = Object.hasOwn(memberInput, 'resources')
+      const resourcesInput = hasV2MemberField(memberInput, 'resources')
         ? memberInput.resources
         : [];
       if (!Array.isArray(resourcesInput)) {
-        gaps.push(issueGap(entry, ['members', index, 'resources']));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'resources']));
       } else if (resourcesInput.length > 100) {
-        gaps.push(issueGap(entry, ['members', index, 'resources'], 'value_not_in_engine_vocabulary'));
+        gaps = gaps.append(issueGap(entry, ['members', index, 'resources'], 'value_not_in_engine_vocabulary'));
       }
       if (Array.isArray(resourcesInput)) {
         for (const [resourceIndex, resourceValue] of resourcesInput.slice(0, 100).entries()) {
           const parsed = externalPartyPackResourceSchema.safeParse(resourceValue);
           if (!parsed.success) {
-            gaps.push(...parsed.error.issues.map((issue) => issueGap(
+            gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
               entry,
-              ['members', index, 'resources', resourceIndex, ...issue.path],
+              parsedPartyPackPath(
+                partyPath('members', index, 'resources', resourceIndex),
+                issue.path,
+              ),
               issue.code === 'unrecognized_keys'
                 ? 'field_not_in_engine_vocabulary'
                 : 'value_not_in_engine_vocabulary',
             )));
-          } else if (resources.some((pool) => pool.resourcePoolId === parsed.data.resourcePoolId)) {
-            gaps.push(issueGap(
+          } else if (resources.some((pool): boolean => pool.resourcePoolId === parsed.data.resourcePoolId)) {
+            gaps = gaps.append(issueGap(
               entry,
               ['members', index, 'resources', resourceIndex, 'resourcePoolId'],
               'value_not_in_engine_vocabulary',
@@ -3067,12 +4158,12 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         }
       }
 
-      if (Object.hasOwn(memberInput, 'passives')) {
+      if (hasV2MemberField(memberInput, 'passives')) {
         const parsed = passivesSchema.safeParse(memberInput.passives);
         if (!parsed.success) {
-          gaps.push(...parsed.error.issues.map((issue) => issueGap(
+          gaps = gaps.append(...parsed.error.issues.map((issue) => issueGap(
             entry,
-            ['members', index, 'passives', ...issue.path],
+            parsedPartyPackPath(partyPath('members', index, 'passives'), issue.path),
             issue.code === 'unrecognized_keys'
               ? 'field_not_in_engine_vocabulary'
               : 'value_not_in_engine_vocabulary',
@@ -3083,11 +4174,11 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           const passiveSpeed = core.data.walkingSpeedFeet + (passives.speedAdjustmentFeet ?? 0);
           let validPassives = true;
           if (passiveAc < 1 || passiveAc > 50) {
-            gaps.push(issueGap(entry, ['members', index, 'passives', 'armorClassBonus'], 'value_not_in_engine_vocabulary'));
+            gaps = gaps.append(issueGap(entry, ['members', index, 'passives', 'armorClassBonus'], 'value_not_in_engine_vocabulary'));
             validPassives = false;
           }
           if (passiveSpeed < 0 || passiveSpeed > 1_000) {
-            gaps.push(issueGap(entry, ['members', index, 'passives', 'speedAdjustmentFeet'], 'value_not_in_engine_vocabulary'));
+            gaps = gaps.append(issueGap(entry, ['members', index, 'passives', 'speedAdjustmentFeet'], 'value_not_in_engine_vocabulary'));
             validPassives = false;
           }
           const passiveCollections = [
@@ -3097,7 +4188,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           ] as const;
           for (const [field, values] of passiveCollections) {
             if (new Set(values).size !== values.length) {
-              gaps.push(issueGap(entry, ['members', index, 'passives', field], 'value_not_in_engine_vocabulary'));
+              gaps = gaps.append(issueGap(entry, ['members', index, 'passives', field], 'value_not_in_engine_vocabulary'));
               validPassives = false;
             }
           }
@@ -3107,7 +4198,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
 
       const resourceIds = new Set(resources.map((pool) => pool.resourcePoolId));
       const attackFormKeys = new Set<string>();
-      effects = effects.filter((effect, effectIndex) => {
+      effects = effects.filter((effect, effectIndex): boolean => {
         const referencedPool = effect.resourcePoolId === undefined
           ? undefined
           : resources.find((pool) => pool.resourcePoolId === effect.resourcePoolId);
@@ -3169,7 +4260,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
                   : attackFormKey !== null && !uniqueAttackForm
                     ? 'kind'
                     : effect.kind === 'extra_attack_count_override' ? 'levels' : 'resourcePoolId';
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
             ['members', index, 'effects', effectIndex, path],
             'value_not_in_engine_vocabulary',
@@ -3179,15 +4270,22 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         }
         return valid;
       });
-      parsedSpellcasting = parsedSpellcasting.map((source, sourceIndex) => {
-        const sourcePrefix: readonly PropertyKey[] = Array.isArray(memberInput.spellcasting)
-          ? ['members', index, 'spellcasting', sourceIndex]
-          : ['members', index, 'spellcasting'];
-        const resourceSpellUses = (source.resourceSpellUses ?? []).filter((use, useIndex) => {
+      parsedSpellcasting = parsedSpellcasting.map((
+        source,
+        sourceIndex,
+      ): z.infer<typeof spellcastingSourceInputSchema> => {
+        const pathSourceIndex = Array.isArray(memberInput.spellcasting) ? sourceIndex : null;
+        const resourceSpellUses = (source.resourceSpellUses ?? []).filter((use, useIndex): boolean => {
           if (resourceIds.has(use.resourcePoolId)) return true;
-          gaps.push(issueGap(
+          gaps = gaps.append(issueGap(
             entry,
-            [...sourcePrefix, 'resourceSpellUses', useIndex, 'resourcePoolId'],
+            spellcastingSourcePath(
+              index,
+              pathSourceIndex,
+              'resourceSpellUses',
+              useIndex,
+              'resourcePoolId',
+            ),
             'value_not_in_engine_vocabulary',
           ));
           return false;
@@ -3196,10 +4294,13 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         if (loadedSource !== undefined) {
           loadedSpellcasting[sourceIndex] = {
             ...loadedSource,
-            resourceSpellUses: resourceSpellUses.map((use) => ({
-              spellId: use.spellId,
-              resourcePoolId: limitedResourcePoolId(use.resourcePoolId),
-            })),
+            resourceSpellUses: resourceSpellUses.flatMap((use) =>
+              isSpellManifestId(use.spellId)
+                ? [{
+                    spellId: use.spellId,
+                    resourcePoolId: limitedResourcePoolId(use.resourcePoolId),
+                  }]
+                : []),
           };
         }
         return {
@@ -3221,11 +4322,11 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           ...core.data,
           attacks,
           startingConditions,
-          ...(Object.hasOwn(memberInput, 'effects') ? { effects } : {}),
-          ...(Object.hasOwn(memberInput, 'resources') ? { resources } : {}),
+          ...(hasV2MemberField(memberInput, 'effects') ? { effects } : {}),
+          ...(hasV2MemberField(memberInput, 'resources') ? { resources } : {}),
           ...(passives === undefined ? {} : { passives }),
-          ...(Object.hasOwn(memberInput, 'worldOperations') ? { worldOperations } : {}),
-          ...(Object.hasOwn(memberInput, 'pactSpellSlots')
+          ...(hasV2MemberField(memberInput, 'worldOperations') ? { worldOperations } : {}),
+          ...(hasV2MemberField(memberInput, 'pactSpellSlots')
             ? {
                 pactSpellSlots: pactSpellSlots.map((capacity) => ({
                   level: capacity.level,
@@ -3254,18 +4355,18 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     });
   }
 
-  const uniqueCombatants = new Set(mapped.map(({ member }) => member.combatantId));
-  const uniqueTokens = new Set(mapped.map(({ member }) => member.tokenId));
-  const uniqueCharacters = new Set(mapped.map(({ member }) => member.characterId));
+  const uniqueCombatants = new Set(mapped.map(({ member }): ExternalCombatantId => member.combatantId));
+  const uniqueTokens = new Set(mapped.map(({ member }): ExternalTokenId => member.tokenId));
+  const uniqueCharacters = new Set(mapped.map(({ member }): number => member.characterId));
   if (
     uniqueCombatants.size !== mapped.length ||
     uniqueTokens.size !== mapped.length ||
     uniqueCharacters.size !== mapped.length
   ) {
-    gaps.push(issueGap(header.data.partyId, ['members'], 'value_not_in_engine_vocabulary'));
+    gaps = gaps.append(issueGap(header.data.partyId, ['members'], 'value_not_in_engine_vocabulary'));
   }
 
-  const allGaps = deduplicateGapReports(gaps);
+  const allGaps = deduplicateGapReports(gaps.values());
   if (unknownSpellId) return refusal('unknown_spell_id', allGaps);
   if (tooManySpellcastingSources) return refusal('too_many_spellcasting_sources', allGaps);
   if (unsupportedEffectShape !== null) {
@@ -3304,7 +4405,10 @@ export function loadExternalPartyPackBytes(bytes: string): PartyPackLoadResult {
   try {
     parsed = JSON.parse(bytes);
   } catch {
-    return refusal('invalid_json', [issueGap('party-pack:root', ['json'])]);
+    return refusal('invalid_json', [issueGap(
+      PARTY_PACK_ROOT_ENTRY,
+      openPartyPackPath([], 'json'),
+    )]);
   }
   return loadExternalPartyPack(parsed);
 }

@@ -25,7 +25,7 @@ export interface SpellManifestRow {
  * source-pinned spells needed by the private build matrix. Spell batch 2 adds
  * seven further matrix-ranked SRD spells under the same closed discipline.
  */
-export const SPELL_MANIFEST: readonly SpellManifestRow[] = [
+const CLOSED_SPELL_MANIFEST = [
   { id: "acid-splash", name: "Acid Splash", level: 0, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:27" }], status: 'implemented' },
   { id: "chill-touch", name: "Chill Touch", level: 0, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:29" }], status: 'implemented' },
   { id: "dancing-lights", name: "Dancing Lights", level: 0, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:31" }], status: 'implemented', partial: 'Light count, radii, concentration, duration, and movement limit are typed; the combined Medium humanoid form, 20-foot adjacency constraint, and independent positions await created-object spatial state.' },
@@ -169,7 +169,7 @@ export const SPELL_MANIFEST: readonly SpellManifestRow[] = [
   { id: "sleet-storm", name: "Sleet Storm", level: 3, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:168" }], status: 'implemented', partial: 'Exact cylinder and all terrain, obscurement, save, Prone, and concentration-break values persist; enter/start triggers, flames, terrain, and concentration loss await zone hooks.' },
   { id: "slow", name: "Slow", level: 3, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:169" }], status: 'implemented', partial: 'Exact cube, six-target selection, save/repeat save, and all penalties persist; Speed, AC, saves, reactions, action limits, and spell failure await effect interception.' },
   { id: "speak-with-dead", name: "Speak with Dead", level: 3, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:118" }, { list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:170" }], status: 'implemented', partial: 'Question cap, corpse lockout, range, and duration persist; corpse eligibility, knowledge, language, answers, and cast history await remains/dialogue state.' },
-  { id: "spirit-guardians", name: "Spirit Guardians", level: 3, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:120" }], status: 'implemented', partial: 'Exact emanation, speed, alignment-bound Radiant/Necrotic mapping, dice/scaling, save-half, once-per-turn, duration, and concentration persist; caster alignment lookup, exclusions, and enter/end damage await moving-zone hooks.' },
+  { id: "spirit-guardians", name: "Spirit Guardians", level: 3, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:120" }], status: 'implemented', partial: 'The caster-anchored emanation, enemy speed halving, declared alignment-bound Radiant/Necrotic damage, save-half, upcasting, enter/end-turn triggers, once-per-turn gate, duration, and concentration execute. Designating individual unaffected creatures awaits a cast exclusion selector.' },
   { id: "stinking-cloud", name: "Stinking Cloud", level: 3, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:171" }], status: 'implemented', partial: 'Exact sphere, obscurement, wind, save, Poisoned, action restriction, duration, and concentration persist; start-turn saves and dispersal await zone/environment hooks.' },
   { id: "tiny-hut", name: "Tiny Hut", level: 3, memberships: [{ list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:172" }], status: 'implemented', partial: 'Exact emanation, passage and spell barriers, visibility, ritual, and duration persist; initial containment, atmosphere, light, recast, and caster-exit expiry await region hooks.' },
   { id: "tongues", name: "Tongues", level: 3, memberships: [{ list: 'Cleric', source: "docs/srd/source/cleric-spell-list.txt:122" }, { list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:173" }], status: 'implemented', partial: 'Spoken/signed comprehension, universal intelligibility, and duration persist; language communication awaits dialogue state.' },
@@ -214,7 +214,22 @@ export const SPELL_MANIFEST: readonly SpellManifestRow[] = [
   { id: "goodberry", name: "Goodberry", level: 1, memberships: [{ list: 'Druid', source: "docs/srd/source/druid-spell-list.txt:52" }, { list: 'Ranger', source: "docs/srd/source/ranger-spell-list.txt:33" }], status: 'implemented', partial: 'The reducer creates ten bonus-action consumables, decrements the pool, and heals exactly 1 HP each; one-day nourishment and 24-hour expiry are outside encounter scope.' },
   { id: "pass-without-trace", name: "Pass without Trace", level: 2, memberships: [{ list: 'Druid', source: "docs/srd/source/druid-spell-list.txt:85" }, { list: 'Ranger', source: "docs/srd/source/ranger-spell-list.txt:52" }], status: 'implemented', partial: 'Declared beneficiaries dynamically receive the concentration-bound +10 Stealth modifier while inside the caster-anchored 30-foot Emanation; track suppression awaits exploration state.' },
   { id: "hold-monster", name: "Hold Monster", level: 5, memberships: [{ list: 'Bard', source: "docs/srd/source/bard-spell-list.txt:163" }, { list: 'Sorcerer', source: "docs/srd/source/sorcerer-spell-list.txt:168" }, { list: 'Warlock', source: "docs/srd/source/warlock-spell-list.txt:98" }, { list: 'Wizard', source: "docs/srd/source/wizard-spell-list.txt:223" }], status: 'implemented', partial: 'Wisdom save, Paralyzed enforcement, target-end save ending, concentration, duration, and upcast target count execute; visible-target filtering awaits perception-aware target legality.' },
-] as const;
+] as const satisfies readonly SpellManifestRow[];
+
+/** Closed id vocabulary authored by the manifest itself. */
+export type SpellManifestId = (typeof CLOSED_SPELL_MANIFEST)[number]['id'];
+export type SpellManifestEntry = SpellManifestRow & { readonly id: SpellManifestId };
+
+export const SPELL_MANIFEST: readonly SpellManifestEntry[] = CLOSED_SPELL_MANIFEST;
+
+const spellManifestIds = Object.fromEntries(
+  SPELL_MANIFEST.map((spell) => [spell.id, true]),
+) as Readonly<Record<SpellManifestId, true>>;
+
+/** Narrows untrusted input once; internal spell-id predicates take SpellManifestId. */
+export function isSpellManifestId(value: unknown): value is SpellManifestId {
+  return typeof value === 'string' && Object.hasOwn(spellManifestIds, value);
+}
 
 export function assertSpellManifestBurnDown(
   rows: readonly SpellManifestRow[],

@@ -69,6 +69,21 @@ export class StableRenderKeyCollisionError extends Error {
   }
 }
 
+export class StableInteractivePathError extends Error {
+  override readonly name = 'StableInteractivePathError' as const;
+  readonly code = 'unstable_interactive_render_path' as const;
+
+  constructor(
+    readonly interactiveTag: string,
+    readonly unkeyedTag: string,
+    readonly tree: 'live' | 'draft',
+  ) {
+    super(
+      `Interactive ${interactiveTag} has an unkeyed ${unkeyedTag} ancestor in the ${tree} tree.`,
+    );
+  }
+}
+
 export function stableRenderKey(
   ...segments: readonly [namespace: string, identity: string, ...path: string[]]
 ): StableRenderKey {
@@ -102,6 +117,40 @@ function assertUniqueRenderKeys(
     }
   };
   visit(root);
+}
+
+function isInteractive(element: HTMLElement): boolean {
+  const tag = element.tagName.toUpperCase();
+  if (['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY'].includes(tag)) return true;
+  if (tag === 'A' && element.getAttribute('href') !== null) return true;
+  return element.getAttribute('tabindex') !== null;
+}
+
+function assertStableInteractivePaths(
+  root: HTMLElement,
+  tree: 'live' | 'draft',
+): void {
+  const visit = (parent: HTMLElement, pathIsStable: boolean): void => {
+    for (const child of Array.from(parent.children)) {
+      if (!isHtmlElement(child)) continue;
+      const childIsStable = pathIsStable && renderKey(child) !== null;
+      if (isInteractive(child) && !childIsStable) {
+        let unkeyed: HTMLElement = child;
+        while (unkeyed !== root && renderKey(unkeyed) !== null) {
+          const ancestor = unkeyed.parentElement;
+          if (ancestor === null) break;
+          unkeyed = ancestor;
+        }
+        throw new StableInteractivePathError(
+          child.tagName.toUpperCase(),
+          unkeyed.tagName.toUpperCase(),
+          tree,
+        );
+      }
+      visit(child, childIsStable);
+    }
+  };
+  visit(root, true);
 }
 
 function keyedChildren(element: HTMLElement): ReadonlyMap<StableRenderKey, HTMLElement> {
@@ -138,23 +187,38 @@ function syncElement(live: HTMLElement, draft: HTMLElement): void {
 export function reconcileStableRenderedChildren(live: HTMLElement, draft: HTMLElement): void {
   assertUniqueRenderKeys(live, 'live');
   assertUniqueRenderKeys(draft, 'draft');
+  assertStableInteractivePaths(live, 'live');
+  assertStableInteractivePaths(draft, 'draft');
   const existing = Array.from(live.children).filter(
     isHtmlElement,
   );
   const keyed = keyedChildren(live);
-  const retained = new Set<HTMLElement>();
   const desired = Array.from(draft.children).filter(
     isHtmlElement,
   );
-  for (const next of desired) {
+  const rendered = desired.map((next) => {
     const key = renderKey(next);
     const prior = key === null ? undefined : keyed.get(key);
-    const rendered = prior !== undefined && prior.tagName === next.tagName
+    const node = prior !== undefined && prior.tagName === next.tagName
       ? prior
       : next;
-    if (rendered === prior) syncElement(rendered, next);
-    live.append(rendered);
-    retained.add(rendered);
+    if (node === prior) syncElement(node, next);
+    return node;
+  });
+  const retained = new Set(rendered);
+  for (const [index, node] of rendered.entries()) {
+    while (true) {
+      const current = Array.from(live.children).filter(isHtmlElement)[index];
+      if (current === node) break;
+      if (current !== undefined && !retained.has(current)) {
+        current.remove();
+        continue;
+      }
+      // Re-appending a retained node is still a DOM move. Leaving it in place
+      // keeps an active pointer sequence intact when preview siblings change.
+      live.insertBefore(node, current ?? null);
+      break;
+    }
   }
   for (const stale of existing) {
     if (!retained.has(stale)) stale.remove();

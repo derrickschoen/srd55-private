@@ -17,6 +17,9 @@ import {
 } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
+import type { PendingDecision } from '../../src/combat/encounter';
+import { decodeSavedSessionFingerprint } from '../../src/vtt/session-persistence';
+import { RehearsalTimings, rehearsalTimingBlock } from './timing';
 
 const REHEARSAL_SEED = 20_260_824;
 const APP_READY_TIMEOUT_MS = 180_000;
@@ -24,12 +27,27 @@ const UI_TIMEOUT_MS = 65_000;
 const CLEANUP_TIMEOUT_MS = 10_000;
 const CLICK_STEP_BUDGET_MS = 30_000;
 const CLICK_ATTEMPT_TIMEOUT_MS = 5_000;
-const CLICK_RETRY_DELAY_MS = 100;
+const CLICK_RETRY_DELAY_MS = 25;
+const TRANSITION_STEP_BUDGET_MS = 30_000;
+const ASSIGNMENT_STEP_BUDGET_MS = 30_000;
+const TRAY_READ_STEP_BUDGET_MS = 30_000;
+const ENCOUNTER_STATE_READ_BUDGET_MS = 30_000;
+const TIMELINE_STEP_BUDGET_MS = 30_000;
+const FORM_STEP_BUDGET_MS = 30_000;
+const SAVE_MANAGER_STEP_BUDGET_MS = 30_000;
+const EXPORT_STEP_BUDGET_MS = 60_000;
 const DEFAULT_RUN_WATCHDOG_MS = 40 * 60 * 1_000;
-const TURN_PULSE_MS = 35;
-const ROUND_STALL_ATTEMPTS = 24;
+const TURN_PULSE_MS = 10;
+const ROUND_STALL_BUDGET_MS = 30_000;
 const MAX_TURN_ATTEMPTS = 600;
 const previewReadiness = new WeakMap<ChildProcess, Promise<string>>();
+const REPRESENTATIVE_PARTY_NAMES = [
+  'Mirel Ash',
+  'Orin Reed',
+  'Brann Vale',
+  'Sera Dawn',
+  'Tamsin Quill',
+] as const;
 
 const FINDING_CLASSES = [
   'page_console_error',
@@ -66,6 +84,7 @@ interface ParsedOptions {
   readonly run: number;
   readonly port: number;
   readonly watchdogMs: number;
+  readonly scenario: 'default' | 'tpk-clean' | 'tpk-recovery';
 }
 
 interface SessionExport {
@@ -77,6 +96,15 @@ interface SessionExport {
   readonly hasAlarm: boolean;
   readonly hasIgnition: boolean;
   readonly seed: number | null;
+  readonly payloadBytes: number;
+  readonly revisionCount: number;
+  readonly format: string;
+  readonly defeatConclusionCount: number;
+  readonly deathSaveCount: number;
+  readonly deathCount: number;
+  readonly revivifyCount: number;
+  readonly dmRevivalCount: number;
+  readonly recoveryRedeathCount: number;
 }
 
 interface EncounterOutcome {
@@ -92,6 +120,27 @@ interface TimelineProgress {
   rewindUsed: boolean;
   continuedForward: boolean;
   rewindRound: number | null;
+}
+
+interface TpkRecoveryProgress {
+  revivifyObserved: boolean;
+  overrideTarget: string | null;
+}
+
+interface PendingDecisionSurface {
+  readonly decisionId: string;
+  readonly decisionKind: PendingDecision['kind'];
+  readonly heading: string;
+  readonly optionCount: number;
+}
+
+type AdventuringDayFlow =
+  | { readonly kind: 'dungeon'; readonly roomCount: 4 }
+  | { readonly kind: 'vane_warren'; readonly name: string; readonly roomCount: 1 | 3 };
+
+interface AdventuringDayMarker {
+  readonly room: number;
+  readonly text: string;
 }
 
 async function withTimeout<T>(
@@ -123,6 +172,14 @@ function findingDedupeKey(
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function recordList(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): readonly Readonly<Record<string, unknown>>[] {
+  const value = record[key];
+  return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
 function positiveInteger(name: string, raw: string | undefined, fallback: number): number {
@@ -181,7 +238,15 @@ async function parseOptions(argv: readonly string[]): Promise<ParsedOptions> {
     process.env.REHEARSAL_WATCHDOG_MS,
     DEFAULT_RUN_WATCHDOG_MS,
   );
-  return { date, run, port, watchdogMs };
+  const requestedScenario = optionValue(argv, '--scenario') ?? 'default';
+  if (
+    requestedScenario !== 'default' &&
+    requestedScenario !== 'tpk-clean' &&
+    requestedScenario !== 'tpk-recovery'
+  ) {
+    throw new Error(`Unknown rehearsal scenario ${JSON.stringify(requestedScenario)}.`);
+  }
+  return { date, run, port, watchdogMs, scenario: requestedScenario };
 }
 
 class FindingsRecorder {
@@ -190,6 +255,7 @@ class FindingsRecorder {
   readonly seenRefusals = new Set<string>();
   readonly exports: SessionExport[] = [];
   readonly pendingScreenshots = new Map<string, Promise<void>>();
+  readonly timings = new RehearsalTimings();
   screenshotCount = 0;
   page: Page | null = null;
   currentPhase = 'driver startup';
@@ -207,8 +273,17 @@ class FindingsRecorder {
   }
 
   track(phase: string, step: string): void {
+    this.timings.track(phase, step);
     this.currentPhase = phase;
     this.currentStep = step;
+  }
+
+  timingBlock(): string {
+    return rehearsalTimingBlock(this.timings.rows());
+  }
+
+  outputBlock(): string {
+    return `${this.timingBlock()}\n\n${this.summaryBlock()}`;
   }
 
   async flushScreenshots(): Promise<void> {
@@ -288,7 +363,9 @@ class FindingsRecorder {
     const aborted = this.phases.filter((phase) => phase.status === 'aborted');
     const skipped = this.phases.filter((phase) => phase.status === 'skipped_dependency');
     const counts = this.counts();
-    const clean = counts.page_console_error === 0 &&
+    const clean = aborted.length === 0 &&
+      skipped.length === 0 &&
+      counts.page_console_error === 0 &&
       counts.selector_timeout === 0 &&
       counts.turn_advance_stall === 0 &&
       counts.tray_unresolved === 0 &&
@@ -325,9 +402,9 @@ class FindingsRecorder {
           ...(finding.screenshot === null ? [] : [`- Screenshot: \`${finding.screenshot}\``]),
         ].join('\n')).join('\n\n');
     const exportRows = this.exports.length === 0
-      ? '| (none) | false | false | 0 | (unknown) |'
+      ? '| (none) | false | false | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | (unknown) | (unknown) |'
       : this.exports.map((entry) =>
-          `| ${escapeTable(entry.filename)} | ${String(entry.parsed)} | ${String(entry.hasSessionRecord)} | ${String(entry.encounterCount)} | ${entry.seed === null ? '(unknown)' : String(entry.seed)} |`).join('\n');
+          `| ${escapeTable(entry.filename)} | ${String(entry.parsed)} | ${String(entry.hasSessionRecord)} | ${String(entry.encounterCount)} | ${String(entry.defeatConclusionCount)} | ${String(entry.deathSaveCount)} | ${String(entry.deathCount)} | ${String(entry.revivifyCount)} | ${String(entry.dmRevivalCount)} | ${String(entry.recoveryRedeathCount)} | ${String(entry.revisionCount)} | ${String(entry.payloadBytes)} | ${entry.seed === null ? '(unknown)' : String(entry.seed)} | ${escapeTable(entry.format)} |`).join('\n');
     const markdown = [
       `# Rehearsal run ${this.date} / ${String(this.run)}`,
       '',
@@ -343,9 +420,11 @@ class FindingsRecorder {
       '',
       '## Session exports',
       '',
-      '| File | Parses | Structured record | Encounters | Seed |',
-      '|---|---:|---:|---:|---:|',
+      '| File | Parses | Structured record | Encounters | Defeats | Death saves | Deaths | Revivify | DM revivals | Re-deaths | Revisions | Bytes | Seed | Format |',
+      '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|',
       exportRows,
+      '',
+      this.timingBlock(),
       '',
       '## Findings',
       '',
@@ -419,7 +498,7 @@ async function stopPreview(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null) return;
   child.kill('SIGTERM');
   const exited = new Promise<void>((complete) => child.once('exit', () => complete()));
-  await Promise.race([exited, wait(5_000)]);
+  await Promise.race([exited, wait(CLEANUP_TIMEOUT_MS)]);
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
@@ -430,13 +509,15 @@ async function screenshot(
 ): Promise<string | null> {
   const safe = label.toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-|-$/gu, '').slice(0, 70);
   recorder.screenshotCount += 1;
-  const path = resolve(recorder.runDirectory, `${String(recorder.screenshotCount).padStart(3, '0')}-${safe || 'finding'}.png`);
+  const path = resolve(recorder.runDirectory, `${String(recorder.screenshotCount).padStart(3, '0')}-${safe || 'finding'}.jpg`);
   try {
+    const startedAt = performance.now();
     await withTimeout(
-      page.screenshot({ path, fullPage: true, timeout: CLEANUP_TIMEOUT_MS }),
+      page.screenshot({ path, fullPage: true, type: 'jpeg', quality: 55, timeout: CLEANUP_TIMEOUT_MS }),
       CLEANUP_TIMEOUT_MS,
       `capture ${label} screenshot`,
     );
+    recorder.timings.record('browser runtime', 'finding screenshot capture', performance.now() - startedAt);
     return path;
   } catch {
     return null;
@@ -470,12 +551,151 @@ async function retryClick(locator: () => Locator, label: string): Promise<void> 
   );
 }
 
-async function locatorCount(locator: () => Locator, label: string): Promise<number> {
-  return withTimeout(locator().count(), CLICK_ATTEMPT_TIMEOUT_MS, label);
+async function retryClickUntil(
+  locator: () => Locator,
+  completed: () => Promise<boolean>,
+  label: string,
+  budgetMs = CLICK_STEP_BUDGET_MS,
+): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  let attempts = 0;
+  let lastError: unknown = new Error(`${label} was not attempted.`);
+  while (Date.now() < deadline) {
+    if (await completed()) return;
+    attempts += 1;
+    const remaining = deadline - Date.now();
+    const attemptTimeout = Math.min(CLICK_ATTEMPT_TIMEOUT_MS, remaining);
+    const playwrightTimeout = Math.max(1, attemptTimeout - 250);
+    try {
+      await withTimeout(
+        locator().click({ timeout: playwrightTimeout }),
+        attemptTimeout,
+        `${label} click attempt ${String(attempts)}`,
+      );
+      lastError = new Error(`${label} was clicked, but its expected state was not observed.`);
+      while (Date.now() < deadline) {
+        if (await completed()) return;
+        const delay = Math.min(CLICK_RETRY_DELAY_MS, deadline - Date.now());
+        if (delay > 0) await wait(delay);
+      }
+      break;
+    } catch (error: unknown) {
+      lastError = error;
+      const observationDeadline = Math.min(
+        deadline,
+        Date.now() + CLICK_ATTEMPT_TIMEOUT_MS,
+      );
+      while (Date.now() < observationDeadline) {
+        if (await completed()) return;
+        const delay = Math.min(CLICK_RETRY_DELAY_MS, observationDeadline - Date.now());
+        if (delay > 0) await wait(delay);
+      }
+    }
+  }
+  throw new Error(
+    `${label} did not reach its expected state within ${String(budgetMs)}ms after ${String(attempts)} attempts. Last error: ${errorDetail(lastError)}`,
+  );
+}
+
+function remainingStepBudget(deadline: number, label: string): number {
+  const remaining = deadline - Date.now();
+  if (remaining < 1) throw new Error(`${label} exceeded its hard step budget.`);
+  return remaining;
+}
+
+async function readAdventuringDayMarker(
+  page: Page,
+  flow: AdventuringDayFlow,
+): Promise<AdventuringDayMarker> {
+  const surface = await withTimeout(page.evaluate(() => {
+    const statuses = Array.from(document.querySelectorAll<HTMLElement>('.adventuring-day-status'))
+      .filter((status) => status.checkVisibility());
+    const status = statuses[0];
+    return {
+      count: statuses.length,
+      rawRoom: status?.dataset.room ?? null,
+      text: status?.innerText.trim() ?? '',
+    };
+  }), TRANSITION_STEP_BUDGET_MS, 'read adventuring-day marker');
+  if (surface.count !== 1) {
+    throw new Error(
+      `Driver DOM contract violation: expected exactly one visible .adventuring-day-status, found ${String(surface.count)}.`,
+    );
+  }
+  const { rawRoom, text } = surface;
+  if (rawRoom === null) {
+    throw new Error(
+      'Driver DOM contract violation: visible .adventuring-day-status is missing data-room.',
+    );
+  }
+  if (!/^[1-9]\d*$/u.test(rawRoom)) {
+    throw new Error(
+      `Driver DOM contract violation: .adventuring-day-status data-room=${JSON.stringify(rawRoom)} is not a positive integer.`,
+    );
+  }
+  const room = Number(rawRoom);
+  const expectedText = flow.kind === 'dungeon'
+    ? `Adventuring day — room ${String(room)} of ${String(flow.roomCount)} · 2024 rules`
+    : `${flow.name} — encounter ${String(room)} of ${String(flow.roomCount)} · 2024 rules`;
+  if (text !== expectedText) {
+    throw new Error(
+      `Driver DOM contract violation: data-room=${rawRoom}, but the visible status was ${JSON.stringify(text)}; expected ${JSON.stringify(expectedText)}.`,
+    );
+  }
+  return { room, text };
+}
+
+async function adventuringDayReachedRoom(
+  page: Page,
+  flow: AdventuringDayFlow,
+  expectedRoom: number,
+): Promise<boolean> {
+  const marker = await readAdventuringDayMarker(page, flow);
+  if (marker.room > expectedRoom) {
+    throw new Error(
+      `Driver room-transition violation: expected room ${String(expectedRoom)}, but the visible status advanced to room ${String(marker.room)}.`,
+    );
+  }
+  return marker.room === expectedRoom;
+}
+
+async function waitForAdventuringDayRoom(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
+  step: string,
+  flow: AdventuringDayFlow,
+  expectedRoom: number,
+): Promise<boolean> {
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    step,
+    page.locator('.adventuring-day-status'),
+    TRANSITION_STEP_BUDGET_MS,
+  )) return false;
+  try {
+    const marker = await readAdventuringDayMarker(page, flow);
+    if (marker.room === expectedRoom) return true;
+    const image = await screenshot(page, recorder, step);
+    recorder.add(
+      'selector_timeout',
+      phase,
+      step,
+      `Driver room-state mismatch: expected room ${String(expectedRoom)}, found room ${String(marker.room)} in ${JSON.stringify(marker.text)}.`,
+      image,
+    );
+    return false;
+  } catch (error: unknown) {
+    const image = await screenshot(page, recorder, step);
+    recorder.add('selector_timeout', phase, step, errorDetail(error), image);
+    return false;
+  }
 }
 
 async function locatorIsVisible(locator: () => Locator, label: string): Promise<boolean> {
-  return withTimeout(locator().isVisible(), CLICK_ATTEMPT_TIMEOUT_MS, label);
+  return withTimeout(locator().isVisible(), ENCOUNTER_STATE_READ_BUDGET_MS, label);
 }
 
 function skipDependency(
@@ -524,16 +744,60 @@ function attachPageFindingCapture(page: Page, recorder: FindingsRecorder): void 
   });
 }
 
+async function captureBrowserRuntimeTimings(page: Page, recorder: FindingsRecorder): Promise<void> {
+  const telemetry = await page.locator('.dm-encounter').first().evaluate((node) => ({
+    flushCount: Number(node.dataset.persistenceFlushCount ?? 0),
+    flushTotalMs: Number(node.dataset.persistenceFlushTotalMs ?? 0),
+    flushMaximumMs: Number(node.dataset.persistenceFlushMaximumMs ?? 0),
+    renderCount: Number(node.dataset.renderCount ?? 0),
+    renderTotalMs: Number(node.dataset.renderTotalMs ?? 0),
+    renderMaximumMs: Number(node.dataset.renderMaximumMs ?? 0),
+    coalescedSnapshotCount: Number(node.dataset.coalescedSnapshotCount ?? 0),
+  })).catch(() => null);
+  if (telemetry === null) return;
+  if (Number.isSafeInteger(telemetry.flushCount) && telemetry.flushCount > 0) {
+    recorder.timings.record(
+      'browser runtime',
+      'IndexedDB flush acknowledgement',
+      telemetry.flushTotalMs,
+      telemetry.flushCount,
+      telemetry.flushMaximumMs,
+    );
+  }
+  if (Number.isSafeInteger(telemetry.renderCount) && telemetry.renderCount > 0) {
+    recorder.timings.record(
+      'browser runtime',
+      'stable DOM render',
+      telemetry.renderTotalMs,
+      telemetry.renderCount,
+      telemetry.renderMaximumMs,
+    );
+  }
+  if (Number.isSafeInteger(telemetry.coalescedSnapshotCount) && telemetry.coalescedSnapshotCount > 0) {
+    recorder.timings.record(
+      'browser runtime',
+      'snapshots coalesced before render',
+      0,
+      telemetry.coalescedSnapshotCount,
+      0,
+    );
+  }
+}
+
 async function captureRefusals(page: Page, recorder: FindingsRecorder, phase: string): Promise<void> {
-  const refusals = page.locator('.dm-decision-refusal');
-  for (let index = 0; index < await refusals.count(); index += 1) {
-    const refusal = refusals.nth(index);
-    const text = (await refusal.textContent())?.trim() ?? '(empty refusal)';
-    const code = await refusal.getAttribute('data-refusal-code');
-    const category = await refusal.getAttribute('data-refusal-category');
+  recorder.track(phase, 'scan refusal notices after turn pulse');
+  const refusals = await withTimeout(page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('.dm-decision-refusal')).map((refusal) => ({
+      text: refusal.textContent?.trim() ?? '(empty refusal)',
+      code: refusal.dataset.refusalCode ?? null,
+      category: refusal.dataset.refusalCategory ?? null,
+    }))), TRAY_READ_STEP_BUDGET_MS, 'read refusal surfaces');
+  let capturedFinding = false;
+  for (const { text, code, category } of refusals) {
     const key = `${phase}:${code ?? ''}:${category ?? ''}:${text}`;
     if (recorder.seenRefusals.has(key)) continue;
     recorder.seenRefusals.add(key);
+    capturedFinding = true;
     recorder.add(
       'refusal',
       phase,
@@ -541,45 +805,60 @@ async function captureRefusals(page: Page, recorder: FindingsRecorder, phase: st
       `${code === null ? '' : `boundary ${code}: `}${category === null ? '' : `category ${category}: `}${text}`,
     );
   }
+  if (capturedFinding) await recorder.flushScreenshots();
 }
 
-async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase: string): Promise<number> {
+async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase: string): Promise<number | null> {
+  recorder.track(phase, 'resolve decision tray after turn pulse');
   let resolved = 0;
   for (let guard = 0; guard < 20; guard += 1) {
-    const pending = page.locator('.dm-decision-entry[data-entry-kind="pending"]');
-    if (await pending.count() === 0) return resolved;
-    const entry = pending.first();
-    const heading = (await entry.locator('h3').textContent())?.trim() ?? 'unnamed tray entry';
-    const options = entry.getByRole('button');
-    if (await options.count() === 0) {
-      const image = await screenshot(page, recorder, `tray-${heading}`);
+    const surface = await pendingDecisionSurface(page);
+    if (surface === null) return resolved;
+    const entry = page.locator(
+      `.dm-decision-entry[data-entry-kind="pending"][data-decision-id=${JSON.stringify(surface.decisionId)}]`,
+    );
+    if (surface.optionCount === 0) {
       recorder.add(
         'tray_unresolved',
         phase,
         'resolve decision tray entry',
-        `${heading} had no offered option.`,
-        image,
+        `${surface.heading} had no offered option.`,
       );
-      return resolved;
+      return null;
     }
     try {
-      await retryClick(
-        () => page.locator('.dm-decision-entry[data-entry-kind="pending"]').first()
-          .getByRole('button').first(),
-        `resolve decision tray entry ${heading}`,
+      switch (surface.decisionKind) {
+        case 'adjudication_prompt':
+          await entry.getByLabel('DM override hit point delta').fill('0');
+          break;
+        case 'reaction_offer':
+        case 'death_save':
+        case 'legendary_action_window':
+        case 'legendary_resistance':
+          break;
+        default: {
+          const exhaustive: never = surface.decisionKind;
+          throw new Error(`Unhandled pending-decision kind ${String(exhaustive)}.`);
+        }
+      }
+      await retryClickUntil(
+        () => entry.getByRole('button').first(),
+        async () => await page.evaluate((expectedDecisionId) =>
+          Array.from(document.querySelectorAll<HTMLElement>(
+            '.dm-decision-entry[data-entry-kind="pending"]',
+          )).every((candidate) => candidate.dataset.decisionId !== expectedDecisionId), surface.decisionId),
+        `resolve decision tray entry ${surface.heading}`,
       );
       resolved += 1;
       await wait(20);
     } catch (error: unknown) {
-      const image = await screenshot(page, recorder, `tray-${heading}`);
       recorder.add(
         'tray_unresolved',
         phase,
         'resolve decision tray entry',
-        `${heading}: ${errorDetail(error)}`,
-        image,
+        `${surface.heading}: ${errorDetail(error)}`,
       );
-      return resolved;
+      return null;
     }
   }
   recorder.add(
@@ -588,52 +867,163 @@ async function resolveDecisionTray(page: Page, recorder: FindingsRecorder, phase
     'resolve decision tray entry',
     'Decision tray still had pending entries after 20 first-option resolutions.',
   );
-  return resolved;
+  return null;
 }
 
-async function pauseEncounter(page: Page): Promise<void> {
-  const pause = await page.locator('[data-pause]').first().getAttribute('data-pause');
+function decodePendingDecisionKind(kind: string | null): PendingDecision['kind'] {
+  switch (kind) {
+    case 'reaction_offer':
+    case 'death_save':
+    case 'legendary_action_window':
+    case 'legendary_resistance':
+    case 'adjudication_prompt':
+      return kind;
+    default:
+      throw new Error(`Decision tray entry exposed unknown pending-decision kind ${JSON.stringify(kind)}.`);
+  }
+}
+
+async function pendingDecisionSurface(page: Page): Promise<PendingDecisionSurface | null> {
+  const raw = await withTimeout(page.evaluate(() => {
+    const entry = document.querySelector<HTMLElement>(
+      '.dm-decision-entry[data-entry-kind="pending"]',
+    );
+    if (entry === null) return null;
+    return {
+      decisionId: entry.dataset.decisionId ?? null,
+      decisionKind: entry.dataset.decisionKind ?? null,
+      heading: entry.querySelector('h3')?.textContent?.trim() ?? 'unnamed tray entry',
+      optionCount: entry.querySelectorAll('button').length,
+    };
+  }), TRAY_READ_STEP_BUDGET_MS, 'read pending-decision surface');
+  if (raw === null) return null;
+  if (raw.decisionId === null) {
+    throw new Error('Decision tray entry omitted its decision id.');
+  }
+  return {
+    decisionId: raw.decisionId,
+    decisionKind: decodePendingDecisionKind(raw.decisionKind),
+    heading: raw.heading,
+    optionCount: raw.optionCount,
+  };
+}
+
+async function pauseEncounter(page: Page, deadline: number): Promise<void> {
+  const pause = await page.locator('[data-pause]').first().getAttribute('data-pause', {
+    timeout: remainingStepBudget(deadline, 'assign algorithm controllers'),
+  });
   if (pause === 'interrupted') return;
   const interrupt = page.getByRole('button', { name: 'Interrupt', exact: true });
-  if (await interrupt.count() > 0) {
-    await retryClick(
-      () => page.getByRole('button', { name: 'Interrupt', exact: true }),
-      'interrupt encounter',
-    );
-    await page.locator('[data-pause="interrupted"]').waitFor({ state: 'visible', timeout: 5_000 });
+  if (await withTimeout(
+    interrupt.count(),
+    remainingStepBudget(deadline, 'find interrupt control'),
+    'find interrupt control',
+  ) > 0) {
+    await interrupt.click({ timeout: remainingStepBudget(deadline, 'interrupt encounter') });
+    await page.locator('[data-pause="interrupted"]').waitFor({
+      state: 'visible',
+      timeout: remainingStepBudget(deadline, 'interrupt encounter'),
+    });
   }
 }
 
-async function resumeEncounter(page: Page): Promise<void> {
-  const pause = await page.locator('[data-pause]').first().getAttribute('data-pause');
+async function resumeEncounter(page: Page, deadline: number): Promise<void> {
+  const pause = await page.locator('[data-pause]').first().getAttribute('data-pause', {
+    timeout: remainingStepBudget(deadline, 'assign algorithm controllers'),
+  });
   if (pause === 'none') return;
   const resume = page.locator('.dm-controls').getByRole('button', { name: 'Resume', exact: true });
-  if (await resume.count() > 0) {
-    await retryClick(
-      () => page.locator('.dm-controls').getByRole('button', { name: 'Resume', exact: true }),
-      'resume encounter',
+  if (await withTimeout(
+    resume.count(),
+    remainingStepBudget(deadline, 'find resume control'),
+    'find resume control',
+  ) > 0) {
+    const revision = await renderedSessionRevision(
+      page,
+      remainingStepBudget(deadline, 'read revision before encounter resume'),
     );
-    await page.locator('[data-pause="none"]').waitFor({ state: 'visible', timeout: 5_000 });
+    await resume.click({ timeout: remainingStepBudget(deadline, 'resume encounter') });
+    await waitForRenderedRevisionAfter(
+      page,
+      revision,
+      'encounter resume',
+      remainingStepBudget(deadline, 'resume encounter'),
+    );
+    const renderedPause = await page.evaluate(() =>
+      document.querySelector<HTMLElement>('[data-pause]')?.dataset.pause ?? null);
+    if (renderedPause !== 'none') {
+      throw new Error(`Encounter resume published pause state ${JSON.stringify(renderedPause)}.`);
+    }
   }
+}
+
+async function renderedSessionRevision(
+  page: Page,
+  timeoutMs = ENCOUNTER_STATE_READ_BUDGET_MS,
+): Promise<number> {
+  const raw = await page.locator('.dm-encounter').first().getAttribute('data-session-revision', {
+    timeout: timeoutMs,
+  });
+  const revision = Number(raw);
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    throw new Error(`DM surface exposed invalid session revision ${JSON.stringify(raw)}.`);
+  }
+  return revision;
+}
+
+async function waitForRenderedRevisionAfter(
+  page: Page,
+  revision: number,
+  label: string,
+  timeoutMs = ENCOUNTER_STATE_READ_BUDGET_MS,
+): Promise<void> {
+  await page.waitForFunction((previous) => {
+    const raw = document.querySelector<HTMLElement>('.dm-encounter')?.dataset.sessionRevision;
+    const current = Number(raw);
+    return Number.isSafeInteger(current) && current > previous;
+  }, revision, { timeout: timeoutMs }).catch((error: unknown) => {
+    throw new Error(`${label} did not publish a newer durable DM surface: ${errorDetail(error)}`);
+  });
 }
 
 async function assignAlgorithms(
   page: Page,
   recorder: FindingsRecorder,
   phase: string,
+  requiredCombatantNames: readonly string[] = [],
 ): Promise<boolean> {
   try {
     recorder.track(phase, 'assign algorithm controllers through UI');
-    await pauseEncounter(page);
+    const deadline = Date.now() + ASSIGNMENT_STEP_BUDGET_MS;
+    await pauseEncounter(page, deadline);
     for (let guard = 0; guard < 40; guard += 1) {
       const human = page.locator('.dm-controller-assignments select').filter({ has: page.locator('option:checked[value="human"]') });
-      if (await human.count() === 0) break;
-      await human.first().selectOption('algorithm', { timeout: 5_000 });
-      await wait(10);
+      if (await withTimeout(
+        human.count(),
+        remainingStepBudget(deadline, 'read human controller assignments'),
+        'read human controller assignments',
+      ) === 0) break;
+      const revision = await renderedSessionRevision(
+        page,
+        remainingStepBudget(deadline, 'read revision before controller assignment'),
+      );
+      await human.first().selectOption('algorithm', {
+        timeout: remainingStepBudget(deadline, 'controller assignment'),
+      });
+      await waitForRenderedRevisionAfter(
+        page,
+        revision,
+        'controller assignment',
+        remainingStepBudget(deadline, 'controller assignment'),
+      );
     }
     const selects = page.locator('.dm-controller-assignments select');
-    const values = await selects.evaluateAll((nodes) => nodes.map((node) =>
-      node instanceof HTMLSelectElement ? node.value : 'not-a-select'));
+    const values = await withTimeout(
+      selects.evaluateAll((nodes) => nodes.map((node) =>
+        node instanceof HTMLSelectElement ? node.value : 'not-a-select')),
+      remainingStepBudget(deadline, 'read assigned controller values'),
+      'read assigned controller values',
+    );
     if (values.length === 0 || values.some((value) => value !== 'algorithm')) {
       const image = await screenshot(page, recorder, 'assign-algorithm-controllers');
       recorder.add(
@@ -645,7 +1035,27 @@ async function assignAlgorithms(
       );
       return false;
     }
-    await resumeEncounter(page);
+    for (const name of requiredCombatantNames) {
+      const controller = page.getByLabel(`${name} controller`, { exact: true });
+      if (await withTimeout(
+        controller.count(),
+        remainingStepBudget(deadline, `find ${name} controller`),
+        `find ${name} controller`,
+      ) !== 1 || await controller.inputValue({
+        timeout: remainingStepBudget(deadline, `read ${name} controller`),
+      }) !== 'algorithm') {
+        const image = await screenshot(page, recorder, 'assign-algorithm-controllers');
+        recorder.add(
+          'selector_timeout',
+          phase,
+          'assign algorithm controllers through UI',
+          `${name} was not uniquely assigned to the algorithm controller.`,
+          image,
+        );
+        return false;
+      }
+    }
+    await resumeEncounter(page, deadline);
     return true;
   } catch (error: unknown) {
     const image = await screenshot(page, recorder, 'assign-algorithm-controllers');
@@ -661,7 +1071,9 @@ async function assignAlgorithms(
 }
 
 async function roundOf(page: Page): Promise<number> {
-  const raw = await page.locator('.dm-initiative-timeline').getAttribute('data-round', { timeout: 5_000 });
+  const raw = await page.locator('.dm-initiative-timeline').getAttribute('data-round', {
+    timeout: ENCOUNTER_STATE_READ_BUDGET_MS,
+  });
   const round = Number(raw);
   return Number.isSafeInteger(round) ? round : 0;
 }
@@ -669,9 +1081,12 @@ async function roundOf(page: Page): Promise<number> {
 async function visibleEncounterOutcome(
   page: Page,
 ): Promise<'victory' | 'defeat' | 'mutual' | null> {
-  const value = await page.locator('[data-encounter-outcome]')
-    .getAttribute('data-encounter-outcome')
-    .catch(() => null);
+  const value = await withTimeout(
+    page.evaluate(() => document.querySelector<HTMLElement>('[data-encounter-outcome]')
+      ?.dataset.encounterOutcome ?? null),
+    ENCOUNTER_STATE_READ_BUDGET_MS,
+    'read encounter outcome',
+  );
   return value === 'victory' || value === 'defeat' || value === 'mutual' ? value : null;
 }
 
@@ -688,32 +1103,52 @@ async function observeTimelinePreview(
   if (await actualEvents.count() > 0) progress.previewListed = true;
 }
 
-async function pulseTurn(page: Page): Promise<void> {
+async function pulseTurn(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
+  waitMs = TURN_PULSE_MS,
+): Promise<void> {
   const endTurn = (): Locator => page.locator('.dm-pending-request').getByRole('button', {
     name: 'End turn',
     exact: true,
   }).first();
-  if (await locatorCount(endTurn, 'find end-turn control') > 0 &&
-    await locatorIsVisible(endTurn, 'check end-turn control visibility')) {
-    await retryClick(
-      endTurn,
-      'end current turn',
-    );
+  for (let guard = 0; guard < 20; guard += 1) {
+    let endTurnVisible = false;
+    try {
+      endTurnVisible = await locatorIsVisible(endTurn, 'check end-turn control visibility');
+    } catch {
+      // A decision surface can replace the pending request during a locator read.
+    }
+    if (endTurnVisible) {
+      await retryClick(endTurn, 'end current turn');
+      break;
+    }
+    const resolution = await resolveDecisionTray(page, recorder, phase);
+    if (resolution === null) throw new Error('A decision tray entry remained unresolved.');
+    if (resolution === 0) break;
   }
-  await wait(TURN_PULSE_MS);
+  await wait(waitMs);
 }
 
 async function playEncounter(
   page: Page,
   recorder: FindingsRecorder,
   phase: string,
+  observeProgress?: () => Promise<void>,
+  turnPulseMs = TURN_PULSE_MS,
+  stallBudgetMs = ROUND_STALL_BUDGET_MS,
 ): Promise<EncounterOutcome> {
   recorder.track(phase, 'initialize encounter driver');
   let lastRound = await roundOf(page);
-  let unchangedAttempts = 0;
+  let lastRevision = await renderedSessionRevision(page);
+  let lastProgressAt = Date.now();
   for (let attempt = 1; attempt <= MAX_TURN_ATTEMPTS; attempt += 1) {
+    if (await resolveDecisionTray(page, recorder, phase) === null) {
+      return { kind: 'aborted', round: lastRound, attempts: attempt - 1 };
+    }
     await captureRefusals(page, recorder, phase);
-    await resolveDecisionTray(page, recorder, phase);
+    if (observeProgress !== undefined) await observeProgress();
     const outcome = await visibleEncounterOutcome(page);
     if (outcome === 'victory') {
       return { kind: 'victory', round: await roundOf(page), attempts: attempt - 1 };
@@ -723,24 +1158,30 @@ async function playEncounter(
     }
     try {
       recorder.track(phase, 'turn pulse through DM controls');
-      await pulseTurn(page);
+      await pulseTurn(page, recorder, phase, turnPulseMs);
     } catch (error: unknown) {
       recorder.add('scripted_nudge', phase, 'turn pulse through DM controls', errorDetail(error));
       return { kind: 'aborted', round: lastRound, attempts: attempt };
     }
+    recorder.track(phase, 'read encounter round after turn pulse');
     const round = await roundOf(page);
-    if (round === lastRound) unchangedAttempts += 1;
-    else {
+    const revision = await renderedSessionRevision(page);
+    if (round !== lastRound || revision !== lastRevision) {
       lastRound = round;
-      unchangedAttempts = 0;
+      lastRevision = revision;
+      lastProgressAt = Date.now();
     }
-    if (unchangedAttempts < ROUND_STALL_ATTEMPTS) continue;
+    if (Date.now() - lastProgressAt < stallBudgetMs) continue;
+    if (await resolveDecisionTray(page, recorder, phase) === null) {
+      return { kind: 'aborted', round: lastRound, attempts: attempt };
+    }
     await captureRefusals(page, recorder, phase);
-    await resolveDecisionTray(page, recorder, phase);
     const afterResolution = await roundOf(page);
-    if (afterResolution !== lastRound) {
+    const revisionAfterResolution = await renderedSessionRevision(page);
+    if (afterResolution !== lastRound || revisionAfterResolution !== lastRevision) {
       lastRound = afterResolution;
-      unchangedAttempts = 0;
+      lastRevision = revisionAfterResolution;
+      lastProgressAt = Date.now();
       continue;
     }
     const image = await screenshot(page, recorder, `${phase}-round-stall`);
@@ -748,7 +1189,7 @@ async function playEncounter(
       'turn_advance_stall',
       phase,
       'advance algorithm-controlled turns',
-      `Round ${String(lastRound)} did not change after ${String(ROUND_STALL_ATTEMPTS)} attempts.`,
+      `Round ${String(lastRound)} and its rendered revision did not progress for ${String(stallBudgetMs)}ms.`,
       image,
     );
     return { kind: 'aborted', round: lastRound, attempts: attempt };
@@ -764,6 +1205,67 @@ async function playEncounter(
   return { kind: 'aborted', round: lastRound, attempts: MAX_TURN_ATTEMPTS };
 }
 
+async function observeTpkRecovery(
+  page: Page,
+  recorder: FindingsRecorder,
+  phase: string,
+  progress: TpkRecoveryProgress,
+): Promise<void> {
+  if (!progress.revivifyObserved) {
+    progress.revivifyObserved = await page.locator(
+      '.dm-log [data-event-type="spell_cast"][data-spell-id="revivify"]',
+    ).count() > 0;
+  }
+  if (progress.overrideTarget !== null) return;
+  const dead = await page.locator('.dm-initiative li[data-life="dead"]').evaluateAll((items) =>
+    items.flatMap((item) => {
+      const combatantId = item.dataset.combatantId;
+      return combatantId === undefined
+        ? []
+        : [{ combatantId, label: item.textContent?.trim() ?? combatantId }];
+    }));
+  if (dead.length < 2) return;
+  const cleric = dead.find((candidate) => candidate.label.startsWith('Sera Dawn'));
+  const target = cleric ?? dead[0];
+  if (target === undefined) return;
+
+  const deadline = Date.now() + FORM_STEP_BUDGET_MS;
+  await pauseEncounter(page, deadline);
+  const form = page.locator('.dm-adjudication');
+  await form.getByLabel('Adjudication target').selectOption(target.combatantId, {
+    timeout: remainingStepBudget(deadline, 'select dead PC for DM override'),
+  });
+  await form.getByLabel('Hit Point delta').fill('1', {
+    timeout: remainingStepBudget(deadline, 'set DM override hit points'),
+  });
+  await form.getByLabel('DM reasoning').fill(
+    'TPK recovery rehearsal: exercise the explicit DM authority un-kill and ruling-card path.',
+    { timeout: remainingStepBudget(deadline, 'document DM override reasoning') },
+  );
+  await retryClick(
+    () => page.locator('.dm-adjudication').getByRole('button', {
+      name: 'Apply ADJUDICATED override',
+      exact: true,
+    }),
+    'apply required TPK recovery DM override',
+  );
+  await page.waitForFunction((combatantId) => {
+    const entry = Array.from(document.querySelectorAll<HTMLElement>('.dm-initiative li'))
+      .find((candidate) => candidate.dataset.combatantId === combatantId);
+    return entry?.dataset.life === 'living';
+  }, target.combatantId, {
+    timeout: remainingStepBudget(deadline, 'confirm DM override un-killed the PC'),
+  });
+  progress.overrideTarget = target.combatantId;
+  recorder.add(
+    'scripted_nudge',
+    phase,
+    'un-kill one dead PC through DM adjudication',
+    `Expected recovery-variant nudge: ${target.label} received +1 HP through the rendered ADJUDICATED override form; Revivify remains controller-policy driven.`,
+  );
+  await resumeEncounter(page, deadline);
+}
+
 async function advanceTimelineToRound(
   page: Page,
   recorder: FindingsRecorder,
@@ -771,12 +1273,12 @@ async function advanceTimelineToRound(
   targetRound: number,
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= MAX_TURN_ATTEMPTS; attempt += 1) {
+    if (await resolveDecisionTray(page, recorder, phase) === null) return false;
     await captureRefusals(page, recorder, phase);
-    await resolveDecisionTray(page, recorder, phase);
     if (await roundOf(page) >= targetRound) return true;
     try {
       recorder.track(phase, 'advance in-session timeline exercise');
-      await pulseTurn(page);
+      await pulseTurn(page, recorder, phase);
     } catch (error: unknown) {
       recorder.add('scripted_nudge', phase, 'advance in-session timeline exercise', errorDetail(error));
       return false;
@@ -799,11 +1301,11 @@ async function exerciseTimelineControls(
   progress: TimelineProgress,
 ): Promise<void> {
   const phase = 'timeline';
-  await observeTimelinePreview(page, progress, 2_000);
+  await observeTimelinePreview(page, progress, TIMELINE_STEP_BUDGET_MS);
 
   const controls = page.locator('.dm-controls');
   const delay = controls.getByRole('button', { name: 'Delay turn', exact: true });
-  if (await waitVisible(page, recorder, phase, 'delay one turn', delay, 10_000)) {
+  if (await waitVisible(page, recorder, phase, 'delay one turn', delay, TIMELINE_STEP_BUDGET_MS)) {
     await retryClick(
       () => page.locator('.dm-controls').getByRole('button', { name: 'Delay turn', exact: true }),
       'delay one turn',
@@ -813,7 +1315,7 @@ async function exerciseTimelineControls(
   }
 
   const skip = controls.getByRole('button', { name: 'Skip turn', exact: true });
-  if (await waitVisible(page, recorder, phase, 'skip one turn', skip, 10_000)) {
+  if (await waitVisible(page, recorder, phase, 'skip one turn', skip, TIMELINE_STEP_BUDGET_MS)) {
     await retryClick(
       () => page.locator('.dm-controls').getByRole('button', { name: 'Skip turn', exact: true }),
       'skip one turn',
@@ -828,7 +1330,7 @@ async function exerciseTimelineControls(
       name: 'Rewind to round 1',
       exact: true,
     });
-    if (await waitVisible(page, recorder, phase, 'rewind to round 1', rewind, 10_000)) {
+    if (await waitVisible(page, recorder, phase, 'rewind to round 1', rewind, TIMELINE_STEP_BUDGET_MS)) {
       await retryClick(
         () => page.locator('.dm-round-rewind').getByRole('button', {
           name: 'Rewind to round 1',
@@ -838,7 +1340,7 @@ async function exerciseTimelineControls(
       );
       await page.locator('.dm-initiative-timeline[data-round="1"]').waitFor({
         state: 'visible',
-        timeout: 10_000,
+        timeout: TIMELINE_STEP_BUDGET_MS,
       });
       progress.rewindUsed = true;
       progress.rewindRound = await roundOf(page);
@@ -899,7 +1401,9 @@ async function loadDungeon(
     recorder.phase(phase, 'aborted', 'Bundled dungeon loader was unavailable.');
     return false;
   }
-  await page.getByLabel('Encounter seed', { exact: true }).fill(String(REHEARSAL_SEED), { timeout: 5_000 });
+  await page.getByLabel('Encounter seed', { exact: true }).fill(String(REHEARSAL_SEED), {
+    timeout: FORM_STEP_BUDGET_MS,
+  });
   await retryClick(
     () => page.getByRole('button', { name: 'Load bundled dungeon and party', exact: true }),
     'load bundled dungeon and party',
@@ -909,16 +1413,26 @@ async function loadDungeon(
     return false;
   }
   const players = page.locator('.encounter-token[data-kind="player_character"]');
-  if (await players.count() !== 4) {
+  const loadedNames = (await players.locator('.encounter-token-label').allTextContents())
+    .map((name) => name.trim())
+    .sort();
+  const expectedNames = [...REPRESENTATIVE_PARTY_NAMES].sort();
+  if (JSON.stringify(loadedNames) !== JSON.stringify(expectedNames)) {
     const image = await screenshot(page, recorder, 'representative-party-count');
-    recorder.add('selector_timeout', phase, 'load representative party', `Expected 4 player tokens; found ${String(await players.count())}.`, image);
+    recorder.add(
+      'selector_timeout',
+      phase,
+      'load representative party',
+      `Expected ${expectedNames.join(', ')}; found ${loadedNames.join(', ') || 'no player characters'}.`,
+      image,
+    );
     recorder.phase(phase, 'aborted', 'Representative party roster was incomplete.');
     return false;
   }
   recorder.phase(
     phase,
     'completed',
-    `Loaded Mirel Ash, Orin Reed, Brann Vale, and Sera Dawn with seed ${String(REHEARSAL_SEED)}.`,
+    `Loaded ${REPRESENTATIVE_PARTY_NAMES.join(', ')} with seed ${String(REHEARSAL_SEED)}.`,
   );
   return true;
 }
@@ -929,12 +1443,18 @@ async function advanceDungeonRoom(
   room: number,
 ): Promise<boolean> {
   const phase = `dungeon room ${String(room)}`;
-  const roomStatus = page.locator(`.adventuring-day-status[data-room="${String(room)}"]`);
-  if (!await waitVisible(page, recorder, phase, `enter dungeon room ${String(room)}`, roomStatus, 10_000)) {
+  if (!await waitForAdventuringDayRoom(
+    page,
+    recorder,
+    phase,
+    `enter dungeon room ${String(room)}`,
+    { kind: 'dungeon', roomCount: 4 },
+    room,
+  )) {
     recorder.phase(phase, 'aborted', 'Room status did not match the requested room.');
     return false;
   }
-  if (!await assignAlgorithms(page, recorder, phase)) {
+  if (!await assignAlgorithms(page, recorder, phase, REPRESENTATIVE_PARTY_NAMES)) {
     recorder.phase(phase, 'aborted', 'Could not assign every combatant to the algorithm controller.');
     return false;
   }
@@ -957,36 +1477,84 @@ async function transitionToNextDungeonRoom(
     );
     return false;
   }
+  const takeScheduledShortRest = completedRoom === 2;
   const shortRest = page.getByRole('button', { name: 'Take Short Rest and enter next room', exact: true });
   const direct = page.getByRole('button', { name: 'End room and enter next room', exact: true });
-  const control = await shortRest.count() > 0 ? shortRest : direct;
-  const label = await shortRest.count() > 0 ? 'short rest' : 'room transition';
-  if (!await waitVisible(page, recorder, phase, `${label} after room ${String(completedRoom)}`, control, 10_000)) {
+  const control = takeScheduledShortRest ? shortRest : direct;
+  const label = takeScheduledShortRest ? 'short rest' : 'room transition';
+  const deadline = Date.now() + TRANSITION_STEP_BUDGET_MS;
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    `${label} after room ${String(completedRoom)}`,
+    control,
+    remainingStepBudget(deadline, `${label} after room ${String(completedRoom)}`),
+  )) {
     return false;
   }
-  await retryClick(
+  if (takeScheduledShortRest) await fillSensibleShortRestSpends(page);
+  const nextRoom = completedRoom + 1;
+  await retryClickUntil(
     () => page.getByRole('button', {
-      name: label === 'short rest'
+      name: takeScheduledShortRest
         ? 'Take Short Rest and enter next room'
         : 'End room and enter next room',
       exact: true,
     }),
+    async () => adventuringDayReachedRoom(
+      page,
+      { kind: 'dungeon', roomCount: 4 },
+      nextRoom,
+    ),
     `${label} after room ${String(completedRoom)}`,
+    remainingStepBudget(deadline, `${label} after room ${String(completedRoom)}`),
   );
-  return waitVisible(
+  return waitForAdventuringDayRoom(
     page,
     recorder,
     phase,
-    `enter room ${String(completedRoom + 1)}`,
-    page.locator(`.adventuring-day-status[data-room="${String(completedRoom + 1)}"]`),
-    10_000,
+    `enter room ${String(nextRoom)}`,
+    { kind: 'dungeon', roomCount: 4 },
+    nextRoom,
   );
+}
+
+async function fillSensibleShortRestSpends(page: Page): Promise<void> {
+  const inputs = page.locator('.dm-short-rest input[type="number"][data-combatant-id]');
+  const spending = new Set<string>();
+  for (let index = 0; index < await inputs.count(); index += 1) {
+    const input = inputs.nth(index);
+    const combatantId = await input.getAttribute('data-combatant-id');
+    const currentHitPointsRaw = await input.getAttribute('data-current-hit-points');
+    const hitPointMaximumRaw = await input.getAttribute('data-hit-point-maximum');
+    const diceRemainingRaw = await input.getAttribute('max');
+    const currentHitPoints = Number(currentHitPointsRaw);
+    const hitPointMaximum = Number(hitPointMaximumRaw);
+    const diceRemaining = Number(diceRemainingRaw);
+    if (combatantId === null || currentHitPointsRaw === null || hitPointMaximumRaw === null ||
+      diceRemainingRaw === null || !Number.isSafeInteger(currentHitPoints) ||
+      !Number.isSafeInteger(hitPointMaximum) || !Number.isSafeInteger(diceRemaining)) {
+      throw new Error('Short Rest Hit Point Dice input omitted its typed party-state metadata.');
+    }
+    const spendOne = !await input.isDisabled() && currentHitPoints < hitPointMaximum &&
+      diceRemaining > 0 && !spending.has(combatantId);
+    await input.fill(spendOne ? '1' : '0');
+    if (spendOne) spending.add(combatantId);
+  }
 }
 
 async function completeLongRest(page: Page, recorder: FindingsRecorder): Promise<boolean> {
   const phase = 'long rest';
   const button = page.getByRole('button', { name: 'Complete Long Rest and end adventuring day', exact: true });
-  if (!await waitVisible(page, recorder, phase, 'trigger DM long-rest flow', button, 10_000)) {
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    'trigger DM long-rest flow',
+    button,
+    TRANSITION_STEP_BUDGET_MS,
+  )) {
     recorder.phase(phase, 'aborted', 'DM long-rest control was unavailable.');
     return false;
   }
@@ -1003,7 +1571,7 @@ async function completeLongRest(page: Page, recorder: FindingsRecorder): Promise
     phase,
     'wait for completed long rest',
     page.locator('.adventuring-day-status[data-status="ended_by_long_rest"]'),
-    10_000,
+    TRANSITION_STEP_BUDGET_MS,
   );
   recorder.phase(phase, ended ? 'completed' : 'aborted', ended
     ? 'DM long-rest flow ended the adventuring day and rendered its summary card.'
@@ -1021,14 +1589,28 @@ async function createManualFileSave(
   phase: string,
 ): Promise<ManualFileSave | null> {
   const manager = page.locator('.dm-save-manager');
-  if (!await waitVisible(page, recorder, phase, 'open save manager', manager, 10_000)) return null;
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    'open save manager',
+    manager,
+    SAVE_MANAGER_STEP_BUDGET_MS,
+  )) return null;
   recorder.track(phase, 'detect save-manager mode');
-  if (await manager.getAttribute('data-mode', { timeout: 5_000 }) !== 'folder') {
+  if (await manager.getAttribute('data-mode', { timeout: SAVE_MANAGER_STEP_BUDGET_MS }) !== 'folder') {
     const save = manager.getByRole('button', { name: 'Download save now', exact: true });
-    if (!await waitVisible(page, recorder, phase, 'create fallback manual file save', save, 10_000)) return null;
+    if (!await waitVisible(
+      page,
+      recorder,
+      phase,
+      'create fallback manual file save',
+      save,
+      SAVE_MANAGER_STEP_BUDGET_MS,
+    )) return null;
     try {
       recorder.track(phase, 'wait for fallback manual-save download');
-      const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
+      const pendingDownload = page.waitForEvent('download', { timeout: EXPORT_STEP_BUDGET_MS });
       await retryClick(
         () => page.locator('.dm-save-manager')
           .getByRole('button', { name: 'Download save now', exact: true }),
@@ -1049,7 +1631,14 @@ async function createManualFileSave(
 
   const before = await manager.locator('.dm-save-row[data-source="folder"]').count();
   const save = manager.getByRole('button', { name: 'Save now', exact: true });
-  if (!await waitVisible(page, recorder, phase, 'create folder manual file save', save, 10_000)) return null;
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    'create folder manual file save',
+    save,
+    SAVE_MANAGER_STEP_BUDGET_MS,
+  )) return null;
   await retryClick(
     () => page.locator('.dm-save-manager')
       .getByRole('button', { name: 'Save now', exact: true }),
@@ -1059,7 +1648,7 @@ async function createManualFileSave(
     recorder.track(phase, 'wait for folder save row');
     await page.waitForFunction((count) =>
       document.querySelectorAll('.dm-save-row[data-source="folder"]').length >= Number(count), before + 1, {
-        timeout: 10_000,
+        timeout: SAVE_MANAGER_STEP_BUDGET_MS,
       });
   } catch (error: unknown) {
     const image = await screenshot(page, recorder, 'manual-file-save');
@@ -1080,10 +1669,17 @@ async function downloadExport(
   label: string,
 ): Promise<SessionExport | null> {
   const button = row().getByRole('button', { name: 'Export copy', exact: true });
-  if (!await waitVisible(page, recorder, phase, `export ${label} session record`, button, 10_000)) return null;
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    `export ${label} session record`,
+    button,
+    EXPORT_STEP_BUDGET_MS,
+  )) return null;
   try {
     recorder.track(phase, `wait for ${label} export download`);
-    const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
+    const pendingDownload = page.waitForEvent('download', { timeout: EXPORT_STEP_BUDGET_MS });
     await retryClick(
       () => row().getByRole('button', { name: 'Export copy', exact: true }),
       `export ${label} session record`,
@@ -1106,22 +1702,36 @@ async function recordDownloadedExport(
   const filename = `${label}.vtt.json`;
   const path = resolve(recorder.runDirectory, filename);
   recorder.track(phase, `save ${label} export download`);
-  await withTimeout(download.saveAs(path), 10_000, `save ${label} export download`);
-  const bytes = await withTimeout(readFile(path, 'utf8'), 10_000, `read ${label} export download`);
+  await withTimeout(download.saveAs(path), EXPORT_STEP_BUDGET_MS, `save ${label} export download`);
+  const bytes = await withTimeout(
+    readFile(path, 'utf8'),
+    EXPORT_STEP_BUDGET_MS,
+    `read ${label} export download`,
+  );
   const value: unknown = JSON.parse(bytes);
   const sessionRecord = isRecord(value) && isRecord(value.sessionRecord)
     ? value.sessionRecord
     : null;
   const encounters = sessionRecord === null ? null : sessionRecord.encounters;
-  const revisions = isRecord(value) && Array.isArray(value.revisions) ? value.revisions : [];
-  const firstRevision = revisions[0];
-  const rngState = isRecord(firstRevision) && isRecord(firstRevision.rngState)
-    ? firstRevision.rngState
-    : null;
-  const seed = rngState !== null && typeof rngState.initialSeed === 'number' &&
-    Number.isSafeInteger(rngState.initialSeed)
-    ? rngState.initialSeed
-    : null;
+  const encounterRecords = Array.isArray(encounters) ? encounters.filter(isRecord) : [];
+  const deaths = encounterRecords.flatMap((encounter) => recordList(encounter, 'deaths'));
+  const deathSaves = encounterRecords.flatMap((encounter) => recordList(encounter, 'deathSaves'));
+  const revivals = encounterRecords.flatMap((encounter) => recordList(encounter, 'revivals'));
+  const defeatConclusionCount = encounterRecords.filter((encounter) => {
+    const conclusion = encounter.conclusion;
+    return isRecord(conclusion) && conclusion.outcome === 'defeat';
+  }).length;
+  const revivifyCount = revivals.filter((revival) => revival.cause === 'revivify').length;
+  const dmRevivalCount = revivals.filter((revival) => revival.cause === 'dm_override').length;
+  const recoveryRedeathCount = revivals.filter((revival) => {
+    const combatant = revival.combatant;
+    const eventSequence = revival.eventSequence;
+    return typeof combatant === 'string' && typeof eventSequence === 'number' && deaths.some((death) =>
+      death.combatant === combatant &&
+      typeof death.eventSequence === 'number' &&
+      death.eventSequence > eventSequence);
+  }).length;
+  const decoded = decodeSavedSessionFingerprint(bytes);
   const result: SessionExport = {
     phase,
     filename,
@@ -1130,7 +1740,16 @@ async function recordDownloadedExport(
     hasSessionRecord: Array.isArray(encounters),
     hasAlarm: bytes.includes('cinder-wave-1-a') || bytes.includes('alarm_used'),
     hasIgnition: bytes.includes('surface_ignited') || /"burningCells":\[(?!\])/u.test(bytes),
-    seed,
+    seed: decoded.initialSeed,
+    payloadBytes: new TextEncoder().encode(bytes).byteLength,
+    revisionCount: decoded.revisionCount,
+    format: isRecord(value) && typeof value.format === 'string' ? value.format : '(unknown)',
+    defeatConclusionCount,
+    deathSaveCount: deathSaves.length,
+    deathCount: deaths.length,
+    revivifyCount,
+    dmRevivalCount,
+    recoveryRedeathCount,
   };
   recorder.exports.push(result);
   return result;
@@ -1150,6 +1769,15 @@ function recordFailedExport(
     hasAlarm: false,
     hasIgnition: false,
     seed: null,
+    payloadBytes: 0,
+    revisionCount: 0,
+    format: '(unknown)',
+    defeatConclusionCount: 0,
+    deathSaveCount: 0,
+    deathCount: 0,
+    revivifyCount: 0,
+    dmRevivalCount: 0,
+    recoveryRedeathCount: 0,
   });
 }
 
@@ -1161,8 +1789,21 @@ async function saveManagerRoundTrip(
   const browserRows = page.locator('.dm-save-row[data-source="browser"]');
   const perRound = browserRows.filter({ has: page.locator('.dm-save-pool', { hasText: /^Per-round autosave$/u }) });
   const boundary = browserRows.filter({ has: page.locator('.dm-save-pool', { hasText: /^Encounter-boundary autosave$/u }) });
-  const poolsPresent = await waitVisible(page, recorder, phase, 'find per-round autosave pool', perRound, 10_000) &&
-    await waitVisible(page, recorder, phase, 'find encounter-boundary autosave pool', boundary, 10_000);
+  const poolsPresent = await waitVisible(
+    page,
+    recorder,
+    phase,
+    'find per-round autosave pool',
+    perRound,
+    SAVE_MANAGER_STEP_BUDGET_MS,
+  ) && await waitVisible(
+    page,
+    recorder,
+    phase,
+    'find encounter-boundary autosave pool',
+    boundary,
+    SAVE_MANAGER_STEP_BUDGET_MS,
+  );
   const manualSave = await createManualFileSave(page, recorder, phase);
   if (manualSave === null) {
     recorder.phase(phase, 'aborted', 'Could not create a manual file save.');
@@ -1178,10 +1819,10 @@ async function saveManagerRoundTrip(
       phase,
       'find fallback upload path',
       page.locator('.dm-save-manager').getByRole('button', { name: 'Upload save file', exact: true }),
-      10_000,
+      SAVE_MANAGER_STEP_BUDGET_MS,
     );
   } else {
-    await pauseEncounter(page);
+    await pauseEncounter(page, Date.now() + SAVE_MANAGER_STEP_BUDGET_MS);
     const history = page.locator('details ol [data-revision]');
     await retryClick(
       () => page.getByText('Full revision history', { exact: true }),
@@ -1190,7 +1831,14 @@ async function saveManagerRoundTrip(
     const revisionCount = await history.count();
     exported = await downloadExport(page, manualSave.row, recorder, phase, 'd365-session');
     const load = manualSave.row().getByRole('button', { name: 'Load', exact: true });
-    if (!await waitVisible(page, recorder, phase, 'load manual save', load, 10_000)) {
+    if (!await waitVisible(
+      page,
+      recorder,
+      phase,
+      'load manual save',
+      load,
+      SAVE_MANAGER_STEP_BUDGET_MS,
+    )) {
       recorder.phase(phase, 'aborted', 'Manual save could not be loaded.');
       return exported;
     }
@@ -1198,7 +1846,14 @@ async function saveManagerRoundTrip(
       () => manualSave.row().getByRole('button', { name: 'Load', exact: true }),
       'load manual save',
     );
-    loadPathReady = await waitVisible(page, recorder, phase, 'mount loaded save', page.getByRole('heading', { name: 'DM controls' }), 20_000);
+    loadPathReady = await waitVisible(
+      page,
+      recorder,
+      phase,
+      'mount loaded save',
+      page.getByRole('heading', { name: 'DM controls' }),
+      SAVE_MANAGER_STEP_BUDGET_MS,
+    );
     if (loadPathReady) {
       await retryClick(
         () => page.getByText('Full revision history', { exact: true }),
@@ -1230,16 +1885,19 @@ async function openVaneWarrenSession(
   baseUrl: string,
   recorder: FindingsRecorder,
   phase: string,
+  scenario: ParsedOptions['scenario'] = 'default',
 ): Promise<boolean> {
   recorder.track(phase, 'navigate to Vane Warren');
-  await page.goto(`${baseUrl}/vtt?encounter=vane-warren`, { timeout: UI_TIMEOUT_MS });
-  const start = page.getByRole('button', { name: 'Start the Vane Warren', exact: true });
+  const scenarioQuery = scenario === 'default' ? '' : `&scenario=${scenario}`;
+  await page.goto(`${baseUrl}/vtt?encounter=vane-warren${scenarioQuery}`, { timeout: UI_TIMEOUT_MS });
+  const startLabel = scenario === 'default' ? 'Start the Vane Warren' : 'Start the doomed rehearsal';
+  const start = page.getByRole('button', { name: startLabel, exact: true });
   if (!await waitVisible(page, recorder, phase, 'open Vane Warren start flow', start)) {
     recorder.phase(phase, 'aborted', 'Vane Warren session start flow was unavailable.');
     return false;
   }
   await retryClick(
-    () => page.getByRole('button', { name: 'Start the Vane Warren', exact: true }),
+    () => page.getByRole('button', { name: startLabel, exact: true }),
     'start the Vane Warren',
   );
   const heading = page.getByRole('heading', { name: 'DM controls' });
@@ -1299,14 +1957,20 @@ async function waitForVaneWarrenFight(
   recorder: FindingsRecorder,
   phase: string,
   fightNumber: number,
+  scenario: ParsedOptions['scenario'] = 'default',
 ): Promise<boolean> {
-  return waitVisible(
+  const name = scenario === 'tpk-clean'
+    ? 'The Cinder Rite — doomed clean wipe'
+    : scenario === 'tpk-recovery'
+      ? 'The Cinder Rite — doomed partial recovery'
+      : 'The Vane Warren';
+  return waitForAdventuringDayRoom(
     page,
     recorder,
     phase,
     `enter Vane Warren fight ${String(fightNumber)}`,
-    page.locator(`.adventuring-day-status[data-room="${String(fightNumber)}"]`),
-    10_000,
+    { kind: 'vane_warren', name, roomCount: scenario === 'default' ? 3 : 1 },
+    fightNumber,
   );
 }
 
@@ -1327,17 +1991,24 @@ async function transitionToNextVaneWarrenFight(
     return false;
   }
   const control = page.getByRole('button', { name: 'End room and enter next room', exact: true });
+  const deadline = Date.now() + TRANSITION_STEP_BUDGET_MS;
   if (!await waitVisible(
     page,
     recorder,
     phase,
     `cross boundary after Vane Warren fight ${String(completedFight)}`,
     control,
-    10_000,
+    remainingStepBudget(deadline, `cross boundary after Vane Warren fight ${String(completedFight)}`),
   )) return false;
-  await retryClick(
+  await retryClickUntil(
     () => page.getByRole('button', { name: 'End room and enter next room', exact: true }),
+    async () => adventuringDayReachedRoom(
+      page,
+      { kind: 'vane_warren', name: 'The Vane Warren', roomCount: 3 },
+      completedFight + 1,
+    ),
     `cross boundary after Vane Warren fight ${String(completedFight)}`,
+    remainingStepBudget(deadline, `cross boundary after Vane Warren fight ${String(completedFight)}`),
   );
   return waitForVaneWarrenFight(page, recorder, phase, completedFight + 1);
 }
@@ -1349,15 +2020,29 @@ async function endVaneWarrenSession(
 ): Promise<SessionExport | null> {
   const label = 'vane-warren-session';
   const control = page.getByRole('button', { name: 'End Session and export', exact: true });
-  if (!await waitVisible(page, recorder, phase, 'end chained Vane Warren session', control, 10_000)) {
+  if (!await waitVisible(
+    page,
+    recorder,
+    phase,
+    'end chained Vane Warren session',
+    control,
+    EXPORT_STEP_BUDGET_MS,
+  )) {
     return null;
   }
   try {
     recorder.track(phase, 'wait for final Vane Warren export download');
-    const pendingDownload = page.waitForEvent('download', { timeout: 10_000 });
-    await retryClick(
-      () => page.getByRole('button', { name: 'End Session and export', exact: true }),
-      'end chained Vane Warren session',
+    const pendingDownload = page.waitForEvent('download', { timeout: EXPORT_STEP_BUDGET_MS });
+    await withTimeout(
+      page.getByRole('button', { name: 'End Session and export', exact: true })
+        .evaluate((button) => {
+          if (!(button instanceof HTMLButtonElement)) {
+            throw new TypeError('End-session control is not a button.');
+          }
+          button.click();
+        }),
+      EXPORT_STEP_BUDGET_MS,
+      'dispatch end chained Vane Warren session',
     );
     const download: Download = await pendingDownload;
     const exported = await recordDownloadedExport(download, recorder, phase, label);
@@ -1367,7 +2052,7 @@ async function endVaneWarrenSession(
       phase,
       'confirm finalized Vane Warren session',
       page.locator('.dm-end-session-export-status'),
-      10_000,
+      EXPORT_STEP_BUDGET_MS,
     );
     return exported;
   } catch (error: unknown) {
@@ -1445,9 +2130,10 @@ async function main(): Promise<void> {
         'aborted',
         `Global run watchdog expired during ${stuckStep}; the partial findings report was written before forced exit.`,
       );
+      recorder.timings.finish();
       await recorder.write(baseUrl);
       reportWritten = true;
-      process.stdout.write(`\n${recorder.summaryBlock()}\n\nFindings: ${recorder.reportPath}\n`);
+      process.stdout.write(`\n${recorder.outputBlock()}\n\nFindings: ${recorder.reportPath}\n`);
       if (context !== null) {
         await withTimeout(context.close(), CLEANUP_TIMEOUT_MS, 'watchdog browser-context cleanup')
           .catch(() => undefined);
@@ -1489,6 +2175,109 @@ async function main(): Promise<void> {
     currentPhase = 'new session';
     const newSessionReady = await runIsolatedPhase(preview, recorder, currentPhase, async () =>
       resetApplication(page, baseUrl, recorder));
+
+    if (options.scenario !== 'default') {
+      currentPhase = `${options.scenario} setup`;
+      const tpkReady = newSessionReady === true
+        ? await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+            if (!await prepareVaneWarrenSession(page, baseUrl, recorder, currentPhase)) {
+              recorder.phase(currentPhase, 'aborted', 'Could not clear prior state for the doomed scenario.');
+              return false;
+            }
+            if (!await openVaneWarrenSession(
+              page,
+              baseUrl,
+              recorder,
+              currentPhase,
+              options.scenario,
+            )) return false;
+            const entered = await waitForVaneWarrenFight(
+              page,
+              recorder,
+              currentPhase,
+              1,
+              options.scenario,
+            );
+            recorder.phase(
+              currentPhase,
+              entered ? 'completed' : 'aborted',
+              entered
+                ? `Loaded ${options.scenario} with the pre-sounded alarm, both waves, and unchanged-statblock doomed reinforcements stacked at encounter start.`
+                : 'The doomed scenario did not enter The Cinder Rite.',
+            );
+            return entered;
+          })
+        : (skipDependency(recorder, currentPhase, 'new session'), false);
+
+      currentPhase = `${options.scenario} defeat flow`;
+      let defeatReached = false;
+      const recovery: TpkRecoveryProgress = {
+        revivifyObserved: false,
+        overrideTarget: null,
+      };
+      if (tpkReady === true) {
+        await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+          if (!await assignAlgorithms(page, recorder, currentPhase)) {
+            recorder.phase(currentPhase, 'aborted', 'Could not assign the doomed combatants to algorithm controllers.');
+            return;
+          }
+          const outcome = await playEncounter(
+            page,
+            recorder,
+            currentPhase,
+            options.scenario === 'tpk-recovery'
+              ? async () => observeTpkRecovery(page, recorder, currentPhase, recovery)
+              : undefined,
+            250,
+            120_000,
+          );
+          defeatReached = outcome.kind === 'defeat';
+          const recoveryComplete = options.scenario === 'tpk-clean' ||
+            (recovery.revivifyObserved && recovery.overrideTarget !== null);
+          const completed = defeatReached && recoveryComplete;
+          recorder.phase(
+            currentPhase,
+            completed ? 'completed' : 'aborted',
+            `${outcome.kind} at round ${String(outcome.round)} after ${String(outcome.attempts)} driver pulses; ` +
+              (options.scenario === 'tpk-clean'
+                ? 'the defeat conclusion banner was recognized as the scenario completion boundary.'
+                : `normal controller policy Revivify observed=${String(recovery.revivifyObserved)}; rendered DM adjudication override target=${recovery.overrideTarget ?? 'none'}; defeat recognized as completion=${String(defeatReached)}.`),
+          );
+        });
+      } else {
+        skipDependency(recorder, currentPhase, `${options.scenario} setup`);
+      }
+
+      currentPhase = `${options.scenario} session record and export`;
+      if (defeatReached) {
+        await runIsolatedPhase(preview, recorder, currentPhase, async () => {
+          const exported = await endVaneWarrenSession(page, recorder, currentPhase);
+          const commonCoverage = exported?.parsed === true &&
+            exported.hasSessionRecord &&
+            exported.encounterCount === 1 &&
+            exported.defeatConclusionCount === 1 &&
+            exported.deathSaveCount > 0 &&
+            exported.deathCount >= REPRESENTATIVE_PARTY_NAMES.length;
+          const recoveryCoverage = options.scenario === 'tpk-clean' || (
+            exported !== null &&
+            exported.revivifyCount >= 1 &&
+            exported.dmRevivalCount >= 1 &&
+            exported.recoveryRedeathCount >= 2
+          );
+          const complete = commonCoverage && recoveryCoverage;
+          recorder.phase(
+            currentPhase,
+            complete ? 'completed' : 'aborted',
+            exported === null
+              ? 'The defeated session did not produce an export.'
+              : `Parsed ${String(exported.encounterCount)} closed encounter with ${String(exported.defeatConclusionCount)} defeat conclusion, ${String(exported.deathSaveCount)} death saves, ${String(exported.deathCount)} deaths, ${String(exported.revivifyCount)} Revivify revival, ${String(exported.dmRevivalCount)} DM revival, and ${String(exported.recoveryRedeathCount)} post-revival deaths.`,
+          );
+        });
+      } else {
+        skipDependency(recorder, currentPhase, `${options.scenario} defeat flow`);
+      }
+      return;
+    }
 
     currentPhase = 'representative party';
     const representativePartyReady = newSessionReady === true
@@ -1638,6 +2427,10 @@ async function main(): Promise<void> {
     recorder.add('page_console_error', currentPhase, 'driver infrastructure', errorDetail(error));
     recorder.phase(currentPhase, 'aborted', 'Driver infrastructure stopped this phase.');
   } finally {
+    recorder.track('driver cleanup', 'capture browser runtime timing');
+    if (recorder.page !== null) {
+      await captureBrowserRuntimeTimings(recorder.page, recorder).catch(() => undefined);
+    }
     recorder.track('driver cleanup', 'flush pending screenshots');
     await withTimeout(recorder.flushScreenshots(), CLEANUP_TIMEOUT_MS, 'flush pending screenshots')
       .catch(() => undefined);
@@ -1655,10 +2448,11 @@ async function main(): Promise<void> {
     recorder.track('driver cleanup', 'stop built preview');
     if (preview !== null) await stopPreview(preview);
     recorder.track('driver cleanup', 'write findings report');
+    recorder.timings.finish();
     await recorder.write(baseUrl);
     reportWritten = true;
     globalThis.clearTimeout(watchdogTimer);
-    process.stdout.write(`\n${recorder.summaryBlock()}\n\nFindings: ${recorder.reportPath}\n`);
+    process.stdout.write(`\n${recorder.outputBlock()}\n\nFindings: ${recorder.reportPath}\n`);
   }
 }
 

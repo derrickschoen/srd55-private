@@ -156,6 +156,15 @@ function registryFromIdentities(
   };
 }
 
+function carryControllerAssignments(
+  previous: readonly ControllerIdentity[],
+  next: readonly ControllerIdentity[],
+): readonly ControllerIdentity[] {
+  const previousByCombatant = new Map(previous.map((identity) => [identity.combatantId, identity] as const));
+  return next.map((identity) => previousByCombatant.get(identity.combatantId) ?? identity)
+    .sort((left, right) => left.combatantId.localeCompare(right.combatantId));
+}
+
 function newIdentities(monsterKind: 'human' | 'agent' = 'human'): readonly ControllerIdentity[] {
   return [...REFERENCE_PLAYER_IDS, encounterSessionMonsterId()].map((combatantId) => ({
     combatantId,
@@ -467,8 +476,14 @@ export class DmEncounterHost {
         if (this.#closed || this.#coordinator.pauseState() !== null) return;
         const step = this.#coordinator.step();
         await Promise.resolve();
-        const preStepFlush = this.#flushStore();
-        if (preStepFlush !== null) await preStepFlush;
+        const pendingRequest = this.#coordinator.coordinatorState().pendingRequest;
+        if (
+          pendingRequest !== null &&
+          this.#registry.kindFor(pendingRequest.actorId) !== 'algorithm'
+        ) {
+          const preStepFlush = this.#flushStore();
+          if (preStepFlush !== null) await preStepFlush;
+        }
         this.#publish();
         let result;
         try {
@@ -733,6 +748,7 @@ export class DmEncounterHost {
     }
     this.#coordinator.interrupt();
     await this.#pump;
+    const previousControllers = this.#registry.identities();
     let partyState = this.#partyStateHasBoundaryRuling
       ? this.#journal.partyState()!
       : this.#journal.capturePartyState();
@@ -744,12 +760,16 @@ export class DmEncounterHost {
       this.#partyDisplayNames,
       advancePartyRoom(partyState),
     );
+    const controllers = carryControllerAssignments(previousControllers, encounter.controllers);
     partyState = this.#journal.composeNextRoom({
       encounterState: encounter.state,
       coordinatorState: INITIAL_COORDINATOR_STATE,
-      controllers: encounter.controllers,
+      controllers,
     });
-    const built = registryFromIdentities(encounter.controllers);
+    const built = registryFromIdentities(
+      controllers,
+      this.#roundPlanSession === null ? undefined : (id) => this.#agentController(id),
+    );
     this.#registry = built.registry;
     this.#humans = built.humans;
     this.#coordinator = this.#coordinatorFor({
@@ -757,7 +777,7 @@ export class DmEncounterHost {
       encounterState: encounter.state,
       partyState,
       coordinatorState: INITIAL_COORDINATOR_STATE,
-      controllers: encounter.controllers,
+      controllers,
       codexSessionId: this.#journal.codexSessionId(),
       rng: this.#rng,
     });

@@ -18,6 +18,10 @@ const liveInclusions =
   process.env.AI_BRIDGE_LIVE === '1'
     ? ['tests/live/**/*.live-test.ts']
     : [];
+const verdictRecorderSetup =
+  process.env.VERDICT_FS_OBSERVATIONS_DIR === undefined
+    ? []
+    : ['tests/helpers/verdict-fs-recorder-setup.mjs'];
 
 export default defineConfig({
   cacheDir:
@@ -28,6 +32,7 @@ export default defineConfig({
     // Run BOTH unit and integration .test.ts under vitest. Browser tests are
     // .spec.ts under tests/browser and belong to Playwright (npm run test:browser).
     include: ['tests/**/*.test.ts', ...liveInclusions],
+    setupFiles: verdictRecorderSetup,
     /**
      * Derives the SRD spell-source parse ONCE, before any worker is forked,
      * and hands the workers a file path and a key. It is a pure-parse cache

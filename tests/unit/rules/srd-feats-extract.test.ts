@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { describe, expect, it } from 'vitest';
 import schema from '../../../src/db/schema.sql?raw';
 import { DatabaseContext } from '../../../src/db/database';

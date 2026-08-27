@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs';
+import { readdirSync } from '../helpers/test-filesystem';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';

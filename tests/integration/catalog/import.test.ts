@@ -451,6 +451,75 @@ describe('catalog import persistence', () => {
   });
 
   /** Asserted content is immutable: supplying a new rules fact is a new value. */
+  it.each([
+    'fixed slot',
+    'current slot',
+    'wizard spellbook',
+    'spell loadout',
+    'spell preference',
+  ] as const)('preserves an imported version referenced by a %s', async (referenceKind) => {
+    const test = await database();
+    test.importer.import({ documents: [document(record())] });
+    const versionId = Number(test.db.scalar('SELECT id FROM spell_versions'));
+    const characterId = test.db.exec(
+      `INSERT INTO characters (name) VALUES (?)`,
+      [`Reference: ${referenceKind}`],
+    ).lastInsertId;
+
+    if (referenceKind === 'wizard spellbook') {
+      test.db.exec(
+        `INSERT INTO wizard_spellbook_entries (character_id, spell_version_id)
+         VALUES (?, ?)`,
+        [characterId, versionId],
+      );
+    } else if (referenceKind === 'spell loadout') {
+      const loadoutId = test.db.exec(
+        `INSERT INTO spell_loadouts (character_id, name) VALUES (?, 'Prepared')`,
+        [characterId],
+      ).lastInsertId;
+      test.db.exec(
+        `INSERT INTO spell_loadout_entries (
+           spell_loadout_id, spell_version_id, role
+         ) VALUES (?, ?, 'prepared')`,
+        [loadoutId, versionId],
+      );
+    } else if (referenceKind === 'spell preference') {
+      test.db.exec(
+        `INSERT INTO character_spell_preferences (
+           character_id, spell_version_id
+         ) VALUES (?, ?)`,
+        [characterId, versionId],
+      );
+    } else {
+      const sourceId = test.db.exec(
+        `INSERT INTO character_source_instances (
+           character_id, instance_uuid, source_type, display_name
+         ) VALUES (?, ?, 'feat', 'Reference source')`,
+        [characterId, `reference:${referenceKind}`],
+      ).lastInsertId;
+      const assignmentColumn = referenceKind === 'fixed slot'
+        ? 'fixed_spell_version_id'
+        : 'current_spell_version_id';
+      test.db.exec(
+        `INSERT INTO spell_selection_slots (
+           character_id, source_instance_id, slot_key, rule_key, bucket,
+           eligibility_kind, ${assignmentColumn}
+         ) VALUES (?, ?, ?, 'reference', 'automatic', 'fixed_spell', ?)`,
+        [characterId, sourceId, `reference:${referenceKind}`, versionId],
+      );
+    }
+
+    test.importer.import({
+      documents: [document(record({ school: 'Illusion' }))],
+    });
+
+    expect(test.db.scalar(
+      'SELECT school FROM spell_versions WHERE id = ?',
+      [versionId],
+    )).toBe('Evocation');
+    test.connection.close();
+  });
+
   it('refuses to mutate an asserted referenced version when an absent rules field is later supplied', async () => {
     const test = await database();
     test.importer.import({ documents: [document(record())] });
