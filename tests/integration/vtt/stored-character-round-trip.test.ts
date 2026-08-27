@@ -325,9 +325,11 @@ describe('stored character authoring-to-encounter round trip', () => {
       path: [{ column: 2, row: 1 }, { column: 3, row: 1 }],
       cause: 'voluntary',
     }, () => 0.5).state;
+    const firstAttack = wizardMember.attacks[0];
+    if (firstAttack === undefined) throw new Error('Stored Wizard attack is missing.');
     const attack = loadedPartyAttackCommand(
       wizardMember,
-      wizardMember.attacks[0]?.attackId ?? '',
+      firstAttack.attackId,
       monster.profile.id,
     );
     const attacked = reduceEncounter(state, attack, () => 0.5);

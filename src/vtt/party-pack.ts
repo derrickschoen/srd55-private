@@ -15,12 +15,18 @@ import {
   type EffectApplication,
 } from '../combat/effects';
 import type { EncounterCommand } from '../combat/events';
+import type { EncounterCombatantState } from '../combat/encounter';
 import { adjacentCells, gridDistance } from '../combat/grid';
 import { cubeAffectedCellsAmong, feetPoint } from '../combat/templates';
 import type { PersistentAreaEffectSpec, PersistentAreaShape } from '../combat/persistent-areas';
 import { spellDefinition } from '../combat/spells/definitions';
 import type { SpellCastCommand, SpellTargeting } from '../combat/spells/types';
-import { SPELL_MANIFEST, type SpellManifestRow } from '../combat/spells/manifest';
+import {
+  isSpellManifestId,
+  SPELL_MANIFEST,
+  type SpellManifestEntry,
+  type SpellManifestId,
+} from '../combat/spells/manifest';
 import {
   armorClass,
   combatantId,
@@ -32,6 +38,7 @@ import {
   limitedResourcePoolId,
   tokenId,
   worldObjectId,
+  type CombatantId,
   type DamageType,
   type DieSides,
   type EncounterEffectId,
@@ -40,6 +47,7 @@ import type { WorldOperation } from '../combat/world-objects';
 import { abilities, creatureSizes, damageTypes, skills, weaponMasteryProperties, type Ability, type KnownCreatureSize, type Skill } from '../domain/enums';
 import { hitDieSizes, type HitDieSize } from '../domain/enums';
 import { exactValues } from '../domain/exact-table';
+import { TotalMap } from '../domain/total-map';
 import { SRD_CLASS_NAMES } from '../rules/class-traits-srd';
 import {
   createGapReport,
@@ -227,37 +235,64 @@ const classSchema = z.strictObject({
   level: classLevelSchema,
 });
 
-const attackObjectSchema = z.strictObject({
+const attackBaseShape = {
   attackId: attackIdSchema,
   kind: z.enum(ATTACK_KINDS),
   attackBonus: modifierSchema,
   criticalFloor: integerSchema.min(2).max(20),
   reachFeet: distanceSchema,
   rangeFeet: distanceSchema,
-  masteryProperty: z.enum(weaponMasteryProperties).optional(),
-  masterySaveDc: integerSchema.min(1).max(50).optional(),
   damage: z.array(z.strictObject({
     damageTypeId: z.enum(damageTypes),
     count: integerSchema.min(0).max(100),
     sides: dieSidesSchema,
     modifier: modifierSchema,
   })).min(1).max(20),
+} as const;
+const attackObjectSchema = z.strictObject({
+  ...attackBaseShape,
+  masteryProperty: z.enum(weaponMasteryProperties).optional(),
+  masterySaveDc: integerSchema.min(1).max(50).optional(),
 });
 const attackSchemaPath = schemaPathFor<z.infer<typeof attackObjectSchema>>();
-type AttackInput = z.infer<typeof attackObjectSchema>;
+type AttackWireInput = z.infer<typeof attackObjectSchema>;
+export type ExternalPartyPackAttack = Omit<
+  AttackWireInput,
+  'masteryProperty' | 'masterySaveDc'
+> & (
+  | {
+      readonly masteryProperty: 'Topple';
+      readonly masterySaveDc: number;
+    }
+  | {
+      readonly masteryProperty: Exclude<(typeof weaponMasteryProperties)[number], 'Topple'>;
+      readonly masterySaveDc?: never;
+    }
+  | {
+      readonly masteryProperty?: never;
+      readonly masterySaveDc?: never;
+    }
+);
+export type ExternalPartyPackAttackMastery = ExternalPartyPackAttack extends infer Attack
+  ? Attack extends unknown
+    ? Pick<Attack, Extract<keyof Attack, 'masteryProperty' | 'masterySaveDc'>>
+    : never
+  : never;
 const ATTACK_RULES = [
-  (attack: AttackInput): readonly PartyPackValidationIssue[] => issueWhen(
+  (attack: AttackWireInput): readonly PartyPackValidationIssue[] => issueWhen(
     attack.masteryProperty === 'Topple' && attack.masterySaveDc === undefined,
     'Topple mastery requires its sourced save DC.',
     attackSchemaPath('masterySaveDc'),
   ),
-  (attack: AttackInput): readonly PartyPackValidationIssue[] => issueWhen(
+  (attack: AttackWireInput): readonly PartyPackValidationIssue[] => issueWhen(
     attack.masteryProperty !== 'Topple' && attack.masterySaveDc !== undefined,
     'Only Topple mastery carries a save DC.',
     attackSchemaPath('masterySaveDc'),
   ),
-] as const satisfies readonly PartyPackRule<AttackInput>[];
-const attackSchema = attackObjectSchema.superRefine(refinementFromRules(ATTACK_RULES));
+] as const satisfies readonly PartyPackRule<AttackWireInput>[];
+const attackSchema = attackObjectSchema.superRefine(
+  refinementFromRules(ATTACK_RULES),
+) as unknown as z.ZodType<ExternalPartyPackAttack, AttackWireInput>;
 
 const gridCellSchema = z.strictObject({
   column: integerSchema.min(0).max(100_000),
@@ -525,6 +560,14 @@ export const FEATURE_EFFECT_KINDS = exactValues<FeatureEffectKind>()(
   'elemental_fury',
   'persistent_area',
 );
+
+const featureEffectKinds = Object.fromEntries(
+  FEATURE_EFFECT_KINDS.map((kind) => [kind, true]),
+) as Readonly<Record<FeatureEffectKind, true>>;
+
+export function isFeatureEffectKind(value: unknown): value is FeatureEffectKind {
+  return typeof value === 'string' && Object.hasOwn(featureEffectKinds, value);
+}
 
 const persistentAreaShapeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('sphere'), radiusFeet: distanceSchema.min(1) }),
@@ -810,6 +853,117 @@ const featureEffectObjectSchema = z.discriminatedUnion('kind', [
 ]);
 
 type FeatureEffectInput = z.infer<typeof featureEffectObjectSchema>;
+type EffectWithoutResource<Effect> = Omit<Effect, 'resourcePoolId'> & {
+  readonly resourcePoolId?: never;
+};
+type ResourceForbiddenEffectKind =
+  | 'extra_attack_count_override'
+  | 'slot_spend_damage_rider'
+  | 'reckless_attack_mode'
+  | 'attack_ability_substitution'
+  | 'attack_damage_die_override'
+  | 'attack_reach_range_override'
+  | 'save_gated_banishment_on_hit'
+  | 'spell_damage_ability_modifier'
+  | 'attack_damage_type_choice'
+  | 'exploding_spell_damage_die'
+  | 'elemental_fury';
+type EffectResourceByTrigger<Effect, Trigger> = Trigger extends 'always_on'
+  ? EffectWithoutResource<Omit<Effect, 'trigger'> & { readonly trigger: Trigger }>
+  : Omit<Effect, 'trigger'> & { readonly trigger: Trigger };
+type EffectResourceTypestate<Effect> = Effect extends {
+  readonly kind: ResourceForbiddenEffectKind;
+}
+  ? EffectWithoutResource<Effect>
+  : Effect extends { readonly trigger: infer Trigger }
+    ? Trigger extends unknown
+      ? EffectResourceByTrigger<Effect, Trigger>
+      : never
+    : Effect;
+
+type PersistentAreaWireEffect = Extract<FeatureEffectInput, { readonly kind: 'persistent_area' }>;
+type PersistentAreaWireHook = PersistentAreaWireEffect['hooks'][number];
+type PersistentAreaWireSpec = PersistentAreaWireHook['effect'];
+type PersistentAreaWirePayload = PersistentAreaWireSpec['payload'];
+type PersistentAreaDamagePayload = Extract<PersistentAreaWirePayload, { readonly kind: 'damage' }>;
+type PersistentAreaNonDamagePayload = Exclude<PersistentAreaWirePayload, PersistentAreaDamagePayload>;
+type PersistentAreaNonSaveEndingPayload = PersistentAreaNonDamagePayload extends infer Payload
+  ? Payload extends { readonly lifetime: infer Lifetime }
+    ? Omit<Payload, 'lifetime'> & {
+        readonly lifetime: Exclude<Lifetime, { readonly kind: 'save_ends' }>;
+      }
+    : never
+  : never;
+
+export type ExternalPersistentAreaEffectSpec =
+  | {
+      readonly kind: 'automatic';
+      readonly payload: PersistentAreaDamagePayload | PersistentAreaNonSaveEndingPayload;
+    }
+  | (Omit<
+      Extract<PersistentAreaWireSpec, { readonly kind: 'save_gated' }>,
+      'onSuccess' | 'payload'
+    > & {
+      readonly onSuccess: 'none';
+      readonly payload: PersistentAreaWirePayload;
+    })
+  | (Omit<
+      Extract<PersistentAreaWireSpec, { readonly kind: 'save_gated' }>,
+      'onSuccess' | 'payload'
+    > & {
+      readonly onSuccess: 'half';
+      readonly payload: PersistentAreaDamagePayload;
+    });
+export type ExternalHalfSavePayload = Extract<
+  ExternalPersistentAreaEffectSpec,
+  { readonly kind: 'save_gated'; readonly onSuccess: 'half' }
+>['payload'];
+
+type PersistentAreaHook = Omit<PersistentAreaWireHook, 'effect'> & {
+  readonly effect: ExternalPersistentAreaEffectSpec;
+};
+type PersistentAreaByOrigin<Effect, Origin> = Origin extends 'self'
+  ? Omit<Effect, 'origin' | 'movableFeet' | 'hooks'> & {
+      readonly origin: 'self';
+      readonly movableFeet: null;
+      readonly hooks: readonly PersistentAreaHook[];
+    }
+  : Omit<Effect, 'origin' | 'hooks'> & {
+      readonly origin: Origin;
+      readonly hooks: readonly PersistentAreaHook[];
+    };
+type PersistentAreaTypestate<Effect> = Effect extends {
+  readonly kind: 'persistent_area';
+  readonly origin: infer Origin;
+}
+  ? Origin extends unknown
+    ? PersistentAreaByOrigin<Effect, Origin>
+    : never
+  : Effect;
+
+export type ExternalPartyPackEffect = FeatureEffectInput extends infer Effect
+  ? Effect extends unknown
+    ? PersistentAreaTypestate<EffectResourceTypestate<Effect>>
+    : never
+  : never;
+export type ExternalExtraAttackResourceState = Pick<
+  Extract<ExternalPartyPackEffect, { readonly kind: 'extra_attack_count_override' }>,
+  'kind' | 'resourcePoolId'
+>;
+export type ExternalAlwaysOnArmorClassResourceState = Pick<
+  Extract<
+    ExternalPartyPackEffect,
+    { readonly kind: 'armor_class_modifier'; readonly trigger: 'always_on' }
+  >,
+  'kind' | 'trigger' | 'resourcePoolId'
+>;
+type ProjectTypestate<Value, Keys extends PropertyKey> = Value extends unknown
+  ? Pick<Value, Extract<keyof Value, Keys>>
+  : never;
+export type ExternalPersistentAreaPlacement = ProjectTypestate<
+  Extract<ExternalPartyPackEffect, { readonly kind: 'persistent_area' }>,
+  'origin' | 'movableFeet'
+>;
 const FEATURE_EFFECT_RULES = [
   (effect: FeatureEffectInput): readonly PartyPackValidationIssue[] =>
     effect.kind === 'damage_operation'
@@ -933,7 +1087,7 @@ const FEATURE_EFFECT_RULES = [
 
 const featureEffectSchema = featureEffectObjectSchema.superRefine(
   refinementFromRules(FEATURE_EFFECT_RULES),
-);
+) as unknown as z.ZodType<ExternalPartyPackEffect, FeatureEffectInput>;
 
 export const externalPartyPackFeatureEffectSchema = featureEffectSchema;
 
@@ -961,8 +1115,8 @@ const passivesSchema = z.strictObject({
   conditionImmunities: z.array(z.enum(conditionNames)).max(conditionNames.length).optional(),
 });
 
-const manifestSpellIdSchema = z.string().refine(
-  (id) => SPELL_MANIFEST.some((spell) => spell.id === id),
+const manifestSpellIdSchema = z.custom<SpellManifestId>(
+  isSpellManifestId,
   'Spell selection must use a manifest spell id.',
 );
 
@@ -1100,8 +1254,6 @@ export type ExternalPartyPack = z.infer<typeof externalPartyPackSchema>;
 export type ExternalPartyPackV1 = z.infer<typeof externalPartyPackV1Schema>;
 export type ExternalPartyPackV2 = z.infer<typeof externalPartyPackV2Schema>;
 export type ExternalPartyPackMember = ExternalPartyPack['members'][number];
-export type ExternalPartyPackAttack = z.infer<typeof attackSchema>;
-export type ExternalPartyPackEffect = z.infer<typeof externalPartyPackFeatureEffectSchema>;
 export type ExternalPartyPackResource = z.infer<typeof externalPartyPackResourceSchema>;
 export type ExternalWorldOperation = z.infer<typeof externalWorldOperationSchema>;
 export type PartySource = z.infer<typeof partySourceSchema>;
@@ -1136,17 +1288,17 @@ export interface LoadedPartySpellcastingSource {
   readonly spellAttackBonus: number;
   readonly spellcastingModifier: number;
   readonly casterLevel: number;
-  readonly preparedSpells: readonly SpellManifestRow[];
-  readonly knownSpells: readonly SpellManifestRow[];
+  readonly preparedSpells: readonly SpellManifestEntry[];
+  readonly knownSpells: readonly SpellManifestEntry[];
   readonly grants: readonly {
-    readonly spell: SpellManifestRow;
+    readonly spell: SpellManifestEntry;
     readonly ability: Ability;
     readonly spellSaveDc: number;
     readonly spellAttackBonus: number;
     readonly spellcastingModifier: number;
   }[];
   readonly resourceSpellUses: readonly {
-    readonly spellId: string;
+    readonly spellId: SpellManifestId;
     readonly resourcePoolId: ReturnType<typeof limitedResourcePoolId>;
   }[];
 }
@@ -1155,7 +1307,7 @@ export interface LoadedPartyMember {
   readonly source: ExternalPartyPackMember;
   readonly profile: Extract<CombatantProfile, { readonly kind: 'player_character' }>;
   readonly attacks: readonly LoadedPartyAttack[];
-  readonly spells: readonly SpellManifestRow[];
+  readonly spells: readonly SpellManifestEntry[];
   readonly spellcasting: readonly LoadedPartySpellcastingSource[];
   readonly sharedSpellSlots: readonly {
     readonly level: z.infer<typeof spellSlotLevelSchema>;
@@ -1174,7 +1326,7 @@ export interface LoadedPartyMember {
   readonly startingConditions: readonly LoadedPartyCondition[];
   readonly effects: readonly CombatFeatureEffect[];
   readonly worldOperations: readonly {
-    readonly operationId: string;
+    readonly operationId: ExternalWorldOperationId;
     readonly cost: Extract<EncounterCommand, { readonly type: 'world_operation' }>['cost'];
     readonly operation: WorldOperation;
   }[];
@@ -1697,6 +1849,23 @@ function sanitizedAttack(
 }
 
 function loadedAttack(attack: ExternalPartyPackAttack): LoadedPartyAttack {
+  const mastery = (() => {
+    switch (attack.masteryProperty) {
+      case 'Topple':
+        return { property: 'Topple' as const, saveDc: attack.masterySaveDc };
+      case 'Slow':
+        return { property: 'Slow' as const };
+      case 'Cleave':
+      case 'Graze':
+      case 'Nick':
+      case 'Push':
+      case 'Sap':
+      case 'Vex':
+      case undefined:
+        return null;
+    }
+    return attack;
+  })();
   return {
     attackId: attack.attackId,
     kind: attack.kind,
@@ -1704,11 +1873,7 @@ function loadedAttack(attack: ExternalPartyPackAttack): LoadedPartyAttack {
     criticalFloor: attack.criticalFloor,
     reach: feet(attack.reachFeet),
     range: feet(attack.rangeFeet),
-    mastery: attack.masteryProperty === 'Topple'
-      ? { property: 'Topple', saveDc: attack.masterySaveDc as number }
-      : attack.masteryProperty === 'Slow'
-        ? { property: 'Slow' }
-        : null,
+    mastery,
     damage: attack.damage.map((term) => ({
       type: damageType(term.damageTypeId),
       count: term.count,
@@ -1789,6 +1954,10 @@ function loadedWorldOperation(operation: ExternalWorldOperation['operation']): W
 }
 
 type ExternalPersistentAreaEffect = Extract<ExternalPartyPackEffect, { readonly kind: 'persistent_area' }>;
+type LoadedPersistentArea = Extract<
+  CombatFeatureEffect['payload'],
+  { readonly kind: 'persistent_area' }
+>['area'];
 
 function loadedPersistentAreaShape(shape: ExternalPersistentAreaEffect['shape']): PersistentAreaShape {
   switch (shape.kind) {
@@ -1805,7 +1974,7 @@ function loadedPersistentAreaShape(shape: ExternalPersistentAreaEffect['shape'])
 function loadedPersistentAreaEffect(
   spec: ExternalPersistentAreaEffect['hooks'][number]['effect'],
 ): PersistentAreaEffectSpec {
-  const payload = (() => {
+  const payload = ((): PersistentAreaEffectSpec['payload'] => {
     switch (spec.payload.kind) {
       case 'damage':
         return {
@@ -1829,12 +1998,77 @@ function loadedPersistentAreaEffect(
         return { kind: 'effect' as const, payload: { kind: 'armor_class_modifier' as const, amount: spec.payload.amount }, lifetime: spec.payload.lifetime };
     }
   })();
-  return spec.kind === 'automatic'
-    ? { kind: 'automatic', payload }
-    : {
-        kind: 'save_gated', ability: spec.ability, dc: spec.saveDc,
-        rollMode: spec.rollMode, onSuccess: spec.onSuccess, payload,
+  switch (spec.kind) {
+    case 'automatic':
+      return { kind: 'automatic', payload };
+    case 'save_gated':
+      switch (spec.onSuccess) {
+        case 'none':
+        case 'half':
+          return {
+            kind: 'save_gated', ability: spec.ability, dc: spec.saveDc,
+            rollMode: spec.rollMode, onSuccess: spec.onSuccess, payload,
+          };
+      }
+  }
+}
+
+function loadedFeatureResourcePoolId(
+  effect: ExternalPartyPackEffect,
+): CombatFeatureEffect['resourcePoolId'] {
+  switch (effect.kind) {
+    case 'extra_attack_count_override':
+    case 'slot_spend_damage_rider':
+    case 'reckless_attack_mode':
+    case 'attack_ability_substitution':
+    case 'attack_damage_die_override':
+    case 'attack_reach_range_override':
+    case 'save_gated_banishment_on_hit':
+    case 'spell_damage_ability_modifier':
+    case 'attack_damage_type_choice':
+    case 'exploding_spell_damage_die':
+    case 'elemental_fury':
+      return null;
+    case 'action_surge':
+    case 'timed_spellcasting_mode':
+    case 'resource_die_maneuver':
+      return limitedResourcePoolId(effect.resourcePoolId);
+    case 'damage_operation':
+    case 'armed_weapon_hit_rider':
+    case 'damage_rider':
+    case 'once_per_turn_damage_rider':
+    case 'first_hit_damage_rider':
+    case 'bonus_action_attack_grant':
+    case 'attack_roll_modifier':
+    case 'attack_roll_mode':
+    case 'armor_class_modifier':
+    case 'saving_throw_modifier':
+    case 'skill_modifier':
+    case 'temporary_hit_points':
+    case 'condition_application':
+    case 'exhaustion_application':
+    case 'movement_modifier':
+    case 'persistent_area':
+      return effect.resourcePoolId === undefined
+        ? null
+        : limitedResourcePoolId(effect.resourcePoolId);
+  }
+}
+
+function loadedPersistentAreaPlacement(
+  effect: ExternalPersistentAreaEffect,
+): Pick<LoadedPersistentArea, 'origin' | 'movable'> {
+  switch (effect.origin) {
+    case 'self':
+      return { origin: 'self', movable: null };
+    case 'selected':
+      return {
+        origin: 'selected',
+        movable: effect.movableFeet === null
+          ? null
+          : { maximumFeet: feet(effect.movableFeet) },
       };
+  }
 }
 
 export function loadedFeatureEffect(
@@ -1844,9 +2078,7 @@ export function loadedFeatureEffect(
   const common = {
     id: encounterEffectId(effect.effectId),
     trigger: 'trigger' in effect ? effect.trigger : 'always_on' as const,
-    resourcePoolId: effect.resourcePoolId === undefined
-      ? null
-      : limitedResourcePoolId(effect.resourcePoolId),
+    resourcePoolId: loadedFeatureResourcePoolId(effect),
   } as const;
   switch (effect.kind) {
     case 'damage_operation':
@@ -1889,6 +2121,22 @@ export function loadedFeatureEffect(
         : packet.damageType.kind === 'fixed'
           ? damageType(packet.damageType.damageType)
           : damageType(packet.damageType.to);
+      const followUp: Required<Pick<
+        Extract<CombatFeatureEffect['payload'], { readonly kind: 'damage_rider' }>,
+        'followUp'
+      >> | null = effect.saveGatedRider === null
+        ? null
+        : {
+            followUp: {
+              kind: 'save_then_condition',
+              saveAbility: effect.saveGatedRider.ability,
+              saveDc: effect.saveDc,
+              rollMode: effect.saveGatedRider.rollMode,
+              condition: effect.saveGatedRider.condition,
+              expiresAt: effect.saveGatedRider.expiresAt,
+              durationRounds: effect.saveGatedRider.durationRounds,
+            },
+          };
       return {
         ...common,
         payload: {
@@ -1913,19 +2161,7 @@ export function loadedFeatureEffect(
           appliesTo: 'weapon_attack_by_target',
           consumeOnHit: effect.persistence === 'consume_on_hit',
           arming: { durationRounds: effect.durationRounds, concentration: effect.concentration },
-          ...(effect.saveGatedRider === null
-            ? {}
-            : {
-                followUp: {
-                  kind: 'save_then_condition' as const,
-                  saveAbility: effect.saveGatedRider.ability,
-                  saveDc: effect.saveDc,
-                  rollMode: effect.saveGatedRider.rollMode,
-                  condition: effect.saveGatedRider.condition,
-                  expiresAt: effect.saveGatedRider.expiresAt,
-                  durationRounds: effect.saveGatedRider.durationRounds,
-                },
-              }),
+          ...(followUp ?? {}),
         },
       };
     }
@@ -2168,7 +2404,7 @@ export function loadedFeatureEffect(
         payload: {
           kind: 'persistent_area',
           area: {
-            origin: effect.origin,
+            ...loadedPersistentAreaPlacement(effect),
             shape: loadedPersistentAreaShape(effect.shape),
             duration: { kind: effect.duration.kind, remaining: effect.duration.rounds },
             targetFilter: { kind: effect.targetFilter },
@@ -2178,7 +2414,6 @@ export function loadedFeatureEffect(
               frequency: hook.frequency,
               effect: loadedPersistentAreaEffect(hook.effect),
             })),
-            movable: effect.movableFeet === null ? null : { maximumFeet: feet(effect.movableFeet) },
           },
         },
       };
@@ -2220,7 +2455,7 @@ function v2MemberExtensions(member: ExternalPartyPackMember): {
 
 function loadedMember(
   member: ExternalPartyPackMember,
-  spells: readonly SpellManifestRow[],
+  spells: readonly SpellManifestEntry[],
   spellSlots: readonly { readonly level: z.infer<typeof spellSlotLevelSchema>; readonly maximum: number }[],
   pactSpellSlots: readonly { readonly level: z.infer<typeof spellSlotLevelSchema>; readonly maximum: number }[],
   spellcasting: readonly LoadedPartySpellcastingSource[],
@@ -2407,7 +2642,7 @@ function effectiveLoadedPartyAttack(
 /** Builds a standard weapon attack; on-hit/on-crit feature riders stay reducer-owned. */
 export function loadedPartyAttackCommand(
   member: LoadedPartyMember,
-  attackId: string,
+  attackId: ExternalAttackId,
   target: Extract<EncounterCommand, { readonly type: 'attack' }>['target'],
   options: {
     readonly recklessAttackEffectId?: EncounterEffectId;
@@ -2491,12 +2726,31 @@ function loadedMemberPosition(state: Parameters<TurnLegalActions>[0], id: Return
   return found.position;
 }
 
+const encounterCombatantIndexes = new WeakMap<
+  Parameters<TurnLegalActions>[0],
+  TotalMap<CombatantId, EncounterCombatantState>
+>();
+
+function encounterCombatantIndex(
+  state: Parameters<TurnLegalActions>[0],
+): TotalMap<CombatantId, EncounterCombatantState> {
+  const cached = encounterCombatantIndexes.get(state);
+  if (cached !== undefined) return cached;
+  const index = TotalMap.from(
+    state.combatants,
+    state.combatants.map((combatant) => combatant.profile.id),
+    (combatant) => combatant.profile.id,
+  );
+  encounterCombatantIndexes.set(state, index);
+  return index;
+}
+
 function loadedPartyMovementActions(
   state: Parameters<TurnLegalActions>[0],
   actor: ReturnType<typeof combatantId>,
 ): readonly Extract<EncounterCommand, { readonly type: 'move' }>[] {
-  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
-  if (acting === undefined || acting.turn.movement.remaining < 5) return [];
+  const acting = encounterCombatantIndex(state).at(actor);
+  if (acting.turn.movement.remaining < 5) return [];
   const occupied = new Set(state.tokens
     .filter((token) => token.combatantId !== actor)
     .map((token) => `${String(token.position.column)},${String(token.position.row)}`));
@@ -2575,8 +2829,7 @@ function healingSpellCommands(
   allowLeveledHealing = true,
 ): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
   if (!allowLeveledHealing) return [];
-  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
-  if (acting === undefined) throw new Error(`Loaded party combatant ${actor} is absent from the encounter.`);
+  const acting = encounterCombatantIndex(state).at(actor);
   const effectiveMaximum = (target: typeof state.combatants[number]) => state.effects.reduce((maximum, effect) =>
     effect.targets.includes(target.profile.id) && effect.payload.kind === 'hit_point_maximum_modifier'
       ? maximum + effect.payload.amount
@@ -2648,10 +2901,10 @@ function revivifySpellCommands(
   state: Parameters<TurnLegalActions>[0],
   actor: ReturnType<typeof combatantId>,
 ): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
-  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  const acting = encounterCombatantIndex(state).at(actor);
   const definition = spellDefinition('revivify');
   if (
-    acting === undefined || acting.turn.action.kind !== 'available' ||
+    acting.turn.action.kind !== 'available' ||
     definition === null || definition.operation.kind !== 'revive' ||
     !member.spells.some((spell) => spell.id === 'revivify')
   ) return [];
@@ -2688,8 +2941,8 @@ function healingPotionCommands(
   state: Parameters<TurnLegalActions>[0],
   actor: ReturnType<typeof combatantId>,
 ): readonly Extract<EncounterCommand, { readonly type: 'drink_healing_potion' }>[] {
-  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
-  if (acting === undefined || !acting.turn.bonusActionAvailable) return [];
+  const acting = encounterCombatantIndex(state).at(actor);
+  if (!acting.turn.bonusActionAvailable) return [];
   const hitPointMaximum = state.effects.reduce((maximum, effect) =>
     effect.targets.includes(actor) && effect.payload.kind === 'hit_point_maximum_modifier'
       ? maximum + effect.payload.amount
@@ -2713,8 +2966,8 @@ function blessSpellCommands(
   state: Parameters<TurnLegalActions>[0],
   actor: ReturnType<typeof combatantId>,
 ): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
-  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
-  if (acting === undefined || acting.turn.action.kind !== 'available') return [];
+  const acting = encounterCombatantIndex(state).at(actor);
+  if (acting.turn.action.kind !== 'available') return [];
   if (state.eventLog.some((event) =>
     event.type === 'spell_cast' && event.caster === actor && event.spellId === 'bless')) return [];
   const definition = spellDefinition('bless');
@@ -2750,7 +3003,7 @@ function sharedSpellSlot(
   actor: ReturnType<typeof combatantId>,
   minimumLevel: number,
 ) {
-  return state.combatants.find((candidate) => candidate.profile.id === actor)?.spellSlots
+  return encounterCombatantIndex(state).at(actor).spellSlots
     .filter((slot) => slot.remaining > 0 && slot.level >= minimumLevel)
     .sort((left, right) => left.level - right.level)[0];
 }
@@ -2763,9 +3016,9 @@ function slowSpellCommands(
   actor: ReturnType<typeof combatantId>,
   targets: Parameters<TurnLegalActions>[0]['combatants'],
 ): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
-  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  const acting = encounterCombatantIndex(state).at(actor);
   if (
-    acting === undefined || acting.turn.action.kind !== 'available' ||
+    acting.turn.action.kind !== 'available' ||
     !member.spells.some((spell) => spell.id === 'slow') ||
     state.effects.some((effect) => effect.concentrationOwner === actor)
   ) return [];
@@ -2852,9 +3105,9 @@ function spiritGuardiansSpellCommands(
   actor: ReturnType<typeof combatantId>,
   reserveThirdLevelSlot = false,
 ): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
-  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  const acting = encounterCombatantIndex(state).at(actor);
   if (
-    acting === undefined || acting.turn.action.kind !== 'available' ||
+    acting.turn.action.kind !== 'available' ||
     !member.spells.some((spell) => spell.id === 'spirit-guardians') ||
     !blessConcentrationBroke(state, actor) ||
     state.effects.some((effect) => effect.concentrationOwner === actor)
@@ -2894,9 +3147,9 @@ function commandKeepAwaySpellCommands(
   actor: ReturnType<typeof combatantId>,
   targets: Parameters<TurnLegalActions>[0]['combatants'],
 ): readonly Extract<EncounterCommand, { readonly type: 'cast_spell' }>[] {
-  const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
+  const acting = encounterCombatantIndex(state).at(actor);
   if (
-    acting === undefined || acting.turn.action.kind !== 'available' ||
+    acting.turn.action.kind !== 'available' ||
     !member.spells.some((spell) => spell.id === 'command')
   ) return [];
   const adjacent = targets
@@ -2935,8 +3188,7 @@ export function loadedPartyTurnLegalActions(
   return (state, actor) => {
     const member = byId.get(actor);
     if (member === undefined) return { actions: [{ type: 'end_turn', actor }] };
-    const acting = state.combatants.find((candidate) => candidate.profile.id === actor);
-    if (acting === undefined) throw new Error(`Loaded party combatant ${actor} is absent from the encounter.`);
+    const acting = encounterCombatantIndex(state).at(actor);
     if (!state.tokens.some((candidate) => candidate.combatantId === actor)) {
       return { actions: [{ type: 'end_turn', actor }] };
     }
@@ -3072,7 +3324,7 @@ export function loadedPartyTurnLegalActions(
           : effect.trigger === 'bonus_action'
             ? acting.turn.bonusActionAvailable
             : false;
-        if (resourceAvailable && costAvailable) actions.push(loadedPartyEffectCommand(member, String(effect.id), []));
+        if (resourceAvailable && costAvailable) actions.push(loadedPartyEffectCommand(member, effect.id, []));
       }
     }
     actions.push({ type: 'end_turn', actor });
@@ -3083,7 +3335,7 @@ export function loadedPartyTurnLegalActions(
 /** Activates an action-economy feature through existing effect/temp-HP commands. */
 export function loadedPartyWorldOperationCommand(
   member: LoadedPartyMember,
-  operationId: string,
+  operationId: ExternalWorldOperationId,
 ): Extract<EncounterCommand, { readonly type: 'world_operation' }> {
   const declared = member.worldOperations.find((entry) => entry.operationId === operationId);
   if (declared === undefined) throw new RangeError(`The party member does not declare ${operationId}.`);
@@ -3097,7 +3349,7 @@ export function loadedPartyWorldOperationCommand(
 
 export function loadedPartyEffectCommand(
   member: LoadedPartyMember,
-  effectId: string,
+  effectId: ExternalEffectId | EncounterEffectId,
   targets: readonly Extract<EncounterCommand, { readonly type: 'apply_effect' }>['effect']['targets'][number][],
 ): Extract<EncounterCommand, {
   readonly type:
@@ -3209,7 +3461,7 @@ export type LoadedPartySpellCastDetails = Omit<Pick<
 /** Builds the existing resolver command exclusively from a v2 member's referenced spell vocabulary. */
 export function loadedPartySpellCastCommand(
   member: LoadedPartyMember,
-  spellId: string,
+  spellId: SpellManifestId,
   details: LoadedPartySpellCastDetails,
 ): SpellCastCommand {
   if (member.spellcasting.length === 0) throw new PartySpellcastingError('spellcasting_unavailable');
@@ -3335,7 +3587,7 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
   let unsupportedEffectShape: string | null = null;
   const mapped: Array<{
     readonly member: ExternalPartyPackMember;
-    readonly spells: readonly SpellManifestRow[];
+    readonly spells: readonly SpellManifestEntry[];
     readonly spellSlots: readonly {
       readonly level: z.infer<typeof spellSlotLevelSchema>;
       readonly maximum: number;
@@ -3460,8 +3712,8 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
 
     let loadedSpellcasting: LoadedPartySpellcastingSource[] = [];
     let parsedSpellcasting: z.infer<typeof spellcastingSourceInputSchema>[] = [];
-    const spells: SpellManifestRow[] = [];
-    const spellIds: string[] = [];
+    const spells: SpellManifestEntry[] = [];
+    const spellIds: SpellManifestId[] = [];
     if (header.data.schemaVersion === 1) {
       const spellInput = Array.isArray(memberInput.spellSelections) ? memberInput.spellSelections : [];
       if (!Array.isArray(memberInput.spellSelections)) {
@@ -3611,10 +3863,10 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
     }
 
     if (header.data.schemaVersion === 2) {
-      const normalizedSources: z.infer<typeof spellcastingSourceInputSchema>[] = [];
+      const normalizedSources: z.infer<typeof spellcastingSourceSchema>[] = [];
       for (const [sourceIndex, source] of parsedSpellcasting.entries()) {
         const pathSourceIndex = Array.isArray(memberInput.spellcasting) ? sourceIndex : null;
-        const sourceSpellIds: string[] = [];
+        const sourceSpellIds: SpellManifestId[] = [];
         const references = [
           ...source.preparedSpellIds.map((value, spellIndex) => ({
             value,
@@ -3647,11 +3899,21 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           }
         }
 
-        const preparedSpellIds = source.preparedSpellIds.filter((id, preparedIndex, ids) =>
-          sourceSpellIds.includes(id) && ids.indexOf(id) === preparedIndex);
+        const preparedSpellIds = source.preparedSpellIds.filter((
+          id,
+          preparedIndex,
+          ids,
+        ): id is SpellManifestId =>
+          isSpellManifestId(id) && sourceSpellIds.includes(id) && ids.indexOf(id) === preparedIndex);
         const preparedSet = new Set(preparedSpellIds);
-        const knownSpellIds = source.knownSpellIds.filter((id, knownIndex, ids): boolean => {
-          if (!sourceSpellIds.includes(id) || ids.indexOf(id) !== knownIndex) return false;
+        const knownSpellIds = source.knownSpellIds.filter((
+          id,
+          knownIndex,
+          ids,
+        ): id is SpellManifestId => {
+          if (!isSpellManifestId(id) || !sourceSpellIds.includes(id) || ids.indexOf(id) !== knownIndex) {
+            return false;
+          }
           if (!preparedSet.has(id)) return true;
           gaps = gaps.append(issueGap(
             entry,
@@ -3660,8 +3922,12 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           ));
           return false;
         });
-        const grants = (source.grants ?? []).filter((grant, grantIndex, candidates): boolean => {
-          if (!sourceSpellIds.includes(grant.spellId)) return false;
+        const grants = (source.grants ?? []).filter((
+          grant,
+          grantIndex,
+          candidates,
+        ): grant is typeof grant & { readonly spellId: SpellManifestId } => {
+          if (!isSpellManifestId(grant.spellId) || !sourceSpellIds.includes(grant.spellId)) return false;
           if (candidates.findIndex((candidate): boolean => candidate.spellId === grant.spellId) !== grantIndex) {
             return false;
           }
@@ -3673,9 +3939,13 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
           ));
           return false;
         });
-        const resourceSpellUses = (source.resourceSpellUses ?? []).filter((use, useIndex, uses): boolean => {
-          if (!sourceSpellIds.includes(use.spellId)) {
-            if (!SPELL_MANIFEST.some((spell) => spell.id === use.spellId)) unknownSpellId = true;
+        const resourceSpellUses = (source.resourceSpellUses ?? []).filter((
+          use,
+          useIndex,
+          uses,
+        ): use is typeof use & { readonly spellId: SpellManifestId } => {
+          if (!isSpellManifestId(use.spellId) || !sourceSpellIds.includes(use.spellId)) {
+            if (!isSpellManifestId(use.spellId)) unknownSpellId = true;
             gaps = gaps.append(issueGap(
               entry,
               spellcastingSourcePath(
@@ -4032,10 +4302,13 @@ export function loadExternalPartyPack(value: unknown): PartyPackLoadResult {
         if (loadedSource !== undefined) {
           loadedSpellcasting[sourceIndex] = {
             ...loadedSource,
-            resourceSpellUses: resourceSpellUses.map((use) => ({
-              spellId: use.spellId,
-              resourcePoolId: limitedResourcePoolId(use.resourcePoolId),
-            })),
+            resourceSpellUses: resourceSpellUses.flatMap((use) =>
+              isSpellManifestId(use.spellId)
+                ? [{
+                    spellId: use.spellId,
+                    resourcePoolId: limitedResourcePoolId(use.resourcePoolId),
+                  }]
+                : []),
           };
         }
         return {

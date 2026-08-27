@@ -704,30 +704,38 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-const COMMAND_TYPES: ReadonlySet<EncounterCommand['type']> = new Set([
-  'roll_initiative',
-  'move',
-  'attack',
-  'opportunity_attack',
-  'decline_reaction',
-  'force_save',
-  'dash',
-  'disengage',
-  'dodge',
-  'spend_bonus_action',
-  'spend_reaction',
-  'activate_action_surge',
-  'heal',
-  'apply_effect',
-  'end_concentration',
-  'end_turn',
-]);
+const AGENT_COMMAND_TYPES = {
+  roll_initiative: true,
+  move: true,
+  attack: true,
+  opportunity_attack: true,
+  decline_reaction: true,
+  force_save: true,
+  dash: true,
+  disengage: true,
+  dodge: true,
+  spend_bonus_action: true,
+  spend_reaction: true,
+  activate_action_surge: true,
+  heal: true,
+  apply_effect: true,
+  end_concentration: true,
+  end_turn: true,
+} as const satisfies Partial<Record<EncounterCommand['type'], true>>;
+
+export type AgentEncounterCommandType = keyof typeof AGENT_COMMAND_TYPES;
+
+export function isAgentEncounterCommandType(
+  value: unknown,
+): value is AgentEncounterCommandType {
+  return typeof value === 'string' && Object.hasOwn(AGENT_COMMAND_TYPES, value);
+}
 
 function decodeEncounterCommand(value: unknown): EncounterCommand {
   if (!isRecord(value) || typeof value.type !== 'string') {
     throw new TypeError('Agent response action must be an encounter command object.');
   }
-  if (!COMMAND_TYPES.has(value.type as EncounterCommand['type'])) {
+  if (!isAgentEncounterCommandType(value.type)) {
     throw new TypeError('Agent response action has an unknown command type.');
   }
   return value as unknown as EncounterCommand;

@@ -358,7 +358,9 @@ describe('external party-pack boundary', () => {
   });
 
   it('preserves returned rule paths when the loader consumes attack issues', () => {
-    const candidate = structuredClone(pack());
+    const candidate = structuredClone(pack()) as unknown as {
+      members: Array<{ attacks: Array<Record<string, unknown>> }>;
+    };
     const firstAttack = candidate.members[0]!.attacks[0]!;
     firstAttack.masteryProperty = 'Topple';
     candidate.members[0]!.attacks.push({
@@ -524,7 +526,7 @@ describe('external party-pack boundary', () => {
       arming: { concentration: false, durationRounds: 2 },
     });
 
-    const malformed = structuredClone(candidate) as {
+    const malformed = structuredClone(candidate) as unknown as {
       members: Array<{ effects?: Array<{ dice?: { rerollBelow?: { threshold: number } }; packets?: Array<{ dice: { rerollBelow?: { threshold: number } } }> }> }>;
     };
     malformed.members[0]!.effects![0]!.packets![0]!.dice.rerollBelow!.threshold = 5;
@@ -554,7 +556,7 @@ describe('external party-pack boundary', () => {
       type: 'create_persistent_area', area: { origin: { kind: 'anchored' } },
     });
 
-    const malformed = structuredClone(candidate) as {
+    const malformed = structuredClone(candidate) as unknown as {
       members: Array<{ effects?: Array<{ hooks: Array<{ effect: { payload: { lifetime?: unknown } } }> }> }>;
     };
     delete malformed.members[0]!.effects![0]!.hooks[0]!.effect.payload.lifetime;
@@ -2067,7 +2069,10 @@ describe('external party-pack boundary', () => {
 
   it('unknown_spell_id_dropped refuses an unknown v2 spell id even when partial loading is allowed', () => {
     const candidate = structuredClone(pack(3, true));
-    objectSpellcasting(candidate.members[0]!).preparedSpellIds = ['not-in-the-181-spell-manifest'];
+    const rawSpellcasting = objectSpellcasting(candidate.members[0]!) as unknown as {
+      preparedSpellIds: string[];
+    };
+    rawSpellcasting.preparedSpellIds = ['not-in-the-181-spell-manifest'];
 
     expect(loadExternalPartyPack(candidate)).toMatchObject({
       status: 'refused',

@@ -18,8 +18,9 @@ import {
   type CharacterSheet,
 } from '../queries/character-sheet-builder';
 import { WeaponQueries } from '../queries/weapons';
-import { SPELL_MANIFEST } from '../combat/spells/manifest';
+import { SPELL_MANIFEST, type SpellManifestId } from '../combat/spells/manifest';
 import type {
+  ExternalPartyPackAttack,
   ExternalPartyPackMember,
   ExternalPartyPackV2,
 } from './party-pack';
@@ -76,7 +77,7 @@ function knownDamageType(value: string): KnownDamageType | null {
   return damageTypes.find((candidate) => candidate === value) ?? null;
 }
 
-function manifestId(name: string): string | null {
+function manifestId(name: string): SpellManifestId | null {
   const matches = SPELL_MANIFEST.filter(
     (spell) => spell.name === name && spell.status === 'implemented',
   );
@@ -172,28 +173,31 @@ function attacks(
         detail: `${weapon.name} has no unambiguous melee/ranged profile.`,
       };
     }
-    exported.push({
+    const attackBase = {
       attackId: `attack:weapon-${String(weapon.id)}`,
       kind: weapon.attack_kind,
       attackBonus: ability.attack_bonus,
       criticalFloor: 20,
       reachFeet: weapon.reach ? 10 : 5,
       rangeFeet: weapon.range.kind === 'ranged' ? weapon.range.near_feet : 5,
-      ...(weapon.mastery_selected && (weapon.mastery_property === 'Slow' || weapon.mastery_property === 'Topple')
-        ? {
-            masteryProperty: weapon.mastery_property,
-            ...(weapon.mastery_property === 'Topple'
-              ? { masterySaveDc: 8 + ability.attack_bonus }
-              : {}),
-          }
-        : {}),
       damage: [{
         damageTypeId: damageType,
         count: parsedDice.count,
         sides: parsedDice.sides,
         modifier: ability.damage_modifier,
       }],
-    });
+    } satisfies Omit<ExternalPartyPackAttack, 'masteryProperty' | 'masterySaveDc'>;
+    if (weapon.mastery_selected && weapon.mastery_property === 'Topple') {
+      exported.push({
+        ...attackBase,
+        masteryProperty: 'Topple',
+        masterySaveDc: 8 + ability.attack_bonus,
+      });
+    } else if (weapon.mastery_selected && weapon.mastery_property === 'Slow') {
+      exported.push({ ...attackBase, masteryProperty: 'Slow' });
+    } else {
+      exported.push(attackBase);
+    }
   }
   return { status: 'exported', attacks: exported };
 }
@@ -272,8 +276,8 @@ function spellcasting(
         detail: statistic?.detail ?? 'The spellcasting ability is absent.',
       };
     }
-    const preparedSpellIds: string[] = [];
-    const knownSpellIds: string[] = [];
+    const preparedSpellIds: SpellManifestId[] = [];
+    const knownSpellIds: SpellManifestId[] = [];
     for (const spell of group.spells) {
       const id = manifestId(spell.name);
       if (id === null) {
