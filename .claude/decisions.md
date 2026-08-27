@@ -7,6 +7,56 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D396 — OWNER: brainstorm round 8 rulings — AI-DM in v1, intent-based turn API (2026-08-27)
+
+Question round (codex sol-high + opus + supervisor merged 15 candidates):
+
+1. **Game-time model: DEFER TO FLYWHEEL DATA.** No binding between luna
+   low / terra medium / tiered; all three run through the room-generator
+   fixtures with KB + correction attached; multi-fixture numbers decide.
+2. **Turn interface: HYBRID menu+fiction**, refined by owner directive
+   (verbatim): "Can we make it so the ai agent can query the engine to say
+   what attack it wants and how much movement it is willing to spend and if
+   it is willing to get into melee range. Have the agent also send a backup
+   plan to do if there is not enough movement available for instance."
+   → **INTENT-BASED TURN API**: the agent declares intent + constraints
+   (attack choice, movement willingness, engagement stance) + a declarative
+   fallback; the ENGINE resolves pathing/reach/costs and executes primary or
+   fallback. The agent never emits coordinates. Narration stays free-text.
+3. **AI-DM is IN v1 as an optional mode** (owner chose against both
+   collaborators' third-track recommendation) — raises v1 reliability
+   requirements and couples the flywheel to the merged-tree gate.
+4. **Correction exhaustion: agent's declared fallback → one correction
+   round → deterministic sim-controller takes the turn, visibly marked
+   "auto-resolved"; always fail-closed on state (no partial execution).**
+5. **Turn latency: NO CEILING, quality first** (owner chose against the
+   recommended <10s/<20s band). Streamed narration is UX mitigation only;
+   KB arms are judged on quality alone, not latency.
+6. **Quality metric: LLM judge panel + owner calibration** — automated
+   blind rubric panel per batch (sol/opus/fable pattern), owner spot-rates
+   samples periodically to recalibrate. (First selection of "owner rates
+   everything" was a declared misclick.)
+7. **Checkpoint merge: AT BATCH-1 GREEN** — main + :4173 advance when the
+   batch-1 scoring run confirms; batch 2 continues on main.
+8. **AI-DM shipping (verbatim): "When running locally on a users machine,
+   with npm, let the public repo code interact with codex like we do now
+   locally."** → public repo carries a local-npm AI bridge that drives the
+   user's own codex CLI; the built browser artifact stays deterministic;
+   no key custody in the page, no hosting.
+
+Adopted by supervisor on collaborator convergence (not owner-asked, noted
+for the record): E08 stays as pre-registered, expanded model×effort matrix
+files as a NEW experiment; encounter sources normalize into one versioned
+encounter IR with provenance; KB measurement uses a frozen fixture basis
+plus a rolling fresh set; SA-subtree content is fixture-only and NEVER an
+input to KB authoring or prompts (one-directional wall); luna transcripts
+live outside git, mined findings and KB deltas are what gets committed; AI
+turns are replay-cached by (seed, prompt-hash); DM takeover is immediate
+but handback commits only at engine transaction boundaries; the AI seat is
+a proposer behind the DM-authoritative client (D391.16 intact);
+Colby-compatibility is defined by named assumptions + golden scenario
+outputs, not UI imitation.
+
 ## D395 — OWNER: import permissively licensed encounters and campaigns as fixture stock (2026-08-27)
 
 Verbatim: "Research permission licensed encounters and campaigns and bring
