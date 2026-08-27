@@ -1,0 +1,18 @@
+{
+  "version": "1.2.4",
+  "title": "The Ember Annex",
+  "story": "A hand-authored schema fixture, not a generator output.",
+  "rects": [
+    { "x": -2, "y": 0, "w": 7, "h": 6, "roomID": "entry" },
+    { "x": 5, "y": 2, "w": 7, "h": 6, "ending": true, "roomID": "vault" }
+  ],
+  "doors": [
+    { "x": 5, "y": 4, "dir": { "x": 1, "y": 0 }, "type": 1 },
+    { "x": -2, "y": 2, "dir": { "x": -1, "y": 0 }, "type": 2 }
+  ],
+  "notes": [
+    { "text": "A brazier marks the old crossing.", "ref": "1", "pos": { "x": 1, "y": 2 } }
+  ],
+  "columns": [],
+  "water": []
+}
