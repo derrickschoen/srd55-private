@@ -29,6 +29,21 @@ narrows to what happens WITHIN a round: one monolithic per-round prompt vs
 MCP-grounded micro-turns per creature. Cold-start only ever happens once
 per fight.
 
+**D397.3 (2026-08-27, verbatim): "The ai dm should run in a single session
+starting the start of the first fight and resume from there including
+following to subsequent rooms. Ai should also store the session id so that
+resume could be done if the browser session needs to resume. / The feedback
+rounds should also be in the same resumed session."** Ruling supersedes
+per-fight scoping: ONE AI session per dungeon run — cold start at the first
+fight, every subsequent round AND every subsequent room is a resume on that
+same session; engine-validation feedback/correction rounds also go into the
+same session (already the validated pattern: 8/10 one-round fixes were
+same-session resumes). The codex session id is persisted in the VTT's
+stored session state so a restored browser session can resume the same AI
+session. Arena/conversation harnesses and the local-npm bridge adopt
+run-scoped sessions; the committed arena CLI's per-fight scoping is to be
+widened at its next increment.
+
 ## D396 — OWNER: brainstorm round 8 rulings — AI-DM in v1, intent-based turn API (2026-08-27)
 
 Question round (codex sol-high + opus + supervisor merged 15 candidates):
