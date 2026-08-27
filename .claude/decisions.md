@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D397 — OWNER: conversational AI-DM sessions with the engine as an MCP server (2026-08-27)
+
+Verbatim: "Experiment with ways to have the ai be in conversation quickly
+when it starts and does shorter multi turn sessions while leveraging the
+engine as an mcp to keep the ai loops short and on track." Ruling: build an
+MCP server exposing the engine's query/intent surface (state summary, legal
+actions, path costs, intent validation/submission per D396.2) and measure
+conversational session patterns against the monolithic prompt: (A) current
+one-shot state-dump → full plan; (B) MCP-grounded micro-turns — tiny
+bootstrap, agent queries the engine tool-by-tool, declares one intent per
+creature; (C) persistent per-fight session — created warm (rules/KB
+preloaded), each round a short resume increment. Metrics: time-to-first-
+action, wall per creature-turn, tokens, legality, judged quality.
+
 ## D396 — OWNER: brainstorm round 8 rulings — AI-DM in v1, intent-based turn API (2026-08-27)
 
 Question round (codex sol-high + opus + supervisor merged 15 candidates):
