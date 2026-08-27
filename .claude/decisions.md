@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D399 — OWNER: install opencode + pi CLIs; MCP implementation leads (2026-08-27)
+
+Two rulings via AskUserQuestion after the MCP design reached consensus
+(round 2, committed 4a3bcf8a on wt/vtt): (1) **Install both** the opencode
+and pi CLIs on this machine so the conformance harness can turn all four
+adapter rows (codex / opencode / pi / claude-code) VERIFIED before the
+public repo ships them — supersedes the loud-UNVERIFIED interim stance in
+D398.2 once installs land. (2) **MCP implementation is the lead
+workstream** — next dispatches and quiet-machine windows go to building the
+real server per the frozen design's §11 migration order; kill batch 2,
+first flywheel cycle, and Track A/B continue as secondary.
+
 ## D398 — OWNER: real engine MCP server design (codex collab); opencode + pi agent support (2026-08-27)
 
 Verbatim: "Codex collab design a real mcp server designed to let ai agents
