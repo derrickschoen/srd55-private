@@ -7,6 +7,21 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D398 — OWNER: real engine MCP server design (codex collab); opencode + pi agent support (2026-08-27)
+
+Verbatim: "Codex collab design a real mcp server designed to let ai agents
+interact with the engine as well as possible. / Add opencode and pi support
+to go with codex support in the public repo." Rulings: (1) the quick D397
+server is a prototype; a designed-for-purpose MCP server gets a proper
+codex-collab design round (codex drafts, supervisor reviews, consensus loop
+≤3) covering the full tool surface, session lifecycle per D397.3,
+notifications/streaming, security (proposer-only, fail-closed, engine
+authoritative), versioning and conformance tests. (2) The public repo's
+local-npm AI bridge supports THREE agent CLIs: codex, opencode, and pi —
+one session-lifecycle abstraction (start / resume / persisted session id)
+with per-CLI adapters; exact CLI flags verified against installed binaries
+at implementation time, never assumed.
+
 ## D397 — OWNER: conversational AI-DM sessions with the engine as an MCP server (2026-08-27)
 
 Verbatim: "Experiment with ways to have the ai be in conversation quickly
