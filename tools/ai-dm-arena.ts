@@ -3,24 +3,27 @@ import { spawn } from 'node:child_process';
 import { appendFile, readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { EncounterState } from '../src/combat/encounter';
-import { adjacentCells, gridDistance, isCellInside, type GridCell } from '../src/combat/grid';
-import type { MonsterAction, MonsterAttackAction } from '../src/combat/statblock';
-import { STARTER_MONSTER_ROSTER } from '../src/combat/statblocks/roster';
-import { SPELL_MANIFEST } from '../src/combat/spells/manifest';
-import type { CombatantId } from '../src/combat/values';
+import { gridDistance } from '../src/combat/grid';
+import type { MonsterAttackAction } from '../src/combat/statblock';
 import {
   JSON_ROUND_PLAN_SURFACE,
   renderArenaPrompt,
   type ArenaPromptEnvelope,
 } from '../src/vtt/arena-prompt';
 import {
+  arenaAttackRange as attackRange,
+  arenaMonsterActions as monsterActions,
+  arenaTokenPosition as tokenPosition,
+  resolveArenaTarget as resolveTarget,
+  validateArenaPlan,
+} from '../src/vtt/arena-legality';
+import {
   DM_BRIDGE_PROTOCOL_VERSION,
-  type DecisionProgram,
-  type PlanAction,
   type RoundPlan,
-  type TargetSelector,
 } from '../src/vtt/dm-bridge/round-plan-contract';
 import { generateRoom } from '../src/vtt/room-generator';
+
+export { validateArenaPlan } from '../src/vtt/arena-legality';
 
 export const ARENA_EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const;
 export type ArenaEffort = (typeof ARENA_EFFORTS)[number];
@@ -123,207 +126,6 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     cwd: resolve(cwd),
     codexBin: values.get('--codex-bin') ?? 'codex',
   };
-}
-
-function tokenPosition(state: EncounterState, id: CombatantId): GridCell | null {
-  return state.tokens.find((token) => token.combatantId === id)?.position ?? null;
-}
-
-function subject(state: EncounterState, id: CombatantId) {
-  return state.combatants.find((candidate) => candidate.profile.id === id) ?? null;
-}
-
-function sameSide(state: EncounterState, left: CombatantId, right: CombatantId): boolean {
-  return subject(state, left)?.profile.kind === subject(state, right)?.profile.kind;
-}
-
-function resolveTarget(
-  state: EncounterState,
-  actor: CombatantId,
-  selector: TargetSelector,
-): CombatantId | null {
-  if (selector.kind === 'combatant') return selector.combatantId;
-  const origin = tokenPosition(state, actor);
-  const acting = subject(state, actor);
-  if (origin === null || acting === null) return null;
-  return state.combatants
-    .filter((candidate) => candidate.profile.kind !== acting.profile.kind && candidate.life !== 'dead')
-    .map((candidate) => ({ id: candidate.profile.id, position: tokenPosition(state, candidate.profile.id) }))
-    .filter((candidate): candidate is { readonly id: CombatantId; readonly position: GridCell } => candidate.position !== null)
-    .sort((left, right) =>
-      gridDistance(origin, left.position) - gridDistance(origin, right.position) ||
-      left.id.localeCompare(right.id))[0]?.id ?? null;
-}
-
-function monsterActions(state: EncounterState, actor: CombatantId): readonly MonsterAction[] {
-  const combatant = subject(state, actor);
-  if (combatant?.profile.kind !== 'monster') return [];
-  const statblockId = combatant.profile.statblockId;
-  const row = STARTER_MONSTER_ROSTER.find((candidate) => candidate.id === statblockId);
-  if (row?.statblock.sourceDetails.actions.kind !== 'present') return [];
-  return row.statblock.sourceDetails.actions.value;
-}
-
-function attackRange(action: MonsterAttackAction): number {
-  switch (action.delivery.kind) {
-    case 'melee': return action.delivery.reachFeet;
-    case 'ranged': return action.delivery.rangeFeet;
-    case 'melee_or_ranged': return action.delivery.rangeFeet;
-  }
-}
-
-function movementCost(
-  state: EncounterState,
-  actor: CombatantId,
-  destination: GridCell,
-): number | null {
-  const origin = tokenPosition(state, actor);
-  if (origin === null || !isCellInside(state.bounds, destination)) return null;
-  const occupied = new Set(state.tokens
-    .filter((token) => token.combatantId !== actor)
-    .map((token) => `${String(token.position.column)},${String(token.position.row)}`));
-  const blocked = new Set([
-    ...state.blockedCells.map((cell) => `${String(cell.column)},${String(cell.row)}`),
-    ...state.worldObjects.filter((object) => object.blocking.movement)
-      .flatMap((object) => object.footprint)
-      .map((cell) => `${String(cell.column)},${String(cell.row)}`),
-  ]);
-  const difficult = new Set(state.environment.difficultTerrainRegions
-    .flatMap((region) => region.cells)
-    .map((cell) => `${String(cell.column)},${String(cell.row)}`));
-  const destinationKey = `${String(destination.column)},${String(destination.row)}`;
-  if (occupied.has(destinationKey) || blocked.has(destinationKey)) return null;
-  const costs = new Map<string, number>([[`${String(origin.column)},${String(origin.row)}`, 0]]);
-  const pending: Array<{ readonly cell: GridCell; readonly cost: number }> = [{ cell: origin, cost: 0 }];
-  while (pending.length > 0) {
-    pending.sort((left, right) => left.cost - right.cost);
-    const current = pending.shift();
-    if (current === undefined) break;
-    const currentKey = `${String(current.cell.column)},${String(current.cell.row)}`;
-    if (current.cost !== costs.get(currentKey)) continue;
-    if (currentKey === destinationKey) return current.cost;
-    for (const next of adjacentCells(state.bounds, current.cell)) {
-      const key = `${String(next.column)},${String(next.row)}`;
-      if (occupied.has(key) || blocked.has(key)) continue;
-      const cost = current.cost + (difficult.has(key) ? 10 : 5);
-      if (cost >= (costs.get(key) ?? Number.POSITIVE_INFINITY)) continue;
-      costs.set(key, cost);
-      pending.push({ cell: next, cost });
-    }
-  }
-  return null;
-}
-
-function actionRefusals(
-  action: PlanAction,
-  actor: CombatantId,
-  state: EncounterState,
-): readonly string[] {
-  const acting = subject(state, actor);
-  const origin = tokenPosition(state, actor);
-  if (acting?.profile.kind !== 'monster' || origin === null) return [`${actor}: actor is not a placed monster`];
-  const actions = monsterActions(state, actor);
-  const refusals: string[] = [];
-  if (action.kind === 'retreat_toward') {
-    const budget = action.maximumFeet ?? acting.profile.rules.speed;
-    if (budget > acting.profile.rules.speed) refusals.push(`${actor}: movement exceeds speed`);
-    const cost = movementCost(state, actor, action.destination);
-    if (cost === null) refusals.push(`${actor}: destination is blocked, occupied, or unreachable`);
-    else if (cost > budget) refusals.push(`${actor}: route costs ${String(cost)} feet including difficult terrain`);
-    return refusals;
-  }
-  if (action.kind === 'move_toward') {
-    if ((action.maximumFeet ?? acting.profile.rules.speed) > acting.profile.rules.speed) {
-      refusals.push(`${actor}: movement exceeds speed`);
-    }
-  }
-  if (action.kind === 'use_action' && action.action === 'action_surge') {
-    const available = acting.profile.rules.featureEffects?.some(
-      (effect) => effect.payload.kind === 'action_surge',
-    ) ?? false;
-    if (!available) refusals.push(`${actor}: Action Surge is absent from the combatant profile`);
-  }
-  if (!('target' in action) || action.target === null) return refusals;
-  const target = resolveTarget(state, actor, action.target);
-  if (target === null || subject(state, target) === null) return [...refusals, `${actor}: target is absent`];
-  if (sameSide(state, actor, target)) refusals.push(`${actor}: target is on the actor's side`);
-  const targetPosition = tokenPosition(state, target);
-  if (targetPosition === null) return [...refusals, `${actor}: target has no token`];
-  const distance = gridDistance(origin, targetPosition);
-  if (action.kind === 'attack' || action.kind === 'bonus_attack') {
-    const selected = action.kind === 'attack' && action.attackId !== undefined
-      ? actions.find((candidate): candidate is MonsterAttackAction =>
-          candidate.kind === 'attack' && candidate.id === action.attackId)
-      : actions.find((candidate): candidate is MonsterAttackAction => candidate.kind === 'attack');
-    if (selected === undefined) refusals.push(`${actor}: attack is absent from the statblock`);
-    else if (distance > attackRange(selected)) refusals.push(`${actor}: target is outside ${selected.id} reach/range`);
-  }
-  if (action.kind === 'force_save') {
-    const selected = actions.find((candidate) => candidate.kind === 'saving_throw');
-    if (selected === undefined) refusals.push(`${actor}: saving-throw action is absent from the statblock`);
-    else if (distance > selected.target.rangeFeet) refusals.push(`${actor}: save target is outside action range`);
-  }
-  if (action.kind === 'cast_spell') {
-    const spellcasting = actions.find((candidate) =>
-      candidate.kind === 'spellcasting' && candidate.spells.some((spell) => spell.id === action.spellId));
-    if (spellcasting === undefined) refusals.push(`${actor}: spell is absent from the statblock`);
-  }
-  return refusals;
-}
-
-function slotCost(action: PlanAction): 0 | 1 {
-  if (action.kind !== 'cast_spell') return 0;
-  return SPELL_MANIFEST.find((spell) => spell.id === action.spellId)?.level === 0 ? 0 : 1;
-}
-
-function maximumSlotActions(program: DecisionProgram): number {
-  switch (program.kind) {
-    case 'action':
-      return slotCost(program.action) +
-        (program.riders ?? []).reduce((total, rider) =>
-          total + slotCost(rider.followUpAction), 0);
-    case 'if':
-      return Math.max(maximumSlotActions(program.then), maximumSlotActions(program.else));
-    case 'priority':
-      return Math.max(...program.choices.map(maximumSlotActions));
-  }
-}
-
-function programActions(program: DecisionProgram): readonly PlanAction[] {
-  switch (program.kind) {
-    case 'action': return [program.action, ...(program.riders ?? []).map((rider) => rider.followUpAction)];
-    case 'if': return [...programActions(program.then), ...programActions(program.else)];
-    case 'priority': return program.choices.flatMap(programActions);
-  }
-}
-
-export function validateArenaPlan(
-  plan: RoundPlan,
-  state: EncounterState,
-  envelope?: ArenaPromptEnvelope,
-): readonly string[] {
-  const refusals: string[] = [];
-  if (envelope !== undefined && (
-    plan.encounterId !== envelope.encounterId ||
-    plan.requestId !== envelope.requestId ||
-    plan.expectedRevision !== envelope.expectedRevision ||
-    plan.round !== envelope.round
-  )) refusals.push('round-plan envelope does not match the actual room request');
-  const expected = state.combatants.flatMap((combatant) =>
-    combatant.profile.kind === 'monster' && combatant.life !== 'dead'
-      ? [combatant.profile.id]
-      : []);
-  const actual = plan.monsters.map((entry) => entry.monsterId);
-  if (new Set(actual).size !== actual.length) refusals.push('monster programs contain duplicate actors');
-  for (const id of expected) if (!actual.includes(id)) refusals.push(`${id}: living monster program is missing`);
-  for (const entry of plan.monsters) {
-    if (!expected.includes(entry.monsterId)) refusals.push(`${entry.monsterId}: actor is not a living monster`);
-    if (maximumSlotActions(entry.program) > 1) refusals.push(`${entry.monsterId}: program can spend more than one slot`);
-    for (const action of programActions(entry.program)) {
-      refusals.push(...actionRefusals(action, entry.monsterId, state));
-    }
-  }
-  return refusals;
 }
 
 function dryRunPlan(state: EncounterState, envelope: ArenaPromptEnvelope): RoundPlan {
