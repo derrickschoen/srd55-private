@@ -21,6 +21,14 @@ creature; (C) persistent per-fight session — created warm (rules/KB
 preloaded), each round a short resume increment. Metrics: time-to-first-
 action, wall per creature-turn, tokens, legality, judged quality.
 
+**D397.2 (2026-08-27, verbatim): "Each round should definitely be a
+resume."** Ruling: the persistent per-fight session is BOUND, not an
+experiment arm — every combat round is a short resume increment on the
+fight's warm session (rules/KB preloaded at session start). The experiment
+narrows to what happens WITHIN a round: one monolithic per-round prompt vs
+MCP-grounded micro-turns per creature. Cold-start only ever happens once
+per fight.
+
 ## D396 — OWNER: brainstorm round 8 rulings — AI-DM in v1, intent-based turn API (2026-08-27)
 
 Question round (codex sol-high + opus + supervisor merged 15 candidates):
