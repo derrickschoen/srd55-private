@@ -7,6 +7,70 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D395 — OWNER: import permissively licensed encounters and campaigns as fixture stock (2026-08-27)
+
+Verbatim: "Research permission licensed encounters and campaigns and bring
+them in so we have a large selection to choose from and iterate on with the
+seeds." Ruling: build a vetted library of externally authored encounters/
+campaigns to serve as fixtures for the D394.3 luna-low iteration flywheel,
+alongside the procedural generator. The licensing wall governs: public repo
+admits CC-BY 4.0 (and strictly-more-permissive CC0/public domain); CC-BY-SA
+requires an explicit owner ruling before any import (ShareAlike could bind
+derived content); NC and ORC/OGL-only content stays out of the public repo.
+Supervisor owns license verdicts; codex does conversion only after a source
+is cleared.
+
+**D395.2 (2026-08-27): CC-BY-SA admitted, segregated.** Owner ruling via
+question round: CC-BY-SA sources (One Page Dungeon Contest corpus, Basic
+Fantasy anthologies) may enter the public repo in a segregated
+`content/cc-by-sa/` subtree with its own license file; converted encounters
+from those sources remain SA-licensed; engine code and all other content
+stay CC-BY-only. Cleared-now sources: Watabou One Page Dungeon JSON (free
+use, attribution optional), Escape the Astral Tower (CC0), A5E SRD tables
+(CC-BY 4.0, already attributed). Research doc:
+docs/design/2026-08-27-licensed-encounter-sourcing.md.
+
+## D394 — OWNER: engine legality feedback to the AI DM + knowledge-base iteration experiment (2026-08-27)
+
+Owner, on the screening probe's recurring illegality ("the drummer given an
+action outside its statblock"): "can we setup feedback from the engineer so
+Luna knows when it did something illegal." Ruling: the engine's validation
+layer feeds precise refusal messages back to the model for a bounded
+correction round; measure fix rate and added latency (connects to E11's
+correction-budget design).
+
+Second directive, verbatim: "Also experiment with iterating on a 'ai-dm'
+knowledge base to measure improvements on 2 dimensions: quality and speed
+based on what you put in the kb. !!important: more is not always better!!"
+Ruling: KB-content arms are measured on BOTH latency and judged quality; the
+kitchen-sink arm exists specifically to test whether more KB content hurts.
+
+**D394.2 (2026-08-27, verbatim): "I would rather run a lot of Luna low
+sessions and have high intelligence models build it a kb. So game time
+decisions are served by Luna low because it is the fastest."** Target
+architecture: game-time controller = luna low; KB authored and iterated
+OFFLINE by high-intelligence models (sol high / Fable / opus) from observed
+luna-low failures. KB arms are therefore measured ON luna low. Supervisor
+datum noted for the record: in the screening probe terra low had lower raw
+latency (9.9s vs 23.2s median) but produced 2 illegal plans in 3 reps.
+**Owner correction (2026-08-27): "There is not enough data to say that Terra
+is worse than Luna. Terra is supposed to be smarter on average."** Conceded:
+n=3 on one fixture ranks nothing (95% CI on 2/3 failure ≈ 9-99%), and terra
+medium beat luna medium on both quality and speed in the same probe. A
+powered reliability run (10 reps/config, then multi-fixture via the room
+generator) is queued before any terra-vs-luna claim is used for routing.
+
+**D394.3 (2026-08-27, verbatim): "I have basically unlimited Luna low usage
+and we could collect a lot of iterations. Especially is we build more varied
+rooms to run. Maybe even a dungeon generator like Diablo uses."** Ruling:
+scale the luna-low data flywheel with a seeded procedural room/encounter
+generator (Diablo-style templates, deterministic per seed) so KB iteration is
+measured across varied fixtures, not one hand-built room. Volume of luna-low
+sessions is a non-constraint (consistent with D381). Pipeline: generator →
+typed encounter state → DM-prompt renderer → luna-low batch runner → engine
+legality validation + scoring → offline failure mining by high-intelligence
+models → KB revision → re-measure.
+
 ## F28 — supervisor repeated the F19 checkout mistake on an uncommitted lane (2026-08-27)
 
 During the wave-4+5 harvest, the supervisor (Claude) spot-checked prevention
