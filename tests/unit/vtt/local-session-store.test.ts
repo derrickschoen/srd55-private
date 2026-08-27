@@ -114,6 +114,34 @@ async function readStoredValue(
   return value;
 }
 
+async function readAllStoredValues(
+  indexedDb: IDBFactory,
+  databaseName: string,
+  storeName: string,
+): Promise<unknown[]> {
+  const opening = indexedDb.open(databaseName, 1);
+  const database = await requestValue(opening);
+  const transaction = database.transaction(storeName, 'readonly');
+  const values: unknown[] = await requestValue(transaction.objectStore(storeName).getAll());
+  await completed(transaction);
+  database.close();
+  return values;
+}
+
+async function readAllStoredKeys(
+  indexedDb: IDBFactory,
+  databaseName: string,
+  storeName: string,
+): Promise<IDBValidKey[]> {
+  const opening = indexedDb.open(databaseName, 1);
+  const database = await requestValue(opening);
+  const transaction = database.transaction(storeName, 'readonly');
+  const keys = await requestValue(transaction.objectStore(storeName).getAllKeys());
+  await completed(transaction);
+  database.close();
+  return keys;
+}
+
 async function seedStoredRevision(
   indexedDb: IDBFactory,
   databaseName: string,
@@ -324,6 +352,10 @@ describe('IndexedDB durable VTT session adapter', () => {
     expect(store.revisions(source.id)).toHaveLength(2);
     expect(store.exported(source.id)).toBe(source.bytes);
     store.close();
+    expect(await readAllStoredKeys(indexedDb, 'bulk-import-contract', 'revisions')).toEqual([
+      `${source.id}\u0000000000000001`,
+      `${source.id}\u0000000000000002`,
+    ]);
 
     const reopened = await IndexedDbBrowserSessionStore.open(indexedDb, new MemoryStorage(), {
       databaseName: 'bulk-import-contract',
@@ -443,6 +475,69 @@ describe('IndexedDB durable VTT session adapter', () => {
     expect(store.revisions(source.id)).toEqual([]);
     expect(store.revisions(other.id)).toHaveLength(2);
     store.close();
+  });
+
+  it('persists snapshot removal and both rename paths across reopen', async () => {
+    const indexedDb = new IDBFactory();
+    const storage = new MemoryStorage();
+    const source = legacySession('session:durable-save-operations');
+    const removed = legacySession('session:durable-save-removed');
+    putLegacyAutosave(storage, source, {
+      storageId: 'per_round:durable-save-operations:000000000002:round_boundary',
+    });
+    putLegacyAutosave(storage, removed, {
+      storageId: 'per_round:durable-save-removed:000000000002:round_boundary',
+    });
+    const databaseName = 'durable-save-operations';
+    const store = await IndexedDbBrowserSessionStore.open(indexedDb, storage, { databaseName });
+    const sourceSnapshot = store.savedSessions().find((save) => save.sessionId === source.id);
+    const removedSnapshot = store.savedSessions().find((save) => save.sessionId === removed.id);
+    if (sourceSnapshot === undefined || removedSnapshot === undefined) {
+      throw new Error('Expected both durable autosave fixtures.');
+    }
+
+    await store.renameStored(sourceSnapshot.storageId, source.id, 'Durable snapshot name');
+    await store.renameStored(`session:${source.id}`, source.id, 'Durable session name');
+    await store.removeStored(removedSnapshot.storageId, removed.id);
+    store.close();
+
+    const reopened = await IndexedDbBrowserSessionStore.open(indexedDb, storage, { databaseName });
+    expect(reopened.savedSessions()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        storageId: sourceSnapshot.storageId,
+        name: 'Durable snapshot name',
+        retention: { kind: 'named' },
+      }),
+      expect.objectContaining({
+        storageId: `session:${source.id}`,
+        name: 'Durable session name',
+        retention: { kind: 'named' },
+      }),
+    ]));
+    expect(reopened.savedSessions().some((save) => save.storageId === removedSnapshot.storageId))
+      .toBe(false);
+    expect(reopened.revisions(removed.id)).toHaveLength(2);
+    reopened.close();
+  });
+
+  it('removes only the selected session snapshots from durable storage', async () => {
+    const indexedDb = new IDBFactory();
+    const storage = new MemoryStorage();
+    const selected = legacySession('session:remove-selected-snapshots');
+    const retained = legacySession('session:remove-retained-snapshots');
+    putLegacyAutosave(storage, selected, { storageId: 'per_round:remove-selected:one' });
+    putLegacyAutosave(storage, selected, { storageId: 'encounter_boundary:remove-selected:two' });
+    putLegacyAutosave(storage, retained, { storageId: 'per_round:remove-retained:one' });
+    const databaseName = 'remove-selected-snapshots';
+    const store = await IndexedDbBrowserSessionStore.open(indexedDb, storage, { databaseName });
+
+    await store.remove(selected.id);
+    store.close();
+
+    const snapshots = await readAllStoredValues(indexedDb, databaseName, 'snapshots');
+    expect(snapshots).toEqual([
+      expect.objectContaining({ sessionId: retained.id, storageId: 'per_round:remove-retained:one' }),
+    ]);
   });
 
   it('turns direct IndexedDB failures into a sticky typed operation failure', async () => {
@@ -586,6 +681,7 @@ describe('IndexedDB durable VTT session adapter', () => {
       { ...valid, bytes: 1 },
       { ...valid, trigger: 'unknown_boundary' },
       { ...valid, pool: 'unknown_pool' },
+      { ...valid, pool: 'unknown_pool', retention: { kind: 'named' } },
       { ...valid, retention: { kind: 'autosave', pool: 'encounter_boundary' } },
     ];
 
@@ -630,6 +726,24 @@ describe('IndexedDB durable VTT session adapter', () => {
       name: `per_round:legacy-trigger:${String(index)}`,
       trigger: normalized,
     })));
+    store.close();
+  });
+
+  it('preserves a valid named legacy autosave retention', async () => {
+    const storage = new MemoryStorage();
+    const source = legacySession('session:named-legacy-autosave');
+    putLegacyAutosave(storage, source, {
+      storageId: 'per_round:named-legacy-autosave:point',
+      retention: { kind: 'named' },
+    });
+
+    const store = await IndexedDbBrowserSessionStore.open(new IDBFactory(), storage, {
+      databaseName: 'named-legacy-autosave',
+    });
+    expect(store.savedSessions()).toContainEqual(expect.objectContaining({
+      storageId: 'per_round:named-legacy-autosave:point',
+      retention: { kind: 'named' },
+    }));
     store.close();
   });
 
@@ -834,8 +948,11 @@ describe('IndexedDB durable VTT session adapter', () => {
     for (let index = 0; index <= combatantCount; index += 1) await host.skipTurn();
     await store.flush();
 
-    expect(store.savedSessions().filter((save) => save.name === 'Round — round boundary — r2'))
-      .toHaveLength(1);
+    const roundBoundary = store.savedSessions().filter(
+      (save) => save.name === 'Round — round boundary — r2',
+    );
+    expect(roundBoundary).toHaveLength(1);
+    expect(roundBoundary[0]?.storageId).toContain(':0000000000');
     host.close();
     await store.flush();
     store.close();
@@ -917,6 +1034,8 @@ describe('IndexedDB durable VTT session adapter', () => {
     await store.flush();
     expect(transactions).toHaveBeenCalledTimes(1);
     expect(store.revisions(encounterSessionId('session:batched-writes'))).toHaveLength(6);
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 10));
+    expect(transactions).toHaveBeenCalledTimes(1);
     transactions.mockRestore();
     host.close();
     await store.flush();
@@ -1231,7 +1350,10 @@ describe('IndexedDB durable VTT session adapter', () => {
       }
     }
 
-    const store = await IndexedDbBrowserSessionStore.open(new IDBFactory(), storage);
+    const indexedDb = new IDBFactory();
+    const store = await IndexedDbBrowserSessionStore.open(indexedDb, storage, {
+      databaseName: 'prune-cross-pool-durable',
+    });
     const saves = store.savedSessions();
     expect(saves.filter((save) => save.retention.kind === 'autosave' && save.retention.pool === 'per_round')).toHaveLength(10);
     expect(saves.filter((save) => save.retention.kind === 'autosave' && save.retention.pool === 'encounter_boundary')).toHaveLength(10);
@@ -1240,5 +1362,7 @@ describe('IndexedDB durable VTT session adapter', () => {
       ...Array.from({ length: 10 }, (_unused, offset) => `per_round-${String(offset + 15)}`),
     ].sort());
     store.close();
+    expect(await readAllStoredValues(indexedDb, 'prune-cross-pool-durable', 'snapshots'))
+      .toHaveLength(20);
   });
 });

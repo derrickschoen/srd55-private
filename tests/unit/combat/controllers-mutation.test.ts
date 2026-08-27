@@ -22,6 +22,7 @@ import type { EncounterCommand, EncounterEvent } from '../../../src/combat/event
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
   armorClass,
+  combatantId,
   damageType,
   dieSides,
   encounterEffectId,
@@ -512,6 +513,33 @@ describe('controller mutation contract: player-character ranking', () => {
     ]))).toMatchObject({ type: 'attack', target: enemy.id });
   });
 
+  it('treats missing and dead allies and missing hostiles as non-targets', async () => {
+    const actor = playerProfile('absent-target-actor', { initiativeBonus: 20 });
+    const deadAlly = playerProfile('absent-target-dead-ally', { hitPoints: 20, initiativeBonus: 0 });
+    const enemy = monsterProfile('absent-target-enemy', { initiativeBonus: -20 });
+    const missing = combatantId('combatant:absent-target-missing');
+    const state = withHitPoints(startedState([actor, deadAlly, enemy]), deadAlly.id, 0, 'dead');
+    const ordinary = attack(actor.id, enemy.id);
+
+    expect(await chooseAction(dmRequest(state, actor.id, [
+      opportunityAttack(actor.id, missing),
+      spell(actor.id, 'healing-word', [missing]),
+      spell(actor.id, 'cure-wounds', [deadAlly.id]),
+      ordinary,
+    ]))).toBe(ordinary);
+  });
+
+  it('keeps revivify ahead of an opportunity attack at the mutated negative-rank boundary', async () => {
+    const actor = playerProfile('revivify-rank-boundary-actor', { initiativeBonus: 20 });
+    const enemy = monsterProfile('revivify-rank-boundary-enemy', { initiativeBonus: -20 });
+    const state = withHitPoints(startedState([actor, enemy]), enemy.id, 0, 'dying');
+
+    await expect(chooseAction(dmRequest(state, actor.id, [
+      opportunityAttack(actor.id, enemy.id),
+      spell(actor.id, 'revivify', [actor.id]),
+    ]))).resolves.toMatchObject({ type: 'cast_spell', spellId: 'revivify' });
+  });
+
   it('sorts healing targets by priority before id and exposes that choice through command rank', async () => {
     const healer = playerProfile('heal-sort-healer', { initiativeBonus: 20 });
     const healthy = playerProfile('heal-sort-z-healthy', { hitPoints: 20, initiativeBonus: 0 });
@@ -637,6 +665,23 @@ describe('controller mutation contract: player-character ranking', () => {
     ]);
     const mixed = spell(actor.id, 'z-distance-focus', [near.id, far.id]);
     const middleOnly = spell(actor.id, 'a-distance-middle', [middle.id]);
+
+    expect(await chooseAction(dmRequest(state, actor.id, [middleOnly, mixed]))).toBe(mixed);
+  });
+
+  it('reorders a far-first equal-HP spell target before comparing the selected distance', async () => {
+    const actor = playerProfile('spell-distance-reorder-actor', { initiativeBonus: 20 });
+    const far = monsterProfile('spell-distance-reorder-a-far', { hitPoints: 5, initiativeBonus: 0 });
+    const near = monsterProfile('spell-distance-reorder-z-near', { hitPoints: 5, initiativeBonus: -5 });
+    const middle = monsterProfile('spell-distance-reorder-middle', { hitPoints: 5, initiativeBonus: -20 });
+    const state = stateAtPositions([
+      { profile: actor, column: 0 },
+      { profile: far, column: 5 },
+      { profile: near, column: 2 },
+      { profile: middle, column: 3 },
+    ]);
+    const mixed = spell(actor.id, 'z-distance-reordered', [far.id, near.id]);
+    const middleOnly = spell(actor.id, 'a-distance-reordered', [middle.id]);
 
     expect(await chooseAction(dmRequest(state, actor.id, [middleOnly, mixed]))).toBe(mixed);
   });
@@ -976,6 +1021,102 @@ describe('controller mutation contract: player-character ranking', () => {
       { type: 'move', actor: actor.id, path: [lower], cause: 'voluntary' },
       { type: 'move', actor: actor.id, path: [upper], cause: 'voluntary' },
     ]))).toEqual({ type: 'move', actor: actor.id, path: [upper], cause: 'voluntary' });
+  });
+
+  it('ignores cover available only against a dead hostile', async () => {
+    const actor = playerProfile('ranged-dead-cover-actor', { initiativeBonus: 20 });
+    const living = monsterProfile('ranged-dead-cover-living', { initiativeBonus: 0 });
+    const dead = monsterProfile('ranged-dead-cover-dead', { initiativeBonus: -20 });
+    const cover: WorldObject = {
+      id: worldObjectId('object:ranged-dead-cover'),
+      name: 'Dead-hostile-only cover',
+      kind: 'barrier',
+      position: { column: 8, row: 2 },
+      footprint: [{ column: 8, row: 2 }],
+      durability: { kind: 'indestructible' },
+      armorClass: armorClass(12),
+      damageResponses: [],
+      blocking: { movement: false, lineOfSight: false, cover: 'half' },
+      createdRevision: 0,
+    };
+    const initial = createEncounter({
+      bounds: { columns: 14, rows: 3 },
+      combatants: [actor, living, dead],
+      tokens: [placedToken(actor, 4, 1), placedToken(living, 1, 1), placedToken(dead, 10, 2)],
+      worldObjects: [cover],
+    });
+    let base = reduceEncounter(initial, { type: 'roll_initiative' }, () => 0.5).state;
+    base = withHitPoints(base, dead.id, 0, 'dead');
+    const upper = { column: 5, row: 0 };
+    const lower = { column: 5, row: 2 };
+    expect(coverTierBetweenObjects(base.worldObjects, upper, { column: 10, row: 2 })).toBe('none');
+    expect(coverTierBetweenObjects(base.worldObjects, lower, { column: 10, row: 2 })).toBe('half');
+    const state = withEvents(base, [{
+      sequence: base.nextEventSequence,
+      type: 'spell_cast',
+      caster: actor.id,
+      spellId: 'eldritch-blast',
+      slotLevel: null,
+      targets: [living.id],
+    }]);
+
+    expect(await chooseAction(dmRequest(state, actor.id, [
+      { type: 'move', actor: actor.id, path: [lower], cause: 'voluntary' },
+      { type: 'move', actor: actor.id, path: [upper], cause: 'voluntary' },
+    ]))).toEqual({ type: 'move', actor: actor.id, path: [upper], cause: 'voluntary' });
+  });
+
+  it('keeps non-mastery movement below an attack and ignores adjacent allies after a ranged action', async () => {
+    const actor = playerProfile('ordinary-movement-actor', { initiativeBonus: 20 });
+    const ally = playerProfile('ordinary-movement-ally', { initiativeBonus: 0 });
+    const enemy = monsterProfile('ordinary-movement-enemy', { initiativeBonus: -20 });
+    const base = stateAtPositions([
+      { profile: actor, column: 4 },
+      { profile: ally, column: 5 },
+      { profile: enemy, column: 1 },
+    ], 12);
+    const ordinaryAttack = attack(actor.id, enemy.id);
+    expect(await chooseAction(dmRequest(base, actor.id, [move(actor.id, 3), ordinaryAttack])))
+      .toBe(ordinaryAttack);
+
+    const ranged = withEvents(base, [{
+      sequence: base.nextEventSequence,
+      type: 'spell_cast',
+      caster: actor.id,
+      spellId: 'eldritch-blast',
+      slotLevel: null,
+      targets: [enemy.id],
+    }]);
+    expect(await chooseAction(dmRequest(ranged, actor.id, [
+      { type: 'end_turn', actor: actor.id },
+      move(actor.id, 5),
+    ]))).toEqual(move(actor.id, 5));
+  });
+
+  it('ignores dead hostiles in retreat distance and prefers the farther of two valid retreats', async () => {
+    const actor = playerProfile('dead-retreat-actor', { initiativeBonus: 20 });
+    const living = monsterProfile('dead-retreat-living', { initiativeBonus: 0 });
+    const dead = monsterProfile('dead-retreat-dead', { initiativeBonus: -20 });
+    let base = stateAtPositions([
+      { profile: actor, column: 4 },
+      { profile: living, column: 1 },
+      { profile: dead, column: 6 },
+    ], 12);
+    base = withHitPoints(base, dead.id, 0, 'dead');
+    const state = withEvents(base, [{
+      sequence: base.nextEventSequence,
+      type: 'spell_cast',
+      caster: actor.id,
+      spellId: 'eldritch-blast',
+      slotLevel: null,
+      targets: [living.id],
+    }]);
+
+    expect(await chooseAction(dmRequest(state, actor.id, [
+      move(actor.id, 5),
+      move(actor.id, 6),
+      { type: 'end_turn', actor: actor.id },
+    ]))).toEqual(move(actor.id, 6));
   });
 
   it('rejects an already-aborted algorithm request and an empty legal-action set', async () => {
@@ -1321,6 +1462,21 @@ describe('controller mutation contract: turn-program enumeration', () => {
       actor.id,
       3,
     )).toEqual(candidates.slice(0, 3));
+  });
+
+  it('excludes dead enemies from monster turn programs', () => {
+    const actor = monsterProfile('program-dead-monster', { initiativeBonus: 20 });
+    const dead = playerProfile('program-dead-enemy', { initiativeBonus: -20 });
+    const state = withHitPoints(startedState([actor, dead]), dead.id, 0, 'dead');
+
+    expect(new AlgorithmController().enumerateTurnPrograms(
+      dmVisibleEncounter(projectDmView(state)),
+      actor.id,
+      20,
+    ).map((candidate) => candidate.program)).toEqual([
+      { kind: 'action', action: { kind: 'use_action', action: 'dodge' } },
+      { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+    ]);
   });
 
   it('groups equal-distance monster attacks ahead of saves using score then stable key', () => {

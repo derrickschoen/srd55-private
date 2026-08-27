@@ -15,7 +15,9 @@ import {
   VANE_WARREN_SOUND_DRUM_ACTION_ID,
   VANE_WARREN_TPK_SCENARIOS,
   advanceVaneWarrenAlarm,
+  breakVaneWarrenOilCask,
   createVaneWarrenFight,
+  deployVaneWarrenConditionalJoiners,
   igniteVaneWarrenSurfaceFromBrazier,
   reduceVaneWarrenEncounter,
   reduceVaneWarrenWorldObjectAction,
@@ -435,6 +437,106 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
     expect(state.transitions).toEqual([]);
   });
 
+  it('covers the fight-construction refusal contract and exact scenario boundary', () => {
+    expect(() => createVaneWarrenFight('cinder-rite', players().slice(0, 4)))
+      .toThrow('exactly five player characters');
+    const monster = fight('iron-voice').encounter.combatants.find(
+      (subject) => subject.profile.kind === 'monster',
+    )?.profile;
+    if (monster === undefined) throw new Error('Construction refusal fixture has no monster.');
+    expect(() => createVaneWarrenFight('cinder-rite', [...players().slice(0, 4), monster]))
+      .toThrow('exactly five player characters');
+    expect(() => createVaneWarrenFight('iron-voice', players(), 'tpk-clean'))
+      .toThrow('tpk-clean is configured only for The Cinder Rite.');
+    expect(() => createVaneWarrenFight('missing' as VaneWarrenFightId, players()))
+      .toThrow('Unknown Vane Warren fight missing.');
+  });
+
+  it('rejects invalid alarm rounds and a sounded wave absent from the fight manifest', () => {
+    const initial = fight('cinder-rite');
+    for (const round of [0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => advanceVaneWarrenAlarm(initial, round)).toThrow(
+        'Alarm advancement requires a positive round.',
+      );
+    }
+    const drummer = combatantIdFor(initial, 'cinder-guard-b');
+    const sounded = useVaneWarrenWarDrum(initial, drummer);
+    if (sounded.alarm.kind !== 'sounded') throw new Error('Expected a sounded alarm fixture.');
+    const corrupt: VaneWarrenEncounterState = {
+      ...sounded,
+      alarm: {
+        ...sounded.alarm,
+        waves: [{ id: 'missing-wave', deployAtRound: 1, status: 'pending' }],
+      },
+    };
+    expect(() => advanceVaneWarrenAlarm(corrupt, 1)).toThrow(
+      'Alarm wave missing-wave is not listed for The Cinder Rite.',
+    );
+  });
+
+  it('deploys conditional joiners exactly at half HP and only once', () => {
+    const initial = fight('last-muster');
+    expect(deployVaneWarrenConditionalJoiners(initial)).toBe(initial);
+    const leader = combatantIdFor(initial, initial.fight.leaderRosterId);
+    const bloodied: VaneWarrenEncounterState = {
+      ...initial,
+      encounter: {
+        ...initial.encounter,
+        round: 0,
+        combatants: initial.encounter.combatants.map((subject) => subject.profile.id === leader
+          ? { ...subject, hitPoints: subject.profile.rules.hitPointMaximum / 2 }
+          : subject),
+      },
+    };
+
+    const deployed = deployVaneWarrenConditionalJoiners(bloodied);
+    expect(deployed.deployedRosterIds).toContain('muster-joiner-a');
+    expect(deployed.encounter.combatants).toContainEqual(expect.objectContaining({
+      profile: expect.objectContaining({ id: 'combatant:vane-warren:last-muster:muster-joiner-a' }),
+    }));
+    expect(deployed.transitions.at(-1)).toEqual({
+      kind: 'conditional_joiners_deployed',
+      round: 1,
+      ids: ['muster-joiner-a'],
+    });
+    expect(deployVaneWarrenConditionalJoiners(deployed)).toBe(deployed);
+  });
+
+  it('breaks the oil cask once, removes its object, and refuses a surface without an enemy owner', () => {
+    const initial = fight('cinder-rite');
+    const cask = initial.objects.find((entry) => entry.class === 'oil_cask');
+    if (cask === undefined) throw new Error('Oil-cask fixture is missing.');
+    const broken = breakVaneWarrenOilCask(initial);
+    const grease = broken.encounter.persistentAreas.at(-1);
+    expect(broken.encounter.revision).toBe(initial.encounter.revision + 1);
+    expect(broken.encounter.worldObjects.some((object) => object.id === cask.object.id)).toBe(false);
+    expect(grease).toEqual(expect.objectContaining({
+      id: `area:${String(initial.encounter.nextPersistentAreaSequence)}`,
+      material: expect.objectContaining({ id: 'grease' }),
+    }));
+    expect(broken.encounter.nextPersistentAreaSequence)
+      .toBe(initial.encounter.nextPersistentAreaSequence + 1);
+    expect(broken.transitions.at(-1)).toEqual({
+      kind: 'oil_cask_broken',
+      round: 1,
+      ids: [String(cask.object.id), String(grease?.id)],
+    });
+    expect(breakVaneWarrenOilCask(broken)).toBe(broken);
+
+    const ownerless: VaneWarrenEncounterState = {
+      ...initial,
+      encounter: {
+        ...initial.encounter,
+        combatants: initial.encounter.combatants.filter(
+          (subject) => subject.profile.kind === 'player_character',
+        ),
+      },
+    };
+    expect(() => breakVaneWarrenOilCask(ownerless)).toThrow(
+      'The oil-cask surface requires a fight owner.',
+    );
+  });
+
   it('legendary_pool_wrong: offers only executable landed actions and one Legendary Resistance', () => {
     const bundled = fight('iron-voice');
     const warlord = bundled.encounter.combatants.find((subject) =>
@@ -512,6 +614,43 @@ describe('D377.5 The Vane Warren flagship bundle', () => {
     }
     expect(state.activeCombatant).toBe(target.id);
     expect(hitPoints(state, target.id)).toBe(before - 2);
+  });
+
+  it('enforces brazier ignition preconditions and does not duplicate a burning cell', () => {
+    const initial = fight('cinder-rite');
+    const brazier = initial.objects.find((entry) => entry.class === 'brazier');
+    if (brazier === undefined) throw new Error('Ignition precondition fixture has no brazier.');
+    const adjacentCells = [
+      { column: brazier.object.position.column - 1, row: brazier.object.position.row },
+      { column: brazier.object.position.column + 1, row: brazier.object.position.row },
+      { column: brazier.object.position.column, row: brazier.object.position.row - 1 },
+      { column: brazier.object.position.column, row: brazier.object.position.row + 1 },
+    ];
+    const flammable = adjacentCells.find((cell) => initial.encounter.persistentAreas.some((area) =>
+      persistentAreaContains(area, cell, null, initial.encounter)));
+    const bare = adjacentCells[0];
+    if (flammable === undefined || bare === undefined) throw new Error('Ignition precondition cells are incomplete.');
+    expect(() => igniteVaneWarrenSurfaceFromBrazier(initial, flammable)).toThrow(
+      'Roll initiative before resolving brazier ignition.',
+    );
+    const started: VaneWarrenEncounterState = {
+      ...initial,
+      encounter: reduceEncounter(initial.encounter, { type: 'roll_initiative' }, faceOne).state,
+    };
+    expect(() => igniteVaneWarrenSurfaceFromBrazier(started, { column: 0, row: 0 })).toThrow(
+      'A Vane Warren brazier can ignite only an adjacent cell.',
+    );
+    const withoutAreas: VaneWarrenEncounterState = {
+      ...started,
+      encounter: { ...started.encounter, persistentAreas: [] },
+    };
+    expect(() => igniteVaneWarrenSurfaceFromBrazier(withoutAreas, bare)).toThrow(
+      'The adjacent cell has no enabled flammable surface.',
+    );
+    const once = igniteVaneWarrenSurfaceFromBrazier(started, flammable);
+    const twice = igniteVaneWarrenSurfaceFromBrazier(once, flammable);
+    expect(twice.encounter.persistentAreas.map((area) => area.burningCells))
+      .toEqual(once.encounter.persistentAreas.map((area) => area.burningCells));
   });
 
   it('pins the four applied-and-restored mutation controls to named killing tests', () => {

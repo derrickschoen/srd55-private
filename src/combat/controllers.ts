@@ -115,7 +115,7 @@ function movementRemaining(
   request: ControllerRequest,
   actorId: CombatantId,
 ): number | null {
-  if ('viewer' in request.visibleState && request.visibleState.viewer === 'dm') {
+  if ('viewer' in request.visibleState) {
     return request.visibleState.combatants.find((candidate) => candidate.id === actorId)
       ?.turn.movement.remaining ?? null;
   }
@@ -176,18 +176,14 @@ function visibleHostile(
     : null;
 }
 
-const TACTICAL_HEALING_SPELL_IDS: ReadonlySet<string> = new Set([
-  'cure-wounds',
-  'healing-word',
-]);
+function isTacticalHealingSpell(spellId: string): boolean {
+  return spellId === 'cure-wounds' || spellId === 'healing-word';
+}
 
-const TACTICAL_RANGED_SPELL_IDS: ReadonlySet<string> = new Set([
-  'eldritch-blast',
-  'ray-of-frost',
-  'slow',
-  'spirit-guardians',
-  'command',
-]);
+function isTacticalRangedSpell(spellId: string): boolean {
+  return spellId === 'eldritch-blast' || spellId === 'ray-of-frost' || spellId === 'slow' ||
+    spellId === 'spirit-guardians' || spellId === 'command';
+}
 
 const COVER_RANK = {
   none: 0,
@@ -211,7 +207,7 @@ function lastKnownHitPoints(
   request: ControllerRequest,
   id: CombatantId,
 ): { readonly current: number; readonly maximumKnown: number } | null {
-  if ('viewer' in request.visibleState && request.visibleState.viewer === 'dm') {
+  if ('viewer' in request.visibleState) {
     const target = request.visibleState.combatants.find((candidate) => candidate.id === id);
     return target === undefined
       ? null
@@ -278,7 +274,7 @@ function usedRangedActionThisTurn(
       return target !== null && gridDistance(actor.position, target.position) > 5;
     }
     if (event.type === 'spell_cast' && event.caster === actor.id) {
-      if (TACTICAL_RANGED_SPELL_IDS.has(event.spellId)) return true;
+      if (isTacticalRangedSpell(event.spellId)) return true;
       return event.targets.some((id) => {
         const target = visibleHostile(request, actor.kind, id);
         return target !== null && gridDistance(actor.position, target.position) > 5;
@@ -315,7 +311,7 @@ function playerCharacterAlgorithmRank(
       return [0, -2, 0, commandKey(command)];
     }
     if (command.spellId === 'command') return [1, -1, 0, commandKey(command)];
-    if (TACTICAL_HEALING_SPELL_IDS.has(command.spellId)) {
+    if (isTacticalHealingSpell(command.spellId)) {
       const ally = command.targets
         .map((id) => visibleAlly(request, actor.kind, id))
         .filter((candidate) => candidate !== null)
