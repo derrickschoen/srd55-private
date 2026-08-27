@@ -40,12 +40,16 @@ and the same two worst (P03, P14 — both terra-low reps).
    and ~half the tokens. The unanimous best plan of all 18 was sol low.
 2. **luna's effort ladder buys quality monotonically** (5.44 → 6.00 → 8.33)
    but the high tier costs 162s/call — untenable for live-table pacing.
-3. **terra low is fast but catastrophically unreliable**: 2 of 3 reps
-   produced the panel's two worst plans (attacks declared from outside reach;
-   Ashmaw casting Healing Word on the *party's* downed druid — side
-   confusion). Its third rep scored 7.7 — high variance, unusable unguarded.
-4. **terra medium is consistent but mediocre** (6.3–6.7 band) — the incumbent
-   is beaten on both axes by sol low in this probe.
+3. **terra low produced 2 illegal plans in 3 reps** (attacks declared from
+   outside reach; Healing Word cast on the party's downed druid). OWNER
+   CORRECTION (2026-08-27): n=3 on one fixture cannot establish that terra is
+   less reliable than luna — the 95% CI on a 2/3 failure rate spans ~9-99%.
+   Note terra medium BEAT luna medium on both quality (6.44 vs 6.00) and
+   speed (19.8s vs 39.6s) in this same probe, consistent with the prior that
+   terra is the smarter model on average. A powered reliability run (10+ reps,
+   multiple fixtures) is queued before any terra-vs-luna conclusion.
+4. **terra medium was consistent** (6.3-6.7 band) and beat luna medium on
+   both axes; sol low beat it on quality at comparable speed in this probe.
 5. **Failure taxonomy** across all configs: geometric errors (out-of-reach
    attacks, ending movement in occupied squares) and rules errors
    (two leveled spells in one turn — SRD "One Spell with a Spell Slot per
