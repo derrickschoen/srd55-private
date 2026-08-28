@@ -23,6 +23,7 @@ export interface ArenaConfig {
   readonly cwd: string;
   readonly cliBin: string;
   readonly timeoutMs: number;
+  readonly kbPath: string | null;
 }
 
 export interface ArenaRow {
@@ -30,6 +31,7 @@ export interface ArenaRow {
   readonly room: number;
   readonly round: number;
   readonly cli: ConversationCli;
+  readonly kbHash: string | null;
   readonly contextRevision: number;
   readonly projectionRevision: number;
   readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused';
@@ -57,6 +59,15 @@ function pathIsInside(parent: string, candidate: string): boolean {
   return path === '' || (!path.startsWith('..') && !isAbsolute(path));
 }
 
+function validateKbPath(cwd: string, candidate: string): void {
+  if (pathIsInside(resolve(cwd, 'content/cc-by-sa'), candidate)) {
+    throw new TypeError('--kb cannot use content/cc-by-sa as a knowledge-base source.');
+  }
+  if (pathIsInside(cwd, candidate) && !pathIsInside(resolve(cwd, 'tests/fixtures'), candidate)) {
+    throw new TypeError('--kb must be outside the repository working tree or within tests/fixtures.');
+  }
+}
+
 export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): ArenaConfig {
   const argumentsValue = argv[0] === '--' ? argv.slice(1) : argv;
   const values = new Map<string, string>();
@@ -66,7 +77,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     if (option === '--dry-run') { dryRun = true; continue; }
     if (![
       '--rooms', '--reps', '--seed', '--cli', '--model', '--effort', '--out',
-      '--cli-bin', '--timeout-ms',
+      '--cli-bin', '--timeout-ms', '--kb',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argumentsValue, index, option ?? '<missing>'));
     index += 1;
@@ -83,6 +94,8 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     throw new TypeError('--effort must be low, medium, high, or xhigh.');
   }
   const selectedCli = cli as ConversationCli;
+  const kbPath = values.has('--kb') ? resolve(values.get('--kb') ?? '') : null;
+  if (kbPath !== null) validateKbPath(cwd, kbPath);
   return {
     rooms: positiveInteger(values.get('--rooms') ?? '', '--rooms'),
     reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
@@ -95,6 +108,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     cwd: resolve(cwd),
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : 'claude'),
     timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
+    kbPath,
   };
 }
 
@@ -118,12 +132,14 @@ export async function runArena(
     cwd: config.cwd,
     cliBin: config.cliBin,
     timeoutMs: config.timeoutMs,
+    kbPath: config.kbPath,
   }, { ...options, roomStates: generated.map((entry) => entry.state) });
   const rows = result.rows.map((row): ArenaRow => ({
     seed: generated[row.room - 1]!.seed,
     room: row.room,
     round: row.round,
     cli: row.cli,
+    kbHash: row.kbHash,
     contextRevision: row.contextRevision,
     projectionRevision: row.projectionRevision,
     outcome: row.outcome,

@@ -67,6 +67,7 @@ export class ClaudeCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
       model: invocation.model,
       engineCommand: this.engineCommand() ?? 'engine-mcp',
       engineArgs: this.engineArgs(invocation.launcherToken),
+      instructions: invocation.instructions ?? null,
       sessionId,
     }));
   }
@@ -100,6 +101,7 @@ interface ClaudeArgvInput {
   readonly model: string;
   readonly engineCommand: string;
   readonly engineArgs: readonly string[];
+  readonly instructions?: string | null;
   readonly sessionId: string | null;
 }
 
@@ -121,6 +123,9 @@ export function claudeCodeArgv(input: ClaudeArgvInput): readonly string[] {
     '--mcp-config', mcpConfig,
     '--permission-mode', 'default',
     '--model', input.model,
+    ...(input.sessionId === null && input.instructions !== null && input.instructions !== undefined
+      ? ['--append-system-prompt', input.instructions]
+      : []),
     ...(input.sessionId === null ? [] : ['--resume', input.sessionId]),
   ];
 }

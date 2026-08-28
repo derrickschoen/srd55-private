@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { appendFile, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
@@ -70,6 +71,7 @@ export interface ConversationConfig {
   readonly cwd: string;
   readonly cliBin: string;
   readonly timeoutMs: number;
+  readonly kbPath: string | null;
 }
 
 export interface ConversationTokenCounts {
@@ -86,6 +88,7 @@ export interface ConversationRow {
   readonly contextRevision: number;
   readonly projectionRevision: number;
   readonly sessionIdHash: string;
+  readonly kbHash: string | null;
   readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused';
   readonly proposalId: string | null;
   readonly timeToFirstAction: number;
@@ -130,6 +133,15 @@ function pathIsInside(parent: string, candidate: string): boolean {
   return path === '' || (!path.startsWith('..') && !isAbsolute(path));
 }
 
+function validateKbPath(cwd: string, candidate: string): void {
+  if (pathIsInside(resolve(cwd, 'content/cc-by-sa'), candidate)) {
+    throw new TypeError('--kb cannot use content/cc-by-sa as a knowledge-base source.');
+  }
+  if (pathIsInside(cwd, candidate) && !pathIsInside(resolve(cwd, 'tests/fixtures'), candidate)) {
+    throw new TypeError('--kb must be outside the repository working tree or within tests/fixtures.');
+  }
+}
+
 export function parseConversationArgs(argv: readonly string[], cwd = process.cwd()): ConversationConfig {
   const values = new Map<string, string>();
   let dryRun = false;
@@ -138,7 +150,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     if (option === '--dry-run') { dryRun = true; continue; }
     if (![
       '--fixtures', '--rooms', '--rounds', '--reps', '--cli', '--model', '--effort',
-      '--out', '--cli-bin', '--timeout-ms',
+      '--out', '--cli-bin', '--timeout-ms', '--kb',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
     index += 1;
@@ -155,6 +167,8 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     throw new TypeError('--cli must be codex or claude-code.');
   }
   const selectedCli = cli as ConversationCli;
+  const kbPath = values.has('--kb') ? resolve(values.get('--kb') ?? '') : null;
+  if (kbPath !== null) validateKbPath(cwd, kbPath);
   return {
     fixturesPath: resolve(values.get('--fixtures') ?? 'tests/fixtures/arena-basis'),
     rooms: positiveInteger(values.get('--rooms') ?? '12', '--rooms'),
@@ -167,6 +181,21 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     cwd: resolve(cwd),
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : 'claude'),
     timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
+    kbPath,
+  };
+}
+
+async function loadKnowledgeBase(config: ConversationConfig): Promise<{
+  readonly text: string;
+  readonly hash: string;
+} | null> {
+  if (config.kbPath === null) return null;
+  const sourcePath = await realpath(config.kbPath);
+  validateKbPath(config.cwd, sourcePath);
+  const bytes = await readFile(sourcePath);
+  return {
+    text: bytes.toString('utf8'),
+    hash: createHash('sha256').update(bytes).digest('hex'),
   };
 }
 
@@ -559,9 +588,15 @@ function authorizedMechanics(state: EncounterState, proposal: RoundIntentProposa
   }[];
 }
 
-function invocation(config: ConversationConfig, runId: EncounterSessionId, prompt: string, launcherToken: string): AgentInvocation {
+function invocation(
+  config: ConversationConfig,
+  runId: EncounterSessionId,
+  prompt: string,
+  launcherToken: string,
+  instructions: string | null = null,
+): AgentInvocation {
   return {
-    runId, prompt, model: config.model, reasoningEffort: config.effort,
+    runId, prompt, instructions, model: config.model, reasoningEffort: config.effort,
     launcherToken, timeoutMs: config.timeoutMs,
   };
 }
@@ -578,6 +613,7 @@ async function roomStates(config: ConversationConfig, options: ConversationRunOp
 }
 
 export async function runConversation(config: ConversationConfig, options: ConversationRunOptions = {}): Promise<ConversationRunResult> {
+  const knowledgeBase = await loadKnowledgeBase(config);
   await writeFile(config.outPath, '', 'utf8');
   const artifacts = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-conversation-'));
   const states = await roomStates(config, options);
@@ -616,6 +652,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
     config, runId,
     'Establish one persistent AI-DM session for this dungeon run. Do not propose a turn until the host resumes you.',
     bootstrap.manifestPath,
+    knowledgeBase?.text ?? null,
   ), new AbortController().signal);
 
   const rows: ConversationRow[] = [];
@@ -743,6 +780,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
       const row: ConversationRow = {
         room, round, cli: config.cli, contextRevision, projectionRevision: capsuleRevision,
         sessionIdHash: sha256(binding.sessionId), outcome, proposalId,
+        kbHash: knowledgeBase?.hash ?? null,
         timeToFirstAction: wall,
         wallPerCreature: wall / Math.max(1, livingMonsterIds(state).length),
         tokens: tokenCounts(roundUsage), refusals,

@@ -43,6 +43,7 @@ const engineArgs = ['/workspace/engine-mcp.mjs'];
 const invocation: AgentInvocation = {
   runId: encounterSessionId('encounter:SIMULATED-adapter'),
   prompt: 'SIMULATED prompt over stdin',
+  instructions: 'SIMULATED session-level KB instructions',
   model: 'model-SIMULATED',
   reasoningEffort: 'high',
   launcherToken: 'launcher-token-SIMULATED',
@@ -127,8 +128,15 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       '-c', `mcp_servers.engine.command=${JSON.stringify(engineCommand)}`,
       '-c', `mcp_servers.engine.args=${JSON.stringify([...engineArgs, invocation.launcherToken])}`,
     ];
-    expect(runner.calls[0]?.spec.argv).toEqual([...expectedPrefix, '-']);
+    expect(runner.calls[0]?.spec.argv).toEqual([
+      ...expectedPrefix,
+      '-c', `developer_instructions=${JSON.stringify(invocation.instructions)}`,
+      '-',
+    ]);
     expect(runner.calls[1]?.spec.argv).toEqual([...expectedPrefix, 'resume', 'codex-thread-123', '-']);
+    expect(runner.calls[1]?.spec.argv).not.toContain(
+      `developer_instructions=${JSON.stringify(invocation.instructions)}`,
+    );
     expect(runner.calls[1]?.spec.argv.indexOf('resume')).toBeGreaterThan(
       runner.calls[1]?.spec.argv.findIndex((value) => value.startsWith('mcp_servers.engine.args=')) ?? -1,
     );
@@ -184,6 +192,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       '--mcp-config', mcpConfig,
       '--permission-mode', 'default',
       '--model', invocation.model,
+      '--append-system-prompt', invocation.instructions,
     ]);
     expect(startArgv.slice(0, 6)).toEqual(['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools']);
     expect(startArgv).toContain('--strict-mcp-config');
@@ -200,6 +209,8 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       mcpServers: { engine: { type: 'stdio', command: engineCommand, args: [...engineArgs, invocation.launcherToken] } },
     });
     const resumeArgv = runner.calls[1]?.spec.argv ?? [];
+    expect(resumeArgv).not.toContain('--append-system-prompt');
+    expect(resumeArgv).not.toContain(invocation.instructions);
     expect(resumeArgv.slice(resumeArgv.indexOf('--resume'), resumeArgv.indexOf('--resume') + 2)).toEqual([
       '--resume', 'claude-session-123',
     ]);
