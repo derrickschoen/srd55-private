@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join } from 'node:path';
 import { agentSessionIdFromCli } from '../agent-session';
 import type { AgentInvocation, AgentSessionBinding, AgentTurnResult, AgentUsage } from '../agent-session';
 import {
@@ -10,10 +13,14 @@ import {
   type AgentProcessSpec,
 } from './process';
 
-// Pi was absent when §6 was frozen. Step 9 must pin its installed extension
-// API, structured events, and whether --session accepts an ID or path.
-export const UNVERIFIED_CONTRACT_PI = 'UNVERIFIED_CONTRACT:pi-cli-absent-at-design-time' as const;
+// The argv and event shapes are pinned to supervisor-captured Pi evidence.
+// Print-mode events do not expose a session ID, so this adapter deliberately
+// uses its explicit --session file path as the opaque lifecycle session ID.
+export const UNVERIFIED_CONTRACT_PI =
+  'UNVERIFIED_CONTRACT:pi-argv-and-events-evidence-based-live-mcp-extension-pending' as const;
 export const PI_MCP_CONFIG_ENV_UNVERIFIED = 'DND_ENGINE_MCP_CONFIG' as const;
+export const PI_MCP_SKIPPED_NO_EXTENSION = 'SKIPPED_NO_EXTENSION' as const;
+export const PI_SESSION_ID_FROM_FILE = 'SESSION_ID_FROM_EXPLICIT_SESSION_FILE_PATH' as const;
 
 interface PiDecodedTurn {
   readonly sessionId: string;
@@ -30,7 +37,7 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
   }
 
   start(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
-    return this.invoke(invocation, null, signal);
+    return this.invoke(invocation, piSessionFilePath(), false, signal);
   }
 
   resume(
@@ -38,17 +45,25 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
     invocation: AgentInvocation,
     signal: AbortSignal,
   ): Promise<AgentTurnResult> {
-    return this.invoke(invocation, binding.sessionId, signal);
+    if (!isAbsolute(binding.sessionId)) {
+      return Promise.reject(new AgentAdapterError(
+        'resume_not_found',
+        'Pi resume session ID is not the absolute session-file path issued by this adapter.',
+      ));
+    }
+    return this.invoke(invocation, binding.sessionId, true, signal);
   }
 
-  invocationSpec(invocation: AgentInvocation, sessionId: string | null): AgentProcessSpec {
-    const argv = piArgv({
+  invocationSpec(invocation: AgentInvocation, sessionId: string): AgentProcessSpec {
+    const extensionPath = this.options.piMcpExtensionPath ?? null;
+    const spec = this.spec(piArgv({
       model: invocation.model,
-      extensionPath: this.options.piMcpExtensionPath ?? 'pi-engine-mcp-extension',
+      extensionPath,
       sessionId,
-    });
+    }));
+    if (extensionPath === null) return spec;
     return {
-      ...this.spec(argv),
+      ...spec,
       env: {
         [PI_MCP_CONFIG_ENV_UNVERIFIED]: JSON.stringify({
           command: this.engineCommand() ?? 'engine-mcp',
@@ -60,7 +75,8 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
 
   private async invoke(
     invocation: AgentInvocation,
-    sessionId: string | null,
+    sessionId: string,
+    resuming: boolean,
     signal: AbortSignal,
   ): Promise<AgentTurnResult> {
     const output = await this.runner().run(
@@ -69,72 +85,128 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
       signal,
       invocation.timeoutMs,
     );
-    completedOutput(output, sessionId !== null);
-    if (output.cancelled && sessionId !== null) {
-      return { sessionId: agentSessionIdFromCli(sessionId), finalText: '', usage: null, exit: 'cancelled' };
+    completedOutput(output, resuming);
+    if (output.cancelled) {
+      return {
+        sessionId: agentSessionIdFromCli(sessionId),
+        finalText: '',
+        usage: null,
+        exit: 'cancelled',
+        contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
+      };
     }
     const decoded = decodePiTurn(output.stdout, sessionId, (event) => this.observe(event));
     return {
       sessionId: agentSessionIdFromCli(decoded.sessionId),
       finalText: decoded.finalText,
       usage: decoded.usage,
-      exit: output.cancelled ? 'cancelled' : 'completed',
+      exit: 'completed',
+      contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
     };
   }
 }
 
 interface PiArgvInput {
   readonly model: string;
-  readonly extensionPath: string;
-  readonly sessionId: string | null;
+  readonly extensionPath: string | null;
+  readonly sessionId: string;
 }
 
 export function piArgv(input: PiArgvInput): readonly string[] {
   return [
     '--print',
     '--mode', 'json',
+    // Pi accepts provider/id directly as --model's value.
     '--model', input.model,
-    '--extension', input.extensionPath,
-    ...(input.sessionId === null ? [] : ['--session', input.sessionId]),
+    ...(input.extensionPath === null ? [] : ['--extension', input.extensionPath]),
+    '--session', input.sessionId,
+  ];
+}
+
+function piSessionFilePath(): string {
+  return join(tmpdir(), `dnd-wt-vtt-pi-session-${randomUUID()}.jsonl`);
+}
+
+function piContractEvidence(extensionPath: string | undefined): readonly string[] {
+  return [
+    PI_SESSION_ID_FROM_FILE,
+    extensionPath === undefined ? PI_MCP_SKIPPED_NO_EXTENSION : 'MCP_EXTENSION_CONFIGURED',
   ];
 }
 
 export function decodePiTurn(
   stdout: string,
-  priorSessionId: string | null,
+  sessionFilePath: string | null,
   onEvent: (event: Readonly<Record<string, unknown>>) => void = () => undefined,
 ): PiDecodedTurn {
-  let sessionId = priorSessionId;
   let finalText = '';
   let usage: AgentUsage | null = null;
   for (const event of jsonEventLines(stdout)) {
     onEvent(event);
-    if (event['type'] === 'session' && typeof event['session_id'] === 'string') sessionId = event['session_id'];
-    if (event['type'] === 'message_end') {
-      const message = record(event['message']);
-      if (message?.['role'] === 'assistant' && typeof message['content'] === 'string') finalText = message['content'];
-      const candidate = record(event['usage']) ?? (message === null ? null : record(message['usage']));
+    const emittedSessionId = sessionIdFromEvent(event);
+    if (emittedSessionId !== null && sessionFilePath !== null && emittedSessionId !== sessionFilePath) {
+      throw new AgentAdapterError('malformed_output', 'Pi returned a different session ID from its explicit session file path.');
+    }
+    for (const message of messagesFromEvent(event)) {
+      if (message['role'] !== 'assistant') continue;
+      const text = textFromContent(message['content']);
+      if (text !== null) finalText = text;
+      const candidate = record(message['usage']);
       if (candidate !== null) usage = decodeUsage(candidate);
     }
+    const eventUsage = record(event['usage']);
+    if (eventUsage !== null) usage = decodeUsage(eventUsage);
   }
-  if (sessionId === null || sessionId.trim().length === 0) {
-    throw new AgentAdapterError('malformed_output', 'Pi JSON events did not contain session.session_id.');
+  if (sessionFilePath === null || sessionFilePath.trim().length === 0) {
+    throw new AgentAdapterError(
+      'malformed_output',
+      'Pi print-mode events omit session IDs; an explicit --session file path is required.',
+    );
   }
-  if (priorSessionId !== null && sessionId !== priorSessionId) {
-    throw new AgentAdapterError('malformed_output', 'Pi resume returned a different session ID.');
+  return { sessionId: sessionFilePath, finalText, usage };
+}
+
+function sessionIdFromEvent(event: Readonly<Record<string, unknown>>): string | null {
+  for (const key of ['sessionID', 'sessionId', 'session_id'] as const) {
+    const candidate = event[key];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
   }
-  return { sessionId, finalText, usage };
+  return null;
+}
+
+function messagesFromEvent(event: Readonly<Record<string, unknown>>): readonly Readonly<Record<string, unknown>>[] {
+  if (event['type'] === 'message_update' || event['type'] === 'message_end' || event['type'] === 'turn_end') {
+    const message = record(event['message']);
+    return message === null ? [] : [message];
+  }
+  if (event['type'] !== 'agent_end' || !Array.isArray(event['messages'])) return [];
+  return event['messages'].flatMap((value) => {
+    const message = record(value);
+    return message === null ? [] : [message];
+  });
+}
+
+function textFromContent(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return null;
+  const texts = value.flatMap((part) => {
+    const candidate = record(part);
+    return candidate?.['type'] === 'text' && typeof candidate['text'] === 'string'
+      ? [candidate['text']]
+      : [];
+  });
+  return texts.length === 0 ? null : texts.join('');
 }
 
 function decodeUsage(value: Readonly<Record<string, unknown>>): AgentUsage | null {
-  const inputTokens = integer(value['input_tokens']);
-  const outputTokens = integer(value['output_tokens']);
-  if (inputTokens === null || outputTokens === null) return null;
+  const inputTokens = integer(value['input']);
+  const outputTokens = integer(value['output']);
+  if (inputTokens === null || outputTokens === null || integer(value['totalTokens']) === null) return null;
   return {
     inputTokens,
-    cachedInputTokens: integer(value['cached_input_tokens']) ?? 0,
+    cachedInputTokens: integer(value['cacheRead']) ?? 0,
     outputTokens,
-    reasoningTokens: integer(value['reasoning_tokens']) ?? 0,
+    reasoningTokens: 0,
   };
 }
 

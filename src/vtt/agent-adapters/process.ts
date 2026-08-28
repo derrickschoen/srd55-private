@@ -55,17 +55,25 @@ export type AgentAdapterErrorCode =
   | 'resume_corrupt'
   | 'credentials_absent'
   | 'spawn_failed'
+  | 'timeout'
   | 'agent_exit'
   | 'malformed_output';
 
+interface AgentAdapterErrorOptions extends ErrorOptions {
+  readonly stderr?: string;
+}
+
 export class AgentAdapterError extends Error {
+  readonly stderr: string;
+
   constructor(
     readonly code: AgentAdapterErrorCode,
     message: string,
-    options?: ErrorOptions,
+    options?: AgentAdapterErrorOptions,
   ) {
     super(message, options);
     this.name = 'AgentAdapterError';
+    this.stderr = options?.stderr ?? '';
   }
 }
 
@@ -107,9 +115,21 @@ export const realAgentProcessRunner: AgentProcessRunner = {
         if (timer !== null) clearTimeout(timer);
         resolvePromise(result);
       };
+      const timeOut = (): void => {
+        if (settled) return;
+        settled = true;
+        cancelled = true;
+        signal.removeEventListener('abort', cancel);
+        child.kill('SIGTERM');
+        reject(new AgentAdapterError(
+          'timeout',
+          `Agent CLI timed out after ${String(timeoutMs)} ms.`,
+          { stderr },
+        ));
+      };
       signal.addEventListener('abort', cancel, { once: true });
       if (timeoutMs !== null) {
-        timer = setTimeout(cancel, timeoutMs);
+        timer = setTimeout(timeOut, timeoutMs);
       }
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
@@ -228,6 +248,7 @@ export function classifyAgentFailure(error: unknown): AgentFailureClassification
     case 'resume_corrupt': return 'resume_corrupt';
     case 'credentials_absent': return 'authentication';
     case 'spawn_failed': return 'transport';
+    case 'timeout': return 'transport';
     case 'agent_exit': return 'agent_exit';
     case 'malformed_output': return 'unknown';
   }
@@ -236,17 +257,18 @@ export function classifyAgentFailure(error: unknown): AgentFailureClassification
 function classifyExit(output: AgentProcessOutput, resuming: boolean): AgentAdapterError {
   const detail = `${output.stderr}\n${output.stdout}`.toLowerCase();
   if (resuming && /(?:session|thread).*(?:not found|does not exist|unknown)|no (?:such )?(?:session|thread)/u.test(detail)) {
-    return new AgentAdapterError('resume_not_found', capStderr(output.stderr));
+    return new AgentAdapterError('resume_not_found', capStderr(output.stderr), { stderr: output.stderr });
   }
   if (resuming && /(?:corrupt|invalid|malformed).*(?:session|thread)|(?:session|thread).*(?:corrupt|invalid|malformed)/u.test(detail)) {
-    return new AgentAdapterError('resume_corrupt', capStderr(output.stderr));
+    return new AgentAdapterError('resume_corrupt', capStderr(output.stderr), { stderr: output.stderr });
   }
   if (/(?:authentication|not logged in|login required|credentials?|api key)/u.test(detail)) {
-    return new AgentAdapterError('credentials_absent', capStderr(output.stderr));
+    return new AgentAdapterError('credentials_absent', capStderr(output.stderr), { stderr: output.stderr });
   }
   return new AgentAdapterError(
     'agent_exit',
     `Agent CLI exited ${String(output.exitCode)}${output.stderr.length === 0 ? '.' : `: ${capStderr(output.stderr)}`}`,
+    { stderr: output.stderr },
   );
 }
 

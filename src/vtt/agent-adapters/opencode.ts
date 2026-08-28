@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { agentSessionIdFromCli } from '../agent-session';
 import type { AgentInvocation, AgentSessionBinding, AgentTurnResult, AgentUsage } from '../agent-session';
 import {
@@ -10,15 +14,33 @@ import {
   type AgentProcessSpec,
 } from './process';
 
-// OpenCode was absent when §6 was frozen. Step 9 must replace this marker only
-// after an installed supported version pins every flag and event below.
-export const UNVERIFIED_CONTRACT_OPENCODE = 'UNVERIFIED_CONTRACT:opencode-cli-absent-at-design-time' as const;
-export const OPENCODE_MCP_CONFIG_FLAG_UNVERIFIED = '--mcp-config' as const;
+// The argv and JSON event shapes are pinned to supervisor-captured OpenCode
+// 1.18.23 evidence. Live MCP negotiation and lifecycle verification remain for
+// the conformance harness, so this marker deliberately remains UNVERIFIED.
+export const UNVERIFIED_CONTRACT_OPENCODE =
+  'UNVERIFIED_CONTRACT:opencode-argv-and-events-evidence-based-live-mcp-pending' as const;
 
 interface OpenCodeDecodedTurn {
   readonly sessionId: string;
   readonly finalText: string;
   readonly usage: AgentUsage | null;
+}
+
+interface OpenCodeConfig {
+  readonly mcp: Readonly<{
+    engine: Readonly<{
+      type: 'local';
+      command: readonly string[];
+      enabled: true;
+    }>;
+  }>;
+  readonly provider?: Readonly<{
+    ollama: Readonly<{
+      npm: '@ai-sdk/openai-compatible';
+      options: Readonly<{ baseURL: 'http://localhost:11434/v1' }>;
+      models: Readonly<Record<string, Readonly<Record<string, never>>>>;
+    }>;
+  }>;
 }
 
 export class OpenCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
@@ -41,13 +63,11 @@ export class OpenCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
     return this.invoke(invocation, binding.sessionId, signal);
   }
 
-  invocationSpec(invocation: AgentInvocation, sessionId: string | null): AgentProcessSpec {
-    return this.spec(openCodeArgv({
-      model: invocation.model,
-      engineCommand: this.engineCommand() ?? 'engine-mcp',
-      engineArgs: this.engineArgs(invocation.launcherToken),
-      sessionId,
-    }));
+  invocationSpec(invocation: AgentInvocation, sessionId: string | null, configPath: string): AgentProcessSpec {
+    return {
+      ...this.spec(openCodeArgv({ model: invocation.model, sessionId })),
+      env: { OPENCODE_CONFIG: configPath },
+    };
   }
 
   private async invoke(
@@ -55,44 +75,85 @@ export class OpenCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
     sessionId: string | null,
     signal: AbortSignal,
   ): Promise<AgentTurnResult> {
-    const output = await this.runner().run(
-      this.invocationSpec(invocation, sessionId),
-      invocation.prompt,
-      signal,
-      invocation.timeoutMs,
-    );
-    completedOutput(output, sessionId !== null);
-    if (output.cancelled && sessionId !== null) {
-      return { sessionId: agentSessionIdFromCli(sessionId), finalText: '', usage: null, exit: 'cancelled' };
+    const configPath = openCodeConfigPath(invocation.launcherToken);
+    const config = openCodeConfig({
+      model: invocation.model,
+      engineCommand: this.engineCommand() ?? 'engine-mcp',
+      engineArgs: this.engineArgs(invocation.launcherToken),
+    });
+    // OPENCODE_CONFIG replaces rather than merges the user's global config.
+    // This isolated generated file must therefore contain every provider and
+    // MCP setting needed by this run; the global file is never modified.
+    await writeFile(configPath, `${JSON.stringify(config)}\n`, { encoding: 'utf8', mode: 0o600 });
+    try {
+      const output = await this.runner().run(
+        this.invocationSpec(invocation, sessionId, configPath),
+        invocation.prompt,
+        signal,
+        invocation.timeoutMs,
+      );
+      completedOutput(output, sessionId !== null);
+      if (output.cancelled && sessionId !== null) {
+        return { sessionId: agentSessionIdFromCli(sessionId), finalText: '', usage: null, exit: 'cancelled' };
+      }
+      const decoded = decodeOpenCodeTurn(output.stdout, sessionId, (event) => this.observe(event));
+      return {
+        sessionId: agentSessionIdFromCli(decoded.sessionId),
+        finalText: decoded.finalText,
+        usage: decoded.usage,
+        exit: output.cancelled ? 'cancelled' : 'completed',
+      };
+    } finally {
+      await rm(configPath, { force: true });
     }
-    const decoded = decodeOpenCodeTurn(output.stdout, sessionId, (event) => this.observe(event));
-    return {
-      sessionId: agentSessionIdFromCli(decoded.sessionId),
-      finalText: decoded.finalText,
-      usage: decoded.usage,
-      exit: output.cancelled ? 'cancelled' : 'completed',
-    };
   }
 }
 
 interface OpenCodeArgvInput {
   readonly model: string;
-  readonly engineCommand: string;
-  readonly engineArgs: readonly string[];
   readonly sessionId: string | null;
 }
 
+interface OpenCodeConfigInput {
+  readonly model: string;
+  readonly engineCommand: string;
+  readonly engineArgs: readonly string[];
+}
+
 export function openCodeArgv(input: OpenCodeArgvInput): readonly string[] {
-  const mcpConfig = JSON.stringify({
-    mcp: { engine: { type: 'local', command: [input.engineCommand, ...input.engineArgs], enabled: true } },
-  });
   return [
     'run',
     '--format', 'json',
     '--model', input.model,
-    OPENCODE_MCP_CONFIG_FLAG_UNVERIFIED, mcpConfig,
     ...(input.sessionId === null ? [] : ['--session', input.sessionId]),
   ];
+}
+
+export function openCodeConfig(input: OpenCodeConfigInput): OpenCodeConfig {
+  const modelId = input.model.startsWith('ollama/') ? input.model.slice('ollama/'.length) : null;
+  return {
+    mcp: {
+      engine: {
+        type: 'local',
+        command: [input.engineCommand, ...input.engineArgs],
+        enabled: true,
+      },
+    },
+    ...(modelId === null || modelId.length === 0 ? {} : {
+      provider: {
+        ollama: {
+          npm: '@ai-sdk/openai-compatible',
+          options: { baseURL: 'http://localhost:11434/v1' },
+          models: { [modelId]: {} },
+        },
+      },
+    }),
+  };
+}
+
+function openCodeConfigPath(launcherToken: string): string {
+  const digest = createHash('sha256').update(launcherToken).digest('hex').slice(0, 24);
+  return join(tmpdir(), `dnd-wt-vtt-opencode-${digest}.json`);
 }
 
 export function decodeOpenCodeTurn(
@@ -105,20 +166,18 @@ export function decodeOpenCodeTurn(
   let usage: AgentUsage | null = null;
   for (const event of jsonEventLines(stdout)) {
     onEvent(event);
-    if (event['type'] === 'session.started' && typeof event['session_id'] === 'string') {
-      sessionId = event['session_id'];
+    if (typeof event['sessionID'] === 'string') sessionId = event['sessionID'];
+    const part = record(event['part']);
+    if (event['type'] === 'text' && part?.['type'] === 'text' && typeof part['text'] === 'string') {
+      finalText = part['text'];
     }
-    if (event['type'] === 'message.completed') {
-      const message = record(event['message']);
-      if (message?.['role'] === 'assistant' && typeof message['text'] === 'string') finalText = message['text'];
-    }
-    if (event['type'] === 'turn.completed') {
-      const candidate = record(event['usage']);
+    if (event['type'] === 'step_finish' && part?.['type'] === 'step-finish') {
+      const candidate = record(part['tokens']);
       if (candidate !== null) usage = decodeUsage(candidate);
     }
   }
   if (sessionId === null || sessionId.trim().length === 0) {
-    throw new AgentAdapterError('malformed_output', 'OpenCode JSON events did not contain session.started.session_id.');
+    throw new AgentAdapterError('malformed_output', 'OpenCode JSON events did not contain top-level sessionID.');
   }
   if (priorSessionId !== null && sessionId !== priorSessionId) {
     throw new AgentAdapterError('malformed_output', 'OpenCode resume returned a different session ID.');
@@ -127,14 +186,20 @@ export function decodeOpenCodeTurn(
 }
 
 function decodeUsage(value: Readonly<Record<string, unknown>>): AgentUsage | null {
-  const inputTokens = integer(value['input_tokens']);
-  const outputTokens = integer(value['output_tokens']);
-  if (inputTokens === null || outputTokens === null) return null;
+  const totalTokens = integer(value['total']);
+  const inputTokens = integer(value['input']);
+  const outputTokens = integer(value['output']);
+  const cache = record(value['cache']);
+  const reasoningTokens = integer(value['reasoning']);
+  const cacheReadTokens = integer(cache?.['read']);
+  const cacheWriteTokens = integer(cache?.['write']);
+  if (totalTokens === null || inputTokens === null || outputTokens === null || reasoningTokens === null ||
+    cacheReadTokens === null || cacheWriteTokens === null) return null;
   return {
     inputTokens,
-    cachedInputTokens: integer(value['cached_input_tokens']) ?? 0,
+    cachedInputTokens: cacheReadTokens,
     outputTokens,
-    reasoningTokens: integer(value['reasoning_tokens']) ?? 0,
+    reasoningTokens,
   };
 }
 

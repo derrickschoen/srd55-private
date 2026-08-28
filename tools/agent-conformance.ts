@@ -5,24 +5,31 @@ import { resolveAgentAdapter } from '../src/vtt/agent-adapters';
 import { UNVERIFIED_CONTRACT_CLAUDE_CODE } from '../src/vtt/agent-adapters/claude-code';
 import { UNVERIFIED_CONTRACT_CODEX } from '../src/vtt/agent-adapters/codex';
 import { UNVERIFIED_CONTRACT_OPENCODE } from '../src/vtt/agent-adapters/opencode';
-import { UNVERIFIED_CONTRACT_PI } from '../src/vtt/agent-adapters/pi';
-import { AGENT_ADAPTER_VERSION } from '../src/vtt/agent-adapters/process';
+import { PI_MCP_SKIPPED_NO_EXTENSION, UNVERIFIED_CONTRACT_PI } from '../src/vtt/agent-adapters/pi';
+import { AgentAdapterError, AGENT_ADAPTER_VERSION } from '../src/vtt/agent-adapters/process';
 import { agentSessionIdFromCli, isAgentCliKind } from '../src/vtt/agent-session';
 import type { AgentCliKind, AgentFailureClassification, AgentInvocation, AgentSessionAdapter, AgentSessionBinding } from '../src/vtt/agent-session';
 
 export const AGENT_CLI_KINDS = ['codex', 'opencode', 'pi', 'claude-code'] as const;
 export type ConformanceStatus = 'VERIFIED' | 'FAILED' | 'UNVERIFIED';
 type LifecycleEvidence = Readonly<{ coldStart: boolean; sessionIdCaptured: boolean; resume: boolean; classifiedResumeFailure: boolean }>;
-type ContractEvidence = Readonly<{ marker: string; liveStatus: ConformanceStatus }>;
+type ContractEvidence = Readonly<{
+  marker: string;
+  liveStatus: ConformanceStatus;
+  turnMarkers?: readonly string[];
+}>;
 
 export interface AgentConformanceRecord {
   readonly cli: AgentCliKind;
   readonly present: boolean;
   readonly version: string | null;
   readonly status: ConformanceStatus;
-  readonly reason: AgentFailureClassification | 'lifecycle_incomplete' | 'resume_missing_session_was_accepted' | null;
+  readonly reason: AgentFailureClassification | 'lifecycle_incomplete' | 'resume_missing_session_was_accepted' |
+    'mcp_wiring_skipped_no_extension' | null;
   readonly lifecycle: LifecycleEvidence;
   readonly contractEvidence: ContractEvidence;
+  readonly errorExcerpt: string | null;
+  readonly stderrTail: string | null;
 }
 
 export interface AgentConformanceReport {
@@ -63,16 +70,61 @@ const statusForFailure = (classification: AgentFailureClassification): Conforman
 
 function invocation(kind: AgentCliKind, prompt: string): AgentInvocation {
   const environmentKey = `DND_AGENT_CONFORMANCE_MODEL_${kind.replaceAll('-', '_').toUpperCase()}`;
-  return { runId: encounterSessionId('encounter:engine-mcp'), prompt, model: process.env[environmentKey] ?? DEFAULT_MODELS[kind], reasoningEffort: 'high', launcherToken: `agent-conformance-${kind}-launcher-token`, timeoutMs: 120_000 };
+  return {
+    runId: encounterSessionId('encounter:engine-mcp'),
+    prompt,
+    model: process.env[environmentKey] ?? DEFAULT_MODELS[kind],
+    reasoningEffort: 'low',
+    launcherToken: `agent-conformance-${kind}-launcher-token`,
+    timeoutMs: conformanceTimeoutMs(),
+  };
 }
 
 function binding(kind: AgentCliKind, sessionId: string): AgentSessionBinding {
   return { cli: kind, sessionId: agentSessionIdFromCli(sessionId), adapterVersion: AGENT_ADAPTER_VERSION, recoveryGeneration: 0, predecessorSessionHash: null, startedAtRevision: 1, lastDispatchedRevision: 1, status: 'active' };
 }
 
-function probeFailure(kind: AgentCliKind, version: string | null, reason: AgentFailureClassification): AgentConformanceRecord {
+function conformanceTimeoutMs(): number {
+  const configured = process.env['DND_AGENT_CONFORMANCE_TIMEOUT_MS'];
+  if (configured === undefined) return 300_000;
+  const parsed = Number(configured);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new TypeError('DND_AGENT_CONFORMANCE_TIMEOUT_MS must be a positive safe integer.');
+  }
+  return parsed;
+}
+
+interface FailureDiagnostic {
+  readonly errorExcerpt: string;
+  readonly stderrTail: string;
+}
+
+function failureDiagnostic(error: unknown, fallback: string): FailureDiagnostic {
+  const message = error instanceof Error ? error.message : error === undefined ? fallback : String(error);
+  const stderr = error instanceof AgentAdapterError ? error.stderr : '';
+  return {
+    errorExcerpt: message.slice(0, 500),
+    stderrTail: stderr.slice(-500),
+  };
+}
+
+function probeFailure(
+  kind: AgentCliKind,
+  version: string | null,
+  reason: AgentFailureClassification,
+  error?: unknown,
+): AgentConformanceRecord {
   const status = statusForFailure(reason);
-  return { cli: kind, present: reason !== 'cli_absent', version, status, reason, lifecycle: emptyLifecycle(), contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: status } };
+  return {
+    cli: kind,
+    present: reason !== 'cli_absent',
+    version,
+    status,
+    reason,
+    lifecycle: emptyLifecycle(),
+    contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: status },
+    ...failureDiagnostic(error, `CLI ${kind} failed during probe: ${reason}.`),
+  };
 }
 
 async function verifyCli(kind: AgentCliKind, adapter: AgentSessionAdapter): Promise<AgentConformanceRecord> {
@@ -82,34 +134,87 @@ async function verifyCli(kind: AgentCliKind, adapter: AgentSessionAdapter): Prom
     version = probe.version;
     if (!probe.present) return probeFailure(kind, null, 'cli_absent');
   } catch (error) {
-    return probeFailure(kind, version, adapter.classifyFailure(error));
+    return probeFailure(kind, version, adapter.classifyFailure(error), error);
   }
 
   const lifecycle = { coldStart: false, sessionIdCaptured: false, resume: false, classifiedResumeFailure: false };
+  const turnMarkers: string[] = [];
   try {
     const signal = new AbortController().signal;
     const started = await adapter.start(invocation(kind, 'Cold start the engine MCP server and reply ENGINE_BOOT_OK.'), signal);
+    turnMarkers.push(...(started.contractEvidence ?? []));
     lifecycle.coldStart = started.exit === 'completed';
     lifecycle.sessionIdCaptured = String(started.sessionId).length > 0;
+    if (turnMarkers.includes(PI_MCP_SKIPPED_NO_EXTENSION)) {
+      return {
+        cli: kind,
+        present: true,
+        version,
+        status: 'UNVERIFIED',
+        reason: 'mcp_wiring_skipped_no_extension',
+        lifecycle,
+        contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: 'UNVERIFIED', turnMarkers },
+        ...failureDiagnostic(undefined, 'Pi MCP wiring was skipped because no extension path was configured.'),
+      };
+    }
     const resumed = await adapter.resume(binding(kind, started.sessionId), invocation(kind, 'Resume the session and reply ENGINE_RESUME_OK.'), signal);
+    turnMarkers.push(...(resumed.contractEvidence ?? []));
     lifecycle.resume = resumed.exit === 'completed' && resumed.sessionId === started.sessionId;
     try {
       await adapter.resume(binding(kind, `missing-session-${kind}`), invocation(kind, 'A deliberately missing session must fail.'), signal);
-      return { cli: kind, present: true, version, status: 'FAILED', reason: 'resume_missing_session_was_accepted', lifecycle, contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: 'FAILED' } };
+      return {
+        cli: kind,
+        present: true,
+        version,
+        status: 'FAILED',
+        reason: 'resume_missing_session_was_accepted',
+        lifecycle,
+        contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: 'FAILED', turnMarkers },
+        ...failureDiagnostic(undefined, 'The adapter accepted a deliberately missing resume session.'),
+      };
     } catch (error) {
       const missingClassification = adapter.classifyFailure(error);
       if (missingClassification !== 'resume_not_found' && missingClassification !== 'resume_corrupt') {
-        return probeFailure(kind, version, missingClassification);
+        const status = statusForFailure(missingClassification);
+        return {
+          cli: kind,
+          present: true,
+          version,
+          status,
+          reason: missingClassification,
+          lifecycle,
+          contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: status, turnMarkers },
+          ...failureDiagnostic(error, `Missing-session check failed: ${missingClassification}.`),
+        };
       }
       lifecycle.classifiedResumeFailure = true;
     }
     const verified = Object.values(lifecycle).every(Boolean);
     const verifiedStatus: ConformanceStatus = verified ? 'VERIFIED' : 'FAILED';
-    return { cli: kind, present: true, version, status: verifiedStatus, reason: verified ? null : 'lifecycle_incomplete', lifecycle, contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: verifiedStatus } };
+    return {
+      cli: kind,
+      present: true,
+      version,
+      status: verifiedStatus,
+      reason: verified ? null : 'lifecycle_incomplete',
+      lifecycle,
+      contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: verifiedStatus, turnMarkers },
+      errorExcerpt: verified ? null : 'One or more required lifecycle proofs did not complete.',
+      stderrTail: verified ? null : '',
+    };
   } catch (error) {
     const classification = adapter.classifyFailure(error);
     const status = statusForFailure(classification);
-    return { cli: kind, present: true, version, status, reason: classification, lifecycle, contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: status } };
+    return {
+      cli: kind,
+      present: true,
+      version,
+      status,
+      reason: classification,
+      lifecycle,
+      contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: status, turnMarkers },
+      ...failureDiagnostic(error, `CLI ${kind} lifecycle failed: ${classification}.`),
+    };
   }
 }
 
@@ -156,12 +261,13 @@ export async function runAgentConformance(
 ): Promise<AgentConformanceReport> {
   const kinds = options.cli === null ? AGENT_CLI_KINDS : [options.cli];
   dependencies.stdout('MCP_CONFORMANCE: SUBSTITUTED_LOCAL (official tooling unavailable without a network fetch)');
-  dependencies.stdout('CLI | PRESENT | VERSION | STATUS | REASON');
+  dependencies.stdout('CLI | PRESENT | VERSION | STATUS | REASON | ERROR');
   const records: AgentConformanceRecord[] = [];
   for (const kind of kinds) {
     const row = await verifyCli(kind, dependencies.adapter(kind));
     records.push(row);
-    const tableLine = `${kind} | ${row.present ? 'yes' : 'no'} | ${row.version ?? '-'} | ${row.status} | ${row.reason ?? '-'}`;
+    const errorExcerpt = row.errorExcerpt?.replaceAll(/\s+/gu, ' ').trim() ?? '-';
+    const tableLine = `${kind} | ${row.present ? 'yes' : 'no'} | ${row.version ?? '-'} | ${row.status} | ${row.reason ?? '-'} | ${errorExcerpt}`;
     dependencies.stdout(tableLine);
     if (row.status !== 'VERIFIED') dependencies.stderr(tableLine);
   }
@@ -169,6 +275,7 @@ export async function runAgentConformance(
   const aggregate: ConformanceStatus = code === 0 ? 'VERIFIED' : code === 1 ? 'FAILED' : 'UNVERIFIED';
   const report: AgentConformanceReport = { schemaVersion: 1, title: 'LIVE AGENT CLI CONFORMANCE — NOT SIMULATED', generatedAt: dependencies.now(), protocolConformance: { status: 'SUBSTITUTED_LOCAL', reason: 'official_conformance_and_inspector_not_installed_network_fetch_forbidden' }, records, aggregate, exitCode: code };
   if (options.reportPath !== null) await dependencies.writeReport(outsideRepository(options.reportPath), report);
+  dependencies.stdout(`AGENT_CONFORMANCE_SUMMARY ${report.aggregate} exit=${String(report.exitCode)}`);
   dependencies.stdout(`REPORT_JSON ${JSON.stringify(report)}`);
   return report;
 }
@@ -178,6 +285,7 @@ export function parseAgentConformanceArguments(argv: readonly string[]): AgentCo
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     const value = argv[index + 1];
+    if (argument === '--') continue;
     if (argument === '--cli') {
       if (!isAgentCliKind(value)) throw new TypeError('--cli requires codex, opencode, pi, or claude-code.');
       cli = value;
@@ -194,11 +302,11 @@ export function parseAgentConformanceArguments(argv: readonly string[]): AgentCo
 }
 
 async function main(): Promise<void> {
+  process.stdout.write('AGENT_CONFORMANCE_START\n');
   const scriptIndex = process.argv.findIndex((argument) => argument.endsWith('/agent-conformance.ts') || argument.endsWith('\\agent-conformance.ts'));
   const argumentsValue = scriptIndex < 0 ? process.argv.slice(2) : process.argv.slice(scriptIndex + 1);
   const report = await runAgentConformance(parseAgentConformanceArguments(argumentsValue));
   process.exitCode = report.exitCode;
 }
 
-const agentConformanceScriptPresent = process.argv.some((argument) => argument.endsWith('/agent-conformance.ts') || argument.endsWith('\\agent-conformance.ts'));
-if (process.env['VITEST'] !== 'true' && agentConformanceScriptPresent) await main();
+if (process.env['VITEST'] !== 'true') await main();

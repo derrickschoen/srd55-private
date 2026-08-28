@@ -17,11 +17,13 @@ import {
 import { CodexAgentSessionAdapter, UNVERIFIED_CONTRACT_CODEX } from '../../../src/vtt/agent-adapters/codex';
 import {
   OpenCodeAgentSessionAdapter,
-  OPENCODE_MCP_CONFIG_FLAG_UNVERIFIED,
+  openCodeConfig,
   UNVERIFIED_CONTRACT_OPENCODE,
 } from '../../../src/vtt/agent-adapters/opencode';
 import {
   PI_MCP_CONFIG_ENV_UNVERIFIED,
+  PI_MCP_SKIPPED_NO_EXTENSION,
+  PI_SESSION_ID_FROM_FILE,
   PiAgentSessionAdapter,
   UNVERIFIED_CONTRACT_PI,
 } from '../../../src/vtt/agent-adapters/pi';
@@ -163,44 +165,89 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(failure).toBeInstanceOf(AgentAdapterError);
   });
 
-  it('SIMULATED OpenCode encodes its loud unverified run/session/json/MCP contract', async () => {
-    const transcript = [
-      JSON.stringify({ type: 'session.started', session_id: 'opencode-session-123' }),
-      JSON.stringify({ type: 'message.completed', message: { role: 'assistant', text: 'OpenCode reply' } }),
-      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 4, output_tokens: 2 } }),
-    ].join('\n');
+  it('SIMULATED OpenCode decodes the literal supervisor-captured 1.18.23 event stream', async () => {
+    // Literal fixture origin: .tmp-cli-evidence.txt supervisor capture, lines 40-42.
+    const transcript = fixture('opencode-1.18.23');
     const runner = new SIMULATEDChildProcessRunner([output(transcript), output(transcript)]);
     const adapter = new OpenCodeAgentSessionAdapter(options(runner));
 
-    expect((await adapter.start(invocation, new AbortController().signal)).sessionId).toBe('opencode-session-123');
-    await adapter.resume(binding('opencode', 'opencode-session-123'), invocation, new AbortController().signal);
+    expect(await adapter.start(invocation, new AbortController().signal)).toEqual({
+      sessionId: 'ses_fba44c8fcffewZFncFkCWbLLuB',
+      finalText: 'OC_EVIDENCE',
+      usage: { inputTokens: 2051, cachedInputTokens: 0, outputTokens: 68, reasoningTokens: 0 },
+      exit: 'completed',
+    });
+    await adapter.resume(
+      binding('opencode', 'ses_fba44c8fcffewZFncFkCWbLLuB'),
+      invocation,
+      new AbortController().signal,
+    );
 
-    const argv = runner.calls[1]?.spec.argv ?? [];
-    expect(argv.slice(0, 5)).toEqual(['run', '--format', 'json', '--model', invocation.model]);
-    expect(argv.slice(-2)).toEqual(['--session', 'opencode-session-123']);
-    expect(argv).toContain(OPENCODE_MCP_CONFIG_FLAG_UNVERIFIED);
-    expect(UNVERIFIED_CONTRACT_OPENCODE).toContain('cli-absent-at-design-time');
+    expect(runner.calls[0]?.spec.argv).toEqual(['run', '--format', 'json', '--model', invocation.model]);
+    expect(runner.calls[1]?.spec.argv).toEqual([
+      'run', '--format', 'json', '--model', invocation.model,
+      '--session', 'ses_fba44c8fcffewZFncFkCWbLLuB',
+    ]);
+    expect(runner.calls[0]?.spec.env?.['OPENCODE_CONFIG']).toMatch(/^\/tmp\/dnd-wt-vtt-opencode-[a-f0-9]{24}\.json$/u);
+    expect(UNVERIFIED_CONTRACT_OPENCODE).toContain('argv-and-events-evidence-based');
   });
 
-  it('SIMULATED Pi encodes its loud unverified print/json/session/extension contract', async () => {
-    const transcript = [
-      JSON.stringify({ type: 'session', session_id: 'pi-session-123' }),
-      JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: 'Pi reply' }, usage: { input_tokens: 3, output_tokens: 1 } }),
-    ].join('\n');
+  it('SIMULATED OpenCode emits a self-contained provider block only for ollama/* models', () => {
+    const base = { engineCommand, engineArgs: [...engineArgs, invocation.launcherToken] };
+    expect(openCodeConfig({ ...base, model: 'openai/gpt-5.6-sol' })).toEqual({
+      mcp: { engine: { type: 'local', command: [engineCommand, ...engineArgs, invocation.launcherToken], enabled: true } },
+    });
+    expect(openCodeConfig({ ...base, model: 'ollama/gemma4:e4b' })).toEqual({
+      mcp: { engine: { type: 'local', command: [engineCommand, ...engineArgs, invocation.launcherToken], enabled: true } },
+      provider: {
+        ollama: {
+          npm: '@ai-sdk/openai-compatible',
+          options: { baseURL: 'http://localhost:11434/v1' },
+          models: { 'gemma4:e4b': {} },
+        },
+      },
+    });
+  });
+
+  it('SIMULATED Pi decodes the literal supervisor-captured print-mode event stream', async () => {
+    // Literal fixture origin: .tmp-cli-evidence.txt supervisor capture, lines 50-51.
+    const transcript = fixture('pi-print');
     const runner = new SIMULATEDChildProcessRunner([output(transcript), output(transcript)]);
     const adapter = new PiAgentSessionAdapter({ ...options(runner), piMcpExtensionPath: '/workspace/pi-engine-extension.mjs' });
 
-    expect((await adapter.start(invocation, new AbortController().signal)).finalText).toBe('Pi reply');
-    await adapter.resume(binding('pi', 'pi-session-123'), invocation, new AbortController().signal);
+    const started = await adapter.start(invocation, new AbortController().signal);
+    expect(started).toMatchObject({
+      finalText: 'PI_EVIDENCE',
+      usage: { inputTokens: 2051, cachedInputTokens: 0, outputTokens: 34, reasoningTokens: 0 },
+      exit: 'completed',
+      contractEvidence: [PI_SESSION_ID_FROM_FILE, 'MCP_EXTENSION_CONFIGURED'],
+    });
+    expect(started.sessionId).toMatch(/^\/tmp\/dnd-wt-vtt-pi-session-[0-9a-f-]{36}\.jsonl$/u);
+    await adapter.resume(binding('pi', started.sessionId), invocation, new AbortController().signal);
 
     expect(runner.calls[1]?.spec.argv).toEqual([
       '--print', '--mode', 'json', '--model', invocation.model,
-      '--extension', '/workspace/pi-engine-extension.mjs', '--session', 'pi-session-123',
+      '--extension', '/workspace/pi-engine-extension.mjs', '--session', started.sessionId,
     ]);
     expect(JSON.parse(runner.calls[1]?.spec.env?.[PI_MCP_CONFIG_ENV_UNVERIFIED] ?? '')).toEqual({
       command: engineCommand, args: [...engineArgs, invocation.launcherToken],
     });
-    expect(UNVERIFIED_CONTRACT_PI).toContain('cli-absent-at-design-time');
+    expect(UNVERIFIED_CONTRACT_PI).toContain('argv-and-events-evidence-based');
+  });
+
+  it('SIMULATED Pi passes provider/id directly and loudly skips MCP when no extension is configured', async () => {
+    const runner = new SIMULATEDChildProcessRunner([output(fixture('pi-print'))]);
+    const adapter = new PiAgentSessionAdapter(options(runner));
+    const ollamaInvocation = { ...invocation, model: 'ollama/gemma4:e4b' };
+
+    const result = await adapter.start(ollamaInvocation, new AbortController().signal);
+
+    expect(runner.calls[0]?.spec.argv).toEqual([
+      '--print', '--mode', 'json', '--model', 'ollama/gemma4:e4b', '--session', result.sessionId,
+    ]);
+    expect(runner.calls[0]?.spec.argv).not.toContain('--extension');
+    expect(runner.calls[0]?.spec.env).toBeUndefined();
+    expect(result.contractEvidence).toEqual([PI_SESSION_ID_FROM_FILE, PI_MCP_SKIPPED_NO_EXTENSION]);
   });
 
   it.each([
@@ -222,6 +269,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
   it.each([
     ['cli_absent', 'cli_absent'],
     ['spawn_failed', 'transport'],
+    ['timeout', 'transport'],
     ['malformed_output', 'unknown'],
   ] as const)('SIMULATED maps internal process code %s to neutral classification %s', async (code, expected) => {
     const runner = new SIMULATEDChildProcessRunner([new AgentAdapterError(code, 'SIMULATED failure')]);

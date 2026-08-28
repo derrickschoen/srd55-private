@@ -34,6 +34,7 @@ export interface AgentTurnResult {
   readonly finalText: string;
   readonly usage: AgentUsage | null;
   readonly exit: 'completed' | 'cancelled';
+  readonly contractEvidence?: readonly string[];
 }
 
 export interface CliProbe {
