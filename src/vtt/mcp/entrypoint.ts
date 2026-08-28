@@ -1,9 +1,15 @@
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
+import { appendFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { EncounterState } from '../../combat/encounter';
-import { encounterBranchId, encounterSessionId } from '../../combat/values';
+import {
+  encounterBranchId,
+  encounterSessionId,
+  type EncounterBranchId,
+  type EncounterSessionId,
+} from '../../combat/values';
 import type { EngineProposalEnvelope, NarrationEnvelope } from '../engine-envelopes';
 import { createEngineStateCapsule, projectEngineEncounterState, type RuleReference } from '../engine-state-capsule';
 import { canonicalEngineQueryPort, engineActionRegistry } from '../engine-query-port';
@@ -106,6 +112,20 @@ export interface EngineMcpRuntime {
   readonly adjudications: readonly AdjudicationEnvelope[];
 }
 
+export interface EngineMcpLauncherManifest {
+  readonly format: 'engine-mcp-launcher-v1';
+  readonly fixturePath: string;
+  readonly proposalSpoolPath: string;
+  readonly runId: EncounterSessionId;
+  readonly branchId: EncounterBranchId;
+  readonly revision: number;
+  readonly requestId: string;
+  readonly phase: 'initial' | 'correction';
+  readonly correctionNumber: 0 | 1;
+  readonly room: number;
+  readonly historyKind: string;
+}
+
 export function createEngineMcpRuntime(
   state: EncounterState,
   options: {
@@ -120,6 +140,10 @@ export function createEngineMcpRuntime(
     readonly correctionNumber?: 0 | 1;
     readonly room?: number | null;
     readonly historyKind?: string;
+    readonly runId?: EncounterSessionId;
+    readonly branchId?: EncounterBranchId;
+    readonly requestId?: string;
+    readonly onProposal?: (proposal: EngineProposalEnvelope) => void;
   } = {},
 ): EngineMcpRuntime {
   const candidates = state.combatants
@@ -132,11 +156,11 @@ export function createEngineMcpRuntime(
   const phase = options.phase ?? 'initial';
   const correctionNumber = options.correctionNumber ?? (phase === 'correction' ? 1 : 0);
   const capsule = createEngineStateCapsule({
-    runId: encounterSessionId('encounter:engine-mcp'),
-    branchId: encounterBranchId('branch:engine-mcp'),
+    runId: options.runId ?? encounterSessionId('encounter:engine-mcp'),
+    branchId: options.branchId ?? encounterBranchId('branch:engine-mcp'),
     revision,
     generatedAt: '2026-08-27T12:00:00.000Z',
-    request: { requestId: 'request:engine-mcp', phase, correctionNumber, actors },
+    request: { requestId: options.requestId ?? 'request:engine-mcp', phase, correctionNumber, actors },
     projection: projectEngineEncounterState(state, engineActionRegistry(state), options.room ?? 1),
     historyDelta: options.historyKind === undefined ? [] : [{
       revision,
@@ -155,7 +179,12 @@ export function createEngineMcpRuntime(
     stateSource: feed,
     queries: canonicalEngineQueryPort,
     intents: pureIntentResolver,
-    proposals: { append: (envelope) => { proposals.push(envelope); } },
+    proposals: {
+      append: (envelope) => {
+        proposals.push(envelope);
+        options.onProposal?.(structuredClone(envelope));
+      },
+    },
     narration: { append: (envelope) => { narrations.push(envelope); } },
     adjudications: { append: (envelope) => { adjudications.push(envelope); } },
     rules: options.rules ?? { get: () => null },
@@ -201,9 +230,53 @@ export async function runEngineMcpServer(
   }
 }
 
+function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const input = value as Readonly<Record<string, unknown>>;
+  return input['format'] === 'engine-mcp-launcher-v1' &&
+    typeof input['fixturePath'] === 'string' && input['fixturePath'].length > 0 &&
+    typeof input['proposalSpoolPath'] === 'string' && input['proposalSpoolPath'].length > 0 &&
+    typeof input['runId'] === 'string' && input['runId'].length > 0 &&
+    typeof input['branchId'] === 'string' && input['branchId'].length > 0 &&
+    Number.isSafeInteger(input['revision']) && typeof input['revision'] === 'number' && input['revision'] >= 1 &&
+    typeof input['requestId'] === 'string' && input['requestId'].length > 0 &&
+    (input['phase'] === 'initial' || input['phase'] === 'correction') &&
+    (input['correctionNumber'] === 0 || input['correctionNumber'] === 1) &&
+    Number.isSafeInteger(input['room']) && typeof input['room'] === 'number' && input['room'] >= 1 &&
+    typeof input['historyKind'] === 'string' && input['historyKind'].length > 0;
+}
+
+async function launcherManifest(path: string): Promise<EngineMcpLauncherManifest | null> {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(await readFile(resolve(path), 'utf8')) as unknown;
+  } catch {
+    return null;
+  }
+  return isLauncherManifest(decoded) ? decoded : null;
+}
+
 export async function runEngineMcpEntrypoint(argv: readonly string[] = process.argv): Promise<void> {
-  const fixturePath = argv[2];
-  if (fixturePath === undefined) throw new TypeError('Usage: engine-mcp-server.ts <arena-fixture.json>');
+  const launcherPath = argv[2];
+  if (launcherPath === undefined) throw new TypeError('Usage: engine-mcp-server.ts <arena-fixture-or-launcher.json>');
+  const manifest = await launcherManifest(launcherPath);
+  if (manifest !== null) {
+    await runEngineMcpServer(manifest.fixturePath, {
+      runId: manifest.runId,
+      branchId: manifest.branchId,
+      revision: manifest.revision,
+      requestId: manifest.requestId,
+      phase: manifest.phase,
+      correctionNumber: manifest.correctionNumber,
+      room: manifest.room,
+      historyKind: manifest.historyKind,
+      onProposal: (proposal) => {
+        appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(proposal)}\n`, 'utf8');
+      },
+    });
+    return;
+  }
+  const fixturePath = launcherPath;
   const thirdArgument = argv[3];
   const scenario = thirdArgument?.startsWith('--') === true ? thirdArgument : undefined;
   if (thirdArgument !== undefined && scenario === undefined && (thirdArgument.length < 16 || thirdArgument.length > 300)) {

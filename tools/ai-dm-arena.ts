@@ -1,69 +1,43 @@
-import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { appendFile, readFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
-import type { EncounterState } from '../src/combat/encounter';
-import { gridDistance } from '../src/combat/grid';
-import type { MonsterAttackAction } from '../src/combat/statblock';
-import {
-  JSON_ROUND_PLAN_SURFACE,
-  renderArenaPrompt,
-  type ArenaPromptEnvelope,
-} from '../src/vtt/arena-prompt';
-import {
-  arenaAttackRange as attackRange,
-  arenaMonsterActions as monsterActions,
-  arenaTokenPosition as tokenPosition,
-  resolveArenaTarget as resolveTarget,
-  validateArenaPlan,
-} from '../src/vtt/arena-legality';
-import {
-  DM_BRIDGE_PROTOCOL_VERSION,
-  type RoundPlan,
-} from '../src/vtt/dm-bridge/round-plan-contract';
 import { generateRoom } from '../src/vtt/room-generator';
-
-export { validateArenaPlan } from '../src/vtt/arena-legality';
-
-export const ARENA_EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const;
-export type ArenaEffort = (typeof ARENA_EFFORTS)[number];
+import {
+  CONVERSATION_CLIS,
+  CONVERSATION_EFFORTS,
+  runConversation,
+  type ConversationCli,
+  type ConversationEffort,
+  type ConversationRunOptions,
+  type ConversationTokenCounts,
+} from './ai-dm-conversation';
 
 export interface ArenaConfig {
   readonly rooms: number;
-  /** Repetitions are successive rounds in one persistent fight session. */
   readonly reps: number;
   readonly seed: number;
-  readonly kbPath: string;
+  readonly cli: ConversationCli;
   readonly model: string;
-  readonly effort: ArenaEffort;
+  readonly effort: ConversationEffort;
   readonly outPath: string;
   readonly dryRun: boolean;
   readonly cwd: string;
-  readonly codexBin: string;
-}
-
-export interface ArenaTokenCounts {
-  readonly input: number;
-  readonly cachedInput: number;
-  readonly output: number;
-  readonly reasoning: number;
+  readonly cliBin: string;
+  readonly timeoutMs: number;
 }
 
 export interface ArenaRow {
   readonly seed: number;
   readonly room: number;
   readonly round: number;
-  readonly kbHash: string;
+  readonly cli: ConversationCli;
+  readonly contextRevision: number;
+  readonly projectionRevision: number;
+  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused';
+  readonly proposalId: string | null;
   readonly wall: number;
-  readonly tokens: ArenaTokenCounts;
+  readonly tokens: ConversationTokenCounts;
   readonly refusals: readonly string[];
-  readonly plan: RoundPlan | null;
-}
-
-interface CodexResult {
-  readonly sessionId: string;
-  readonly reply: unknown;
-  readonly tokens: ArenaTokenCounts;
+  readonly toolCalls: number;
 }
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -88,200 +62,77 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   let dryRun = false;
   for (let index = 0; index < argv.length; index += 1) {
     const option = argv[index];
-    if (option === '--dry-run') {
-      dryRun = true;
-      continue;
-    }
-    if (!['--rooms', '--reps', '--seed', '--kb', '--model', '--effort', '--out', '--codex-bin'].includes(option ?? '')) {
-      throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
-    }
-    const value = requiredValue(argv, index, option ?? '<missing>');
-    values.set(option ?? '', value);
+    if (option === '--dry-run') { dryRun = true; continue; }
+    if (![
+      '--rooms', '--reps', '--seed', '--cli', '--model', '--effort', '--out',
+      '--cli-bin', '--timeout-ms',
+    ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
+    values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
     index += 1;
   }
-  const rooms = positiveInteger(values.get('--rooms') ?? '', '--rooms');
-  const reps = positiveInteger(values.get('--reps') ?? '', '--reps');
   const seed = Number(values.get('--seed'));
   if (!Number.isSafeInteger(seed)) throw new TypeError('--seed must be a safe integer.');
-  const kbPath = resolve(values.get('--kb') ?? '');
   const outPath = resolve(values.get('--out') ?? '');
-  if ((values.get('--kb') ?? '').length === 0) throw new TypeError('--kb is required.');
   if ((values.get('--out') ?? '').length === 0) throw new TypeError('--out is required.');
   if (pathIsInside(cwd, outPath)) throw new TypeError('--out must be outside the repository working tree.');
-  const model = values.get('--model') ?? '';
-  if (model.trim().length === 0) throw new TypeError('--model is required.');
-  const effort = values.get('--effort');
-  if (!ARENA_EFFORTS.includes(effort as ArenaEffort)) {
+  const cli = values.get('--cli') ?? 'codex';
+  if (!CONVERSATION_CLIS.includes(cli as ConversationCli)) throw new TypeError('--cli must be codex or claude-code.');
+  const effort = values.get('--effort') ?? 'medium';
+  if (!CONVERSATION_EFFORTS.includes(effort as ConversationEffort)) {
     throw new TypeError('--effort must be low, medium, high, or xhigh.');
   }
+  const selectedCli = cli as ConversationCli;
   return {
-    rooms,
-    reps,
+    rooms: positiveInteger(values.get('--rooms') ?? '', '--rooms'),
+    reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
     seed,
-    kbPath,
-    model,
-    effort: effort as ArenaEffort,
+    cli: selectedCli,
+    model: values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
+    effort: effort as ConversationEffort,
     outPath,
     dryRun,
     cwd: resolve(cwd),
-    codexBin: values.get('--codex-bin') ?? 'codex',
+    cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : 'claude'),
+    timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
   };
 }
 
-function dryRunPlan(state: EncounterState, envelope: ArenaPromptEnvelope): RoundPlan {
-  return {
-    kind: 'round_plan',
-    protocolVersion: DM_BRIDGE_PROTOCOL_VERSION,
-    encounterId: envelope.encounterId as RoundPlan['encounterId'],
-    requestId: envelope.requestId,
-    expectedRevision: envelope.expectedRevision,
-    round: envelope.round,
-    monsters: state.combatants.flatMap((subject) => {
-      if (subject.profile.kind !== 'monster' || subject.life === 'dead') return [];
-      const attack = monsterActions(state, subject.profile.id)
-        .find((action): action is MonsterAttackAction => action.kind === 'attack');
-      const target = resolveTarget(state, subject.profile.id, { kind: 'nearest_enemy' });
-      const origin = tokenPosition(state, subject.profile.id);
-      const destination = target === null ? null : tokenPosition(state, target);
-      const inRange = attack !== undefined && origin !== null && destination !== null &&
-        gridDistance(origin, destination) <= attackRange(attack);
-      return [{
-        monsterId: subject.profile.id,
-        program: inRange
-          ? {
-              kind: 'action' as const,
-              action: {
-                kind: 'attack' as const,
-                target: { kind: 'nearest_enemy' as const },
-                attackId: attack.id,
-              },
-            }
-          : {
-              kind: 'action' as const,
-              action: {
-                kind: 'move_toward' as const,
-                target: { kind: 'nearest_enemy' as const },
-                maximumFeet: subject.profile.rules.speed,
-              },
-            },
-      }];
-    }),
-  };
-}
-
-function parseCodexOutput(stdout: string, priorSessionId: string | null): CodexResult {
-  let sessionId = priorSessionId;
-  let reply: unknown = null;
-  let tokens: ArenaTokenCounts = { input: 0, cachedInput: 0, output: 0, reasoning: 0 };
-  for (const line of stdout.split('\n').filter((candidate) => candidate.trim().length > 0)) {
-    const value: unknown = JSON.parse(line);
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue;
-    const event = value as Readonly<Record<string, unknown>>;
-    if (event['type'] === 'thread.started' && typeof event['thread_id'] === 'string') sessionId = event['thread_id'];
-    if (event['type'] === 'item.completed' && typeof event['item'] === 'object' && event['item'] !== null) {
-      const item = event['item'] as Readonly<Record<string, unknown>>;
-      if (item['type'] === 'agent_message' && typeof item['text'] === 'string') reply = JSON.parse(item['text']);
-    }
-    if (event['type'] === 'turn.completed' && typeof event['usage'] === 'object' && event['usage'] !== null) {
-      const usage = event['usage'] as Readonly<Record<string, unknown>>;
-      const count = (key: string): number => typeof usage[key] === 'number' && Number.isSafeInteger(usage[key])
-        ? usage[key]
-        : 0;
-      tokens = {
-        input: count('input_tokens'),
-        cachedInput: count('cached_input_tokens'),
-        output: count('output_tokens'),
-        reasoning: count('reasoning_tokens'),
-      };
-    }
-  }
-  if (sessionId === null) throw new Error('Codex output did not contain a persistent session id.');
-  return { sessionId, reply, tokens };
-}
-
-async function runCodex(
+export async function runArena(
   config: ArenaConfig,
-  prompt: string,
-  sessionId: string | null,
-): Promise<CodexResult> {
-  const args = [
-    'exec',
-    '-C', config.cwd,
-    '--sandbox', 'read-only',
-    '--json',
-    '-m', config.model,
-    '-c', `model_reasoning_effort="${config.effort}"`,
-    ...(sessionId === null ? [] : ['resume', sessionId]),
-    '-',
-  ];
-  const stdout = await new Promise<string>((resolvePromise, reject) => {
-    const child = spawn(config.codexBin, args, { cwd: config.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
-    let output = '';
-    let errorOutput = '';
-    child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); });
-    child.stderr.on('data', (chunk: Buffer) => { errorOutput += chunk.toString('utf8'); });
-    child.once('error', reject);
-    child.once('exit', (code) => {
-      if (code === 0) resolvePromise(output);
-      else reject(new Error(`codex exec exited ${String(code)}: ${errorOutput}`));
-    });
-    child.stdin.end(prompt);
+  options: Omit<ConversationRunOptions, 'roomStates'> = {},
+): Promise<readonly ArenaRow[]> {
+  const generated = Array.from({ length: config.rooms }, (_, index) => {
+    const seed = (config.seed + index) >>> 0;
+    return { seed, state: generateRoom(seed).encounter.state };
   });
-  return parseCodexOutput(stdout, sessionId);
-}
-
-export async function runArena(config: ArenaConfig): Promise<readonly ArenaRow[]> {
-  const knowledgeBase = await readFile(config.kbPath, 'utf8');
-  const kbHash = createHash('sha256').update(knowledgeBase).digest('hex');
-  const rows: ArenaRow[] = [];
-  for (let room = 1; room <= config.rooms; room += 1) {
-    const roomSeed = (config.seed + room - 1) >>> 0;
-    const generated = generateRoom(roomSeed);
-    let sessionId: string | null = null;
-    for (let round = 1; round <= config.reps; round += 1) {
-      const envelope: ArenaPromptEnvelope = {
-        encounterId: `encounter:arena-${String(roomSeed)}`,
-        requestId: `arena-${String(roomSeed)}-round-${String(round)}`,
-        expectedRevision: generated.encounter.state.revision,
-        round,
-      };
-      const prompt = renderArenaPrompt({
-        state: generated.encounter.state,
-        envelope,
-        knowledgeBase,
-        surface: JSON_ROUND_PLAN_SURFACE,
-      });
-      const started = performance.now();
-      let plan: RoundPlan | null = null;
-      let tokens: ArenaTokenCounts = { input: 0, cachedInput: 0, output: 0, reasoning: 0 };
-      const refusals: string[] = [];
-      try {
-        if (config.dryRun) {
-          plan = JSON_ROUND_PLAN_SURFACE.decode(dryRunPlan(generated.encounter.state, envelope));
-        } else {
-          const result = await runCodex(config, prompt, sessionId);
-          sessionId = result.sessionId;
-          tokens = result.tokens;
-          plan = JSON_ROUND_PLAN_SURFACE.decode(result.reply);
-        }
-        refusals.push(...validateArenaPlan(plan, generated.encounter.state, envelope));
-      } catch (error) {
-        refusals.push(error instanceof Error ? error.message : String(error));
-      }
-      const row: ArenaRow = {
-        seed: roomSeed,
-        room,
-        round,
-        kbHash,
-        wall: performance.now() - started,
-        tokens,
-        refusals,
-        plan,
-      };
-      rows.push(row);
-      await appendFile(config.outPath, `${JSON.stringify(row)}\n`, 'utf8');
-    }
-  }
+  const result = await runConversation({
+    fixturesPath: resolve(config.cwd, 'tests/fixtures/arena-basis'),
+    rooms: config.rooms,
+    rounds: config.reps,
+    cli: config.cli,
+    model: config.model,
+    effort: config.effort,
+    outPath: config.outPath,
+    dryRun: config.dryRun,
+    cwd: config.cwd,
+    cliBin: config.cliBin,
+    timeoutMs: config.timeoutMs,
+  }, { ...options, roomStates: generated.map((entry) => entry.state) });
+  const rows = result.rows.map((row): ArenaRow => ({
+    seed: generated[row.room - 1]!.seed,
+    room: row.room,
+    round: row.round,
+    cli: row.cli,
+    contextRevision: row.contextRevision,
+    projectionRevision: row.projectionRevision,
+    outcome: row.outcome,
+    proposalId: row.proposalId,
+    wall: row.wallPerCreature,
+    tokens: row.tokens,
+    refusals: row.refusals,
+    toolCalls: row.toolCalls,
+  }));
+  await writeFile(config.outPath, rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
   return rows;
 }
 
@@ -291,14 +142,8 @@ async function main(): Promise<void> {
 
 const invokedPath = process.argv[1];
 if (invokedPath !== undefined && (
-  invokedPath.endsWith('/ai-dm-arena.ts') ||
-  invokedPath.endsWith('\\ai-dm-arena.ts') ||
-  ((
-    invokedPath.endsWith('/vite-node') ||
-    invokedPath.endsWith('\\vite-node') ||
-    invokedPath.endsWith('/vite-node.mjs') ||
-    invokedPath.endsWith('\\vite-node.mjs')
-  ) && process.argv.includes('--rooms'))
-)) {
-  await main();
-}
+  invokedPath.endsWith('/ai-dm-arena.ts') || invokedPath.endsWith('\\ai-dm-arena.ts') ||
+  ((invokedPath.endsWith('/vite-node') || invokedPath.endsWith('\\vite-node') ||
+    invokedPath.endsWith('/vite-node.mjs') || invokedPath.endsWith('\\vite-node.mjs')) &&
+    process.argv.includes('--seed'))
+)) await main();

@@ -5,47 +5,43 @@ import { describe, expect, it } from 'vitest';
 import { encounterSessionId } from '../../../src/combat/values';
 import type { RoundPlan } from '../../../src/vtt/dm-bridge/round-plan-contract';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { validateArenaPlan } from '../../../src/vtt/arena-legality';
 import {
   parseArenaArgs,
   runArena,
-  validateArenaPlan,
 } from '../../../tools/ai-dm-arena';
 import {
   mkdtempSync,
   readFileSync,
-  writeFileSync,
 } from '../../helpers/test-filesystem';
 
 describe('AI-DM arena', () => {
-  it('renders and validates a multi-round dry run without spawning a model', async () => {
+  it('renders and validates a multi-round dry run without spawning a model', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-dry-'));
-    const kbPath = join(directory, 'kb.txt');
     const outPath = join(directory, 'arena.jsonl');
-    writeFileSync(kbPath, 'fixture knowledge only', 'utf8');
     const config = parseArenaArgs([
       '--rooms', '2',
       '--reps', '2',
       '--seed', '3943001',
-      '--kb', kbPath,
-      '--model', 'not-contacted-in-dry-run',
       '--effort', 'low',
       '--out', outPath,
-      '--codex-bin', 'definitely-not-a-real-codex-binary',
+      '--cli-bin', 'definitely-not-a-real-codex-binary',
       '--dry-run',
     ]);
 
     const rows = await runArena(config);
 
     expect(rows).toHaveLength(4);
-    expect(rows.every((row) => row.plan !== null && row.refusals.length === 0)).toBe(true);
+    expect(rows.every((row) =>
+      row.outcome === 'authorized' && row.refusals.length === 0 &&
+      row.projectionRevision > row.contextRevision)).toBe(true);
+    expect(rows[1]?.contextRevision).toBe(rows[0]?.projectionRevision);
     expect(readFileSync(outPath, 'utf8').trim().split('\n')).toHaveLength(4);
   });
 
-  it('runs as a vite-node --dry-run CLI without contacting the model binary', () => {
+  it('runs as a vite-node --dry-run CLI without contacting the model binary', { timeout: 30_000 }, () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-cli-'));
-    const kbPath = join(directory, 'kb.txt');
     const outPath = join(directory, 'arena.jsonl');
-    writeFileSync(kbPath, 'fixture knowledge only', 'utf8');
     const environment = { ...process.env };
     delete environment.FORCE_COLOR;
     delete environment.NO_COLOR;
@@ -57,11 +53,9 @@ describe('AI-DM arena', () => {
         '--rooms', '1',
         '--reps', '1',
         '--seed', '3943001',
-        '--kb', kbPath,
-        '--model', 'not-contacted-in-dry-run',
         '--effort', 'low',
         '--out', outPath,
-        '--codex-bin', 'definitely-not-a-real-codex-binary',
+        '--cli-bin', 'definitely-not-a-real-codex-binary',
         '--dry-run',
       ],
       { cwd: process.cwd(), encoding: 'utf8', env: environment },
