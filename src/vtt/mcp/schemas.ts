@@ -43,6 +43,28 @@ const engagement = z.object({
 const intentBranch = z.object({ choice: actionChoice, movement: movementPreference, engagement }).strict();
 const turnIntent = intentBranch.extend({ actor_id: identifier, fallback: intentBranch.nullable() }).strict()
   .describe('One actor intent with at most one declarative fallback.');
+const reactionGuidanceInstruction = z.enum([
+  'take', 'decline', 'only_when_target_visible', 'only_when_legal_without_moving',
+]);
+const reactionTriggerGuidance = z.object({
+  hit_by_attack: reactionGuidanceInstruction.optional(),
+  damaged_by_creature: reactionGuidanceInstruction.optional(),
+  taking_damage_of_type: reactionGuidanceInstruction.optional(),
+  creature_casts_spell: reactionGuidanceInstruction.optional(),
+  opportunity_attack: reactionGuidanceInstruction.optional(),
+}).strict().refine((value) => Object.keys(value).length > 0, 'At least one reaction trigger must be covered.');
+const reactionGuidance = z.object({
+  side_wide: reactionTriggerGuidance.optional(),
+  actors: z.array(z.object({ actor_id: identifier, triggers: reactionTriggerGuidance }).strict()).max(50).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.side_wide === undefined && (value.actors === undefined || value.actors.length === 0)) {
+    context.addIssue({ code: 'custom', message: 'Reaction guidance must declare side-wide or actor guidance.' });
+  }
+  const actors = value.actors?.map((entry) => entry.actor_id) ?? [];
+  if (new Set(actors).size !== actors.length) {
+    context.addIssue({ code: 'custom', path: ['actors'], message: 'Reaction guidance actor IDs must be unique.' });
+  }
+});
 const page = z.object({ cursor: z.string().min(1).max(500).optional(), maximum_items: z.number().int().min(1).max(100).optional() }).strict();
 
 const refusal = z.object({ code: shortCode, summary: summaryText }).strict();
@@ -119,7 +141,15 @@ const resolutionPreview = z.object({ actor_id: identifier, action_id: identifier
 const correctionGuidance = z.object({ remaining_corrections: z.union([z.literal(0), z.literal(1)]), required_actor_ids: z.array(identifier).min(1).max(50), replace_whole_round: z.literal(true) }).strict();
 const validateOutput = z.object({ state_ref: stateRef, valid: z.boolean(), selected_branch: z.enum(['primary', 'fallback', 'none']), resolution: resolutionPreview.nullable(), refusals: z.array(refusal).max(20), correction_guidance: correctionGuidance.nullable() }).strict();
 const actorResolution = z.object({ actor_id: identifier, selected_branch: z.enum(['primary', 'fallback']), resolution_digest: z.string().min(64).max(128), summary: summaryText }).strict();
-const actorRefusal = z.object({ actor_id: identifier, codes: z.array(shortCode).min(1).max(20), summary: summaryText }).strict();
+const actorRefusal = z.object({
+  actor_id: identifier,
+  codes: z.array(shortCode).min(1).max(20),
+  summary: summaryText,
+  attempt_rejections: z.array(z.object({
+    attempt: z.enum(['primary', 'fallback']),
+    rejection_reasons: z.array(summaryText).min(1).max(20),
+  }).strict()).min(1).max(2),
+}).strict();
 const roundOutput = z.union([
   z.object({ status: z.literal('proposed'), round_proposal_id: identifier, state_ref: stateRef, actor_resolutions: z.array(actorResolution).min(1).max(50) }).strict(),
   z.object({ status: z.literal('rejected'), state_ref: stateRef, actor_refusals: z.array(actorRefusal).min(1).max(50), correction_guidance: correctionGuidance }).strict(),
@@ -135,10 +165,10 @@ const refInput = { state_ref: stateRef };
 const phaseIntentInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), intent: turnIntent }).strict().superRefine((value, context) => {
   if (value.phase === 'correction' && value.intent.fallback !== null) context.addIssue({ code: 'custom', path: ['intent', 'fallback'], message: 'Correction intent fallback must be null.' });
 });
-const submitIntentInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), intent: turnIntent }).strict().superRefine((value, context) => {
+const submitIntentInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), intent: turnIntent, reaction_guidance: reactionGuidance.optional() }).strict().superRefine((value, context) => {
   if (value.phase === 'correction' && value.intent.fallback !== null) context.addIssue({ code: 'custom', path: ['intent', 'fallback'], message: 'Correction intent fallback must be null.' });
 });
-const submitRoundInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), intents: z.array(turnIntent).min(1).max(50) }).strict().superRefine((value, context) => {
+const submitRoundInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), intents: z.array(turnIntent).min(1).max(50), reaction_guidance: reactionGuidance.optional() }).strict().superRefine((value, context) => {
   if (value.phase === 'correction') value.intents.forEach((intent, index) => {
     if (intent.fallback !== null) context.addIssue({ code: 'custom', path: ['intents', index, 'fallback'], message: 'Correction intent fallback must be null.' });
   });

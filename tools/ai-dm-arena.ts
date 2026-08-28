@@ -42,6 +42,8 @@ export interface ArenaRow {
   readonly tokens: ConversationTokenCounts;
   readonly refusals: readonly string[];
   readonly toolCalls: number;
+  readonly agentDispatched: boolean;
+  readonly chainEvidence: import('./ai-dm-conversation').ConversationChainEvidence;
 }
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -157,6 +159,8 @@ export async function runArena(
     tokens: row.tokens,
     refusals: row.refusals,
     toolCalls: row.toolCalls,
+    agentDispatched: row.agentDispatched,
+    chainEvidence: row.chainEvidence,
   }));
   await writeFile(config.outPath, rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
   return rows;

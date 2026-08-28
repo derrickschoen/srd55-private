@@ -201,6 +201,7 @@ describe('read-only engine state capsule', () => {
     if (!resolution.valid) throw new Error(resolution.refusals.map((entry) => entry.summary).join('\n'));
     const envelope: EngineProposalEnvelope = {
       kind: 'round_intent_proposal',
+      reactionGuidance: null,
       proposalId: 'proposal:mcp-migration',
       runId: fixture.capsule.runId,
       branchId: fixture.capsule.branchId,

@@ -67,6 +67,11 @@ export type EngineIntentResolution =
       readonly selectedBranch: 'primary' | 'fallback';
       readonly resolutionDigest: string;
       readonly summary: string;
+      readonly refusals: readonly {
+        readonly branch: 'primary';
+        readonly code: string;
+        readonly summary: string;
+      }[];
       /** Engine-internal geometry. Proposal envelopes expose only its digest and summary. */
       readonly mechanics: ResolvedIntentMechanics;
     }
@@ -255,6 +260,7 @@ function resolveBranch(
 function accepted(
   selectedBranch: 'primary' | 'fallback',
   mechanics: ResolvedIntentMechanics,
+  refusals: Extract<EngineIntentResolution, { readonly valid: true }>['refusals'] = [],
 ): EngineIntentResolution {
   const resolutionDigest = sha256(canonicalJson(mechanics));
   return {
@@ -265,6 +271,7 @@ function accepted(
       ? `${mechanics.actorId} uses ${mechanics.actionId}`
       : `${mechanics.actorId} moves ${String(mechanics.movementCostFeet)} feet and uses ${mechanics.actionId} on ${mechanics.targetId}`,
     mechanics,
+    refusals,
   };
 }
 
@@ -283,7 +290,9 @@ export function createPureIntentResolver(
         };
       }
       const fallback = resolveBranch(state, intent.actorId, intent.fallback, queries);
-      if (fallback.valid) return accepted('fallback', fallback.mechanics);
+      if (fallback.valid) return accepted('fallback', fallback.mechanics, [{
+        branch: 'primary', code: primary.code, summary: primary.summary,
+      }]);
       return {
         valid: false,
         selectedBranch: 'none',

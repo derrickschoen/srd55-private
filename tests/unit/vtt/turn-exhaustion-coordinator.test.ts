@@ -121,6 +121,7 @@ function proposal(
     stateHandle: 'engine-state:test',
     phase,
     idempotencyKey: `idempotency:${phase}:0001`,
+    reactionGuidance: null,
     resolutions: [{
       intent: selectedIntent,
       selectedBranch,

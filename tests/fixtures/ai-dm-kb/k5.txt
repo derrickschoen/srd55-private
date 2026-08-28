@@ -18,3 +18,4 @@ Exploit longer melee reach by attacking from the nearest effective distance inst
 Do not spend movement that does not improve reach, safety, line of attack, or the next-turn position.
 Keep ranged attackers at effective range unless closing creates a clear advantage.
 Prefer robust legal actions over fragile plans that depend on every uncertain condition succeeding.
+Declare guidance for foreseeable reactions once, early, and rely on its persistence across later rounds and rooms.

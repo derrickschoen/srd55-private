@@ -352,6 +352,42 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(runtime.proposals).toHaveLength(1);
   });
 
+  it('queues closed reaction guidance on both submission tools and rejects free text', async () => {
+    const roundFixture = await fixtureRuntime();
+    const roundArguments = happyArguments('engine.submit_round_intents', roundFixture.state, roundFixture.runtime);
+    expect(structured(toolCall(roundFixture.runtime.handler, 'engine.submit_round_intents', {
+      ...roundArguments,
+      reaction_guidance: { side_wide: { opportunity_attack: 'only_when_target_visible' } },
+    }))['status']).toBe('proposed');
+    expect(roundFixture.runtime.proposals[0]).toEqual(expect.objectContaining({
+      reactionGuidance: {
+        sideWide: { opportunity_attack: 'only_when_target_visible' }, actors: [],
+      },
+    }));
+
+    const singleFixture = await fixtureRuntime({ requestedActorCount: 1 });
+    const facts = fixtureFacts(singleFixture.state, singleFixture.runtime);
+    expect(structured(toolCall(singleFixture.runtime.handler, 'engine.submit_intent', {
+      ...happyArguments('engine.submit_intent', singleFixture.state, singleFixture.runtime),
+      reaction_guidance: {
+        actors: [{ actor_id: facts.actor, triggers: { hit_by_attack: 'decline' } }],
+      },
+    }))['status']).toBe('proposed');
+    expect(singleFixture.runtime.proposals[0]).toEqual(expect.objectContaining({
+      reactionGuidance: expect.objectContaining({
+        actors: [expect.objectContaining({
+          actorId: facts.actor, triggers: { hit_by_attack: 'decline' },
+        })],
+      }),
+    }));
+
+    expect(toolCall(singleFixture.runtime.handler, 'engine.submit_intent', {
+      ...happyArguments('engine.submit_intent', singleFixture.state, singleFixture.runtime),
+      idempotency_key: 'intent-idempotency-invalid-guidance',
+      reaction_guidance: { side_wide: { opportunity_attack: 'ask the agent synchronously' } },
+    })['isError']).toBe(true);
+  });
+
   it('paginates application collections and rejects a cursor after filters change', async () => {
     const { state, runtime } = await fixtureRuntime();
     const facts = fixtureFacts(state, runtime);
@@ -421,6 +457,8 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     }).result);
     expect(JSON.stringify(plan)).toContain('engine.get_turn_context');
     expect(JSON.stringify(plan)).toContain('engine.submit_round_intents');
+    expect(JSON.stringify(plan)).toContain('reaction_guidance');
+    expect(JSON.stringify(plan)).toContain('persists until replaced');
     const capsule = runtime.feed.current();
     expect(JSON.stringify(plan)).not.toContain('proof_token');
     expect(JSON.stringify(plan)).not.toContain(engineStateSummaryProofToken(capsule.digest, 'turn_minimal'));
