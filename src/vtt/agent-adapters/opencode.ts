@@ -32,13 +32,14 @@ interface OpenCodeConfig {
       type: 'local';
       command: readonly string[];
       enabled: true;
+      timeout: 120_000;
     }>;
   }>;
   readonly provider?: Readonly<{
     ollama: Readonly<{
       npm: '@ai-sdk/openai-compatible';
       options: Readonly<{ baseURL: 'http://localhost:11434/v1' }>;
-      models: Readonly<Record<string, Readonly<Record<string, never>>>>;
+      models: Readonly<Record<string, Readonly<{ tool_call: true }>>>;
     }>;
   }>;
 }
@@ -137,6 +138,7 @@ export function openCodeConfig(input: OpenCodeConfigInput): OpenCodeConfig {
         type: 'local',
         command: [input.engineCommand, ...input.engineArgs],
         enabled: true,
+        timeout: 120_000,
       },
     },
     ...(modelId === null || modelId.length === 0 ? {} : {
@@ -144,7 +146,7 @@ export function openCodeConfig(input: OpenCodeConfigInput): OpenCodeConfig {
         ollama: {
           npm: '@ai-sdk/openai-compatible',
           options: { baseURL: 'http://localhost:11434/v1' },
-          models: { [modelId]: {} },
+          models: { [modelId]: { tool_call: true } },
         },
       },
     }),

@@ -47,10 +47,12 @@ class SIMULATEDCli implements AgentSessionAdapter {
       return Promise.reject(new AgentAdapterError('malformed_output', 'SIMULATED resume failure'));
     }
     if (this.#resumes === 3) return Promise.reject(new AgentAdapterError('resume_not_found', 'SIMULATED missing'));
-    const proof = _invocation.prompt.includes('engine.get_state_summary');
+    const proof = _invocation.prompt.includes('state summary');
     return Promise.resolve({
       sessionId: binding.sessionId,
-      finalText: proof && this.mode !== 'bad_mcp_proof' ? SIMULATED_DIGEST : 'RESUME',
+      finalText: proof && this.mode !== 'bad_mcp_proof'
+        ? SIMULATED_DIGEST
+        : proof ? 'Called engine.get_state_summary successfully.' : 'RESUME',
       usage: null,
       exit: 'completed',
     });
@@ -146,6 +148,21 @@ describe('SIMULATED four-CLI conformance harness — not live CLI verification',
       reason: 'lifecycle_incomplete',
       lifecycle: { coldStart: true, sessionIdCaptured: true, resume: true, mcpProof: false, classifiedResumeFailure: true },
     });
+    expect(fake.invocations[2]?.prompt).not.toContain('engine.get_state_summary');
+  });
+
+  it('judges MCP proof by the independently derived digest alone and gives Pi proxy-specific instructions', async () => {
+    const openCode = dependenciesFor(MODES);
+    const openCodeReport = await runAgentConformance({ cli: 'opencode', reportPath: null }, openCode.dependencies);
+    expect(openCodeReport.records[0]?.lifecycle.mcpProof).toBe(true);
+    expect(openCode.invocations[2]?.prompt).toContain('engine state summary tool');
+    expect(openCode.invocations[2]?.prompt).not.toContain('engine.get_state_summary');
+
+    const pi = dependenciesFor(MODES);
+    const piReport = await runAgentConformance({ cli: 'pi', reportPath: null }, pi.dependencies);
+    expect(piReport.records[0]?.lifecycle.mcpProof).toBe(true);
+    expect(pi.invocations[2]?.prompt).toContain('MCP proxy tool');
+    expect(pi.invocations[2]?.prompt).toContain('discover the engine server tools');
   });
 
   it('preserves accumulated lifecycle evidence when a mid-lifecycle case fails', async () => {
@@ -164,6 +181,29 @@ describe('SIMULATED four-CLI conformance harness — not live CLI verification',
       const fake = dependenciesFor(MODES);
       await runAgentConformance({ cli: 'codex', reportPath: null }, fake.dependencies);
       expect(fake.invocations.every((value) => value.timeoutMs === 456_789)).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('prefers per-CLI timeout overrides over the global timeout', async () => {
+    vi.stubEnv('DND_AGENT_CONFORMANCE_TIMEOUT_MS', '456789');
+    vi.stubEnv('DND_AGENT_CONFORMANCE_TIMEOUT_MS_CODEX', '310001');
+    vi.stubEnv('DND_AGENT_CONFORMANCE_TIMEOUT_MS_OPENCODE', '310002');
+    vi.stubEnv('DND_AGENT_CONFORMANCE_TIMEOUT_MS_PI', '310003');
+    vi.stubEnv('DND_AGENT_CONFORMANCE_TIMEOUT_MS_CLAUDE_CODE', '310004');
+    try {
+      const expected = new Map<AgentCliKind, number>([
+        ['codex', 310_001],
+        ['opencode', 310_002],
+        ['pi', 310_003],
+        ['claude-code', 310_004],
+      ]);
+      for (const kind of ['codex', 'opencode', 'pi', 'claude-code'] as const) {
+        const fake = dependenciesFor(MODES);
+        await runAgentConformance({ cli: kind, reportPath: null }, fake.dependencies);
+        expect(fake.invocations.every((value) => value.timeoutMs === expected.get(kind))).toBe(true);
+      }
     } finally {
       vi.unstubAllEnvs();
     }

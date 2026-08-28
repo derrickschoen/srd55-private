@@ -14,21 +14,27 @@ import {
 // allowlist, MCP negotiation, session stability, and resumed proposal flow.
 export const UNVERIFIED_CONTRACT_CLAUDE_CODE = 'UNVERIFIED_CONTRACT:claude-code-mcp-and-resume' as const;
 
-export const CLAUDE_ENGINE_TOOLS = Object.freeze([
-  'mcp__engine__engine.get_turn_context',
-  'mcp__engine__engine.get_state_summary',
-  'mcp__engine__engine.get_combatant_options',
-  'mcp__engine__engine.query_path',
-  'mcp__engine__engine.query_reach',
-  'mcp__engine__engine.query_cover',
-  'mcp__engine__engine.query_visibility',
-  'mcp__engine__engine.query_dice_expectation',
-  'mcp__engine__engine.validate_intent',
-  'mcp__engine__engine.submit_round_intents',
-  'mcp__engine__engine.submit_intent',
-  'mcp__engine__engine.emit_narration',
-  'mcp__engine__engine.request_dm_adjudication',
-] as const);
+const ENGINE_TOOL_NAMES = [
+  'engine.get_turn_context',
+  'engine.get_state_summary',
+  'engine.get_combatant_options',
+  'engine.query_path',
+  'engine.query_reach',
+  'engine.query_cover',
+  'engine.query_visibility',
+  'engine.query_dice_expectation',
+  'engine.validate_intent',
+  'engine.submit_round_intents',
+  'engine.submit_intent',
+  'engine.emit_narration',
+  'engine.request_dm_adjudication',
+] as const;
+
+export function claudeCodeEngineToolName(toolName: string): string {
+  return `mcp__engine__${toolName.replaceAll('.', '_')}`;
+}
+
+export const CLAUDE_ENGINE_TOOLS = Object.freeze(ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName));
 
 interface ClaudeDecodedTurn {
   readonly sessionId: string;
@@ -165,11 +171,12 @@ function assertClaudeInitTools(value: unknown): void {
 }
 
 function assertClaudeEngineServerConnected(value: unknown): void {
-  if (!Array.isArray(value) || value.length !== 1) {
-    throw new AgentAdapterError('malformed_output', 'Claude Code init MCP server inventory was not engine-only.');
+  if (!Array.isArray(value)) {
+    throw new AgentAdapterError('malformed_output', 'Claude Code init MCP server inventory was not an array.');
   }
-  const server = record(value[0]);
-  if (server?.['name'] !== 'engine' || server['status'] !== 'connected') {
+  const servers = value.map((candidate) => record(candidate));
+  if (servers.some((server) => server === null) ||
+    !servers.some((server) => server?.['name'] === 'engine' && server['status'] === 'connected')) {
     throw new AgentAdapterError('malformed_output', 'Claude Code init did not report the engine MCP server connected.');
   }
 }

@@ -92,7 +92,7 @@ function invocation(kind: AgentCliKind, prompt: string): AgentInvocation {
     model: process.env[environmentKey] ?? DEFAULT_MODELS[kind],
     reasoningEffort: 'low',
     launcherToken: `agent-conformance-${kind}-launcher-token`,
-    timeoutMs: conformanceTimeoutMs(),
+    timeoutMs: conformanceTimeoutMs(kind),
   };
 }
 
@@ -100,14 +100,32 @@ function binding(kind: AgentCliKind, sessionId: string): AgentSessionBinding {
   return { cli: kind, sessionId: agentSessionIdFromCli(sessionId), adapterVersion: AGENT_ADAPTER_VERSION, recoveryGeneration: 0, predecessorSessionHash: null, startedAtRevision: 1, lastDispatchedRevision: 1, status: 'active' };
 }
 
-function conformanceTimeoutMs(): number {
-  const configured = process.env['DND_AGENT_CONFORMANCE_TIMEOUT_MS'];
+function conformanceTimeoutMs(kind: AgentCliKind): number {
+  const kindKey = `DND_AGENT_CONFORMANCE_TIMEOUT_MS_${kind.replaceAll('-', '_').toUpperCase()}`;
+  const configured = process.env[kindKey] ?? process.env['DND_AGENT_CONFORMANCE_TIMEOUT_MS'];
   if (configured === undefined) return 300_000;
   const parsed = Number(configured);
   if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new TypeError('DND_AGENT_CONFORMANCE_TIMEOUT_MS must be a positive safe integer.');
+    throw new TypeError(`${kindKey} or DND_AGENT_CONFORMANCE_TIMEOUT_MS must be a positive safe integer.`);
   }
   return parsed;
+}
+
+function mcpProofPrompt(kind: AgentCliKind): string {
+  if (kind === 'pi') {
+    return [
+      'Use the MCP proxy tool to discover the engine server tools; do not answer from prompt text.',
+      'Through that proxy, obtain the current round turn context for run encounter:engine-mcp at revision 1.',
+      'Then through the proxy call the engine state summary tool for that state reference at turn-minimal granularity.',
+      'Reply with only the exact digest returned by the state summary.',
+    ].join(' ');
+  }
+  return [
+    'Use the engine MCP server now; do not answer from prompt text.',
+    'Obtain the current round turn context for run encounter:engine-mcp at revision 1.',
+    'Then use the engine state summary tool for that state reference at turn-minimal granularity.',
+    'Reply with only the exact digest returned by the state summary.',
+  ].join(' ');
 }
 
 interface FailureDiagnostic {
@@ -183,12 +201,7 @@ async function verifyCli(
     const digest = await expectedMcpDigest();
     const mcpProof = await adapter.resume(
       binding(kind, started.sessionId),
-      invocation(kind, [
-        'Use the engine MCP server now; do not answer from prompt text.',
-        'Call engine.get_turn_context with run_id encounter:engine-mcp, expected_revision 1, and scope round.',
-        'Then call engine.get_state_summary with the returned state_ref and granularity turn_minimal.',
-        'Reply with the exact digest from the state_ref returned by engine.get_state_summary.',
-      ].join(' ')),
+      invocation(kind, mcpProofPrompt(kind)),
       signal,
     );
     turnMarkers.push(...(mcpProof.contractEvidence ?? []));

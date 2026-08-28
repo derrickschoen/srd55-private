@@ -12,6 +12,7 @@ import { resolveAgentAdapter } from '../../../src/vtt/agent-adapters';
 import {
   CLAUDE_ENGINE_TOOLS,
   ClaudeCodeAgentSessionAdapter,
+  claudeCodeEngineToolName,
   UNVERIFIED_CONTRACT_CLAUDE_CODE,
 } from '../../../src/vtt/agent-adapters/claude-code';
 import { CodexAgentSessionAdapter, UNVERIFIED_CONTRACT_CODEX } from '../../../src/vtt/agent-adapters/codex';
@@ -166,6 +167,9 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(startArgv.slice(0, 6)).toEqual(['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools']);
     expect(startArgv).toContain('--strict-mcp-config');
     expect(startArgv.slice(startArgv.indexOf('--tools') + 1, startArgv.indexOf('--setting-sources'))).toEqual(CLAUDE_ENGINE_TOOLS);
+    expect(claudeCodeEngineToolName('engine.get_state_summary')).toBe('mcp__engine__engine_get_state_summary');
+    expect(CLAUDE_ENGINE_TOOLS).toHaveLength(13);
+    expect(CLAUDE_ENGINE_TOOLS.every((name) => !name.includes('.'))).toBe(true);
     expect(JSON.parse(startArgv[startArgv.indexOf('--mcp-config') + 1] ?? '')).toEqual({
       mcpServers: { engine: { type: 'stdio', command: engineCommand, args: [...engineArgs, invocation.launcherToken] } },
     });
@@ -216,15 +220,23 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
   it('SIMULATED OpenCode emits a self-contained provider block only for ollama/* models', () => {
     const base = { engineCommand, engineArgs: [...engineArgs, invocation.launcherToken] };
     expect(openCodeConfig({ ...base, model: 'openai/gpt-5.6-sol' })).toEqual({
-      mcp: { engine: { type: 'local', command: [engineCommand, ...engineArgs, invocation.launcherToken], enabled: true } },
+      mcp: {
+        engine: {
+          type: 'local', command: [engineCommand, ...engineArgs, invocation.launcherToken], enabled: true, timeout: 120_000,
+        },
+      },
     });
     expect(openCodeConfig({ ...base, model: 'ollama/gemma4:e4b' })).toEqual({
-      mcp: { engine: { type: 'local', command: [engineCommand, ...engineArgs, invocation.launcherToken], enabled: true } },
+      mcp: {
+        engine: {
+          type: 'local', command: [engineCommand, ...engineArgs, invocation.launcherToken], enabled: true, timeout: 120_000,
+        },
+      },
       provider: {
         ollama: {
           npm: '@ai-sdk/openai-compatible',
           options: { baseURL: 'http://localhost:11434/v1' },
-          models: { 'gemma4:e4b': {} },
+          models: { 'gemma4:e4b': { tool_call: true } },
         },
       },
     });
