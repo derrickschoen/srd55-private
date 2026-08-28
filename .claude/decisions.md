@@ -7,6 +7,26 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D405.4 — OWNER: snippets are pre-coded strategies the model chooses (2026-08-28)
+
+Verbatim: "I was thinking for the snippet thing like strategies the model
+can choose from that are pre coded. I think we already have basic move and
+attack. Other tools might be like focus fire, remove obstacle (spell or
+grapple for instance). Basically distilling common approaches done by the
+agent enough times to warrant having a tool snippet algorithm." Ruling:
+the PLAYS library (openings-book design) leads the D405 v1 instead of
+trailing it — named pre-coded strategies ({name, applicability(capsule),
+expand(capsule) -> intents in the semantic vocabulary}); the engine
+advertises the applicable plays in turn context (agent chooses among ~3,
+not 30); one tool returns a DRAFT intent set the agent may accept, edit,
+or discard (proposer boundary intact); the flywheel's distillation loop —
+recurring agent approaches mined from arena transcripts become play
+candidates — is the refinement mechanism. Basic move-and-attack is play
+zero. The consensus substrate (registry, zod typing, content hashes,
+shadow-run promotion, ast-grep purity, golden capsules) is unchanged;
+advisory/auto snippets become the second increment; veto stays
+flywheel-only per D405.3.
+
 ## D406 — OWNER: luna low is the intelligence floor (2026-08-28)
 
 Verbatim: "Don't worry about things that broke Gemma-e4b. It was just a
