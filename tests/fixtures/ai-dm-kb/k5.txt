@@ -1,0 +1,20 @@
+Use only actions and spells offered for the actor; never invent abilities absent from its statblock.
+For every required actor, declare a primary intent with explicit movement and engagement constraints and a legal fallback.
+A fallback is a complete alternate choice, movement policy, and engagement objective; choose one that can succeed when the primary cannot.
+When reach, path, visibility, cover, or resource legality is uncertain, use the focused query tools before committing.
+Use engine.validate_intent before submission when any intended branch remains uncertain.
+Use semantic target selectors and let the engine resolve all geometry.
+Set willingness deliberately: none means no movement; only_if_required permits movement needed to enable the choice.
+Use maximum_feet to cap movement only when that cap still permits the intended action.
+Set opportunity_risk deliberately; avoid risk unless accepting it has a clear tactical payoff.
+Set stance to match the plan: close_to_melee, maintain_range, withdraw, or hold_position.
+Use anchor when the stance should be resolved relative to a particular semantic target.
+For melee plans, pair close_to_melee with enough willingness and movement budget to reach the target.
+Difficult terrain doubles movement cost, so a nominal speed budget may not reach as far as expected.
+Dash adds movement budget but consumes the action; use it only when repositioning is worth giving up another action.
+Spend at most one spell slot per actor turn, including anything attempted by the fallback.
+Focus attacks on one vulnerable enemy when doing so can remove its next turn.
+Exploit longer melee reach by attacking from the nearest effective distance instead of closing farther than needed.
+Do not spend movement that does not improve reach, safety, line of attack, or the next-turn position.
+Keep ranged attackers at effective range unless closing creates a clear advantage.
+Prefer robust legal actions over fragile plans that depend on every uncertain condition succeeding.

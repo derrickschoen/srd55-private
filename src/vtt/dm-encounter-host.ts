@@ -90,6 +90,11 @@ import type {
   AdjudicationEnvelope,
   AdjudicationSink,
 } from './mcp/engine-server';
+import {
+  DM_ATTENDED_REACTION_OFFER_POLICY,
+  unattendedReactionOfferResolution,
+  type ReactionOfferHostPolicy,
+} from './reaction-offer-host-policy';
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -244,6 +249,7 @@ export class DmEncounterHost {
   readonly #partyMembers: readonly LoadedPartyMember[] | null;
   readonly #partyDisplayNames: ReadonlyMap<number, string>;
   readonly #composeRoom: StoredCharacterRoomComposer;
+  readonly #reactionOfferPolicy: ReactionOfferHostPolicy;
 
   constructor(
     sessionKey: string,
@@ -264,6 +270,7 @@ export class DmEncounterHost {
       readonly agentSession?: Pick<AgentSessionBinding, 'cli' | 'sessionId' | 'adapterVersion'>;
       readonly steeringMode?: SteeringCoordinatorMode;
       readonly onSteeringTelemetry?: (telemetry: SteeringTelemetry) => void;
+      readonly reactionOfferPolicy?: ReactionOfferHostPolicy;
     } = {},
   ) {
     this.sessionId = encounterSessionId(sessionKey);
@@ -276,6 +283,7 @@ export class DmEncounterHost {
     this.#partyMembers = options.partyMembers ?? null;
     this.#partyDisplayNames = options.partyDisplayNames ?? new Map();
     this.#composeRoom = options.composeRoom ?? composeStoredCharacterEncounter;
+    this.#reactionOfferPolicy = options.reactionOfferPolicy ?? DM_ATTENDED_REACTION_OFFER_POLICY;
     if (options.bridge !== undefined) {
       this.#mirror.connect(options.bridge);
       this.#roundPlanSession = new DmRoundPlanSession(
@@ -533,10 +541,19 @@ export class DmEncounterHost {
           if (this.#bridgeFailureGuard?.report() !== null) return;
           throw error;
         }
+        const autoResolvedReactions = this.#autoResolveUnattendedReactionOffers();
         const postStepFlush = this.#flushStore();
         if (postStepFlush !== null) await postStepFlush;
         this.#completeHandbacksAtTransactionBoundary();
         this.#publish();
+        if (
+          autoResolvedReactions > 0 &&
+          result.kind === 'refused' &&
+          result.pendingDecisionCode === 'turn_boundary_blocked'
+        ) {
+          this.#boundaryRefusal = null;
+          continue;
+        }
         if (result.kind === 'refused') {
           this.#boundaryRefusal = result.pendingDecisionCode === 'turn_boundary_blocked'
             ? { code: result.pendingDecisionCode, message: result.reason }
@@ -560,6 +577,37 @@ export class DmEncounterHost {
       }
     });
     return this.#pump;
+  }
+
+  #autoResolveUnattendedReactionOffers(): number {
+    let resolved = 0;
+    for (;;) {
+      const state = this.#coordinator.state();
+      const selected = state.pendingDecisions.flatMap((decision) => {
+        if (decision.kind !== 'reaction_offer') return [];
+        const resolution = unattendedReactionOfferResolution(
+          state,
+          decision,
+          this.#registry.kindFor(decision.combatant),
+          this.#reactionOfferPolicy,
+        );
+        return resolution === null ? [] : [resolution];
+      })[0];
+      if (selected === undefined) return resolved;
+      const result = this.#coordinator.resolvePendingDecision({
+        type: 'resolve_pending_decision',
+        decisionId: selected.decisionId,
+        optionId: selected.resolution,
+      });
+      if (result.kind === 'refused') {
+        throw new Error(`Unattended Reaction resolution was refused: ${result.reason}`);
+      }
+      this.#journal.recordHostTransition({
+        kind: 'unattended_reaction_auto_resolved',
+        ...selected,
+      });
+      resolved += 1;
+    }
   }
 
   #flushStore(): Promise<void> | null {

@@ -861,6 +861,7 @@ export function replayBundle(
       case 'intent_correction_failed':
       case 'intent_auto_resolved':
       case 'intent_auto_resolution_failed':
+      case 'unattended_reaction_auto_resolved':
       case 'engine_adjudication_requested':
       case 'engine_adjudication_resolved':
       case 'dm_takeover_started':
