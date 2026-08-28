@@ -95,7 +95,6 @@ describe('SUBSTITUTED_LOCAL MCP conformance and artifacts', () => {
     expect(adapter.request('tools/list', {})).toHaveProperty('result');
     expect(adapter.request('resources/list', {})).toHaveProperty('result');
     expect(adapter.request('prompts/list', {})).toHaveProperty('result');
-    expect(adapter.request('initialize', {})).toMatchObject({ error: { code: -32601 } });
     expect(runtime.handler.handle({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { _meta: META, requestId: 9 } })).toBeNull();
 
     const argumentsValue = { run_id: 'encounter:engine-mcp', expected_revision: 1, scope: 'round' };

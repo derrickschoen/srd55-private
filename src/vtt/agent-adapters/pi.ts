@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { agentSessionIdFromCli } from '../agent-session';
@@ -18,7 +19,7 @@ import {
 // uses its explicit --session file path as the opaque lifecycle session ID.
 export const UNVERIFIED_CONTRACT_PI =
   'UNVERIFIED_CONTRACT:pi-argv-and-events-evidence-based-live-mcp-extension-pending' as const;
-export const PI_MCP_CONFIG_ENV_UNVERIFIED = 'DND_ENGINE_MCP_CONFIG' as const;
+export const PI_MCP_CONFIG_FILENAME = '.mcp.json' as const;
 export const PI_MCP_SKIPPED_NO_EXTENSION = 'SKIPPED_NO_EXTENSION' as const;
 export const PI_SESSION_ID_FROM_FILE = 'SESSION_ID_FROM_EXPLICIT_SESSION_FILE_PATH' as const;
 
@@ -54,23 +55,14 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
     return this.invoke(invocation, binding.sessionId, true, signal);
   }
 
-  invocationSpec(invocation: AgentInvocation, sessionId: string): AgentProcessSpec {
+  invocationSpec(invocation: AgentInvocation, sessionId: string, mcpDirectory: string | null): AgentProcessSpec {
     const extensionPath = this.options.piMcpExtensionPath ?? null;
     const spec = this.spec(piArgv({
       model: invocation.model,
       extensionPath,
       sessionId,
     }));
-    if (extensionPath === null) return spec;
-    return {
-      ...spec,
-      env: {
-        [PI_MCP_CONFIG_ENV_UNVERIFIED]: JSON.stringify({
-          command: this.engineCommand() ?? 'engine-mcp',
-          args: this.engineArgs(invocation.launcherToken),
-        }),
-      },
-    };
+    return mcpDirectory === null ? spec : { ...spec, cwd: mcpDirectory };
   }
 
   private async invoke(
@@ -79,31 +71,52 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
     resuming: boolean,
     signal: AbortSignal,
   ): Promise<AgentTurnResult> {
-    const output = await this.runner().run(
-      this.invocationSpec(invocation, sessionId),
-      invocation.prompt,
-      signal,
-      invocation.timeoutMs,
-    );
-    completedOutput(output, resuming);
-    if (output.cancelled) {
+    const mcpDirectory = this.options.piMcpExtensionPath === undefined
+      ? null
+      : await mkdtemp(join(tmpdir(), 'dnd-wt-vtt-pi-mcp-'));
+    try {
+      if (mcpDirectory !== null) {
+        await writeFile(
+          join(mcpDirectory, PI_MCP_CONFIG_FILENAME),
+          `${JSON.stringify(piMcpConfig(
+            this.engineCommand() ?? 'engine-mcp',
+            this.engineArgs(invocation.launcherToken),
+          ))}\n`,
+          { encoding: 'utf8', mode: 0o600 },
+        );
+      }
+      const output = await this.runner().run(
+        this.invocationSpec(invocation, sessionId, mcpDirectory),
+        invocation.prompt,
+        signal,
+        invocation.timeoutMs,
+      );
+      completedOutput(output, resuming);
+      if (output.cancelled) {
+        return {
+          sessionId: agentSessionIdFromCli(sessionId),
+          finalText: '',
+          usage: null,
+          exit: 'cancelled',
+          contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
+        };
+      }
+      const decoded = decodePiTurn(output.stdout, sessionId, (event) => this.observe(event));
       return {
-        sessionId: agentSessionIdFromCli(sessionId),
-        finalText: '',
-        usage: null,
-        exit: 'cancelled',
+        sessionId: agentSessionIdFromCli(decoded.sessionId),
+        finalText: decoded.finalText,
+        usage: decoded.usage,
+        exit: 'completed',
         contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
       };
+    } finally {
+      if (mcpDirectory !== null) await rm(mcpDirectory, { recursive: true, force: true });
     }
-    const decoded = decodePiTurn(output.stdout, sessionId, (event) => this.observe(event));
-    return {
-      sessionId: agentSessionIdFromCli(decoded.sessionId),
-      finalText: decoded.finalText,
-      usage: decoded.usage,
-      exit: 'completed',
-      contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
-    };
   }
+}
+
+export function piMcpConfig(command: string, args: readonly string[]): Readonly<Record<string, unknown>> {
+  return { mcpServers: { engine: { command, args } } };
 }
 
 interface PiArgvInput {

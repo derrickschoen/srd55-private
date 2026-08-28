@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from '../../helpers/test-filesystem';
 import type { EncounterState } from '../../../src/combat/encounter';
 import {
+  MCP_CLASSIC_PROTOCOL_VERSIONS,
   MCP_CLIENT_CAPABILITIES_META_KEY,
   MCP_CLIENT_INFO_META_KEY,
   MCP_PROTOCOL_VERSION,
@@ -114,7 +116,7 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
   }
 }
 
-describe('engine MCP 2026-07-28 full surface conformance', () => {
+describe('engine MCP dual-handshake full surface conformance', () => {
   it('discovers the designed capability envelope and rejects unsupported versions', async () => {
     const { runtime } = await fixtureRuntime();
     expect(request(runtime.handler, 1, 'server/discover').result).toMatchObject({
@@ -126,6 +128,75 @@ describe('engine MCP 2026-07-28 full surface conformance', () => {
       jsonrpc: '2.0', id: 2, method: 'server/discover', params: { _meta: { ...mcpRequestMeta(CLIENT_INFO), [MCP_PROTOCOL_VERSION_META_KEY]: '2025-03-26' } },
     });
     expect(response).toMatchObject({ id: 2, error: { code: -32022, data: { supported: [MCP_PROTOCOL_VERSION] } } });
+  });
+
+  it('negotiates the literal Claude Code classic initialize and keeps the same proposer-only tools under both handshakes', async () => {
+    const initialize = JSON.parse(readFileSync(
+      'tests/fixtures/mcp-migration/claude-code-2.1.246-initialize.json',
+      'utf8',
+    )) as unknown;
+    const { state, runtime } = await fixtureRuntime();
+    const initialized = runtime.handler.handle(initialize);
+    expect(initialized).toMatchObject({
+      id: 0,
+      result: {
+        protocolVersion: '2025-11-25',
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: 'dnd-wt-vtt-engine', version: '1.0.0' },
+      },
+    });
+    expect(runtime.handler.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }))
+      .toMatchObject({ error: { code: -32002, message: 'Server not initialized' } });
+    expect(runtime.handler.handle({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })).toBeNull();
+    const classicListResponse = runtime.handler.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+    if (classicListResponse === null) throw new TypeError('Classic tools/list returned no response.');
+    const classicList = record(classicListResponse.result);
+    expect(classicList['resultType']).toBeUndefined();
+    const classicTools = classicList['tools'];
+    if (!Array.isArray(classicTools)) throw new TypeError('Classic tools/list omitted tools.');
+    const classicNames = classicTools.map((tool) => String(record(tool)['name']));
+    expect(classicNames).toEqual(TOOL_NAMES);
+
+    const classicCall = runtime.handler.handle({
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'engine.get_state_summary', arguments: happyArguments('engine.get_state_summary', state, runtime) },
+    });
+    if (classicCall === null) throw new TypeError('Classic tools/call returned no response.');
+    expect(structured(record(classicCall.result))).toHaveProperty('state_ref');
+
+    const modern = await fixtureRuntime();
+    const modernList = record(request(modern.runtime.handler, 4, 'tools/list').result);
+    const modernTools = modernList['tools'];
+    if (!Array.isArray(modernTools)) throw new TypeError('Modern tools/list omitted tools.');
+    expect(modernTools.map((tool) => String(record(tool)['name']))).toEqual(classicNames);
+  });
+
+  it('rejects a genuinely unsupported classic initialize revision', async () => {
+    const { runtime } = await fixtureRuntime();
+    const response = runtime.handler.handle({
+      jsonrpc: '2.0',
+      id: 5,
+      method: 'initialize',
+      params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: CLIENT_INFO },
+    });
+    expect(response).toMatchObject({
+      error: {
+        code: -32022,
+        data: { requested: '2024-11-05', supported: MCP_CLASSIC_PROTOCOL_VERSIONS },
+      },
+    });
+  });
+
+  it.each(MCP_CLASSIC_PROTOCOL_VERSIONS)('negotiates supported classic revision %s exactly', async (protocolVersion) => {
+    const { runtime } = await fixtureRuntime();
+    expect(runtime.handler.handle({
+      jsonrpc: '2.0',
+      id: protocolVersion,
+      method: 'initialize',
+      params: { protocolVersion, capabilities: {}, clientInfo: CLIENT_INFO },
+    })).toMatchObject({ id: protocolVersion, result: { protocolVersion } });
   });
 
   it.each([MCP_PROTOCOL_VERSION_META_KEY, MCP_CLIENT_INFO_META_KEY, MCP_CLIENT_CAPABILITIES_META_KEY])('rejects requests missing metadata key %s', async (missing) => {

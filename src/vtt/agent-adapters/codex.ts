@@ -128,7 +128,7 @@ export function decodeCodexTurn(
     throw new AgentAdapterError('malformed_output', 'Codex event stream did not contain thread.started.thread_id.');
   }
   if (priorSessionId !== null && sessionId !== priorSessionId) {
-    throw new AgentAdapterError('malformed_output', 'Codex resume returned a different thread ID.');
+    throw new AgentAdapterError('resume_not_found', 'Codex resume returned a different thread ID.');
   }
   return { sessionId, finalText, usage };
 }

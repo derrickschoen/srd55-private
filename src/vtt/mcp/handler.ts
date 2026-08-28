@@ -1,4 +1,9 @@
 export const MCP_PROTOCOL_VERSION = '2026-07-28' as const;
+export const MCP_CLASSIC_PROTOCOL_VERSIONS = Object.freeze([
+  '2025-03-26',
+  '2025-06-18',
+  '2025-11-25',
+] as const);
 export const MCP_TOOL_RESULT_MAX_BYTES = 64 * 1024;
 export const MCP_RESOURCE_MAX_BYTES = 128 * 1024;
 export const MCP_STATIC_LIST_TTL_MS = 300_000;
@@ -47,6 +52,7 @@ const INVALID_REQUEST = -32600;
 const METHOD_NOT_FOUND = -32601;
 const INVALID_PARAMS = -32602;
 const UNSUPPORTED_PROTOCOL_VERSION = -32022;
+const SERVER_NOT_INITIALIZED = -32002;
 const SERVER_INFO = Object.freeze({ name: 'dnd-wt-vtt-engine', version: '1.0.0' });
 const RESPONSE_META = Object.freeze({ [MCP_SERVER_INFO_META_KEY]: SERVER_INFO });
 
@@ -97,17 +103,25 @@ function validateRequestMetadata(id: JsonRpcId, paramsValue: unknown): ObjectPar
     ? { ok: false, response: responseError(id, UNSUPPORTED_PROTOCOL_VERSION, 'Unsupported protocol version', { supported: [MCP_PROTOCOL_VERSION], requested: version }) }
     : { ok: true, value: params };
 }
-function completeList(field: string, values: readonly unknown[], nextCursor: string | null): unknown {
-  return { resultType: 'complete', [field]: values, ...(nextCursor === null ? {} : { nextCursor }), ttlMs: MCP_STATIC_LIST_TTL_MS, cacheScope: 'public', _meta: RESPONSE_META };
+function completeList(field: string, values: readonly unknown[], nextCursor: string | null, classic: boolean): unknown {
+  const page = { [field]: values, ...(nextCursor === null ? {} : { nextCursor }) };
+  return classic
+    ? page
+    : { resultType: 'complete', ...page, ttlMs: MCP_STATIC_LIST_TTL_MS, cacheScope: 'public', _meta: RESPONSE_META };
 }
-function toolResult(value: unknown, maximumBytes: number): unknown {
+function toolResult(value: unknown, maximumBytes: number, classic: boolean): unknown {
   const text = JSON.stringify(value);
   if (text === undefined) throw new TypeError('Tool result is not JSON serializable.');
   const bytes = new TextEncoder().encode(text).byteLength;
-  if (bytes > maximumBytes) return { resultType: 'complete', isError: true, content: [{ type: 'text', text: `TOOL_RESULT_TOO_LARGE: ${bytes} UTF-8 bytes exceeds the ${maximumBytes}-byte limit.` }], _meta: RESPONSE_META };
-  return { resultType: 'complete', content: [{ type: 'text', text }], structuredContent: value, isError: false, _meta: RESPONSE_META };
+  const result = bytes > maximumBytes
+    ? { isError: true, content: [{ type: 'text', text: `TOOL_RESULT_TOO_LARGE: ${bytes} UTF-8 bytes exceeds the ${maximumBytes}-byte limit.` }] }
+    : { content: [{ type: 'text', text }], structuredContent: value, isError: false };
+  return classic ? result : { resultType: 'complete', ...result, _meta: RESPONSE_META };
 }
-function toolExecutionError(error: unknown): unknown { return { resultType: 'complete', isError: true, content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], _meta: RESPONSE_META } }
+function toolExecutionError(error: unknown, classic: boolean): unknown {
+  const result = { isError: true, content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }] };
+  return classic ? result : { resultType: 'complete', ...result, _meta: RESPONSE_META };
+}
 function listPage(kind: string, values: readonly unknown[], cursor: unknown, pageSize: number, issued: Map<string, { readonly kind: string; readonly offset: number }>): { readonly values: readonly unknown[]; readonly nextCursor: string | null } | null {
   let offset = 0;
   if (cursor !== undefined) {
@@ -141,23 +155,78 @@ export function createMcpHandler(input: {
   const cursors = new Map<string, { readonly kind: string; readonly offset: number }>();
   const notifications: JsonRpcNotification[] = [];
   const unsubscribe = new Map<string, () => void>();
+  let classicSession: { readonly protocolVersion: string; initialized: boolean } | null = null;
+  const capabilities = Object.freeze({
+    tools: { listChanged: false },
+    ...(input.resources === undefined ? {} : { resources: { subscribe: true, listChanged: true } }),
+    ...(input.prompts === undefined ? {} : { prompts: { listChanged: true } }),
+  });
   function listed(id: JsonRpcId, params: Readonly<Record<string, unknown>>, kind: string, field: string, values: readonly unknown[]): JsonRpcResponse {
     if (!hasOnlyKeys(params, ['_meta', 'cursor'])) return invalidParams(id, [{ path: '$', message: `${kind}/list params contain an unknown property.` }]);
     const page = listPage(kind, values, params['cursor'], listPageSize, cursors);
-    return page === null ? invalidParams(id, [{ path: '$.cursor', message: 'is not a valid cursor.' }]) : { jsonrpc: '2.0', id, result: completeList(field, page.values, page.nextCursor) };
+    return page === null
+      ? invalidParams(id, [{ path: '$.cursor', message: 'is not a valid cursor.' }])
+      : { jsonrpc: '2.0', id, result: completeList(field, page.values, page.nextCursor, classicSession !== null) };
   }
   return Object.freeze({
     drainNotifications(): readonly JsonRpcNotification[] { return notifications.splice(0, notifications.length) },
     handle(message: unknown): JsonRpcResponse | null {
+      if (isRecord(message) && message['jsonrpc'] === '2.0' && message['id'] === undefined &&
+        message['method'] === 'notifications/initialized') {
+        if (classicSession !== null) classicSession.initialized = true;
+        return null;
+      }
       const parsed = parseRequest(message);
       if (parsed === null || 'jsonrpc' in parsed) return parsed;
-      const metadata = validateRequestMetadata(parsed.id, parsed.params);
+      if (parsed.method === 'initialize') {
+        const decoded = objectParams(parsed.id, parsed.params, 'initialize params');
+        if (!decoded.ok) return decoded.response;
+        const params = decoded.value;
+        const violations: SchemaViolation[] = [];
+        if (!hasOnlyKeys(params, ['protocolVersion', 'capabilities', 'clientInfo', '_meta'])) {
+          violations.push({ path: '$', message: 'initialize params contain an unknown property.' });
+        }
+        const requestedVersion = params['protocolVersion'];
+        if (typeof requestedVersion !== 'string' || requestedVersion.length === 0) {
+          violations.push({ path: '$.protocolVersion', message: 'must be a non-empty string.' });
+        }
+        if (!isRecord(params['capabilities'])) violations.push({ path: '$.capabilities', message: 'must be an object.' });
+        const clientInfo = params['clientInfo'];
+        if (!isRecord(clientInfo)) violations.push({ path: '$.clientInfo', message: 'must be an object.' });
+        else {
+          if (typeof clientInfo['name'] !== 'string' || clientInfo['name'].length === 0) {
+            violations.push({ path: '$.clientInfo.name', message: 'must be a non-empty string.' });
+          }
+          if (typeof clientInfo['version'] !== 'string' || clientInfo['version'].length === 0) {
+            violations.push({ path: '$.clientInfo.version', message: 'must be a non-empty string.' });
+          }
+        }
+        if (violations.length > 0 || typeof requestedVersion !== 'string') return invalidParams(parsed.id, violations);
+        if (!(MCP_CLASSIC_PROTOCOL_VERSIONS as readonly string[]).includes(requestedVersion)) {
+          return responseError(parsed.id, UNSUPPORTED_PROTOCOL_VERSION, 'Unsupported protocol version', {
+            supported: MCP_CLASSIC_PROTOCOL_VERSIONS,
+            requested: requestedVersion,
+          });
+        }
+        classicSession = { protocolVersion: requestedVersion, initialized: false };
+        return {
+          jsonrpc: '2.0',
+          id: parsed.id,
+          result: { protocolVersion: requestedVersion, capabilities, serverInfo: SERVER_INFO },
+        };
+      }
+      if (classicSession !== null && !classicSession.initialized) {
+        return responseError(parsed.id, SERVER_NOT_INITIALIZED, 'Server not initialized');
+      }
+      const metadata = classicSession === null
+        ? validateRequestMetadata(parsed.id, parsed.params)
+        : objectParams(parsed.id, parsed.params, 'request params');
       if (!metadata.ok) return metadata.response;
       const params = metadata.value;
       switch (parsed.method) {
         case 'server/discover':
           if (!hasOnlyKeys(params, ['_meta'])) return invalidParams(parsed.id, [{ path: '$', message: 'server/discover params may contain only _meta.' }]);
-          return { jsonrpc: '2.0', id: parsed.id, result: { resultType: 'complete', supportedVersions: [MCP_PROTOCOL_VERSION], capabilities: { tools: { listChanged: false }, resources: { subscribe: input.resources !== undefined, listChanged: input.resources !== undefined }, prompts: { listChanged: input.prompts !== undefined } }, _meta: RESPONSE_META, ttlMs: MCP_STATIC_LIST_TTL_MS, cacheScope: 'public' } };
+          return { jsonrpc: '2.0', id: parsed.id, result: { resultType: 'complete', supportedVersions: [MCP_PROTOCOL_VERSION], capabilities, _meta: RESPONSE_META, ttlMs: MCP_STATIC_LIST_TTL_MS, cacheScope: 'public' } };
         case 'ping': return !hasOnlyKeys(params, ['_meta']) ? invalidParams(parsed.id, [{ path: '$', message: 'ping params may contain only _meta.' }]) : { jsonrpc: '2.0', id: parsed.id, result: { _meta: RESPONSE_META } };
         case 'tools/list': return listed(parsed.id, params, 'tools', 'tools', descriptors);
         case 'resources/list': return input.resources === undefined ? responseError(parsed.id, METHOD_NOT_FOUND, 'Method not found: resources/list') : listed(parsed.id, params, 'resources', 'resources', input.resources.list());
@@ -202,14 +271,14 @@ export function createMcpHandler(input: {
           if (binding === undefined) return responseError(parsed.id, INVALID_PARAMS, `Unknown tool: ${name}`, { kind: 'unknown_tool', tool: name });
           const argumentsValue = params['arguments'] ?? {};
           const argumentViolations = binding.validateArguments(argumentsValue);
-          if (argumentViolations.length > 0) return { jsonrpc: '2.0', id: parsed.id, result: toolExecutionError(`Invalid tool arguments: ${JSON.stringify({ violations: argumentViolations })}`) };
+          if (argumentViolations.length > 0) return { jsonrpc: '2.0', id: parsed.id, result: toolExecutionError(`Invalid tool arguments: ${JSON.stringify({ violations: argumentViolations })}`, classicSession !== null) };
           try {
             const value = binding.execute(argumentsValue);
             const outputViolations = binding.validateOutput(value);
             return outputViolations.length > 0
-              ? { jsonrpc: '2.0', id: parsed.id, result: toolExecutionError(`Tool output violated outputSchema: ${JSON.stringify({ violations: outputViolations })}`) }
-              : { jsonrpc: '2.0', id: parsed.id, result: toolResult(value, maximumToolResultBytes) };
-          } catch (error) { return { jsonrpc: '2.0', id: parsed.id, result: toolExecutionError(error) }; }
+              ? { jsonrpc: '2.0', id: parsed.id, result: toolExecutionError(`Tool output violated outputSchema: ${JSON.stringify({ violations: outputViolations })}`, classicSession !== null) }
+              : { jsonrpc: '2.0', id: parsed.id, result: toolResult(value, maximumToolResultBytes, classicSession !== null) };
+          } catch (error) { return { jsonrpc: '2.0', id: parsed.id, result: toolExecutionError(error, classicSession !== null) }; }
         }
         default: return responseError(parsed.id, METHOD_NOT_FOUND, `Method not found: ${parsed.method}`);
       }

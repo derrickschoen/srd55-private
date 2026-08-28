@@ -1,6 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
-import { encounterSessionId } from '../src/combat/values';
+import { encounterBranchId, encounterSessionId } from '../src/combat/values';
+import { createEngineStateCapsule, projectEngineEncounterState } from '../src/vtt/engine-state-capsule';
+import { engineActionRegistry } from '../src/vtt/engine-query-port';
 import { resolveAgentAdapter } from '../src/vtt/agent-adapters';
 import { UNVERIFIED_CONTRACT_CLAUDE_CODE } from '../src/vtt/agent-adapters/claude-code';
 import { UNVERIFIED_CONTRACT_CODEX } from '../src/vtt/agent-adapters/codex';
@@ -9,10 +11,17 @@ import { PI_MCP_SKIPPED_NO_EXTENSION, UNVERIFIED_CONTRACT_PI } from '../src/vtt/
 import { AgentAdapterError, AGENT_ADAPTER_VERSION } from '../src/vtt/agent-adapters/process';
 import { agentSessionIdFromCli, isAgentCliKind } from '../src/vtt/agent-session';
 import type { AgentCliKind, AgentFailureClassification, AgentInvocation, AgentSessionAdapter, AgentSessionBinding } from '../src/vtt/agent-session';
+import { loadArenaFixture } from './engine-mcp-server';
 
 export const AGENT_CLI_KINDS = ['codex', 'opencode', 'pi', 'claude-code'] as const;
 export type ConformanceStatus = 'VERIFIED' | 'FAILED' | 'UNVERIFIED';
-type LifecycleEvidence = Readonly<{ coldStart: boolean; sessionIdCaptured: boolean; resume: boolean; classifiedResumeFailure: boolean }>;
+type LifecycleEvidence = Readonly<{
+  coldStart: boolean;
+  sessionIdCaptured: boolean;
+  resume: boolean;
+  mcpProof: boolean;
+  classifiedResumeFailure: boolean;
+}>;
 type ContractEvidence = Readonly<{
   marker: string;
   liveStatus: ConformanceStatus;
@@ -48,6 +57,7 @@ export interface AgentConformanceDependencies {
   readonly now: () => string;
   readonly stdout: (line: string) => void;
   readonly stderr: (line: string) => void;
+  readonly expectedMcpDigest: () => Promise<string>;
   readonly writeReport: (path: string, report: AgentConformanceReport) => Promise<void>;
 }
 
@@ -64,7 +74,13 @@ const DEFAULT_MODELS: Readonly<Record<AgentCliKind, string>> = {
   'claude-code': 'sonnet',
 };
 
-const emptyLifecycle = (): LifecycleEvidence => ({ coldStart: false, sessionIdCaptured: false, resume: false, classifiedResumeFailure: false });
+const emptyLifecycle = (): LifecycleEvidence => ({
+  coldStart: false,
+  sessionIdCaptured: false,
+  resume: false,
+  mcpProof: false,
+  classifiedResumeFailure: false,
+});
 const statusForFailure = (classification: AgentFailureClassification): ConformanceStatus =>
   classification === 'cli_absent' || classification === 'authentication' ? 'UNVERIFIED' : 'FAILED';
 
@@ -127,7 +143,11 @@ function probeFailure(
   };
 }
 
-async function verifyCli(kind: AgentCliKind, adapter: AgentSessionAdapter): Promise<AgentConformanceRecord> {
+async function verifyCli(
+  kind: AgentCliKind,
+  adapter: AgentSessionAdapter,
+  expectedMcpDigest: () => Promise<string>,
+): Promise<AgentConformanceRecord> {
   let version: string | null = null;
   try {
     const probe = await adapter.probe();
@@ -137,7 +157,7 @@ async function verifyCli(kind: AgentCliKind, adapter: AgentSessionAdapter): Prom
     return probeFailure(kind, version, adapter.classifyFailure(error), error);
   }
 
-  const lifecycle = { coldStart: false, sessionIdCaptured: false, resume: false, classifiedResumeFailure: false };
+  const lifecycle = { coldStart: false, sessionIdCaptured: false, resume: false, mcpProof: false, classifiedResumeFailure: false };
   const turnMarkers: string[] = [];
   try {
     const signal = new AbortController().signal;
@@ -160,6 +180,20 @@ async function verifyCli(kind: AgentCliKind, adapter: AgentSessionAdapter): Prom
     const resumed = await adapter.resume(binding(kind, started.sessionId), invocation(kind, 'Resume the session and reply ENGINE_RESUME_OK.'), signal);
     turnMarkers.push(...(resumed.contractEvidence ?? []));
     lifecycle.resume = resumed.exit === 'completed' && resumed.sessionId === started.sessionId;
+    const digest = await expectedMcpDigest();
+    const mcpProof = await adapter.resume(
+      binding(kind, started.sessionId),
+      invocation(kind, [
+        'Use the engine MCP server now; do not answer from prompt text.',
+        'Call engine.get_turn_context with run_id encounter:engine-mcp, expected_revision 1, and scope round.',
+        'Then call engine.get_state_summary with the returned state_ref and granularity turn_minimal.',
+        'Reply with the exact digest from the state_ref returned by engine.get_state_summary.',
+      ].join(' ')),
+      signal,
+    );
+    turnMarkers.push(...(mcpProof.contractEvidence ?? []));
+    lifecycle.mcpProof = mcpProof.exit === 'completed' && mcpProof.sessionId === started.sessionId &&
+      mcpProof.finalText.includes(digest);
     try {
       await adapter.resume(binding(kind, `missing-session-${kind}`), invocation(kind, 'A deliberately missing session must fail.'), signal);
       return {
@@ -225,11 +259,13 @@ function reportExitCode(records: readonly AgentConformanceRecord[]): 0 | 1 | 2 {
 }
 
 function defaultDependencies(): AgentConformanceDependencies {
+  const fixturePath = resolve('tests/fixtures/arena-basis/seed-3943001.json');
   const engineArgs = [
     resolve('node_modules/vite-node/vite-node.mjs'),
     resolve('tools/engine-mcp-server.ts'),
-    resolve('tests/fixtures/arena-basis/seed-3943001.json'),
+    fixturePath,
   ];
+  const digest = recomputeFixtureCapsuleDigest(fixturePath);
   return {
     adapter: (kind) => resolveAgentAdapter(kind, {
       cwd: process.cwd(),
@@ -240,11 +276,34 @@ function defaultDependencies(): AgentConformanceDependencies {
     now: () => new Date().toISOString(),
     stdout: (line) => { process.stdout.write(`${line}\n`); },
     stderr: (line) => { process.stderr.write(`${line}\n`); },
+    expectedMcpDigest: () => digest,
     writeReport: async (path, report) => {
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
     },
   };
+}
+
+async function recomputeFixtureCapsuleDigest(fixturePath: string): Promise<string> {
+  const state = await loadArenaFixture(fixturePath);
+  const actors = state.combatants
+    .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
+    .map((candidate) => candidate.profile.id)
+    .sort();
+  if (actors.length === 0) throw new TypeError('Agent conformance fixture has no living monster actors.');
+  return createEngineStateCapsule({
+    runId: encounterSessionId('encounter:engine-mcp'),
+    branchId: encounterBranchId('branch:engine-mcp'),
+    revision: 1,
+    generatedAt: '2026-08-27T12:00:00.000Z',
+    request: {
+      requestId: 'request:engine-mcp',
+      phase: 'initial',
+      correctionNumber: 0,
+      actors,
+    },
+    projection: projectEngineEncounterState(state, engineActionRegistry(state), 1),
+  }).digest;
 }
 
 function outsideRepository(path: string): string {
@@ -264,7 +323,7 @@ export async function runAgentConformance(
   dependencies.stdout('CLI | PRESENT | VERSION | STATUS | REASON | ERROR');
   const records: AgentConformanceRecord[] = [];
   for (const kind of kinds) {
-    const row = await verifyCli(kind, dependencies.adapter(kind));
+    const row = await verifyCli(kind, dependencies.adapter(kind), dependencies.expectedMcpDigest);
     records.push(row);
     const errorExcerpt = row.errorExcerpt?.replaceAll(/\s+/gu, ' ').trim() ?? '-';
     const tableLine = `${kind} | ${row.present ? 'yes' : 'no'} | ${row.version ?? '-'} | ${row.status} | ${row.reason ?? '-'} | ${errorExcerpt}`;

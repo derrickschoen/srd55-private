@@ -6,7 +6,10 @@ import type { AgentCliKind, AgentFailureClassification, AgentInvocation, AgentSe
 import { parseAgentConformanceArguments, runAgentConformance } from '../../../tools/agent-conformance';
 import type { AgentConformanceDependencies } from '../../../tools/agent-conformance';
 
-type Mode = 'verified' | 'absent' | 'authentication' | 'failed' | 'timeout' | 'skipped_mcp';
+type Mode = 'verified' | 'absent' | 'authentication' | 'failed' | 'timeout' | 'skipped_mcp' |
+  'resume_failure' | 'bad_mcp_proof';
+
+const SIMULATED_DIGEST = '0123456789abcdef'.repeat(4);
 
 class SIMULATEDCli implements AgentSessionAdapter {
   #resumes = 0;
@@ -40,8 +43,17 @@ class SIMULATEDCli implements AgentSessionAdapter {
   resume(binding: AgentSessionBinding, _invocation: AgentInvocation, _signal: AbortSignal): Promise<AgentTurnResult> {
     this.invocations.push(_invocation);
     this.#resumes += 1;
-    if (this.#resumes === 2) return Promise.reject(new AgentAdapterError('resume_not_found', 'SIMULATED missing'));
-    return Promise.resolve({ sessionId: binding.sessionId, finalText: 'RESUME', usage: null, exit: 'completed' });
+    if (this.mode === 'resume_failure' && this.#resumes === 1) {
+      return Promise.reject(new AgentAdapterError('malformed_output', 'SIMULATED resume failure'));
+    }
+    if (this.#resumes === 3) return Promise.reject(new AgentAdapterError('resume_not_found', 'SIMULATED missing'));
+    const proof = _invocation.prompt.includes('engine.get_state_summary');
+    return Promise.resolve({
+      sessionId: binding.sessionId,
+      finalText: proof && this.mode !== 'bad_mcp_proof' ? SIMULATED_DIGEST : 'RESUME',
+      usage: null,
+      exit: 'completed',
+    });
   }
   classifyFailure(error: unknown): AgentFailureClassification {
     if (!(error instanceof AgentAdapterError)) return 'unknown';
@@ -62,6 +74,7 @@ function dependenciesFor(modes: Readonly<Record<AgentCliKind, Mode>>) {
     now: () => '2026-08-27T20:00:00.000Z',
     stdout: (line) => { output.push(line); },
     stderr: (line) => { errors.push(line); },
+    expectedMcpDigest: () => Promise.resolve(SIMULATED_DIGEST),
     writeReport: () => Promise.resolve(),
   };
   return { dependencies, output, errors, invocations };
@@ -73,7 +86,13 @@ describe('SIMULATED four-CLI conformance harness — not live CLI verification',
     const report = await runAgentConformance({ cli: null, reportPath: null }, fake.dependencies);
     expect(report).toMatchObject({ aggregate: 'VERIFIED', exitCode: 0 });
     expect(report.records.map((row) => row.status)).toEqual(['VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED']);
-    expect(report.records[0]?.lifecycle).toEqual({ coldStart: true, sessionIdCaptured: true, resume: true, classifiedResumeFailure: true });
+    expect(report.records[0]?.lifecycle).toEqual({
+      coldStart: true,
+      sessionIdCaptured: true,
+      resume: true,
+      mcpProof: true,
+      classifiedResumeFailure: true,
+    });
     expect(report.records[0]?.contractEvidence.marker).toContain('UNVERIFIED_CONTRACT');
     expect(fake.output.slice(0, 2)).toEqual([
       expect.stringContaining('SUBSTITUTED_LOCAL'),
@@ -116,6 +135,26 @@ describe('SIMULATED four-CLI conformance harness — not live CLI verification',
       reason: 'mcp_wiring_skipped_no_extension',
       errorExcerpt: 'Pi MCP wiring was skipped because no extension path was configured.',
       contractEvidence: { turnMarkers: [PI_MCP_SKIPPED_NO_EXTENSION] },
+    });
+  });
+
+  it('does not report VERIFIED when the MCP proof reply omits the independently derived digest', async () => {
+    const fake = dependenciesFor({ ...MODES, opencode: 'bad_mcp_proof' });
+    const report = await runAgentConformance({ cli: 'opencode', reportPath: null }, fake.dependencies);
+    expect(report.records[0]).toMatchObject({
+      status: 'FAILED',
+      reason: 'lifecycle_incomplete',
+      lifecycle: { coldStart: true, sessionIdCaptured: true, resume: true, mcpProof: false, classifiedResumeFailure: true },
+    });
+  });
+
+  it('preserves accumulated lifecycle evidence when a mid-lifecycle case fails', async () => {
+    const fake = dependenciesFor({ ...MODES, codex: 'resume_failure' });
+    const report = await runAgentConformance({ cli: 'codex', reportPath: null }, fake.dependencies);
+    expect(report.records[0]).toMatchObject({
+      status: 'FAILED',
+      lifecycle: { coldStart: true, sessionIdCaptured: true, resume: false, mcpProof: false, classifiedResumeFailure: false },
+      errorExcerpt: 'SIMULATED resume failure',
     });
   });
 

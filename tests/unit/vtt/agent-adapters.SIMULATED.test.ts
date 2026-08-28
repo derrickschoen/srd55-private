@@ -21,10 +21,11 @@ import {
   UNVERIFIED_CONTRACT_OPENCODE,
 } from '../../../src/vtt/agent-adapters/opencode';
 import {
-  PI_MCP_CONFIG_ENV_UNVERIFIED,
+  PI_MCP_CONFIG_FILENAME,
   PI_MCP_SKIPPED_NO_EXTENSION,
   PI_SESSION_ID_FROM_FILE,
   PiAgentSessionAdapter,
+  piMcpConfig,
   UNVERIFIED_CONTRACT_PI,
 } from '../../../src/vtt/agent-adapters/pi';
 import {
@@ -49,7 +50,10 @@ const invocation: AgentInvocation = {
 class SIMULATEDChildProcessRunner implements AgentProcessRunner {
   readonly calls: { readonly spec: AgentProcessSpec; readonly stdin: string; readonly timeoutMs: number | null }[] = [];
 
-  constructor(private readonly outcomes: (AgentProcessOutput | Error)[]) {}
+  constructor(
+    private readonly outcomes: (AgentProcessOutput | Error)[],
+    private readonly onRun: (spec: AgentProcessSpec) => void = () => undefined,
+  ) {}
 
   run(
     spec: AgentProcessSpec,
@@ -58,6 +62,7 @@ class SIMULATEDChildProcessRunner implements AgentProcessRunner {
     timeoutMs: number | null,
   ): Promise<AgentProcessOutput> {
     this.calls.push({ spec, stdin, timeoutMs });
+    this.onRun(spec);
     const outcome = this.outcomes.shift();
     if (outcome === undefined) return Promise.reject(new Error('SIMULATED child process had no queued outcome.'));
     return outcome instanceof Error ? Promise.reject(outcome) : Promise.resolve(outcome);
@@ -128,7 +133,24 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(UNVERIFIED_CONTRACT_CODEX).toContain('UNVERIFIED_CONTRACT');
   });
 
-  it('SIMULATED Claude Code uses the measured headless base, strict MCP config, allowlist, init ID, and resume seam', async () => {
+  it('SIMULATED Codex classifies a replacement thread on resume as resume_not_found', async () => {
+    const runner = new SIMULATEDChildProcessRunner([
+      output(fixture('codex-start')),
+      output(fixture('codex-start').replaceAll('codex-thread-123', 'codex-replacement-thread')),
+    ]);
+    const adapter = new CodexAgentSessionAdapter(options(runner));
+    await adapter.start(invocation, new AbortController().signal);
+    let failure: unknown;
+    try {
+      await adapter.resume(binding('codex', 'codex-thread-123'), invocation, new AbortController().signal);
+    } catch (error) {
+      failure = error;
+    }
+    expect(adapter.classifyFailure(failure)).toBe('resume_not_found');
+    expect(failure).toMatchObject({ code: 'resume_not_found' });
+  });
+
+  it('SIMULATED Claude Code accepts built-ins while requiring connected engine MCP tools and the resume seam', async () => {
     const transcript = fixture('claude-code-start');
     const runner = new SIMULATEDChildProcessRunner([output(transcript), output(transcript)]);
     const adapter = new ClaudeCodeAgentSessionAdapter(options(runner));
@@ -138,6 +160,8 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
 
     expect(started.sessionId).toBe('claude-session-123');
     expect(started.finalText).toBe('{"intents":[]}');
+    expect(transcript).toContain('"Bash"');
+    expect(transcript).toContain('"mcp_servers":[{"name":"engine","status":"connected"}]');
     const startArgv = runner.calls[0]?.spec.argv ?? [];
     expect(startArgv.slice(0, 6)).toEqual(['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools']);
     expect(startArgv).toContain('--strict-mcp-config');
@@ -152,11 +176,8 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(UNVERIFIED_CONTRACT_CLAUDE_CODE).toContain('UNVERIFIED_CONTRACT');
   });
 
-  it('SIMULATED Claude Code rejects an init event that admits a built-in tool', async () => {
-    const transcript = fixture('claude-code-start').replace(
-      `"tools":[${CLAUDE_ENGINE_TOOLS.map((tool) => JSON.stringify(tool)).join(',')}]`,
-      `"tools":[${CLAUDE_ENGINE_TOOLS.map((tool) => JSON.stringify(tool)).join(',')},"Bash"]`,
-    );
+  it('SIMULATED Claude Code rejects a failed engine MCP connection', async () => {
+    const transcript = fixture('claude-code-start').replace('"status":"connected"', '"status":"failed"');
     const adapter = new ClaudeCodeAgentSessionAdapter(options(new SIMULATEDChildProcessRunner([output(transcript)])));
     let failure: unknown;
     try { await adapter.start(invocation, new AbortController().signal); }
@@ -212,7 +233,13 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
   it('SIMULATED Pi decodes the literal supervisor-captured print-mode event stream', async () => {
     // Literal fixture origin: .tmp-cli-evidence.txt supervisor capture, lines 50-51.
     const transcript = fixture('pi-print');
-    const runner = new SIMULATEDChildProcessRunner([output(transcript), output(transcript)]);
+    const observedConfigs: unknown[] = [];
+    const runner = new SIMULATEDChildProcessRunner(
+      [output(transcript), output(transcript)],
+      (spec) => {
+        observedConfigs.push(JSON.parse(readFileSync(resolve(spec.cwd, PI_MCP_CONFIG_FILENAME), 'utf8')) as unknown);
+      },
+    );
     const adapter = new PiAgentSessionAdapter({ ...options(runner), piMcpExtensionPath: '/workspace/pi-engine-extension.mjs' });
 
     const started = await adapter.start(invocation, new AbortController().signal);
@@ -229,9 +256,15 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       '--print', '--mode', 'json', '--model', invocation.model,
       '--extension', '/workspace/pi-engine-extension.mjs', '--session', started.sessionId,
     ]);
-    expect(JSON.parse(runner.calls[1]?.spec.env?.[PI_MCP_CONFIG_ENV_UNVERIFIED] ?? '')).toEqual({
-      command: engineCommand, args: [...engineArgs, invocation.launcherToken],
+    expect(runner.calls[1]?.spec.cwd).toMatch(/^\/tmp\/dnd-wt-vtt-pi-mcp-/u);
+    expect(PI_MCP_CONFIG_FILENAME).toBe('.mcp.json');
+    expect(piMcpConfig(engineCommand, [...engineArgs, invocation.launcherToken])).toEqual({
+      mcpServers: { engine: { command: engineCommand, args: [...engineArgs, invocation.launcherToken] } },
     });
+    expect(observedConfigs).toEqual([
+      piMcpConfig(engineCommand, [...engineArgs, invocation.launcherToken]),
+      piMcpConfig(engineCommand, [...engineArgs, invocation.launcherToken]),
+    ]);
     expect(UNVERIFIED_CONTRACT_PI).toContain('argv-and-events-evidence-based');
   });
 

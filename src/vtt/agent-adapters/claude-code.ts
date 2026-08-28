@@ -130,8 +130,8 @@ export function decodeClaudeCodeTurn(
   for (const event of jsonEventLines(stdout)) {
     onEvent(event);
     if (event['type'] === 'system' && event['subtype'] === 'init') {
-      assertExactStrings(event['tools'], CLAUDE_ENGINE_TOOLS, 'Claude Code init tools');
-      assertExactStrings(event['mcp_servers'], ['engine'], 'Claude Code init MCP servers');
+      assertClaudeInitTools(event['tools']);
+      assertClaudeEngineServerConnected(event['mcp_servers']);
       if (typeof event['session_id'] !== 'string' || event['session_id'].trim().length === 0) {
         throw new AgentAdapterError('malformed_output', 'Claude Code init event omitted session_id.');
       }
@@ -153,10 +153,24 @@ export function decodeClaudeCodeTurn(
   return { sessionId, finalText, usage };
 }
 
-function assertExactStrings(value: unknown, expected: readonly string[], label: string): void {
-  if (!Array.isArray(value) || value.length !== expected.length ||
-    value.some((entry, index) => entry !== expected[index])) {
-    throw new AgentAdapterError('malformed_output', `${label} did not match the configured engine-only inventory.`);
+function assertClaudeInitTools(value: unknown): void {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new AgentAdapterError('malformed_output', 'Claude Code init tools were not a string array.');
+  }
+  const names = value as readonly string[];
+  if (CLAUDE_ENGINE_TOOLS.some((expected) => !names.includes(expected)) ||
+    names.some((name) => name.startsWith('mcp__') && !name.startsWith('mcp__engine__'))) {
+    throw new AgentAdapterError('malformed_output', 'Claude Code init omitted an engine tool or admitted a foreign MCP tool.');
+  }
+}
+
+function assertClaudeEngineServerConnected(value: unknown): void {
+  if (!Array.isArray(value) || value.length !== 1) {
+    throw new AgentAdapterError('malformed_output', 'Claude Code init MCP server inventory was not engine-only.');
+  }
+  const server = record(value[0]);
+  if (server?.['name'] !== 'engine' || server['status'] !== 'connected') {
+    throw new AgentAdapterError('malformed_output', 'Claude Code init did not report the engine MCP server connected.');
   }
 }
 
