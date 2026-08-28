@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D399.4 — OWNER: local Gemma scoped to opencode/pi MCP verification, then deleted (2026-08-27)
+
+Verbatim: "Only use local Gemma to verify the mcp works for opencode and pi.
+Then delete it when done." Ruling: the D399.3 install is single-purpose —
+once the conformance matrix records opencode/pi VERIFIED (or the attempt is
+abandoned), delete the gemma4:e4b model, uninstall the ollama service, and
+remove the ollama-specific entries from ~/.pi/agent/models.json and
+~/.config/opencode/opencode.json. Local Gemma is NOT a standing provider:
+not for the flywheel, not for game-time, not for any other experiment.
+Future matrix re-runs (release gate) authenticate per D399.2 instead. The
+recorded VERIFIED evidence in the conformance report is the durable output.
+
 ## D399.3 — OWNER: local CPU gemma 4B model for agent-CLI verification (2026-08-27)
 
 Verbatim: "Use local cpu gemma4-4b model. Install lm studio or whatever."
