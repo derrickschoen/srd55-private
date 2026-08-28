@@ -157,8 +157,9 @@ describe('SIMULATED four-CLI conformance harness — not live CLI verification',
     const report = await runAgentConformance({ cli: 'opencode', reportPath: null }, fake.dependencies);
     expect(report.records[0]).toMatchObject({
       status: 'FAILED',
-      reason: 'lifecycle_incomplete',
+      reason: 'upstream_mcp_tools_not_exposed_issue_33027',
       lifecycle: { coldStart: true, sessionIdCaptured: true, resume: true, mcpProof: false, classifiedResumeFailure: true },
+      errorExcerpt: expect.stringContaining('anomalyco/opencode#33027'),
     });
     expect(fake.invocations[2]?.prompt).not.toContain('engine.get_state_summary');
   });
@@ -176,8 +177,19 @@ describe('SIMULATED four-CLI conformance harness — not live CLI verification',
     const pi = dependenciesFor(MODES);
     const piReport = await runAgentConformance({ cli: 'pi', reportPath: null }, pi.dependencies);
     expect(piReport.records[0]?.lifecycle.mcpProof).toBe(true);
-    expect(pi.invocations[2]?.prompt).toContain('MCP proxy tool');
-    expect(pi.invocations[2]?.prompt).toContain('discover the engine server tools');
+    expect(pi.invocations[2]?.prompt).toContain('engine_engine_get_state_summary');
+    expect(pi.invocations[2]?.prompt).toContain('mcp({search:"engine"})');
+  });
+
+  it('keeps generic lifecycle_incomplete reporting for a non-OpenCode MCP proof failure', async () => {
+    const fake = dependenciesFor({ ...MODES, pi: 'bad_mcp_proof' });
+    const report = await runAgentConformance({ cli: 'pi', reportPath: null }, fake.dependencies);
+    expect(report.records[0]).toMatchObject({
+      status: 'FAILED',
+      reason: 'lifecycle_incomplete',
+      lifecycle: { mcpProof: false },
+      errorExcerpt: 'One or more required lifecycle proofs did not complete.',
+    });
   });
 
   it('uses a valid-format fixed UUID for the Claude missing-session proof only', async () => {

@@ -60,6 +60,7 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
     const spec = this.spec(piArgv({
       model: invocation.model,
       extensionPath,
+      mcpConfigPath: mcpDirectory === null ? null : join(mcpDirectory, PI_MCP_CONFIG_FILENAME),
       sessionId,
     }));
     return mcpDirectory === null ? spec : { ...spec, cwd: mcpDirectory };
@@ -114,12 +115,13 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
 }
 
 export function piMcpConfig(command: string, args: readonly string[]): Readonly<Record<string, unknown>> {
-  return { mcpServers: { engine: { command, args } } };
+  return { mcpServers: { engine: { command, args, lifecycle: 'eager' } } };
 }
 
 interface PiArgvInput {
   readonly model: string;
   readonly extensionPath: string | null;
+  readonly mcpConfigPath: string | null;
   readonly sessionId: string;
 }
 
@@ -130,6 +132,10 @@ export function piArgv(input: PiArgvInput): readonly string[] {
     // Pi accepts provider/id directly as --model's value.
     '--model', input.model,
     ...(input.extensionPath === null ? [] : ['--extension', input.extensionPath]),
+    // The explicit extension config path prevents a pre-existing
+    // ~/.pi/agent/mcp.json engine definition from becoming a second layer.
+    // Duplicate engine definitions are a known pi-mcp-adapter conflict.
+    ...(input.mcpConfigPath === null ? [] : ['--mcp-config', input.mcpConfigPath]),
     '--session', input.sessionId,
   ];
 }

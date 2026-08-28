@@ -35,7 +35,7 @@ export interface AgentConformanceRecord {
   readonly version: string | null;
   readonly status: ConformanceStatus;
   readonly reason: AgentFailureClassification | 'lifecycle_incomplete' | 'resume_missing_session_was_accepted' |
-    'mcp_wiring_skipped_no_extension' | null;
+    'mcp_wiring_skipped_no_extension' | 'upstream_mcp_tools_not_exposed_issue_33027' | null;
   readonly lifecycle: LifecycleEvidence;
   readonly contractEvidence: ContractEvidence;
   readonly errorExcerpt: string | null;
@@ -120,9 +120,9 @@ function mcpProofPrompt(kind: AgentCliKind, stateRef: EngineStateReference): str
   });
   if (kind === 'pi') {
     return [
-      'Use the MCP proxy tool to discover the engine server tools; do not answer from prompt text.',
-      'Through that proxy, obtain the current round turn context for run encounter:engine-mcp at revision 1.',
-      `Then through the proxy call the engine state summary tool at turn-minimal granularity with this exact state_ref: ${reference}.`,
+      'Call the proxied tool engine_engine_get_state_summary; do not answer from prompt text.',
+      'If that tool is unavailable, first call mcp({search:"engine"}) and then call the matching engine state-summary tool.',
+      `Use turn-minimal granularity with this exact state_ref: ${reference}.`,
       'Reply with only the exact digest returned by the state summary.',
     ].join(' ');
   }
@@ -243,16 +243,24 @@ async function verifyCli(
       lifecycle.classifiedResumeFailure = true;
     }
     const verified = Object.values(lifecycle).every(Boolean);
+    const openCodeUpstreamFailure = kind === 'opencode' && lifecycle.coldStart && lifecycle.sessionIdCaptured &&
+      lifecycle.resume && !lifecycle.mcpProof && lifecycle.classifiedResumeFailure;
     const verifiedStatus: ConformanceStatus = verified ? 'VERIFIED' : 'FAILED';
     return {
       cli: kind,
       present: true,
       version,
       status: verifiedStatus,
-      reason: verified ? null : 'lifecycle_incomplete',
+      reason: verified
+        ? null
+        : openCodeUpstreamFailure ? 'upstream_mcp_tools_not_exposed_issue_33027' : 'lifecycle_incomplete',
       lifecycle,
       contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: verifiedStatus, turnMarkers },
-      errorExcerpt: verified ? null : 'One or more required lifecycle proofs did not complete.',
+      errorExcerpt: verified
+        ? null
+        : openCodeUpstreamFailure
+          ? 'OpenCode upstream issue anomalyco/opencode#33027: connected MCP tools are not exposed to the headless agent.'
+          : 'One or more required lifecycle proofs did not complete.',
       stderrTail: verified ? null : '',
     };
   } catch (error) {

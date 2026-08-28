@@ -67,6 +67,49 @@ function forbiddenAgentKeys(value: unknown): readonly string[] {
   ];
 }
 
+function localPointerExists(root: unknown, reference: string): boolean {
+  if (reference === '#') return true;
+  if (!reference.startsWith('#/')) return false;
+  let segments: readonly string[];
+  try {
+    segments = decodeURIComponent(reference.slice(2)).split('/').map((segment) =>
+      segment.replaceAll('~1', '/').replaceAll('~0', '~'));
+  } catch {
+    return false;
+  }
+  let current = root;
+  for (const segment of segments) {
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isSafeInteger(index) || index < 0 || index >= current.length) return false;
+      current = current[index];
+      continue;
+    }
+    if (typeof current !== 'object' || current === null || !Object.hasOwn(current, segment)) return false;
+    current = (current as Readonly<Record<string, unknown>>)[segment];
+  }
+  return current !== undefined;
+}
+
+function unresolvedSchemaReferences(root: unknown, value: unknown = root, path = '$'): readonly string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => unresolvedSchemaReferences(root, entry, `${path}[${String(index)}]`));
+  }
+  if (typeof value !== 'object' || value === null) return [];
+  const candidate = value as Readonly<Record<string, unknown>>;
+  const reference = candidate['$ref'];
+  const failure = reference === undefined
+    ? []
+    : typeof reference !== 'string' || !localPointerExists(root, reference)
+      ? [`${path}.$ref=${String(reference)}`]
+      : [];
+  return [
+    ...failure,
+    ...Object.entries(candidate).flatMap(([key, nested]) =>
+      unresolvedSchemaReferences(root, nested, `${path}.${key}`)),
+  ];
+}
+
 async function fixtureRuntime(options: Parameters<typeof createEngineMcpRuntime>[1] = { requestedActorCount: 1 }): Promise<{ readonly state: EncounterState; readonly runtime: EngineMcpRuntime }> {
   const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
   return { state, runtime: createEngineMcpRuntime(state, options) };
@@ -230,6 +273,23 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     } while (cursor !== undefined);
     expect(names).toEqual(TOOL_NAMES);
     expect(request(runtime.handler, 99, 'tools/list', { cursor: 'forged' })).toMatchObject({ error: { code: -32602 } });
+  });
+
+  it('advertises only per-document-resolvable refs in every tool input and output schema', async () => {
+    const { runtime } = await fixtureRuntime({ requestedActorCount: 1 });
+    const discovery = record(request(runtime.handler, 100, 'server/discover').result);
+    const listing = record(request(runtime.handler, 101, 'tools/list').result);
+    for (const [surface, tools] of [['server/discover', discovery['tools']], ['tools/list', listing['tools']]] as const) {
+      if (!Array.isArray(tools)) throw new TypeError(`${surface} did not advertise tools.`);
+      expect(tools).toHaveLength(TOOL_NAMES.length);
+      for (const value of tools) {
+        const tool = record(value);
+        for (const key of ['inputSchema', 'outputSchema'] as const) {
+          const schema = record(tool[key]);
+          expect(unresolvedSchemaReferences(schema), `${surface}:${String(tool['name'])}.${key}`).toEqual([]);
+        }
+      }
+    }
   });
 
   it.each(TOOL_NAMES)('%s has a direct happy path with output-schema-conforming structured content', async (name) => {

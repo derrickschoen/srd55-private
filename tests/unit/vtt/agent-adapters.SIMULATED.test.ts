@@ -1,4 +1,5 @@
 import { readFileSync } from '../../helpers/test-filesystem';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { encounterSessionId } from '../../../src/combat/values';
@@ -309,13 +310,20 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
 
     expect(runner.calls[1]?.spec.argv).toEqual([
       '--print', '--mode', 'json', '--model', invocation.model,
-      '--extension', '/workspace/pi-engine-extension.mjs', '--session', started.sessionId,
+      '--extension', '/workspace/pi-engine-extension.mjs',
+      '--mcp-config', resolve(runner.calls[1]?.spec.cwd ?? '', PI_MCP_CONFIG_FILENAME),
+      '--session', started.sessionId,
     ]);
     expect(runner.calls[0]?.spec.cwd).toMatch(/^\/tmp\/dnd-wt-vtt-pi-mcp-[a-f0-9]{24}$/u);
+    expect(runner.calls[0]?.spec.cwd.startsWith(`${tmpdir()}/`)).toBe(true);
     expect(runner.calls[1]?.spec.cwd).toBe(runner.calls[0]?.spec.cwd);
     expect(PI_MCP_CONFIG_FILENAME).toBe('.mcp.json');
     expect(piMcpConfig(engineCommand, [...engineArgs, invocation.launcherToken])).toEqual({
-      mcpServers: { engine: { command: engineCommand, args: [...engineArgs, invocation.launcherToken] } },
+      mcpServers: {
+        engine: {
+          command: engineCommand, args: [...engineArgs, invocation.launcherToken], lifecycle: 'eager',
+        },
+      },
     });
     expect(observedConfigs).toEqual([
       piMcpConfig(engineCommand, [...engineArgs, invocation.launcherToken]),

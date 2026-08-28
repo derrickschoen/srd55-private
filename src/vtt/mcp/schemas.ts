@@ -147,6 +147,10 @@ const submitRoundInput = z.object({ ...refInput, request_id: identifier, phase: 
 export interface EngineToolSpec { readonly descriptor: McpToolDescriptor; readonly input: z.ZodType<unknown>; readonly output: z.ZodType<unknown> }
 function jsonSchema(schema: z.ZodType<unknown>): Readonly<Record<string, unknown>> {
   const generated = z.toJSONSchema(schema, { target: 'draft-2020-12', io: 'input', reused: 'ref' });
+  const generatedDefinitions = typeof generated['$defs'] === 'object' && generated['$defs'] !== null &&
+    !Array.isArray(generated['$defs'])
+    ? generated['$defs'] as Readonly<Record<string, unknown>>
+    : {};
   const variants = Array.isArray(generated['anyOf']) ? generated['anyOf'] : Array.isArray(generated['oneOf']) ? generated['oneOf'] : [];
   const unionProperties = Object.fromEntries(variants.flatMap((variant) => {
     if (typeof variant !== 'object' || variant === null || Array.isArray(variant)) return [];
@@ -162,6 +166,7 @@ function jsonSchema(schema: z.ZodType<unknown>): Readonly<Record<string, unknown
       ? { properties: unionProperties, additionalProperties: false }
       : {}),
     $defs: {
+      ...generatedDefinitions,
       stateRef: z.toJSONSchema(stateRef, { target: 'draft-2020-12', io: 'input' }),
       targetSelector: z.toJSONSchema(targetSelector, { target: 'draft-2020-12', io: 'input' }),
     },
