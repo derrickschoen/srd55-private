@@ -7,6 +7,11 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D402.2 — OWNER: drop terra from the game-time comparison (2026-08-28)
+
+Verbatim: "Drop Terra." Ruling: terra medium leaves the cycle-2 matrix.
+The comparison is FOUR arms: luna low, luna medium, sol low, tiered.
+
 ## D402 — OWNER: game-time comparison adds luna medium and sol low (2026-08-28)
 
 Verbatim: "Looks like we should add Luna medium and sol low to the game
