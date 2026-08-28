@@ -7,6 +7,23 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D405.5 — OWNER: second layer — DM "skills" (algorithm + prose) (2026-08-28)
+
+Verbatim: "Maybe the opener and then a separate layer that is broader and
+works more like a Claude code 'skill' that has some pre gen algorithm and
+some plain language that reduces output token burden." Ruling: above the
+plays/opener layer sits a broader SKILL layer modeled on Claude Code
+skills — a skill bundles short plain-language tactical procedure (when
+and how to apply an approach) WITH the pre-generated algorithms (plays/
+advisors) it references. Skills are advertised by one-line description
+and loaded selectively when applicable (situation-triggered), so the
+agent's job shifts from GENERATING plans to SELECTING and PARAMETERIZING
+procedures — cutting output tokens. This unifies the KB (prose) and the
+snippet registry (algorithms) into one refinable artifact kind: the
+flywheel distills, measures (skillHash arms), and revises whole skills.
+K5's successor becomes the always-on core skill; focus_fire becomes a
+skill = prose trigger-guidance + its play.
+
 ## D405.4 — OWNER: snippets are pre-coded strategies the model chooses (2026-08-28)
 
 Verbatim: "I was thinking for the snippet thing like strategies the model
