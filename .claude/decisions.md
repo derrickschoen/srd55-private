@@ -7,6 +7,14 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D405.2 — OWNER: Fable brainstorms independently, then consolidates (2026-08-28)
+
+Verbatim: "Also want this fable session brainstorming and then
+consolidating with the other models to find consensus." Ruling: the
+supervisor session writes its OWN D405 designs before reading the sol/opus
+outputs, then consolidates all three perspectives into a consensus
+recommendation.
+
 ## D405 — OWNER: agent-reachable JS snippet "tools", flywheel-refinable (2026-08-28)
 
 Verbatim: "separate collab skill lane for trying to come up with a system
