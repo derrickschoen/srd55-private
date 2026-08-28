@@ -164,9 +164,34 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(transcript).toContain('"Bash"');
     expect(transcript).toContain('"mcp_servers":[{"name":"engine","status":"connected"}]');
     const startArgv = runner.calls[0]?.spec.argv ?? [];
+    const mcpConfig = JSON.stringify({
+      mcpServers: {
+        engine: {
+          type: 'stdio', command: engineCommand, args: [...engineArgs, invocation.launcherToken],
+        },
+      },
+    });
+    expect(startArgv).toEqual([
+      '-p',
+      '--output-format', 'stream-json',
+      '--verbose',
+      '--include-partial-messages',
+      '--tools', ...CLAUDE_ENGINE_TOOLS,
+      '--allowedTools', 'mcp__engine__*',
+      '--setting-sources', '',
+      '--strict-mcp-config',
+      '--mcp-config', mcpConfig,
+      '--permission-mode', 'default',
+      '--model', invocation.model,
+    ]);
     expect(startArgv.slice(0, 6)).toEqual(['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools']);
     expect(startArgv).toContain('--strict-mcp-config');
-    expect(startArgv.slice(startArgv.indexOf('--tools') + 1, startArgv.indexOf('--setting-sources'))).toEqual(CLAUDE_ENGINE_TOOLS);
+    expect(startArgv.slice(startArgv.indexOf('--tools') + 1, startArgv.indexOf('--allowedTools'))).toEqual(CLAUDE_ENGINE_TOOLS);
+    expect(startArgv.slice(startArgv.indexOf('--allowedTools') + 1, startArgv.indexOf('--setting-sources'))).toEqual([
+      'mcp__engine__*',
+    ]);
+    expect(startArgv).not.toContain(invocation.prompt);
+    expect(runner.calls.map((call) => call.stdin)).toEqual([invocation.prompt, invocation.prompt]);
     expect(claudeCodeEngineToolName('engine.get_state_summary')).toBe('mcp__engine__engine_get_state_summary');
     expect(CLAUDE_ENGINE_TOOLS).toHaveLength(13);
     expect(CLAUDE_ENGINE_TOOLS.every((name) => !name.includes('.'))).toBe(true);
@@ -188,6 +213,23 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     catch (error) { failure = error; }
     expect(adapter.classifyFailure(failure)).toBe('unknown');
     expect(failure).toBeInstanceOf(AgentAdapterError);
+  });
+
+  it('SIMULATED Claude Code classifies live missing-conversation messages as resume_not_found', async () => {
+    const runner = new SIMULATEDChildProcessRunner([
+      output('', "No conversation found; provided value does not match any session", 1),
+    ]);
+    const adapter = new ClaudeCodeAgentSessionAdapter(options(runner));
+    let failure: unknown;
+    try {
+      await adapter.resume(
+        binding('claude-code', '00000000-0000-4000-8000-000000000001'),
+        invocation,
+        new AbortController().signal,
+      );
+    } catch (error) { failure = error; }
+    expect(adapter.classifyFailure(failure)).toBe('resume_not_found');
+    expect(failure).toMatchObject({ code: 'resume_not_found' });
   });
 
   it('SIMULATED OpenCode decodes the literal supervisor-captured 1.18.23 event stream', async () => {
@@ -252,9 +294,9 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
         observedConfigs.push(JSON.parse(readFileSync(resolve(spec.cwd, PI_MCP_CONFIG_FILENAME), 'utf8')) as unknown);
       },
     );
-    const adapter = new PiAgentSessionAdapter({ ...options(runner), piMcpExtensionPath: '/workspace/pi-engine-extension.mjs' });
+    const startAdapter = new PiAgentSessionAdapter({ ...options(runner), piMcpExtensionPath: '/workspace/pi-engine-extension.mjs' });
 
-    const started = await adapter.start(invocation, new AbortController().signal);
+    const started = await startAdapter.start(invocation, new AbortController().signal);
     expect(started).toMatchObject({
       finalText: 'PI_EVIDENCE',
       usage: { inputTokens: 2051, cachedInputTokens: 0, outputTokens: 34, reasoningTokens: 0 },
@@ -262,13 +304,15 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       contractEvidence: [PI_SESSION_ID_FROM_FILE, 'MCP_EXTENSION_CONFIGURED'],
     });
     expect(started.sessionId).toMatch(/^\/tmp\/dnd-wt-vtt-pi-session-[0-9a-f-]{36}\.jsonl$/u);
-    await adapter.resume(binding('pi', started.sessionId), invocation, new AbortController().signal);
+    const resumeAdapter = new PiAgentSessionAdapter({ ...options(runner), piMcpExtensionPath: '/workspace/pi-engine-extension.mjs' });
+    await resumeAdapter.resume(binding('pi', started.sessionId), invocation, new AbortController().signal);
 
     expect(runner.calls[1]?.spec.argv).toEqual([
       '--print', '--mode', 'json', '--model', invocation.model,
       '--extension', '/workspace/pi-engine-extension.mjs', '--session', started.sessionId,
     ]);
-    expect(runner.calls[1]?.spec.cwd).toMatch(/^\/tmp\/dnd-wt-vtt-pi-mcp-/u);
+    expect(runner.calls[0]?.spec.cwd).toMatch(/^\/tmp\/dnd-wt-vtt-pi-mcp-[a-f0-9]{24}$/u);
+    expect(runner.calls[1]?.spec.cwd).toBe(runner.calls[0]?.spec.cwd);
     expect(PI_MCP_CONFIG_FILENAME).toBe('.mcp.json');
     expect(piMcpConfig(engineCommand, [...engineArgs, invocation.launcherToken])).toEqual({
       mcpServers: { engine: { command: engineCommand, args: [...engineArgs, invocation.launcherToken] } },
@@ -278,6 +322,23 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       piMcpConfig(engineCommand, [...engineArgs, invocation.launcherToken]),
     ]);
     expect(UNVERIFIED_CONTRACT_PI).toContain('argv-and-events-evidence-based');
+  });
+
+  it('SIMULATED Pi classifies a missing stored session cwd as resume_corrupt', async () => {
+    const runner = new SIMULATEDChildProcessRunner([
+      output('', 'Stored session working directory does not exist: /tmp/dnd-wt-vtt-pi-mcp-gone', 1),
+    ]);
+    const adapter = new PiAgentSessionAdapter({ ...options(runner), piMcpExtensionPath: '/workspace/pi-engine-extension.mjs' });
+    let failure: unknown;
+    try {
+      await adapter.resume(
+        binding('pi', '/tmp/dnd-wt-vtt-pi-session-SIMULATED.jsonl'),
+        invocation,
+        new AbortController().signal,
+      );
+    } catch (error) { failure = error; }
+    expect(adapter.classifyFailure(failure)).toBe('resume_corrupt');
+    expect(failure).toMatchObject({ code: 'resume_corrupt' });
   });
 
   it('SIMULATED Pi passes provider/id directly and loudly skips MCP when no extension is configured', async () => {

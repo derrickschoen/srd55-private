@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
 import { encounterBranchId, encounterSessionId } from '../src/combat/values';
-import { createEngineStateCapsule, projectEngineEncounterState } from '../src/vtt/engine-state-capsule';
+import { createEngineStateCapsule, engineStateHandle, projectEngineEncounterState } from '../src/vtt/engine-state-capsule';
+import type { EngineStateReference } from '../src/vtt/engine-state-capsule';
 import { engineActionRegistry } from '../src/vtt/engine-query-port';
 import { resolveAgentAdapter } from '../src/vtt/agent-adapters';
 import { UNVERIFIED_CONTRACT_CLAUDE_CODE } from '../src/vtt/agent-adapters/claude-code';
@@ -57,7 +58,7 @@ export interface AgentConformanceDependencies {
   readonly now: () => string;
   readonly stdout: (line: string) => void;
   readonly stderr: (line: string) => void;
-  readonly expectedMcpDigest: () => Promise<string>;
+  readonly expectedMcpProof: () => Promise<Readonly<{ digest: string; stateRef: EngineStateReference }>>;
   readonly writeReport: (path: string, report: AgentConformanceReport) => Promise<void>;
 }
 
@@ -111,19 +112,24 @@ function conformanceTimeoutMs(kind: AgentCliKind): number {
   return parsed;
 }
 
-function mcpProofPrompt(kind: AgentCliKind): string {
+function mcpProofPrompt(kind: AgentCliKind, stateRef: EngineStateReference): string {
+  const reference = JSON.stringify({
+    run_id: stateRef.runId,
+    state_handle: stateRef.stateHandle,
+    expected_revision: stateRef.expectedRevision,
+  });
   if (kind === 'pi') {
     return [
       'Use the MCP proxy tool to discover the engine server tools; do not answer from prompt text.',
       'Through that proxy, obtain the current round turn context for run encounter:engine-mcp at revision 1.',
-      'Then through the proxy call the engine state summary tool for that state reference at turn-minimal granularity.',
+      `Then through the proxy call the engine state summary tool at turn-minimal granularity with this exact state_ref: ${reference}.`,
       'Reply with only the exact digest returned by the state summary.',
     ].join(' ');
   }
   return [
     'Use the engine MCP server now; do not answer from prompt text.',
     'Obtain the current round turn context for run encounter:engine-mcp at revision 1.',
-    'Then use the engine state summary tool for that state reference at turn-minimal granularity.',
+    `Then use the engine state summary tool at turn-minimal granularity with this exact state_ref: ${reference}.`,
     'Reply with only the exact digest returned by the state summary.',
   ].join(' ');
 }
@@ -164,7 +170,7 @@ function probeFailure(
 async function verifyCli(
   kind: AgentCliKind,
   adapter: AgentSessionAdapter,
-  expectedMcpDigest: () => Promise<string>,
+  expectedMcpProof: () => Promise<Readonly<{ digest: string; stateRef: EngineStateReference }>>,
 ): Promise<AgentConformanceRecord> {
   let version: string | null = null;
   try {
@@ -198,17 +204,17 @@ async function verifyCli(
     const resumed = await adapter.resume(binding(kind, started.sessionId), invocation(kind, 'Resume the session and reply ENGINE_RESUME_OK.'), signal);
     turnMarkers.push(...(resumed.contractEvidence ?? []));
     lifecycle.resume = resumed.exit === 'completed' && resumed.sessionId === started.sessionId;
-    const digest = await expectedMcpDigest();
+    const proof = await expectedMcpProof();
     const mcpProof = await adapter.resume(
       binding(kind, started.sessionId),
-      invocation(kind, mcpProofPrompt(kind)),
+      invocation(kind, mcpProofPrompt(kind, proof.stateRef)),
       signal,
     );
     turnMarkers.push(...(mcpProof.contractEvidence ?? []));
     lifecycle.mcpProof = mcpProof.exit === 'completed' && mcpProof.sessionId === started.sessionId &&
-      mcpProof.finalText.includes(digest);
+      mcpProof.finalText.includes(proof.digest);
     try {
-      await adapter.resume(binding(kind, `missing-session-${kind}`), invocation(kind, 'A deliberately missing session must fail.'), signal);
+      await adapter.resume(binding(kind, missingSessionId(kind)), invocation(kind, 'A deliberately missing session must fail.'), signal);
       return {
         cli: kind,
         present: true,
@@ -271,6 +277,12 @@ function reportExitCode(records: readonly AgentConformanceRecord[]): 0 | 1 | 2 {
   return 0;
 }
 
+function missingSessionId(kind: AgentCliKind): string {
+  return kind === 'claude-code'
+    ? '00000000-0000-4000-8000-000000000001'
+    : `missing-session-${kind}`;
+}
+
 function defaultDependencies(): AgentConformanceDependencies {
   const fixturePath = resolve('tests/fixtures/arena-basis/seed-3943001.json');
   const engineArgs = [
@@ -278,7 +290,7 @@ function defaultDependencies(): AgentConformanceDependencies {
     resolve('tools/engine-mcp-server.ts'),
     fixturePath,
   ];
-  const digest = recomputeFixtureCapsuleDigest(fixturePath);
+  const proof = recomputeFixtureCapsuleProof(fixturePath);
   return {
     adapter: (kind) => resolveAgentAdapter(kind, {
       cwd: process.cwd(),
@@ -289,7 +301,7 @@ function defaultDependencies(): AgentConformanceDependencies {
     now: () => new Date().toISOString(),
     stdout: (line) => { process.stdout.write(`${line}\n`); },
     stderr: (line) => { process.stderr.write(`${line}\n`); },
-    expectedMcpDigest: () => digest,
+    expectedMcpProof: () => proof,
     writeReport: async (path, report) => {
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
@@ -297,14 +309,16 @@ function defaultDependencies(): AgentConformanceDependencies {
   };
 }
 
-async function recomputeFixtureCapsuleDigest(fixturePath: string): Promise<string> {
+async function recomputeFixtureCapsuleProof(
+  fixturePath: string,
+): Promise<Readonly<{ digest: string; stateRef: EngineStateReference }>> {
   const state = await loadArenaFixture(fixturePath);
   const actors = state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
     .map((candidate) => candidate.profile.id)
     .sort();
   if (actors.length === 0) throw new TypeError('Agent conformance fixture has no living monster actors.');
-  return createEngineStateCapsule({
+  const capsule = createEngineStateCapsule({
     runId: encounterSessionId('encounter:engine-mcp'),
     branchId: encounterBranchId('branch:engine-mcp'),
     revision: 1,
@@ -316,7 +330,15 @@ async function recomputeFixtureCapsuleDigest(fixturePath: string): Promise<strin
       actors,
     },
     projection: projectEngineEncounterState(state, engineActionRegistry(state), 1),
-  }).digest;
+  });
+  return {
+    digest: capsule.digest,
+    stateRef: {
+      runId: capsule.runId,
+      stateHandle: engineStateHandle(capsule),
+      expectedRevision: capsule.revision,
+    },
+  };
 }
 
 function outsideRepository(path: string): string {
@@ -336,7 +358,7 @@ export async function runAgentConformance(
   dependencies.stdout('CLI | PRESENT | VERSION | STATUS | REASON | ERROR');
   const records: AgentConformanceRecord[] = [];
   for (const kind of kinds) {
-    const row = await verifyCli(kind, dependencies.adapter(kind), dependencies.expectedMcpDigest);
+    const row = await verifyCli(kind, dependencies.adapter(kind), dependencies.expectedMcpProof);
     records.push(row);
     const errorExcerpt = row.errorExcerpt?.replaceAll(/\s+/gu, ' ').trim() ?? '-';
     const tableLine = `${kind} | ${row.present ? 'yes' : 'no'} | ${row.version ?? '-'} | ${row.status} | ${row.reason ?? '-'} | ${errorExcerpt}`;

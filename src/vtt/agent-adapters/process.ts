@@ -256,7 +256,10 @@ export function classifyAgentFailure(error: unknown): AgentFailureClassification
 
 function classifyExit(output: AgentProcessOutput, resuming: boolean): AgentAdapterError {
   const detail = `${output.stderr}\n${output.stdout}`.toLowerCase();
-  if (resuming && /(?:session|thread).*(?:not found|does not exist|unknown)|no (?:such )?(?:session|thread)/u.test(detail)) {
+  if (resuming && /stored session working directory does not exist/u.test(detail)) {
+    return new AgentAdapterError('resume_corrupt', capStderr(output.stderr), { stderr: output.stderr });
+  }
+  if (resuming && /(?:session|thread|conversation).*(?:not found|does not exist|unknown)|no (?:such )?(?:session|thread|conversation)|no conversation found|does not match any (?:session|thread|conversation)/u.test(detail)) {
     return new AgentAdapterError('resume_not_found', capStderr(output.stderr), { stderr: output.stderr });
   }
   if (resuming && /(?:corrupt|invalid|malformed).*(?:session|thread)|(?:session|thread).*(?:corrupt|invalid|malformed)/u.test(detail)) {

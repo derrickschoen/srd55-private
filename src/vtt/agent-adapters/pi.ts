@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { agentSessionIdFromCli } from '../agent-session';
@@ -71,47 +71,45 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
     resuming: boolean,
     signal: AbortSignal,
   ): Promise<AgentTurnResult> {
-    const mcpDirectory = this.options.piMcpExtensionPath === undefined
-      ? null
-      : await mkdtemp(join(tmpdir(), 'dnd-wt-vtt-pi-mcp-'));
-    try {
-      if (mcpDirectory !== null) {
-        await writeFile(
-          join(mcpDirectory, PI_MCP_CONFIG_FILENAME),
-          `${JSON.stringify(piMcpConfig(
-            this.engineCommand() ?? 'engine-mcp',
-            this.engineArgs(invocation.launcherToken),
-          ))}\n`,
-          { encoding: 'utf8', mode: 0o600 },
-        );
-      }
-      const output = await this.runner().run(
-        this.invocationSpec(invocation, sessionId, mcpDirectory),
-        invocation.prompt,
-        signal,
-        invocation.timeoutMs,
+    const mcpDirectory = this.options.piMcpExtensionPath === undefined ? null : piMcpDirectory(sessionId);
+    if (mcpDirectory !== null) {
+      // Pi persists the session cwd. This directory is intentionally stable for
+      // the full session and is not removed between turns; the adapter contract
+      // currently has no terminal session callback at which cleanup is safe.
+      await mkdir(mcpDirectory, { recursive: true, mode: 0o700 });
+      await writeFile(
+        join(mcpDirectory, PI_MCP_CONFIG_FILENAME),
+        `${JSON.stringify(piMcpConfig(
+          this.engineCommand() ?? 'engine-mcp',
+          this.engineArgs(invocation.launcherToken),
+        ))}\n`,
+        { encoding: 'utf8', mode: 0o600 },
       );
-      completedOutput(output, resuming);
-      if (output.cancelled) {
-        return {
-          sessionId: agentSessionIdFromCli(sessionId),
-          finalText: '',
-          usage: null,
-          exit: 'cancelled',
-          contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
-        };
-      }
-      const decoded = decodePiTurn(output.stdout, sessionId, (event) => this.observe(event));
+    }
+    const output = await this.runner().run(
+      this.invocationSpec(invocation, sessionId, mcpDirectory),
+      invocation.prompt,
+      signal,
+      invocation.timeoutMs,
+    );
+    completedOutput(output, resuming);
+    if (output.cancelled) {
       return {
-        sessionId: agentSessionIdFromCli(decoded.sessionId),
-        finalText: decoded.finalText,
-        usage: decoded.usage,
-        exit: 'completed',
+        sessionId: agentSessionIdFromCli(sessionId),
+        finalText: '',
+        usage: null,
+        exit: 'cancelled',
         contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
       };
-    } finally {
-      if (mcpDirectory !== null) await rm(mcpDirectory, { recursive: true, force: true });
     }
+    const decoded = decodePiTurn(output.stdout, sessionId, (event) => this.observe(event));
+    return {
+      sessionId: agentSessionIdFromCli(decoded.sessionId),
+      finalText: decoded.finalText,
+      usage: decoded.usage,
+      exit: 'completed',
+      contractEvidence: piContractEvidence(this.options.piMcpExtensionPath),
+    };
   }
 }
 
@@ -138,6 +136,11 @@ export function piArgv(input: PiArgvInput): readonly string[] {
 
 function piSessionFilePath(): string {
   return join(tmpdir(), `dnd-wt-vtt-pi-session-${randomUUID()}.jsonl`);
+}
+
+function piMcpDirectory(sessionId: string): string {
+  const digest = createHash('sha256').update(sessionId).digest('hex').slice(0, 24);
+  return join(tmpdir(), `dnd-wt-vtt-pi-mcp-${digest}`);
 }
 
 function piContractEvidence(extensionPath: string | undefined): readonly string[] {

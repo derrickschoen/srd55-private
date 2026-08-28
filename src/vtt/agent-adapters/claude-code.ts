@@ -115,6 +115,7 @@ export function claudeCodeArgv(input: ClaudeArgvInput): readonly string[] {
     '--verbose',
     '--include-partial-messages',
     '--tools', ...CLAUDE_ENGINE_TOOLS,
+    '--allowedTools', 'mcp__engine__*',
     '--setting-sources', '',
     '--strict-mcp-config',
     '--mcp-config', mcpConfig,

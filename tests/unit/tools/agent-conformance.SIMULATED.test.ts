@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AgentAdapterError } from '../../../src/vtt/agent-adapters/process';
 import { PI_MCP_SKIPPED_NO_EXTENSION } from '../../../src/vtt/agent-adapters/pi';
+import { encounterSessionId } from '../../../src/combat/values';
 import { agentSessionIdFromCli } from '../../../src/vtt/agent-session';
 import type { AgentCliKind, AgentFailureClassification, AgentInvocation, AgentSessionAdapter, AgentSessionBinding, AgentTurnResult, CliProbe } from '../../../src/vtt/agent-session';
 import { parseAgentConformanceArguments, runAgentConformance } from '../../../tools/agent-conformance';
@@ -10,6 +11,14 @@ type Mode = 'verified' | 'absent' | 'authentication' | 'failed' | 'timeout' | 's
   'resume_failure' | 'bad_mcp_proof';
 
 const SIMULATED_DIGEST = '0123456789abcdef'.repeat(4);
+const SIMULATED_PROOF = {
+  digest: SIMULATED_DIGEST,
+  stateRef: {
+    runId: encounterSessionId('encounter:engine-mcp'),
+    stateHandle: `engine-state:${SIMULATED_DIGEST}`,
+    expectedRevision: 1,
+  },
+} as const;
 
 class SIMULATEDCli implements AgentSessionAdapter {
   #resumes = 0;
@@ -17,6 +26,7 @@ class SIMULATEDCli implements AgentSessionAdapter {
     readonly kind: AgentCliKind,
     private readonly mode: Mode,
     private readonly invocations: AgentInvocation[],
+    private readonly bindings: AgentSessionBinding[],
   ) {}
   probe(): Promise<CliProbe> { return Promise.resolve(this.mode === 'absent' ? { present: false, version: null } : { present: true, version: 'SIMULATED-1' }); }
   start(_invocation: AgentInvocation, _signal: AbortSignal): Promise<AgentTurnResult> {
@@ -42,6 +52,7 @@ class SIMULATEDCli implements AgentSessionAdapter {
   }
   resume(binding: AgentSessionBinding, _invocation: AgentInvocation, _signal: AbortSignal): Promise<AgentTurnResult> {
     this.invocations.push(_invocation);
+    this.bindings.push(binding);
     this.#resumes += 1;
     if (this.mode === 'resume_failure' && this.#resumes === 1) {
       return Promise.reject(new AgentAdapterError('malformed_output', 'SIMULATED resume failure'));
@@ -71,15 +82,16 @@ function dependenciesFor(modes: Readonly<Record<AgentCliKind, Mode>>) {
   const output: string[] = [];
   const errors: string[] = [];
   const invocations: AgentInvocation[] = [];
+  const bindings: AgentSessionBinding[] = [];
   const dependencies: AgentConformanceDependencies = {
-    adapter: (kind) => new SIMULATEDCli(kind, modes[kind], invocations),
+    adapter: (kind) => new SIMULATEDCli(kind, modes[kind], invocations, bindings),
     now: () => '2026-08-27T20:00:00.000Z',
     stdout: (line) => { output.push(line); },
     stderr: (line) => { errors.push(line); },
-    expectedMcpDigest: () => Promise.resolve(SIMULATED_DIGEST),
+    expectedMcpProof: () => Promise.resolve(SIMULATED_PROOF),
     writeReport: () => Promise.resolve(),
   };
-  return { dependencies, output, errors, invocations };
+  return { dependencies, output, errors, invocations, bindings };
 }
 
 describe('SIMULATED four-CLI conformance harness — not live CLI verification', () => {
@@ -157,12 +169,25 @@ describe('SIMULATED four-CLI conformance harness — not live CLI verification',
     expect(openCodeReport.records[0]?.lifecycle.mcpProof).toBe(true);
     expect(openCode.invocations[2]?.prompt).toContain('engine state summary tool');
     expect(openCode.invocations[2]?.prompt).not.toContain('engine.get_state_summary');
+    expect(openCode.invocations[2]?.prompt).toContain('"run_id":"encounter:engine-mcp"');
+    expect(openCode.invocations[2]?.prompt).toContain(`"state_handle":"engine-state:${SIMULATED_DIGEST}"`);
+    expect(openCode.invocations[2]?.prompt).toContain('"expected_revision":1');
 
     const pi = dependenciesFor(MODES);
     const piReport = await runAgentConformance({ cli: 'pi', reportPath: null }, pi.dependencies);
     expect(piReport.records[0]?.lifecycle.mcpProof).toBe(true);
     expect(pi.invocations[2]?.prompt).toContain('MCP proxy tool');
     expect(pi.invocations[2]?.prompt).toContain('discover the engine server tools');
+  });
+
+  it('uses a valid-format fixed UUID for the Claude missing-session proof only', async () => {
+    const claude = dependenciesFor(MODES);
+    await runAgentConformance({ cli: 'claude-code', reportPath: null }, claude.dependencies);
+    expect(claude.bindings[2]?.sessionId).toBe('00000000-0000-4000-8000-000000000001');
+
+    const codex = dependenciesFor(MODES);
+    await runAgentConformance({ cli: 'codex', reportPath: null }, codex.dependencies);
+    expect(codex.bindings[2]?.sessionId).toBe('missing-session-codex');
   });
 
   it('preserves accumulated lifecycle evidence when a mid-lifecycle case fails', async () => {
