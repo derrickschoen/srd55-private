@@ -10,6 +10,7 @@ import {
   type ConversationRunOptions,
   type ConversationTokenCounts,
 } from './ai-dm-conversation';
+import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
 
 export interface ArenaConfig {
   readonly rooms: number;
@@ -24,6 +25,7 @@ export interface ArenaConfig {
   readonly cliBin: string;
   readonly timeoutMs: number;
   readonly kbPath: string | null;
+  readonly reactionAskDefault: UnattendedReactionAskDefault;
 }
 
 export interface ArenaRow {
@@ -78,6 +80,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     if (![
       '--rooms', '--reps', '--seed', '--cli', '--model', '--effort', '--out',
       '--cli-bin', '--timeout-ms', '--kb',
+      '--reaction-ask-default',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argumentsValue, index, option ?? '<missing>'));
     index += 1;
@@ -96,6 +99,10 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   const selectedCli = cli as ConversationCli;
   const kbPath = values.has('--kb') ? resolve(values.get('--kb') ?? '') : null;
   if (kbPath !== null) validateKbPath(cwd, kbPath);
+  const reactionAskDefault = values.get('--reaction-ask-default') ?? 'decline';
+  if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
+    throw new TypeError('--reaction-ask-default must be decline or take.');
+  }
   return {
     rooms: positiveInteger(values.get('--rooms') ?? '', '--rooms'),
     reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
@@ -109,6 +116,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : 'claude'),
     timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
     kbPath,
+    reactionAskDefault,
   };
 }
 
@@ -133,6 +141,7 @@ export async function runArena(
     cliBin: config.cliBin,
     timeoutMs: config.timeoutMs,
     kbPath: config.kbPath,
+    reactionAskDefault: config.reactionAskDefault,
   }, { ...options, roomStates: generated.map((entry) => entry.state) });
   const rows = result.rows.map((row): ArenaRow => ({
     seed: generated[row.room - 1]!.seed,

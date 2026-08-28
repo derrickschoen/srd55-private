@@ -44,6 +44,12 @@ import {
   TurnExhaustionCoordinator, type DeterministicIntentResolution,
   type InitialIntentAttempt, type TurnExhaustionHost,
 } from '../src/vtt/turn-exhaustion-coordinator';
+import {
+  type AutoResolvedReactionOffer,
+  unattendedReactionOfferResolution,
+  type ReactionOfferHostPolicy,
+  type UnattendedReactionAskDefault,
+} from '../src/vtt/reaction-offer-host-policy';
 
 export const CONVERSATION_CLIS = ['codex', 'claude-code'] as const;
 export type ConversationCli = (typeof CONVERSATION_CLIS)[number];
@@ -72,6 +78,7 @@ export interface ConversationConfig {
   readonly cliBin: string;
   readonly timeoutMs: number;
   readonly kbPath: string | null;
+  readonly reactionAskDefault: UnattendedReactionAskDefault;
 }
 
 export interface ConversationTokenCounts {
@@ -150,7 +157,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     if (option === '--dry-run') { dryRun = true; continue; }
     if (![
       '--fixtures', '--rooms', '--rounds', '--reps', '--cli', '--model', '--effort',
-      '--out', '--cli-bin', '--timeout-ms', '--kb',
+      '--out', '--cli-bin', '--timeout-ms', '--kb', '--reaction-ask-default',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
     index += 1;
@@ -169,6 +176,10 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   const selectedCli = cli as ConversationCli;
   const kbPath = values.has('--kb') ? resolve(values.get('--kb') ?? '') : null;
   if (kbPath !== null) validateKbPath(cwd, kbPath);
+  const reactionAskDefault = values.get('--reaction-ask-default') ?? 'decline';
+  if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
+    throw new TypeError('--reaction-ask-default must be decline or take.');
+  }
   return {
     fixturesPath: resolve(values.get('--fixtures') ?? 'tests/fixtures/arena-basis'),
     rooms: positiveInteger(values.get('--rooms') ?? '12', '--rooms'),
@@ -182,6 +193,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : 'claude'),
     timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
     kbPath,
+    reactionAskDefault,
   };
 }
 
@@ -526,6 +538,49 @@ function reduceOne(state: EncounterState, command: EncounterCommand, rng: Serial
   return reduceSessionEncounter(state, command, rng).state;
 }
 
+function resolveUnattendedReactionOffers(
+  initialState: EncounterState,
+  rng: SerializableRng,
+  policy: ReactionOfferHostPolicy,
+): {
+  readonly state: EncounterState;
+  readonly resolutions: readonly AutoResolvedReactionOffer[];
+} {
+  let state = initialState;
+  const resolutions: AutoResolvedReactionOffer[] = [];
+  for (;;) {
+    const selected = state.pendingDecisions.flatMap((decision) => {
+      if (decision.kind !== 'reaction_offer') return [];
+      const resolution = unattendedReactionOfferResolution(
+        state,
+        decision,
+        'algorithm',
+        policy,
+      );
+      return resolution === null ? [] : [resolution];
+    })[0];
+    if (selected === undefined) return { state, resolutions };
+    state = reduceOne(state, {
+      type: 'resolve_pending_decision',
+      decisionId: selected.decisionId,
+      optionId: selected.resolution,
+    }, rng);
+    resolutions.push(selected);
+  }
+}
+
+function recordAutoResolvedReactions(
+  journal: EncounterSessionJournal,
+  resolutions: readonly AutoResolvedReactionOffer[],
+): void {
+  for (const resolution of resolutions) {
+    journal.recordHostTransition({
+      kind: 'unattended_reaction_auto_resolved',
+      ...resolution,
+    });
+  }
+}
+
 function advanceToActor(state: EncounterState, actorId: CombatantId, rng: SerializableRng): EncounterState {
   let current = state;
   if (current.initiative.length === 0) current = reduceOne(current, { type: 'roll_initiative' }, rng);
@@ -543,12 +598,26 @@ function applyResolvedMechanics(
   mechanics: ResolvedIntentMechanics,
   choice: EngineActionChoice,
   rng: SerializableRng,
-): EncounterState {
+  reactionPolicy: ReactionOfferHostPolicy,
+): {
+  readonly state: EncounterState;
+  readonly autoResolvedReactions: readonly AutoResolvedReactionOffer[];
+} {
+  const autoResolvedReactions: AutoResolvedReactionOffer[] = [];
+  const reduce = (current: EncounterState, command: EncounterCommand): EncounterState => {
+    const reduced = reduceOne(current, command, rng);
+    const resolved = resolveUnattendedReactionOffers(reduced, rng, reactionPolicy);
+    autoResolvedReactions.push(...resolved.resolutions);
+    return resolved.state;
+  };
   let current = advanceToActor(state, mechanics.actorId, rng);
   if (mechanics.path.length > 0) {
-    current = reduceOne(current, {
+    current = reduce(current, {
       type: 'move', actor: mechanics.actorId, path: mechanics.path, cause: 'voluntary',
-    }, rng);
+    });
+  }
+  if (current.combatants.find((entry) => entry.profile.id === mechanics.actorId)?.life !== 'living') {
+    return { state: current, autoResolvedReactions };
   }
   switch (choice.kind) {
     case 'attack': {
@@ -557,17 +626,23 @@ function applyResolvedMechanics(
         .find((candidate): candidate is MonsterAttackAction =>
           candidate.kind === 'attack' && candidate.id === mechanics.actionId);
       if (action === undefined) throw new Error(`Resolved attack ${mechanics.actionId} is absent.`);
-      current = reduceOne(current, monsterAttackCommand(action, mechanics.actorId, mechanics.targetId), rng);
+      current = reduce(current, monsterAttackCommand(action, mechanics.actorId, mechanics.targetId));
       break;
     }
     case 'dodge':
     case 'disengage':
-    case 'dash': current = reduceOne(current, { type: choice.kind, actor: mechanics.actorId }, rng); break;
-    case 'end_turn': return reduceOne(current, { type: 'end_turn', actor: mechanics.actorId }, rng);
+    case 'dash': current = reduce(current, { type: choice.kind, actor: mechanics.actorId }); break;
+    case 'end_turn': return {
+      state: reduce(current, { type: 'end_turn', actor: mechanics.actorId }),
+      autoResolvedReactions,
+    };
     case 'cast_spell':
     case 'use_action': throw new Error(`Arena host cannot authorize unresolved ${choice.kind} mechanics.`);
   }
-  return reduceOne(current, { type: 'end_turn', actor: mechanics.actorId }, rng);
+  return {
+    state: reduce(current, { type: 'end_turn', actor: mechanics.actorId }),
+    autoResolvedReactions,
+  };
 }
 
 function authorizedMechanics(state: EncounterState, proposal: RoundIntentProposalEnvelope): readonly {
@@ -666,6 +741,16 @@ export async function runConversation(config: ConversationConfig, options: Conve
     if (room > 1) {
       state = structuredClone(states[room - 1]!);
       capsuleRevision += 1;
+    }
+    const beforeReactionResolution = state.revision;
+    const roomReactionResolution = resolveUnattendedReactionOffers(state, hostRng, {
+      kind: 'unattended',
+      askDefault: config.reactionAskDefault,
+    });
+    state = roomReactionResolution.state;
+    recordAutoResolvedReactions(journal, roomReactionResolution.resolutions);
+    capsuleRevision += state.revision - beforeReactionResolution;
+    if (room > 1) {
       const requestId = `request:room-${String(room)}-round-1`;
       const capsule = capsuleFor({ state, runId, branchId, revision: capsuleRevision, requestId, phase: 'initial', room, historyKind: 'room_transition' });
       const launcher = await writeLauncher({ directory: artifacts, name: `room-${String(room)}-transition`, state, capsule, room, historyKind: 'room_transition' });
@@ -723,13 +808,25 @@ export async function runConversation(config: ConversationConfig, options: Conve
             if (mechanics === null) return 'invalid';
             const trialRng = restoreMulberry32(hostRng.snapshot());
             let trialState = state;
+            const autoResolvedReactions: AutoResolvedReactionOffer[] = [];
             try {
-              for (const entry of mechanics) trialState = applyResolvedMechanics(trialState, entry.mechanics, entry.choice, trialRng);
+              for (const entry of mechanics) {
+                const applied = applyResolvedMechanics(
+                  trialState,
+                  entry.mechanics,
+                  entry.choice,
+                  trialRng,
+                  { kind: 'unattended', askDefault: config.reactionAskDefault },
+                );
+                trialState = applied.state;
+                autoResolvedReactions.push(...applied.autoResolvedReactions);
+              }
             } catch { return 'invalid'; }
             capsuleRevision += Math.max(1, trialState.revision - state.revision);
             state = trialState;
             hostRng = trialRng;
             proposalId = proposal.proposalId;
+            recordAutoResolvedReactions(journal, autoResolvedReactions);
             return 'authorized';
           },
           resolveDeterministically: async (actorId): Promise<DeterministicIntentResolution> => ({
@@ -740,13 +837,16 @@ export async function runConversation(config: ConversationConfig, options: Conve
             const position = canonicalEngineQueryPort.tokenPosition(state, resolution.actorId);
             if (position === null) throw new Error('Deterministic actor has no token.');
             const trialRng = restoreMulberry32(hostRng.snapshot());
-            const trialState = applyResolvedMechanics(state, {
+            const applied = applyResolvedMechanics(state, {
               actorId: resolution.actorId, actionId: 'dodge', targetId: null,
               movementCostFeet: 0, path: [], finalPosition: position,
-            }, { kind: 'dodge' }, trialRng);
-            capsuleRevision += Math.max(1, trialState.revision - state.revision);
-            state = trialState;
+            }, { kind: 'dodge' }, trialRng, {
+              kind: 'unattended', askDefault: config.reactionAskDefault,
+            });
+            capsuleRevision += Math.max(1, applied.state.revision - state.revision);
+            state = applied.state;
             hostRng = trialRng;
+            recordAutoResolvedReactions(journal, applied.autoResolvedReactions);
           },
           pauseForDmAdjudication: ({ actorId, reason }) => { refusals.push(`${actorId}: ${reason}`); },
         };

@@ -11,6 +11,13 @@ import {
 } from '../../../src/vtt/agent-session';
 import { parseConversationArgs, runConversation } from '../../../tools/ai-dm-conversation';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
+import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { encounterSessionId } from '../../../src/combat/values';
+import {
+  importSavedSession,
+  MemoryBrowserSessionStore,
+} from '../../../src/vtt/session-persistence';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 class RecordingConversationAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
@@ -36,7 +43,67 @@ class RecordingConversationAdapter implements AgentSessionAdapter {
   }
 }
 
+function pendingArenaReactionState(): EncounterState {
+  const mover = playerProfile('arena-reaction-mover', { hitPoints: 100, initiativeBonus: 20 });
+  const reactor = monsterProfile('arena-reaction-reactor', { hitPoints: 100, initiativeBonus: -20 });
+  const started = reduceEncounter(createEncounter({
+    bounds: { columns: 5, rows: 2 },
+    combatants: [mover, reactor],
+    tokens: [placedToken(mover, 1), placedToken(reactor, 0)],
+    reactionPolicies: [{
+      combatant: reactor.id,
+      reactionKind: 'opportunity_attack',
+      policy: 'ask',
+    }],
+  }), { type: 'roll_initiative' }, () => 0.5).state;
+  return reduceEncounter(started, {
+    type: 'move',
+    actor: mover.id,
+    path: [{ column: 2, row: 0 }],
+    cause: 'voluntary',
+  }, () => 0.5).state;
+}
+
 describe('AI-DM engine MCP conversation runner', () => {
+  it.each([
+    ['decline', 'decline'],
+    ['take', 'accept'],
+  ] as const)(
+    'auto-resolves an unattended ask Reaction with the %s policy and authorizes the SIMULATED arena round',
+    { timeout: 60_000 },
+    async (askDefault, resolution) => {
+      const directory = mkdtempSync(join(tmpdir(), `dnd-conversation-reaction-${askDefault}-`));
+      const store = new MemoryBrowserSessionStore();
+      const config = parseConversationArgs([
+        '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+        '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
+        '--reaction-ask-default', askDefault,
+      ]);
+
+      const result = await runConversation(config, {
+        roomStates: [pendingArenaReactionState()],
+        store,
+      });
+
+      expect(result.rows).toEqual([
+        expect.objectContaining({ outcome: 'authorized', refusals: [] }),
+      ]);
+      expect(store.revisions(encounterSessionId('encounter:ai-dm-conversation'))
+        .map((revision) => revision.transition))
+        .toContainEqual(expect.objectContaining({
+          kind: 'unattended_reaction_auto_resolved',
+          configuredPolicy: 'ask',
+          askDefault,
+          resolution,
+        }));
+      const restored = new MemoryBrowserSessionStore();
+      importSavedSession(restored, result.journalExport);
+      expect(restored.revisions(encounterSessionId('encounter:ai-dm-conversation'))
+        .map((revision) => revision.transition.kind))
+        .toContain('unattended_reaction_auto_resolved');
+    },
+  );
+
   it('keeps one SIMULATED session across two rooms, one correction, and a browser restore', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-'));
     const outPath = join(directory, 'rows.jsonl');

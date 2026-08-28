@@ -290,6 +290,82 @@ describe('DmEncounterHost live algorithm path', () => {
     host.close();
   });
 
+  it.each([
+    ['decline', 'decline'],
+    ['take', 'accept'],
+  ] as const)(
+    'auto-resolves a non-human ask Reaction with unattended %s and advances the round',
+    async (askDefault, resolution) => {
+      const mover = playerProfile(`host-unattended-${askDefault}-mover`, { hitPoints: 100, initiativeBonus: 20 });
+      const reactor = monsterProfile(`host-unattended-${askDefault}-reactor`, { hitPoints: 100, initiativeBonus: -20 });
+      const initialState = startedEncounter({
+        bounds: { columns: 5, rows: 2 },
+        combatants: [mover, reactor],
+        tokens: [placedToken(mover, 1), placedToken(reactor, 0)],
+        reactionPolicies: [{
+          combatant: reactor.id,
+          reactionKind: 'opportunity_attack',
+          policy: 'ask',
+        }],
+      });
+      const store = new MemoryBrowserSessionStore();
+      const host = new DmEncounterHost(
+        `session:host-unattended-reaction-${askDefault}`,
+        store,
+        {
+          initialState,
+          initialControllers: algorithmIdentities(initialState),
+          playerIds: [mover.id],
+          reactionOfferPolicy: { kind: 'unattended', askDefault },
+          turnLegalActions: (state, actor) => actor === mover.id
+            ? {
+                actions: [
+                  ...(position(state, actor).column === 1
+                    ? [{
+                        type: 'move' as const,
+                        actor,
+                        path: [{ column: 2, row: 0 }],
+                        cause: 'voluntary' as const,
+                      }]
+                    : []),
+                  { type: 'end_turn' as const, actor },
+                ],
+              }
+            : { actions: [{ type: 'end_turn', actor }] },
+          reactionLegalActions: (_state, reacting, moving) => reacting === reactor.id && moving === mover.id
+            ? [{ ...attack(reacting, moving), type: 'opportunity_attack' }]
+            : [],
+        },
+      );
+
+      const startedRound = host.snapshot().dm.encounter.round;
+      const advanced = await hostUntil(
+        host,
+        (snapshot) => snapshot.dm.encounter.round > startedRound ||
+          snapshot.dm.decisionTray.boundaryRefusal?.code === 'turn_boundary_blocked',
+        60,
+      );
+
+      expect(advanced.dm.encounter.round).toBeGreaterThan(startedRound);
+      expect(advanced.dm.decisionTray.boundaryRefusal).toBeNull();
+      expect(advanced.dm.encounter.recentEvents).toContainEqual(expect.objectContaining({
+        type: 'pending_decision_resolved',
+        optionId: resolution,
+      }));
+      expect(store.revisions(host.sessionId).map((revision) => revision.transition))
+        .toContainEqual(expect.objectContaining({
+          kind: 'unattended_reaction_auto_resolved',
+          configuredPolicy: 'ask',
+          askDefault,
+          resolution,
+        }));
+      expect(replaySessionRevisions(store.revisions(host.sessionId)).encounterState).toEqual(
+        store.revisions(host.sessionId).at(-1)?.encounterState,
+      );
+      host.close();
+    },
+  );
+
   it('does not queue a Wolf opportunity-attack decision when no attack is executable', async () => {
     const mover = playerProfile('host-wolf-oa-mover', { hitPoints: 100, initiativeBonus: 20 });
     const wolf = monsterCombatantProfile(WOLF, {

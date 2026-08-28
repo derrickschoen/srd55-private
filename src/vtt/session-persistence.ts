@@ -67,9 +67,11 @@ import {
 } from './agent-session';
 import type { AdjudicationEnvelope } from './mcp/engine-server';
 import type { TurnExhaustionTransition } from './turn-exhaustion-coordinator';
+import type { AutoResolvedReactionOffer } from './reaction-offer-host-policy';
 
 export type EngineHostTransition =
   | TurnExhaustionTransition
+  | ({ readonly kind: 'unattended_reaction_auto_resolved' } & AutoResolvedReactionOffer)
   | { readonly kind: 'engine_adjudication_requested'; readonly request: AdjudicationEnvelope }
   | {
       readonly kind: 'engine_adjudication_resolved';
@@ -179,6 +181,7 @@ export const SESSION_TRANSITION_KINDS = [
   'intent_correction_failed',
   'intent_auto_resolved',
   'intent_auto_resolution_failed',
+  'unattended_reaction_auto_resolved',
   'engine_adjudication_requested',
   'engine_adjudication_resolved',
   'dm_takeover_started',
@@ -650,6 +653,29 @@ function decodeTransition(value: unknown): SessionTransition {
       if (hasExactlyKeys(value, ['kind', 'requestId', 'actorId', 'reason']) &&
         typeof value.requestId === 'string' && typeof value.actorId === 'string' && typeof value.reason === 'string') {
         return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_auto_resolution_failed' }>;
+      }
+      break;
+    case 'unattended_reaction_auto_resolved':
+      if (
+        hasExactlyKeys(value, [
+          'kind', 'decisionId', 'combatant', 'reactionKind', 'configuredPolicy',
+          'askDefault', 'resolution',
+        ]) &&
+        typeof value.decisionId === 'string' &&
+        typeof value.combatant === 'string' &&
+        value.reactionKind === 'opportunity_attack' &&
+        (value.configuredPolicy === 'ask' || value.configuredPolicy === 'always' || value.configuredPolicy === 'never') &&
+        (value.askDefault === null || value.askDefault === 'decline' || value.askDefault === 'take') &&
+        (value.resolution === 'accept' || value.resolution === 'decline') &&
+        (
+          value.configuredPolicy === 'always'
+            ? value.askDefault === null && value.resolution === 'accept'
+            : value.configuredPolicy === 'never'
+              ? value.askDefault === null && value.resolution === 'decline'
+              : (value.askDefault === 'take') === (value.resolution === 'accept')
+        )
+      ) {
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'unattended_reaction_auto_resolved' }>;
       }
       break;
     case 'engine_adjudication_requested':
@@ -1361,6 +1387,7 @@ export function replaySessionRevisions(
       case 'intent_correction_failed':
       case 'intent_auto_resolved':
       case 'intent_auto_resolution_failed':
+      case 'unattended_reaction_auto_resolved':
       case 'engine_adjudication_requested':
       case 'engine_adjudication_resolved':
       case 'dm_takeover_started':
