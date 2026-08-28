@@ -7,6 +7,26 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D403 — OWNER: speculative DM planning during player turns (2026-08-28)
+
+Verbatim: "Can we have the dm agent start planning the next turn while the
+players are doing theirs? This way it doesn't seem like the dm is thinking
+for as long as he actually is. Have to plan for different likely scenarios,
+will have to give guidance with conditionals. Will have to recalculate if
+players do something unexpected." Ruling: the AI DM plans the next monster
+round CONCURRENTLY with the player phase — a contingent plan of 2-4
+branches keyed on deterministically-checkable conditions (closed
+vocabulary, same pattern as D401 reaction guidance); at monster-round
+start the host evaluates branches against actual state, validates the
+matching branch, and executes instantly on hit; on miss (no branch
+matches, or validation fails against the real state) it recalculates —
+preferring a cheap resume turn carrying a diff of what changed over cold
+replanning. Perceived latency (monster-round start to first action)
+becomes a measured dimension distinct from planning wall. Speculative
+turns run against snapshot capsules; revision-digest/STALE_STATE decides
+reuse; proposer-only and fail-closed invariants unchanged. Design goes
+through a codex-collab round before implementation.
+
 ## D402.2 — OWNER: drop terra from the game-time comparison (2026-08-28)
 
 Verbatim: "Drop Terra." Ruling: terra medium leaves the cycle-2 matrix.
