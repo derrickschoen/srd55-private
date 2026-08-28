@@ -7,6 +7,16 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D399.3 — OWNER: local CPU gemma 4B model for agent-CLI verification (2026-08-27)
+
+Verbatim: "Use local cpu gemma4-4b model. Install lm studio or whatever."
+Ruling (supersedes the practical effect of D399.2's deferral): install a
+local model server (LM Studio or equivalent — implementer's choice) serving
+a Gemma ~4B model on CPU, and point the unauthenticated agent CLIs
+(opencode, pi) at it so the four-CLI live conformance matrix can reach
+VERIFIED locally with no paid credentials. Game-time model choice (D396.1)
+is unaffected — this is verification plumbing, not the play model.
+
 ## D399.2 — OWNER: opencode/pi credentials deferred to release gate (2026-08-27)
 
 Both CLIs are installed (opencode 1.18.23, pi 0.73.1) but unauthenticated.
