@@ -7,6 +7,25 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D401 — OWNER: pre-declared reaction guidance from the agent (2026-08-28)
+
+Verbatim: "The agent should give some of them guidance on foreseeable
+reactions ahead of time. Try to intelligently brainstorm on how to minimize
+the time burden on the agent by having it plan ahead." Ruling: AI-driven
+reaction offers are resolved from guidance the agent DECLARES AHEAD of the
+boundary — no synchronous mid-boundary agent round trip. Supervisor design
+under the time-burden constraint: submit_round_intents gains an optional
+reaction_guidance block (closed trigger-kind vocabulary from the engine's
+trigger union; responses take/decline plus a tiny closed condition set —
+never free text, engine resolves deterministically); guidance is STICKY —
+last declared persists across rounds/rooms until replaced, so the common
+case costs one declaration per encounter, zero extra round trips; offers
+not covered by guidance fall back to the toggle policy (unattended 'ask'
+default: decline); resolutions journaled with the guidance that produced
+them; KB teaches "declare guidance once, rely on stickiness."
+D396.6 calibration: owner chose to hold the first judge-calibration
+session until after cycle 2.
+
 ## D400 — OWNER: pi and opencode shelved (2026-08-28)
 
 Verbatim: "If pi or opencode don't work as of now, shelve them for later."
