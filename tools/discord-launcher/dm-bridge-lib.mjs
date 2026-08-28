@@ -404,9 +404,6 @@ function roundPlanPrompt(request) {
   if (contract.schemaVersion !== 1) {
     throw new TypeError('request.replyContract version is unsupported');
   }
-  if ('maximumCorrectionAttempts' in contract && contract.maximumCorrectionAttempts !== 2) {
-    throw new TypeError('request.replyContract correction bound is unsupported');
-  }
   let correction = 'This is the initial reply for this request.';
   if (input.kind === 'round_plan_correction_request') {
     if (typeof input.validatorError !== 'string' || input.validatorError.length === 0) {

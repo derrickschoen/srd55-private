@@ -506,7 +506,7 @@ describe('JS round-plan protocol and replay integration', () => {
     expect(cause.diagnostics).toContainEqual(expect.objectContaining({ code: 2345, line: 1 }));
     expect(cause.message).toContain('TS2345 at 1:');
     expect(exchange.requests[1]).toMatchObject({ validatorError: cause.message });
-    expect(telemetry).toHaveLength(3);
+    expect(telemetry).toHaveLength(2);
     expect(telemetry.every((entry) =>
       !entry.passed && entry.diagnosticCodes.includes(2345) && entry.durationMs === 0)).toBe(true);
     expect(session.typeCheckTelemetry()).toEqual(telemetry);
@@ -542,7 +542,7 @@ describe('JS round-plan protocol and replay integration', () => {
 
     expect(typedExchange.requests[0]).toEqual(untypedExchange.requests[0]);
     expect(typedExchange.requests[0]).not.toHaveProperty('ambientDeclarations');
-    expect(typed.typeCheckTelemetry()).toHaveLength(3);
+    expect(typed.typeCheckTelemetry()).toHaveLength(2);
     expect(untyped.typeCheckTelemetry()).toEqual([]);
     expect(untyped.jsProgramArtifact(1, f.monster.id)).toMatchObject({
       ambientDeclarations: null,
@@ -589,7 +589,6 @@ describe('JS round-plan protocol and replay integration', () => {
       schemaVersion: 1,
       grammar: JS_TURN_PROGRAM_GRAMMAR,
       workedExamples: JS_ROUND_PLAN_WORKED_EXAMPLES,
-      maximumCorrectionAttempts: 2,
     });
     expect(ROUND_PLAN_JS_REPLY_CONTRACT.workedExamples).toHaveLength(3);
     expect(ROUND_PLAN_JS_REPLY_CONTRACT.workedExamples[0]?.monsters).toHaveLength(2);
@@ -687,7 +686,7 @@ describe('JS round-plan protocol and replay integration', () => {
     await expect(session.startRound(context(f.state), new AbortController().signal)).rejects.toThrow(
       'round plan.monsters[0].program.action.destination.column',
     );
-    expect(exchange.requests.map((request) => request.correctionAttempt)).toEqual([0, 1, 2]);
+    expect(exchange.requests.map((request) => request.correctionAttempt)).toEqual([0, 1]);
   });
 
   it('rider_searched_independently never considers a fixed rider follow-up when the attached attack is illegal', async () => {

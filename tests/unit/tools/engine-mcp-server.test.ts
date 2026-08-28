@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from '../../helpers/test-filesystem';
 import {
   MCP_PROTOCOL_VERSION,
   MCP_STATIC_LIST_TTL_MS,
@@ -95,6 +96,52 @@ describe('engine MCP stdio protocol', () => {
     expect(Array.isArray(structured['actors'])).toBe(true);
     expect(record((callResult['content'] as readonly unknown[])[0])['text'])
       .toBe(JSON.stringify(callResult['structuredContent']));
+    expect(await exit).toBe(0);
+  });
+
+  it('negotiates the literal Claude Code initialize transcript and serves classic tools over real stdio', { timeout: 20_000 }, async () => {
+    const child = spawn(process.execPath, [
+      resolve('node_modules/vite-node/vite-node.mjs'),
+      resolve('tools/engine-mcp-server.ts'),
+      resolve('tests/fixtures/arena-basis/seed-3943001.json'),
+    ], { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] });
+    const exit = new Promise<number | null>((resolvePromise, reject) => {
+      child.once('error', reject);
+      child.once('exit', resolvePromise);
+    });
+    const lines = createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY });
+    const iterator = lines[Symbol.asyncIterator]();
+    const nextResponse = async (): Promise<Readonly<Record<string, unknown>>> => {
+      const line = await iterator.next();
+      if (line.done) throw new Error('Classic MCP server closed before responding.');
+      return record(JSON.parse(line.value) as unknown);
+    };
+
+    child.stdin.write(readFileSync(
+      'tests/fixtures/mcp-migration/claude-code-2.1.246-initialize.json',
+      'utf8',
+    ));
+    const initialized = await nextResponse();
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })}\n`);
+    const listed = await nextResponse();
+    child.stdin.write(`${JSON.stringify({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'engine.get_turn_context',
+        arguments: { run_id: 'encounter:engine-mcp', expected_revision: 1, scope: 'round' },
+      },
+    })}\n`);
+    const called = await nextResponse();
+    child.stdin.end();
+
+    expect(initialized).toMatchObject({ id: 0, result: { protocolVersion: '2025-11-25' } });
+    expect(record(listed['result'])['resultType']).toBeUndefined();
+    expect(Array.isArray(record(listed['result'])['tools'])).toBe(true);
+    expect(record(called['result'])).toMatchObject({ isError: false });
+    expect(record(called['result'])['resultType']).toBeUndefined();
     expect(await exit).toBe(0);
   });
 });

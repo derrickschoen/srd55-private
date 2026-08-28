@@ -282,9 +282,8 @@ export class TurnCoordinator {
       if (request !== null && request.actorId === id) {
         this.#pendingRequest = null;
         this.#record({ kind: 'controller_request_cancelled', request });
-      } else {
-        this.#record({ kind: 'controller_replaced', combatantId: id });
       }
+      this.#record({ kind: 'controller_replaced', combatantId: id });
       abort?.abort();
     });
     for (const subject of initialState.combatants) {

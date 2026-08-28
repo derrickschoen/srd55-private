@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from '../../helpers/test-filesystem';
 import type { EncounterState } from '../../../src/combat/encounter';
 import {
+  MCP_CLASSIC_PROTOCOL_VERSIONS,
   MCP_CLIENT_CAPABILITIES_META_KEY,
   MCP_CLIENT_INFO_META_KEY,
   MCP_PROTOCOL_VERSION,
@@ -11,7 +13,8 @@ import {
   type McpHandler,
 } from '../../../src/vtt/mcp/handler';
 import { createEngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
-import { createEngineMcpRuntime, loadArenaFixture, type EngineMcpRuntime } from '../../../tools/engine-mcp-server';
+import { engineStateSummaryProofToken } from '../../../src/vtt/mcp/engine-server';
+import { createEngineMcpRuntime, loadArenaFixture, type EngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
 const TOOL_NAMES = [
@@ -65,6 +68,49 @@ function forbiddenAgentKeys(value: unknown): readonly string[] {
   ];
 }
 
+function localPointerExists(root: unknown, reference: string): boolean {
+  if (reference === '#') return true;
+  if (!reference.startsWith('#/')) return false;
+  let segments: readonly string[];
+  try {
+    segments = decodeURIComponent(reference.slice(2)).split('/').map((segment) =>
+      segment.replaceAll('~1', '/').replaceAll('~0', '~'));
+  } catch {
+    return false;
+  }
+  let current = root;
+  for (const segment of segments) {
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isSafeInteger(index) || index < 0 || index >= current.length) return false;
+      current = current[index];
+      continue;
+    }
+    if (typeof current !== 'object' || current === null || !Object.hasOwn(current, segment)) return false;
+    current = (current as Readonly<Record<string, unknown>>)[segment];
+  }
+  return current !== undefined;
+}
+
+function unresolvedSchemaReferences(root: unknown, value: unknown = root, path = '$'): readonly string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => unresolvedSchemaReferences(root, entry, `${path}[${String(index)}]`));
+  }
+  if (typeof value !== 'object' || value === null) return [];
+  const candidate = value as Readonly<Record<string, unknown>>;
+  const reference = candidate['$ref'];
+  const failure = reference === undefined
+    ? []
+    : typeof reference !== 'string' || !localPointerExists(root, reference)
+      ? [`${path}.$ref=${String(reference)}`]
+      : [];
+  return [
+    ...failure,
+    ...Object.entries(candidate).flatMap(([key, nested]) =>
+      unresolvedSchemaReferences(root, nested, `${path}.${key}`)),
+  ];
+}
+
 async function fixtureRuntime(options: Parameters<typeof createEngineMcpRuntime>[1] = { requestedActorCount: 1 }): Promise<{ readonly state: EncounterState; readonly runtime: EngineMcpRuntime }> {
   const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
   return { state, runtime: createEngineMcpRuntime(state, options) };
@@ -114,7 +160,13 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
   }
 }
 
-describe('engine MCP 2026-07-28 full surface conformance', () => {
+describe('engine MCP dual-handshake full surface conformance', () => {
+  it('derives the state-summary proof token from digest, granularity, and the v1 domain separator', () => {
+    expect(engineStateSummaryProofToken('a'.repeat(64), 'turn_minimal')).toBe(
+      '59f83cdc47b641fd55ca7dcda5b0a55839f61f718819fda843fe1e8bf767e114',
+    );
+  });
+
   it('discovers the designed capability envelope and rejects unsupported versions', async () => {
     const { runtime } = await fixtureRuntime();
     expect(request(runtime.handler, 1, 'server/discover').result).toMatchObject({
@@ -126,6 +178,75 @@ describe('engine MCP 2026-07-28 full surface conformance', () => {
       jsonrpc: '2.0', id: 2, method: 'server/discover', params: { _meta: { ...mcpRequestMeta(CLIENT_INFO), [MCP_PROTOCOL_VERSION_META_KEY]: '2025-03-26' } },
     });
     expect(response).toMatchObject({ id: 2, error: { code: -32022, data: { supported: [MCP_PROTOCOL_VERSION] } } });
+  });
+
+  it('negotiates the literal Claude Code classic initialize and keeps the same proposer-only tools under both handshakes', async () => {
+    const initialize = JSON.parse(readFileSync(
+      'tests/fixtures/mcp-migration/claude-code-2.1.246-initialize.json',
+      'utf8',
+    )) as unknown;
+    const { state, runtime } = await fixtureRuntime();
+    const initialized = runtime.handler.handle(initialize);
+    expect(initialized).toMatchObject({
+      id: 0,
+      result: {
+        protocolVersion: '2025-11-25',
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: 'dnd-wt-vtt-engine', version: '1.0.0' },
+      },
+    });
+    expect(runtime.handler.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }))
+      .toMatchObject({ error: { code: -32002, message: 'Server not initialized' } });
+    expect(runtime.handler.handle({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })).toBeNull();
+    const classicListResponse = runtime.handler.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+    if (classicListResponse === null) throw new TypeError('Classic tools/list returned no response.');
+    const classicList = record(classicListResponse.result);
+    expect(classicList['resultType']).toBeUndefined();
+    const classicTools = classicList['tools'];
+    if (!Array.isArray(classicTools)) throw new TypeError('Classic tools/list omitted tools.');
+    const classicNames = classicTools.map((tool) => String(record(tool)['name']));
+    expect(classicNames).toEqual(TOOL_NAMES);
+
+    const classicCall = runtime.handler.handle({
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'engine.get_state_summary', arguments: happyArguments('engine.get_state_summary', state, runtime) },
+    });
+    if (classicCall === null) throw new TypeError('Classic tools/call returned no response.');
+    expect(structured(record(classicCall.result))).toHaveProperty('state_ref');
+
+    const modern = await fixtureRuntime();
+    const modernList = record(request(modern.runtime.handler, 4, 'tools/list').result);
+    const modernTools = modernList['tools'];
+    if (!Array.isArray(modernTools)) throw new TypeError('Modern tools/list omitted tools.');
+    expect(modernTools.map((tool) => String(record(tool)['name']))).toEqual(classicNames);
+  });
+
+  it('rejects a genuinely unsupported classic initialize revision', async () => {
+    const { runtime } = await fixtureRuntime();
+    const response = runtime.handler.handle({
+      jsonrpc: '2.0',
+      id: 5,
+      method: 'initialize',
+      params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: CLIENT_INFO },
+    });
+    expect(response).toMatchObject({
+      error: {
+        code: -32022,
+        data: { requested: '2024-11-05', supported: MCP_CLASSIC_PROTOCOL_VERSIONS },
+      },
+    });
+  });
+
+  it.each(MCP_CLASSIC_PROTOCOL_VERSIONS)('negotiates supported classic revision %s exactly', async (protocolVersion) => {
+    const { runtime } = await fixtureRuntime();
+    expect(runtime.handler.handle({
+      jsonrpc: '2.0',
+      id: protocolVersion,
+      method: 'initialize',
+      params: { protocolVersion, capabilities: {}, clientInfo: CLIENT_INFO },
+    })).toMatchObject({ id: protocolVersion, result: { protocolVersion } });
   });
 
   it.each([MCP_PROTOCOL_VERSION_META_KEY, MCP_CLIENT_INFO_META_KEY, MCP_CLIENT_CAPABILITIES_META_KEY])('rejects requests missing metadata key %s', async (missing) => {
@@ -161,12 +282,42 @@ describe('engine MCP 2026-07-28 full surface conformance', () => {
     expect(request(runtime.handler, 99, 'tools/list', { cursor: 'forged' })).toMatchObject({ error: { code: -32602 } });
   });
 
+  it('advertises only per-document-resolvable refs in every tool input and output schema', async () => {
+    const { runtime } = await fixtureRuntime({ requestedActorCount: 1 });
+    const discovery = record(request(runtime.handler, 100, 'server/discover').result);
+    const listing = record(request(runtime.handler, 101, 'tools/list').result);
+    for (const [surface, tools] of [['server/discover', discovery['tools']], ['tools/list', listing['tools']]] as const) {
+      if (!Array.isArray(tools)) throw new TypeError(`${surface} did not advertise tools.`);
+      expect(tools).toHaveLength(TOOL_NAMES.length);
+      for (const value of tools) {
+        const tool = record(value);
+        for (const key of ['inputSchema', 'outputSchema'] as const) {
+          const schema = record(tool[key]);
+          expect(unresolvedSchemaReferences(schema), `${surface}:${String(tool['name'])}.${key}`).toEqual([]);
+        }
+      }
+    }
+  });
+
   it.each(TOOL_NAMES)('%s has a direct happy path with output-schema-conforming structured content', async (name) => {
     const { state, runtime } = await fixtureRuntime();
     const result = toolCall(runtime.handler, name, happyArguments(name, state, runtime));
     const value = structured(result);
     expect(record((result['content'] as readonly unknown[])[0])['text']).toBe(JSON.stringify(value));
     expect(forbiddenAgentKeys(value)).toEqual([]);
+  });
+
+  it('returns proof_token only from the direct state-summary tool result', async () => {
+    const { state, runtime } = await fixtureRuntime();
+    const capsule = runtime.feed.current();
+    const summary = structured(toolCall(
+      runtime.handler,
+      'engine.get_state_summary',
+      happyArguments('engine.get_state_summary', state, runtime),
+    ));
+    expect(summary['proof_token']).toBe(engineStateSummaryProofToken(capsule.digest, 'room_tactical'));
+    expect(summary['proof_token']).toMatch(/^[0-9a-f]{64}$/u);
+    expect(record(summary['state_ref'])['proof_token']).toBeUndefined();
   });
 
   it.each(TOOL_NAMES)('%s rejects a schema violation as a self-correctable tool error', async (name) => {
@@ -257,6 +408,7 @@ describe('engine MCP 2026-07-28 full surface conformance', () => {
       if (!Array.isArray(contents)) throw new TypeError('Expected resource contents.');
       expect(record(contents[0])['mimeType']).toBe('application/json');
       expect(() => JSON.parse(String(record(contents[0])['text'])) as unknown).not.toThrow();
+      expect(String(record(contents[0])['text'])).not.toContain('proof_token');
     }
     const templates = record(request(runtime.handler, 399, 'resources/templates/list').result)['resourceTemplates'];
     expect(Array.isArray(templates) ? templates.map((value) => record(value)['name']) : []).toEqual(['Journal chunk', 'Rule entry']);
@@ -270,6 +422,8 @@ describe('engine MCP 2026-07-28 full surface conformance', () => {
     expect(JSON.stringify(plan)).toContain('engine.get_turn_context');
     expect(JSON.stringify(plan)).toContain('engine.submit_round_intents');
     const capsule = runtime.feed.current();
+    expect(JSON.stringify(plan)).not.toContain('proof_token');
+    expect(JSON.stringify(plan)).not.toContain(engineStateSummaryProofToken(capsule.digest, 'turn_minimal'));
     runtime.feed.replace(createEngineStateCapsule({
       runId: capsule.runId, branchId: capsule.branchId, revision: 2, generatedAt: '2026-08-27T12:02:00.000Z',
       request: capsule.request === null ? null : { ...capsule.request, phase: 'correction', correctionNumber: 1 },

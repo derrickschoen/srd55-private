@@ -95,7 +95,7 @@ const stateSummaryBody = z.object({
   room: z.number().int().min(1).nullable(), round: z.number().int().min(0), active_side: z.enum(['players', 'monsters', 'none']),
   combatants: z.array(combatantSummary).max(100), terrain_tags: z.array(shortCode).max(100), history: z.array(recentChange).max(100),
 }).strict();
-const stateSummaryOutput = z.object({ state_ref: stateRef, granularity: z.enum(['turn_minimal', 'room_tactical', 'combatant_detail', 'journal_delta']), summary: stateSummaryBody, truncated: z.boolean(), next_cursor: z.string().max(500).nullable() }).strict();
+const stateSummaryOutput = z.object({ state_ref: stateRef, granularity: z.enum(['turn_minimal', 'room_tactical', 'combatant_detail', 'journal_delta']), proof_token: z.string().regex(/^[0-9a-f]{64}$/u), summary: stateSummaryBody, truncated: z.boolean(), next_cursor: z.string().max(500).nullable() }).strict();
 const optionsOutput = z.object({ state_ref: stateRef, actor_id: identifier, status: actorStatus, options: z.array(tacticalOption).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable() }).strict();
 
 const pathOutput = z.object({
@@ -147,6 +147,10 @@ const submitRoundInput = z.object({ ...refInput, request_id: identifier, phase: 
 export interface EngineToolSpec { readonly descriptor: McpToolDescriptor; readonly input: z.ZodType<unknown>; readonly output: z.ZodType<unknown> }
 function jsonSchema(schema: z.ZodType<unknown>): Readonly<Record<string, unknown>> {
   const generated = z.toJSONSchema(schema, { target: 'draft-2020-12', io: 'input', reused: 'ref' });
+  const generatedDefinitions = typeof generated['$defs'] === 'object' && generated['$defs'] !== null &&
+    !Array.isArray(generated['$defs'])
+    ? generated['$defs'] as Readonly<Record<string, unknown>>
+    : {};
   const variants = Array.isArray(generated['anyOf']) ? generated['anyOf'] : Array.isArray(generated['oneOf']) ? generated['oneOf'] : [];
   const unionProperties = Object.fromEntries(variants.flatMap((variant) => {
     if (typeof variant !== 'object' || variant === null || Array.isArray(variant)) return [];
@@ -162,6 +166,7 @@ function jsonSchema(schema: z.ZodType<unknown>): Readonly<Record<string, unknown
       ? { properties: unionProperties, additionalProperties: false }
       : {}),
     $defs: {
+      ...generatedDefinitions,
       stateRef: z.toJSONSchema(stateRef, { target: 'draft-2020-12', io: 'input' }),
       targetSelector: z.toJSONSchema(targetSelector, { target: 'draft-2020-12', io: 'input' }),
     },

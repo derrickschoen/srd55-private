@@ -1184,6 +1184,27 @@ Apps, or Skills-over-MCP. Roots, sampling, and protocol logging are deprecated
 in this protocol revision and would widen the boundary. Diagnostics go only to
 bounded stderr; stdout remains newline-delimited MCP JSON-RPC.
 
+#### Amendment (2026-08-27, live-interop evidence)
+
+The sentence “The server implements the `2026-07-28` modern lifecycle” is
+superseded only where it implied an exclusive lifecycle. The bullet “there is
+no `initialize`/`notifications/initialized` handshake” is superseded in full.
+Live Claude Code 2.1.246 proved that an initialize-free server is unreachable
+from current agent clients.
+
+The server therefore implements **dual handshake** on the same stdio transport:
+
+- classic clients negotiate `2025-03-26`, `2025-06-18`, or `2025-11-25`
+  through standard `initialize` followed by `notifications/initialized`;
+- negotiation returns the mutually supported requested revision and rejects
+  only revisions outside the supported set;
+- classic requests are validated according to the negotiated revision and do
+  not require the 2026 per-request `_meta` fields;
+- `2026-07-28`-native clients retain `server/discover`, required per-request
+  metadata, and modern result forms unchanged;
+- both paths expose the same proposer-only tool inventory and preserve the
+  read-only capsule, CC-BY-SA deny, stdio-only, and no-reducer invariants.
+
 ### 5.2 Resources
 
 The server exposes only the run selected at process launch:
@@ -1582,6 +1603,21 @@ Required protocol cases include:
 - proof that legacy `initialize` is rejected rather than falsely negotiated as
   `2025-03-26`.
 
+#### Amendment (2026-08-27, live-interop evidence)
+
+The final required case above—“proof that legacy `initialize` is rejected”—is
+superseded. Its replacement proof sends the literal Claude Code 2.1.246
+`initialize` envelope, verifies spec-correct revision negotiation and the
+`notifications/initialized` gate, then proves `tools/list` and `tools/call`
+against the same proposer-only inventory used by `server/discover` clients.
+
+Installed-CLI `VERIFIED` status additionally requires a real MCP proof case:
+the CLI must invoke `engine.get_state_summary` and return the fixture capsule
+digest. The harness independently recomputes that digest from the capsule
+module; spawn, session capture, and resume without this digest proof cannot
+produce `VERIFIED`. Mid-lifecycle failures retain every completed lifecycle
+field in the machine-readable report.
+
 ### 9.2 Domain contract and golden transcripts
 
 Golden transcripts are hand-authored fixtures with independently authored
@@ -1807,3 +1843,13 @@ The design is implemented when all of the following are demonstrated:
   matrix is fully `VERIFIED`.
 - No production MCP code opens a network socket, and no KB/prompt/resource path
   can read `content/cc-by-sa` or private source prose.
+
+### Amendment (2026-08-27, live-interop evidence)
+
+The acceptance bullet “MCP `2026-07-28` conformance” is superseded only in its
+single-lifecycle implication. Acceptance now requires conformance and stdio
+parity for both the classic initialize handshake (`2025-03-26` through
+`2025-11-25`) and the unchanged `2026-07-28` discover lifecycle. Each live CLI
+row must also pass the independently checked `engine.get_state_summary` digest
+proof; lifecycle-only success is not `VERIFIED`. All security and mutation
+boundaries above remain unchanged.

@@ -62,7 +62,6 @@ import {
 export {
   DM_BRIDGE_PROTOCOL_VERSION,
   E02_SHARED_INSTRUCTIONS,
-  MAX_ROUND_PLAN_CORRECTIONS,
   ROUND_PLAN_CANONICAL_EXAMPLE,
   JS_ROUND_PLAN_WORKED_EXAMPLES,
   ROUND_PLAN_JS_REPLY_CONTRACT,
@@ -215,7 +214,7 @@ export interface RoundPlanCorrectionRequest {
   readonly validatorError: string;
   readonly surface: RoundPlanSurface;
   readonly replyContract: RoundPlanReplyContract;
-  readonly correctionAttempt: 1 | 2;
+  readonly correctionAttempt: 1;
   readonly ambientApiDescriptions?: readonly TurnProgramAmbientApiDescription[];
 }
 

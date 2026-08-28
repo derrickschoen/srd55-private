@@ -65,6 +65,32 @@ import {
   type AgentFailureClassification,
   type AgentSessionBinding,
 } from './agent-session';
+import type { AdjudicationEnvelope } from './mcp/engine-server';
+import type { TurnExhaustionTransition } from './turn-exhaustion-coordinator';
+
+export type EngineHostTransition =
+  | TurnExhaustionTransition
+  | { readonly kind: 'engine_adjudication_requested'; readonly request: AdjudicationEnvelope }
+  | {
+      readonly kind: 'engine_adjudication_resolved';
+      readonly adjudicationRequestId: string;
+      readonly verdictSubject: string;
+    }
+  | {
+      readonly kind: 'dm_takeover_started';
+      readonly actorId: import('../combat/values').CombatantId;
+      readonly previousControllerKind: 'agent' | 'algorithm';
+    }
+  | {
+      readonly kind: 'dm_handback_requested';
+      readonly actorId: import('../combat/values').CombatantId;
+      readonly controllerKind: 'agent' | 'algorithm';
+    }
+  | {
+      readonly kind: 'dm_handback_completed';
+      readonly actorId: import('../combat/values').CombatantId;
+      readonly controllerKind: 'agent' | 'algorithm';
+    };
 
 export const VTT_SESSION_SCHEMA_VERSION = 8 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
@@ -86,6 +112,7 @@ export type SessionTransition =
       readonly failure: Extract<AgentFailureClassification, 'resume_not_found' | 'resume_corrupt'>;
     }
   | { readonly kind: 'session_ended' }
+  | EngineHostTransition
   | DurableCoordinatorTransition
   | {
       readonly kind: 'party_state_captured';
@@ -146,6 +173,17 @@ export const SESSION_TRANSITION_KINDS = [
   'agent_session_dispatched',
   'agent_session_recovered',
   'session_ended',
+  'intent_fallback_resolved',
+  'intent_correction_requested',
+  'intent_correction_resolved',
+  'intent_correction_failed',
+  'intent_auto_resolved',
+  'intent_auto_resolution_failed',
+  'engine_adjudication_requested',
+  'engine_adjudication_resolved',
+  'dm_takeover_started',
+  'dm_handback_requested',
+  'dm_handback_completed',
   'party_state_captured',
   'reaction_preference_changed',
   'refusal_handling_changed',
@@ -496,6 +534,33 @@ function validLongRestSummary(value: unknown): value is LongRestSummaryCard {
   });
 }
 
+function validAdjudicationEnvelope(value: unknown): value is AdjudicationEnvelope {
+  return isRecord(value) && hasExactlyKeys(value, [
+    'adjudicationRequestId', 'runId', 'branchId', 'requestId', 'expectedRevision',
+    'stateDigest', 'stateHandle', 'actorId', 'subject', 'reason', 'blocking',
+    'suggestedOutcomes', 'idempotencyKey',
+  ]) &&
+    typeof value.adjudicationRequestId === 'string' &&
+    typeof value.runId === 'string' && typeof value.branchId === 'string' &&
+    typeof value.requestId === 'string' && Number.isSafeInteger(value.expectedRevision) &&
+    typeof value.stateDigest === 'string' && typeof value.stateHandle === 'string' &&
+    typeof value.actorId === 'string' && typeof value.subject === 'string' &&
+    typeof value.reason === 'string' && typeof value.blocking === 'boolean' &&
+    Array.isArray(value.suggestedOutcomes) && value.suggestedOutcomes.every((entry) => typeof entry === 'string') &&
+    typeof value.idempotencyKey === 'string';
+}
+
+function validActorFailures(value: unknown): value is Extract<
+  TurnExhaustionTransition,
+  { readonly kind: 'intent_correction_requested' }
+>['actorFailures'] {
+  return Array.isArray(value) && value.length > 0 && value.every((entry) =>
+    isRecord(entry) && hasExactlyKeys(entry, ['actorId', 'fallbackResult']) &&
+    typeof entry.actorId === 'string' &&
+    (entry.fallbackResult === 'invalid' || entry.fallbackResult === 'invalidated' || entry.fallbackResult === 'absent')) &&
+    new Set(value.map((entry) => String(Reflect.get(entry, 'actorId')))).size === value.length;
+}
+
 function decodeTransition(value: unknown): SessionTransition {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     throw new TypeError('Malformed VTT session transition.');
@@ -538,6 +603,79 @@ function decodeTransition(value: unknown): SessionTransition {
       break;
     case 'session_ended':
       if (hasExactlyKeys(value, ['kind'])) return { kind: 'session_ended' };
+      break;
+    case 'intent_fallback_resolved':
+      if (hasExactlyKeys(value, ['kind', 'requestId', 'proposalId', 'actorId', 'resolutionDigest']) &&
+        typeof value.requestId === 'string' && typeof value.proposalId === 'string' &&
+        typeof value.actorId === 'string' && typeof value.resolutionDigest === 'string') {
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_fallback_resolved' }>;
+      }
+      break;
+    case 'intent_correction_requested':
+      if (hasExactlyKeys(value, ['kind', 'requestId', 'initialProposalId', 'correctionNumber', 'actorFailures']) &&
+        typeof value.requestId === 'string' && typeof value.initialProposalId === 'string' &&
+        value.correctionNumber === 1 && validActorFailures(value.actorFailures)) {
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_correction_requested' }>;
+      }
+      break;
+    case 'intent_correction_resolved':
+      if (hasExactlyKeys(value, ['kind', 'requestId', 'proposalId', 'actorIds']) &&
+        typeof value.requestId === 'string' && typeof value.proposalId === 'string' &&
+        Array.isArray(value.actorIds) && value.actorIds.length > 0 &&
+        value.actorIds.every((entry) => typeof entry === 'string') &&
+        new Set(value.actorIds).size === value.actorIds.length) {
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_correction_resolved' }>;
+      }
+      break;
+    case 'intent_correction_failed':
+      if (hasExactlyKeys(value, ['kind', 'requestId', 'result']) && typeof value.requestId === 'string' &&
+        (value.result === 'invalid' || value.result === 'invalidated' || value.result === 'no_response')) {
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_correction_failed' }>;
+      }
+      break;
+    case 'intent_auto_resolved':
+      if (hasExactlyKeys(value, [
+        'kind', 'runId', 'branchId', 'expectedRevision', 'requestId', 'actorId',
+        'initialProposalId', 'fallbackResult', 'correctionResult', 'controllerResolutionDigest',
+      ]) && typeof value.runId === 'string' && typeof value.branchId === 'string' &&
+        Number.isSafeInteger(value.expectedRevision) && typeof value.requestId === 'string' &&
+        typeof value.actorId === 'string' && typeof value.initialProposalId === 'string' &&
+        (value.fallbackResult === 'invalid' || value.fallbackResult === 'invalidated' || value.fallbackResult === 'absent') &&
+        (value.correctionResult === 'invalid' || value.correctionResult === 'invalidated' || value.correctionResult === 'no_response') &&
+        typeof value.controllerResolutionDigest === 'string') {
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_auto_resolved' }>;
+      }
+      break;
+    case 'intent_auto_resolution_failed':
+      if (hasExactlyKeys(value, ['kind', 'requestId', 'actorId', 'reason']) &&
+        typeof value.requestId === 'string' && typeof value.actorId === 'string' && typeof value.reason === 'string') {
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_auto_resolution_failed' }>;
+      }
+      break;
+    case 'engine_adjudication_requested':
+      if (hasExactlyKeys(value, ['kind', 'request']) && validAdjudicationEnvelope(value.request)) {
+        return { kind: 'engine_adjudication_requested', request: value.request };
+      }
+      break;
+    case 'engine_adjudication_resolved':
+      if (hasExactlyKeys(value, ['kind', 'adjudicationRequestId', 'verdictSubject']) &&
+        typeof value.adjudicationRequestId === 'string' && typeof value.verdictSubject === 'string') {
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'engine_adjudication_resolved' }>;
+      }
+      break;
+    case 'dm_takeover_started':
+      if (hasExactlyKeys(value, ['kind', 'actorId', 'previousControllerKind']) &&
+        typeof value.actorId === 'string' &&
+        (value.previousControllerKind === 'agent' || value.previousControllerKind === 'algorithm')) {
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'dm_takeover_started' }>;
+      }
+      break;
+    case 'dm_handback_requested':
+    case 'dm_handback_completed':
+      if (hasExactlyKeys(value, ['kind', 'actorId', 'controllerKind']) && typeof value.actorId === 'string' &&
+        (value.controllerKind === 'agent' || value.controllerKind === 'algorithm')) {
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'dm_handback_requested' | 'dm_handback_completed' }>;
+      }
       break;
     case 'party_state_captured':
     case 'room_composed':
@@ -1217,8 +1355,19 @@ export function replaySessionRevisions(
       case 'controller_response_refused':
       case 'coordinator_paused':
       case 'coordinator_resumed':
+      case 'intent_fallback_resolved':
+      case 'intent_correction_requested':
+      case 'intent_correction_resolved':
+      case 'intent_correction_failed':
+      case 'intent_auto_resolved':
+      case 'intent_auto_resolution_failed':
+      case 'engine_adjudication_requested':
+      case 'engine_adjudication_resolved':
+      case 'dm_takeover_started':
+      case 'dm_handback_requested':
+      case 'dm_handback_completed':
         if (parent === null || parent === undefined) {
-          throw new Error('A coordinator revision requires a parent.');
+          throw new Error('A host-state revision requires a parent.');
         }
         requireCanonicalEqual(
           revision.encounterState,
@@ -1499,6 +1648,30 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       controllers: input.controllers,
       agentSession: latest.agentSession,
     });
+  }
+
+  recordHostTransition(transition: EngineHostTransition): void {
+    const latest = this.#latest();
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition,
+      encounterState: latest.encounterState,
+      partyState: latest.partyState,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      agentSession: latest.agentSession,
+    });
+  }
+
+  turnExhaustionPersistence(): import('./turn-exhaustion-coordinator').TurnExhaustionPersistence {
+    return {
+      transitions: () => this.history().flatMap((entry) =>
+        !entry.void && entry.transition.kind.startsWith('intent_')
+          ? [entry.transition as TurnExhaustionTransition]
+          : []),
+      record: (transition) => this.recordHostTransition(transition),
+    };
   }
 
   moveHead(

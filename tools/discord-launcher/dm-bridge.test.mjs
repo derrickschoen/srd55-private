@@ -120,7 +120,6 @@ process.stdout.write(JSON.stringify({ type: 'item.completed', item: { type: 'age
         schemaVersion: 1,
         jsonSchema: { type: 'object', additionalProperties: false },
         canonicalExample: { kind: 'round_plan' },
-        maximumCorrectionAttempts: 2,
       },
     });
     assert.ok(reply && typeof reply === 'object' && 'args' in reply && Array.isArray(reply.args));
@@ -138,7 +137,6 @@ process.stdout.write(JSON.stringify({ type: 'item.completed', item: { type: 'age
         schemaVersion: 1,
         jsonSchema: { type: 'object', additionalProperties: false },
         canonicalExample: { kind: 'round_plan' },
-        maximumCorrectionAttempts: 2,
       },
     });
     assert.match(correctionPrompt, /previous reply failed strict validation/);
@@ -165,13 +163,13 @@ test('bridge fleet telemetry decodes first-class usage fields from Codex JSON ev
   });
   assert.equal(dmBridgeLibInternals.fleetTelemetry({
     model: { model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
-    correctionAttempt: 2,
+    correctionAttempt: 1,
   }, 42, {
     input: 120,
     cachedInput: 80,
     output: 30,
     reasoning: 12,
-  }).correctionAttempts, 2);
+  }).correctionAttempts, 1);
 });
 
 test('restricted-JS prompt retains three full-envelope examples and demonstrates batching', () => {
@@ -201,7 +199,6 @@ test('restricted-JS prompt retains three full-envelope examples and demonstrates
     replyContract: {
       surface: 'js_program',
       schemaVersion: 1,
-      maximumCorrectionAttempts: 2,
       grammar: 'program ::= statement*',
       workedExamples,
     },
