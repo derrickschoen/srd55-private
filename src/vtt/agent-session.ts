@@ -16,6 +16,8 @@ export interface AgentSessionBinding {
 export interface AgentInvocation {
   readonly runId: EncounterSessionId;
   readonly prompt: string;
+  /** Session-level instructions supplied only when creating a new agent session. */
+  readonly instructions?: string | null;
   readonly model: string;
   readonly reasoningEffort: string;
   readonly launcherToken: string;

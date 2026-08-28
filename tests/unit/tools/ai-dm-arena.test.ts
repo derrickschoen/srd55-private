@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { encounterSessionId } from '../../../src/combat/values';
@@ -21,6 +22,7 @@ import {
 import {
   mkdtempSync,
   readFileSync,
+  writeFileSync,
 } from '../../helpers/test-filesystem';
 
 class FakeCodexUsageAdapter implements AgentSessionAdapter {
@@ -65,12 +67,16 @@ describe('AI-DM arena', () => {
   it('renders and validates a multi-round dry run without spawning a model', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-dry-'));
     const outPath = join(directory, 'arena.jsonl');
+    const kbPath = join(directory, 'kb.txt');
+    const kbText = 'SIMULATED arena knowledge base\n';
+    writeFileSync(kbPath, kbText, 'utf8');
     const config = parseArenaArgs([
       '--rooms', '2',
       '--reps', '2',
       '--seed', '3943001',
       '--effort', 'low',
       '--out', outPath,
+      '--kb', kbPath,
       '--cli-bin', 'definitely-not-a-real-codex-binary',
       '--dry-run',
     ]);
@@ -82,6 +88,10 @@ describe('AI-DM arena', () => {
       row.outcome === 'authorized' && row.refusals.length === 0 &&
       row.projectionRevision > row.contextRevision)).toBe(true);
     expect(rows[1]?.contextRevision).toBe(rows[0]?.projectionRevision);
+    const kbHash = createHash('sha256').update(Buffer.from(kbText, 'utf8')).digest('hex');
+    expect(rows.every((row) => row.kbHash === kbHash)).toBe(true);
+    expect(readFileSync(outPath, 'utf8').trim().split('\n').every((line) =>
+      (JSON.parse(line) as { readonly kbHash?: unknown }).kbHash === kbHash)).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n')).toHaveLength(4);
   });
 
@@ -135,6 +145,14 @@ describe('AI-DM arena', () => {
     expect(result.status).not.toBe(0);
   });
 
+  it('rejects the CC-BY-SA content tree as a KB source before reading it', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-kb-wall-'));
+    expect(() => parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'), '--kb', 'content/cc-by-sa/forbidden.txt',
+    ])).toThrow('--kb cannot use content/cc-by-sa');
+  });
+
   it('sums live-shape Codex usage across initial and correction turns into the arena row', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-usage-'));
     const outPath = join(directory, 'arena.jsonl');
@@ -149,6 +167,7 @@ describe('AI-DM arena', () => {
     expect(rows).toEqual([
       expect.objectContaining({
         outcome: 'auto_resolved',
+        kbHash: null,
         tokens: { input: 304, cachedInput: 72, output: 46, reasoning: 18 },
       }),
     ]);
