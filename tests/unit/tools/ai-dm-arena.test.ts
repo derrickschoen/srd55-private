@@ -3,6 +3,14 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { encounterSessionId } from '../../../src/combat/values';
+import {
+  agentSessionIdFromCli,
+  type AgentInvocation,
+  type AgentSessionAdapter,
+  type AgentSessionBinding,
+  type AgentTurnResult,
+} from '../../../src/vtt/agent-session';
+import { decodeCodexTurn } from '../../../src/vtt/agent-adapters/codex';
 import type { RoundPlan } from '../../../src/vtt/dm-bridge/round-plan-contract';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
@@ -14,6 +22,44 @@ import {
   mkdtempSync,
   readFileSync,
 } from '../../helpers/test-filesystem';
+
+class FakeCodexUsageAdapter implements AgentSessionAdapter {
+  readonly kind = 'codex' as const;
+  resumeCalls = 0;
+
+  async probe() { return { present: true, version: 'SIMULATED' }; }
+
+  async start(_invocation: AgentInvocation): Promise<AgentTurnResult> {
+    return {
+      sessionId: agentSessionIdFromCli('codex-arena-usage'),
+      finalText: '',
+      usage: null,
+      exit: 'completed',
+    };
+  }
+
+  async resume(binding: AgentSessionBinding): Promise<AgentTurnResult> {
+    const usages = [
+      { input_tokens: 101, cached_input_tokens: 31, output_tokens: 17, reasoning_output_tokens: 7 },
+      { input_tokens: 203, cached_input_tokens: 41, output_tokens: 29, reasoning_output_tokens: 11 },
+    ] as const;
+    const usage = usages[this.resumeCalls];
+    if (usage === undefined) throw new Error('Unexpected fake Codex resume.');
+    this.resumeCalls += 1;
+    const decoded = decodeCodexTurn(
+      `${JSON.stringify({ type: 'turn.completed', usage })}\n`,
+      binding.sessionId,
+    );
+    return {
+      sessionId: agentSessionIdFromCli(decoded.sessionId),
+      finalText: decoded.finalText,
+      usage: decoded.usage,
+      exit: 'completed',
+    };
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+}
 
 describe('AI-DM arena', () => {
   it('renders and validates a multi-round dry run without spawning a model', { timeout: 30_000 }, async () => {
@@ -45,6 +91,7 @@ describe('AI-DM arena', () => {
     const environment = { ...process.env };
     delete environment.FORCE_COLOR;
     delete environment.NO_COLOR;
+    delete environment.VITEST;
     const result = spawnSync(
       process.execPath,
       [
@@ -64,6 +111,50 @@ describe('AI-DM arena', () => {
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
     expect(readFileSync(outPath, 'utf8').trim().split('\n')).toHaveLength(1);
+  });
+
+  it('runs through vite-node with a retained -- separator instead of exiting silently', { timeout: 30_000 }, () => {
+    const environment = { ...process.env };
+    delete environment.FORCE_COLOR;
+    delete environment.NO_COLOR;
+    delete environment.VITEST;
+    const result = spawnSync(
+      process.execPath,
+      [
+        'node_modules/vite-node/vite-node.mjs',
+        'tools/ai-dm-arena.ts',
+        '--',
+        '--rooms', '1',
+        '--reps', '1',
+        '--seed', '3943001',
+      ],
+      { cwd: process.cwd(), encoding: 'utf8', env: environment },
+    );
+
+    expect(`${result.stdout}${result.stderr}`).toContain('--out is required.');
+    expect(result.status).not.toBe(0);
+  });
+
+  it('sums live-shape Codex usage across initial and correction turns into the arena row', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-usage-'));
+    const outPath = join(directory, 'arena.jsonl');
+    const adapter = new FakeCodexUsageAdapter();
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--out', outPath,
+    ]);
+
+    const rows = await runArena(config, { adapter });
+
+    expect(adapter.resumeCalls).toBe(2);
+    expect(rows).toEqual([
+      expect.objectContaining({
+        outcome: 'auto_resolved',
+        tokens: { input: 304, cachedInput: 72, output: 46, reasoning: 18 },
+      }),
+    ]);
+    expect(JSON.parse(readFileSync(outPath, 'utf8').trim())).toEqual(
+      expect.objectContaining({ tokens: { input: 304, cachedInput: 72, output: 46, reasoning: 18 } }),
+    );
   });
 
   it('rejects occupied movement and more than one slot-spending action on a path', () => {

@@ -137,7 +137,7 @@ function decodeUsage(value: Readonly<Record<string, unknown>>): AgentUsage | nul
   const inputTokens = integer(value['input_tokens']);
   const cachedInputTokens = integer(value['cached_input_tokens']);
   const outputTokens = integer(value['output_tokens']);
-  const reasoningTokens = integer(value['reasoning_tokens']);
+  const reasoningTokens = integer(value['reasoning_output_tokens']);
   return inputTokens === null || cachedInputTokens === null || outputTokens === null || reasoningTokens === null
     ? null
     : { inputTokens, cachedInputTokens, outputTokens, reasoningTokens };

@@ -198,6 +198,17 @@ function tokenCounts(usage: AgentUsage | null): ConversationTokenCounts {
   };
 }
 
+function addAgentUsage(total: AgentUsage | null, usage: AgentUsage | null): AgentUsage | null {
+  if (usage === null) return total;
+  if (total === null) return usage;
+  return {
+    inputTokens: total.inputTokens + usage.inputTokens,
+    cachedInputTokens: total.cachedInputTokens + usage.cachedInputTokens,
+    outputTokens: total.outputTokens + usage.outputTokens,
+    reasoningTokens: total.reasoningTokens + usage.reasoningTokens,
+  };
+}
+
 function livingMonsterIds(state: EncounterState): readonly CombatantId[] {
   return state.combatants.flatMap((subject) =>
     subject.profile.kind === 'monster' && subject.life !== 'dead' ? [subject.profile.id] : [],
@@ -643,6 +654,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
         historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
       });
       let turn: AgentTurnResult | null = null;
+      let roundUsage: AgentUsage | null = null;
       let proposalId: string | null = null;
       let outcome: ConversationRow['outcome'] = 'refused';
       const refusals: string[] = [];
@@ -650,6 +662,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
         turn = await lifecycle.resumeRound(invocation(
           config, runId, renderEnginePrompt('plan_round', capsule, RULES_SOURCE), initialLauncher.manifestPath,
         ), new AbortController().signal);
+        roundUsage = addAgentUsage(roundUsage, turn.usage);
         const proposed = takeRoundProposal(initialLauncher.spoolPath);
         const initial: InitialIntentAttempt = proposed === null ? {
           kind: 'exhausted', requestId, initialProposalId: `exhausted:${requestId}`,
@@ -704,7 +717,14 @@ export async function runConversation(config: ConversationConfig, options: Conve
           initial,
           correction: {
             capsule: correctionCapsule, rules: RULES_SOURCE,
-            turnContext: { revision: contextRevision, room, round }, lifecycle,
+            turnContext: { revision: contextRevision, room, round },
+            lifecycle: {
+              resumeCorrection: async (correctionInvocation: AgentInvocation, signal: AbortSignal) => {
+                const correctionTurn = await lifecycle.resumeCorrection(correctionInvocation, signal);
+                roundUsage = addAgentUsage(roundUsage, correctionTurn.usage);
+                return correctionTurn;
+              },
+            },
             invocation: invocation(config, runId, 'replaced by correction renderer', correctionLauncher.manifestPath),
             signal: new AbortController().signal,
             activateCapsule: () => undefined,
@@ -725,7 +745,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
         sessionIdHash: sha256(binding.sessionId), outcome, proposalId,
         timeToFirstAction: wall,
         wallPerCreature: wall / Math.max(1, livingMonsterIds(state).length),
-        tokens: tokenCounts(turn?.usage ?? null), refusals,
+        tokens: tokenCounts(roundUsage), refusals,
         toolCalls: simulated?.callsByRequest.get(requestId) ?? observedToolCalls,
       };
       rows.push(row);

@@ -58,16 +58,17 @@ function pathIsInside(parent: string, candidate: string): boolean {
 }
 
 export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): ArenaConfig {
+  const argumentsValue = argv[0] === '--' ? argv.slice(1) : argv;
   const values = new Map<string, string>();
   let dryRun = false;
-  for (let index = 0; index < argv.length; index += 1) {
-    const option = argv[index];
+  for (let index = 0; index < argumentsValue.length; index += 1) {
+    const option = argumentsValue[index];
     if (option === '--dry-run') { dryRun = true; continue; }
     if (![
       '--rooms', '--reps', '--seed', '--cli', '--model', '--effort', '--out',
       '--cli-bin', '--timeout-ms',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
-    values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
+    values.set(option ?? '', requiredValue(argumentsValue, index, option ?? '<missing>'));
     index += 1;
   }
   const seed = Number(values.get('--seed'));
@@ -137,13 +138,10 @@ export async function runArena(
 }
 
 async function main(): Promise<void> {
-  await runArena(parseArenaArgs(process.argv.slice(2)));
+  const scriptIndex = process.argv.findIndex((argument) =>
+    argument.endsWith('/ai-dm-arena.ts') || argument.endsWith('\\ai-dm-arena.ts'));
+  const argumentsValue = scriptIndex < 0 ? process.argv.slice(2) : process.argv.slice(scriptIndex + 1);
+  await runArena(parseArenaArgs(argumentsValue));
 }
 
-const invokedPath = process.argv[1];
-if (invokedPath !== undefined && (
-  invokedPath.endsWith('/ai-dm-arena.ts') || invokedPath.endsWith('\\ai-dm-arena.ts') ||
-  ((invokedPath.endsWith('/vite-node') || invokedPath.endsWith('\\vite-node') ||
-    invokedPath.endsWith('/vite-node.mjs') || invokedPath.endsWith('\\vite-node.mjs')) &&
-    process.argv.includes('--seed'))
-)) await main();
+if (process.env['VITEST'] !== 'true') await main();
