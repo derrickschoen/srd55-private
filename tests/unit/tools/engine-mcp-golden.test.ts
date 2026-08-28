@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runEngineMcpDryClient } from '../../../tools/engine-mcp-dry-client';
 import type { DryTranscriptEntry } from '../../../tools/engine-mcp-dry-client';
-import { loadArenaFixture } from '../../../tools/engine-mcp-server';
+import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943006.json';
 

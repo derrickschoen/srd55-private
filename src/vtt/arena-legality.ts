@@ -10,27 +10,12 @@ import {
   engineAttackRangeFeet,
   type EngineTargetSelector,
 } from './engine-query-port';
-import {
-  resolvePrototypeIntent,
-  type PrototypeIntent,
-  type PrototypeIntentChoice,
-  type PrototypeIntentResult,
-} from './intent-resolver';
 import type {
   DecisionProgram,
   PlanAction,
   RoundPlan,
   TargetSelector,
 } from './dm-bridge/round-plan-contract';
-
-export interface ArenaPath {
-  readonly cells: readonly GridCell[];
-  readonly cost: number;
-}
-
-export type ArenaIntentChoice = PrototypeIntentChoice;
-export type ArenaIntent = PrototypeIntent;
-export type ArenaIntentResult = PrototypeIntentResult;
 
 export function arenaTokenPosition(state: EncounterState, id: CombatantId): GridCell | null {
   return canonicalEngineQueryPort.tokenPosition(state, id);
@@ -66,30 +51,18 @@ export function arenaAttackRange(action: MonsterAttackAction): number {
   return engineAttackRangeFeet(action);
 }
 
-/** Transitional prototype name backed by the canonical movement service. */
-export function arenaPathCost(
-  state: EncounterState,
-  actor: CombatantId,
-  destination: GridCell,
-  maximumCost = Number.POSITIVE_INFINITY,
-): ArenaPath | null {
-  const result = canonicalEngineQueryPort.path(state, {
-    actorId: actor,
-    destination,
-    movement: 'normal',
-    maximumFeet: Number.isFinite(maximumCost)
-      ? maximumCost
-      : state.bounds.columns * state.bounds.rows * 10,
-  });
-  return result.legal ? { cells: result.cells, cost: result.costFeet } : null;
-}
-
-export function arenaMovementCost(
+function arenaMovementCost(
   state: EncounterState,
   actor: CombatantId,
   destination: GridCell,
 ): number | null {
-  return arenaPathCost(state, actor, destination)?.cost ?? null;
+  const result = canonicalEngineQueryPort.path(state, {
+    actorId: actor,
+    destination,
+    movement: 'normal',
+    maximumFeet: state.bounds.columns * state.bounds.rows * 10,
+  });
+  return result.legal ? result.costFeet : null;
 }
 
 function actionRange(
@@ -97,42 +70,6 @@ function actionRange(
   selected: MonsterAction,
 ): number | null {
   return engineActionRangeFeet(actions, selected);
-}
-
-export type ArenaReachResult =
-  | {
-      readonly legal: true;
-      readonly distanceFeet: number;
-      readonly rangeFeet: number;
-    }
-  | { readonly legal: false; readonly refusals: readonly string[] };
-
-export function arenaReachCheck(
-  state: EncounterState,
-  actor: CombatantId,
-  target: CombatantId,
-  actionId: string,
-  originOverride?: GridCell,
-): ArenaReachResult {
-  const result = canonicalEngineQueryPort.reach(state, {
-    actorId: actor,
-    targetId: target,
-    actionId,
-    ...(originOverride === undefined ? {} : { origin: originOverride }),
-  });
-  if (result.legal) return result;
-  const refusals = result.codes.map((code): string => {
-    switch (code) {
-      case 'actor_not_placed_monster': return `${actor}: actor is not a placed monster`;
-      case 'target_absent': return `${actor}: target is absent`;
-      case 'target_same_side': return `${actor}: target is on the actor's side`;
-      case 'target_not_placed': return `${actor}: target has no token`;
-      case 'action_absent': return `${actor}: action ${actionId} is absent from the statblock`;
-      case 'action_range_unresolved': return `${actor}: action ${actionId} has no engine-resolvable target range`;
-      case 'target_out_of_range': return `${actor}: target is outside ${actionId} reach/range`;
-    }
-  });
-  return { legal: false, refusals };
 }
 
 function actionRefusals(
@@ -250,12 +187,4 @@ export function validateArenaPlan(
     }
   }
   return refusals;
-}
-
-export function declareArenaIntent(
-  state: EncounterState,
-  actor: CombatantId,
-  intent: ArenaIntent,
-): ArenaIntentResult {
-  return resolvePrototypeIntent(state, actor, intent);
 }

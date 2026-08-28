@@ -3,7 +3,7 @@ import { mcpRequestMeta } from '../../../src/vtt/mcp/handler';
 import type { McpHandler } from '../../../src/vtt/mcp/handler';
 import { EngineMcpStdioClient } from '../../../tools/engine-mcp-dry-client';
 import { collectEngineMcpRuntimeGraph, engineMcpImportBoundaryFailures, scanEngineMcpArtifacts } from '../../../tools/engine-mcp-proof';
-import { createEngineMcpRuntime, loadArenaFixture } from '../../../tools/engine-mcp-server';
+import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943006.json';
 const META = mcpRequestMeta({ name: 'SUBSTITUTED_LOCAL', version: '1.0.0' });

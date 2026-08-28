@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { EncounterState } from '../../../src/combat/encounter';
 import type { GridCell } from '../../../src/combat/grid';
 import { combatantId, type CombatantId } from '../../../src/combat/values';
-import { arenaPathCost, arenaReachCheck } from '../../../src/vtt/arena-legality';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
-import { pureIntentResolver, resolvePrototypeIntent } from '../../../src/vtt/intent-resolver';
+import { pureIntentResolver } from '../../../src/vtt/intent-resolver';
 import { generateRoom } from '../../../src/vtt/room-generator';
-import { intentTranscript } from '../../fixtures/mcp-migration/intent-transcript';
-import { movementTranscript } from '../../fixtures/mcp-migration/movement-transcript';
-import { reachTranscript } from '../../fixtures/mcp-migration/reach-transcript';
+
+const SEED = 3_943_001;
+const ACTOR_ID = combatantId('combatant:generated-3943001-monster-2');
+const TARGET_ID = combatantId('combatant:fighter');
 
 function placedState(
   seed: number,
@@ -27,7 +27,7 @@ function placedState(
       ...state.environment,
       difficultTerrainRegions: difficultCells.length === 0
         ? []
-        : [{ id: 'mcp-migration-difficult', cells: difficultCells }],
+        : [{ id: 'engine-query-difficult', cells: difficultCells }],
       movementRegions: [],
     },
     tokens: state.tokens.flatMap((token) => {
@@ -37,22 +37,26 @@ function placedState(
   };
 }
 
-describe('engine query migration characterization', () => {
-  it('preserves canonical path legality and hand-computed movement costs', () => {
-    const actorId = combatantId(movementTranscript.actorId);
-    const occupantId = combatantId(movementTranscript.occupantId);
-    for (const call of movementTranscript.calls) {
-      const positions = new Map<CombatantId, GridCell>([[actorId, call.actor]]);
+describe('canonical engine query port', () => {
+  it('returns independently hand-computed path legality and movement costs', () => {
+    const occupantId = TARGET_ID;
+    const calls = [
+      { case: 'normal_move', actor: { column: 0, row: 0 }, destination: { column: 2, row: 0 }, difficultCells: [], maximumFeet: 30, movement: 'normal' },
+      { case: 'difficult_terrain', actor: { column: 0, row: 0 }, destination: { column: 2, row: 0 }, difficultCells: [{ column: 1, row: 0 }, { column: 2, row: 0 }], maximumFeet: 30, movement: 'normal' },
+      { case: 'dash', actor: { column: 0, row: 0 }, destination: { column: 7, row: 0 }, difficultCells: [], maximumFeet: 60, movement: 'dash' },
+      { case: 'occupied_endpoint', actor: { column: 0, row: 0 }, occupant: { column: 2, row: 0 }, destination: { column: 2, row: 0 }, difficultCells: [], maximumFeet: 30, movement: 'normal' },
+    ] as const;
+    for (const call of calls) {
+      const positions = new Map<CombatantId, GridCell>([[ACTOR_ID, call.actor]]);
       if ('occupant' in call) positions.set(occupantId, call.occupant);
       const state = placedState(
-        movementTranscript.seed,
+        SEED,
         positions,
         call.difficultCells,
         call.case === 'difficult_terrain' ? 1 : undefined,
       );
-      const prototype = arenaPathCost(state, actorId, call.destination, call.maximumFeet);
       const canonical = canonicalEngineQueryPort.path(state, {
-        actorId,
+        actorId: ACTOR_ID,
         destination: call.destination,
         movement: call.movement,
         ...(call.movement === 'normal' ? { maximumFeet: call.maximumFeet } : {}),
@@ -60,66 +64,57 @@ describe('engine query migration characterization', () => {
 
       if (call.case === 'normal_move') {
         // Two ordinary five-foot entries: 2 * 5 = 10 feet.
-        expect(prototype?.cost).toBe(10);
         expect(canonical).toMatchObject({ legal: true, costFeet: 10, budgetFeet: 30 });
       } else if (call.case === 'difficult_terrain') {
         // A one-row board forces two difficult entries: 2 * (5 * 2) = 20 feet.
-        expect(prototype?.cost).toBe(20);
         expect(canonical).toMatchObject({ legal: true, costFeet: 20, budgetFeet: 30 });
       } else if (call.case === 'dash') {
         // Seven ordinary entries cost 35 feet; Dash supplies the second 30-foot budget.
-        expect(prototype?.cost).toBe(35);
         expect(canonical).toMatchObject({ legal: true, costFeet: 35, budgetFeet: 60 });
       } else {
         // A hostile living creature occupies the requested endpoint.
-        expect(prototype).toBeNull();
         expect(canonical).toEqual({ legal: false, code: 'destination_unreachable' });
       }
-      expect(canonical.legal ? canonical.costFeet : null).toBe(prototype?.cost ?? null);
     }
   });
 
-  it('preserves hand-computed melee reach and thrown normal range', () => {
-    const actorId = combatantId(reachTranscript.actorId);
-    const targetId = combatantId(reachTranscript.targetId);
-    for (const call of reachTranscript.calls) {
-      const state = placedState(reachTranscript.seed, new Map<CombatantId, GridCell>([
-        [actorId, call.actor],
-        [targetId, call.target],
+  it('returns independently hand-computed melee reach and thrown normal range', () => {
+    const calls = [
+      { case: 'melee_reach', actionId: 'grab', actor: { column: 0, row: 0 }, target: { column: 2, row: 0 } },
+      { case: 'thrown_range', actionId: 'light-hammer', actor: { column: 0, row: 0 }, target: { column: 4, row: 0 } },
+    ] as const;
+    for (const call of calls) {
+      const state = placedState(SEED, new Map<CombatantId, GridCell>([
+        [ACTOR_ID, call.actor],
+        [TARGET_ID, call.target],
       ]));
-      const prototype = arenaReachCheck(state, actorId, targetId, call.actionId);
       const canonical = canonicalEngineQueryPort.reach(state, {
-        actorId,
-        targetId,
+        actorId: ACTOR_ID,
+        targetId: TARGET_ID,
         actionId: call.actionId,
       });
       if (call.case === 'melee_reach') {
         // Two grid intervals are 10 feet, exactly the Bugbear Warrior's Grab reach.
-        expect(prototype).toEqual({ legal: true, distanceFeet: 10, rangeFeet: 10 });
         expect(canonical).toEqual({ legal: true, distanceFeet: 10, rangeFeet: 10 });
       } else {
         // Four grid intervals are 20 feet, exactly Light Hammer's normal thrown range.
-        expect(prototype).toEqual({ legal: true, distanceFeet: 20, rangeFeet: 20 });
         expect(canonical).toEqual({ legal: true, distanceFeet: 20, rangeFeet: 20 });
       }
     }
   });
 
-  it('consumes the frozen intent input while deriving fallback behavior independently', () => {
-    const actorId = combatantId(intentTranscript.actorId);
-    const targetId = combatantId(intentTranscript.targetId);
-    const state = placedState(intentTranscript.seed, new Map<CombatantId, GridCell>([
-      [actorId, intentTranscript.actor],
-      [targetId, intentTranscript.target],
+  it('derives fallback behavior independently from fixed geometry', () => {
+    const state = placedState(SEED, new Map<CombatantId, GridCell>([
+      [ACTOR_ID, { column: 0, row: 0 }],
+      [TARGET_ID, { column: 4, row: 0 }],
     ]));
 
-    const prototype = resolvePrototypeIntent(state, actorId, intentTranscript.intent);
     const resolved = pureIntentResolver.resolve(state, {
-      actorId,
+      actorId: ACTOR_ID,
       choice: {
         kind: 'attack',
         actionId: 'grab',
-        target: { kind: 'combatant', combatantId: targetId },
+        target: { kind: 'combatant', combatantId: TARGET_ID },
       },
       movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'accept_if_needed' },
       engagement: { stance: 'close_to_melee' },
@@ -127,7 +122,7 @@ describe('engine query migration characterization', () => {
         choice: {
           kind: 'attack',
           actionId: 'light-hammer',
-          target: { kind: 'combatant', combatantId: targetId },
+          target: { kind: 'combatant', combatantId: TARGET_ID },
         },
         movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'accept_if_needed' },
         engagement: { stance: 'maintain_range' },
@@ -135,11 +130,10 @@ describe('engine query migration characterization', () => {
     });
 
     // Grab reaches 10 feet, not the hand-computed 20; Light Hammer reaches 20 with zero movement.
-    expect(prototype).toEqual({ legal: true, resolvedPath: [], finalPosition: { column: 0, row: 0 } });
     expect(resolved).toMatchObject({
       valid: true,
       selectedBranch: 'fallback',
-      mechanics: { movementCostFeet: 0, actionId: 'light-hammer', targetId },
+      mechanics: { movementCostFeet: 0, actionId: 'light-hammer', targetId: TARGET_ID },
     });
   });
 });

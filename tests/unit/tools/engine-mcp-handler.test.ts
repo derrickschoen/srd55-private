@@ -14,7 +14,7 @@ import {
 } from '../../../src/vtt/mcp/handler';
 import { createEngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
 import { engineStateSummaryProofToken } from '../../../src/vtt/mcp/engine-server';
-import { createEngineMcpRuntime, loadArenaFixture, type EngineMcpRuntime } from '../../../tools/engine-mcp-server';
+import { createEngineMcpRuntime, loadArenaFixture, type EngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
 const TOOL_NAMES = [

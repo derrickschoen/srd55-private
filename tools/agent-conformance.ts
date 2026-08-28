@@ -13,7 +13,7 @@ import { PI_MCP_SKIPPED_NO_EXTENSION, UNVERIFIED_CONTRACT_PI } from '../src/vtt/
 import { AgentAdapterError, AGENT_ADAPTER_VERSION } from '../src/vtt/agent-adapters/process';
 import { agentSessionIdFromCli, isAgentCliKind } from '../src/vtt/agent-session';
 import type { AgentCliKind, AgentFailureClassification, AgentInvocation, AgentSessionAdapter, AgentSessionBinding } from '../src/vtt/agent-session';
-import { loadArenaFixture } from './engine-mcp-server';
+import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 
 export const AGENT_CLI_KINDS = ['codex', 'opencode', 'pi', 'claude-code'] as const;
 export type ConformanceStatus = 'VERIFIED' | 'FAILED' | 'UNVERIFIED';

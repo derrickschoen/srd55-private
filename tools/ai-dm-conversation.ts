@@ -4,19 +4,24 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
 import { canonicalJson } from '../src/commands/canonical-json';
 import type { EncounterState } from '../src/combat/encounter';
-import type { MonsterAction } from '../src/combat/statblock';
+import type { MonsterAttackAction } from '../src/combat/statblock';
 import { combatantId, encounterSessionId, type CombatantId } from '../src/combat/values';
 import {
   arenaMonsterActions,
-  declareArenaIntent,
   resolveArenaTarget,
-  type ArenaIntent,
 } from '../src/vtt/arena-legality';
+import {
+  pureIntentResolver,
+  type EngineActionChoice,
+  type EngineEngagement,
+  type EngineIntentBranch,
+  type EngineMovementPreference,
+} from '../src/vtt/intent-resolver';
 import { mcpRequestMeta } from '../src/vtt/mcp/handler';
 import { agentSessionIdFromCli, type AgentInvocation, type AgentSessionBinding } from '../src/vtt/agent-session';
 import { AGENT_ADAPTER_VERSION, resolveAgentAdapter } from '../src/vtt/agent-adapters';
 import { codexArgv } from '../src/vtt/agent-adapters/codex';
-import { loadArenaFixture } from './engine-mcp-server';
+import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 
 export const CONVERSATION_ARMS = ['M', 'C'] as const;
 export type ConversationArm = (typeof CONVERSATION_ARMS)[number];
@@ -55,7 +60,7 @@ export interface ConversationRow {
 
 interface DeclaredIntent {
   readonly id: CombatantId;
-  readonly intent: ArenaIntent;
+  readonly intent: EngineIntentBranch & { readonly fallback: EngineIntentBranch | null };
 }
 
 interface CodexTurnResult {
@@ -135,11 +140,18 @@ const INTENT_CONTRACT = {
   intents: [{
     id: 'combatant id',
     intent: {
-      action: 'statblock action id',
-      targetId: 'hostile combatant id',
-      maxMovementFeet: 'non-negative 5-foot increment no greater than speed',
-      acceptMelee: 'boolean engagement stance',
-      fallback: 'null or another {action,targetId,maxMovementFeet,acceptMelee}',
+      choice: {
+        kind: 'attack',
+        actionId: 'statblock attack action id',
+        target: { kind: 'combatant', combatantId: 'hostile combatant id' },
+      },
+      movement: {
+        willingness: 'none | only_if_required | for_clear_advantage | freely',
+        maximumFeet: 'optional non-negative 5-foot increment no greater than speed',
+        opportunityRisk: 'avoid | accept_if_needed | accept',
+      },
+      engagement: { stance: 'hold_position | close_to_melee | maintain_range | withdraw' },
+      fallback: 'null or another {choice,movement,engagement}',
     },
   }],
 } as const;
@@ -304,7 +316,7 @@ function decodeDeclaredIntents(value: unknown, expected: readonly CombatantId[])
     if (candidate === null || typeof candidate['id'] !== 'string') {
       throw new TypeError('Each intent entry requires a combatant id.');
     }
-    return { id: combatantId(candidate['id']), intent: decodeArenaIntent(candidate['intent']) };
+    return { id: combatantId(candidate['id']), intent: decodeConversationIntent(candidate['intent']) };
   });
   const actual = intents.map((entry) => entry.id);
   if (new Set(actual).size !== actual.length) throw new TypeError('Intent entries contain duplicate actors.');
@@ -313,47 +325,91 @@ function decodeDeclaredIntents(value: unknown, expected: readonly CombatantId[])
   return intents;
 }
 
-function decodeArenaIntent(value: unknown): ArenaIntent {
+function decodeChoice(value: unknown): EngineActionChoice {
   const input = asRecord(value);
-  if (input === null) throw new TypeError('intent must be an object.');
-  const action = input['action'];
-  const targetId = input['targetId'];
-  const maxMovementFeet = input['maxMovementFeet'];
-  const acceptMelee = input['acceptMelee'];
-  if (typeof action !== 'string' || typeof targetId !== 'string' ||
-    !Number.isSafeInteger(maxMovementFeet) || typeof acceptMelee !== 'boolean') {
-    throw new TypeError('intent action, targetId, maxMovementFeet, or acceptMelee is invalid.');
+  const target = asRecord(input?.['target']);
+  if (input?.['kind'] !== 'attack' || typeof input['actionId'] !== 'string' ||
+    target?.['kind'] !== 'combatant' || typeof target['combatantId'] !== 'string') {
+    throw new TypeError('Conversation choice must be an attack with a combatant target.');
   }
-  const fallback = input['fallback'];
   return {
-    action,
-    targetId: combatantId(targetId),
-    maxMovementFeet: maxMovementFeet as number,
-    acceptMelee,
-    fallback: fallback === null ? null : decodeArenaIntent({ ...asRecord(fallback), fallback: null }),
+    kind: 'attack',
+    actionId: input['actionId'],
+    target: { kind: 'combatant', combatantId: combatantId(target['combatantId']) },
   };
 }
 
-function resolvableAction(actions: readonly MonsterAction[]): MonsterAction | null {
-  return actions.find((action) => action.kind === 'attack') ??
-    actions.find((action) => action.kind === 'saving_throw') ??
-    actions.find((action) => action.kind === 'multiattack') ??
-    null;
+function decodeMovement(value: unknown): EngineMovementPreference {
+  const input = asRecord(value);
+  const willingness = input?.['willingness'];
+  const maximumFeet = input?.['maximumFeet'];
+  const opportunityRisk = input?.['opportunityRisk'];
+  if (!['none', 'only_if_required', 'for_clear_advantage', 'freely'].includes(String(willingness)) ||
+    !['avoid', 'accept_if_needed', 'accept'].includes(String(opportunityRisk)) ||
+    (maximumFeet !== undefined && !Number.isSafeInteger(maximumFeet))) {
+    throw new TypeError('Conversation movement preference is invalid.');
+  }
+  return {
+    willingness: willingness as EngineMovementPreference['willingness'],
+    ...(maximumFeet === undefined ? {} : { maximumFeet: maximumFeet as number }),
+    opportunityRisk: opportunityRisk as EngineMovementPreference['opportunityRisk'],
+  };
+}
+
+function decodeEngagement(value: unknown): EngineEngagement {
+  const input = asRecord(value);
+  const stance = input?.['stance'];
+  if (!['hold_position', 'close_to_melee', 'maintain_range', 'withdraw'].includes(String(stance))) {
+    throw new TypeError('Conversation engagement stance is invalid.');
+  }
+  return { stance: stance as EngineEngagement['stance'] };
+}
+
+function decodeBranch(value: unknown): EngineIntentBranch {
+  const input = asRecord(value);
+  if (input === null) throw new TypeError('intent branch must be an object.');
+  return {
+    choice: decodeChoice(input['choice']),
+    movement: decodeMovement(input['movement']),
+    engagement: decodeEngagement(input['engagement']),
+  };
+}
+
+function decodeConversationIntent(value: unknown): EngineIntentBranch & { readonly fallback: EngineIntentBranch | null } {
+  const input = asRecord(value);
+  if (input === null) throw new TypeError('intent must be an object.');
+  const fallback = input['fallback'];
+  if (fallback !== null && fallback !== undefined && asRecord(fallback) === null) {
+    throw new TypeError('intent fallback must be an object or null.');
+  }
+  return { ...decodeBranch(input), fallback: fallback === null || fallback === undefined ? null : decodeBranch(fallback) };
+}
+
+function resolvableAction(actions: readonly MonsterAttackAction[]): MonsterAttackAction | null {
+  return actions[0] ?? null;
 }
 
 function scriptedIntents(state: EncounterState): readonly DeclaredIntent[] {
   return livingMonsterIds(state).flatMap((id) => {
     const target = resolveArenaTarget(state, id, { kind: 'nearest_enemy' });
     const acting = state.combatants.find((subject) => subject.profile.id === id);
-    const action = resolvableAction(arenaMonsterActions(state, id));
+    const action = resolvableAction(arenaMonsterActions(state, id)
+      .filter((candidate): candidate is MonsterAttackAction => candidate.kind === 'attack'));
     if (target === null || acting === undefined || action === null) return [];
     return [{
       id,
       intent: {
-        action: action.id,
-        targetId: target,
-        maxMovementFeet: acting.profile.rules.speed,
-        acceptMelee: true,
+        choice: {
+          kind: 'attack',
+          actionId: action.id,
+          target: { kind: 'combatant', combatantId: target },
+        },
+        movement: {
+          willingness: 'only_if_required',
+          maximumFeet: acting.profile.rules.speed,
+          opportunityRisk: 'accept_if_needed',
+        },
+        engagement: { stance: 'close_to_melee' },
         fallback: null,
       },
     }];
@@ -366,8 +422,11 @@ function validateIntents(
 ): readonly string[] {
   const refusals: string[] = [];
   for (const declaration of intents) {
-    const result = declareArenaIntent(state, declaration.id, declaration.intent);
-    if (!result.legal) refusals.push(...result.refusals);
+    const result = pureIntentResolver.resolve(state, {
+      actorId: declaration.id,
+      ...declaration.intent,
+    });
+    if (!result.valid) refusals.push(...result.refusals.map((refusal) => refusal.summary));
   }
   for (const id of livingMonsterIds(state)) {
     if (!intents.some((declaration) => declaration.id === id)) refusals.push(`${id}: intent is missing.`);
@@ -465,20 +524,28 @@ async function scriptedMcpRound(
     toolCalls += 1;
     const declaration = intents[0];
     if (declaration === undefined) throw new Error('The dry-run fixture has no scripted intent.');
+    const externalBranch = (branch: EngineIntentBranch): Readonly<Record<string, unknown>> => {
+      if (branch.choice.kind !== 'attack' || branch.choice.target.kind !== 'combatant') {
+        throw new TypeError('Conversation harness supports attack choices with direct combatant targets.');
+      }
+      return {
+        choice: {
+          kind: 'attack',
+          action_id: branch.choice.actionId,
+          target: { kind: 'combatant', combatant_id: branch.choice.target.combatantId },
+        },
+        movement: {
+          willingness: branch.movement.willingness,
+          ...(branch.movement.maximumFeet === undefined ? {} : { maximum_feet: branch.movement.maximumFeet }),
+          opportunity_risk: branch.movement.opportunityRisk,
+        },
+        engagement: { stance: branch.engagement.stance },
+      };
+    };
     const intent = {
       actor_id: declaration.id,
-      choice: {
-        kind: 'attack',
-        action_id: declaration.intent.action,
-        target: { kind: 'combatant', combatant_id: declaration.intent.targetId },
-      },
-      movement: {
-        willingness: declaration.intent.maxMovementFeet === 0 ? 'none' : 'only_if_required',
-        maximum_feet: declaration.intent.maxMovementFeet,
-        opportunity_risk: 'accept_if_needed',
-      },
-      engagement: { stance: declaration.intent.acceptMelee ? 'close_to_melee' : 'maintain_range' },
-      fallback: null,
+      ...externalBranch(declaration.intent),
+      fallback: declaration.intent.fallback === null ? null : externalBranch(declaration.intent.fallback),
     };
     const submitResult = asRecord(await mcpRequest(client, 'tools/call', {
       name: 'engine.submit_intent',
