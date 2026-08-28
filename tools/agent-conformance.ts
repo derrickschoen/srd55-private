@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
 import { encounterBranchId, encounterSessionId } from '../src/combat/values';
+import { sha256 } from '../src/crypto/sha256';
 import { createEngineStateCapsule, engineStateHandle, projectEngineEncounterState } from '../src/vtt/engine-state-capsule';
 import type { EngineStateReference } from '../src/vtt/engine-state-capsule';
 import { engineActionRegistry } from '../src/vtt/engine-query-port';
@@ -21,6 +22,7 @@ type LifecycleEvidence = Readonly<{
   sessionIdCaptured: boolean;
   resume: boolean;
   mcpProof: boolean;
+  attempts_used: number;
   classifiedResumeFailure: boolean;
 }>;
 type ContractEvidence = Readonly<{
@@ -58,7 +60,7 @@ export interface AgentConformanceDependencies {
   readonly now: () => string;
   readonly stdout: (line: string) => void;
   readonly stderr: (line: string) => void;
-  readonly expectedMcpProof: () => Promise<Readonly<{ digest: string; stateRef: EngineStateReference }>>;
+  readonly expectedMcpProof: () => Promise<Readonly<{ proofToken: string; stateRef: EngineStateReference }>>;
   readonly writeReport: (path: string, report: AgentConformanceReport) => Promise<void>;
 }
 
@@ -80,6 +82,7 @@ const emptyLifecycle = (): LifecycleEvidence => ({
   sessionIdCaptured: false,
   resume: false,
   mcpProof: false,
+  attempts_used: 0,
   classifiedResumeFailure: false,
 });
 const statusForFailure = (classification: AgentFailureClassification): ConformanceStatus =>
@@ -123,14 +126,14 @@ function mcpProofPrompt(kind: AgentCliKind, stateRef: EngineStateReference): str
       'Call the proxied tool engine_engine_get_state_summary; do not answer from prompt text.',
       'If that tool is unavailable, first call mcp({search:"engine"}) and then call the matching engine state-summary tool.',
       `Use turn-minimal granularity with this exact state_ref: ${reference}.`,
-      'Reply with only the exact digest returned by the state summary.',
+      'Reply with exactly the proof_token field from the tool result, a 64-character hexadecimal string.',
     ].join(' ');
   }
   return [
     'Use the engine MCP server now; do not answer from prompt text.',
     'Obtain the current round turn context for run encounter:engine-mcp at revision 1.',
     `Then use the engine state summary tool at turn-minimal granularity with this exact state_ref: ${reference}.`,
-    'Reply with only the exact digest returned by the state summary.',
+    'Reply with exactly the proof_token field from the tool result, a 64-character hexadecimal string.',
   ].join(' ');
 }
 
@@ -170,7 +173,7 @@ function probeFailure(
 async function verifyCli(
   kind: AgentCliKind,
   adapter: AgentSessionAdapter,
-  expectedMcpProof: () => Promise<Readonly<{ digest: string; stateRef: EngineStateReference }>>,
+  expectedMcpProof: () => Promise<Readonly<{ proofToken: string; stateRef: EngineStateReference }>>,
 ): Promise<AgentConformanceRecord> {
   let version: string | null = null;
   try {
@@ -181,7 +184,7 @@ async function verifyCli(
     return probeFailure(kind, version, adapter.classifyFailure(error), error);
   }
 
-  const lifecycle = { coldStart: false, sessionIdCaptured: false, resume: false, mcpProof: false, classifiedResumeFailure: false };
+  const lifecycle = { coldStart: false, sessionIdCaptured: false, resume: false, mcpProof: false, attempts_used: 0, classifiedResumeFailure: false };
   const turnMarkers: string[] = [];
   try {
     const signal = new AbortController().signal;
@@ -205,14 +208,22 @@ async function verifyCli(
     turnMarkers.push(...(resumed.contractEvidence ?? []));
     lifecycle.resume = resumed.exit === 'completed' && resumed.sessionId === started.sessionId;
     const proof = await expectedMcpProof();
-    const mcpProof = await adapter.resume(
-      binding(kind, started.sessionId),
-      invocation(kind, mcpProofPrompt(kind, proof.stateRef)),
-      signal,
-    );
-    turnMarkers.push(...(mcpProof.contractEvidence ?? []));
-    lifecycle.mcpProof = mcpProof.exit === 'completed' && mcpProof.sessionId === started.sessionId &&
-      mcpProof.finalText.includes(proof.digest);
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      lifecycle.attempts_used = attempt;
+      try {
+        const mcpProof = await adapter.resume(
+          binding(kind, started.sessionId),
+          invocation(kind, mcpProofPrompt(kind, proof.stateRef)),
+          signal,
+        );
+        turnMarkers.push(...(mcpProof.contractEvidence ?? []));
+        lifecycle.mcpProof = mcpProof.exit === 'completed' && mcpProof.sessionId === started.sessionId &&
+          mcpProof.finalText.includes(proof.proofToken);
+        if (lifecycle.mcpProof) break;
+      } catch (error) {
+        if (attempt === 3) throw error;
+      }
+    }
     try {
       await adapter.resume(binding(kind, missingSessionId(kind)), invocation(kind, 'A deliberately missing session must fail.'), signal);
       return {
@@ -242,7 +253,8 @@ async function verifyCli(
       }
       lifecycle.classifiedResumeFailure = true;
     }
-    const verified = Object.values(lifecycle).every(Boolean);
+    const verified = lifecycle.coldStart && lifecycle.sessionIdCaptured && lifecycle.resume && lifecycle.mcpProof &&
+      lifecycle.classifiedResumeFailure;
     const openCodeUpstreamFailure = kind === 'opencode' && lifecycle.coldStart && lifecycle.sessionIdCaptured &&
       lifecycle.resume && !lifecycle.mcpProof && lifecycle.classifiedResumeFailure;
     const verifiedStatus: ConformanceStatus = verified ? 'VERIFIED' : 'FAILED';
@@ -319,7 +331,7 @@ function defaultDependencies(): AgentConformanceDependencies {
 
 async function recomputeFixtureCapsuleProof(
   fixturePath: string,
-): Promise<Readonly<{ digest: string; stateRef: EngineStateReference }>> {
+): Promise<Readonly<{ proofToken: string; stateRef: EngineStateReference }>> {
   const state = await loadArenaFixture(fixturePath);
   const actors = state.combatants
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
@@ -340,7 +352,7 @@ async function recomputeFixtureCapsuleProof(
     projection: projectEngineEncounterState(state, engineActionRegistry(state), 1),
   });
   return {
-    digest: capsule.digest,
+    proofToken: sha256(`${capsule.digest}|turn_minimal|state_summary_proof_v1`),
     stateRef: {
       runId: capsule.runId,
       stateHandle: engineStateHandle(capsule),

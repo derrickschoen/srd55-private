@@ -8,11 +8,12 @@ import { parseAgentConformanceArguments, runAgentConformance } from '../../../to
 import type { AgentConformanceDependencies } from '../../../tools/agent-conformance';
 
 type Mode = 'verified' | 'absent' | 'authentication' | 'failed' | 'timeout' | 'skipped_mcp' |
-  'resume_failure' | 'bad_mcp_proof';
+  'resume_failure' | 'bad_mcp_proof' | 'retry_mcp_proof';
 
 const SIMULATED_DIGEST = '0123456789abcdef'.repeat(4);
+const SIMULATED_PROOF_TOKEN = '51b0af273f28f31751890e5dfd277624e7b1b2594f4c9f50a6ab938886e9b0bb';
 const SIMULATED_PROOF = {
-  digest: SIMULATED_DIGEST,
+  proofToken: SIMULATED_PROOF_TOKEN,
   stateRef: {
     runId: encounterSessionId('encounter:engine-mcp'),
     stateHandle: `engine-state:${SIMULATED_DIGEST}`,
@@ -22,6 +23,7 @@ const SIMULATED_PROOF = {
 
 class SIMULATEDCli implements AgentSessionAdapter {
   #resumes = 0;
+  #proofAttempts = 0;
   constructor(
     readonly kind: AgentCliKind,
     private readonly mode: Mode,
@@ -57,13 +59,16 @@ class SIMULATEDCli implements AgentSessionAdapter {
     if (this.mode === 'resume_failure' && this.#resumes === 1) {
       return Promise.reject(new AgentAdapterError('malformed_output', 'SIMULATED resume failure'));
     }
-    if (this.#resumes === 3) return Promise.reject(new AgentAdapterError('resume_not_found', 'SIMULATED missing'));
-    const proof = _invocation.prompt.includes('state summary');
+    if (_invocation.prompt.includes('deliberately missing session')) {
+      return Promise.reject(new AgentAdapterError('resume_not_found', 'SIMULATED missing'));
+    }
+    const proof = _invocation.prompt.includes('proof_token');
+    if (proof) this.#proofAttempts += 1;
+    const proofSucceeded = this.mode !== 'bad_mcp_proof' &&
+      (this.mode !== 'retry_mcp_proof' || this.#proofAttempts >= 3);
     return Promise.resolve({
       sessionId: binding.sessionId,
-      finalText: proof && this.mode !== 'bad_mcp_proof'
-        ? SIMULATED_DIGEST
-        : proof ? 'Called engine.get_state_summary successfully.' : 'RESUME',
+      finalText: proof && proofSucceeded ? SIMULATED_PROOF_TOKEN : proof ? SIMULATED_DIGEST : 'RESUME',
       usage: null,
       exit: 'completed',
     });
@@ -105,6 +110,7 @@ describe('SIMULATED four-CLI conformance harness — not live CLI verification',
       sessionIdCaptured: true,
       resume: true,
       mcpProof: true,
+      attempts_used: 1,
       classifiedResumeFailure: true,
     });
     expect(report.records[0]?.contractEvidence.marker).toContain('UNVERIFIED_CONTRACT');
@@ -152,19 +158,19 @@ describe('SIMULATED four-CLI conformance harness — not live CLI verification',
     });
   });
 
-  it('does not report VERIFIED when the MCP proof reply omits the independently derived digest', async () => {
+  it('does not report VERIFIED when MCP proof only echoes the prompt-supplied capsule digest', async () => {
     const fake = dependenciesFor({ ...MODES, opencode: 'bad_mcp_proof' });
     const report = await runAgentConformance({ cli: 'opencode', reportPath: null }, fake.dependencies);
     expect(report.records[0]).toMatchObject({
       status: 'FAILED',
       reason: 'upstream_mcp_tools_not_exposed_issue_33027',
-      lifecycle: { coldStart: true, sessionIdCaptured: true, resume: true, mcpProof: false, classifiedResumeFailure: true },
+      lifecycle: { coldStart: true, sessionIdCaptured: true, resume: true, mcpProof: false, attempts_used: 3, classifiedResumeFailure: true },
       errorExcerpt: expect.stringContaining('anomalyco/opencode#33027'),
     });
     expect(fake.invocations[2]?.prompt).not.toContain('engine.get_state_summary');
   });
 
-  it('judges MCP proof by the independently derived digest alone and gives Pi proxy-specific instructions', async () => {
+  it('judges MCP proof by the independently derived response token and never puts that token in the prompt', async () => {
     const openCode = dependenciesFor(MODES);
     const openCodeReport = await runAgentConformance({ cli: 'opencode', reportPath: null }, openCode.dependencies);
     expect(openCodeReport.records[0]?.lifecycle.mcpProof).toBe(true);
@@ -173,12 +179,28 @@ describe('SIMULATED four-CLI conformance harness — not live CLI verification',
     expect(openCode.invocations[2]?.prompt).toContain('"run_id":"encounter:engine-mcp"');
     expect(openCode.invocations[2]?.prompt).toContain(`"state_handle":"engine-state:${SIMULATED_DIGEST}"`);
     expect(openCode.invocations[2]?.prompt).toContain('"expected_revision":1');
+    expect(openCode.invocations[2]?.prompt).toContain('proof_token');
+    expect(openCode.invocations[2]?.prompt).not.toContain(SIMULATED_PROOF_TOKEN);
 
     const pi = dependenciesFor(MODES);
     const piReport = await runAgentConformance({ cli: 'pi', reportPath: null }, pi.dependencies);
     expect(piReport.records[0]?.lifecycle.mcpProof).toBe(true);
     expect(pi.invocations[2]?.prompt).toContain('engine_engine_get_state_summary');
     expect(pi.invocations[2]?.prompt).toContain('mcp({search:"engine"})');
+    expect(pi.invocations[2]?.prompt).not.toContain(SIMULATED_PROOF_TOKEN);
+  });
+
+  it('uses up to three same-session MCP proof attempts and records attempts_used', async () => {
+    const fake = dependenciesFor({ ...MODES, pi: 'retry_mcp_proof' });
+    const report = await runAgentConformance({ cli: 'pi', reportPath: null }, fake.dependencies);
+    expect(report.records[0]).toMatchObject({
+      status: 'VERIFIED',
+      lifecycle: { mcpProof: true, attempts_used: 3 },
+    });
+    const proofInvocations = fake.invocations.filter((value) => value.prompt.includes('proof_token'));
+    expect(proofInvocations).toHaveLength(3);
+    expect(proofInvocations.every((value) => !value.prompt.includes(SIMULATED_PROOF_TOKEN))).toBe(true);
+    expect(fake.bindings.slice(1, 4).every((value) => value.sessionId === 'pi-SIMULATED-session')).toBe(true);
   });
 
   it('keeps generic lifecycle_incomplete reporting for a non-OpenCode MCP proof failure', async () => {
@@ -187,7 +209,7 @@ describe('SIMULATED four-CLI conformance harness — not live CLI verification',
     expect(report.records[0]).toMatchObject({
       status: 'FAILED',
       reason: 'lifecycle_incomplete',
-      lifecycle: { mcpProof: false },
+      lifecycle: { mcpProof: false, attempts_used: 3 },
       errorExcerpt: 'One or more required lifecycle proofs did not complete.',
     });
   });
@@ -207,7 +229,7 @@ describe('SIMULATED four-CLI conformance harness — not live CLI verification',
     const report = await runAgentConformance({ cli: 'codex', reportPath: null }, fake.dependencies);
     expect(report.records[0]).toMatchObject({
       status: 'FAILED',
-      lifecycle: { coldStart: true, sessionIdCaptured: true, resume: false, mcpProof: false, classifiedResumeFailure: false },
+      lifecycle: { coldStart: true, sessionIdCaptured: true, resume: false, mcpProof: false, attempts_used: 0, classifiedResumeFailure: false },
       errorExcerpt: 'SIMULATED resume failure',
     });
   });

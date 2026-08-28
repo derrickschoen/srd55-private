@@ -77,6 +77,10 @@ export interface AllowlistedRuleEntry extends RuleReference {
   readonly text: string;
   readonly attribution: string;
 }
+
+export function engineStateSummaryProofToken(capsuleDigest: string, granularity: string): string {
+  return sha256(`${capsuleDigest}|${granularity}|state_summary_proof_v1`);
+}
 export interface AllowlistedRulesSource { readonly get: (ruleId: string) => AllowlistedRuleEntry | null }
 export interface AdjudicationEnvelope {
   readonly adjudicationRequestId: string; readonly runId: string; readonly branchId: string;
@@ -363,7 +367,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const history = recentChanges(capsule).filter((entry) => typeof input['since_revision'] !== 'number' || Number(entry['revision']) > input['since_revision']);
       const source = granularity === 'journal_delta' ? history : combatants;
       const paged = applicationPage(capsule, canonicalJson({ granularity, ids, since: input['since_revision'] ?? null }), source, input['page']);
-      return { state_ref: externalStateRef(capsule), granularity, summary: { room: capsule.projection.room, round: capsule.projection.round, active_side: capsule.projection.activeSide, combatants: granularity === 'journal_delta' ? [] : paged.values, terrain_tags: tacticalSummary(capsule)['terrain_tags'], history: granularity === 'journal_delta' ? paged.values : history }, truncated: paged.truncated, next_cursor: paged.next };
+      return { state_ref: externalStateRef(capsule), granularity, proof_token: engineStateSummaryProofToken(capsule.digest, granularity), summary: { room: capsule.projection.room, round: capsule.projection.round, active_side: capsule.projection.activeSide, combatants: granularity === 'journal_delta' ? [] : paged.values, terrain_tags: tacticalSummary(capsule)['terrain_tags'], history: granularity === 'journal_delta' ? paged.values : history }, truncated: paged.truncated, next_cursor: paged.next };
     }
     if (name === 'engine.get_combatant_options') {
       const actorId = combatantId(stringField(input, 'actor_id'));
@@ -529,7 +533,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   };
   const resources = createResourceProvider(feed, rules, currentTurnContext, () => {
     const capsule = feed.current();
-    return execute('engine.get_state_summary', { state_ref: externalStateRef(capsule), granularity: 'room_tactical' });
+    const summary = record(execute('engine.get_state_summary', { state_ref: externalStateRef(capsule), granularity: 'room_tactical' }), 'state summary resource');
+    const { proof_token: _proofToken, ...resource } = summary;
+    return resource;
   });
   const prompts = createPromptProvider(feed, rules, currentTurnContext);
   return createMcpHandler({ tools: bindings, resources, prompts, ...(dependencies.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: dependencies.maximumToolResultBytes }), ...(dependencies.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: dependencies.maximumResourceBytes }), ...(dependencies.listPageSize === undefined ? {} : { listPageSize: dependencies.listPageSize }) });

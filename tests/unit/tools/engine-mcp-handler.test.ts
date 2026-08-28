@@ -13,6 +13,7 @@ import {
   type McpHandler,
 } from '../../../src/vtt/mcp/handler';
 import { createEngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
+import { engineStateSummaryProofToken } from '../../../src/vtt/mcp/engine-server';
 import { createEngineMcpRuntime, loadArenaFixture, type EngineMcpRuntime } from '../../../tools/engine-mcp-server';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
@@ -160,6 +161,12 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
 }
 
 describe('engine MCP dual-handshake full surface conformance', () => {
+  it('derives the state-summary proof token from digest, granularity, and the v1 domain separator', () => {
+    expect(engineStateSummaryProofToken('a'.repeat(64), 'turn_minimal')).toBe(
+      '59f83cdc47b641fd55ca7dcda5b0a55839f61f718819fda843fe1e8bf767e114',
+    );
+  });
+
   it('discovers the designed capability envelope and rejects unsupported versions', async () => {
     const { runtime } = await fixtureRuntime();
     expect(request(runtime.handler, 1, 'server/discover').result).toMatchObject({
@@ -300,6 +307,19 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(forbiddenAgentKeys(value)).toEqual([]);
   });
 
+  it('returns proof_token only from the direct state-summary tool result', async () => {
+    const { state, runtime } = await fixtureRuntime();
+    const capsule = runtime.feed.current();
+    const summary = structured(toolCall(
+      runtime.handler,
+      'engine.get_state_summary',
+      happyArguments('engine.get_state_summary', state, runtime),
+    ));
+    expect(summary['proof_token']).toBe(engineStateSummaryProofToken(capsule.digest, 'room_tactical'));
+    expect(summary['proof_token']).toMatch(/^[0-9a-f]{64}$/u);
+    expect(record(summary['state_ref'])['proof_token']).toBeUndefined();
+  });
+
   it.each(TOOL_NAMES)('%s rejects a schema violation as a self-correctable tool error', async (name) => {
     const { runtime } = await fixtureRuntime();
     const result = toolCall(runtime.handler, name, { coordinate: { row: 1, column: 1 } });
@@ -388,6 +408,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       if (!Array.isArray(contents)) throw new TypeError('Expected resource contents.');
       expect(record(contents[0])['mimeType']).toBe('application/json');
       expect(() => JSON.parse(String(record(contents[0])['text'])) as unknown).not.toThrow();
+      expect(String(record(contents[0])['text'])).not.toContain('proof_token');
     }
     const templates = record(request(runtime.handler, 399, 'resources/templates/list').result)['resourceTemplates'];
     expect(Array.isArray(templates) ? templates.map((value) => record(value)['name']) : []).toEqual(['Journal chunk', 'Rule entry']);
@@ -401,6 +422,8 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(JSON.stringify(plan)).toContain('engine.get_turn_context');
     expect(JSON.stringify(plan)).toContain('engine.submit_round_intents');
     const capsule = runtime.feed.current();
+    expect(JSON.stringify(plan)).not.toContain('proof_token');
+    expect(JSON.stringify(plan)).not.toContain(engineStateSummaryProofToken(capsule.digest, 'turn_minimal'));
     runtime.feed.replace(createEngineStateCapsule({
       runId: capsule.runId, branchId: capsule.branchId, revision: 2, generatedAt: '2026-08-27T12:02:00.000Z',
       request: capsule.request === null ? null : { ...capsule.request, phase: 'correction', correctionNumber: 1 },
