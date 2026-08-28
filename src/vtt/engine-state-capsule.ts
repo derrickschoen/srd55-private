@@ -5,6 +5,7 @@ import type {
   EncounterBranchId,
   EncounterSessionId,
 } from '../combat/values';
+import type { EncounterState } from '../combat/encounter';
 import { sha256 } from '../crypto/sha256';
 import type { DmBoardProjection } from './encounter-projections';
 
@@ -144,6 +145,58 @@ export function projectEngineDmProjection(
       movementRemainingFeet: combatant.turn.movement.remaining,
       actions: registry.actionsFor(combatant.id).map((action) => ({ ...action })),
     })),
+  };
+}
+
+/** Direct query-only projection used by the stdio package without importing the encounter reducer module. */
+export function projectEngineEncounterState(
+  state: EncounterState,
+  registry: EngineActionRegistry,
+  room: number | null = null,
+): EngineDmProjection {
+  const active = state.activeCombatant === null
+    ? null
+    : state.combatants.find((candidate) => candidate.profile.id === state.activeCombatant) ?? null;
+  return {
+    room,
+    round: state.round,
+    activeSide: active === null
+      ? 'none'
+      : active.profile.kind === 'monster' ? 'monsters' : 'players',
+    activeCombatant: state.activeCombatant,
+    bounds: { ...state.bounds },
+    blockedCells: state.blockedCells.map((cell) => ({ ...cell })),
+    difficultTerrainCells: state.environment.difficultTerrainRegions
+      .flatMap((region) => region.cells)
+      .map((cell) => ({ ...cell })),
+    movementBlockingObjects: state.worldObjects
+      .filter((object) => object.blocking.movement)
+      .map((object) => ({
+        id: boundedText(String(object.id), 'world object id', 200),
+        name: boundedText(object.name, 'world object name', 200),
+        cells: object.footprint.map((cell) => ({ ...cell })),
+      })),
+    combatants: state.combatants.map((combatant) => {
+      const token = state.tokens.find((candidate) => candidate.combatantId === combatant.profile.id);
+      if (token === undefined) throw new TypeError(`Combatant ${String(combatant.profile.id)} has no query projection token.`);
+      const rules = combatant.wildShape?.physical ?? combatant.profile.rules;
+      return {
+        id: combatant.profile.id,
+        name: boundedText(combatant.profile.name, 'combatant name', 200),
+        side: combatant.profile.kind,
+        life: combatant.life,
+        hitPoints: combatant.wildShape?.physical.hitPoints ?? combatant.hitPoints,
+        hitPointMaximum: rules.hitPointMaximum,
+        speedFeet: rules.speed,
+        reachFeet: rules.reach,
+        position: { ...token.position },
+        actionAvailable: combatant.turn.action.kind !== 'spent',
+        bonusActionAvailable: combatant.turn.bonusActionAvailable,
+        reactionAvailable: combatant.turn.reactionAvailable,
+        movementRemainingFeet: combatant.turn.movement.remaining,
+        actions: registry.actionsFor(combatant.profile.id).map((action) => ({ ...action })),
+      };
+    }),
   };
 }
 

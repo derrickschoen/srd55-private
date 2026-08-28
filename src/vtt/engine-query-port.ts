@@ -1,19 +1,24 @@
 import { combatantsAreAllies } from '../combat/allies';
+import { creatureSizes } from '../domain/enums';
 import {
-  canCombatantSee,
-  coverTierBetween,
-  coverTierBetweenObjects,
-  detectCombatant,
-  encounterMonsterActions,
-  encounterMovementWorld,
   type EncounterCombatantState,
   type EncounterState,
 } from '../combat/encounter';
 import { gridDistance, type GridCell } from '../combat/grid';
 import { findPath } from '../combat/movement';
+import { persistentAreaContains } from '../combat/persistent-areas';
 import { attackRangeVerdict } from '../combat/range';
 import type { MonsterAction, MonsterAttackAction } from '../combat/statblock';
+import { lookupBundledMonster } from '../combat/statblocks/companions';
 import { feet, type CombatantId } from '../combat/values';
+import { wildShapeRulesLens } from '../combat/wild-shape';
+import {
+  environmentLightAt,
+  environmentObscurementAt,
+  isEnvironmentDifficultTerrain,
+  type CoverTier,
+  type WorldObject,
+} from '../combat/world-objects';
 
 export type EngineTargetSelector =
   | { readonly kind: 'combatant'; readonly combatantId: CombatantId }
@@ -98,6 +103,213 @@ export interface EngineQueryPort {
   } | null;
 }
 
+function cellKey(cell: GridCell): string {
+  return `${String(cell.column)},${String(cell.row)}`;
+}
+
+function combatant(state: EncounterState, id: CombatantId): EncounterCombatantState | null {
+  return state.combatants.find((candidate) => candidate.profile.id === id) ?? null;
+}
+
+function rulesFor(subject: EncounterCombatantState): EncounterCombatantState['profile']['rules'] {
+  return subject.wildShape === undefined
+    ? subject.profile.rules
+    : wildShapeRulesLens(subject.profile.rules, subject.wildShape);
+}
+
+function monsterActions(state: EncounterState, actorId: CombatantId): readonly MonsterAction[] {
+  const subject = combatant(state, actorId);
+  if (subject === null) return [];
+  if (subject.wildShape !== undefined) return subject.wildShape.physical.actions;
+  if (subject.form !== undefined) return subject.form.availableActions;
+  if (subject.profile.kind !== 'monster') return [];
+  const statblockId = subject.profile.statblockId;
+  for (const pack of state.contentPacks ?? []) {
+    const imported = pack.monsters.find((monster) => monster.statblock.id === statblockId);
+    if (imported !== undefined) return imported.actions;
+  }
+  const lookup = lookupBundledMonster(String(statblockId));
+  if (lookup.status !== 'resolved' || lookup.entry.kind !== 'static') return [];
+  const actions = lookup.entry.statblock.sourceDetails.actions;
+  return actions.kind === 'present' ? actions.value : [];
+}
+
+function interveningCells(from: GridCell, to: GridCell): readonly GridCell[] {
+  const columnDelta = to.column - from.column;
+  const rowDelta = to.row - from.row;
+  const steps = Math.max(Math.abs(columnDelta), Math.abs(rowDelta));
+  if (steps <= 1) return [];
+  const cells: GridCell[] = [];
+  const seen = new Set<string>();
+  for (let step = 1; step < steps; step += 1) {
+    const cell = {
+      column: Math.round(from.column + columnDelta * step / steps),
+      row: Math.round(from.row + rowDelta * step / steps),
+    };
+    const key = cellKey(cell);
+    if (!seen.has(key)) {
+      seen.add(key);
+      cells.push(cell);
+    }
+  }
+  return cells;
+}
+
+function objectOccupies(object: WorldObject, cell: GridCell): boolean {
+  return object.footprint.some((candidate) => cellKey(candidate) === cellKey(cell));
+}
+
+function hasLineOfSight(state: EncounterState, from: GridCell, to: GridCell): boolean {
+  const blocked = new Set(state.worldObjects
+    .flatMap((object) => object.blocking.lineOfSight ? object.footprint : [])
+    .map(cellKey));
+  return interveningCells(from, to).every((cell) => !blocked.has(cellKey(cell)));
+}
+
+const COVER_ORDER: Readonly<Record<CoverTier, number>> = {
+  none: 0,
+  half: 1,
+  three_quarters: 2,
+  total: 3,
+};
+
+function coverBetweenObjects(objects: readonly WorldObject[], from: GridCell, to: GridCell): CoverTier {
+  let cover: CoverTier = 'none';
+  for (const cell of interveningCells(from, to)) {
+    for (const object of objects) {
+      if (objectOccupies(object, cell) && COVER_ORDER[object.blocking.cover] > COVER_ORDER[cover]) {
+        cover = object.blocking.cover;
+      }
+    }
+  }
+  return cover;
+}
+
+function effectConditionNames(state: EncounterState, id: CombatantId): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const effect of state.effects) {
+    if (!effect.targets.includes(id)) continue;
+    const payload = effect.payload;
+    if (payload.kind === 'condition') names.add(payload.condition);
+    if (payload.kind === 'condition_bundle') for (const condition of payload.conditions) names.add(condition);
+    if (payload.kind === 'sleep_sequence') names.add(payload.initial);
+    if (payload.kind === 'web_area') names.add('Restrained');
+    if (payload.kind === 'fear') names.add('Frightened');
+  }
+  if (combatant(state, id)?.life === 'dying') names.add('Unconscious');
+  return names;
+}
+
+function isIncapacitatedByState(state: EncounterState, id: CombatantId): boolean {
+  const names = effectConditionNames(state, id);
+  return ['Incapacitated', 'Paralyzed', 'Petrified', 'Stunned', 'Unconscious']
+    .some((name) => names.has(name));
+}
+
+function sharesWebArea(state: EncounterState, observer: CombatantId, subject: CombatantId): boolean {
+  const observerCell = state.tokens.find((token) => token.combatantId === observer)?.position;
+  const subjectCell = state.tokens.find((token) => token.combatantId === subject)?.position;
+  if (observerCell === undefined || subjectCell === undefined) return false;
+  return state.persistentAreas.some((area) => {
+    if (area.material?.id !== 'webs') return false;
+    const origin = area.origin;
+    const anchor = origin.kind === 'anchored'
+      ? state.tokens.find((candidate) => candidate.combatantId === origin.combatant)?.position ?? null
+      : origin.kind === 'anchored_to_object'
+        ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
+        : null;
+    return persistentAreaContains(area, observerCell, anchor, state) &&
+      persistentAreaContains(area, subjectCell, anchor, state);
+  });
+}
+
+type Detection =
+  | { readonly kind: 'seen'; readonly sense: 'normal_sight' | 'darkvision' | 'blindsight' | 'truesight' }
+  | { readonly kind: 'located'; readonly sense: 'web_sense' }
+  | { readonly kind: 'undetected'; readonly reason: 'blocked' | 'hidden' | 'invisible' | 'obscured' | 'darkness' | 'out_of_range' };
+
+function detect(state: EncounterState, observer: CombatantId, subject: CombatantId): Detection | null {
+  const observerState = combatant(state, observer);
+  const from = state.tokens.find((token) => token.combatantId === observer)?.position;
+  const to = state.tokens.find((token) => token.combatantId === subject)?.position;
+  if (observerState === null || combatant(state, subject) === null || from === undefined || to === undefined) return null;
+  const distance = gridDistance(from, to);
+  const senses = rulesFor(observerState).senses;
+  if (senses.some((sense) => sense.kind === 'blindsight' && distance <= sense.rangeFeet) && hasLineOfSight(state, from, to)) {
+    return { kind: 'seen', sense: 'blindsight' };
+  }
+  const truesight = senses.some((sense) => sense.kind === 'truesight' && distance <= sense.rangeFeet);
+  if (rulesFor(observerState).detectionTraits.includes('web_sense') && sharesWebArea(state, observer, subject)) {
+    return { kind: 'located', sense: 'web_sense' };
+  }
+  if (!hasLineOfSight(state, from, to)) return { kind: 'undetected', reason: 'blocked' };
+  if (effectConditionNames(state, observer).has('Blinded')) return { kind: 'undetected', reason: 'obscured' };
+  if (state.hiddenCombatants.some((entry) => entry.combatant === subject) && !truesight) return { kind: 'undetected', reason: 'hidden' };
+  if (effectConditionNames(state, subject).has('Invisible') && !truesight) return { kind: 'undetected', reason: 'invisible' };
+  const obscurement = environmentObscurementAt(state.environment, to);
+  if (obscurement === 'heavy') return { kind: 'undetected', reason: 'obscured' };
+  if (truesight) return { kind: 'seen', sense: 'truesight' };
+  if (obscurement === 'magical_darkness') return { kind: 'undetected', reason: 'darkness' };
+  if (environmentLightAt(state.environment, to) !== 'darkness') return { kind: 'seen', sense: 'normal_sight' };
+  const darkvision = senses.some((sense) => sense.kind === 'darkvision' && distance <= sense.rangeFeet);
+  return darkvision
+    ? { kind: 'seen', sense: 'darkvision' }
+    : { kind: 'undetected', reason: senses.some((sense) => sense.kind === 'darkvision') ? 'out_of_range' : 'darkness' };
+}
+
+function ignoresDifficultTerrain(state: EncounterState, id: CombatantId): boolean {
+  return state.effects.some((effect) => effect.targets.includes(id) && effect.payload.kind === 'movement_modifier' &&
+    'modeGrants' in effect.payload && (effect.payload.difficultTerrainImmunity ||
+      effect.payload.modeGrants.some((grant) => grant.mode === 'flying')));
+}
+
+function movementWorld(state: EncounterState) {
+  return {
+    bounds: state.bounds,
+    canTraverseStep: () => true,
+    traversal: (actorId: CombatantId, _from: GridCell, to: GridCell) => {
+      const blocked = state.blockedCells.some((candidate) => cellKey(candidate) === cellKey(to)) ||
+        state.worldObjects.some((object) => object.blocking.movement && objectOccupies(object, to)) ||
+        (state.environment.movementRegions ?? []).some((region) => region.entry === 'blocked' &&
+          region.cells.some((candidate) => cellKey(candidate) === cellKey(to)));
+      if (blocked) return { kind: 'blocked' as const, reason: 'blocked cell' };
+      const actor = combatant(state, actorId);
+      if (actor === null) return { kind: 'blocked' as const, reason: 'unknown actor' };
+      const occupants = state.tokens.flatMap((token): readonly EncounterCombatantState[] => {
+        if (token.combatantId === actorId || cellKey(token.position) !== cellKey(to)) return [];
+        const occupant = combatant(state, token.combatantId);
+        return occupant === null || occupant.life === 'dead' ? [] : [occupant];
+      });
+      const actorSize = rulesFor(actor).sizeCategory;
+      const canPass = (occupant: EncounterCombatantState): boolean => {
+        if (combatantsAreAllies(state, actorId, occupant.profile.id) || isIncapacitatedByState(state, occupant.profile.id)) return true;
+        const occupantSize = rulesFor(occupant).sizeCategory;
+        if (occupantSize === 'Tiny') return true;
+        if (actorSize === undefined || occupantSize === undefined) return false;
+        return Math.abs(creatureSizes.indexOf(actorSize) - creatureSizes.indexOf(occupantSize)) >= 2;
+      };
+      if (occupants.some((occupant) => !canPass(occupant))) {
+        return { kind: 'blocked' as const, reason: 'creature space cannot be traversed' };
+      }
+      const creatureSpaceIsDifficult = occupants.some((occupant) =>
+        !combatantsAreAllies(state, actorId, occupant.profile.id) && rulesFor(occupant).sizeCategory !== 'Tiny');
+      const areaDifficult = state.persistentAreas.some((area) => {
+        if (!area.difficultTerrain) return false;
+        const origin = area.origin;
+        const anchor = origin.kind === 'anchored'
+          ? state.tokens.find((token) => token.combatantId === origin.combatant)?.position ?? null
+          : origin.kind === 'anchored_to_object'
+            ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
+            : null;
+        return persistentAreaContains(area, to, anchor, state);
+      });
+      const difficult = !ignoresDifficultTerrain(state, actorId) &&
+        (creatureSpaceIsDifficult || isEnvironmentDifficultTerrain(state.environment, to) || areaDifficult);
+      return { kind: 'enterable' as const, cost: feet(difficult ? 10 : 5), canEnd: occupants.length === 0 };
+    },
+  };
+}
+
 export function engineAttackRangeFeet(action: MonsterAttackAction): number {
   switch (action.delivery.kind) {
     case 'melee': return action.delivery.reachFeet;
@@ -138,7 +350,7 @@ export function engineActionRegistry(state: EncounterState): {
 } {
   return {
     actionsFor(combatantId) {
-      const actions = encounterMonsterActions(state, combatantId);
+      const actions = monsterActions(state, combatantId);
       return actions.map((action) => ({
         actionId: action.id,
         kind: action.kind,
@@ -175,7 +387,7 @@ function resolveTarget(
       state,
       (candidate) => candidate.life !== 'dead' &&
         combatantsAreAllies(state, actorId, candidate.profile.id) &&
-        canCombatantSee(state, actorId, candidate.profile.id),
+        detect(state, actorId, candidate.profile.id)?.kind === 'seen',
     ).sort((left, right) =>
       (left.combatant.hitPoints / left.combatant.profile.rules.hitPointMaximum) -
         (right.combatant.hitPoints / right.combatant.profile.rules.hitPointMaximum) ||
@@ -191,7 +403,7 @@ function resolveTarget(
       (
         selector.kind === 'current_threat' ||
         selector.kind === 'enemy_threatening_ally' ||
-        canCombatantSee(state, actorId, candidate.profile.id)
+        detect(state, actorId, candidate.profile.id)?.kind === 'seen'
       ),
   );
   if (selector.kind === 'lowest_hp_visible_enemy') {
@@ -225,7 +437,7 @@ function path(state: EncounterState, request: EnginePathRequest): EnginePathResu
   const searchBudget = request.maximumFeet === undefined
     ? availableBudget
     : Math.min(availableBudget, maximumPathCost(state));
-  const result = findPath(encounterMovementWorld(state), {
+  const result = findPath(movementWorld(state), {
     actorId: request.actorId,
     start,
     goal: request.destination,
@@ -240,7 +452,7 @@ function path(state: EncounterState, request: EnginePathRequest): EnginePathResu
     };
   }
   if (request.maximumFeet !== undefined && request.maximumFeet < maximumPathCost(state)) {
-    const unbounded = findPath(encounterMovementWorld(state), {
+    const unbounded = findPath(movementWorld(state), {
       actorId: request.actorId,
       start,
       goal: request.destination,
@@ -267,7 +479,7 @@ function reach(state: EncounterState, request: EngineReachRequest): EngineReachR
     codes.push('target_same_side');
   }
   if (targetPosition === undefined) codes.push('target_not_placed');
-  const actions = actor?.profile.kind === 'monster' ? encounterMonsterActions(state, request.actorId) : [];
+  const actions = actor?.profile.kind === 'monster' ? monsterActions(state, request.actorId) : [];
   const action = actions.find((candidate) => candidate.id === request.actionId);
   if (action === undefined) codes.push('action_absent');
   const rangeFeet = action === undefined ? null : engineActionRangeFeet(actions, action);
@@ -290,7 +502,7 @@ const engineQueryPort: EngineQueryPort = {
   combatant: (state, id) => state.combatants.find((candidate) => candidate.profile.id === id) ?? null,
   tokenPosition: (state, id) => state.tokens.find((token) => token.combatantId === id)?.position ?? null,
   sameSide: (state, left, right) => combatantsAreAllies(state, left, right),
-  actions: encounterMonsterActions,
+  actions: monsterActions,
   resolveTarget,
   path,
   reach,
@@ -299,9 +511,9 @@ const engineQueryPort: EngineQueryPort = {
     const to = state.tokens.find((token) => token.combatantId === targetId)?.position;
     if (from === undefined || to === undefined) return null;
     return {
-      tier: coverTierBetween(state, from, to),
+      tier: coverBetweenObjects(state.worldObjects, from, to),
       sourceIds: state.worldObjects
-        .filter((object) => coverTierBetweenObjects([object], from, to) !== 'none')
+        .filter((object) => coverBetweenObjects([object], from, to) !== 'none')
         .map((object) => String(object.id))
         .sort(),
     };
@@ -313,10 +525,12 @@ const engineQueryPort: EngineQueryPort = {
       !state.tokens.some((token) => token.combatantId === actorId) ||
       !state.tokens.some((token) => token.combatantId === targetId)
     ) return null;
-    const detection = detectCombatant(state, actorId, targetId);
+    const detection = detect(state, actorId, targetId);
+    const reciprocal = detect(state, targetId, actorId);
+    if (detection === null || reciprocal === null) return null;
     return {
-      visible: canCombatantSee(state, actorId, targetId),
-      reciprocal: canCombatantSee(state, targetId, actorId),
+      visible: detection.kind === 'seen',
+      reciprocal: reciprocal.kind === 'seen',
       sense: detection.kind === 'seen' ? detection.sense : 'unknown',
       reason: detection.kind === 'undetected' ? detection.reason : null,
     };

@@ -1,0 +1,204 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, relative, resolve } from 'node:path';
+import { encounterSessionId } from '../src/combat/values';
+import { resolveAgentAdapter } from '../src/vtt/agent-adapters';
+import { UNVERIFIED_CONTRACT_CLAUDE_CODE } from '../src/vtt/agent-adapters/claude-code';
+import { UNVERIFIED_CONTRACT_CODEX } from '../src/vtt/agent-adapters/codex';
+import { UNVERIFIED_CONTRACT_OPENCODE } from '../src/vtt/agent-adapters/opencode';
+import { UNVERIFIED_CONTRACT_PI } from '../src/vtt/agent-adapters/pi';
+import { AGENT_ADAPTER_VERSION } from '../src/vtt/agent-adapters/process';
+import { agentSessionIdFromCli, isAgentCliKind } from '../src/vtt/agent-session';
+import type { AgentCliKind, AgentFailureClassification, AgentInvocation, AgentSessionAdapter, AgentSessionBinding } from '../src/vtt/agent-session';
+
+export const AGENT_CLI_KINDS = ['codex', 'opencode', 'pi', 'claude-code'] as const;
+export type ConformanceStatus = 'VERIFIED' | 'FAILED' | 'UNVERIFIED';
+type LifecycleEvidence = Readonly<{ coldStart: boolean; sessionIdCaptured: boolean; resume: boolean; classifiedResumeFailure: boolean }>;
+type ContractEvidence = Readonly<{ marker: string; liveStatus: ConformanceStatus }>;
+
+export interface AgentConformanceRecord {
+  readonly cli: AgentCliKind;
+  readonly present: boolean;
+  readonly version: string | null;
+  readonly status: ConformanceStatus;
+  readonly reason: AgentFailureClassification | 'lifecycle_incomplete' | 'resume_missing_session_was_accepted' | null;
+  readonly lifecycle: LifecycleEvidence;
+  readonly contractEvidence: ContractEvidence;
+}
+
+export interface AgentConformanceReport {
+  readonly schemaVersion: 1;
+  readonly title: 'LIVE AGENT CLI CONFORMANCE — NOT SIMULATED';
+  readonly generatedAt: string;
+  readonly protocolConformance: Readonly<{ status: 'SUBSTITUTED_LOCAL'; reason: 'official_conformance_and_inspector_not_installed_network_fetch_forbidden' }>;
+  readonly records: readonly AgentConformanceRecord[];
+  readonly aggregate: ConformanceStatus;
+  readonly exitCode: 0 | 1 | 2;
+}
+
+export interface AgentConformanceOptions { readonly cli: AgentCliKind | null; readonly reportPath: string | null }
+export interface AgentConformanceDependencies {
+  readonly adapter: (kind: AgentCliKind) => AgentSessionAdapter;
+  readonly now: () => string;
+  readonly stdout: (line: string) => void;
+  readonly stderr: (line: string) => void;
+  readonly writeReport: (path: string, report: AgentConformanceReport) => Promise<void>;
+}
+
+const CONTRACT_MARKERS: Readonly<Record<AgentCliKind, string>> = {
+  codex: UNVERIFIED_CONTRACT_CODEX,
+  opencode: UNVERIFIED_CONTRACT_OPENCODE,
+  pi: UNVERIFIED_CONTRACT_PI,
+  'claude-code': UNVERIFIED_CONTRACT_CLAUDE_CODE,
+};
+const DEFAULT_MODELS: Readonly<Record<AgentCliKind, string>> = {
+  codex: 'gpt-5.6-sol',
+  opencode: 'openai/gpt-5.6-sol',
+  pi: 'openai/gpt-5.6-sol',
+  'claude-code': 'sonnet',
+};
+
+const emptyLifecycle = (): LifecycleEvidence => ({ coldStart: false, sessionIdCaptured: false, resume: false, classifiedResumeFailure: false });
+const statusForFailure = (classification: AgentFailureClassification): ConformanceStatus =>
+  classification === 'cli_absent' || classification === 'authentication' ? 'UNVERIFIED' : 'FAILED';
+
+function invocation(kind: AgentCliKind, prompt: string): AgentInvocation {
+  const environmentKey = `DND_AGENT_CONFORMANCE_MODEL_${kind.replaceAll('-', '_').toUpperCase()}`;
+  return { runId: encounterSessionId('encounter:engine-mcp'), prompt, model: process.env[environmentKey] ?? DEFAULT_MODELS[kind], reasoningEffort: 'high', launcherToken: `agent-conformance-${kind}-launcher-token`, timeoutMs: 120_000 };
+}
+
+function binding(kind: AgentCliKind, sessionId: string): AgentSessionBinding {
+  return { cli: kind, sessionId: agentSessionIdFromCli(sessionId), adapterVersion: AGENT_ADAPTER_VERSION, recoveryGeneration: 0, predecessorSessionHash: null, startedAtRevision: 1, lastDispatchedRevision: 1, status: 'active' };
+}
+
+function probeFailure(kind: AgentCliKind, version: string | null, reason: AgentFailureClassification): AgentConformanceRecord {
+  const status = statusForFailure(reason);
+  return { cli: kind, present: reason !== 'cli_absent', version, status, reason, lifecycle: emptyLifecycle(), contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: status } };
+}
+
+async function verifyCli(kind: AgentCliKind, adapter: AgentSessionAdapter): Promise<AgentConformanceRecord> {
+  let version: string | null = null;
+  try {
+    const probe = await adapter.probe();
+    version = probe.version;
+    if (!probe.present) return probeFailure(kind, null, 'cli_absent');
+  } catch (error) {
+    return probeFailure(kind, version, adapter.classifyFailure(error));
+  }
+
+  const lifecycle = { coldStart: false, sessionIdCaptured: false, resume: false, classifiedResumeFailure: false };
+  try {
+    const signal = new AbortController().signal;
+    const started = await adapter.start(invocation(kind, 'Cold start the engine MCP server and reply ENGINE_BOOT_OK.'), signal);
+    lifecycle.coldStart = started.exit === 'completed';
+    lifecycle.sessionIdCaptured = String(started.sessionId).length > 0;
+    const resumed = await adapter.resume(binding(kind, started.sessionId), invocation(kind, 'Resume the session and reply ENGINE_RESUME_OK.'), signal);
+    lifecycle.resume = resumed.exit === 'completed' && resumed.sessionId === started.sessionId;
+    try {
+      await adapter.resume(binding(kind, `missing-session-${kind}`), invocation(kind, 'A deliberately missing session must fail.'), signal);
+      return { cli: kind, present: true, version, status: 'FAILED', reason: 'resume_missing_session_was_accepted', lifecycle, contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: 'FAILED' } };
+    } catch (error) {
+      const missingClassification = adapter.classifyFailure(error);
+      if (missingClassification !== 'resume_not_found' && missingClassification !== 'resume_corrupt') {
+        return probeFailure(kind, version, missingClassification);
+      }
+      lifecycle.classifiedResumeFailure = true;
+    }
+    const verified = Object.values(lifecycle).every(Boolean);
+    const verifiedStatus: ConformanceStatus = verified ? 'VERIFIED' : 'FAILED';
+    return { cli: kind, present: true, version, status: verifiedStatus, reason: verified ? null : 'lifecycle_incomplete', lifecycle, contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: verifiedStatus } };
+  } catch (error) {
+    const classification = adapter.classifyFailure(error);
+    const status = statusForFailure(classification);
+    return { cli: kind, present: true, version, status, reason: classification, lifecycle, contractEvidence: { marker: CONTRACT_MARKERS[kind], liveStatus: status } };
+  }
+}
+
+function reportExitCode(records: readonly AgentConformanceRecord[]): 0 | 1 | 2 {
+  if (records.some((record) => record.status === 'FAILED')) return 1;
+  if (records.some((record) => record.status === 'UNVERIFIED')) return 2;
+  return 0;
+}
+
+function defaultDependencies(): AgentConformanceDependencies {
+  const engineArgs = [
+    resolve('node_modules/vite-node/vite-node.mjs'),
+    resolve('tools/engine-mcp-server.ts'),
+    resolve('tests/fixtures/arena-basis/seed-3943001.json'),
+  ];
+  return {
+    adapter: (kind) => resolveAgentAdapter(kind, {
+      cwd: process.cwd(),
+      engineCommand: process.execPath,
+      engineArgs,
+      ...(process.env['DND_PI_MCP_EXTENSION_PATH'] === undefined ? {} : { piMcpExtensionPath: process.env['DND_PI_MCP_EXTENSION_PATH'] }),
+    }),
+    now: () => new Date().toISOString(),
+    stdout: (line) => { process.stdout.write(`${line}\n`); },
+    stderr: (line) => { process.stderr.write(`${line}\n`); },
+    writeReport: async (path, report) => {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+    },
+  };
+}
+
+function outsideRepository(path: string): string {
+  const root = resolve('.');
+  const output = resolve(path);
+  const relation = relative(root, output);
+  if (relation === '' || !relation.startsWith('..')) throw new TypeError('--report must resolve outside the repository.');
+  return output;
+}
+
+export async function runAgentConformance(
+  options: AgentConformanceOptions,
+  dependencies: AgentConformanceDependencies = defaultDependencies(),
+): Promise<AgentConformanceReport> {
+  const kinds = options.cli === null ? AGENT_CLI_KINDS : [options.cli];
+  dependencies.stdout('MCP_CONFORMANCE: SUBSTITUTED_LOCAL (official tooling unavailable without a network fetch)');
+  dependencies.stdout('CLI | PRESENT | VERSION | STATUS | REASON');
+  const records: AgentConformanceRecord[] = [];
+  for (const kind of kinds) {
+    const row = await verifyCli(kind, dependencies.adapter(kind));
+    records.push(row);
+    const tableLine = `${kind} | ${row.present ? 'yes' : 'no'} | ${row.version ?? '-'} | ${row.status} | ${row.reason ?? '-'}`;
+    dependencies.stdout(tableLine);
+    if (row.status !== 'VERIFIED') dependencies.stderr(tableLine);
+  }
+  const code = reportExitCode(records);
+  const aggregate: ConformanceStatus = code === 0 ? 'VERIFIED' : code === 1 ? 'FAILED' : 'UNVERIFIED';
+  const report: AgentConformanceReport = { schemaVersion: 1, title: 'LIVE AGENT CLI CONFORMANCE — NOT SIMULATED', generatedAt: dependencies.now(), protocolConformance: { status: 'SUBSTITUTED_LOCAL', reason: 'official_conformance_and_inspector_not_installed_network_fetch_forbidden' }, records, aggregate, exitCode: code };
+  if (options.reportPath !== null) await dependencies.writeReport(outsideRepository(options.reportPath), report);
+  dependencies.stdout(`REPORT_JSON ${JSON.stringify(report)}`);
+  return report;
+}
+export function parseAgentConformanceArguments(argv: readonly string[]): AgentConformanceOptions {
+  let cli: AgentCliKind | null = null;
+  let reportPath: string | null = null;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    const value = argv[index + 1];
+    if (argument === '--cli') {
+      if (!isAgentCliKind(value)) throw new TypeError('--cli requires codex, opencode, pi, or claude-code.');
+      cli = value;
+      index += 1;
+    } else if (argument === '--report') {
+      if (value === undefined || value.length === 0) throw new TypeError('--report requires a path outside the repository.');
+      reportPath = value;
+      index += 1;
+    } else {
+      throw new TypeError(`Unknown agent conformance argument: ${String(argument)}`);
+    }
+  }
+  return { cli, reportPath };
+}
+
+async function main(): Promise<void> {
+  const scriptIndex = process.argv.findIndex((argument) => argument.endsWith('/agent-conformance.ts') || argument.endsWith('\\agent-conformance.ts'));
+  const argumentsValue = scriptIndex < 0 ? process.argv.slice(2) : process.argv.slice(scriptIndex + 1);
+  const report = await runAgentConformance(parseAgentConformanceArguments(argumentsValue));
+  process.exitCode = report.exitCode;
+}
+
+const agentConformanceScriptPresent = process.argv.some((argument) => argument.endsWith('/agent-conformance.ts') || argument.endsWith('\\agent-conformance.ts'));
+if (process.env['VITEST'] !== 'true' && agentConformanceScriptPresent) await main();
