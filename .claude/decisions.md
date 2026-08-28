@@ -7,6 +7,14 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D406 — OWNER: luna low is the intelligence floor (2026-08-28)
+
+Verbatim: "Don't worry about things that broke Gemma-e4b. It was just a
+cheap way to test pi and opencode. Luna low is the real world intelligence
+floor." Ruling: design margins target gpt-5.6-luna low, not weaker models.
+Gemma-only failure modes carry no design weight; weak-model
+accommodations are justified only by luna-low (or stronger) evidence.
+
 ## D405.3 — OWNER: veto snippets are flywheel-only (2026-08-28)
 
 AskUserQuestion ruling: "Flywheel-only veto." Veto-class snippets (engine
