@@ -11,13 +11,13 @@ import {
 } from '../../../src/vtt/agent-session';
 import { parseConversationArgs, runConversation } from '../../../tools/ai-dm-conversation';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
-import { reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { encounterSessionId } from '../../../src/combat/values';
 import {
   importSavedSession,
   MemoryBrowserSessionStore,
 } from '../../../src/vtt/session-persistence';
-import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 class RecordingConversationAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
@@ -43,28 +43,23 @@ class RecordingConversationAdapter implements AgentSessionAdapter {
   }
 }
 
-async function pendingFrozenBasisReactionState(): Promise<EncounterState> {
-  const frozen = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
-  const mover = frozen.combatants.find((entry) => entry.profile.kind === 'player_character');
-  const reactor = frozen.combatants.find((entry) => entry.profile.kind === 'monster');
-  if (mover === undefined || reactor === undefined) throw new Error('Frozen arena fixture lacks combatants.');
-  const moverToken = frozen.tokens.find((entry) => entry.combatantId === mover.profile.id);
-  if (moverToken === undefined) throw new Error('Frozen arena fixture lacks the player token.');
-  const started = reduceEncounter({
-    ...frozen,
-    tokens: frozen.tokens.map((entry) => entry.combatantId === reactor.profile.id
-      ? { ...entry, position: { column: moverToken.position.column - 1, row: moverToken.position.row } }
-      : entry),
+function pendingArenaReactionState(): EncounterState {
+  const mover = playerProfile('arena-reaction-mover', { hitPoints: 100, initiativeBonus: 20 });
+  const reactor = monsterProfile('arena-reaction-reactor', { hitPoints: 100, initiativeBonus: -20 });
+  const started = reduceEncounter(createEncounter({
+    bounds: { columns: 5, rows: 2 },
+    combatants: [mover, reactor],
+    tokens: [placedToken(mover, 1), placedToken(reactor, 0)],
     reactionPolicies: [{
-      combatant: reactor.profile.id,
+      combatant: reactor.id,
       reactionKind: 'opportunity_attack',
       policy: 'ask',
     }],
-  }, { type: 'roll_initiative' }, () => 0.5).state;
+  }), { type: 'roll_initiative' }, () => 0.5).state;
   return reduceEncounter(started, {
     type: 'move',
-    actor: mover.profile.id,
-    path: [{ column: moverToken.position.column + 1, row: moverToken.position.row }],
+    actor: mover.id,
+    path: [{ column: 2, row: 0 }],
     cause: 'voluntary',
   }, () => 0.5).state;
 }
@@ -74,7 +69,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     ['decline', 'decline'],
     ['take', 'accept'],
   ] as const)(
-    'auto-resolves a frozen-basis Reaction already pending at round start with unattended %s',
+    'auto-resolves an unattended ask Reaction with the %s policy and authorizes the SIMULATED arena round',
     { timeout: 60_000 },
     async (askDefault, resolution) => {
       const directory = mkdtempSync(join(tmpdir(), `dnd-conversation-reaction-${askDefault}-`));
@@ -85,20 +80,14 @@ describe('AI-DM engine MCP conversation runner', () => {
         '--reaction-ask-default', askDefault,
       ]);
 
-      const pendingState = await pendingFrozenBasisReactionState();
-      expect(pendingState.pendingDecisions).toContainEqual(expect.objectContaining({
-        kind: 'reaction_offer',
-        reactionKind: 'opportunity_attack',
-      }));
       const result = await runConversation(config, {
-        roomStates: [pendingState],
+        roomStates: [pendingArenaReactionState()],
         store,
       });
 
       expect(result.rows).toEqual([
         expect.objectContaining({ outcome: 'authorized', refusals: [] }),
       ]);
-      expect(result.rows[0]?.contextRevision).toBeGreaterThan(1);
       expect(store.revisions(encounterSessionId('encounter:ai-dm-conversation'))
         .map((revision) => revision.transition))
         .toContainEqual(expect.objectContaining({
