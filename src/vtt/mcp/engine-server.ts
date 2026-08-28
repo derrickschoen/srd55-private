@@ -20,7 +20,7 @@ import {
   type RuleReference,
 } from '../engine-state-capsule';
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
-import type { EngineActionChoice, EngineEngagement, EngineIntentBranch, EngineMovementPreference, EngineTurnIntent, PureIntentResolver } from '../intent-resolver';
+import type { EngineActionChoice, EngineEngagement, EngineMovementPreference, EngineTurnIntent, PureIntentResolver } from '../intent-resolver';
 import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
 import {
   createMcpHandler,
@@ -191,53 +191,6 @@ function decodeIntent(value: unknown): EngineTurnIntent {
   const input = record(value, 'intent');
   const fallback = input['fallback'];
   return { actorId: combatantId(stringField(input, 'actor_id')), ...decodeBranch(input), fallback: fallback === null ? null : decodeBranch(fallback) };
-}
-function externalTargetSelector(target: EngineTargetSelector): Readonly<Record<string, unknown>> {
-  switch (target.kind) {
-    case 'combatant': return { kind: target.kind, combatant_id: target.combatantId };
-    case 'enemy_threatening_ally': return { kind: target.kind, ally_id: target.allyId };
-    case 'nearest_visible_enemy':
-    case 'lowest_hp_visible_enemy':
-    case 'most_injured_visible_ally':
-    case 'current_threat': return { kind: target.kind };
-  }
-}
-function externalActionChoice(choice: EngineActionChoice): Readonly<Record<string, unknown>> {
-  switch (choice.kind) {
-    case 'attack': return {
-      kind: choice.kind, action_id: choice.actionId, target: externalTargetSelector(choice.target),
-      ...(choice.resourcePolicy === undefined ? {} : { resource_policy: choice.resourcePolicy }),
-    };
-    case 'cast_spell': return {
-      kind: choice.kind, spell_id: choice.spellId,
-      target: choice.target === null ? null : externalTargetSelector(choice.target),
-      ...(choice.slotPolicy === undefined ? {} : { slot_policy: choice.slotPolicy }),
-    };
-    case 'use_action': return {
-      kind: choice.kind, action_id: choice.actionId,
-      target: choice.target === null ? null : externalTargetSelector(choice.target),
-    };
-    case 'dodge':
-    case 'disengage':
-    case 'dash':
-    case 'end_turn': return { kind: choice.kind };
-  }
-}
-function externalIntentBranch(branch: EngineIntentBranch): Readonly<Record<string, unknown>> {
-  return {
-    choice: externalActionChoice(branch.choice),
-    movement: {
-      willingness: branch.movement.willingness,
-      ...(branch.movement.maximumFeet === undefined ? {} : { maximum_feet: branch.movement.maximumFeet }),
-      opportunity_risk: branch.movement.opportunityRisk,
-    },
-    engagement: {
-      stance: branch.engagement.stance,
-      ...(branch.engagement.anchor === undefined ? {} : {
-        anchor: branch.engagement.anchor === null ? null : externalTargetSelector(branch.engagement.anchor),
-      }),
-    },
-  };
 }
 function hitPointBand(hitPoints: number, maximum: number): 'uninjured' | 'injured' | 'critical' | 'unknown' {
   if (maximum <= 0) return 'unknown';
@@ -542,7 +495,6 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           summary: 'Round submission must contain each required actor exactly once.',
           attempt_rejections: [{
             attempt: 'primary' as const,
-            declared_intent: decoded[0] === undefined ? null : externalIntentBranch(decoded[0]),
             rejection_reasons: ['Round submission must contain each required actor exactly once.'],
           }],
         }]),
@@ -554,12 +506,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             const reasons = resolution.refusals
               .filter((entry) => entry.branch === attempt)
               .map((entry) => entry.summary);
-            const declared = attempt === 'primary' ? intent : intent.fallback;
-            return reasons.length === 0 ? [] : [{
-              attempt,
-              declared_intent: declared === null ? null : externalIntentBranch(declared),
-              rejection_reasons: reasons,
-            }];
+            return reasons.length === 0 ? [] : [{ attempt, rejection_reasons: reasons }];
           }),
         }]),
       ];

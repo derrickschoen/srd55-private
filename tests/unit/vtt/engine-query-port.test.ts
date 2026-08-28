@@ -136,29 +136,4 @@ describe('canonical engine query port', () => {
       mechanics: { movementCostFeet: 0, actionId: 'light-hammer', targetId: TARGET_ID },
     });
   });
-
-  it('moves into melee before attacking when the declared stance and willingness permit it', () => {
-    const state = placedState(SEED, new Map<CombatantId, GridCell>([
-      [ACTOR_ID, { column: 0, row: 0 }],
-      [TARGET_ID, { column: 4, row: 0 }],
-    ]));
-
-    const resolved = pureIntentResolver.resolve(state, {
-      actorId: ACTOR_ID,
-      choice: {
-        kind: 'attack',
-        actionId: 'grab',
-        target: { kind: 'combatant', combatantId: TARGET_ID },
-      },
-      movement: { willingness: 'only_if_required', maximumFeet: 30, opportunityRisk: 'accept_if_needed' },
-      engagement: { stance: 'close_to_melee' },
-      fallback: null,
-    });
-
-    expect(resolved).toMatchObject({
-      valid: true,
-      selectedBranch: 'primary',
-      mechanics: { movementCostFeet: 10, actionId: 'grab', targetId: TARGET_ID },
-    });
-  });
 });

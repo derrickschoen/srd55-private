@@ -239,7 +239,7 @@ export class PendingDecisionRuleError extends EncounterRuleError {
 
   constructor(readonly code: 'turn_boundary_blocked' | 'unknown_decision') {
     super(code === 'turn_boundary_blocked' ? 'pending_decision_boundary' : 'pending_decision_validation', code === 'turn_boundary_blocked'
-      ? 'The turn cannot advance while a pending decision for this boundary is unresolved.'
+      ? 'The turn cannot advance while a Reaction offer for this boundary is unresolved.'
       : 'The pending decision does not exist.');
   }
 }

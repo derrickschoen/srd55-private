@@ -147,7 +147,6 @@ const actorRefusal = z.object({
   summary: summaryText,
   attempt_rejections: z.array(z.object({
     attempt: z.enum(['primary', 'fallback']),
-    declared_intent: intentBranch.nullable(),
     rejection_reasons: z.array(summaryText).min(1).max(20),
   }).strict()).min(1).max(2),
 }).strict();
