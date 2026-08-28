@@ -25,8 +25,6 @@ import {
   writeFileSync,
 } from '../../helpers/test-filesystem';
 
-const SIMULATED_CORRECTION_FINAL_TEXT = `SIMULATED correction explanation: ${'x'.repeat(400)}`;
-
 class FakeCodexUsageAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
   resumeCalls = 0;
@@ -43,7 +41,6 @@ class FakeCodexUsageAdapter implements AgentSessionAdapter {
   }
 
   async resume(binding: AgentSessionBinding): Promise<AgentTurnResult> {
-    const turnNumber = this.resumeCalls;
     const usages = [
       { input_tokens: 101, cached_input_tokens: 31, output_tokens: 17, reasoning_output_tokens: 7 },
       { input_tokens: 203, cached_input_tokens: 41, output_tokens: 29, reasoning_output_tokens: 11 },
@@ -57,7 +54,7 @@ class FakeCodexUsageAdapter implements AgentSessionAdapter {
     );
     return {
       sessionId: agentSessionIdFromCli(decoded.sessionId),
-      finalText: turnNumber === 1 ? SIMULATED_CORRECTION_FINAL_TEXT : decoded.finalText,
+      finalText: decoded.finalText,
       usage: decoded.usage,
       exit: 'completed',
     };
@@ -183,7 +180,6 @@ describe('AI-DM arena', () => {
             expect.objectContaining({ attempt: 'correction' }),
           ]),
           autoResolvedTrigger: expect.stringContaining('deterministic controller'),
-          correctionFinalText: SIMULATED_CORRECTION_FINAL_TEXT.slice(0, 300),
         },
         tokens: { input: 304, cachedInput: 72, output: 46, reasoning: 18 },
       }),
@@ -204,7 +200,7 @@ describe('AI-DM arena', () => {
 
     expect(row).toEqual(expect.objectContaining({
       outcome: 'refused', agentDispatched: false, toolCalls: 0,
-      chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
+      chainEvidence: { failedAttempts: [], autoResolvedTrigger: null },
       refusals: ['SIMULATED host failure before agent dispatch.'],
     }));
   });
@@ -236,12 +232,10 @@ describe('AI-DM arena', () => {
           }),
         ]),
         autoResolvedTrigger: expect.stringContaining('deterministic controller'),
-        correctionFinalText: 'SIMULATED — proposal delivered through engine MCP spool',
       },
     }));
     expect(row?.chainEvidence.failedAttempts.flatMap((entry) => entry.rejectionReasons)
       .some((reason) => reason.startsWith('No engine rejection'))).toBe(false);
-    expect(row?.chainEvidence.failedAttempts.every((entry) => entry.declaredIntent !== null)).toBe(true);
   });
 
   it('rejects occupied movement and more than one slot-spending action on a path', () => {

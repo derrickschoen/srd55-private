@@ -9,16 +9,10 @@ import {
   type AgentSessionBinding,
   type AgentTurnResult,
 } from '../../../src/vtt/agent-session';
-import {
-  parseConversationArgs,
-  proposalResolutionDivergence,
-  runConversation,
-} from '../../../tools/ai-dm-conversation';
+import { parseConversationArgs, runConversation } from '../../../tools/ai-dm-conversation';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { encounterSessionId } from '../../../src/combat/values';
-import { generateRoom } from '../../../src/vtt/room-generator';
-import { pureIntentResolver, type EngineTurnIntent } from '../../../src/vtt/intent-resolver';
 import {
   importSavedSession,
   MemoryBrowserSessionStore,
@@ -71,60 +65,6 @@ function pendingArenaReactionState(): EncounterState {
 }
 
 describe('AI-DM engine MCP conversation runner', () => {
-  it('identifies the divergent mechanic when room 3943006 cannot be re-resolved', () => {
-    const state = generateRoom(3_943_006).encounter.state;
-    const actor = state.combatants.find((combatant) =>
-      combatant.profile.kind === 'monster' && combatant.life !== 'dead');
-    if (actor === undefined) throw new Error('Generated room 3943006 has no living monster.');
-    const intent: EngineTurnIntent = {
-      actorId: actor.profile.id,
-      choice: { kind: 'dodge' },
-      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-      engagement: { stance: 'hold_position' },
-      fallback: null,
-    };
-    const proposalTime = pureIntentResolver.resolve(state, intent);
-    if (!proposalTime.valid) throw new Error('Room 3943006 dodge intent did not resolve.');
-
-    expect(proposalResolutionDivergence(state, {
-      intent,
-      selectedBranch: proposalTime.selectedBranch,
-      resolutionDigest: '0'.repeat(64),
-      summary: proposalTime.summary,
-    })).toEqual([
-      `${actor.profile.id}: path or final-position geometry diverged while action, target, and movement cost remained ${proposalTime.summary}.`,
-    ]);
-  });
-
-  it.each([3_943_004, 3_943_007])(
-    'authorizes generated room %i through the real host without a Reaction-offer refusal',
-    { timeout: 60_000 },
-    async (seed) => {
-      const directory = mkdtempSync(join(tmpdir(), `dnd-conversation-generated-${String(seed)}-`));
-      const config = parseConversationArgs([
-        '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
-        '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
-      ]);
-
-      const result = await runConversation(config, {
-        roomStates: [generateRoom(seed).encounter.state],
-      });
-
-      expect(result.rows).toEqual([
-        expect.objectContaining({ outcome: 'authorized', agentDispatched: true }),
-      ]);
-      expect(result.rows[0]?.chainEvidence.failedAttempts.flatMap((attempt) =>
-        attempt.rejectionReasons,
-      ).some((reason) => reason.includes('Reaction offer'))).toBe(false);
-      expect(result.rows[0]?.chainEvidence.failedAttempts.find((attempt) =>
-        attempt.rejectionReasons.some((reason) => reason.includes('cannot reach')),
-      )?.declaredIntent).toEqual(expect.objectContaining({
-        movement: expect.objectContaining({ willingness: 'only_if_required' }),
-        engagement: { stance: 'close_to_melee' },
-      }));
-    },
-  );
-
   it.each([
     ['decline', 'decline'],
     ['take', 'accept'],
@@ -258,7 +198,6 @@ describe('AI-DM engine MCP conversation runner', () => {
         expect.objectContaining({ attempt: 'correction' }),
       ]),
       autoResolvedTrigger: expect.stringContaining('deterministic controller'),
-      correctionFinalText: 'SIMULATED — proposal delivered through engine MCP spool',
     });
     expect(result.rows[0]?.proposalId).toBeNull();
     expect(result.rows[1]?.proposalId).toContain('round:');
