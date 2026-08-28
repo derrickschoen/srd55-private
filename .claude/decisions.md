@@ -7,6 +7,16 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D402 — OWNER: game-time comparison adds luna medium and sol low (2026-08-28)
+
+Verbatim: "Looks like we should add Luna medium and sol low to the game
+time comparison." Ruling: the cycle-2 game-time model comparison (D396.1,
+first measurement on the MCP intent interface) runs FIVE arms: luna low,
+luna medium, terra medium, sol low, and the tiered configuration — frozen
+12-room basis, K5, reaction guidance active, pre-registered before the run.
+Sol low enters as the old-interface quality ceiling (8.78/10 at 26.8s);
+luna medium as the mid-effort check on the game-time default.
+
 ## D401 — OWNER: pre-declared reaction guidance from the agent (2026-08-28)
 
 Verbatim: "The agent should give some of them guidance on foreseeable
