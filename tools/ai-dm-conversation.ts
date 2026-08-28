@@ -742,6 +742,14 @@ export async function runConversation(config: ConversationConfig, options: Conve
       state = structuredClone(states[room - 1]!);
       capsuleRevision += 1;
     }
+    const beforeReactionResolution = state.revision;
+    const roomReactionResolution = resolveUnattendedReactionOffers(state, hostRng, {
+      kind: 'unattended',
+      askDefault: config.reactionAskDefault,
+    });
+    state = roomReactionResolution.state;
+    recordAutoResolvedReactions(journal, roomReactionResolution.resolutions);
+    capsuleRevision += state.revision - beforeReactionResolution;
     if (room > 1) {
       const requestId = `request:room-${String(room)}-round-1`;
       const capsule = capsuleFor({ state, runId, branchId, revision: capsuleRevision, requestId, phase: 'initial', room, historyKind: 'room_transition' });
@@ -754,16 +762,6 @@ export async function runConversation(config: ConversationConfig, options: Conve
     }
 
     for (let round = 1; round <= config.rounds; round += 1) {
-      // Keep this inside the round boundary: PC-side pre-round work may leave
-      // an offer that must be resolved before the agent receives its capsule.
-      const beforeReactionResolution = state.revision;
-      const roundReactionResolution = resolveUnattendedReactionOffers(state, hostRng, {
-        kind: 'unattended',
-        askDefault: config.reactionAskDefault,
-      });
-      state = roundReactionResolution.state;
-      recordAutoResolvedReactions(journal, roundReactionResolution.resolutions);
-      capsuleRevision += state.revision - beforeReactionResolution;
       const started = performance.now();
       observedToolCalls = 0;
       const contextRevision = capsuleRevision;
