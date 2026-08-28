@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D400 — OWNER: pi and opencode shelved (2026-08-28)
+
+Verbatim: "If pi or opencode don't work as of now, shelve them for later."
+As of the recorded matrix (docs/perf/2026-08-28-agent-conformance-matrix.md):
+opencode is blocked by upstream anomalyco/opencode#33027 (headless agent
+never receives MCP tools) and pi's model-driven proof failed on the local
+4B model (plumbing itself supervisor-proven). Ruling: SHELVED — their
+adapters and matrix rows stay in the codebase with loud FAILED/UNVERIFIED
+status, no further verification effort now; the AI-DM bridge proceeds on
+the two VERIFIED adapters (codex, claude-code). Revisit at the release
+gate (D399.2 credentials) or when the upstream issue closes.
+
 ## D399.4 — OWNER: local Gemma scoped to opencode/pi MCP verification, then deleted (2026-08-27)
 
 Verbatim: "Only use local Gemma to verify the mcp works for opencode and pi.
