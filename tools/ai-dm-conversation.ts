@@ -112,7 +112,7 @@ export interface ConversationRow {
   readonly projectionRevision: number;
   readonly sessionIdHash: string;
   readonly kbHash: string | null;
-  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused';
+  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null';
   readonly proposalId: string | null;
   readonly timeToFirstAction: number;
   readonly wallPerCreature: number;
@@ -120,6 +120,8 @@ export interface ConversationRow {
   readonly refusals: readonly string[];
   readonly toolCalls: number;
   readonly agentDispatched: boolean;
+  readonly flapRetries: 0 | 1 | 2;
+  readonly serviceNull: boolean;
   readonly chainEvidence: ConversationChainEvidence;
 }
 
@@ -140,6 +142,8 @@ export interface ConversationRunOptions {
   readonly exhaustInitial?: readonly string[];
   readonly invalidInitial?: readonly string[];
   readonly failCorrection?: readonly string[];
+  /** SIMULATED-only count of consecutive service-null primary turns by request key. */
+  readonly flapPrimaryByRequest?: Readonly<Record<string, number>>;
   /** SIMULATED-only host failures before the round reaches the agent lifecycle. */
   readonly failBeforeDispatch?: readonly string[];
   /** SIMULATED-only sticky declarations keyed by `room-N-round-N`. */
@@ -507,6 +511,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   readonly #exhaustInitial: ReadonlySet<string>;
   readonly #invalidInitial: ReadonlySet<string>;
   readonly #failCorrection: ReadonlySet<string>;
+  readonly #remainingPrimaryFlaps: Map<string, number>;
   readonly #reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>;
 
   constructor(
@@ -515,12 +520,14 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     exhaust: readonly string[],
     invalid: readonly string[],
     fail: readonly string[],
+    primaryFlaps: Readonly<Record<string, number>>,
     reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>,
   ) {
     this.kind = kind;
     this.#exhaustInitial = new Set(exhaust);
     this.#invalidInitial = new Set(invalid);
     this.#failCorrection = new Set(fail);
+    this.#remainingPrimaryFlaps = new Map(Object.entries(primaryFlaps));
     this.#reactionGuidanceByRequest = reactionGuidanceByRequest;
   }
 
@@ -534,6 +541,11 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const key = manifest.requestId.replace(/^request:/u, '');
     const roomTransition = invocation.prompt.startsWith('[ROOM_TRANSITION]');
+    const remainingFlaps = this.#remainingPrimaryFlaps.get(key) ?? 0;
+    if (!roomTransition && manifest.phase === 'initial' && remainingFlaps > 0) {
+      this.#remainingPrimaryFlaps.set(key, remainingFlaps - 1);
+      return completedSimulated(binding.sessionId);
+    }
     const submit = !roomTransition && !(manifest.phase === 'initial'
       ? this.#exhaustInitial.has(key) : this.#failCorrection.has(key));
     const driven = await driveScriptedMcp(
@@ -836,6 +848,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
   const simulated = config.dryRun ? new SimulatedConversationAdapter(
     config.cli, config.cwd, options.exhaustInitial ?? [], options.invalidInitial ?? [],
     options.failCorrection ?? [],
+    options.flapPrimaryByRequest ?? {},
     options.reactionGuidanceByRequest ?? {},
   ) : null;
   const adapter = options.adapter ?? simulated ?? resolveAgentAdapter(config.cli, {
@@ -915,12 +928,13 @@ export async function runConversation(config: ConversationConfig, options: Conve
         directory: artifacts, name: `${key}-initial`, state, capsule, room,
         historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
       });
-      let turn: AgentTurnResult | null = null;
       let roundUsage: AgentUsage | null = null;
       let proposalId: string | null = null;
       let outcome: ConversationRow['outcome'] = 'refused';
       const refusals: string[] = [];
       let agentDispatched = false;
+      let flapRetries: 0 | 1 | 2 = 0;
+      let serviceNull = false;
       const failedAttempts: ConversationChainAttemptEvidence[] = [];
       let autoResolvedTrigger: string | null = null;
       try {
@@ -928,16 +942,38 @@ export async function runConversation(config: ConversationConfig, options: Conve
           throw new Error('SIMULATED host failure before agent dispatch.');
         }
         const dispatchBefore = journal.agentSession()?.lastDispatchedRevision ?? null;
+        let proposed: RoundIntentProposalEnvelope | null = null;
+        const toolCallsObserved = (): number =>
+          simulated?.callsByRequest.get(requestId) ?? observedToolCalls;
+        const rejectionsObserved = (): readonly ConversationChainAttemptEvidence[] =>
+          simulated?.rejectionsByRequest.get(requestId) ?? observedRejections;
+        const primaryPrompt = renderEnginePrompt('plan_round', capsule, RULES_SOURCE);
         try {
-          turn = await lifecycle.resumeRound(invocation(
-            config, runId, renderEnginePrompt('plan_round', capsule, RULES_SOURCE), initialLauncher.manifestPath,
-          ), new AbortController().signal);
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            const callsBefore = toolCallsObserved();
+            const rejectionsBefore = rejectionsObserved().length;
+            const retryNote = attempt === 0 ? '' :
+              '[SERVICE_RETRY] The previous turn completed with no engine tool activity and no proposal. Retry the same round now.\n\n';
+            const turn = await lifecycle.resumeRound(invocation(
+              config, runId, `${retryNote}${primaryPrompt}`, initialLauncher.manifestPath,
+            ), new AbortController().signal);
+            roundUsage = addAgentUsage(roundUsage, turn.usage);
+            proposed = takeRoundProposal(initialLauncher.spoolPath);
+            const flapped = turn.exit === 'completed' && proposed === null &&
+              toolCallsObserved() === callsBefore && rejectionsObserved().length === rejectionsBefore;
+            if (!flapped) break;
+            if (attempt === 2) {
+              serviceNull = true;
+              outcome = 'service_null';
+              break;
+            }
+            flapRetries = attempt === 0 ? 1 : 2;
+          }
         } finally {
           const dispatchAfter = journal.agentSession()?.lastDispatchedRevision ?? null;
           agentDispatched = dispatchAfter !== null && dispatchAfter !== dispatchBefore;
         }
-        roundUsage = addAgentUsage(roundUsage, turn.usage);
-        const proposed = takeRoundProposal(initialLauncher.spoolPath);
+        if (!serviceNull) {
         const engineRejections = simulated?.rejectionsByRequest.get(requestId) ?? observedRejections;
         const initial: InitialIntentAttempt = proposed === null ? {
           kind: 'exhausted', requestId, initialProposalId: `exhausted:${requestId}`,
@@ -1099,6 +1135,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
           }
           autoResolvedTrigger = 'The initial primary/fallback chain and single correction were exhausted; the deterministic controller resolved the turn.';
         }
+        }
       } catch (error) {
         refusals.push(error instanceof Error ? error.message : String(error));
       }
@@ -1113,7 +1150,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
         wallPerCreature: wall / Math.max(1, livingMonsterIds(state).length),
         tokens: tokenCounts(roundUsage), refusals,
         toolCalls: simulated?.callsByRequest.get(requestId) ?? observedToolCalls,
-        agentDispatched,
+        agentDispatched, flapRetries, serviceNull,
         chainEvidence: { failedAttempts, autoResolvedTrigger },
       };
       rows.push(row);

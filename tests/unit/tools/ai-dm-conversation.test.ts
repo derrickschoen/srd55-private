@@ -227,6 +227,68 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.tokens).toEqual({ input: 0, cachedInput: 0, output: 0, reasoning: 0 });
   });
 
+  it('retries one SIMULATED service flap and uses the first healthy primary turn', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-flap-recovery-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      flapPrimaryByRequest: { 'room-1-round-1': 1 },
+    });
+
+    expect(result.rows).toEqual([
+      expect.objectContaining({
+        outcome: 'authorized', flapRetries: 1, serviceNull: false,
+        toolCalls: 2, refusals: [],
+      }),
+    ]);
+  });
+
+  it('marks three consecutive SIMULATED service flaps as service_null without exhausting the turn', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-service-null-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      flapPrimaryByRequest: { 'room-1-round-1': 3 },
+    });
+
+    expect(result.rows).toEqual([
+      expect.objectContaining({
+        outcome: 'service_null', flapRetries: 2, serviceNull: true,
+        toolCalls: 0, proposalId: null, refusals: [],
+        chainEvidence: { failedAttempts: [], autoResolvedTrigger: null },
+      }),
+    ]);
+    expect(result.rows[0]?.projectionRevision).toBe(result.rows[0]?.contextRevision);
+  });
+
+  it('does not retry a SIMULATED primary turn that called engine tools before rejection', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-engine-rejection-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      invalidInitial: ['room-1-round-1'],
+    });
+
+    expect(result.rows).toEqual([
+      expect.objectContaining({
+        outcome: 'auto_resolved', flapRetries: 0, serviceNull: false,
+        toolCalls: 4,
+        chainEvidence: expect.objectContaining({
+          failedAttempts: expect.arrayContaining([
+            expect.objectContaining({ attempt: 'primary' }),
+            expect.objectContaining({ attempt: 'fallback' }),
+          ]),
+        }),
+      }),
+    ]);
+  });
+
   it('injects a KB only on cold start and attributes every output row to its bytes', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-kb-'));
     const outPath = join(directory, 'rows.jsonl');
