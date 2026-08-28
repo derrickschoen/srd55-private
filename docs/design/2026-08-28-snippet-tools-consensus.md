@@ -95,3 +95,28 @@ library expressed as workflow snippets) once plays have a substrate.
 
 Next: this doc + the v1 slice go to codex for implementation-readiness
 review (consensus loop, cap 3); the veto fork goes to the owner.
+
+## Amendment (2026-08-28, owner ruling D405.4)
+
+The owner clarified the intent: snippets are PRE-CODED STRATEGIES the
+model chooses from — "focus fire, remove obstacle (spell or grapple),"
+with basic move-and-attack as the existing baseline — distilled from
+approaches the agent repeats often enough to warrant an algorithm. This
+promotes the plays library (design #6/F6) from increment 3 to the v1
+lead:
+
+- v1 = registry substrate (unchanged: zod contracts, content hashes,
+  shadow-run, ast-grep purity, golden capsules) + the `play` snippet kind:
+  {name, applicability(capsule), expand(capsule) -> draft intents in the
+  semantic vocabulary}. Turn context advertises the applicable plays
+  (engine pre-filters; the agent chooses among ~3); one tool
+  (engine.propose_from_play) returns a DRAFT intent set the agent may
+  accept, edit, or discard — proposer boundary intact.
+- Seed plays: formalized basic move-and-attack (play zero), focus_fire,
+  remove_obstacle (spell-or-grapple variant selection inside the play).
+- The distillation loop is the flywheel refinement mechanism: recurring
+  intent patterns mined from arena transcripts become play candidates,
+  measured by adoption rate and per-play outcome, revised or deleted like
+  KB entries.
+- Advisory/auto snippets move to increment 2; veto class remains
+  flywheel-only per D405.3; margins target luna low per D406.
