@@ -23,7 +23,7 @@ import {
 } from '../src/vtt/agent-session';
 import { AgentSessionLifecycle } from '../src/vtt/agent-session-lifecycle';
 import { AGENT_ADAPTER_VERSION, resolveAgentAdapter } from '../src/vtt/agent-adapters';
-import type { RoundIntentProposalEnvelope } from '../src/vtt/engine-envelopes';
+import type { ProposedIntentResolution, RoundIntentProposalEnvelope } from '../src/vtt/engine-envelopes';
 import { engineStateHandle, type EngineStateCapsule } from '../src/vtt/engine-state-capsule';
 import { canonicalEngineQueryPort } from '../src/vtt/engine-query-port';
 import {
@@ -96,12 +96,14 @@ export interface ConversationTokenCounts {
 export interface ConversationChainAttemptEvidence {
   readonly attempt: 'primary' | 'fallback' | 'correction';
   readonly actorId: CombatantId | null;
+  readonly declaredIntent: Readonly<Record<string, unknown>> | null;
   readonly rejectionReasons: readonly string[];
 }
 
 export interface ConversationChainEvidence {
   readonly failedAttempts: readonly ConversationChainAttemptEvidence[];
   readonly autoResolvedTrigger: string | null;
+  readonly correctionFinalText: string | null;
 }
 
 export interface ConversationRow {
@@ -263,9 +265,15 @@ function rejectionEvidence(value: unknown): readonly ConversationChainAttemptEvi
       const attempt = asRecord(attemptValue);
       const reasons = attempt?.['rejection_reasons'];
       const attemptKind = attempt?.['attempt'];
+      const declaredIntent = asRecord(attempt?.['declared_intent']);
       if ((attemptKind !== 'primary' && attemptKind !== 'fallback') ||
         !Array.isArray(reasons) || !reasons.every((reason) => typeof reason === 'string')) return [];
-      return [{ attempt: attemptKind, actorId, rejectionReasons: reasons as readonly string[] }];
+      return [{
+        attempt: attemptKind,
+        actorId,
+        declaredIntent: declaredIntent === null ? null : structuredClone(declaredIntent),
+        rejectionReasons: reasons as readonly string[],
+      }];
     });
   });
   if (attempts.length > 0) return attempts;
@@ -275,7 +283,9 @@ function rejectionEvidence(value: unknown): readonly ConversationChainAttemptEvi
     ['reason', 'summary', 'message', 'text'].flatMap((key) =>
       typeof candidate[key] === 'string' ? [candidate[key] as string] : []),
   ))].filter((reason) => reason.length > 0 && reason.length <= 2_000);
-  return reasons.length === 0 ? [] : [{ attempt: 'primary', actorId: null, rejectionReasons: reasons }];
+  return reasons.length === 0 ? [] : [{
+    attempt: 'primary', actorId: null, declaredIntent: null, rejectionReasons: reasons,
+  }];
 }
 
 function tokenCounts(usage: AgentUsage | null): ConversationTokenCounts {
@@ -285,6 +295,10 @@ function tokenCounts(usage: AgentUsage | null): ConversationTokenCounts {
     output: usage.outputTokens,
     reasoning: usage.reasoningTokens,
   };
+}
+
+function truncateAgentFinalText(value: string): string {
+  return Array.from(value).slice(0, 300).join('');
 }
 
 function addAgentUsage(total: AgentUsage | null, usage: AgentUsage | null): AgentUsage | null {
@@ -626,10 +640,16 @@ async function writeLauncher(input: {
   return { manifestPath, spoolPath };
 }
 
-function selectedChoice(entry: RoundIntentProposalEnvelope['resolutions'][number]): EngineActionChoice {
-  if (entry.selectedBranch === 'primary') return entry.intent.choice;
+function selectedIntentBranch(
+  entry: RoundIntentProposalEnvelope['resolutions'][number],
+): EngineIntentBranch {
+  if (entry.selectedBranch === 'primary') return entry.intent;
   if (entry.intent.fallback === null) throw new Error('Fallback resolution omitted its branch.');
-  return entry.intent.fallback.choice;
+  return entry.intent.fallback;
+}
+
+function selectedChoice(entry: RoundIntentProposalEnvelope['resolutions'][number]): EngineActionChoice {
+  return selectedIntentBranch(entry).choice;
 }
 
 function reduceOne(state: EncounterState, command: EncounterCommand, rng: SerializableRng): EncounterState {
@@ -683,6 +703,32 @@ function resolveUnattendedReactionOffers(
   }
 }
 
+function resolveUnattendedBoundaryDecisions(
+  initialState: EncounterState,
+  rng: SerializableRng,
+  policy: ReactionOfferHostPolicy,
+  guidance: ReactionGuidanceDeclaration | null,
+): {
+  readonly state: EncounterState;
+  readonly fallbackResolutions: readonly AutoResolvedReactionOffer[];
+  readonly guidedResolutions: readonly GuidedReactionResolution[];
+} {
+  let state = initialState;
+  const fallbackResolutions: AutoResolvedReactionOffer[] = [];
+  const guidedResolutions: GuidedReactionResolution[] = [];
+  for (;;) {
+    const reactions = resolveUnattendedReactionOffers(state, rng, policy, guidance);
+    state = reactions.state;
+    fallbackResolutions.push(...reactions.fallbackResolutions);
+    guidedResolutions.push(...reactions.guidedResolutions);
+    const deathSave = state.pendingDecisions.find((decision) => decision.kind === 'death_save');
+    if (deathSave === undefined) return { state, fallbackResolutions, guidedResolutions };
+    state = reduceOne(state, {
+      type: 'resolve_pending_decision', decisionId: deathSave.id, optionId: 'roll',
+    }, rng);
+  }
+}
+
 function recordAutoResolvedReactions(
   journal: EncounterSessionJournal,
   resolutions: {
@@ -701,13 +747,17 @@ function recordAutoResolvedReactions(
   }
 }
 
-function advanceToActor(state: EncounterState, actorId: CombatantId, rng: SerializableRng): EncounterState {
+function advanceToActor(
+  state: EncounterState,
+  actorId: CombatantId,
+  reduce: (state: EncounterState, command: EncounterCommand) => EncounterState,
+): EncounterState {
   let current = state;
-  if (current.initiative.length === 0) current = reduceOne(current, { type: 'roll_initiative' }, rng);
+  if (current.initiative.length === 0) current = reduce(current, { type: 'roll_initiative' });
   for (let index = 0; current.activeCombatant !== actorId && index < current.combatants.length * 3; index += 1) {
     const active = current.activeCombatant;
     if (active === null) throw new Error('Initiative has no active combatant.');
-    current = reduceOne(current, { type: 'end_turn', actor: active }, rng);
+    current = reduce(current, { type: 'end_turn', actor: active });
   }
   if (current.activeCombatant !== actorId) throw new Error(`Could not advance initiative to ${actorId}.`);
   return current;
@@ -731,12 +781,12 @@ function applyResolvedMechanics(
   const guidedResolutions: GuidedReactionResolution[] = [];
   const reduce = (current: EncounterState, command: EncounterCommand): EncounterState => {
     const reduced = reduceOne(current, command, rng);
-    const resolved = resolveUnattendedReactionOffers(reduced, rng, reactionPolicy, reactionGuidance);
+    const resolved = resolveUnattendedBoundaryDecisions(reduced, rng, reactionPolicy, reactionGuidance);
     fallbackResolutions.push(...resolved.fallbackResolutions);
     guidedResolutions.push(...resolved.guidedResolutions);
     return resolved.state;
   };
-  let current = advanceToActor(state, mechanics.actorId, rng);
+  let current = advanceToActor(state, mechanics.actorId, reduce);
   if (mechanics.path.length > 0) {
     current = reduce(current, {
       type: 'move', actor: mechanics.actorId, path: mechanics.path, cause: 'voluntary',
@@ -771,28 +821,67 @@ function applyResolvedMechanics(
   };
 }
 
-function authorizedMechanics(state: EncounterState, proposal: RoundIntentProposalEnvelope): readonly {
-  readonly mechanics: ResolvedIntentMechanics;
-  readonly choice: EngineActionChoice;
-  readonly primaryRejectionReasons: readonly string[];
-}[] | null {
+export function proposalResolutionDivergence(
+  state: EncounterState,
+  entry: ProposedIntentResolution,
+): readonly string[] {
+  const checked = pureIntentResolver.resolve(state, entry.intent);
+  if (!checked.valid) {
+    return [`${entry.intent.actorId}: proposal-time resolution was valid, but authoritative resolution refused it: ${checked.refusals.map((refusal) => refusal.summary).join('; ')}`];
+  }
+  if (checked.selectedBranch !== entry.selectedBranch) {
+    return [`${entry.intent.actorId}: selected branch diverged from ${entry.selectedBranch} to ${checked.selectedBranch}.`];
+  }
+  if (checked.resolutionDigest === entry.resolutionDigest) return [];
+  return checked.summary === entry.summary
+    ? [`${entry.intent.actorId}: path or final-position geometry diverged while action, target, and movement cost remained ${checked.summary}.`]
+    : [`${entry.intent.actorId}: resolved action, target, or movement cost diverged; proposal was "${entry.summary}" and authoritative resolution was "${checked.summary}".`];
+}
+
+function authorizedMechanics(state: EncounterState, proposal: RoundIntentProposalEnvelope): {
+  readonly entries: readonly {
+    readonly mechanics: ResolvedIntentMechanics;
+    readonly choice: EngineActionChoice;
+    readonly primaryDeclaredIntent: Readonly<Record<string, unknown>>;
+    readonly selectedDeclaredIntent: Readonly<Record<string, unknown>>;
+    readonly primaryRejectionReasons: readonly string[];
+  }[] | null;
+  readonly divergences: readonly ConversationChainAttemptEvidence[];
+} {
+  const divergences = proposal.resolutions.flatMap<ConversationChainAttemptEvidence>((entry) => {
+    const reasons = proposalResolutionDivergence(state, entry);
+    return reasons.length === 0 ? [] : [{
+      attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
+      actorId: entry.intent.actorId,
+      declaredIntent: externalBranch(selectedIntentBranch(entry)),
+      rejectionReasons: reasons,
+    }];
+  });
+  if (divergences.length > 0) return { entries: null, divergences };
   const resolved = proposal.resolutions.map((entry) => {
     const checked = pureIntentResolver.resolve(state, entry.intent);
-    if (!checked.valid || checked.selectedBranch !== entry.selectedBranch ||
-      checked.resolutionDigest !== entry.resolutionDigest) return null;
+    if (!checked.valid) return null;
     const choice = selectedChoice(entry);
+    const declared = selectedIntentBranch(entry);
     return choice.kind === 'cast_spell' || choice.kind === 'use_action'
       ? null : {
           mechanics: checked.mechanics,
           choice,
+          primaryDeclaredIntent: externalBranch(entry.intent),
+          selectedDeclaredIntent: externalBranch(declared),
           primaryRejectionReasons: checked.refusals.map((refusal) => refusal.summary),
         };
   });
-  return resolved.some((entry) => entry === null) ? null : resolved as readonly {
-    readonly mechanics: ResolvedIntentMechanics;
-    readonly choice: EngineActionChoice;
-    readonly primaryRejectionReasons: readonly string[];
-  }[];
+  return {
+    entries: resolved.some((entry) => entry === null) ? null : resolved as readonly {
+      readonly mechanics: ResolvedIntentMechanics;
+      readonly choice: EngineActionChoice;
+      readonly primaryDeclaredIntent: Readonly<Record<string, unknown>>;
+      readonly selectedDeclaredIntent: Readonly<Record<string, unknown>>;
+      readonly primaryRejectionReasons: readonly string[];
+    }[],
+    divergences,
+  };
 }
 
 function invocation(
@@ -923,6 +1012,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let agentDispatched = false;
       const failedAttempts: ConversationChainAttemptEvidence[] = [];
       let autoResolvedTrigger: string | null = null;
+      let correctionFinalText: string | null = null;
       try {
         if (options.failBeforeDispatch?.includes(key) === true) {
           throw new Error('SIMULATED host failure before agent dispatch.');
@@ -946,8 +1036,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
               entry.actorId === null || entry.actorId === actorId);
             if (actorRejections.length > 0) failedAttempts.push(...actorRejections);
             else failedAttempts.push(
-              { attempt: 'primary', actorId, rejectionReasons: ['No engine rejection was returned because the agent submitted no initial proposal.'] },
-              { attempt: 'fallback', actorId, rejectionReasons: ['No engine rejection was returned because the agent submitted no fallback proposal.'] },
+              { attempt: 'primary', actorId, declaredIntent: null, rejectionReasons: ['No engine rejection was returned because the agent submitted no initial proposal.'] },
+              { attempt: 'fallback', actorId, declaredIntent: null, rejectionReasons: ['No engine rejection was returned because the agent submitted no fallback proposal.'] },
             );
             return { actorId, fallbackResult: 'absent' };
           }),
@@ -969,19 +1059,26 @@ export async function runConversation(config: ConversationConfig, options: Conve
               failedAttempts.push({
                 attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
                 actorId: null,
+                declaredIntent: proposal.resolutions[0] === undefined
+                  ? null : externalBranch(selectedIntentBranch(proposal.resolutions[0])),
                 rejectionReasons: ['Proposal binding does not match the authoritative run, branch, request, revision, digest, and state handle.'],
               });
               return 'invalidated';
             }
-            const mechanics = authorizedMechanics(state, proposal);
-            if (mechanics === null) {
-              failedAttempts.push({
-                attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
-                actorId: null,
-                rejectionReasons: ['The engine could not reproduce the proposal resolution against authoritative state.'],
-              });
+            const checkedProposal = authorizedMechanics(state, proposal);
+            if (checkedProposal.entries === null) {
+              failedAttempts.push(...(checkedProposal.divergences.length > 0
+                ? checkedProposal.divergences
+                : [{
+                    attempt: proposal.phase === 'correction' ? 'correction' as const : 'primary' as const,
+                    actorId: null,
+                    declaredIntent: proposal.resolutions[0] === undefined
+                      ? null : externalBranch(selectedIntentBranch(proposal.resolutions[0])),
+                    rejectionReasons: ['The engine could not authorize this proposal mechanic.'],
+                  }]));
               return 'invalid';
             }
+            const mechanics = checkedProposal.entries;
             const trialRng = restoreMulberry32(hostRng.snapshot());
             let trialState = state;
             const effectiveReactionGuidance = proposal.reactionGuidance ?? journal.reactionGuidance();
@@ -994,6 +1091,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
                 if (entry.primaryRejectionReasons.length > 0) {
                   failedAttempts.push({
                     attempt: 'primary', actorId: entry.mechanics.actorId,
+                    declaredIntent: entry.primaryDeclaredIntent,
                     rejectionReasons: entry.primaryRejectionReasons,
                   });
                 }
@@ -1017,6 +1115,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
               failedAttempts.push({
                 attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
                 actorId: null,
+                declaredIntent: mechanics[0]?.selectedDeclaredIntent ?? null,
                 rejectionReasons: [error instanceof Error ? error.message : String(error)],
               });
               return 'invalid';
@@ -1065,6 +1164,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
               resumeCorrection: async (correctionInvocation: AgentInvocation, signal: AbortSignal) => {
                 const correctionTurn = await lifecycle.resumeCorrection(correctionInvocation, signal);
                 roundUsage = addAgentUsage(roundUsage, correctionTurn.usage);
+                correctionFinalText = correctionTurn.finalText;
                 return correctionTurn;
               },
             },
@@ -1092,13 +1192,19 @@ export async function runConversation(config: ConversationConfig, options: Conve
             !failedAttempts.some((entry) => entry.attempt === 'correction')) {
             failedAttempts.push({
               attempt: 'correction', actorId: null,
+              declaredIntent: null,
               rejectionReasons: [correctionFailure.result === 'no_response'
                 ? 'No engine rejection was returned because the correction dispatch submitted no proposal.'
                 : `The engine rejected the correction as ${correctionFailure.result}.`],
             });
           }
+          correctionFinalText = correctionFailure?.kind === 'intent_correction_failed' &&
+            correctionFailure.result === 'no_response' && correctionFinalText !== null
+            ? truncateAgentFinalText(correctionFinalText)
+            : null;
           autoResolvedTrigger = 'The initial primary/fallback chain and single correction were exhausted; the deterministic controller resolved the turn.';
         }
+        if (coordinated.kind !== 'auto_resolved') correctionFinalText = null;
       } catch (error) {
         refusals.push(error instanceof Error ? error.message : String(error));
       }
@@ -1114,7 +1220,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
         tokens: tokenCounts(roundUsage), refusals,
         toolCalls: simulated?.callsByRequest.get(requestId) ?? observedToolCalls,
         agentDispatched,
-        chainEvidence: { failedAttempts, autoResolvedTrigger },
+        chainEvidence: { failedAttempts, autoResolvedTrigger, correctionFinalText },
       };
       rows.push(row);
       await appendFile(config.outPath, `${JSON.stringify(row)}\n`, 'utf8');
