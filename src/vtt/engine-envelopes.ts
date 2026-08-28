@@ -9,6 +9,7 @@ import {
   type ReadonlyStateCapsuleSource,
 } from './engine-state-capsule';
 import type { EngineTurnIntent } from './intent-resolver';
+import type { ReactionGuidanceDeclaration } from './reaction-guidance';
 
 export interface EngineProposalBinding {
   readonly runId: EncounterSessionId;
@@ -32,12 +33,14 @@ export interface IntentProposalEnvelope extends EngineProposalBinding {
   readonly kind: 'intent_proposal';
   readonly proposalId: string;
   readonly resolution: ProposedIntentResolution;
+  readonly reactionGuidance: ReactionGuidanceDeclaration | null;
 }
 
 export interface RoundIntentProposalEnvelope extends EngineProposalBinding {
   readonly kind: 'round_intent_proposal';
   readonly proposalId: string;
   readonly resolutions: readonly ProposedIntentResolution[];
+  readonly reactionGuidance: ReactionGuidanceDeclaration | null;
 }
 
 export type EngineProposalEnvelope =

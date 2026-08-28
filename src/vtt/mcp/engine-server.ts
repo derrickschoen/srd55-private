@@ -21,6 +21,7 @@ import {
 } from '../engine-state-capsule';
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
 import type { EngineActionChoice, EngineEngagement, EngineMovementPreference, EngineTurnIntent, PureIntentResolver } from '../intent-resolver';
+import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
 import {
   createMcpHandler,
   type McpHandler,
@@ -168,6 +169,24 @@ function decodeBranch(value: unknown): Omit<EngineTurnIntent, 'actorId' | 'fallb
   const input = record(value, 'intent branch');
   return { choice: decodeChoice(input['choice']), movement: decodeMovement(input['movement']), engagement: decodeEngagement(input['engagement']) };
 }
+function decodeReactionTriggerGuidance(value: unknown): ReactionTriggerGuidance {
+  const input = record(value, 'reaction trigger guidance');
+  return Object.fromEntries(Object.entries(input)) as ReactionTriggerGuidance;
+}
+function decodeReactionGuidance(value: unknown): ReactionGuidanceDeclaration {
+  const input = record(value, 'reaction_guidance');
+  const actorValues = input['actors'];
+  return {
+    sideWide: input['side_wide'] === undefined ? null : decodeReactionTriggerGuidance(input['side_wide']),
+    actors: actorValues === undefined ? [] : (actorValues as readonly unknown[]).map((value) => {
+      const actor = record(value, 'actor reaction guidance');
+      return {
+        actorId: combatantId(stringField(actor, 'actor_id')),
+        triggers: decodeReactionTriggerGuidance(actor['triggers']),
+      };
+    }),
+  };
+}
 function decodeIntent(value: unknown): EngineTurnIntent {
   const input = record(value, 'intent');
   const fallback = input['fallback'];
@@ -272,7 +291,7 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_intent', capsul
   });
   const uriBase = `engine://run/${encodeURIComponent(capsule.runId)}`;
   const fixed = kind === 'plan_round'
-    ? 'Use engine.get_turn_context, then engine.submit_round_intents once for the complete required actor set. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
+    ? 'Use engine.get_turn_context, then engine.submit_round_intents once for the complete required actor set. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
     : 'Correct the complete refused intent request once. No fallback remains after this correction; correction fallback must be null.';
   return [fixed, `Turn resource: ${uriBase}/turn/current`, `Intent schema: ${uriBase}/schema/intent-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: capsule.request, voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
 }
@@ -471,15 +490,34 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         : decoded;
       const resolved = canonical.map((intent) => ({ intent, resolution: intents.resolve(state, intent) }));
       const invalid = [
-        ...(actorSetValid ? [] : [{ actor_id: request.actors[0], codes: ['ROUND_ACTOR_SET_MISMATCH'], summary: 'Round submission must contain each required actor exactly once.' }]),
-        ...resolved.flatMap(({ intent, resolution }) => resolution.valid ? [] : [{ actor_id: intent.actorId, codes: resolution.refusals.map((entry) => entry.code), summary: resolution.refusals.map((entry) => entry.summary).join('; ') }]),
+        ...(actorSetValid ? [] : [{
+          actor_id: request.actors[0], codes: ['ROUND_ACTOR_SET_MISMATCH'],
+          summary: 'Round submission must contain each required actor exactly once.',
+          attempt_rejections: [{
+            attempt: 'primary' as const,
+            rejection_reasons: ['Round submission must contain each required actor exactly once.'],
+          }],
+        }]),
+        ...resolved.flatMap(({ intent, resolution }) => resolution.valid ? [] : [{
+          actor_id: intent.actorId,
+          codes: resolution.refusals.map((entry) => entry.code),
+          summary: resolution.refusals.map((entry) => entry.summary).join('; '),
+          attempt_rejections: (['primary', 'fallback'] as const).flatMap((attempt) => {
+            const reasons = resolution.refusals
+              .filter((entry) => entry.branch === attempt)
+              .map((entry) => entry.summary);
+            return reasons.length === 0 ? [] : [{ attempt, rejection_reasons: reasons }];
+          }),
+        }]),
       ];
       if (invalid.length > 0) return { status: 'rejected', state_ref: externalStateRef(capsule), actor_refusals: invalid, correction_guidance: correctionGuidance(capsule) };
       const key = stringField(input, 'idempotency_key');
+      const reactionGuidance = input['reaction_guidance'] === undefined
+        ? null : decodeReactionGuidance(input['reaction_guidance']);
       return idempotent(key, input, () => {
         const valid = resolved.flatMap(({ intent, resolution }) => resolution.valid ? [{ intent, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
-        const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid })).slice(0, 48)}`;
-        submitEngineProposal(feed, proposals, { kind: 'round_intent_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid });
+        const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
+        submitEngineProposal(feed, proposals, { kind: 'round_intent_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance });
         return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.intent.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
       });
     }
@@ -490,9 +528,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const resolution = intents.resolve(state, intent);
       if (!resolution.valid) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
       const key = stringField(input, 'idempotency_key');
+      const reactionGuidance = input['reaction_guidance'] === undefined
+        ? null : decodeReactionGuidance(input['reaction_guidance']);
       return idempotent(key, input, () => {
-        const proposalId = `intent:${sha256(canonicalJson({ digest: capsule.digest, key, intent })).slice(0, 48)}`;
-        submitEngineProposal(feed, proposals, { kind: 'intent_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolution: { intent, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary } });
+        const proposalId = `intent:${sha256(canonicalJson({ digest: capsule.digest, key, intent, reactionGuidance })).slice(0, 48)}`;
+        submitEngineProposal(feed, proposals, { kind: 'intent_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolution: { intent, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }, reactionGuidance });
         return { status: 'proposed', proposal_id: proposalId, state_ref: externalStateRef(capsule), selected_branch: resolution.selectedBranch, resolution_summary: resolutionPreview(resolution) };
       });
     }

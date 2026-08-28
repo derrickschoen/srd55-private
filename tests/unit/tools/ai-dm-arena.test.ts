@@ -87,6 +87,10 @@ describe('AI-DM arena', () => {
     expect(rows.every((row) =>
       row.outcome === 'authorized' && row.refusals.length === 0 &&
       row.projectionRevision > row.contextRevision)).toBe(true);
+    expect(rows.every((row) => row.agentDispatched)).toBe(true);
+    expect(rows.every((row) => row.chainEvidence.autoResolvedTrigger === null)).toBe(true);
+    expect(rows.every((row) => row.chainEvidence.failedAttempts.every((attempt) =>
+      attempt.rejectionReasons.length > 0))).toBe(true);
     expect(rows[1]?.contextRevision).toBe(rows[0]?.projectionRevision);
     const kbHash = createHash('sha256').update(Buffer.from(kbText, 'utf8')).digest('hex');
     expect(rows.every((row) => row.kbHash === kbHash)).toBe(true);
@@ -168,12 +172,70 @@ describe('AI-DM arena', () => {
       expect.objectContaining({
         outcome: 'auto_resolved',
         kbHash: null,
+        agentDispatched: true,
+        chainEvidence: {
+          failedAttempts: expect.arrayContaining([
+            expect.objectContaining({ attempt: 'primary' }),
+            expect.objectContaining({ attempt: 'fallback' }),
+            expect.objectContaining({ attempt: 'correction' }),
+          ]),
+          autoResolvedTrigger: expect.stringContaining('deterministic controller'),
+        },
         tokens: { input: 304, cachedInput: 72, output: 46, reasoning: 18 },
       }),
     ]);
     expect(JSON.parse(readFileSync(outPath, 'utf8').trim())).toEqual(
       expect.objectContaining({ tokens: { input: 304, cachedInput: 72, output: 46, reasoning: 18 } }),
     );
+  });
+
+  it('distinguishes a SIMULATED zero-dispatch round from an agent planning failure', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-zero-dispatch-'));
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'), '--dry-run',
+    ]);
+
+    const [row] = await runArena(config, { failBeforeDispatch: ['room-1-round-1'] });
+
+    expect(row).toEqual(expect.objectContaining({
+      outcome: 'refused', agentDispatched: false, toolCalls: 0,
+      chainEvidence: { failedAttempts: [], autoResolvedTrigger: null },
+      refusals: ['SIMULATED host failure before agent dispatch.'],
+    }));
+  });
+
+  it('records the engine actual primary and fallback rejection strings in chain evidence', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-chain-evidence-'));
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'), '--dry-run',
+    ]);
+
+    const [row] = await runArena(config, { invalidInitial: ['room-1-round-1'] });
+
+    expect(row).toEqual(expect.objectContaining({
+      outcome: 'auto_resolved', agentDispatched: true,
+      chainEvidence: {
+        failedAttempts: expect.arrayContaining([
+          expect.objectContaining({
+            attempt: 'primary',
+            rejectionReasons: expect.arrayContaining([
+              expect.stringContaining('spell intent resolution is not yet available'),
+            ]),
+          }),
+          expect.objectContaining({
+            attempt: 'fallback',
+            rejectionReasons: expect.arrayContaining([
+              expect.stringContaining('spell intent resolution is not yet available'),
+            ]),
+          }),
+        ]),
+        autoResolvedTrigger: expect.stringContaining('deterministic controller'),
+      },
+    }));
+    expect(row?.chainEvidence.failedAttempts.flatMap((entry) => entry.rejectionReasons)
+      .some((reason) => reason.startsWith('No engine rejection'))).toBe(false);
   });
 
   it('rejects occupied movement and more than one slot-spending action on a path', () => {

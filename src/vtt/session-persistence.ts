@@ -9,6 +9,7 @@ import {
   encounterConclusionAfter,
   isEncounterConfig,
   isEncounterPhase,
+  REACTION_KINDS,
   reduceEncounter,
   type EncounterState,
   type ReactionKind,
@@ -68,10 +69,23 @@ import {
 import type { AdjudicationEnvelope } from './mcp/engine-server';
 import type { TurnExhaustionTransition } from './turn-exhaustion-coordinator';
 import type { AutoResolvedReactionOffer } from './reaction-offer-host-policy';
+import {
+  REACTION_GUIDANCE_INSTRUCTIONS,
+  type GuidedReactionResolution,
+  type ReactionGuidanceDeclaration,
+  type ReactionGuidanceInstruction,
+} from './reaction-guidance';
 
 export type EngineHostTransition =
   | TurnExhaustionTransition
   | ({ readonly kind: 'unattended_reaction_auto_resolved' } & AutoResolvedReactionOffer)
+  | {
+      readonly kind: 'reaction_guidance_replaced';
+      readonly requestId: string;
+      readonly proposalId: string;
+      readonly guidance: ReactionGuidanceDeclaration;
+    }
+  | ({ readonly kind: 'reaction_guidance_auto_resolved' } & GuidedReactionResolution)
   | { readonly kind: 'engine_adjudication_requested'; readonly request: AdjudicationEnvelope }
   | {
       readonly kind: 'engine_adjudication_resolved';
@@ -182,6 +196,8 @@ export const SESSION_TRANSITION_KINDS = [
   'intent_auto_resolved',
   'intent_auto_resolution_failed',
   'unattended_reaction_auto_resolved',
+  'reaction_guidance_replaced',
+  'reaction_guidance_auto_resolved',
   'engine_adjudication_requested',
   'engine_adjudication_resolved',
   'dm_takeover_started',
@@ -564,6 +580,24 @@ function validActorFailures(value: unknown): value is Extract<
     new Set(value.map((entry) => String(Reflect.get(entry, 'actorId')))).size === value.length;
 }
 
+function validReactionTriggerGuidance(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length > 0 && keys.every((key) =>
+    REACTION_KINDS.includes(key as ReactionKind) &&
+    REACTION_GUIDANCE_INSTRUCTIONS.includes(value[key] as ReactionGuidanceInstruction));
+}
+
+function validReactionGuidance(value: unknown): value is ReactionGuidanceDeclaration {
+  if (!isRecord(value) || !hasExactlyKeys(value, ['sideWide', 'actors']) ||
+    (value.sideWide !== null && !validReactionTriggerGuidance(value.sideWide)) ||
+    !Array.isArray(value.actors) || value.actors.length > 50 ||
+    !value.actors.every((entry) => isRecord(entry) && hasExactlyKeys(entry, ['actorId', 'triggers']) &&
+      typeof entry.actorId === 'string' && validReactionTriggerGuidance(entry.triggers))) return false;
+  const actorIds = value.actors.map((entry) => String(Reflect.get(entry, 'actorId')));
+  return new Set(actorIds).size === actorIds.length && (value.sideWide !== null || value.actors.length > 0);
+}
+
 function decodeTransition(value: unknown): SessionTransition {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     throw new TypeError('Malformed VTT session transition.');
@@ -676,6 +710,27 @@ function decodeTransition(value: unknown): SessionTransition {
         )
       ) {
         return value as unknown as Extract<SessionTransition, { readonly kind: 'unattended_reaction_auto_resolved' }>;
+      }
+      break;
+    case 'reaction_guidance_replaced':
+      if (hasExactlyKeys(value, ['kind', 'requestId', 'proposalId', 'guidance']) &&
+        typeof value.requestId === 'string' && typeof value.proposalId === 'string' &&
+        validReactionGuidance(value.guidance)) {
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'reaction_guidance_replaced' }>;
+      }
+      break;
+    case 'reaction_guidance_auto_resolved':
+      if (hasExactlyKeys(value, [
+        'kind', 'decisionId', 'combatant', 'reactionKind', 'instruction', 'scope', 'resolution',
+      ]) && typeof value.decisionId === 'string' && typeof value.combatant === 'string' &&
+        REACTION_KINDS.includes(value.reactionKind as ReactionKind) &&
+        REACTION_GUIDANCE_INSTRUCTIONS.includes(value.instruction as ReactionGuidanceInstruction) &&
+        isRecord(value.scope) && (
+          hasExactlyKeys(value.scope, ['kind']) && value.scope.kind === 'side_wide' ||
+          hasExactlyKeys(value.scope, ['kind', 'actorId']) && value.scope.kind === 'actor' &&
+            value.scope.actorId === value.combatant
+        ) && (value.resolution === 'accept' || value.resolution === 'decline')) {
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'reaction_guidance_auto_resolved' }>;
       }
       break;
     case 'engine_adjudication_requested':
@@ -1388,6 +1443,8 @@ export function replaySessionRevisions(
       case 'intent_auto_resolved':
       case 'intent_auto_resolution_failed':
       case 'unattended_reaction_auto_resolved':
+      case 'reaction_guidance_replaced':
+      case 'reaction_guidance_auto_resolved':
       case 'engine_adjudication_requested':
       case 'engine_adjudication_resolved':
       case 'dm_takeover_started':
@@ -1502,6 +1559,25 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
 
   agentSession(): AgentSessionBinding | null {
     return structuredClone(this.#latest().agentSession);
+  }
+
+  reactionGuidance(): ReactionGuidanceDeclaration | null {
+    const transition = [...this.history()].reverse().find((entry) =>
+      !entry.void && entry.transition.kind === 'reaction_guidance_replaced')?.transition;
+    return transition?.kind === 'reaction_guidance_replaced'
+      ? structuredClone(transition.guidance)
+      : null;
+  }
+
+  replaceReactionGuidance(
+    requestId: string,
+    proposalId: string,
+    guidance: ReactionGuidanceDeclaration,
+  ): void {
+    this.recordHostTransition({
+      kind: 'reaction_guidance_replaced', requestId, proposalId,
+      guidance: structuredClone(guidance),
+    });
   }
 
   startAgentSession(input: Pick<AgentSessionBinding, 'cli' | 'sessionId' | 'adapterVersion'>): AgentSessionBinding {

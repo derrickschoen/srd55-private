@@ -86,7 +86,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       });
 
       expect(result.rows).toEqual([
-        expect.objectContaining({ outcome: 'authorized', refusals: [] }),
+        expect.objectContaining({ outcome: 'authorized', refusals: [], agentDispatched: true }),
       ]);
       expect(store.revisions(encounterSessionId('encounter:ai-dm-conversation'))
         .map((revision) => revision.transition))
@@ -103,6 +103,68 @@ describe('AI-DM engine MCP conversation runner', () => {
         .toContain('unattended_reaction_auto_resolved');
     },
   );
+
+  it('restores sticky side-wide guidance across a room transition and resolves a pending offer before dispatch', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-sticky-reaction-'));
+    const store = new MemoryBrowserSessionStore();
+    const config = parseConversationArgs([
+      '--rooms', '2', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
+      '--reaction-ask-default', 'decline',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [pendingArenaReactionState(), pendingArenaReactionState()],
+      store,
+      restoreAfterRound: 1,
+      reactionGuidanceByRequest: {
+        'room-1-round-1': { sideWide: { opportunity_attack: 'take' }, actors: [] },
+      },
+    });
+
+    expect(result.restoredMidRun).toBe(true);
+    expect(result.rows.map((row) => row.outcome)).toEqual(['authorized', 'authorized']);
+    expect(result.rows.every((row) => row.agentDispatched)).toBe(true);
+    const restoredStore = new MemoryBrowserSessionStore();
+    importSavedSession(restoredStore, result.journalExport);
+    const transitions = restoredStore.revisions(encounterSessionId('encounter:ai-dm-conversation'))
+      .map((revision) => revision.transition);
+    expect(transitions).toContainEqual(expect.objectContaining({
+      kind: 'reaction_guidance_replaced',
+      guidance: { sideWide: { opportunity_attack: 'take' }, actors: [] },
+    }));
+    expect(transitions).toContainEqual(expect.objectContaining({
+      kind: 'reaction_guidance_auto_resolved',
+      reactionKind: 'opportunity_attack', instruction: 'take',
+      scope: { kind: 'side_wide' }, resolution: 'accept',
+    }));
+  });
+
+  it('falls back to unattended toggle policy when sticky guidance does not cover the pending trigger', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-uncovered-reaction-'));
+    const store = new MemoryBrowserSessionStore();
+    const config = parseConversationArgs([
+      '--rooms', '2', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
+      '--reaction-ask-default', 'decline',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [pendingArenaReactionState(), pendingArenaReactionState()],
+      store,
+      reactionGuidanceByRequest: {
+        'room-1-round-1': { sideWide: { hit_by_attack: 'take' }, actors: [] },
+      },
+    });
+
+    expect(result.rows[1]).toEqual(expect.objectContaining({ outcome: 'authorized', agentDispatched: true }));
+    expect(store.revisions(encounterSessionId('encounter:ai-dm-conversation'))
+      .map((revision) => revision.transition))
+      .toContainEqual(expect.objectContaining({
+        kind: 'unattended_reaction_auto_resolved', reactionKind: 'opportunity_attack',
+        configuredPolicy: 'ask', askDefault: 'decline', resolution: 'decline',
+      }));
+  });
 
   it('keeps one SIMULATED session across two rooms, one correction, and a browser restore', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-'));
@@ -128,6 +190,15 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows.every((row) => row.refusals.length === 0)).toBe(true);
     expect(new Set(result.rows.map((row) => row.sessionIdHash)).size).toBe(1);
     expect(result.rows[0]?.toolCalls).toBe(3);
+    expect(result.rows[0]?.agentDispatched).toBe(true);
+    expect(result.rows[0]?.chainEvidence).toEqual({
+      failedAttempts: expect.arrayContaining([
+        expect.objectContaining({ attempt: 'primary' }),
+        expect.objectContaining({ attempt: 'fallback' }),
+        expect.objectContaining({ attempt: 'correction' }),
+      ]),
+      autoResolvedTrigger: expect.stringContaining('deterministic controller'),
+    });
     expect(result.rows[0]?.proposalId).toBeNull();
     expect(result.rows[1]?.proposalId).toContain('round:');
     expect(result.rows[0]?.projectionRevision).toBeGreaterThan(result.rows[0]?.contextRevision ?? 0);

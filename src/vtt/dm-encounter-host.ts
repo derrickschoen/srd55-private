@@ -95,6 +95,7 @@ import {
   unattendedReactionOfferResolution,
   type ReactionOfferHostPolicy,
 } from './reaction-offer-host-policy';
+import { guidedPendingReactionResolution } from './reaction-guidance';
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -583,29 +584,46 @@ export class DmEncounterHost {
     let resolved = 0;
     for (;;) {
       const state = this.#coordinator.state();
-      const selected = state.pendingDecisions.flatMap((decision) => {
-        if (decision.kind !== 'reaction_offer') return [];
+      let selected:
+        | { readonly kind: 'guidance'; readonly resolution: import('./reaction-guidance').GuidedReactionResolution }
+        | { readonly kind: 'fallback'; readonly resolution: import('./reaction-offer-host-policy').AutoResolvedReactionOffer }
+        | undefined;
+      for (const decision of state.pendingDecisions) {
+        if (decision.kind !== 'reaction_offer') continue;
+        const guided = guidedPendingReactionResolution(
+          state,
+          decision,
+          this.#registry.kindFor(decision.combatant),
+          this.#reactionOfferPolicy,
+          this.#journal.reactionGuidance(),
+        );
+        if (guided !== null) {
+          selected = { kind: 'guidance', resolution: guided };
+          break;
+        }
         const resolution = unattendedReactionOfferResolution(
           state,
           decision,
           this.#registry.kindFor(decision.combatant),
           this.#reactionOfferPolicy,
         );
-        return resolution === null ? [] : [resolution];
-      })[0];
+        if (resolution !== null) {
+          selected = { kind: 'fallback', resolution };
+          break;
+        }
+      }
       if (selected === undefined) return resolved;
       const result = this.#coordinator.resolvePendingDecision({
         type: 'resolve_pending_decision',
-        decisionId: selected.decisionId,
-        optionId: selected.resolution,
+        decisionId: selected.resolution.decisionId,
+        optionId: selected.resolution.resolution,
       });
       if (result.kind === 'refused') {
         throw new Error(`Unattended Reaction resolution was refused: ${result.reason}`);
       }
-      this.#journal.recordHostTransition({
-        kind: 'unattended_reaction_auto_resolved',
-        ...selected,
-      });
+      this.#journal.recordHostTransition(selected.kind === 'guidance'
+        ? { kind: 'reaction_guidance_auto_resolved', ...selected.resolution }
+        : { kind: 'unattended_reaction_auto_resolved', ...selected.resolution });
       resolved += 1;
     }
   }

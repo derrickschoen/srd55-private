@@ -13,7 +13,7 @@ import { monsterAttackCommand } from '../src/combat/monster-commands';
 import { mulberry32, restoreMulberry32, type SerializableRng } from '../src/combat/random';
 import type { MonsterAttackAction } from '../src/combat/statblock';
 import {
-  agentSessionId, encounterBranchId, encounterSessionId,
+  agentSessionId, combatantId, encounterBranchId, encounterSessionId,
   type CombatantId, type EncounterBranchId, type EncounterSessionId,
 } from '../src/combat/values';
 import { sha256 } from '../src/crypto/sha256';
@@ -50,6 +50,11 @@ import {
   type ReactionOfferHostPolicy,
   type UnattendedReactionAskDefault,
 } from '../src/vtt/reaction-offer-host-policy';
+import {
+  guidedPendingReactionResolution,
+  type GuidedReactionResolution,
+  type ReactionGuidanceDeclaration,
+} from '../src/vtt/reaction-guidance';
 
 export const CONVERSATION_CLIS = ['codex', 'claude-code'] as const;
 export type ConversationCli = (typeof CONVERSATION_CLIS)[number];
@@ -88,6 +93,17 @@ export interface ConversationTokenCounts {
   readonly reasoning: number;
 }
 
+export interface ConversationChainAttemptEvidence {
+  readonly attempt: 'primary' | 'fallback' | 'correction';
+  readonly actorId: CombatantId | null;
+  readonly rejectionReasons: readonly string[];
+}
+
+export interface ConversationChainEvidence {
+  readonly failedAttempts: readonly ConversationChainAttemptEvidence[];
+  readonly autoResolvedTrigger: string | null;
+}
+
 export interface ConversationRow {
   readonly room: number;
   readonly round: number;
@@ -103,6 +119,8 @@ export interface ConversationRow {
   readonly tokens: ConversationTokenCounts;
   readonly refusals: readonly string[];
   readonly toolCalls: number;
+  readonly agentDispatched: boolean;
+  readonly chainEvidence: ConversationChainEvidence;
 }
 
 export interface ConversationRunResult {
@@ -120,7 +138,12 @@ export interface ConversationRunOptions {
   readonly restoreAfterRound?: number;
   /** SIMULATED-only exhaustion cases, encoded as `room-N-round-N`. */
   readonly exhaustInitial?: readonly string[];
+  readonly invalidInitial?: readonly string[];
   readonly failCorrection?: readonly string[];
+  /** SIMULATED-only host failures before the round reaches the agent lifecycle. */
+  readonly failBeforeDispatch?: readonly string[];
+  /** SIMULATED-only sticky declarations keyed by `room-N-round-N`. */
+  readonly reactionGuidanceByRequest?: Readonly<Record<string, ReactionGuidanceDeclaration>>;
 }
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -228,6 +251,31 @@ function eventToolNames(value: unknown): readonly string[] {
     const name = candidate['tool'] ?? candidate['name'];
     return typeof name === 'string' && name.includes('engine') ? [name] : [];
   });
+}
+
+function rejectionEvidence(value: unknown): readonly ConversationChainAttemptEvidence[] {
+  const attempts = recordsWithin(value).flatMap((candidate) => {
+    const rawAttempts = candidate['attempt_rejections'];
+    if (!Array.isArray(rawAttempts)) return [];
+    const actorId = typeof candidate['actor_id'] === 'string'
+      ? combatantId(candidate['actor_id']) : null;
+    return rawAttempts.flatMap<ConversationChainAttemptEvidence>((attemptValue) => {
+      const attempt = asRecord(attemptValue);
+      const reasons = attempt?.['rejection_reasons'];
+      const attemptKind = attempt?.['attempt'];
+      if ((attemptKind !== 'primary' && attemptKind !== 'fallback') ||
+        !Array.isArray(reasons) || !reasons.every((reason) => typeof reason === 'string')) return [];
+      return [{ attempt: attemptKind, actorId, rejectionReasons: reasons as readonly string[] }];
+    });
+  });
+  if (attempts.length > 0) return attempts;
+  const error = recordsWithin(value).find((candidate) => candidate['isError'] === true);
+  if (error === undefined) return [];
+  const reasons = [...new Set(recordsWithin(error).flatMap((candidate) =>
+    ['reason', 'summary', 'message', 'text'].flatMap((key) =>
+      typeof candidate[key] === 'string' ? [candidate[key] as string] : []),
+  ))].filter((reason) => reason.length > 0 && reason.length <= 2_000);
+  return reasons.length === 0 ? [] : [{ attempt: 'primary', actorId: null, rejectionReasons: reasons }];
 }
 
 function tokenCounts(usage: AgentUsage | null): ConversationTokenCounts {
@@ -388,7 +436,22 @@ async function stopMcpClient(client: McpClient): Promise<void> {
   if (code !== 0) throw new Error(`Engine MCP server exited ${String(code)}: ${client.stderr}`);
 }
 
-async function driveScriptedMcp(cwd: string, launcherPath: string, submit: boolean): Promise<number> {
+function externalReactionGuidance(guidance: ReactionGuidanceDeclaration): Readonly<Record<string, unknown>> {
+  return {
+    ...(guidance.sideWide === null ? {} : { side_wide: guidance.sideWide }),
+    ...(guidance.actors.length === 0 ? {} : {
+      actors: guidance.actors.map((entry) => ({ actor_id: entry.actorId, triggers: entry.triggers })),
+    }),
+  };
+}
+
+async function driveScriptedMcp(
+  cwd: string,
+  launcherPath: string,
+  submit: boolean,
+  invalid: boolean,
+  reactionGuidance: ReactionGuidanceDeclaration | null,
+): Promise<{ readonly calls: number; readonly rejections: readonly ConversationChainAttemptEvidence[] }> {
   const manifest = JSON.parse(await readFile(launcherPath, 'utf8')) as EngineMcpLauncherManifest;
   const state = await loadArenaFixture(manifest.fixturePath);
   const client = startMcpClient(cwd, launcherPath);
@@ -400,10 +463,22 @@ async function driveScriptedMcp(cwd: string, launcherPath: string, submit: boole
       arguments: { run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round' },
     }));
     calls += 1;
-    if (contextResult === null || contextResult['isError'] !== false || !submit) return calls;
+    if (contextResult === null || contextResult['isError'] !== false || !submit) {
+      return { calls, rejections: rejectionEvidence(contextResult) };
+    }
     const context = asRecord(contextResult['structuredContent']);
     const stateRef = context === null ? null : asRecord(context['state_ref']);
     if (stateRef === null) throw new Error('engine.get_turn_context omitted state_ref.');
+    const intents = scriptedIntents(state, manifest.phase).map(externalIntent);
+    const submittedIntents = invalid ? intents.map((intent) => ({
+      ...intent,
+      choice: { kind: 'cast_spell', spell_id: 'SIMULATED-unavailable', target: null },
+      fallback: {
+        choice: { kind: 'cast_spell', spell_id: 'SIMULATED-unavailable-fallback', target: null },
+        movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
+        engagement: { stance: 'hold_position' },
+      },
+    })) : intents;
     const submitResult = asRecord(await mcpRequest(client, 'tools/call', {
       name: 'engine.submit_round_intents',
       arguments: {
@@ -411,29 +486,42 @@ async function driveScriptedMcp(cwd: string, launcherPath: string, submit: boole
         request_id: manifest.requestId,
         phase: manifest.phase,
         idempotency_key: `SIMULATED-${manifest.requestId}-${manifest.phase}`.slice(0, 200),
-        intents: scriptedIntents(state, manifest.phase).map(externalIntent),
+        intents: submittedIntents,
+        ...(reactionGuidance === null ? {} : { reaction_guidance: externalReactionGuidance(reactionGuidance) }),
       },
     }));
     calls += 1;
     if (submitResult === null || submitResult['isError'] !== false) {
       throw new Error('engine.submit_round_intents failed in the SIMULATED client.');
     }
+    return { calls, rejections: rejectionEvidence(submitResult) };
   } finally {
     await stopMcpClient(client);
   }
-  return calls;
 }
 
 class SimulatedConversationAdapter implements AgentSessionAdapter {
   readonly kind: AgentCliKind;
   readonly callsByRequest = new Map<string, number>();
+  readonly rejectionsByRequest = new Map<string, readonly ConversationChainAttemptEvidence[]>();
   readonly #exhaustInitial: ReadonlySet<string>;
+  readonly #invalidInitial: ReadonlySet<string>;
   readonly #failCorrection: ReadonlySet<string>;
+  readonly #reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>;
 
-  constructor(kind: ConversationCli, private readonly cwd: string, exhaust: readonly string[], fail: readonly string[]) {
+  constructor(
+    kind: ConversationCli,
+    private readonly cwd: string,
+    exhaust: readonly string[],
+    invalid: readonly string[],
+    fail: readonly string[],
+    reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>,
+  ) {
     this.kind = kind;
     this.#exhaustInitial = new Set(exhaust);
+    this.#invalidInitial = new Set(invalid);
     this.#failCorrection = new Set(fail);
+    this.#reactionGuidanceByRequest = reactionGuidanceByRequest;
   }
 
   async probe() { return { present: true, version: 'SIMULATED' }; }
@@ -448,8 +536,17 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     const roomTransition = invocation.prompt.startsWith('[ROOM_TRANSITION]');
     const submit = !roomTransition && !(manifest.phase === 'initial'
       ? this.#exhaustInitial.has(key) : this.#failCorrection.has(key));
-    const calls = await driveScriptedMcp(this.cwd, invocation.launcherToken, submit);
-    this.callsByRequest.set(manifest.requestId, (this.callsByRequest.get(manifest.requestId) ?? 0) + calls);
+    const driven = await driveScriptedMcp(
+      this.cwd,
+      invocation.launcherToken,
+      submit,
+      manifest.phase === 'initial' && this.#invalidInitial.has(key),
+      manifest.phase === 'initial' ? this.#reactionGuidanceByRequest[key] ?? null : null,
+    );
+    this.callsByRequest.set(manifest.requestId, (this.callsByRequest.get(manifest.requestId) ?? 0) + driven.calls);
+    if (driven.rejections.length > 0) {
+      this.rejectionsByRequest.set(manifest.requestId, driven.rejections);
+    }
     return completedSimulated(binding.sessionId);
   }
 
@@ -473,7 +570,8 @@ function isRoundProposal(value: unknown): value is RoundIntentProposalEnvelope {
     typeof input['expectedRevision'] === 'number' && typeof input['stateDigest'] === 'string' &&
     typeof input['stateHandle'] === 'string' &&
     (input['phase'] === 'initial' || input['phase'] === 'correction') &&
-    typeof input['idempotencyKey'] === 'string' && Array.isArray(input['resolutions']);
+    typeof input['idempotencyKey'] === 'string' && Array.isArray(input['resolutions']) &&
+    (input['reactionGuidance'] === null || asRecord(input['reactionGuidance']) !== null);
 }
 
 function takeRoundProposal(path: string): RoundIntentProposalEnvelope | null {
@@ -542,42 +640,64 @@ function resolveUnattendedReactionOffers(
   initialState: EncounterState,
   rng: SerializableRng,
   policy: ReactionOfferHostPolicy,
+  guidance: ReactionGuidanceDeclaration | null,
 ): {
   readonly state: EncounterState;
-  readonly resolutions: readonly AutoResolvedReactionOffer[];
+  readonly fallbackResolutions: readonly AutoResolvedReactionOffer[];
+  readonly guidedResolutions: readonly GuidedReactionResolution[];
 } {
   let state = initialState;
-  const resolutions: AutoResolvedReactionOffer[] = [];
+  const fallbackResolutions: AutoResolvedReactionOffer[] = [];
+  const guidedResolutions: GuidedReactionResolution[] = [];
   for (;;) {
-    const selected = state.pendingDecisions.flatMap((decision) => {
-      if (decision.kind !== 'reaction_offer') return [];
+    let selected:
+      | { readonly kind: 'guidance'; readonly resolution: GuidedReactionResolution }
+      | { readonly kind: 'fallback'; readonly resolution: AutoResolvedReactionOffer }
+      | undefined;
+    for (const decision of state.pendingDecisions) {
+      if (decision.kind !== 'reaction_offer') continue;
+      const guided = guidedPendingReactionResolution(state, decision, 'algorithm', policy, guidance);
+      if (guided !== null) {
+        selected = { kind: 'guidance', resolution: guided };
+        break;
+      }
       const resolution = unattendedReactionOfferResolution(
         state,
         decision,
         'algorithm',
         policy,
       );
-      return resolution === null ? [] : [resolution];
-    })[0];
-    if (selected === undefined) return { state, resolutions };
+      if (resolution !== null) {
+        selected = { kind: 'fallback', resolution };
+        break;
+      }
+    }
+    if (selected === undefined) return { state, fallbackResolutions, guidedResolutions };
     state = reduceOne(state, {
       type: 'resolve_pending_decision',
-      decisionId: selected.decisionId,
-      optionId: selected.resolution,
+      decisionId: selected.resolution.decisionId,
+      optionId: selected.resolution.resolution,
     }, rng);
-    resolutions.push(selected);
+    if (selected.kind === 'guidance') guidedResolutions.push(selected.resolution);
+    else fallbackResolutions.push(selected.resolution);
   }
 }
 
 function recordAutoResolvedReactions(
   journal: EncounterSessionJournal,
-  resolutions: readonly AutoResolvedReactionOffer[],
+  resolutions: {
+    readonly fallbackResolutions: readonly AutoResolvedReactionOffer[];
+    readonly guidedResolutions: readonly GuidedReactionResolution[];
+  },
 ): void {
-  for (const resolution of resolutions) {
+  for (const resolution of resolutions.fallbackResolutions) {
     journal.recordHostTransition({
       kind: 'unattended_reaction_auto_resolved',
       ...resolution,
     });
+  }
+  for (const resolution of resolutions.guidedResolutions) {
+    journal.recordHostTransition({ kind: 'reaction_guidance_auto_resolved', ...resolution });
   }
 }
 
@@ -599,15 +719,21 @@ function applyResolvedMechanics(
   choice: EngineActionChoice,
   rng: SerializableRng,
   reactionPolicy: ReactionOfferHostPolicy,
+  reactionGuidance: ReactionGuidanceDeclaration | null,
 ): {
   readonly state: EncounterState;
-  readonly autoResolvedReactions: readonly AutoResolvedReactionOffer[];
+  readonly autoResolvedReactions: {
+    readonly fallbackResolutions: readonly AutoResolvedReactionOffer[];
+    readonly guidedResolutions: readonly GuidedReactionResolution[];
+  };
 } {
-  const autoResolvedReactions: AutoResolvedReactionOffer[] = [];
+  const fallbackResolutions: AutoResolvedReactionOffer[] = [];
+  const guidedResolutions: GuidedReactionResolution[] = [];
   const reduce = (current: EncounterState, command: EncounterCommand): EncounterState => {
     const reduced = reduceOne(current, command, rng);
-    const resolved = resolveUnattendedReactionOffers(reduced, rng, reactionPolicy);
-    autoResolvedReactions.push(...resolved.resolutions);
+    const resolved = resolveUnattendedReactionOffers(reduced, rng, reactionPolicy, reactionGuidance);
+    fallbackResolutions.push(...resolved.fallbackResolutions);
+    guidedResolutions.push(...resolved.guidedResolutions);
     return resolved.state;
   };
   let current = advanceToActor(state, mechanics.actorId, rng);
@@ -617,7 +743,7 @@ function applyResolvedMechanics(
     });
   }
   if (current.combatants.find((entry) => entry.profile.id === mechanics.actorId)?.life !== 'living') {
-    return { state: current, autoResolvedReactions };
+    return { state: current, autoResolvedReactions: { fallbackResolutions, guidedResolutions } };
   }
   switch (choice.kind) {
     case 'attack': {
@@ -634,20 +760,21 @@ function applyResolvedMechanics(
     case 'dash': current = reduce(current, { type: choice.kind, actor: mechanics.actorId }); break;
     case 'end_turn': return {
       state: reduce(current, { type: 'end_turn', actor: mechanics.actorId }),
-      autoResolvedReactions,
+      autoResolvedReactions: { fallbackResolutions, guidedResolutions },
     };
     case 'cast_spell':
     case 'use_action': throw new Error(`Arena host cannot authorize unresolved ${choice.kind} mechanics.`);
   }
   return {
     state: reduce(current, { type: 'end_turn', actor: mechanics.actorId }),
-    autoResolvedReactions,
+    autoResolvedReactions: { fallbackResolutions, guidedResolutions },
   };
 }
 
 function authorizedMechanics(state: EncounterState, proposal: RoundIntentProposalEnvelope): readonly {
   readonly mechanics: ResolvedIntentMechanics;
   readonly choice: EngineActionChoice;
+  readonly primaryRejectionReasons: readonly string[];
 }[] | null {
   const resolved = proposal.resolutions.map((entry) => {
     const checked = pureIntentResolver.resolve(state, entry.intent);
@@ -655,11 +782,16 @@ function authorizedMechanics(state: EncounterState, proposal: RoundIntentProposa
       checked.resolutionDigest !== entry.resolutionDigest) return null;
     const choice = selectedChoice(entry);
     return choice.kind === 'cast_spell' || choice.kind === 'use_action'
-      ? null : { mechanics: checked.mechanics, choice };
+      ? null : {
+          mechanics: checked.mechanics,
+          choice,
+          primaryRejectionReasons: checked.refusals.map((refusal) => refusal.summary),
+        };
   });
   return resolved.some((entry) => entry === null) ? null : resolved as readonly {
     readonly mechanics: ResolvedIntentMechanics;
     readonly choice: EngineActionChoice;
+    readonly primaryRejectionReasons: readonly string[];
   }[];
 }
 
@@ -700,8 +832,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
     controllers: [], rng: mulberry32(3_943_001), store, mirror: new MemoryMirrorSink(),
   });
   let observedToolCalls = 0;
+  let observedRejections: ConversationChainAttemptEvidence[] = [];
   const simulated = config.dryRun ? new SimulatedConversationAdapter(
-    config.cli, config.cwd, options.exhaustInitial ?? [], options.failCorrection ?? [],
+    config.cli, config.cwd, options.exhaustInitial ?? [], options.invalidInitial ?? [],
+    options.failCorrection ?? [],
+    options.reactionGuidanceByRequest ?? {},
   ) : null;
   const adapter = options.adapter ?? simulated ?? resolveAgentAdapter(config.cli, {
     binary: config.cliBin, cwd: config.cwd, engineCommand: process.execPath,
@@ -710,7 +845,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
       resolve(config.cwd, 'tools/engine-mcp-server.ts'),
     ],
     onStdoutLine: (line) => {
-      try { observedToolCalls += eventToolNames(JSON.parse(line) as unknown).length; } catch { /* non-JSON */ }
+      try {
+        const event: unknown = JSON.parse(line) as unknown;
+        observedToolCalls += eventToolNames(event).length;
+        observedRejections.push(...rejectionEvidence(event));
+      } catch { /* non-JSON */ }
     },
   });
   if (adapter.kind !== config.cli) throw new Error('Configured CLI and agent adapter kind disagree.');
@@ -746,9 +885,9 @@ export async function runConversation(config: ConversationConfig, options: Conve
     const roomReactionResolution = resolveUnattendedReactionOffers(state, hostRng, {
       kind: 'unattended',
       askDefault: config.reactionAskDefault,
-    });
+    }, journal.reactionGuidance());
     state = roomReactionResolution.state;
-    recordAutoResolvedReactions(journal, roomReactionResolution.resolutions);
+    recordAutoResolvedReactions(journal, roomReactionResolution);
     capsuleRevision += state.revision - beforeReactionResolution;
     if (room > 1) {
       const requestId = `request:room-${String(room)}-round-1`;
@@ -764,6 +903,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
     for (let round = 1; round <= config.rounds; round += 1) {
       const started = performance.now();
       observedToolCalls = 0;
+      observedRejections = [];
       const contextRevision = capsuleRevision;
       const requestId = `request:room-${String(room)}-round-${String(round)}`;
       const key = `room-${String(room)}-round-${String(round)}`;
@@ -780,15 +920,37 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let proposalId: string | null = null;
       let outcome: ConversationRow['outcome'] = 'refused';
       const refusals: string[] = [];
+      let agentDispatched = false;
+      const failedAttempts: ConversationChainAttemptEvidence[] = [];
+      let autoResolvedTrigger: string | null = null;
       try {
-        turn = await lifecycle.resumeRound(invocation(
-          config, runId, renderEnginePrompt('plan_round', capsule, RULES_SOURCE), initialLauncher.manifestPath,
-        ), new AbortController().signal);
+        if (options.failBeforeDispatch?.includes(key) === true) {
+          throw new Error('SIMULATED host failure before agent dispatch.');
+        }
+        const dispatchBefore = journal.agentSession()?.lastDispatchedRevision ?? null;
+        try {
+          turn = await lifecycle.resumeRound(invocation(
+            config, runId, renderEnginePrompt('plan_round', capsule, RULES_SOURCE), initialLauncher.manifestPath,
+          ), new AbortController().signal);
+        } finally {
+          const dispatchAfter = journal.agentSession()?.lastDispatchedRevision ?? null;
+          agentDispatched = dispatchAfter !== null && dispatchAfter !== dispatchBefore;
+        }
         roundUsage = addAgentUsage(roundUsage, turn.usage);
         const proposed = takeRoundProposal(initialLauncher.spoolPath);
+        const engineRejections = simulated?.rejectionsByRequest.get(requestId) ?? observedRejections;
         const initial: InitialIntentAttempt = proposed === null ? {
           kind: 'exhausted', requestId, initialProposalId: `exhausted:${requestId}`,
-          actorFailures: livingMonsterIds(state).map((actorId) => ({ actorId, fallbackResult: 'absent' })),
+          actorFailures: livingMonsterIds(state).map((actorId) => {
+            const actorRejections = engineRejections.filter((entry) =>
+              entry.actorId === null || entry.actorId === actorId);
+            if (actorRejections.length > 0) failedAttempts.push(...actorRejections);
+            else failedAttempts.push(
+              { attempt: 'primary', actorId, rejectionReasons: ['No engine rejection was returned because the agent submitted no initial proposal.'] },
+              { attempt: 'fallback', actorId, rejectionReasons: ['No engine rejection was returned because the agent submitted no fallback proposal.'] },
+            );
+            return { actorId, fallbackResult: 'absent' };
+          }),
         } : { kind: 'proposal', proposal: proposed };
         const correctionCapsule = capsuleFor({
           state, runId, branchId, revision: contextRevision, requestId,
@@ -803,29 +965,73 @@ export async function runConversation(config: ConversationConfig, options: Conve
             const expectedCapsule = proposal.phase === 'initial' ? capsule : correctionCapsule;
             if (proposal.runId !== runId || proposal.branchId !== branchId || proposal.requestId !== requestId ||
               proposal.expectedRevision !== contextRevision || proposal.stateDigest !== expectedCapsule.digest ||
-              proposal.stateHandle !== engineStateHandle(expectedCapsule)) return 'invalidated';
+              proposal.stateHandle !== engineStateHandle(expectedCapsule)) {
+              failedAttempts.push({
+                attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
+                actorId: null,
+                rejectionReasons: ['Proposal binding does not match the authoritative run, branch, request, revision, digest, and state handle.'],
+              });
+              return 'invalidated';
+            }
             const mechanics = authorizedMechanics(state, proposal);
-            if (mechanics === null) return 'invalid';
+            if (mechanics === null) {
+              failedAttempts.push({
+                attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
+                actorId: null,
+                rejectionReasons: ['The engine could not reproduce the proposal resolution against authoritative state.'],
+              });
+              return 'invalid';
+            }
             const trialRng = restoreMulberry32(hostRng.snapshot());
             let trialState = state;
-            const autoResolvedReactions: AutoResolvedReactionOffer[] = [];
+            const effectiveReactionGuidance = proposal.reactionGuidance ?? journal.reactionGuidance();
+            const autoResolvedReactions = {
+              fallbackResolutions: [] as AutoResolvedReactionOffer[],
+              guidedResolutions: [] as GuidedReactionResolution[],
+            };
             try {
               for (const entry of mechanics) {
+                if (entry.primaryRejectionReasons.length > 0) {
+                  failedAttempts.push({
+                    attempt: 'primary', actorId: entry.mechanics.actorId,
+                    rejectionReasons: entry.primaryRejectionReasons,
+                  });
+                }
                 const applied = applyResolvedMechanics(
                   trialState,
                   entry.mechanics,
                   entry.choice,
                   trialRng,
                   { kind: 'unattended', askDefault: config.reactionAskDefault },
+                  effectiveReactionGuidance,
                 );
                 trialState = applied.state;
-                autoResolvedReactions.push(...applied.autoResolvedReactions);
+                autoResolvedReactions.fallbackResolutions.push(
+                  ...applied.autoResolvedReactions.fallbackResolutions,
+                );
+                autoResolvedReactions.guidedResolutions.push(
+                  ...applied.autoResolvedReactions.guidedResolutions,
+                );
               }
-            } catch { return 'invalid'; }
+            } catch (error) {
+              failedAttempts.push({
+                attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
+                actorId: null,
+                rejectionReasons: [error instanceof Error ? error.message : String(error)],
+              });
+              return 'invalid';
+            }
             capsuleRevision += Math.max(1, trialState.revision - state.revision);
             state = trialState;
             hostRng = trialRng;
             proposalId = proposal.proposalId;
+            if (proposal.reactionGuidance !== null) {
+              journal.replaceReactionGuidance(
+                proposal.requestId,
+                proposal.proposalId,
+                proposal.reactionGuidance,
+              );
+            }
             recordAutoResolvedReactions(journal, autoResolvedReactions);
             return 'authorized';
           },
@@ -842,7 +1048,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
               movementCostFeet: 0, path: [], finalPosition: position,
             }, { kind: 'dodge' }, trialRng, {
               kind: 'unattended', askDefault: config.reactionAskDefault,
-            });
+            }, journal.reactionGuidance());
             capsuleRevision += Math.max(1, applied.state.revision - state.revision);
             state = applied.state;
             hostRng = trialRng;
@@ -871,6 +1077,28 @@ export async function runConversation(config: ConversationConfig, options: Conve
         });
         outcome = coordinated.kind;
         if (coordinated.kind === 'authorized') proposalId = coordinated.proposalId;
+        if (coordinated.kind === 'auto_resolved') {
+          const correctionRejections = simulated?.rejectionsByRequest.get(requestId) ?? observedRejections;
+          if (correctionRejections.length > 0 &&
+            !failedAttempts.some((entry) => entry.attempt === 'correction')) {
+            failedAttempts.push(...correctionRejections.map((entry) => ({
+              ...entry,
+              attempt: 'correction' as const,
+            })));
+          }
+          const correctionFailure = journal.turnExhaustionPersistence().transitions().find((entry) =>
+            entry.kind === 'intent_correction_failed' && entry.requestId === requestId);
+          if (correctionFailure?.kind === 'intent_correction_failed' &&
+            !failedAttempts.some((entry) => entry.attempt === 'correction')) {
+            failedAttempts.push({
+              attempt: 'correction', actorId: null,
+              rejectionReasons: [correctionFailure.result === 'no_response'
+                ? 'No engine rejection was returned because the correction dispatch submitted no proposal.'
+                : `The engine rejected the correction as ${correctionFailure.result}.`],
+            });
+          }
+          autoResolvedTrigger = 'The initial primary/fallback chain and single correction were exhausted; the deterministic controller resolved the turn.';
+        }
       } catch (error) {
         refusals.push(error instanceof Error ? error.message : String(error));
       }
@@ -885,6 +1113,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
         wallPerCreature: wall / Math.max(1, livingMonsterIds(state).length),
         tokens: tokenCounts(roundUsage), refusals,
         toolCalls: simulated?.callsByRequest.get(requestId) ?? observedToolCalls,
+        agentDispatched,
+        chainEvidence: { failedAttempts, autoResolvedTrigger },
       };
       rows.push(row);
       await appendFile(config.outPath, `${JSON.stringify(row)}\n`, 'utf8');
