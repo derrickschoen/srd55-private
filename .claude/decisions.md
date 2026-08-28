@@ -7,6 +7,14 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D405.3 — OWNER: veto snippets are flywheel-only (2026-08-28)
+
+AskUserQuestion ruling: "Flywheel-only veto." Veto-class snippets (engine
+refusing legal-but-tactically-doomed intents) run ONLY in arena/measurement
+runs to quantify what they would have caught — never in real play. The
+proposer-only boundary stays absolute at the table; the boundary decision
+is revisited with data, not before.
+
 ## D405.2 — OWNER: Fable brainstorms independently, then consolidates (2026-08-28)
 
 Verbatim: "Also want this fable session brainstorming and then
