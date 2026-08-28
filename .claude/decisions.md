@@ -7,6 +7,37 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D405 — OWNER: agent-reachable JS snippet "tools", flywheel-refinable (2026-08-28)
+
+Verbatim: "separate collab skill lane for trying to come up with a system
+where we can add small js style snippets the agent can reach for. Look
+into how Claude workflows work. I want these 'tools' to be repeatable and
+to be able to be refined as we go through the flywheel process and
+experiment. Brainstorm from many perspectives several different ways this
+could work." Ruling: design-space exploration (multi-perspective collab:
+codex sol high + opus + supervisor synthesis) for a registry of small,
+deterministic, versioned JS-style snippets exposed to the DM agent as
+callable tools; repeatable (same input -> same output, testable), refined
+through flywheel iterations (failure classes become snippet candidates;
+measured like KB arms); reference model: Claude Code workflows
+(deterministic scripts orchestrating model calls, persisted/versioned/
+resumable). Security floor non-negotiable: snippets run against read-only
+capsule projections under the proposer-only boundary; no engine mutation,
+no I/O, no free eval of agent-authored code at game time — refinement
+happens in the flywheel loop, execution is of REVIEWED, committed
+snippets only.
+
+## D404 — OWNER: hone D403 contingency planning via collab (2026-08-28)
+
+Verbatim: "Use the collab skill to really hone the ai dm planning
+contingencies while the players are deciding." Ruling: the D403
+speculative-planning design gets a full multi-agent collab round after the
+codex draft lands — codex (sol high) and opus critique/brainstorm the
+contingency system specifically (branch vocabulary, scenario selection,
+guard design, re-speculation policy, recalc diffing), supervisor
+synthesizes; owner questions surfaced via AskUserQuestion where forks are
+genuinely theirs.
+
 ## D403 — OWNER: speculative DM planning during player turns (2026-08-28)
 
 Verbatim: "Can we have the dm agent start planning the next turn while the
