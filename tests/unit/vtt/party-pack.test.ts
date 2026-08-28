@@ -9,6 +9,8 @@ import {
   encounterBranchId,
   encounterEffectId,
   encounterSessionId,
+  effectStackingIdentity,
+  itemId,
 } from '../../../src/combat/values';
 import {
   externalPartyPackFeatureEffectSchema,
@@ -3219,6 +3221,583 @@ describe('external party-pack boundary', () => {
     );
     expect(() => loadedPartyEffectCommand(actor, 'effect:manual-condition', [])).not.toThrow();
     expect(() => loadedPartyEffectCommand(actor, 'effect:armed-boundary', [])).not.toThrow();
+  });
+
+  it('pins every attack transformation and optional command field to its declared attack', () => {
+    const candidate = structuredClone(pack());
+    const input = candidate.members[0]!;
+    input.classes = [{ classId: 'Fighter', level: 7 }];
+    input.abilities.strength = 9;
+    input.abilities.wisdom = 14;
+    objectSpellcasting(input).ability = 'wisdom';
+    input.attacks[0]!.damage.push({
+      damageTypeId: 'Fire', count: 1, sides: 4, modifier: 1,
+    });
+    input.resources = [{
+      resourcePoolId: 'resource:attack-matrix', maximum: 1, recharge: 'short_rest',
+    }];
+    input.effects = [{
+      effectId: 'effect:ability-matrix', kind: 'attack_ability_substitution',
+      attackId: input.attacks[0]!.attackId, damageTermIndex: 1,
+      replacesAbility: 'strength', spellcastingAbility: 'wisdom',
+    }, {
+      effectId: 'effect:die-matrix', kind: 'attack_damage_die_override',
+      attackId: input.attacks[0]!.attackId, damageTermIndex: 1,
+      levels: [
+        { minimumLevel: 1, count: 1, sides: 6 },
+        { minimumLevel: 7, count: 2, sides: 10 },
+        { minimumLevel: 8, count: 3, sides: 12 },
+      ],
+    }, {
+      effectId: 'effect:range-matrix', kind: 'attack_reach_range_override',
+      attackId: input.attacks[0]!.attackId, reachFeet: 10, rangeFeet: 20,
+    }, {
+      effectId: 'effect:type-matrix-exact', kind: 'attack_damage_type_choice',
+      attackId: input.attacks[0]!.attackId, damageTermIndex: 0,
+      damageTypeIds: ['Cold', 'Lightning'],
+    }, {
+      effectId: 'effect:maneuver-matrix-exact', kind: 'resource_die_maneuver', trigger: 'on_hit',
+      resourcePoolId: 'resource:attack-matrix', sides: 8, damageType: 'attack_primary',
+      conditionId: 'Prone', conditionDuration: 'until_end_of_target_next_turn',
+    }];
+
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Exact attack matrix was refused.');
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('exact-attack-target').id;
+    const command = loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target, {
+      recklessAttackEffectId: encounterEffectId('effect:reckless-selection'),
+      bonusActionGrantEffectId: encounterEffectId('effect:bonus-selection'),
+      riderSelections: [{ effectId: encounterEffectId('effect:rider-selection'), slotLevel: 3 }],
+      damageTypeSelection: {
+        effectId: encounterEffectId('effect:type-matrix-exact'), damageTypeId: 'Lightning',
+      },
+      maneuverEffectId: encounterEffectId('effect:maneuver-matrix-exact'),
+    });
+    expect(command).toEqual({
+      type: 'attack', actor: actor.profile.id, target,
+      attackBonus: 9, criticalFloor: 20, rollMode: 'normal',
+      attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+      damage: {
+        terms: [
+          { type: 'Slashing', dice: { count: 1, sides: 8, modifier: 3 } },
+          { type: 'Fire', dice: { count: 2, sides: 10, modifier: 4 } },
+        ],
+        critical: false,
+        responses: [],
+      },
+      attackId: actor.attacks[0]!.attackId,
+      recklessAttackEffectId: 'effect:reckless-selection',
+      bonusActionGrantEffectId: 'effect:bonus-selection',
+      riderSelections: [{ effectId: 'effect:rider-selection', slotLevel: 3 }],
+      damageTypeSelection: { effectId: 'effect:type-matrix-exact', damageType: 'Lightning' },
+      maneuverEffectId: 'effect:maneuver-matrix-exact',
+    });
+    expect(() => loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target)).toThrow(
+      'The requested attack is not referenced by the loaded party member.',
+    );
+    expect(() => loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target, {
+      damageTypeSelection: {
+        effectId: encounterEffectId('effect:type-matrix-exact'), damageTypeId: 'Fire',
+      },
+    })).toThrow('The requested attack is not referenced by the loaded party member.');
+    expect(() => loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target, {
+      damageTypeSelection: {
+        effectId: encounterEffectId('effect:ability-matrix'), damageTypeId: 'Cold',
+      },
+    })).toThrow('The requested attack is not referenced by the loaded party member.');
+    expect(() => loadedPartyAttackCommand(actor, actor.attacks[0]!.attackId, target, {
+      damageTypeSelection: {
+        effectId: encounterEffectId('effect:type-matrix-exact'), damageTypeId: 'Cold',
+      },
+      maneuverEffectId: encounterEffectId('effect:ability-matrix'),
+    })).toThrow('The requested attack is not referenced by the loaded party member.');
+    expect(() => loadedPartyAttackCommand(actor, 'attack:not-declared', target)).toThrow(
+      'The requested attack is not referenced by the loaded party member.',
+    );
+  });
+
+  it('enumerates exact movement cells and damaging-cantrip targets, beams, and range boundaries', () => {
+    const candidate = structuredClone(pack());
+    const input = candidate.members[0]!;
+    input.classes = [{ classId: 'Wizard', level: 7 }];
+    const source = objectSpellcasting(input);
+    source.preparedSpellIds = ['fire-bolt', 'light'];
+    source.knownSpellIds = ['eldritch-blast', 'mage-hand'];
+    source.grants = [
+      { spellId: 'sacred-flame', ability: 'wisdom' },
+      { spellId: 'guidance', ability: 'wisdom' },
+    ];
+
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Cantrip boundary pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const near = monsterProfile('cantrip-near', { initiativeBonus: -10 });
+    const atMaximum = monsterProfile('cantrip-at-maximum', { initiativeBonus: -11 });
+    const beyondMaximum = monsterProfile('cantrip-beyond-maximum', { initiativeBonus: -12 });
+    const occupant = loaded.party.members[1]!;
+    let state = createEncounter({
+      bounds: { columns: 27, rows: 3 },
+      blockedCells: [{ column: 0, row: 0 }],
+      combatants: [actor.profile, occupant.profile, near, atMaximum, beyondMaximum],
+      tokens: [
+        combatToken(actor.profile, { column: 1, row: 1 }),
+        combatToken(occupant.profile, { column: 0, row: 1 }),
+        combatToken(near, { column: 12, row: 1 }),
+        combatToken(atMaximum, { column: 25, row: 1 }),
+        combatToken(beyondMaximum, { column: 26, row: 1 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+
+    const actions = loadedPartyTurnLegalActions(loaded.party.members)(state, actor.profile.id).actions;
+    expect(actions.flatMap((action) => action.type === 'move' ? action.path : [])).toEqual([
+      { column: 1, row: 0 },
+      { column: 2, row: 0 },
+      { column: 2, row: 1 },
+      { column: 0, row: 2 },
+      { column: 1, row: 2 },
+      { column: 2, row: 2 },
+    ]);
+    expect(actions.flatMap((action) => action.type === 'cast_spell' && action.slotLevel === null
+      ? [{ spellId: action.spellId, targets: action.targets }]
+      : [])).toEqual([
+      { spellId: 'fire-bolt', targets: [near.id] },
+      { spellId: 'fire-bolt', targets: [atMaximum.id] },
+      { spellId: 'eldritch-blast', targets: [near.id, near.id] },
+      { spellId: 'eldritch-blast', targets: [atMaximum.id, atMaximum.id] },
+      { spellId: 'sacred-flame', targets: [near.id] },
+    ]);
+  });
+
+  it('offers only healing casts whose exact average fits each eligible ally deficit', () => {
+    const candidate = structuredClone(pack(5));
+    const input = candidate.members[0]!;
+    input.classes = [{ classId: 'Cleric', level: 7 }];
+    input.abilities.wisdom = 16;
+    const source = objectSpellcasting(input);
+    source.ability = 'wisdom';
+    source.preparedSpellIds = ['cure-wounds', 'magic-missile'];
+    source.knownSpellIds = ['healing-word', 'sacred-flame'];
+    source.spellSlots = [
+      { level: 2, count: 1, recharge: 'long_rest' },
+      { level: 1, count: 1, recharge: 'long_rest' },
+      { level: 3, count: 1, recharge: 'long_rest' },
+    ];
+
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Healing arithmetic pack was refused.');
+    const [healer, exactCure, belowCure, deeplyWounded, tokenless] = loaded.party.members;
+    if (healer === undefined || exactCure === undefined || belowCure === undefined ||
+      deeplyWounded === undefined || tokenless === undefined) {
+      throw new Error('Expected five loaded healing fixtures.');
+    }
+    let state = createEncounter({
+      bounds: { columns: 4, rows: 3 },
+      combatants: loaded.party.members.map((member) => member.profile),
+      tokens: [
+        combatToken(healer.profile, { column: 1, row: 1 }),
+        combatToken(exactCure.profile, { column: 0, row: 0 }),
+        combatToken(belowCure.profile, { column: 1, row: 0 }),
+        combatToken(deeplyWounded.profile, { column: 2, row: 0 }),
+        combatToken(tokenless.profile, { column: 3, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const wounded = {
+      ...state,
+      tokens: state.tokens.filter((token) => token.combatantId !== tokenless.profile.id),
+      combatants: state.combatants.map((combatant) => {
+        if (combatant.profile.id === exactCure.profile.id) {
+          return { ...combatant, hitPoints: combatant.profile.rules.hitPointMaximum - 12 };
+        }
+        if (combatant.profile.id === belowCure.profile.id) {
+          return { ...combatant, hitPoints: combatant.profile.rules.hitPointMaximum - 11 };
+        }
+        if (combatant.profile.id === deeplyWounded.profile.id) return { ...combatant, hitPoints: 1 };
+        if (combatant.profile.id === healer.profile.id) {
+          return {
+            ...combatant,
+            spellSlots: combatant.spellSlots.map((slot) => slot.level === 3
+              ? { ...slot, remaining: 0 }
+              : slot),
+          };
+        }
+        return { ...combatant, hitPoints: 1 };
+      }),
+    };
+    const healing = loadedPartyTurnLegalActions(loaded.party.members)(wounded, healer.profile.id).actions
+      .flatMap((action) => action.type === 'cast_spell' &&
+        (action.spellId === 'cure-wounds' || action.spellId === 'healing-word')
+        ? [{ spellId: action.spellId, slotLevel: action.slotLevel, targets: action.targets }]
+        : []);
+    expect(healing).toEqual([
+      { spellId: 'cure-wounds', slotLevel: 1, targets: [exactCure.profile.id] },
+      { spellId: 'cure-wounds', slotLevel: 1, targets: [deeplyWounded.profile.id] },
+      { spellId: 'cure-wounds', slotLevel: 2, targets: [deeplyWounded.profile.id] },
+      { spellId: 'healing-word', slotLevel: 1, targets: [exactCure.profile.id] },
+      { spellId: 'healing-word', slotLevel: 1, targets: [belowCure.profile.id] },
+      { spellId: 'healing-word', slotLevel: 1, targets: [deeplyWounded.profile.id] },
+      { spellId: 'healing-word', slotLevel: 2, targets: [deeplyWounded.profile.id] },
+    ]);
+  });
+
+  it('pins revivify age, distance, life, slot ordering, and deterministic target ordering', () => {
+    const candidate = structuredClone(pack(5));
+    const input = candidate.members[0]!;
+    const source = objectSpellcasting(input);
+    source.preparedSpellIds = ['revivify'];
+    source.knownSpellIds = [];
+    source.spellSlots = [
+      { level: 4, count: 1, recharge: 'long_rest' },
+      { level: 3, count: 1, recharge: 'long_rest' },
+    ];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Revivify boundary pack was refused.');
+    const [actor, ageBoundary, younger, tooFar, tooOld] = loaded.party.members;
+    if (actor === undefined || ageBoundary === undefined || younger === undefined ||
+      tooFar === undefined || tooOld === undefined) throw new Error('Expected five revivify fixtures.');
+    let state = createEncounter({
+      bounds: { columns: 4, rows: 2 },
+      combatants: loaded.party.members.map((member) => member.profile),
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(ageBoundary.profile, { column: 1, row: 0 }),
+        combatToken(younger.profile, { column: 0, row: 1 }),
+        combatToken(tooFar.profile, { column: 2, row: 0 }),
+        combatToken(tooOld.profile, { column: 1, row: 1 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = {
+      ...state,
+      round: 12,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? combatant
+        : {
+            ...combatant,
+            hitPoints: 0,
+            life: 'dead' as const,
+            deathAt: {
+              round: combatant.profile.id === tooOld.profile.id ? 1
+                : combatant.profile.id === ageBoundary.profile.id ? 2 : 3,
+              initiativeIndex: 0,
+            },
+          }),
+    };
+    const revivify = loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: false, openWithBless: false, useClericContingency: true,
+    })(state, actor.profile.id).actions.flatMap((action) => action.type === 'cast_spell' &&
+      action.spellId === 'revivify'
+      ? [{ slotLevel: action.slotLevel, targets: action.targets }]
+      : []);
+    expect(revivify).toEqual([
+      { slotLevel: 3, targets: [ageBoundary.profile.id] },
+      { slotLevel: 3, targets: [younger.profile.id] },
+    ]);
+  });
+
+  it('offers a healing potion only from the acting owner with a positive remaining use', () => {
+    const loaded = loadExternalPartyPack(pack());
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Potion policy pack was refused.');
+    const actor = loaded.party.members[0]!;
+    let state = createEncounter({
+      bounds: { columns: 2, rows: 1 },
+      combatants: [actor.profile],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 })],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = {
+      ...state,
+      combatants: state.combatants.map((combatant) => ({ ...combatant, hitPoints: 10 })),
+      effects: [{
+        id: encounterEffectId('effect:owned-potion'), source: actor.profile.id,
+        targets: [actor.profile.id], createdRevision: state.revision,
+        duration: { kind: 'permanent' }, concentrationOwner: null,
+        stackingIdentity: effectStackingIdentity('item:owned-potion'), stacking: 'coexist',
+        repeatedSave: null, damageBreak: null,
+        payload: {
+          kind: 'healing_potion', itemId: itemId('item:owned-potion'), remainingUses: 1,
+          dice: { count: 2, sides: 4, modifier: 2 }, activation: 'bonus_action',
+        },
+      }, {
+        id: encounterEffectId('effect:depleted-potion'), source: actor.profile.id,
+        targets: [actor.profile.id], createdRevision: state.revision,
+        duration: { kind: 'permanent' }, concentrationOwner: null,
+        stackingIdentity: effectStackingIdentity('item:depleted-potion'), stacking: 'coexist',
+        repeatedSave: null, damageBreak: null,
+        payload: {
+          kind: 'healing_potion', itemId: itemId('item:depleted-potion'), remainingUses: 0,
+          dice: { count: 2, sides: 4, modifier: 2 }, activation: 'bonus_action',
+        },
+      }, {
+        id: encounterEffectId('effect:foreign-potion'), source: loaded.party.members[1]!.profile.id,
+        targets: [actor.profile.id], createdRevision: state.revision,
+        duration: { kind: 'permanent' }, concentrationOwner: null,
+        stackingIdentity: effectStackingIdentity('item:foreign-potion'), stacking: 'coexist',
+        repeatedSave: null, damageBreak: null,
+        payload: {
+          kind: 'healing_potion', itemId: itemId('item:foreign-potion'), remainingUses: 1,
+          dice: { count: 2, sides: 4, modifier: 2 }, activation: 'bonus_action',
+        },
+      }],
+    };
+    expect(loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: true, openWithBless: false,
+    })(state, actor.profile.id).actions.filter((action) => action.type === 'drink_healing_potion')).toEqual([{
+      type: 'drink_healing_potion', actor: actor.profile.id, effectId: 'effect:owned-potion',
+    }]);
+  });
+
+  it('selects the exact three bless targets and the lowest available slot', () => {
+    const candidate = structuredClone(pack(5));
+    const input = candidate.members[0]!;
+    input.attacksPerAction = 2;
+    candidate.members[1]!.attacksPerAction = 3;
+    candidate.members[2]!.attacksPerAction = 2;
+    candidate.members[3]!.attacksPerAction = 1;
+    candidate.members[4]!.attacksPerAction = 4;
+    const source = objectSpellcasting(input);
+    source.preparedSpellIds = ['bless'];
+    source.knownSpellIds = [];
+    source.spellSlots = [
+      { level: 2, count: 1, recharge: 'long_rest' },
+      { level: 1, count: 1, recharge: 'long_rest' },
+    ];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Bless ordering pack was refused.');
+    const [actor, first, tied, fourth, outOfRange] = loaded.party.members;
+    if (actor === undefined || first === undefined || tied === undefined ||
+      fourth === undefined || outOfRange === undefined) throw new Error('Expected five bless fixtures.');
+    let state = createEncounter({
+      bounds: { columns: 9, rows: 2 },
+      combatants: loaded.party.members.map((member) => member.profile),
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(first.profile, { column: 1, row: 0 }),
+        combatToken(tied.profile, { column: 2, row: 0 }),
+        combatToken(fourth.profile, { column: 3, row: 0 }),
+        combatToken(outOfRange.profile, { column: 8, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const legalActions = loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: false, openWithBless: true,
+    });
+    expect(legalActions(state, actor.profile.id).actions.flatMap((action) =>
+      action.type === 'cast_spell' && action.spellId === 'bless'
+        ? [{ slotLevel: action.slotLevel, targets: action.targets }]
+        : [])).toEqual([{
+      slotLevel: 1,
+      targets: [first.profile.id, actor.profile.id, tied.profile.id],
+    }]);
+
+    const priorBless = {
+      ...state,
+      eventLog: [...state.eventLog, {
+        sequence: state.nextEventSequence,
+        type: 'spell_cast' as const,
+        caster: actor.profile.id,
+        spellId: 'bless',
+        slotLevel: 1,
+        targets: [actor.profile.id],
+      }],
+    };
+    expect(legalActions(priorBless, actor.profile.id).actions.some((action) =>
+      action.type === 'cast_spell' && action.spellId === 'bless')).toBe(false);
+  });
+
+  it('builds the exact Slow cube and six-target-bounded deterministic selection', () => {
+    const candidate = structuredClone(pack());
+    const input = candidate.members[0]!;
+    const source = objectSpellcasting(input);
+    source.preparedSpellIds = ['slow'];
+    source.knownSpellIds = [];
+    source.spellSlots = [{ level: 3, count: 1, recharge: 'long_rest' }];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Slow placement pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const targets = [
+      monsterProfile('slow-a', { initiativeBonus: -10 }),
+      monsterProfile('slow-b', { initiativeBonus: -11 }),
+      monsterProfile('slow-c', { initiativeBonus: -12 }),
+    ];
+    let state = createEncounter({
+      bounds: { columns: 4, rows: 1 },
+      combatants: [actor.profile, ...targets],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        ...targets.map((target, index) => combatToken(target, { column: index + 1, row: 0 })),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const slow = loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: false, openWithBless: false, useWizardTactics: true,
+    })(state, actor.profile.id).actions.flatMap((action) => action.type === 'cast_spell' &&
+      action.spellId === 'slow'
+      ? [{ slotLevel: action.slotLevel, targets: action.targets, area: action.area }]
+      : []);
+    expect(slow).toEqual([{
+      slotLevel: 3,
+      targets: targets.map((target) => target.id),
+      area: {
+        shape: 'cube',
+        template: {
+          origin: { x: 0, y: 0 },
+          center: { x: 20, y: 0 },
+          axis: { x: 1, y: 0 },
+          size: 40,
+          includeOrigin: false,
+        },
+      },
+    }]);
+  });
+
+  it('requires the exact bless-break history and reserve before placing Spirit Guardians', () => {
+    const candidate = structuredClone(pack());
+    const input = candidate.members[0]!;
+    input.classes = [{ classId: 'Cleric', level: 7 }];
+    const source = objectSpellcasting(input);
+    source.preparedSpellIds = ['spirit-guardians'];
+    source.knownSpellIds = [];
+    source.spellSlots = [
+      { level: 4, count: 1, recharge: 'long_rest' },
+      { level: 3, count: 1, recharge: 'long_rest' },
+    ];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Spirit Guardians contingency pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const distant = monsterProfile('spirit-guardians-distant', { initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 6, rows: 3 },
+      combatants: [actor.profile, distant],
+      tokens: [
+        combatToken(actor.profile, { column: 2, row: 1 }),
+        combatToken(distant, { column: 5, row: 1 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const bless = {
+      sequence: state.nextEventSequence,
+      type: 'spell_cast' as const,
+      caster: actor.profile.id,
+      spellId: 'bless',
+      slotLevel: 1,
+      targets: [actor.profile.id],
+    };
+    const priorGuardians = {
+      sequence: state.nextEventSequence + 1,
+      type: 'spell_cast' as const,
+      caster: actor.profile.id,
+      spellId: 'spirit-guardians',
+      slotLevel: 3,
+      targets: [],
+    };
+    const concentrationBreak = {
+      sequence: state.nextEventSequence + 2,
+      type: 'effect_ended' as const,
+      effectId: encounterEffectId('effect:broken-concentration'),
+      reason: 'concentration_broken' as const,
+    };
+    const legalActions = loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: false,
+      openWithBless: false,
+      useClericContingency: true,
+      reserveClericSlotForRevivify: true,
+    });
+    const commandValues = (candidateState: typeof state) => legalActions(candidateState, actor.profile.id).actions
+      .flatMap((action) => action.type === 'cast_spell' && action.spellId === 'spirit-guardians'
+        ? [{
+            slotLevel: action.slotLevel,
+            targets: action.targets,
+            area: action.area,
+            selectedOption: action.selectedOption,
+          }]
+        : []);
+    expect(commandValues({ ...state, eventLog: [bless, priorGuardians, concentrationBreak] })).toEqual([{
+      slotLevel: 3,
+      targets: [],
+      area: {
+        shape: 'emanation',
+        template: { origin: { x: 12.5, y: 7.5 }, radius: 15, includeOrigin: true },
+      },
+      selectedOption: 'Radiant',
+    }]);
+    expect(commandValues({ ...state, eventLog: [concentrationBreak] })).toEqual([]);
+    expect(commandValues({ ...state, eventLog: [bless] })).toEqual([]);
+    expect(commandValues({ ...state, eventLog: [concentrationBreak, bless] })).toEqual([]);
+    expect(commandValues({
+      ...state,
+      eventLog: [bless, concentrationBreak, { ...priorGuardians, sequence: state.nextEventSequence + 3 }],
+    })).toEqual([]);
+    expect(commandValues({
+      ...state,
+      eventLog: [bless, concentrationBreak],
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? {
+            ...combatant,
+            spellSlots: combatant.spellSlots.map((slot) => slot.level === 4
+              ? { ...slot, remaining: 0 }
+              : slot),
+          }
+        : combatant),
+    })).toEqual([]);
+  });
+
+  it('chooses the lowest-HP adjacent Command target, lexically breaking exact ties', () => {
+    const candidate = structuredClone(pack());
+    const input = candidate.members[0]!;
+    const source = objectSpellcasting(input);
+    source.preparedSpellIds = ['command'];
+    source.knownSpellIds = [];
+    source.spellSlots = [
+      { level: 2, count: 1, recharge: 'long_rest' },
+      { level: 1, count: 1, recharge: 'long_rest' },
+    ];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Command target-order pack was refused.');
+    const actor = loaded.party.members[0]!;
+    const tiedLater = monsterProfile('command-z', { initiativeBonus: -10 });
+    const tiedEarlier = monsterProfile('command-a', { initiativeBonus: -11 });
+    const lowerButFar = monsterProfile('command-far', { initiativeBonus: -12 });
+    let state = createEncounter({
+      bounds: { columns: 4, rows: 2 },
+      combatants: [actor.profile, tiedLater, tiedEarlier, lowerButFar],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(tiedLater, { column: 1, row: 0 }),
+        combatToken(tiedEarlier, { column: 0, row: 1 }),
+        combatToken(lowerButFar, { column: 2, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = {
+      ...state,
+      combatants: state.combatants.map((combatant) => ({
+        ...combatant,
+        hitPoints: combatant.profile.id === lowerButFar.id ? 1
+          : combatant.profile.id === actor.profile.id ? combatant.hitPoints : 4,
+      })),
+    };
+    expect(loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: false, openWithBless: false, useClericContingency: true,
+    })(state, actor.profile.id).actions.flatMap((action) => action.type === 'cast_spell' &&
+      action.spellId === 'command'
+      ? [{ slotLevel: action.slotLevel, targets: action.targets, selectedOption: action.selectedOption }]
+      : [])).toEqual([{
+      slotLevel: 1,
+      targets: [tiedEarlier.id],
+      selectedOption: 'flee',
+    }]);
   });
 
   it('schema_missing_variant refuses malformed JSON and pins the complete Zod union in the public schema', () => {
