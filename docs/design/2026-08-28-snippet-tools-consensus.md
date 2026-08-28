@@ -120,3 +120,24 @@ lead:
   KB entries.
 - Advisory/auto snippets move to increment 2; veto class remains
   flywheel-only per D405.3; margins target luna low per D406.
+
+## Amendment 2 (2026-08-28, owner ruling D405.5): the skill layer
+
+Above the plays layer sits a broader "DM skill" layer, modeled on Claude
+Code skills. A skill is one refinable artifact bundling:
+- a one-line description (always advertised; cheap),
+- short plain-language procedure prose (loaded ONLY when the skill's
+  applicability holds — situation-triggered, like on-demand skill loading),
+- references to the pre-coded algorithms (plays, advisors) it employs.
+
+Purpose per the owner: reduce OUTPUT token burden — the agent selects and
+parameterizes a procedure instead of generating a plan from scratch. This
+unifies KB text and the snippet registry into one artifact kind with one
+flywheel loop: skillHash arms, adoption/outcome measurement, revision or
+deletion like KB entries. K5's successor becomes the always-on core skill;
+e.g. focus_fire = {description, trigger prose ("concentrate on the target
+whose removal denies the most enemy actions..."), play: focus_fire}.
+
+Build order stands: registry + plays v1 (D405.4) -> skill bundles wrapping
+them (this layer) -> advisories -> flywheel-only vetoes (D405.3). Margins
+target luna low (D406).
