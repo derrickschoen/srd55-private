@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D412.2 — OWNER: 0.8B schema-constrained angle + small-K2 narration seat (2026-08-29)
+
+Verbatim: "What are my options to use all of the latest model efficiency
+techniques? Do I have to train a new one? Maybe like a 0.8b json schema
+constrained model with the latest efficiency techniques? — Also look
+into a small kimi k2 to do the narration and story. I heard it was
+trained to be good at prose." Ruling captured: (a) evaluate the
+0.8B-schema-constrained tactician (Qwen3.5-0.8B + constrained decoding +
+SFT/GRPO) as a first-class D410 candidate alongside 2B; (b) D412
+research scope extends to a SEPARATE small narration/prose model (Kimi
+K2 lineage distills), split-role architecture: tactician emits intents,
+narrator writes flavor text.
+
 ## D412 — OWNER: research V4-Flash/GLM-5.3-Flash techniques at 0.5-2B (2026-08-29)
 
 Verbatim: "Deepseek v4-flash and glm5.3-flash have a lot of advanced new
