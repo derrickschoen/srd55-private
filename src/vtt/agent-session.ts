@@ -1,9 +1,21 @@
 import type { EncounterSessionId, AgentSessionId } from '../combat/values';
 
 export type AgentCliKind = 'codex' | 'opencode' | 'pi' | 'claude-code';
+export type AgentAdapterKind = AgentCliKind | 'local-openai';
+
+export interface AgentToolDescriptor {
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: Readonly<Record<string, unknown>>;
+}
+
+export interface AgentToolSession {
+  readonly tools: readonly AgentToolDescriptor[];
+  execute(name: string, argumentsValue: unknown): unknown;
+}
 
 export interface AgentSessionBinding {
-  readonly cli: AgentCliKind;
+  readonly cli: AgentAdapterKind;
   readonly sessionId: AgentSessionId;
   readonly adapterVersion: number;
   readonly recoveryGeneration: number;
@@ -25,6 +37,8 @@ export interface AgentInvocation {
   /** Full-context launcher used only if resume recovery creates a fresh agent session. */
   readonly recoveryLauncherToken?: string;
   readonly timeoutMs: number | null;
+  /** Direct in-process engine surface used by adapters that do not speak MCP. */
+  readonly toolSession?: AgentToolSession;
 }
 
 export interface AgentUsage {
@@ -57,7 +71,7 @@ export type AgentFailureClassification =
   | 'unknown';
 
 export interface AgentSessionAdapter {
-  readonly kind: AgentCliKind;
+  readonly kind: AgentAdapterKind;
   probe(): Promise<CliProbe>;
   start(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult>;
   resume(
@@ -79,11 +93,15 @@ export function isAgentCliKind(value: unknown): value is AgentCliKind {
   return value === 'codex' || value === 'opencode' || value === 'pi' || value === 'claude-code';
 }
 
+export function isAgentAdapterKind(value: unknown): value is AgentAdapterKind {
+  return isAgentCliKind(value) || value === 'local-openai';
+}
+
 export function isAgentSessionBinding(value: unknown): value is AgentSessionBinding {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const binding = value as Readonly<Record<string, unknown>>;
   return Object.keys(binding).length === 8 &&
-    isAgentCliKind(binding.cli) &&
+    isAgentAdapterKind(binding.cli) &&
     typeof binding.sessionId === 'string' && binding.sessionId.length > 0 && binding.sessionId.trim() === binding.sessionId && binding.sessionId.length <= 200 &&
     Number.isSafeInteger(binding.adapterVersion) && typeof binding.adapterVersion === 'number' && binding.adapterVersion >= 1 &&
     Number.isSafeInteger(binding.recoveryGeneration) && typeof binding.recoveryGeneration === 'number' && binding.recoveryGeneration >= 0 &&

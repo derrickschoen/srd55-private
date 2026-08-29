@@ -41,6 +41,8 @@ export interface RoundIntentProposalEnvelope extends EngineProposalBinding {
   readonly proposalId: string;
   readonly resolutions: readonly ProposedIntentResolution[];
   readonly reactionGuidance: ReactionGuidanceDeclaration | null;
+  /** Validated wire arguments retained for opt-in model-training provenance. */
+  readonly submittedArguments?: Readonly<Record<string, unknown>>;
 }
 
 export type EngineProposalEnvelope =

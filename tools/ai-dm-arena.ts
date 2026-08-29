@@ -12,6 +12,7 @@ import {
 } from './ai-dm-conversation';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
 import type { AgentSessionAdapter } from '../src/vtt/agent-session';
+import type { LocalOpenAiConfig } from '../src/vtt/agent-adapters/local-openai';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 
 export const ARENA_BASES = ['standard', 'hard'] as const;
@@ -44,6 +45,8 @@ export interface ArenaConfig {
   readonly basis: ArenaBasis;
   readonly interleave: boolean;
   readonly arms: readonly ArenaArm[];
+  readonly captureRlData: boolean;
+  readonly localOpenAi: LocalOpenAiConfig | null;
 }
 
 export interface ArenaRow {
@@ -53,6 +56,7 @@ export interface ArenaRow {
   readonly room: number;
   readonly round: number;
   readonly cli: ConversationCli;
+  readonly model: string;
   readonly kbHash: string | null;
   readonly snippetHash: string;
   readonly snippetSetHash: string;
@@ -60,7 +64,7 @@ export interface ArenaRow {
   readonly suggestionAdopted: import('./ai-dm-conversation').ConversationSuggestionAdoption | null;
   readonly contextRevision: number;
   readonly projectionRevision: number;
-  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null';
+  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null' | 'local_error';
   readonly proposalId: string | null;
   readonly wall: number;
   readonly tokens: ConversationTokenCounts;
@@ -77,6 +81,7 @@ export interface ArenaRow {
   readonly authorizedPlan: readonly import('./ai-dm-conversation').ConversationAuthorizedActorPlan[] | null;
   readonly roundNarrative: string | null;
   readonly chainEvidence: import('./ai-dm-conversation').ConversationChainEvidence;
+  readonly rlData?: import('./ai-dm-conversation').ConversationRlData;
 }
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -110,17 +115,19 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   const values = new Map<string, string>();
   let dryRun = false;
   let interleave = false;
+  let captureRlData = false;
   const rawArms: string[] = [];
   for (let index = 0; index < argumentsValue.length; index += 1) {
     const option = argumentsValue[index];
     if (option === '--dry-run') { dryRun = true; continue; }
     if (option === '--interleave') { interleave = true; continue; }
+    if (option === '--capture-rl-data') { captureRlData = true; continue; }
     if (![
       '--rooms', '--reps', '--seed', '--cli', '--model', '--effort', '--out',
       '--escalation-model', '--escalation-effort',
       '--cli-bin', '--timeout-ms', '--kb',
       '--reaction-ask-default',
-      '--basis', '--arm',
+      '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
     if (option === '--arm') rawArms.push(value);
@@ -133,7 +140,9 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if ((values.get('--out') ?? '').length === 0) throw new TypeError('--out is required.');
   if (pathIsInside(cwd, outPath)) throw new TypeError('--out must be outside the repository working tree.');
   const cli = values.get('--cli') ?? 'codex';
-  if (!CONVERSATION_CLIS.includes(cli as ConversationCli)) throw new TypeError('--cli must be codex or claude-code.');
+  if (!CONVERSATION_CLIS.includes(cli as ConversationCli)) {
+    throw new TypeError('--cli must be codex, claude-code, or local-openai.');
+  }
   const effort = values.get('--effort') ?? 'medium';
   if (!CONVERSATION_EFFORTS.includes(effort as ConversationEffort)) {
     throw new TypeError('--effort must be low, medium, high, or xhigh.');
@@ -148,8 +157,28 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     throw new TypeError('--escalation-effort must be low, medium, high, or xhigh.');
   }
   const selectedCli = cli as ConversationCli;
+  const hasLocalOption = values.has('--local-base-url') || values.has('--local-model') ||
+    values.has('--local-api-key');
+  if (selectedCli !== 'local-openai' && hasLocalOption) {
+    throw new TypeError('--local-base-url, --local-model, and --local-api-key require --cli local-openai.');
+  }
+  const localBaseUrl = values.get('--local-base-url');
+  const localModel = values.get('--local-model');
+  if (selectedCli === 'local-openai' && (localBaseUrl === undefined || localModel === undefined)) {
+    throw new TypeError('--cli local-openai requires --local-base-url and --local-model.');
+  }
+  const localOpenAi: LocalOpenAiConfig | null = selectedCli === 'local-openai'
+    ? {
+        baseUrl: localBaseUrl ?? '',
+        model: localModel ?? '',
+        ...(values.has('--local-api-key') ? { apiKey: values.get('--local-api-key') ?? '' } : {}),
+      }
+    : null;
   const kbPath = values.has('--kb') ? resolve(values.get('--kb') ?? '') : null;
   if (kbPath !== null) validateKbPath(cwd, kbPath);
+  if (captureRlData && kbPath !== null && !pathIsInside(resolve(cwd, 'tests/fixtures'), kbPath)) {
+    throw new TypeError('--capture-rl-data requires a project fixture KB or no KB.');
+  }
   const reactionAskDefault = values.get('--reaction-ask-default') ?? 'decline';
   if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
     throw new TypeError('--reaction-ask-default must be decline or take.');
@@ -197,20 +226,22 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
     seed,
     cli: selectedCli,
-    model: values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
+    model: localOpenAi?.model ?? values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
     effort: effort as ConversationEffort,
     escalationModel,
     escalationEffort: escalationEffort as ConversationEffort | null,
     outPath,
     dryRun,
     cwd: resolve(cwd),
-    cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : 'claude'),
+    cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : selectedCli === 'claude-code' ? 'claude' : ''),
     timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
     kbPath,
     reactionAskDefault,
     basis: basis as ArenaBasis,
     interleave,
     arms,
+    captureRlData,
+    localOpenAi,
   };
 }
 
@@ -248,6 +279,7 @@ function arenaRows(
     room: row.room,
     round: row.round,
     cli: row.cli,
+    model: row.model,
     kbHash: row.kbHash,
     snippetHash: row.snippetHash,
     snippetSetHash: row.snippetSetHash,
@@ -272,6 +304,7 @@ function arenaRows(
     authorizedPlan: row.authorizedPlan,
     roundNarrative: row.roundNarrative,
     chainEvidence: row.chainEvidence,
+    ...(row.rlData === undefined ? {} : { rlData: row.rlData }),
   }));
 }
 
@@ -303,6 +336,11 @@ function conversationConfig(
     timeoutMs: config.timeoutMs,
     kbPath: config.kbPath,
     reactionAskDefault: config.reactionAskDefault,
+    captureRlData: config.captureRlData,
+    localOpenAi: config.localOpenAi === null ? null : {
+      ...config.localOpenAi,
+      model: overrides.model,
+    },
   };
 }
 
@@ -396,4 +434,10 @@ async function main(): Promise<void> {
   await runArena(parseArenaArgs(argumentsValue));
 }
 
-if (process.env['VITEST'] !== 'true') await main();
+const invokedPath = process.argv[1];
+if (process.env['VITEST'] !== 'true' && invokedPath !== undefined && (
+  invokedPath.endsWith('/ai-dm-arena.ts') || invokedPath.endsWith('\\ai-dm-arena.ts') ||
+  ((invokedPath.endsWith('/vite-node') || invokedPath.endsWith('\\vite-node') ||
+    invokedPath.endsWith('/vite-node.mjs') || invokedPath.endsWith('\\vite-node.mjs')) &&
+    process.argv.includes('--rooms') && process.argv.includes('--seed'))
+)) await main();

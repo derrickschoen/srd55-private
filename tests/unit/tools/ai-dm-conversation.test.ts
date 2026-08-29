@@ -982,13 +982,23 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(k6).toContain('Only when suggested_plan is absent');
   });
 
-  it('admits only the active codex and claude-code adapters', () => {
+  it('admits the active process and local OpenAI conversation adapters', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-cli-'));
     const outPath = join(directory, 'rows.jsonl');
     expect(parseConversationArgs(['--rooms', '1', '--out', outPath, '--cli', 'claude-code']).cli)
       .toBe('claude-code');
     expect(() => parseConversationArgs(['--rooms', '1', '--out', outPath, '--cli', 'pi']))
-      .toThrow('--cli must be codex or claude-code');
+      .toThrow('--cli must be codex, claude-code, or local-openai');
+    expect(parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--cli', 'local-openai',
+      '--local-base-url', 'http://127.0.0.1:11434/v1', '--local-model', 'llama-SIMULATED',
+    ])).toEqual(expect.objectContaining({
+      cli: 'local-openai', model: 'llama-SIMULATED', cliBin: '',
+      localOpenAi: {
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        model: 'llama-SIMULATED',
+      },
+    }));
     expect(parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--kb', 'tests/fixtures/arena-basis/seed-3943001.json',
     ]).kbPath).toBe(join(process.cwd(), 'tests/fixtures/arena-basis/seed-3943001.json'));

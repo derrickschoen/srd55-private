@@ -134,6 +134,15 @@ interface EngineMcpDependencies {
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
 }
 
+export interface EngineToolSurface {
+  readonly tools: readonly import('./handler').McpToolDescriptor[];
+  execute(name: string, argumentsValue: unknown): unknown;
+}
+
+export interface EngineMcpApplication extends McpHandler {
+  readonly toolSurface: EngineToolSurface;
+}
+
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
   return value as Readonly<Record<string, unknown>>;
@@ -379,7 +388,7 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_intent', capsul
   return [fixed, `Turn resource: ${uriBase}/turn/current`, `Intent schema: ${uriBase}/schema/intent-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: capsule.request, voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
 }
 
-export function createEngineMcpApplication(dependencies: EngineMcpDependencies): McpHandler {
+export function createEngineMcpApplication(dependencies: EngineMcpDependencies): EngineMcpApplication {
   if (dependencies.maximumToolResultBytes !== undefined && dependencies.maximumToolResultBytes > 64 * 1024) {
     throw new RangeError('maximumToolResultBytes cannot exceed the 64 KiB hard limit.');
   }
@@ -680,7 +689,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       return idempotent(key, input, () => {
         const valid = resolved.flatMap(({ intent, resolution }) => resolution.valid ? [{ intent, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
-        submitEngineProposal(feed, proposals, { kind: 'round_intent_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance });
+        submitEngineProposal(feed, proposals, { kind: 'round_intent_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance, submittedArguments: structuredClone(input) });
         return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.intent.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
       });
     }
@@ -781,6 +790,24 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   const bindings: readonly McpToolBinding[] = ENGINE_TOOL_SPECS
     .filter((spec) => advertisedNames === null || advertisedNames.has(spec.descriptor.name))
     .map((spec) => ({ descriptor: spec.descriptor, validateArguments: (value) => schemaViolations(spec.input, value), validateOutput: (value) => schemaViolations(spec.output, value), execute: (value) => execute(spec.descriptor.name, value) }));
+  const bindingsByName = new Map(bindings.map((binding) => [binding.descriptor.name, binding]));
+  const toolSurface: EngineToolSurface = Object.freeze({
+    tools: Object.freeze(bindings.map((binding) => binding.descriptor)),
+    execute(name: string, argumentsValue: unknown): unknown {
+      const binding = bindingsByName.get(name);
+      if (binding === undefined) throw new RangeError(`Unknown engine tool ${name}.`);
+      const argumentViolations = binding.validateArguments(argumentsValue);
+      if (argumentViolations.length > 0) {
+        throw new TypeError(`Invalid tool arguments: ${JSON.stringify({ violations: argumentViolations })}`);
+      }
+      const value = binding.execute(argumentsValue);
+      const outputViolations = binding.validateOutput(value);
+      if (outputViolations.length > 0) {
+        throw new TypeError(`Tool output violated outputSchema: ${JSON.stringify({ violations: outputViolations })}`);
+      }
+      return value;
+    },
+  });
   const currentTurnContext = (): unknown => {
     const capsule = feed.current();
     return execute('engine.get_turn_context', { run_id: capsule.runId, expected_revision: capsule.revision, scope: 'round' });
@@ -792,7 +819,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     return resource;
   });
   const prompts = createPromptProvider(feed, rules, currentTurnContext);
-  return createMcpHandler({ tools: bindings, resources, prompts, ...(dependencies.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: dependencies.maximumToolResultBytes }), ...(dependencies.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: dependencies.maximumResourceBytes }), ...(dependencies.listPageSize === undefined ? {} : { listPageSize: dependencies.listPageSize }) });
+  const handler = createMcpHandler({ tools: bindings, resources, prompts, ...(dependencies.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: dependencies.maximumToolResultBytes }), ...(dependencies.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: dependencies.maximumResourceBytes }), ...(dependencies.listPageSize === undefined ? {} : { listPageSize: dependencies.listPageSize }) });
+  return Object.freeze({
+    handle: handler.handle,
+    drainNotifications: handler.drainNotifications,
+    toolSurface,
+  });
 }
 
 function runBase(capsule: EngineStateCapsule): string { return `engine://run/${encodeURIComponent(capsule.runId)}`; }
