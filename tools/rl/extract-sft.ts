@@ -60,6 +60,14 @@ export interface ExtractSftStats {
   readonly deduplicated: number;
 }
 
+export interface ExtractSftDependencies {
+  readonly heartbeat?: (line: string) => void;
+}
+
+function stdoutHeartbeat(line: string): void {
+  process.stdout.write(`[rl-extract] ${line}\n`);
+}
+
 interface RolloutCapture {
   readonly sessionInstructions: string;
   readonly turnContext: Readonly<Record<string, unknown>>;
@@ -308,8 +316,16 @@ async function* arenaRows(path: string): AsyncGenerator<{ readonly row: Extracta
   }
 }
 
-export async function extractSft(config: ExtractSftConfig): Promise<ExtractSftStats> {
+export async function extractSft(
+  config: ExtractSftConfig,
+  dependencies: ExtractSftDependencies = {},
+): Promise<ExtractSftStats> {
   if (config.arenaPaths.length === 0) throw new TypeError('At least one arena JSONL path is required.');
+  const heartbeat = dependencies.heartbeat ?? stdoutHeartbeat;
+  heartbeat(
+    `start batches=${String(config.arenaPaths.length)} rollouts=${String(config.rolloutPaths.length)} ` +
+    `out=${config.outPath}`,
+  );
   assertLicensedPath(config.outPath);
   const rollout = await loadRolloutCaptures(config.rolloutPaths);
   const output = await open(config.outPath, 'w');
@@ -319,6 +335,8 @@ export async function extractSft(config: ExtractSftConfig): Promise<ExtractSftSt
   let deduplicated = 0;
   try {
     for (const path of config.arenaPaths) {
+      const examplesBefore = examples;
+      heartbeat(`batch path=${resolve(path)} status=start`);
       for await (const { row, line } of arenaRows(path)) {
         if (row.outcome !== 'authorized' || row.serviceNull) continue;
         const example = exampleFrom(row, path, line, rollout);
@@ -329,6 +347,9 @@ export async function extractSft(config: ExtractSftConfig): Promise<ExtractSftSt
         await output.write(`${canonicalJson(example)}\n`);
         examples += 1;
       }
+      heartbeat(
+        `batch path=${resolve(path)} status=complete examples=${String(examples - examplesBefore)}`,
+      );
     }
   } finally {
     await output.close();
@@ -370,10 +391,15 @@ async function main(): Promise<void> {
   process.stdout.write(`${formatExtractSftStats(stats)}\n`);
 }
 
-const invokedPath = process.argv[1];
-if (process.env['VITEST'] !== 'true' && invokedPath !== undefined && (
-  invokedPath.endsWith('/extract-sft.ts') || invokedPath.endsWith('\\extract-sft.ts') ||
-  ((invokedPath.endsWith('/vite-node') || invokedPath.endsWith('\\vite-node') ||
-    invokedPath.endsWith('/vite-node.mjs') || invokedPath.endsWith('\\vite-node.mjs')) &&
-    process.argv.includes('--out'))
-)) await main();
+const EXTRACT_SFT_USAGE =
+  'Usage: rl:extract-sft <arena.jsonl> [arena.jsonl ...] [--rollout codex-rollout.jsonl ...] --out PATH';
+
+async function runCli(): Promise<void> {
+  try { await main(); }
+  catch (error) {
+    process.stderr.write(`${EXTRACT_SFT_USAGE}\n${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+}
+
+if (process.env['VITEST'] !== 'true') await runCli();

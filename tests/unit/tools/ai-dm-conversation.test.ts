@@ -997,8 +997,19 @@ describe('AI-DM engine MCP conversation runner', () => {
       localOpenAi: {
         baseUrl: 'http://127.0.0.1:11434/v1',
         model: 'llama-SIMULATED',
+        thinkMode: 'off',
       },
     }));
+    expect(parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--cli', 'local-openai',
+      '--local-base-url', 'http://127.0.0.1:11434/v1', '--local-model', 'llama-SIMULATED',
+      '--local-think', 'on',
+    ]).localOpenAi?.thinkMode).toBe('on');
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--cli', 'local-openai',
+      '--local-base-url', 'http://127.0.0.1:11434/v1', '--local-model', 'llama-SIMULATED',
+      '--local-think', 'sometimes',
+    ])).toThrow('--local-think must be on or off');
     expect(parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--kb', 'tests/fixtures/arena-basis/seed-3943001.json',
     ]).kbPath).toBe(join(process.cwd(), 'tests/fixtures/arena-basis/seed-3943001.json'));
