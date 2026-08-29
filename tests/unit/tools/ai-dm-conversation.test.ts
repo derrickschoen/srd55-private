@@ -779,6 +779,7 @@ describe('AI-DM engine MCP conversation runner', () => {
         outcome: 'service_null', flapRetries: 2, serviceNull: true,
         toolCalls: 0, proposalId: null, refusals: [],
         plannedBy: null, escalated: false, escalationModel: null,
+        authorizedPlan: null, roundNarrative: null,
         chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
       }),
     ]);
