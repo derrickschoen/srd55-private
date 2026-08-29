@@ -26,7 +26,10 @@ const actionChoice = z.union([
     slot_policy: z.enum(['lowest_legal', 'conserve', 'best_effect']).optional(),
   }).strict(),
   z.object({ kind: z.literal('use_action'), action_id: identifier, target: targetSelector.nullable() }).strict(),
-  z.object({ kind: z.enum(['dodge', 'disengage', 'dash', 'end_turn']) }).strict(),
+  z.object({ kind: z.literal('dodge'), action_id: z.literal('dodge').optional() }).strict(),
+  z.object({ kind: z.literal('disengage'), action_id: z.literal('disengage').optional() }).strict(),
+  z.object({ kind: z.literal('dash'), action_id: z.literal('dash').optional() }).strict(),
+  z.object({ kind: z.literal('end_turn'), action_id: z.literal('end_turn').optional() }).strict(),
 ]).describe('Declarative engine-named action choice.');
 
 const movementPreference = z.object({

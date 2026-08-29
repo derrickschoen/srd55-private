@@ -1,9 +1,9 @@
 import { canonicalJson } from '../commands/canonical-json';
 import type { EncounterState } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
-import { monsterAttackCommand } from '../combat/monster-commands';
+import { monsterAttackCommand, monsterSavingThrowCommand } from '../combat/monster-commands';
 import { restoreMulberry32, type SerializableRng } from '../combat/random';
-import type { MonsterAttackAction } from '../combat/statblock';
+import type { MonsterAttackAction, MonsterSavingThrowAction } from '../combat/statblock';
 import type { CombatantId, EncounterBranchId, EncounterSessionId } from '../combat/values';
 import type { EngineStateCapsule } from './engine-state-capsule';
 import { canonicalEngineQueryPort } from './engine-query-port';
@@ -180,7 +180,21 @@ function applyOneResolvedMechanic(
     case 'end_turn': return reduce(state, { type: 'end_turn', actor: mechanics.actorId });
     case 'use_action': {
       if (choice.target !== null || mechanics.targetId !== null) {
-        throw new Error(`Utility action ${choice.actionId} cannot authorize a target.`);
+        if (choice.target === null || mechanics.targetId === null) {
+          throw new Error(`Resolved utility action ${choice.actionId} has inconsistent target bookkeeping.`);
+        }
+        const action = canonicalEngineQueryPort.actions(state, mechanics.actorId)
+          .find((candidate): candidate is MonsterSavingThrowAction =>
+            candidate.kind === 'saving_throw' && candidate.id === mechanics.actionId);
+        if (action === undefined) {
+          throw new Error(`Targeted utility action ${choice.actionId} is absent or has no executable target definition.`);
+        }
+        state = reduce(state, monsterSavingThrowCommand(
+          action,
+          mechanics.actorId,
+          mechanics.targetId,
+        ));
+        break;
       }
       switch (choice.actionId) {
         case 'dodge':

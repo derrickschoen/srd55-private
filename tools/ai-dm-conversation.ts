@@ -73,6 +73,8 @@ export interface ConversationConfig {
   readonly cli: ConversationCli;
   readonly model: string;
   readonly effort: ConversationEffort;
+  readonly escalationModel: string | null;
+  readonly escalationEffort: ConversationEffort | null;
   readonly outPath: string;
   readonly dryRun: boolean;
   readonly cwd: string;
@@ -120,11 +122,19 @@ export interface ConversationRow {
   readonly agentDispatched: boolean;
   readonly flapRetries: 0 | 1 | 2;
   readonly serviceNull: boolean;
+  readonly plannedBy: ConversationPlannerAttribution | 'sim_controller' | null;
+  readonly escalated: boolean;
+  readonly escalationModel: string | null;
   readonly stateBinding: {
     readonly capsule: { readonly revision: number; readonly digest: string };
     readonly authorization: { readonly revision: number; readonly digest: string } | null;
   };
   readonly chainEvidence: ConversationChainEvidence;
+}
+
+export interface ConversationPlannerAttribution {
+  readonly model: string;
+  readonly effort: ConversationEffort;
 }
 
 export interface ConversationRunResult {
@@ -186,6 +196,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     if (option === '--dry-run') { dryRun = true; continue; }
     if (![
       '--fixtures', '--rooms', '--rounds', '--reps', '--cli', '--model', '--effort',
+      '--escalation-model', '--escalation-effort',
       '--out', '--cli-bin', '--timeout-ms', '--kb', '--reaction-ask-default',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
@@ -197,6 +208,15 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   const effort = values.get('--effort') ?? 'medium';
   if (!CONVERSATION_EFFORTS.includes(effort as ConversationEffort)) {
     throw new TypeError('--effort must be low, medium, high, or xhigh.');
+  }
+  const escalationModel = values.get('--escalation-model') ?? null;
+  const escalationEffort = values.get('--escalation-effort') ?? null;
+  if ((escalationModel === null) !== (escalationEffort === null)) {
+    throw new TypeError('--escalation-model and --escalation-effort must be supplied together.');
+  }
+  if (escalationEffort !== null &&
+    !CONVERSATION_EFFORTS.includes(escalationEffort as ConversationEffort)) {
+    throw new TypeError('--escalation-effort must be low, medium, high, or xhigh.');
   }
   const cli = values.get('--cli') ?? 'codex';
   if (!CONVERSATION_CLIS.includes(cli as ConversationCli)) {
@@ -216,6 +236,8 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     cli: selectedCli,
     model: values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
     effort: effort as ConversationEffort,
+    escalationModel,
+    escalationEffort: escalationEffort as ConversationEffort | null,
     outPath,
     dryRun,
     cwd: resolve(cwd),
@@ -536,6 +558,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   readonly #failCorrection: ReadonlySet<string>;
   readonly #remainingPrimaryFlaps: Map<string, number>;
   readonly #reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>;
+  #starts = 0;
 
   constructor(
     kind: ConversationCli,
@@ -557,17 +580,31 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   async probe() { return { present: true, version: 'SIMULATED' }; }
 
   async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
-    return completedSimulated(`agent-session:SIMULATED:${invocation.runId}`);
+    this.#starts += 1;
+    const sessionId = this.#starts === 1
+      ? `agent-session:SIMULATED:${invocation.runId}`
+      : `agent-session:SIMULATED:${invocation.runId}:fresh-${String(this.#starts)}`;
+    const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+    return manifest.phase === 'correction'
+      ? this.#dispatch(sessionId, invocation, false)
+      : completedSimulated(sessionId);
   }
 
   async resume(binding: AgentSessionBinding, invocation: AgentInvocation): Promise<AgentTurnResult> {
+    return this.#dispatch(binding.sessionId, invocation, invocation.prompt.startsWith('[ROOM_TRANSITION]'));
+  }
+
+  async #dispatch(
+    sessionId: string,
+    invocation: AgentInvocation,
+    roomTransition: boolean,
+  ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const key = manifest.requestId.replace(/^request:/u, '');
-    const roomTransition = invocation.prompt.startsWith('[ROOM_TRANSITION]');
     const remainingFlaps = this.#remainingPrimaryFlaps.get(key) ?? 0;
     if (!roomTransition && manifest.phase === 'initial' && remainingFlaps > 0) {
       this.#remainingPrimaryFlaps.set(key, remainingFlaps - 1);
-      return completedSimulated(binding.sessionId);
+      return completedSimulated(sessionId);
     }
     const submit = !roomTransition && !(manifest.phase === 'initial'
       ? this.#exhaustInitial.has(key) : this.#failCorrection.has(key));
@@ -582,7 +619,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     if (driven.rejections.length > 0) {
       this.rejectionsByRequest.set(manifest.requestId, driven.rejections);
     }
-    return completedSimulated(binding.sessionId);
+    return completedSimulated(sessionId);
   }
 
   classifyFailure(): 'unknown' { return 'unknown'; }
@@ -739,10 +776,21 @@ function invocation(
   prompt: string,
   launcherToken: string,
   instructions: string | null = null,
+  planner: ConversationPlannerAttribution = { model: config.model, effort: config.effort },
 ): AgentInvocation {
   return {
-    runId, prompt, instructions, model: config.model, reasoningEffort: config.effort,
+    runId, prompt, instructions, model: planner.model, reasoningEffort: planner.effort,
     launcherToken, timeoutMs: config.timeoutMs,
+  };
+}
+
+function plannerAttribution(dispatched: AgentInvocation): ConversationPlannerAttribution {
+  if (!CONVERSATION_EFFORTS.includes(dispatched.reasoningEffort as ConversationEffort)) {
+    throw new TypeError(`Dispatched planner effort ${dispatched.reasoningEffort} is not attributable.`);
+  }
+  return {
+    model: dispatched.model,
+    effort: dispatched.reasoningEffort as ConversationEffort,
   };
 }
 
@@ -801,6 +849,18 @@ export async function runConversation(config: ConversationConfig, options: Conve
   );
   let completedRounds = 0;
   let restoredMidRun = false;
+  const basePlanner: ConversationPlannerAttribution = {
+    model: config.model,
+    effort: config.effort,
+  };
+  const escalationPlanner: ConversationPlannerAttribution | null =
+    config.escalationModel === null || config.escalationEffort === null
+      ? null
+      : { model: config.escalationModel, effort: config.escalationEffort };
+  const escalationInstructions = [
+    'This is a fresh one-shot escalation session for the single correction in the supplied repair brief. Use only the correction launcher and submit the complete corrected round once; no fallback remains.',
+    knowledgeBase?.text ?? '',
+  ].filter((entry) => entry.length > 0).join('\n\n');
   const prepareRound = (request: EngineRoundCapsuleRequest): EngineRoundSnapshot => {
     const prepared = engineSession.prepareRound(request, journal.reactionGuidance());
     recordAutoResolvedReactions(journal, prepared);
@@ -875,6 +935,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let autoResolvedTrigger: string | null = null;
       let correctionFinalText: string | null = null;
       let authorizationStateBinding: ConversationRow['stateBinding']['authorization'] = null;
+      let initialDispatchPlanner: ConversationPlannerAttribution | null = null;
+      let correctionDispatchPlanner: ConversationPlannerAttribution | null = null;
+      let plannedBy: ConversationRow['plannedBy'] = null;
+      let escalated = false;
+      let firedEscalationModel: string | null = null;
       try {
         if (options.failBeforeDispatch?.includes(key) === true) {
           throw new Error('SIMULATED host failure before agent dispatch.');
@@ -892,9 +957,15 @@ export async function runConversation(config: ConversationConfig, options: Conve
             const rejectionsBefore = rejectionsObserved().length;
             const retryNote = attempt === 0 ? '' :
               '[SERVICE_RETRY] The previous turn completed with no engine tool activity and no proposal. Retry the same round now.\n\n';
-            const turn = await lifecycle.resumeRound(invocation(
+            const primaryInvocation = invocation(
               config, runId, `${retryNote}${primaryPrompt}`, initialLauncher.manifestPath,
-            ), new AbortController().signal);
+              null, basePlanner,
+            );
+            initialDispatchPlanner = plannerAttribution(primaryInvocation);
+            const turn = await lifecycle.resumeRound(
+              primaryInvocation,
+              new AbortController().signal,
+            );
             roundUsage = addAgentUsage(roundUsage, turn.usage);
             proposed = takeRoundProposal(initialLauncher.spoolPath);
             const flapped = turn.exit === 'completed' && proposed === null &&
@@ -999,6 +1070,13 @@ export async function runConversation(config: ConversationConfig, options: Conve
               return 'invalid';
             }
             proposalId = proposal.proposalId;
+            const acceptingPlanner = proposal.phase === 'initial'
+              ? initialDispatchPlanner
+              : correctionDispatchPlanner;
+            if (acceptingPlanner === null) {
+              throw new Error(`Accepted ${proposal.phase} proposal has no dispatch attribution.`);
+            }
+            plannedBy = acceptingPlanner;
             if (proposal.reactionGuidance !== null) {
               journal.replaceReactionGuidance(
                 proposal.requestId,
@@ -1026,6 +1104,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
             }], journal.reactionGuidance());
             capsuleRevision += Math.max(1, applied.revisionDelta);
             recordAutoResolvedReactions(journal, applied);
+            plannedBy = 'sim_controller';
           },
           pauseForDmAdjudication: ({ actorId, reason }) => { refusals.push(`${actorId}: ${reason}`); },
         };
@@ -1036,13 +1115,40 @@ export async function runConversation(config: ConversationConfig, options: Conve
             turnContext: { revision: contextRevision, room, round },
             lifecycle: {
               resumeCorrection: async (correctionInvocation: AgentInvocation, signal: AbortSignal) => {
-                const correctionTurn = await lifecycle.resumeCorrection(correctionInvocation, signal);
+                correctionDispatchPlanner = plannerAttribution(correctionInvocation);
+                escalated = escalationPlanner !== null;
+                firedEscalationModel = escalationPlanner === null
+                  ? null
+                  : correctionDispatchPlanner.model;
+                /* A model-changing resume contaminates the persistent base session even when
+                 * the next primary argv switches back. Keep untiered corrections in-session,
+                 * but dispatch configured escalation as a fresh, repair-brief-seeded session. */
+                const correctionTurn = escalationPlanner === null
+                  ? await lifecycle.resumeCorrection(correctionInvocation, signal)
+                  : await adapter.start({
+                      ...correctionInvocation,
+                      instructions: escalationInstructions,
+                    }, signal);
+                if (correctionTurn.exit !== 'completed') {
+                  throw new Error('Agent correction dispatch was cancelled.');
+                }
+                if (escalationPlanner !== null &&
+                  correctionTurn.sessionId === journal.agentSession()?.sessionId) {
+                  throw new Error('Tiered correction did not create an isolated escalation session.');
+                }
                 roundUsage = addAgentUsage(roundUsage, correctionTurn.usage);
                 correctionFinalText = correctionTurn.finalText;
                 return correctionTurn;
               },
             },
-            invocation: invocation(config, runId, 'replaced by correction renderer', correctionLauncher.manifestPath),
+            invocation: invocation(
+              config,
+              runId,
+              'replaced by correction renderer',
+              correctionLauncher.manifestPath,
+              null,
+              escalationPlanner ?? basePlanner,
+            ),
             signal: new AbortController().signal,
             activateCapsule: () => undefined,
             takeProposal: () => takeRoundProposal(correctionLauncher.spoolPath),
@@ -1095,6 +1201,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
         tokens: tokenCounts(roundUsage), refusals,
         toolCalls: simulated?.callsByRequest.get(requestId) ?? observedToolCalls,
         agentDispatched, flapRetries, serviceNull,
+        plannedBy, escalated, escalationModel: firedEscalationModel,
         stateBinding: {
           capsule: { revision: capsule.revision, digest: capsule.digest },
           authorization: authorizationStateBinding,

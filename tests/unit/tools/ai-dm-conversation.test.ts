@@ -38,6 +38,7 @@ import {
   importSavedSession,
   MemoryBrowserSessionStore,
 } from '../../../src/vtt/session-persistence';
+import { codexArgv } from '../../../src/vtt/agent-adapters/codex';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 class RecordingConversationAdapter implements AgentSessionAdapter {
@@ -133,20 +134,74 @@ function attackIntent(state: EncounterState, actorId: CombatantId): Readonly<Rec
   return null;
 }
 
+function targetedUtilityIntent(
+  state: EncounterState,
+  actorId: CombatantId,
+  actionId: string,
+): Readonly<Record<string, unknown>> | null {
+  const actor = canonicalEngineQueryPort.combatant(state, actorId);
+  if (actor === null || !canonicalEngineQueryPort.actions(state, actorId)
+    .some((action) => action.kind === 'saving_throw' && action.id === actionId)) return null;
+  const targets = state.combatants.filter((candidate) =>
+    candidate.life !== 'dead' && !canonicalEngineQueryPort.sameSide(state, actorId, candidate.profile.id));
+  for (const target of targets) {
+    const intent: EngineTurnIntent = {
+      actorId,
+      choice: {
+        kind: 'use_action', actionId,
+        target: { kind: 'combatant', combatantId: target.profile.id },
+      },
+      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
+      engagement: { stance: 'hold_position' },
+      fallback: null,
+    };
+    if (!pureIntentResolver.resolve(state, intent).valid) continue;
+    return {
+      actor_id: actorId,
+      choice: {
+        kind: 'use_action', action_id: actionId,
+        target: { kind: 'combatant', combatant_id: target.profile.id },
+      },
+      movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
+      engagement: { stance: 'hold_position' },
+      fallback: null,
+    };
+  }
+  return null;
+}
+
 class SerializedRoundTripAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
   readonly submittedChoices: Readonly<Record<string, unknown>>[] = [];
   readonly decodedChoices: EngineActionChoice[] = [];
+  readonly startInvocations: AgentInvocation[] = [];
+  readonly resumeInvocations: AgentInvocation[] = [];
+  #startCount = 0;
 
-  constructor(private readonly choice: 'use_action_dodge' | 'attack') {}
+  constructor(private readonly choice: 'use_action_dodge' | 'targeted_web' | 'attack' | 'invalid_then_dodge' | 'option_shaped_end_turn') {}
 
   async probe() { return { present: true, version: 'SERIALIZED-TEST' }; }
 
   async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
-    return this.completed(agentSessionIdFromCli(`codex:serialized:${invocation.runId}`));
+    this.startInvocations.push(invocation);
+    this.#startCount += 1;
+    const sessionId = agentSessionIdFromCli(
+      `codex:serialized:${invocation.runId}:session-${String(this.#startCount)}`,
+    );
+    return this.#startCount === 1
+      ? this.completed(sessionId)
+      : this.dispatch(sessionId, invocation);
   }
 
   async resume(binding: AgentSessionBinding, invocation: AgentInvocation): Promise<AgentTurnResult> {
+    this.resumeInvocations.push(invocation);
+    return this.dispatch(binding.sessionId, invocation);
+  }
+
+  private async dispatch(
+    sessionId: AgentTurnResult['sessionId'],
+    invocation: AgentInvocation,
+  ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const state = await loadArenaFixture(manifest.fixturePath);
     const runtime = createEngineMcpRuntime(state, {
@@ -165,17 +220,23 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
     const stateRef = objectValue(context['state_ref'], 'serialized state ref');
     const actors = runtime.feed.current().request?.actors;
     if (actors === undefined) throw new Error('Serialized round request has no actors.');
-    let attackSubmitted = false;
+    let specialSubmitted = false;
     const intents = actors.map((actorId) => {
-      const attack = this.choice === 'attack' && !attackSubmitted
+      const attack = this.choice === 'attack' && !specialSubmitted
         ? attackIntent(state, actorId)
         : null;
-      if (attack !== null) attackSubmitted = true;
-      const intent = attack ?? {
+      const targetedUtility = this.choice === 'targeted_web' && !specialSubmitted
+        ? targetedUtilityIntent(state, actorId, 'web')
+        : null;
+      if (attack !== null || targetedUtility !== null) specialSubmitted = true;
+      const intent = attack ?? targetedUtility ?? {
         actor_id: actorId,
-        choice: this.choice === 'use_action_dodge'
+        choice: this.choice === 'use_action_dodge' || this.choice === 'targeted_web' ||
+          this.choice === 'invalid_then_dodge'
           ? { kind: 'use_action', action_id: 'dodge', target: null }
-          : { kind: 'dodge' },
+          : this.choice === 'option_shaped_end_turn'
+            ? { kind: 'end_turn', action_id: 'end_turn' }
+            : { kind: 'dodge' },
         movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
         engagement: { stance: 'hold_position' },
         fallback: null,
@@ -183,8 +244,8 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       this.submittedChoices.push(objectValue(intent['choice'], 'serialized intent choice'));
       return intent;
     });
-    if (this.choice === 'attack' && !attackSubmitted) {
-      throw new Error('Serialized round has no requested actor with a resolvable attack.');
+    if ((this.choice === 'attack' || this.choice === 'targeted_web') && !specialSubmitted) {
+      throw new Error(`Serialized round has no requested actor with a resolvable ${this.choice}.`);
     }
     const submitted = serializedToolCall(runtime.handler, 'engine.submit_round_intents', {
       state_ref: stateRef,
@@ -199,8 +260,17 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
     const proposal = runtime.proposals[0];
     if (proposal?.kind !== 'round_intent_proposal') throw new Error('Serialized handler omitted the round proposal.');
     this.decodedChoices.push(...proposal.resolutions.map((resolution) => resolution.intent.choice));
-    writeFileSync(manifest.proposalSpoolPath, `${JSON.stringify(proposal)}\n`, 'utf8');
-    return this.completed(binding.sessionId);
+    const dispatchedProposal = this.choice === 'invalid_then_dodge' && manifest.phase === 'initial'
+      ? {
+          ...proposal,
+          resolutions: proposal.resolutions.map((resolution) => ({
+            ...resolution,
+            resolutionDigest: '0'.repeat(64),
+          })),
+        }
+      : proposal;
+    writeFileSync(manifest.proposalSpoolPath, `${JSON.stringify(dispatchedProposal)}\n`, 'utf8');
+    return this.completed(sessionId);
   }
 
   classifyFailure(): 'unknown' { return 'unknown'; }
@@ -287,8 +357,151 @@ describe('AI-DM engine MCP conversation runner', () => {
     });
     expect(rejectionReasons).not.toContain('The engine could not authorize this proposal mechanic.');
     expect(result.rows[0]).toEqual(expect.objectContaining({ outcome: 'authorized', refusals: [] }));
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      plannedBy: { model: 'gpt-5.6-sol', effort: 'medium' },
+      escalated: false,
+      escalationModel: null,
+    }));
     expect(result.rows[0]?.stateBinding.authorization).toEqual(result.rows[0]?.stateBinding.capsule);
   });
+
+  it('authorizes targeted Web and non-targeted Dodge through serialized MCP use_action choices', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-serialized-web-'));
+    const adapter = new SerializedRoundTripAdapter('targeted_web');
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+    ]);
+
+    const result = await runConversation(config, {
+      adapter,
+      roomStates: [generateRoom(3_943_006).encounter.state],
+    });
+
+    expect(adapter.submittedChoices).toContainEqual(expect.objectContaining({
+      kind: 'use_action', action_id: 'web',
+      target: expect.objectContaining({ kind: 'combatant' }),
+    }));
+    expect(adapter.submittedChoices).toContainEqual({
+      kind: 'use_action', action_id: 'dodge', target: null,
+    });
+    expect(adapter.decodedChoices).toContainEqual(expect.objectContaining({
+      kind: 'use_action', actionId: 'web',
+      target: expect.objectContaining({ kind: 'combatant' }),
+    }));
+    expect(result.rows[0]).toEqual(expect.objectContaining({ outcome: 'authorized', refusals: [] }));
+    expect(result.rows[0]?.chainEvidence.failedAttempts.flatMap((attempt) => attempt.rejectionReasons))
+      .not.toContain('Utility action web cannot authorize a target.');
+  });
+
+  it('round-trips the option-shaped end_turn choice emitted by the tactical context', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-serialized-end-turn-'));
+    const adapter = new SerializedRoundTripAdapter('option_shaped_end_turn');
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+    ]);
+
+    const result = await runConversation(config, {
+      adapter,
+      roomStates: [generateRoom(3_943_006).encounter.state],
+    });
+
+    expect(adapter.submittedChoices).toContainEqual({ kind: 'end_turn', action_id: 'end_turn' });
+    expect(adapter.decodedChoices).toContainEqual({ kind: 'end_turn' });
+    expect(result.rows[0]).toEqual(expect.objectContaining({ outcome: 'authorized', refusals: [] }));
+  });
+
+  function primaryCodexArgvBytes(dispatched: AgentInvocation): string {
+    return JSON.stringify(codexArgv({
+      cwd: '/SIMULATED/workspace',
+      model: dispatched.model,
+      reasoningEffort: dispatched.reasoningEffort,
+      engineCommand: '/SIMULATED/node',
+      engineArgs: ['/SIMULATED/engine-mcp.mjs', '/SIMULATED/primary-launcher.json'],
+      instructions: null,
+      sessionId: 'SIMULATED-base-session',
+    }));
+  }
+
+  it('keeps tiered primary argv/config byte-identical and isolates escalation from the base session', { timeout: 60_000 }, async () => {
+    const untieredDirectory = mkdtempSync(join(tmpdir(), 'dnd-conversation-primary-untiered-'));
+    const tieredDirectory = mkdtempSync(join(tmpdir(), 'dnd-conversation-primary-tiered-'));
+    const untieredAdapter = new SerializedRoundTripAdapter('invalid_then_dodge');
+    const tieredAdapter = new SerializedRoundTripAdapter('invalid_then_dodge');
+    const commonArgs = [
+      '--rooms', '1', '--rounds', '1', '--model', 'gpt-base', '--effort', 'low',
+    ] as const;
+
+    await runConversation(parseConversationArgs([
+      ...commonArgs, '--out', join(untieredDirectory, 'rows.jsonl'),
+    ]), { adapter: untieredAdapter, roomStates: [generateRoom(3_943_006).encounter.state] });
+    await runConversation(parseConversationArgs([
+      ...commonArgs, '--out', join(tieredDirectory, 'rows.jsonl'),
+      '--escalation-model', 'gpt-escalation', '--escalation-effort', 'high',
+    ]), { adapter: tieredAdapter, roomStates: [generateRoom(3_943_006).encounter.state] });
+
+    const untieredPrimary = untieredAdapter.resumeInvocations[0];
+    const tieredPrimary = tieredAdapter.resumeInvocations[0];
+    if (untieredPrimary === undefined || tieredPrimary === undefined) {
+      throw new Error('SIMULATED primary dispatch was not recorded.');
+    }
+    expect(primaryCodexArgvBytes(tieredPrimary)).toBe(primaryCodexArgvBytes(untieredPrimary));
+    expect(tieredAdapter.startInvocations).toHaveLength(2);
+    expect(tieredAdapter.resumeInvocations).toHaveLength(1);
+    expect(untieredAdapter.startInvocations).toHaveLength(1);
+    expect(untieredAdapter.resumeInvocations).toHaveLength(2);
+  });
+
+  it.each([
+    {
+      name: 'tiered',
+      escalationArgs: ['--escalation-model', 'gpt-escalation', '--escalation-effort', 'high'],
+      expectedPlanner: { model: 'gpt-escalation', effort: 'high' },
+      expectedEscalated: true,
+      expectedEscalationModel: 'gpt-escalation',
+    },
+    {
+      name: 'untiered',
+      escalationArgs: [],
+      expectedPlanner: { model: 'gpt-base', effort: 'low' },
+      expectedEscalated: false,
+      expectedEscalationModel: null,
+    },
+  ] as const)(
+    'routes a $name correction using actual dispatch bookkeeping',
+    { timeout: 60_000 },
+    async ({ escalationArgs, expectedPlanner, expectedEscalated, expectedEscalationModel }) => {
+      const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-tiered-correction-'));
+      const adapter = new SerializedRoundTripAdapter('invalid_then_dodge');
+      const config = parseConversationArgs([
+        '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+        '--model', 'gpt-base', '--effort', 'low',
+        ...escalationArgs,
+      ]);
+
+      const result = await runConversation(config, {
+        adapter,
+        roomStates: [generateRoom(3_943_006).encounter.state],
+      });
+
+      expect(adapter.resumeInvocations[0]).toEqual(expect.objectContaining({
+        model: 'gpt-base', reasoningEffort: 'low',
+      }));
+      const correctionInvocation = expectedEscalated
+        ? adapter.startInvocations[1]
+        : adapter.resumeInvocations[1];
+      expect(correctionInvocation).toEqual(expect.objectContaining({
+        model: expectedPlanner.model, reasoningEffort: expectedPlanner.effort,
+      }));
+      expect(adapter.startInvocations).toHaveLength(expectedEscalated ? 2 : 1);
+      expect(adapter.resumeInvocations).toHaveLength(expectedEscalated ? 1 : 2);
+      expect(result.rows[0]).toEqual(expect.objectContaining({
+        outcome: 'authorized',
+        plannedBy: expectedPlanner,
+        escalated: expectedEscalated,
+        escalationModel: expectedEscalationModel,
+      }));
+    },
+  );
 
   it('authorizes a serialized MCP attack proposal', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-serialized-attack-'));
@@ -493,6 +706,9 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(new Set(result.rows.map((row) => row.sessionIdHash)).size).toBe(1);
     expect(result.rows[0]?.toolCalls).toBe(3);
     expect(result.rows[0]?.agentDispatched).toBe(true);
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      plannedBy: 'sim_controller', escalated: false, escalationModel: null,
+    }));
     expect(result.rows[0]?.chainEvidence).toEqual({
       failedAttempts: expect.arrayContaining([
         expect.objectContaining({ attempt: 'primary' }),
@@ -562,6 +778,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       expect.objectContaining({
         outcome: 'service_null', flapRetries: 2, serviceNull: true,
         toolCalls: 0, proposalId: null, refusals: [],
+        plannedBy: null, escalated: false, escalationModel: null,
         chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
       }),
     ]);
@@ -628,6 +845,15 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--kb', 'tests/fixtures/arena-basis/seed-3943001.json',
     ]).kbPath).toBe(join(process.cwd(), 'tests/fixtures/arena-basis/seed-3943001.json'));
+    expect(parseConversationArgs([
+      '--rooms', '1', '--out', outPath,
+      '--escalation-model', 'gpt-escalation', '--escalation-effort', 'xhigh',
+    ])).toEqual(expect.objectContaining({
+      escalationModel: 'gpt-escalation', escalationEffort: 'xhigh',
+    }));
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--escalation-model', 'gpt-escalation',
+    ])).toThrow('--escalation-model and --escalation-effort must be supplied together');
     expect(() => parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--kb', 'content/cc-by-sa/forbidden.txt',
     ])).toThrow('--kb cannot use content/cc-by-sa');
