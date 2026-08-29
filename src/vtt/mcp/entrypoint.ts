@@ -21,6 +21,7 @@ import {
   type AdjudicationEnvelope,
   type AllowlistedRulesSource,
   type EngineMcpToolProfile,
+  type EngineToolSurface,
   type TurnContextDeltaBase,
 } from './engine-server';
 import { jsonRpcParseError, type JsonRpcResponse, type McpHandler } from './handler';
@@ -109,6 +110,7 @@ async function writeJsonLine(value: unknown): Promise<void> {
 
 export interface EngineMcpRuntime {
   readonly handler: McpHandler;
+  readonly toolSurface: EngineToolSurface;
   readonly feed: MutableEngineCapsuleFeed;
   readonly proposals: readonly EngineProposalEnvelope[];
   readonly speculativePlans: readonly QueuedSpeculativePlanEnvelope[];
@@ -183,7 +185,7 @@ export function createEngineMcpRuntime(
   const speculativePlans: QueuedSpeculativePlanEnvelope[] = [];
   const narrations: NarrationEnvelope[] = [];
   const adjudications: AdjudicationEnvelope[] = [];
-  const handler = createEngineMcpApplication({
+  const application = createEngineMcpApplication({
     state,
     stateSource: feed,
     queries: canonicalEngineQueryPort,
@@ -206,7 +208,15 @@ export function createEngineMcpRuntime(
       turnContextDeltaBase: structuredClone(options.turnContextDeltaBase),
     }),
   });
-  return { handler, feed, proposals, speculativePlans, narrations, adjudications };
+  return {
+    handler: application,
+    toolSurface: application.toolSurface,
+    feed,
+    proposals,
+    speculativePlans,
+    narrations,
+    adjudications,
+  };
 }
 
 export function createEngineMcpHandler(state: EncounterState, maximumToolResultBytes?: number): McpHandler {

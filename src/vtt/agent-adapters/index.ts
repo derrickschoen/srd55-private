@@ -19,3 +19,12 @@ export function resolveAgentAdapter(
 
 export type { AgentAdapterOptions, AgentProcessOutput, AgentProcessRunner, AgentProcessSpec } from './process';
 export { AgentAdapterError, AGENT_ADAPTER_VERSION } from './process';
+export {
+  LocalOpenAiAdapterError,
+  LocalOpenAiAgentSessionAdapter,
+  localOpenAiFunctionName,
+  openAiFunctionTools,
+  type LocalOpenAiAdapterOptions,
+  type LocalOpenAiConfig,
+  type OpenAiFunctionTool,
+} from './local-openai';

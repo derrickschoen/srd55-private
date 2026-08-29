@@ -17,11 +17,15 @@ import {
 } from '../src/combat/values';
 import { sha256 } from '../src/crypto/sha256';
 import {
-  type AgentCliKind, type AgentFailureClassification, type AgentInvocation, type AgentSessionAdapter,
-  type AgentSessionBinding, type AgentTurnResult, type AgentUsage,
+  type AgentAdapterKind, type AgentCliKind, type AgentFailureClassification, type AgentInvocation, type AgentSessionAdapter,
+  type AgentSessionBinding, type AgentToolSession, type AgentTurnResult, type AgentUsage,
 } from '../src/vtt/agent-session';
 import { AgentSessionLifecycle } from '../src/vtt/agent-session-lifecycle';
 import { AGENT_ADAPTER_VERSION, resolveAgentAdapter } from '../src/vtt/agent-adapters';
+import {
+  LocalOpenAiAgentSessionAdapter,
+  type LocalOpenAiConfig,
+} from '../src/vtt/agent-adapters/local-openai';
 import type { ProposedIntentResolution, RoundIntentProposalEnvelope } from '../src/vtt/engine-envelopes';
 import { engineStateHandle } from '../src/vtt/engine-state-capsule';
 import {
@@ -58,8 +62,9 @@ import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-hos
 import {
   type ReactionGuidanceDeclaration,
 } from '../src/vtt/reaction-guidance';
+import { buildArenaSessionInstructions } from './rl/arena-session-instructions';
 
-export const CONVERSATION_CLIS = ['codex', 'claude-code'] as const;
+export const CONVERSATION_CLIS = ['codex', 'claude-code', 'local-openai'] as const;
 export type ConversationCli = (typeof CONVERSATION_CLIS)[number];
 export const CONVERSATION_EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const;
 export type ConversationEffort = (typeof CONVERSATION_EFFORTS)[number];
@@ -89,6 +94,17 @@ export interface ConversationConfig {
   readonly timeoutMs: number;
   readonly kbPath: string | null;
   readonly reactionAskDefault: UnattendedReactionAskDefault;
+  readonly captureRlData: boolean;
+  readonly localOpenAi: LocalOpenAiConfig | null;
+}
+
+export interface ConversationRlData {
+  readonly format: 'arena-rl-capture-v1';
+  readonly sourceLicense: 'project-generated';
+  readonly sessionInstructions: string;
+  readonly turnContext: Readonly<Record<string, unknown>>;
+  readonly submitRoundIntentsArguments: Readonly<Record<string, unknown>>;
+  readonly stateDigest: string;
 }
 
 export interface ConversationTokenCounts {
@@ -134,6 +150,7 @@ export interface ConversationRow {
   readonly room: number;
   readonly round: number;
   readonly cli: ConversationCli;
+  readonly model: string;
   readonly contextRevision: number;
   readonly projectionRevision: number;
   readonly sessionIdHash: string | null;
@@ -142,7 +159,7 @@ export interface ConversationRow {
   readonly snippetSetHash: string;
   readonly suggestedPlay: ConversationSuggestedPlay | null;
   readonly suggestionAdopted: ConversationSuggestionAdoption | null;
-  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null';
+  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null' | 'local_error';
   readonly proposalId: string | null;
   readonly timeToFirstAction: number;
   readonly wallPerCreature: number;
@@ -164,6 +181,7 @@ export interface ConversationRow {
   readonly authorizedPlan: readonly ConversationAuthorizedActorPlan[] | null;
   readonly roundNarrative: string | null;
   readonly chainEvidence: ConversationChainEvidence;
+  readonly rlData?: ConversationRlData;
 }
 
 export interface ConversationPlannerAttribution {
@@ -228,13 +246,16 @@ function validateKbPath(cwd: string, candidate: string): void {
 export function parseConversationArgs(argv: readonly string[], cwd = process.cwd()): ConversationConfig {
   const values = new Map<string, string>();
   let dryRun = false;
+  let captureRlData = false;
   for (let index = 0; index < argv.length; index += 1) {
     const option = argv[index];
     if (option === '--dry-run') { dryRun = true; continue; }
+    if (option === '--capture-rl-data') { captureRlData = true; continue; }
     if (![
       '--fixtures', '--rooms', '--rounds', '--reps', '--cli', '--model', '--effort',
       '--escalation-model', '--escalation-effort',
       '--out', '--cli-bin', '--timeout-ms', '--kb', '--reaction-ask-default',
+      '--local-base-url', '--local-model', '--local-api-key',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
     index += 1;
@@ -257,11 +278,31 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   }
   const cli = values.get('--cli') ?? 'codex';
   if (!CONVERSATION_CLIS.includes(cli as ConversationCli)) {
-    throw new TypeError('--cli must be codex or claude-code.');
+    throw new TypeError('--cli must be codex, claude-code, or local-openai.');
   }
   const selectedCli = cli as ConversationCli;
+  const hasLocalOption = values.has('--local-base-url') || values.has('--local-model') ||
+    values.has('--local-api-key');
+  if (selectedCli !== 'local-openai' && hasLocalOption) {
+    throw new TypeError('--local-base-url, --local-model, and --local-api-key require --cli local-openai.');
+  }
+  const localBaseUrl = values.get('--local-base-url');
+  const localModel = values.get('--local-model');
+  if (selectedCli === 'local-openai' && (localBaseUrl === undefined || localModel === undefined)) {
+    throw new TypeError('--cli local-openai requires --local-base-url and --local-model.');
+  }
+  const localOpenAi: LocalOpenAiConfig | null = selectedCli === 'local-openai'
+    ? {
+        baseUrl: localBaseUrl ?? '',
+        model: localModel ?? '',
+        ...(values.has('--local-api-key') ? { apiKey: values.get('--local-api-key') ?? '' } : {}),
+      }
+    : null;
   const kbPath = values.has('--kb') ? resolve(values.get('--kb') ?? '') : null;
   if (kbPath !== null) validateKbPath(cwd, kbPath);
+  if (captureRlData && kbPath !== null && !pathIsInside(resolve(cwd, 'tests/fixtures'), kbPath)) {
+    throw new TypeError('--capture-rl-data requires a project fixture KB or no KB.');
+  }
   const reactionAskDefault = values.get('--reaction-ask-default') ?? 'decline';
   if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
     throw new TypeError('--reaction-ask-default must be decline or take.');
@@ -271,17 +312,19 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     rooms: positiveInteger(values.get('--rooms') ?? '12', '--rooms'),
     rounds: positiveInteger(values.get('--rounds') ?? values.get('--reps') ?? '1', '--rounds'),
     cli: selectedCli,
-    model: values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
+    model: localOpenAi?.model ?? values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
     effort: effort as ConversationEffort,
     escalationModel,
     escalationEffort: escalationEffort as ConversationEffort | null,
     outPath,
     dryRun,
     cwd: resolve(cwd),
-    cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : 'claude'),
+    cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : selectedCli === 'claude-code' ? 'claude' : ''),
     timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
     kbPath,
     reactionAskDefault,
+    captureRlData,
+    localOpenAi,
   };
 }
 
@@ -579,6 +622,24 @@ function externalReactionGuidance(guidance: ReactionGuidanceDeclaration): Readon
   };
 }
 
+function rlCapture(
+  knowledgeBase: string | null,
+  turnContext: Readonly<Record<string, unknown>>,
+  proposal: RoundIntentProposalEnvelope,
+): ConversationRlData {
+  if (proposal.submittedArguments === undefined) {
+    throw new Error('Accepted round proposal omitted its validated submit_round_intents arguments.');
+  }
+  return {
+    format: 'arena-rl-capture-v1',
+    sourceLicense: 'project-generated',
+    sessionInstructions: buildArenaSessionInstructions(knowledgeBase),
+    turnContext: structuredClone(turnContext),
+    submitRoundIntentsArguments: structuredClone(proposal.submittedArguments),
+    stateDigest: proposal.stateDigest,
+  };
+}
+
 async function driveScriptedMcp(
   cwd: string,
   launcherPath: string,
@@ -687,7 +748,7 @@ async function driveScriptedMcp(
 }
 
 class SimulatedConversationAdapter implements AgentSessionAdapter {
-  readonly kind: AgentCliKind;
+  readonly kind: AgentAdapterKind;
   readonly callsByRequest = new Map<string, number>();
   readonly rejectionsByRequest = new Map<string, readonly ConversationChainAttemptEvidence[]>();
   readonly contextTruncatedByRequest = new Map<string, boolean>();
@@ -772,7 +833,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
 }
 
 class ModelCallBookkeepingAdapter implements AgentSessionAdapter {
-  readonly kind: AgentCliKind;
+  readonly kind: AgentAdapterKind;
   #modelCalls = 0;
 
   constructor(private readonly inner: AgentSessionAdapter) {
@@ -913,6 +974,53 @@ function fullTurnContextBase(
   return { revision: capsule.revision, context: structuredClone(context) };
 }
 
+function inProcessDmToolSession(input: {
+  readonly state: EncounterState;
+  readonly snapshot: EngineRoundSnapshot;
+  readonly turnContextDeltaBase?: TurnContextDeltaBase;
+  readonly onProposal: (proposal: RoundIntentProposalEnvelope) => void;
+  readonly onToolResult: (name: string, result: unknown) => void;
+}): AgentToolSession {
+  const capsule = input.snapshot.capsule;
+  const request = capsule.request;
+  if (request === null || request.phase === 'speculative') {
+    throw new Error('Local OpenAI tool session requires an ordinary pending request.');
+  }
+  const runtime = createEngineMcpRuntime(input.state, {
+    runId: capsule.runId,
+    branchId: capsule.branchId,
+    revision: capsule.revision,
+    requestId: request.requestId,
+    phase: request.phase,
+    correctionNumber: request.correctionNumber,
+    room: capsule.projection.room,
+    ...(capsule.historyDelta[0] === undefined ? {} : {
+      historyKind: capsule.historyDelta[0].kind,
+    }),
+    requestedActorCount: request.actors.length,
+    toolProfile: 'dm',
+    ...(input.turnContextDeltaBase === undefined ? {} : {
+      turnContextDeltaBase: input.turnContextDeltaBase,
+    }),
+    onProposal: (proposal) => {
+      if (isRoundProposal(proposal)) input.onProposal(structuredClone(proposal));
+    },
+  });
+  return {
+    tools: runtime.toolSurface.tools,
+    execute(name, argumentsValue) {
+      try {
+        const result = runtime.toolSurface.execute(name, argumentsValue);
+        input.onToolResult(name, result);
+        return result;
+      } catch (error) {
+        input.onToolResult(name, { error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
+    },
+  };
+}
+
 function selectedIntentBranch(
   entry: RoundIntentProposalEnvelope['resolutions'][number],
 ): EngineIntentBranch {
@@ -1020,12 +1128,14 @@ function invocation(
   instructions: string | null = null,
   planner: ConversationPlannerAttribution = { model: config.model, effort: config.effort },
   recoveryLauncherToken?: string,
+  toolSession?: AgentToolSession,
 ): AgentInvocation {
   return {
     runId, prompt, instructions, model: planner.model, reasoningEffort: planner.effort,
     sessionProfile: 'arena',
     launcherToken, timeoutMs: config.timeoutMs,
     ...(recoveryLauncherToken === undefined ? {} : { recoveryLauncherToken }),
+    ...(toolSession === undefined ? {} : { toolSession }),
   };
 }
 
@@ -1079,24 +1189,29 @@ export async function runConversation(config: ConversationConfig, options: Conve
     options.reactionGuidanceByRequest ?? {},
     options.suggestionResponseByRequest ?? {},
   ) : null;
-  const selectedAdapter = options.adapter ?? simulated ?? resolveAgentAdapter(config.cli, {
-    binary: config.cliBin, cwd: config.cwd, engineCommand: process.execPath,
-    engineToolProfile: 'dm',
-    engineArgs: [
-      resolve(config.cwd, 'node_modules/vite-node/vite-node.mjs'),
-      resolve(config.cwd, 'tools/engine-mcp-server.ts'),
-    ],
-    onStdoutLine: (line) => {
-      try {
-        const event: unknown = JSON.parse(line) as unknown;
-        const toolNames = eventToolNames(event);
-        observedToolCalls += toolNames.length;
-        observedTurnContextCalls += toolNames.filter((name) => name.includes('get_turn_context')).length;
-        if (eventContextTrimmed(event)) observedContextTruncated = true;
-        observedRejections.push(...rejectionEvidence(event));
-      } catch { /* non-JSON */ }
-    },
-  });
+  const selectedAdapter = options.adapter ?? simulated ?? (config.cli === 'local-openai'
+    ? new LocalOpenAiAgentSessionAdapter({
+        baseUrl: config.localOpenAi?.baseUrl ?? '',
+        ...(config.localOpenAi?.apiKey === undefined ? {} : { apiKey: config.localOpenAi.apiKey }),
+      })
+    : resolveAgentAdapter(config.cli as AgentCliKind, {
+        binary: config.cliBin, cwd: config.cwd, engineCommand: process.execPath,
+        engineToolProfile: 'dm',
+        engineArgs: [
+          resolve(config.cwd, 'node_modules/vite-node/vite-node.mjs'),
+          resolve(config.cwd, 'tools/engine-mcp-server.ts'),
+        ],
+        onStdoutLine: (line) => {
+          try {
+            const event: unknown = JSON.parse(line) as unknown;
+            const toolNames = eventToolNames(event);
+            observedToolCalls += toolNames.length;
+            observedTurnContextCalls += toolNames.filter((name) => name.includes('get_turn_context')).length;
+            if (eventContextTrimmed(event)) observedContextTruncated = true;
+            observedRejections.push(...rejectionEvidence(event));
+          } catch { /* non-JSON */ }
+        },
+      }));
   if (selectedAdapter.kind !== config.cli) throw new Error('Configured CLI and agent adapter kind disagree.');
   const adapter = new ModelCallBookkeepingAdapter(selectedAdapter);
   const rows: ConversationRow[] = [];
@@ -1172,6 +1287,23 @@ export async function runConversation(config: ConversationConfig, options: Conve
           turnContextDeltaBase: lastSeenTurnContext,
         }),
       });
+      let localInitialProposal: RoundIntentProposalEnvelope | null = null;
+      const initialToolSession = config.cli === 'local-openai'
+        ? inProcessDmToolSession({
+            state: engineSession.currentState(),
+            snapshot: initialSnapshot,
+            ...(lastSeenTurnContext === undefined ? {} : {
+              turnContextDeltaBase: lastSeenTurnContext,
+            }),
+            onProposal: (proposal) => { localInitialProposal = proposal; },
+            onToolResult: (name, result) => {
+              observedToolCalls += 1;
+              if (name === 'engine.get_turn_context') observedTurnContextCalls += 1;
+              if (eventContextTrimmed(result)) observedContextTruncated = true;
+              observedRejections.push(...rejectionEvidence(result));
+            },
+          })
+        : undefined;
       let roundUsage: AgentUsage | null = null;
       let proposalId: string | null = null;
       let outcome: ConversationRow['outcome'] = 'refused';
@@ -1191,6 +1323,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let plannedBy: ConversationRow['plannedBy'] = null;
       let escalated = false;
       let firedEscalationModel: string | null = null;
+      let capturedRlData: ConversationRlData | undefined;
       try {
         if (options.failBeforeDispatch?.includes(key) === true) {
           throw new Error('SIMULATED host failure before agent dispatch.');
@@ -1217,6 +1350,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
               journal.agentSession() === null ? knowledgeBase?.text ?? null : null,
               basePlanner,
               initialLauncher.recoveryManifestPath,
+              initialToolSession,
             );
             initialDispatchPlanner = plannerAttribution(primaryInvocation);
             options.onPrimaryDispatchStart?.();
@@ -1224,7 +1358,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
               ? await lifecycle.coldStartRound(primaryInvocation, new AbortController().signal)
               : await lifecycle.resumeRound(primaryInvocation, new AbortController().signal);
             roundUsage = addAgentUsage(roundUsage, turn.usage);
-            proposed = takeRoundProposal(initialLauncher.spoolPath);
+            proposed = localInitialProposal ?? takeRoundProposal(initialLauncher.spoolPath);
             const flapped = turn.exit === 'completed' && proposed === null &&
               toolCallsObserved() === callsBefore && rejectionsObserved().length === rejectionsBefore;
             if (contextCallsObserved() > contextCallsBefore || proposed !== null) {
@@ -1273,6 +1407,23 @@ export async function runConversation(config: ConversationConfig, options: Conve
             turnContextDeltaBase: correctionTurnContextBase,
           }),
         });
+        let localCorrectionProposal: RoundIntentProposalEnvelope | null = null;
+        const correctionToolSession = config.cli === 'local-openai'
+          ? inProcessDmToolSession({
+              state: engineSession.currentState(),
+              snapshot: correctionSnapshot,
+              ...(correctionTurnContextBase === undefined ? {} : {
+                turnContextDeltaBase: correctionTurnContextBase,
+              }),
+              onProposal: (proposal) => { localCorrectionProposal = proposal; },
+              onToolResult: (name, result) => {
+                observedToolCalls += 1;
+                if (name === 'engine.get_turn_context') observedTurnContextCalls += 1;
+                if (eventContextTrimmed(result)) observedContextTruncated = true;
+                observedRejections.push(...rejectionEvidence(result));
+              },
+            })
+          : undefined;
         const host: TurnExhaustionHost = {
           authorize: async (proposal) => {
             const expectedCapsule = proposal.phase === 'initial' ? capsule : correctionCapsule;
@@ -1297,6 +1448,14 @@ export async function runConversation(config: ConversationConfig, options: Conve
               });
               return 'invalidated';
             }
+            const proposalTurnContext = config.captureRlData
+              ? proposal.phase === 'initial'
+                ? currentTurnContext.context
+                : fullTurnContextBase(engineSession.currentState(), correctionSnapshot).context
+              : null;
+            const proposalRlData = proposalTurnContext === null
+              ? undefined
+              : rlCapture(knowledgeBase?.text ?? null, proposalTurnContext, proposal);
             const checkedProposal = authorizedMechanics(engineSession.currentState(), proposal);
             if (checkedProposal.entries === null) {
               failedAttempts.push(...(checkedProposal.divergences.length > 0
@@ -1346,6 +1505,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
                 movementFeet: entry.mechanics.movementCostFeet,
               },
             }));
+            capturedRlData = proposalRlData;
             roundNarrative = mechanics.map((entry) => entry.summary).join('; ');
             const acceptingPlanner = proposal.phase === 'initial'
               ? initialDispatchPlanner
@@ -1445,10 +1605,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
               null,
               escalationPlanner ?? basePlanner,
               correctionLauncher.recoveryManifestPath,
+              correctionToolSession,
             ),
             signal: new AbortController().signal,
             activateCapsule: () => undefined,
-            takeProposal: () => takeRoundProposal(correctionLauncher.spoolPath),
+            takeProposal: () => localCorrectionProposal ?? takeRoundProposal(correctionLauncher.spoolPath),
           },
           host,
         });
@@ -1484,12 +1645,18 @@ export async function runConversation(config: ConversationConfig, options: Conve
         if (coordinated.kind !== 'auto_resolved') correctionFinalText = null;
         }
       } catch (error) {
+        if (config.cli === 'local-openai' && selectedAdapter.classifyFailure(error) !== 'unknown') {
+          outcome = 'local_error';
+          serviceNull = false;
+          flapRetries = 0;
+        }
         refusals.push(error instanceof Error ? error.message : String(error));
       }
       const wall = performance.now() - started;
       const binding = journal.agentSession();
       const row: ConversationRow = {
-        room, round, cli: config.cli, contextRevision, projectionRevision: capsuleRevision,
+        room, round, cli: config.cli, model: config.model,
+        contextRevision, projectionRevision: capsuleRevision,
         sessionIdHash: binding === null ? null : sha256(binding.sessionId), outcome, proposalId,
         kbHash: knowledgeBase?.hash ?? null,
         snippetHash: SNIPPET_REGISTRY.snippetHash,
@@ -1511,6 +1678,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
         authorizedPlan,
         roundNarrative,
         chainEvidence: { failedAttempts, autoResolvedTrigger, correctionFinalText },
+        ...(capturedRlData === undefined ? {} : { rlData: capturedRlData }),
       };
       rows.push(row);
       await appendFile(config.outPath, `${JSON.stringify(row)}\n`, 'utf8');
