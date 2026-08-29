@@ -36,13 +36,15 @@ export interface ArenaRow {
   readonly kbHash: string | null;
   readonly contextRevision: number;
   readonly projectionRevision: number;
-  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused';
+  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null';
   readonly proposalId: string | null;
   readonly wall: number;
   readonly tokens: ConversationTokenCounts;
   readonly refusals: readonly string[];
   readonly toolCalls: number;
   readonly agentDispatched: boolean;
+  readonly flapRetries: 0 | 1 | 2;
+  readonly serviceNull: boolean;
   readonly chainEvidence: import('./ai-dm-conversation').ConversationChainEvidence;
 }
 
@@ -160,6 +162,8 @@ export async function runArena(
     refusals: row.refusals,
     toolCalls: row.toolCalls,
     agentDispatched: row.agentDispatched,
+    flapRetries: row.flapRetries,
+    serviceNull: row.serviceNull,
     chainEvidence: row.chainEvidence,
   }));
   await writeFile(config.outPath, rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
