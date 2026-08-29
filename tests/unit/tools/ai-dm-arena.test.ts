@@ -98,6 +98,47 @@ class OrderingNullAdapter implements AgentSessionAdapter {
 }
 
 describe('AI-DM arena', () => {
+  it('parses plain and per-arm escalation forms while retaining global fallback', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-parse-'));
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'), '--interleave',
+      '--escalation-model', 'global-escalation', '--escalation-effort', 'medium',
+      '--arm', 'plain:model-plain:low',
+      '--arm', 'tiered:model-tiered:high:arm-escalation:xhigh',
+    ]);
+
+    expect(config.arms).toEqual([
+      {
+        label: 'plain', model: 'model-plain', effort: 'low',
+        escalationModel: null, escalationEffort: null,
+      },
+      {
+        label: 'tiered', model: 'model-tiered', effort: 'high',
+        escalationModel: 'arm-escalation', escalationEffort: 'xhigh',
+      },
+    ]);
+    expect(config).toMatchObject({
+      escalationModel: 'global-escalation', escalationEffort: 'medium',
+    });
+  });
+
+  it('rejects partial per-arm escalation suffixes and invalid escalation effort', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-invalid-'));
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'), '--interleave',
+      '--arm', 'plain:model-plain:low',
+    ] as const;
+
+    expect(() => parseArenaArgs([
+      ...common, '--arm', 'partial:model-tiered:high:arm-escalation',
+    ])).toThrow('--arm must use label:model:effort[:escalationModel:escalationEffort] syntax.');
+    expect(() => parseArenaArgs([
+      ...common, '--arm', 'bad-effort:model-tiered:high:arm-escalation:max',
+    ])).toThrow('--arm escalation effort must be low, medium, high, or xhigh.');
+  });
+
   it('renders and validates a multi-round dry run without spawning a model', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-dry-'));
     const outPath = join(directory, 'arena.jsonl');
@@ -229,6 +270,32 @@ describe('AI-DM arena', () => {
       const row = JSON.parse(line) as { readonly basis: unknown; readonly arm: unknown };
       return { basis: row.basis, arm: row.arm };
     })).toEqual(rows.map((row) => ({ basis: row.basis, arm: row.arm })));
+  });
+
+  it('applies escalation to only the configured arm and attributes the resulting row', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-escalation-'));
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'), '--interleave', '--dry-run',
+      '--arm', 'plain:model-plain:low',
+      '--arm', 'tiered:model-tiered:high:model-escalation:xhigh',
+    ]);
+
+    const rows = await runArena(config, { invalidInitial: ['room-1-round-1'] });
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      arm: 'plain',
+      plannedBy: 'sim_controller',
+      escalated: false,
+      escalationModel: null,
+    }));
+    expect(rows[1]).toEqual(expect.objectContaining({
+      arm: 'tiered',
+      plannedBy: 'sim_controller',
+      escalated: true,
+      escalationModel: 'model-escalation',
+    }));
   });
 
   it('classifies exact, edited, and ignored responses to the inline suggestion from structural bookkeeping', { timeout: 60_000 }, async () => {
