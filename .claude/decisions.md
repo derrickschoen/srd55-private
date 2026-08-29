@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D407 — OWNER: 5-minute free-thinking budget; team-planned PC turns in the flywheel (2026-08-29)
+
+Verbatim: "Budget each player taking 1 minute per turn. This gives the dm
+5 minutes to think for 'free' before the players notice it 'thinking'."
+And: "For the flywheel, have the ai plan all of the pc turns together as
+a team to increase time efficiency." Rulings: (1) the D403 speculative-
+planning design adopts a named pacing model — ~1 minute per player turn,
+~5 minutes of imperceptible DM thinking per round with a typical party;
+speculation deadlines, refresh budgets, and model choice FOR SPECULATION
+are set against that window (a strong slow model can speculate at zero
+perceived cost; live-path speed only matters on recalc misses). (2) In
+arena/flywheel runs the PC side is planned by the AI as ONE team call per
+round (party-round intents in a single dispatch, mirroring
+submit_round_intents), cutting flywheel wall-clock and generating the
+player-phase dynamics the speculation metrics need.
+
 ## D405.5 — OWNER: second layer — DM "skills" (algorithm + prose) (2026-08-28)
 
 Verbatim: "Maybe the opener and then a separate layer that is broader and
