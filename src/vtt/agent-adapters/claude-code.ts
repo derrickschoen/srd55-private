@@ -16,6 +16,7 @@ export const UNVERIFIED_CONTRACT_CLAUDE_CODE = 'UNVERIFIED_CONTRACT:claude-code-
 
 const ENGINE_TOOL_NAMES = [
   'engine.get_turn_context',
+  'engine.propose_from_play',
   'engine.get_state_summary',
   'engine.get_combatant_options',
   'engine.query_path',

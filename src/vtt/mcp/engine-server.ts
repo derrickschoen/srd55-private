@@ -23,6 +23,11 @@ import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port
 import type { EngineActionChoice, EngineEngagement, EngineIntentBranch, EngineMovementPreference, EngineTurnIntent, PureIntentResolver } from '../intent-resolver';
 import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
 import {
+  PLAY_NAMES,
+  SNIPPET_REGISTRY,
+  type PlayName,
+} from '../snippet-registry-runtime';
+import {
   createMcpHandler,
   type McpHandler,
   type McpPromptProvider,
@@ -239,6 +244,13 @@ function externalIntentBranch(branch: EngineIntentBranch): Readonly<Record<strin
     },
   };
 }
+function externalIntent(intent: EngineTurnIntent): Readonly<Record<string, unknown>> {
+  return {
+    actor_id: intent.actorId,
+    ...externalIntentBranch(intent),
+    fallback: intent.fallback === null ? null : externalIntentBranch(intent.fallback),
+  };
+}
 function hitPointBand(hitPoints: number, maximum: number): 'uninjured' | 'injured' | 'critical' | 'unknown' {
   if (maximum <= 0) return 'unknown';
   if (hitPoints >= maximum) return 'uninjured';
@@ -406,6 +418,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         state_ref: externalStateRef(capsule),
         request: { request_id: capsule.request.requestId, phase: capsule.request.phase, correction_number: capsule.request.correctionNumber, required_actor_ids: capsule.request.actors },
         summary: tacticalSummary(capsule), actors: actors.map(({ omitted: _omitted, ...actor }) => actor), recent_changes: recentChanges(capsule),
+        applicable_plays: SNIPPET_REGISTRY.applicable(capsule).map((play) => ({
+          name: play.name,
+          description: play.description,
+          snippet_hash: play.snippetHash,
+        })),
         truncated: actors.some((actor) => actor.omitted), next_cursor: null,
       };
       while (new TextEncoder().encode(JSON.stringify(result)).byteLength > 32 * 1024) {
@@ -415,6 +432,22 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         result.truncated = true;
       }
       return result;
+    }
+    if (name === 'engine.propose_from_play') {
+      const capsule = feed.current();
+      if (capsule.request === null) throw new RangeError('NO_PENDING_REQUEST');
+      const requestedName = stringField(input, 'play_name');
+      if (!PLAY_NAMES.some((candidate) => candidate === requestedName)) {
+        throw new RangeError(`Unknown play ${requestedName}.`);
+      }
+      const playName = requestedName as PlayName;
+      const draft = SNIPPET_REGISTRY.expand(playName, capsule);
+      return {
+        state_ref: externalStateRef(capsule),
+        play_name: playName,
+        snippet_hash: draft.definition.snippetHash,
+        intents: draft.intents.map(externalIntent),
+      };
     }
     const capsule = feed.read(stateReference(input['state_ref']));
     if (name === 'engine.get_state_summary') {

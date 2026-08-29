@@ -15,6 +15,7 @@ import { decodeCodexTurn } from '../../../src/vtt/agent-adapters/codex';
 import type { RoundPlan } from '../../../src/vtt/dm-bridge/round-plan-contract';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
+import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import {
   parseArenaArgs,
   runArena,
@@ -145,8 +146,16 @@ describe('AI-DM arena', () => {
     expect(rows[1]?.contextRevision).toBe(rows[0]?.projectionRevision);
     const kbHash = createHash('sha256').update(Buffer.from(kbText, 'utf8')).digest('hex');
     expect(rows.every((row) => row.kbHash === kbHash)).toBe(true);
+    expect(rows.every((row) =>
+      row.snippetHash === SNIPPET_REGISTRY.snippetHash &&
+      row.snippetSetHash === SNIPPET_REGISTRY.snippetSetHash)).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n').every((line) =>
       (JSON.parse(line) as { readonly kbHash?: unknown }).kbHash === kbHash)).toBe(true);
+    expect(readFileSync(outPath, 'utf8').trim().split('\n').every((line) => {
+      const row = JSON.parse(line) as { readonly snippetHash?: unknown; readonly snippetSetHash?: unknown };
+      return row.snippetHash === SNIPPET_REGISTRY.snippetHash &&
+        row.snippetSetHash === SNIPPET_REGISTRY.snippetSetHash;
+    })).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n')).toHaveLength(4);
   });
 

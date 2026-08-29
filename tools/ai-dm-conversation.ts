@@ -34,6 +34,7 @@ import {
   pureIntentResolver, type EngineActionChoice, type EngineIntentBranch,
   type EngineTurnIntent, type ResolvedIntentMechanics,
 } from '../src/vtt/intent-resolver';
+import { SNIPPET_REGISTRY } from '../src/vtt/snippet-registry-runtime';
 import { mcpRequestMeta } from '../src/vtt/mcp/handler';
 import {
   loadArenaFixture, type EngineMcpLauncherManifest,
@@ -123,6 +124,8 @@ export interface ConversationRow {
   readonly projectionRevision: number;
   readonly sessionIdHash: string;
   readonly kbHash: string | null;
+  readonly snippetHash: string;
+  readonly snippetSetHash: string;
   readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null';
   readonly proposalId: string | null;
   readonly timeToFirstAction: number;
@@ -1231,6 +1234,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
         room, round, cli: config.cli, contextRevision, projectionRevision: capsuleRevision,
         sessionIdHash: sha256(binding.sessionId), outcome, proposalId,
         kbHash: knowledgeBase?.hash ?? null,
+        snippetHash: SNIPPET_REGISTRY.snippetHash,
+        snippetSetHash: SNIPPET_REGISTRY.snippetSetHash,
         timeToFirstAction: wall,
         wallPerCreature: wall / Math.max(1, livingMonsterIds(engineSession.currentState()).length),
         tokens: tokenCounts(roundUsage), refusals,

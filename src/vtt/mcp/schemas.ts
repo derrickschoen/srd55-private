@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PLAY_NAMES } from '../snippet-registry-runtime';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
 
 const identifier = z.string().min(1).max(200).describe('Engine-owned stable identifier.');
@@ -107,9 +108,21 @@ const turnRequest = z.object({
   required_actor_ids: z.array(identifier).min(1).max(50),
 }).strict();
 const actorContext = z.object({ actor_id: identifier, status: actorStatus, options: z.array(tacticalOption).max(20), threats: z.array(threat).max(50) }).strict();
+const advertisedPlay = z.object({
+  name: z.enum(PLAY_NAMES),
+  description: z.string().min(1).max(200),
+  snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+}).strict();
 const turnContextOutput = z.object({
   state_ref: stateRef, request: turnRequest, summary: tacticalSummary, actors: z.array(actorContext).min(1).max(50),
+  applicable_plays: z.array(advertisedPlay).max(3),
   recent_changes: z.array(recentChange).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable(),
+}).strict();
+const proposeFromPlayOutput = z.object({
+  state_ref: stateRef,
+  play_name: z.enum(PLAY_NAMES),
+  snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+  intents: z.array(turnIntent).min(1).max(50),
 }).strict();
 
 const combatantSummary = z.object({
@@ -230,6 +243,7 @@ function spec(name: string, description: string, input: z.ZodType<unknown>, outp
 
 export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.get_turn_context', 'Return the complete bounded tactical context for the active turn or shared-initiative round.', z.object({ run_id: identifier, expected_revision: z.number().int().min(1), scope: z.enum(['active_turn', 'round']), actor_ids: z.array(identifier).min(1).max(50).optional(), include_expectations: z.boolean().optional(), maximum_options_per_actor: z.number().int().min(1).max(20).optional() }).strict(), turnContextOutput),
+  spec('engine.propose_from_play', 'Expand one advertised play into an editable, unqueued draft intent set.', z.object({ play_name: z.enum(PLAY_NAMES) }).strict(), proposeFromPlayOutput),
   spec('engine.get_state_summary', 'Read one bounded state projection or journal delta using an opaque application cursor.', z.object({ ...refInput, granularity: z.enum(['turn_minimal', 'room_tactical', 'combatant_detail', 'journal_delta']), combatant_ids: z.array(identifier).max(50).optional(), since_revision: z.number().int().min(1).optional(), page: page.optional() }).strict(), stateSummaryOutput),
   spec('engine.get_combatant_options', 'List canonical legal and unavailable action options for one combatant.', z.object({ ...refInput, actor_id: identifier, include_unavailable: z.boolean().optional(), page: page.optional() }).strict(), optionsOutput),
   spec('engine.query_path', 'Resolve a semantic movement objective without accepting or returning coordinates.', z.object({ ...refInput, actor_id: identifier, objective: z.union([z.object({ kind: z.literal('enable_action'), action_id: identifier, target: targetSelector }).strict(), z.object({ kind: z.enum(['approach', 'maintain_range_from', 'withdraw_from']), target: targetSelector }).strict()]), movement: movementPreference, engagement: engagement.optional() }).strict(), pathOutput),

@@ -76,6 +76,7 @@ describe('engine MCP stdio protocol', () => {
     const tools = listResult['tools'];
     expect(Array.isArray(tools) ? tools.map((tool) => record(tool)['name']) : []).toEqual([
       'engine.get_turn_context',
+      'engine.propose_from_play',
       'engine.get_state_summary',
       'engine.get_combatant_options',
       'engine.query_path',
