@@ -156,6 +156,8 @@ function applyOneResolvedMechanic(
   reduce: (state: EncounterState, command: EncounterCommand) => EncounterState,
 ): EncounterState {
   let state = advanceToActor(initialState, mechanics.actorId, reduce);
+  const dashBeforeMovement = choice.kind === 'dash' && mechanics.path.length > 0;
+  if (dashBeforeMovement) state = reduce(state, { type: 'dash', actor: mechanics.actorId });
   if (mechanics.path.length > 0) {
     state = reduce(state, {
       type: 'move', actor: mechanics.actorId, path: mechanics.path, cause: 'voluntary',
@@ -176,7 +178,10 @@ function applyOneResolvedMechanic(
     }
     case 'dodge':
     case 'disengage':
-    case 'dash': state = reduce(state, { type: choice.kind, actor: mechanics.actorId }); break;
+    case 'dash': {
+      if (!dashBeforeMovement) state = reduce(state, { type: 'dash', actor: mechanics.actorId });
+      break;
+    }
     case 'end_turn': return reduce(state, { type: 'end_turn', actor: mechanics.actorId });
     case 'use_action': {
       if (choice.target !== null || mechanics.targetId !== null) {

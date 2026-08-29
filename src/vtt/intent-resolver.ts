@@ -127,6 +127,79 @@ function movementLimit(
   return movement.willingness === 'none' ? 0 : maximum;
 }
 
+function dashResolution(
+  state: EncounterState,
+  actorId: CombatantId,
+  movement: EngineMovementPreference,
+  engagement: EngineEngagement,
+  queries: EngineQueryPort,
+): BranchResolution {
+  const actor = queries.combatant(state, actorId);
+  const origin = queries.tokenPosition(state, actorId);
+  const selector = engagement.anchor;
+  if (actor?.profile.kind !== 'monster' || actor.life === 'dead') {
+    return { valid: false, code: 'ACTOR_NOT_LIVING_MONSTER', summary: `${actorId}: actor is not a living monster` };
+  }
+  if (origin === null || selector === undefined || selector === null) {
+    return { valid: false, code: 'DASH_TARGET_ABSENT', summary: `${actorId}: Dash needs an engagement anchor` };
+  }
+  const maximumFeet = movement.maximumFeet ?? actor.profile.rules.speed * 2;
+  if (
+    movement.willingness === 'none' || !Number.isSafeInteger(maximumFeet) || maximumFeet <= 0 ||
+    maximumFeet % 5 !== 0 || maximumFeet > actor.profile.rules.speed * 2
+  ) {
+    return { valid: false, code: 'INVALID_MOVEMENT_LIMIT', summary: `${actorId}: Dash movement limit is invalid` };
+  }
+  const targetId = queries.resolveTarget(state, actorId, selector);
+  const targetPosition = targetId === null ? null : queries.tokenPosition(state, targetId);
+  if (targetId === null || targetPosition === null) {
+    return { valid: false, code: 'DASH_TARGET_ABSENT', summary: `${actorId}: Dash target is absent` };
+  }
+  const candidates: { readonly destination: GridCell; readonly result: Extract<ReturnType<EngineQueryPort['path']>, { readonly legal: true }> }[] = [];
+  for (let row = 0; row < state.bounds.rows; row += 1) {
+    for (let column = 0; column < state.bounds.columns; column += 1) {
+      const destination = { column, row };
+      const result = queries.path(state, {
+        actorId,
+        destination,
+        movement: 'dash',
+        maximumFeet,
+      });
+      if (result.legal) candidates.push({ destination, result });
+    }
+  }
+  candidates.sort((left, right) =>
+    gridDistance(left.destination, targetPosition) - gridDistance(right.destination, targetPosition) ||
+    left.destination.row - right.destination.row ||
+    left.destination.column - right.destination.column ||
+    left.result.costFeet - right.result.costFeet);
+  const minimumDistance = candidates[0] === undefined
+    ? null
+    : gridDistance(candidates[0].destination, targetPosition);
+  const closest = minimumDistance === null ? [] : candidates.filter((candidate) =>
+    gridDistance(candidate.destination, targetPosition) === minimumDistance);
+  const alliedRank = state.combatants
+    .filter((candidate) => candidate.life !== 'dead' && queries.sameSide(state, actorId, candidate.profile.id))
+    .map((candidate) => candidate.profile.id)
+    .sort((left, right) => left.localeCompare(right))
+    .indexOf(actorId);
+  const selected = closest.length === 0 ? undefined : closest[Math.max(0, alliedRank) % closest.length];
+  if (selected === undefined) {
+    return { valid: false, code: 'DASH_TARGET_UNREACHABLE', summary: `${actorId}: no Dash path approaches ${targetId}` };
+  }
+  return {
+    valid: true,
+    mechanics: {
+      actorId,
+      actionId: 'dash',
+      targetId,
+      movementCostFeet: selected.result.costFeet,
+      path: selected.result.cells,
+      finalPosition: selected.destination,
+    },
+  };
+}
+
 function targetActionResolution(
   state: EncounterState,
   actorId: CombatantId,
@@ -249,9 +322,10 @@ function resolveBranch(
         code: 'SPELL_RESOLUTION_UNAVAILABLE',
         summary: `${actorId}: spell intent resolution is not yet available`,
       };
+    case 'dash':
+      return dashResolution(state, actorId, branch.movement, branch.engagement, queries);
     case 'dodge':
     case 'disengage':
-    case 'dash':
     case 'end_turn':
       return noMovementResolution(state, actorId, branch.choice.kind);
   }

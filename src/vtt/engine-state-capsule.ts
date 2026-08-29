@@ -15,8 +15,16 @@ export interface EngineProjectedAction {
   readonly rangeFeet: number | null;
 }
 
+export interface EngineProjectedActionApproach {
+  readonly actionId: string;
+  readonly targetId: CombatantId;
+  /** Canonical least path cost to a legal action origin; null means no path exists. */
+  readonly minimumMovementFeet: number | null;
+}
+
 export interface EngineActionRegistry {
   actionsFor(combatantId: CombatantId): readonly EngineProjectedAction[];
+  approachesFor(combatantId: CombatantId): readonly EngineProjectedActionApproach[];
 }
 
 export interface EngineProjectionCombatant {
@@ -34,6 +42,7 @@ export interface EngineProjectionCombatant {
   readonly reactionAvailable: boolean;
   readonly movementRemainingFeet: number;
   readonly actions: readonly EngineProjectedAction[];
+  readonly actionApproaches: readonly EngineProjectedActionApproach[];
 }
 
 export interface EngineDmProjection {
@@ -144,6 +153,7 @@ export function projectEngineDmProjection(
       reactionAvailable: combatant.turn.reactionAvailable,
       movementRemainingFeet: combatant.turn.movement.remaining,
       actions: registry.actionsFor(combatant.id).map((action) => ({ ...action })),
+      actionApproaches: registry.approachesFor(combatant.id).map((approach) => ({ ...approach })),
     })),
   };
 }
@@ -195,6 +205,7 @@ export function projectEngineEncounterState(
         reactionAvailable: combatant.turn.reactionAvailable,
         movementRemainingFeet: combatant.turn.movement.remaining,
         actions: registry.actionsFor(combatant.profile.id).map((action) => ({ ...action })),
+        actionApproaches: registry.approachesFor(combatant.profile.id).map((approach) => ({ ...approach })),
       };
     }),
   };

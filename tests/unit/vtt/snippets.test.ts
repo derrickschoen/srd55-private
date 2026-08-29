@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EngineTargetSelector } from '../../../src/vtt/engine-query-port';
 import type { EngineTurnIntent } from '../../../src/vtt/intent-resolver';
+import { pureIntentResolver } from '../../../src/vtt/intent-resolver';
 import { createEngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
 import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import { SUGGESTED_PLAN_MAX_BYTES } from '../../../src/vtt/mcp/engine-server';
@@ -91,7 +92,7 @@ function goldenSummary(intents: readonly EngineTurnIntent[]) {
 async function registryFixture(seed: number) {
   const state = await loadArenaFixture(`tests/fixtures/arena-basis/seed-${String(seed)}.json`);
   const runtime = createEngineMcpRuntime(state);
-  return { runtime, capsule: runtime.feed.current() };
+  return { state, runtime, capsule: runtime.feed.current() };
 }
 
 describe('plays v1 registry', () => {
@@ -204,6 +205,71 @@ describe('plays v1 registry', () => {
   ] as const)('pins $name against frozen arena-basis room $seed', async ({ name, seed, expected }) => {
     const { capsule } = await registryFixture(seed);
     expect(goldenSummary(SNIPPET_REGISTRY.expand(name, capsule).intents)).toEqual(expected);
+  });
+
+  it.each([
+    // Room 1: the Hobgoblin at (16,3) has a 150-foot Longbow against every PC.
+    { room: 1, seed: 3_943_001, proof: 'Longbow 150 feet from (16,3)' },
+    // Room 2: the Specters at (11,1)/(10,1) need 40/35 feet to bring 5-foot Life Drain to the Cleric at (2,4), both within a 60-foot Dash commitment.
+    { room: 2, seed: 3_943_002, proof: 'Life Drain after 40/35 feet toward (2,4)' },
+    // Room 4: the Tough at (20,1) is already within its Heavy Crossbow's 100-foot range of the Wizard at (1,6).
+    { room: 4, seed: 3_943_004, proof: 'Heavy Crossbow 100 feet from (20,1)' },
+    // Room 5: the Tough at (21,3) is exactly 100 feet from the Wizard at (1,6), matching Heavy Crossbow range.
+    { room: 5, seed: 3_943_005, proof: 'Heavy Crossbow exactly 100 feet from (21,3)' },
+    // Room 6: the Dire Wolf at (9,1) needs 35 feet to bring its 5-foot Bite to the Fighter at (1,2), within its 50-foot speed.
+    { room: 6, seed: 3_943_006, proof: 'Bite after 35 feet toward (1,2)' },
+  ] as const)('keeps frozen room $room focus-fire aggressive: $proof', async ({ seed, proof }) => {
+    const { state, capsule } = await registryFixture(seed);
+    const draft = SNIPPET_REGISTRY.expand('focus_fire', capsule).intents;
+    const attacks = draft.filter((intent) => intent.choice.kind === 'attack');
+    expect(attacks.length, proof).toBeGreaterThan(0);
+
+    for (const actor of capsule.projection.combatants.filter((candidate) =>
+      capsule.request?.actors.includes(candidate.id) === true)) {
+      const attackIds = new Set(actor.actions.filter((action) => action.kind === 'attack').map((action) => action.actionId));
+      const reachable = actor.actionApproaches.some((approach) =>
+        attackIds.has(approach.actionId) && approach.minimumMovementFeet !== null &&
+        approach.minimumMovementFeet <= actor.speedFeet * 2);
+      const intent = draft.find((candidate) => candidate.actorId === actor.id);
+      expect(intent?.choice.kind).toBe(reachable ? 'attack' : 'dodge');
+    }
+
+    for (const attack of attacks) {
+      const resolution = pureIntentResolver.resolve(state, attack);
+      expect(resolution.valid).toBe(true);
+      if (resolution.valid && resolution.selectedBranch === 'fallback') {
+        expect(resolution.mechanics.actionId).toBe('dash');
+        expect(resolution.mechanics.movementCostFeet).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it.each([
+    { seed: 3_943_001, actors: [] },
+    { seed: 3_943_002, actors: ['combatant:generated-3943002-monster-1', 'combatant:generated-3943002-monster-2'] },
+    { seed: 3_943_003, actors: ['combatant:generated-3943003-monster-1'] },
+    { seed: 3_943_004, actors: [] },
+    { seed: 3_943_005, actors: [] },
+    { seed: 3_943_006, actors: ['combatant:generated-3943006-monster-1', 'combatant:generated-3943006-monster-2'] },
+  ] as const)('commits movement for out-of-reach melee plans in frozen room seed $seed', async ({ seed, actors }) => {
+    const { capsule } = await registryFixture(seed);
+    const draft = SNIPPET_REGISTRY.expand('basic_advance', capsule).intents;
+    for (const actorId of actors) {
+      const intent = draft.find((candidate) => candidate.actorId === actorId);
+      expect(intent?.choice.kind).toBe('attack');
+      expect(intent?.engagement.stance).toBe('close_to_melee');
+      expect(intent?.movement.willingness).not.toBe('none');
+    }
+  });
+
+  it('moves to grapple the blocker when no control spell is in range', async () => {
+    const { capsule } = await registryFixture(3_943_001);
+    const draft = SNIPPET_REGISTRY.expand('remove_obstacle', capsule).intents;
+    const grapple = draft.find((intent) =>
+      (intent.choice.kind === 'attack' || intent.choice.kind === 'use_action') &&
+      /grapple|grab/iu.test(intent.choice.actionId));
+    expect(grapple?.engagement.stance).toBe('close_to_melee');
+    expect(grapple?.movement.willingness).not.toBe('none');
   });
 
   it('content-addresses every play and the enabled set independently', () => {

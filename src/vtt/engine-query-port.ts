@@ -5,7 +5,7 @@ import {
   type EncounterState,
 } from '../combat/encounter';
 import { gridDistance, type GridCell } from '../combat/grid';
-import { findPath } from '../combat/movement';
+import { findPath, findPathToAny } from '../combat/movement';
 import { persistentAreaContains } from '../combat/persistent-areas';
 import { attackRangeVerdict } from '../combat/range';
 import type { MonsterAction, MonsterAttackAction } from '../combat/statblock';
@@ -347,6 +347,11 @@ export function engineActionRegistry(state: EncounterState): {
     readonly kind: 'attack' | 'saving_throw' | 'multiattack' | 'spellcasting';
     readonly rangeFeet: number | null;
   }[];
+  approachesFor(combatantId: CombatantId): readonly {
+    readonly actionId: string;
+    readonly targetId: CombatantId;
+    readonly minimumMovementFeet: number | null;
+  }[];
 } {
   return {
     actionsFor(combatantId) {
@@ -355,6 +360,45 @@ export function engineActionRegistry(state: EncounterState): {
         actionId: action.id,
         kind: action.kind,
         rangeFeet: engineActionRangeFeet(actions, action),
+      }));
+    },
+    approachesFor(combatantId) {
+      const actor = combatant(state, combatantId);
+      const start = state.tokens.find((token) => token.combatantId === combatantId)?.position;
+      if (actor?.profile.kind !== 'monster' || actor.life === 'dead' || start === undefined) return [];
+      const actions = monsterActions(state, combatantId);
+      const targets = state.combatants
+        .filter((target) => target.life !== 'dead' && !combatantsAreAllies(state, combatantId, target.profile.id))
+        .sort((left, right) => left.profile.id.localeCompare(right.profile.id));
+      return targets.flatMap((target) => actions.flatMap((action) => {
+        const rangeFeet = engineActionRangeFeet(actions, action);
+        if (rangeFeet === null) return [];
+        const maintainRange = rangeFeet > actor.profile.rules.reach;
+        const targetPosition = state.tokens.find(
+          (token) => token.combatantId === target.profile.id,
+        )?.position;
+        if (targetPosition === undefined) return [];
+        const result = findPathToAny(movementWorld(state), {
+          actorId: combatantId,
+          start,
+          maximumCost: feet(maximumPathCost(state)),
+          isGoal: (origin) => {
+            if (maintainRange && gridDistance(origin, targetPosition) <= target.profile.rules.reach) {
+              return false;
+            }
+            return reach(state, {
+              actorId: combatantId,
+              targetId: target.profile.id,
+              actionId: action.id,
+              origin,
+            }).legal;
+          },
+        });
+        return [{
+          actionId: action.id,
+          targetId: target.profile.id,
+          minimumMovementFeet: result.kind === 'found' ? result.cost : null,
+        }];
       }));
     },
   };

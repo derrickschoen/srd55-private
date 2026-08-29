@@ -172,6 +172,9 @@ describe('read-only engine state capsule', () => {
     const { capsule } = capsuleFixture();
     expect(verifyEngineStateCapsule(capsule)).toBe(true);
     expect(capsule.projection.combatants.some((combatant) => combatant.actions.length > 0)).toBe(true);
+    expect(capsule.projection.combatants.some((combatant) =>
+      combatant.actionApproaches.some((approach) => approach.minimumMovementFeet !== null),
+    )).toBe(true);
     expect(Object.keys(capsule.projection).sort()).toEqual([
       'activeCombatant',
       'activeSide',
