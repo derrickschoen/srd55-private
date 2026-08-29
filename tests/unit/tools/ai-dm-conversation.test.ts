@@ -39,6 +39,10 @@ import {
   MemoryBrowserSessionStore,
 } from '../../../src/vtt/session-persistence';
 import { codexArgv } from '../../../src/vtt/agent-adapters/codex';
+import {
+  applyRevisionDelta,
+  type RevisionDeltaOperation,
+} from '../../../src/vtt/dm-bridge/projection-transport';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 class RecordingConversationAdapter implements AgentSessionAdapter {
@@ -215,10 +219,26 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       room: manifest.room,
       historyKind: manifest.historyKind,
       ...(manifest.toolProfile === undefined ? {} : { toolProfile: manifest.toolProfile }),
+      ...(manifest.turnContextDeltaBase === undefined ? {} : {
+        turnContextDeltaBase: manifest.turnContextDeltaBase,
+      }),
     });
-    const context = serializedToolCall(runtime.handler, 'engine.get_turn_context', {
+    const wireContext = serializedToolCall(runtime.handler, 'engine.get_turn_context', {
       run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round',
+      ...(manifest.turnContextDeltaBase === undefined ? { granularity: 'full' } : {
+        granularity: 'turn_delta', since_revision: manifest.turnContextDeltaBase.revision,
+      }),
     });
+    const changes = wireContext['changes'];
+    const context = wireContext['granularity'] !== 'turn_delta'
+      ? wireContext
+      : manifest.turnContextDeltaBase === undefined || !Array.isArray(changes)
+        ? null
+        : applyRevisionDelta(
+            manifest.turnContextDeltaBase.context,
+            changes as readonly RevisionDeltaOperation[],
+          );
+    if (context === null) throw new Error('Serialized turn delta could not be reconstructed.');
     const stateRef = objectValue(context['state_ref'], 'serialized state ref');
     const actors = runtime.feed.current().request?.actors;
     if (actors === undefined) throw new Error('Serialized round request has no actors.');
@@ -301,6 +321,20 @@ function pendingArenaReactionState(): EncounterState {
     path: [{ column: 2, row: 0 }],
     cause: 'voluntary',
   }, () => 0.5).state;
+}
+
+function oversizedTurnContextState(): EncounterState {
+  const player = playerProfile('context-trim-player', { initiativeBonus: 20 });
+  const monsters = Array.from({ length: 30 }, (_value, index) =>
+    monsterProfile(`context-trim-monster-${String(index + 1)}`, { initiativeBonus: -20 }));
+  return reduceEncounter(createEncounter({
+    bounds: { columns: 40, rows: 2 },
+    combatants: [player, ...monsters],
+    tokens: [
+      placedToken(player, 39),
+      ...monsters.map((monster, index) => placedToken(monster, index)),
+    ],
+  }), { type: 'roll_initiative' }, () => 0.5).state;
 }
 
 function preparedMonsterRoundRevision(initialState: EncounterState): {
@@ -521,6 +555,31 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(adapter.decodedChoices.some((choice) => choice.kind === 'attack')).toBe(true);
     expect(result.rows[0]).toEqual(expect.objectContaining({ outcome: 'authorized', refusals: [] }));
     expect(result.rows[0]?.stateBinding.authorization).toEqual(result.rows[0]?.stateBinding.capsule);
+  });
+
+  it('requests full context for round one and a delta for a resumed later round', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-round-delta-'));
+    const adapter = new SerializedRoundTripAdapter('use_action_dodge');
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '2', '--out', join(directory, 'rows.jsonl'),
+    ]);
+
+    const result = await runConversation(config, {
+      adapter,
+      roomStates: [generateRoom(3_943_001).encounter.state],
+    });
+    const initialInvocations = adapter.resumeInvocations.filter((entry) =>
+      entry.launcherToken.includes('-initial-launcher.json'));
+    const secondManifest = initialInvocations[1] === undefined
+      ? null
+      : JSON.parse(readFileSync(initialInvocations[1].launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+
+    expect(result.rows).toHaveLength(2);
+    expect(initialInvocations[0]?.prompt).toContain('granularity "full"');
+    expect(initialInvocations[1]?.prompt).toContain('granularity "turn_delta"');
+    expect(secondManifest?.turnContextDeltaBase).toEqual(expect.objectContaining({
+      revision: result.rows[0]?.contextRevision,
+    }));
   });
 
   it('preserves an accepted suggested fallback in the authorized SIMULATED row', { timeout: 60_000 }, async () => {
@@ -847,6 +906,19 @@ describe('AI-DM engine MCP conversation runner', () => {
     ]);
   });
 
+  it('records when the turn-context 32KB trimmer fired', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-context-trim-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [oversizedTurnContextState()],
+    });
+
+    expect(result.rows[0]).toEqual(expect.objectContaining({ contextTruncated: true }));
+  });
+
   it('injects a KB only on cold start and attributes every output row to its bytes', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-kb-'));
     const outPath = join(directory, 'rows.jsonl');
@@ -855,7 +927,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     writeFileSync(kbPath, kbText, 'utf8');
     const adapter = new RecordingConversationAdapter();
     const config = parseConversationArgs([
-      '--rooms', '1', '--rounds', '1', '--out', outPath, '--kb', kbPath,
+      '--rooms', '3', '--rounds', '1', '--out', outPath, '--kb', kbPath,
     ]);
 
     const result = await runConversation(config, { adapter });
@@ -867,10 +939,33 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(adapter.resumeInvocations.length).toBeGreaterThan(0);
     expect(adapter.resumeInvocations.every((entry) => entry.instructions === null)).toBe(true);
     expect(adapter.resumeInvocations.every((entry) => !entry.prompt.includes(kbText))).toBe(true);
+    const injectedText = [
+      ...adapter.startInvocations.map((entry) => entry.instructions ?? ''),
+      ...adapter.resumeInvocations.map((entry) => entry.instructions ?? ''),
+    ].join('\n');
+    expect(injectedText.split(kbText).length - 1).toBe(1);
+
+    const roomTransitions = adapter.resumeInvocations.filter((entry) =>
+      entry.prompt.startsWith('[ROOM_TRANSITION]'));
+    expect(roomTransitions).toHaveLength(2);
+    expect(roomTransitions.every((entry) =>
+      entry.prompt.includes('get_turn_context once with granularity "full"'))).toBe(true);
+    expect(roomTransitions.every((entry) => {
+      const manifest = JSON.parse(readFileSync(entry.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+      return manifest.turnContextDeltaBase === undefined;
+    })).toBe(true);
+
+    const initialRoundInvocations = adapter.resumeInvocations.filter((entry) =>
+      entry.launcherToken.includes('-initial-launcher.json'));
+    expect(initialRoundInvocations).toHaveLength(9);
+    expect(initialRoundInvocations.every((entry) => {
+      const manifest = JSON.parse(readFileSync(entry.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+      return entry.prompt.includes('granularity "full"') &&
+        manifest.turnContextDeltaBase === undefined;
+    })).toBe(true);
     expect(result.rows.every((row) => row.kbHash === expectedHash)).toBe(true);
-    expect(JSON.parse(readFileSync(outPath, 'utf8').trim())).toEqual(
-      expect.objectContaining({ kbHash: expectedHash }),
-    );
+    expect(readFileSync(outPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line)))
+      .toHaveLength(3);
   });
 
   it('admits only the active codex and claude-code adapters', () => {

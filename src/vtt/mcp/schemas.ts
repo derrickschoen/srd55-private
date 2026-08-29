@@ -119,12 +119,29 @@ const suggestedPlan = z.object({
   intents: z.array(turnIntent).min(1).max(50),
   advisory: z.string().min(1).max(300),
 }).strict();
-const turnContextOutput = z.object({
+const fullTurnContextOutput = z.object({
+  granularity: z.literal('full'), context_trimmed: z.boolean(),
   state_ref: stateRef, request: turnRequest, summary: tacticalSummary, actors: z.array(actorContext).min(1).max(50),
   applicable_plays: z.array(advertisedPlay).max(3),
   suggested_plan: suggestedPlan.optional(),
   recent_changes: z.array(recentChange).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable(),
 }).strict();
+const revisionDeltaOperation = z.union([
+  z.object({ kind: z.literal('set'), path: z.array(z.string()).min(1).max(20), value: z.unknown() }).strict(),
+  z.object({ kind: z.literal('delete'), path: z.array(z.string()).min(1).max(20) }).strict(),
+]);
+const turnDeltaOutput = z.object({
+  granularity: z.literal('turn_delta'),
+  anchor: z.object({
+    base_revision: z.number().int().min(1), revision: z.number().int().min(1),
+    base_context_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+    context_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+    state_ref: stateRef, request: turnRequest,
+  }).strict(),
+  changes: z.array(revisionDeltaOperation).max(10_000),
+  context_trimmed: z.boolean(),
+}).strict();
+const turnContextOutput = z.union([fullTurnContextOutput, turnDeltaOutput]);
 const proposeFromPlayOutput = z.object({
   state_ref: stateRef,
   play_name: z.enum(PLAY_NAMES),
@@ -297,7 +314,11 @@ function spec(name: string, description: string, input: z.ZodType<unknown>, outp
 }
 
 export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
-  spec('engine.get_turn_context', 'Return the complete bounded tactical context for the active turn or shared-initiative round.', z.object({ run_id: identifier, expected_revision: z.number().int().min(1), scope: z.enum(['active_turn', 'round']), actor_ids: z.array(identifier).min(1).max(50).optional(), include_expectations: z.boolean().optional(), maximum_options_per_actor: z.number().int().min(1).max(20).optional() }).strict(), turnContextOutput),
+  spec('engine.get_turn_context', 'Return full bounded tactical context, or a revision-addressed delta for a resumed session.', z.object({ run_id: identifier, expected_revision: z.number().int().min(1), scope: z.enum(['active_turn', 'round']), granularity: z.enum(['full', 'turn_delta']).optional(), since_revision: z.number().int().min(1).optional(), actor_ids: z.array(identifier).min(1).max(50).optional(), include_expectations: z.boolean().optional(), maximum_options_per_actor: z.number().int().min(1).max(20).optional() }).strict().superRefine((value, context) => {
+    if (value.granularity === 'turn_delta' && value.since_revision === undefined) {
+      context.addIssue({ code: 'custom', path: ['since_revision'], message: 'since_revision is required for turn_delta.' });
+    }
+  }), turnContextOutput),
   spec('engine.propose_from_play', 'Expand one advertised play into an editable, unqueued draft intent set.', z.object({ play_name: z.enum(PLAY_NAMES) }).strict(), proposeFromPlayOutput),
   spec('engine.get_state_summary', 'Read one bounded state projection or journal delta using an opaque application cursor.', z.object({ ...refInput, granularity: z.enum(['turn_minimal', 'room_tactical', 'combatant_detail', 'journal_delta']), combatant_ids: z.array(identifier).max(50).optional(), since_revision: z.number().int().min(1).optional(), page: page.optional() }).strict(), stateSummaryOutput),
   spec('engine.get_combatant_options', 'List canonical legal and unavailable action options for one combatant.', z.object({ ...refInput, actor_id: identifier, include_unavailable: z.boolean().optional(), page: page.optional() }).strict(), optionsOutput),

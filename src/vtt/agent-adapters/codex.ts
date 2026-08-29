@@ -46,6 +46,7 @@ export class CodexAgentSessionAdapter extends ProcessAgentSessionAdapter {
       engineCommand: this.engineCommand(),
       engineArgs: this.engineArgs(invocation.launcherToken),
       instructions: invocation.instructions ?? null,
+      arenaSession: invocation.sessionProfile === 'arena',
       sessionId,
     }));
   }
@@ -82,6 +83,7 @@ export interface CodexArgvInput {
   readonly engineCommand: string | null;
   readonly engineArgs: readonly string[];
   readonly instructions?: string | null;
+  readonly arenaSession?: boolean;
   readonly sessionId: string | null;
 }
 
@@ -93,6 +95,11 @@ export function codexArgv(input: CodexArgvInput): readonly string[] {
     '--json',
     '-m', input.model,
     '-c', `model_reasoning_effort=${JSON.stringify(input.reasoningEffort)}`,
+    ...(input.arenaSession === true ? [
+      '-c', 'project_doc_max_bytes=0',
+      '-c', 'features.recommended_plugins=false',
+      '-c', 'skills.include_instructions=false',
+    ] : []),
     ...(input.engineCommand === null ? [] : [
       '-c', `mcp_servers.engine.command=${JSON.stringify(input.engineCommand)}`,
       '-c', `mcp_servers.engine.args=${JSON.stringify(input.engineArgs)}`,

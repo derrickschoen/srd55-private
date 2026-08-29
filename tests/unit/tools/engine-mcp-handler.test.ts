@@ -16,6 +16,11 @@ import { createEngineStateCapsule, engineStateHandle } from '../../../src/vtt/en
 import { engineStateSummaryProofToken } from '../../../src/vtt/mcp/engine-server';
 import { ENGINE_DM_TOOL_NAMES } from '../../../src/vtt/mcp/engine-server';
 import { createEngineMcpRuntime, loadArenaFixture, type EngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
+import { canonicalJson } from '../../../src/commands/canonical-json';
+import {
+  applyRevisionDelta,
+  type RevisionDeltaOperation,
+} from '../../../src/vtt/dm-bridge/projection-transport';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
 const TOOL_NAMES = [
@@ -431,6 +436,55 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     const value = structured(result);
     expect(record((result['content'] as readonly unknown[])[0])['text']).toBe(JSON.stringify(value));
     expect(forbiddenAgentKeys(value)).toEqual([]);
+  });
+
+  it('returns a revision delta that reconstructs the independently recomputed full turn context', async () => {
+    const { state, runtime: baseRuntime } = await fixtureRuntime({ requestedActorCount: 1, revision: 1 });
+    const base = structured(toolCall(baseRuntime.handler, 'engine.get_turn_context', {
+      ...contextArguments(), granularity: 'full', maximum_options_per_actor: 8,
+    }));
+    const currentOptions = {
+      requestedActorCount: 1,
+      revision: 2,
+      phase: 'correction' as const,
+      correctionNumber: 1 as const,
+      historyKind: 'intent_correction_requested',
+    };
+    const recomputedRuntime = createEngineMcpRuntime(state, currentOptions);
+    const recomputed = structured(toolCall(recomputedRuntime.handler, 'engine.get_turn_context', {
+      run_id: 'encounter:engine-mcp', expected_revision: 2, scope: 'round',
+      granularity: 'full', maximum_options_per_actor: 8,
+    }));
+    const deltaRuntime = createEngineMcpRuntime(state, {
+      ...currentOptions,
+      turnContextDeltaBase: { revision: 1, context: base },
+    });
+    const delta = structured(toolCall(deltaRuntime.handler, 'engine.get_turn_context', {
+      run_id: 'encounter:engine-mcp', expected_revision: 2, scope: 'round',
+      granularity: 'turn_delta', since_revision: 1, maximum_options_per_actor: 8,
+    }));
+    const changes = delta['changes'];
+    if (!Array.isArray(changes)) throw new TypeError('Turn delta omitted changes.');
+    const reconstructed = applyRevisionDelta(base, changes as readonly RevisionDeltaOperation[]);
+
+    expect(delta).toMatchObject({
+      granularity: 'turn_delta',
+      anchor: { base_revision: 1, revision: 2 },
+    });
+    expect(canonicalJson(reconstructed)).toBe(canonicalJson(recomputed));
+    expect(new TextEncoder().encode(JSON.stringify(delta)).byteLength)
+      .toBeLessThan(new TextEncoder().encode(JSON.stringify(recomputed)).byteLength);
+  });
+
+  it('fails closed to full turn context when the requested delta base is unavailable', async () => {
+    const { runtime } = await fixtureRuntime({ requestedActorCount: 1, revision: 2 });
+    const context = structured(toolCall(runtime.handler, 'engine.get_turn_context', {
+      run_id: 'encounter:engine-mcp', expected_revision: 2, scope: 'round',
+      granularity: 'turn_delta', since_revision: 1,
+    }));
+
+    expect(context).toMatchObject({ granularity: 'full', context_trimmed: false });
+    expect(context['actors']).toBeInstanceOf(Array);
   });
 
   it('returns proof_token only from the direct state-summary tool result', async () => {

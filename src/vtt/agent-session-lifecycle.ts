@@ -71,6 +71,7 @@ export class AgentSessionLifecycle {
       const recoveryInvocation: AgentInvocation = {
         ...invocation,
         prompt: this.journal.recoveryBootstrapPrompt(predecessorSessionHash),
+        launcherToken: invocation.recoveryLauncherToken ?? invocation.launcherToken,
       };
       const bootstrap = requireCompleted(
         await this.adapter.start(recoveryInvocation, signal),
@@ -86,7 +87,10 @@ export class AgentSessionLifecycle {
       });
       const successor = this.journal.recordAgentSessionDispatch();
       return requireResumedSameSession(
-        await this.adapter.resume(successor, invocation, signal),
+        await this.adapter.resume(successor, {
+          ...invocation,
+          launcherToken: invocation.recoveryLauncherToken ?? invocation.launcherToken,
+        }, signal),
         successor,
         'Recovered agent resume',
       );

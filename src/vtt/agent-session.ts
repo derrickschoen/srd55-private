@@ -20,7 +20,10 @@ export interface AgentInvocation {
   readonly instructions?: string | null;
   readonly model: string;
   readonly reasoningEffort: string;
+  readonly sessionProfile?: 'arena';
   readonly launcherToken: string;
+  /** Full-context launcher used only if resume recovery creates a fresh agent session. */
+  readonly recoveryLauncherToken?: string;
   readonly timeoutMs: number | null;
 }
 
