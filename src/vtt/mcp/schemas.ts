@@ -197,6 +197,25 @@ const submitRoundInput = z.object({ ...refInput, request_id: identifier, phase: 
     if (intent.fallback !== null) context.addIssue({ code: 'custom', path: ['intents', index, 'fallback'], message: 'Correction intent fallback must be null.' });
   });
 });
+const speculativeBranch = z.object({
+  scenario_id: identifier,
+  intents: z.array(turnIntent).min(1).max(50),
+}).strict();
+const submitSpeculativeRoundPlanInput = z.object({
+  ...refInput,
+  request_id: identifier,
+  target_room: z.number().int().min(1),
+  target_monster_round: z.number().int().min(1),
+  refresh_generation: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+  branches: z.array(speculativeBranch).min(1).max(4),
+  reaction_guidance: reactionGuidance.optional(),
+  idempotency_key: z.string().min(16).max(200),
+}).strict();
+const speculativeRoundPlanOutput = z.object({
+  status: z.literal('QUEUED-SPECULATIVE'),
+  speculative_plan_id: identifier,
+  state_ref: stateRef,
+}).strict();
 
 export interface EngineToolSpec { readonly descriptor: McpToolDescriptor; readonly input: z.ZodType<unknown>; readonly output: z.ZodType<unknown> }
 function jsonSchema(schema: z.ZodType<unknown>): Readonly<Record<string, unknown>> {
@@ -260,6 +279,7 @@ export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.query_dice_expectation', 'Compare bounded analytic outcomes without consuming RNG.', z.object({ ...refInput, candidates: z.array(z.object({ candidate_id: z.string().min(1).max(100), actor_id: identifier, choice: actionChoice, movement: movementPreference.optional(), engagement: engagement.optional() }).strict()).min(1).max(20), include_distribution: z.boolean().optional() }).strict(), diceOutput),
   spec('engine.validate_intent', 'Purely validate and preview one revision-bound intent.', phaseIntentInput, validateOutput),
   spec('engine.submit_round_intents', 'Validate and queue one all-or-nothing shared-initiative round proposal.', submitRoundInput, roundOutput, true),
+  spec('engine.submit_speculative_round_plan', 'Structurally validate and queue one host-guarded contingent monster-round plan.', submitSpeculativeRoundPlanInput, speculativeRoundPlanOutput, true),
   spec('engine.submit_intent', 'Validate and queue one separately controlled seat proposal.', submitIntentInput, singleOutput, true),
   spec('engine.emit_narration', 'Queue one bounded presentation-only narration chunk.', z.object({ ...refInput, request_id: identifier, idempotency_key: z.string().min(16).max(200), voice: z.enum(['cinematic_visible_rolls', 'terse_tactical', 'rules_explicit', 'terse_rule_citing_validation']), text: z.string().min(1).max(12_000), audience: z.enum(['shared', 'dm_only']), rule_references: z.array(z.object({ rule_id: identifier, source_locator: z.string().min(1).max(300) }).strict()).max(20).optional() }).strict(), narrationOutput, true),
   spec('engine.request_dm_adjudication', 'Queue a bounded DM question with no raw mechanical consequence.', z.object({ ...refInput, request_id: identifier, actor_id: identifier, subject: z.string().min(1).max(300), reason: z.string().min(1).max(2_000), blocking: z.boolean(), suggested_outcomes: z.array(z.string().min(1).max(500)).max(5).optional(), idempotency_key: z.string().min(16).max(200) }).strict(), adjudicationOutput, true),
@@ -273,4 +293,12 @@ export function schemaViolations(schema: z.ZodType<unknown>, value: unknown): re
   return decoded.success ? [] : decoded.error.issues.map((issue) => ({ path: jsonPointer(issue.path), keyword: issue.code, message: issue.message }));
 }
 
-export const engineSchemaInternals = { stateRef, targetSelector, actionChoice, movementPreference, engagement, turnIntent };
+export const engineSchemaInternals = {
+  stateRef,
+  targetSelector,
+  actionChoice,
+  movementPreference,
+  engagement,
+  turnIntent,
+  submitSpeculativeRoundPlanInput,
+};

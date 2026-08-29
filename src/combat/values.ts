@@ -10,6 +10,7 @@ export type TokenId = Brand<string, 'TokenId'>;
 export type StatblockId = Brand<string, 'StatblockId'>;
 export type EncounterEffectId = Brand<string, 'EncounterEffectId'>;
 export type PersistentAreaId = Brand<string, 'PersistentAreaId'>;
+export type EngineZoneId = Brand<string, 'EngineZoneId'>;
 export type WorldObjectId = Brand<string, 'WorldObjectId'>;
 export type ItemId = Brand<string, 'ItemId'>;
 export type ObjectTargetId = WorldObjectId | ItemId;
@@ -85,6 +86,9 @@ export const encounterEffectId = (value: string): EncounterEffectId =>
 
 export const persistentAreaId = (value: string): PersistentAreaId =>
   identity<PersistentAreaId>(value, 'PersistentAreaId');
+
+export const engineZoneId = (value: string): EngineZoneId =>
+  identity<EngineZoneId>(value, 'EngineZoneId');
 
 export const worldObjectId = (value: string): WorldObjectId =>
   identity<WorldObjectId>(value, 'WorldObjectId');

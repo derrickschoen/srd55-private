@@ -185,6 +185,7 @@ describe('read-only engine state capsule', () => {
       'movementBlockingObjects',
       'room',
       'round',
+      'semanticZones',
     ]);
     expect(JSON.stringify(capsule.projection)).not.toContain('pendingCommand');
     expect(JSON.stringify(capsule.projection)).not.toContain('rngState');

@@ -76,7 +76,7 @@ interface RegistryDependencies {
 type ProjectedActor = EngineStateCapsule['projection']['combatants'][number];
 type ProjectedAction = ProjectedActor['actions'][number];
 
-const RUNTIME_VERSION = 'plays-v1-runtime-3';
+const RUNTIME_VERSION = 'plays-v1-runtime-4';
 const DODGE: EngineIntentBranch = {
   choice: { kind: 'dodge' },
   movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
@@ -164,13 +164,19 @@ function canAttackThisTurn(
   actor: ProjectedActor,
   target: ProjectedActor,
   action: ProjectedAction,
+  maximumMovementFeet = actor.speedFeet * 2,
 ): boolean {
   const movement = minimumMovement(actor, target, action);
-  return movement !== null && movement <= actor.speedFeet * 2;
+  return movement !== null && movement <= maximumMovementFeet;
 }
 
-function bestAttack(actor: ProjectedActor, target: ProjectedActor): ProjectedAction | null {
-  const actions = attackActions(actor).filter((action) => canAttackThisTurn(actor, target, action));
+function bestAttack(
+  actor: ProjectedActor,
+  target: ProjectedActor,
+  maximumMovementFeet = actor.speedFeet * 2,
+): ProjectedAction | null {
+  const actions = attackActions(actor).filter((action) =>
+    canAttackThisTurn(actor, target, action, maximumMovementFeet));
   actions.sort((left, right) =>
     (minimumMovement(actor, target, left) ?? Number.POSITIVE_INFINITY) -
       (minimumMovement(actor, target, right) ?? Number.POSITIVE_INFINITY) ||
@@ -193,12 +199,12 @@ function engagement(actor: ProjectedActor, target: ProjectedActor, action: Proje
     : { stance: 'close_to_melee', anchor: selector };
 }
 
-function advance(actor: ProjectedActor, target: ProjectedActor): EngineIntentBranch {
+function dash(actor: ProjectedActor, target: ProjectedActor): EngineIntentBranch {
   return {
     choice: { kind: 'dash' },
     movement: {
       willingness: 'freely',
-      maximumFeet: actor.speedFeet,
+      maximumFeet: actor.speedFeet * 2,
       opportunityRisk: 'avoid',
     },
     engagement: { stance: 'close_to_melee', anchor: targetSelector(target) },
@@ -221,16 +227,10 @@ function intent(actor: ProjectedActor, target: ProjectedActor, action: Projected
           opportunityRisk: 'accept_if_needed',
         },
     engagement: engagement(actor, target, action),
-    fallback: requiredMovement !== null && requiredMovement > actor.speedFeet
-      ? {
-          ...advance(actor, target),
-          movement: {
-            willingness: 'freely',
-            maximumFeet: actor.speedFeet * 2,
-            opportunityRisk: 'accept_if_needed',
-          },
-        }
-      : advance(actor, target),
+    fallback: requiredMovement !== null && requiredMovement > actor.speedFeet &&
+      requiredMovement <= actor.speedFeet * 2
+      ? dash(actor, target)
+      : DODGE,
   };
 }
 
@@ -238,11 +238,67 @@ function defensiveHold(actor: ProjectedActor): EngineTurnIntent {
   return { actorId: actor.id, ...DODGE, fallback: END_TURN };
 }
 
-function advanceIntent(
+function attackPlan(
   actor: ProjectedActor,
-  target: ProjectedActor,
+  targets: readonly ProjectedActor[],
 ): EngineTurnIntent {
-  return { actorId: actor.id, ...advance(actor, target), fallback: DODGE };
+  const normalTarget = targets.find((target) => bestAttack(actor, target, actor.speedFeet) !== null);
+  if (normalTarget !== undefined) {
+    const action = bestAttack(actor, normalTarget, actor.speedFeet);
+    if (action !== null) return intent(actor, normalTarget, action);
+  }
+  const dashTarget = targets.find((target) => bestAttack(actor, target) !== null);
+  if (dashTarget !== undefined) {
+    const action = bestAttack(actor, dashTarget);
+    if (action !== null) return intent(actor, dashTarget, action);
+  }
+  return defensiveHold(actor);
+}
+
+function alternateBranch(actor: ProjectedActor, target: ProjectedActor): EngineIntentBranch | null {
+  const normalAction = bestAttack(actor, target, actor.speedFeet);
+  if (normalAction !== null) {
+    const alternate = intent(actor, target, normalAction);
+    return {
+      choice: alternate.choice,
+      movement: alternate.movement,
+      engagement: alternate.engagement,
+    };
+  }
+  const dashAction = bestAttack(actor, target);
+  return dashAction === null ? null : dash(actor, target);
+}
+
+function diversifyAnchors(
+  capsule: EngineStateCapsule,
+  intents: readonly EngineTurnIntent[],
+): readonly EngineTurnIntent[] {
+  const actors = requestedActors(capsule);
+  const targets = opposingTargets(capsule, actors);
+  const byActor = new Map(actors.map((actor) => [actor.id, actor]));
+  const replacements = new Map<EngineTurnIntent, EngineIntentBranch>();
+  for (const primaryTarget of targets) {
+    const concentrated = intents.filter((entry) =>
+      entry.engagement.anchor?.kind === 'combatant' &&
+      entry.engagement.anchor.combatantId === primaryTarget.id);
+    if (concentrated.length < 4) continue;
+    const secondary = targets.find((target) => target.id !== primaryTarget.id);
+    if (secondary === undefined) continue;
+    const candidates = concentrated.flatMap((entry) => {
+      const actor = byActor.get(entry.actorId);
+      if (actor === undefined) return [];
+      const alternate = alternateBranch(actor, secondary);
+      return alternate === null ? [] : [{ entry, alternate }];
+    });
+    const count = Math.min(Math.ceil(concentrated.length / 4), concentrated.length - 1, candidates.length);
+    for (const candidate of candidates.slice(-count)) {
+      replacements.set(candidate.entry, candidate.alternate);
+    }
+  }
+  return intents.map((entry) => {
+    const fallback = replacements.get(entry);
+    return fallback === undefined ? entry : { ...entry, fallback };
+  });
 }
 
 function phaseDraft(
@@ -264,15 +320,8 @@ function basicApplicable(capsule: EngineStateCapsule): boolean {
 function expandBasic(capsule: EngineStateCapsule): readonly EngineTurnIntent[] {
   const actors = requestedActors(capsule);
   const targets = opposingTargets(capsule, actors);
-  return phaseDraft(capsule, actors.map((actor) => {
-    const target = targets.find((candidate) => bestAttack(actor, candidate) !== null);
-    if (target === undefined) {
-      const anchor = targets[0];
-      return anchor === undefined ? defensiveHold(actor) : advanceIntent(actor, anchor);
-    }
-    const action = bestAttack(actor, target);
-    return action === null ? advanceIntent(actor, target) : intent(actor, target, action);
-  }));
+  return phaseDraft(capsule, diversifyAnchors(capsule, actors.map((actor) =>
+    attackPlan(actor, targets))));
 }
 
 function focusApplicable(capsule: EngineStateCapsule): boolean {
@@ -284,15 +333,8 @@ function focusApplicable(capsule: EngineStateCapsule): boolean {
 function expandFocus(capsule: EngineStateCapsule): readonly EngineTurnIntent[] {
   const actors = requestedActors(capsule);
   const targets = opposingTargets(capsule, actors);
-  return phaseDraft(capsule, actors.map((actor) => {
-    const target = targets.find((candidate) => bestAttack(actor, candidate) !== null);
-    if (target === undefined) {
-      const anchor = targets[0];
-      return anchor === undefined ? defensiveHold(actor) : advanceIntent(actor, anchor);
-    }
-    const action = bestAttack(actor, target);
-    return action === null ? advanceIntent(actor, target) : intent(actor, target, action);
-  }));
+  return phaseDraft(capsule, diversifyAnchors(capsule, actors.map((actor) =>
+    attackPlan(actor, targets))));
 }
 
 function controlAction(actors: readonly ProjectedActor[], target: ProjectedActor): {
@@ -331,7 +373,7 @@ function expandObstacle(capsule: EngineStateCapsule): readonly EngineTurnIntent[
   return phaseDraft(capsule, actors.map((actor) => {
     if (actor.id === controller.actor.id) return intent(actor, target, controller.action);
     const action = bestAttack(actor, target);
-    return action === null ? advanceIntent(actor, target) : intent(actor, target, action);
+    return action === null ? defensiveHold(actor) : intent(actor, target, action);
   }));
 }
 
@@ -382,17 +424,17 @@ export function createSnippetRegistry(dependencies: RegistryDependencies): Snipp
     }),
     definition(dependencies, {
       name: 'focus_fire',
-      description: 'Concentrate attacks on the ranked removal target and advance actors beyond the Dash horizon.',
+      description: 'Concentrate attacks on the ranked removal target, preferring attacks reachable at normal speed.',
       rank: 20,
-      strategy: 'rank reachable target by hit points then reach; attack within full turn movement including dash commitment; otherwise advance at normal speed; ranged maintain range; melee close',
+      strategy: 'prefer a normal-move attack before ranked dash-range attacks; Dash only when an attack position costs more than speed and no more than double speed; otherwise Dodge; diversify concentrated anchors through alternate-target fallbacks',
       applicability: focusApplicable,
       expand: expandFocus,
     }),
     definition(dependencies, {
       name: 'basic_advance',
-      description: 'Each actor attacks its best reachable target or advances at normal speed toward its anchor.',
+      description: 'Each actor attacks its best normal-speed target, Dashes only into a next-turn attack position, or Dodges.',
       rank: 30,
-      strategy: 'per actor choose first reachable ranked target using projected path cost; commit up to dash movement; otherwise advance at normal speed; ranged maintain range; melee close',
+      strategy: 'per actor prefer any normal-speed attack over a ranked dash-range attack; Dash only when attack-position path cost is above speed and at most double speed; otherwise Dodge; diversify concentrated anchors through alternate-target fallbacks',
       applicability: basicApplicable,
       expand: expandBasic,
     }),

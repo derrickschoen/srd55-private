@@ -26,6 +26,7 @@ const ENGINE_TOOL_NAMES = [
   'engine.query_dice_expectation',
   'engine.validate_intent',
   'engine.submit_round_intents',
+  'engine.submit_speculative_round_plan',
   'engine.submit_intent',
   'engine.emit_narration',
   'engine.request_dm_adjudication',

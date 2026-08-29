@@ -132,43 +132,33 @@ describe('AI-DM arena', () => {
     expect(rows.every((row) => row.chainEvidence.failedAttempts.every((attempt) =>
       attempt.rejectionReasons.length > 0))).toBe(true);
     expect(rows[0]?.authorizedPlan).toEqual([
-      {
-        actorId: 'combatant:generated-3943001-monster-1',
-        acceptedIntent: {
+      ['combatant:generated-3943001-monster-1', 'dagger'],
+      ['combatant:generated-3943001-monster-2', 'grab'],
+      ['combatant:generated-3943001-monster-3', 'longsword'],
+    ].map(([actorId, actionId]) => ({
+      actorId,
+      acceptedIntent: {
+        actor_id: actorId,
+        choice: {
+          kind: 'attack', action_id: actionId,
+          target: { kind: 'combatant', combatant_id: 'combatant:cleric' },
+        },
+        movement: {
+          willingness: 'only_if_required', maximum_feet: 30,
+          opportunity_risk: 'accept_if_needed',
+        },
+        engagement: { stance: 'close_to_melee' },
+        fallback: {
           choice: { kind: 'dodge' },
           movement: {
             willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid',
           },
           engagement: { stance: 'hold_position' },
         },
-        selectedBranch: 'fallback',
-        resolutionSummary: { actionId: 'dodge', targetId: null, movementFeet: 0 },
       },
-      {
-        actorId: 'combatant:generated-3943001-monster-2',
-        acceptedIntent: {
-          choice: { kind: 'dodge' },
-          movement: {
-            willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid',
-          },
-          engagement: { stance: 'hold_position' },
-        },
-        selectedBranch: 'fallback',
-        resolutionSummary: { actionId: 'dodge', targetId: null, movementFeet: 0 },
-      },
-      {
-        actorId: 'combatant:generated-3943001-monster-3',
-        acceptedIntent: {
-          choice: { kind: 'dodge' },
-          movement: {
-            willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid',
-          },
-          engagement: { stance: 'hold_position' },
-        },
-        selectedBranch: 'fallback',
-        resolutionSummary: { actionId: 'dodge', targetId: null, movementFeet: 0 },
-      },
-    ]);
+      selectedBranch: 'fallback',
+      resolutionSummary: { actionId: 'dodge', targetId: null, movementFeet: 0 },
+    })));
     expect(rows[0]?.roundNarrative).toBe(
       'combatant:generated-3943001-monster-1 uses dodge; ' +
       'combatant:generated-3943001-monster-2 uses dodge; ' +
@@ -281,9 +271,40 @@ describe('AI-DM arena', () => {
       suggestionAdopted: 'as_is',
     });
     expect(rows[0]?.authorizedPlan).toEqual([
-      expect.objectContaining({ acceptedIntent: expect.objectContaining({ choice: { kind: 'dash' } }) }),
-      expect.objectContaining({ acceptedIntent: expect.objectContaining({ choice: { kind: 'dash' } }) }),
-    ]);
+      ['combatant:generated-3943002-monster-1', 50],
+      ['combatant:generated-3943002-monster-2', 40],
+    ].map(([actorId, movementFeet]) => ({
+      actorId,
+      acceptedIntent: {
+        actor_id: actorId,
+        choice: {
+          kind: 'attack', action_id: 'life-drain', resource_policy: 'normal',
+          target: { kind: 'combatant', combatant_id: 'combatant:cleric' },
+        },
+        movement: {
+          willingness: 'only_if_required', maximum_feet: 30,
+          opportunity_risk: 'accept_if_needed',
+        },
+        engagement: {
+          stance: 'close_to_melee',
+          anchor: { kind: 'combatant', combatant_id: 'combatant:cleric' },
+        },
+        fallback: {
+          choice: { kind: 'dash' },
+          movement: {
+            willingness: 'freely', maximum_feet: 60, opportunity_risk: 'avoid',
+          },
+          engagement: {
+            stance: 'close_to_melee',
+            anchor: { kind: 'combatant', combatant_id: 'combatant:cleric' },
+          },
+        },
+      },
+      selectedBranch: 'fallback',
+      resolutionSummary: {
+        actionId: 'dash', targetId: 'combatant:cleric', movementFeet,
+      },
+    })));
   });
 
   it('runs as a vite-node --dry-run CLI without contacting the model binary', { timeout: 30_000 }, () => {

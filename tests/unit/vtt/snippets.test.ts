@@ -257,7 +257,7 @@ describe('plays v1 registry', () => {
         attackIds.has(approach.actionId) && approach.minimumMovementFeet !== null &&
         approach.minimumMovementFeet <= actor.speedFeet * 2);
       const intent = draft.find((candidate) => candidate.actorId === actor.id);
-      expect(intent?.choice.kind).toBe(reachable ? 'attack' : 'dash');
+      expect(intent?.choice.kind).toBe(reachable ? 'attack' : 'dodge');
     }
 
     for (const attack of attacks) {
@@ -268,6 +268,75 @@ describe('plays v1 registry', () => {
         expect(resolution.mechanics.movementCostFeet).toBeGreaterThan(0);
       }
     }
+  });
+
+  it.each(['focus_fire', 'basic_advance'] as const)(
+    'uses room 3943007 path cost before target rank for %s',
+    async (play) => {
+      const { capsule } = await registryFixture(3_943_007);
+      const actorId = 'combatant:generated-3943007-monster-2';
+      const shaped = withProjection(capsule, {
+        ...capsule.projection,
+        combatants: capsule.projection.combatants.map((actor) => actor.id !== actorId ? actor : {
+          ...actor,
+          actionApproaches: actor.actionApproaches.map((approach) => ({
+            ...approach,
+            minimumMovementFeet: approach.targetId === 'combatant:fighter' ? 35
+              : approach.targetId === 'combatant:wizard' ? 20
+                : approach.minimumMovementFeet,
+          })),
+        }),
+      });
+      const actor = shaped.projection.combatants.find((candidate) => candidate.id === actorId);
+      const draft = SNIPPET_REGISTRY.expand(play, shaped).intents;
+      const selected = draft.find((candidate) => candidate.actorId === actorId);
+
+      expect(actor?.speedFeet).toBe(30);
+      expect(actor?.actionApproaches).toEqual(expect.arrayContaining([
+        expect.objectContaining({ targetId: 'combatant:fighter', minimumMovementFeet: 35 }),
+        expect.objectContaining({ targetId: 'combatant:wizard', minimumMovementFeet: 20 }),
+      ]));
+      expect(selected).toMatchObject({
+        choice: {
+          kind: 'attack', actionId: 'life-drain',
+          target: { kind: 'combatant', combatantId: 'combatant:wizard' },
+        },
+        movement: { willingness: 'only_if_required', maximumFeet: 30 },
+        fallback: { choice: { kind: 'dodge' } },
+      });
+    },
+  );
+
+  it('uses Dash only for a room 3943007 attack position beyond normal speed but within double speed', async () => {
+    const { capsule } = await registryFixture(3_943_007);
+    const actorId = 'combatant:generated-3943007-monster-2';
+    const shaped = withProjection(capsule, {
+      ...capsule.projection,
+      combatants: capsule.projection.combatants.map((actor) => actor.id !== actorId ? actor : {
+        ...actor,
+        actionApproaches: actor.actionApproaches.map((approach) => ({
+          ...approach,
+          minimumMovementFeet: approach.targetId === 'combatant:fighter' ? 35 : 70,
+        })),
+      }),
+    });
+    const selected = SNIPPET_REGISTRY.expand('focus_fire', shaped).intents
+      .find((candidate) => candidate.actorId === actorId);
+
+    expect(selected).toMatchObject({
+      choice: {
+        kind: 'attack', actionId: 'life-drain',
+        target: { kind: 'combatant', combatantId: 'combatant:fighter' },
+      },
+      movement: { maximumFeet: 30 },
+      fallback: {
+        choice: { kind: 'dash' },
+        movement: { maximumFeet: 60, opportunityRisk: 'avoid' },
+        engagement: {
+          anchor: { kind: 'combatant', combatantId: 'combatant:fighter' },
+        },
+      },
+    });
   });
 
   it.each([
@@ -318,37 +387,36 @@ describe('plays v1 registry', () => {
       .toThrow('PLAY_NOT_APPLICABLE');
   });
 
-  it('never holds and Dodges against a living projected enemy unless no adjacent path exists', async () => {
+  it('never drafts Dash without a projected attack position beyond speed and within double speed', async () => {
     for (let seed = 3_943_001; seed <= 3_943_012; seed += 1) {
       const { capsule } = await registryFixture(seed);
       const requested = capsule.projection.combatants.filter((actor) =>
         capsule.request?.actors.includes(actor.id) === true && actor.life !== 'dead');
-      const blocked = [
-        ...capsule.projection.blockedCells,
-        ...capsule.projection.movementBlockingObjects.flatMap((object) => object.cells),
-      ];
       for (const play of SNIPPET_REGISTRY.applicable(capsule)) {
         const intents = SNIPPET_REGISTRY.expand(play.name, capsule).intents;
         for (const intent of intents) {
           const actor = requested.find((candidate) => candidate.id === intent.actorId);
           if (actor === undefined) throw new Error(`Requested actor ${String(intent.actorId)} is absent.`);
-          const holdAndDodge = intent.choice.kind === 'dodge' && intent.engagement.stance === 'hold_position';
-          const openAdjacentCell = Array.from({ length: capsule.projection.bounds.rows }, (_, row) =>
-            Array.from({ length: capsule.projection.bounds.columns }, (_, column) => ({ column, row })))
-            .flat()
-            .some((cell) =>
-              Math.max(Math.abs(cell.column - actor.position.column), Math.abs(cell.row - actor.position.row)) === 1 &&
-              !blocked.some((candidate) => candidate.column === cell.column && candidate.row === cell.row) &&
-              !capsule.projection.combatants.some((candidate) =>
-                candidate.id !== actor.id && candidate.life !== 'dead' &&
-                candidate.position.column === cell.column && candidate.position.row === cell.row));
-          expect(holdAndDodge, `${String(seed)} ${play.name} ${String(actor.id)}`).toBe(!openAdjacentCell);
+          const branches = [intent, ...(intent.fallback === null ? [] : [intent.fallback])];
+          for (const branch of branches.filter((candidate) => candidate.choice.kind === 'dash')) {
+            const anchor = branch.engagement.anchor;
+            expect(anchor?.kind, `${String(seed)} ${play.name} ${String(actor.id)}`).toBe('combatant');
+            if (anchor?.kind !== 'combatant') throw new Error('Dash branch anchor is absent.');
+            const attackIds = new Set(actor.actions.filter((action) => action.kind === 'attack')
+              .map((action) => action.actionId));
+            const approach = actor.actionApproaches.find((candidate) =>
+              candidate.targetId === anchor.combatantId && attackIds.has(candidate.actionId) &&
+              candidate.minimumMovementFeet !== null && candidate.minimumMovementFeet > actor.speedFeet &&
+              candidate.minimumMovementFeet <= actor.speedFeet * 2);
+            expect(approach, `${String(seed)} ${play.name} ${String(actor.id)}`).toBeDefined();
+            expect(branch.movement.opportunityRisk).toBe('avoid');
+          }
         }
       }
     }
   });
 
-  it('advances at full normal speed with a defensive posture when no attack is reachable after Dash', async () => {
+  it('Dodges instead of spending Dash when no attack is reachable within double speed', async () => {
     for (let seed = 3_943_001; seed <= 3_943_012; seed += 1) {
       const { capsule } = await registryFixture(seed);
       const actors = capsule.projection.combatants.filter((actor) =>
@@ -367,18 +435,46 @@ describe('plays v1 registry', () => {
           if (canAttackAfterDash) continue;
           const intent = intents.find((candidate) => candidate.actorId === actor.id);
           expect(intent, `${String(seed)} ${play.name} ${String(actor.id)}`).toMatchObject({
-            choice: { kind: 'dash' },
+            choice: { kind: 'dodge' },
             movement: {
-              willingness: 'freely',
-              maximumFeet: actor.speedFeet,
+              willingness: 'none',
+              maximumFeet: 0,
               opportunityRisk: 'avoid',
             },
-            engagement: { stance: 'close_to_melee' },
-            fallback: { choice: { kind: 'dodge' } },
+            engagement: { stance: 'hold_position' },
+            fallback: { choice: { kind: 'end_turn' } },
           });
         }
       }
     }
+  });
+
+  it('spreads alternate fallback anchors across a concentrated six-unit room', async () => {
+    const { capsule } = await registryFixture(3_943_005);
+    const requested = new Set(capsule.request?.actors ?? []);
+    const shaped = withProjection(capsule, {
+      ...capsule.projection,
+      combatants: capsule.projection.combatants.map((actor) => !requested.has(actor.id) ? actor : {
+        ...actor,
+        actionApproaches: actor.actionApproaches.map((approach) => ({
+          ...approach,
+          minimumMovementFeet: approach.targetId === 'combatant:wizard' ||
+            approach.targetId === 'combatant:cleric' ? 0 : approach.minimumMovementFeet,
+        })),
+      }),
+    });
+    const draft = SNIPPET_REGISTRY.expand('focus_fire', shaped).intents;
+
+    expect(draft).toHaveLength(6);
+    expect(draft.map((entry) => entry.engagement.anchor)).toEqual(draft.map(() => ({
+      kind: 'combatant', combatantId: 'combatant:wizard',
+    })));
+    expect(draft.flatMap((entry) => entry.fallback?.engagement.anchor?.kind === 'combatant'
+      ? [{ actorId: entry.actorId, targetId: entry.fallback.engagement.anchor.combatantId }]
+      : [])).toEqual([
+      { actorId: 'combatant:generated-3943005-monster-5', targetId: 'combatant:cleric' },
+      { actorId: 'combatant:generated-3943005-monster-6', targetId: 'combatant:cleric' },
+    ]);
   });
 
   it('does not offer fallback-bearing plays during a correction request', async () => {

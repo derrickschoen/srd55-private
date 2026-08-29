@@ -203,7 +203,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(startArgv).not.toContain(invocation.prompt);
     expect(runner.calls.map((call) => call.stdin)).toEqual([invocation.prompt, invocation.prompt]);
     expect(claudeCodeEngineToolName('engine.get_state_summary')).toBe('mcp__engine__engine_get_state_summary');
-    expect(CLAUDE_ENGINE_TOOLS).toHaveLength(14);
+    expect(CLAUDE_ENGINE_TOOLS).toHaveLength(15);
     expect(CLAUDE_ENGINE_TOOLS.every((name) => !name.includes('.'))).toBe(true);
     expect(JSON.parse(startArgv[startArgv.indexOf('--mcp-config') + 1] ?? '')).toEqual({
       mcpServers: { engine: { type: 'stdio', command: engineCommand, args: [...engineArgs, invocation.launcherToken] } },
