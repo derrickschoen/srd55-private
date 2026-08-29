@@ -1,0 +1,24 @@
+id: vtt-snippet-purity
+language: TypeScript
+severity: error
+message: VTT snippets must remain deterministic, synchronous, and capsule/intent-only.
+files:
+  - src/vtt/snippets/**/*.ts
+rule:
+  any:
+    - pattern: Date.now()
+    - pattern: Math.random()
+    - pattern: new Date($$$ARGS)
+    - pattern: fetch($$$ARGS)
+    - pattern: await $EXPRESSION
+    - pattern:
+        context: while ($CONDITION) { $$$BODY }
+        selector: while_statement
+    - all:
+        - any:
+            - pattern: import $$$BINDINGS from '$MODULE'
+            - pattern: import '$MODULE'
+        - not:
+            any:
+              - pattern: import type $$$BINDINGS from '../engine-state-capsule'
+              - pattern: import type $$$BINDINGS from '../intent-resolver'
