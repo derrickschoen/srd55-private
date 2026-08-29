@@ -12,7 +12,7 @@ import {
   type JsonRpcResponse,
   type McpHandler,
 } from '../../../src/vtt/mcp/handler';
-import { createEngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
+import { createEngineStateCapsule, engineStateHandle } from '../../../src/vtt/engine-state-capsule';
 import { engineStateSummaryProofToken } from '../../../src/vtt/mcp/engine-server';
 import { createEngineMcpRuntime, loadArenaFixture, type EngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
 
@@ -29,6 +29,7 @@ const TOOL_NAMES = [
   'engine.query_dice_expectation',
   'engine.validate_intent',
   'engine.submit_round_intents',
+  'engine.submit_speculative_round_plan',
   'engine.submit_intent',
   'engine.emit_narration',
   'engine.request_dm_adjudication',
@@ -144,6 +145,90 @@ function fixtureFacts(state: EncounterState, runtime: EngineMcpRuntime) {
   return { actor, target, action, request: capsule.request, intent, ref: stateRef(runtime) };
 }
 function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, runtime: EngineMcpRuntime): Readonly<Record<string, unknown>> {
+  if (name === 'engine.submit_speculative_round_plan') {
+    const capsule = runtime.feed.current();
+    const actor = capsule.request?.actors[0];
+    if (actor === undefined) throw new Error('Speculative fixture actor is absent.');
+    const atom = {
+      kind: 'resource_available_is' as const,
+      subject: { actorId: actor, selector: { kind: 'combatant' as const, combatantId: actor } },
+      resource: { kind: 'reaction' as const },
+      available: true,
+    };
+    const candidate = {
+      candidateId: 'candidate:mcp-speculative',
+      rank: 1 as const,
+      factKey: `reaction:${actor}`,
+      baseline: atom,
+      flipped: { ...atom, available: false },
+      referencedIntentCount: 1,
+      influencingPlayerIds: [],
+      summedMovementRadiusFeet: 30,
+      volatilityScore: 30,
+    };
+    const scenarios = [
+      {
+        scenarioId: 'scenario:mcp-speculative-default',
+        ordinal: 1 as const,
+        kind: 'no_material_change' as const,
+        flippedCandidateId: null,
+        facts: [atom],
+      },
+      {
+        scenarioId: 'scenario:mcp-speculative-flip',
+        ordinal: 2 as const,
+        kind: 'single_candidate_flip' as const,
+        flippedCandidateId: candidate.candidateId,
+        facts: [candidate.flipped],
+      },
+    ];
+    const defaultScenario = scenarios[0];
+    if (defaultScenario === undefined) throw new Error('Speculative default scenario is absent.');
+    const speculative = createEngineStateCapsule({
+      runId: capsule.runId,
+      branchId: capsule.branchId,
+      revision: capsule.revision + 1,
+      generatedAt: '2026-08-29T12:00:00.000Z',
+      request: {
+        requestId: 'request:mcp-speculative',
+        phase: 'speculative',
+        correctionNumber: 0,
+        actors: [actor],
+        targetRoom: 1,
+        targetMonsterRound: 2,
+        refreshGeneration: 0,
+        scenarioMenu: [candidate],
+        scenarios,
+      },
+      projection: capsule.projection,
+      historyDelta: capsule.historyDelta,
+      rulesIndex: capsule.rulesIndex,
+    });
+    runtime.feed.replace(speculative);
+    return {
+      state_ref: {
+        run_id: speculative.runId,
+        state_handle: engineStateHandle(speculative),
+        expected_revision: speculative.revision,
+      },
+      request_id: 'request:mcp-speculative',
+      target_room: 1,
+      target_monster_round: 2,
+      refresh_generation: 0,
+      branches: scenarios.map((scenario) => ({
+        scenario_id: scenario.scenarioId,
+        intents: [{
+          actor_id: actor,
+          choice: { kind: 'dodge' },
+          movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
+          engagement: { stance: 'hold_position' },
+          fallback: null,
+        }],
+      })),
+      reaction_guidance: { side_wide: { opportunity_attack: 'decline' } },
+      idempotency_key: 'mcp-speculative-idempotency-0001',
+    };
+  }
   const facts = fixtureFacts(state, runtime);
   switch (name) {
     case 'engine.get_turn_context': return contextArguments();
@@ -353,6 +438,29 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     }));
     expect(rejected['status']).toBe('rejected');
     expect(runtime.proposals).toHaveLength(1);
+  });
+
+  it('queues speculative prediction envelopes separately and byte-locks idempotency', async () => {
+    const { state, runtime } = await fixtureRuntime();
+    const input = happyArguments('engine.submit_speculative_round_plan', state, runtime);
+    const first = structured(toolCall(runtime.handler, 'engine.submit_speculative_round_plan', input));
+    const repeated = structured(toolCall(runtime.handler, 'engine.submit_speculative_round_plan', input));
+    expect(repeated).toEqual(first);
+    expect(first).toMatchObject({ status: 'QUEUED-SPECULATIVE' });
+    expect(runtime.speculativePlans).toHaveLength(1);
+    expect(runtime.speculativePlans[0]).toMatchObject({
+      status: 'QUEUED-SPECULATIVE',
+      reactionGuidance: { sideWide: { opportunity_attack: 'decline' } },
+    });
+    expect(runtime.proposals).toEqual([]);
+
+    const changed = toolCall(runtime.handler, 'engine.submit_speculative_round_plan', {
+      ...input,
+      target_monster_round: 3,
+    });
+    expect(changed['isError']).toBe(true);
+    expect(JSON.stringify(changed)).toContain('IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_INPUT');
+    expect(runtime.speculativePlans).toHaveLength(1);
   });
 
   it('queues closed reaction guidance on both submission tools and rejects free text', async () => {

@@ -1,16 +1,23 @@
 import { combatantsAreAllies } from '../combat/allies';
+import { conditionSpeedPenaltyFeet } from '../combat/conditions';
 import { creatureSizes } from '../domain/enums';
-import {
-  type EncounterCombatantState,
-  type EncounterState,
+import type {
+  EncounterCombatantState,
+  EncounterState,
 } from '../combat/encounter';
+import type { AppliedCondition, ExhaustionLevel } from '../combat/conditions';
 import { gridDistance, type GridCell } from '../combat/grid';
 import { findPath, findPathToAny } from '../combat/movement';
 import { persistentAreaContains } from '../combat/persistent-areas';
 import { attackRangeVerdict } from '../combat/range';
 import type { MonsterAction, MonsterAttackAction } from '../combat/statblock';
 import { lookupBundledMonster } from '../combat/statblocks/companions';
-import { feet, type CombatantId } from '../combat/values';
+import {
+  engineZoneId,
+  feet,
+  type CombatantId,
+  type EngineZoneId,
+} from '../combat/values';
 import { wildShapeRulesLens } from '../combat/wild-shape';
 import {
   environmentLightAt,
@@ -112,9 +119,255 @@ function combatant(state: EncounterState, id: CombatantId): EncounterCombatantSt
 }
 
 function rulesFor(subject: EncounterCombatantState): EncounterCombatantState['profile']['rules'] {
-  return subject.wildShape === undefined
-    ? subject.profile.rules
-    : wildShapeRulesLens(subject.profile.rules, subject.wildShape);
+  if (subject.wildShape !== undefined) {
+    return wildShapeRulesLens(subject.profile.rules, subject.wildShape);
+  }
+  return subject.profile.rules;
+}
+
+/** Canonical active-pool numerator for planning, guards, and projections. */
+export function enginePlanningHitPoints(
+  state: EncounterState,
+  subjectId: CombatantId,
+): number {
+  const subject = combatant(state, subjectId);
+  if (subject === null) return 0;
+  if (subject.wildShape !== undefined) return subject.wildShape.physical.hitPoints;
+  if (subject.form !== undefined) return subject.form.hitPoints;
+  return subject.hitPoints;
+}
+
+/** Canonical active-pool denominator; temporary HP is deliberately excluded. */
+export function enginePlanningHitPointMaximum(
+  state: EncounterState,
+  subjectId: CombatantId,
+): number {
+  const subject = combatant(state, subjectId);
+  if (subject === null) return 0;
+  const activePoolMaximum = subject.wildShape?.physical.hitPointMaximum ??
+    subject.form?.hitPointMaximum ??
+    subject.profile.rules.hitPointMaximum;
+  return state.effects.reduce((maximum, effect) =>
+    effect.targets.includes(subjectId) && effect.payload.kind === 'hit_point_maximum_modifier'
+      ? maximum + effect.payload.amount
+      : maximum, activePoolMaximum);
+}
+
+/** One canonical concentration query covers owned effects and persistent areas. */
+export function engineConcentrationActive(
+  state: EncounterState,
+  subjectId: CombatantId,
+): boolean {
+  return state.effects.some((effect) => effect.concentrationOwner === subjectId) ||
+    state.persistentAreas.some((area) =>
+      area.owner === subjectId && area.duration.kind === 'concentration' && area.duration.remaining > 0);
+}
+
+export interface EnginePlanningCombatantFacts {
+  readonly conditionFlags: readonly AppliedCondition[];
+  readonly temporaryHitPoints: number;
+  readonly spellSlots: readonly { readonly level: number; readonly remaining: number }[];
+  readonly legendaryActionUsesRemaining: number;
+  readonly legendaryResistanceUsesRemaining: number;
+  readonly concentrating: boolean;
+}
+
+function engineAppliedConditions(
+  effect: EncounterState['effects'][number],
+): readonly AppliedCondition[] {
+  const payload = effect.payload;
+  if (payload.kind === 'ensnaring_strike' || payload.kind === 'banishment') {
+    return [{ name: payload.condition }];
+  }
+  if (payload.kind === 'charm_monster') {
+    return [{ name: payload.condition, source: effect.source }];
+  }
+  if (payload.kind === 'hypnotic_pattern') {
+    return payload.conditions.map((condition) => condition === 'Charmed'
+      ? { name: condition, source: effect.source }
+      : { name: condition });
+  }
+  if (payload.kind === 'fear') return [{ name: 'Frightened', source: effect.source }];
+  if (payload.kind === 'web_area') return [{ name: 'Restrained' }];
+  if (payload.kind === 'condition_bundle') {
+    return payload.conditions.map((condition) =>
+      condition === 'Charmed' || condition === 'Frightened' || condition === 'Grappled'
+        ? { name: condition, source: effect.source }
+        : { name: condition });
+  }
+  if (payload.kind === 'sleep_sequence') return [{ name: payload.initial }];
+  if (payload.kind === 'exhaustion') return [{ name: 'Exhaustion', level: payload.level }];
+  if (payload.kind !== 'condition') return [];
+  switch (payload.condition) {
+    case 'Charmed':
+    case 'Frightened':
+    case 'Grappled': return [{ name: payload.condition, source: effect.source }];
+    case 'Blinded':
+    case 'Deafened':
+    case 'Incapacitated':
+    case 'Invisible':
+    case 'Paralyzed':
+    case 'Petrified':
+    case 'Poisoned':
+    case 'Prone':
+    case 'Restrained':
+    case 'Stunned':
+    case 'Unconscious': return [{ name: payload.condition }];
+  }
+}
+
+/** Query-only mirror of the canonical condition identity projection. */
+export function enginePlanningConditions(
+  state: EncounterState,
+  subjectId: CombatantId,
+): readonly AppliedCondition[] {
+  const subject = combatant(state, subjectId);
+  if (subject === null) return [];
+  const conditions: AppliedCondition[] = [];
+  const seen = new Set<string>();
+  let exhaustion = 0;
+  for (const effect of state.effects) {
+    if (!effect.targets.includes(subjectId)) continue;
+    for (const condition of engineAppliedConditions(effect)) {
+      if (condition.name === 'Exhaustion') {
+        exhaustion += condition.level;
+        continue;
+      }
+      if (condition.name === 'Invisible' && state.effects.some((candidate) =>
+        candidate.targets.includes(subjectId) && candidate.payload.kind === 'faerie_fire' &&
+        candidate.payload.preventsInvisibleConditionBenefit)) continue;
+      const key = 'source' in condition ? `${condition.name}:${condition.source}` : condition.name;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      conditions.push(condition);
+    }
+  }
+  if (exhaustion > 0) {
+    conditions.push({
+      name: 'Exhaustion',
+      level: Math.min(6, exhaustion) as ExhaustionLevel,
+    });
+  }
+  if (subject.life === 'dying' && !conditions.some((condition) => condition.name === 'Unconscious')) {
+    conditions.push({ name: 'Unconscious' });
+  }
+  return conditions;
+}
+
+/** Canonical query-only movement speed, including active typed modifiers. */
+export function enginePlanningSpeedFeet(
+  state: EncounterState,
+  subjectId: CombatantId,
+): number {
+  const subject = combatant(state, subjectId);
+  if (subject === null) return 0;
+  const penalty = conditionSpeedPenaltyFeet(enginePlanningConditions(state, subjectId));
+  if (penalty === Number.NEGATIVE_INFINITY) return 0;
+  const modifiers = state.effects.flatMap((effect) =>
+    effect.targets.includes(subjectId) && effect.payload.kind === 'movement_modifier'
+      ? [effect.payload]
+      : []);
+  const immuneToReduction = modifiers.some((payload) =>
+    'magicalSpeedReductionImmunity' in payload && payload.magicalSpeedReductionImmunity);
+  const speeds = new Map<'walking' | 'flying' | 'climbing' | 'swimming', number>([
+    ['walking', rulesFor(subject).speed + penalty],
+  ]);
+  for (const payload of modifiers) {
+    if ('speedDeltaFeet' in payload) {
+      speeds.set('walking', (speeds.get('walking') ?? 0) + payload.speedDeltaFeet);
+      continue;
+    }
+    switch (payload.speedChange.kind) {
+      case 'set':
+        for (const mode of speeds.keys()) speeds.set(mode, payload.speedChange.speedFeet);
+        break;
+      case 'increase':
+        for (const [mode, speed] of speeds) speeds.set(mode, speed + payload.speedChange.feet);
+        break;
+      case 'reduce':
+        if (!immuneToReduction) {
+          for (const [mode, speed] of speeds) {
+            speeds.set(mode, payload.speedChange.reduction.kind === 'feet'
+              ? speed - payload.speedChange.reduction.feet
+              : speed * payload.speedChange.reduction.multiplier);
+          }
+        }
+        break;
+    }
+    const walking = Math.max(0, speeds.get('walking') ?? 0);
+    for (const grant of payload.modeGrants) {
+      speeds.set(grant.mode, grant.speed.kind === 'fixed' ? grant.speed.feet : walking);
+    }
+  }
+  const ordinarySpeed = Math.max(0, ...speeds.values());
+  const slowMultiplier = state.effects.reduce((lowest, effect) =>
+    effect.targets.includes(subjectId) && effect.payload.kind === 'slow'
+      ? Math.min(lowest, effect.payload.speedMultiplier)
+      : lowest, 1);
+  return ordinarySpeed * slowMultiplier;
+}
+
+export interface EnginePlanningSemanticZone {
+  readonly id: EngineZoneId;
+  readonly kind: 'persistent_area' | 'authored_encounter_zone';
+  readonly memberCombatantIds: readonly CombatantId[];
+  readonly active: boolean;
+}
+
+export function enginePlanningCombatantFacts(
+  state: EncounterState,
+  subjectId: CombatantId,
+): EnginePlanningCombatantFacts {
+  const subject = combatant(state, subjectId);
+  if (subject === null) {
+    return {
+      conditionFlags: [],
+      temporaryHitPoints: 0,
+      spellSlots: [],
+      legendaryActionUsesRemaining: 0,
+      legendaryResistanceUsesRemaining: 0,
+      concentrating: false,
+    };
+  }
+  return {
+    conditionFlags: enginePlanningConditions(state, subjectId),
+    temporaryHitPoints: subject.temporaryHitPoints,
+    spellSlots: subject.spellSlots.map((slot) => ({
+      level: slot.level,
+      remaining: slot.remaining,
+    })),
+    legendaryActionUsesRemaining: subject.legendary?.actionUsesRemaining ?? 0,
+    legendaryResistanceUsesRemaining: subject.legendary?.resistanceUsesRemaining ?? 0,
+    concentrating: engineConcentrationActive(state, subjectId),
+  };
+}
+
+export function enginePlanningSemanticZones(
+  state: EncounterState,
+): readonly EnginePlanningSemanticZone[] {
+  const persistentAreas = state.persistentAreas.map((area) => ({
+      id: engineZoneId(String(area.id)),
+      kind: 'persistent_area' as const,
+      memberCombatantIds: [...area.members].sort((left, right) => left.localeCompare(right)),
+      active: area.duration.remaining > 0,
+    }));
+  const positions = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
+  const authoredZones = (state.environment.movementRegions ?? []).map((region) => ({
+    id: engineZoneId(region.id),
+    kind: 'authored_encounter_zone' as const,
+    memberCombatantIds: state.combatants
+      .filter((subject) => subject.life !== 'dead')
+      .flatMap((subject) => {
+        const position = positions.get(subject.profile.id);
+        return position !== undefined && region.cells.some((cell) => cellKey(cell) === cellKey(position))
+          ? [subject.profile.id]
+          : [];
+      })
+      .sort((left, right) => left.localeCompare(right)),
+    active: true,
+  }));
+  return [...persistentAreas, ...authoredZones]
+    .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function monsterActions(state: EncounterState, actorId: CombatantId): readonly MonsterAction[] {
@@ -352,6 +605,10 @@ export function engineActionRegistry(state: EncounterState): {
     readonly targetId: CombatantId;
     readonly minimumMovementFeet: number | null;
   }[];
+  planningFactsFor(combatantId: CombatantId): EnginePlanningCombatantFacts;
+  planningHitPointsFor(combatantId: CombatantId): number;
+  planningHitPointMaximumFor(combatantId: CombatantId): number;
+  semanticZones(): readonly EnginePlanningSemanticZone[];
 } {
   return {
     actionsFor(combatantId) {
@@ -400,6 +657,18 @@ export function engineActionRegistry(state: EncounterState): {
           minimumMovementFeet: result.kind === 'found' ? result.cost : null,
         }];
       }));
+    },
+    planningFactsFor(combatantId) {
+      return enginePlanningCombatantFacts(state, combatantId);
+    },
+    planningHitPointsFor(combatantId) {
+      return enginePlanningHitPoints(state, combatantId);
+    },
+    planningHitPointMaximumFor(combatantId) {
+      return enginePlanningHitPointMaximum(state, combatantId);
+    },
+    semanticZones() {
+      return enginePlanningSemanticZones(state);
     },
   };
 }

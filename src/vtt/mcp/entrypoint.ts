@@ -11,6 +11,7 @@ import {
   type EncounterSessionId,
 } from '../../combat/values';
 import type { EngineProposalEnvelope, NarrationEnvelope } from '../engine-envelopes';
+import type { QueuedSpeculativePlanEnvelope } from '../speculative-plan-types';
 import { createEngineStateCapsule, projectEngineEncounterState, type RuleReference } from '../engine-state-capsule';
 import { canonicalEngineQueryPort, engineActionRegistry } from '../engine-query-port';
 import { pureIntentResolver } from '../intent-resolver';
@@ -108,6 +109,7 @@ export interface EngineMcpRuntime {
   readonly handler: McpHandler;
   readonly feed: MutableEngineCapsuleFeed;
   readonly proposals: readonly EngineProposalEnvelope[];
+  readonly speculativePlans: readonly QueuedSpeculativePlanEnvelope[];
   readonly narrations: readonly NarrationEnvelope[];
   readonly adjudications: readonly AdjudicationEnvelope[];
 }
@@ -172,6 +174,7 @@ export function createEngineMcpRuntime(
   });
   const feed = new MutableEngineCapsuleFeed(capsule);
   const proposals: EngineProposalEnvelope[] = [];
+  const speculativePlans: QueuedSpeculativePlanEnvelope[] = [];
   const narrations: NarrationEnvelope[] = [];
   const adjudications: AdjudicationEnvelope[] = [];
   const handler = createEngineMcpApplication({
@@ -185,6 +188,7 @@ export function createEngineMcpRuntime(
         options.onProposal?.(structuredClone(envelope));
       },
     },
+    speculativePlans: { append: (envelope) => { speculativePlans.push(envelope); } },
     narration: { append: (envelope) => { narrations.push(envelope); } },
     adjudications: { append: (envelope) => { adjudications.push(envelope); } },
     rules: options.rules ?? { get: () => null },
@@ -192,7 +196,7 @@ export function createEngineMcpRuntime(
     ...(options.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: options.maximumResourceBytes }),
     ...(options.listPageSize === undefined ? {} : { listPageSize: options.listPageSize }),
   });
-  return { handler, feed, proposals, narrations, adjudications };
+  return { handler, feed, proposals, speculativePlans, narrations, adjudications };
 }
 
 export function createEngineMcpHandler(state: EncounterState, maximumToolResultBytes?: number): McpHandler {

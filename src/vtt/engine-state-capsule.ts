@@ -4,10 +4,16 @@ import type {
   CombatantId,
   EncounterBranchId,
   EncounterSessionId,
+  EngineZoneId,
 } from '../combat/values';
 import type { EncounterState } from '../combat/encounter';
 import { sha256 } from '../crypto/sha256';
 import type { DmBoardProjection } from './encounter-projections';
+import type {
+  GuardConditionIdentity,
+  HostScenario,
+  HostSplitCandidate,
+} from './speculative-plan-types';
 
 export interface EngineProjectedAction {
   readonly actionId: string;
@@ -25,6 +31,26 @@ export interface EngineProjectedActionApproach {
 export interface EngineActionRegistry {
   actionsFor(combatantId: CombatantId): readonly EngineProjectedAction[];
   approachesFor(combatantId: CombatantId): readonly EngineProjectedActionApproach[];
+  planningFactsFor(combatantId: CombatantId): EngineProjectionCombatantFacts;
+  planningHitPointsFor(combatantId: CombatantId): number;
+  planningHitPointMaximumFor(combatantId: CombatantId): number;
+  semanticZones(): readonly EngineSemanticZone[];
+}
+
+export interface EngineProjectionCombatantFacts {
+  readonly conditionFlags: readonly GuardConditionIdentity[];
+  readonly temporaryHitPoints: number;
+  readonly spellSlots: readonly { readonly level: number; readonly remaining: number }[];
+  readonly legendaryActionUsesRemaining: number;
+  readonly legendaryResistanceUsesRemaining: number;
+  readonly concentrating: boolean;
+}
+
+export interface EngineSemanticZone {
+  readonly id: EngineZoneId;
+  readonly kind: 'persistent_area' | 'authored_encounter_zone';
+  readonly memberCombatantIds: readonly CombatantId[];
+  readonly active: boolean;
 }
 
 export interface EngineProjectionCombatant {
@@ -43,6 +69,7 @@ export interface EngineProjectionCombatant {
   readonly movementRemainingFeet: number;
   readonly actions: readonly EngineProjectedAction[];
   readonly actionApproaches: readonly EngineProjectedActionApproach[];
+  readonly planning: EngineProjectionCombatantFacts;
 }
 
 export interface EngineDmProjection {
@@ -59,6 +86,7 @@ export interface EngineDmProjection {
     readonly cells: readonly GridCell[];
   }[];
   readonly combatants: readonly EngineProjectionCombatant[];
+  readonly semanticZones: readonly EngineSemanticZone[];
 }
 
 export interface EngineHistoryEntry {
@@ -81,16 +109,30 @@ export interface EngineStateCapsule {
   readonly revision: number;
   readonly digest: string;
   readonly generatedAt: string;
-  readonly request: null | {
-    readonly requestId: string;
-    readonly phase: 'initial' | 'correction';
-    readonly correctionNumber: 0 | 1;
-    readonly actors: readonly CombatantId[];
-  };
+  readonly request: EngineCapsuleRequest | null;
   readonly projection: EngineDmProjection;
   readonly historyDelta: readonly EngineHistoryEntry[];
   readonly rulesIndex: readonly RuleReference[];
 }
+
+export type EngineCapsuleRequest =
+  | {
+      readonly requestId: string;
+      readonly phase: 'initial' | 'correction';
+      readonly correctionNumber: 0 | 1;
+      readonly actors: readonly CombatantId[];
+    }
+  | {
+      readonly requestId: string;
+      readonly phase: 'speculative';
+      readonly correctionNumber: 0;
+      readonly actors: readonly CombatantId[];
+      readonly targetRoom: number;
+      readonly targetMonsterRound: number;
+      readonly refreshGeneration: 0 | 1 | 2;
+      readonly scenarioMenu: readonly HostSplitCandidate[];
+      readonly scenarios: readonly HostScenario[];
+    };
 
 export interface EngineStateReference {
   readonly runId: EncounterSessionId;
@@ -143,8 +185,8 @@ export function projectEngineDmProjection(
       name: boundedText(combatant.name, 'combatant name', 200),
       side: combatant.kind,
       life: combatant.life,
-      hitPoints: combatant.hitPoints,
-      hitPointMaximum: combatant.rules.hitPointMaximum,
+      hitPoints: registry.planningHitPointsFor(combatant.id),
+      hitPointMaximum: registry.planningHitPointMaximumFor(combatant.id),
       speedFeet: combatant.rules.speed,
       reachFeet: combatant.rules.reach,
       position: { ...combatant.position },
@@ -154,7 +196,9 @@ export function projectEngineDmProjection(
       movementRemainingFeet: combatant.turn.movement.remaining,
       actions: registry.actionsFor(combatant.id).map((action) => ({ ...action })),
       actionApproaches: registry.approachesFor(combatant.id).map((approach) => ({ ...approach })),
+      planning: structuredClone(registry.planningFactsFor(combatant.id)),
     })),
+    semanticZones: structuredClone(registry.semanticZones()),
   };
 }
 
@@ -195,8 +239,8 @@ export function projectEngineEncounterState(
         name: boundedText(combatant.profile.name, 'combatant name', 200),
         side: combatant.profile.kind,
         life: combatant.life,
-        hitPoints: combatant.wildShape?.physical.hitPoints ?? combatant.hitPoints,
-        hitPointMaximum: rules.hitPointMaximum,
+        hitPoints: registry.planningHitPointsFor(combatant.profile.id),
+        hitPointMaximum: registry.planningHitPointMaximumFor(combatant.profile.id),
         speedFeet: rules.speed,
         reachFeet: rules.reach,
         position: { ...token.position },
@@ -206,8 +250,10 @@ export function projectEngineEncounterState(
         movementRemainingFeet: combatant.turn.movement.remaining,
         actions: registry.actionsFor(combatant.profile.id).map((action) => ({ ...action })),
         actionApproaches: registry.approachesFor(combatant.profile.id).map((approach) => ({ ...approach })),
+        planning: structuredClone(registry.planningFactsFor(combatant.profile.id)),
       };
     }),
+    semanticZones: structuredClone(registry.semanticZones()),
   };
 }
 
@@ -229,6 +275,36 @@ function digestFor(input: CapsuleDigestInput): string {
   return sha256(canonicalJson(input));
 }
 
+function assertSpeculativeRequest(
+  request: Extract<EngineCapsuleRequest, { readonly phase: 'speculative' }>,
+): void {
+  if (!Number.isSafeInteger(request.targetRoom) || request.targetRoom < 1 ||
+    !Number.isSafeInteger(request.targetMonsterRound) || request.targetMonsterRound < 1 ||
+    request.actors.length === 0 || new Set(request.actors).size !== request.actors.length ||
+    request.scenarioMenu.length < 1 || request.scenarioMenu.length > 8) {
+    throw new RangeError('Speculative capsule target, actor set, and menu must be bounded and non-empty.');
+  }
+  const ordered = [...request.scenarioMenu].sort((left, right) => left.rank - right.rank);
+  if (ordered.some((candidate, index) => candidate.rank !== index + 1) ||
+    new Set(ordered.map((candidate) => candidate.factKey)).size !== ordered.length) {
+    throw new RangeError('Speculative capsule candidates require contiguous ranks and unique fact keys.');
+  }
+  const selected = ordered.slice(0, 3);
+  if (request.scenarios.length !== selected.length + 1) {
+    throw new RangeError('Speculative capsule scenarios must contain one default plus each selected single flip.');
+  }
+  for (const [index, scenario] of request.scenarios.entries()) {
+    const expectedFacts = selected.map((candidate, factIndex) =>
+      index > 0 && factIndex === index - 1 ? candidate.flipped : candidate.baseline);
+    if (scenario.ordinal !== index + 1 ||
+      scenario.kind !== (index === 0 ? 'no_material_change' : 'single_candidate_flip') ||
+      scenario.flippedCandidateId !== (index === 0 ? null : selected[index - 1]?.candidateId ?? null) ||
+      canonicalJson(scenario.facts) !== canonicalJson(expectedFacts)) {
+      throw new RangeError('Speculative capsule scenarios must be canonical Hamming-0/Hamming-1 vectors.');
+    }
+  }
+}
+
 export function createEngineStateCapsule(input: {
   readonly runId: EncounterSessionId;
   readonly branchId: EncounterBranchId;
@@ -245,6 +321,7 @@ export function createEngineStateCapsule(input: {
   if (Number.isNaN(Date.parse(input.generatedAt))) {
     throw new TypeError('Capsule generatedAt must be an ISO date-time string.');
   }
+  if (input.request?.phase === 'speculative') assertSpeculativeRequest(input.request);
   const body: CapsuleDigestInput = {
     format: 'engine-mcp-state-capsule',
     schemaVersion: 1,

@@ -22,6 +22,8 @@ import {
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
 import type { EngineActionChoice, EngineEngagement, EngineIntentBranch, EngineMovementPreference, EngineTurnIntent, PureIntentResolver } from '../intent-resolver';
 import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
+import { submitSpeculativeRoundPlan } from '../speculative-plan-submission';
+import type { SpeculativePlanSink } from '../speculative-plan-types';
 import {
   PLAY_NAMES,
   SNIPPET_REGISTRY,
@@ -106,6 +108,7 @@ interface EngineMcpDependencies {
   readonly queries: EngineQueryPort;
   readonly intents: PureIntentResolver;
   readonly proposals: ProposalSink;
+  readonly speculativePlans: SpeculativePlanSink;
   readonly narration: NarrationSink;
   readonly adjudications: AdjudicationSink;
   readonly rules: AllowlistedRulesSource;
@@ -366,7 +369,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   if (dependencies.maximumResourceBytes !== undefined && dependencies.maximumResourceBytes > 128 * 1024) {
     throw new RangeError('maximumResourceBytes cannot exceed the 128 KiB hard limit.');
   }
-  const { state, stateSource: feed, proposals, narration, adjudications, rules } = dependencies;
+  const { state, stateSource: feed, proposals, speculativePlans, narration, adjudications, rules } = dependencies;
   const { queries, intents } = dependencies;
   const idempotency = new Map<string, { readonly bytes: string; readonly result: unknown }>();
   const applicationCursors = new Map<string, { readonly digest: string; readonly key: string; readonly offset: number }>();
@@ -387,9 +390,14 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     applicationCursors.set(next, { digest: capsule.digest, key, offset: nextOffset });
     return { values: selected, truncated: true, next };
   }
-  function currentRequest(capsule: EngineStateCapsule, requestId: string, phase: string): NonNullable<EngineStateCapsule['request']> {
+  function currentRequest(
+    capsule: EngineStateCapsule,
+    requestId: string,
+    phase: string,
+  ): Extract<NonNullable<EngineStateCapsule['request']>, { readonly phase: 'initial' | 'correction' }> {
     const request = capsule.request;
-    if (request === null || request.requestId !== requestId || request.phase !== phase) throw new RangeError('REQUEST_MISMATCH');
+    if (request === null || request.phase === 'speculative' ||
+      request.requestId !== requestId || request.phase !== phase) throw new RangeError('REQUEST_MISMATCH');
     return request;
   }
   function idempotent(key: string, input: unknown, create: () => unknown): unknown {
@@ -408,6 +416,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     if (name === 'engine.get_turn_context') {
       const capsule = exactCurrent(feed, stringField(input, 'run_id'), numberField(input, 'expected_revision'));
       if (capsule.request === null) throw new RangeError('NO_PENDING_REQUEST');
+      if (capsule.request.phase === 'speculative') throw new RangeError('SPECULATIVE_CONTEXT_USES_CAPSULE_MENU');
       const requested = Array.isArray(input['actor_ids']) ? input['actor_ids'].map((id) => combatantId(String(id))) : capsule.request.actors;
       const required = input['scope'] === 'active_turn' && capsule.projection.activeCombatant !== null ? [capsule.projection.activeCombatant] : requested;
       const maximum = typeof input['maximum_options_per_actor'] === 'number' ? input['maximum_options_per_actor'] : 8;
@@ -623,6 +632,52 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
         submitEngineProposal(feed, proposals, { kind: 'round_intent_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance });
         return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.intent.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
+      });
+    }
+    if (name === 'engine.submit_speculative_round_plan') {
+      const requestCapsule = feed.read(stateReference(input['state_ref']));
+      const request = requestCapsule.request;
+      if (request === null || request.phase !== 'speculative' ||
+        request.requestId !== stringField(input, 'request_id')) {
+        throw new RangeError('SPECULATIVE_REQUEST_MISMATCH');
+      }
+      const branchValues = input['branches'];
+      if (!Array.isArray(branchValues)) throw new TypeError('branches must be an array.');
+      const branches = branchValues.map((value) => {
+        const branch = record(value, 'speculative branch');
+        const intentValues = branch['intents'];
+        if (!Array.isArray(intentValues)) throw new TypeError('branch intents must be an array.');
+        return {
+          scenarioId: stringField(branch, 'scenario_id'),
+          intents: intentValues.map(decodeIntent),
+        };
+      });
+      const key = stringField(input, 'idempotency_key');
+      const reactionGuidance = input['reaction_guidance'] === undefined
+        ? null
+        : decodeReactionGuidance(input['reaction_guidance']);
+      return idempotent(key, input, () => {
+        const envelope = submitSpeculativeRoundPlan(feed, speculativePlans, {
+          kind: 'speculative_round_plan',
+          schemaVersion: 2,
+          runId: requestCapsule.runId,
+          encounterBranchId: requestCapsule.branchId,
+          requestId: request.requestId,
+          sourceRevision: requestCapsule.revision,
+          sourceDigest: requestCapsule.digest,
+          stateHandle: engineStateHandle(requestCapsule),
+          targetRoom: numberField(input, 'target_room'),
+          targetMonsterRound: numberField(input, 'target_monster_round'),
+          refreshGeneration: numberField(input, 'refresh_generation') as 0 | 1 | 2,
+          branches,
+          reactionGuidance,
+          idempotencyKey: key,
+        });
+        return {
+          status: envelope.status,
+          speculative_plan_id: envelope.speculativePlanId,
+          state_ref: externalStateRef(requestCapsule),
+        };
       });
     }
     if (name === 'engine.submit_intent') {
