@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D410 — OWNER: start CPU training proof-of-concept now (2026-08-29)
+
+Verbatim: "Pick a small model to start training on the cpu as a proof of
+concept. Look at how much memory overhead we have. Maybe 1 or 2 billion
+parameters to start. Use quantization aware reinforcement training with
+all of the latest tricks. Try to get it to behave as well as Luna low as
+possible. It won't need to be a general model. Specialize in what Luna is
+doing for us." Ruling: begin the PoC on this machine's CPU — 1-2B base
+picked from the D409.2 research's verified list; quantization-aware
+RL (QAT-style + latest applicable tricks per research); success metric =
+approach luna low's arena numbers (authorization rate, judge scores) on
+the SPECIALIST task only (intent-API monster rounds); general capability
+explicitly not a goal. Pipeline: SFT warm start from our authorized
+transcripts -> engine-verified GRPO -> quantized serving -> arena+judge
+eval vs luna low.
+
 ## D409.2 — OWNER: RL target is a small LOCAL model replacing luna/codex (2026-08-29)
 
 Verbatim: "When I asked about rl, I was thinking of something that we
