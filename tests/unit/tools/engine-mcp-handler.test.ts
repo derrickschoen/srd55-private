@@ -19,6 +19,7 @@ import { createEngineMcpRuntime, loadArenaFixture, type EngineMcpRuntime } from 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
 const TOOL_NAMES = [
   'engine.get_turn_context',
+  'engine.propose_from_play',
   'engine.get_state_summary',
   'engine.get_combatant_options',
   'engine.query_path',
@@ -32,6 +33,7 @@ const TOOL_NAMES = [
   'engine.emit_narration',
   'engine.request_dm_adjudication',
 ] as const;
+const REVISION_BOUND_TOOL_NAMES = TOOL_NAMES.filter((name) => name !== 'engine.propose_from_play');
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError('Expected an object.');
@@ -145,6 +147,7 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
   const facts = fixtureFacts(state, runtime);
   switch (name) {
     case 'engine.get_turn_context': return contextArguments();
+    case 'engine.propose_from_play': return { play_name: 'basic_advance' };
     case 'engine.get_state_summary': return { state_ref: facts.ref, granularity: 'room_tactical', page: { maximum_items: 1 } };
     case 'engine.get_combatant_options': return { state_ref: facts.ref, actor_id: facts.actor, include_unavailable: true, page: { maximum_items: 2 } };
     case 'engine.query_path': return { state_ref: facts.ref, actor_id: facts.actor, objective: { kind: 'approach', target: { kind: 'combatant', combatant_id: facts.target } }, movement: { willingness: 'freely', maximum_feet: 30, opportunity_risk: 'accept_if_needed' }, engagement: { stance: 'close_to_melee' } };
@@ -327,7 +330,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(JSON.stringify(result)).toContain('Invalid tool arguments');
   });
 
-  it.each(TOOL_NAMES)('%s fails closed with STALE_STATE when its revision binding is stale', async (name) => {
+  it.each(REVISION_BOUND_TOOL_NAMES)('%s fails closed with STALE_STATE when its revision binding is stale', async (name) => {
     const { state, runtime } = await fixtureRuntime();
     const args = { ...happyArguments(name, state, runtime) };
     if (name === 'engine.get_turn_context') args['expected_revision'] = 2;

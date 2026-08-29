@@ -36,6 +36,8 @@ export interface ArenaRow {
   readonly round: number;
   readonly cli: ConversationCli;
   readonly kbHash: string | null;
+  readonly snippetHash: string;
+  readonly snippetSetHash: string;
   readonly contextRevision: number;
   readonly projectionRevision: number;
   readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null';
@@ -174,6 +176,8 @@ export async function runArena(
     round: row.round,
     cli: row.cli,
     kbHash: row.kbHash,
+    snippetHash: row.snippetHash,
+    snippetSetHash: row.snippetSetHash,
     contextRevision: row.contextRevision,
     projectionRevision: row.projectionRevision,
     outcome: row.outcome,
