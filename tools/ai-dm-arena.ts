@@ -38,6 +38,8 @@ export interface ArenaRow {
   readonly kbHash: string | null;
   readonly snippetHash: string;
   readonly snippetSetHash: string;
+  readonly suggestedPlay: import('./ai-dm-conversation').ConversationSuggestedPlay | null;
+  readonly suggestionAdopted: import('./ai-dm-conversation').ConversationSuggestionAdoption | null;
   readonly contextRevision: number;
   readonly projectionRevision: number;
   readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null';
@@ -178,6 +180,8 @@ export async function runArena(
     kbHash: row.kbHash,
     snippetHash: row.snippetHash,
     snippetSetHash: row.snippetSetHash,
+    suggestedPlay: row.suggestedPlay,
+    suggestionAdopted: row.suggestionAdopted,
     contextRevision: row.contextRevision,
     projectionRevision: row.projectionRevision,
     outcome: row.outcome,

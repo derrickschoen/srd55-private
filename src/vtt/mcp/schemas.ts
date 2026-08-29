@@ -113,9 +113,16 @@ const advertisedPlay = z.object({
   description: z.string().min(1).max(200),
   snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
 }).strict();
+const suggestedPlan = z.object({
+  play_name: z.enum(PLAY_NAMES),
+  snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+  intents: z.array(turnIntent).min(1).max(50),
+  advisory: z.string().min(1).max(300),
+}).strict();
 const turnContextOutput = z.object({
   state_ref: stateRef, request: turnRequest, summary: tacticalSummary, actors: z.array(actorContext).min(1).max(50),
   applicable_plays: z.array(advertisedPlay).max(3),
+  suggested_plan: suggestedPlan.optional(),
   recent_changes: z.array(recentChange).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable(),
 }).strict();
 const proposeFromPlayOutput = z.object({

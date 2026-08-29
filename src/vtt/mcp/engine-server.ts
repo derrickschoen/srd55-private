@@ -84,6 +84,10 @@ export interface AllowlistedRuleEntry extends RuleReference {
   readonly attribution: string;
 }
 
+export const SUGGESTED_PLAN_MAX_BYTES = 16 * 1024;
+const TURN_CONTEXT_BASE_MAX_BYTES = 32 * 1024;
+const SUGGESTED_PLAN_ADVISORY = 'You may submit these intents as-is via engine.submit_round_intents, edit them, or ignore this suggested plan.';
+
 export function engineStateSummaryProofToken(capsuleDigest: string, granularity: string): string {
   return sha256(`${capsuleDigest}|${granularity}|state_summary_proof_v1`);
 }
@@ -414,24 +418,38 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const all = tacticalOptions(state, queries, capsule, actorId, includeExpectations, true);
         return { actor_id: actorId, status: actorStatus(actor), options: all.slice(0, maximum), threats: threats(state, queries, actorId), omitted: all.length > maximum };
       });
+      const applicablePlays = SNIPPET_REGISTRY.applicable(capsule);
       const result = {
         state_ref: externalStateRef(capsule),
         request: { request_id: capsule.request.requestId, phase: capsule.request.phase, correction_number: capsule.request.correctionNumber, required_actor_ids: capsule.request.actors },
         summary: tacticalSummary(capsule), actors: actors.map(({ omitted: _omitted, ...actor }) => actor), recent_changes: recentChanges(capsule),
-        applicable_plays: SNIPPET_REGISTRY.applicable(capsule).map((play) => ({
+        applicable_plays: applicablePlays.map((play) => ({
           name: play.name,
           description: play.description,
           snippet_hash: play.snippetHash,
         })),
         truncated: actors.some((actor) => actor.omitted), next_cursor: null,
       };
-      while (new TextEncoder().encode(JSON.stringify(result)).byteLength > 32 * 1024) {
+      while (new TextEncoder().encode(JSON.stringify(result)).byteLength > TURN_CONTEXT_BASE_MAX_BYTES) {
         const actor = [...result.actors].reverse().find((candidate) => candidate.options.length > 0);
         if (actor === undefined) break;
         actor.options.pop();
         result.truncated = true;
       }
-      return result;
+      const topPlay = applicablePlays[0];
+      if (topPlay === undefined) return result;
+      const draft = SNIPPET_REGISTRY.expand(topPlay.name, capsule);
+      const suggestedPlan = {
+        play_name: topPlay.name,
+        snippet_hash: topPlay.snippetHash,
+        intents: draft.intents.map(externalIntent),
+        advisory: SUGGESTED_PLAN_ADVISORY,
+      };
+      const suggestedBytes = new TextEncoder().encode(JSON.stringify(suggestedPlan)).byteLength;
+      if (suggestedBytes > SUGGESTED_PLAN_MAX_BYTES) {
+        throw new RangeError(`SUGGESTED_PLAN_TOO_LARGE: ${String(suggestedBytes)} UTF-8 bytes exceeds the ${String(SUGGESTED_PLAN_MAX_BYTES)}-byte limit.`);
+      }
+      return { ...result, suggested_plan: suggestedPlan };
     }
     if (name === 'engine.propose_from_play') {
       const capsule = feed.current();
