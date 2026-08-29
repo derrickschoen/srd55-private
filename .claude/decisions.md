@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D408 — OWNER: audit and reduce the ~195k input tokens per round (2026-08-29)
+
+Verbatim: "195k token input is way too large. What is going on there? Use
+the collab skill to list and audit assumptions and brainstorm plans to
+reduce." And the offered angle: "The kb should be structured with an index
+and glossary and the text heavy stuff should load on demand at agent
+discretion." Ruling: collab round (sol high + opus + Fable independent,
+then consensus) audits the input-token budget and produces reduction
+plans; the lazy-KB (index + glossary + on-demand text) is a mandated
+design angle. Supervisor pre-measurement: server/discover 145KB (~36k
+tok) WITH tools embedded, tools/list 145KB again (double delivery), 14
+tools totaling 156KB schema after the 7g self-contained-$defs inlining.
+
 ## D407 — OWNER: 5-minute free-thinking budget; team-planned PC turns in the flywheel (2026-08-29)
 
 Verbatim: "Budget each player taking 1 minute per turn. This gives the dm
