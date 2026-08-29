@@ -45,7 +45,8 @@ class SIMULATEDCli implements AgentSessionAdapter {
       return Promise.reject(new AgentAdapterError('timeout', 'Agent CLI timed out after 300000 ms.'));
     }
     return Promise.resolve({
-      sessionId: agentSessionIdFromCli(`${this.kind}-SIMULATED-session`),
+      resumeSessionId: agentSessionIdFromCli(`${this.kind}-SIMULATED-session`),
+      sessionId: null,
       finalText: 'BOOT',
       usage: null,
       exit: 'completed',
@@ -67,7 +68,8 @@ class SIMULATEDCli implements AgentSessionAdapter {
     const proofSucceeded = this.mode !== 'bad_mcp_proof' &&
       (this.mode !== 'retry_mcp_proof' || this.#proofAttempts >= 3);
     return Promise.resolve({
-      sessionId: binding.sessionId,
+      resumeSessionId: binding.sessionId,
+      sessionId: null,
       finalText: proof && proofSucceeded ? SIMULATED_PROOF_TOKEN : proof ? SIMULATED_DIGEST : 'RESUME',
       usage: null,
       exit: 'completed',

@@ -64,8 +64,8 @@ class RecordingConversationAdapter implements AgentSessionAdapter {
 
   classifyFailure(): 'unknown' { return 'unknown'; }
 
-  private completed(sessionId: AgentTurnResult['sessionId']): AgentTurnResult {
-    return { sessionId, finalText: 'SIMULATED', usage: null, exit: 'completed' };
+  private completed(sessionId: AgentTurnResult['resumeSessionId']): AgentTurnResult {
+    return { resumeSessionId: sessionId, sessionId: null, finalText: 'SIMULATED', usage: null, exit: 'completed' };
   }
 }
 
@@ -201,7 +201,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
   }
 
   private async dispatch(
-    sessionId: AgentTurnResult['sessionId'],
+    sessionId: AgentTurnResult['resumeSessionId'],
     invocation: AgentInvocation,
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
@@ -295,8 +295,14 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
 
   classifyFailure(): 'unknown' { return 'unknown'; }
 
-  private completed(sessionId: AgentTurnResult['sessionId']): AgentTurnResult {
-    return { sessionId, finalText: 'SERIALIZED-TEST', usage: null, exit: 'completed' };
+  private completed(sessionId: AgentTurnResult['resumeSessionId']): AgentTurnResult {
+    return {
+      resumeSessionId: sessionId,
+      sessionId,
+      finalText: 'SERIALIZED-TEST',
+      usage: null,
+      exit: 'completed',
+    };
   }
 }
 
@@ -530,6 +536,10 @@ describe('AI-DM engine MCP conversation runner', () => {
       expect(adapter.resumeInvocations).toHaveLength(expectedEscalated ? 0 : 1);
       expect(result.rows[0]).toEqual(expect.objectContaining({
         outcome: 'authorized',
+        sessionId: 'codex:serialized:encounter:ai-dm-conversation:session-1',
+        escalationSessionId: expectedEscalated
+          ? 'codex:serialized:encounter:ai-dm-conversation:session-2'
+          : null,
         plannedBy: expectedPlanner,
         escalated: expectedEscalated,
         escalationModel: expectedEscalationModel,
@@ -797,6 +807,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       'auto_resolved', 'authorized', 'authorized', 'authorized',
     ]);
     expect(result.rows.every((row) => row.refusals.length === 0)).toBe(true);
+    expect(result.rows.every((row) => row.sessionId === null && row.escalationSessionId === null)).toBe(true);
     expect(new Set(result.rows.map((row) => row.sessionIdHash)).size).toBe(1);
     expect(result.rows[0]?.toolCalls).toBe(3);
     expect(result.rows[0]?.agentDispatched).toBe(true);

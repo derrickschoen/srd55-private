@@ -63,7 +63,8 @@ export class SIMULATEDAgentSessionAdapter implements AgentSessionAdapter {
 
 function completed(sessionId: string, finalText: string): AgentTurnResult {
   return {
-    sessionId: agentSessionId(sessionId),
+    resumeSessionId: agentSessionId(sessionId),
+    sessionId: null,
     finalText,
     usage: null,
     exit: 'completed',

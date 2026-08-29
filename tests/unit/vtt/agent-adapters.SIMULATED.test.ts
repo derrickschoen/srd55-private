@@ -117,11 +117,13 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     const resumed = await adapter.resume(binding('codex', 'codex-thread-123'), invocation, new AbortController().signal);
 
     expect(started).toEqual({
+      resumeSessionId: 'codex-thread-123',
       sessionId: 'codex-thread-123',
       finalText: '{"intents":[]}',
       usage: { inputTokens: 101, cachedInputTokens: 55, outputTokens: 17, reasoningTokens: 9 },
       exit: 'completed',
     });
+    expect(resumed.resumeSessionId).toBe('codex-thread-123');
     expect(resumed.sessionId).toBe('codex-thread-123');
     expect(runner.calls.map((call) => call.stdin)).toEqual([invocation.prompt, invocation.prompt]);
     expect(runner.calls[0]?.spec).toMatchObject({
@@ -146,6 +148,20 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       runner.calls[1]?.spec.argv.findIndex((value) => value.startsWith('mcp_servers.engine.args=')) ?? -1,
     );
     expect(UNVERIFIED_CONTRACT_CODEX).toContain('UNVERIFIED_CONTRACT');
+  });
+
+  it('SIMULATED Codex extracts the UUID from captured stdout session id output', async () => {
+    const adapter = new CodexAgentSessionAdapter(options(new SIMULATEDChildProcessRunner([
+      output(fixture('codex-session-id-stdout')),
+    ])));
+
+    expect(await adapter.start(invocation, new AbortController().signal)).toEqual({
+      resumeSessionId: '019d1234-5678-7abc-8def-0123456789ab',
+      sessionId: '019d1234-5678-7abc-8def-0123456789ab',
+      finalText: 'CAPTURED_CODEX_STDOUT',
+      usage: { inputTokens: 89, cachedInputTokens: 34, outputTokens: 13, reasoningTokens: 5 },
+      exit: 'completed',
+    });
   });
 
   it('SIMULATED Codex disables project docs, the plugin surface, and skill instructions only for arena sessions', () => {
@@ -201,7 +217,8 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     const started = await adapter.start(invocation, new AbortController().signal);
     await adapter.resume(binding('claude-code', 'claude-session-123'), invocation, new AbortController().signal);
 
-    expect(started.sessionId).toBe('claude-session-123');
+    expect(started.resumeSessionId).toBe('claude-session-123');
+    expect(started.sessionId).toBeNull();
     expect(started.finalText).toBe('{"intents":[]}');
     expect(transcript).toContain('"Bash"');
     expect(transcript).toContain('"mcp_servers":[{"name":"engine","status":"connected"}]');
@@ -308,7 +325,8 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     const adapter = new OpenCodeAgentSessionAdapter(options(runner));
 
     expect(await adapter.start(invocation, new AbortController().signal)).toEqual({
-      sessionId: 'ses_fba44c8fcffewZFncFkCWbLLuB',
+      resumeSessionId: 'ses_fba44c8fcffewZFncFkCWbLLuB',
+      sessionId: null,
       finalText: 'OC_EVIDENCE',
       usage: { inputTokens: 2051, cachedInputTokens: 0, outputTokens: 68, reasoningTokens: 0 },
       exit: 'completed',
@@ -372,15 +390,16 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       exit: 'completed',
       contractEvidence: [PI_SESSION_ID_FROM_FILE, 'MCP_EXTENSION_CONFIGURED'],
     });
-    expect(started.sessionId).toMatch(/^\/tmp\/dnd-wt-vtt-pi-session-[0-9a-f-]{36}\.jsonl$/u);
+    expect(started.sessionId).toBeNull();
+    expect(started.resumeSessionId).toMatch(/^\/tmp\/dnd-wt-vtt-pi-session-[0-9a-f-]{36}\.jsonl$/u);
     const resumeAdapter = new PiAgentSessionAdapter({ ...options(runner), piMcpExtensionPath: '/workspace/pi-engine-extension.mjs' });
-    await resumeAdapter.resume(binding('pi', started.sessionId), invocation, new AbortController().signal);
+    await resumeAdapter.resume(binding('pi', started.resumeSessionId), invocation, new AbortController().signal);
 
     expect(runner.calls[1]?.spec.argv).toEqual([
       '--print', '--mode', 'json', '--model', invocation.model,
       '--extension', '/workspace/pi-engine-extension.mjs',
       '--mcp-config', resolve(runner.calls[1]?.spec.cwd ?? '', PI_MCP_CONFIG_FILENAME),
-      '--session', started.sessionId,
+      '--session', started.resumeSessionId,
     ]);
     expect(runner.calls[0]?.spec.cwd).toMatch(/^\/tmp\/dnd-wt-vtt-pi-mcp-[a-f0-9]{24}$/u);
     expect(runner.calls[0]?.spec.cwd.startsWith(`${tmpdir()}/`)).toBe(true);
@@ -425,7 +444,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     const result = await adapter.start(ollamaInvocation, new AbortController().signal);
 
     expect(runner.calls[0]?.spec.argv).toEqual([
-      '--print', '--mode', 'json', '--model', 'ollama/gemma4:e4b', '--session', result.sessionId,
+      '--print', '--mode', 'json', '--model', 'ollama/gemma4:e4b', '--session', result.resumeSessionId,
     ]);
     expect(runner.calls[0]?.spec.argv).not.toContain('--extension');
     expect(runner.calls[0]?.spec.env).toBeUndefined();
@@ -477,7 +496,8 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       invocation,
       new AbortController().signal,
     )).toEqual({
-      sessionId: 'claude-session-cancelled', finalText: '', usage: null, exit: 'cancelled',
+      resumeSessionId: 'claude-session-cancelled', sessionId: null,
+      finalText: '', usage: null, exit: 'cancelled',
     });
   });
 });

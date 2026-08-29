@@ -96,7 +96,8 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
     completedOutput(output, resuming);
     if (output.cancelled) {
       return {
-        sessionId: agentSessionIdFromCli(sessionId),
+        resumeSessionId: agentSessionIdFromCli(sessionId),
+        sessionId: null,
         finalText: '',
         usage: null,
         exit: 'cancelled',
@@ -105,7 +106,8 @@ export class PiAgentSessionAdapter extends ProcessAgentSessionAdapter {
     }
     const decoded = decodePiTurn(output.stdout, sessionId, (event) => this.observe(event));
     return {
-      sessionId: agentSessionIdFromCli(decoded.sessionId),
+      resumeSessionId: agentSessionIdFromCli(decoded.sessionId),
+      sessionId: null,
       finalText: decoded.finalText,
       usage: decoded.usage,
       exit: 'completed',

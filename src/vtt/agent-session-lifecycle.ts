@@ -22,7 +22,7 @@ export class AgentSessionLifecycle {
     const result = await this.#coldStart(invocation, signal);
     return this.journal.startAgentSession({
       cli: this.adapter.kind,
-      sessionId: result.sessionId,
+      sessionId: result.resumeSessionId,
       adapterVersion: this.adapterVersion,
     });
   }
@@ -31,7 +31,7 @@ export class AgentSessionLifecycle {
     const result = await this.#coldStart(invocation, signal);
     this.journal.startAgentSession({
       cli: this.adapter.kind,
-      sessionId: result.sessionId,
+      sessionId: result.resumeSessionId,
       adapterVersion: this.adapterVersion,
     });
     this.journal.recordAgentSessionDispatch();
@@ -93,11 +93,11 @@ export class AgentSessionLifecycle {
         await this.adapter.start(recoveryInvocation, signal),
         'Agent recovery cold start',
       );
-      if (bootstrap.sessionId === dispatched.sessionId) {
+      if (bootstrap.resumeSessionId === dispatched.sessionId) {
         throw new Error('Agent recovery cold start did not create a successor session.');
       }
       const successor = this.journal.recoverAgentSession({
-        sessionId: bootstrap.sessionId,
+        sessionId: bootstrap.resumeSessionId,
         predecessorSessionHash,
         failure: classification,
       });
@@ -122,7 +122,7 @@ function requireResumedSameSession(
   operation: string,
 ): AgentTurnResult {
   requireCompleted(result, operation);
-  if (result.sessionId !== binding.sessionId) {
+  if (result.resumeSessionId !== binding.sessionId) {
     throw new Error(`${operation} returned a different session ID.`);
   }
   return result;

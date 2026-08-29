@@ -49,7 +49,10 @@ export interface AgentUsage {
 }
 
 export interface AgentTurnResult {
-  readonly sessionId: AgentSessionId;
+  /** Opaque adapter session used by the generic resume lifecycle. */
+  readonly resumeSessionId: AgentSessionId;
+  /** Codex rollout session ID; null for adapters without Codex rollout logs. */
+  readonly sessionId: string | null;
   readonly finalText: string;
   readonly usage: AgentUsage | null;
   readonly exit: 'completed' | 'cancelled';

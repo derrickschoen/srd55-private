@@ -26,6 +26,8 @@ interface ExtractableArenaRow {
   readonly outcome: string;
   readonly proposalId: string | null;
   readonly serviceNull: boolean;
+  readonly sessionId: string | null;
+  readonly escalationSessionId: string | null;
   readonly rlData?: ArenaRlCapture;
 }
 
@@ -46,6 +48,9 @@ export interface SftExample {
   };
   readonly stateDigest: string;
   readonly planHash: string;
+  /** Corpus metadata only; never included in the training messages. */
+  readonly sessionId: string | null;
+  readonly escalationSessionId: string | null;
 }
 
 export interface ExtractSftConfig {
@@ -234,12 +239,18 @@ function assertLicensedPath(path: string): void {
   }
 }
 
+function isNullableSessionId(value: unknown): value is string | null {
+  return value === null || typeof value === 'string' && value.length > 0 && value.trim() === value;
+}
+
 function requiredArenaRow(value: unknown, path: string, line: number): ExtractableArenaRow {
   const candidate = record(value);
   if (candidate === null || typeof candidate['seed'] !== 'number' ||
     typeof candidate['basis'] !== 'string' || typeof candidate['room'] !== 'number' ||
     typeof candidate['round'] !== 'number' || typeof candidate['outcome'] !== 'string' ||
     (candidate['proposalId'] !== null && typeof candidate['proposalId'] !== 'string') ||
+    !isNullableSessionId(candidate['sessionId']) ||
+    !isNullableSessionId(candidate['escalationSessionId']) ||
     typeof candidate['serviceNull'] !== 'boolean') {
     throw new TypeError(`Arena row ${path}:${String(line)} has an invalid extraction shape.`);
   }
@@ -295,6 +306,8 @@ function exampleFrom(
     },
     stateDigest: capture.stateDigest,
     planHash,
+    sessionId: row.sessionId,
+    escalationSessionId: row.escalationSessionId,
   };
   if (FORBIDDEN_PAYLOAD.test(canonicalJson(example))) {
     throw new TypeError(`Arena row ${path}:${String(line)} contains prohibited CC-BY-SA provenance.`);

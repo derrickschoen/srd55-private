@@ -272,7 +272,7 @@ export class LocalOpenAiAgentSessionAdapter {
       finalText = completion.message.content ?? finalText;
       const toolCalls = completion.message.tool_calls ?? [];
       if (toolCalls.length === 0) {
-        return { sessionId, finalText, usage, exit: 'completed' };
+        return { resumeSessionId: sessionId, sessionId: null, finalText, usage, exit: 'completed' };
       }
       for (const call of toolCalls) {
         const engineName = engineNamesByFunction.get(call.function.name);
@@ -290,12 +290,13 @@ export class LocalOpenAiAgentSessionAdapter {
         }
         messages.push({ role: 'tool', tool_call_id: call.id, content: toolResultText(result) });
         if (engineName === 'engine.submit_round_intents' && record(result)?.['status'] === 'proposed') {
-          return { sessionId, finalText, usage, exit: 'completed' };
+          return { resumeSessionId: sessionId, sessionId: null, finalText, usage, exit: 'completed' };
         }
       }
     }
     return {
-      sessionId,
+      resumeSessionId: sessionId,
+      sessionId: null,
       finalText: finalText.length > 0 ? finalText : 'LOCAL_OPENAI_TOOL_ROUND_LIMIT',
       usage,
       exit: 'completed',

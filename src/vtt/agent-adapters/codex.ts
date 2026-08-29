@@ -64,11 +64,18 @@ export class CodexAgentSessionAdapter extends ProcessAgentSessionAdapter {
     );
     completedOutput(output, sessionId !== null);
     if (output.cancelled && sessionId !== null) {
-      return { sessionId: agentSessionIdFromCli(sessionId), finalText: '', usage: null, exit: 'cancelled' };
+      return {
+        resumeSessionId: agentSessionIdFromCli(sessionId),
+        sessionId,
+        finalText: '',
+        usage: null,
+        exit: 'cancelled',
+      };
     }
     const decoded = decodeCodexTurn(output.stdout, sessionId, (event) => this.observe(event));
     return {
-      sessionId: agentSessionIdFromCli(decoded.sessionId),
+      resumeSessionId: agentSessionIdFromCli(decoded.sessionId),
+      sessionId: decoded.sessionId,
       finalText: decoded.finalText,
       usage: decoded.usage,
       exit: output.cancelled ? 'cancelled' : 'completed',
@@ -120,7 +127,15 @@ export function decodeCodexTurn(
   let sessionId = priorSessionId;
   let finalText = '';
   let usage: AgentUsage | null = null;
-  for (const event of jsonEventLines(stdout)) {
+  for (const line of stdout.split('\n')) {
+    if (line.trim().length === 0) continue;
+    const announced = /^session id:\s*(\S+)$/iu.exec(line.trim());
+    if (announced !== null) {
+      sessionId = announced[1] ?? null;
+      continue;
+    }
+    const [event] = jsonEventLines(line);
+    if (event === undefined) continue;
     onEvent(event);
     if (event['type'] === 'thread.started' && typeof event['thread_id'] === 'string') {
       sessionId = event['thread_id'];
@@ -137,7 +152,7 @@ export function decodeCodexTurn(
     }
   }
   if (sessionId === null || sessionId.trim().length === 0) {
-    throw new AgentAdapterError('malformed_output', 'Codex event stream did not contain thread.started.thread_id.');
+    throw new AgentAdapterError('malformed_output', 'Codex output did not contain a session ID.');
   }
   if (priorSessionId !== null && sessionId !== priorSessionId) {
     throw new AgentAdapterError('resume_not_found', 'Codex resume returned a different thread ID.');

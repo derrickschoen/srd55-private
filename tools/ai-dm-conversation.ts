@@ -155,6 +155,9 @@ export interface ConversationRow {
   readonly thinkMode: LocalThinkMode | null;
   readonly contextRevision: number;
   readonly projectionRevision: number;
+  /** Codex rollout ID; locate its full log with a rollout-*-<id>.jsonl glob. */
+  readonly sessionId: string | null;
+  readonly escalationSessionId: string | null;
   readonly sessionIdHash: string | null;
   readonly kbHash: string | null;
   readonly snippetHash: string;
@@ -872,7 +875,8 @@ class ModelCallBookkeepingAdapter implements AgentSessionAdapter {
 
 function completedSimulated(value: string): AgentTurnResult {
   return {
-    sessionId: agentSessionId(value),
+    resumeSessionId: agentSessionId(value),
+    sessionId: null,
     finalText: 'SIMULATED — proposal delivered through engine MCP spool',
     usage: null,
     exit: 'completed',
@@ -1331,6 +1335,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let plannedBy: ConversationRow['plannedBy'] = null;
       let escalated = false;
       let firedEscalationModel: string | null = null;
+      let rolloutSessionId: string | null = null;
+      let escalationSessionId: string | null = null;
       let capturedRlData: ConversationRlData | undefined;
       try {
         if (options.failBeforeDispatch?.includes(key) === true) {
@@ -1365,6 +1371,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
             const turn = journal.agentSession() === null
               ? await lifecycle.coldStartRound(primaryInvocation, new AbortController().signal)
               : await lifecycle.resumeRound(primaryInvocation, new AbortController().signal);
+            rolloutSessionId = turn.sessionId;
             roundUsage = addAgentUsage(roundUsage, turn.usage);
             proposed = localInitialProposal ?? takeRoundProposal(initialLauncher.spoolPath);
             const flapped = turn.exit === 'completed' && proposed === null &&
@@ -1588,9 +1595,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
                   throw new Error('Agent correction dispatch was cancelled.');
                 }
                 if (escalationPlanner !== null &&
-                  correctionTurn.sessionId === journal.agentSession()?.sessionId) {
+                  correctionTurn.resumeSessionId === journal.agentSession()?.sessionId) {
                   throw new Error('Tiered correction did not create an isolated escalation session.');
                 }
+                if (escalationPlanner === null) rolloutSessionId = correctionTurn.sessionId;
+                else escalationSessionId = correctionTurn.sessionId;
                 roundUsage = addAgentUsage(roundUsage, correctionTurn.usage);
                 const contextCallsAfterCorrection = simulated?.contextCallsByRequest.get(requestId) ??
                   observedTurnContextCalls;
@@ -1666,6 +1675,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
         room, round, cli: config.cli, model: config.model,
         thinkMode: config.localOpenAi?.thinkMode ?? null,
         contextRevision, projectionRevision: capsuleRevision,
+        sessionId: rolloutSessionId,
+        escalationSessionId,
         sessionIdHash: binding === null ? null : sha256(binding.sessionId), outcome, proposalId,
         kbHash: knowledgeBase?.hash ?? null,
         snippetHash: SNIPPET_REGISTRY.snippetHash,

@@ -191,7 +191,7 @@ async function verifyCli(
     const started = await adapter.start(invocation(kind, 'Cold start the engine MCP server and reply ENGINE_BOOT_OK.'), signal);
     turnMarkers.push(...(started.contractEvidence ?? []));
     lifecycle.coldStart = started.exit === 'completed';
-    lifecycle.sessionIdCaptured = String(started.sessionId).length > 0;
+    lifecycle.sessionIdCaptured = String(started.resumeSessionId).length > 0;
     if (turnMarkers.includes(PI_MCP_SKIPPED_NO_EXTENSION)) {
       return {
         cli: kind,
@@ -204,20 +204,20 @@ async function verifyCli(
         ...failureDiagnostic(undefined, 'Pi MCP wiring was skipped because no extension path was configured.'),
       };
     }
-    const resumed = await adapter.resume(binding(kind, started.sessionId), invocation(kind, 'Resume the session and reply ENGINE_RESUME_OK.'), signal);
+    const resumed = await adapter.resume(binding(kind, started.resumeSessionId), invocation(kind, 'Resume the session and reply ENGINE_RESUME_OK.'), signal);
     turnMarkers.push(...(resumed.contractEvidence ?? []));
-    lifecycle.resume = resumed.exit === 'completed' && resumed.sessionId === started.sessionId;
+    lifecycle.resume = resumed.exit === 'completed' && resumed.resumeSessionId === started.resumeSessionId;
     const proof = await expectedMcpProof();
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       lifecycle.attempts_used = attempt;
       try {
         const mcpProof = await adapter.resume(
-          binding(kind, started.sessionId),
+          binding(kind, started.resumeSessionId),
           invocation(kind, mcpProofPrompt(kind, proof.stateRef)),
           signal,
         );
         turnMarkers.push(...(mcpProof.contractEvidence ?? []));
-        lifecycle.mcpProof = mcpProof.exit === 'completed' && mcpProof.sessionId === started.sessionId &&
+        lifecycle.mcpProof = mcpProof.exit === 'completed' && mcpProof.resumeSessionId === started.resumeSessionId &&
           mcpProof.finalText.includes(proof.proofToken);
         if (lifecycle.mcpProof) break;
       } catch (error) {
