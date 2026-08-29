@@ -182,7 +182,7 @@ describe('AI-DM arena', () => {
         agentDispatched: true,
         flapRetries: 2,
         serviceNull: true,
-        chainEvidence: { failedAttempts: [], autoResolvedTrigger: null },
+        chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
         tokens: { input: 611, cachedInput: 115, output: 77, reasoning: 31 },
       }),
     ]);
@@ -205,7 +205,7 @@ describe('AI-DM arena', () => {
 
     expect(row).toEqual(expect.objectContaining({
       outcome: 'refused', agentDispatched: false, toolCalls: 0,
-      chainEvidence: { failedAttempts: [], autoResolvedTrigger: null },
+      chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
       refusals: ['SIMULATED host failure before agent dispatch.'],
     }));
   });
@@ -237,10 +237,12 @@ describe('AI-DM arena', () => {
           }),
         ]),
         autoResolvedTrigger: expect.stringContaining('deterministic controller'),
+        correctionFinalText: 'SIMULATED — proposal delivered through engine MCP spool',
       },
     }));
     expect(row?.chainEvidence.failedAttempts.flatMap((entry) => entry.rejectionReasons)
       .some((reason) => reason.startsWith('No engine rejection'))).toBe(false);
+    expect(row?.chainEvidence.failedAttempts.every((entry) => entry.declaredIntent !== null)).toBe(true);
   });
 
   it('rejects occupied movement and more than one slot-spending action on a path', () => {

@@ -85,7 +85,7 @@ describe('D373 detection UI projections', () => {
       history: [],
       boundaryRefusal: {
         code: 'turn_boundary_blocked',
-        message: 'The turn cannot advance while a Reaction offer for this boundary is unresolved.',
+        message: 'The turn cannot advance while a pending decision for this boundary is unresolved.',
       },
     });
 

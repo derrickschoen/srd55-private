@@ -8,9 +8,7 @@ import { createInterface, type Interface } from 'node:readline';
 import { canonicalJson } from '../src/commands/canonical-json';
 import type { PersistedCoordinatorState } from '../src/combat/coordinator';
 import type { EncounterState } from '../src/combat/encounter';
-import type { EncounterCommand } from '../src/combat/events';
-import { monsterAttackCommand } from '../src/combat/monster-commands';
-import { mulberry32, restoreMulberry32, type SerializableRng } from '../src/combat/random';
+import { mulberry32 } from '../src/combat/random';
 import type { MonsterAttackAction } from '../src/combat/statblock';
 import {
   agentSessionId, combatantId, encounterBranchId, encounterSessionId,
@@ -23,8 +21,14 @@ import {
 } from '../src/vtt/agent-session';
 import { AgentSessionLifecycle } from '../src/vtt/agent-session-lifecycle';
 import { AGENT_ADAPTER_VERSION, resolveAgentAdapter } from '../src/vtt/agent-adapters';
-import type { RoundIntentProposalEnvelope } from '../src/vtt/engine-envelopes';
-import { engineStateHandle, type EngineStateCapsule } from '../src/vtt/engine-state-capsule';
+import type { ProposedIntentResolution, RoundIntentProposalEnvelope } from '../src/vtt/engine-envelopes';
+import { engineStateHandle } from '../src/vtt/engine-state-capsule';
+import {
+  EngineRoundSession,
+  type EngineBoundaryResolutions,
+  type EngineRoundCapsuleRequest,
+  type EngineRoundSnapshot,
+} from '../src/vtt/engine-round-session';
 import { canonicalEngineQueryPort } from '../src/vtt/engine-query-port';
 import {
   pureIntentResolver, type EngineActionChoice, type EngineIntentBranch,
@@ -32,27 +36,19 @@ import {
 } from '../src/vtt/intent-resolver';
 import { mcpRequestMeta } from '../src/vtt/mcp/handler';
 import {
-  createEngineMcpRuntime, loadArenaFixture, type EngineMcpLauncherManifest,
+  loadArenaFixture, type EngineMcpLauncherManifest,
 } from '../src/vtt/mcp/entrypoint';
 import { renderEnginePrompt } from '../src/vtt/mcp/engine-server';
 import {
   EncounterSessionJournal, importSavedSession, MemoryBrowserSessionStore,
   MemoryMirrorSink, type BrowserSessionStore,
 } from '../src/vtt/session-persistence';
-import { reduceSessionEncounter } from '../src/vtt/session-encounter-reducer';
 import {
   TurnExhaustionCoordinator, type DeterministicIntentResolution,
   type InitialIntentAttempt, type TurnExhaustionHost,
 } from '../src/vtt/turn-exhaustion-coordinator';
+import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
 import {
-  type AutoResolvedReactionOffer,
-  unattendedReactionOfferResolution,
-  type ReactionOfferHostPolicy,
-  type UnattendedReactionAskDefault,
-} from '../src/vtt/reaction-offer-host-policy';
-import {
-  guidedPendingReactionResolution,
-  type GuidedReactionResolution,
   type ReactionGuidanceDeclaration,
 } from '../src/vtt/reaction-guidance';
 
@@ -96,12 +92,14 @@ export interface ConversationTokenCounts {
 export interface ConversationChainAttemptEvidence {
   readonly attempt: 'primary' | 'fallback' | 'correction';
   readonly actorId: CombatantId | null;
+  readonly declaredIntent: Readonly<Record<string, unknown>> | null;
   readonly rejectionReasons: readonly string[];
 }
 
 export interface ConversationChainEvidence {
   readonly failedAttempts: readonly ConversationChainAttemptEvidence[];
   readonly autoResolvedTrigger: string | null;
+  readonly correctionFinalText: string | null;
 }
 
 export interface ConversationRow {
@@ -122,6 +120,10 @@ export interface ConversationRow {
   readonly agentDispatched: boolean;
   readonly flapRetries: 0 | 1 | 2;
   readonly serviceNull: boolean;
+  readonly stateBinding: {
+    readonly capsule: { readonly revision: number; readonly digest: string };
+    readonly authorization: { readonly revision: number; readonly digest: string } | null;
+  };
   readonly chainEvidence: ConversationChainEvidence;
 }
 
@@ -267,9 +269,15 @@ function rejectionEvidence(value: unknown): readonly ConversationChainAttemptEvi
       const attempt = asRecord(attemptValue);
       const reasons = attempt?.['rejection_reasons'];
       const attemptKind = attempt?.['attempt'];
+      const declaredIntent = asRecord(attempt?.['declared_intent']);
       if ((attemptKind !== 'primary' && attemptKind !== 'fallback') ||
         !Array.isArray(reasons) || !reasons.every((reason) => typeof reason === 'string')) return [];
-      return [{ attempt: attemptKind, actorId, rejectionReasons: reasons as readonly string[] }];
+      return [{
+        attempt: attemptKind,
+        actorId,
+        declaredIntent: declaredIntent === null ? null : structuredClone(declaredIntent),
+        rejectionReasons: reasons as readonly string[],
+      }];
     });
   });
   if (attempts.length > 0) return attempts;
@@ -279,7 +287,9 @@ function rejectionEvidence(value: unknown): readonly ConversationChainAttemptEvi
     ['reason', 'summary', 'message', 'text'].flatMap((key) =>
       typeof candidate[key] === 'string' ? [candidate[key] as string] : []),
   ))].filter((reason) => reason.length > 0 && reason.length <= 2_000);
-  return reasons.length === 0 ? [] : [{ attempt: 'primary', actorId: null, rejectionReasons: reasons }];
+  return reasons.length === 0 ? [] : [{
+    attempt: 'primary', actorId: null, declaredIntent: null, rejectionReasons: reasons,
+  }];
 }
 
 function tokenCounts(usage: AgentUsage | null): ConversationTokenCounts {
@@ -289,6 +299,10 @@ function tokenCounts(usage: AgentUsage | null): ConversationTokenCounts {
     output: usage.outputTokens,
     reasoning: usage.reasoningTokens,
   };
+}
+
+function truncateAgentFinalText(value: string): string {
+  return Array.from(value).slice(0, 300).join('');
 }
 
 function addAgentUsage(total: AgentUsage | null, usage: AgentUsage | null): AgentUsage | null {
@@ -321,10 +335,14 @@ function externalTarget(target: Extract<EngineActionChoice, { readonly kind: 'at
 
 function externalChoice(choice: EngineActionChoice): Readonly<Record<string, unknown>> {
   switch (choice.kind) {
-    case 'attack': return { kind: choice.kind, action_id: choice.actionId, target: externalTarget(choice.target) };
+    case 'attack': return {
+      kind: choice.kind, action_id: choice.actionId, target: externalTarget(choice.target),
+      ...(choice.resourcePolicy === undefined ? {} : { resource_policy: choice.resourcePolicy }),
+    };
     case 'cast_spell': return {
       kind: choice.kind, spell_id: choice.spellId,
       target: choice.target === null ? null : externalTarget(choice.target),
+      ...(choice.slotPolicy === undefined ? {} : { slot_policy: choice.slotPolicy }),
     };
     case 'use_action': return {
       kind: choice.kind, action_id: choice.actionId,
@@ -345,7 +363,12 @@ function externalBranch(branch: EngineIntentBranch): Readonly<Record<string, unk
       ...(branch.movement.maximumFeet === undefined ? {} : { maximum_feet: branch.movement.maximumFeet }),
       opportunity_risk: branch.movement.opportunityRisk,
     },
-    engagement: { stance: branch.engagement.stance },
+    engagement: {
+      stance: branch.engagement.stance,
+      ...(branch.engagement.anchor === undefined ? {} : {
+        anchor: branch.engagement.anchor === null ? null : externalTarget(branch.engagement.anchor),
+      }),
+    },
   };
 }
 
@@ -594,43 +617,25 @@ function takeRoundProposal(path: string): RoundIntentProposalEnvelope | null {
   return proposal === null ? null : structuredClone(proposal);
 }
 
-function capsuleFor(input: {
-  readonly state: EncounterState;
-  readonly runId: EncounterSessionId;
-  readonly branchId: EncounterBranchId;
-  readonly revision: number;
-  readonly requestId: string;
-  readonly phase: 'initial' | 'correction';
-  readonly room: number;
-  readonly historyKind: string;
-}): EngineStateCapsule {
-  return createEngineMcpRuntime(input.state, {
-    runId: input.runId, branchId: input.branchId, revision: input.revision,
-    requestId: input.requestId, phase: input.phase,
-    correctionNumber: input.phase === 'correction' ? 1 : 0,
-    room: input.room, historyKind: input.historyKind,
-  }).feed.current();
-}
-
 async function writeLauncher(input: {
   readonly directory: string;
   readonly name: string;
-  readonly state: EncounterState;
-  readonly capsule: EngineStateCapsule;
+  readonly snapshot: EngineRoundSnapshot;
   readonly room: number;
   readonly historyKind: string;
 }): Promise<{ readonly manifestPath: string; readonly spoolPath: string }> {
   const fixturePath = join(input.directory, `${input.name}-fixture.json`);
   const spoolPath = join(input.directory, `${input.name}-proposals.jsonl`);
   const manifestPath = join(input.directory, `${input.name}-launcher.json`);
-  await writeFile(fixturePath, canonicalJson({ encounter: { state: input.state } }), 'utf8');
+  await writeFile(fixturePath, input.snapshot.fixtureJson, 'utf8');
   await writeFile(spoolPath, '', 'utf8');
-  const request = input.capsule.request;
+  const capsule = input.snapshot.capsule;
+  const request = capsule.request;
   if (request === null) throw new Error('Conversation capsule must have a pending request.');
   const manifest: EngineMcpLauncherManifest = {
     format: 'engine-mcp-launcher-v1', fixturePath, proposalSpoolPath: spoolPath,
-    runId: input.capsule.runId, branchId: input.capsule.branchId,
-    revision: input.capsule.revision, requestId: request.requestId,
+    runId: capsule.runId, branchId: capsule.branchId,
+    revision: capsule.revision, requestId: request.requestId,
     phase: request.phase, correctionNumber: request.correctionNumber,
     room: input.room, historyKind: input.historyKind,
   };
@@ -638,69 +643,21 @@ async function writeLauncher(input: {
   return { manifestPath, spoolPath };
 }
 
-function selectedChoice(entry: RoundIntentProposalEnvelope['resolutions'][number]): EngineActionChoice {
-  if (entry.selectedBranch === 'primary') return entry.intent.choice;
+function selectedIntentBranch(
+  entry: RoundIntentProposalEnvelope['resolutions'][number],
+): EngineIntentBranch {
+  if (entry.selectedBranch === 'primary') return entry.intent;
   if (entry.intent.fallback === null) throw new Error('Fallback resolution omitted its branch.');
-  return entry.intent.fallback.choice;
+  return entry.intent.fallback;
 }
 
-function reduceOne(state: EncounterState, command: EncounterCommand, rng: SerializableRng): EncounterState {
-  return reduceSessionEncounter(state, command, rng).state;
-}
-
-function resolveUnattendedReactionOffers(
-  initialState: EncounterState,
-  rng: SerializableRng,
-  policy: ReactionOfferHostPolicy,
-  guidance: ReactionGuidanceDeclaration | null,
-): {
-  readonly state: EncounterState;
-  readonly fallbackResolutions: readonly AutoResolvedReactionOffer[];
-  readonly guidedResolutions: readonly GuidedReactionResolution[];
-} {
-  let state = initialState;
-  const fallbackResolutions: AutoResolvedReactionOffer[] = [];
-  const guidedResolutions: GuidedReactionResolution[] = [];
-  for (;;) {
-    let selected:
-      | { readonly kind: 'guidance'; readonly resolution: GuidedReactionResolution }
-      | { readonly kind: 'fallback'; readonly resolution: AutoResolvedReactionOffer }
-      | undefined;
-    for (const decision of state.pendingDecisions) {
-      if (decision.kind !== 'reaction_offer') continue;
-      const guided = guidedPendingReactionResolution(state, decision, 'algorithm', policy, guidance);
-      if (guided !== null) {
-        selected = { kind: 'guidance', resolution: guided };
-        break;
-      }
-      const resolution = unattendedReactionOfferResolution(
-        state,
-        decision,
-        'algorithm',
-        policy,
-      );
-      if (resolution !== null) {
-        selected = { kind: 'fallback', resolution };
-        break;
-      }
-    }
-    if (selected === undefined) return { state, fallbackResolutions, guidedResolutions };
-    state = reduceOne(state, {
-      type: 'resolve_pending_decision',
-      decisionId: selected.resolution.decisionId,
-      optionId: selected.resolution.resolution,
-    }, rng);
-    if (selected.kind === 'guidance') guidedResolutions.push(selected.resolution);
-    else fallbackResolutions.push(selected.resolution);
-  }
+function selectedChoice(entry: RoundIntentProposalEnvelope['resolutions'][number]): EngineActionChoice {
+  return selectedIntentBranch(entry).choice;
 }
 
 function recordAutoResolvedReactions(
   journal: EncounterSessionJournal,
-  resolutions: {
-    readonly fallbackResolutions: readonly AutoResolvedReactionOffer[];
-    readonly guidedResolutions: readonly GuidedReactionResolution[];
-  },
+  resolutions: EngineBoundaryResolutions,
 ): void {
   for (const resolution of resolutions.fallbackResolutions) {
     journal.recordHostTransition({
@@ -713,98 +670,67 @@ function recordAutoResolvedReactions(
   }
 }
 
-function advanceToActor(state: EncounterState, actorId: CombatantId, rng: SerializableRng): EncounterState {
-  let current = state;
-  if (current.initiative.length === 0) current = reduceOne(current, { type: 'roll_initiative' }, rng);
-  for (let index = 0; current.activeCombatant !== actorId && index < current.combatants.length * 3; index += 1) {
-    const active = current.activeCombatant;
-    if (active === null) throw new Error('Initiative has no active combatant.');
-    current = reduceOne(current, { type: 'end_turn', actor: active }, rng);
-  }
-  if (current.activeCombatant !== actorId) throw new Error(`Could not advance initiative to ${actorId}.`);
-  return current;
-}
-
-function applyResolvedMechanics(
+export function proposalResolutionDivergence(
   state: EncounterState,
-  mechanics: ResolvedIntentMechanics,
-  choice: EngineActionChoice,
-  rng: SerializableRng,
-  reactionPolicy: ReactionOfferHostPolicy,
-  reactionGuidance: ReactionGuidanceDeclaration | null,
-): {
-  readonly state: EncounterState;
-  readonly autoResolvedReactions: {
-    readonly fallbackResolutions: readonly AutoResolvedReactionOffer[];
-    readonly guidedResolutions: readonly GuidedReactionResolution[];
-  };
-} {
-  const fallbackResolutions: AutoResolvedReactionOffer[] = [];
-  const guidedResolutions: GuidedReactionResolution[] = [];
-  const reduce = (current: EncounterState, command: EncounterCommand): EncounterState => {
-    const reduced = reduceOne(current, command, rng);
-    const resolved = resolveUnattendedReactionOffers(reduced, rng, reactionPolicy, reactionGuidance);
-    fallbackResolutions.push(...resolved.fallbackResolutions);
-    guidedResolutions.push(...resolved.guidedResolutions);
-    return resolved.state;
-  };
-  let current = advanceToActor(state, mechanics.actorId, rng);
-  if (mechanics.path.length > 0) {
-    current = reduce(current, {
-      type: 'move', actor: mechanics.actorId, path: mechanics.path, cause: 'voluntary',
-    });
+  entry: ProposedIntentResolution,
+): readonly string[] {
+  const checked = pureIntentResolver.resolve(state, entry.intent);
+  if (!checked.valid) {
+    return [`${entry.intent.actorId}: proposal-time resolution was valid, but authoritative resolution refused it: ${checked.refusals.map((refusal) => refusal.summary).join('; ')}`];
   }
-  if (current.combatants.find((entry) => entry.profile.id === mechanics.actorId)?.life !== 'living') {
-    return { state: current, autoResolvedReactions: { fallbackResolutions, guidedResolutions } };
+  if (checked.selectedBranch !== entry.selectedBranch) {
+    return [`${entry.intent.actorId}: selected branch diverged from ${entry.selectedBranch} to ${checked.selectedBranch}.`];
   }
-  switch (choice.kind) {
-    case 'attack': {
-      if (mechanics.targetId === null) throw new Error('Resolved attack omitted its target.');
-      const action = canonicalEngineQueryPort.actions(current, mechanics.actorId)
-        .find((candidate): candidate is MonsterAttackAction =>
-          candidate.kind === 'attack' && candidate.id === mechanics.actionId);
-      if (action === undefined) throw new Error(`Resolved attack ${mechanics.actionId} is absent.`);
-      current = reduce(current, monsterAttackCommand(action, mechanics.actorId, mechanics.targetId));
-      break;
-    }
-    case 'dodge':
-    case 'disengage':
-    case 'dash': current = reduce(current, { type: choice.kind, actor: mechanics.actorId }); break;
-    case 'end_turn': return {
-      state: reduce(current, { type: 'end_turn', actor: mechanics.actorId }),
-      autoResolvedReactions: { fallbackResolutions, guidedResolutions },
-    };
-    case 'cast_spell':
-    case 'use_action': throw new Error(`Arena host cannot authorize unresolved ${choice.kind} mechanics.`);
-  }
-  return {
-    state: reduce(current, { type: 'end_turn', actor: mechanics.actorId }),
-    autoResolvedReactions: { fallbackResolutions, guidedResolutions },
-  };
+  if (checked.resolutionDigest === entry.resolutionDigest) return [];
+  return checked.summary === entry.summary
+    ? [`${entry.intent.actorId}: path or final-position geometry diverged while action, target, and movement cost remained ${checked.summary}.`]
+    : [`${entry.intent.actorId}: resolved action, target, or movement cost diverged; proposal was "${entry.summary}" and authoritative resolution was "${checked.summary}".`];
 }
 
-function authorizedMechanics(state: EncounterState, proposal: RoundIntentProposalEnvelope): readonly {
-  readonly mechanics: ResolvedIntentMechanics;
-  readonly choice: EngineActionChoice;
-  readonly primaryRejectionReasons: readonly string[];
-}[] | null {
+function authorizedMechanics(state: EncounterState, proposal: RoundIntentProposalEnvelope): {
+  readonly entries: readonly {
+    readonly mechanics: ResolvedIntentMechanics;
+    readonly choice: EngineActionChoice;
+    readonly primaryDeclaredIntent: Readonly<Record<string, unknown>>;
+    readonly selectedDeclaredIntent: Readonly<Record<string, unknown>>;
+    readonly primaryRejectionReasons: readonly string[];
+  }[] | null;
+  readonly divergences: readonly ConversationChainAttemptEvidence[];
+} {
+  const divergences = proposal.resolutions.flatMap<ConversationChainAttemptEvidence>((entry) => {
+    const reasons = proposalResolutionDivergence(state, entry);
+    return reasons.length === 0 ? [] : [{
+      attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
+      actorId: entry.intent.actorId,
+      declaredIntent: externalBranch(selectedIntentBranch(entry)),
+      rejectionReasons: reasons,
+    }];
+  });
+  if (divergences.length > 0) return { entries: null, divergences };
   const resolved = proposal.resolutions.map((entry) => {
     const checked = pureIntentResolver.resolve(state, entry.intent);
-    if (!checked.valid || checked.selectedBranch !== entry.selectedBranch ||
-      checked.resolutionDigest !== entry.resolutionDigest) return null;
+    if (!checked.valid) return null;
     const choice = selectedChoice(entry);
-    return choice.kind === 'cast_spell' || choice.kind === 'use_action'
+    const declared = selectedIntentBranch(entry);
+    return choice.kind === 'cast_spell'
       ? null : {
           mechanics: checked.mechanics,
           choice,
+          primaryDeclaredIntent: externalBranch(entry.intent),
+          selectedDeclaredIntent: externalBranch(declared),
           primaryRejectionReasons: checked.refusals.map((refusal) => refusal.summary),
         };
   });
-  return resolved.some((entry) => entry === null) ? null : resolved as readonly {
-    readonly mechanics: ResolvedIntentMechanics;
-    readonly choice: EngineActionChoice;
-    readonly primaryRejectionReasons: readonly string[];
-  }[];
+  return {
+    entries: resolved.some((entry) => entry === null) ? null : resolved as readonly {
+      readonly mechanics: ResolvedIntentMechanics;
+      readonly choice: EngineActionChoice;
+      readonly primaryDeclaredIntent: Readonly<Record<string, unknown>>;
+      readonly selectedDeclaredIntent: Readonly<Record<string, unknown>>;
+      readonly primaryRejectionReasons: readonly string[];
+    }[],
+    divergences,
+  };
 }
 
 function invocation(
@@ -866,13 +792,29 @@ export async function runConversation(config: ConversationConfig, options: Conve
     },
   });
   if (adapter.kind !== config.cli) throw new Error('Configured CLI and agent adapter kind disagree.');
-  let lifecycle = new AgentSessionLifecycle(journal, adapter, AGENT_ADAPTER_VERSION);
-  const firstCapsule = capsuleFor({
-    state: states[0]!, runId, branchId, revision: 1, requestId: 'request:room-1-round-1',
+  const rows: ConversationRow[] = [];
+  let capsuleRevision = 1;
+  const engineSession = new EngineRoundSession(
+    states[0]!,
+    mulberry32(8_274_113),
+    { kind: 'unattended', askDefault: config.reactionAskDefault },
+  );
+  let completedRounds = 0;
+  let restoredMidRun = false;
+  const prepareRound = (request: EngineRoundCapsuleRequest): EngineRoundSnapshot => {
+    const prepared = engineSession.prepareRound(request, journal.reactionGuidance());
+    recordAutoResolvedReactions(journal, prepared);
+    capsuleRevision += prepared.revisionDelta;
+    return prepared.snapshot;
+  };
+
+  const firstSnapshot = prepareRound({
+    runId, branchId, revision: capsuleRevision, requestId: 'request:room-1-round-1',
     phase: 'initial', room: 1, historyKind: 'session_started',
   });
+  let lifecycle = new AgentSessionLifecycle(journal, adapter, AGENT_ADAPTER_VERSION);
   const bootstrap = await writeLauncher({
-    directory: artifacts, name: 'bootstrap', state: states[0]!, capsule: firstCapsule,
+    directory: artifacts, name: 'bootstrap', snapshot: firstSnapshot,
     room: 1, historyKind: 'session_started',
   });
   await lifecycle.coldStart(invocation(
@@ -882,30 +824,19 @@ export async function runConversation(config: ConversationConfig, options: Conve
     knowledgeBase?.text ?? null,
   ), new AbortController().signal);
 
-  const rows: ConversationRow[] = [];
-  let capsuleRevision = 1;
-  let state = structuredClone(states[0]!);
-  let hostRng: SerializableRng = mulberry32(8_274_113);
-  let completedRounds = 0;
-  let restoredMidRun = false;
-
   for (let room = 1; room <= config.rooms; room += 1) {
     if (room > 1) {
-      state = structuredClone(states[room - 1]!);
+      engineSession.replaceEncounterState(states[room - 1]!);
       capsuleRevision += 1;
-    }
-    const beforeReactionResolution = state.revision;
-    const roomReactionResolution = resolveUnattendedReactionOffers(state, hostRng, {
-      kind: 'unattended',
-      askDefault: config.reactionAskDefault,
-    }, journal.reactionGuidance());
-    state = roomReactionResolution.state;
-    recordAutoResolvedReactions(journal, roomReactionResolution);
-    capsuleRevision += state.revision - beforeReactionResolution;
-    if (room > 1) {
       const requestId = `request:room-${String(room)}-round-1`;
-      const capsule = capsuleFor({ state, runId, branchId, revision: capsuleRevision, requestId, phase: 'initial', room, historyKind: 'room_transition' });
-      const launcher = await writeLauncher({ directory: artifacts, name: `room-${String(room)}-transition`, state, capsule, room, historyKind: 'room_transition' });
+      const snapshot = prepareRound({
+        runId, branchId, revision: capsuleRevision, requestId,
+        phase: 'initial', room, historyKind: 'room_transition',
+      });
+      const launcher = await writeLauncher({
+        directory: artifacts, name: `room-${String(room)}-transition`, snapshot,
+        room, historyKind: 'room_transition',
+      });
       await lifecycle.resumeRoomTransition(invocation(
         config, runId,
         `[ROOM_TRANSITION] Enter room ${String(room)}. Call engine.get_turn_context once; do not submit intents yet.`,
@@ -917,15 +848,20 @@ export async function runConversation(config: ConversationConfig, options: Conve
       const started = performance.now();
       observedToolCalls = 0;
       observedRejections = [];
-      const contextRevision = capsuleRevision;
       const requestId = `request:room-${String(room)}-round-${String(round)}`;
       const key = `room-${String(room)}-round-${String(round)}`;
-      const capsule = capsuleFor({
-        state, runId, branchId, revision: contextRevision, requestId,
+      const initialRequest: EngineRoundCapsuleRequest = {
+        runId, branchId, revision: capsuleRevision, requestId,
         phase: 'initial', room, historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
-      });
+      };
+      const initialSnapshot = round === 1
+        ? engineSession.snapshot(initialRequest)
+        : prepareRound(initialRequest);
+      const capsule = initialSnapshot.capsule;
+      const contextRevision = capsule.revision;
+      const authoritativeInitialRequest = { ...initialRequest, revision: contextRevision };
       const initialLauncher = await writeLauncher({
-        directory: artifacts, name: `${key}-initial`, state, capsule, room,
+        directory: artifacts, name: `${key}-initial`, snapshot: initialSnapshot, room,
         historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
       });
       let roundUsage: AgentUsage | null = null;
@@ -937,6 +873,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let serviceNull = false;
       const failedAttempts: ConversationChainAttemptEvidence[] = [];
       let autoResolvedTrigger: string | null = null;
+      let correctionFinalText: string | null = null;
+      let authorizationStateBinding: ConversationRow['stateBinding']['authorization'] = null;
       try {
         if (options.failBeforeDispatch?.includes(key) === true) {
           throw new Error('SIMULATED host failure before agent dispatch.');
@@ -975,91 +913,91 @@ export async function runConversation(config: ConversationConfig, options: Conve
         }
         if (!serviceNull) {
         const engineRejections = simulated?.rejectionsByRequest.get(requestId) ?? observedRejections;
+        const authorizationState = engineSession.currentState();
         const initial: InitialIntentAttempt = proposed === null ? {
           kind: 'exhausted', requestId, initialProposalId: `exhausted:${requestId}`,
-          actorFailures: livingMonsterIds(state).map((actorId) => {
+          actorFailures: livingMonsterIds(authorizationState).map((actorId) => {
             const actorRejections = engineRejections.filter((entry) =>
               entry.actorId === null || entry.actorId === actorId);
             if (actorRejections.length > 0) failedAttempts.push(...actorRejections);
             else failedAttempts.push(
-              { attempt: 'primary', actorId, rejectionReasons: ['No engine rejection was returned because the agent submitted no initial proposal.'] },
-              { attempt: 'fallback', actorId, rejectionReasons: ['No engine rejection was returned because the agent submitted no fallback proposal.'] },
+              { attempt: 'primary', actorId, declaredIntent: null, rejectionReasons: ['No engine rejection was returned because the agent submitted no initial proposal.'] },
+              { attempt: 'fallback', actorId, declaredIntent: null, rejectionReasons: ['No engine rejection was returned because the agent submitted no fallback proposal.'] },
             );
             return { actorId, fallbackResult: 'absent' };
           }),
         } : { kind: 'proposal', proposal: proposed };
-        const correctionCapsule = capsuleFor({
-          state, runId, branchId, revision: contextRevision, requestId,
+        const correctionRequest: EngineRoundCapsuleRequest = {
+          runId, branchId, revision: contextRevision, requestId,
           phase: 'correction', room, historyKind: 'intent_correction_requested',
-        });
+        };
+        const correctionSnapshot = engineSession.snapshot(correctionRequest);
+        const correctionCapsule = correctionSnapshot.capsule;
         const correctionLauncher = await writeLauncher({
-          directory: artifacts, name: `${key}-correction`, state, capsule: correctionCapsule,
+          directory: artifacts, name: `${key}-correction`, snapshot: correctionSnapshot,
           room, historyKind: 'intent_correction_requested',
         });
         const host: TurnExhaustionHost = {
           authorize: async (proposal) => {
             const expectedCapsule = proposal.phase === 'initial' ? capsule : correctionCapsule;
+            const expectedRequest = proposal.phase === 'initial'
+              ? authoritativeInitialRequest : correctionRequest;
+            const authorizationCapsule = engineSession.authorizationCapsule(expectedRequest);
+            authorizationStateBinding = {
+              revision: authorizationCapsule.revision,
+              digest: authorizationCapsule.digest,
+            };
             if (proposal.runId !== runId || proposal.branchId !== branchId || proposal.requestId !== requestId ||
               proposal.expectedRevision !== contextRevision || proposal.stateDigest !== expectedCapsule.digest ||
-              proposal.stateHandle !== engineStateHandle(expectedCapsule)) {
+              proposal.stateHandle !== engineStateHandle(expectedCapsule) ||
+              authorizationCapsule.revision !== expectedCapsule.revision ||
+              authorizationCapsule.digest !== expectedCapsule.digest) {
               failedAttempts.push({
                 attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
                 actorId: null,
+                declaredIntent: proposal.resolutions[0] === undefined
+                  ? null : externalBranch(selectedIntentBranch(proposal.resolutions[0])),
                 rejectionReasons: ['Proposal binding does not match the authoritative run, branch, request, revision, digest, and state handle.'],
               });
               return 'invalidated';
             }
-            const mechanics = authorizedMechanics(state, proposal);
-            if (mechanics === null) {
-              failedAttempts.push({
-                attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
-                actorId: null,
-                rejectionReasons: ['The engine could not reproduce the proposal resolution against authoritative state.'],
-              });
+            const checkedProposal = authorizedMechanics(engineSession.currentState(), proposal);
+            if (checkedProposal.entries === null) {
+              failedAttempts.push(...(checkedProposal.divergences.length > 0
+                ? checkedProposal.divergences
+                : [{
+                    attempt: proposal.phase === 'correction' ? 'correction' as const : 'primary' as const,
+                    actorId: null,
+                    declaredIntent: proposal.resolutions[0] === undefined
+                      ? null : externalBranch(selectedIntentBranch(proposal.resolutions[0])),
+                    rejectionReasons: ['The engine could not authorize this proposal mechanic.'],
+                  }]));
               return 'invalid';
             }
-            const trialRng = restoreMulberry32(hostRng.snapshot());
-            let trialState = state;
+            const mechanics = checkedProposal.entries;
             const effectiveReactionGuidance = proposal.reactionGuidance ?? journal.reactionGuidance();
-            const autoResolvedReactions = {
-              fallbackResolutions: [] as AutoResolvedReactionOffer[],
-              guidedResolutions: [] as GuidedReactionResolution[],
-            };
             try {
               for (const entry of mechanics) {
                 if (entry.primaryRejectionReasons.length > 0) {
                   failedAttempts.push({
                     attempt: 'primary', actorId: entry.mechanics.actorId,
+                    declaredIntent: entry.primaryDeclaredIntent,
                     rejectionReasons: entry.primaryRejectionReasons,
                   });
                 }
-                const applied = applyResolvedMechanics(
-                  trialState,
-                  entry.mechanics,
-                  entry.choice,
-                  trialRng,
-                  { kind: 'unattended', askDefault: config.reactionAskDefault },
-                  effectiveReactionGuidance,
-                );
-                trialState = applied.state;
-                autoResolvedReactions.fallbackResolutions.push(
-                  ...applied.autoResolvedReactions.fallbackResolutions,
-                );
-                autoResolvedReactions.guidedResolutions.push(
-                  ...applied.autoResolvedReactions.guidedResolutions,
-                );
               }
+              const applied = engineSession.applyResolvedMechanics(mechanics, effectiveReactionGuidance);
+              capsuleRevision += Math.max(1, applied.revisionDelta);
+              recordAutoResolvedReactions(journal, applied);
             } catch (error) {
               failedAttempts.push({
                 attempt: proposal.phase === 'correction' ? 'correction' : 'primary',
                 actorId: null,
+                declaredIntent: mechanics[0]?.selectedDeclaredIntent ?? null,
                 rejectionReasons: [error instanceof Error ? error.message : String(error)],
               });
               return 'invalid';
             }
-            capsuleRevision += Math.max(1, trialState.revision - state.revision);
-            state = trialState;
-            hostRng = trialRng;
             proposalId = proposal.proposalId;
             if (proposal.reactionGuidance !== null) {
               journal.replaceReactionGuidance(
@@ -1068,7 +1006,6 @@ export async function runConversation(config: ConversationConfig, options: Conve
                 proposal.reactionGuidance,
               );
             }
-            recordAutoResolvedReactions(journal, autoResolvedReactions);
             return 'authorized';
           },
           resolveDeterministically: async (actorId): Promise<DeterministicIntentResolution> => ({
@@ -1076,19 +1013,19 @@ export async function runConversation(config: ConversationConfig, options: Conve
             resolutionDigest: sha256(canonicalJson({ actorId, choice: 'dodge', revision: capsuleRevision })),
           }),
           applyAutoResolved: async (resolution) => {
-            const position = canonicalEngineQueryPort.tokenPosition(state, resolution.actorId);
+            const position = canonicalEngineQueryPort.tokenPosition(
+              engineSession.currentState(), resolution.actorId,
+            );
             if (position === null) throw new Error('Deterministic actor has no token.');
-            const trialRng = restoreMulberry32(hostRng.snapshot());
-            const applied = applyResolvedMechanics(state, {
-              actorId: resolution.actorId, actionId: 'dodge', targetId: null,
-              movementCostFeet: 0, path: [], finalPosition: position,
-            }, { kind: 'dodge' }, trialRng, {
-              kind: 'unattended', askDefault: config.reactionAskDefault,
-            }, journal.reactionGuidance());
-            capsuleRevision += Math.max(1, applied.state.revision - state.revision);
-            state = applied.state;
-            hostRng = trialRng;
-            recordAutoResolvedReactions(journal, applied.autoResolvedReactions);
+            const applied = engineSession.applyResolvedMechanics([{
+              mechanics: {
+                actorId: resolution.actorId, actionId: 'dodge', targetId: null,
+                movementCostFeet: 0, path: [], finalPosition: position,
+              },
+              choice: { kind: 'dodge' },
+            }], journal.reactionGuidance());
+            capsuleRevision += Math.max(1, applied.revisionDelta);
+            recordAutoResolvedReactions(journal, applied);
           },
           pauseForDmAdjudication: ({ actorId, reason }) => { refusals.push(`${actorId}: ${reason}`); },
         };
@@ -1101,6 +1038,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
               resumeCorrection: async (correctionInvocation: AgentInvocation, signal: AbortSignal) => {
                 const correctionTurn = await lifecycle.resumeCorrection(correctionInvocation, signal);
                 roundUsage = addAgentUsage(roundUsage, correctionTurn.usage);
+                correctionFinalText = correctionTurn.finalText;
                 return correctionTurn;
               },
             },
@@ -1128,13 +1066,19 @@ export async function runConversation(config: ConversationConfig, options: Conve
             !failedAttempts.some((entry) => entry.attempt === 'correction')) {
             failedAttempts.push({
               attempt: 'correction', actorId: null,
+              declaredIntent: null,
               rejectionReasons: [correctionFailure.result === 'no_response'
                 ? 'No engine rejection was returned because the correction dispatch submitted no proposal.'
                 : `The engine rejected the correction as ${correctionFailure.result}.`],
             });
           }
+          correctionFinalText = correctionFailure?.kind === 'intent_correction_failed' &&
+            correctionFailure.result === 'no_response' && correctionFinalText !== null
+            ? truncateAgentFinalText(correctionFinalText)
+            : null;
           autoResolvedTrigger = 'The initial primary/fallback chain and single correction were exhausted; the deterministic controller resolved the turn.';
         }
+        if (coordinated.kind !== 'auto_resolved') correctionFinalText = null;
         }
       } catch (error) {
         refusals.push(error instanceof Error ? error.message : String(error));
@@ -1147,11 +1091,15 @@ export async function runConversation(config: ConversationConfig, options: Conve
         sessionIdHash: sha256(binding.sessionId), outcome, proposalId,
         kbHash: knowledgeBase?.hash ?? null,
         timeToFirstAction: wall,
-        wallPerCreature: wall / Math.max(1, livingMonsterIds(state).length),
+        wallPerCreature: wall / Math.max(1, livingMonsterIds(engineSession.currentState()).length),
         tokens: tokenCounts(roundUsage), refusals,
         toolCalls: simulated?.callsByRequest.get(requestId) ?? observedToolCalls,
         agentDispatched, flapRetries, serviceNull,
-        chainEvidence: { failedAttempts, autoResolvedTrigger },
+        stateBinding: {
+          capsule: { revision: capsule.revision, digest: capsule.digest },
+          authorization: authorizationStateBinding,
+        },
+        chainEvidence: { failedAttempts, autoResolvedTrigger, correctionFinalText },
       };
       rows.push(row);
       await appendFile(config.outPath, `${JSON.stringify(row)}\n`, 'utf8');
