@@ -21,6 +21,8 @@ export interface ArenaArm {
   readonly label: string;
   readonly model: string;
   readonly effort: ConversationEffort;
+  readonly escalationModel: string | null;
+  readonly escalationEffort: ConversationEffort | null;
 }
 
 export interface ArenaConfig {
@@ -156,15 +158,29 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     throw new TypeError('--basis must be standard or hard.');
   }
   const arms = rawArms.map((raw): ArenaArm => {
-    const [label, armModel, armEffort, extra] = raw.split(':');
+    const [label, armModel, armEffort, armEscalationModel, armEscalationEffort, extra] = raw.split(':');
     if (label === undefined || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) ||
-      armModel === undefined || armModel.length === 0 || armEffort === undefined || extra !== undefined) {
-      throw new TypeError('--arm must use label:model:effort syntax.');
+      armModel === undefined || armModel.length === 0 || armEffort === undefined ||
+      (armEscalationModel === undefined) !== (armEscalationEffort === undefined) ||
+      armEscalationModel === '' || extra !== undefined) {
+      throw new TypeError('--arm must use label:model:effort[:escalationModel:escalationEffort] syntax.');
     }
     if (!CONVERSATION_EFFORTS.includes(armEffort as ConversationEffort)) {
       throw new TypeError('--arm effort must be low, medium, high, or xhigh.');
     }
-    return { label, model: armModel, effort: armEffort as ConversationEffort };
+    if (armEscalationEffort !== undefined &&
+      !CONVERSATION_EFFORTS.includes(armEscalationEffort as ConversationEffort)) {
+      throw new TypeError('--arm escalation effort must be low, medium, high, or xhigh.');
+    }
+    return {
+      label,
+      model: armModel,
+      effort: armEffort as ConversationEffort,
+      escalationModel: armEscalationModel ?? null,
+      escalationEffort: armEscalationEffort === undefined
+        ? null
+        : armEscalationEffort as ConversationEffort,
+    };
   });
   if (new Set(arms.map((arm) => arm.label)).size !== arms.length) {
     throw new TypeError('--arm labels must be unique.');
@@ -259,6 +275,8 @@ function conversationConfig(
     readonly rounds: number;
     readonly model: string;
     readonly effort: ConversationEffort;
+    readonly escalationModel: string | null;
+    readonly escalationEffort: ConversationEffort | null;
     readonly outPath: string;
   },
 ): import('./ai-dm-conversation').ConversationConfig {
@@ -269,8 +287,8 @@ function conversationConfig(
     cli: config.cli,
     model: overrides.model,
     effort: overrides.effort,
-    escalationModel: config.escalationModel,
-    escalationEffort: config.escalationEffort,
+    escalationModel: overrides.escalationModel,
+    escalationEffort: overrides.escalationEffort,
     outPath: overrides.outPath,
     dryRun: config.dryRun,
     cwd: config.cwd,
@@ -295,6 +313,8 @@ export async function runArena(
       rounds: config.reps,
       model: config.model,
       effort: config.effort,
+      escalationModel: config.escalationModel,
+      escalationEffort: config.escalationEffort,
       outPath: config.outPath,
     }), { ...conversationOptions, roomStates: states });
     rows = arenaRows(config, result.rows, 'single', seeds);
@@ -309,6 +329,8 @@ export async function runArena(
             rounds: 1,
             model: arm.model,
             effort: arm.effort,
+            escalationModel: arm.escalationModel ?? config.escalationModel,
+            escalationEffort: arm.escalationEffort ?? config.escalationEffort,
             outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-${arm.label}.jsonl`),
           }), {
             ...conversationOptions,
