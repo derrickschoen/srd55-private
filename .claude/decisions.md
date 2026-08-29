@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D409 — OWNER: harvest the 25%; standing luna experiments; RL research lane (2026-08-29)
+
+Verbatim: "Harvest the 25%. Keep going on trying to improve Luna low and
+medium results by experimenting. Use codex collab skill to brainstorm and
+implement and judge experiments. — In a separate lane research how we
+might rl train an open model to do better at D&D dm work specifically."
+Rulings: (1) implement the two degradation-free cuts from the D408 audit
+(recommended_plugins suppression verified by rollout re-attribution;
+calls-per-round 7->~4 via K6 double-fetch fix and collapsed protocol
+turns). (2) A STANDING experiment loop targets luna low + luna medium
+quality/speed: codex-collab brainstorm -> implement -> blind-judge each
+experiment; flywheel cadence. (3) Separate research lane: how to RL-train
+an open model specifically for D&D DM work (methods, base models, reward
+design from our engine's authorization/judge signals, data from arena
+transcripts, cost/feasibility).
+
 ## D408 — OWNER: audit and reduce the ~195k input tokens per round (2026-08-29)
 
 Verbatim: "195k token input is way too large. What is going on there? Use
