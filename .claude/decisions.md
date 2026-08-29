@@ -7,6 +7,16 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D413 — OWNER: prior-art survey, AI-plays-D&D, last 6 months only (2026-08-29)
+
+Verbatim: "I'm not the first to try to make ai play D&D. Look into prior
+art that is no more than 6 months old. Do research to get the most up to
+date." Ruling: dedicated research pass over 2026-03 onward — academic
+(arxiv/openreview), community (GitHub, HF, Reddit, itch), and product —
+on LLMs playing/DMing D&D with rules engines; what they got right/wrong,
+what we should steal or avoid. Older foundational work may be cited only
+as lineage for a recent item.
+
 ## D412.2 — OWNER: 0.8B schema-constrained angle + small-K2 narration seat (2026-08-29)
 
 Verbatim: "What are my options to use all of the latest model efficiency
