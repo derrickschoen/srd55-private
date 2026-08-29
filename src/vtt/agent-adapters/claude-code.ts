@@ -31,12 +31,20 @@ const ENGINE_TOOL_NAMES = [
   'engine.emit_narration',
   'engine.request_dm_adjudication',
 ] as const;
+const DM_ENGINE_TOOL_NAMES = [
+  'engine.get_turn_context',
+  'engine.propose_from_play',
+  'engine.validate_intent',
+  'engine.submit_round_intents',
+  'engine.request_dm_adjudication',
+] as const;
 
 export function claudeCodeEngineToolName(toolName: string): string {
   return `mcp__engine__${toolName.replaceAll('.', '_')}`;
 }
 
 export const CLAUDE_ENGINE_TOOLS = Object.freeze(ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName));
+export const CLAUDE_DM_ENGINE_TOOLS = Object.freeze(DM_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName));
 
 interface ClaudeDecodedTurn {
   readonly sessionId: string;
@@ -71,6 +79,7 @@ export class ClaudeCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
       engineArgs: this.engineArgs(invocation.launcherToken),
       instructions: invocation.instructions ?? null,
       sessionId,
+      engineTools: this.options.engineToolProfile === 'dm' ? CLAUDE_DM_ENGINE_TOOLS : CLAUDE_ENGINE_TOOLS,
     }));
   }
 
@@ -89,7 +98,12 @@ export class ClaudeCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
     if (output.cancelled && sessionId !== null) {
       return { sessionId: agentSessionIdFromCli(sessionId), finalText: '', usage: null, exit: 'cancelled' };
     }
-    const decoded = decodeClaudeCodeTurn(output.stdout, sessionId, (event) => this.observe(event));
+    const decoded = decodeClaudeCodeTurn(
+      output.stdout,
+      sessionId,
+      (event) => this.observe(event),
+      this.options.engineToolProfile === 'dm' ? CLAUDE_DM_ENGINE_TOOLS : CLAUDE_ENGINE_TOOLS,
+    );
     return {
       sessionId: agentSessionIdFromCli(decoded.sessionId),
       finalText: decoded.finalText,
@@ -105,6 +119,7 @@ interface ClaudeArgvInput {
   readonly engineArgs: readonly string[];
   readonly instructions?: string | null;
   readonly sessionId: string | null;
+  readonly engineTools?: readonly string[];
 }
 
 export function claudeCodeArgv(input: ClaudeArgvInput): readonly string[] {
@@ -118,7 +133,7 @@ export function claudeCodeArgv(input: ClaudeArgvInput): readonly string[] {
     '--output-format', 'stream-json',
     '--verbose',
     '--include-partial-messages',
-    '--tools', ...CLAUDE_ENGINE_TOOLS,
+    '--tools', ...(input.engineTools ?? CLAUDE_ENGINE_TOOLS),
     '--allowedTools', 'mcp__engine__*',
     '--setting-sources', '',
     '--strict-mcp-config',
@@ -136,6 +151,7 @@ export function decodeClaudeCodeTurn(
   stdout: string,
   priorSessionId: string | null,
   onEvent: (event: Readonly<Record<string, unknown>>) => void = () => undefined,
+  expectedEngineTools: readonly string[] = CLAUDE_ENGINE_TOOLS,
 ): ClaudeDecodedTurn {
   let initSeen = false;
   let sessionId: string | null = null;
@@ -144,7 +160,7 @@ export function decodeClaudeCodeTurn(
   for (const event of jsonEventLines(stdout)) {
     onEvent(event);
     if (event['type'] === 'system' && event['subtype'] === 'init') {
-      assertClaudeInitTools(event['tools']);
+      assertClaudeInitTools(event['tools'], expectedEngineTools);
       assertClaudeEngineServerConnected(event['mcp_servers']);
       if (typeof event['session_id'] !== 'string' || event['session_id'].trim().length === 0) {
         throw new AgentAdapterError('malformed_output', 'Claude Code init event omitted session_id.');
@@ -167,14 +183,15 @@ export function decodeClaudeCodeTurn(
   return { sessionId, finalText, usage };
 }
 
-function assertClaudeInitTools(value: unknown): void {
+function assertClaudeInitTools(value: unknown, expectedEngineTools: readonly string[]): void {
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
     throw new AgentAdapterError('malformed_output', 'Claude Code init tools were not a string array.');
   }
   const names = value as readonly string[];
-  if (CLAUDE_ENGINE_TOOLS.some((expected) => !names.includes(expected)) ||
+  if (expectedEngineTools.some((expected) => !names.includes(expected)) ||
+    names.some((name) => name.startsWith('mcp__engine__') && !expectedEngineTools.includes(name)) ||
     names.some((name) => name.startsWith('mcp__') && !name.startsWith('mcp__engine__'))) {
-    throw new AgentAdapterError('malformed_output', 'Claude Code init omitted an engine tool or admitted a foreign MCP tool.');
+    throw new AgentAdapterError('malformed_output', 'Claude Code init engine tools did not match the selected profile or admitted a foreign MCP tool.');
   }
 }
 

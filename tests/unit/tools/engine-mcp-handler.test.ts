@@ -14,6 +14,7 @@ import {
 } from '../../../src/vtt/mcp/handler';
 import { createEngineStateCapsule, engineStateHandle } from '../../../src/vtt/engine-state-capsule';
 import { engineStateSummaryProofToken } from '../../../src/vtt/mcp/engine-server';
+import { ENGINE_DM_TOOL_NAMES } from '../../../src/vtt/mcp/engine-server';
 import { createEngineMcpRuntime, loadArenaFixture, type EngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
@@ -112,6 +113,31 @@ function unresolvedSchemaReferences(root: unknown, value: unknown = root, path =
     ...Object.entries(candidate).flatMap(([key, nested]) =>
       unresolvedSchemaReferences(root, nested, `${path}.${key}`)),
   ];
+}
+
+function referencedDefinitionKeys(value: unknown): ReadonlySet<string> {
+  const root = record(value);
+  const definitions = root['$defs'] === undefined ? {} : record(root['$defs']);
+  const keys = new Set<string>();
+  const visit = (candidate: unknown): void => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(visit);
+      return;
+    }
+    if (typeof candidate !== 'object' || candidate === null) return;
+    const recordValue = candidate as Readonly<Record<string, unknown>>;
+    const reference = recordValue['$ref'];
+    if (typeof reference === 'string' && reference.startsWith('#/$defs/')) {
+      const key = decodeURIComponent(reference.slice('#/$defs/'.length)).replaceAll('~1', '/').replaceAll('~0', '~');
+      if (!keys.has(key)) {
+        keys.add(key);
+        visit(definitions[key]);
+      }
+    }
+    for (const [key, nested] of Object.entries(recordValue)) if (key !== '$defs') visit(nested);
+  };
+  visit(root);
+  return keys;
 }
 
 async function fixtureRuntime(options: Parameters<typeof createEngineMcpRuntime>[1] = { requestedActorCount: 1 }): Promise<{ readonly state: EncounterState; readonly runtime: EngineMcpRuntime }> {
@@ -260,8 +286,10 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(request(runtime.handler, 1, 'server/discover').result).toMatchObject({
       resultType: 'complete', supportedVersions: [MCP_PROTOCOL_VERSION],
       capabilities: { tools: { listChanged: false }, resources: { subscribe: true, listChanged: true }, prompts: { listChanged: true } },
+      counts: { tools: TOOL_NAMES.length, resources: 5, resourceTemplates: 2, prompts: 2 },
       ttlMs: MCP_STATIC_LIST_TTL_MS, cacheScope: 'public',
     });
+    expect(record(request(runtime.handler, 3, 'server/discover').result)['tools']).toBeUndefined();
     const response = runtime.handler.handle({
       jsonrpc: '2.0', id: 2, method: 'server/discover', params: { _meta: { ...mcpRequestMeta(CLIENT_INFO), [MCP_PROTOCOL_VERSION_META_KEY]: '2025-03-26' } },
     });
@@ -356,13 +384,10 @@ describe('engine MCP dual-handshake full surface conformance', () => {
         const tool = record(value);
         names.push(String(tool['name']));
         expect(String(tool['description']).length).toBeGreaterThan(10);
-        for (const key of ['inputSchema', 'outputSchema']) {
-          const schema = record(tool[key]);
-          expect(schema).toMatchObject({ $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object' });
-          expect(record(schema['$defs'])).toHaveProperty('stateRef');
-          expect(record(schema['$defs'])).toHaveProperty('targetSelector');
-          expect(closedObjects(schema)).toEqual([]);
-        }
+        const schema = record(tool['inputSchema']);
+        expect(schema).toMatchObject({ $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object' });
+        expect(tool['outputSchema']).toBeUndefined();
+        expect(closedObjects(schema)).toEqual([]);
       }
       cursor = typeof result['nextCursor'] === 'string' ? result['nextCursor'] : undefined;
     } while (cursor !== undefined);
@@ -370,21 +395,34 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(request(runtime.handler, 99, 'tools/list', { cursor: 'forged' })).toMatchObject({ error: { code: -32602 } });
   });
 
-  it('advertises only per-document-resolvable refs in every tool input and output schema', async () => {
+  it('advertises only locally resolved and reachable definitions in every tool input schema', async () => {
     const { runtime } = await fixtureRuntime({ requestedActorCount: 1 });
     const discovery = record(request(runtime.handler, 100, 'server/discover').result);
     const listing = record(request(runtime.handler, 101, 'tools/list').result);
-    for (const [surface, tools] of [['server/discover', discovery['tools']], ['tools/list', listing['tools']]] as const) {
-      if (!Array.isArray(tools)) throw new TypeError(`${surface} did not advertise tools.`);
-      expect(tools).toHaveLength(TOOL_NAMES.length);
-      for (const value of tools) {
-        const tool = record(value);
-        for (const key of ['inputSchema', 'outputSchema'] as const) {
-          const schema = record(tool[key]);
-          expect(unresolvedSchemaReferences(schema), `${surface}:${String(tool['name'])}.${key}`).toEqual([]);
-        }
-      }
+    expect(discovery['tools']).toBeUndefined();
+    const tools = listing['tools'];
+    if (!Array.isArray(tools)) throw new TypeError('tools/list did not advertise tools.');
+    expect(tools).toHaveLength(TOOL_NAMES.length);
+    for (const value of tools) {
+      const tool = record(value);
+      const schema = record(tool['inputSchema']);
+      expect(unresolvedSchemaReferences(schema), `${String(tool['name'])}.inputSchema`).toEqual([]);
+      const definitions = schema['$defs'] === undefined ? {} : record(schema['$defs']);
+      const referenced = referencedDefinitionKeys(schema);
+      expect(Object.keys(definitions).sort(), `${String(tool['name'])}.inputSchema unreachable $defs`).toEqual([...referenced].sort());
     }
+  });
+
+  it('serves the bounded DM profile while retaining the full profile as the default', async () => {
+    const { runtime } = await fixtureRuntime({ requestedActorCount: 1, toolProfile: 'dm' });
+    const result = record(request(runtime.handler, 102, 'tools/list').result);
+    const tools = result['tools'];
+    if (!Array.isArray(tools)) throw new TypeError('DM tools/list omitted tools.');
+    expect(tools.map((tool) => record(tool)['name'])).toEqual(ENGINE_DM_TOOL_NAMES);
+    expect(new TextEncoder().encode(JSON.stringify(tools)).byteLength).toBeLessThanOrEqual(17 * 1024);
+    expect(request(runtime.handler, 103, 'tools/call', {
+      name: 'engine.get_state_summary', arguments: {},
+    })).toMatchObject({ error: { code: -32602, data: { kind: 'unknown_tool' } } });
   });
 
   it.each(TOOL_NAMES)('%s has a direct happy path with output-schema-conforming structured content', async (name) => {

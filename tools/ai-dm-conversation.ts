@@ -772,7 +772,7 @@ async function writeLauncher(input: {
     runId: capsule.runId, branchId: capsule.branchId,
     revision: capsule.revision, requestId: request.requestId,
     phase: request.phase, correctionNumber: request.correctionNumber,
-    room: input.room, historyKind: input.historyKind,
+    room: input.room, historyKind: input.historyKind, toolProfile: 'dm',
   };
   await writeFile(manifestPath, canonicalJson(manifest), 'utf8');
   return { manifestPath, spoolPath };
@@ -935,6 +935,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
   ) : null;
   const adapter = options.adapter ?? simulated ?? resolveAgentAdapter(config.cli, {
     binary: config.cliBin, cwd: config.cwd, engineCommand: process.execPath,
+    engineToolProfile: 'dm',
     engineArgs: [
       resolve(config.cwd, 'node_modules/vite-node/vite-node.mjs'),
       resolve(config.cwd, 'tools/engine-mcp-server.ts'),

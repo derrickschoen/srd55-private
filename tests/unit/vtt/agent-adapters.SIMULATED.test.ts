@@ -11,6 +11,7 @@ import {
 } from '../../../src/vtt/agent-session';
 import { resolveAgentAdapter } from '../../../src/vtt/agent-adapters';
 import {
+  CLAUDE_DM_ENGINE_TOOLS,
   CLAUDE_ENGINE_TOOLS,
   ClaudeCodeAgentSessionAdapter,
   claudeCodeEngineToolName,
@@ -215,6 +216,30 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       '--resume', 'claude-session-123',
     ]);
     expect(UNVERIFIED_CONTRACT_CLAUDE_CODE).toContain('UNVERIFIED_CONTRACT');
+  });
+
+  it('SIMULATED Claude Code narrows both its allowlist and init contract for the DM profile', async () => {
+    const transcript = fixture('claude-code-start').split('\n').filter((line) => line.length > 0).map((line) => {
+      const event = JSON.parse(line) as Readonly<Record<string, unknown>>;
+      if (event['type'] !== 'system' || event['subtype'] !== 'init') return line;
+      const tools = event['tools'];
+      if (!Array.isArray(tools)) throw new TypeError('SIMULATED Claude init tools are not an array.');
+      return JSON.stringify({
+        ...event,
+        tools: [...tools.filter((name) => typeof name === 'string' && !name.startsWith('mcp__engine__')), ...CLAUDE_DM_ENGINE_TOOLS],
+      });
+    }).join('\n');
+    const runner = new SIMULATEDChildProcessRunner([output(transcript)]);
+    const adapter = new ClaudeCodeAgentSessionAdapter({
+      ...options(runner),
+      engineToolProfile: 'dm',
+    });
+
+    await adapter.start(invocation, new AbortController().signal);
+
+    const argv = runner.calls[0]?.spec.argv ?? [];
+    expect(argv.slice(argv.indexOf('--tools') + 1, argv.indexOf('--allowedTools'))).toEqual(CLAUDE_DM_ENGINE_TOOLS);
+    expect(CLAUDE_DM_ENGINE_TOOLS).toHaveLength(5);
   });
 
   it('SIMULATED Claude Code rejects a failed engine MCP connection', async () => {

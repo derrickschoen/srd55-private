@@ -39,6 +39,15 @@ import {
 } from './handler';
 import { ENGINE_TOOL_SPECS, schemaViolations } from './schemas';
 
+export const ENGINE_DM_TOOL_NAMES = Object.freeze([
+  'engine.get_turn_context',
+  'engine.propose_from_play',
+  'engine.validate_intent',
+  'engine.submit_round_intents',
+  'engine.request_dm_adjudication',
+] as const);
+export type EngineMcpToolProfile = 'full' | 'dm';
+
 export interface EngineCapsuleFeed extends ReadonlyStateCapsuleSource {
   current(): EngineStateCapsule;
   snapshot(revision: number): EngineStateCapsule | null;
@@ -115,6 +124,7 @@ interface EngineMcpDependencies {
   readonly maximumToolResultBytes?: number;
   readonly maximumResourceBytes?: number;
   readonly listPageSize?: number;
+  readonly toolProfile?: EngineMcpToolProfile;
 }
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
@@ -725,7 +735,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     throw new RangeError(`Unknown engine tool ${name}.`);
   }
 
-  const bindings: readonly McpToolBinding[] = ENGINE_TOOL_SPECS.map((spec) => ({ descriptor: spec.descriptor, validateArguments: (value) => schemaViolations(spec.input, value), validateOutput: (value) => schemaViolations(spec.output, value), execute: (value) => execute(spec.descriptor.name, value) }));
+  const advertisedNames: ReadonlySet<string> | null = dependencies.toolProfile === 'dm'
+    ? new Set(ENGINE_DM_TOOL_NAMES)
+    : null;
+  const bindings: readonly McpToolBinding[] = ENGINE_TOOL_SPECS
+    .filter((spec) => advertisedNames === null || advertisedNames.has(spec.descriptor.name))
+    .map((spec) => ({ descriptor: spec.descriptor, validateArguments: (value) => schemaViolations(spec.input, value), validateOutput: (value) => schemaViolations(spec.output, value), execute: (value) => execute(spec.descriptor.name, value) }));
   const currentTurnContext = (): unknown => {
     const capsule = feed.current();
     return execute('engine.get_turn_context', { run_id: capsule.runId, expected_revision: capsule.revision, scope: 'round' });

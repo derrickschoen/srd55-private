@@ -218,6 +218,31 @@ const speculativeRoundPlanOutput = z.object({
 }).strict();
 
 export interface EngineToolSpec { readonly descriptor: McpToolDescriptor; readonly input: z.ZodType<unknown>; readonly output: z.ZodType<unknown> }
+export const ADVERTISE_MCP_OUTPUT_SCHEMAS: boolean = false;
+
+function referencedDefinitionKeys(value: unknown, definitions: Readonly<Record<string, unknown>>): ReadonlySet<string> {
+  const referenced = new Set<string>();
+  const visit = (candidate: unknown): void => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(visit);
+      return;
+    }
+    if (typeof candidate !== 'object' || candidate === null) return;
+    const record = candidate as Readonly<Record<string, unknown>>;
+    const reference = record['$ref'];
+    if (typeof reference === 'string' && reference.startsWith('#/$defs/')) {
+      const key = decodeURIComponent(reference.slice('#/$defs/'.length)).replaceAll('~1', '/').replaceAll('~0', '~');
+      if (!referenced.has(key)) {
+        referenced.add(key);
+        visit(definitions[key]);
+      }
+    }
+    for (const [key, nested] of Object.entries(record)) if (key !== '$defs') visit(nested);
+  };
+  visit(value);
+  return referenced;
+}
+
 function jsonSchema(schema: z.ZodType<unknown>): Readonly<Record<string, unknown>> {
   const generated = z.toJSONSchema(schema, { target: 'draft-2020-12', io: 'input', reused: 'ref' });
   const generatedDefinitions = typeof generated['$defs'] === 'object' && generated['$defs'] !== null &&
@@ -232,17 +257,21 @@ function jsonSchema(schema: z.ZodType<unknown>): Readonly<Record<string, unknown
       ? Object.entries(properties)
       : [];
   }));
-  return Object.freeze({
-    ...generated,
+  const { $defs: _generatedDefinitions, ...generatedRoot } = generated;
+  const root = {
+    ...generatedRoot,
     type: 'object',
     ...(generated['additionalProperties'] === undefined
       ? { properties: unionProperties, additionalProperties: false }
       : {}),
-    $defs: {
-      ...generatedDefinitions,
-      stateRef: z.toJSONSchema(stateRef, { target: 'draft-2020-12', io: 'input' }),
-      targetSelector: z.toJSONSchema(targetSelector, { target: 'draft-2020-12', io: 'input' }),
-    },
+  };
+  const reachable = referencedDefinitionKeys(root, generatedDefinitions);
+  const definitions = Object.fromEntries(
+    Object.entries(generatedDefinitions).filter(([key]) => reachable.has(key)),
+  );
+  return Object.freeze({
+    ...root,
+    ...(Object.keys(definitions).length === 0 ? {} : { $defs: definitions }),
   });
 }
 const queryAnnotations = Object.freeze({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
@@ -259,7 +288,7 @@ function spec(name: string, description: string, input: z.ZodType<unknown>, outp
       name,
       description,
       inputSchema: correctionRule === null ? inputSchema : { ...inputSchema, allOf: correctionRule },
-      outputSchema: jsonSchema(output),
+      ...(ADVERTISE_MCP_OUTPUT_SCHEMAS ? { outputSchema: jsonSchema(output) } : {}),
       annotations: proposal ? proposalAnnotations : queryAnnotations,
     },
     input,

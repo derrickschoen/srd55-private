@@ -47,6 +47,7 @@ export interface AgentAdapterOptions {
   readonly onEvent?: (event: Readonly<Record<string, unknown>>) => void;
   readonly onStdoutLine?: (line: string) => void;
   readonly piMcpExtensionPath?: string;
+  readonly engineToolProfile?: 'full' | 'dm';
 }
 
 export type AgentAdapterErrorCode =
