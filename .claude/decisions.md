@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D412 — OWNER: research V4-Flash/GLM-5.3-Flash techniques at 0.5-2B (2026-08-29)
+
+Verbatim: "Deepseek v4-flash and glm5.3-flash have a lot of advanced new
+techniques that let them be smarter while using less memory. Collab with
+codex to research Reddit and huggingface and forums and such to see
+where people are trying to use these techniques on smaller models. Look
+into what the leading edge people are doing in the 0.5 to 2b size model
+space for specialized work like our ai dm that leverages the existing
+engines and algorithms and just fills in the gaps." Ruling: joint
+Claude+codex research unit — community sources (Reddit, HF, forums)
+specifically, not just papers; deliverable = consensus research doc on
+which V4-Flash/GLM-5.3-Flash efficiency techniques transfer to 0.5-2B
+specialists, and what the leading edge does for engine-backed
+narrow-task models. Feeds the D410/D411 base-model and training-recipe
+choices.
+
 ## D411 — OWNER: collect much more Luna run-log data before CPU training (2026-08-29)
 
 Verbatim: "We will need to collect a lot more run log data from Luna
