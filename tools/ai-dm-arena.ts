@@ -1,6 +1,6 @@
-import { writeFile } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
-import { generateRoom } from '../src/vtt/room-generator';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
   CONVERSATION_CLIS,
   CONVERSATION_EFFORTS,
@@ -11,6 +11,17 @@ import {
   type ConversationTokenCounts,
 } from './ai-dm-conversation';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
+import type { AgentSessionAdapter } from '../src/vtt/agent-session';
+import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
+
+export const ARENA_BASES = ['standard', 'hard'] as const;
+export type ArenaBasis = (typeof ARENA_BASES)[number];
+
+export interface ArenaArm {
+  readonly label: string;
+  readonly model: string;
+  readonly effort: ConversationEffort;
+}
 
 export interface ArenaConfig {
   readonly rooms: number;
@@ -28,10 +39,15 @@ export interface ArenaConfig {
   readonly timeoutMs: number;
   readonly kbPath: string | null;
   readonly reactionAskDefault: UnattendedReactionAskDefault;
+  readonly basis: ArenaBasis;
+  readonly interleave: boolean;
+  readonly arms: readonly ArenaArm[];
 }
 
 export interface ArenaRow {
   readonly seed: number;
+  readonly basis: ArenaBasis;
+  readonly arm: string;
   readonly room: number;
   readonly round: number;
   readonly cli: ConversationCli;
@@ -89,16 +105,22 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   const argumentsValue = argv[0] === '--' ? argv.slice(1) : argv;
   const values = new Map<string, string>();
   let dryRun = false;
+  let interleave = false;
+  const rawArms: string[] = [];
   for (let index = 0; index < argumentsValue.length; index += 1) {
     const option = argumentsValue[index];
     if (option === '--dry-run') { dryRun = true; continue; }
+    if (option === '--interleave') { interleave = true; continue; }
     if (![
       '--rooms', '--reps', '--seed', '--cli', '--model', '--effort', '--out',
       '--escalation-model', '--escalation-effort',
       '--cli-bin', '--timeout-ms', '--kb',
       '--reaction-ask-default',
+      '--basis', '--arm',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
-    values.set(option ?? '', requiredValue(argumentsValue, index, option ?? '<missing>'));
+    const value = requiredValue(argumentsValue, index, option ?? '<missing>');
+    if (option === '--arm') rawArms.push(value);
+    else values.set(option ?? '', value);
     index += 1;
   }
   const seed = Number(values.get('--seed'));
@@ -128,6 +150,30 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
     throw new TypeError('--reaction-ask-default must be decline or take.');
   }
+  const basis = values.get('--basis') ?? 'standard';
+  if (!ARENA_BASES.includes(basis as ArenaBasis)) {
+    throw new TypeError('--basis must be standard or hard.');
+  }
+  const arms = rawArms.map((raw): ArenaArm => {
+    const [label, armModel, armEffort, extra] = raw.split(':');
+    if (label === undefined || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) ||
+      armModel === undefined || armModel.length === 0 || armEffort === undefined || extra !== undefined) {
+      throw new TypeError('--arm must use label:model:effort syntax.');
+    }
+    if (!CONVERSATION_EFFORTS.includes(armEffort as ConversationEffort)) {
+      throw new TypeError('--arm effort must be low, medium, high, or xhigh.');
+    }
+    return { label, model: armModel, effort: armEffort as ConversationEffort };
+  });
+  if (new Set(arms.map((arm) => arm.label)).size !== arms.length) {
+    throw new TypeError('--arm labels must be unique.');
+  }
+  if (interleave && arms.length < 2) {
+    throw new TypeError('--interleave requires at least two --arm label:model:effort values.');
+  }
+  if (!interleave && arms.length > 0) {
+    throw new TypeError('--arm is only valid with --interleave.');
+  }
   return {
     rooms: positiveInteger(values.get('--rooms') ?? '', '--rooms'),
     reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
@@ -144,36 +190,38 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
     kbPath,
     reactionAskDefault,
+    basis: basis as ArenaBasis,
+    interleave,
+    arms,
   };
 }
 
-export async function runArena(
+export interface ArenaRunOptions extends Omit<ConversationRunOptions, 'roomStates'> {
+  readonly adapterByArm?: Readonly<Record<string, AgentSessionAdapter>>;
+}
+
+function basisFixturesPath(config: ArenaConfig): string {
+  return resolve(config.cwd, config.basis === 'hard'
+    ? 'tests/fixtures/arena-basis-hard'
+    : 'tests/fixtures/arena-basis');
+}
+
+async function frozenRoomStates(config: ArenaConfig): Promise<readonly import('../src/combat/encounter').EncounterState[]> {
+  const fixturesPath = basisFixturesPath(config);
+  return Promise.all(Array.from({ length: config.rooms }, (_unused, index) =>
+    loadArenaFixture(resolve(fixturesPath, `seed-${String(config.seed + index)}.json`))));
+}
+
+function arenaRows(
   config: ArenaConfig,
-  options: Omit<ConversationRunOptions, 'roomStates'> = {},
-): Promise<readonly ArenaRow[]> {
-  const generated = Array.from({ length: config.rooms }, (_, index) => {
-    const seed = (config.seed + index) >>> 0;
-    return { seed, state: generateRoom(seed).encounter.state };
-  });
-  const result = await runConversation({
-    fixturesPath: resolve(config.cwd, 'tests/fixtures/arena-basis'),
-    rooms: config.rooms,
-    rounds: config.reps,
-    cli: config.cli,
-    model: config.model,
-    effort: config.effort,
-    escalationModel: config.escalationModel,
-    escalationEffort: config.escalationEffort,
-    outPath: config.outPath,
-    dryRun: config.dryRun,
-    cwd: config.cwd,
-    cliBin: config.cliBin,
-    timeoutMs: config.timeoutMs,
-    kbPath: config.kbPath,
-    reactionAskDefault: config.reactionAskDefault,
-  }, { ...options, roomStates: generated.map((entry) => entry.state) });
-  const rows = result.rows.map((row): ArenaRow => ({
-    seed: generated[row.room - 1]!.seed,
+  rows: readonly import('./ai-dm-conversation').ConversationRow[],
+  arm: string,
+  seeds: readonly number[],
+): readonly ArenaRow[] {
+  return rows.map((row): ArenaRow => ({
+    seed: seeds[row.room - 1]!,
+    basis: config.basis,
+    arm,
     room: row.room,
     round: row.round,
     cli: row.cli,
@@ -200,6 +248,79 @@ export async function runArena(
     roundNarrative: row.roundNarrative,
     chainEvidence: row.chainEvidence,
   }));
+}
+
+function conversationConfig(
+  config: ArenaConfig,
+  overrides: {
+    readonly rooms: number;
+    readonly rounds: number;
+    readonly model: string;
+    readonly effort: ConversationEffort;
+    readonly outPath: string;
+  },
+): import('./ai-dm-conversation').ConversationConfig {
+  return {
+    fixturesPath: basisFixturesPath(config),
+    rooms: overrides.rooms,
+    rounds: overrides.rounds,
+    cli: config.cli,
+    model: overrides.model,
+    effort: overrides.effort,
+    escalationModel: config.escalationModel,
+    escalationEffort: config.escalationEffort,
+    outPath: overrides.outPath,
+    dryRun: config.dryRun,
+    cwd: config.cwd,
+    cliBin: config.cliBin,
+    timeoutMs: config.timeoutMs,
+    kbPath: config.kbPath,
+    reactionAskDefault: config.reactionAskDefault,
+  };
+}
+
+export async function runArena(
+  config: ArenaConfig,
+  options: ArenaRunOptions = {},
+): Promise<readonly ArenaRow[]> {
+  const states = await frozenRoomStates(config);
+  const seeds = Array.from({ length: config.rooms }, (_unused, index) => config.seed + index);
+  const { adapterByArm, ...conversationOptions } = options;
+  let rows: readonly ArenaRow[];
+  if (!config.interleave) {
+    const result = await runConversation(conversationConfig(config, {
+      rooms: config.rooms,
+      rounds: config.reps,
+      model: config.model,
+      effort: config.effort,
+      outPath: config.outPath,
+    }), { ...conversationOptions, roomStates: states });
+    rows = arenaRows(config, result.rows, 'single', seeds);
+  } else {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-arena-interleaved-'));
+    const interleaved: ArenaRow[] = [];
+    for (let room = 1; room <= config.rooms; room += 1) {
+      for (let rep = 1; rep <= config.reps; rep += 1) {
+        for (const arm of config.arms) {
+          const result = await runConversation(conversationConfig(config, {
+            rooms: 1,
+            rounds: 1,
+            model: arm.model,
+            effort: arm.effort,
+            outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-${arm.label}.jsonl`),
+          }), {
+            ...conversationOptions,
+            ...(adapterByArm?.[arm.label] === undefined ? {} : { adapter: adapterByArm[arm.label] }),
+            roomStates: [states[room - 1]!],
+          });
+          const [row] = arenaRows(config, result.rows, arm.label, [seeds[room - 1]!]);
+          if (row === undefined) throw new Error('Interleaved arena unit produced no row.');
+          interleaved.push({ ...row, room, round: rep });
+        }
+      }
+    }
+    rows = interleaved;
+  }
   await writeFile(config.outPath, rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
   return rows;
 }
