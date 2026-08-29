@@ -25,6 +25,7 @@ import { AGENT_ADAPTER_VERSION, resolveAgentAdapter } from '../src/vtt/agent-ada
 import {
   LocalOpenAiAgentSessionAdapter,
   type LocalOpenAiConfig,
+  type LocalThinkMode,
 } from '../src/vtt/agent-adapters/local-openai';
 import type { ProposedIntentResolution, RoundIntentProposalEnvelope } from '../src/vtt/engine-envelopes';
 import { engineStateHandle } from '../src/vtt/engine-state-capsule';
@@ -151,6 +152,7 @@ export interface ConversationRow {
   readonly round: number;
   readonly cli: ConversationCli;
   readonly model: string;
+  readonly thinkMode: LocalThinkMode | null;
   readonly contextRevision: number;
   readonly projectionRevision: number;
   readonly sessionIdHash: string | null;
@@ -255,7 +257,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
       '--fixtures', '--rooms', '--rounds', '--reps', '--cli', '--model', '--effort',
       '--escalation-model', '--escalation-effort',
       '--out', '--cli-bin', '--timeout-ms', '--kb', '--reaction-ask-default',
-      '--local-base-url', '--local-model', '--local-api-key',
+      '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
     index += 1;
@@ -282,19 +284,24 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   }
   const selectedCli = cli as ConversationCli;
   const hasLocalOption = values.has('--local-base-url') || values.has('--local-model') ||
-    values.has('--local-api-key');
+    values.has('--local-api-key') || values.has('--local-think');
   if (selectedCli !== 'local-openai' && hasLocalOption) {
-    throw new TypeError('--local-base-url, --local-model, and --local-api-key require --cli local-openai.');
+    throw new TypeError('--local-base-url, --local-model, --local-api-key, and --local-think require --cli local-openai.');
   }
   const localBaseUrl = values.get('--local-base-url');
   const localModel = values.get('--local-model');
   if (selectedCli === 'local-openai' && (localBaseUrl === undefined || localModel === undefined)) {
     throw new TypeError('--cli local-openai requires --local-base-url and --local-model.');
   }
+  const localThink = values.get('--local-think') ?? 'off';
+  if (localThink !== 'on' && localThink !== 'off') {
+    throw new TypeError('--local-think must be on or off.');
+  }
   const localOpenAi: LocalOpenAiConfig | null = selectedCli === 'local-openai'
     ? {
         baseUrl: localBaseUrl ?? '',
         model: localModel ?? '',
+        thinkMode: localThink,
         ...(values.has('--local-api-key') ? { apiKey: values.get('--local-api-key') ?? '' } : {}),
       }
     : null;
@@ -1192,6 +1199,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
   const selectedAdapter = options.adapter ?? simulated ?? (config.cli === 'local-openai'
     ? new LocalOpenAiAgentSessionAdapter({
         baseUrl: config.localOpenAi?.baseUrl ?? '',
+        thinkMode: config.localOpenAi?.thinkMode ?? 'off',
         ...(config.localOpenAi?.apiKey === undefined ? {} : { apiKey: config.localOpenAi.apiKey }),
       })
     : resolveAgentAdapter(config.cli as AgentCliKind, {
@@ -1656,6 +1664,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
       const binding = journal.agentSession();
       const row: ConversationRow = {
         room, round, cli: config.cli, model: config.model,
+        thinkMode: config.localOpenAi?.thinkMode ?? null,
         contextRevision, projectionRevision: capsuleRevision,
         sessionIdHash: binding === null ? null : sha256(binding.sessionId), outcome, proposalId,
         kbHash: knowledgeBase?.hash ?? null,

@@ -52,6 +52,11 @@ export type ArenaBatchRunner = (config: ArenaConfig) => Promise<readonly Pick<
 
 export interface GenerateDataDependencies {
   readonly arenaRunner?: ArenaBatchRunner;
+  readonly heartbeat?: (line: string) => void;
+}
+
+function stdoutHeartbeat(line: string): void {
+  process.stdout.write(`[rl-generate] ${line}\n`);
 }
 
 function positiveInteger(value: string, option: string): number {
@@ -180,6 +185,7 @@ function arenaConfig(config: GenerateDataConfig, seed: number, outPath: string):
     '--kb', resolve(config.cwd, 'tests/fixtures/ai-dm-kb/k6.txt'),
     '--basis', config.basis,
     '--capture-rl-data',
+    '--generate-missing-rooms',
   ], config.cwd);
 }
 
@@ -188,9 +194,15 @@ export async function generateData(
   dependencies: GenerateDataDependencies = {},
 ): Promise<readonly GenerateDataManifest[]> {
   const arenaRunner = dependencies.arenaRunner ?? runArena;
+  const heartbeat = dependencies.heartbeat ?? stdoutHeartbeat;
+  heartbeat(
+    `start batches=${String(config.seedRanges.length)} reps=${String(config.reps)} ` +
+    `target=${config.targetDirectory}`,
+  );
   await mkdir(config.targetDirectory, { recursive: true });
   const completed: GenerateDataManifest[] = [];
   for (const range of config.seedRanges) {
+    heartbeat(`batch start=${String(range.start)} end=${String(range.end)}`);
     const batchDirectory = join(config.targetDirectory, `batch-${String(range.start)}-${String(range.end)}`);
     await mkdir(batchDirectory, { recursive: true });
     const manifestPath = join(config.targetDirectory, manifestName(range));
@@ -199,8 +211,12 @@ export async function generateData(
       .filter((entry) => entry.status === 'complete')
       .map((entry) => entry.seed));
     for (let seed = range.start; seed <= range.end; seed += 1) {
-      if (alreadyComplete.has(seed)) continue;
+      if (alreadyComplete.has(seed)) {
+        heartbeat(`seed=${String(seed)} status=skipped-complete`);
+        continue;
+      }
       const outputPath = join(batchDirectory, `seed-${String(seed)}.jsonl`);
+      heartbeat(`seed=${String(seed)} status=start`);
       try {
         const rows = await arenaRunner(arenaConfig(config, seed, outputPath));
         const serviceNullRows = rows.filter((row) => row.serviceNull || row.outcome === 'service_null').length;
@@ -213,6 +229,10 @@ export async function generateData(
           serviceNullRows,
           error: null,
         });
+        heartbeat(
+          `seed=${String(seed)} status=${serviceNullRows === 0 ? 'complete' : 'flapped'} ` +
+          `rows=${String(rows.length)}`,
+        );
       } catch (error) {
         manifest = replaceSeed(manifest, {
           seed,
@@ -223,11 +243,16 @@ export async function generateData(
           serviceNullRows: 0,
           error: error instanceof Error ? error.message : String(error),
         });
+        heartbeat(`seed=${String(seed)} status=failed`);
         await writeFile(manifestPath, `${canonicalJson(manifest)}\n`, 'utf8');
         throw error;
       }
       await writeFile(manifestPath, `${canonicalJson(manifest)}\n`, 'utf8');
     }
+    heartbeat(
+      `batch start=${String(range.start)} end=${String(range.end)} status=complete ` +
+      `seeds=${String(manifest.seeds.length)}`,
+    );
     completed.push(manifest);
   }
   return completed;
@@ -245,10 +270,15 @@ async function main(): Promise<void> {
   process.stdout.write(`batches=${String(manifests.length)} completed_seeds=${String(completed)} flapped_seeds=${String(flapped)}\n`);
 }
 
-const invokedPath = process.argv[1];
-if (process.env['VITEST'] !== 'true' && invokedPath !== undefined && (
-  invokedPath.endsWith('/generate-data.ts') || invokedPath.endsWith('\\generate-data.ts') ||
-  ((invokedPath.endsWith('/vite-node') || invokedPath.endsWith('\\vite-node') ||
-    invokedPath.endsWith('/vite-node.mjs') || invokedPath.endsWith('\\vite-node.mjs')) &&
-    process.argv.includes('--seed-range'))
-)) await main();
+const GENERATE_DATA_USAGE =
+  'Usage: rl:generate-data --seed-range START-END [--seed-range START-END ...] --reps N --target-dir PATH [--basis standard|hard] [--timeout-ms N] [--resume]';
+
+async function runCli(): Promise<void> {
+  try { await main(); }
+  catch (error) {
+    process.stderr.write(`${GENERATE_DATA_USAGE}\n${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+}
+
+if (process.env['VITEST'] !== 'true') await runCli();

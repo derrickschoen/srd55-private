@@ -26,5 +26,6 @@ export {
   openAiFunctionTools,
   type LocalOpenAiAdapterOptions,
   type LocalOpenAiConfig,
+  type LocalThinkMode,
   type OpenAiFunctionTool,
 } from './local-openai';

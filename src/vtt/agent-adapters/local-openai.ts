@@ -11,8 +11,11 @@ import {
 export interface LocalOpenAiConfig {
   readonly baseUrl: string;
   readonly model: string;
+  readonly thinkMode: LocalThinkMode;
   readonly apiKey?: string;
 }
+
+export type LocalThinkMode = 'on' | 'off';
 
 export interface OpenAiFunctionTool {
   readonly type: 'function';
@@ -25,6 +28,7 @@ export interface OpenAiFunctionTool {
 
 export interface LocalOpenAiAdapterOptions {
   readonly baseUrl: string;
+  readonly thinkMode: LocalThinkMode;
   readonly apiKey?: string;
   readonly fetch?: typeof fetch;
   readonly maximumToolRounds?: number;
@@ -179,6 +183,7 @@ export class LocalOpenAiAgentSessionAdapter {
   readonly #fetch: typeof fetch;
   readonly #maximumToolRounds: number;
   readonly #apiKey: string | undefined;
+  readonly #thinkMode: LocalThinkMode;
   readonly #messages = new Map<string, OpenAiMessage[]>();
   #sessionSequence = 0;
 
@@ -186,6 +191,7 @@ export class LocalOpenAiAgentSessionAdapter {
     this.#endpoint = chatCompletionsUrl(options.baseUrl);
     this.#fetch = options.fetch ?? fetch;
     this.#maximumToolRounds = options.maximumToolRounds ?? 16;
+    this.#thinkMode = options.thinkMode;
     if (!Number.isSafeInteger(this.#maximumToolRounds) || this.#maximumToolRounds < 1) {
       throw new TypeError('maximumToolRounds must be a positive safe integer.');
     }
@@ -253,7 +259,14 @@ export class LocalOpenAiAgentSessionAdapter {
     let usage: AgentUsage | null = null;
     let finalText = '';
     for (let toolRound = 0; toolRound < this.#maximumToolRounds; toolRound += 1) {
-      const completion = await this.#completion(invocation.model, messages, tools, signal, invocation.timeoutMs);
+      const completion = await this.#completion(
+        invocation.model,
+        invocation.reasoningEffort,
+        messages,
+        tools,
+        signal,
+        invocation.timeoutMs,
+      );
       usage = addUsage(usage, completion.usage);
       messages.push(completion.message);
       finalText = completion.message.content ?? finalText;
@@ -291,6 +304,7 @@ export class LocalOpenAiAgentSessionAdapter {
 
   async #completion(
     model: string,
+    reasoningEffort: AgentInvocation['reasoningEffort'],
     messages: readonly OpenAiMessage[],
     tools: readonly OpenAiFunctionTool[],
     signal: AbortSignal,
@@ -312,7 +326,16 @@ export class LocalOpenAiAgentSessionAdapter {
             'content-type': 'application/json',
             ...(this.#apiKey === undefined ? {} : { authorization: `Bearer ${this.#apiKey}` }),
           },
-          body: JSON.stringify({ model, messages, tools, tool_choice: 'auto', stream: false }),
+          body: JSON.stringify({
+            model,
+            messages,
+            tools,
+            tool_choice: 'auto',
+            stream: false,
+            reasoning_effort: this.#thinkMode === 'off'
+              ? 'none'
+              : reasoningEffort === 'xhigh' ? 'high' : reasoningEffort,
+          }),
           signal: controller.signal,
         });
       } catch (error) {

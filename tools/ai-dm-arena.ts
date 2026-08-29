@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
@@ -12,8 +12,9 @@ import {
 } from './ai-dm-conversation';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
 import type { AgentSessionAdapter } from '../src/vtt/agent-session';
-import type { LocalOpenAiConfig } from '../src/vtt/agent-adapters/local-openai';
+import type { LocalOpenAiConfig, LocalThinkMode } from '../src/vtt/agent-adapters/local-openai';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
+import { generateRoom } from '../src/vtt/room-generator';
 
 export const ARENA_BASES = ['standard', 'hard'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
@@ -46,6 +47,7 @@ export interface ArenaConfig {
   readonly interleave: boolean;
   readonly arms: readonly ArenaArm[];
   readonly captureRlData: boolean;
+  readonly generateMissingRooms: boolean;
   readonly localOpenAi: LocalOpenAiConfig | null;
 }
 
@@ -57,6 +59,7 @@ export interface ArenaRow {
   readonly round: number;
   readonly cli: ConversationCli;
   readonly model: string;
+  readonly thinkMode: LocalThinkMode | null;
   readonly kbHash: string | null;
   readonly snippetHash: string;
   readonly snippetSetHash: string;
@@ -116,18 +119,20 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   let dryRun = false;
   let interleave = false;
   let captureRlData = false;
+  let generateMissingRooms = false;
   const rawArms: string[] = [];
   for (let index = 0; index < argumentsValue.length; index += 1) {
     const option = argumentsValue[index];
     if (option === '--dry-run') { dryRun = true; continue; }
     if (option === '--interleave') { interleave = true; continue; }
     if (option === '--capture-rl-data') { captureRlData = true; continue; }
+    if (option === '--generate-missing-rooms') { generateMissingRooms = true; continue; }
     if (![
       '--rooms', '--reps', '--seed', '--cli', '--model', '--effort', '--out',
       '--escalation-model', '--escalation-effort',
       '--cli-bin', '--timeout-ms', '--kb',
       '--reaction-ask-default',
-      '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key',
+      '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
     if (option === '--arm') rawArms.push(value);
@@ -158,19 +163,24 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   }
   const selectedCli = cli as ConversationCli;
   const hasLocalOption = values.has('--local-base-url') || values.has('--local-model') ||
-    values.has('--local-api-key');
+    values.has('--local-api-key') || values.has('--local-think');
   if (selectedCli !== 'local-openai' && hasLocalOption) {
-    throw new TypeError('--local-base-url, --local-model, and --local-api-key require --cli local-openai.');
+    throw new TypeError('--local-base-url, --local-model, --local-api-key, and --local-think require --cli local-openai.');
   }
   const localBaseUrl = values.get('--local-base-url');
   const localModel = values.get('--local-model');
   if (selectedCli === 'local-openai' && (localBaseUrl === undefined || localModel === undefined)) {
     throw new TypeError('--cli local-openai requires --local-base-url and --local-model.');
   }
+  const localThink = values.get('--local-think') ?? 'off';
+  if (localThink !== 'on' && localThink !== 'off') {
+    throw new TypeError('--local-think must be on or off.');
+  }
   const localOpenAi: LocalOpenAiConfig | null = selectedCli === 'local-openai'
     ? {
         baseUrl: localBaseUrl ?? '',
         model: localModel ?? '',
+        thinkMode: localThink,
         ...(values.has('--local-api-key') ? { apiKey: values.get('--local-api-key') ?? '' } : {}),
       }
     : null;
@@ -241,6 +251,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     interleave,
     arms,
     captureRlData,
+    generateMissingRooms,
     localOpenAi,
   };
 }
@@ -262,8 +273,18 @@ function basisFixturesPath(config: ArenaConfig): string {
 
 async function frozenRoomStates(config: ArenaConfig): Promise<readonly import('../src/combat/encounter').EncounterState[]> {
   const fixturesPath = basisFixturesPath(config);
-  return Promise.all(Array.from({ length: config.rooms }, (_unused, index) =>
-    loadArenaFixture(resolve(fixturesPath, `seed-${String(config.seed + index)}.json`))));
+  return Promise.all(Array.from({ length: config.rooms }, async (_unused, index) => {
+    const seed = config.seed + index;
+    const fixturePath = resolve(fixturesPath, `seed-${String(seed)}.json`);
+    try {
+      await access(fixturePath);
+      return await loadArenaFixture(fixturePath);
+    } catch (error) {
+      if (!config.generateMissingRooms || !(error instanceof Error) ||
+        !('code' in error) || error.code !== 'ENOENT') throw error;
+      return generateRoom(seed, { difficulty: config.basis }).encounter.state;
+    }
+  }));
 }
 
 function arenaRows(
@@ -280,6 +301,7 @@ function arenaRows(
     round: row.round,
     cli: row.cli,
     model: row.model,
+    thinkMode: row.thinkMode,
     kbHash: row.kbHash,
     snippetHash: row.snippetHash,
     snippetSetHash: row.snippetSetHash,

@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -28,12 +29,13 @@ describe('RL SFT extractor', () => {
   it('pins the exact chat example produced from the authorized fixture row', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'd410-extract-golden-'));
     const outPath = join(directory, 'sft.jsonl');
+    const heartbeats: string[] = [];
 
     const stats = await extractSft({
       arenaPaths: [resolve(fixturePath)],
       rolloutPaths: [],
       outPath,
-    });
+    }, { heartbeat: (line) => { heartbeats.push(line); } });
 
     const expected: SftExample = {
       messages: [
@@ -94,6 +96,11 @@ describe('RL SFT extractor', () => {
     expect(formatExtractSftStats(stats)).toBe(
       'examples=1 rooms=1 deduplicated=0 dedupe=state-digest+plan-hash',
     );
+    expect(heartbeats).toEqual([
+      `start batches=1 rollouts=0 out=${outPath}`,
+      `batch path=${resolve(fixturePath)} status=start`,
+      `batch path=${resolve(fixturePath)} status=complete examples=1`,
+    ]);
   });
 
   it('deduplicates by state digest plus plan hash', async () => {
@@ -199,5 +206,22 @@ describe('RL SFT extractor', () => {
 
     await expect(extractSft({ arenaPaths: [arenaPath], rolloutPaths: [], outPath }))
       .rejects.toThrow('contains prohibited CC-BY-SA provenance');
+  });
+
+  it('runs on bad CLI arguments and exits nonzero with usage text', { timeout: 15_000 }, () => {
+    const environment = { ...process.env };
+    delete environment.FORCE_COLOR;
+    delete environment.NO_COLOR;
+    delete environment.VITEST;
+    const result = spawnSync(process.execPath, [
+      'node_modules/vite-node/vite-node.mjs',
+      'tools/rl/extract-sft.ts',
+      '--',
+      '--not-an-extractor-option',
+    ], { cwd: process.cwd(), encoding: 'utf8', env: environment });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Usage: rl:extract-sft');
+    expect(result.stderr).toContain('Unknown extractor option --not-an-extractor-option.');
   });
 });

@@ -126,12 +126,13 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         '--out', join(directory, 'rows.jsonl'),
         '--cli', 'local-openai', '--local-base-url', endpoint.baseUrl,
         '--local-model', 'quantized-SIMULATED', '--local-api-key', 'secret-SIMULATED',
+        '--local-think', 'on',
         '--effort', 'low', '--kb', 'tests/fixtures/ai-dm-kb/k6.txt',
       ]);
       const rows = await runArena(config);
 
       expect(rows).toEqual([expect.objectContaining({
-        cli: 'local-openai', model: 'quantized-SIMULATED', outcome: 'authorized',
+        cli: 'local-openai', model: 'quantized-SIMULATED', thinkMode: 'on', outcome: 'authorized',
         toolCalls: 2, callsPerRound: 1, flapRetries: 0, serviceNull: false,
         plannedBy: { model: 'quantized-SIMULATED', effort: 'low' },
         refusals: [],
@@ -142,6 +143,7 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         '/v1/chat/completions', '/v1/chat/completions',
       ]);
       expect(endpoint.requests.every((request) => request.body['model'] === 'quantized-SIMULATED')).toBe(true);
+      expect(endpoint.requests.every((request) => request.body['reasoning_effort'] === 'low')).toBe(true);
       expect(endpoint.requests.every((request) => request.headers.authorization === 'Bearer secret-SIMULATED')).toBe(true);
       expect(messages(endpoint.requests[1]?.body['messages'])).toEqual(expect.arrayContaining([
         expect.objectContaining({
@@ -167,8 +169,9 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
       ]));
 
       expect(endpoint.requests).toHaveLength(1);
+      expect(endpoint.requests[0]?.body['reasoning_effort']).toBe('none');
       expect(rows).toEqual([expect.objectContaining({
-        model: 'quantized-SIMULATED', outcome: 'local_error',
+        model: 'quantized-SIMULATED', thinkMode: 'off', outcome: 'local_error',
         callsPerRound: 1, agentDispatched: true,
         flapRetries: 0, serviceNull: false, proposalId: null,
         refusals: [expect.stringContaining('HTTP 503')],
