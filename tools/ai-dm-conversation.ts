@@ -182,6 +182,7 @@ export interface ConversationRunOptions {
   readonly roomStates?: readonly EncounterState[];
   readonly store?: BrowserSessionStore;
   readonly adapter?: AgentSessionAdapter;
+  readonly onPrimaryDispatchStart?: () => void;
   /** Test-only browser-reload proof point; one-based completed round count. */
   readonly restoreAfterRound?: number;
   /** SIMULATED-only exhaustion cases, encoded as `room-N-round-N`. */
@@ -1218,6 +1219,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
               initialLauncher.recoveryManifestPath,
             );
             initialDispatchPlanner = plannerAttribution(primaryInvocation);
+            options.onPrimaryDispatchStart?.();
             const turn = journal.agentSession() === null
               ? await lifecycle.coldStartRound(primaryInvocation, new AbortController().signal)
               : await lifecycle.resumeRound(primaryInvocation, new AbortController().signal);
