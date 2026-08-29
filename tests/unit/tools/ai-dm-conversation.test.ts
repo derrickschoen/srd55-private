@@ -192,9 +192,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
     const sessionId = agentSessionIdFromCli(
       `codex:serialized:${invocation.runId}:session-${String(this.#startCount)}`,
     );
-    return this.#startCount === 1
-      ? this.completed(sessionId)
-      : this.dispatch(sessionId, invocation);
+    return this.dispatch(sessionId, invocation);
   }
 
   async resume(binding: AgentSessionBinding, invocation: AgentInvocation): Promise<AgentTurnResult> {
@@ -475,16 +473,16 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--escalation-model', 'gpt-escalation', '--escalation-effort', 'high',
     ]), { adapter: tieredAdapter, roomStates: [generateRoom(3_943_006).encounter.state] });
 
-    const untieredPrimary = untieredAdapter.resumeInvocations[0];
-    const tieredPrimary = tieredAdapter.resumeInvocations[0];
+    const untieredPrimary = untieredAdapter.startInvocations[0];
+    const tieredPrimary = tieredAdapter.startInvocations[0];
     if (untieredPrimary === undefined || tieredPrimary === undefined) {
       throw new Error('SIMULATED primary dispatch was not recorded.');
     }
     expect(primaryCodexArgvBytes(tieredPrimary)).toBe(primaryCodexArgvBytes(untieredPrimary));
     expect(tieredAdapter.startInvocations).toHaveLength(2);
-    expect(tieredAdapter.resumeInvocations).toHaveLength(1);
+    expect(tieredAdapter.resumeInvocations).toHaveLength(0);
     expect(untieredAdapter.startInvocations).toHaveLength(1);
-    expect(untieredAdapter.resumeInvocations).toHaveLength(2);
+    expect(untieredAdapter.resumeInvocations).toHaveLength(1);
   });
 
   it.each([
@@ -519,17 +517,17 @@ describe('AI-DM engine MCP conversation runner', () => {
         roomStates: [generateRoom(3_943_006).encounter.state],
       });
 
-      expect(adapter.resumeInvocations[0]).toEqual(expect.objectContaining({
+      expect(adapter.startInvocations[0]).toEqual(expect.objectContaining({
         model: 'gpt-base', reasoningEffort: 'low',
       }));
       const correctionInvocation = expectedEscalated
         ? adapter.startInvocations[1]
-        : adapter.resumeInvocations[1];
+        : adapter.resumeInvocations[0];
       expect(correctionInvocation).toEqual(expect.objectContaining({
         model: expectedPlanner.model, reasoningEffort: expectedPlanner.effort,
       }));
       expect(adapter.startInvocations).toHaveLength(expectedEscalated ? 2 : 1);
-      expect(adapter.resumeInvocations).toHaveLength(expectedEscalated ? 1 : 2);
+      expect(adapter.resumeInvocations).toHaveLength(expectedEscalated ? 0 : 1);
       expect(result.rows[0]).toEqual(expect.objectContaining({
         outcome: 'authorized',
         plannedBy: expectedPlanner,
@@ -568,7 +566,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       adapter,
       roomStates: [generateRoom(3_943_001).encounter.state],
     });
-    const initialInvocations = adapter.resumeInvocations.filter((entry) =>
+    const initialInvocations = [...adapter.startInvocations, ...adapter.resumeInvocations].filter((entry) =>
       entry.launcherToken.includes('-initial-launcher.json'));
     const secondManifest = initialInvocations[1] === undefined
       ? null
@@ -819,7 +817,9 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.projectionRevision).toBeGreaterThan(result.rows[0]?.contextRevision ?? 0);
     expect(result.rows[1]?.contextRevision).toBe(result.rows[0]?.projectionRevision);
     expect(result.rows[2]?.contextRevision).toBeGreaterThan(result.rows[1]?.projectionRevision ?? 0);
-    expect(result.binding.sessionId).toBe('agent-session:SIMULATED:encounter:ai-dm-conversation');
+    expect(result.binding?.sessionId).toBe('agent-session:SIMULATED:encounter:ai-dm-conversation');
+    expect(result.binding).not.toBeNull();
+    if (result.binding === null) throw new Error('SIMULATED run lost its agent binding.');
     expect(result.binding.lastDispatchedRevision).toBeGreaterThan(result.binding.startedAtRevision);
     expect(result.restoredMidRun).toBe(true);
     expect(result.journalExport).toContain('agent-session:SIMULATED:encounter:ai-dm-conversation');
@@ -837,7 +837,9 @@ describe('AI-DM engine MCP conversation runner', () => {
     const result = await runConversation(config);
 
     expect(result.rows).toEqual([
-      expect.objectContaining({ outcome: 'authorized', toolCalls: 2, refusals: [], kbHash: null }),
+      expect.objectContaining({
+        outcome: 'authorized', toolCalls: 2, callsPerRound: 1, refusals: [], kbHash: null,
+      }),
     ]);
     expect(result.rows[0]?.tokens).toEqual({ input: 0, cachedInput: 0, output: 0, reasoning: 0 });
   });
@@ -945,17 +947,10 @@ describe('AI-DM engine MCP conversation runner', () => {
     ].join('\n');
     expect(injectedText.split(kbText).length - 1).toBe(1);
 
-    const roomTransitions = adapter.resumeInvocations.filter((entry) =>
-      entry.prompt.startsWith('[ROOM_TRANSITION]'));
-    expect(roomTransitions).toHaveLength(2);
-    expect(roomTransitions.every((entry) =>
-      entry.prompt.includes('get_turn_context once with granularity "full"'))).toBe(true);
-    expect(roomTransitions.every((entry) => {
-      const manifest = JSON.parse(readFileSync(entry.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
-      return manifest.turnContextDeltaBase === undefined;
-    })).toBe(true);
+    expect(adapter.resumeInvocations.some((entry) =>
+      entry.prompt.startsWith('[ROOM_TRANSITION]'))).toBe(false);
 
-    const initialRoundInvocations = adapter.resumeInvocations.filter((entry) =>
+    const initialRoundInvocations = [...adapter.startInvocations, ...adapter.resumeInvocations].filter((entry) =>
       entry.launcherToken.includes('-initial-launcher.json'));
     expect(initialRoundInvocations).toHaveLength(9);
     expect(initialRoundInvocations.every((entry) => {
@@ -966,6 +961,25 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows.every((row) => row.kbHash === expectedHash)).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line)))
       .toHaveLength(3);
+  });
+
+  it('starts the persistent SIMULATED session with the first round plan in one model dispatch', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-cold-plan-'));
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+    ]));
+
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      outcome: 'authorized', agentDispatched: true, callsPerRound: 1,
+    }));
+  });
+
+  it('directs K6 to consume an inline suggestion without fetching the same play again', () => {
+    const k6 = readFileSync('tests/fixtures/ai-dm-kb/k6.txt', 'utf8');
+
+    expect(k6).toContain('If suggested_plan is present, use its intents directly');
+    expect(k6).toContain('do not call engine.propose_from_play');
+    expect(k6).toContain('Only when suggested_plan is absent');
   });
 
   it('admits only the active codex and claude-code adapters', () => {

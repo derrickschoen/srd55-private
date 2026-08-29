@@ -29,33 +29,35 @@ import {
 
 class FakeCodexUsageAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
-  resumeCalls = 0;
-  readonly resumePrompts: string[] = [];
+  modelCalls = 0;
+  readonly prompts: string[] = [];
 
   async probe() { return { present: true, version: 'SIMULATED' }; }
 
-  async start(_invocation: AgentInvocation): Promise<AgentTurnResult> {
-    return {
-      sessionId: agentSessionIdFromCli('codex-arena-usage'),
-      finalText: '',
-      usage: null,
-      exit: 'completed',
-    };
+  async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
+    return this.completed(agentSessionIdFromCli('codex-arena-usage'), invocation);
   }
 
   async resume(binding: AgentSessionBinding, invocation: AgentInvocation): Promise<AgentTurnResult> {
+    return this.completed(binding.sessionId, invocation);
+  }
+
+  private completed(
+    sessionId: AgentTurnResult['sessionId'],
+    invocation: AgentInvocation,
+  ): AgentTurnResult {
     const usages = [
       { input_tokens: 101, cached_input_tokens: 31, output_tokens: 17, reasoning_output_tokens: 7 },
       { input_tokens: 203, cached_input_tokens: 41, output_tokens: 29, reasoning_output_tokens: 11 },
       { input_tokens: 307, cached_input_tokens: 43, output_tokens: 31, reasoning_output_tokens: 13 },
     ] as const;
-    const usage = usages[this.resumeCalls];
-    if (usage === undefined) throw new Error('Unexpected fake Codex resume.');
-    this.resumeCalls += 1;
-    this.resumePrompts.push(invocation.prompt);
+    const usage = usages[this.modelCalls];
+    if (usage === undefined) throw new Error('Unexpected fake Codex model call.');
+    this.modelCalls += 1;
+    this.prompts.push(invocation.prompt);
     const decoded = decodeCodexTurn(
       `${JSON.stringify({ type: 'turn.completed', usage })}\n`,
-      binding.sessionId,
+      sessionId,
     );
     return {
       sessionId: agentSessionIdFromCli(decoded.sessionId),
@@ -442,9 +444,9 @@ describe('AI-DM arena', () => {
 
     const rows = await runArena(config, { adapter });
 
-    expect(adapter.resumeCalls).toBe(3);
-    expect(adapter.resumePrompts[0]).not.toContain('[SERVICE_RETRY]');
-    expect(adapter.resumePrompts.slice(1).every((prompt) =>
+    expect(adapter.modelCalls).toBe(3);
+    expect(adapter.prompts[0]).not.toContain('[SERVICE_RETRY]');
+    expect(adapter.prompts.slice(1).every((prompt) =>
       prompt.includes('[SERVICE_RETRY]') && prompt.includes('Retry the same round now.'))).toBe(true);
     expect(rows).toEqual([
       expect.objectContaining({
@@ -453,6 +455,7 @@ describe('AI-DM arena', () => {
         agentDispatched: true,
         flapRetries: 2,
         serviceNull: true,
+        callsPerRound: 3,
         authorizedPlan: null,
         roundNarrative: null,
         chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
@@ -461,7 +464,7 @@ describe('AI-DM arena', () => {
     ]);
     expect(JSON.parse(readFileSync(outPath, 'utf8').trim())).toEqual(
       expect.objectContaining({
-        flapRetries: 2, serviceNull: true,
+        flapRetries: 2, serviceNull: true, callsPerRound: 3,
         tokens: { input: 611, cachedInput: 115, output: 77, reasoning: 31 },
       }),
     );
@@ -478,7 +481,7 @@ describe('AI-DM arena', () => {
     const [row] = await runArena(config, { failBeforeDispatch: ['room-1-round-1'] });
 
     expect(row).toEqual(expect.objectContaining({
-      outcome: 'refused', agentDispatched: false, toolCalls: 0,
+      outcome: 'refused', agentDispatched: false, toolCalls: 0, callsPerRound: 0,
       plannedBy: null, escalated: false, escalationModel: null,
       authorizedPlan: null, roundNarrative: null,
       chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },

@@ -148,7 +148,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(UNVERIFIED_CONTRACT_CODEX).toContain('UNVERIFIED_CONTRACT');
   });
 
-  it('SIMULATED Codex disables project docs, recommended plugins, and skill instructions only for arena sessions', () => {
+  it('SIMULATED Codex disables project docs, the plugin surface, and skill instructions only for arena sessions', () => {
     const base = {
       cwd,
       model: invocation.model,
@@ -162,14 +162,14 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     const arenaResume = codexArgv({ ...base, arenaSession: true, sessionId: 'codex-arena-thread' });
 
     expect(ordinary).not.toContain('project_doc_max_bytes=0');
-    expect(ordinary).not.toContain('features.recommended_plugins=false');
+    expect(ordinary).not.toContain('features.plugins=false');
     expect(ordinary).not.toContain('skills.include_instructions=false');
     expect(arena).toContain('project_doc_max_bytes=0');
-    expect(arena).toContain('features.recommended_plugins=false');
+    expect(arena).toContain('features.plugins=false');
     expect(arena).toContain('skills.include_instructions=false');
     expect(arenaResume).toEqual(expect.arrayContaining([
       'project_doc_max_bytes=0',
-      'features.recommended_plugins=false',
+      'features.plugins=false',
       'skills.include_instructions=false',
       'resume',
       'codex-arena-thread',

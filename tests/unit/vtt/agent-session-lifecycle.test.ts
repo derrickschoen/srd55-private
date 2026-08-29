@@ -130,14 +130,13 @@ describe('SIMULATED agent session lifecycle', () => {
       expect(adapter.startInvocations[1]?.prompt).toContain('"format":"recovery_bootstrap"');
       expect(adapter.startInvocations[1]?.prompt).toContain(predecessorHash);
       expect(adapter.startInvocations[1]?.prompt).not.toContain('agent-session:failed');
+      expect(adapter.startInvocations[1]?.prompt).toContain('[RECOVERY_DISPATCH]\npending-round');
       expect(adapter.startInvocations[1]?.launcherToken).toBe('SIMULATED-full-launcher-token');
       expect(adapter.resumeInvocations.map((entry) => entry.binding.sessionId)).toEqual([
         agentSessionId('agent-session:failed'),
-        agentSessionId('agent-session:successor'),
       ]);
       expect(adapter.resumeInvocations.map((entry) => entry.invocation.launcherToken)).toEqual([
         'SIMULATED-delta-launcher-token',
-        'SIMULATED-full-launcher-token',
       ]);
       const recovered = store.revisions(sessionId).find(
         (revision) => revision.transition.kind === 'agent_session_recovered',

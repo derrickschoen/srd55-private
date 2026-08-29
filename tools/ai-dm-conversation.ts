@@ -17,7 +17,7 @@ import {
 } from '../src/combat/values';
 import { sha256 } from '../src/crypto/sha256';
 import {
-  type AgentCliKind, type AgentInvocation, type AgentSessionAdapter,
+  type AgentCliKind, type AgentFailureClassification, type AgentInvocation, type AgentSessionAdapter,
   type AgentSessionBinding, type AgentTurnResult, type AgentUsage,
 } from '../src/vtt/agent-session';
 import { AgentSessionLifecycle } from '../src/vtt/agent-session-lifecycle';
@@ -136,7 +136,7 @@ export interface ConversationRow {
   readonly cli: ConversationCli;
   readonly contextRevision: number;
   readonly projectionRevision: number;
-  readonly sessionIdHash: string;
+  readonly sessionIdHash: string | null;
   readonly kbHash: string | null;
   readonly snippetHash: string;
   readonly snippetSetHash: string;
@@ -149,6 +149,7 @@ export interface ConversationRow {
   readonly tokens: ConversationTokenCounts;
   readonly refusals: readonly string[];
   readonly toolCalls: number;
+  readonly callsPerRound: number;
   readonly agentDispatched: boolean;
   readonly flapRetries: 0 | 1 | 2;
   readonly serviceNull: boolean;
@@ -172,7 +173,7 @@ export interface ConversationPlannerAttribution {
 
 export interface ConversationRunResult {
   readonly rows: readonly ConversationRow[];
-  readonly binding: AgentSessionBinding;
+  readonly binding: AgentSessionBinding | null;
   readonly journalExport: string;
   readonly restoredMidRun: boolean;
 }
@@ -725,9 +726,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
       ? `agent-session:SIMULATED:${invocation.runId}`
       : `agent-session:SIMULATED:${invocation.runId}:fresh-${String(this.#starts)}`;
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
-    return manifest.phase === 'correction'
-      ? this.#dispatch(sessionId, invocation, false)
-      : completedSimulated(sessionId);
+    return this.#dispatch(sessionId, invocation, false);
   }
 
   async resume(binding: AgentSessionBinding, invocation: AgentInvocation): Promise<AgentTurnResult> {
@@ -769,6 +768,37 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   }
 
   classifyFailure(): 'unknown' { return 'unknown'; }
+}
+
+class ModelCallBookkeepingAdapter implements AgentSessionAdapter {
+  readonly kind: AgentCliKind;
+  #modelCalls = 0;
+
+  constructor(private readonly inner: AgentSessionAdapter) {
+    this.kind = inner.kind;
+  }
+
+  get modelCalls(): number { return this.#modelCalls; }
+
+  probe() { return this.inner.probe(); }
+
+  start(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
+    this.#modelCalls += 1;
+    return this.inner.start(invocation, signal);
+  }
+
+  resume(
+    binding: AgentSessionBinding,
+    invocation: AgentInvocation,
+    signal: AbortSignal,
+  ): Promise<AgentTurnResult> {
+    this.#modelCalls += 1;
+    return this.inner.resume(binding, invocation, signal);
+  }
+
+  classifyFailure(error: unknown): AgentFailureClassification {
+    return this.inner.classifyFailure(error);
+  }
 }
 
 function completedSimulated(value: string): AgentTurnResult {
@@ -1048,7 +1078,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
     options.reactionGuidanceByRequest ?? {},
     options.suggestionResponseByRequest ?? {},
   ) : null;
-  const adapter = options.adapter ?? simulated ?? resolveAgentAdapter(config.cli, {
+  const selectedAdapter = options.adapter ?? simulated ?? resolveAgentAdapter(config.cli, {
     binary: config.cliBin, cwd: config.cwd, engineCommand: process.execPath,
     engineToolProfile: 'dm',
     engineArgs: [
@@ -1066,7 +1096,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
       } catch { /* non-JSON */ }
     },
   });
-  if (adapter.kind !== config.cli) throw new Error('Configured CLI and agent adapter kind disagree.');
+  if (selectedAdapter.kind !== config.cli) throw new Error('Configured CLI and agent adapter kind disagree.');
+  const adapter = new ModelCallBookkeepingAdapter(selectedAdapter);
   const rows: ConversationRow[] = [];
   let capsuleRevision = 1;
   const engineSession = new EngineRoundSession(
@@ -1094,54 +1125,27 @@ export async function runConversation(config: ConversationConfig, options: Conve
     return prepared.snapshot;
   };
 
-  const firstSnapshot = prepareRound({
+  prepareRound({
     runId, branchId, revision: capsuleRevision, requestId: 'request:room-1-round-1',
     phase: 'initial', room: 1, historyKind: 'session_started',
   });
   let lifecycle = new AgentSessionLifecycle(journal, adapter, AGENT_ADAPTER_VERSION);
-  const bootstrap = await writeLauncher({
-    directory: artifacts, name: 'bootstrap', snapshot: firstSnapshot,
-    room: 1, historyKind: 'session_started',
-  });
-  await lifecycle.coldStart(invocation(
-    config, runId,
-    'Establish one persistent AI-DM session for this dungeon run. Do not propose a turn until the host resumes you.',
-    bootstrap.manifestPath,
-    knowledgeBase?.text ?? null,
-  ), new AbortController().signal);
 
   for (let room = 1; room <= config.rooms; room += 1) {
     if (room > 1) {
       engineSession.replaceEncounterState(states[room - 1]!);
       capsuleRevision += 1;
       const requestId = `request:room-${String(room)}-round-1`;
-      const snapshot = prepareRound({
+      prepareRound({
         runId, branchId, revision: capsuleRevision, requestId,
         phase: 'initial', room, historyKind: 'room_transition',
       });
-      const launcher = await writeLauncher({
-        directory: artifacts, name: `room-${String(room)}-transition`, snapshot,
-        room, historyKind: 'room_transition',
-      });
-      const contextCallsBeforeTransition = simulated?.contextCallsByRequest.get(requestId) ??
-        observedTurnContextCalls;
-      await lifecycle.resumeRoomTransition(invocation(
-        config, runId,
-        `[ROOM_TRANSITION] Enter room ${String(room)}. Call engine.get_turn_context once with granularity "full"; do not submit intents yet.`,
-        launcher.manifestPath,
-        null,
-        basePlanner,
-        launcher.recoveryManifestPath,
-      ), new AbortController().signal);
-      const contextCallsAfterTransition = simulated?.contextCallsByRequest.get(requestId) ??
-        observedTurnContextCalls;
-      lastSeenTurnContext = contextCallsAfterTransition > contextCallsBeforeTransition
-        ? fullTurnContextBase(engineSession.currentState(), snapshot)
-        : undefined;
+      lastSeenTurnContext = undefined;
     }
 
     for (let round = 1; round <= config.rounds; round += 1) {
       const started = performance.now();
+      const modelCallsBeforeRound = adapter.modelCalls;
       observedToolCalls = 0;
       observedTurnContextCalls = 0;
       observedContextTruncated = false;
@@ -1190,7 +1194,6 @@ export async function runConversation(config: ConversationConfig, options: Conve
         if (options.failBeforeDispatch?.includes(key) === true) {
           throw new Error('SIMULATED host failure before agent dispatch.');
         }
-        const dispatchBefore = journal.agentSession()?.lastDispatchedRevision ?? null;
         let proposed: RoundIntentProposalEnvelope | null = null;
         const toolCallsObserved = (): number =>
           simulated?.callsByRequest.get(requestId) ?? observedToolCalls;
@@ -1210,13 +1213,14 @@ export async function runConversation(config: ConversationConfig, options: Conve
               config, runId,
               `${retryNote}${turnContextPrompt(lastSeenTurnContext)}\n\n${primaryPrompt}`,
               initialLauncher.manifestPath,
-              null, basePlanner, initialLauncher.recoveryManifestPath,
+              journal.agentSession() === null ? knowledgeBase?.text ?? null : null,
+              basePlanner,
+              initialLauncher.recoveryManifestPath,
             );
             initialDispatchPlanner = plannerAttribution(primaryInvocation);
-            const turn = await lifecycle.resumeRound(
-              primaryInvocation,
-              new AbortController().signal,
-            );
+            const turn = journal.agentSession() === null
+              ? await lifecycle.coldStartRound(primaryInvocation, new AbortController().signal)
+              : await lifecycle.resumeRound(primaryInvocation, new AbortController().signal);
             roundUsage = addAgentUsage(roundUsage, turn.usage);
             proposed = takeRoundProposal(initialLauncher.spoolPath);
             const flapped = turn.exit === 'completed' && proposed === null &&
@@ -1233,8 +1237,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
             flapRetries = attempt === 0 ? 1 : 2;
           }
         } finally {
-          const dispatchAfter = journal.agentSession()?.lastDispatchedRevision ?? null;
-          agentDispatched = dispatchAfter !== null && dispatchAfter !== dispatchBefore;
+          agentDispatched = adapter.modelCalls > modelCallsBeforeRound;
         }
         if (!serviceNull) {
         const engineRejections = simulated?.rejectionsByRequest.get(requestId) ?? observedRejections;
@@ -1483,10 +1486,9 @@ export async function runConversation(config: ConversationConfig, options: Conve
       }
       const wall = performance.now() - started;
       const binding = journal.agentSession();
-      if (binding === null) throw new Error('Conversation lost its persisted agent session binding.');
       const row: ConversationRow = {
         room, round, cli: config.cli, contextRevision, projectionRevision: capsuleRevision,
-        sessionIdHash: sha256(binding.sessionId), outcome, proposalId,
+        sessionIdHash: binding === null ? null : sha256(binding.sessionId), outcome, proposalId,
         kbHash: knowledgeBase?.hash ?? null,
         snippetHash: SNIPPET_REGISTRY.snippetHash,
         snippetSetHash: SNIPPET_REGISTRY.snippetSetHash,
@@ -1496,6 +1498,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
         wallPerCreature: wall / Math.max(1, livingMonsterIds(engineSession.currentState()).length),
         tokens: tokenCounts(roundUsage), refusals,
         toolCalls: simulated?.callsByRequest.get(requestId) ?? observedToolCalls,
+        callsPerRound: adapter.modelCalls - modelCallsBeforeRound,
         agentDispatched, flapRetries, serviceNull,
         contextTruncated: simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated,
         plannedBy, escalated, escalationModel: firedEscalationModel,
@@ -1521,7 +1524,6 @@ export async function runConversation(config: ConversationConfig, options: Conve
     }
   }
   const binding = journal.agentSession();
-  if (binding === null) throw new Error('Conversation completed without a persisted agent session binding.');
   return { rows, binding, journalExport: journal.export(), restoredMidRun };
 }
 
