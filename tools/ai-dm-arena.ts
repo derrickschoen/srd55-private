@@ -19,6 +19,8 @@ export interface ArenaConfig {
   readonly cli: ConversationCli;
   readonly model: string;
   readonly effort: ConversationEffort;
+  readonly escalationModel: string | null;
+  readonly escalationEffort: ConversationEffort | null;
   readonly outPath: string;
   readonly dryRun: boolean;
   readonly cwd: string;
@@ -45,6 +47,9 @@ export interface ArenaRow {
   readonly agentDispatched: boolean;
   readonly flapRetries: 0 | 1 | 2;
   readonly serviceNull: boolean;
+  readonly plannedBy: import('./ai-dm-conversation').ConversationPlannerAttribution | 'sim_controller' | null;
+  readonly escalated: boolean;
+  readonly escalationModel: string | null;
   readonly chainEvidence: import('./ai-dm-conversation').ConversationChainEvidence;
 }
 
@@ -83,6 +88,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     if (option === '--dry-run') { dryRun = true; continue; }
     if (![
       '--rooms', '--reps', '--seed', '--cli', '--model', '--effort', '--out',
+      '--escalation-model', '--escalation-effort',
       '--cli-bin', '--timeout-ms', '--kb',
       '--reaction-ask-default',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
@@ -100,6 +106,15 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (!CONVERSATION_EFFORTS.includes(effort as ConversationEffort)) {
     throw new TypeError('--effort must be low, medium, high, or xhigh.');
   }
+  const escalationModel = values.get('--escalation-model') ?? null;
+  const escalationEffort = values.get('--escalation-effort') ?? null;
+  if ((escalationModel === null) !== (escalationEffort === null)) {
+    throw new TypeError('--escalation-model and --escalation-effort must be supplied together.');
+  }
+  if (escalationEffort !== null &&
+    !CONVERSATION_EFFORTS.includes(escalationEffort as ConversationEffort)) {
+    throw new TypeError('--escalation-effort must be low, medium, high, or xhigh.');
+  }
   const selectedCli = cli as ConversationCli;
   const kbPath = values.has('--kb') ? resolve(values.get('--kb') ?? '') : null;
   if (kbPath !== null) validateKbPath(cwd, kbPath);
@@ -114,6 +129,8 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     cli: selectedCli,
     model: values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
     effort: effort as ConversationEffort,
+    escalationModel,
+    escalationEffort: escalationEffort as ConversationEffort | null,
     outPath,
     dryRun,
     cwd: resolve(cwd),
@@ -139,6 +156,8 @@ export async function runArena(
     cli: config.cli,
     model: config.model,
     effort: config.effort,
+    escalationModel: config.escalationModel,
+    escalationEffort: config.escalationEffort,
     outPath: config.outPath,
     dryRun: config.dryRun,
     cwd: config.cwd,
@@ -164,6 +183,9 @@ export async function runArena(
     agentDispatched: row.agentDispatched,
     flapRetries: row.flapRetries,
     serviceNull: row.serviceNull,
+    plannedBy: row.plannedBy,
+    escalated: row.escalated,
+    escalationModel: row.escalationModel,
     chainEvidence: row.chainEvidence,
   }));
   await writeFile(config.outPath, rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');

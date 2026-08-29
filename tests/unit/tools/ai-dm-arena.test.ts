@@ -91,6 +91,10 @@ describe('AI-DM arena', () => {
       row.outcome === 'authorized' && row.refusals.length === 0 &&
       row.projectionRevision > row.contextRevision)).toBe(true);
     expect(rows.every((row) => row.agentDispatched)).toBe(true);
+    expect(rows.every((row) =>
+      typeof row.plannedBy === 'object' && row.plannedBy?.model === 'gpt-5.6-sol' &&
+      row.plannedBy.effort === 'low' &&
+      !row.escalated && row.escalationModel === null)).toBe(true);
     expect(rows.every((row) => row.flapRetries === 0 && !row.serviceNull)).toBe(true);
     expect(rows.every((row) => row.chainEvidence.autoResolvedTrigger === null)).toBe(true);
     expect(rows.every((row) => row.chainEvidence.failedAttempts.every((attempt) =>
@@ -199,12 +203,14 @@ describe('AI-DM arena', () => {
     const config = parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943001',
       '--out', join(directory, 'arena.jsonl'), '--dry-run',
+      '--escalation-model', 'gpt-escalation', '--escalation-effort', 'high',
     ]);
 
     const [row] = await runArena(config, { failBeforeDispatch: ['room-1-round-1'] });
 
     expect(row).toEqual(expect.objectContaining({
       outcome: 'refused', agentDispatched: false, toolCalls: 0,
+      plannedBy: null, escalated: false, escalationModel: null,
       chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
       refusals: ['SIMULATED host failure before agent dispatch.'],
     }));
@@ -215,12 +221,14 @@ describe('AI-DM arena', () => {
     const config = parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943001',
       '--out', join(directory, 'arena.jsonl'), '--dry-run',
+      '--escalation-model', 'gpt-escalation', '--escalation-effort', 'high',
     ]);
 
     const [row] = await runArena(config, { invalidInitial: ['room-1-round-1'] });
 
     expect(row).toEqual(expect.objectContaining({
       outcome: 'auto_resolved', agentDispatched: true,
+      plannedBy: 'sim_controller', escalated: true, escalationModel: 'gpt-escalation',
       chainEvidence: {
         failedAttempts: expect.arrayContaining([
           expect.objectContaining({

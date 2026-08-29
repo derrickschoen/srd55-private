@@ -769,3 +769,27 @@ No dissent on 2026-08-28. All supervisor-arbitrated round-2 changes are adopted 
 6. Ephemeral speculation queue loss on restart is ACCEPTED — speculation
    is a cache; the journal stays authoritative and cold rounds fall back
    to live planning.
+
+## 18. Amendment (2026-08-29, owner ruling D407): the pacing budget
+
+The design adopts a named pacing model: each player turn budgets ~1
+minute; with a typical 4-5 PC party the DM has ~5 minutes of
+imperceptible thinking per round. Consequences, binding on
+implementation:
+- Speculation deadlines and refresh budgets are set against the 5-minute
+  window, not against live-turn latencies. The reserved post-last-player
+  refresh (§ re-speculation) gets the final ~60s slot.
+- Model choice FOR SPECULATION is decoupled from the live-path model: a
+  strong slow model (e.g. sol) can author contingent plans at zero
+  perceived cost; the fast model matters only for recalc misses at
+  monster-round start. The cycle-2+ speculation arms should therefore
+  include strong-speculator/fast-recalc pairings.
+- Perceived-latency accounting treats speculation tokens/wall spent
+  inside the window as free; only monster-round-start-to-first-action
+  counts.
+- The arena's player-phase interleave (§ measurement) paces simulated
+  player turns on the same ~1-minute model when measuring perceived
+  latency, and per D407 the PC side is planned by the AI as ONE team
+  call per round (party-round intents in a single dispatch), which both
+  cuts flywheel wall-clock and produces realistic player-phase dynamics
+  for speculation hit-rate measurement.
