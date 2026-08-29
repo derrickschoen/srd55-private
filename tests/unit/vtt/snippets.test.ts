@@ -95,14 +95,38 @@ async function registryFixture(seed: number) {
   return { state, runtime, capsule: runtime.feed.current() };
 }
 
+function withProjection(
+  capsule: Awaited<ReturnType<typeof registryFixture>>['capsule'],
+  projection: typeof capsule.projection,
+) {
+  if (capsule.request === null) throw new TypeError('Fixture request is absent.');
+  return createEngineStateCapsule({
+    runId: capsule.runId,
+    branchId: capsule.branchId,
+    revision: capsule.revision + 1,
+    generatedAt: capsule.generatedAt,
+    request: capsule.request,
+    projection,
+    historyDelta: capsule.historyDelta,
+    rulesIndex: capsule.rulesIndex,
+  });
+}
+
+function chokeCapsule(capsule: Awaited<ReturnType<typeof registryFixture>>['capsule']) {
+  return withProjection(capsule, {
+    ...capsule.projection,
+    blockedCells: [...capsule.projection.blockedCells, { column: 2, row: 6 }],
+  });
+}
+
 describe('plays v1 registry', () => {
   it('gates applicability, advertises at most three plays, and ranks them deterministically', async () => {
     const roomOne = await registryFixture(3_943_001);
     const first = SNIPPET_REGISTRY.applicable(roomOne.capsule);
     const second = SNIPPET_REGISTRY.applicable(roomOne.capsule);
     expect(first).toEqual(second);
-    expect(first).toHaveLength(3);
-    expect(first.map((play) => play.name)).toEqual(['remove_obstacle', 'focus_fire', 'basic_advance']);
+    expect(first).toHaveLength(2);
+    expect(first.map((play) => play.name)).toEqual(['focus_fire', 'basic_advance']);
     expect(first.every((play) => !play.description.includes('\n'))).toBe(true);
 
     const roomThree = await registryFixture(3_943_003);
@@ -196,15 +220,17 @@ describe('plays v1 registry', () => {
       ],
     },
     {
-      name: 'remove_obstacle', seed: 3_943_006,
+      name: 'remove_obstacle', seed: 3_943_001,
       expected: [
-        { actor: 'combatant:generated-3943006-monster-1', action: 'use_action:web', target: 'combatant:fighter', stance: 'maintain_range' },
-        { actor: 'combatant:generated-3943006-monster-2', action: 'attack:bite', target: 'combatant:fighter', stance: 'close_to_melee' },
+        { actor: 'combatant:generated-3943001-monster-1', action: 'attack:dagger', target: 'combatant:wizard', stance: 'maintain_range' },
+        { actor: 'combatant:generated-3943001-monster-2', action: 'attack:grab', target: 'combatant:wizard', stance: 'close_to_melee' },
+        { actor: 'combatant:generated-3943001-monster-3', action: 'attack:longbow', target: 'combatant:wizard', stance: 'maintain_range' },
       ],
     },
   ] as const)('pins $name against frozen arena-basis room $seed', async ({ name, seed, expected }) => {
     const { capsule } = await registryFixture(seed);
-    expect(goldenSummary(SNIPPET_REGISTRY.expand(name, capsule).intents)).toEqual(expected);
+    const basis = name === 'remove_obstacle' ? chokeCapsule(capsule) : capsule;
+    expect(goldenSummary(SNIPPET_REGISTRY.expand(name, basis).intents)).toEqual(expected);
   });
 
   it.each([
@@ -231,7 +257,7 @@ describe('plays v1 registry', () => {
         attackIds.has(approach.actionId) && approach.minimumMovementFeet !== null &&
         approach.minimumMovementFeet <= actor.speedFeet * 2);
       const intent = draft.find((candidate) => candidate.actorId === actor.id);
-      expect(intent?.choice.kind).toBe(reachable ? 'attack' : 'dodge');
+      expect(intent?.choice.kind).toBe(reachable ? 'attack' : 'dash');
     }
 
     for (const attack of attacks) {
@@ -264,12 +290,130 @@ describe('plays v1 registry', () => {
 
   it('moves to grapple the blocker when no control spell is in range', async () => {
     const { capsule } = await registryFixture(3_943_001);
-    const draft = SNIPPET_REGISTRY.expand('remove_obstacle', capsule).intents;
+    const draft = SNIPPET_REGISTRY.expand('remove_obstacle', chokeCapsule(capsule)).intents;
     const grapple = draft.find((intent) =>
       (intent.choice.kind === 'attack' || intent.choice.kind === 'use_action') &&
       /grapple|grab/iu.test(intent.choice.actionId));
     expect(grapple?.engagement.stance).toBe('close_to_melee');
     expect(grapple?.movement.willingness).not.toBe('none');
+  });
+
+  it('requires a real obstacle and yields honestly to focus fire without a control action', async () => {
+    const { capsule } = await registryFixture(3_943_001);
+    expect(SNIPPET_REGISTRY.applicable(capsule).map((play) => play.name)).not.toContain('remove_obstacle');
+    expect(() => SNIPPET_REGISTRY.expand('remove_obstacle', capsule)).toThrow('PLAY_NOT_APPLICABLE');
+
+    const obstructed = chokeCapsule(capsule);
+    expect(SNIPPET_REGISTRY.applicable(obstructed).map((play) => play.name)[0]).toBe('remove_obstacle');
+    const withoutControl = withProjection(obstructed, {
+      ...obstructed.projection,
+      combatants: obstructed.projection.combatants.map((actor) => ({
+        ...actor,
+        actions: actor.actions.filter((action) => !/web|grapple|grab/iu.test(action.actionId)),
+      })),
+    });
+    expect(SNIPPET_REGISTRY.applicable(withoutControl).map((play) => play.name))
+      .toEqual(['focus_fire', 'basic_advance']);
+    expect(() => SNIPPET_REGISTRY.expand('remove_obstacle', withoutControl))
+      .toThrow('PLAY_NOT_APPLICABLE');
+  });
+
+  it('never holds and Dodges against a living projected enemy unless no adjacent path exists', async () => {
+    for (let seed = 3_943_001; seed <= 3_943_012; seed += 1) {
+      const { capsule } = await registryFixture(seed);
+      const requested = capsule.projection.combatants.filter((actor) =>
+        capsule.request?.actors.includes(actor.id) === true && actor.life !== 'dead');
+      const blocked = [
+        ...capsule.projection.blockedCells,
+        ...capsule.projection.movementBlockingObjects.flatMap((object) => object.cells),
+      ];
+      for (const play of SNIPPET_REGISTRY.applicable(capsule)) {
+        const intents = SNIPPET_REGISTRY.expand(play.name, capsule).intents;
+        for (const intent of intents) {
+          const actor = requested.find((candidate) => candidate.id === intent.actorId);
+          if (actor === undefined) throw new Error(`Requested actor ${String(intent.actorId)} is absent.`);
+          const holdAndDodge = intent.choice.kind === 'dodge' && intent.engagement.stance === 'hold_position';
+          const openAdjacentCell = Array.from({ length: capsule.projection.bounds.rows }, (_, row) =>
+            Array.from({ length: capsule.projection.bounds.columns }, (_, column) => ({ column, row })))
+            .flat()
+            .some((cell) =>
+              Math.max(Math.abs(cell.column - actor.position.column), Math.abs(cell.row - actor.position.row)) === 1 &&
+              !blocked.some((candidate) => candidate.column === cell.column && candidate.row === cell.row) &&
+              !capsule.projection.combatants.some((candidate) =>
+                candidate.id !== actor.id && candidate.life !== 'dead' &&
+                candidate.position.column === cell.column && candidate.position.row === cell.row));
+          expect(holdAndDodge, `${String(seed)} ${play.name} ${String(actor.id)}`).toBe(!openAdjacentCell);
+        }
+      }
+    }
+  });
+
+  it('advances at full normal speed with a defensive posture when no attack is reachable after Dash', async () => {
+    for (let seed = 3_943_001; seed <= 3_943_012; seed += 1) {
+      const { capsule } = await registryFixture(seed);
+      const actors = capsule.projection.combatants.filter((actor) =>
+        capsule.request?.actors.includes(actor.id) === true && actor.life !== 'dead');
+      const targets = capsule.projection.combatants.filter((target) =>
+        target.life !== 'dead' && target.side !== actors[0]?.side);
+      for (const play of SNIPPET_REGISTRY.applicable(capsule).filter((candidate) =>
+        candidate.name !== 'remove_obstacle')) {
+        const intents = SNIPPET_REGISTRY.expand(play.name, capsule).intents;
+        for (const actor of actors) {
+          const attackIds = new Set(actor.actions.filter((action) => action.kind === 'attack').map((action) => action.actionId));
+          const canAttackAfterDash = actor.actionApproaches.some((approach) =>
+            targets.some((target) => target.id === approach.targetId) &&
+            attackIds.has(approach.actionId) && approach.minimumMovementFeet !== null &&
+            approach.minimumMovementFeet <= actor.speedFeet * 2);
+          if (canAttackAfterDash) continue;
+          const intent = intents.find((candidate) => candidate.actorId === actor.id);
+          expect(intent, `${String(seed)} ${play.name} ${String(actor.id)}`).toMatchObject({
+            choice: { kind: 'dash' },
+            movement: {
+              willingness: 'freely',
+              maximumFeet: actor.speedFeet,
+              opportunityRisk: 'avoid',
+            },
+            engagement: { stance: 'close_to_melee' },
+            fallback: { choice: { kind: 'dodge' } },
+          });
+        }
+      }
+    }
+  });
+
+  it('does not offer fallback-bearing plays during a correction request', async () => {
+    const { capsule } = await registryFixture(3_943_001);
+    if (capsule.request === null) throw new TypeError('Fixture request is absent.');
+    const correction = withProjection(createEngineStateCapsule({
+      runId: capsule.runId,
+      branchId: capsule.branchId,
+      revision: capsule.revision + 1,
+      generatedAt: capsule.generatedAt,
+      request: { ...capsule.request, phase: 'correction', correctionNumber: 1 },
+      projection: capsule.projection,
+      historyDelta: capsule.historyDelta,
+      rulesIndex: capsule.rulesIndex,
+    }), capsule.projection);
+    expect(SNIPPET_REGISTRY.applicable(correction)).toEqual([]);
+  });
+
+  it('gives every initial frozen-basis draft a schema-valid, independently legal fallback', { timeout: 60_000 }, async () => {
+    const legalityByBranch = new Map<string, boolean>();
+    for (let seed = 3_943_001; seed <= 3_943_012; seed += 1) {
+      const { state, capsule } = await registryFixture(seed);
+      for (const play of SNIPPET_REGISTRY.applicable(capsule)) {
+        for (const intent of SNIPPET_REGISTRY.expand(play.name, capsule).intents) {
+          expect(intent.fallback, `${String(seed)} ${play.name} ${String(intent.actorId)}`).not.toBeNull();
+          if (intent.fallback === null) throw new Error('Initial play fallback is absent.');
+          expect(schemaViolations(engineSchemaInternals.turnIntent, externalIntent(intent))).toEqual([]);
+          const fallbackIntent = { actorId: intent.actorId, ...intent.fallback, fallback: null };
+          const key = `${String(seed)}:${JSON.stringify(fallbackIntent)}`;
+          const legal = legalityByBranch.get(key) ?? pureIntentResolver.resolve(state, fallbackIntent).valid;
+          legalityByBranch.set(key, legal);
+          expect(legal, `${String(seed)} ${play.name} ${String(intent.actorId)}`).toBe(true);
+        }
+      }
+    }
   });
 
   it('content-addresses every play and the enabled set independently', () => {

@@ -151,8 +151,8 @@ describe('AI-DM arena', () => {
       row.snippetHash === SNIPPET_REGISTRY.snippetHash &&
       row.snippetSetHash === SNIPPET_REGISTRY.snippetSetHash)).toBe(true);
     expect(rows[0]?.suggestedPlay).toEqual({
-      name: 'remove_obstacle',
-      hash: SNIPPET_REGISTRY.expand('remove_obstacle',
+      name: 'focus_fire',
+      hash: SNIPPET_REGISTRY.expand('focus_fire',
         createEngineMcpRuntime(generateRoom(3_943_001).encounter.state).feed.current()).definition.snippetHash,
     });
     expect(rows[0]?.suggestionAdopted).toBe('ignored');
