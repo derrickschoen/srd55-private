@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { reduceEncounter } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
-import { generateRoom, ROOM_GRID_DIMENSIONS } from '../../../src/vtt/room-generator';
+import { STARTER_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
+import { spellDefinition } from '../../../src/combat/spells/definitions';
+import {
+  generateRoom,
+  ROOM_GRID_DIMENSIONS,
+  type GeneratedRoom,
+} from '../../../src/vtt/room-generator';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
 const BASIS_SEEDS = [
@@ -20,6 +26,21 @@ const BASIS_SEEDS = [
   3_943_012,
 ] as const;
 
+const HARD_BASIS_SEEDS = [
+  5_117_001,
+  5_117_002,
+  5_117_003,
+  5_117_004,
+  5_117_005,
+  5_117_006,
+  5_117_007,
+  5_117_008,
+  5_117_009,
+  5_117_010,
+  5_117_011,
+  5_117_012,
+] as const;
+
 const inputs = declareTestInputs({
   fixtures: [
     'tests/fixtures/arena-basis/seed-3943001.json',
@@ -34,12 +55,27 @@ const inputs = declareTestInputs({
     'tests/fixtures/arena-basis/seed-3943010.json',
     'tests/fixtures/arena-basis/seed-3943011.json',
     'tests/fixtures/arena-basis/seed-3943012.json',
+    'tests/fixtures/arena-basis-hard/seed-5117001.json',
+    'tests/fixtures/arena-basis-hard/seed-5117002.json',
+    'tests/fixtures/arena-basis-hard/seed-5117003.json',
+    'tests/fixtures/arena-basis-hard/seed-5117004.json',
+    'tests/fixtures/arena-basis-hard/seed-5117005.json',
+    'tests/fixtures/arena-basis-hard/seed-5117006.json',
+    'tests/fixtures/arena-basis-hard/seed-5117007.json',
+    'tests/fixtures/arena-basis-hard/seed-5117008.json',
+    'tests/fixtures/arena-basis-hard/seed-5117009.json',
+    'tests/fixtures/arena-basis-hard/seed-5117010.json',
+    'tests/fixtures/arena-basis-hard/seed-5117011.json',
+    'tests/fixtures/arena-basis-hard/seed-5117012.json',
   ],
 });
 
 describe('seeded room generator', () => {
   it('produces byte-identical reducer state for the same seed', () => {
     expect(canonicalJson(generateRoom(394_300))).toBe(canonicalJson(generateRoom(394_300)));
+    expect(canonicalJson(generateRoom(511_700, { difficulty: 'hard' }))).toBe(
+      canonicalJson(generateRoom(511_700, { difficulty: 'hard' })),
+    );
   });
 
   it('samples only the declared room vocabulary and stays within its CR budget', () => {
@@ -82,5 +118,58 @@ describe('seeded room generator', () => {
     const path = `tests/fixtures/arena-basis/seed-${String(seed)}.json` as
       `tests/fixtures/arena-basis/seed-${typeof seed}.json`;
     expect(`${canonicalJson(generateRoom(seed))}\n`).toBe(inputs.fixtures.readText(path));
+  });
+
+  it.each(HARD_BASIS_SEEDS)('pins frozen hard arena basis seed %s byte-for-byte', (seed) => {
+    const path = `tests/fixtures/arena-basis-hard/seed-${String(seed)}.json` as
+      `tests/fixtures/arena-basis-hard/seed-${typeof seed}.json`;
+    expect(`${canonicalJson(generateRoom(seed, { difficulty: 'hard' }))}\n`).toBe(
+      inputs.fixtures.readText(path),
+    );
+  });
+
+  it.each(HARD_BASIS_SEEDS)('derives every required hard feature from frozen seed %s', (seed) => {
+    const path = `tests/fixtures/arena-basis-hard/seed-${String(seed)}.json` as
+      `tests/fixtures/arena-basis-hard/seed-${typeof seed}.json`;
+    const room = JSON.parse(inputs.fixtures.readText(path)) as GeneratedRoom;
+    const rows = room.spec.monsterRoster.map((entry) => {
+      const row = STARTER_MONSTER_ROSTER.find((candidate) => candidate.id === entry.statblockId);
+      if (row === undefined) throw new Error(`Frozen hard room references unknown ${entry.statblockId}.`);
+      return row;
+    });
+    const casterRows = rows.filter((row) =>
+      row.statblock.sourceDetails.actions.kind === 'present' &&
+      row.statblock.sourceDetails.actions.value.some((action) => action.kind === 'spellcasting'));
+    const controlCasterRows = casterRows.filter((row) =>
+      row.statblock.sourceDetails.actions.kind === 'present' &&
+      row.statblock.sourceDetails.actions.value.some((action) =>
+        action.kind === 'spellcasting' && action.spells.some((spell) => {
+          const definition = spellDefinition(spell.id);
+          return definition?.operation.kind === 'persistent_area' &&
+            definition.operation.hooks.some((hook) => hook.effect.kind === 'save_gated') &&
+            definition.operation.hooks.some((hook) =>
+              hook.effect.kind === 'automatic' && hook.effect.payload.kind === 'effect' &&
+              hook.effect.payload.payload.kind === 'movement_modifier');
+        })));
+    expect(casterRows.length).toBeGreaterThanOrEqual(1);
+    expect(controlCasterRows.length).toBeGreaterThanOrEqual(1);
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    expect(rows.length).toBeLessThanOrEqual(7);
+    expect(rows.some((row) => row.id === 'statblock:guard')).toBe(true);
+    expect(rows.some((row) => row.id === 'statblock:scout')).toBe(true);
+
+    const difficultRegions = room.spec.terrain.filter((feature) =>
+      feature.kind === 'difficult-terrain-patch');
+    const features = room.spec.hardFeatures;
+    expect(features?.shape).toBe('single-gate');
+    expect(difficultRegions.length).toBeGreaterThanOrEqual(1);
+    expect(features?.likelyApproachTerrainRegionIds.every((id) =>
+      difficultRegions.some((region) => region.id === id && region.cells.length > 0))).toBe(true);
+    expect(features?.chokepointCells).toHaveLength(1);
+    const [gate] = features?.chokepointCells ?? [];
+    if (gate === undefined) throw new Error('Hard room has no declared chokepoint cell.');
+    const barrier = room.spec.blockedCells.filter((cell) => cell.column === gate.column);
+    expect(barrier).toHaveLength(room.spec.dimensions.rows - 1);
+    expect(barrier.some((cell) => cell.row === gate.row)).toBe(false);
   });
 });

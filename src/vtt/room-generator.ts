@@ -20,6 +20,9 @@ export type RoomGridDimension = (typeof ROOM_GRID_DIMENSIONS)[number];
 export const PARTY_HIT_POINT_FRACTIONS = [1, 0.75, 0.5, 0.25, 0] as const;
 export type PartyHitPointFraction = (typeof PARTY_HIT_POINT_FRACTIONS)[number];
 
+export const ROOM_DIFFICULTY_PROFILES = ['standard', 'hard'] as const;
+export type RoomDifficultyProfile = (typeof ROOM_DIFFICULTY_PROFILES)[number];
+
 export type RoomTerrainFeature =
   | {
       readonly kind: 'difficult-terrain-patch';
@@ -67,6 +70,8 @@ export interface SampledPartySeat {
 
 export interface RoomSpec {
   readonly seed: number;
+  /** Omitted for the original standard profile so its frozen bytes remain stable. */
+  readonly difficultyProfile?: 'hard';
   readonly dimensions: {
     readonly columns: RoomGridDimension;
     readonly rows: RoomGridDimension;
@@ -77,6 +82,11 @@ export interface RoomSpec {
   readonly challengeBudgetEighths: number;
   readonly challengeSpentEighths: number;
   readonly partyState: readonly SampledPartySeat[];
+  readonly hardFeatures?: {
+    readonly shape: 'single-gate';
+    readonly chokepointCells: readonly GridCell[];
+    readonly likelyApproachTerrainRegionIds: readonly string[];
+  };
 }
 
 export interface GeneratedRoom {
@@ -85,11 +95,22 @@ export interface GeneratedRoom {
 }
 
 export interface GenerateRoomOptions {
+  readonly difficulty?: RoomDifficultyProfile;
   readonly dimensions?: {
     readonly columns: RoomGridDimension;
     readonly rows: RoomGridDimension;
   };
   readonly provenance?: EncounterProvenance;
+}
+
+const HARD_CONTROL_CASTER_ID = 'statblock:priest';
+const HARD_MELEE_ID = 'statblock:guard';
+const HARD_RANGED_ID = 'statblock:scout';
+
+function rosterRow(id: string): (typeof STARTER_MONSTER_ROSTER)[number] {
+  const row = STARTER_MONSTER_ROSTER.find((candidate) => candidate.id === id);
+  if (row === undefined) throw new Error(`Bundled starter roster is missing ${id}.`);
+  return row;
 }
 
 function integer(rng: Rng, minimum: number, maximum: number): number {
@@ -233,6 +254,81 @@ function sampledRoster(
   return { budget, spent: budget - remaining, entries, profiles };
 }
 
+function sampledHardRoster(
+  rng: Rng,
+  seed: number,
+): {
+  readonly budget: number;
+  readonly spent: number;
+  readonly entries: readonly RoomMonsterRosterEntry[];
+  readonly profiles: readonly CombatantProfile[];
+} {
+  const count = integer(rng, 4, 7);
+  const required = [
+    rosterRow(HARD_CONTROL_CASTER_ID),
+    rosterRow(HARD_MELEE_ID),
+    rosterRow(HARD_RANGED_ID),
+  ];
+  const reinforcements = STARTER_MONSTER_ROSTER.filter((row) =>
+    row.family === 'mercenary_company' &&
+    ['statblock:bandit', 'statblock:guard', 'statblock:scout', 'statblock:tough'].includes(row.id));
+  const rows = [
+    ...required,
+    ...Array.from({ length: count - required.length }, () => pick(rng, reinforcements)),
+  ];
+  const entries = rows.map((row, index): RoomMonsterRosterEntry => {
+    const sequence = index + 1;
+    return {
+      combatantId: `combatant:generated-${String(seed)}-monster-${String(sequence)}`,
+      tokenId: `token:generated-${String(seed)}-monster-${String(sequence)}`,
+      statblockId: row.id,
+      challengeRating: row.challengeRating,
+      challengeEighths: challengeEighths(row.challengeRating),
+    };
+  });
+  const profiles = rows.map((row, index) => monsterCombatantProfile(row.statblock, {
+    combatantId: entries[index]!.combatantId,
+    tokenId: entries[index]!.tokenId,
+  }));
+  const spent = entries.reduce((total, entry) => total + entry.challengeEighths, 0);
+  return { budget: spent + integer(rng, 0, 8), spent, entries, profiles };
+}
+
+function hardChokepoint(
+  rng: Rng,
+  seed: number,
+  dimensions: RoomSpec['dimensions'],
+): {
+  readonly blockedCells: readonly GridCell[];
+  readonly terrain: readonly RoomTerrainFeature[];
+  readonly chokepointCells: readonly GridCell[];
+  readonly likelyApproachTerrainRegionIds: readonly string[];
+} {
+  const barrierColumn = Math.floor(dimensions.columns / 2);
+  const gateRow = integer(rng, 3, dimensions.rows - 4);
+  const chokepointCells = [{ column: barrierColumn, row: gateRow }];
+  const blockedCells = Array.from({ length: dimensions.rows }, (_unused, row) => ({
+    column: barrierColumn,
+    row,
+  })).filter((cell) => cell.row !== gateRow);
+  const approachRegionId = `difficult:generated-${String(seed)}-approach`;
+  const approachCells = uniqueCells([-2, -1, 1, 2].flatMap((columnOffset) =>
+    [-1, 0, 1].map((rowOffset) => ({
+      column: barrierColumn + columnOffset,
+      row: gateRow + rowOffset,
+    }))));
+  return {
+    blockedCells,
+    terrain: [{
+      kind: 'difficult-terrain-patch',
+      id: approachRegionId,
+      cells: approachCells,
+    }],
+    chokepointCells,
+    likelyApproachTerrainRegionIds: [approachRegionId],
+  };
+}
+
 function samplePartyState(
   rng: Rng,
   state: EncounterState,
@@ -320,7 +416,10 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
   const partyProfiles = referenceEncounterSetup().combatants.filter(
     (profile) => profile.kind === 'player_character',
   );
-  const roster = sampledRoster(rng, normalizedSeed);
+  const difficulty = options.difficulty ?? 'standard';
+  const roster = difficulty === 'hard'
+    ? sampledHardRoster(rng, normalizedSeed)
+    : sampledRoster(rng, normalizedSeed);
   const partyPositions = partyProfiles.map((_profile, index) => ({
     column: 1 + index % 2,
     row: 2 + index * 2,
@@ -331,17 +430,30 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
   }));
   const reserved = new Set([...partyPositions, ...monsterPositions].map(cellKey));
 
-  const blockedCells = uniqueCells(Array.from(
+  const hardLayout = difficulty === 'hard'
+    ? hardChokepoint(rng, normalizedSeed, dimensions)
+    : null;
+  if (hardLayout !== null) {
+    for (const cell of hardLayout.blockedCells) reserved.add(cellKey(cell));
+    for (const feature of hardLayout.terrain) {
+      if (feature.kind === 'difficult-terrain-patch') {
+        for (const cell of feature.cells) reserved.add(cellKey(cell));
+      }
+    }
+  }
+  const blockedCells = hardLayout?.blockedCells ?? uniqueCells(Array.from(
     { length: integer(rng, 2, 5) },
     () => unreservedCell(rng, dimensions, reserved),
   ));
-  const terrain: RoomTerrainFeature[] = [];
-  for (let sequence = 1; sequence <= integer(rng, 1, 3); sequence += 1) {
-    terrain.push({
-      kind: 'difficult-terrain-patch',
-      id: `difficult:generated-${String(normalizedSeed)}-${String(sequence)}`,
-      cells: patchCells(rng, dimensions, reserved),
-    });
+  const terrain: RoomTerrainFeature[] = hardLayout === null ? [] : [...hardLayout.terrain];
+  if (hardLayout === null) {
+    for (let sequence = 1; sequence <= integer(rng, 1, 3); sequence += 1) {
+      terrain.push({
+        kind: 'difficult-terrain-patch',
+        id: `difficult:generated-${String(normalizedSeed)}-${String(sequence)}`,
+        cells: patchCells(rng, dimensions, reserved),
+      });
+    }
   }
   let objectSequence = 1;
   for (let sequence = 1; sequence <= integer(rng, 1, 2); sequence += 1) {
@@ -397,6 +509,7 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
   const sampled = samplePartyState(rng, fresh);
   const spec: RoomSpec = {
     seed: normalizedSeed,
+    ...(difficulty === 'hard' ? { difficultyProfile: difficulty } : {}),
     dimensions,
     terrain,
     blockedCells,
@@ -404,6 +517,13 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
     challengeBudgetEighths: roster.budget,
     challengeSpentEighths: roster.spent,
     partyState: sampled.samples,
+    ...(hardLayout === null ? {} : {
+      hardFeatures: {
+        shape: 'single-gate' as const,
+        chokepointCells: hardLayout.chokepointCells,
+        likelyApproachTerrainRegionIds: hardLayout.likelyApproachTerrainRegionIds,
+      },
+    }),
   };
   return {
     spec,

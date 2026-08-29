@@ -68,6 +68,35 @@ class FakeCodexUsageAdapter implements AgentSessionAdapter {
   classifyFailure(): 'unknown' { return 'unknown'; }
 }
 
+class OrderingNullAdapter implements AgentSessionAdapter {
+  readonly kind = 'codex' as const;
+  starts = 0;
+
+  constructor(
+    private readonly label: string,
+    private readonly ordering: string[],
+  ) {}
+
+  async probe() { return { present: true, version: 'SIMULATED' }; }
+
+  async start(): Promise<AgentTurnResult> {
+    this.starts += 1;
+    this.ordering.push(this.label);
+    return {
+      sessionId: agentSessionIdFromCli(`ordering-${this.label}-${String(this.starts)}`),
+      finalText: '',
+      usage: null,
+      exit: 'completed',
+    };
+  }
+
+  async resume(binding: AgentSessionBinding): Promise<AgentTurnResult> {
+    return { sessionId: binding.sessionId, finalText: '', usage: null, exit: 'completed' };
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+}
+
 describe('AI-DM arena', () => {
   it('renders and validates a multi-round dry run without spawning a model', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-dry-'));
@@ -89,6 +118,7 @@ describe('AI-DM arena', () => {
     const rows = await runArena(config);
 
     expect(rows).toHaveLength(4);
+    expect(rows.every((row) => row.basis === 'standard' && row.arm === 'single')).toBe(true);
     expect(rows.every((row) =>
       row.outcome === 'authorized' && row.refusals.length === 0 &&
       row.projectionRevision > row.contextRevision)).toBe(true);
@@ -164,6 +194,51 @@ describe('AI-DM arena', () => {
         row.snippetSetHash === SNIPPET_REGISTRY.snippetSetHash;
     })).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n')).toHaveLength(4);
+  });
+
+  it('runs configured arms round-robin for every room-rep unit with basis and arm tags', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-interleaved-'));
+    const ordering: string[] = [];
+    const config = parseArenaArgs([
+      '--rooms', '2', '--reps', '2', '--seed', '5117001',
+      '--basis', 'hard', '--out', join(directory, 'arena.jsonl'),
+      '--interleave',
+      '--arm', 'control:model-control:low',
+      '--arm', 'candidate:model-candidate:high',
+    ]);
+
+    const rows = await runArena(config, {
+      adapterByArm: {
+        control: new OrderingNullAdapter('control', ordering),
+        candidate: new OrderingNullAdapter('candidate', ordering),
+      },
+    });
+
+    expect(ordering).toEqual([
+      'control', 'candidate',
+      'control', 'candidate',
+      'control', 'candidate',
+      'control', 'candidate',
+    ]);
+    expect(rows.map(({ room, round, arm }) => ({ room, round, arm }))).toEqual([
+      { room: 1, round: 1, arm: 'control' },
+      { room: 1, round: 1, arm: 'candidate' },
+      { room: 1, round: 2, arm: 'control' },
+      { room: 1, round: 2, arm: 'candidate' },
+      { room: 2, round: 1, arm: 'control' },
+      { room: 2, round: 1, arm: 'candidate' },
+      { room: 2, round: 2, arm: 'control' },
+      { room: 2, round: 2, arm: 'candidate' },
+    ]);
+    expect(rows.every((row) => row.basis === 'hard')).toBe(true);
+    expect(rows.map((row) => row.seed)).toEqual([
+      5_117_001, 5_117_001, 5_117_001, 5_117_001,
+      5_117_002, 5_117_002, 5_117_002, 5_117_002,
+    ]);
+    expect(readFileSync(config.outPath, 'utf8').trim().split('\n').map((line) => {
+      const row = JSON.parse(line) as { readonly basis: unknown; readonly arm: unknown };
+      return { basis: row.basis, arm: row.arm };
+    })).toEqual(rows.map((row) => ({ basis: row.basis, arm: row.arm })));
   });
 
   it('classifies exact, edited, and ignored responses to the inline suggestion from structural bookkeeping', { timeout: 60_000 }, async () => {
