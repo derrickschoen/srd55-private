@@ -119,6 +119,17 @@ turns run against snapshot capsules; revision-digest/STALE_STATE decides
 reuse; proposer-only and fail-closed invariants unchanged. Design goes
 through a codex-collab round before implementation.
 
+## D402.3 — OWNER: two more tiered configs (2026-08-28)
+
+Verbatim: "Add a Luna medium -> sol low tiered test config. Add a Luna
+low -> Luna medium test config as well." Ruling: the cycle-2 game-time
+comparison runs SIX arms — luna low, luna medium, sol low, and three
+tiered configs (luna low -> sol low; luna medium -> sol low; luna low ->
+luna medium), all under the pre-registered v1 escalation rule (the single
+correction round routes to the escalation model; base model plans
+everything else). Frozen 12-room basis, K5, per-arm model attribution in
+every row.
+
 ## D402.2 — OWNER: drop terra from the game-time comparison (2026-08-28)
 
 Verbatim: "Drop Terra." Ruling: terra medium leaves the cycle-2 matrix.
