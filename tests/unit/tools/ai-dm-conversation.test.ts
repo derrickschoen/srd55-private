@@ -521,6 +521,41 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.stateBinding.authorization).toEqual(result.rows[0]?.stateBinding.capsule);
   });
 
+  it('preserves an accepted suggested fallback in the authorized SIMULATED row', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-accepted-fallback-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath,
+      '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [generateRoom(3_943_002).encounter.state],
+      suggestionResponseByRequest: { 'room-1-round-1': 'as_is' },
+    });
+    const row = result.rows[0];
+    const fallbackPlan = row?.authorizedPlan?.find((entry) => entry.selectedBranch === 'fallback');
+
+    expect(row).toEqual(expect.objectContaining({
+      outcome: 'authorized', suggestionAdopted: 'as_is', refusals: [],
+    }));
+    expect(fallbackPlan?.acceptedIntent).toEqual(expect.objectContaining({
+      actor_id: fallbackPlan?.actorId,
+      choice: expect.objectContaining({ kind: 'attack' }),
+      fallback: expect.objectContaining({ choice: { kind: 'dash' } }),
+    }));
+    expect(JSON.parse(readFileSync(outPath, 'utf8').trim())).toEqual(expect.objectContaining({
+      authorizedPlan: expect.arrayContaining([
+        expect.objectContaining({
+          selectedBranch: 'fallback',
+          acceptedIntent: expect.objectContaining({
+            fallback: expect.objectContaining({ choice: { kind: 'dash' } }),
+          }),
+        }),
+      ]),
+    }));
+  });
+
   it('identifies the divergent mechanic when room 3943006 cannot be re-resolved', () => {
     const state = generateRoom(3_943_006).encounter.state;
     const actor = state.combatants.find((combatant) =>

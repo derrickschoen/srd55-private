@@ -764,7 +764,9 @@ async function writeLauncher(input: {
   await writeFile(spoolPath, '', 'utf8');
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
-  if (request === null) throw new Error('Conversation capsule must have a pending request.');
+  if (request === null || request.phase === 'speculative') {
+    throw new Error('Conversation launcher requires an ordinary pending request.');
+  }
   const manifest: EngineMcpLauncherManifest = {
     format: 'engine-mcp-launcher-v1', fixturePath, proposalSpoolPath: spoolPath,
     runId: capsule.runId, branchId: capsule.branchId,
@@ -852,7 +854,7 @@ function authorizedMechanics(state: EncounterState, proposal: RoundIntentProposa
       ? null : {
           mechanics: checked.mechanics,
           choice,
-          acceptedIntent: externalBranch(declared),
+          acceptedIntent: externalIntent(entry.intent),
           selectedBranch: entry.selectedBranch,
           summary: entry.summary,
           primaryDeclaredIntent: externalBranch(entry.intent),
