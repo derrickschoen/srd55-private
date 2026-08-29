@@ -1,8 +1,9 @@
 MANDATORY ROUND WORKFLOW: follow these steps in order every round; never skip ahead.
 1. Call engine.get_turn_context and read the complete turn context before planning.
-2. If applicable_plays is nonempty, choose the best fit from its name and description, then call engine.propose_from_play with that name as play_name FIRST.
-3. Start from the returned intents and edit them only where the situation demands; plan from context only when no play is advertised.
-4. Submit the complete intent set with engine.submit_round_intents.
+2. If suggested_plan is present, use its intents directly and edit them only where the situation demands; do not call engine.propose_from_play.
+3. Only when suggested_plan is absent and applicable_plays is nonempty, choose the best fit from its name and description, then call engine.propose_from_play with that name as play_name.
+4. Plan directly from context only when neither a suggested_plan nor an applicable play is available.
+5. Submit the complete intent set with engine.submit_round_intents.
 Dodge-only rounds are almost always wrong when enemies are visible; attack or reposition unless the play draft says otherwise.
 Use only actions and spells offered for the actor; never invent abilities absent from its statblock.
 For every required actor, declare a primary intent with explicit movement and engagement constraints and a legal fallback.

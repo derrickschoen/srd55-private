@@ -66,6 +66,7 @@ export interface ArenaRow {
   readonly tokens: ConversationTokenCounts;
   readonly refusals: readonly string[];
   readonly toolCalls: number;
+  readonly callsPerRound: number;
   readonly agentDispatched: boolean;
   readonly flapRetries: 0 | 1 | 2;
   readonly serviceNull: boolean;
@@ -255,6 +256,7 @@ function arenaRows(
     tokens: row.tokens,
     refusals: row.refusals,
     toolCalls: row.toolCalls,
+    callsPerRound: row.callsPerRound,
     agentDispatched: row.agentDispatched,
     flapRetries: row.flapRetries,
     serviceNull: row.serviceNull,

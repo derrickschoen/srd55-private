@@ -19,6 +19,26 @@ export class AgentSessionLifecycle {
   }
 
   async coldStart(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentSessionBinding> {
+    const result = await this.#coldStart(invocation, signal);
+    return this.journal.startAgentSession({
+      cli: this.adapter.kind,
+      sessionId: result.sessionId,
+      adapterVersion: this.adapterVersion,
+    });
+  }
+
+  async coldStartRound(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
+    const result = await this.#coldStart(invocation, signal);
+    this.journal.startAgentSession({
+      cli: this.adapter.kind,
+      sessionId: result.sessionId,
+      adapterVersion: this.adapterVersion,
+    });
+    this.journal.recordAgentSessionDispatch();
+    return result;
+  }
+
+  async #coldStart(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
     if (invocation.runId !== this.journal.sessionId) {
       throw new Error('Agent invocation run does not match the authoritative journal.');
     }
@@ -27,11 +47,7 @@ export class AgentSessionLifecycle {
     }
     const result = await this.adapter.start(invocation, signal);
     requireCompleted(result, 'Agent cold start');
-    return this.journal.startAgentSession({
-      cli: this.adapter.kind,
-      sessionId: result.sessionId,
-      adapterVersion: this.adapterVersion,
-    });
+    return result;
   }
 
   resumeRound(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
@@ -70,7 +86,7 @@ export class AgentSessionLifecycle {
       const predecessorSessionHash = sha256(dispatched.sessionId);
       const recoveryInvocation: AgentInvocation = {
         ...invocation,
-        prompt: this.journal.recoveryBootstrapPrompt(predecessorSessionHash),
+        prompt: `${this.journal.recoveryBootstrapPrompt(predecessorSessionHash)}\n\n[RECOVERY_DISPATCH]\n${invocation.prompt}`,
         launcherToken: invocation.recoveryLauncherToken ?? invocation.launcherToken,
       };
       const bootstrap = requireCompleted(
@@ -80,19 +96,16 @@ export class AgentSessionLifecycle {
       if (bootstrap.sessionId === dispatched.sessionId) {
         throw new Error('Agent recovery cold start did not create a successor session.');
       }
-      this.journal.recoverAgentSession({
+      const successor = this.journal.recoverAgentSession({
         sessionId: bootstrap.sessionId,
         predecessorSessionHash,
         failure: classification,
       });
-      const successor = this.journal.recordAgentSessionDispatch();
+      this.journal.recordAgentSessionDispatch();
       return requireResumedSameSession(
-        await this.adapter.resume(successor, {
-          ...invocation,
-          launcherToken: invocation.recoveryLauncherToken ?? invocation.launcherToken,
-        }, signal),
+        bootstrap,
         successor,
-        'Recovered agent resume',
+        'Recovered agent dispatch',
       );
     }
   }

@@ -97,7 +97,7 @@ export function codexArgv(input: CodexArgvInput): readonly string[] {
     '-c', `model_reasoning_effort=${JSON.stringify(input.reasoningEffort)}`,
     ...(input.arenaSession === true ? [
       '-c', 'project_doc_max_bytes=0',
-      '-c', 'features.recommended_plugins=false',
+      '-c', 'features.plugins=false',
       '-c', 'skills.include_instructions=false',
     ] : []),
     ...(input.engineCommand === null ? [] : [
