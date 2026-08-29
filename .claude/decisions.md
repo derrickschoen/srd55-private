@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D411 — OWNER: collect much more Luna run-log data before CPU training (2026-08-29)
+
+Verbatim: "We will need to collect a lot more run log data from Luna
+before we start dedicating the cpu to training." Ruling: data collection
+outranks training for CPU time. Generation campaigns (Luna-driven rooms
+-> SFT/RL corpus) keep running and scale up; the D410 training pipeline
+gets BUILT and smoke-validated (bounded, ~30 steps) but no sustained
+training runs launch until the corpus is much larger. Amends D410's
+"start now" to "tooling now, training after the corpus". Corpus capture
+should preserve FULL run logs (rollouts, rejection/correction chains),
+not only distilled authorized pairs — RL needs trajectories.
+
 ## D410 — OWNER: start CPU training proof-of-concept now (2026-08-29)
 
 Verbatim: "Pick a small model to start training on the cpu as a proof of
