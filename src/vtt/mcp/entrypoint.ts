@@ -20,6 +20,7 @@ import {
   MutableEngineCapsuleFeed,
   type AdjudicationEnvelope,
   type AllowlistedRulesSource,
+  type EngineMcpToolProfile,
 } from './engine-server';
 import { jsonRpcParseError, type JsonRpcResponse, type McpHandler } from './handler';
 
@@ -126,6 +127,7 @@ export interface EngineMcpLauncherManifest {
   readonly correctionNumber: 0 | 1;
   readonly room: number;
   readonly historyKind: string;
+  readonly toolProfile?: EngineMcpToolProfile;
 }
 
 export function createEngineMcpRuntime(
@@ -146,6 +148,7 @@ export function createEngineMcpRuntime(
     readonly branchId?: EncounterBranchId;
     readonly requestId?: string;
     readonly onProposal?: (proposal: EngineProposalEnvelope) => void;
+    readonly toolProfile?: EngineMcpToolProfile;
   } = {},
 ): EngineMcpRuntime {
   const candidates = state.combatants
@@ -195,6 +198,7 @@ export function createEngineMcpRuntime(
     ...(options.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: options.maximumToolResultBytes }),
     ...(options.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: options.maximumResourceBytes }),
     ...(options.listPageSize === undefined ? {} : { listPageSize: options.listPageSize }),
+    ...(options.toolProfile === undefined ? {} : { toolProfile: options.toolProfile }),
   });
   return { handler, feed, proposals, speculativePlans, narrations, adjudications };
 }
@@ -247,7 +251,8 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
     (input['phase'] === 'initial' || input['phase'] === 'correction') &&
     (input['correctionNumber'] === 0 || input['correctionNumber'] === 1) &&
     Number.isSafeInteger(input['room']) && typeof input['room'] === 'number' && input['room'] >= 1 &&
-    typeof input['historyKind'] === 'string' && input['historyKind'].length > 0;
+    typeof input['historyKind'] === 'string' && input['historyKind'].length > 0 &&
+    (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm');
 }
 
 async function launcherManifest(path: string): Promise<EngineMcpLauncherManifest | null> {
@@ -261,8 +266,16 @@ async function launcherManifest(path: string): Promise<EngineMcpLauncherManifest
 }
 
 export async function runEngineMcpEntrypoint(argv: readonly string[] = process.argv): Promise<void> {
-  const launcherPath = argv[2];
-  if (launcherPath === undefined) throw new TypeError('Usage: engine-mcp-server.ts <arena-fixture-or-launcher.json>');
+  const profileArguments = argv.slice(2).filter((argument) => argument.startsWith('--agent-profile='));
+  if (profileArguments.length > 1) throw new TypeError('Engine MCP accepts at most one agent profile flag.');
+  const profileValue = profileArguments[0]?.slice('--agent-profile='.length);
+  if (profileValue !== undefined && profileValue !== 'dm' && profileValue !== 'full') {
+    throw new TypeError(`Unknown engine MCP agent profile ${profileValue}.`);
+  }
+  const positional = argv.slice(2).filter((argument) => !argument.startsWith('--agent-profile='));
+  const launcherPath = positional[0];
+  if (launcherPath === undefined) throw new TypeError('Usage: engine-mcp-server.ts [--agent-profile=full|dm] <arena-fixture-or-launcher.json>');
+  const selectedProfile = profileValue as EngineMcpToolProfile | undefined;
   const manifest = await launcherManifest(launcherPath);
   if (manifest !== null) {
     await runEngineMcpServer(manifest.fixturePath, {
@@ -274,6 +287,9 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       correctionNumber: manifest.correctionNumber,
       room: manifest.room,
       historyKind: manifest.historyKind,
+      ...((selectedProfile ?? manifest.toolProfile) === undefined
+        ? {}
+        : { toolProfile: selectedProfile ?? manifest.toolProfile }),
       onProposal: (proposal) => {
         appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(proposal)}\n`, 'utf8');
       },
@@ -281,16 +297,16 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
     return;
   }
   const fixturePath = launcherPath;
-  const thirdArgument = argv[3];
+  const thirdArgument = positional[1];
   const scenario = thirdArgument?.startsWith('--') === true ? thirdArgument : undefined;
   if (thirdArgument !== undefined && scenario === undefined && (thirdArgument.length < 16 || thirdArgument.length > 300)) {
     throw new TypeError('Engine MCP launcher token must contain 16 to 300 characters.');
   }
   const options: Parameters<typeof runEngineMcpServer>[1] = scenario === '--correction'
-    ? { revision: 2, phase: 'correction' as const, correctionNumber: 1, historyKind: 'intent_correction_requested' }
+    ? { revision: 2, phase: 'correction' as const, correctionNumber: 1, historyKind: 'intent_correction_requested', ...(selectedProfile === undefined ? {} : { toolProfile: selectedProfile }) }
     : scenario === '--room-transition'
-      ? { revision: 3, room: 2, historyKind: 'room_transition' }
-      : {};
+      ? { revision: 3, room: 2, historyKind: 'room_transition', ...(selectedProfile === undefined ? {} : { toolProfile: selectedProfile }) }
+      : selectedProfile === undefined ? {} : { toolProfile: selectedProfile };
   if (scenario !== undefined && scenario !== '--correction' && scenario !== '--room-transition') {
     throw new TypeError('Unknown engine MCP fixture scenario.');
   }

@@ -203,6 +203,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
     invocation: AgentInvocation,
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+    expect(manifest.toolProfile).toBe('dm');
     const state = await loadArenaFixture(manifest.fixturePath);
     const runtime = createEngineMcpRuntime(state, {
       runId: manifest.runId,
@@ -213,6 +214,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       correctionNumber: manifest.correctionNumber,
       room: manifest.room,
       historyKind: manifest.historyKind,
+      ...(manifest.toolProfile === undefined ? {} : { toolProfile: manifest.toolProfile }),
     });
     const context = serializedToolCall(runtime.handler, 'engine.get_turn_context', {
       run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round',

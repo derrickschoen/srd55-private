@@ -20,7 +20,7 @@ export interface JsonRpcNotification { readonly jsonrpc: '2.0'; readonly method:
 export interface McpToolDescriptor {
   readonly name: string; readonly description: string;
   readonly inputSchema: Readonly<Record<string, unknown>>;
-  readonly outputSchema: Readonly<Record<string, unknown>>;
+  readonly outputSchema?: Readonly<Record<string, unknown>>;
   readonly annotations?: Readonly<Record<string, boolean>>;
 }
 export interface SchemaViolation { readonly path: string; readonly keyword?: string; readonly message: string }
@@ -226,7 +226,19 @@ export function createMcpHandler(input: {
       switch (parsed.method) {
         case 'server/discover':
           if (!hasOnlyKeys(params, ['_meta'])) return invalidParams(parsed.id, [{ path: '$', message: 'server/discover params may contain only _meta.' }]);
-          return { jsonrpc: '2.0', id: parsed.id, result: { resultType: 'complete', supportedVersions: [MCP_PROTOCOL_VERSION], capabilities, tools: descriptors, _meta: RESPONSE_META, ttlMs: MCP_STATIC_LIST_TTL_MS, cacheScope: 'public' } };
+          return {
+            jsonrpc: '2.0', id: parsed.id,
+            result: {
+              resultType: 'complete', supportedVersions: [MCP_PROTOCOL_VERSION], capabilities,
+              counts: {
+                tools: descriptors.length,
+                resources: input.resources?.list().length ?? 0,
+                resourceTemplates: input.resources?.templates().length ?? 0,
+                prompts: input.prompts?.list().length ?? 0,
+              },
+              _meta: RESPONSE_META, ttlMs: MCP_STATIC_LIST_TTL_MS, cacheScope: 'public',
+            },
+          };
         case 'ping': return !hasOnlyKeys(params, ['_meta']) ? invalidParams(parsed.id, [{ path: '$', message: 'ping params may contain only _meta.' }]) : { jsonrpc: '2.0', id: parsed.id, result: { _meta: RESPONSE_META } };
         case 'tools/list': return listed(parsed.id, params, 'tools', 'tools', descriptors);
         case 'resources/list': return input.resources === undefined ? responseError(parsed.id, METHOD_NOT_FOUND, 'Method not found: resources/list') : listed(parsed.id, params, 'resources', 'resources', input.resources.list());
