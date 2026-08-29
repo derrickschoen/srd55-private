@@ -91,6 +91,13 @@ export interface PathRequest<TActorId extends string> {
   readonly maximumCost: Feet;
 }
 
+export interface PathToAnyRequest<TActorId extends string> {
+  readonly actorId: TActorId;
+  readonly start: GridCell;
+  readonly maximumCost: Feet;
+  readonly isGoal: (cell: GridCell) => boolean;
+}
+
 export type PathResult =
   | {
       readonly kind: 'found';
@@ -103,6 +110,7 @@ export type PathResult =
 interface FrontierCell {
   readonly cell: GridCell;
   readonly cost: number;
+  readonly canEnd: boolean;
 }
 
 function cellKey(cell: GridCell): string {
@@ -152,21 +160,33 @@ export function findPath<TActorId extends string>(
   world: MovementWorld<TActorId>,
   request: PathRequest<TActorId>,
 ): PathResult {
-  const maximumCost = validatedCost(request.maximumCost);
   if (
     !isCellInside(world.bounds, request.start) ||
     !isCellInside(world.bounds, request.goal)
   ) {
     return { kind: 'unreachable' };
   }
-  if (sameCell(request.start, request.goal)) {
-    return { kind: 'found', cells: [], cost: feet(0) };
-  }
+  return findPathToAny(world, {
+    actorId: request.actorId,
+    start: request.start,
+    maximumCost: request.maximumCost,
+    isGoal: (cell) => sameCell(cell, request.goal),
+  });
+}
+
+/** Finds the least-cost path to any legal endpoint matching a pure predicate. */
+export function findPathToAny<TActorId extends string>(
+  world: MovementWorld<TActorId>,
+  request: PathToAnyRequest<TActorId>,
+): PathResult {
+  const maximumCost = validatedCost(request.maximumCost);
+  if (!isCellInside(world.bounds, request.start)) return { kind: 'unreachable' };
+  if (request.isGoal(request.start)) return { kind: 'found', cells: [], cost: feet(0) };
 
   const startKey = cellKey(request.start);
   const distances = new Map<string, number>([[startKey, 0]]);
   const previous = new Map<string, GridCell>();
-  const frontier: FrontierCell[] = [{ cell: request.start, cost: 0 }];
+  const frontier: FrontierCell[] = [{ cell: request.start, cost: 0, canEnd: true }];
 
   while (frontier.length > 0) {
     frontier.sort(frontierOrder);
@@ -177,10 +197,10 @@ export function findPath<TActorId extends string>(
     if (distances.get(cellKey(current.cell)) !== current.cost) {
       continue;
     }
-    if (sameCell(current.cell, request.goal)) {
+    if (current.canEnd && request.isGoal(current.cell)) {
       return {
         kind: 'found',
-        cells: reconstructPath(request.start, request.goal, previous),
+        cells: reconstructPath(request.start, current.cell, previous),
         cost: feet(current.cost),
       };
     }
@@ -196,10 +216,7 @@ export function findPath<TActorId extends string>(
         current.cell,
         neighbor,
       );
-      if (
-        traversal.kind === 'blocked' ||
-        (sameCell(neighbor, request.goal) && !traversal.canEnd)
-      ) {
+      if (traversal.kind === 'blocked') {
         continue;
       }
       const stepCost = validatedCost(traversal.cost);
@@ -214,7 +231,7 @@ export function findPath<TActorId extends string>(
       }
       distances.set(neighborKey, nextCost);
       previous.set(neighborKey, current.cell);
-      frontier.push({ cell: neighbor, cost: nextCost });
+      frontier.push({ cell: neighbor, cost: nextCost, canEnd: traversal.canEnd });
     }
   }
 

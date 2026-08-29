@@ -188,6 +188,29 @@ describe('AI-DM arena', () => {
     }
   });
 
+  it('adopts the frozen room-two focus draft without collapsing the round to Dodge', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-aggressive-room-two-'));
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943002', '--effort', 'low',
+      '--out', join(directory, 'as-is.jsonl'), '--dry-run',
+    ]);
+
+    const rows = await runArena(config, {
+      suggestionResponseByRequest: { 'room-1-round-1': 'as_is' },
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      outcome: 'authorized',
+      suggestedPlay: { name: 'focus_fire' },
+      suggestionAdopted: 'as_is',
+    });
+    expect(rows[0]?.authorizedPlan).toEqual([
+      expect.objectContaining({ acceptedIntent: expect.objectContaining({ choice: { kind: 'dash' } }) }),
+      expect.objectContaining({ acceptedIntent: expect.objectContaining({ choice: { kind: 'dash' } }) }),
+    ]);
+  });
+
   it('runs as a vite-node --dry-run CLI without contacting the model binary', { timeout: 30_000 }, () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-cli-'));
     const outPath = join(directory, 'arena.jsonl');

@@ -76,7 +76,7 @@ interface RegistryDependencies {
 type ProjectedActor = EngineStateCapsule['projection']['combatants'][number];
 type ProjectedAction = ProjectedActor['actions'][number];
 
-const RUNTIME_VERSION = 'plays-v1-runtime-1';
+const RUNTIME_VERSION = 'plays-v1-runtime-2';
 const DODGE: EngineIntentBranch = {
   choice: { kind: 'dodge' },
   movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
@@ -109,28 +109,34 @@ function blockerTargets(capsule: EngineStateCapsule, actors: readonly ProjectedA
     left.id.localeCompare(right.id));
 }
 
-function distanceFeet(left: ProjectedActor, right: ProjectedActor): number {
-  return Math.max(
-    Math.abs(left.position.column - right.position.column),
-    Math.abs(left.position.row - right.position.row),
-  ) * 5;
+function attackActions(actor: ProjectedActor): readonly ProjectedAction[] {
+  return actor.actions.filter((action) => action.kind === 'attack' && action.rangeFeet !== null);
 }
 
-function combatActions(actor: ProjectedActor): readonly ProjectedAction[] {
-  return actor.actions.filter((action) =>
-    (action.kind === 'attack' || action.kind === 'multiattack') && action.rangeFeet !== null);
+function minimumMovement(
+  actor: ProjectedActor,
+  target: ProjectedActor,
+  action: ProjectedAction,
+): number | null {
+  return actor.actionApproaches.find((approach) =>
+    approach.actionId === action.actionId && approach.targetId === target.id,
+  )?.minimumMovementFeet ?? null;
 }
 
-function canReach(actor: ProjectedActor, target: ProjectedActor, action: ProjectedAction): boolean {
-  return action.rangeFeet !== null &&
-    distanceFeet(actor, target) <= action.rangeFeet + actor.movementRemainingFeet;
+function canAttackThisTurn(
+  actor: ProjectedActor,
+  target: ProjectedActor,
+  action: ProjectedAction,
+): boolean {
+  const movement = minimumMovement(actor, target, action);
+  return movement !== null && movement <= actor.speedFeet * 2;
 }
 
-function bestAction(actor: ProjectedActor, target: ProjectedActor): ProjectedAction | null {
-  const actions = [...combatActions(actor)];
+function bestAttack(actor: ProjectedActor, target: ProjectedActor): ProjectedAction | null {
+  const actions = attackActions(actor).filter((action) => canAttackThisTurn(actor, target, action));
   actions.sort((left, right) =>
-    Number(canReach(actor, target, right)) - Number(canReach(actor, target, left)) ||
-    Number(right.kind === 'multiattack') - Number(left.kind === 'multiattack') ||
+    (minimumMovement(actor, target, left) ?? Number.POSITIVE_INFINITY) -
+      (minimumMovement(actor, target, right) ?? Number.POSITIVE_INFINITY) ||
     (right.rangeFeet ?? 0) - (left.rangeFeet ?? 0) ||
     left.actionId.localeCompare(right.actionId));
   return actions[0] ?? null;
@@ -151,19 +157,33 @@ function engagement(actor: ProjectedActor, target: ProjectedActor, action: Proje
 }
 
 function intent(actor: ProjectedActor, target: ProjectedActor, action: ProjectedAction): EngineTurnIntent {
-  const inRange = action.rangeFeet !== null && distanceFeet(actor, target) <= action.rangeFeet;
+  const requiredMovement = minimumMovement(actor, target, action);
+  const movementBudget = requiredMovement === null || requiredMovement === 0
+    ? 0
+    : actor.speedFeet;
+  const selector = { kind: 'combatant' as const, combatantId: target.id };
   return {
     actorId: actor.id,
     choice: choice(action, target),
-    movement: inRange || actor.movementRemainingFeet === 0
+    movement: movementBudget === 0
       ? { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' }
       : {
           willingness: 'only_if_required',
-          maximumFeet: actor.movementRemainingFeet,
+          maximumFeet: movementBudget,
           opportunityRisk: 'accept_if_needed',
         },
     engagement: engagement(actor, target, action),
-    fallback: DODGE,
+    fallback: requiredMovement !== null && requiredMovement > actor.speedFeet
+      ? {
+          choice: { kind: 'dash' },
+          movement: {
+            willingness: 'freely',
+            maximumFeet: actor.speedFeet * 2,
+            opportunityRisk: 'accept_if_needed',
+          },
+          engagement: { stance: 'close_to_melee', anchor: selector },
+        }
+      : DODGE,
   };
 }
 
@@ -183,67 +203,73 @@ function phaseDraft(
 function basicApplicable(capsule: EngineStateCapsule): boolean {
   const actors = requestedActors(capsule);
   const targets = opposingTargets(capsule, actors);
-  return actors.length > 0 && targets.length > 0 && actors.every((actor) => combatActions(actor).length > 0);
+  return actors.length > 0 && targets.length > 0 && actors.every((actor) => attackActions(actor).length > 0);
 }
 
 function expandBasic(capsule: EngineStateCapsule): readonly EngineTurnIntent[] {
   const actors = requestedActors(capsule);
   const targets = opposingTargets(capsule, actors);
   return phaseDraft(capsule, actors.map((actor) => {
-    const reachable = targets.find((target) => combatActions(actor).some((action) => canReach(actor, target, action)));
-    const target = reachable ?? targets[0];
+    const target = targets.find((candidate) => bestAttack(actor, candidate) !== null);
     if (target === undefined) return dodge(actor);
-    const action = bestAction(actor, target);
+    const action = bestAttack(actor, target);
     return action === null ? dodge(actor) : intent(actor, target, action);
   }));
 }
 
 function focusApplicable(capsule: EngineStateCapsule): boolean {
   const actors = requestedActors(capsule);
-  const target = opposingTargets(capsule, actors)[0];
-  return actors.length >= 2 && target !== undefined &&
-    actors.every((actor) => bestAction(actor, target) !== null);
+  return actors.length >= 2 && opposingTargets(capsule, actors).length > 0 &&
+    actors.every((actor) => attackActions(actor).length > 0);
 }
 
 function expandFocus(capsule: EngineStateCapsule): readonly EngineTurnIntent[] {
   const actors = requestedActors(capsule);
-  const target = opposingTargets(capsule, actors)[0];
-  if (target === undefined) return phaseDraft(capsule, actors.map(dodge));
+  const targets = opposingTargets(capsule, actors);
   return phaseDraft(capsule, actors.map((actor) => {
-    const action = bestAction(actor, target);
+    const target = targets.find((candidate) => bestAttack(actor, candidate) !== null);
+    if (target === undefined) return dodge(actor);
+    const action = bestAttack(actor, target);
     return action === null ? dodge(actor) : intent(actor, target, action);
   }));
 }
 
-function controlAction(actors: readonly ProjectedActor[]): {
+function controlAction(actors: readonly ProjectedActor[], target: ProjectedActor): {
   readonly actor: ProjectedActor;
   readonly action: ProjectedAction;
 } | null {
-  const candidates = actors.flatMap((actor) => actor.actions.map((action) => ({ actor, action })));
+  const candidates = actors.flatMap((actor) => actor.actions.flatMap((action) => {
+    const id = action.actionId.toLowerCase();
+    const movement = minimumMovement(actor, target, action);
+    if (movement === null || movement > actor.speedFeet * 2) return [];
+    if (id.includes('web') && movement !== 0) return [];
+    return id.includes('web') || id.includes('grapple') || id.includes('grab')
+      ? [{ actor, action }]
+      : [];
+  }));
   candidates.sort((left, right) =>
     Number(right.action.actionId.toLowerCase().includes('web')) -
       Number(left.action.actionId.toLowerCase().includes('web')) ||
     left.actor.id.localeCompare(right.actor.id) ||
     left.action.actionId.localeCompare(right.action.actionId));
-  return candidates.find(({ action }) => {
-    const id = action.actionId.toLowerCase();
-    return id.includes('web') || id.includes('grapple') || id.includes('grab');
-  }) ?? null;
+  return candidates[0] ?? null;
 }
 
 function obstacleApplicable(capsule: EngineStateCapsule): boolean {
   const actors = requestedActors(capsule);
-  return blockerTargets(capsule, actors).length > 0 && controlAction(actors) !== null;
+  const target = blockerTargets(capsule, actors)[0];
+  return target !== undefined && controlAction(actors, target) !== null;
 }
 
 function expandObstacle(capsule: EngineStateCapsule): readonly EngineTurnIntent[] {
   const actors = requestedActors(capsule);
   const target = blockerTargets(capsule, actors)[0];
-  const controller = controlAction(actors);
-  if (target === undefined || controller === null) return phaseDraft(capsule, actors.map(dodge));
+  if (target === undefined) return phaseDraft(capsule, actors.map(dodge));
+  const controller = controlAction(actors, target);
+  if (controller === null) return phaseDraft(capsule, actors.map(dodge));
   return phaseDraft(capsule, actors.map((actor) => {
     if (actor.id === controller.actor.id) return intent(actor, target, controller.action);
-    const action = bestAction(actor, target);
+    const action = bestAttack(actor, target);
     return action === null ? dodge(actor) : intent(actor, target, action);
   }));
 }
@@ -289,7 +315,7 @@ export function createSnippetRegistry(dependencies: RegistryDependencies): Snipp
       name: 'remove_obstacle',
       description: 'Control the ranked blocker with Web when available, otherwise a statblock grapple or grab.',
       rank: 10,
-      strategy: 'rank blocker by reach then removal; prefer web, then grapple/grab; allies attack blocker',
+      strategy: 'rank blocker by reach then removal; prefer in-range web, then reachable grapple/grab with full movement; allies attack blocker',
       applicability: obstacleApplicable,
       expand: expandObstacle,
     }),
@@ -297,7 +323,7 @@ export function createSnippetRegistry(dependencies: RegistryDependencies): Snipp
       name: 'focus_fire',
       description: 'Concentrate every attack on the ranked best removal target while preserving each attacker’s stance.',
       rank: 20,
-      strategy: 'rank target by hit points then reach; ranged maintain range; melee close',
+      strategy: 'rank reachable target by hit points then reach; attack within full turn movement including dash commitment; ranged maintain range; melee close',
       applicability: focusApplicable,
       expand: expandFocus,
     }),
@@ -305,7 +331,7 @@ export function createSnippetRegistry(dependencies: RegistryDependencies): Snipp
       name: 'basic_advance',
       description: 'Each actor advances only as needed and attacks its best reachable ranked target.',
       rank: 30,
-      strategy: 'per actor choose first reachable ranked target; ranged maintain range; melee close',
+      strategy: 'per actor choose first reachable ranked target using projected path cost; commit up to dash movement; ranged maintain range; melee close',
       applicability: basicApplicable,
       expand: expandBasic,
     }),
