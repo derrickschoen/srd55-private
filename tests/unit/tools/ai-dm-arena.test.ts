@@ -14,6 +14,7 @@ import {
 import { decodeCodexTurn } from '../../../src/vtt/agent-adapters/codex';
 import type { RoundPlan } from '../../../src/vtt/dm-bridge/round-plan-contract';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import {
@@ -149,6 +150,12 @@ describe('AI-DM arena', () => {
     expect(rows.every((row) =>
       row.snippetHash === SNIPPET_REGISTRY.snippetHash &&
       row.snippetSetHash === SNIPPET_REGISTRY.snippetSetHash)).toBe(true);
+    expect(rows[0]?.suggestedPlay).toEqual({
+      name: 'remove_obstacle',
+      hash: SNIPPET_REGISTRY.expand('remove_obstacle',
+        createEngineMcpRuntime(generateRoom(3_943_001).encounter.state).feed.current()).definition.snippetHash,
+    });
+    expect(rows[0]?.suggestionAdopted).toBe('ignored');
     expect(readFileSync(outPath, 'utf8').trim().split('\n').every((line) =>
       (JSON.parse(line) as { readonly kbHash?: unknown }).kbHash === kbHash)).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n').every((line) => {
@@ -157,6 +164,28 @@ describe('AI-DM arena', () => {
         row.snippetSetHash === SNIPPET_REGISTRY.snippetSetHash;
     })).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n')).toHaveLength(4);
+  });
+
+  it('classifies exact, edited, and ignored responses to the inline suggestion from structural bookkeeping', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-suggestion-'));
+    const cases = ['as_is', 'edited', 'ignored'] as const;
+
+    for (const response of cases) {
+      const config = parseArenaArgs([
+        '--rooms', '1', '--reps', '1', '--seed', '3943003', '--effort', 'low',
+        '--out', join(directory, `${response}.jsonl`), '--dry-run',
+      ]);
+      const rows = await runArena(config, {
+        suggestionResponseByRequest: { 'room-1-round-1': response },
+      });
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        outcome: 'authorized',
+        suggestedPlay: { name: 'basic_advance' },
+        suggestionAdopted: response,
+      });
+    }
   });
 
   it('runs as a vite-node --dry-run CLI without contacting the model binary', { timeout: 30_000 }, () => {

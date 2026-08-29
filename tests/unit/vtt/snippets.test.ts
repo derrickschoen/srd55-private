@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { EngineTargetSelector } from '../../../src/vtt/engine-query-port';
 import type { EngineTurnIntent } from '../../../src/vtt/intent-resolver';
+import { createEngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
 import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { SUGGESTED_PLAN_MAX_BYTES } from '../../../src/vtt/mcp/engine-server';
 import { mcpRequestMeta } from '../../../src/vtt/mcp/handler';
 import { engineSchemaInternals, schemaViolations } from '../../../src/vtt/mcp/schemas';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
@@ -118,6 +120,22 @@ describe('plays v1 registry', () => {
     if (!Array.isArray(advertised)) throw new TypeError('Applicable plays are absent.');
     expect(advertised.map((play) => record(play, 'advertised play')['name'])).toContain('focus_fire');
 
+    const top = record(advertised[0], 'top advertised play');
+    const suggested = record(context['suggested_plan'], 'suggested plan');
+    expect(suggested).toMatchObject({
+      play_name: top['name'],
+      snippet_hash: top['snippet_hash'],
+      advisory: expect.stringContaining('submit_round_intents'),
+    });
+    expect(Buffer.byteLength(JSON.stringify(suggested), 'utf8')).toBeLessThanOrEqual(
+      SUGGESTED_PLAN_MAX_BYTES,
+    );
+    const suggestedIntents = suggested['intents'];
+    if (!Array.isArray(suggestedIntents)) throw new TypeError('Suggested intents are absent.');
+    expect(suggestedIntents.some((value) =>
+      record(record(value, 'suggested intent')['choice'], 'suggested choice')['kind'] === 'attack'))
+      .toBe(true);
+
     const expected = SNIPPET_REGISTRY.expand('focus_fire', capsule);
     const draft = tool(runtime, 'engine.propose_from_play', { play_name: 'focus_fire' });
     expect(draft).toEqual({
@@ -133,6 +151,34 @@ describe('plays v1 registry', () => {
       values.map(() => []),
     );
     expect(values.every((value) => record(value, 'draft intent')['choice'] !== undefined)).toBe(true);
+  });
+
+  it('omits the suggestion when no play applies', async () => {
+    const { runtime, capsule } = await registryFixture(3_943_003);
+    if (capsule.request === null) throw new TypeError('Fixture request is absent.');
+    const requested = new Set(capsule.request.actors);
+    runtime.feed.replace(createEngineStateCapsule({
+      runId: capsule.runId,
+      branchId: capsule.branchId,
+      revision: capsule.revision + 1,
+      generatedAt: capsule.generatedAt,
+      request: capsule.request,
+      projection: {
+        ...capsule.projection,
+        combatants: capsule.projection.combatants.map((actor) =>
+          requested.has(actor.id) ? { ...actor, life: 'dead' as const } : actor),
+      },
+      historyDelta: capsule.historyDelta,
+      rulesIndex: capsule.rulesIndex,
+    }));
+
+    const context = tool(runtime, 'engine.get_turn_context', {
+      run_id: capsule.runId,
+      expected_revision: capsule.revision + 1,
+      scope: 'round',
+    });
+    expect(context['applicable_plays']).toEqual([]);
+    expect(context).not.toHaveProperty('suggested_plan');
   });
 
   it.each([

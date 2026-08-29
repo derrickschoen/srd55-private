@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { appendFile, mkdtemp, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { createInterface, type Interface } from 'node:readline';
 import { canonicalJson } from '../src/commands/canonical-json';
 import type { PersistedCoordinatorState } from '../src/combat/coordinator';
@@ -34,7 +35,7 @@ import {
   pureIntentResolver, type EngineActionChoice, type EngineIntentBranch,
   type EngineTurnIntent, type ResolvedIntentMechanics,
 } from '../src/vtt/intent-resolver';
-import { SNIPPET_REGISTRY } from '../src/vtt/snippet-registry-runtime';
+import { SNIPPET_REGISTRY, type PlayName } from '../src/vtt/snippet-registry-runtime';
 import { mcpRequestMeta } from '../src/vtt/mcp/handler';
 import {
   loadArenaFixture, type EngineMcpLauncherManifest,
@@ -116,6 +117,14 @@ export interface ConversationAuthorizedActorPlan {
   };
 }
 
+export interface ConversationSuggestedPlay {
+  readonly name: PlayName;
+  readonly hash: string;
+}
+
+export type ConversationSuggestionAdoption = 'as_is' | 'edited' | 'ignored';
+type SimulatedSuggestionResponse = ConversationSuggestionAdoption | 'legacy';
+
 export interface ConversationRow {
   readonly room: number;
   readonly round: number;
@@ -126,6 +135,8 @@ export interface ConversationRow {
   readonly kbHash: string | null;
   readonly snippetHash: string;
   readonly snippetSetHash: string;
+  readonly suggestedPlay: ConversationSuggestedPlay | null;
+  readonly suggestionAdopted: ConversationSuggestionAdoption | null;
   readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null';
   readonly proposalId: string | null;
   readonly timeToFirstAction: number;
@@ -176,6 +187,8 @@ export interface ConversationRunOptions {
   readonly failBeforeDispatch?: readonly string[];
   /** SIMULATED-only sticky declarations keyed by `room-N-round-N`. */
   readonly reactionGuidanceByRequest?: Readonly<Record<string, ReactionGuidanceDeclaration>>;
+  /** SIMULATED-only response to the inline suggestion, keyed by `room-N-round-N`. */
+  readonly suggestionResponseByRequest?: Readonly<Record<string, ConversationSuggestionAdoption>>;
 }
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -281,6 +294,12 @@ async function loadKnowledgeBase(config: ConversationConfig): Promise<{
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Readonly<Record<string, unknown>> : null;
+}
+
+function requiredRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {
+  const candidate = asRecord(value);
+  if (candidate === null) throw new TypeError(`${label} must be an object.`);
+  return candidate;
 }
 
 function recordsWithin(value: unknown): readonly Readonly<Record<string, unknown>>[] {
@@ -418,6 +437,38 @@ function externalIntent(intent: EngineTurnIntent): Readonly<Record<string, unkno
   };
 }
 
+interface SuggestedPlanBookkeeping {
+  readonly play: ConversationSuggestedPlay;
+  readonly intents: readonly EngineTurnIntent[];
+}
+
+function suggestedPlanBookkeeping(capsule: EngineRoundSnapshot['capsule']): SuggestedPlanBookkeeping | null {
+  const top = SNIPPET_REGISTRY.applicable(capsule)[0];
+  if (top === undefined) return null;
+  const draft = SNIPPET_REGISTRY.expand(top.name, capsule);
+  return {
+    play: { name: top.name, hash: top.snippetHash },
+    intents: draft.intents,
+  };
+}
+
+export function classifySuggestionAdoption(
+  suggestion: readonly EngineTurnIntent[] | null,
+  accepted: readonly EngineTurnIntent[] | null,
+): ConversationSuggestionAdoption | null {
+  if (suggestion === null) return null;
+  if (accepted === null || accepted.length === 0) return 'ignored';
+  const acceptedByActor = new Map(accepted.map((entry) => [entry.actorId, entry]));
+  const exact = accepted.length === suggestion.length && suggestion.every((intent) =>
+    isDeepStrictEqual(acceptedByActor.get(intent.actorId), intent));
+  if (exact) return 'as_is';
+  const retainsSuggestedChoice = suggestion.some((intent) => {
+    const acceptedIntent = acceptedByActor.get(intent.actorId);
+    return acceptedIntent !== undefined && isDeepStrictEqual(acceptedIntent.choice, intent.choice);
+  });
+  return retainsSuggestedChoice ? 'edited' : 'ignored';
+}
+
 function scriptedIntents(state: EncounterState, phase: 'initial' | 'correction'): readonly EngineTurnIntent[] {
   return livingMonsterIds(state).map((actorId): EngineTurnIntent => {
     const actor = canonicalEngineQueryPort.combatant(state, actorId);
@@ -516,6 +567,7 @@ async function driveScriptedMcp(
   submit: boolean,
   invalid: boolean,
   reactionGuidance: ReactionGuidanceDeclaration | null,
+  suggestionResponse: SimulatedSuggestionResponse,
 ): Promise<{ readonly calls: number; readonly rejections: readonly ConversationChainAttemptEvidence[] }> {
   const manifest = JSON.parse(await readFile(launcherPath, 'utf8')) as EngineMcpLauncherManifest;
   const state = await loadArenaFixture(manifest.fixturePath);
@@ -532,10 +584,34 @@ async function driveScriptedMcp(
       return { calls, rejections: rejectionEvidence(contextResult) };
     }
     const context = asRecord(contextResult['structuredContent']);
-    const stateRef = context === null ? null : asRecord(context['state_ref']);
+    if (context === null) throw new Error('engine.get_turn_context omitted structured content.');
+    const stateRef = asRecord(context['state_ref']);
     if (stateRef === null) throw new Error('engine.get_turn_context omitted state_ref.');
-    const intents = scriptedIntents(state, manifest.phase).map(externalIntent);
-    const submittedIntents = invalid ? intents.map((intent) => ({
+    const suggestion = asRecord(context['suggested_plan']);
+    const suggestedIntents = suggestion?.['intents'];
+    const useSuggestion = (suggestionResponse === 'as_is' || suggestionResponse === 'edited') &&
+      Array.isArray(suggestedIntents);
+    const intents = useSuggestion
+      ? structuredClone(suggestedIntents) as readonly Readonly<Record<string, unknown>>[]
+      : suggestionResponse === 'ignored'
+        ? livingMonsterIds(state).map((actorId) => externalIntent({
+            actorId,
+            choice: { kind: 'dodge' },
+            movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
+            engagement: { stance: 'hold_position' },
+            fallback: null,
+          }))
+        : scriptedIntents(state, manifest.phase).map(externalIntent);
+    const responseIntents = suggestionResponse !== 'edited' || !useSuggestion
+      ? intents
+      : intents.map((intent, index) => index !== 0 ? intent : {
+          ...intent,
+          movement: {
+            ...requiredRecord(intent['movement'], 'suggested movement'),
+            opportunity_risk: 'accept',
+          },
+        });
+    const submittedIntents = invalid ? responseIntents.map((intent) => ({
       ...intent,
       choice: { kind: 'cast_spell', spell_id: 'SIMULATED-unavailable', target: null },
       fallback: {
@@ -543,7 +619,7 @@ async function driveScriptedMcp(
         movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
         engagement: { stance: 'hold_position' },
       },
-    })) : intents;
+    })) : responseIntents;
     const submitResult = asRecord(await mcpRequest(client, 'tools/call', {
       name: 'engine.submit_round_intents',
       arguments: {
@@ -574,6 +650,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   readonly #failCorrection: ReadonlySet<string>;
   readonly #remainingPrimaryFlaps: Map<string, number>;
   readonly #reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>;
+  readonly #suggestionResponseByRequest: Readonly<Record<string, ConversationSuggestionAdoption>>;
   #starts = 0;
 
   constructor(
@@ -584,6 +661,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     fail: readonly string[],
     primaryFlaps: Readonly<Record<string, number>>,
     reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>,
+    suggestionResponseByRequest: Readonly<Record<string, ConversationSuggestionAdoption>>,
   ) {
     this.kind = kind;
     this.#exhaustInitial = new Set(exhaust);
@@ -591,6 +669,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     this.#failCorrection = new Set(fail);
     this.#remainingPrimaryFlaps = new Map(Object.entries(primaryFlaps));
     this.#reactionGuidanceByRequest = reactionGuidanceByRequest;
+    this.#suggestionResponseByRequest = suggestionResponseByRequest;
   }
 
   async probe() { return { present: true, version: 'SIMULATED' }; }
@@ -630,6 +709,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
       submit,
       manifest.phase === 'initial' && this.#invalidInitial.has(key),
       manifest.phase === 'initial' ? this.#reactionGuidanceByRequest[key] ?? null : null,
+      manifest.phase === 'initial' ? this.#suggestionResponseByRequest[key] ?? 'legacy' : 'legacy',
     );
     this.callsByRequest.set(manifest.requestId, (this.callsByRequest.get(manifest.requestId) ?? 0) + driven.calls);
     if (driven.rejections.length > 0) {
@@ -849,6 +929,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
     options.failCorrection ?? [],
     options.flapPrimaryByRequest ?? {},
     options.reactionGuidanceByRequest ?? {},
+    options.suggestionResponseByRequest ?? {},
   ) : null;
   const adapter = options.adapter ?? simulated ?? resolveAgentAdapter(config.cli, {
     binary: config.cliBin, cwd: config.cwd, engineCommand: process.execPath,
@@ -943,6 +1024,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
         ? engineSession.snapshot(initialRequest)
         : prepareRound(initialRequest);
       const capsule = initialSnapshot.capsule;
+      const suggestedPlan = suggestedPlanBookkeeping(capsule);
       const contextRevision = capsule.revision;
       const authoritativeInitialRequest = { ...initialRequest, revision: contextRevision };
       const initialLauncher = await writeLauncher({
@@ -961,6 +1043,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let correctionFinalText: string | null = null;
       let authorizationStateBinding: ConversationRow['stateBinding']['authorization'] = null;
       let authorizedPlan: ConversationRow['authorizedPlan'] = null;
+      let acceptedSubmission: readonly EngineTurnIntent[] | null = null;
       let roundNarrative: ConversationRow['roundNarrative'] = null;
       let initialDispatchPlanner: ConversationPlannerAttribution | null = null;
       let correctionDispatchPlanner: ConversationPlannerAttribution | null = null;
@@ -1097,6 +1180,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
               return 'invalid';
             }
             proposalId = proposal.proposalId;
+            acceptedSubmission = proposal.resolutions.map((entry) => structuredClone(entry.intent));
             authorizedPlan = mechanics.map((entry): ConversationAuthorizedActorPlan => ({
               actorId: entry.mechanics.actorId,
               acceptedIntent: structuredClone(entry.acceptedIntent),
@@ -1236,6 +1320,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
         kbHash: knowledgeBase?.hash ?? null,
         snippetHash: SNIPPET_REGISTRY.snippetHash,
         snippetSetHash: SNIPPET_REGISTRY.snippetSetHash,
+        suggestedPlay: suggestedPlan?.play ?? null,
+        suggestionAdopted: classifySuggestionAdoption(suggestedPlan?.intents ?? null, acceptedSubmission),
         timeToFirstAction: wall,
         wallPerCreature: wall / Math.max(1, livingMonsterIds(engineSession.currentState()).length),
         tokens: tokenCounts(roundUsage), refusals,
