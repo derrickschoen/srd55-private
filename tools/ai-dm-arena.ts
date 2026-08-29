@@ -50,6 +50,8 @@ export interface ArenaRow {
   readonly plannedBy: import('./ai-dm-conversation').ConversationPlannerAttribution | 'sim_controller' | null;
   readonly escalated: boolean;
   readonly escalationModel: string | null;
+  readonly authorizedPlan: readonly import('./ai-dm-conversation').ConversationAuthorizedActorPlan[] | null;
+  readonly roundNarrative: string | null;
   readonly chainEvidence: import('./ai-dm-conversation').ConversationChainEvidence;
 }
 
@@ -186,6 +188,8 @@ export async function runArena(
     plannedBy: row.plannedBy,
     escalated: row.escalated,
     escalationModel: row.escalationModel,
+    authorizedPlan: row.authorizedPlan,
+    roundNarrative: row.roundNarrative,
     chainEvidence: row.chainEvidence,
   }));
   await writeFile(config.outPath, rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');

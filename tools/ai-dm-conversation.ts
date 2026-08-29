@@ -104,6 +104,17 @@ export interface ConversationChainEvidence {
   readonly correctionFinalText: string | null;
 }
 
+export interface ConversationAuthorizedActorPlan {
+  readonly actorId: CombatantId;
+  readonly acceptedIntent: Readonly<Record<string, unknown>>;
+  readonly selectedBranch: 'primary' | 'fallback';
+  readonly resolutionSummary: {
+    readonly actionId: string;
+    readonly targetId: CombatantId | null;
+    readonly movementFeet: number;
+  };
+}
+
 export interface ConversationRow {
   readonly room: number;
   readonly round: number;
@@ -129,6 +140,8 @@ export interface ConversationRow {
     readonly capsule: { readonly revision: number; readonly digest: string };
     readonly authorization: { readonly revision: number; readonly digest: string } | null;
   };
+  readonly authorizedPlan: readonly ConversationAuthorizedActorPlan[] | null;
+  readonly roundNarrative: string | null;
   readonly chainEvidence: ConversationChainEvidence;
 }
 
@@ -728,6 +741,9 @@ function authorizedMechanics(state: EncounterState, proposal: RoundIntentProposa
   readonly entries: readonly {
     readonly mechanics: ResolvedIntentMechanics;
     readonly choice: EngineActionChoice;
+    readonly acceptedIntent: Readonly<Record<string, unknown>>;
+    readonly selectedBranch: 'primary' | 'fallback';
+    readonly summary: string;
     readonly primaryDeclaredIntent: Readonly<Record<string, unknown>>;
     readonly selectedDeclaredIntent: Readonly<Record<string, unknown>>;
     readonly primaryRejectionReasons: readonly string[];
@@ -753,6 +769,9 @@ function authorizedMechanics(state: EncounterState, proposal: RoundIntentProposa
       ? null : {
           mechanics: checked.mechanics,
           choice,
+          acceptedIntent: externalBranch(declared),
+          selectedBranch: entry.selectedBranch,
+          summary: entry.summary,
           primaryDeclaredIntent: externalBranch(entry.intent),
           selectedDeclaredIntent: externalBranch(declared),
           primaryRejectionReasons: checked.refusals.map((refusal) => refusal.summary),
@@ -762,6 +781,9 @@ function authorizedMechanics(state: EncounterState, proposal: RoundIntentProposa
     entries: resolved.some((entry) => entry === null) ? null : resolved as readonly {
       readonly mechanics: ResolvedIntentMechanics;
       readonly choice: EngineActionChoice;
+      readonly acceptedIntent: Readonly<Record<string, unknown>>;
+      readonly selectedBranch: 'primary' | 'fallback';
+      readonly summary: string;
       readonly primaryDeclaredIntent: Readonly<Record<string, unknown>>;
       readonly selectedDeclaredIntent: Readonly<Record<string, unknown>>;
       readonly primaryRejectionReasons: readonly string[];
@@ -935,6 +957,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let autoResolvedTrigger: string | null = null;
       let correctionFinalText: string | null = null;
       let authorizationStateBinding: ConversationRow['stateBinding']['authorization'] = null;
+      let authorizedPlan: ConversationRow['authorizedPlan'] = null;
+      let roundNarrative: ConversationRow['roundNarrative'] = null;
       let initialDispatchPlanner: ConversationPlannerAttribution | null = null;
       let correctionDispatchPlanner: ConversationPlannerAttribution | null = null;
       let plannedBy: ConversationRow['plannedBy'] = null;
@@ -1070,6 +1094,17 @@ export async function runConversation(config: ConversationConfig, options: Conve
               return 'invalid';
             }
             proposalId = proposal.proposalId;
+            authorizedPlan = mechanics.map((entry): ConversationAuthorizedActorPlan => ({
+              actorId: entry.mechanics.actorId,
+              acceptedIntent: structuredClone(entry.acceptedIntent),
+              selectedBranch: entry.selectedBranch,
+              resolutionSummary: {
+                actionId: entry.mechanics.actionId,
+                targetId: entry.mechanics.targetId,
+                movementFeet: entry.mechanics.movementCostFeet,
+              },
+            }));
+            roundNarrative = mechanics.map((entry) => entry.summary).join('; ');
             const acceptingPlanner = proposal.phase === 'initial'
               ? initialDispatchPlanner
               : correctionDispatchPlanner;
@@ -1206,6 +1241,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
           capsule: { revision: capsule.revision, digest: capsule.digest },
           authorization: authorizationStateBinding,
         },
+        authorizedPlan,
+        roundNarrative,
         chainEvidence: { failedAttempts, autoResolvedTrigger, correctionFinalText },
       };
       rows.push(row);

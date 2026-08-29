@@ -99,6 +99,49 @@ describe('AI-DM arena', () => {
     expect(rows.every((row) => row.chainEvidence.autoResolvedTrigger === null)).toBe(true);
     expect(rows.every((row) => row.chainEvidence.failedAttempts.every((attempt) =>
       attempt.rejectionReasons.length > 0))).toBe(true);
+    expect(rows[0]?.authorizedPlan).toEqual([
+      {
+        actorId: 'combatant:generated-3943001-monster-1',
+        acceptedIntent: {
+          choice: { kind: 'dodge' },
+          movement: {
+            willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid',
+          },
+          engagement: { stance: 'hold_position' },
+        },
+        selectedBranch: 'fallback',
+        resolutionSummary: { actionId: 'dodge', targetId: null, movementFeet: 0 },
+      },
+      {
+        actorId: 'combatant:generated-3943001-monster-2',
+        acceptedIntent: {
+          choice: { kind: 'dodge' },
+          movement: {
+            willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid',
+          },
+          engagement: { stance: 'hold_position' },
+        },
+        selectedBranch: 'fallback',
+        resolutionSummary: { actionId: 'dodge', targetId: null, movementFeet: 0 },
+      },
+      {
+        actorId: 'combatant:generated-3943001-monster-3',
+        acceptedIntent: {
+          choice: { kind: 'dodge' },
+          movement: {
+            willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid',
+          },
+          engagement: { stance: 'hold_position' },
+        },
+        selectedBranch: 'fallback',
+        resolutionSummary: { actionId: 'dodge', targetId: null, movementFeet: 0 },
+      },
+    ]);
+    expect(rows[0]?.roundNarrative).toBe(
+      'combatant:generated-3943001-monster-1 uses dodge; ' +
+      'combatant:generated-3943001-monster-2 uses dodge; ' +
+      'combatant:generated-3943001-monster-3 uses dodge',
+    );
     expect(rows[1]?.contextRevision).toBe(rows[0]?.projectionRevision);
     const kbHash = createHash('sha256').update(Buffer.from(kbText, 'utf8')).digest('hex');
     expect(rows.every((row) => row.kbHash === kbHash)).toBe(true);
@@ -186,6 +229,8 @@ describe('AI-DM arena', () => {
         agentDispatched: true,
         flapRetries: 2,
         serviceNull: true,
+        authorizedPlan: null,
+        roundNarrative: null,
         chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
         tokens: { input: 611, cachedInput: 115, output: 77, reasoning: 31 },
       }),
@@ -211,6 +256,7 @@ describe('AI-DM arena', () => {
     expect(row).toEqual(expect.objectContaining({
       outcome: 'refused', agentDispatched: false, toolCalls: 0,
       plannedBy: null, escalated: false, escalationModel: null,
+      authorizedPlan: null, roundNarrative: null,
       chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
       refusals: ['SIMULATED host failure before agent dispatch.'],
     }));
@@ -229,6 +275,8 @@ describe('AI-DM arena', () => {
     expect(row).toEqual(expect.objectContaining({
       outcome: 'auto_resolved', agentDispatched: true,
       plannedBy: 'sim_controller', escalated: true, escalationModel: 'gpt-escalation',
+      authorizedPlan: null,
+      roundNarrative: null,
       chainEvidence: {
         failedAttempts: expect.arrayContaining([
           expect.objectContaining({
