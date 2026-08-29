@@ -17,7 +17,11 @@ import {
   claudeCodeEngineToolName,
   UNVERIFIED_CONTRACT_CLAUDE_CODE,
 } from '../../../src/vtt/agent-adapters/claude-code';
-import { CodexAgentSessionAdapter, UNVERIFIED_CONTRACT_CODEX } from '../../../src/vtt/agent-adapters/codex';
+import {
+  CodexAgentSessionAdapter,
+  codexArgv,
+  UNVERIFIED_CONTRACT_CODEX,
+} from '../../../src/vtt/agent-adapters/codex';
 import {
   OpenCodeAgentSessionAdapter,
   openCodeConfig,
@@ -142,6 +146,34 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       runner.calls[1]?.spec.argv.findIndex((value) => value.startsWith('mcp_servers.engine.args=')) ?? -1,
     );
     expect(UNVERIFIED_CONTRACT_CODEX).toContain('UNVERIFIED_CONTRACT');
+  });
+
+  it('SIMULATED Codex disables project docs, recommended plugins, and skill instructions only for arena sessions', () => {
+    const base = {
+      cwd,
+      model: invocation.model,
+      reasoningEffort: invocation.reasoningEffort,
+      engineCommand,
+      engineArgs,
+      sessionId: null,
+    } as const;
+    const ordinary = codexArgv(base);
+    const arena = codexArgv({ ...base, arenaSession: true });
+    const arenaResume = codexArgv({ ...base, arenaSession: true, sessionId: 'codex-arena-thread' });
+
+    expect(ordinary).not.toContain('project_doc_max_bytes=0');
+    expect(ordinary).not.toContain('features.recommended_plugins=false');
+    expect(ordinary).not.toContain('skills.include_instructions=false');
+    expect(arena).toContain('project_doc_max_bytes=0');
+    expect(arena).toContain('features.recommended_plugins=false');
+    expect(arena).toContain('skills.include_instructions=false');
+    expect(arenaResume).toEqual(expect.arrayContaining([
+      'project_doc_max_bytes=0',
+      'features.recommended_plugins=false',
+      'skills.include_instructions=false',
+      'resume',
+      'codex-arena-thread',
+    ]));
   });
 
   it('SIMULATED Codex classifies a replacement thread on resume as resume_not_found', async () => {

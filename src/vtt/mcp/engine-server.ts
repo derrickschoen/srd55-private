@@ -22,6 +22,7 @@ import {
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
 import type { EngineActionChoice, EngineEngagement, EngineIntentBranch, EngineMovementPreference, EngineTurnIntent, PureIntentResolver } from '../intent-resolver';
 import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
+import { diffTurnContextValues } from '../dm-bridge/projection-transport';
 import { submitSpeculativeRoundPlan } from '../speculative-plan-submission';
 import type { SpeculativePlanSink } from '../speculative-plan-types';
 import {
@@ -111,6 +112,11 @@ export interface AdjudicationEnvelope {
 }
 export interface AdjudicationSink { readonly append: (envelope: AdjudicationEnvelope) => void }
 
+export interface TurnContextDeltaBase {
+  readonly revision: number;
+  readonly context: Readonly<Record<string, unknown>>;
+}
+
 interface EngineMcpDependencies {
   readonly state: EncounterState;
   readonly stateSource: EngineCapsuleFeed;
@@ -125,6 +131,7 @@ interface EngineMcpDependencies {
   readonly maximumResourceBytes?: number;
   readonly listPageSize?: number;
   readonly toolProfile?: EngineMcpToolProfile;
+  readonly turnContextDeltaBase?: TurnContextDeltaBase;
 }
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
@@ -368,7 +375,7 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_intent', capsul
   const uriBase = `engine://run/${encodeURIComponent(capsule.runId)}`;
   const fixed = kind === 'plan_round'
     ? 'Use engine.get_turn_context, then engine.submit_round_intents once for the complete required actor set. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
-    : 'Correct the complete refused intent request once. No fallback remains after this correction; correction fallback must be null.';
+    : 'Correct the complete refused intent request once. No fallback remains after this correction; correction fallback must be null. If you refresh context, use the get_turn_context request in current_context exactly.';
   return [fixed, `Turn resource: ${uriBase}/turn/current`, `Intent schema: ${uriBase}/schema/intent-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: capsule.request, voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
 }
 
@@ -421,54 +428,87 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     idempotency.set(key, { bytes, result: structuredClone(result) });
     return result;
   }
+  function fullTurnContext(
+    capsule: EngineStateCapsule,
+    input: Readonly<Record<string, unknown>>,
+  ): Readonly<Record<string, unknown>> {
+    const requested = Array.isArray(input['actor_ids']) ? input['actor_ids'].map((id) => combatantId(String(id))) : capsule.request?.actors ?? [];
+    const required = input['scope'] === 'active_turn' && capsule.projection.activeCombatant !== null ? [capsule.projection.activeCombatant] : requested;
+    const maximum = typeof input['maximum_options_per_actor'] === 'number' ? input['maximum_options_per_actor'] : 8;
+    const includeExpectations = input['include_expectations'] !== false;
+    const actors = [...required].sort().map((actorId) => {
+      const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
+      if (actor === undefined) throw new RangeError(`ACTOR_ABSENT:${actorId}`);
+      const all = tacticalOptions(state, queries, capsule, actorId, includeExpectations, true);
+      return { actor_id: actorId, status: actorStatus(actor), options: all.slice(0, maximum), threats: threats(state, queries, actorId), omitted: all.length > maximum };
+    });
+    const applicablePlays = SNIPPET_REGISTRY.applicable(capsule);
+    const result = {
+      granularity: 'full' as const,
+      context_trimmed: false,
+      state_ref: externalStateRef(capsule),
+      request: capsule.request === null || capsule.request.phase === 'speculative' ? null : {
+        request_id: capsule.request.requestId, phase: capsule.request.phase,
+        correction_number: capsule.request.correctionNumber,
+        required_actor_ids: capsule.request.actors,
+      },
+      summary: tacticalSummary(capsule), actors: actors.map(({ omitted: _omitted, ...actor }) => actor), recent_changes: recentChanges(capsule),
+      applicable_plays: applicablePlays.map((play) => ({
+        name: play.name,
+        description: play.description,
+        snippet_hash: play.snippetHash,
+      })),
+      truncated: actors.some((actor) => actor.omitted), next_cursor: null,
+    };
+    while (new TextEncoder().encode(JSON.stringify(result)).byteLength > TURN_CONTEXT_BASE_MAX_BYTES) {
+      const actor = [...result.actors].reverse().find((candidate) => candidate.options.length > 0);
+      if (actor === undefined) break;
+      actor.options.pop();
+      result.truncated = true;
+      result.context_trimmed = true;
+    }
+    const topPlay = applicablePlays[0];
+    if (topPlay === undefined) return result;
+    const draft = SNIPPET_REGISTRY.expand(topPlay.name, capsule);
+    const suggestedPlan = {
+      play_name: topPlay.name,
+      snippet_hash: topPlay.snippetHash,
+      intents: draft.intents.map(externalIntent),
+      advisory: SUGGESTED_PLAN_ADVISORY,
+    };
+    const suggestedBytes = new TextEncoder().encode(JSON.stringify(suggestedPlan)).byteLength;
+    if (suggestedBytes > SUGGESTED_PLAN_MAX_BYTES) {
+      throw new RangeError(`SUGGESTED_PLAN_TOO_LARGE: ${String(suggestedBytes)} UTF-8 bytes exceeds the ${String(SUGGESTED_PLAN_MAX_BYTES)}-byte limit.`);
+    }
+    return { ...result, suggested_plan: suggestedPlan };
+  }
   function execute(name: string, value: unknown): unknown {
     const input = record(value, `${name} arguments`);
     if (name === 'engine.get_turn_context') {
       const capsule = exactCurrent(feed, stringField(input, 'run_id'), numberField(input, 'expected_revision'));
       if (capsule.request === null) throw new RangeError('NO_PENDING_REQUEST');
       if (capsule.request.phase === 'speculative') throw new RangeError('SPECULATIVE_CONTEXT_USES_CAPSULE_MENU');
-      const requested = Array.isArray(input['actor_ids']) ? input['actor_ids'].map((id) => combatantId(String(id))) : capsule.request.actors;
-      const required = input['scope'] === 'active_turn' && capsule.projection.activeCombatant !== null ? [capsule.projection.activeCombatant] : requested;
-      const maximum = typeof input['maximum_options_per_actor'] === 'number' ? input['maximum_options_per_actor'] : 8;
-      const includeExpectations = input['include_expectations'] !== false;
-      const actors = [...required].sort().map((actorId) => {
-        const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
-        if (actor === undefined) throw new RangeError(`ACTOR_ABSENT:${actorId}`);
-        const all = tacticalOptions(state, queries, capsule, actorId, includeExpectations, true);
-        return { actor_id: actorId, status: actorStatus(actor), options: all.slice(0, maximum), threats: threats(state, queries, actorId), omitted: all.length > maximum };
-      });
-      const applicablePlays = SNIPPET_REGISTRY.applicable(capsule);
-      const result = {
-        state_ref: externalStateRef(capsule),
-        request: { request_id: capsule.request.requestId, phase: capsule.request.phase, correction_number: capsule.request.correctionNumber, required_actor_ids: capsule.request.actors },
-        summary: tacticalSummary(capsule), actors: actors.map(({ omitted: _omitted, ...actor }) => actor), recent_changes: recentChanges(capsule),
-        applicable_plays: applicablePlays.map((play) => ({
-          name: play.name,
-          description: play.description,
-          snippet_hash: play.snippetHash,
-        })),
-        truncated: actors.some((actor) => actor.omitted), next_cursor: null,
+      const full = fullTurnContext(capsule, input);
+      const base = dependencies.turnContextDeltaBase;
+      if (input['granularity'] !== 'turn_delta' || base === undefined ||
+        input['since_revision'] !== base.revision ||
+        base.context['granularity'] !== 'full') return full;
+      const baseStateRef = record(base.context['state_ref'], 'turn context delta base state_ref');
+      if (baseStateRef['run_id'] !== capsule.runId ||
+        baseStateRef['expected_revision'] !== base.revision) return full;
+      return {
+        granularity: 'turn_delta',
+        anchor: {
+          base_revision: base.revision,
+          revision: capsule.revision,
+          base_context_hash: sha256(canonicalJson(base.context)),
+          context_hash: sha256(canonicalJson(full)),
+          state_ref: full['state_ref'],
+          request: full['request'],
+        },
+        changes: diffTurnContextValues(base.context, full),
+        context_trimmed: full['context_trimmed'],
       };
-      while (new TextEncoder().encode(JSON.stringify(result)).byteLength > TURN_CONTEXT_BASE_MAX_BYTES) {
-        const actor = [...result.actors].reverse().find((candidate) => candidate.options.length > 0);
-        if (actor === undefined) break;
-        actor.options.pop();
-        result.truncated = true;
-      }
-      const topPlay = applicablePlays[0];
-      if (topPlay === undefined) return result;
-      const draft = SNIPPET_REGISTRY.expand(topPlay.name, capsule);
-      const suggestedPlan = {
-        play_name: topPlay.name,
-        snippet_hash: topPlay.snippetHash,
-        intents: draft.intents.map(externalIntent),
-        advisory: SUGGESTED_PLAN_ADVISORY,
-      };
-      const suggestedBytes = new TextEncoder().encode(JSON.stringify(suggestedPlan)).byteLength;
-      if (suggestedBytes > SUGGESTED_PLAN_MAX_BYTES) {
-        throw new RangeError(`SUGGESTED_PLAN_TOO_LARGE: ${String(suggestedBytes)} UTF-8 bytes exceeds the ${String(SUGGESTED_PLAN_MAX_BYTES)}-byte limit.`);
-      }
-      return { ...result, suggested_plan: suggestedPlan };
     }
     if (name === 'engine.propose_from_play') {
       const capsule = feed.current();

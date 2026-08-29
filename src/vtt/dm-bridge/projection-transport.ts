@@ -10,7 +10,7 @@ export type ProjectionTransportMode =
   | 'compact_lossless'
   | 'revision_delta';
 
-export type ProjectionDeltaOperation =
+export type RevisionDeltaOperation =
   | {
       readonly kind: 'set';
       readonly path: readonly string[];
@@ -20,6 +20,8 @@ export type ProjectionDeltaOperation =
       readonly kind: 'delete';
       readonly path: readonly string[];
     };
+
+export type ProjectionDeltaOperation = RevisionDeltaOperation;
 
 type CompactProjectionView =
   Omit<DmBoardProjection, 'audience' | 'history' | 'coordinator'> & {
@@ -86,16 +88,24 @@ function assertProjectionFields(
   );
 }
 
-function delta(
+function diffValues(
   before: unknown,
   after: unknown,
   path: readonly string[] = [],
-): readonly ProjectionDeltaOperation[] {
+  granularArrays = false,
+): readonly RevisionDeltaOperation[] {
   if (canonicalJson(before) === canonicalJson(after)) return [];
+  if (Array.isArray(before) && Array.isArray(after)) {
+    if (!granularArrays || before.length !== after.length) {
+      return [{ kind: 'set', path, value: structuredClone(after) }];
+    }
+    return before.flatMap((value, index) =>
+      diffValues(value, after[index], [...path, String(index)], true));
+  }
   if (!isRecord(before) || !isRecord(after)) {
     return [{ kind: 'set', path, value: structuredClone(after) }];
   }
-  const operations: ProjectionDeltaOperation[] = [];
+  const operations: RevisionDeltaOperation[] = [];
   const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
   for (const key of keys) {
     if (!(key in after)) {
@@ -103,33 +113,78 @@ function delta(
     } else if (!(key in before)) {
       operations.push({ kind: 'set', path: [...path, key], value: structuredClone(after[key]) });
     } else {
-      operations.push(...delta(before[key], after[key], [...path, key]));
+      operations.push(...diffValues(before[key], after[key], [...path, key], granularArrays));
     }
   }
   return operations;
 }
 
-function mutableRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!isRecord(value)) throw new TypeError(`${label} is not an object.`);
-  return value as Record<string, unknown>;
+export function diffRevisionValues(
+  before: unknown,
+  after: unknown,
+  path: readonly string[] = [],
+): readonly RevisionDeltaOperation[] {
+  return diffValues(before, after, path);
 }
 
-function applyOperation(root: Record<string, unknown>, operation: ProjectionDeltaOperation): void {
+export function diffTurnContextValues(
+  before: unknown,
+  after: unknown,
+): readonly RevisionDeltaOperation[] {
+  return diffValues(before, after, [], true);
+}
+
+function mutableContainer(value: unknown, label: string): Record<string, unknown> | unknown[] {
+  if (!isRecord(value) && !Array.isArray(value)) throw new TypeError(`${label} is not a container.`);
+  return value as Record<string, unknown> | unknown[];
+}
+
+function containerValue(container: Record<string, unknown> | unknown[], segment: string): unknown {
+  if (!Array.isArray(container)) return container[segment];
+  const index = Number(segment);
+  if (!Number.isSafeInteger(index) || index < 0 || index >= container.length) {
+    throw new TypeError('Revision delta array index is invalid.');
+  }
+  return container[index];
+}
+
+function applyOperation(
+  root: Record<string, unknown>,
+  operation: RevisionDeltaOperation,
+): void {
   if (operation.path.length === 0) throw new TypeError('Projection delta cannot replace or delete its root.');
-  let parent = root;
+  let parent: Record<string, unknown> | unknown[] = root;
   for (const segment of operation.path.slice(0, -1)) {
-    parent = mutableRecord(parent[segment], 'Projection delta path');
+    parent = mutableContainer(containerValue(parent, segment), 'Revision delta path');
   }
   const leaf = operation.path.at(-1);
   if (leaf === undefined) throw new TypeError('Projection delta path is empty.');
+  const key: string | number = Array.isArray(parent) ? Number(leaf) : leaf;
+  if (Array.isArray(parent)) {
+    const index = Number(leaf);
+    if (!Number.isSafeInteger(index) || index < 0 || index >= parent.length) {
+      throw new TypeError('Revision delta array index is invalid.');
+    }
+  }
   switch (operation.kind) {
     case 'set':
-      parent[leaf] = structuredClone(operation.value);
+      Reflect.set(parent, key, structuredClone(operation.value));
       break;
     case 'delete':
+      if (Array.isArray(parent)) throw new TypeError('Revision delta cannot delete an array element.');
       delete parent[leaf];
       break;
   }
+}
+
+export function applyRevisionDelta<T extends Readonly<Record<string, unknown>>>(
+  base: T,
+  operations: readonly RevisionDeltaOperation[],
+): T {
+  const candidate = mutableContainer(structuredClone(base), 'Revision delta base');
+  if (Array.isArray(candidate)) throw new TypeError('Revision delta base must be an object.');
+  for (const operation of operations) applyOperation(candidate, operation);
+  return candidate as T;
 }
 
 interface StoredProjection {
@@ -161,7 +216,7 @@ export class ProjectionTransferSender {
           baseHash: previous.hash,
           revision: current.revision,
           stateHash: current.hash,
-          operations: delta(previous.projection, current.projection),
+          operations: diffRevisionValues(previous.projection, current.projection),
         };
     this.#sent.set(request.encounterId, current);
     const { projection: _projection, ...rest } = request;
@@ -232,9 +287,10 @@ export class ProjectionTransferReceiver {
           expectedRevision: transfer.revision,
         };
       }
-      const candidate = mutableRecord(structuredClone(previous.projection), 'Stored projection');
-      for (const operation of transfer.operations) applyOperation(candidate, operation);
-      projection = candidate as unknown as DmBoardProjection;
+      projection = applyRevisionDelta(
+        previous.projection as unknown as Readonly<Record<string, unknown>>,
+        transfer.operations,
+      ) as unknown as DmBoardProjection;
     }
     const actualHash = projectionHash(projection);
     if (actualHash !== transfer.stateHash || projection.encounter.revision !== transfer.revision) {
@@ -265,6 +321,6 @@ export class ProjectionTransferReceiver {
 export const projectionTransportInternals = {
   applyOperation,
   assertProjectionFields,
-  delta,
+  delta: diffRevisionValues,
   projectionHash,
 };

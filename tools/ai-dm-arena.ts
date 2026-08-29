@@ -67,6 +67,7 @@ export interface ArenaRow {
   readonly agentDispatched: boolean;
   readonly flapRetries: 0 | 1 | 2;
   readonly serviceNull: boolean;
+  readonly contextTruncated: boolean;
   readonly plannedBy: import('./ai-dm-conversation').ConversationPlannerAttribution | 'sim_controller' | null;
   readonly escalated: boolean;
   readonly escalationModel: string | null;
@@ -241,6 +242,7 @@ function arenaRows(
     agentDispatched: row.agentDispatched,
     flapRetries: row.flapRetries,
     serviceNull: row.serviceNull,
+    contextTruncated: row.contextTruncated,
     plannedBy: row.plannedBy,
     escalated: row.escalated,
     escalationModel: row.escalationModel,

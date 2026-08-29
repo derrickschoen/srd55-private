@@ -21,6 +21,7 @@ import {
   type AdjudicationEnvelope,
   type AllowlistedRulesSource,
   type EngineMcpToolProfile,
+  type TurnContextDeltaBase,
 } from './engine-server';
 import { jsonRpcParseError, type JsonRpcResponse, type McpHandler } from './handler';
 
@@ -128,6 +129,7 @@ export interface EngineMcpLauncherManifest {
   readonly room: number;
   readonly historyKind: string;
   readonly toolProfile?: EngineMcpToolProfile;
+  readonly turnContextDeltaBase?: TurnContextDeltaBase;
 }
 
 export function createEngineMcpRuntime(
@@ -149,6 +151,7 @@ export function createEngineMcpRuntime(
     readonly requestId?: string;
     readonly onProposal?: (proposal: EngineProposalEnvelope) => void;
     readonly toolProfile?: EngineMcpToolProfile;
+    readonly turnContextDeltaBase?: TurnContextDeltaBase;
   } = {},
 ): EngineMcpRuntime {
   const candidates = state.combatants
@@ -199,6 +202,9 @@ export function createEngineMcpRuntime(
     ...(options.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: options.maximumResourceBytes }),
     ...(options.listPageSize === undefined ? {} : { listPageSize: options.listPageSize }),
     ...(options.toolProfile === undefined ? {} : { toolProfile: options.toolProfile }),
+    ...(options.turnContextDeltaBase === undefined ? {} : {
+      turnContextDeltaBase: structuredClone(options.turnContextDeltaBase),
+    }),
   });
   return { handler, feed, proposals, speculativePlans, narrations, adjudications };
 }
@@ -252,6 +258,15 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
     (input['correctionNumber'] === 0 || input['correctionNumber'] === 1) &&
     Number.isSafeInteger(input['room']) && typeof input['room'] === 'number' && input['room'] >= 1 &&
     typeof input['historyKind'] === 'string' && input['historyKind'].length > 0 &&
+    (input['turnContextDeltaBase'] === undefined || (() => {
+      const base = input['turnContextDeltaBase'];
+      if (typeof base !== 'object' || base === null || Array.isArray(base)) return false;
+      const candidate = base as Readonly<Record<string, unknown>>;
+      return Number.isSafeInteger(candidate['revision']) && typeof candidate['revision'] === 'number' &&
+        candidate['revision'] >= 1 && typeof candidate['context'] === 'object' &&
+        candidate['context'] !== null && !Array.isArray(candidate['context']) &&
+        (candidate['context'] as Readonly<Record<string, unknown>>)['granularity'] === 'full';
+    })()) &&
     (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm');
 }
 
@@ -287,6 +302,9 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       correctionNumber: manifest.correctionNumber,
       room: manifest.room,
       historyKind: manifest.historyKind,
+      ...(manifest.turnContextDeltaBase === undefined ? {} : {
+        turnContextDeltaBase: manifest.turnContextDeltaBase,
+      }),
       ...((selectedProfile ?? manifest.toolProfile) === undefined
         ? {}
         : { toolProfile: selectedProfile ?? manifest.toolProfile }),

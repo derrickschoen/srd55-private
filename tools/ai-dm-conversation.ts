@@ -38,9 +38,14 @@ import {
 import { SNIPPET_REGISTRY, type PlayName } from '../src/vtt/snippet-registry-runtime';
 import { mcpRequestMeta } from '../src/vtt/mcp/handler';
 import {
-  loadArenaFixture, type EngineMcpLauncherManifest,
+  createEngineMcpRuntime, loadArenaFixture, type EngineMcpLauncherManifest,
 } from '../src/vtt/mcp/entrypoint';
+import type { TurnContextDeltaBase } from '../src/vtt/mcp/engine-server';
 import { renderEnginePrompt } from '../src/vtt/mcp/engine-server';
+import {
+  applyRevisionDelta,
+  type RevisionDeltaOperation,
+} from '../src/vtt/dm-bridge/projection-transport';
 import {
   EncounterSessionJournal, importSavedSession, MemoryBrowserSessionStore,
   MemoryMirrorSink, type BrowserSessionStore,
@@ -147,6 +152,7 @@ export interface ConversationRow {
   readonly agentDispatched: boolean;
   readonly flapRetries: 0 | 1 | 2;
   readonly serviceNull: boolean;
+  readonly contextTruncated: boolean;
   readonly plannedBy: ConversationPlannerAttribution | 'sim_controller' | null;
   readonly escalated: boolean;
   readonly escalationModel: string | null;
@@ -314,6 +320,16 @@ function eventToolNames(value: unknown): readonly string[] {
     const name = candidate['tool'] ?? candidate['name'];
     return typeof name === 'string' && name.includes('engine') ? [name] : [];
   });
+}
+
+function eventContextTrimmed(value: unknown): boolean {
+  if (typeof value === 'string' && value.includes('context_trimmed')) {
+    try { return eventContextTrimmed(JSON.parse(value) as unknown); } catch { return false; }
+  }
+  if (Array.isArray(value)) return value.some(eventContextTrimmed);
+  const candidate = asRecord(value);
+  return candidate !== null && (candidate['context_trimmed'] === true ||
+    Object.values(candidate).some(eventContextTrimmed));
 }
 
 function rejectionEvidence(value: unknown): readonly ConversationChainAttemptEvidence[] {
@@ -568,7 +584,11 @@ async function driveScriptedMcp(
   invalid: boolean,
   reactionGuidance: ReactionGuidanceDeclaration | null,
   suggestionResponse: SimulatedSuggestionResponse,
-): Promise<{ readonly calls: number; readonly rejections: readonly ConversationChainAttemptEvidence[] }> {
+): Promise<{
+  readonly calls: number;
+  readonly rejections: readonly ConversationChainAttemptEvidence[];
+  readonly contextTruncated: boolean;
+}> {
   const manifest = JSON.parse(await readFile(launcherPath, 'utf8')) as EngineMcpLauncherManifest;
   const state = await loadArenaFixture(manifest.fixturePath);
   const client = startMcpClient(cwd, launcherPath);
@@ -577,14 +597,33 @@ async function driveScriptedMcp(
     await mcpRequest(client, 'server/discover', {});
     const contextResult = asRecord(await mcpRequest(client, 'tools/call', {
       name: 'engine.get_turn_context',
-      arguments: { run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round' },
+      arguments: {
+        run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round',
+        ...(manifest.turnContextDeltaBase === undefined ? { granularity: 'full' } : {
+          granularity: 'turn_delta', since_revision: manifest.turnContextDeltaBase.revision,
+        }),
+      },
     }));
     calls += 1;
     if (contextResult === null || contextResult['isError'] !== false || !submit) {
-      return { calls, rejections: rejectionEvidence(contextResult) };
+      return {
+        calls,
+        rejections: rejectionEvidence(contextResult),
+        contextTruncated: eventContextTrimmed(contextResult),
+      };
     }
-    const context = asRecord(contextResult['structuredContent']);
-    if (context === null) throw new Error('engine.get_turn_context omitted structured content.');
+    const wireContext = asRecord(contextResult['structuredContent']);
+    if (wireContext === null) throw new Error('engine.get_turn_context omitted structured content.');
+    const changes = wireContext['changes'];
+    const context = wireContext['granularity'] !== 'turn_delta'
+      ? wireContext
+      : manifest.turnContextDeltaBase === undefined || !Array.isArray(changes)
+        ? null
+        : applyRevisionDelta(
+            manifest.turnContextDeltaBase.context,
+            changes as readonly RevisionDeltaOperation[],
+          );
+    if (context === null) throw new Error('engine.get_turn_context delta could not be reconstructed.');
     const stateRef = asRecord(context['state_ref']);
     if (stateRef === null) throw new Error('engine.get_turn_context omitted state_ref.');
     const suggestion = asRecord(context['suggested_plan']);
@@ -635,7 +674,11 @@ async function driveScriptedMcp(
     if (submitResult === null || submitResult['isError'] !== false) {
       throw new Error('engine.submit_round_intents failed in the SIMULATED client.');
     }
-    return { calls, rejections: rejectionEvidence(submitResult) };
+    return {
+      calls,
+      rejections: rejectionEvidence(submitResult),
+      contextTruncated: eventContextTrimmed(contextResult),
+    };
   } finally {
     await stopMcpClient(client);
   }
@@ -645,6 +688,8 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   readonly kind: AgentCliKind;
   readonly callsByRequest = new Map<string, number>();
   readonly rejectionsByRequest = new Map<string, readonly ConversationChainAttemptEvidence[]>();
+  readonly contextTruncatedByRequest = new Map<string, boolean>();
+  readonly contextCallsByRequest = new Map<string, number>();
   readonly #exhaustInitial: ReadonlySet<string>;
   readonly #invalidInitial: ReadonlySet<string>;
   readonly #failCorrection: ReadonlySet<string>;
@@ -712,9 +757,14 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
       manifest.phase === 'initial' ? this.#suggestionResponseByRequest[key] ?? 'legacy' : 'legacy',
     );
     this.callsByRequest.set(manifest.requestId, (this.callsByRequest.get(manifest.requestId) ?? 0) + driven.calls);
+    this.contextCallsByRequest.set(
+      manifest.requestId,
+      (this.contextCallsByRequest.get(manifest.requestId) ?? 0) + 1,
+    );
     if (driven.rejections.length > 0) {
       this.rejectionsByRequest.set(manifest.requestId, driven.rejections);
     }
+    if (driven.contextTruncated) this.contextTruncatedByRequest.set(manifest.requestId, true);
     return completedSimulated(sessionId);
   }
 
@@ -756,10 +806,16 @@ async function writeLauncher(input: {
   readonly snapshot: EngineRoundSnapshot;
   readonly room: number;
   readonly historyKind: string;
-}): Promise<{ readonly manifestPath: string; readonly spoolPath: string }> {
+  readonly turnContextDeltaBase?: TurnContextDeltaBase;
+}): Promise<{
+  readonly manifestPath: string;
+  readonly recoveryManifestPath: string;
+  readonly spoolPath: string;
+}> {
   const fixturePath = join(input.directory, `${input.name}-fixture.json`);
   const spoolPath = join(input.directory, `${input.name}-proposals.jsonl`);
   const manifestPath = join(input.directory, `${input.name}-launcher.json`);
+  const recoveryManifestPath = join(input.directory, `${input.name}-launcher-full.json`);
   await writeFile(fixturePath, input.snapshot.fixtureJson, 'utf8');
   await writeFile(spoolPath, '', 'utf8');
   const capsule = input.snapshot.capsule;
@@ -773,9 +829,57 @@ async function writeLauncher(input: {
     revision: capsule.revision, requestId: request.requestId,
     phase: request.phase, correctionNumber: request.correctionNumber,
     room: input.room, historyKind: input.historyKind, toolProfile: 'dm',
+    ...(input.turnContextDeltaBase === undefined ? {} : {
+      turnContextDeltaBase: input.turnContextDeltaBase,
+    }),
   };
   await writeFile(manifestPath, canonicalJson(manifest), 'utf8');
-  return { manifestPath, spoolPath };
+  const { turnContextDeltaBase: _turnContextDeltaBase, ...fullManifest } = manifest;
+  await writeFile(recoveryManifestPath, canonicalJson(fullManifest), 'utf8');
+  return { manifestPath, recoveryManifestPath, spoolPath };
+}
+
+function fullTurnContextBase(
+  state: EncounterState,
+  snapshot: EngineRoundSnapshot,
+): TurnContextDeltaBase {
+  const capsule = snapshot.capsule;
+  const request = capsule.request;
+  if (request === null || request.phase === 'speculative') {
+    throw new Error('Turn-context base requires an ordinary pending request.');
+  }
+  const runtime = createEngineMcpRuntime(state, {
+    runId: capsule.runId,
+    branchId: capsule.branchId,
+    revision: capsule.revision,
+    requestId: request.requestId,
+    phase: request.phase,
+    correctionNumber: request.correctionNumber,
+    room: capsule.projection.room,
+    ...(capsule.historyDelta[0] === undefined ? {} : {
+      historyKind: capsule.historyDelta[0].kind,
+    }),
+    requestedActorCount: request.actors.length,
+    toolProfile: 'dm',
+  });
+  const response = runtime.handler.handle({
+    jsonrpc: '2.0', id: 'turn-context-base', method: 'tools/call',
+    params: {
+      name: 'engine.get_turn_context',
+      arguments: {
+        run_id: capsule.runId, expected_revision: capsule.revision,
+        scope: 'round', granularity: 'full',
+      },
+      _meta: mcpRequestMeta({ name: 'ai-dm-conversation-base', version: '1.0.0' }),
+    },
+  });
+  const responseRecord = asRecord(response);
+  const result = asRecord(responseRecord?.['result']);
+  const context = asRecord(result?.['structuredContent']);
+  if (result?.['isError'] !== false || context === null || context['granularity'] !== 'full') {
+    throw new Error('Could not compute the full turn-context delta base.');
+  }
+  return { revision: capsule.revision, context: structuredClone(context) };
 }
 
 function selectedIntentBranch(
@@ -884,10 +988,13 @@ function invocation(
   launcherToken: string,
   instructions: string | null = null,
   planner: ConversationPlannerAttribution = { model: config.model, effort: config.effort },
+  recoveryLauncherToken?: string,
 ): AgentInvocation {
   return {
     runId, prompt, instructions, model: planner.model, reasoningEffort: planner.effort,
+    sessionProfile: 'arena',
     launcherToken, timeoutMs: config.timeoutMs,
+    ...(recoveryLauncherToken === undefined ? {} : { recoveryLauncherToken }),
   };
 }
 
@@ -899,6 +1006,12 @@ function plannerAttribution(dispatched: AgentInvocation): ConversationPlannerAtt
     model: dispatched.model,
     effort: dispatched.reasoningEffort as ConversationEffort,
   };
+}
+
+function turnContextPrompt(base: TurnContextDeltaBase | undefined): string {
+  return base === undefined
+    ? 'Call engine.get_turn_context with granularity "full".'
+    : `Call engine.get_turn_context with granularity "turn_delta" and since_revision ${String(base.revision)}; the engine will return full context if that base is unavailable.`;
 }
 
 async function roomStates(config: ConversationConfig, options: ConversationRunOptions): Promise<readonly EncounterState[]> {
@@ -925,6 +1038,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
     controllers: [], rng: mulberry32(3_943_001), store, mirror: new MemoryMirrorSink(),
   });
   let observedToolCalls = 0;
+  let observedTurnContextCalls = 0;
+  let observedContextTruncated = false;
   let observedRejections: ConversationChainAttemptEvidence[] = [];
   const simulated = config.dryRun ? new SimulatedConversationAdapter(
     config.cli, config.cwd, options.exhaustInitial ?? [], options.invalidInitial ?? [],
@@ -943,7 +1058,10 @@ export async function runConversation(config: ConversationConfig, options: Conve
     onStdoutLine: (line) => {
       try {
         const event: unknown = JSON.parse(line) as unknown;
-        observedToolCalls += eventToolNames(event).length;
+        const toolNames = eventToolNames(event);
+        observedToolCalls += toolNames.length;
+        observedTurnContextCalls += toolNames.filter((name) => name.includes('get_turn_context')).length;
+        if (eventContextTrimmed(event)) observedContextTruncated = true;
         observedRejections.push(...rejectionEvidence(event));
       } catch { /* non-JSON */ }
     },
@@ -958,6 +1076,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
   );
   let completedRounds = 0;
   let restoredMidRun = false;
+  let lastSeenTurnContext: TurnContextDeltaBase | undefined;
   const basePlanner: ConversationPlannerAttribution = {
     model: config.model,
     effort: config.effort,
@@ -966,10 +1085,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
     config.escalationModel === null || config.escalationEffort === null
       ? null
       : { model: config.escalationModel, effort: config.escalationEffort };
-  const escalationInstructions = [
-    'This is a fresh one-shot escalation session for the single correction in the supplied repair brief. Use only the correction launcher and submit the complete corrected round once; no fallback remains.',
-    knowledgeBase?.text ?? '',
-  ].filter((entry) => entry.length > 0).join('\n\n');
+  const escalationInstructions =
+    'This is a fresh one-shot escalation session for the single correction in the supplied repair brief. Use only the correction launcher and submit the complete corrected round once; no fallback remains.';
   const prepareRound = (request: EngineRoundCapsuleRequest): EngineRoundSnapshot => {
     const prepared = engineSession.prepareRound(request, journal.reactionGuidance());
     recordAutoResolvedReactions(journal, prepared);
@@ -1006,16 +1123,28 @@ export async function runConversation(config: ConversationConfig, options: Conve
         directory: artifacts, name: `room-${String(room)}-transition`, snapshot,
         room, historyKind: 'room_transition',
       });
+      const contextCallsBeforeTransition = simulated?.contextCallsByRequest.get(requestId) ??
+        observedTurnContextCalls;
       await lifecycle.resumeRoomTransition(invocation(
         config, runId,
-        `[ROOM_TRANSITION] Enter room ${String(room)}. Call engine.get_turn_context once; do not submit intents yet.`,
+        `[ROOM_TRANSITION] Enter room ${String(room)}. Call engine.get_turn_context once with granularity "full"; do not submit intents yet.`,
         launcher.manifestPath,
+        null,
+        basePlanner,
+        launcher.recoveryManifestPath,
       ), new AbortController().signal);
+      const contextCallsAfterTransition = simulated?.contextCallsByRequest.get(requestId) ??
+        observedTurnContextCalls;
+      lastSeenTurnContext = contextCallsAfterTransition > contextCallsBeforeTransition
+        ? fullTurnContextBase(engineSession.currentState(), snapshot)
+        : undefined;
     }
 
     for (let round = 1; round <= config.rounds; round += 1) {
       const started = performance.now();
       observedToolCalls = 0;
+      observedTurnContextCalls = 0;
+      observedContextTruncated = false;
       observedRejections = [];
       const requestId = `request:room-${String(room)}-round-${String(round)}`;
       const key = `room-${String(room)}-round-${String(round)}`;
@@ -1030,9 +1159,13 @@ export async function runConversation(config: ConversationConfig, options: Conve
       const suggestedPlan = suggestedPlanBookkeeping(capsule);
       const contextRevision = capsule.revision;
       const authoritativeInitialRequest = { ...initialRequest, revision: contextRevision };
+      const currentTurnContext = fullTurnContextBase(engineSession.currentState(), initialSnapshot);
       const initialLauncher = await writeLauncher({
         directory: artifacts, name: `${key}-initial`, snapshot: initialSnapshot, room,
         historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
+        ...(lastSeenTurnContext === undefined ? {} : {
+          turnContextDeltaBase: lastSeenTurnContext,
+        }),
       });
       let roundUsage: AgentUsage | null = null;
       let proposalId: string | null = null;
@@ -1061,18 +1194,23 @@ export async function runConversation(config: ConversationConfig, options: Conve
         let proposed: RoundIntentProposalEnvelope | null = null;
         const toolCallsObserved = (): number =>
           simulated?.callsByRequest.get(requestId) ?? observedToolCalls;
+        const contextCallsObserved = (): number =>
+          simulated?.contextCallsByRequest.get(requestId) ?? observedTurnContextCalls;
         const rejectionsObserved = (): readonly ConversationChainAttemptEvidence[] =>
           simulated?.rejectionsByRequest.get(requestId) ?? observedRejections;
         const primaryPrompt = renderEnginePrompt('plan_round', capsule, RULES_SOURCE);
         try {
           for (let attempt = 0; attempt < 3; attempt += 1) {
             const callsBefore = toolCallsObserved();
+            const contextCallsBefore = contextCallsObserved();
             const rejectionsBefore = rejectionsObserved().length;
             const retryNote = attempt === 0 ? '' :
               '[SERVICE_RETRY] The previous turn completed with no engine tool activity and no proposal. Retry the same round now.\n\n';
             const primaryInvocation = invocation(
-              config, runId, `${retryNote}${primaryPrompt}`, initialLauncher.manifestPath,
-              null, basePlanner,
+              config, runId,
+              `${retryNote}${turnContextPrompt(lastSeenTurnContext)}\n\n${primaryPrompt}`,
+              initialLauncher.manifestPath,
+              null, basePlanner, initialLauncher.recoveryManifestPath,
             );
             initialDispatchPlanner = plannerAttribution(primaryInvocation);
             const turn = await lifecycle.resumeRound(
@@ -1083,6 +1221,9 @@ export async function runConversation(config: ConversationConfig, options: Conve
             proposed = takeRoundProposal(initialLauncher.spoolPath);
             const flapped = turn.exit === 'completed' && proposed === null &&
               toolCallsObserved() === callsBefore && rejectionsObserved().length === rejectionsBefore;
+            if (contextCallsObserved() > contextCallsBefore || proposed !== null) {
+              lastSeenTurnContext = currentTurnContext;
+            }
             if (!flapped) break;
             if (attempt === 2) {
               serviceNull = true;
@@ -1117,9 +1258,15 @@ export async function runConversation(config: ConversationConfig, options: Conve
         };
         const correctionSnapshot = engineSession.snapshot(correctionRequest);
         const correctionCapsule = correctionSnapshot.capsule;
+        const correctionTurnContextBase = escalationPlanner === null
+          ? lastSeenTurnContext
+          : undefined;
         const correctionLauncher = await writeLauncher({
           directory: artifacts, name: `${key}-correction`, snapshot: correctionSnapshot,
           room, historyKind: 'intent_correction_requested',
+          ...(correctionTurnContextBase === undefined ? {} : {
+            turnContextDeltaBase: correctionTurnContextBase,
+          }),
         });
         const host: TurnExhaustionHost = {
           authorize: async (proposal) => {
@@ -1237,7 +1384,15 @@ export async function runConversation(config: ConversationConfig, options: Conve
           initial,
           correction: {
             capsule: correctionCapsule, rules: RULES_SOURCE,
-            turnContext: { revision: contextRevision, room, round },
+            turnContext: {
+              revision: contextRevision, room, round,
+              get_turn_context: correctionTurnContextBase === undefined
+                ? { granularity: 'full' }
+                : {
+                    granularity: 'turn_delta',
+                    since_revision: correctionTurnContextBase.revision,
+                  },
+            },
             lifecycle: {
               resumeCorrection: async (correctionInvocation: AgentInvocation, signal: AbortSignal) => {
                 correctionDispatchPlanner = plannerAttribution(correctionInvocation);
@@ -1248,6 +1403,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
                 /* A model-changing resume contaminates the persistent base session even when
                  * the next primary argv switches back. Keep untiered corrections in-session,
                  * but dispatch configured escalation as a fresh, repair-brief-seeded session. */
+                const contextCallsBeforeCorrection = simulated?.contextCallsByRequest.get(requestId) ??
+                  observedTurnContextCalls;
                 const correctionTurn = escalationPlanner === null
                   ? await lifecycle.resumeCorrection(correctionInvocation, signal)
                   : await adapter.start({
@@ -1262,6 +1419,15 @@ export async function runConversation(config: ConversationConfig, options: Conve
                   throw new Error('Tiered correction did not create an isolated escalation session.');
                 }
                 roundUsage = addAgentUsage(roundUsage, correctionTurn.usage);
+                const contextCallsAfterCorrection = simulated?.contextCallsByRequest.get(requestId) ??
+                  observedTurnContextCalls;
+                if (escalationPlanner === null &&
+                  contextCallsAfterCorrection > contextCallsBeforeCorrection) {
+                  lastSeenTurnContext = fullTurnContextBase(
+                    engineSession.currentState(),
+                    correctionSnapshot,
+                  );
+                }
                 correctionFinalText = correctionTurn.finalText;
                 return correctionTurn;
               },
@@ -1273,6 +1439,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
               correctionLauncher.manifestPath,
               null,
               escalationPlanner ?? basePlanner,
+              correctionLauncher.recoveryManifestPath,
             ),
             signal: new AbortController().signal,
             activateCapsule: () => undefined,
@@ -1330,6 +1497,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
         tokens: tokenCounts(roundUsage), refusals,
         toolCalls: simulated?.callsByRequest.get(requestId) ?? observedToolCalls,
         agentDispatched, flapRetries, serviceNull,
+        contextTruncated: simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated,
         plannedBy, escalated, escalationModel: firedEscalationModel,
         stateBinding: {
           capsule: { revision: capsule.revision, digest: capsule.digest },
