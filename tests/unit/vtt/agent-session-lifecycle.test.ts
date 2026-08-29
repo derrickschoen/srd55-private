@@ -125,7 +125,8 @@ describe('SIMULATED agent session lifecycle', () => {
       }, signal);
 
       const predecessorHash = sha256('agent-session:failed');
-      expect(result.sessionId).toBe(agentSessionId('agent-session:successor'));
+      expect(result.resumeSessionId).toBe(agentSessionId('agent-session:successor'));
+      expect(result.sessionId).toBeNull();
       expect(adapter.startInvocations).toHaveLength(2);
       expect(adapter.startInvocations[1]?.prompt).toContain('"format":"recovery_bootstrap"');
       expect(adapter.startInvocations[1]?.prompt).toContain(predecessorHash);

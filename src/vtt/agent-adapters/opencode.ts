@@ -95,11 +95,15 @@ export class OpenCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
       );
       completedOutput(output, sessionId !== null);
       if (output.cancelled && sessionId !== null) {
-        return { sessionId: agentSessionIdFromCli(sessionId), finalText: '', usage: null, exit: 'cancelled' };
+        return {
+          resumeSessionId: agentSessionIdFromCli(sessionId), sessionId: null,
+          finalText: '', usage: null, exit: 'cancelled',
+        };
       }
       const decoded = decodeOpenCodeTurn(output.stdout, sessionId, (event) => this.observe(event));
       return {
-        sessionId: agentSessionIdFromCli(decoded.sessionId),
+        resumeSessionId: agentSessionIdFromCli(decoded.sessionId),
+        sessionId: null,
         finalText: decoded.finalText,
         usage: decoded.usage,
         exit: output.cancelled ? 'cancelled' : 'completed',

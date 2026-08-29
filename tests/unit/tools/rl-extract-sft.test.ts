@@ -90,6 +90,8 @@ describe('RL SFT extractor', () => {
       },
       stateDigest: 'a'.repeat(64),
       planHash: '736ca86563291fa686e06d91d055145c6cfde87b41ac11518622e0c4617b430a',
+      sessionId: '019d1111-1111-7111-8111-111111111111',
+      escalationSessionId: null,
     };
     expect(readFileSync(outPath, 'utf8')).toBe(`${canonicalJson(expected)}\n`);
     expect(stats).toEqual({ examples: 1, rooms: 1, deduplicated: 0 });
@@ -113,6 +115,25 @@ describe('RL SFT extractor', () => {
 
     expect(stats).toEqual({ examples: 1, rooms: 1, deduplicated: 1 });
     expect(readFileSync(outPath, 'utf8').trim().split('\n')).toHaveLength(1);
+  });
+
+  it('round-trips primary and escalation session IDs as non-training metadata', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd411-extract-session-metadata-'));
+    const arenaPath = join(directory, 'session-linked.jsonl');
+    const outPath = join(directory, 'sft.jsonl');
+    writeFileSync(arenaPath, `${canonicalJson({
+      ...fixtureRow(),
+      sessionId: '019d2222-2222-7222-8222-222222222222',
+      escalationSessionId: '019d3333-3333-7333-8333-333333333333',
+    })}\n`, 'utf8');
+
+    await extractSft({ arenaPaths: [arenaPath], rolloutPaths: [], outPath });
+
+    const example = JSON.parse(readFileSync(outPath, 'utf8')) as SftExample;
+    expect(example.sessionId).toBe('019d2222-2222-7222-8222-222222222222');
+    expect(example.escalationSessionId).toBe('019d3333-3333-7333-8333-333333333333');
+    expect(example.messages.every((message) => !message.content.includes('019d2222') &&
+      !message.content.includes('019d3333'))).toBe(true);
   });
 
   it('uses a proposal-matched Codex rollout when legacy rows lack the opt-in capture', async () => {

@@ -96,7 +96,10 @@ export class ClaudeCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
     );
     completedOutput(output, sessionId !== null);
     if (output.cancelled && sessionId !== null) {
-      return { sessionId: agentSessionIdFromCli(sessionId), finalText: '', usage: null, exit: 'cancelled' };
+      return {
+        resumeSessionId: agentSessionIdFromCli(sessionId), sessionId: null,
+        finalText: '', usage: null, exit: 'cancelled',
+      };
     }
     const decoded = decodeClaudeCodeTurn(
       output.stdout,
@@ -105,7 +108,8 @@ export class ClaudeCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
       this.options.engineToolProfile === 'dm' ? CLAUDE_DM_ENGINE_TOOLS : CLAUDE_ENGINE_TOOLS,
     );
     return {
-      sessionId: agentSessionIdFromCli(decoded.sessionId),
+      resumeSessionId: agentSessionIdFromCli(decoded.sessionId),
+      sessionId: null,
       finalText: decoded.finalText,
       usage: decoded.usage,
       exit: output.cancelled ? 'cancelled' : 'completed',

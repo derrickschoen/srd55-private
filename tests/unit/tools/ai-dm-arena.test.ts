@@ -43,7 +43,7 @@ class FakeCodexUsageAdapter implements AgentSessionAdapter {
   }
 
   private completed(
-    sessionId: AgentTurnResult['sessionId'],
+    sessionId: AgentTurnResult['resumeSessionId'],
     invocation: AgentInvocation,
   ): AgentTurnResult {
     const usages = [
@@ -60,7 +60,8 @@ class FakeCodexUsageAdapter implements AgentSessionAdapter {
       sessionId,
     );
     return {
-      sessionId: agentSessionIdFromCli(decoded.sessionId),
+      resumeSessionId: agentSessionIdFromCli(decoded.sessionId),
+      sessionId: decoded.sessionId,
       finalText: decoded.finalText,
       usage: decoded.usage,
       exit: 'completed',
@@ -87,7 +88,8 @@ class OrderingNullAdapter implements AgentSessionAdapter {
     this.ordering.push(this.label);
     await this.beforeStart();
     return {
-      sessionId: agentSessionIdFromCli(`ordering-${this.label}-${String(this.starts)}`),
+      resumeSessionId: agentSessionIdFromCli(`ordering-${this.label}-${String(this.starts)}`),
+      sessionId: null,
       finalText: '',
       usage: null,
       exit: 'completed',
@@ -95,7 +97,10 @@ class OrderingNullAdapter implements AgentSessionAdapter {
   }
 
   async resume(binding: AgentSessionBinding): Promise<AgentTurnResult> {
-    return { sessionId: binding.sessionId, finalText: '', usage: null, exit: 'completed' };
+    return {
+      resumeSessionId: binding.sessionId, sessionId: null,
+      finalText: '', usage: null, exit: 'completed',
+    };
   }
 
   classifyFailure(): 'unknown' { return 'unknown'; }
@@ -168,6 +173,7 @@ describe('AI-DM arena', () => {
       row.outcome === 'authorized' && row.refusals.length === 0 &&
       row.projectionRevision > row.contextRevision)).toBe(true);
     expect(rows.every((row) => row.agentDispatched)).toBe(true);
+    expect(rows.every((row) => row.sessionId === null && row.escalationSessionId === null)).toBe(true);
     expect(rows.every((row) =>
       typeof row.plannedBy === 'object' && row.plannedBy?.model === 'gpt-5.6-sol' &&
       row.plannedBy.effort === 'low' &&
@@ -477,6 +483,8 @@ describe('AI-DM arena', () => {
     expect(rows).toEqual([
       expect.objectContaining({
         outcome: 'service_null',
+        sessionId: 'codex-arena-usage',
+        escalationSessionId: null,
         kbHash: null,
         agentDispatched: true,
         flapRetries: 2,
@@ -491,6 +499,7 @@ describe('AI-DM arena', () => {
     expect(JSON.parse(readFileSync(outPath, 'utf8').trim())).toEqual(
       expect.objectContaining({
         flapRetries: 2, serviceNull: true, callsPerRound: 3,
+        sessionId: 'codex-arena-usage', escalationSessionId: null,
         tokens: { input: 611, cachedInput: 115, output: 77, reasoning: 31 },
       }),
     );

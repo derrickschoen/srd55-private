@@ -96,6 +96,8 @@ describe('RL arena batch generator', () => {
     )) as Readonly<Record<string, unknown>>;
     expect(row['seed']).toBe(6_000_001);
     expect(row['outcome']).toBe('authorized');
+    expect(row).toHaveProperty('sessionId', null);
+    expect(row).toHaveProperty('escalationSessionId', null);
   });
 
   it('runs on bad CLI arguments and exits nonzero with usage text', { timeout: 15_000 }, () => {

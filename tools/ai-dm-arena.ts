@@ -67,6 +67,9 @@ export interface ArenaRow {
   readonly suggestionAdopted: import('./ai-dm-conversation').ConversationSuggestionAdoption | null;
   readonly contextRevision: number;
   readonly projectionRevision: number;
+  /** Codex rollout ID; locate its full log with a rollout-*-<id>.jsonl glob. */
+  readonly sessionId: string | null;
+  readonly escalationSessionId: string | null;
   readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null' | 'local_error';
   readonly proposalId: string | null;
   readonly wall: number;
@@ -309,6 +312,8 @@ function arenaRows(
     suggestionAdopted: row.suggestionAdopted,
     contextRevision: row.contextRevision,
     projectionRevision: row.projectionRevision,
+    sessionId: row.sessionId,
+    escalationSessionId: row.escalationSessionId,
     outcome: row.outcome,
     proposalId: row.proposalId,
     wall: row.wallPerCreature,
