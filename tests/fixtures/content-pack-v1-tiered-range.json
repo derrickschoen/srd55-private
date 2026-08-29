@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "packId": "tiered-range-fixture",
+  "provenance": {
+    "sourceName": "Tiered Range Fixture",
+    "sourceKind": "homebrew",
+    "importedAt": "2026-08-29T12:00:00Z"
+  },
+  "namespaces": ["tiered-range"],
+  "spells": [
+    {
+      "sourceId": "tiered-range",
+      "recordId": "damage-bolt",
+      "name": "Damage Bolt",
+      "level": 0,
+      "school": { "kind": "other", "name": "Rangecraft" },
+      "castingTime": "action",
+      "range": { "kind": "feet", "feet": 5 },
+      "components": { "verbal": true, "somatic": true, "material": null },
+      "duration": { "kind": "instantaneous" },
+      "concentration": false,
+      "targeting": {
+        "kind": "single",
+        "rangeFeet": 5,
+        "willing": false,
+        "rangeByCasterLevel": [
+          { "minimumLevel": 11, "rangeFeet": 30 },
+          { "minimumLevel": 1, "rangeFeet": 10 },
+          { "minimumLevel": 5, "rangeFeet": 20 }
+        ]
+      },
+      "operation": {
+        "kind": "attack_damage",
+        "attackKind": "ranged",
+        "damageType": "Force",
+        "dice": {
+          "baseCount": 1,
+          "sides": 6,
+          "modifier": 0,
+          "perSlotCount": 0,
+          "perSlotModifier": 0,
+          "cantripUpgrade": true
+        },
+        "rider": null
+      }
+    }
+  ],
+  "features": [],
+  "items": [],
+  "species": [],
+  "backgrounds": [],
+  "subclasses": [],
+  "monsters": []
+}

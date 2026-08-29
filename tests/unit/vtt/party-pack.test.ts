@@ -5,12 +5,15 @@ import { combatToken } from '../../../src/combat/combatant';
 import type { PersistedCoordinatorState } from '../../../src/combat/coordinator';
 import { combatantConditions, createEncounter, reduceEncounter } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
+import { SPELL_MANIFEST } from '../../../src/combat/spells/manifest';
 import {
+  combatantId,
   encounterBranchId,
   encounterEffectId,
   encounterSessionId,
   effectStackingIdentity,
   itemId,
+  limitedResourcePoolId,
 } from '../../../src/combat/values';
 import {
   externalPartyPackFeatureEffectSchema,
@@ -3886,5 +3889,501 @@ describe('external party-pack boundary', () => {
     expect(new Set(referencedKinds).size).toBe(referencedKinds.length);
     expect([...schemaKinds].sort()).toEqual(sortedZodKinds);
     expect([...referencedKinds].sort()).toEqual(sortedZodKinds);
+  });
+});
+
+describe('external party-pack batch 2b mutation boundaries', () => {
+  const loadedV2 = (candidate: ExternalPartyPackV2 = pack()) => {
+    const result = loadExternalPartyPack(candidate);
+    expect(result.status).toBe('loaded');
+    if (result.status !== 'loaded') throw new Error(`Expected loaded pack, received ${result.refusal.reason}.`);
+    return result;
+  };
+
+  const castDetails = () => ({
+    slotLevel: 1 as const,
+    castAsRitual: false,
+    targets: [] as const,
+    area: null,
+    weaponAttack: null,
+    selectedOption: null,
+  });
+
+  it('accepts nontrivial world-operation values and rejects every relaxed empty boundary', () => {
+    const valid = structuredClone(pack(3, true));
+    const createOperation = {
+      kind: 'create_object' as const,
+      object: {
+        objectId: 'object:boundary:create' as const,
+        name: 'Gate',
+        kind: 'barrier' as const,
+        position: { column: 4, row: 5 },
+        footprint: [{ column: 4, row: 5 }, { column: 5, row: 5 }],
+        durability: { kind: 'hit_points' as const, hitPoints: 50, maximumHitPoints: 100 },
+        armorClass: 50,
+        damageResponses: [],
+        blocking: { movement: true, lineOfSight: false, cover: 'half' as const },
+      },
+    };
+    valid.members[0]!.worldOperations = [{
+      operationId: 'world:create-boundary',
+      cost: 'action',
+      operation: createOperation,
+    }, {
+      operationId: 'world:modify-boundary',
+      cost: 'bonus_action',
+      operation: {
+        kind: 'modify_object',
+        objectId: 'object:boundary:create',
+        changes: {
+          name: 'Open Gate',
+          footprint: [{ column: 4, row: 5 }, { column: 5, row: 5 }],
+          armorClass: 50,
+        },
+      },
+    }, {
+      operationId: 'world:damage-boundary',
+      cost: 'reaction',
+      operation: {
+        kind: 'damage_object',
+        objectId: 'object:boundary:create',
+        delivery: { kind: 'attack', attackBonus: 0, criticalFloor: 10, rollMode: 'normal' },
+        damage: {
+          terms: [
+            { damageTypeId: 'Fire', count: 50, sides: 6, modifier: 0 },
+            { damageTypeId: 'Cold', count: 50, sides: 8, modifier: 0 },
+          ],
+          critical: false,
+        },
+      },
+    }, {
+      operationId: 'world:terrain-boundary',
+      cost: 'none',
+      operation: {
+        kind: 'transform_terrain',
+        region: { id: 'zone', cells: [{ column: 1, row: 1 }, { column: 2, row: 1 }] },
+        difficultTerrain: true,
+      },
+    }, {
+      operationId: 'world:light-boundary',
+      cost: 'none',
+      operation: {
+        kind: 'set_light_level',
+        region: { id: 'room', cells: [{ column: 7, row: 8 }, { column: 8, row: 8 }] },
+        level: 'dim',
+      },
+    }];
+    const accepted = loadedV2(valid);
+    expect(accepted.gaps).toEqual([]);
+    expect(accepted.party.members[0]!.worldOperations.map((entry) => entry.operationId)).toEqual([
+      'world:create-boundary',
+      'world:modify-boundary',
+      'world:damage-boundary',
+      'world:terrain-boundary',
+      'world:light-boundary',
+    ]);
+    expect(accepted.party.pack.schemaVersion).toBe(2);
+    if (accepted.party.pack.schemaVersion !== 2) throw new Error('Expected a v2 accepted pack.');
+    const acceptedSourceOperations = accepted.party.pack.members[0]!.worldOperations;
+    expect(acceptedSourceOperations?.[0]).toMatchObject({
+      operation: { kind: 'create_object', object: { name: 'Gate', armorClass: 50 } },
+    });
+    expect(acceptedSourceOperations?.[2]).toMatchObject({
+      operation: {
+        kind: 'damage_object',
+        delivery: { criticalFloor: 10 },
+        damage: { terms: [{ count: 50 }, { count: 50 }] },
+      },
+    });
+
+    const invalidOperations: readonly {
+      readonly operationId: string;
+      readonly operation: unknown;
+      readonly suffix: string;
+    }[] = [{
+      operationId: 'world:empty-object-name',
+      operation: {
+        ...createOperation,
+        object: { ...createOperation.object, name: ' ' },
+      },
+      suffix: 'operation.object.name',
+    }, {
+      operationId: 'world:empty-modification-name',
+      operation: {
+        kind: 'modify_object', objectId: 'object:boundary:create', changes: { name: ' ' },
+      },
+      suffix: 'operation.changes.name',
+    }, {
+      operationId: 'world:empty-modification-footprint',
+      operation: {
+        kind: 'modify_object', objectId: 'object:boundary:create', changes: { footprint: [] },
+      },
+      suffix: 'operation.changes.footprint',
+    }, {
+      operationId: 'world:empty-damage',
+      operation: {
+        kind: 'damage_object', objectId: 'object:boundary:create',
+        delivery: { kind: 'area_effect' }, damage: { terms: [], critical: false },
+      },
+      suffix: 'operation.damage.terms',
+    }, {
+      operationId: 'world:empty-terrain-id',
+      operation: {
+        kind: 'transform_terrain', region: { id: ' ', cells: [{ column: 0, row: 0 }] },
+        difficultTerrain: false,
+      },
+      suffix: 'operation.region.id',
+    }, {
+      operationId: 'world:empty-terrain-cells',
+      operation: {
+        kind: 'transform_terrain', region: { id: 'zone', cells: [] }, difficultTerrain: false,
+      },
+      suffix: 'operation.region.cells',
+    }, {
+      operationId: 'world:empty-light-id',
+      operation: {
+        kind: 'set_light_level', region: { id: ' ', cells: [{ column: 0, row: 0 }] }, level: 'bright',
+      },
+      suffix: 'operation.region.id',
+    }, {
+      operationId: 'world:empty-light-cells',
+      operation: {
+        kind: 'set_light_level', region: { id: 'room', cells: [] }, level: 'bright',
+      },
+      suffix: 'operation.region.cells',
+    }];
+    for (const invalid of invalidOperations) {
+      const candidate = structuredClone(pack(3, true)) as unknown as {
+        members: Array<Record<string, unknown>>;
+      };
+      candidate.members[0]!.worldOperations = [{
+        operationId: invalid.operationId,
+        cost: 'none',
+        operation: invalid.operation,
+      }];
+      expect(gapSummary(loadExternalPartyPack(candidate))).toEqual([{
+        featurePath: `members.0.worldOperations.0.${invalid.suffix}`,
+        reason: 'value_not_in_engine_vocabulary',
+      }]);
+    }
+  });
+
+  it('accepts every loader collection at its exact upper boundary', () => {
+    const candidate = structuredClone(pack(3, true));
+    const member = candidate.members[0]!;
+    member.classes = [{ classId: 'Wizard', level: 20 }];
+    const baseAttack = member.attacks[0]!;
+    member.attacks = Array.from({ length: 100 }, (_value, index) => ({
+      ...baseAttack,
+      attackId: `attack:limit-${String(index)}`,
+    }));
+    member.startingConditions = Array.from({ length: 100 }, (_value, index) => ({
+      effectId: `effect:condition-limit-${String(index)}`,
+      conditionId: 'Prone',
+    }));
+    member.worldOperations = Array.from({ length: 100 }, (_value, index) => ({
+      operationId: `world:limit-${String(index)}`,
+      cost: 'none',
+      operation: {
+        kind: 'set_light_level',
+        region: { id: `room-${String(index)}`, cells: [{ column: index, row: 0 }] },
+        level: 'dim',
+      },
+    }));
+    member.effects = Array.from({ length: 100 }, (_value, index) => ({
+      effectId: `effect:limit-${String(index)}`,
+      kind: 'temporary_hit_points',
+      trigger: 'bonus_action',
+      amount: index + 1,
+    }));
+    member.resources = Array.from({ length: 100 }, (_value, index) => ({
+      resourcePoolId: `resource:limit-${String(index)}`,
+      maximum: index + 1,
+      recharge: 'short_rest',
+    }));
+    member.pactSpellSlots = Array.from({ length: 9 }, (_value, index) => ({
+      level: (index + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
+      count: 1,
+      recharge: 'short_rest' as const,
+    }));
+    const source = objectSpellcasting(member);
+    member.spellcasting = Array.from({ length: 4 }, (_value, index) => ({
+      ability: (['intelligence', 'wisdom', 'charisma', 'constitution'] as const)[index]!,
+      spellSaveDc: 10 + index,
+      spellAttackBonus: index,
+      preparedSpellIds: [],
+      knownSpellIds: [],
+    }));
+    member.sharedSpellSlots = [];
+    expect(source.spellSlots).toHaveLength(1);
+
+    const result = loadedV2(candidate);
+    expect(result.gaps).toEqual([]);
+    const loadedMember = result.party.members[0]!;
+    if (!('sizeCategory' in loadedMember.source)) throw new Error('Expected a v2 loaded member.');
+    expect(loadedMember.source.classes).toEqual([{ classId: 'Wizard', level: 20 }]);
+    expect({
+      attacks: loadedMember.source.attacks.length,
+      startingConditions: loadedMember.source.startingConditions.length,
+      worldOperations: loadedMember.source.worldOperations?.length,
+      effects: loadedMember.source.effects?.length,
+      resources: loadedMember.source.resources?.length,
+      spellcasting: spellcastingSources(loadedMember.source).length,
+      pactSpellSlots: loadedMember.source.pactSpellSlots?.length,
+    }).toEqual({
+      attacks: 100,
+      startingConditions: 100,
+      worldOperations: 100,
+      effects: 100,
+      resources: 100,
+      spellcasting: 4,
+      pactSpellSlots: 9,
+    });
+  });
+
+  it('accepts the exact manifest limit and reports only the overflow element after slicing', () => {
+    const exact = v1Pack();
+    exact.allowPartial = true;
+    exact.members[0]!.spellSelections = SPELL_MANIFEST.map((spell) => spell.id);
+    const exactResult = loadExternalPartyPack(exact);
+    expect(exactResult.status).toBe('loaded');
+    expect(exactResult.gaps).toEqual([]);
+    if (exactResult.status !== 'loaded') throw new Error('Exact manifest-size fixture was refused.');
+    expect(exactResult.party.members[0]!.spells.map((spell) => spell.id)).toEqual(
+      SPELL_MANIFEST.map((spell) => spell.id),
+    );
+
+    const overflow = structuredClone(exact);
+    overflow.members[0]!.spellSelections = [...SPELL_MANIFEST.map((spell) => spell.id), 'magic-missile'];
+    expect(gapSummary(loadExternalPartyPack(overflow))).toEqual([{
+      featurePath: 'members.0.spellSelections',
+      reason: 'value_not_in_engine_vocabulary',
+    }]);
+  });
+
+  it('keeps exact passive endpoints and effect-level equality inside the vocabulary', () => {
+    for (const [armorClassValue, speed] of [[1, 0], [50, 1_000]] as const) {
+      const candidate = structuredClone(pack(3, true));
+      candidate.members[0]!.armorClass = armorClassValue;
+      candidate.members[0]!.walkingSpeedFeet = speed;
+      candidate.members[0]!.passives = { armorClassBonus: 0, speedAdjustmentFeet: 0 };
+      const result = loadedV2(candidate);
+      expect(result.gaps).toEqual([]);
+      expect(result.party.members[0]!.profile.rules).toMatchObject({
+        armorClass: armorClassValue,
+        speed,
+      });
+    }
+
+    const candidate = structuredClone(pack(3, true));
+    const member = candidate.members[0]!;
+    member.classes = [{ classId: 'Wizard', level: 7 }];
+    const legacy = objectSpellcasting(member);
+    const { spellSlots: _spellSlots, ...firstSource } = legacy;
+    member.spellcasting = [firstSource, {
+      ability: 'wisdom', spellSaveDc: 13, spellAttackBonus: 5,
+      preparedSpellIds: [], knownSpellIds: [],
+    }];
+    member.sharedSpellSlots = [];
+    member.effects = [{
+      effectId: 'effect:level-equal-extra', kind: 'extra_attack_count_override',
+      levels: [{ minimumLevel: 7, attackCount: 2 }, { minimumLevel: 8, attackCount: 3 }],
+    }, {
+      effectId: 'effect:level-equal-die', kind: 'attack_damage_die_override',
+      attackId: member.attacks[0]!.attackId, damageTermIndex: 0,
+      levels: [{ minimumLevel: 7, count: 2, sides: 8 }, { minimumLevel: 8, count: 3, sides: 8 }],
+    }, {
+      effectId: 'effect:one-source-ability', kind: 'attack_ability_substitution',
+      attackId: member.attacks[0]!.attackId, damageTermIndex: 0,
+      replacesAbility: 'strength', spellcastingAbility: 'intelligence',
+    }, {
+      effectId: 'effect:one-source-cantrip', kind: 'spell_damage_ability_modifier',
+      spellId: 'fire-bolt', application: 'one_damage_roll_per_turn',
+    }];
+    const result = loadExternalPartyPack(candidate);
+    expect(result.status).toBe('loaded');
+    expect(result.gaps).toEqual([]);
+    if (result.status !== 'loaded') throw new Error('Effect equality fixture was refused.');
+    expect(result.party.members[0]!.effects.map((effect) => effect.id)).toEqual([
+      'effect:level-equal-extra',
+      'effect:level-equal-die',
+      'effect:one-source-ability',
+      'effect:one-source-cantrip',
+    ]);
+  });
+
+  it('requires every declared reckless and elemental attack reference to resolve', () => {
+    const candidate = structuredClone(pack(3, true));
+    const declared = candidate.members[0]!.attacks[0]!.attackId;
+    candidate.members[0]!.effects = [{
+      effectId: 'effect:mixed-reckless', kind: 'reckless_attack_mode',
+      strengthBasedMeleeAttackIds: [declared, 'attack:missing'],
+    }, {
+      effectId: 'effect:mixed-elemental', kind: 'elemental_fury',
+      attackIds: [declared, 'attack:missing'], damageTypeIds: ['Fire', 'Cold'],
+      selectedDamageTypeId: 'Fire', amount: 2, gate: 'first_hit_this_turn',
+    }];
+    const result = loadExternalPartyPack(candidate);
+    expect(result.status).toBe('loaded');
+    expect(gapSummary(result)).toEqual([
+      { featurePath: 'members.0.effects.0.strengthBasedMeleeAttackIds', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.effects.1.attackIds', reason: 'value_not_in_engine_vocabulary' },
+    ]);
+  });
+
+  it('pins member fallback identity, each cross-member identity, and refusal precedence', () => {
+    const unmappable = structuredClone(pack(3, true)) as unknown as {
+      members: unknown[];
+    };
+    unmappable.members = [null, null, null];
+    expect(loadExternalPartyPack(unmappable)).toEqual({
+      status: 'refused',
+      refusal: { kind: 'external_party_pack_refusal', reason: 'no_mappable_members' },
+      gaps: [0, 1, 2].map((index) => ({
+        packEntry: `party:generic-soak-fixture:member-${String(index + 1)}`,
+        featurePath: `members.${String(index)}`,
+        requestedCapability: `field:members.${String(index)}`,
+        engineRefusalReason: 'invalid_party_pack_structure',
+      })),
+    });
+
+    for (const field of ['combatantId', 'tokenId', 'characterId'] as const) {
+      const duplicate = structuredClone(pack(3, true)) as unknown as {
+        members: Array<Record<string, unknown>>;
+      };
+      duplicate.members[1]![field] = duplicate.members[0]![field];
+      expect(loadExternalPartyPack(duplicate)).toMatchObject({
+        status: 'refused',
+        refusal: { reason: 'invalid_structure' },
+        gaps: [{ featurePath: 'members', engineRefusalReason: 'value_not_in_engine_vocabulary' }],
+      });
+    }
+
+    const onlyTwo = structuredClone(pack(3, true)) as unknown as { members: unknown[] };
+    onlyTwo.members[2] = null;
+    expect(loadExternalPartyPack(onlyTwo)).toMatchObject({
+      status: 'refused', refusal: { reason: 'invalid_structure' },
+    });
+
+    const strict = structuredClone(pack());
+    (strict.members[0] as unknown as Record<string, unknown>).unsupported = true;
+    expect(loadExternalPartyPack(strict)).toMatchObject({
+      status: 'refused', refusal: { reason: 'gaps_not_allowed' },
+    });
+    const partial = structuredClone(pack(3, true));
+    (partial.members[0] as unknown as Record<string, unknown>).unsupported = true;
+    expect(loadExternalPartyPack(partial)).toMatchObject({ status: 'loaded' });
+  });
+
+  it('distinguishes every spell route, resource pair, weapon term, and slot-recharge branch', () => {
+    const result = loadedV2(effectPack());
+    const caster = result.party.members[0]!;
+    const withoutSources = { ...caster, spellcasting: [] };
+    expect(() => loadedPartySpellCastCommand(withoutSources, 'magic-missile', castDetails()))
+      .toThrow(expect.objectContaining({ reason: 'spellcasting_unavailable' }));
+
+    const withoutMemberSpell = { ...caster, spells: caster.spells.filter((spell) => spell.id !== 'magic-missile') };
+    expect(() => loadedPartySpellCastCommand(withoutMemberSpell, 'magic-missile', castDetails()))
+      .toThrow(expect.objectContaining({ reason: 'spell_not_referenced' }));
+    const withoutSourceSpell = {
+      ...caster,
+      spellcasting: caster.spellcasting.map((source) => ({
+        ...source, preparedSpells: [], knownSpells: [], grants: [],
+      })),
+    };
+    expect(() => loadedPartySpellCastCommand(withoutSourceSpell, 'magic-missile', castDetails()))
+      .toThrow(expect.objectContaining({ reason: 'spell_not_referenced' }));
+    const ambiguous = { ...caster, spellcasting: [caster.spellcasting[0]!, caster.spellcasting[0]!] };
+    expect(() => loadedPartySpellCastCommand(ambiguous, 'magic-missile', castDetails()))
+      .toThrow(expect.objectContaining({ reason: 'ambiguous_spell_source' }));
+
+    const crossPairedUses = {
+      ...caster,
+      spellcasting: caster.spellcasting.map((source) => ({
+        ...source,
+        resourceSpellUses: [
+          { spellId: 'magic-missile' as const, resourcePoolId: limitedResourcePoolId('resource:wrong-pool') },
+          { spellId: 'fire-bolt' as const, resourcePoolId: limitedResourcePoolId('resource:precise-strikes') },
+        ],
+      })),
+    };
+    expect(() => loadedPartySpellCastCommand(crossPairedUses, 'magic-missile', {
+      ...castDetails(), resourcePoolId: 'resource:precise-strikes',
+    })).toThrow('Spell magic-missile is not declared for loaded resource pool resource:precise-strikes.');
+
+    const fueled = loadedPartySpellCastCommand(caster, 'magic-missile', {
+      ...castDetails(), resourcePoolId: 'resource:precise-strikes',
+    });
+    expect(fueled).toMatchObject({
+      spellId: 'magic-missile', resourcePoolId: 'resource:precise-strikes',
+    });
+
+    const pactOnly = {
+      ...caster,
+      sharedSpellSlots: [],
+      pactSpellSlots: [{ level: 1 as const, maximum: 1, recharge: 'short_rest' as const }],
+    };
+    expect(loadedPartySpellCastCommand(pactOnly, 'magic-missile', castDetails())).toMatchObject({
+      slotRecharge: 'short_rest',
+    });
+    expect(loadedPartySpellCastCommand(caster, 'magic-missile', {
+      ...castDetails(), slotRecharge: 'short_rest',
+    })).toMatchObject({ slotRecharge: 'short_rest' });
+    expect(loadedPartySpellCastCommand(caster, 'magic-missile', castDetails())).not.toHaveProperty('slotRecharge');
+    expect(loadedPartySpellCastCommand(pactOnly, 'magic-missile', {
+      ...castDetails(), slotLevel: null,
+    })).not.toHaveProperty('slotRecharge');
+  });
+
+  it('filters tokenless and dead targets and keeps ranged attacks legal at the exact range', () => {
+    const candidate = structuredClone(pack());
+    const input = candidate.members[0]!;
+    input.attacks = [{
+      attackId: 'attack:exact-ranged', kind: 'ranged', attackBonus: 6,
+      criticalFloor: 20, reachFeet: 5, rangeFeet: 10,
+      damage: [{ damageTypeId: 'Piercing', count: 1, sides: 8, modifier: 3 }],
+    }];
+    const loaded = loadedV2(candidate);
+    const actor = loaded.party.members[0]!;
+    const exact = monsterProfile('exact-ranged-target', { initiativeBonus: -10 });
+    const beyond = monsterProfile('beyond-ranged-target', { initiativeBonus: -11 });
+    const tokenless = monsterProfile('tokenless-ranged-target', { initiativeBonus: -12 });
+    const dead = monsterProfile('dead-ranged-target', { initiativeBonus: -13, hitPoints: 1 });
+    let state = createEncounter({
+      bounds: { columns: 6, rows: 2 },
+      combatants: [actor.profile, exact, beyond, tokenless, dead],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(exact, { column: 2, row: 0 }),
+        combatToken(beyond, { column: 3, row: 0 }),
+        combatToken(tokenless, { column: 4, row: 0 }),
+        combatToken(dead, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = {
+      ...state,
+      tokens: state.tokens.filter((token) => token.combatantId !== tokenless.id),
+    };
+    state = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === dead.id
+        ? {
+            ...combatant,
+            hitPoints: 0,
+            life: 'dead' as const,
+            deathAt: { round: state.round, initiativeIndex: 0 },
+          }
+        : combatant),
+    };
+    const legal = loadedPartyTurnLegalActions(loaded.party.members);
+    expect(legal(state, actor.profile.id).actions.flatMap((action) => action.type === 'attack'
+      ? [action.target]
+      : [])).toEqual([exact.id]);
+    expect(legal({ ...state, tokens: state.tokens.filter((token) => token.combatantId !== actor.profile.id) }, actor.profile.id))
+      .toEqual({ actions: [{ type: 'end_turn', actor: actor.profile.id }] });
+    expect(legal(state, combatantId('combatant:not-loaded'))).toEqual({
+      actions: [{ type: 'end_turn', actor: 'combatant:not-loaded' }],
+    });
   });
 });
