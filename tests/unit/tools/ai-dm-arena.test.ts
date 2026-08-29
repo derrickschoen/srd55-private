@@ -77,6 +77,7 @@ class OrderingNullAdapter implements AgentSessionAdapter {
   constructor(
     private readonly label: string,
     private readonly ordering: string[],
+    private readonly beforeStart: () => Promise<void> | void = () => undefined,
   ) {}
 
   async probe() { return { present: true, version: 'SIMULATED' }; }
@@ -84,6 +85,7 @@ class OrderingNullAdapter implements AgentSessionAdapter {
   async start(): Promise<AgentTurnResult> {
     this.starts += 1;
     this.ordering.push(this.label);
+    await this.beforeStart();
     return {
       sessionId: agentSessionIdFromCli(`ordering-${this.label}-${String(this.starts)}`),
       finalText: '',
@@ -272,6 +274,30 @@ describe('AI-DM arena', () => {
       const row = JSON.parse(line) as { readonly basis: unknown; readonly arm: unknown };
       return { basis: row.basis, arm: row.arm };
     })).toEqual(rows.map((row) => ({ basis: row.basis, arm: row.arm })));
+  });
+
+  it('fills the arm ring before awaiting an arm whose startup depends on its peer', { timeout: 5_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-interleave-ring-'));
+    const ordering: string[] = [];
+    let releaseControl: () => void = () => undefined;
+    const candidateStarted = new Promise<void>((resolvePromise) => { releaseControl = resolvePromise; });
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '5117001',
+      '--basis', 'hard', '--out', join(directory, 'arena.jsonl'),
+      '--interleave',
+      '--arm', 'control:model-control:low',
+      '--arm', 'candidate:model-candidate:high',
+    ]);
+
+    const rows = await runArena(config, {
+      adapterByArm: {
+        control: new OrderingNullAdapter('control', ordering, () => candidateStarted),
+        candidate: new OrderingNullAdapter('candidate', ordering, () => { releaseControl(); }),
+      },
+    });
+
+    expect(ordering).toEqual(['control', 'candidate']);
+    expect(rows.map(({ arm }) => arm)).toEqual(['control', 'candidate']);
   });
 
   it('applies escalation to only the configured arm and attributes the resulting row', { timeout: 30_000 }, async () => {

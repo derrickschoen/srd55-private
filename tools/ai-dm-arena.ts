@@ -214,8 +214,13 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   };
 }
 
-export interface ArenaRunOptions extends Omit<ConversationRunOptions, 'roomStates'> {
+export interface ArenaRunOptions extends Omit<ConversationRunOptions, 'roomStates' | 'onPrimaryDispatchStart'> {
   readonly adapterByArm?: Readonly<Record<string, AgentSessionAdapter>>;
+  readonly heartbeat?: (line: string) => void;
+}
+
+function stdoutHeartbeat(line: string): void {
+  process.stdout.write(`[arena] ${line}\n`);
 }
 
 function basisFixturesPath(config: ArenaConfig): string {
@@ -307,7 +312,7 @@ export async function runArena(
 ): Promise<readonly ArenaRow[]> {
   const states = await frozenRoomStates(config);
   const seeds = Array.from({ length: config.rooms }, (_unused, index) => config.seed + index);
-  const { adapterByArm, ...conversationOptions } = options;
+  const { adapterByArm, heartbeat = stdoutHeartbeat, ...conversationOptions } = options;
   let rows: readonly ArenaRow[];
   if (!config.interleave) {
     const result = await runConversation(conversationConfig(config, {
@@ -323,10 +328,22 @@ export async function runArena(
   } else {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-arena-interleaved-'));
     const interleaved: ArenaRow[] = [];
+    heartbeat(
+      `interleave scheduling started arms=${String(config.arms.length)} ` +
+      `rooms=${String(config.rooms)} reps=${String(config.reps)}`,
+    );
     for (let room = 1; room <= config.rooms; room += 1) {
       for (let rep = 1; rep <= config.reps; rep += 1) {
+        const pendingResults: Promise<import('./ai-dm-conversation').ConversationRunResult>[] = [];
         for (const arm of config.arms) {
-          const result = await runConversation(conversationConfig(config, {
+          let markDispatchStarted = (): void => {
+            throw new Error('Interleave dispatch gate was not initialized.');
+          };
+          const dispatchStarted = new Promise<void>((resolvePromise) => {
+            markDispatchStarted = resolvePromise;
+          });
+          let announced = false;
+          const pendingResult = runConversation(conversationConfig(config, {
             rooms: 1,
             rounds: 1,
             model: arm.model,
@@ -338,7 +355,28 @@ export async function runArena(
             ...conversationOptions,
             ...(adapterByArm?.[arm.label] === undefined ? {} : { adapter: adapterByArm[arm.label] }),
             roomStates: [states[room - 1]!],
+            onPrimaryDispatchStart: () => {
+              if (announced) return;
+              announced = true;
+              heartbeat(
+                `dispatch room=${String(room)} rep=${String(rep)} arm=${arm.label} ` +
+                `model=${arm.model} effort=${arm.effort}`,
+              );
+              markDispatchStarted();
+            },
           });
+          pendingResults.push(pendingResult);
+          await Promise.race([
+            dispatchStarted,
+            pendingResult.then(() => {
+              throw new Error(`Interleaved arena arm ${arm.label} completed without a primary dispatch.`);
+            }),
+          ]);
+        }
+        const results = await Promise.all(pendingResults);
+        for (let armIndex = 0; armIndex < config.arms.length; armIndex += 1) {
+          const arm = config.arms[armIndex]!;
+          const result = results[armIndex]!;
           const [row] = arenaRows(config, result.rows, arm.label, [seeds[room - 1]!]);
           if (row === undefined) throw new Error('Interleaved arena unit produced no row.');
           interleaved.push({ ...row, room, round: rep });
