@@ -7,6 +7,24 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D409.2 — OWNER: RL target is a small LOCAL model replacing luna/codex (2026-08-29)
+
+Verbatim: "When I asked about rl, I was thinking of something that we
+could train to replace Luna and codex as the ai dm. Something small with
+all of the latest efficiency wins found in things like ox-alpha
+(glm5.3-flash), deepseek, kimi k3, Gemma with turboquant. I want
+something that can run with 3 or 4 bit quantized kv cache. Something that
+can run on an 8gb gpu or a cpu with 12gb free ram and free ssd space."
+Ruling: the RL research pivots to a DEPLOYMENT-ENVELOPE-FIRST target —
+the trained checkpoint must serve as the local AI DM on consumer hardware
+(8GB GPU or CPU+12GB RAM, 3-4-bit quantized KV cache), replacing the
+codex/luna dependency entirely for game time. Research the named
+efficiency lineages (web-verify: ox-alpha/glm5.3-flash, deepseek, kimi
+k3, gemma turboquant) for architectures/quant stacks fitting the
+envelope, the inference runtime story (llama.cpp-class KV-quant support),
+and how the engine-verified-reward RL plan transfers to those bases; the
+public-repo local-npm mode is the deployment context.
+
 ## D409 — OWNER: harvest the 25%; standing luna experiments; RL research lane (2026-08-29)
 
 Verbatim: "Harvest the 25%. Keep going on trying to improve Luna low and
