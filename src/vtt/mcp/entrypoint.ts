@@ -122,6 +122,7 @@ export interface EngineMcpLauncherManifest {
   readonly format: 'engine-mcp-launcher-v1';
   readonly fixturePath: string;
   readonly proposalSpoolPath: string;
+  readonly turnContextSpoolPath?: string;
   readonly runId: EncounterSessionId;
   readonly branchId: EncounterBranchId;
   readonly revision: number;
@@ -154,6 +155,7 @@ export function createEngineMcpRuntime(
     readonly onProposal?: (proposal: EngineProposalEnvelope) => void;
     readonly toolProfile?: EngineMcpToolProfile;
     readonly turnContextDeltaBase?: TurnContextDeltaBase;
+    readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
   } = {},
 ): EngineMcpRuntime {
   const candidates = state.combatants
@@ -207,6 +209,7 @@ export function createEngineMcpRuntime(
     ...(options.turnContextDeltaBase === undefined ? {} : {
       turnContextDeltaBase: structuredClone(options.turnContextDeltaBase),
     }),
+    ...(options.onTurnContext === undefined ? {} : { onTurnContext: options.onTurnContext }),
   });
   return {
     handler: application,
@@ -260,6 +263,8 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
   return input['format'] === 'engine-mcp-launcher-v1' &&
     typeof input['fixturePath'] === 'string' && input['fixturePath'].length > 0 &&
     typeof input['proposalSpoolPath'] === 'string' && input['proposalSpoolPath'].length > 0 &&
+    (input['turnContextSpoolPath'] === undefined ||
+      typeof input['turnContextSpoolPath'] === 'string' && input['turnContextSpoolPath'].length > 0) &&
     typeof input['runId'] === 'string' && input['runId'].length > 0 &&
     typeof input['branchId'] === 'string' && input['branchId'].length > 0 &&
     Number.isSafeInteger(input['revision']) && typeof input['revision'] === 'number' && input['revision'] >= 1 &&
@@ -321,6 +326,11 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       onProposal: (proposal) => {
         appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(proposal)}\n`, 'utf8');
       },
+      ...(manifest.turnContextSpoolPath === undefined ? {} : {
+        onTurnContext: (context: Readonly<Record<string, unknown>>) => {
+          appendFileSync(manifest.turnContextSpoolPath ?? '', `${JSON.stringify(context)}\n`, 'utf8');
+        },
+      }),
     });
     return;
   }

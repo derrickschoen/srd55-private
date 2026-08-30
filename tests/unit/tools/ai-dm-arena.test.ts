@@ -218,6 +218,19 @@ describe('AI-DM arena', () => {
     expect(rows[1]?.contextRevision).toBe(rows[0]?.projectionRevision);
     const kbHash = createHash('sha256').update(Buffer.from(kbText, 'utf8')).digest('hex');
     expect(rows.every((row) => row.kbHash === kbHash)).toBe(true);
+    expect(rows.every((row) => /^[0-9a-f]{40}$/u.test(row.repoCommit))).toBe(true);
+    expect(rows[0]?.turnContextGranularity).toBe('full');
+    expect(rows[1]?.turnContextGranularity).toBe('turn_delta');
+    expect(JSON.parse(rows[0]?.rawTurnContext ?? '')).toMatchObject({
+      granularity: 'full',
+      suggested_plan: { play_name: 'focus_fire' },
+    });
+    expect(JSON.parse(rows[1]?.rawTurnContext ?? '')).toMatchObject({
+      granularity: 'turn_delta',
+      anchor: { base_revision: rows[0]?.contextRevision },
+    });
+    expect(new TextEncoder().encode(rows[0]?.rawTurnContext).byteLength).toBeLessThanOrEqual(32 * 1024);
+    expect(new TextEncoder().encode(rows[1]?.rawTurnContext).byteLength).toBeLessThanOrEqual(32 * 1024);
     expect(rows.every((row) =>
       row.snippetHash === SNIPPET_REGISTRY.snippetHash &&
       row.snippetSetHash === SNIPPET_REGISTRY.snippetSetHash)).toBe(true);

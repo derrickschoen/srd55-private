@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { canonicalJson } from '../../src/commands/canonical-json';
 import {
@@ -7,6 +8,7 @@ import {
   type ArenaConfig,
   type ArenaRow,
 } from '../ai-dm-arena';
+import { readRepoCommit } from './repo-commit';
 
 export interface SeedRange {
   readonly start: number;
@@ -21,6 +23,7 @@ export interface GenerateDataConfig {
   readonly cwd: string;
   readonly timeoutMs: number;
   readonly basis: 'standard' | 'hard';
+  readonly toolArgv: readonly string[];
 }
 
 interface SeedManifestEntry {
@@ -39,7 +42,12 @@ export interface GenerateDataManifest {
   readonly reps: number;
   readonly model: 'gpt-5.6-luna';
   readonly effort: 'low';
-  readonly kb: 'K6';
+  readonly adapterCliName: 'codex';
+  readonly adapterCliVersion: string | null;
+  readonly kbId: 'K6';
+  readonly kbHash: string;
+  readonly repoCommit: string;
+  readonly toolArgv: readonly string[];
   readonly flapPolicy: 'arena-retry-then-resume-seed';
   readonly basis: 'standard' | 'hard';
   readonly seeds: readonly SeedManifestEntry[];
@@ -119,6 +127,7 @@ export function parseGenerateDataArgs(
     cwd: resolve(cwd),
     timeoutMs,
     basis,
+    toolArgv: [...args],
   };
 }
 
@@ -130,6 +139,7 @@ async function existingManifest(
   path: string,
   config: GenerateDataConfig,
   range: SeedRange,
+  provenance: ManifestProvenance,
 ): Promise<GenerateDataManifest | null> {
   if (!config.resume) return null;
   let source: string;
@@ -141,20 +151,49 @@ async function existingManifest(
   const decoded = JSON.parse(source) as GenerateDataManifest;
   if (decoded.format !== 'arena-rl-batch-v1' || decoded.range.start !== range.start ||
     decoded.range.end !== range.end || decoded.reps !== config.reps || decoded.basis !== config.basis ||
-    decoded.model !== 'gpt-5.6-luna' || decoded.effort !== 'low' || decoded.kb !== 'K6') {
+    decoded.model !== 'gpt-5.6-luna' || decoded.effort !== 'low' || decoded.kbId !== 'K6' ||
+    decoded.kbHash !== provenance.kbHash || decoded.repoCommit !== provenance.repoCommit ||
+    decoded.adapterCliName !== provenance.adapterCliName ||
+    decoded.adapterCliVersion !== provenance.adapterCliVersion) {
     throw new Error(`Resume manifest ${path} does not match this batch configuration.`);
   }
-  return decoded;
+  return { ...decoded, toolArgv: [...config.toolArgv] };
 }
 
-function emptyManifest(config: GenerateDataConfig, range: SeedRange): GenerateDataManifest {
+interface ManifestProvenance {
+  readonly adapterCliName: 'codex';
+  readonly adapterCliVersion: string | null;
+  readonly kbHash: string;
+  readonly repoCommit: string;
+}
+
+async function manifestProvenance(config: GenerateDataConfig): Promise<ManifestProvenance> {
+  const kbBytes = await readFile(resolve(config.cwd, 'tests/fixtures/ai-dm-kb/k6.txt'));
+  return {
+    adapterCliName: 'codex',
+    adapterCliVersion: null,
+    kbHash: createHash('sha256').update(kbBytes).digest('hex'),
+    repoCommit: await readRepoCommit(config.cwd),
+  };
+}
+
+function emptyManifest(
+  config: GenerateDataConfig,
+  range: SeedRange,
+  provenance: ManifestProvenance,
+): GenerateDataManifest {
   return {
     format: 'arena-rl-batch-v1',
     range,
     reps: config.reps,
     model: 'gpt-5.6-luna',
     effort: 'low',
-    kb: 'K6',
+    adapterCliName: provenance.adapterCliName,
+    adapterCliVersion: provenance.adapterCliVersion,
+    kbId: 'K6',
+    kbHash: provenance.kbHash,
+    repoCommit: provenance.repoCommit,
+    toolArgv: [...config.toolArgv],
     flapPolicy: 'arena-retry-then-resume-seed',
     basis: config.basis,
     seeds: [],
@@ -200,13 +239,15 @@ export async function generateData(
     `target=${config.targetDirectory}`,
   );
   await mkdir(config.targetDirectory, { recursive: true });
+  const provenance = await manifestProvenance(config);
   const completed: GenerateDataManifest[] = [];
   for (const range of config.seedRanges) {
     heartbeat(`batch start=${String(range.start)} end=${String(range.end)}`);
     const batchDirectory = join(config.targetDirectory, `batch-${String(range.start)}-${String(range.end)}`);
     await mkdir(batchDirectory, { recursive: true });
     const manifestPath = join(config.targetDirectory, manifestName(range));
-    let manifest = await existingManifest(manifestPath, config, range) ?? emptyManifest(config, range);
+    let manifest = await existingManifest(manifestPath, config, range, provenance) ??
+      emptyManifest(config, range, provenance);
     const alreadyComplete = new Set(manifest.seeds
       .filter((entry) => entry.status === 'complete')
       .map((entry) => entry.seed));

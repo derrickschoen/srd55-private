@@ -61,6 +61,9 @@ export interface ArenaRow {
   readonly model: string;
   readonly thinkMode: LocalThinkMode | null;
   readonly kbHash: string | null;
+  readonly repoCommit: string;
+  readonly rawTurnContext: string;
+  readonly turnContextGranularity: 'full' | 'turn_delta';
   readonly snippetHash: string;
   readonly snippetSetHash: string;
   readonly suggestedPlay: import('./ai-dm-conversation').ConversationSuggestedPlay | null;
@@ -306,6 +309,9 @@ function arenaRows(
     model: row.model,
     thinkMode: row.thinkMode,
     kbHash: row.kbHash,
+    repoCommit: row.repoCommit,
+    rawTurnContext: row.rawTurnContext,
+    turnContextGranularity: row.turnContextGranularity,
     snippetHash: row.snippetHash,
     snippetSetHash: row.snippetSetHash,
     suggestedPlay: row.suggestedPlay,
