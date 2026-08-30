@@ -30,3 +30,6 @@ tools/discord-launcher/.env
 __pycache__/
 .vtt-soak-out/
 .tmp-*
+
+# Licensing wall (D369 era): BG3-derived notes must never be committed to this public repo
+docs/design/bg3-*.md

@@ -7,6 +7,45 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D416.1 — OWNER: "Do your recommendations" — phasing adopted (2026-08-29)
+
+Owner adopted the supervisor's D416 recommendations verbatim ("Do your
+recommendations"). Execution order: (1) engine lane NOW — phases 0+1
+merged into one unit: monster-block application re-resolves each intent
+at the actor's turn against live state, primary→fallback→Dodge, with
+structured deviation evidence (subsumes the apply-time re-validation
+bug fix); packed-refs fallback for repo-commit.ts rides along. (2)
+plays-v1 quality lane NOW, in parallel (disjoint files) — R01 fixes
+folded in: attack-type-aware OA policy, safe advance for ranged, no
+bare-Dodge fallback when attacks are resolvable, offensive escalation
+repair brief. (3) Phase 2 (initiative segments + scripted party on PC
+turns + delta-context DM adjustment) after both land. (4) Phase 3
+(persona-per-PC agents + comms) last. Campaign continues collecting
+block-model rows meanwhile — rows are era-tagged by repoCommit since
+0b55e2c6. Also merged lane-wt/mutshard (parked D410 training tooling)
+into main so the plan-of-record artifact is not stranded on a lane.
+
+## D416 — OWNER: interleaved initiative is the target model; plan-then-adjust; one persona per PC (2026-08-29)
+
+Verbatim: "Interleaving is how most tables play. Ai for pc team and for
+npc team should still come up with a game plan at the top of the round
+and then dm ai will adjust the game plan as the pcs act. Each pc turn
+will be evaluated to see if they follow the game plan or alter it.
+Replicate the scenario of pc being played by a different person each.
+They still share the same goals and can communicate with each other."
+Ruling: (a) true interleaved PC/NPC initiative replaces the current
+declared-orders monster block as the target combat model; (b) both
+teams produce a top-of-round game plan (the plays/suggested-plan layer
+survives as the plan artifact); (c) the DM adjusts its plan per PC turn
+— each PC turn is evaluated for plan adherence vs alteration; (d) the
+PC team is one agent persona per PC with shared goals and an open
+communication channel. Discovered in the same exchange, bug regardless
+of model: frozen mechanics execute without apply-time range/LoS/target-
+liveness re-validation (monsterAttackCommand hardcodes
+attackerCanSeeTarget, engine-round-session replays frozen paths) — must
+re-validate and degrade to fallback. Phasing and scheduling vs the
+plays-v1 lane: supervisor proposal pending owner reply.
+
 ## D415 — OWNER: no global AGENTS.md injection into DM/PC codex turns (2026-08-29)
 
 Verbatim: "We need to not inject global agents.md to codex when acting as

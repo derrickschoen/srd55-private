@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from '../../helpers/test-filesy
 const NORMAL_COMMIT = '1234567890abcdef1234567890abcdef12345678';
 const DETACHED_COMMIT = 'abcdef1234567890abcdef1234567890abcdef12';
 const WORKTREE_COMMIT = 'fedcba0987654321fedcba0987654321fedcba09';
+const PACKED_COMMIT = '0123456789abcdef0123456789abcdef01234567';
 
 describe('repository commit reader', () => {
   it('reads a symbolic ref from a normal .git directory', async () => {
@@ -40,5 +41,20 @@ describe('repository commit reader', () => {
     writeFileSync(join(common, 'refs', 'heads', 'feature'), `${WORKTREE_COMMIT}\n`, 'utf8');
 
     await expect(readRepoCommit(checkout)).resolves.toBe(WORKTREE_COMMIT);
+  });
+
+  it('falls back to an exact packed ref when the loose branch ref is absent', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'repo-commit-packed-'));
+    mkdirSync(join(root, '.git'), { recursive: true });
+    writeFileSync(join(root, '.git', 'HEAD'), 'ref: refs/heads/feature\n', 'utf8');
+    writeFileSync(join(root, '.git', 'packed-refs'), [
+      '# pack-refs with: peeled fully-peeled sorted',
+      `${DETACHED_COMMIT} refs/heads/feature-longer`,
+      `${PACKED_COMMIT} refs/heads/feature`,
+      `^${WORKTREE_COMMIT}`,
+      '',
+    ].join('\n'), 'utf8');
+
+    await expect(readRepoCommit(root)).resolves.toBe(PACKED_COMMIT);
   });
 });

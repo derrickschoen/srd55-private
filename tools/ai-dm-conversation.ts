@@ -1318,7 +1318,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
       ? null
       : { model: config.escalationModel, effort: config.escalationEffort };
   const escalationInstructions =
-    'This is a fresh one-shot escalation session for the single correction in the supplied repair brief. Use only the correction launcher and submit the complete corrected round once; no fallback remains.';
+    'This is a fresh one-shot escalation session for the supplied repair brief. Submit one complete OFFENSIVE corrected round: every actor with a legal attack must attack; Dash-to-close counts as offense for out-of-reach melee; Dodge is allowed only when that actor has no resolvable action. Use only the correction launcher; no fallback remains.';
   const prepareRound = (request: EngineRoundCapsuleRequest): EngineRoundSnapshot => {
     const prepared = engineSession.prepareRound(request, journal.reactionGuidance());
     recordAutoResolvedReactions(journal, prepared);

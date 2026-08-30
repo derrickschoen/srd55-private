@@ -35,6 +35,40 @@ function commitHash(source: string, label: string): string {
   return value;
 }
 
+function isEnoent(error: unknown): error is Error & { readonly code: 'ENOENT' } {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+async function symbolicRefCommit(commonDir: string, reference: string): Promise<string> {
+  const loosePath = resolve(commonDir, reference);
+  let looseError: Error & { readonly code: 'ENOENT' };
+  try {
+    return commitHash(await readFile(loosePath, 'utf8'), loosePath);
+  } catch (error) {
+    if (!isEnoent(error)) throw error;
+    looseError = error;
+  }
+
+  let packed: string;
+  const packedPath = resolve(commonDir, 'packed-refs');
+  try {
+    packed = await readFile(packedPath, 'utf8');
+  } catch (error) {
+    if (isEnoent(error)) throw looseError;
+    throw error;
+  }
+  for (const sourceLine of packed.split(/\r?\n/u)) {
+    const line = sourceLine.trim();
+    if (line.length === 0 || line.startsWith('#') || line.startsWith('^')) continue;
+    const separator = line.search(/\s/u);
+    if (separator < 1) continue;
+    const hash = line.slice(0, separator);
+    const packedReference = line.slice(separator).trim();
+    if (packedReference === reference) return commitHash(hash, `${packedPath} entry for ${reference}`);
+  }
+  throw new TypeError(`${packedPath} does not contain ${reference}.`);
+}
+
 export async function readRepoCommit(repositoryRoot: string): Promise<string> {
   const gitDir = await gitDirectory(repositoryRoot);
   const head = (await readFile(resolve(gitDir, 'HEAD'), 'utf8')).trim();
@@ -44,5 +78,5 @@ export async function readRepoCommit(repositoryRoot: string): Promise<string> {
     throw new TypeError(`${gitDir}/HEAD contains an invalid ref.`);
   }
   const commonDir = await commonGitDirectory(gitDir);
-  return commitHash(await readFile(resolve(commonDir, reference), 'utf8'), `${commonDir}/${reference}`);
+  return symbolicRefCommit(commonDir, reference);
 }
