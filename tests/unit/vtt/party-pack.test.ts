@@ -18,6 +18,7 @@ import {
 import {
   externalPartyPackFeatureEffectSchema,
   externalPartyPackSchema,
+  partySourceSchema,
   loadExternalPartyPack,
   loadExternalPartyPackBytes,
   loadedPartyAttackCommand,
@@ -27,6 +28,7 @@ import {
   loadedPartyWorldOperationCommand,
   type ExternalPartyPackV1,
   type ExternalPartyPackV2,
+  type ExternalWorldOperation,
 } from '../../../src/vtt/party-pack';
 import {
   EncounterSessionJournal,
@@ -3446,6 +3448,25 @@ describe('external party-pack boundary', () => {
       { spellId: 'healing-word', slotLevel: 1, targets: [deeplyWounded.profile.id] },
       { spellId: 'healing-word', slotLevel: 2, targets: [deeplyWounded.profile.id] },
     ]);
+
+    const maximumRaised = {
+      ...wounded,
+      combatants: wounded.combatants.map((combatant) => combatant.profile.id === exactCure.profile.id
+        ? { ...combatant, hitPoints: combatant.profile.rules.hitPointMaximum - 2 }
+        : combatant),
+      effects: [{
+        id: encounterEffectId('effect:raised-healing-maximum'), source: healer.profile.id,
+        targets: [exactCure.profile.id], createdRevision: wounded.revision,
+        duration: { kind: 'permanent' as const }, concentrationOwner: null,
+        stackingIdentity: effectStackingIdentity('item:raised-healing-maximum'), stacking: 'coexist' as const,
+        repeatedSave: null, damageBreak: null,
+        payload: { kind: 'hit_point_maximum_modifier' as const, amount: 10 },
+      }],
+    };
+    expect(loadedPartyTurnLegalActions(loaded.party.members)(maximumRaised, healer.profile.id).actions
+      .flatMap((action) => action.type === 'cast_spell' && action.spellId === 'cure-wounds'
+        ? [{ slotLevel: action.slotLevel, targets: action.targets }]
+        : [])).toContainEqual({ slotLevel: 1, targets: [exactCure.profile.id] });
   });
 
   it('pins revivify age, distance, life, slot ordering, and deterministic target ordering', () => {
@@ -3614,6 +3635,60 @@ describe('external party-pack boundary', () => {
     };
     expect(legalActions(priorBless, actor.profile.id).actions.some((action) =>
       action.type === 'cast_spell' && action.spellId === 'bless')).toBe(false);
+
+    const blessCommands = (candidateState: typeof state) => legalActions(candidateState, actor.profile.id).actions
+      .flatMap((action) => action.type === 'cast_spell' && action.spellId === 'bless'
+        ? [{ slotLevel: action.slotLevel, targets: action.targets }]
+        : []);
+    const spentAction = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? { ...combatant, turn: { ...combatant.turn, action: { kind: 'spent' as const } } }
+        : combatant),
+    };
+    expect(blessCommands(spentAction)).toEqual([]);
+    const otherCasterBless = {
+      ...state,
+      eventLog: [...state.eventLog, {
+        sequence: state.nextEventSequence,
+        type: 'spell_cast' as const,
+        caster: first.profile.id,
+        spellId: 'bless',
+        slotLevel: 1 as const,
+        targets: [first.profile.id],
+      }],
+    };
+    expect(blessCommands(otherCasterBless)).toEqual([{
+      slotLevel: 1,
+      targets: [first.profile.id, actor.profile.id, tied.profile.id],
+    }]);
+    const otherActorSpell = {
+      ...state,
+      eventLog: [...state.eventLog, {
+        sequence: state.nextEventSequence,
+        type: 'spell_cast' as const,
+        caster: actor.profile.id,
+        spellId: 'magic-missile',
+        slotLevel: 1 as const,
+        targets: [first.profile.id],
+      }],
+    };
+    expect(blessCommands(otherActorSpell)).toEqual([{
+      slotLevel: 1,
+      targets: [first.profile.id, actor.profile.id, tied.profile.id],
+    }]);
+    const reorderedCombatants = {
+      ...state,
+      combatants: [outOfRange, fourth, tied, first, actor].map((member) => {
+        const combatant = state.combatants.find((candidate) => candidate.profile.id === member.profile.id);
+        if (combatant === undefined) throw new Error('Bless ordering fixture lost a combatant.');
+        return combatant;
+      }),
+    };
+    expect(blessCommands(reorderedCombatants)).toEqual([{
+      slotLevel: 1,
+      targets: [first.profile.id, actor.profile.id, tied.profile.id],
+    }]);
   });
 
   it('builds the exact Slow cube and six-target-bounded deterministic selection', () => {
@@ -4385,5 +4460,103 @@ describe('external party-pack batch 2b mutation boundaries', () => {
     expect(legal(state, combatantId('combatant:not-loaded'))).toEqual({
       actions: [{ type: 'end_turn', actor: 'combatant:not-loaded' }],
     });
+  });
+
+  it('pins party-pack wire boundaries, whitespace handling, and loader-preserved hit dice', () => {
+    const rejectedAt = (candidate: unknown, path: readonly (string | number)[]) => {
+      const parsed = externalPartyPackSchema.safeParse(candidate);
+      expect(parsed.success).toBe(false);
+      if (parsed.success) throw new Error(`Expected a rejection at ${path.join('.')}.`);
+      expect(parsed.error.issues.map((issue) => issue.path)).toContainEqual(path);
+    };
+    const validOperation = {
+      operationId: 'world:boundary-operation', cost: 'action',
+      operation: {
+        kind: 'create_object',
+        object: {
+          objectId: 'object:boundary-object', name: 'Gate', kind: 'barrier',
+          position: { column: 0, row: 1 },
+          footprint: [{ column: 0, row: 1 }, { column: 1, row: 1 }],
+          durability: { kind: 'hit_points', hitPoints: 1, maximumHitPoints: 2 },
+          armorClass: 10, damageResponses: [],
+          blocking: { movement: true, lineOfSight: true, cover: 'half' },
+        },
+      },
+    } satisfies ExternalWorldOperation;
+    const valid = structuredClone(pack(3, true));
+    valid.members[0]!.worldOperations = [validOperation];
+    const parsedValid = externalPartyPackSchema.parse(valid);
+    if (parsedValid.schemaVersion !== 2) throw new Error('Expected the valid boundary pack to remain v2.');
+    expect(parsedValid.members[0]!.worldOperations).toHaveLength(1);
+
+    rejectedAt({ ...valid, partyId: 'party:valid-tail!' }, ['partyId']);
+    rejectedAt({ ...valid, partyId: 'xparty:valid' }, ['partyId']);
+    rejectedAt({ ...valid, members: [{ ...valid.members[0]!, combatantId: 'combatant:valid!' }, ...valid.members.slice(1)] }, ['members', 0, 'combatantId']);
+    rejectedAt({ ...valid, members: [{ ...valid.members[0]!, combatantId: 'xcombatant:valid' }, ...valid.members.slice(1)] }, ['members', 0, 'combatantId']);
+    rejectedAt({ ...valid, members: [{ ...valid.members[0]!, tokenId: 'token:valid!' }, ...valid.members.slice(1)] }, ['members', 0, 'tokenId']);
+    rejectedAt({ ...valid, members: [{ ...valid.members[0]!, tokenId: 'xtoken:valid' }, ...valid.members.slice(1)] }, ['members', 0, 'tokenId']);
+    rejectedAt({ ...valid, members: [{ ...valid.members[0]!, worldOperations: [{ ...validOperation, operation: { ...validOperation.operation, object: { ...validOperation.operation.object, objectId: 'object:valid!' } } }] }, ...valid.members.slice(1)] }, ['members', 0, 'worldOperations', 0, 'operation', 'object', 'objectId']);
+    rejectedAt({ ...valid, members: [{ ...valid.members[0]!, worldOperations: [{ ...validOperation, operation: { ...validOperation.operation, object: { ...validOperation.operation.object, objectId: 'xobject:valid' } } }] }, ...valid.members.slice(1)] }, ['members', 0, 'worldOperations', 0, 'operation', 'object', 'objectId']);
+    rejectedAt({ ...valid, members: [{ ...valid.members[0]!, worldOperations: [{ ...validOperation, operationId: 'world:valid!' }] }, ...valid.members.slice(1)] }, ['members', 0, 'worldOperations', 0, 'operationId']);
+    rejectedAt({ ...valid, members: [{ ...valid.members[0]!, worldOperations: [{ ...validOperation, operationId: 'xworld:valid' }] }, ...valid.members.slice(1)] }, ['members', 0, 'worldOperations', 0, 'operationId']);
+
+    const relaxedBoundaries = externalPartyPackSchema.parse(valid);
+    if (relaxedBoundaries.schemaVersion !== 2) throw new Error('Expected the relaxed-boundary pack to remain v2.');
+    expect(relaxedBoundaries.members[0]!.worldOperations?.[0]).toMatchObject({
+      operation: { object: { name: 'Gate', footprint: [{ column: 0, row: 1 }, { column: 1, row: 1 }] } },
+    });
+    rejectedAt({ ...valid, members: [{ ...valid.members[0]!, worldOperations: [{ ...validOperation, operation: { ...validOperation.operation, object: { ...validOperation.operation.object, name: ' ' } } }] }, ...valid.members.slice(1)] }, ['members', 0, 'worldOperations', 0, 'operation', 'object', 'name']);
+
+    const terrainAndLight = structuredClone(valid);
+    terrainAndLight.members[0]!.worldOperations = [{
+      operationId: 'world:terrain', cost: 'none', operation: {
+        kind: 'transform_terrain', region: { id: 'zone', cells: [{ column: 0, row: 1 }, { column: 1, row: 1 }] }, difficultTerrain: true,
+      },
+    }, {
+      operationId: 'world:light', cost: 'none', operation: {
+        kind: 'set_light_level', region: { id: 'room', cells: [{ column: 0, row: 1 }, { column: 1, row: 1 }] }, level: 'dim',
+      },
+    }];
+    const parsedTerrainAndLight = externalPartyPackSchema.parse(terrainAndLight);
+    if (parsedTerrainAndLight.schemaVersion !== 2) throw new Error('Expected the terrain-and-light pack to remain v2.');
+    expect(parsedTerrainAndLight.members[0]!.worldOperations).toHaveLength(2);
+    rejectedAt({ ...terrainAndLight, members: [{ ...terrainAndLight.members[0]!, worldOperations: [{ ...terrainAndLight.members[0]!.worldOperations![0]!, operation: { kind: 'transform_terrain', region: { id: ' ', cells: [{ column: 0, row: 1 }] }, difficultTerrain: true } }] }, ...terrainAndLight.members.slice(1)] }, ['members', 0, 'worldOperations', 0, 'operation', 'region', 'id']);
+    rejectedAt({ ...terrainAndLight, members: [{ ...terrainAndLight.members[0]!, worldOperations: [{ ...terrainAndLight.members[0]!.worldOperations![1]!, operation: { kind: 'set_light_level', region: { id: ' ', cells: [{ column: 0, row: 1 }, { column: 1, row: 1 }] }, level: 'dim' } }] }, ...terrainAndLight.members.slice(1)] }, ['members', 0, 'worldOperations', 0, 'operation', 'region', 'id']);
+
+    const damage = structuredClone(valid);
+    damage.members[0]!.worldOperations = [{
+      operationId: 'world:damage', cost: 'action', operation: {
+        kind: 'damage_object', objectId: 'object:boundary-object',
+        delivery: { kind: 'attack', attackBonus: 0, criticalFloor: 10, rollMode: 'normal' },
+        damage: { terms: [{ damageTypeId: 'Fire', count: 1, sides: 6, modifier: 0 }, { damageTypeId: 'Cold', count: 1, sides: 8, modifier: 0 }], critical: false },
+      },
+    }];
+    const parsedDamage = externalPartyPackSchema.parse(damage);
+    if (parsedDamage.schemaVersion !== 2) throw new Error('Expected the damage-boundary pack to remain v2.');
+    expect(parsedDamage.members[0]!.worldOperations?.[0]).toMatchObject({ operation: { damage: { terms: [{ count: 1 }, { count: 1 }] } } });
+
+    const passives = structuredClone(pack(3, true));
+    passives.members[0]!.passives = { skillBonuses: [{ skillId: 'acrobatics', bonus: 1 }], conditionImmunities: ['Blinded'] };
+    const parsedPassives = externalPartyPackSchema.parse(passives);
+    if (parsedPassives.schemaVersion !== 2) throw new Error('Expected the passive-boundary pack to remain v2.');
+    expect(parsedPassives.members[0]!.passives).toEqual(passives.members[0]!.passives);
+    rejectedAt({ ...passives, members: [{ ...passives.members[0]!, passives: { skillBonuses: [{}] } }, ...passives.members.slice(1)] }, ['members', 0, 'passives', 'skillBonuses', 0, 'skillId']);
+
+    const invalidManifestSpell = externalPartyPackSchema.safeParse({ ...passives, members: [{ ...passives.members[0]!, spellcasting: { ...objectSpellcasting(passives.members[0]!), preparedSpellIds: ['not-a-manifest-spell'] } }, ...passives.members.slice(1)] });
+    expect(invalidManifestSpell.success).toBe(false);
+    const sourceMessage = partySourceSchema.safeParse({ packFile: ' leading.json' });
+    expect(sourceMessage.success).toBe(false);
+    if (!sourceMessage.success) expect(sourceMessage.error.issues.map((issue) => issue.message)).toContain('External party-pack paths must be trimmed.');
+
+    const withHitDice = structuredClone(pack(3, true));
+    withHitDice.members[0]!.hitDice = [{ sides: 8, maximum: 2 }, { sides: 10, maximum: 3 }];
+    const loaded = loadedV2(withHitDice);
+    expect(loaded.party.members[0]!.hitDice).toEqual([{ sides: 8, maximum: 2 }, { sides: 10, maximum: 3 }]);
+
+    const fourMemberV1 = v1Pack();
+    fourMemberV1.members = [...fourMemberV1.members, {
+      ...fourMemberV1.members[0]!, combatantId: 'combatant:legacy-four', tokenId: 'token:legacy-four', characterId: 40_004,
+    }];
+    expect(externalPartyPackSchema.parse(fourMemberV1).members).toHaveLength(4);
   });
 });
