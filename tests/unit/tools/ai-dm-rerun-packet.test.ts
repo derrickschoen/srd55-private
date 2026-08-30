@@ -17,8 +17,8 @@ type JsonRecord = z.infer<typeof fixtureRowSchema>;
 
 const inputs = declareTestInputs({
   fixtures: [
-    'tests/fixtures/ai-dm-rerun/paired-tiny.jsonl',
-    'tests/fixtures/ai-dm-rerun/leaked-training.jsonl',
+    'tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl',
+    'tests/fixtures/ai-dm-rerun/leaked-training.SIMULATED.jsonl',
   ],
 });
 
@@ -58,7 +58,7 @@ function registeredRows(): JsonRecord[] {
 
 describe('AI-DM R1-10 rerun packet', () => {
   it('builds the exact blinded packet and separate answer key from hand-built arena rows', () => {
-    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.jsonl');
+    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl');
     const result = buildRerunPacket(rows, 1, tinyProtocol);
 
     const expectedPacket = {
@@ -131,7 +131,7 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(() => validateRerunRows(missingRep, R1_10_PROTOCOL)).toThrow('requires one row from each arm');
 
     expect(() => buildRerunPacket(
-      rowsFromFixture('tests/fixtures/ai-dm-rerun/leaked-training.jsonl'), 1, tinyProtocol,
+      rowsFromFixture('tests/fixtures/ai-dm-rerun/leaked-training.SIMULATED.jsonl'), 1, tinyProtocol,
     )).toThrow('permanent holdout');
   });
 
