@@ -42,10 +42,10 @@ const caster = (overrides: Partial<CasterContext> = {}): CasterContext => ({
 });
 
 describe('D364 SRD companion monster registry', () => {
-  it('exposes 48 SRD rows, including the D371.3 Unicorn legendary exemplar, with 50 homebrew rows and three parameterized entries through one registry', () => {
+  it('exposes 60 SRD rows, including the D371.3 Unicorn legendary exemplar, with 55 homebrew rows and three parameterized entries through one registry', () => {
     expect(STARTER_MONSTER_ROSTER).toHaveLength(47);
-    expect(BUNDLED_MONSTER_REGISTRY).toHaveLength(101);
-    expect(BUNDLED_MONSTER_REGISTRY.filter((entry) => entry.kind === 'static')).toHaveLength(98);
+    expect(BUNDLED_MONSTER_REGISTRY).toHaveLength(118);
+    expect(BUNDLED_MONSTER_REGISTRY.filter((entry) => entry.kind === 'static')).toHaveLength(115);
     expect(BUNDLED_MONSTER_REGISTRY.filter((entry) => entry.kind === 'parameterized')).toHaveLength(3);
     expect(BUNDLED_MONSTER_REGISTRY.find((entry) => entry.id === 'statblock:unicorn')).toMatchObject({
       kind: 'static',
