@@ -38,6 +38,7 @@ describe('RL SFT extractor', () => {
     }, { heartbeat: (line) => { heartbeats.push(line); } });
 
     const expected: SftExample = {
+      task: 'round_plan',
       messages: [
         { role: 'system', content: 'K6 fixture instructions\n' },
         {
@@ -213,6 +214,87 @@ describe('RL SFT extractor', () => {
       round: 1,
       proposalId: 'round:fixture-authorized',
     });
+  });
+
+  it('accepts v1 while separating v2 round-plan and adjustment tasks unless all is explicit', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd416-extract-task-separation-'));
+    const arenaPath = join(directory, 'tasks.jsonl');
+    const legacyCapture = fixtureRow()['rlData'] as Readonly<Record<string, unknown>>;
+    const turnContext = legacyCapture['turnContext'] as Readonly<Record<string, unknown>>;
+    const roundArguments = legacyCapture['submitRoundIntentsArguments'] as Readonly<Record<string, unknown>>;
+    const rawRound = canonicalJson(turnContext);
+    const adjustmentArguments = {
+      state_ref: {
+        run_id: 'encounter:ai-dm-conversation',
+        state_handle: `engine-state:${'b'.repeat(64)}`,
+        expected_revision: 9,
+      },
+      request_id: 'request:room-1-round-1-pc-turn-1',
+      phase: 'initial',
+      baseline_plan_hash: 'c'.repeat(64),
+      idempotency_key: 'adjustment-fixture',
+      updates: [],
+    };
+    const commonCapture = {
+      format: 'arena-rl-capture-v2',
+      sourceLicense: 'project-generated',
+      sessionInstructions: 'K6 fixture instructions\n',
+      repoCommit: 'd'.repeat(40),
+      model: 'gpt-5.6-luna',
+      effort: 'low',
+      sessionId: null,
+      roundProtocolVersion: 2,
+      partyPolicyHash: null,
+      materialityPolicyHash: null,
+    } as const;
+    writeFileSync(arenaPath, `${canonicalJson({
+      ...fixtureRow(),
+      rlData: {
+        ...commonCapture,
+        task: 'round_plan',
+        submissionTool: 'engine.submit_round_intents',
+        rawTurnContext: rawRound,
+        turnContext,
+        submittedArguments: roundArguments,
+        stateDigest: 'a'.repeat(64),
+        requestId: 'request:room-1-round-1',
+        proposalId: 'round:fixture-authorized',
+        parentPlanId: null,
+      },
+      adjustments: [{
+        rlData: [{
+          ...commonCapture,
+          task: 'plan_adjustment',
+          submissionTool: 'engine.submit_plan_adjustment',
+          rawTurnContext: '{"granularity":"turn_delta","task":"adjustment"}',
+          turnContext: { granularity: 'turn_delta', task: 'adjustment' },
+          submittedArguments: adjustmentArguments,
+          stateDigest: 'b'.repeat(64),
+          requestId: 'request:room-1-round-1-pc-turn-1',
+          proposalId: 'adjustment:fixture-authorized',
+          parentPlanId: 'round:fixture-authorized',
+        }],
+      }],
+    })}\n`, 'utf8');
+
+    const roundOut = join(directory, 'round.jsonl');
+    const adjustmentOut = join(directory, 'adjustment.jsonl');
+    const allOut = join(directory, 'all.jsonl');
+    await extractSft({ arenaPaths: [arenaPath], rolloutPaths: [], outPath: roundOut });
+    await extractSft({
+      arenaPaths: [arenaPath], rolloutPaths: [], outPath: adjustmentOut, task: 'plan_adjustment',
+    });
+    await extractSft({ arenaPaths: [arenaPath], rolloutPaths: [], outPath: allOut, task: 'all' });
+
+    const round = JSON.parse(readFileSync(roundOut, 'utf8')) as SftExample;
+    const adjustment = JSON.parse(readFileSync(adjustmentOut, 'utf8')) as SftExample;
+    const all = readFileSync(allOut, 'utf8').trim().split('\n')
+      .map((line) => JSON.parse(line) as SftExample);
+    expect(round.task).toBe('round_plan');
+    expect(round.messages[2].content).toBe(canonicalJson(roundArguments));
+    expect(adjustment.task).toBe('plan_adjustment');
+    expect(adjustment.messages[2].content).toBe(canonicalJson(adjustmentArguments));
+    expect(all.map((example) => example.task)).toEqual(['round_plan', 'plan_adjustment']);
   });
 
   it('excludes service-null, auto-resolved, refused, and non-authorized rows', async () => {

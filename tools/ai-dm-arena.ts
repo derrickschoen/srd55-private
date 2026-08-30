@@ -16,7 +16,12 @@ import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-hos
 import type { AgentSessionAdapter } from '../src/vtt/agent-session';
 import type { LocalOpenAiConfig, LocalThinkMode } from '../src/vtt/agent-adapters/local-openai';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
-import { generateRoom } from '../src/vtt/room-generator';
+import {
+  applyRoomInitiativeProfile,
+  generateRoom,
+  ROOM_INITIATIVE_PROFILES,
+  type RoomInitiativeProfile,
+} from '../src/vtt/room-generator';
 
 export const ARENA_BASES = ['standard', 'hard'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
@@ -27,10 +32,12 @@ export interface ArenaArm {
   readonly effort: ConversationEffort;
   readonly escalationModel: string | null;
   readonly escalationEffort: ConversationEffort | null;
+  readonly combatModel: CombatModel;
 }
 
 export interface ArenaConfig {
   readonly combatModel: CombatModel;
+  readonly initiativeProfile: RoomInitiativeProfile;
   readonly rooms: number;
   readonly reps: number;
   readonly seed: number;
@@ -55,6 +62,9 @@ export interface ArenaConfig {
 }
 
 export interface ArenaRow {
+  readonly combatModel: CombatModel;
+  readonly roundProtocolVersion: import('./ai-dm-conversation').ConversationRow['roundProtocolVersion'];
+  readonly startingRoomDigest: string;
   readonly seed: number;
   readonly basis: ArenaBasis;
   readonly arm: string;
@@ -93,6 +103,15 @@ export interface ArenaRow {
   readonly authorizedPlan: readonly import('./ai-dm-conversation').ConversationAuthorizedActorPlan[] | null;
   readonly roundNarrative: string | null;
   readonly chainEvidence: import('./ai-dm-conversation').ConversationChainEvidence;
+  readonly initiativeOrder: import('./ai-dm-conversation').ConversationRow['initiativeOrder'];
+  readonly partyPolicyHash: string | null;
+  readonly materialityPolicyHash: string | null;
+  readonly adjustmentBudget: number;
+  readonly teamPlans: import('./ai-dm-conversation').ConversationTeamPlans;
+  readonly pcTurns: readonly import('./ai-dm-conversation').ConversationPcTurn[];
+  readonly adjustments: readonly import('./ai-dm-conversation').ConversationAdjustment[];
+  readonly monsterSegments: readonly import('./ai-dm-conversation').ConversationMonsterSegment[];
+  readonly roundTotals: import('./ai-dm-conversation').ConversationRow['roundTotals'];
   readonly rlData?: import('./ai-dm-conversation').ConversationRlData;
 }
 
@@ -130,6 +149,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   let captureRlData = false;
   let generateMissingRooms = false;
   const rawArms: string[] = [];
+  const rawArmCombatModels: string[] = [];
   for (let index = 0; index < argumentsValue.length; index += 1) {
     const option = argumentsValue[index];
     if (option === '--dry-run') { dryRun = true; continue; }
@@ -141,11 +161,12 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--escalation-model', '--escalation-effort',
       '--cli-bin', '--timeout-ms', '--kb',
       '--reaction-ask-default',
-      '--combat-model',
+      '--combat-model', '--initiative-profile', '--arm-combat-model',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
     if (option === '--arm') rawArms.push(value);
+    else if (option === '--arm-combat-model') rawArmCombatModels.push(value);
     else values.set(option ?? '', value);
     index += 1;
   }
@@ -211,6 +232,20 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (!COMBAT_MODELS.includes(combatModel as CombatModel)) {
     throw new TypeError('--combat-model must be monster_block_v1 or initiative_segments_v1.');
   }
+  const initiativeProfile = values.get('--initiative-profile') ?? 'legacy';
+  if (!ROOM_INITIATIVE_PROFILES.includes(initiativeProfile as RoomInitiativeProfile)) {
+    throw new TypeError('--initiative-profile must be legacy or derived_v1.');
+  }
+  const armCombatModels = new Map<string, CombatModel>();
+  for (const raw of rawArmCombatModels) {
+    const [label, model, extra] = raw.split(':');
+    if (label === undefined || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) ||
+      model === undefined || extra !== undefined || !COMBAT_MODELS.includes(model as CombatModel)) {
+      throw new TypeError('--arm-combat-model must use label:monster_block_v1|initiative_segments_v1 syntax.');
+    }
+    if (armCombatModels.has(label)) throw new TypeError(`Duplicate --arm-combat-model for ${label}.`);
+    armCombatModels.set(label, model as CombatModel);
+  }
   const arms = rawArms.map((raw): ArenaArm => {
     const [label, armModel, armEffort, armEscalationModel, armEscalationEffort, extra] = raw.split(':');
     if (label === undefined || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) ||
@@ -234,6 +269,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       escalationEffort: armEscalationEffort === undefined
         ? null
         : armEscalationEffort as ConversationEffort,
+      combatModel: armCombatModels.get(label) ?? combatModel as CombatModel,
     };
   });
   if (new Set(arms.map((arm) => arm.label)).size !== arms.length) {
@@ -245,8 +281,17 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (!interleave && arms.length > 0) {
     throw new TypeError('--arm is only valid with --interleave.');
   }
+  const armLabels = new Set(arms.map((arm) => arm.label));
+  const unknownArmModel = [...armCombatModels.keys()].find((label) => !armLabels.has(label));
+  if (unknownArmModel !== undefined) {
+    throw new TypeError(`--arm-combat-model names unknown arm ${unknownArmModel}.`);
+  }
+  if (!interleave && armCombatModels.size > 0) {
+    throw new TypeError('--arm-combat-model is only valid with --interleave.');
+  }
   return {
     combatModel: combatModel as CombatModel,
+    initiativeProfile: initiativeProfile as RoomInitiativeProfile,
     rooms: positiveInteger(values.get('--rooms') ?? '', '--rooms'),
     reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
     seed,
@@ -293,11 +338,14 @@ async function frozenRoomStates(config: ArenaConfig): Promise<readonly import('.
     const fixturePath = resolve(fixturesPath, `seed-${String(seed)}.json`);
     try {
       await access(fixturePath);
-      return await loadArenaFixture(fixturePath);
+      return applyRoomInitiativeProfile(await loadArenaFixture(fixturePath), config.initiativeProfile);
     } catch (error) {
       if (!config.generateMissingRooms || !(error instanceof Error) ||
         !('code' in error) || error.code !== 'ENOENT') throw error;
-      return generateRoom(seed, { difficulty: config.basis }).encounter.state;
+      return generateRoom(seed, {
+        difficulty: config.basis,
+        initiativeProfile: config.initiativeProfile,
+      }).encounter.state;
     }
   }));
 }
@@ -309,6 +357,9 @@ function arenaRows(
   seeds: readonly number[],
 ): readonly ArenaRow[] {
   return rows.map((row): ArenaRow => ({
+    combatModel: row.combatModel,
+    roundProtocolVersion: row.roundProtocolVersion,
+    startingRoomDigest: row.startingRoomDigest,
     seed: seeds[row.room - 1]!,
     basis: config.basis,
     arm,
@@ -346,6 +397,15 @@ function arenaRows(
     authorizedPlan: row.authorizedPlan,
     roundNarrative: row.roundNarrative,
     chainEvidence: row.chainEvidence,
+    initiativeOrder: row.initiativeOrder,
+    partyPolicyHash: row.partyPolicyHash,
+    materialityPolicyHash: row.materialityPolicyHash,
+    adjustmentBudget: row.adjustmentBudget,
+    teamPlans: row.teamPlans,
+    pcTurns: row.pcTurns,
+    adjustments: row.adjustments,
+    monsterSegments: row.monsterSegments,
+    roundTotals: row.roundTotals,
     ...(row.rlData === undefined ? {} : { rlData: row.rlData }),
   }));
 }
@@ -360,10 +420,11 @@ function conversationConfig(
     readonly escalationModel: string | null;
     readonly escalationEffort: ConversationEffort | null;
     readonly outPath: string;
+    readonly combatModel?: CombatModel;
   },
 ): import('./ai-dm-conversation').ConversationConfig {
   return {
-    combatModel: config.combatModel,
+    combatModel: overrides.combatModel ?? config.combatModel,
     fixturesPath: basisFixturesPath(config),
     rooms: overrides.rooms,
     rounds: overrides.rounds,
@@ -432,10 +493,11 @@ export async function runArena(
             escalationModel: arm.escalationModel ?? config.escalationModel,
             escalationEffort: arm.escalationEffort ?? config.escalationEffort,
             outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-${arm.label}.jsonl`),
+            combatModel: arm.combatModel,
           }), {
             ...conversationOptions,
             ...(adapterByArm?.[arm.label] === undefined ? {} : { adapter: adapterByArm[arm.label] }),
-            roomStates: [states[room - 1]!],
+            roomStates: [structuredClone(states[room - 1]!)],
             onPrimaryDispatchStart: () => {
               if (announced) return;
               announced = true;
