@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-07",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 7, "name": "Guardhouse Vault", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "blocking", "name": "Iron vault bars", "position": { "kind": "relative", "area": "south" }, "mechanics": ["floor-to-ceiling barrier", "locked barred door"] },
+    { "kind": "obstacle", "name": "Guard supplies", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["crates", "barrels", "small table and chair"] },
+    { "kind": "resource", "name": "Vault contents", "position": { "kind": "relative", "area": "south" }, "mechanics": ["two chests", "two barrels", "coin pile", "Reliquary Chamber Key"] }
+  ]
+}

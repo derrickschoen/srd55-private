@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-26",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 26, "name": "Xenobotanical Cavern", "sourcePage": 6 },
+  "layout": { "kind": "source_map", "sourcePage": 7, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [
+    { "sourceName": "Astraldendon", "quantity": { "kind": "fixed", "value": 6 }, "reference": { "status": "unmapped", "reason": "no_srd_exact_match" }, "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "activation": "present" },
+    { "sourceName": "Astralmycon", "quantity": { "kind": "fixed", "value": 5 }, "reference": { "status": "unmapped", "reason": "no_srd_exact_match" }, "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "activation": "present" }
+  ],
+  "terrain": [
+    { "kind": "terrain", "name": "Central pool", "position": { "kind": "relative", "area": "center" }, "mechanics": ["pool of water"] },
+    { "kind": "access", "name": "Branching cavern paths", "position": { "kind": "relative", "area": "perimeter" }, "mechanics": ["multiple paths leave the chamber"] },
+    { "kind": "resource", "name": "Apprentice journal", "position": { "kind": "relative", "area": "apprentice_remains" }, "mechanics": ["contains room 21 teleportation-circle instructions"] }
+  ]
+}

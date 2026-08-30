@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-18",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 18, "name": "Herbarium", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [
+    { "sourceName": "Astraldendon", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "no_srd_exact_match" }, "position": { "kind": "relative", "area": "center" }, "activation": "present" }
+  ],
+  "terrain": [
+    { "kind": "obstacle", "name": "Wall shelving", "position": { "kind": "relative", "area": "walls" }, "mechanics": ["shelving lines the walls"] },
+    { "kind": "terrain", "name": "Broken glass and powders", "position": { "kind": "relative", "area": "floor" }, "mechanics": ["scattered debris"] },
+    { "kind": "resource", "name": "Research notes", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["identify Xenobotanical Cavern location"] }
+  ]
+}

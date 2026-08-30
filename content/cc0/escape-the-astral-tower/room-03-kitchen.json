@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-03",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 3, "name": "Kitchen", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "obstacle", "name": "Cooking furniture", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["small table", "large workbench", "wall shelves"] },
+    { "kind": "terrain", "name": "Cooking hearth", "position": { "kind": "relative", "area": "east_wall" }, "mechanics": ["fixed hearth"] },
+    { "kind": "resource", "name": "Water barrels", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["two large barrels of water"] }
+  ]
+}

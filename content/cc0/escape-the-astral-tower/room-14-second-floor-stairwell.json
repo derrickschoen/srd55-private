@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-14",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 14, "name": "Tower Stairwell Second Floor", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "access", "name": "Second-floor stairwell", "position": { "kind": "relative", "area": "center" }, "mechanics": ["vertical access", "doors east and west"] },
+    { "kind": "terrain", "name": "Outer hall", "position": { "kind": "relative", "area": "perimeter" }, "mechanics": ["circles the stairwell"] }
+  ]
+}

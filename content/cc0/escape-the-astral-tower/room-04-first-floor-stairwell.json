@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-04",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 4, "name": "Tower Stairwell First Floor", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "access", "name": "Inner stairwell", "position": { "kind": "relative", "area": "center" }, "mechanics": ["connects upward and downward"] },
+    { "kind": "terrain", "name": "Outer hall", "position": { "kind": "relative", "area": "perimeter" }, "mechanics": ["circles the inner stairwell"] }
+  ]
+}

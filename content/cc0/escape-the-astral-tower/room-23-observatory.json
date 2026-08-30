@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-23",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 23, "name": "Observatory", "sourcePage": 6 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "obstacle", "name": "Telescope and work table", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["large telescope", "table", "scattered gears and parts"] },
+    { "kind": "resource", "name": "Vault key", "position": { "kind": "relative", "area": "under_table_papers" }, "mechanics": ["opens room 7 vault"] }
+  ]
+}

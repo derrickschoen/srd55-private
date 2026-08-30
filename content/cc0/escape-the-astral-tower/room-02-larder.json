@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-02",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 2, "name": "Larder", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "obstacle", "name": "Shelves, barrels, and crates", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["three large shelves", "multiple containers"] },
+    { "kind": "resource", "name": "Salted pork", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["two sealed edible barrels"] }
+  ]
+}

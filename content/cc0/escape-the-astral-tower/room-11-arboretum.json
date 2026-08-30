@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-11",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 11, "name": "Arboretum", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "terrain", "name": "Trees and undergrowth", "position": { "kind": "relative", "area": "back_half" }, "mechanics": ["fruit trees", "grass", "bushes"] },
+    { "kind": "resource", "name": "Regrowing fruit", "position": { "kind": "relative", "area": "back_half" }, "mechanics": ["harvested fruit regrows after one day"] }
+  ]
+}

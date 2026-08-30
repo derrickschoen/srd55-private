@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-19",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 19, "name": "Reliquary Chamber", "sourcePage": 6 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [
+    { "sourceName": "Animated statue", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "no_srd_exact_match" }, "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "activation": "on_interaction" }
+  ],
+  "terrain": [
+    { "kind": "access", "name": "Locked door", "position": { "kind": "relative", "area": "entrance" }, "mechanics": ["requires the Reliquary Chamber Key"] },
+    { "kind": "rest", "name": "Calm chamber", "position": { "kind": "relative", "area": "throughout" }, "mechanics": ["safe rest while statue and sarcophagus remain undisturbed"] },
+    { "kind": "terrain", "name": "Sarcophagus and statue", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["disturbing either activates the statue"] }
+  ]
+}

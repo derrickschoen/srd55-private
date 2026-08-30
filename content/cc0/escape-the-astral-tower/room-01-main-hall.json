@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-01",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 1, "name": "Main Hall", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "access", "name": "Main entrance doors", "position": { "kind": "relative", "area": "entrance" }, "mechanics": ["large wooden doors"] },
+    { "kind": "terrain", "name": "Second-floor galleries", "position": { "kind": "relative", "area": "sides" }, "mechanics": ["elevated galleries on both sides"] },
+    { "kind": "light", "name": "High windows", "position": { "kind": "relative", "area": "upper_walls" }, "mechanics": ["dim exterior light"] }
+  ]
+}

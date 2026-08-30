@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-21",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 21, "name": "Arcane Library", "sourcePage": 6 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [
+    { "sourceName": "Mimic", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "relative", "area": "back" }, "activation": "on_interaction" }
+  ],
+  "terrain": [
+    { "kind": "obstacle", "name": "Library shelving and pillars", "position": { "kind": "relative", "area": "throughout" }, "mechanics": ["wall shelves", "three central shelf rows", "four support pillars"] },
+    { "kind": "resource", "name": "Spellbooks", "position": { "kind": "relative", "area": "shelves" }, "mechanics": ["six spellbooks"] },
+    { "kind": "access", "name": "Teleportation circle", "position": { "kind": "relative", "area": "floor" }, "mechanics": ["requires prior knowledge or the instructions from room 26"] }
+  ]
+}
