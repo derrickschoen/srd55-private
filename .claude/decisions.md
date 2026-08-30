@@ -7,6 +7,21 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D415 — OWNER: no global AGENTS.md injection into DM/PC codex turns (2026-08-29)
+
+Verbatim: "We need to not inject global agents.md to codex when acting as
+a dm or pc." Context: `~/.codex/AGENTS.md` is a symlink to
+`~/.claude/CLAUDE.md` (12,004 bytes of machine/PHP/Jira/codex-routing
+guidance) and is injected into every codex agent turn, including DM/PC
+arena turns — pure contamination plus token cost (the KNOWN-OPEN
+~12.5KB/session item). Ruling: DM/PC agent-adapter turns must not
+receive the global AGENTS.md. Supervision/implementation lanes keep it.
+Suppression mechanism must be empirically verified before relying on it
+(config override vs CODEX_HOME isolation), and the repo-level AGENTS.md
+(5,884 bytes, also engineering guidance irrelevant to a DM role) is
+flagged as the same class — owner has ruled only on the global file so
+far.
+
 ## D414 — OWNER: finalize recording, park training until very large corpus (2026-08-29)
 
 Verbatim: "What is the final plan for the training? We need to make sure
