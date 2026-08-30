@@ -8,6 +8,11 @@ import {
   type ArenaConfig,
   type ArenaRow,
 } from '../ai-dm-arena';
+import { COMBAT_MODELS, type CombatModel } from '../ai-dm-conversation';
+import {
+  ROOM_INITIATIVE_PROFILES,
+  type RoomInitiativeProfile,
+} from '../../src/vtt/room-generator';
 import { readRepoCommit } from './repo-commit';
 
 export interface SeedRange {
@@ -16,6 +21,8 @@ export interface SeedRange {
 }
 
 export interface GenerateDataConfig {
+  readonly combatModel: CombatModel;
+  readonly initiativeProfile: RoomInitiativeProfile;
   readonly seedRanges: readonly SeedRange[];
   readonly reps: number;
   readonly targetDirectory: string;
@@ -50,7 +57,18 @@ export interface GenerateDataManifest {
   readonly toolArgv: readonly string[];
   readonly flapPolicy: 'arena-retry-then-resume-seed';
   readonly basis: 'standard' | 'hard';
+  readonly combatModel: CombatModel;
+  readonly initiativeProfile: RoomInitiativeProfile;
   readonly seeds: readonly SeedManifestEntry[];
+  readonly totals: {
+    readonly seeds: number;
+    readonly completeSeeds: number;
+    readonly flappedSeeds: number;
+    readonly failedSeeds: number;
+    readonly rows: number;
+    readonly flapRetries: number;
+    readonly serviceNullRows: number;
+  };
 }
 
 export type ArenaBatchRunner = (config: ArenaConfig) => Promise<readonly Pick<
@@ -93,10 +111,15 @@ export function parseGenerateDataArgs(
   let timeoutMs = 120_000;
   let resume = false;
   let basis: GenerateDataConfig['basis'] = 'standard';
+  let combatModel: CombatModel = 'monster_block_v1';
+  let initiativeProfile: RoomInitiativeProfile = 'legacy';
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];
     if (option === '--resume') { resume = true; continue; }
-    if (!['--seed-range', '--reps', '--target-dir', '--timeout-ms', '--basis'].includes(option ?? '')) {
+    if (![
+      '--seed-range', '--reps', '--target-dir', '--timeout-ms', '--basis', '--combat-model',
+      '--initiative-profile',
+    ].includes(option ?? '')) {
       throw new TypeError(`Unknown generate-data option ${option ?? '<missing>'}.`);
     }
     const value = args[index + 1];
@@ -105,8 +128,20 @@ export function parseGenerateDataArgs(
     else if (option === '--reps') reps = positiveInteger(value, '--reps');
     else if (option === '--target-dir') targetDirectory = resolve(value);
     else if (option === '--timeout-ms') timeoutMs = positiveInteger(value, '--timeout-ms');
-    else if (value === 'standard' || value === 'hard') basis = value;
-    else throw new TypeError('--basis must be standard or hard.');
+    else if (option === '--basis') {
+      if (value !== 'standard' && value !== 'hard') throw new TypeError('--basis must be standard or hard.');
+      basis = value;
+    } else if (option === '--combat-model') {
+      if (!COMBAT_MODELS.includes(value as CombatModel)) {
+        throw new TypeError('--combat-model must be monster_block_v1 or initiative_segments_v1.');
+      }
+      combatModel = value as CombatModel;
+    } else {
+      if (!ROOM_INITIATIVE_PROFILES.includes(value as RoomInitiativeProfile)) {
+        throw new TypeError('--initiative-profile must be legacy or derived_v1.');
+      }
+      initiativeProfile = value as RoomInitiativeProfile;
+    }
     index += 1;
   }
   if (ranges.length === 0) throw new TypeError('At least one --seed-range is required.');
@@ -120,6 +155,8 @@ export function parseGenerateDataArgs(
     }
   }
   return {
+    combatModel,
+    initiativeProfile,
     seedRanges: ranges,
     reps,
     targetDirectory,
@@ -151,6 +188,8 @@ async function existingManifest(
   const decoded = JSON.parse(source) as GenerateDataManifest;
   if (decoded.format !== 'arena-rl-batch-v1' || decoded.range.start !== range.start ||
     decoded.range.end !== range.end || decoded.reps !== config.reps || decoded.basis !== config.basis ||
+    decoded.combatModel !== config.combatModel ||
+    decoded.initiativeProfile !== config.initiativeProfile ||
     decoded.model !== 'gpt-5.6-luna' || decoded.effort !== 'low' || decoded.kbId !== 'K6' ||
     decoded.kbHash !== provenance.kbHash || decoded.repoCommit !== provenance.repoCommit ||
     decoded.adapterCliName !== provenance.adapterCliName ||
@@ -196,7 +235,25 @@ function emptyManifest(
     toolArgv: [...config.toolArgv],
     flapPolicy: 'arena-retry-then-resume-seed',
     basis: config.basis,
+    combatModel: config.combatModel,
+    initiativeProfile: config.initiativeProfile,
     seeds: [],
+    totals: {
+      seeds: 0, completeSeeds: 0, flappedSeeds: 0, failedSeeds: 0,
+      rows: 0, flapRetries: 0, serviceNullRows: 0,
+    },
+  };
+}
+
+function manifestTotals(seeds: readonly SeedManifestEntry[]): GenerateDataManifest['totals'] {
+  return {
+    seeds: seeds.length,
+    completeSeeds: seeds.filter((entry) => entry.status === 'complete').length,
+    flappedSeeds: seeds.filter((entry) => entry.status === 'flapped').length,
+    failedSeeds: seeds.filter((entry) => entry.status === 'failed').length,
+    rows: seeds.reduce((total, entry) => total + entry.rows, 0),
+    flapRetries: seeds.reduce((total, entry) => total + entry.flapRetries, 0),
+    serviceNullRows: seeds.reduce((total, entry) => total + entry.serviceNullRows, 0),
   };
 }
 
@@ -204,10 +261,12 @@ function replaceSeed(
   manifest: GenerateDataManifest,
   entry: SeedManifestEntry,
 ): GenerateDataManifest {
+  const seeds = [...manifest.seeds.filter((candidate) => candidate.seed !== entry.seed), entry]
+    .sort((left, right) => left.seed - right.seed);
   return {
     ...manifest,
-    seeds: [...manifest.seeds.filter((candidate) => candidate.seed !== entry.seed), entry]
-      .sort((left, right) => left.seed - right.seed),
+    seeds,
+    totals: manifestTotals(seeds),
   };
 }
 
@@ -223,6 +282,8 @@ function arenaConfig(config: GenerateDataConfig, seed: number, outPath: string):
     '--timeout-ms', String(config.timeoutMs),
     '--kb', resolve(config.cwd, 'tests/fixtures/ai-dm-kb/k6.txt'),
     '--basis', config.basis,
+    '--combat-model', config.combatModel,
+    '--initiative-profile', config.initiativeProfile,
     '--capture-rl-data',
     '--generate-missing-rooms',
   ], config.cwd);
@@ -312,7 +373,7 @@ async function main(): Promise<void> {
 }
 
 const GENERATE_DATA_USAGE =
-  'Usage: rl:generate-data --seed-range START-END [--seed-range START-END ...] --reps N --target-dir PATH [--basis standard|hard] [--timeout-ms N] [--resume]';
+  'Usage: rl:generate-data --seed-range START-END [--seed-range START-END ...] --reps N --target-dir PATH [--basis standard|hard] [--combat-model monster_block_v1|initiative_segments_v1] [--initiative-profile legacy|derived_v1] [--timeout-ms N] [--resume]';
 
 async function runCli(): Promise<void> {
   try { await main(); }

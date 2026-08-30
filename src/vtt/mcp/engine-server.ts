@@ -47,6 +47,12 @@ export const ENGINE_DM_TOOL_NAMES = Object.freeze([
   'engine.submit_round_intents',
   'engine.request_dm_adjudication',
 ] as const);
+export const ENGINE_ADJUSTMENT_DM_TOOL_NAMES = Object.freeze([
+  'engine.get_turn_context',
+  'engine.validate_intent',
+  'engine.submit_plan_adjustment',
+  'engine.request_dm_adjudication',
+] as const);
 export type EngineMcpToolProfile = 'full' | 'dm';
 
 export interface EngineCapsuleFeed extends ReadonlyStateCapsuleSource {
@@ -360,9 +366,16 @@ function exactCurrent(feed: EngineCapsuleFeed, runId: string, revision: number):
   if (capsule.runId !== runId || capsule.revision !== revision || !verifyEngineStateCapsule(capsule)) throw new StaleEngineStateError();
   return capsule;
 }
-function correctionGuidance(capsule: EngineStateCapsule): Readonly<Record<string, unknown>> {
+function correctionGuidance(
+  capsule: EngineStateCapsule,
+  actorIds: readonly CombatantId[] = capsule.request?.actors ?? [],
+): Readonly<Record<string, unknown>> {
   if (capsule.request === null) throw new RangeError('No intent request is pending.');
-  return { remaining_corrections: capsule.request.phase === 'initial' ? 1 : 0, required_actor_ids: capsule.request.actors, replace_whole_round: true };
+  return {
+    remaining_corrections: capsule.request.phase === 'initial' ? 1 : 0,
+    required_actor_ids: actorIds,
+    replace_whole_round: capsule.request.phase === 'speculative' || capsule.request.kind !== 'plan_adjustment',
+  };
 }
 function resolutionPreview(resolution: Extract<ReturnType<PureIntentResolver['resolve']>, { readonly valid: true }>): Readonly<Record<string, unknown>> {
   return { actor_id: resolution.mechanics.actorId, action_id: resolution.mechanics.actionId, target_id: resolution.mechanics.targetId, movement_feet: resolution.mechanics.movementCostFeet, resolution_digest: resolution.resolutionDigest, summary: resolution.summary };
@@ -383,9 +396,14 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_intent', capsul
     return entry === null ? [] : [{ rule_id: entry.ruleId, source_locator: entry.sourceLocator, text: entry.text, attribution: entry.attribution }];
   });
   const uriBase = `engine://run/${encodeURIComponent(capsule.runId)}`;
-  const fixed = kind === 'plan_round'
-    ? 'Use engine.get_turn_context, then engine.submit_round_intents once for the complete required actor set. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
-    : 'Correct the complete refused intent request once. No fallback remains after this correction; correction fallback must be null. If you refresh context, use the get_turn_context request in current_context exactly.';
+  const adjustment = capsule.request?.phase !== 'speculative' && capsule.request?.kind === 'plan_adjustment';
+  const fixed = adjustment
+    ? kind === 'plan_round'
+      ? 'Review the current remaining monster plan, then use engine.submit_plan_adjustment once. Submit zero to the stated adjustment budget of open-actor replacements; omitted actors keep their baseline intents and an empty updates list explicitly keeps the plan. Do not change reaction guidance. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
+      : 'Correct only the refused plan-adjustment actors once with engine.submit_plan_adjustment. Valid staged updates remain accepted. No fallback remains after this correction; every correction fallback must be null. Omitted refused actors keep their baseline intents.'
+    : kind === 'plan_round'
+      ? 'Use engine.get_turn_context, then engine.submit_round_intents once for the complete required actor set. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
+      : 'Correct the complete refused intent request once. No fallback remains after this correction; correction fallback must be null. If you refresh context, use the get_turn_context request in current_context exactly.';
   return [fixed, `Turn resource: ${uriBase}/turn/current`, `Intent schema: ${uriBase}/schema/intent-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: capsule.request, voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
 }
 
@@ -452,15 +470,23 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const all = tacticalOptions(state, queries, capsule, actorId, includeExpectations, true);
       return { actor_id: actorId, status: actorStatus(actor), options: all.slice(0, maximum), threats: threats(state, queries, actorId), omitted: all.length > maximum };
     });
-    const applicablePlays = SNIPPET_REGISTRY.applicable(capsule);
+    const adjustmentRequest = capsule.request?.phase !== 'speculative' && capsule.request?.kind === 'plan_adjustment'
+      ? capsule.request
+      : null;
+    const applicablePlays = adjustmentRequest === null ? SNIPPET_REGISTRY.applicable(capsule) : [];
     const result = {
       granularity: 'full' as const,
       context_trimmed: false,
       state_ref: externalStateRef(capsule),
       request: capsule.request === null || capsule.request.phase === 'speculative' ? null : {
+        kind: capsule.request.kind ?? 'round_plan',
         request_id: capsule.request.requestId, phase: capsule.request.phase,
         correction_number: capsule.request.correctionNumber,
         required_actor_ids: capsule.request.actors,
+        ...(adjustmentRequest === null ? {} : {
+          baseline_plan_hash: adjustmentRequest.baselinePlanHash,
+          adjustment_budget: adjustmentRequest.adjustmentBudget,
+        }),
       },
       summary: tacticalSummary(capsule), actors: actors.map(({ omitted: _omitted, ...actor }) => actor), recent_changes: recentChanges(capsule),
       applicable_plays: applicablePlays.map((play) => ({
@@ -468,6 +494,16 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         description: play.description,
         snippet_hash: play.snippetHash,
       })),
+      ...(adjustmentRequest === null ? {} : {
+        current_plan: {
+          parent_plan_id: adjustmentRequest.parentPlanId,
+          baseline_plan_hash: adjustmentRequest.baselinePlanHash,
+          open_actor_intents: adjustmentRequest.baselineIntentDigests.map((entry) => ({
+            actor_id: entry.actorId,
+            intent_digest: entry.intentDigest,
+          })),
+        },
+      }),
       truncated: actors.some((actor) => actor.omitted), next_cursor: null,
     };
     while (new TextEncoder().encode(JSON.stringify(result)).byteLength > TURN_CONTEXT_MAX_BYTES) {
@@ -528,6 +564,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     if (name === 'engine.propose_from_play') {
       const capsule = feed.current();
       if (capsule.request === null) throw new RangeError('NO_PENDING_REQUEST');
+      if (capsule.request.phase !== 'initial' || capsule.request.kind === 'plan_adjustment') {
+        throw new RangeError('PLAY_NOT_APPLICABLE_TO_REQUEST');
+      }
       const requestedName = stringField(input, 'play_name');
       if (!PLAY_NAMES.some((candidate) => candidate === requestedName)) {
         throw new RangeError(`Unknown play ${requestedName}.`);
@@ -650,6 +689,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     }
     if (name === 'engine.submit_round_intents') {
       const request = currentRequest(capsule, stringField(input, 'request_id'), stringField(input, 'phase'));
+      if (request.kind === 'plan_adjustment') throw new RangeError('REQUEST_KIND_MISMATCH');
       const intentValues = input['intents'];
       if (!Array.isArray(intentValues)) throw new TypeError('intents must be an array.');
       const decoded = intentValues.map(decodeIntent);
@@ -697,6 +737,104 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
         submitEngineProposal(feed, proposals, { kind: 'round_intent_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance, submittedArguments: structuredClone(input) });
         return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.intent.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
+      });
+    }
+    if (name === 'engine.submit_plan_adjustment') {
+      const request = currentRequest(capsule, stringField(input, 'request_id'), stringField(input, 'phase'));
+      if (request.kind !== 'plan_adjustment') throw new RangeError('REQUEST_KIND_MISMATCH');
+      if (stringField(input, 'baseline_plan_hash') !== request.baselinePlanHash) {
+        throw new RangeError('BASELINE_PLAN_MISMATCH');
+      }
+      const updateValues = input['updates'];
+      if (!Array.isArray(updateValues)) throw new TypeError('updates must be an array.');
+      const decoded = updateValues.map(decodeIntent);
+      const counts = new Map<CombatantId, number>();
+      for (const intent of decoded) counts.set(intent.actorId, (counts.get(intent.actorId) ?? 0) + 1);
+      const overBudget = decoded.length > request.adjustmentBudget;
+      const evaluated = decoded.map((intent) => {
+        const actor = state.combatants.find((candidate) => candidate.profile.id === intent.actorId);
+        const staticRefusal = overBudget
+          ? { code: 'ADJUSTMENT_BUDGET_EXCEEDED', summary: `Adjustment contains more than ${String(request.adjustmentBudget)} replacement intents.` }
+          : (counts.get(intent.actorId) ?? 0) > 1
+            ? { code: 'DUPLICATE_ACTOR_UPDATE', summary: 'An adjustment may replace an open actor at most once.' }
+            : actor?.life === 'dead'
+              ? { code: 'ACTOR_DEAD', summary: 'A dead actor cannot receive a plan adjustment.' }
+              : !request.actors.includes(intent.actorId)
+                ? { code: 'ACTOR_NOT_OPEN', summary: 'Only actors whose turns remain open may receive an adjustment.' }
+                : null;
+        if (staticRefusal !== null) return { intent, resolution: null, staticRefusal };
+        return { intent, resolution: intents.resolve(state, intent), staticRefusal: null };
+      });
+      const valid = evaluated.flatMap((entry) => entry.resolution?.valid === true ? [{
+        intent: entry.intent,
+        selectedBranch: entry.resolution.selectedBranch,
+        resolutionDigest: entry.resolution.resolutionDigest,
+        summary: entry.resolution.summary,
+      }] : []);
+      const refusals = evaluated.flatMap((entry) => {
+        if (entry.staticRefusal !== null) return [{
+          actor_id: entry.intent.actorId,
+          codes: [entry.staticRefusal.code],
+          summary: entry.staticRefusal.summary,
+          attempt_rejections: [{
+            attempt: 'primary' as const,
+            declared_intent: externalIntentBranch(entry.intent),
+            rejection_reasons: [entry.staticRefusal.summary],
+          }],
+        }];
+        const resolution = entry.resolution;
+        if (resolution === null || resolution.valid) return [];
+        return [{
+          actor_id: entry.intent.actorId,
+          codes: resolution.refusals.map((refusal) => refusal.code),
+          summary: resolution.refusals.map((refusal) => refusal.summary).join('; '),
+          attempt_rejections: (['primary', 'fallback'] as const).flatMap((attempt) => {
+            const reasons = resolution.refusals.filter((refusal) => refusal.branch === attempt).map((refusal) => refusal.summary);
+            const declared = attempt === 'primary' ? entry.intent : entry.intent.fallback;
+            return reasons.length === 0 ? [] : [{
+              attempt,
+              declared_intent: declared === null ? null : externalIntentBranch(declared),
+              rejection_reasons: reasons,
+            }];
+          }),
+        }];
+      });
+      const key = stringField(input, 'idempotency_key');
+      return idempotent(key, input, () => {
+        const proposalId = `adjustment:${sha256(canonicalJson({ digest: capsule.digest, key, baselinePlanHash: request.baselinePlanHash, valid })).slice(0, 48)}`;
+        if (refusals.length === 0 || valid.length > 0) {
+          submitEngineProposal(feed, proposals, {
+            kind: 'plan_adjustment_proposal',
+            proposalId,
+            runId: capsule.runId,
+            branchId: capsule.branchId,
+            requestId: request.requestId,
+            expectedRevision: capsule.revision,
+            stateDigest: capsule.digest,
+            stateHandle: engineStateHandle(capsule),
+            phase: request.phase,
+            idempotencyKey: key,
+            baseline_plan_hash: request.baselinePlanHash,
+            updates: valid,
+            submittedArguments: structuredClone(input),
+          });
+        }
+        const actorResolutions = valid.map((entry) => ({
+          actor_id: entry.intent.actorId,
+          selected_branch: entry.selectedBranch,
+          resolution_digest: entry.resolutionDigest,
+          summary: entry.summary,
+        }));
+        return refusals.length === 0
+          ? { status: 'proposed', adjustment_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: actorResolutions }
+          : {
+              status: 'rejected',
+              staged_proposal_id: valid.length === 0 ? null : proposalId,
+              state_ref: externalStateRef(capsule),
+              staged_actor_resolutions: actorResolutions,
+              actor_refusals: refusals,
+              correction_guidance: correctionGuidance(capsule, [...new Set(refusals.map((entry) => combatantId(entry.actor_id)))]),
+            };
       });
     }
     if (name === 'engine.submit_speculative_round_plan') {
@@ -747,6 +885,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     }
     if (name === 'engine.submit_intent') {
       const request = currentRequest(capsule, stringField(input, 'request_id'), stringField(input, 'phase'));
+      if (request.kind === 'plan_adjustment') throw new RangeError('REQUEST_KIND_MISMATCH');
       const intent = decodeIntent(input['intent']);
       if (request.actors.length !== 1 || request.actors[0] !== intent.actorId) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: 'ACTOR_REQUIRES_WHOLE_ROUND', summary: 'This actor belongs to the pending shared-initiative whole-round request.' }], correction_guidance: correctionGuidance(capsule) };
       const resolution = intents.resolve(state, intent);
@@ -790,8 +929,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     throw new RangeError(`Unknown engine tool ${name}.`);
   }
 
+  const profileRequest = feed.current().request;
   const advertisedNames: ReadonlySet<string> | null = dependencies.toolProfile === 'dm'
-    ? new Set(ENGINE_DM_TOOL_NAMES)
+    ? new Set(profileRequest?.phase !== 'speculative' && profileRequest?.kind === 'plan_adjustment'
+      ? ENGINE_ADJUSTMENT_DM_TOOL_NAMES
+      : ENGINE_DM_TOOL_NAMES)
     : null;
   const bindings: readonly McpToolBinding[] = ENGINE_TOOL_SPECS
     .filter((spec) => advertisedNames === null || advertisedNames.has(spec.descriptor.name))

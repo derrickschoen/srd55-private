@@ -44,6 +44,7 @@ import {
   type RevisionDeltaOperation,
 } from '../../../src/vtt/dm-bridge/projection-transport';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 
 class RecordingConversationAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
@@ -989,6 +990,26 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows[0]).toEqual(expect.objectContaining({
       outcome: 'authorized', agentDispatched: true, callsPerRound: 1,
+      combatModel: 'monster_block_v1',
+      roundProtocolVersion: 2,
+      partyPolicyHash: null,
+      materialityPolicyHash: null,
+      adjustmentBudget: 0,
+      pcTurns: [],
+      adjustments: [],
+      monsterSegments: [],
+    }));
+    expect(result.rows[0]?.startingRoomDigest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(result.rows[0]?.teamPlans).toEqual({
+      party: null,
+      monsters: expect.objectContaining({ initialProposalId: expect.any(String) }),
+    });
+    expect(result.rows[0]?.roundTotals).toEqual(expect.objectContaining({
+      initialCalls: 1,
+      adjustmentCalls: 0,
+      correctionCalls: 0,
+      serviceNullAdjustments: 0,
+      tokens: result.rows[0]?.tokens,
     }));
   });
 
@@ -1003,6 +1024,14 @@ describe('AI-DM engine MCP conversation runner', () => {
   it('admits the active process and local OpenAI conversation adapters', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-cli-'));
     const outPath = join(directory, 'rows.jsonl');
+    expect(parseConversationArgs(['--rooms', '1', '--out', outPath]).combatModel)
+      .toBe('monster_block_v1');
+    expect(parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--combat-model', 'initiative_segments_v1',
+    ]).combatModel).toBe('initiative_segments_v1');
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--combat-model', 'unknown-model',
+    ])).toThrow('--combat-model must be monster_block_v1 or initiative_segments_v1');
     expect(parseConversationArgs(['--rooms', '1', '--out', outPath, '--cli', 'claude-code']).cli)
       .toBe('claude-code');
     expect(() => parseConversationArgs(['--rooms', '1', '--out', outPath, '--cli', 'pi']))
@@ -1043,5 +1072,223 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(() => parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--kb', 'content/cc-by-sa/forbidden.txt',
     ])).toThrow('--kb cannot use content/cc-by-sa');
+  });
+
+  it('fails loudly when an initiative-segment room uses a frozen block fixture', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-fixture-constraint-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    await expect(runConversation(config)).rejects.toThrow(
+      'initiative_segments_v1 fixture constraint: room 1 must declare config.initiativeMode="per_combatant"',
+    );
+  });
+
+  it('walks an alternating initiative fixture without waking the DM for HP-only drift', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-no-drift-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, { roomStates: [await alternatingInitiativeRoom()] });
+    const row = result.rows[0];
+
+    expect(row).toEqual(expect.objectContaining({
+      combatModel: 'initiative_segments_v1',
+      roundProtocolVersion: 2,
+      outcome: 'authorized',
+      adjustments: [],
+      callsPerRound: 1,
+      adjustmentBudget: 2,
+    }));
+    expect(row?.partyPolicyHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(row?.materialityPolicyHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(row?.teamPlans.party).toEqual(expect.objectContaining({
+      planId: expect.any(String),
+      planHash: expect.any(String),
+      sharedObjective: 'defeat_the_hostile_team',
+      programs: expect.any(Array),
+    }));
+    expect(row?.teamPlans.monsters).toEqual(expect.objectContaining({
+      initialProposalId: expect.any(String),
+      initialProposalHash: expect.any(String),
+      authorizedIntents: expect.any(Array),
+    }));
+    expect(row?.initiativeOrder).toHaveLength(6);
+    expect(row?.initiativeOrder).toEqual([
+      'combatant:cleric',
+      'combatant:generated-3943001-monster-3',
+      'combatant:fighter',
+      'combatant:wizard',
+      'combatant:generated-3943001-monster-2',
+      'combatant:generated-3943001-monster-1',
+    ]);
+    expect(row?.pcTurns).toHaveLength(3);
+    expect(row?.pcTurns?.every((turn) => !turn.material)).toBe(true);
+    expect(row?.pcTurns?.every((turn) =>
+      turn.initiativeIndex >= 0 && turn.afterRevision > turn.beforeRevision &&
+      turn.plannedProgramHash.length === 64 && turn.executedProgramHash.length === 64 &&
+      turn.commandSequence.length > 0 && turn.adherenceReasons.length > 0)).toBe(true);
+    expect(row?.monsterSegments?.map((segment) => segment.actors)).toEqual([
+      ['combatant:generated-3943001-monster-3'],
+      [
+        'combatant:generated-3943001-monster-2',
+        'combatant:generated-3943001-monster-1',
+      ],
+    ]);
+    expect(row?.monsterSegments?.every((segment) =>
+      Array.isArray(segment.deviationResolutions) &&
+      segment.initiativeIndexes.length === segment.actors.length &&
+      segment.afterRevision > segment.beforeRevision && segment.appliedPlanHash.length === 64)).toBe(true);
+    expect(row?.roundTotals).toEqual(expect.objectContaining({
+      initialCalls: 1,
+      adjustmentCalls: 0,
+      correctionCalls: 0,
+      serviceNullAdjustments: 0,
+    }));
+  });
+
+  it.each([
+    ['keep', 'baseline_kept'],
+    ['change', 'adjusted'],
+  ] as const)('records a material adjustment that chooses %s', { timeout: 30_000 }, async (response, outcome) => {
+    const directory = mkdtempSync(join(tmpdir(), `dnd-conversation-segments-${response}-`));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--capture-rl-data', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': response },
+    });
+    const row = result.rows[0];
+
+    expect(row?.adjustments?.[0]).toEqual(expect.objectContaining({
+      outcome,
+      granularity: 'turn_delta',
+      flapRetries: 0,
+      triggerPcTurnOrdinal: 1,
+      triggerInitiativeIndex: 0,
+      requestId: 'request:room-1-round-1-pc-turn-1',
+      openActors: expect.any(Array),
+      proposalId: expect.any(String),
+      baselinePlanHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      resultPlanHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      changedActors: expect.any(Array),
+      correctionSessionId: null,
+      usage: expect.objectContaining({ input: expect.any(Number) }),
+      toolCalls: expect.any(Number),
+      modelCalls: 1,
+      refusals: [],
+      correctionChain: null,
+      rlData: expect.any(Array),
+    }));
+    expect(row?.adjustments?.[0]?.stateBinding).toEqual({
+      request: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
+      result: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
+    });
+    expect(row?.adjustments?.[0]?.rawContext).toContain('"granularity":"turn_delta"');
+    expect(row?.rlData).toEqual(expect.objectContaining({
+      format: 'arena-rl-capture-v2',
+      task: 'round_plan',
+      submissionTool: 'engine.submit_round_intents',
+      roundProtocolVersion: 2,
+    }));
+    expect(row?.adjustments[0]?.rlData[0]).toEqual(expect.objectContaining({
+      format: 'arena-rl-capture-v2',
+      task: 'plan_adjustment',
+      submissionTool: 'engine.submit_plan_adjustment',
+      parentPlanId: expect.any(String),
+    }));
+    expect(row?.adjustments?.[0]?.reasons).toContain('OPEN_MONSTER_SET_CHANGED');
+    expect(row?.adjustments).toHaveLength(1);
+    expect(row?.roundTotals.adjustmentCalls).toBe(1);
+    expect(row?.monsterSegments?.flatMap((segment) => segment.actors)).toHaveLength(2);
+  });
+
+  it('gives two material PC turns independent adjustment flap budgets', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-independent-flaps-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom({ monsterHitPoints: 1 })],
+      flapPrimaryByRequest: {
+        'room-1-round-1-pc-turn-2': 1,
+        'room-1-round-1-pc-turn-3': 1,
+      },
+    });
+
+    expect(result.rows[0]?.adjustments?.slice(0, 2)).toEqual([
+      expect.objectContaining({ flapRetries: 1, outcome: 'baseline_kept' }),
+      expect.objectContaining({ flapRetries: 1, outcome: 'baseline_kept' }),
+    ]);
+  });
+
+  it('runs one adjustment correction and retains the corrected replacement', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-correction-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'invalid' },
+    });
+
+    expect(result.rows[0]?.adjustments?.[0]).toEqual(expect.objectContaining({
+      outcome: 'adjusted',
+      flapRetries: 0,
+    }));
+    expect(result.rows[0]?.callsPerRound).toBeGreaterThanOrEqual(3);
+  });
+
+  it('keeps the baseline after three adjustment service nulls and continues the round', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-service-null-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      flapPrimaryByRequest: { 'room-1-round-1-pc-turn-1': 3 },
+    });
+
+    expect(result.rows[0]?.adjustments?.[0]).toEqual(expect.objectContaining({
+      outcome: 'service_null',
+      flapRetries: 2,
+    }));
+    expect(result.rows[0]?.pcTurns).toHaveLength(3);
+    expect(result.rows[0]?.monsterSegments?.flatMap((segment) => segment.actors).length)
+      .toBeGreaterThan(0);
+  });
+
+  it('treats adjustment correction no-response as protocol exhaustion, not a flap', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-correction-exhaustion-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'invalid' },
+      failCorrection: ['room-1-round-1-pc-turn-1'],
+    });
+
+    expect(result.rows[0]?.adjustments?.[0]).toEqual(expect.objectContaining({
+      outcome: 'baseline_kept',
+      flapRetries: 0,
+    }));
+    expect(result.rows[0]?.monsterSegments?.flatMap((segment) => segment.actors).length)
+      .toBeGreaterThan(0);
   });
 });

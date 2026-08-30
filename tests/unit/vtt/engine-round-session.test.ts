@@ -21,8 +21,11 @@ const REQUEST: EngineRoundCapsuleRequest = {
 };
 
 const KILLER_ID = combatantId('combatant:generated-3943001-monster-1');
+const BRUTE_ID = combatantId('combatant:generated-3943001-monster-2');
 const ARCHER_ID = combatantId('combatant:generated-3943001-monster-3');
 const FOCUS_ID = combatantId('combatant:fighter');
+const CLERIC_ID = combatantId('combatant:cleric');
+const WIZARD_ID = combatantId('combatant:wizard');
 
 function fixedPositions(
   positions: ReadonlyMap<CombatantId, { readonly column: number; readonly row: number }>,
@@ -69,7 +72,150 @@ function authorized(state: EncounterState, intent: EngineTurnIntent): Authorized
   return { intent, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch };
 }
 
+function segmentedState(
+  positions: ReadonlyMap<CombatantId, { readonly column: number; readonly row: number }> = new Map(),
+): EncounterState {
+  const state = fixedPositions(positions);
+  const bonuses = new Map<CombatantId, number>([
+    [FOCUS_ID, 200],
+    [KILLER_ID, 150],
+    [ARCHER_ID, 140],
+    [CLERIC_ID, 100],
+    [BRUTE_ID, 50],
+    [WIZARD_ID, 0],
+  ]);
+  return {
+    ...state,
+    config: { initiativeMode: 'per_combatant' },
+    combatants: state.combatants.map((combatant) => ({
+      ...combatant,
+      profile: {
+        ...combatant.profile,
+        rules: {
+          ...combatant.profile.rules,
+          initiativeBonus: bonuses.get(combatant.profile.id) ?? combatant.profile.rules.initiativeBonus,
+        },
+      },
+    })),
+  };
+}
+
+function dodgeIntent(actorId: CombatantId): EngineTurnIntent {
+  return {
+    actorId,
+    choice: { kind: 'dodge' },
+    movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
+    engagement: { stance: 'hold_position' },
+    fallback: null,
+  };
+}
+
+function completeDodge(session: EngineRoundSession, actorId: CombatantId) {
+  return session.completeScriptedPcTurn({
+    actorId,
+    reducerCommands: [{ type: 'dodge', actor: actorId }],
+  }, null);
+}
+
 describe('authoritative engine round session', () => {
+  it('honors exact per-combatant order without skipping PCs and enforces maximal monster mini-blocks', () => {
+    const session = new EngineRoundSession(
+      segmentedState(),
+      mulberry32(8_274_113),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+
+    session.beginRoundWithoutSkipping(REQUEST, null);
+    expect(session.currentState().initiative.map((entry) => entry.combatant)).toEqual([
+      FOCUS_ID, KILLER_ID, ARCHER_ID, CLERIC_ID, BRUTE_ID, WIZARD_ID,
+    ]);
+    expect(session.currentState().activeCombatant).toBe(FOCUS_ID);
+
+    completeDodge(session, FOCUS_ID);
+    const beforeRejectedSegment = session.currentState();
+    const killer = authorized(beforeRejectedSegment, dodgeIntent(KILLER_ID));
+    const archer = authorized(beforeRejectedSegment, dodgeIntent(ARCHER_ID));
+    expect(() => session.applyConsecutiveMonsterSegment([killer], null)).toThrow(
+      `Monster initiative segment must contain the maximal consecutive actors: ${KILLER_ID}, ${ARCHER_ID}.`,
+    );
+    expect(session.currentState()).toEqual(beforeRejectedSegment);
+
+    session.applyConsecutiveMonsterSegment([killer, archer], null);
+    expect(session.currentState().activeCombatant).toBe(CLERIC_ID);
+    expect(session.currentState().eventLog.flatMap((event) =>
+      event.type === 'turn_started' && event.round === 1 ? [event.combatant] : [])).toEqual([
+      FOCUS_ID, KILLER_ID, ARCHER_ID, CLERIC_ID,
+    ]);
+    expect(session.currentState().eventLog.some((event) =>
+      event.type === 'turn_ended' && event.combatant === CLERIC_ID)).toBe(false);
+  });
+
+  it('keeps the session RNG authoritative across PC turns and monster segments', () => {
+    const execute = (): EncounterState['eventLog'] => {
+      const session = new EngineRoundSession(
+        segmentedState(),
+        mulberry32(6_103_921),
+        { kind: 'unattended', askDefault: 'decline' },
+      );
+      session.beginRoundWithoutSkipping(REQUEST, null);
+      completeDodge(session, FOCUS_ID);
+      session.applyConsecutiveMonsterSegment([
+        authorized(session.currentState(), dodgeIntent(KILLER_ID)),
+        authorized(session.currentState(), dodgeIntent(ARCHER_ID)),
+      ], null);
+      completeDodge(session, CLERIC_ID);
+      session.applyConsecutiveMonsterSegment([
+        authorized(session.currentState(), dodgeIntent(BRUTE_ID)),
+      ], null);
+      completeDodge(session, WIZARD_ID);
+      return session.currentState().eventLog;
+    };
+
+    expect(execute()).toEqual(execute());
+  });
+
+  it('resolves reactions raised by a scripted PC command through the session boundary policy', () => {
+    const state = segmentedState(new Map([
+      [KILLER_ID, { column: 5, row: 5 }],
+      [CLERIC_ID, { column: 6, row: 5 }],
+    ]));
+    const session = new EngineRoundSession(
+      state,
+      mulberry32(7_210_411),
+      { kind: 'unattended', askDefault: 'take' },
+    );
+    session.beginRoundWithoutSkipping(REQUEST, null);
+    session.completeScriptedPcTurn({
+      actorId: FOCUS_ID,
+      reducerCommands: [{ type: 'end_turn', actor: FOCUS_ID }],
+    }, null);
+    session.applyConsecutiveMonsterSegment([
+      authorized(session.currentState(), dodgeIntent(KILLER_ID)),
+      authorized(session.currentState(), dodgeIntent(ARCHER_ID)),
+    ], null);
+
+    const applied = session.completeScriptedPcTurn({
+      actorId: CLERIC_ID,
+      reducerCommands: [{
+        type: 'move', actor: CLERIC_ID,
+        path: [{ column: 7, row: 5 }, { column: 8, row: 5 }],
+        cause: 'voluntary',
+      }],
+    }, null);
+
+    expect(applied.fallbackResolutions).toContainEqual(expect.objectContaining({
+      combatant: KILLER_ID,
+      reactionKind: 'opportunity_attack',
+      resolution: 'accept',
+    }));
+    expect(session.currentState().eventLog).toContainEqual(expect.objectContaining({
+      type: 'pending_decision_resolved',
+      combatant: KILLER_ID,
+      reactionKind: 'opportunity_attack',
+      optionId: 'accept',
+    }));
+  });
+
   it.each([3_943_004, 3_943_007])(
     'uses one canonical state for generated room %i capsule, fixture, and authorization',
     (seed) => {
@@ -158,6 +304,54 @@ describe('authoritative engine round session', () => {
     expect(session.currentState().combatants.find((entry) => entry.profile.id === FOCUS_ID)?.life).toBe('dead');
     expect(session.currentState().eventLog.some((event) =>
       event.type === 'attack_resolved' && event.actor === ARCHER_ID && event.target === FOCUS_ID)).toBe(false);
+    expect(applied.deviationResolutions).toEqual([{
+      actorId: ARCHER_ID,
+      authorizedBranch: 'primary',
+      appliedBranch: 'fallback',
+      authorizedTargetId: FOCUS_ID,
+      appliedTargetId: null,
+      reasonCodes: ['branch_changed', 'target_changed'],
+      refusalCodes: ['TARGET_DEAD'],
+    }]);
+  });
+
+  it('preserves live re-resolution deviation evidence inside a monster segment', () => {
+    const positioned = segmentedState(new Map([
+      [KILLER_ID, { column: 0, row: 0 }],
+      [FOCUS_ID, { column: 1, row: 0 }],
+      [ARCHER_ID, { column: 4, row: 0 }],
+    ]));
+    const state: EncounterState = {
+      ...positioned,
+      combatants: positioned.combatants.map((candidate) => candidate.profile.id === FOCUS_ID
+        ? {
+            ...candidate,
+            hitPoints: 1,
+            profile: {
+              ...candidate.profile,
+              rules: { ...candidate.profile.rules, armorClass: armorClass(1), usesDeathSaves: false },
+            },
+          }
+        : candidate),
+    };
+    const session = new EngineRoundSession(
+      state,
+      mulberry32(19),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    session.beginRoundWithoutSkipping(REQUEST, null);
+    session.completeScriptedPcTurn({
+      actorId: FOCUS_ID,
+      reducerCommands: [{ type: 'end_turn', actor: FOCUS_ID }],
+    }, null);
+    const killer = authorized(session.currentState(), attackIntent(KILLER_ID, 'dagger', FOCUS_ID));
+    const archer = authorized(session.currentState(), attackIntent(ARCHER_ID, 'longbow', FOCUS_ID));
+
+    const applied = session.applyConsecutiveMonsterSegment([killer, archer], null);
+
+    expect(session.currentState().combatants.find((entry) => entry.profile.id === FOCUS_ID)?.life).toBe('dead');
+    expect(session.currentState().eventLog.flatMap((event) =>
+      event.type === 'attack_resolved' ? [event.actor] : [])).toEqual([KILLER_ID]);
     expect(applied.deviationResolutions).toEqual([{
       actorId: ARCHER_ID,
       authorizedBranch: 'primary',

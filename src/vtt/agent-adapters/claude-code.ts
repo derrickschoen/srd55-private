@@ -26,6 +26,7 @@ const ENGINE_TOOL_NAMES = [
   'engine.query_dice_expectation',
   'engine.validate_intent',
   'engine.submit_round_intents',
+  'engine.submit_plan_adjustment',
   'engine.submit_speculative_round_plan',
   'engine.submit_intent',
   'engine.emit_narration',
@@ -36,8 +37,13 @@ const DM_ENGINE_TOOL_NAMES = [
   'engine.propose_from_play',
   'engine.validate_intent',
   'engine.submit_round_intents',
+  'engine.submit_plan_adjustment',
   'engine.request_dm_adjudication',
 ] as const;
+const ROUND_PLAN_DM_ENGINE_TOOL_NAMES = DM_ENGINE_TOOL_NAMES.filter((name) =>
+  name !== 'engine.submit_plan_adjustment');
+const PLAN_ADJUSTMENT_DM_ENGINE_TOOL_NAMES = DM_ENGINE_TOOL_NAMES.filter((name) =>
+  name !== 'engine.propose_from_play' && name !== 'engine.submit_round_intents');
 
 export function claudeCodeEngineToolName(toolName: string): string {
   return `mcp__engine__${toolName.replaceAll('.', '_')}`;
@@ -106,6 +112,12 @@ export class ClaudeCodeAgentSessionAdapter extends ProcessAgentSessionAdapter {
       sessionId,
       (event) => this.observe(event),
       this.options.engineToolProfile === 'dm' ? CLAUDE_DM_ENGINE_TOOLS : CLAUDE_ENGINE_TOOLS,
+      this.options.engineToolProfile === 'dm'
+        ? [
+            ROUND_PLAN_DM_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName),
+            PLAN_ADJUSTMENT_DM_ENGINE_TOOL_NAMES.map(claudeCodeEngineToolName),
+          ]
+        : undefined,
     );
     return {
       resumeSessionId: agentSessionIdFromCli(decoded.sessionId),
@@ -156,6 +168,7 @@ export function decodeClaudeCodeTurn(
   priorSessionId: string | null,
   onEvent: (event: Readonly<Record<string, unknown>>) => void = () => undefined,
   expectedEngineTools: readonly string[] = CLAUDE_ENGINE_TOOLS,
+  acceptedRequestToolSets: readonly (readonly string[])[] = [expectedEngineTools],
 ): ClaudeDecodedTurn {
   let initSeen = false;
   let sessionId: string | null = null;
@@ -164,7 +177,7 @@ export function decodeClaudeCodeTurn(
   for (const event of jsonEventLines(stdout)) {
     onEvent(event);
     if (event['type'] === 'system' && event['subtype'] === 'init') {
-      assertClaudeInitTools(event['tools'], expectedEngineTools);
+      assertClaudeInitTools(event['tools'], expectedEngineTools, acceptedRequestToolSets);
       assertClaudeEngineServerConnected(event['mcp_servers']);
       if (typeof event['session_id'] !== 'string' || event['session_id'].trim().length === 0) {
         throw new AgentAdapterError('malformed_output', 'Claude Code init event omitted session_id.');
@@ -187,13 +200,20 @@ export function decodeClaudeCodeTurn(
   return { sessionId, finalText, usage };
 }
 
-function assertClaudeInitTools(value: unknown, expectedEngineTools: readonly string[]): void {
+function assertClaudeInitTools(
+  value: unknown,
+  allowedEngineTools: readonly string[],
+  acceptedRequestToolSets: readonly (readonly string[])[],
+): void {
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
     throw new AgentAdapterError('malformed_output', 'Claude Code init tools were not a string array.');
   }
   const names = value as readonly string[];
-  if (expectedEngineTools.some((expected) => !names.includes(expected)) ||
-    names.some((name) => name.startsWith('mcp__engine__') && !expectedEngineTools.includes(name)) ||
+  const engineNames = names.filter((name) => name.startsWith('mcp__engine__'));
+  const exactAcceptedSet = acceptedRequestToolSets.some((accepted) =>
+    accepted.length === engineNames.length && accepted.every((name) => engineNames.includes(name)));
+  if (!exactAcceptedSet ||
+    names.some((name) => name.startsWith('mcp__engine__') && !allowedEngineTools.includes(name)) ||
     names.some((name) => name.startsWith('mcp__') && !name.startsWith('mcp__engine__'))) {
     throw new AgentAdapterError('malformed_output', 'Claude Code init engine tools did not match the selected profile or admitted a foreign MCP tool.');
   }

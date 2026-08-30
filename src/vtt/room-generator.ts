@@ -23,6 +23,9 @@ export type PartyHitPointFraction = (typeof PARTY_HIT_POINT_FRACTIONS)[number];
 export const ROOM_DIFFICULTY_PROFILES = ['standard', 'hard'] as const;
 export type RoomDifficultyProfile = (typeof ROOM_DIFFICULTY_PROFILES)[number];
 
+export const ROOM_INITIATIVE_PROFILES = ['legacy', 'derived_v1'] as const;
+export type RoomInitiativeProfile = (typeof ROOM_INITIATIVE_PROFILES)[number];
+
 export type RoomTerrainFeature =
   | {
       readonly kind: 'difficult-terrain-patch';
@@ -96,11 +99,61 @@ export interface GeneratedRoom {
 
 export interface GenerateRoomOptions {
   readonly difficulty?: RoomDifficultyProfile;
+  readonly initiativeProfile?: RoomInitiativeProfile;
   readonly dimensions?: {
     readonly columns: RoomGridDimension;
     readonly rows: RoomGridDimension;
   };
   readonly provenance?: EncounterProvenance;
+}
+
+const GENERATED_PARTY_ABILITY_SCORES = {
+  'combatant:fighter': {
+    strength: 15, dexterity: 14, constitution: 13, intelligence: 10, wisdom: 12, charisma: 8,
+  },
+  'combatant:cleric': {
+    strength: 10, dexterity: 12, constitution: 14, intelligence: 8, wisdom: 15, charisma: 13,
+  },
+  'combatant:wizard': {
+    strength: 8, dexterity: 14, constitution: 13, intelligence: 15, wisdom: 12, charisma: 10,
+  },
+} as const satisfies Readonly<Record<string, NonNullable<CombatantProfile['rules']['abilityScores']>>>;
+
+function derivedAbilityScores(
+  profile: CombatantProfile,
+): NonNullable<CombatantProfile['rules']['abilityScores']> {
+  const scores = profile.rules.abilityScores ??
+    GENERATED_PARTY_ABILITY_SCORES[String(profile.id) as keyof typeof GENERATED_PARTY_ABILITY_SCORES];
+  if (scores === undefined) {
+    throw new Error(`derived_v1 initiative requires Dexterity for ${profile.id}.`);
+  }
+  return scores;
+}
+
+/** Applies an opt-in arena profile without mutating frozen fixtures or their callers. */
+export function applyRoomInitiativeProfile(
+  state: EncounterState,
+  profile: RoomInitiativeProfile,
+): EncounterState {
+  if (profile === 'legacy') return structuredClone(state);
+  return {
+    ...structuredClone(state),
+    config: { ...state.config, initiativeMode: 'per_combatant' },
+    combatants: state.combatants.map((combatant) => {
+      const abilityScores = derivedAbilityScores(combatant.profile);
+      return {
+        ...structuredClone(combatant),
+        profile: {
+          ...structuredClone(combatant.profile),
+          rules: {
+            ...structuredClone(combatant.profile.rules),
+            abilityScores: structuredClone(abilityScores),
+            initiativeBonus: Math.floor((abilityScores.dexterity - 10) / 2),
+          },
+        },
+      };
+    }),
+  };
 }
 
 const HARD_CONTROL_CASTER_ID = 'statblock:priest';
@@ -507,6 +560,10 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
     dmNotes: [`Deterministic generated room seed ${String(normalizedSeed)}.`],
   });
   const sampled = samplePartyState(rng, fresh);
+  const profiledState = applyRoomInitiativeProfile(
+    sampled.state,
+    options.initiativeProfile ?? 'legacy',
+  );
   const spec: RoomSpec = {
     seed: normalizedSeed,
     ...(difficulty === 'hard' ? { difficultyProfile: difficulty } : {}),
@@ -527,7 +584,7 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
   };
   return {
     spec,
-    encounter: encounterIr(sampled.state, options.provenance ?? {
+    encounter: encounterIr(profiledState, options.provenance ?? {
       source: 'generated',
       licenseTag: 'MIT',
       seed: normalizedSeed,

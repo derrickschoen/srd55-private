@@ -210,7 +210,16 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
   });
 
   it('SIMULATED Claude Code accepts built-ins while requiring connected engine MCP tools and the resume seam', async () => {
-    const transcript = fixture('claude-code-start');
+    const transcript = fixture('claude-code-start').split('\n').filter((line) => line.length > 0).map((line) => {
+      const event = JSON.parse(line) as Readonly<Record<string, unknown>>;
+      if (event['type'] !== 'system' || event['subtype'] !== 'init') return line;
+      const tools = event['tools'];
+      if (!Array.isArray(tools)) throw new TypeError('SIMULATED Claude init tools are not an array.');
+      return JSON.stringify({
+        ...event,
+        tools: [...tools.filter((name) => typeof name === 'string' && !name.startsWith('mcp__engine__')), ...CLAUDE_ENGINE_TOOLS],
+      });
+    }).join('\n');
     const runner = new SIMULATEDChildProcessRunner([output(transcript), output(transcript)]);
     const adapter = new ClaudeCodeAgentSessionAdapter(options(runner));
 
@@ -253,7 +262,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(startArgv).not.toContain(invocation.prompt);
     expect(runner.calls.map((call) => call.stdin)).toEqual([invocation.prompt, invocation.prompt]);
     expect(claudeCodeEngineToolName('engine.get_state_summary')).toBe('mcp__engine__engine_get_state_summary');
-    expect(CLAUDE_ENGINE_TOOLS).toHaveLength(15);
+    expect(CLAUDE_ENGINE_TOOLS).toHaveLength(16);
     expect(CLAUDE_ENGINE_TOOLS.every((name) => !name.includes('.'))).toBe(true);
     expect(JSON.parse(startArgv[startArgv.indexOf('--mcp-config') + 1] ?? '')).toEqual({
       mcpServers: { engine: { type: 'stdio', command: engineCommand, args: [...engineArgs, invocation.launcherToken] } },
@@ -275,7 +284,10 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       if (!Array.isArray(tools)) throw new TypeError('SIMULATED Claude init tools are not an array.');
       return JSON.stringify({
         ...event,
-        tools: [...tools.filter((name) => typeof name === 'string' && !name.startsWith('mcp__engine__')), ...CLAUDE_DM_ENGINE_TOOLS],
+        tools: [
+          ...tools.filter((name) => typeof name === 'string' && !name.startsWith('mcp__engine__')),
+          ...CLAUDE_DM_ENGINE_TOOLS.filter((name) => !name.endsWith('submit_plan_adjustment')),
+        ],
       });
     }).join('\n');
     const runner = new SIMULATEDChildProcessRunner([output(transcript)]);
@@ -288,7 +300,32 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
 
     const argv = runner.calls[0]?.spec.argv ?? [];
     expect(argv.slice(argv.indexOf('--tools') + 1, argv.indexOf('--allowedTools'))).toEqual(CLAUDE_DM_ENGINE_TOOLS);
-    expect(CLAUDE_DM_ENGINE_TOOLS).toHaveLength(5);
+    expect(CLAUDE_DM_ENGINE_TOOLS).toHaveLength(6);
+  });
+
+  it('SIMULATED Claude Code accepts the request-scoped adjustment DM inventory', async () => {
+    const transcript = fixture('claude-code-start').split('\n').filter((line) => line.length > 0).map((line) => {
+      const event = JSON.parse(line) as Readonly<Record<string, unknown>>;
+      if (event['type'] !== 'system' || event['subtype'] !== 'init') return line;
+      const tools = event['tools'];
+      if (!Array.isArray(tools)) throw new TypeError('SIMULATED Claude init tools are not an array.');
+      return JSON.stringify({
+        ...event,
+        tools: [
+          ...tools.filter((name) => typeof name === 'string' && !name.startsWith('mcp__engine__')),
+          ...CLAUDE_DM_ENGINE_TOOLS.filter((name) =>
+            !name.endsWith('propose_from_play') && !name.endsWith('submit_round_intents')),
+        ],
+      });
+    }).join('\n');
+    const runner = new SIMULATEDChildProcessRunner([output(transcript)]);
+    const adapter = new ClaudeCodeAgentSessionAdapter({ ...options(runner), engineToolProfile: 'dm' });
+
+    await expect(adapter.start(invocation, new AbortController().signal)).resolves.toMatchObject({ exit: 'completed' });
+    expect(runner.calls[0]?.spec.argv).toEqual(expect.arrayContaining([
+      'mcp__engine__engine_submit_round_intents',
+      'mcp__engine__engine_submit_plan_adjustment',
+    ]));
   });
 
   it('SIMULATED Claude Code rejects a failed engine MCP connection', async () => {

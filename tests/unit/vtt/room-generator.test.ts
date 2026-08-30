@@ -104,6 +104,22 @@ describe('seeded room generator', () => {
     expect(reduced.state.initiative).toHaveLength(generated.encounter.state.combatants.length);
   });
 
+  it('applies derived per-combatant initiative without changing the legacy profile', () => {
+    const legacy = generateRoom(394_302).encounter.state;
+    const derived = generateRoom(394_302, { initiativeProfile: 'derived_v1' }).encounter.state;
+
+    expect(legacy.config.initiativeMode).toBe('shared_enemy');
+    expect(legacy.combatants.slice(0, 3).map((entry) => entry.profile.rules.initiativeBonus))
+      .toEqual([100, 70, 40]);
+    expect(derived.config.initiativeMode).toBe('per_combatant');
+    expect(derived.combatants.slice(0, 3).map((entry) => entry.profile.rules.initiativeBonus))
+      .toEqual([2, 1, 2]);
+    expect(derived.combatants.filter((entry) => entry.profile.rules.abilityScores !== undefined)
+      .every((entry) => entry.profile.rules.initiativeBonus ===
+        Math.floor(((entry.profile.rules.abilityScores?.dexterity ?? 10) - 10) / 2))).toBe(true);
+    expect(canonicalJson(legacy)).toBe(canonicalJson(generateRoom(394_302).encounter.state));
+  });
+
   it('keeps every sampled token in bounds across a rolling fresh seed set', () => {
     for (let seed = 0; seed < 256; seed += 1) {
       const state = generateRoom(seed).encounter.state;

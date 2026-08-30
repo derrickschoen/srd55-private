@@ -107,6 +107,24 @@ class OrderingNullAdapter implements AgentSessionAdapter {
 }
 
 describe('AI-DM arena', () => {
+  it('defaults the combat model and propagates an explicit initiative-segment selection', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-combat-model-'));
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'), '--dry-run',
+    ] as const;
+
+    expect(parseArenaArgs(common).combatModel).toBe('monster_block_v1');
+    expect(parseArenaArgs(common).initiativeProfile).toBe('legacy');
+    const segments = parseArenaArgs([...common, '--combat-model', 'initiative_segments_v1']);
+    expect(segments.combatModel).toBe('initiative_segments_v1');
+    await expect(runArena(segments)).rejects.toThrow(
+      'initiative_segments_v1 fixture constraint: room 1 must declare config.initiativeMode="per_combatant"',
+    );
+    expect(() => parseArenaArgs([...common, '--combat-model', 'unknown-model']))
+      .toThrow('--combat-model must be monster_block_v1 or initiative_segments_v1');
+  });
+
   it('parses plain and per-arm escalation forms while retaining global fallback', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-parse-'));
     const config = parseArenaArgs([
@@ -120,16 +138,39 @@ describe('AI-DM arena', () => {
     expect(config.arms).toEqual([
       {
         label: 'plain', model: 'model-plain', effort: 'low',
-        escalationModel: null, escalationEffort: null,
+        escalationModel: null, escalationEffort: null, combatModel: 'monster_block_v1',
       },
       {
         label: 'tiered', model: 'model-tiered', effort: 'high',
         escalationModel: 'arm-escalation', escalationEffort: 'xhigh',
+        combatModel: 'monster_block_v1',
       },
     ]);
     expect(config).toMatchObject({
       escalationModel: 'global-escalation', escalationEffort: 'medium',
     });
+  });
+
+  it('parses an opt-in initiative profile and independent arm combat models', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-combat-model-'));
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'), '--interleave',
+      '--initiative-profile', 'derived_v1',
+      '--arm', 'block:model-block:low',
+      '--arm', 'segments:model-segments:low',
+      '--arm-combat-model', 'segments:initiative_segments_v1',
+    ]);
+
+    expect(config.initiativeProfile).toBe('derived_v1');
+    expect(config.arms.map(({ label, combatModel }) => ({ label, combatModel }))).toEqual([
+      { label: 'block', combatModel: 'monster_block_v1' },
+      { label: 'segments', combatModel: 'initiative_segments_v1' },
+    ]);
+    expect(() => parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'bad.jsonl'), '--initiative-profile', 'synthetic',
+    ])).toThrow('--initiative-profile must be legacy or derived_v1');
   });
 
   it('rejects partial per-arm escalation suffixes and invalid escalation effort', () => {

@@ -206,6 +206,53 @@ describe('plays v1 registry', () => {
     expect(context).not.toHaveProperty('suggested_plan');
   });
 
+  it('gates both advertisement and expansion to initial round-plan requests', async () => {
+    const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const actors = state.combatants
+      .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
+      .map((candidate) => candidate.profile.id)
+      .sort();
+    const runtime = createEngineMcpRuntime(state, {
+      requestKind: 'plan_adjustment',
+      requestedActorIds: actors,
+      planAdjustment: {
+        parentPlanId: 'plan:snippet-adjustment',
+        baselinePlanHash: 'a'.repeat(64),
+        triggerPcTurnId: 'pc-turn:snippet-adjustment',
+        beforeRevision: 1,
+        afterRevision: 2,
+        materialityReasonCodes: ['INTENT_RESOLUTION_CHANGED'],
+        baselineIntentDigests: actors.map((actorId) => ({ actorId, intentDigest: 'b'.repeat(64) })),
+        adjustmentBudget: Math.min(actors.length, 2) as 1 | 2,
+      },
+    });
+    const capsule = runtime.feed.current();
+    const context = tool(runtime, 'engine.get_turn_context', {
+      run_id: capsule.runId,
+      expected_revision: capsule.revision,
+      scope: 'round',
+    });
+
+    expect(context).toMatchObject({
+      request: { kind: 'plan_adjustment', baseline_plan_hash: 'a'.repeat(64) },
+      applicable_plays: [],
+      current_plan: {
+        parent_plan_id: 'plan:snippet-adjustment',
+        baseline_plan_hash: 'a'.repeat(64),
+      },
+    });
+    expect(context).not.toHaveProperty('suggested_plan');
+    expect(SNIPPET_REGISTRY.applicable(capsule)).toEqual([]);
+    expect(() => SNIPPET_REGISTRY.expand('focus_fire', capsule)).toThrow('PLAY_NOT_APPLICABLE');
+    const rejected = runtime.handler.handle({
+      jsonrpc: '2.0',
+      id: 'adjustment-play',
+      method: 'tools/call',
+      params: { _meta: mcpRequestMeta(CLIENT), name: 'engine.propose_from_play', arguments: { play_name: 'focus_fire' } },
+    });
+    expect(JSON.stringify(rejected)).toContain('PLAY_NOT_APPLICABLE_TO_REQUEST');
+  });
+
   it.each([
     {
       name: 'basic_advance', seed: 3_943_003,

@@ -29,14 +29,6 @@ import {
 
 export type EngineProjectedAttackDelivery = 'melee' | 'ranged' | 'melee_or_ranged';
 
-declare module './engine-state-capsule' {
-  interface EngineProjectedAction {
-    readonly attackDelivery: EngineProjectedAttackDelivery | null;
-    readonly normalRangeFeet: number | null;
-    readonly longRangeFeet: number | null;
-  }
-}
-
 export type EngineTargetSelector =
   | { readonly kind: 'combatant'; readonly combatantId: CombatantId }
   | {
