@@ -336,6 +336,7 @@ export async function generateData(
           `rows=${String(rows.length)}`,
         );
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         manifest = replaceSeed(manifest, {
           seed,
           outputPath,
@@ -343,11 +344,11 @@ export async function generateData(
           rows: 0,
           flapRetries: 0,
           serviceNullRows: 0,
-          error: error instanceof Error ? error.message : String(error),
+          error: errorMessage,
         });
-        heartbeat(`seed=${String(seed)} status=failed`);
+        heartbeat(`seed=${String(seed)} status=failed error=${JSON.stringify(errorMessage)}`);
         await writeFile(manifestPath, `${canonicalJson(manifest)}\n`, 'utf8');
-        throw error;
+        continue;
       }
       await writeFile(manifestPath, `${canonicalJson(manifest)}\n`, 'utf8');
     }
@@ -357,6 +358,10 @@ export async function generateData(
     );
     completed.push(manifest);
   }
+  const seeds = completed.flatMap((manifest) => manifest.seeds);
+  if (seeds.length > 0 && seeds.every((entry) => entry.status === 'failed')) {
+    throw new Error('Every seed in the generation batch failed.');
+  }
   return completed;
 }
 
@@ -365,9 +370,10 @@ async function main(): Promise<void> {
     argument.endsWith('/generate-data.ts') || argument.endsWith('\\generate-data.ts'));
   const args = scriptIndex < 0 ? process.argv.slice(2) : process.argv.slice(scriptIndex + 1);
   const manifests = await generateData(parseGenerateDataArgs(args));
-  const completed = manifests.flatMap((manifest) => manifest.seeds)
+  const seeds = manifests.flatMap((manifest) => manifest.seeds);
+  const completed = seeds
     .filter((entry) => entry.status === 'complete').length;
-  const flapped = manifests.flatMap((manifest) => manifest.seeds)
+  const flapped = seeds
     .filter((entry) => entry.status === 'flapped').length;
   process.stdout.write(`batches=${String(manifests.length)} completed_seeds=${String(completed)} flapped_seeds=${String(flapped)}\n`);
 }

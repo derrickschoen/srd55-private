@@ -208,7 +208,7 @@ function patchCells(
   rng: Rng,
   dimensions: RoomSpec['dimensions'],
   reserved: ReadonlySet<string>,
-): readonly GridCell[] {
+): readonly [GridCell, ...GridCell[]] {
   const width = integer(rng, 2, 4);
   const height = integer(rng, 2, 4);
   const startColumn = integer(rng, 3, dimensions.columns - width - 3);
@@ -220,7 +220,19 @@ function patchCells(
       if (!reserved.has(cellKey(cell))) result.push(cell);
     }
   }
-  return result;
+  const [first, ...rest] = result;
+  if (first !== undefined) return [first, ...rest];
+
+  // A sampled patch can be fully covered by the hard layout's reserved cells.
+  // Keep the consumed RNG sequence stable and deterministically select the
+  // first legal interior cell instead of emitting an invalid empty region.
+  for (let row = 1; row < dimensions.rows - 1; row += 1) {
+    for (let column = 1; column < dimensions.columns - 1; column += 1) {
+      const cell = { column, row };
+      if (!reserved.has(cellKey(cell))) return [cell];
+    }
+  }
+  throw new RangeError('Generated room has no unreserved interior cell for a terrain patch.');
 }
 
 function unreservedCell(
