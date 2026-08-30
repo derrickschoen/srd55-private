@@ -11,6 +11,7 @@ import {
 } from '../../../src/vtt/engine-envelopes';
 import {
   createEngineStateCapsule,
+  engineCapsuleRequestKind,
   engineStateHandle,
   FixedReadonlyStateCapsuleSource,
   projectEngineDmProjection,
@@ -152,6 +153,136 @@ function capsuleFixture() {
 }
 
 describe('read-only engine state capsule', () => {
+  it('defaults legacy ordinary requests to round_plan and carries exact adjustment metadata', () => {
+    const fixture = capsuleFixture();
+    const legacyRequest = fixture.capsule.request;
+    if (legacyRequest === null || legacyRequest.phase === 'speculative') {
+      throw new Error('Fixture did not create an ordinary request.');
+    }
+    expect(engineCapsuleRequestKind(legacyRequest)).toBe('round_plan');
+
+    const actors = fixture.state.combatants.flatMap((combatant) =>
+      combatant.profile.kind === 'monster' && combatant.life !== 'dead' ? [combatant.profile.id] : []);
+    const request = {
+      kind: 'plan_adjustment' as const,
+      requestId: 'request:plan-adjustment',
+      phase: 'initial' as const,
+      correctionNumber: 0 as const,
+      actors,
+      parentPlanId: 'monster-plan:parent',
+      baselinePlanHash: 'a'.repeat(64),
+      triggerPcTurnId: 'pc-turn:round-1-fighter',
+      beforeRevision: 10,
+      afterRevision: 12,
+      materialityReasonCodes: ['INTENT_RESOLUTION_CHANGED'] as const,
+      baselineIntentDigests: actors.map((actorId, index) => ({
+        actorId,
+        intentDigest: index.toString(16).padStart(64, '0'),
+      })),
+      adjustmentBudget: 2 as const,
+    };
+    const capsule = createEngineStateCapsule({
+      runId: fixture.capsule.runId,
+      branchId: fixture.capsule.branchId,
+      revision: 12,
+      generatedAt: '2026-08-29T12:00:00.000Z',
+      request,
+      projection: fixture.capsule.projection,
+    });
+
+    expect(engineCapsuleRequestKind(request)).toBe('plan_adjustment');
+    expect(capsule.request).toEqual(request);
+    expect(verifyEngineStateCapsule(capsule)).toBe(true);
+    expect(() => createEngineStateCapsule({
+      runId: fixture.capsule.runId,
+      branchId: fixture.capsule.branchId,
+      revision: 12,
+      generatedAt: '2026-08-29T12:00:00.000Z',
+      request: { ...request, adjustmentBudget: 1 },
+      projection: fixture.capsule.projection,
+    })).toThrow('Plan adjustment actors, baseline intent digests, and budget must match exactly.');
+  });
+
+  it('accepts an exactly bound empty adjustment patch as an explicit keep decision', () => {
+    const fixture = capsuleFixture();
+    const actors = fixture.state.combatants.flatMap((combatant) =>
+      combatant.profile.kind === 'monster' && combatant.life !== 'dead' ? [combatant.profile.id] : []);
+    const capsule = createEngineStateCapsule({
+      runId: fixture.capsule.runId,
+      branchId: fixture.capsule.branchId,
+      revision: 8,
+      generatedAt: '2026-08-29T12:00:00.000Z',
+      request: {
+        kind: 'plan_adjustment',
+        requestId: 'request:empty-adjustment',
+        phase: 'initial',
+        correctionNumber: 0,
+        actors,
+        parentPlanId: 'monster-plan:parent',
+        baselinePlanHash: 'b'.repeat(64),
+        triggerPcTurnId: 'pc-turn:round-1-cleric',
+        beforeRevision: 6,
+        afterRevision: 8,
+        materialityReasonCodes: ['OPEN_MONSTER_SET_CHANGED'],
+        baselineIntentDigests: actors.map((actorId, index) => ({
+          actorId,
+          intentDigest: (index + 10).toString(16).padStart(64, '0'),
+        })),
+        adjustmentBudget: 2,
+      },
+      projection: fixture.capsule.projection,
+    });
+    const source = new FixedReadonlyStateCapsuleSource(capsule);
+    const accepted: EngineProposalEnvelope[] = [];
+    const envelope: EngineProposalEnvelope = {
+      kind: 'plan_adjustment_proposal',
+      proposalId: 'proposal:explicit-keep',
+      runId: capsule.runId,
+      branchId: capsule.branchId,
+      requestId: 'request:empty-adjustment',
+      expectedRevision: capsule.revision,
+      stateDigest: capsule.digest,
+      stateHandle: engineStateHandle(capsule),
+      phase: 'initial',
+      idempotencyKey: 'explicit-keep-adjustment-0001',
+      baseline_plan_hash: 'b'.repeat(64),
+      updates: [],
+    };
+
+    submitEngineProposal(source, { append: (proposal) => { accepted.push(proposal); } }, envelope);
+
+    expect(accepted).toEqual([envelope]);
+    expect(() => submitEngineProposal(source, { append: () => undefined }, {
+      ...envelope,
+      proposalId: 'proposal:wrong-baseline',
+      idempotencyKey: 'wrong-baseline-adjustment-0001',
+      baseline_plan_hash: 'c'.repeat(64),
+    })).toThrow('Plan adjustment proposal does not match the baseline plan hash.');
+    const updates = actors.map((actorId) => {
+      const intent = {
+        actorId,
+        choice: { kind: 'dodge' as const },
+        movement: { willingness: 'none' as const, maximumFeet: 0, opportunityRisk: 'avoid' as const },
+        engagement: { stance: 'hold_position' as const },
+        fallback: null,
+      };
+      const resolution = pureIntentResolver.resolve(fixture.state, intent);
+      if (!resolution.valid) throw new Error(resolution.refusals.map((entry) => entry.summary).join('\n'));
+      return {
+        intent,
+        selectedBranch: resolution.selectedBranch,
+        resolutionDigest: resolution.resolutionDigest,
+        summary: resolution.summary,
+      };
+    });
+    expect(() => submitEngineProposal(source, { append: () => undefined }, {
+      ...envelope,
+      proposalId: 'proposal:over-budget',
+      idempotencyKey: 'over-budget-adjustment-0001',
+      updates,
+    })).toThrow('Plan adjustment updates must be unique open actors within the adjustment budget.');
+  });
+
   it('has no reducer, journal, coordinator, store, or RNG module in the capsule or MCP runtime import graphs', () => {
     const chain = forbiddenCapsuleImportChain();
     expect(

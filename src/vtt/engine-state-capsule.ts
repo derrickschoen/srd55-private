@@ -14,11 +14,15 @@ import type {
   HostScenario,
   HostSplitCandidate,
 } from './speculative-plan-types';
+import type { PlanMaterialityReasonCode } from './plan-materiality';
 
 export interface EngineProjectedAction {
   readonly actionId: string;
   readonly kind: 'attack' | 'saving_throw' | 'multiattack' | 'spellcasting';
   readonly rangeFeet: number | null;
+  readonly attackDelivery: import('./engine-query-port').EngineProjectedAttackDelivery | null;
+  readonly normalRangeFeet: number | null;
+  readonly longRangeFeet: number | null;
 }
 
 export interface EngineProjectedActionApproach {
@@ -115,13 +119,40 @@ export interface EngineStateCapsule {
   readonly rulesIndex: readonly RuleReference[];
 }
 
+export type EngineOrdinaryRequestKind = 'round_plan' | 'plan_adjustment';
+
+export interface EngineBaselineIntentDigest {
+  readonly actorId: CombatantId;
+  readonly intentDigest: string;
+}
+
+export interface EnginePlanAdjustmentMetadata {
+  readonly parentPlanId: string;
+  readonly baselinePlanHash: string;
+  readonly triggerPcTurnId: string;
+  readonly beforeRevision: number;
+  readonly afterRevision: number;
+  readonly materialityReasonCodes: readonly PlanMaterialityReasonCode[];
+  readonly baselineIntentDigests: readonly EngineBaselineIntentDigest[];
+  readonly adjustmentBudget: 0 | 1 | 2;
+}
+
 export type EngineCapsuleRequest =
   | {
+      /** Absent is the legacy wire representation of round_plan. */
+      readonly kind?: 'round_plan';
       readonly requestId: string;
       readonly phase: 'initial' | 'correction';
       readonly correctionNumber: 0 | 1;
       readonly actors: readonly CombatantId[];
     }
+  | ({
+      readonly kind: 'plan_adjustment';
+      readonly requestId: string;
+      readonly phase: 'initial' | 'correction';
+      readonly correctionNumber: 0 | 1;
+      readonly actors: readonly CombatantId[];
+    } & EnginePlanAdjustmentMetadata)
   | {
       readonly requestId: string;
       readonly phase: 'speculative';
@@ -141,6 +172,12 @@ export interface EngineStateReference {
 }
 
 type CapsuleDigestInput = Omit<EngineStateCapsule, 'digest' | 'generatedAt'>;
+
+export function engineCapsuleRequestKind(
+  request: Exclude<EngineCapsuleRequest, { readonly phase: 'speculative' }>,
+): EngineOrdinaryRequestKind {
+  return request.kind ?? 'round_plan';
+}
 
 function boundedText(value: string, label: string, maximum: number): string {
   if (value.trim().length === 0 || value.length > maximum || /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u.test(value)) {
@@ -305,6 +342,40 @@ function assertSpeculativeRequest(
   }
 }
 
+function assertPlanAdjustmentRequest(
+  request: Extract<EngineCapsuleRequest, { readonly kind: 'plan_adjustment' }>,
+): void {
+  const actorIds = [...request.actors];
+  const digestActors = request.baselineIntentDigests.map((entry) => entry.actorId);
+  const expectedBudget = Math.min(actorIds.length, 2);
+  if (
+    actorIds.length === 0 ||
+    new Set(actorIds).size !== actorIds.length ||
+    request.adjustmentBudget !== expectedBudget ||
+    request.baselineIntentDigests.length !== actorIds.length ||
+    new Set(digestActors).size !== digestActors.length ||
+    actorIds.some((actorId) => !digestActors.includes(actorId))
+  ) {
+    throw new RangeError('Plan adjustment actors, baseline intent digests, and budget must match exactly.');
+  }
+  if (
+    request.parentPlanId.trim().length === 0 ||
+    request.triggerPcTurnId.trim().length === 0 ||
+    !/^[0-9a-f]{64}$/u.test(request.baselinePlanHash) ||
+    request.baselineIntentDigests.some((entry) => !/^[0-9a-f]{64}$/u.test(entry.intentDigest))
+  ) {
+    throw new TypeError('Plan adjustment correlation ids and hashes must be non-empty and canonical.');
+  }
+  if (
+    !Number.isSafeInteger(request.beforeRevision) || request.beforeRevision < 0 ||
+    !Number.isSafeInteger(request.afterRevision) || request.afterRevision < request.beforeRevision ||
+    request.materialityReasonCodes.length === 0 ||
+    new Set(request.materialityReasonCodes).size !== request.materialityReasonCodes.length
+  ) {
+    throw new RangeError('Plan adjustment revisions and materiality reasons must describe one material PC turn.');
+  }
+}
+
 export function createEngineStateCapsule(input: {
   readonly runId: EncounterSessionId;
   readonly branchId: EncounterBranchId;
@@ -322,6 +393,10 @@ export function createEngineStateCapsule(input: {
     throw new TypeError('Capsule generatedAt must be an ISO date-time string.');
   }
   if (input.request?.phase === 'speculative') assertSpeculativeRequest(input.request);
+  if (input.request !== null && input.request.phase !== 'speculative' &&
+    input.request.kind === 'plan_adjustment') {
+    assertPlanAdjustmentRequest(input.request);
+  }
   const body: CapsuleDigestInput = {
     format: 'engine-mcp-state-capsule',
     schemaVersion: 1,

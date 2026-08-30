@@ -12,7 +12,14 @@ import {
 } from '../../combat/values';
 import type { EngineProposalEnvelope, NarrationEnvelope } from '../engine-envelopes';
 import type { QueuedSpeculativePlanEnvelope } from '../speculative-plan-types';
-import { createEngineStateCapsule, projectEngineEncounterState, type RuleReference } from '../engine-state-capsule';
+import {
+  createEngineStateCapsule,
+  projectEngineEncounterState,
+  type EngineCapsuleRequest,
+  type EngineOrdinaryRequestKind,
+  type EnginePlanAdjustmentMetadata,
+  type RuleReference,
+} from '../engine-state-capsule';
 import { canonicalEngineQueryPort, engineActionRegistry } from '../engine-query-port';
 import { pureIntentResolver } from '../intent-resolver';
 import {
@@ -131,6 +138,10 @@ export interface EngineMcpLauncherManifest {
   readonly correctionNumber: 0 | 1;
   readonly room: number;
   readonly historyKind: string;
+  /** Optional on disk so pre-Phase-2 launchers decode as round_plan. */
+  readonly requestKind?: EngineOrdinaryRequestKind;
+  readonly requestedActorIds?: readonly import('../../combat/values').CombatantId[];
+  readonly planAdjustment?: EnginePlanAdjustmentMetadata;
   readonly toolProfile?: EngineMcpToolProfile;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
 }
@@ -152,6 +163,9 @@ export function createEngineMcpRuntime(
     readonly runId?: EncounterSessionId;
     readonly branchId?: EncounterBranchId;
     readonly requestId?: string;
+    readonly requestKind?: EngineOrdinaryRequestKind;
+    readonly requestedActorIds?: readonly import('../../combat/values').CombatantId[];
+    readonly planAdjustment?: EnginePlanAdjustmentMetadata;
     readonly onProposal?: (proposal: EngineProposalEnvelope) => void;
     readonly toolProfile?: EngineMcpToolProfile;
     readonly turnContextDeltaBase?: TurnContextDeltaBase;
@@ -162,17 +176,48 @@ export function createEngineMcpRuntime(
     .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
     .map((candidate) => candidate.profile.id)
     .sort();
-  const actors = candidates.slice(0, options.requestedActorCount ?? candidates.length);
+  const actors = options.requestedActorIds === undefined
+    ? candidates.slice(0, options.requestedActorCount ?? candidates.length)
+    : [...options.requestedActorIds];
   if (actors.length === 0) throw new RangeError('Encounter has no living monster for the engine request.');
+  if (new Set(actors).size !== actors.length || actors.some((actorId) => !candidates.includes(actorId))) {
+    throw new RangeError('Engine request actors must be unique living monsters.');
+  }
   const revision = options.revision ?? 1;
   const phase = options.phase ?? 'initial';
   const correctionNumber = options.correctionNumber ?? (phase === 'correction' ? 1 : 0);
+  let request: EngineCapsuleRequest;
+  if (options.requestKind === 'plan_adjustment') {
+    const metadata = options.planAdjustment;
+    if (metadata === undefined) {
+      throw new TypeError('Plan-adjustment engine requests require correlation metadata.');
+    }
+    request = {
+      kind: 'plan_adjustment',
+      requestId: options.requestId ?? 'request:engine-mcp',
+      phase,
+      correctionNumber,
+      actors,
+      ...metadata,
+    };
+  } else {
+    if (options.planAdjustment !== undefined) {
+      throw new TypeError('Round-plan engine requests cannot carry plan-adjustment metadata.');
+    }
+    request = {
+      ...(options.requestKind === 'round_plan' ? { kind: 'round_plan' as const } : {}),
+      requestId: options.requestId ?? 'request:engine-mcp',
+      phase,
+      correctionNumber,
+      actors,
+    };
+  }
   const capsule = createEngineStateCapsule({
     runId: options.runId ?? encounterSessionId('encounter:engine-mcp'),
     branchId: options.branchId ?? encounterBranchId('branch:engine-mcp'),
     revision,
     generatedAt: '2026-08-27T12:00:00.000Z',
-    request: { requestId: options.requestId ?? 'request:engine-mcp', phase, correctionNumber, actors },
+    request,
     projection: projectEngineEncounterState(state, engineActionRegistry(state), options.room ?? 1),
     historyDelta: options.historyKind === undefined ? [] : [{
       revision,
@@ -273,6 +318,16 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
     (input['correctionNumber'] === 0 || input['correctionNumber'] === 1) &&
     Number.isSafeInteger(input['room']) && typeof input['room'] === 'number' && input['room'] >= 1 &&
     typeof input['historyKind'] === 'string' && input['historyKind'].length > 0 &&
+    (input['requestKind'] === undefined || input['requestKind'] === 'round_plan' ||
+      input['requestKind'] === 'plan_adjustment') &&
+    (input['requestedActorIds'] === undefined ||
+      Array.isArray(input['requestedActorIds']) && input['requestedActorIds'].length > 0 &&
+      input['requestedActorIds'].every((actorId) => typeof actorId === 'string') &&
+      new Set(input['requestedActorIds']).size === input['requestedActorIds'].length) &&
+    (input['requestKind'] === 'plan_adjustment'
+      ? typeof input['planAdjustment'] === 'object' && input['planAdjustment'] !== null &&
+        !Array.isArray(input['planAdjustment']) && Array.isArray(input['requestedActorIds'])
+      : input['planAdjustment'] === undefined) &&
     (input['turnContextDeltaBase'] === undefined || (() => {
       const base = input['turnContextDeltaBase'];
       if (typeof base !== 'object' || base === null || Array.isArray(base)) return false;
@@ -285,14 +340,23 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
     (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm');
 }
 
-async function launcherManifest(path: string): Promise<EngineMcpLauncherManifest | null> {
+export type DecodedEngineMcpLauncherManifest = EngineMcpLauncherManifest & {
+  readonly requestKind: EngineOrdinaryRequestKind;
+};
+
+export function decodeEngineMcpLauncherManifest(value: unknown): DecodedEngineMcpLauncherManifest | null {
+  if (!isLauncherManifest(value)) return null;
+  return { ...value, requestKind: value.requestKind ?? 'round_plan' };
+}
+
+async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherManifest | null> {
   let decoded: unknown;
   try {
     decoded = JSON.parse(await readFile(resolve(path), 'utf8')) as unknown;
   } catch {
     return null;
   }
-  return isLauncherManifest(decoded) ? decoded : null;
+  return decodeEngineMcpLauncherManifest(decoded);
 }
 
 export async function runEngineMcpEntrypoint(argv: readonly string[] = process.argv): Promise<void> {
@@ -317,6 +381,11 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       correctionNumber: manifest.correctionNumber,
       room: manifest.room,
       historyKind: manifest.historyKind,
+      ...(manifest.requestKind === 'plan_adjustment' ? {
+        requestKind: manifest.requestKind,
+        requestedActorIds: manifest.requestedActorIds,
+        planAdjustment: manifest.planAdjustment,
+      } : {}),
       ...(manifest.turnContextDeltaBase === undefined ? {} : {
         turnContextDeltaBase: manifest.turnContextDeltaBase,
       }),
