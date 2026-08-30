@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D418.4 — OWNER: engine computes kill-sequence probability across action allocations (2026-08-30)
+
+Verbatim: "Have the engine do the bless math both ways so we know how bless
+vs radiant flame action use maximize the likelihood of killing the fighter."
+Capability: the tactical evaluator gains a sequence fold — P(target death) =
+P(accumulated death-save failures reach 3) across an ordered attack
+allocation, with crit=2 failures, bless-style modifier folds (+1d4 to-hit
+averaged exactly), and allocation comparison (with/without Bless, bless-
+target selection, initiative-order conditioning: Bless only helps attackers
+acting AFTER the caster). Note recorded with the ruling: Bless is the
+Priest's BONUS action (Divine Aid) — it does not compete with Radiant Flame
+for the action; the engine surfaces that fact rather than a false tradeoff.
+Placement: evaluator extension unit after increment 2 harvest; feeds
+increment 3 consequence rows and the increment 7 team scorer (which D418.3
+already directs to weight dying-PC removal).
+
 ## D418.3 — OWNER: four intel-program rulings from the consolidated question set (2026-08-30)
 
 Dual-blind question consolidation (Claude sealed 543701b7..., codex terra
