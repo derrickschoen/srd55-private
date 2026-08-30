@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D414 — OWNER: finalize recording, park training until very large corpus (2026-08-29)
+
+Verbatim: "What is the final plan for the training? We need to make sure
+we are recording what we need and then park the rest until we have a
+very large corpus of training data." Ruling: (a) recording completeness
+is the active workstream — rows must capture everything any later
+training stage could need (raw turn context as sent, repo commit
+provenance, session linkage, correction chains, narration); (b) ALL
+training work is parked at the D410 smoke (tooling committed, adapter
+proven) until the corpus milestone; (c) milestone proposal: ~10k
+authorized post-dedupe SFT examples with a hard-basis slice + judged
+sample, revisit when RX 6800 lands. Staged plan of record: collect ->
+curate -> LoRA SFT (2B and 0.8B + constrained decoding) -> engine-
+verified GRPO on GPU -> optional on-policy distill/preference stage ->
+QAT serving -> arena+judge eval vs luna low.
+
 ## D413 — OWNER: prior-art survey, AI-plays-D&D, last 6 months only (2026-08-29)
 
 Verbatim: "I'm not the first to try to make ai play D&D. Look into prior
