@@ -18,6 +18,31 @@ class), and elevation-derived cover/line-of-sight — but NO to-hit modifier.
 The tactical evaluator prices edge proximity and fall EV when elevation
 modeling arrives.
 
+## D421.1 — OWNER: initiative-systems research, clean-room derivation experiment, creator-opinion survey (2026-08-30)
+
+Three additions to D421, verbatim: "Also research different popular optional
+rules. Especially initiative. Look at how daggerheart and draw steel handle
+initiative as well. See if we could fit in a popcorn initiative for pcs. //
+Try to see if a clean room document could be made that comes up with nimble
+style house rules from first principles" and "Look up what bob the world
+builder and other YouTube creators said about which nimble rules they liked
+or didn't like."
+Execution: (1) second private research lane — popular optional rules with an
+initiative focus: Daggerheart (spotlight/no-initiative flow), Draw Steel
+(their initiative model), popcorn/Elective Action Order, side/group
+initiative variants; feasibility of POPCORN INITIATIVE FOR PCs in our
+engine (interacts with initiative_segments_v1, derived_v1, plan-then-
+adjust). (2) CLEAN-ROOM EXPERIMENT with contamination control: a FRESH
+codex session that has never read Nimble derives streamlining houserules
+from first principles (goals only: faster combat, fewer dead turns, less
+whiffing, SRD 5.2.1 compatibility); afterward a comparison pass maps the
+derived set against the Nimble inventory — convergent rules are
+independently derivable and safest for public use. The derivation document,
+if clean, may graduate to the public repo; the comparison stays private.
+(3) The running D421 lane extends with a creator-opinion survey: Bob World
+Builder and other YouTube reviewers, which Nimble rules they praised or
+rejected, folded into the optional-rule shortlist ranking.
+
 ## D421 — OWNER: Nimble 5e research in the private lane; prior-art and licensing screen for optional rules (2026-08-30)
 
 Verbatim (garbled tail preserved): "Research in a private lane all of the
