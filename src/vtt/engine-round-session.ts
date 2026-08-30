@@ -5,7 +5,11 @@ import { monsterAttackCommand, monsterSavingThrowCommand } from '../combat/monst
 import { restoreMulberry32, type SerializableRng } from '../combat/random';
 import type { MonsterAttackAction, MonsterSavingThrowAction } from '../combat/statblock';
 import { combatantId, type CombatantId, type EncounterBranchId, type EncounterSessionId } from '../combat/values';
-import type { EngineStateCapsule } from './engine-state-capsule';
+import type {
+  EngineOrdinaryRequestKind,
+  EnginePlanAdjustmentMetadata,
+  EngineStateCapsule,
+} from './engine-state-capsule';
 import { canonicalEngineQueryPort, type EngineTargetSelector } from './engine-query-port';
 import {
   createPureIntentResolver,
@@ -38,6 +42,9 @@ export interface EngineRoundCapsuleRequest {
   readonly phase: 'initial' | 'correction';
   readonly room: number;
   readonly historyKind: string;
+  readonly requestKind?: EngineOrdinaryRequestKind;
+  readonly requestedActorIds?: readonly CombatantId[];
+  readonly planAdjustment?: EnginePlanAdjustmentMetadata;
 }
 
 export interface EngineRoundSnapshot {
@@ -645,6 +652,13 @@ export class EngineRoundSession {
       correctionNumber: request.phase === 'correction' ? 1 : 0,
       room: request.room,
       historyKind: request.historyKind,
+      ...(request.requestKind === undefined ? {} : { requestKind: request.requestKind }),
+      ...(request.requestedActorIds === undefined ? {} : {
+        requestedActorIds: request.requestedActorIds,
+      }),
+      ...(request.planAdjustment === undefined ? {} : {
+        planAdjustment: request.planAdjustment,
+      }),
     }).feed.current();
   }
 }
