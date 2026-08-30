@@ -18,6 +18,35 @@ class), and elevation-derived cover/line-of-sight — but NO to-hit modifier.
 The tactical evaluator prices edge proximity and fall EV when elevation
 modeling arrives.
 
+## D420 — OWNER: search memory, help-calling, and a known-failure-modes manifest for the DM (2026-08-30)
+
+Verbatim: "I want our engine to have a memory for if something goes
+invisible, you look for it and start trying whatever you can. // If one npc
+is attacked, have it call out for the other npcs to help within yelling
+distance. // Cover what blind spots you can in the engine and then
+explicitly let the ai dm know what known failure modes the engine has that
+it should look for." Three capabilities:
+1. PERSISTENT SEARCH MEMORY: when a combatant becomes unseen (invisibility,
+   hiding, obscurement), the engine keeps last-known position + expanding
+   suspicion region with expiry; NPC behavior escalates through the legal
+   toolkit — move-and-search, readied actions, attacks into suspected
+   squares (with unseen-target disadvantage per SRD), AoE over the
+   suspicion region. Directly plugs the stealth-search blind-spot class
+   (pot-shot loops, invisibility resets).
+2. HELP-CALLING / ALERT PROPAGATION: an attacked NPC calls out within
+   yelling distance (typed radius, blocked by appropriate barriers/
+   soundproofing later); nearby NPCs join the encounter. Plugs the
+   combat-membership/leash class (pull-one-at-a-time cheese).
+3. KNOWN-FAILURE-MODES MANIFEST: engine ships a typed, versioned list of
+   its own residual blind spots (whatever is not yet covered
+   algorithmically), rendered to the AI DM as watch-for intel so the DM
+   agent hunts exactly the holes the engine cannot close. Manifest shrinks
+   as engine coverage grows; every entry cites its blind-spot class.
+Placement: the manifest rides increment 3 (context rendering) as a cheap
+static intel surface; search memory and help-calling join the post-rerun-1
+blind-spot program alongside the D419 parity-floor Missing rows, sequenced
+after the intel program so the R1-10 comparison stays one-variable.
+
 ## D419.1 — OWNER: parity is capability-class under RAW; catch-rate knob deferred; calibration waits for the rerun packet (2026-08-30)
 
 Three rulings on the supervisor's questions: (1) BG3 parity floor =
