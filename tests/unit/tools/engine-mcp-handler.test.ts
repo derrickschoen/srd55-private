@@ -35,6 +35,7 @@ const TOOL_NAMES = [
   'engine.query_dice_expectation',
   'engine.validate_intent',
   'engine.submit_round_intents',
+  'engine.submit_plan_adjustment',
   'engine.submit_speculative_round_plan',
   'engine.submit_intent',
   'engine.emit_narration',
@@ -175,6 +176,27 @@ function fixtureFacts(state: EncounterState, runtime: EngineMcpRuntime) {
   } as const;
   return { actor, target, action, request: capsule.request, intent, ref: stateRef(runtime) };
 }
+function adjustmentMetadata(actorIds: readonly import('../../../src/combat/values').CombatantId[]) {
+  return {
+    parentPlanId: 'plan:mcp-adjustment',
+    baselinePlanHash: 'a'.repeat(64),
+    triggerPcTurnId: 'pc-turn:mcp-adjustment',
+    beforeRevision: 1,
+    afterRevision: 2,
+    materialityReasonCodes: ['INTENT_RESOLUTION_CHANGED'] as const,
+    baselineIntentDigests: actorIds.map((actorId) => ({ actorId, intentDigest: 'b'.repeat(64) })),
+    adjustmentBudget: Math.min(actorIds.length, 2) as 1 | 2,
+  };
+}
+function dodgeUpdate(actorId: string, fallback: Readonly<Record<string, unknown>> | null = null) {
+  return {
+    actor_id: actorId,
+    choice: { kind: 'dodge' },
+    movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
+    engagement: { stance: 'hold_position' },
+    fallback,
+  };
+}
 function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, runtime: EngineMcpRuntime): Readonly<Record<string, unknown>> {
   if (name === 'engine.submit_speculative_round_plan') {
     const capsule = runtime.feed.current();
@@ -258,6 +280,43 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
       })),
       reaction_guidance: { side_wide: { opportunity_attack: 'decline' } },
       idempotency_key: 'mcp-speculative-idempotency-0001',
+    };
+  }
+  if (name === 'engine.submit_plan_adjustment') {
+    const capsule = runtime.feed.current();
+    if (capsule.request === null || capsule.request.phase === 'speculative') throw new Error('Adjustment fixture request is absent.');
+    const adjusted = createEngineStateCapsule({
+      runId: capsule.runId,
+      branchId: capsule.branchId,
+      revision: capsule.revision + 1,
+      generatedAt: capsule.generatedAt,
+      request: {
+        kind: 'plan_adjustment',
+        requestId: capsule.request.requestId,
+        phase: 'initial',
+        correctionNumber: 0,
+        actors: capsule.request.actors,
+        parentPlanId: 'plan:mcp-happy',
+        baselinePlanHash: 'a'.repeat(64),
+        triggerPcTurnId: 'pc-turn:mcp-happy',
+        beforeRevision: 1,
+        afterRevision: 2,
+        materialityReasonCodes: ['OPEN_MONSTER_SET_CHANGED'],
+        baselineIntentDigests: capsule.request.actors.map((actorId) => ({ actorId, intentDigest: 'b'.repeat(64) })),
+        adjustmentBudget: Math.min(capsule.request.actors.length, 2) as 1 | 2,
+      },
+      projection: capsule.projection,
+      historyDelta: capsule.historyDelta,
+      rulesIndex: capsule.rulesIndex,
+    });
+    runtime.feed.replace(adjusted);
+    return {
+      state_ref: { run_id: adjusted.runId, state_handle: engineStateHandle(adjusted), expected_revision: adjusted.revision },
+      request_id: adjusted.request?.requestId,
+      phase: 'initial',
+      idempotency_key: 'adjustment-idempotency-0001',
+      baseline_plan_hash: 'a'.repeat(64),
+      updates: [],
     };
   }
   const facts = fixtureFacts(state, runtime);
@@ -428,6 +487,28 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(request(runtime.handler, 103, 'tools/call', {
       name: 'engine.get_state_summary', arguments: {},
     })).toMatchObject({ error: { code: -32602, data: { kind: 'unknown_tool' } } });
+
+    const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const actors = state.combatants
+      .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
+      .map((candidate) => candidate.profile.id)
+      .slice(0, 2);
+    const adjustment = createEngineMcpRuntime(state, {
+      toolProfile: 'dm',
+      requestKind: 'plan_adjustment',
+      requestedActorIds: actors,
+      planAdjustment: adjustmentMetadata(actors),
+    });
+    const adjustmentList = record(request(adjustment.handler, 104, 'tools/list').result)['tools'];
+    if (!Array.isArray(adjustmentList)) throw new TypeError('Adjustment DM tools/list omitted tools.');
+    expect(adjustmentList.map((tool) => record(tool)['name'])).toEqual([
+      'engine.get_turn_context',
+      'engine.validate_intent',
+      'engine.submit_plan_adjustment',
+      'engine.request_dm_adjudication',
+    ]);
+    expect(JSON.stringify(adjustmentList)).not.toContain('engine.submit_round_intents');
+    expect(JSON.stringify(adjustmentList)).not.toContain('engine.propose_from_play');
   });
 
   it.each(TOOL_NAMES)('%s has a direct happy path with output-schema-conforming structured content', async (name) => {
@@ -530,6 +611,179 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     }));
     expect(rejected['status']).toBe('rejected');
     expect(runtime.proposals).toHaveLength(1);
+  });
+
+  it('binds, budgets, stages, corrects, and explicitly keeps plan adjustments per actor', async () => {
+    const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const actors = state.combatants
+      .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
+      .map((candidate) => candidate.profile.id)
+      .sort();
+    const first = actors[0];
+    const second = actors[1];
+    const closed = actors[2];
+    if (first === undefined || second === undefined || closed === undefined) throw new Error('Adjustment fixture requires three monsters.');
+    const runtime = createEngineMcpRuntime(state, {
+      requestKind: 'plan_adjustment',
+      requestedActorIds: [first, second],
+      planAdjustment: adjustmentMetadata([first, second]),
+    });
+    const capsule = runtime.feed.current();
+    const context = structured(toolCall(runtime.handler, 'engine.get_turn_context', {
+      run_id: capsule.runId,
+      expected_revision: capsule.revision,
+      scope: 'round',
+    }));
+    const ref = record(context['state_ref']);
+    const base = {
+      state_ref: ref,
+      request_id: capsule.request?.requestId,
+      phase: 'initial',
+      baseline_plan_hash: 'a'.repeat(64),
+    };
+    expect(context).toMatchObject({
+      request: { kind: 'plan_adjustment', adjustment_budget: 2 },
+      applicable_plays: [],
+      current_plan: { parent_plan_id: 'plan:mcp-adjustment' },
+    });
+    expect(context).not.toHaveProperty('suggested_plan');
+
+    const emptyKeep = structured(toolCall(runtime.handler, 'engine.submit_plan_adjustment', {
+      ...base,
+      idempotency_key: 'adjustment-empty-keep-0001',
+      updates: [],
+    }));
+    expect(emptyKeep).toMatchObject({ status: 'proposed', actor_resolutions: [] });
+    expect(runtime.proposals[0]).toMatchObject({ kind: 'plan_adjustment_proposal', updates: [] });
+    expect(structured(toolCall(runtime.handler, 'engine.submit_plan_adjustment', {
+      ...base,
+      idempotency_key: 'adjustment-empty-keep-0001',
+      updates: [],
+    }))).toEqual(emptyKeep);
+
+    const fallback = {
+      choice: { kind: 'end_turn' },
+      movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
+      engagement: { stance: 'hold_position' },
+    };
+    const partial = structured(toolCall(runtime.handler, 'engine.submit_plan_adjustment', {
+      ...base,
+      idempotency_key: 'adjustment-partial-stage-0001',
+      updates: [
+        dodgeUpdate(first, fallback),
+        { ...dodgeUpdate(second), choice: { kind: 'attack', action_id: 'missing-action', target: { kind: 'nearest_visible_enemy' } } },
+      ],
+    }));
+    expect(partial).toMatchObject({
+      status: 'rejected',
+      staged_proposal_id: expect.any(String),
+      staged_actor_resolutions: [{ actor_id: first }],
+      actor_refusals: [{ actor_id: second }],
+      correction_guidance: { required_actor_ids: [second], replace_whole_round: false },
+    });
+    expect(runtime.proposals[1]).toMatchObject({
+      kind: 'plan_adjustment_proposal',
+      updates: [{ intent: { actorId: first, fallback: expect.objectContaining({ choice: { kind: 'end_turn' } }) } }],
+    });
+
+    const closedResult = structured(toolCall(runtime.handler, 'engine.submit_plan_adjustment', {
+      ...base,
+      idempotency_key: 'adjustment-closed-actor-0001',
+      updates: [dodgeUpdate(closed)],
+    }));
+    expect(closedResult).toMatchObject({ status: 'rejected', actor_refusals: [{ actor_id: closed, codes: ['ACTOR_NOT_OPEN'] }] });
+
+    const staleBaseline = toolCall(runtime.handler, 'engine.submit_plan_adjustment', {
+      ...base,
+      idempotency_key: 'adjustment-stale-baseline-0001',
+      baseline_plan_hash: 'c'.repeat(64),
+      updates: [],
+    });
+    expect(staleBaseline['isError']).toBe(true);
+    expect(JSON.stringify(staleBaseline)).toContain('BASELINE_PLAN_MISMATCH');
+
+    const oneActorRuntime = createEngineMcpRuntime(state, {
+      requestKind: 'plan_adjustment',
+      requestedActorIds: [first],
+      planAdjustment: adjustmentMetadata([first]),
+    });
+    const oneContext = structured(toolCall(oneActorRuntime.handler, 'engine.get_turn_context', {
+      run_id: oneActorRuntime.feed.current().runId,
+      expected_revision: 1,
+      scope: 'round',
+    }));
+    const overBudget = structured(toolCall(oneActorRuntime.handler, 'engine.submit_plan_adjustment', {
+      state_ref: oneContext['state_ref'],
+      request_id: oneActorRuntime.feed.current().request?.requestId,
+      phase: 'initial',
+      baseline_plan_hash: 'a'.repeat(64),
+      idempotency_key: 'adjustment-over-budget-0001',
+      updates: [dodgeUpdate(first), dodgeUpdate(second)],
+    }));
+    expect(overBudget).toMatchObject({
+      status: 'rejected',
+      staged_proposal_id: null,
+      actor_refusals: [
+        { codes: ['ADJUSTMENT_BUDGET_EXCEEDED'] },
+        { codes: ['ADJUSTMENT_BUDGET_EXCEEDED'] },
+      ],
+    });
+
+    const deadState: EncounterState = {
+      ...state,
+      combatants: state.combatants.map((combatant) =>
+        combatant.profile.id === closed ? { ...combatant, life: 'dead' as const } : combatant),
+    };
+    const deadRuntime = createEngineMcpRuntime(deadState, {
+      requestKind: 'plan_adjustment',
+      requestedActorIds: [first],
+      planAdjustment: adjustmentMetadata([first]),
+    });
+    const deadContext = structured(toolCall(deadRuntime.handler, 'engine.get_turn_context', {
+      run_id: deadRuntime.feed.current().runId,
+      expected_revision: 1,
+      scope: 'round',
+    }));
+    const deadResult = structured(toolCall(deadRuntime.handler, 'engine.submit_plan_adjustment', {
+      state_ref: deadContext['state_ref'],
+      request_id: deadRuntime.feed.current().request?.requestId,
+      phase: 'initial',
+      baseline_plan_hash: 'a'.repeat(64),
+      idempotency_key: 'adjustment-dead-actor-0001',
+      updates: [dodgeUpdate(closed)],
+    }));
+    expect(deadResult).toMatchObject({ status: 'rejected', actor_refusals: [{ actor_id: closed, codes: ['ACTOR_DEAD'] }] });
+
+    const correctionRuntime = createEngineMcpRuntime(state, {
+      requestKind: 'plan_adjustment',
+      requestedActorIds: [second],
+      planAdjustment: adjustmentMetadata([second]),
+      phase: 'correction',
+      correctionNumber: 1,
+    });
+    const correctionContext = structured(toolCall(correctionRuntime.handler, 'engine.get_turn_context', {
+      run_id: correctionRuntime.feed.current().runId,
+      expected_revision: 1,
+      scope: 'round',
+    }));
+    expect(structured(toolCall(correctionRuntime.handler, 'engine.submit_plan_adjustment', {
+      state_ref: correctionContext['state_ref'],
+      request_id: correctionRuntime.feed.current().request?.requestId,
+      phase: 'correction',
+      baseline_plan_hash: 'a'.repeat(64),
+      idempotency_key: 'adjustment-correction-0001',
+      updates: [dodgeUpdate(second)],
+    }))).toMatchObject({ status: 'proposed', actor_resolutions: [{ actor_id: second }] });
+    const fallbackCorrection = toolCall(correctionRuntime.handler, 'engine.submit_plan_adjustment', {
+      state_ref: correctionContext['state_ref'],
+      request_id: correctionRuntime.feed.current().request?.requestId,
+      phase: 'correction',
+      baseline_plan_hash: 'a'.repeat(64),
+      idempotency_key: 'adjustment-correction-fallback-0001',
+      updates: [dodgeUpdate(second, fallback)],
+    });
+    expect(fallbackCorrection['isError']).toBe(true);
+    expect(JSON.stringify(fallbackCorrection)).toContain('fallback');
   });
 
   it('queues speculative prediction envelopes separately and byte-locks idempotency', async () => {

@@ -3,9 +3,13 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
+import { encounterSessionId } from '../../../src/combat/values';
 import { ENGINE_DM_TOOL_NAMES } from '../../../src/vtt/mcp/engine-server';
 import { ENGINE_TOOL_SPECS } from '../../../src/vtt/mcp/schemas';
-import { openAiFunctionTools } from '../../../src/vtt/agent-adapters/local-openai';
+import {
+  LocalOpenAiAgentSessionAdapter,
+  openAiFunctionTools,
+} from '../../../src/vtt/agent-adapters/local-openai';
 import { parseArenaArgs, runArena } from '../../../tools/ai-dm-arena';
 import { mkdtempSync, readFileSync } from '../../helpers/test-filesystem';
 
@@ -85,6 +89,47 @@ function assistantToolCall(id: string, name: string, argumentsValue: unknown, us
 }
 
 describe('SIMULATED local OpenAI conversation adapter', () => {
+  it('terminates the tool loop immediately after an accepted plan adjustment', async () => {
+    const endpoint = await fakeServer(() => ({
+      body: assistantToolCall('call-adjustment', 'engine__submit_plan_adjustment', {
+        baseline_plan_hash: 'a'.repeat(64),
+        updates: [],
+      }, null),
+    }));
+    const calls: string[] = [];
+    try {
+      const adapter = new LocalOpenAiAgentSessionAdapter({
+        baseUrl: endpoint.baseUrl,
+        thinkMode: 'off',
+      });
+      const result = await adapter.start({
+        runId: encounterSessionId('encounter:SIMULATED-adjustment'),
+        prompt: 'SIMULATED adjustment prompt',
+        model: 'SIMULATED-local-model',
+        reasoningEffort: 'low',
+        launcherToken: 'SIMULATED-adjustment-launcher',
+        timeoutMs: null,
+        toolSession: {
+          tools: [{
+            name: 'engine.submit_plan_adjustment',
+            description: 'Submit a bounded adjustment.',
+            inputSchema: { type: 'object', additionalProperties: false },
+          }],
+          execute: (name) => {
+            calls.push(name);
+            return { status: 'proposed', adjustment_proposal_id: 'proposal:SIMULATED-adjustment' };
+          },
+        },
+      }, new AbortController().signal);
+
+      expect(result.exit).toBe('completed');
+      expect(calls).toEqual(['engine.submit_plan_adjustment']);
+      expect(endpoint.requests).toHaveLength(1);
+    } finally {
+      await close(endpoint.server);
+    }
+  });
+
   it('drives a full authorized round through one context tool round and the in-process proposer', { timeout: 30_000 }, async () => {
     const endpoint = await fakeServer((request, index) => {
       const requestMessages = messages(request.body['messages']);
