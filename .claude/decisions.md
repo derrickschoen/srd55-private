@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D418.5 — OWNER: rerun 1 judged by the cycle-2 panel (2026-08-30)
+
+Owner chose "Same panel as cycle 2" for the first R1-10 rerun: blind
+panel of sol high + opus + Fable with an owner calibration sample
+(D396.6 pattern), consuming the rerun-packet-v1 blinded interleaved
+packets. Keeps scores comparable to pre-intel baseline judgments.
+
+## D395.3 — OWNER: statblock roster expansion, SRD set plus clean-room customs (2026-08-30)
+
+Owner chose "Yes, plus clean-room customs": import the ~12 SRD 5.2.1
+monsters the Astral Tower rooms reference (CC-BY, typed statblocks +
+tests) so the 26 imported rooms become runnable, AND derive D417-style
+clean-room equivalents for the two custom monsters (Astraldendon,
+Astralmycon) so every room fully resolves. Clean-room derivation from
+mechanical role only — no Knave prose.
+
 ## D419.2 — OWNER: exploit plugging emulates a human DM; no artificial catch roll (2026-08-30)
 
 Verbatim: "The intent is to have it act like a human dm would as much as
