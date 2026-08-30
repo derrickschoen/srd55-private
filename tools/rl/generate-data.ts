@@ -8,6 +8,7 @@ import {
   type ArenaConfig,
   type ArenaRow,
 } from '../ai-dm-arena';
+import { COMBAT_MODELS, type CombatModel } from '../ai-dm-conversation';
 import { readRepoCommit } from './repo-commit';
 
 export interface SeedRange {
@@ -16,6 +17,7 @@ export interface SeedRange {
 }
 
 export interface GenerateDataConfig {
+  readonly combatModel: CombatModel;
   readonly seedRanges: readonly SeedRange[];
   readonly reps: number;
   readonly targetDirectory: string;
@@ -50,6 +52,7 @@ export interface GenerateDataManifest {
   readonly toolArgv: readonly string[];
   readonly flapPolicy: 'arena-retry-then-resume-seed';
   readonly basis: 'standard' | 'hard';
+  readonly combatModel: CombatModel;
   readonly seeds: readonly SeedManifestEntry[];
 }
 
@@ -93,10 +96,11 @@ export function parseGenerateDataArgs(
   let timeoutMs = 120_000;
   let resume = false;
   let basis: GenerateDataConfig['basis'] = 'standard';
+  let combatModel: CombatModel = 'monster_block_v1';
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];
     if (option === '--resume') { resume = true; continue; }
-    if (!['--seed-range', '--reps', '--target-dir', '--timeout-ms', '--basis'].includes(option ?? '')) {
+    if (!['--seed-range', '--reps', '--target-dir', '--timeout-ms', '--basis', '--combat-model'].includes(option ?? '')) {
       throw new TypeError(`Unknown generate-data option ${option ?? '<missing>'}.`);
     }
     const value = args[index + 1];
@@ -105,8 +109,15 @@ export function parseGenerateDataArgs(
     else if (option === '--reps') reps = positiveInteger(value, '--reps');
     else if (option === '--target-dir') targetDirectory = resolve(value);
     else if (option === '--timeout-ms') timeoutMs = positiveInteger(value, '--timeout-ms');
-    else if (value === 'standard' || value === 'hard') basis = value;
-    else throw new TypeError('--basis must be standard or hard.');
+    else if (option === '--basis') {
+      if (value !== 'standard' && value !== 'hard') throw new TypeError('--basis must be standard or hard.');
+      basis = value;
+    } else {
+      if (!COMBAT_MODELS.includes(value as CombatModel)) {
+        throw new TypeError('--combat-model must be monster_block_v1 or initiative_segments_v1.');
+      }
+      combatModel = value as CombatModel;
+    }
     index += 1;
   }
   if (ranges.length === 0) throw new TypeError('At least one --seed-range is required.');
@@ -120,6 +131,7 @@ export function parseGenerateDataArgs(
     }
   }
   return {
+    combatModel,
     seedRanges: ranges,
     reps,
     targetDirectory,
@@ -151,6 +163,7 @@ async function existingManifest(
   const decoded = JSON.parse(source) as GenerateDataManifest;
   if (decoded.format !== 'arena-rl-batch-v1' || decoded.range.start !== range.start ||
     decoded.range.end !== range.end || decoded.reps !== config.reps || decoded.basis !== config.basis ||
+    decoded.combatModel !== config.combatModel ||
     decoded.model !== 'gpt-5.6-luna' || decoded.effort !== 'low' || decoded.kbId !== 'K6' ||
     decoded.kbHash !== provenance.kbHash || decoded.repoCommit !== provenance.repoCommit ||
     decoded.adapterCliName !== provenance.adapterCliName ||
@@ -196,6 +209,7 @@ function emptyManifest(
     toolArgv: [...config.toolArgv],
     flapPolicy: 'arena-retry-then-resume-seed',
     basis: config.basis,
+    combatModel: config.combatModel,
     seeds: [],
   };
 }
@@ -223,6 +237,7 @@ function arenaConfig(config: GenerateDataConfig, seed: number, outPath: string):
     '--timeout-ms', String(config.timeoutMs),
     '--kb', resolve(config.cwd, 'tests/fixtures/ai-dm-kb/k6.txt'),
     '--basis', config.basis,
+    '--combat-model', config.combatModel,
     '--capture-rl-data',
     '--generate-missing-rooms',
   ], config.cwd);
@@ -312,7 +327,7 @@ async function main(): Promise<void> {
 }
 
 const GENERATE_DATA_USAGE =
-  'Usage: rl:generate-data --seed-range START-END [--seed-range START-END ...] --reps N --target-dir PATH [--basis standard|hard] [--timeout-ms N] [--resume]';
+  'Usage: rl:generate-data --seed-range START-END [--seed-range START-END ...] --reps N --target-dir PATH [--basis standard|hard] [--combat-model monster_block_v1|initiative_segments_v1] [--timeout-ms N] [--resume]';
 
 async function runCli(): Promise<void> {
   try { await main(); }
