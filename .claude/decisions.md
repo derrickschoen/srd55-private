@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D419.1 — OWNER: parity is capability-class under RAW; catch-rate knob deferred; calibration waits for the rerun packet (2026-08-30)
+
+Three rulings on the supervisor's questions: (1) BG3 parity floor =
+CAPABILITY-CLASS UNDER RAW — the AI matches BG3's tactical breadth using our
+mechanics (cover-seeking, range bands, chokepoints); houserule-driven
+behaviors map to RAW analogues, consistent with D417. (2) Where the
+stochastic exploit-catch factor lives (difficulty knob vs constant) is
+DEFERRED until the D419 research digest returns its design sketch with
+tradeoffs. (3) R01/R02 owner calibration scores wait for the interleaved
+blinded rerun packet (D418.3) — old and post-intel rounds scored side by
+side in one sitting; do not press for scores before then.
+
 ## D419 — OWNER: BG3 NPC-AI deep research in the private lane; parity floor + AI-DM exploit plugging (2026-08-30)
 
 Verbatim: "In a private repo lane. Do deep research into how the bg3 ai npcs
