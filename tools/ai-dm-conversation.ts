@@ -76,6 +76,11 @@ import {
   type ScriptedPartyPlan,
 } from '../src/vtt/scripted-party-round';
 import {
+  applyRoomInitiativeProfile,
+  ROOM_INITIATIVE_PROFILES,
+  type RoomInitiativeProfile,
+} from '../src/vtt/room-generator';
+import {
   evaluatePlanMateriality,
   PLAN_MATERIALITY_POLICY_HASH,
   type PlanMaterialityReasonCode,
@@ -106,6 +111,7 @@ const RULES_SOURCE = { get: () => null } as const;
 
 export interface ConversationConfig {
   readonly combatModel: CombatModel;
+  readonly initiativeProfile: RoomInitiativeProfile;
   readonly fixturesPath: string;
   readonly rooms: number;
   readonly rounds: number;
@@ -413,7 +419,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
       '--fixtures', '--rooms', '--rounds', '--reps', '--cli', '--model', '--effort',
       '--escalation-model', '--escalation-effort',
       '--out', '--cli-bin', '--timeout-ms', '--kb', '--reaction-ask-default',
-      '--combat-model',
+      '--combat-model', '--initiative-profile',
       '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
@@ -471,12 +477,17 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
     throw new TypeError('--reaction-ask-default must be decline or take.');
   }
-  const combatModel = values.get('--combat-model') ?? 'monster_block_v1';
+  const combatModel = values.get('--combat-model') ?? 'initiative_segments_v1';
   if (!COMBAT_MODELS.includes(combatModel as CombatModel)) {
     throw new TypeError('--combat-model must be monster_block_v1 or initiative_segments_v1.');
   }
+  const initiativeProfile = values.get('--initiative-profile') ?? 'derived_v1';
+  if (!ROOM_INITIATIVE_PROFILES.includes(initiativeProfile as RoomInitiativeProfile)) {
+    throw new TypeError('--initiative-profile must be legacy or derived_v1.');
+  }
   return {
     combatModel: combatModel as CombatModel,
+    initiativeProfile: initiativeProfile as RoomInitiativeProfile,
     fixturesPath: resolve(values.get('--fixtures') ?? 'tests/fixtures/arena-basis'),
     rooms: positiveInteger(values.get('--rooms') ?? '12', '--rooms'),
     rounds: positiveInteger(values.get('--rounds') ?? values.get('--reps') ?? '1', '--rounds'),
@@ -1595,7 +1606,11 @@ async function roomStates(config: ConversationConfig, options: ConversationRunOp
   const names = (await readdir(config.fixturesPath)).filter((name) => /^seed-\d+\.json$/u.test(name))
     .sort((left, right) => left.localeCompare(right, 'en', { numeric: true }));
   if (names.length < config.rooms) throw new RangeError(`Requested ${String(config.rooms)} rooms, but only ${String(names.length)} fixtures exist.`);
-  return Promise.all(names.slice(0, config.rooms).map((name) => loadArenaFixture(resolve(config.fixturesPath, name))));
+  return Promise.all(names.slice(0, config.rooms).map(async (name) =>
+    applyRoomInitiativeProfile(
+      await loadArenaFixture(resolve(config.fixturesPath, name)),
+      config.initiativeProfile,
+    )));
 }
 
 export async function runConversation(config: ConversationConfig, options: ConversationRunOptions = {}): Promise<ConversationRunResult> {
@@ -1608,7 +1623,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
     const invalidFixture = states.findIndex((state) => state.config.initiativeMode !== 'per_combatant');
     if (invalidFixture >= 0) {
       throw new Error(
-        `initiative_segments_v1 fixture constraint: room ${String(invalidFixture + 1)} must declare config.initiativeMode="per_combatant"; frozen block fixtures are not mutated by the conversation driver.`,
+        `initiative_segments_v1 fixture constraint: room ${String(invalidFixture + 1)} must declare config.initiativeMode="per_combatant"; use --initiative-profile derived_v1 for frozen block fixtures.`,
       );
     }
   }

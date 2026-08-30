@@ -41,8 +41,8 @@ describe('RL arena batch generator', () => {
       config.captureRlData && config.kbPath?.endsWith('/tests/fixtures/ai-dm-kb/k6.txt') === true,
     )).toBe(true);
     expect(firstCalls.every((config) => config.generateMissingRooms)).toBe(true);
-    expect(firstCalls.every((config) => config.combatModel === 'monster_block_v1')).toBe(true);
-    expect(firstCalls.every((config) => config.initiativeProfile === 'legacy')).toBe(true);
+    expect(firstCalls.every((config) => config.combatModel === 'initiative_segments_v1')).toBe(true);
+    expect(firstCalls.every((config) => config.initiativeProfile === 'derived_v1')).toBe(true);
     expect(heartbeats).toContain(`start batches=1 reps=2 target=${targetDirectory}`);
     expect(heartbeats).toContain('batch start=3943001 end=3943003');
     expect(heartbeats).toContain('seed=3943002 status=start');
@@ -59,8 +59,8 @@ describe('RL arena batch generator', () => {
       adapterCliVersion: null,
       kbId: 'K6',
       basis: 'standard',
-      combatModel: 'monster_block_v1',
-      initiativeProfile: 'legacy',
+      combatModel: 'initiative_segments_v1',
+      initiativeProfile: 'derived_v1',
       toolArgv: args,
       totals: {
         seeds: 3,
@@ -111,6 +111,12 @@ describe('RL arena batch generator', () => {
       calls.push(config);
       return [{ outcome: 'authorized', serviceNull: false, flapRetries: 0 }];
     };
+
+    const block = parseGenerateDataArgs([
+      ...common, '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
+    ]);
+    expect(block.combatModel).toBe('monster_block_v1');
+    expect(block.initiativeProfile).toBe('legacy');
 
     const [manifest] = await generateData(parseGenerateDataArgs([
       ...common, '--combat-model', 'initiative_segments_v1',

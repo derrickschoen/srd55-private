@@ -106,19 +106,30 @@ class OrderingNullAdapter implements AgentSessionAdapter {
   classifyFailure(): 'unknown' { return 'unknown'; }
 }
 
+const LEGACY_BLOCK_ARGS = [
+  '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
+] as const;
+
 describe('AI-DM arena', () => {
-  it('defaults the combat model and propagates an explicit initiative-segment selection', async () => {
+  it('defaults to initiative segments while retaining the explicit legacy block selection', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-combat-model-'));
     const common = [
       '--rooms', '1', '--reps', '1', '--seed', '3943001',
       '--out', join(directory, 'arena.jsonl'), '--dry-run',
     ] as const;
 
-    expect(parseArenaArgs(common).combatModel).toBe('monster_block_v1');
-    expect(parseArenaArgs(common).initiativeProfile).toBe('legacy');
-    const segments = parseArenaArgs([...common, '--combat-model', 'initiative_segments_v1']);
-    expect(segments.combatModel).toBe('initiative_segments_v1');
-    await expect(runArena(segments)).rejects.toThrow(
+    const defaults = parseArenaArgs(common);
+    expect(defaults.combatModel).toBe('initiative_segments_v1');
+    expect(defaults.initiativeProfile).toBe('derived_v1');
+    const block = parseArenaArgs([
+      ...common, '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
+    ]);
+    expect(block.combatModel).toBe('monster_block_v1');
+    expect(block.initiativeProfile).toBe('legacy');
+    const incompatible = parseArenaArgs([
+      ...common, '--combat-model', 'initiative_segments_v1', '--initiative-profile', 'legacy',
+    ]);
+    await expect(runArena(incompatible)).rejects.toThrow(
       'initiative_segments_v1 fixture constraint: room 1 must declare config.initiativeMode="per_combatant"',
     );
     expect(() => parseArenaArgs([...common, '--combat-model', 'unknown-model']))
@@ -130,6 +141,7 @@ describe('AI-DM arena', () => {
     const config = parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943001',
       '--out', join(directory, 'arena.jsonl'), '--interleave',
+      '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
       '--escalation-model', 'global-escalation', '--escalation-effort', 'medium',
       '--arm', 'plain:model-plain:low',
       '--arm', 'tiered:model-tiered:high:arm-escalation:xhigh',
@@ -159,6 +171,7 @@ describe('AI-DM arena', () => {
       '--initiative-profile', 'derived_v1',
       '--arm', 'block:model-block:low',
       '--arm', 'segments:model-segments:low',
+      '--arm-combat-model', 'block:monster_block_v1',
       '--arm-combat-model', 'segments:initiative_segments_v1',
     ]);
 
@@ -204,6 +217,7 @@ describe('AI-DM arena', () => {
       '--kb', kbPath,
       '--cli-bin', 'definitely-not-a-real-codex-binary',
       '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const rows = await runArena(config);
@@ -298,6 +312,7 @@ describe('AI-DM arena', () => {
       '--rooms', '2', '--reps', '2', '--seed', '5117001',
       '--basis', 'hard', '--out', join(directory, 'arena.jsonl'),
       '--interleave',
+      ...LEGACY_BLOCK_ARGS,
       '--arm', 'control:model-control:low',
       '--arm', 'candidate:model-candidate:high',
     ]);
@@ -345,6 +360,7 @@ describe('AI-DM arena', () => {
       '--rooms', '1', '--reps', '1', '--seed', '5117001',
       '--basis', 'hard', '--out', join(directory, 'arena.jsonl'),
       '--interleave',
+      ...LEGACY_BLOCK_ARGS,
       '--arm', 'control:model-control:low',
       '--arm', 'candidate:model-candidate:high',
     ]);
@@ -365,6 +381,7 @@ describe('AI-DM arena', () => {
     const config = parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943001',
       '--out', join(directory, 'arena.jsonl'), '--interleave', '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
       '--arm', 'plain:model-plain:low',
       '--arm', 'tiered:model-tiered:high:model-escalation:xhigh',
     ]);
@@ -394,6 +411,7 @@ describe('AI-DM arena', () => {
       const config = parseArenaArgs([
         '--rooms', '1', '--reps', '1', '--seed', '3943003', '--effort', 'low',
         '--out', join(directory, `${response}.jsonl`), '--dry-run',
+        ...LEGACY_BLOCK_ARGS,
       ]);
       const rows = await runArena(config, {
         suggestionResponseByRequest: { 'room-1-round-1': response },
@@ -413,6 +431,7 @@ describe('AI-DM arena', () => {
     const config = parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943002', '--effort', 'low',
       '--out', join(directory, 'as-is.jsonl'), '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const rows = await runArena(config, {
@@ -526,6 +545,7 @@ describe('AI-DM arena', () => {
     const adapter = new FakeCodexUsageAdapter();
     const config = parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943001', '--out', outPath,
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const rows = await runArena(config, { adapter });
@@ -565,6 +585,7 @@ describe('AI-DM arena', () => {
       '--rooms', '1', '--reps', '1', '--seed', '3943001',
       '--out', join(directory, 'arena.jsonl'), '--dry-run',
       '--escalation-model', 'gpt-escalation', '--escalation-effort', 'high',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const [row] = await runArena(config, { failBeforeDispatch: ['room-1-round-1'] });
@@ -584,6 +605,7 @@ describe('AI-DM arena', () => {
       '--rooms', '1', '--reps', '1', '--seed', '3943001',
       '--out', join(directory, 'arena.jsonl'), '--dry-run',
       '--escalation-model', 'gpt-escalation', '--escalation-effort', 'high',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const [row] = await runArena(config, { invalidInitial: ['room-1-round-1'] });

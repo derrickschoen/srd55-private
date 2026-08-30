@@ -111,8 +111,8 @@ export function parseGenerateDataArgs(
   let timeoutMs = 120_000;
   let resume = false;
   let basis: GenerateDataConfig['basis'] = 'standard';
-  let combatModel: CombatModel = 'monster_block_v1';
-  let initiativeProfile: RoomInitiativeProfile = 'legacy';
+  let combatModel: CombatModel = 'initiative_segments_v1';
+  let initiativeProfile: RoomInitiativeProfile = 'derived_v1';
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];
     if (option === '--resume') { resume = true; continue; }
