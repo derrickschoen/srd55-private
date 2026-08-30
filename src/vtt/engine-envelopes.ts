@@ -14,6 +14,7 @@ import type {
   ResolvedTurnMechanics,
 } from './intent-resolver';
 import type { ReactionGuidanceDeclaration } from './reaction-guidance';
+import type { DmIntelCapture } from './dm-tactical-intel';
 
 export interface EngineProposalBinding {
   readonly runId: EncounterSessionId;
@@ -51,6 +52,8 @@ export interface RoundTurnProposalEnvelope extends EngineProposalBinding {
   readonly reactionGuidance: ReactionGuidanceDeclaration | null;
   /** Validated wire arguments retained for opt-in model-training provenance. */
   readonly submittedArguments?: Readonly<Record<string, unknown>>;
+  /** Full-precision offered-set provenance; never rendered into model context. */
+  readonly intelCapture?: DmIntelCapture;
 }
 
 export interface PlanAdjustmentProposalEnvelope extends EngineProposalBinding {
@@ -61,6 +64,8 @@ export interface PlanAdjustmentProposalEnvelope extends EngineProposalBinding {
   readonly updates: readonly ProposedTurnResolution[];
   /** Validated wire arguments retained for opt-in model-training provenance. */
   readonly submittedArguments?: Readonly<Record<string, unknown>>;
+  /** Full-precision offered-set provenance; never rendered into model context. */
+  readonly intelCapture?: DmIntelCapture;
 }
 
 export type EngineProposalEnvelope =

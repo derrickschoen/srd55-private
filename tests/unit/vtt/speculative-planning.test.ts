@@ -22,6 +22,7 @@ import {
   FixedReadonlyStateCapsuleSource,
   projectEngineEncounterState,
 } from '../../../src/vtt/engine-state-capsule';
+import { projectEngineInitiativeIntel } from '../../../src/vtt/engine-initiative-intel';
 import {
   engineActionRegistry,
   engineConcentrationActive,
@@ -322,7 +323,7 @@ describe('speculative host fact system', () => {
       kind: 'zone_occupancy_is', subject: targetRef, zoneId: authoredZoneId, value: 'inside',
     }).matches).toBe(true);
     expect(engineConcentrationActive(zoned, actor.profile.id)).toBe(true);
-    expect(projectEngineEncounterState(zoned, engineActionRegistry(zoned), 1).semanticZones)
+    expect(projectEngineEncounterState(zoned, engineActionRegistry(zoned), projectEngineInitiativeIntel(zoned, []), 1).semanticZones)
       .toEqual([
         {
           id: authoredZoneId,
@@ -358,7 +359,7 @@ describe('speculative host fact system', () => {
           }
         : entry),
     };
-    const projection = projectEngineEncounterState(state, engineActionRegistry(state), 1);
+    const projection = projectEngineEncounterState(state, engineActionRegistry(state), projectEngineInitiativeIntel(state, []), 1);
     expect(projection.combatants.find((entry) => entry.id === fixture.target.id)?.planning)
       .toMatchObject({
         temporaryHitPoints: 9,
@@ -464,7 +465,7 @@ describe('speculative host fact system', () => {
           scenarioMenu: menu,
           scenarios,
         },
-        projection: projectEngineEncounterState(state, engineActionRegistry(state), 1),
+        projection: projectEngineEncounterState(state, engineActionRegistry(state), projectEngineInitiativeIntel(state, []), 1),
       });
       if (capsule.request?.phase !== 'speculative') throw new Error('Speculative capsule was not retained.');
       expect(evaluateHostScenarios(state, capsule.request.scenarios)).toMatchObject({
@@ -521,7 +522,7 @@ describe('speculative host fact system', () => {
         scenarioMenu: menu,
         scenarios,
       },
-      projection: projectEngineEncounterState(planningState, engineActionRegistry(planningState), 2),
+      projection: projectEngineEncounterState(planningState, engineActionRegistry(planningState), projectEngineInitiativeIntel(planningState, []), 2),
     });
     const source = new FixedReadonlyStateCapsuleSource(capsule);
     const accepted: Array<ReturnType<typeof submitSpeculativeRoundPlan>> = [];

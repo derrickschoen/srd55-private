@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { TACTICAL_EVALUATOR_POLICY } from '../../combat/tactical-evaluator';
 import { PLAY_NAMES } from '../snippet-registry-runtime';
+import { DM_INTEL_QUERY_POLICY, DM_TURN_INTEL_POLICY } from '../dm-tactical-intel';
+import { ENGINE_FAILURE_MODES_POLICY } from '../engine-failure-modes';
+import { ENGINE_INITIATIVE_PROJECTION_POLICY } from '../engine-state-capsule';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
 
 const identifier = z.string().min(1).max(200).describe('Engine-owned stable identifier.');
@@ -120,6 +123,42 @@ const tacticalSummary = z.object({
   room: z.number().int().min(1).nullable(), round: z.number().int().min(0), active_side: z.enum(['players', 'monsters', 'none']),
   living_allies: z.number().int().min(0), living_enemies: z.number().int().min(0), terrain_tags: z.array(shortCode).max(100),
 }).strict();
+const compactIntelRow = z.object({
+  policy: z.literal(DM_TURN_INTEL_POLICY),
+  actor_id: identifier,
+  target_id: identifier,
+  option_id: identifier.nullable(),
+  action_id: identifier.nullable(),
+  attacks: z.number().int().min(0).max(20),
+  kind: z.enum(['offense', 'approach']),
+  visibility: z.enum(['VISIBLE', 'HIDDEN', 'UNKNOWN']),
+  cover: z.enum(['NONE', 'HALF', 'THREE_QUARTERS', 'TOTAL', 'UNKNOWN']),
+  range: z.enum(['MELEE', 'NORMAL', 'LONG', 'OUT', 'UNRESOLVED']),
+  distance_feet: z.number().int().min(0).nullable(),
+  roll_mode: z.enum(['STRAIGHT', 'ADVANTAGE', 'DISADVANTAGE', 'MIXED', 'UNRESOLVED']),
+  reason_codes: z.array(shortCode).max(50),
+  p_hit: z.enum(['≈0', '≈1/4', '≈1/3', '≈1/2', '≈2/3', '≈3/4', '≈1']).nullable(),
+  ev: z.number().int().nullable(),
+  consequence_codes: z.array(shortCode).max(20),
+  movement_need_feet: z.number().int().min(0).nullable(),
+}).strict();
+const contextIntelRow = compactIntelRow
+  .omit({ policy: true, actor_id: true, option_id: true, attacks: true, reason_codes: true, consequence_codes: true })
+  .extend({
+    attacks: z.number().int().min(0).max(20).optional(),
+    reason_codes: z.array(shortCode).max(50).optional(),
+    consequence_codes: z.array(shortCode).max(20).optional(),
+  });
+const actorIntel = z.object({
+  policy: z.literal(DM_TURN_INTEL_POLICY),
+  zero_movement_offense_count: z.number().int().min(0),
+  rows: z.array(contextIntelRow).max(3),
+  salient_window: z.string().min(1).max(500).nullable(),
+}).strict();
+const failureModesManifest = z.object({
+  policy: z.literal(ENGINE_FAILURE_MODES_POLICY),
+  modes: z.array(z.string().min(1).max(500)).min(1).max(20),
+}).strict();
 const turnRequest = z.union([
   z.object({
     kind: z.literal('round_plan'), request_id: identifier,
@@ -142,7 +181,7 @@ const currentPlanSummary = z.object({
     proposal_digest: z.string().regex(/^[0-9a-f]{64}$/u),
   }).strict()).min(1).max(50),
 }).strict();
-const actorContext = z.object({ actor_id: identifier, status: actorStatus, options: z.array(tacticalOption).max(20), threats: z.array(threat).max(50) }).strict();
+const actorContext = z.object({ actor_id: identifier, status: actorStatus, options: z.array(tacticalOption).max(20), threats: z.array(threat).max(50), intel: actorIntel }).strict();
 const advertisedPlay = z.object({
   name: z.enum(PLAY_NAMES),
   description: z.string().min(1).max(200),
@@ -160,6 +199,7 @@ const fullTurnContextOutput = z.object({
   applicable_plays: z.array(advertisedPlay).max(3),
   suggested_plan: suggestedPlan.optional(),
   current_plan: currentPlanSummary.optional(),
+  known_failure_modes: failureModesManifest.optional(),
   recent_changes: z.array(recentChange).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable(),
 }).strict();
 const revisionDeltaOperation = z.union([
@@ -212,6 +252,31 @@ function pairOutput(facts: z.ZodType<unknown>) {
 }
 const metrics = z.object({ outcome_probability: z.number().min(0).max(1).nullable(), expected_damage: z.number().finite().nullable(), expected_healing: z.number().finite().nullable(), resource_cost: z.number().int().min(0).nullable(), distribution: z.array(z.object({ outcome: z.number().finite(), probability: z.number().min(0).max(1) }).strict()).max(100).nullable() }).strict();
 const diceOutput = z.object({ state_ref: stateRef, results: z.array(z.object({ candidate_id: z.string().min(1).max(100), policy: z.literal(TACTICAL_EVALUATOR_POLICY), resolvable: z.boolean(), metrics, assumptions: z.array(shortCode).max(20), refusals: z.array(refusal).max(20) }).strict()).max(20) }).strict();
+const tacticalIntelInitiative = z.union([
+  z.object({
+    policy: z.literal(ENGINE_INITIATIVE_PROJECTION_POLICY),
+    order: z.array(identifier).max(100),
+    upcoming: z.array(z.unknown()).max(500),
+  }).strict(),
+  z.object({
+    policy: z.literal(ENGINE_INITIATIVE_PROJECTION_POLICY),
+    pairs: z.array(z.object({
+      actor_id: identifier,
+      target_id: identifier,
+      actor_before_target: z.boolean(),
+    }).strict()).max(100),
+  }).strict(),
+]);
+const tacticalIntelOutput = z.object({
+  state_ref: stateRef,
+  policy: z.literal(DM_INTEL_QUERY_POLICY),
+  renderer_policy: z.literal(DM_TURN_INTEL_POLICY),
+  evaluator_policy: z.literal(TACTICAL_EVALUATOR_POLICY),
+  rows: z.array(compactIntelRow).max(20),
+  initiative: tacticalIntelInitiative.nullable(),
+  truncated: z.boolean(),
+  next_cursor: z.string().max(500).nullable(),
+}).strict();
 
 const resolutionPreview = z.object({ actor_id: identifier, option_id: identifier, action_slot_count: z.number().int().min(1).max(20), movement_feet: z.number().int().min(0), resolution_digest: z.string().min(64).max(128), summary: summaryText }).strict();
 const correctionGuidance = z.union([
@@ -388,6 +453,17 @@ export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
       context.addIssue({ code: 'custom', path: ['since_revision'], message: 'since_revision is required for turn_delta.' });
     }
   }), turnContextOutput),
+  spec('engine.query_tactical_intel', 'Read the versioned paginated actor-by-target tactical matrix and optional initiative order.', z.object({
+    ...refInput,
+    actor_ids: z.array(identifier).min(1).max(50).optional(),
+    target_ids: z.array(identifier).min(1).max(50).optional(),
+    page: z.object({ cursor: z.string().min(1).max(500).optional(), maximum_items: z.number().int().min(1).max(20).optional() }).strict().optional(),
+    initiative: z.union([
+      z.object({ mode: z.literal('none') }).strict(),
+      z.object({ mode: z.literal('full') }).strict(),
+      z.object({ mode: z.literal('pairwise'), pairs: z.array(z.object({ actor_id: identifier, target_id: identifier }).strict()).min(1).max(100) }).strict(),
+    ]).optional(),
+  }).strict(), tacticalIntelOutput),
   spec('engine.propose_from_play', 'Expand one advertised play into an editable, unqueued composite proposal set.', z.object({ play_name: z.enum(PLAY_NAMES) }).strict(), proposeFromPlayOutput),
   spec('engine.get_state_summary', 'Read one bounded state projection or journal delta using an opaque application cursor.', z.object({ ...refInput, granularity: z.enum(['turn_minimal', 'room_tactical', 'combatant_detail', 'journal_delta']), combatant_ids: z.array(identifier).max(50).optional(), since_revision: z.number().int().min(1).optional(), page: page.optional() }).strict(), stateSummaryOutput),
   spec('engine.get_combatant_options', 'List canonical legal and unavailable action options for one combatant.', z.object({ ...refInput, actor_id: identifier, include_unavailable: z.boolean().optional(), page: page.optional() }).strict(), optionsOutput),

@@ -234,6 +234,7 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
 
     expect(converted.map((tool) => tool.function.name)).toEqual([
       'engine__get_turn_context',
+      'engine__query_tactical_intel',
       'engine__propose_from_play',
       'engine__validate_proposal',
       'engine__submit_round_proposals',

@@ -141,6 +141,9 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       ...(manifest.turnContextDeltaBase === undefined ? {} : {
         turnContextDeltaBase: manifest.turnContextDeltaBase,
       }),
+      ...(manifest.initiativeProjection === undefined ? {} : {
+        initiativeProjection: manifest.initiativeProjection,
+      }),
     });
     const wireContext = serializedToolCall(runtime.handler, 'engine.get_turn_context', {
       run_id: manifest.runId, expected_revision: manifest.revision, scope: 'round',
@@ -1154,7 +1157,21 @@ describe('AI-DM engine MCP conversation runner', () => {
       task: 'round_plan',
       submissionTool: 'engine.submit_round_proposals',
       roundProtocolVersion: 3,
+      engineIntel: expect.objectContaining({
+        policy: 'dm-intel-capture-v1',
+        policyVersions: expect.objectContaining({
+          evaluator: 'tactical-evaluator-v2',
+          renderer: 'dm-turn-intel-v1',
+          query: 'dm-intel-query-v1',
+          capture: 'dm-intel-capture-v1',
+        }),
+        actors: expect.arrayContaining([expect.objectContaining({
+          offeredOptionIds: expect.any(Array),
+          rows: expect.any(Array),
+        })]),
+      }),
     }));
+    expect(row?.engineIntel).toEqual(row?.rlData?.engineIntel);
     expect(row?.adjustments[0]?.rlData[0]).toEqual(expect.objectContaining({
       format: 'arena-rl-capture-v2',
       task: 'plan_adjustment',

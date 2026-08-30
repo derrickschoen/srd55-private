@@ -65,6 +65,7 @@ import {
   type InitialProposalAttempt, type TurnExhaustionHost,
 } from '../src/vtt/turn-exhaustion-coordinator';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
+import type { DmIntelCapture } from '../src/vtt/dm-tactical-intel';
 import {
   type ReactionGuidanceDeclaration,
 } from '../src/vtt/reaction-guidance';
@@ -156,6 +157,7 @@ export interface ConversationRlDataV2 {
   readonly roundProtocolVersion: typeof ROUND_PROTOCOL_VERSION;
   readonly partyPolicyHash: string | null;
   readonly materialityPolicyHash: string | null;
+  readonly engineIntel: DmIntelCapture;
 }
 
 export type ConversationRlData = ConversationRlDataV2;
@@ -321,6 +323,7 @@ export interface ConversationRow {
   readonly initiativeOrder: readonly CombatantId[];
   readonly partyPolicyHash: string | null;
   readonly materialityPolicyHash: string | null;
+  readonly engineIntel: DmIntelCapture | null;
   readonly adjustmentBudget: number;
   readonly teamPlans: ConversationTeamPlans;
   readonly pcTurns: readonly ConversationPcTurn[];
@@ -814,6 +817,9 @@ function rlCapture(
   if (proposal.submittedArguments === undefined) {
     throw new Error('Accepted proposal omitted its validated submission arguments.');
   }
+  if (proposal.intelCapture === undefined) {
+    throw new Error('Accepted proposal omitted its full-precision offered-set intel capture.');
+  }
   const adjustment = proposal.kind === 'plan_adjustment_turn_proposal';
   return {
     format: 'arena-rl-capture-v2',
@@ -837,6 +843,7 @@ function rlCapture(
     roundProtocolVersion: ROUND_PROTOCOL_VERSION,
     partyPolicyHash: metadata.partyPolicyHash,
     materialityPolicyHash: metadata.materialityPolicyHash,
+    engineIntel: structuredClone(proposal.intelCapture),
   };
 }
 
@@ -897,6 +904,7 @@ function plannedTurnContext(
       },
     } : { requestedActorCount: request.actors.length }),
     toolProfile: 'dm',
+    initiativeProjection: capsule.projection.initiative,
     ...(base === undefined ? {} : { turnContextDeltaBase: base }),
   });
   const value = runtime.toolSurface.execute('engine.get_turn_context', {
@@ -1250,6 +1258,7 @@ async function writeLauncher(input: {
     revision: capsule.revision, requestId: request.requestId,
     phase: request.phase, correctionNumber: request.correctionNumber,
     room: input.room, historyKind: input.historyKind, toolProfile: 'dm',
+    initiativeProjection: capsule.projection.initiative,
     ...(request.kind === 'plan_adjustment' ? {
       requestKind: request.kind,
       requestedActorIds: request.actors,
@@ -1309,6 +1318,7 @@ function fullTurnContextBase(
       },
     } : { requestedActorCount: request.actors.length }),
     toolProfile: 'dm',
+    initiativeProjection: capsule.projection.initiative,
   });
   const response = runtime.handler.handle({
     jsonrpc: '2.0', id: 'turn-context-base', method: 'tools/call',
@@ -1368,6 +1378,7 @@ function inProcessDmToolSession(input: {
       },
     } : { requestedActorCount: request.actors.length }),
     toolProfile: 'dm',
+    initiativeProjection: capsule.projection.initiative,
     ...(input.turnContextDeltaBase === undefined ? {} : {
       turnContextDeltaBase: input.turnContextDeltaBase,
     }),
@@ -1730,6 +1741,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let authorizationStateBinding: ConversationRow['stateBinding']['authorization'] = null;
       let authorizedPlan: ConversationRow['authorizedPlan'] = null;
       let acceptedSubmission: readonly EngineTurnProposal[] | null = null;
+      let acceptedIntelCapture: DmIntelCapture | null = null;
       let authorizedMonsterProposalHash: string | null = null;
       let roundNarrative: ConversationRow['roundNarrative'] = null;
       let initialDispatchPlanner: ConversationPlannerAttribution | null = null;
@@ -2317,6 +2329,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
             proposalId = proposal.proposalId;
             authorizedMonsterProposalHash = sha256(canonicalJson(proposal));
             acceptedSubmission = proposal.resolutions.map((entry) => structuredClone(entry.proposal));
+            acceptedIntelCapture = proposal.intelCapture === undefined
+              ? null : structuredClone(proposal.intelCapture);
             authorizedPlan = mechanics.map((entry): ConversationAuthorizedActorPlan => ({
               actorId: entry.mechanics.actorId,
               acceptedProposal: structuredClone(entry.acceptedProposal),
@@ -2683,6 +2697,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
         materialityPolicyHash: config.combatModel === 'initiative_segments_v1'
           ? PLAN_MATERIALITY_POLICY_HASH
           : null,
+        engineIntel: acceptedIntelCapture,
         adjustmentBudget: config.combatModel === 'initiative_segments_v1' ? 2 : 0,
         teamPlans,
         pcTurns,

@@ -26,6 +26,7 @@ import { feet } from '../../../src/combat/values';
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
 const TOOL_NAMES = [
   'engine.get_turn_context',
+  'engine.query_tactical_intel',
   'engine.propose_from_play',
   'engine.get_state_summary',
   'engine.get_combatant_options',
@@ -336,6 +337,11 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
   const facts = fixtureFacts(state, runtime);
   switch (name) {
     case 'engine.get_turn_context': return contextArguments();
+    case 'engine.query_tactical_intel': return {
+      state_ref: facts.ref,
+      page: { maximum_items: 2 },
+      initiative: { mode: 'none' },
+    };
     case 'engine.propose_from_play': return { play_name: 'basic_advance' };
     case 'engine.get_state_summary': return { state_ref: facts.ref, granularity: 'room_tactical', page: { maximum_items: 1 } };
     case 'engine.get_combatant_options': return { state_ref: facts.ref, actor_id: facts.actor, include_unavailable: true, page: { maximum_items: 2 } };
@@ -517,6 +523,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     if (!Array.isArray(adjustmentList)) throw new TypeError('Adjustment DM tools/list omitted tools.');
     expect(adjustmentList.map((tool) => record(tool)['name'])).toEqual([
       'engine.get_turn_context',
+      'engine.query_tactical_intel',
       'engine.validate_proposal',
       'engine.submit_plan_adjustment',
       'engine.request_dm_adjudication',

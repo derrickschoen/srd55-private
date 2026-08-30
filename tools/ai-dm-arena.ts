@@ -14,6 +14,7 @@ import {
 } from './ai-dm-conversation';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
 import type { AgentSessionAdapter } from '../src/vtt/agent-session';
+import type { DmIntelCapture } from '../src/vtt/dm-tactical-intel';
 import type { LocalOpenAiConfig, LocalThinkMode } from '../src/vtt/agent-adapters/local-openai';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 import {
@@ -106,6 +107,7 @@ export interface ArenaRow {
   readonly initiativeOrder: import('./ai-dm-conversation').ConversationRow['initiativeOrder'];
   readonly partyPolicyHash: string | null;
   readonly materialityPolicyHash: string | null;
+  readonly engineIntel: DmIntelCapture | null;
   readonly adjustmentBudget: number;
   readonly teamPlans: import('./ai-dm-conversation').ConversationTeamPlans;
   readonly pcTurns: readonly import('./ai-dm-conversation').ConversationPcTurn[];
@@ -400,6 +402,7 @@ function arenaRows(
     initiativeOrder: row.initiativeOrder,
     partyPolicyHash: row.partyPolicyHash,
     materialityPolicyHash: row.materialityPolicyHash,
+    engineIntel: row.engineIntel,
     adjustmentBudget: row.adjustmentBudget,
     teamPlans: row.teamPlans,
     pcTurns: row.pcTurns,

@@ -16,6 +16,13 @@ import type {
 } from './speculative-plan-types';
 import type { PlanMaterialityReasonCode } from './plan-materiality';
 import type { EngineActorOption } from './turn-proposal';
+import type { EncounterTimelineProjection } from './session-timeline';
+export const ENGINE_INITIATIVE_PROJECTION_POLICY = 'initiative-intel-v1' as const;
+
+export interface EngineInitiativeProjection {
+  readonly policy: typeof ENGINE_INITIATIVE_PROJECTION_POLICY;
+  readonly timeline: EncounterTimelineProjection;
+}
 
 export interface EngineProjectedAction {
   readonly actionId: string;
@@ -92,6 +99,7 @@ export interface EngineDmProjection {
   readonly round: number;
   readonly activeSide: 'players' | 'monsters' | 'none';
   readonly activeCombatant: CombatantId | null;
+  readonly initiative: EngineInitiativeProjection;
   readonly bounds: { readonly columns: number; readonly rows: number };
   readonly blockedCells: readonly GridCell[];
   readonly difficultTerrainCells: readonly GridCell[];
@@ -216,6 +224,10 @@ export function projectEngineDmProjection(
     round: encounter.round,
     activeSide: activeSide(projection),
     activeCombatant: encounter.activeCombatant,
+    initiative: {
+      policy: ENGINE_INITIATIVE_PROJECTION_POLICY,
+      timeline: structuredClone(projection.timeline),
+    },
     bounds: { ...encounter.bounds },
     blockedCells: encounter.blockedCells.map((cell) => ({ ...cell })),
     difficultTerrainCells: encounter.environment.difficultTerrainRegions
@@ -255,6 +267,7 @@ export function projectEngineDmProjection(
 export function projectEngineEncounterState(
   state: EncounterState,
   registry: EngineActionRegistry,
+  initiative: EngineInitiativeProjection,
   room: number | null = null,
 ): EngineDmProjection {
   const active = state.activeCombatant === null
@@ -267,6 +280,7 @@ export function projectEngineEncounterState(
       ? 'none'
       : active.profile.kind === 'monster' ? 'monsters' : 'players',
     activeCombatant: state.activeCombatant,
+    initiative: structuredClone(initiative),
     bounds: { ...state.bounds },
     blockedCells: state.blockedCells.map((cell) => ({ ...cell })),
     difficultTerrainCells: state.environment.difficultTerrainRegions

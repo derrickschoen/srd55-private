@@ -16,6 +16,7 @@ import {
   createEngineStateCapsule,
   projectEngineEncounterState,
   type EngineCapsuleRequest,
+  type EngineInitiativeProjection,
   type EngineOrdinaryRequestKind,
   type EnginePlanAdjustmentMetadata,
   type RuleReference,
@@ -145,6 +146,7 @@ export interface EngineMcpLauncherManifest {
   readonly planAdjustment?: EnginePlanAdjustmentMetadata;
   readonly toolProfile?: EngineMcpToolProfile;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
+  readonly initiativeProjection?: EngineInitiativeProjection;
 }
 
 export function createEngineMcpRuntime(
@@ -170,6 +172,7 @@ export function createEngineMcpRuntime(
     readonly onProposal?: (proposal: EngineProposalEnvelope) => void;
     readonly toolProfile?: EngineMcpToolProfile;
     readonly turnContextDeltaBase?: TurnContextDeltaBase;
+    readonly initiativeProjection?: EngineInitiativeProjection;
     readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
   } = {},
 ): EngineMcpRuntime {
@@ -220,7 +223,23 @@ export function createEngineMcpRuntime(
     revision,
     generatedAt: '2026-08-27T12:00:00.000Z',
     request,
-    projection: projectEngineEncounterState(planningState, engineActionRegistry(planningState, revision), options.room ?? 1),
+    projection: projectEngineEncounterState(
+      planningState,
+      engineActionRegistry(planningState, revision),
+      options.initiativeProjection ?? {
+        policy: 'initiative-intel-v1',
+        timeline: {
+          phase: structuredClone(planningState.phase),
+          round: planningState.round,
+          currentCombatant: null,
+          initiative: [],
+          upcoming: [],
+          roundBoundaries: [],
+          branchPoints: [],
+        },
+      },
+      options.room ?? 1,
+    ),
     historyDelta: options.historyKind === undefined ? [] : [{
       revision,
       kind: options.historyKind,
@@ -334,6 +353,15 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
       ? typeof input['planAdjustment'] === 'object' && input['planAdjustment'] !== null &&
         !Array.isArray(input['planAdjustment']) && Array.isArray(input['requestedActorIds'])
       : input['planAdjustment'] === undefined) &&
+    (input['initiativeProjection'] === undefined || (() => {
+      const projection = input['initiativeProjection'];
+      if (typeof projection !== 'object' || projection === null || Array.isArray(projection)) return false;
+      const candidate = projection as Readonly<Record<string, unknown>>;
+      const timeline = candidate['timeline'];
+      return candidate['policy'] === 'initiative-intel-v1' &&
+        typeof timeline === 'object' && timeline !== null && !Array.isArray(timeline) &&
+        Array.isArray((timeline as Readonly<Record<string, unknown>>)['initiative']);
+    })()) &&
     (input['turnContextDeltaBase'] === undefined || (() => {
       const base = input['turnContextDeltaBase'];
       if (typeof base !== 'object' || base === null || Array.isArray(base)) return false;
@@ -394,6 +422,9 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       } : {}),
       ...(manifest.turnContextDeltaBase === undefined ? {} : {
         turnContextDeltaBase: manifest.turnContextDeltaBase,
+      }),
+      ...(manifest.initiativeProjection === undefined ? {} : {
+        initiativeProjection: manifest.initiativeProjection,
       }),
       ...((selectedProfile ?? manifest.toolProfile) === undefined
         ? {}

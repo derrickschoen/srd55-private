@@ -26,6 +26,7 @@ import {
   type ResolvedTurnMechanics,
 } from './intent-resolver';
 import { createEngineMcpRuntime } from './mcp/entrypoint';
+import { projectEngineInitiativeIntel } from './engine-initiative-intel';
 import {
   unattendedReactionOfferResolution,
   type AutoResolvedReactionOffer,
@@ -572,6 +573,7 @@ export class EngineRoundSession {
       correctionNumber: request.phase === 'correction' ? 1 : 0,
       room: request.room,
       historyKind: request.historyKind,
+      initiativeProjection: projectEngineInitiativeIntel(this.#state, []),
       ...(request.requestKind === undefined ? {} : { requestKind: request.requestKind }),
       ...(request.requestedActorIds === undefined ? {} : {
         requestedActorIds: request.requestedActorIds,

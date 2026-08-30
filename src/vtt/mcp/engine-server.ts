@@ -23,6 +23,19 @@ import {
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
 import type { EngineMovementPreference, EngineTurnProposal, PureTurnProposalResolver } from '../intent-resolver';
 import { engineOptionId, type EngineActorOption } from '../turn-proposal';
+import {
+  DM_INTEL_QUERY_POLICY,
+  DM_TURN_INTEL_POLICY,
+  captureDmIntel,
+  exactDmIntelMatrix,
+  fullInitiativeIntel,
+  pairwiseInitiativeIntel,
+  renderDmContextIntelRow,
+  renderDmIntelRow,
+  salientInitiativeWindow,
+  topDmActorIntelRows,
+} from '../dm-tactical-intel';
+import { renderEngineFailureModes } from '../engine-failure-modes';
 import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
 import { diffTurnContextValues } from '../dm-bridge/projection-transport';
 import { submitSpeculativeRoundPlan } from '../speculative-plan-submission';
@@ -44,6 +57,7 @@ import { ENGINE_TOOL_SPECS, schemaViolations } from './schemas';
 
 export const ENGINE_DM_TOOL_NAMES = Object.freeze([
   'engine.get_turn_context',
+  'engine.query_tactical_intel',
   'engine.propose_from_play',
   'engine.validate_proposal',
   'engine.submit_round_proposals',
@@ -51,6 +65,7 @@ export const ENGINE_DM_TOOL_NAMES = Object.freeze([
 ] as const);
 export const ENGINE_ADJUSTMENT_DM_TOOL_NAMES = Object.freeze([
   'engine.get_turn_context',
+  'engine.query_tactical_intel',
   'engine.validate_proposal',
   'engine.submit_plan_adjustment',
   'engine.request_dm_adjudication',
@@ -270,7 +285,7 @@ function hitPointBand(hitPoints: number, maximum: number): 'uninjured' | 'injure
 function actorStatus(actor: EngineStateCapsule['projection']['combatants'][number]): Readonly<Record<string, unknown>> {
   return { life: actor.life, hit_point_band: hitPointBand(actor.hitPoints, actor.hitPointMaximum), movement_feet: actor.movementRemainingFeet, action_available: actor.actionAvailable, bonus_action_available: actor.bonusActionAvailable, reaction_available: actor.reactionAvailable, effect_tags: [], pending_decision_ids: [] };
 }
-function tacticalSummary(capsule: EngineStateCapsule): Readonly<Record<string, unknown>> {
+function tacticalSummary(capsule: EngineStateCapsule) {
   const living = capsule.projection.combatants.filter((actor) => actor.life !== 'dead');
   return {
     room: capsule.projection.room, round: capsule.projection.round, active_side: capsule.projection.activeSide,
@@ -506,11 +521,26 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     const required = input['scope'] === 'active_turn' && capsule.projection.activeCombatant !== null ? [capsule.projection.activeCombatant] : requested;
     const maximum = typeof input['maximum_options_per_actor'] === 'number' ? input['maximum_options_per_actor'] : 20;
     const includeExpectations = input['include_expectations'] !== false;
+    const exactIntel = exactDmIntelMatrix(state, capsule, queries, required);
     const actors = [...required].sort().map((actorId) => {
       const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
       if (actor === undefined) throw new RangeError(`ACTOR_ABSENT:${actorId}`);
       const all = tacticalOptions(state, queries, capsule, actorId, includeExpectations, true);
-      return { actor_id: actorId, status: actorStatus(actor), options: all.slice(0, maximum), threats: threats(state, queries, actorId), omitted: all.length > maximum };
+      const intelRows = topDmActorIntelRows(exactIntel, actorId);
+      return {
+        actor_id: actorId,
+        status: actorStatus(actor),
+        options: all.slice(0, maximum),
+        threats: [...threats(state, queries, actorId)],
+        intel: {
+          policy: DM_TURN_INTEL_POLICY,
+          zero_movement_offense_count: exactIntel.filter((row) =>
+            row.actorId === actorId && row.minimumMovementFeet === 0).length,
+          rows: intelRows.map(renderDmContextIntelRow),
+          salient_window: salientInitiativeWindow(capsule, intelRows),
+        },
+        omitted: all.length > maximum,
+      };
     });
     const adjustmentRequest = capsule.request?.phase !== 'speculative' && capsule.request?.kind === 'plan_adjustment'
       ? capsule.request
@@ -530,7 +560,10 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           adjustment_budget: adjustmentRequest.adjustmentBudget,
         }),
       },
-      summary: tacticalSummary(capsule), actors: actors.map(({ omitted: _omitted, ...actor }) => actor), recent_changes: recentChanges(capsule),
+      summary: tacticalSummary(capsule), actors: actors.map(({ omitted: _omitted, ...actor }) => actor), recent_changes: [...recentChanges(capsule)],
+      ...(dependencies.toolProfile === 'dm' ? {
+        known_failure_modes: renderEngineFailureModes(),
+      } : {}),
       applicable_plays: applicablePlays.map((play) => ({
         name: play.name,
         description: play.description,
@@ -568,12 +601,40 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     let output: Readonly<Record<string, unknown>> = suggestedPlan === null
       ? result
       : { ...result, suggested_plan: suggestedPlan };
+    const markContextTrimmed = (): void => {
+      result.truncated = true;
+      result.context_trimmed = true;
+      if (suggestedPlan !== null && output !== result) {
+        output = { ...output, truncated: true, context_trimmed: true };
+      }
+    };
     while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.options.length > 0);
       if (actor === undefined) break;
       actor.options.pop();
-      result.truncated = true;
-      result.context_trimmed = true;
+      markContextTrimmed();
+    }
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+      const actor = [...result.actors].reverse().find((candidate) => candidate.intel.rows.length > 1);
+      if (actor === undefined) break;
+      actor.intel.rows.pop();
+      markContextTrimmed();
+    }
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+      const actor = [...result.actors].reverse().find((candidate) => candidate.threats.length > 0);
+      if (actor === undefined) break;
+      actor.threats.pop();
+      markContextTrimmed();
+    }
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+      result.recent_changes.length > 0) {
+      result.recent_changes.pop();
+      markContextTrimmed();
+    }
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+      result.summary.terrain_tags.length > 0) {
+      result.summary.terrain_tags.pop();
+      markContextTrimmed();
     }
     if (suggestedPlan !== null &&
       new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
@@ -636,6 +697,54 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       };
     }
     const capsule = feed.read(stateReference(input['state_ref']));
+    if (name === 'engine.query_tactical_intel') {
+      const actorIds = Array.isArray(input['actor_ids'])
+        ? input['actor_ids'].map((value) => combatantId(String(value)))
+        : capsule.request?.actors ?? [];
+      const targetIds = Array.isArray(input['target_ids'])
+        ? new Set(input['target_ids'].map((value) => combatantId(String(value))))
+        : null;
+      const matrix = exactDmIntelMatrix(state, capsule, queries, actorIds)
+        .filter((row) => targetIds === null || targetIds.has(row.targetId));
+      const requestedPage = input['page'] === undefined ? {} : record(input['page'], 'page');
+      const pageInput = {
+        ...requestedPage,
+        maximum_items: typeof requestedPage['maximum_items'] === 'number'
+          ? requestedPage['maximum_items'] : 20,
+      };
+      const paged = applicationPage(
+        capsule,
+        canonicalJson({ actorIds, targetIds: targetIds === null ? null : [...targetIds].sort() }),
+        matrix,
+        pageInput,
+      );
+      const initiativeInput = input['initiative'] === undefined
+        ? null : record(input['initiative'], 'initiative');
+      const initiativeMode = initiativeInput === null ? 'none' : stringField(initiativeInput, 'mode');
+      const initiative = initiativeMode === 'full'
+        ? fullInitiativeIntel(capsule)
+        : initiativeMode === 'pairwise'
+          ? pairwiseInitiativeIntel(capsule, Array.isArray(initiativeInput?.['pairs'])
+            ? initiativeInput['pairs'].map((value) => {
+                const pair = record(value, 'initiative pair');
+                return {
+                  actorId: combatantId(stringField(pair, 'actor_id')),
+                  targetId: combatantId(stringField(pair, 'target_id')),
+                };
+              })
+            : [])
+          : null;
+      return {
+        state_ref: externalStateRef(capsule),
+        policy: DM_INTEL_QUERY_POLICY,
+        renderer_policy: DM_TURN_INTEL_POLICY,
+        evaluator_policy: TACTICAL_EVALUATOR_POLICY,
+        rows: paged.values.map(renderDmIntelRow),
+        initiative,
+        truncated: paged.truncated,
+        next_cursor: paged.next,
+      };
+    }
     if (name === 'engine.get_state_summary') {
       const granularity = stringField(input, 'granularity');
       if (granularity === 'combatant_detail' && !Array.isArray(input['combatant_ids'])) throw new RangeError('combatant_ids are required.');
@@ -790,7 +899,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       return idempotent(key, input, () => {
         const valid = resolved.flatMap(({ proposal, resolution }) => resolution.valid ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
-        submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance, submittedArguments: structuredClone(input) });
+        submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance, submittedArguments: structuredClone(input), intelCapture: captureDmIntel(state, capsule, queries) });
         return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.proposal.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
       });
     }
@@ -875,6 +984,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             baseline_plan_hash: request.baselinePlanHash,
             updates: valid,
             submittedArguments: structuredClone(input),
+            intelCapture: captureDmIntel(state, capsule, queries),
           });
         }
         const actorResolutions = valid.map((entry) => ({

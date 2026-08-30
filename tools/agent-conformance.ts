@@ -5,6 +5,7 @@ import { sha256 } from '../src/crypto/sha256';
 import { createEngineStateCapsule, engineStateHandle, projectEngineEncounterState } from '../src/vtt/engine-state-capsule';
 import type { EngineStateReference } from '../src/vtt/engine-state-capsule';
 import { engineActionRegistry } from '../src/vtt/engine-query-port';
+import { projectEngineInitiativeIntel } from '../src/vtt/engine-initiative-intel';
 import { resolveAgentAdapter } from '../src/vtt/agent-adapters';
 import { UNVERIFIED_CONTRACT_CLAUDE_CODE } from '../src/vtt/agent-adapters/claude-code';
 import { UNVERIFIED_CONTRACT_CODEX } from '../src/vtt/agent-adapters/codex';
@@ -349,7 +350,12 @@ async function recomputeFixtureCapsuleProof(
       correctionNumber: 0,
       actors,
     },
-    projection: projectEngineEncounterState(state, engineActionRegistry(state), 1),
+    projection: projectEngineEncounterState(
+      state,
+      engineActionRegistry(state),
+      projectEngineInitiativeIntel(state, []),
+      1,
+    ),
   });
   return {
     proofToken: sha256(`${capsule.digest}|turn_minimal|state_summary_proof_v1`),

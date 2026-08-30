@@ -318,6 +318,7 @@ describe('read-only engine state capsule', () => {
       'bounds',
       'combatants',
       'difficultTerrainCells',
+      'initiative',
       'movementBlockingObjects',
       'room',
       'round',
