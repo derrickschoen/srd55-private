@@ -46,7 +46,7 @@ import {
   createEngineMcpRuntime, loadArenaFixture, type EngineMcpLauncherManifest,
 } from '../src/vtt/mcp/entrypoint';
 import type { TurnContextDeltaBase } from '../src/vtt/mcp/engine-server';
-import { renderEnginePrompt } from '../src/vtt/mcp/engine-server';
+import { renderEnginePrompt, TURN_CONTEXT_MAX_BYTES } from '../src/vtt/mcp/engine-server';
 import {
   applyRevisionDelta,
   type RevisionDeltaOperation,
@@ -64,6 +64,7 @@ import {
   type ReactionGuidanceDeclaration,
 } from '../src/vtt/reaction-guidance';
 import { buildArenaSessionInstructions } from './rl/arena-session-instructions';
+import { readRepoCommit } from './rl/repo-commit';
 
 export const CONVERSATION_CLIS = ['codex', 'claude-code', 'local-openai'] as const;
 export type ConversationCli = (typeof CONVERSATION_CLIS)[number];
@@ -160,6 +161,9 @@ export interface ConversationRow {
   readonly escalationSessionId: string | null;
   readonly sessionIdHash: string | null;
   readonly kbHash: string | null;
+  readonly repoCommit: string;
+  readonly rawTurnContext: string;
+  readonly turnContextGranularity: 'full' | 'turn_delta';
   readonly snippetHash: string;
   readonly snippetSetHash: string;
   readonly suggestedPlay: ConversationSuggestedPlay | null;
@@ -634,7 +638,7 @@ function externalReactionGuidance(guidance: ReactionGuidanceDeclaration): Readon
 
 function rlCapture(
   knowledgeBase: string | null,
-  turnContext: Readonly<Record<string, unknown>>,
+  turnContext: CapturedTurnContext,
   proposal: RoundIntentProposalEnvelope,
 ): ConversationRlData {
   if (proposal.submittedArguments === undefined) {
@@ -644,10 +648,74 @@ function rlCapture(
     format: 'arena-rl-capture-v1',
     sourceLicense: 'project-generated',
     sessionInstructions: buildArenaSessionInstructions(knowledgeBase),
-    turnContext: structuredClone(turnContext),
+    turnContext: structuredClone(turnContext.value),
     submitRoundIntentsArguments: structuredClone(proposal.submittedArguments),
     stateDigest: proposal.stateDigest,
   };
+}
+
+interface CapturedTurnContext {
+  readonly raw: string;
+  readonly granularity: 'full' | 'turn_delta';
+  readonly value: Readonly<Record<string, unknown>>;
+}
+
+function capturedTurnContext(raw: string): CapturedTurnContext {
+  const bytes = new TextEncoder().encode(raw).byteLength;
+  if (bytes > TURN_CONTEXT_MAX_BYTES) {
+    throw new RangeError(
+      `Recorded turn context is ${String(bytes)} UTF-8 bytes; maximum is ${String(TURN_CONTEXT_MAX_BYTES)}.`,
+    );
+  }
+  const value = requiredRecord(JSON.parse(raw) as unknown, 'recorded turn context');
+  const granularity = value['granularity'];
+  if (granularity !== 'full' && granularity !== 'turn_delta') {
+    throw new TypeError('Recorded turn context has no supported granularity marker.');
+  }
+  return { raw, granularity, value };
+}
+
+function plannedTurnContext(
+  state: EncounterState,
+  snapshot: EngineRoundSnapshot,
+  base: TurnContextDeltaBase | undefined,
+): CapturedTurnContext {
+  const capsule = snapshot.capsule;
+  const request = capsule.request;
+  if (request === null || request.phase === 'speculative') {
+    throw new Error('Recorded turn context requires an ordinary pending request.');
+  }
+  const runtime = createEngineMcpRuntime(state, {
+    runId: capsule.runId,
+    branchId: capsule.branchId,
+    revision: capsule.revision,
+    requestId: request.requestId,
+    phase: request.phase,
+    correctionNumber: request.correctionNumber,
+    room: capsule.projection.room,
+    ...(capsule.historyDelta[0] === undefined ? {} : {
+      historyKind: capsule.historyDelta[0].kind,
+    }),
+    requestedActorCount: request.actors.length,
+    toolProfile: 'dm',
+    ...(base === undefined ? {} : { turnContextDeltaBase: base }),
+  });
+  const value = runtime.toolSurface.execute('engine.get_turn_context', {
+    run_id: capsule.runId,
+    expected_revision: capsule.revision,
+    scope: 'round',
+    ...(base === undefined
+      ? { granularity: 'full' }
+      : { granularity: 'turn_delta', since_revision: base.revision }),
+  });
+  return capturedTurnContext(JSON.stringify(value));
+}
+
+function takeTurnContext(path: string): CapturedTurnContext | null {
+  let source: string;
+  try { source = readFileSync(path, 'utf8'); } catch { return null; }
+  const raw = source.split('\n').filter((line) => line.trim().length > 0).at(-1);
+  return raw === undefined ? null : capturedTurnContext(raw);
 }
 
 async function driveScriptedMcp(
@@ -914,13 +982,16 @@ async function writeLauncher(input: {
   readonly manifestPath: string;
   readonly recoveryManifestPath: string;
   readonly spoolPath: string;
+  readonly turnContextSpoolPath: string;
 }> {
   const fixturePath = join(input.directory, `${input.name}-fixture.json`);
   const spoolPath = join(input.directory, `${input.name}-proposals.jsonl`);
+  const turnContextSpoolPath = join(input.directory, `${input.name}-turn-context.jsonl`);
   const manifestPath = join(input.directory, `${input.name}-launcher.json`);
   const recoveryManifestPath = join(input.directory, `${input.name}-launcher-full.json`);
   await writeFile(fixturePath, input.snapshot.fixtureJson, 'utf8');
   await writeFile(spoolPath, '', 'utf8');
+  await writeFile(turnContextSpoolPath, '', 'utf8');
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
   if (request === null || request.phase === 'speculative') {
@@ -928,6 +999,7 @@ async function writeLauncher(input: {
   }
   const manifest: EngineMcpLauncherManifest = {
     format: 'engine-mcp-launcher-v1', fixturePath, proposalSpoolPath: spoolPath,
+    turnContextSpoolPath,
     runId: capsule.runId, branchId: capsule.branchId,
     revision: capsule.revision, requestId: request.requestId,
     phase: request.phase, correctionNumber: request.correctionNumber,
@@ -939,7 +1011,7 @@ async function writeLauncher(input: {
   await writeFile(manifestPath, canonicalJson(manifest), 'utf8');
   const { turnContextDeltaBase: _turnContextDeltaBase, ...fullManifest } = manifest;
   await writeFile(recoveryManifestPath, canonicalJson(fullManifest), 'utf8');
-  return { manifestPath, recoveryManifestPath, spoolPath };
+  return { manifestPath, recoveryManifestPath, spoolPath, turnContextSpoolPath };
 }
 
 function fullTurnContextBase(
@@ -1179,6 +1251,7 @@ async function roomStates(config: ConversationConfig, options: ConversationRunOp
 
 export async function runConversation(config: ConversationConfig, options: ConversationRunOptions = {}): Promise<ConversationRunResult> {
   const knowledgeBase = await loadKnowledgeBase(config);
+  const repoCommit = await readRepoCommit(config.cwd);
   await writeFile(config.outPath, '', 'utf8');
   const artifacts = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-conversation-'));
   const states = await roomStates(config, options);
@@ -1292,6 +1365,12 @@ export async function runConversation(config: ConversationConfig, options: Conve
       const contextRevision = capsule.revision;
       const authoritativeInitialRequest = { ...initialRequest, revision: contextRevision };
       const currentTurnContext = fullTurnContextBase(engineSession.currentState(), initialSnapshot);
+      const plannedInitialTurnContext = plannedTurnContext(
+        engineSession.currentState(),
+        initialSnapshot,
+        lastSeenTurnContext,
+      );
+      let rowTurnContext = plannedInitialTurnContext;
       const initialLauncher = await writeLauncher({
         directory: artifacts, name: `${key}-initial`, snapshot: initialSnapshot, room,
         historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
@@ -1311,6 +1390,9 @@ export async function runConversation(config: ConversationConfig, options: Conve
             onToolResult: (name, result) => {
               observedToolCalls += 1;
               if (name === 'engine.get_turn_context') observedTurnContextCalls += 1;
+              if (name === 'engine.get_turn_context') {
+                rowTurnContext = capturedTurnContext(JSON.stringify(result));
+              }
               if (eventContextTrimmed(result)) observedContextTruncated = true;
               observedRejections.push(...rejectionEvidence(result));
             },
@@ -1338,6 +1420,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let rolloutSessionId: string | null = null;
       let escalationSessionId: string | null = null;
       let capturedRlData: ConversationRlData | undefined;
+      let correctionTurnContextSpoolPath: string | null = null;
       try {
         if (options.failBeforeDispatch?.includes(key) === true) {
           throw new Error('SIMULATED host failure before agent dispatch.');
@@ -1373,6 +1456,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
               : await lifecycle.resumeRound(primaryInvocation, new AbortController().signal);
             rolloutSessionId = turn.sessionId;
             roundUsage = addAgentUsage(roundUsage, turn.usage);
+            rowTurnContext = takeTurnContext(initialLauncher.turnContextSpoolPath) ?? rowTurnContext;
             proposed = localInitialProposal ?? takeRoundProposal(initialLauncher.spoolPath);
             const flapped = turn.exit === 'completed' && proposed === null &&
               toolCallsObserved() === callsBefore && rejectionsObserved().length === rejectionsBefore;
@@ -1415,6 +1499,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
         const correctionTurnContextBase = escalationPlanner === null
           ? lastSeenTurnContext
           : undefined;
+        const plannedCorrectionTurnContext = plannedTurnContext(
+          engineSession.currentState(),
+          correctionSnapshot,
+          correctionTurnContextBase,
+        );
         const correctionLauncher = await writeLauncher({
           directory: artifacts, name: `${key}-correction`, snapshot: correctionSnapshot,
           room, historyKind: 'intent_correction_requested',
@@ -1422,6 +1511,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
             turnContextDeltaBase: correctionTurnContextBase,
           }),
         });
+        correctionTurnContextSpoolPath = correctionLauncher.turnContextSpoolPath;
         let localCorrectionProposal: RoundIntentProposalEnvelope | null = null;
         const correctionToolSession = config.cli === 'local-openai'
           ? inProcessDmToolSession({
@@ -1432,8 +1522,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
               }),
               onProposal: (proposal) => { localCorrectionProposal = proposal; },
               onToolResult: (name, result) => {
-                observedToolCalls += 1;
-                if (name === 'engine.get_turn_context') observedTurnContextCalls += 1;
+              observedToolCalls += 1;
+              if (name === 'engine.get_turn_context') observedTurnContextCalls += 1;
+              if (name === 'engine.get_turn_context') {
+                rowTurnContext = capturedTurnContext(JSON.stringify(result));
+              }
                 if (eventContextTrimmed(result)) observedContextTruncated = true;
                 observedRejections.push(...rejectionEvidence(result));
               },
@@ -1465,8 +1558,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
             }
             const proposalTurnContext = config.captureRlData
               ? proposal.phase === 'initial'
-                ? currentTurnContext.context
-                : fullTurnContextBase(engineSession.currentState(), correctionSnapshot).context
+                ? takeTurnContext(initialLauncher.turnContextSpoolPath) ?? plannedInitialTurnContext
+                : takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? plannedCorrectionTurnContext
               : null;
             const proposalRlData = proposalTurnContext === null
               ? undefined
@@ -1601,6 +1694,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
                 if (escalationPlanner === null) rolloutSessionId = correctionTurn.sessionId;
                 else escalationSessionId = correctionTurn.sessionId;
                 roundUsage = addAgentUsage(roundUsage, correctionTurn.usage);
+                rowTurnContext = takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? rowTurnContext;
                 const contextCallsAfterCorrection = simulated?.contextCallsByRequest.get(requestId) ??
                   observedTurnContextCalls;
                 if (escalationPlanner === null &&
@@ -1671,6 +1765,10 @@ export async function runConversation(config: ConversationConfig, options: Conve
       }
       const wall = performance.now() - started;
       const binding = journal.agentSession();
+      rowTurnContext = (correctionTurnContextSpoolPath === null
+        ? null
+        : takeTurnContext(correctionTurnContextSpoolPath)) ??
+        takeTurnContext(initialLauncher.turnContextSpoolPath) ?? rowTurnContext;
       const row: ConversationRow = {
         room, round, cli: config.cli, model: config.model,
         thinkMode: config.localOpenAi?.thinkMode ?? null,
@@ -1679,6 +1777,9 @@ export async function runConversation(config: ConversationConfig, options: Conve
         escalationSessionId,
         sessionIdHash: binding === null ? null : sha256(binding.sessionId), outcome, proposalId,
         kbHash: knowledgeBase?.hash ?? null,
+        repoCommit,
+        rawTurnContext: rowTurnContext.raw,
+        turnContextGranularity: rowTurnContext.granularity,
         snippetHash: SNIPPET_REGISTRY.snippetHash,
         snippetSetHash: SNIPPET_REGISTRY.snippetSetHash,
         suggestedPlay: suggestedPlan?.play ?? null,

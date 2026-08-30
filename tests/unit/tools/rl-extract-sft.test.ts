@@ -90,6 +90,7 @@ describe('RL SFT extractor', () => {
       },
       stateDigest: 'a'.repeat(64),
       planHash: '736ca86563291fa686e06d91d055145c6cfde87b41ac11518622e0c4617b430a',
+      contextSource: 'reconstructed',
       sessionId: '019d1111-1111-7111-8111-111111111111',
       escalationSessionId: null,
     };
@@ -103,6 +104,24 @@ describe('RL SFT extractor', () => {
       `batch path=${resolve(fixturePath)} status=start`,
       `batch path=${resolve(fixturePath)} status=complete examples=1`,
     ]);
+  });
+
+  it('uses raw turn context verbatim and tags its source', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'd414-extract-raw-'));
+    const arenaPath = join(directory, 'raw.jsonl');
+    const outPath = join(directory, 'sft.jsonl');
+    const rawTurnContext = '{\n  "granularity": "turn_delta",\n  "exact": "payload bytes"\n}';
+    writeFileSync(arenaPath, `${canonicalJson({
+      ...fixtureRow(),
+      rawTurnContext,
+      turnContextGranularity: 'turn_delta',
+    })}\n`, 'utf8');
+
+    await extractSft({ arenaPaths: [arenaPath], rolloutPaths: [], outPath });
+
+    const example = JSON.parse(readFileSync(outPath, 'utf8')) as SftExample;
+    expect(example.messages[1].content).toBe(rawTurnContext);
+    expect(example.contextSource).toBe('raw');
   });
 
   it('deduplicates by state digest plus plan hash', async () => {

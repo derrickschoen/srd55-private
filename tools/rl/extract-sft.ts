@@ -28,6 +28,8 @@ interface ExtractableArenaRow {
   readonly serviceNull: boolean;
   readonly sessionId: string | null;
   readonly escalationSessionId: string | null;
+  readonly rawTurnContext?: string;
+  readonly turnContextGranularity?: 'full' | 'turn_delta';
   readonly rlData?: ArenaRlCapture;
 }
 
@@ -48,6 +50,7 @@ export interface SftExample {
   };
   readonly stateDigest: string;
   readonly planHash: string;
+  readonly contextSource: 'raw' | 'reconstructed';
   /** Corpus metadata only; never included in the training messages. */
   readonly sessionId: string | null;
   readonly escalationSessionId: string | null;
@@ -251,6 +254,13 @@ function requiredArenaRow(value: unknown, path: string, line: number): Extractab
     (candidate['proposalId'] !== null && typeof candidate['proposalId'] !== 'string') ||
     !isNullableSessionId(candidate['sessionId']) ||
     !isNullableSessionId(candidate['escalationSessionId']) ||
+    ((candidate['rawTurnContext'] === undefined) !==
+      (candidate['turnContextGranularity'] === undefined)) ||
+    (candidate['rawTurnContext'] !== undefined &&
+      (typeof candidate['rawTurnContext'] !== 'string' ||
+        candidate['rawTurnContext'].length === 0 ||
+        candidate['turnContextGranularity'] !== 'full' &&
+        candidate['turnContextGranularity'] !== 'turn_delta')) ||
     typeof candidate['serviceNull'] !== 'boolean') {
     throw new TypeError(`Arena row ${path}:${String(line)} has an invalid extraction shape.`);
   }
@@ -294,10 +304,14 @@ function exampleFrom(
   if (row.proposalId === null) throw new TypeError(`Authorized arena row ${path}:${String(line)} has no proposalId.`);
   const assistant = canonicalJson(capture.submitRoundIntentsArguments);
   const planHash = sha256(assistant);
+  const contextSource = row.rawTurnContext === undefined ? 'reconstructed' : 'raw';
   const example: SftExample = {
     messages: [
       { role: 'system', content: buildArenaSessionInstructions(capture.sessionInstructions) },
-      { role: 'user', content: canonicalJson(capture.turnContext) },
+      {
+        role: 'user',
+        content: contextSource === 'raw' ? row.rawTurnContext ?? '' : canonicalJson(capture.turnContext),
+      },
       { role: 'assistant', content: assistant },
     ],
     sourceRow: {
@@ -306,6 +320,7 @@ function exampleFrom(
     },
     stateDigest: capture.stateDigest,
     planHash,
+    contextSource,
     sessionId: row.sessionId,
     escalationSessionId: row.escalationSessionId,
   };

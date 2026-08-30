@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -51,6 +52,17 @@ describe('RL arena batch generator', () => {
       { seed: 3_943_002, status: 'flapped', flapRetries: 2 },
       { seed: 3_943_003, status: 'complete', flapRetries: 0 },
     ]);
+    expect(firstManifest).toMatchObject({
+      adapterCliName: 'codex',
+      adapterCliVersion: null,
+      kbId: 'K6',
+      basis: 'standard',
+      toolArgv: args,
+    });
+    expect(firstManifest?.kbHash).toBe(createHash('sha256').update(readFileSync(
+      join(process.cwd(), 'tests/fixtures/ai-dm-kb/k6.txt'),
+    )).digest('hex'));
+    expect(firstManifest?.repoCommit).toMatch(/^[0-9a-f]{40}$/u);
 
     const resumeCalls: number[] = [];
     const resumeRunner: ArenaBatchRunner = async (config) => {
@@ -96,6 +108,9 @@ describe('RL arena batch generator', () => {
     )) as Readonly<Record<string, unknown>>;
     expect(row['seed']).toBe(6_000_001);
     expect(row['outcome']).toBe('authorized');
+    expect(row).toHaveProperty('rawTurnContext');
+    expect(row).toHaveProperty('turnContextGranularity', 'full');
+    expect(row).toHaveProperty('repoCommit', manifest?.repoCommit);
     expect(row).toHaveProperty('sessionId', null);
     expect(row).toHaveProperty('escalationSessionId', null);
   });

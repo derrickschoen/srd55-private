@@ -97,7 +97,7 @@ export interface AllowlistedRuleEntry extends RuleReference {
 }
 
 export const SUGGESTED_PLAN_MAX_BYTES = 16 * 1024;
-const TURN_CONTEXT_BASE_MAX_BYTES = 32 * 1024;
+export const TURN_CONTEXT_MAX_BYTES = 32 * 1024;
 const SUGGESTED_PLAN_ADVISORY = 'You may submit these intents as-is via engine.submit_round_intents, edit them, or ignore this suggested plan.';
 
 export function engineStateSummaryProofToken(capsuleDigest: string, granularity: string): string {
@@ -132,6 +132,7 @@ interface EngineMcpDependencies {
   readonly listPageSize?: number;
   readonly toolProfile?: EngineMcpToolProfile;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
+  readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
 }
 
 export interface EngineToolSurface {
@@ -469,7 +470,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       })),
       truncated: actors.some((actor) => actor.omitted), next_cursor: null,
     };
-    while (new TextEncoder().encode(JSON.stringify(result)).byteLength > TURN_CONTEXT_BASE_MAX_BYTES) {
+    while (new TextEncoder().encode(JSON.stringify(result)).byteLength > TURN_CONTEXT_MAX_BYTES) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.options.length > 0);
       if (actor === undefined) break;
       actor.options.pop();
@@ -499,25 +500,30 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (capsule.request.phase === 'speculative') throw new RangeError('SPECULATIVE_CONTEXT_USES_CAPSULE_MENU');
       const full = fullTurnContext(capsule, input);
       const base = dependencies.turnContextDeltaBase;
-      if (input['granularity'] !== 'turn_delta' || base === undefined ||
+      const context = input['granularity'] !== 'turn_delta' || base === undefined ||
         input['since_revision'] !== base.revision ||
-        base.context['granularity'] !== 'full') return full;
-      const baseStateRef = record(base.context['state_ref'], 'turn context delta base state_ref');
-      if (baseStateRef['run_id'] !== capsule.runId ||
-        baseStateRef['expected_revision'] !== base.revision) return full;
-      return {
-        granularity: 'turn_delta',
-        anchor: {
-          base_revision: base.revision,
-          revision: capsule.revision,
-          base_context_hash: sha256(canonicalJson(base.context)),
-          context_hash: sha256(canonicalJson(full)),
-          state_ref: full['state_ref'],
-          request: full['request'],
-        },
-        changes: diffTurnContextValues(base.context, full),
-        context_trimmed: full['context_trimmed'],
-      };
+        base.context['granularity'] !== 'full'
+        ? full
+        : (() => {
+            const baseStateRef = record(base.context['state_ref'], 'turn context delta base state_ref');
+            if (baseStateRef['run_id'] !== capsule.runId ||
+              baseStateRef['expected_revision'] !== base.revision) return full;
+            return {
+              granularity: 'turn_delta' as const,
+              anchor: {
+                base_revision: base.revision,
+                revision: capsule.revision,
+                base_context_hash: sha256(canonicalJson(base.context)),
+                context_hash: sha256(canonicalJson(full)),
+                state_ref: full['state_ref'],
+                request: full['request'],
+              },
+              changes: diffTurnContextValues(base.context, full),
+              context_trimmed: full['context_trimmed'],
+            };
+          })();
+      dependencies.onTurnContext?.(structuredClone(context));
+      return context;
     }
     if (name === 'engine.propose_from_play') {
       const capsule = feed.current();
