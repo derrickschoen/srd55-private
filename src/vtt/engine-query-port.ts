@@ -27,6 +27,16 @@ import {
   type WorldObject,
 } from '../combat/world-objects';
 
+export type EngineProjectedAttackDelivery = 'melee' | 'ranged' | 'melee_or_ranged';
+
+declare module './engine-state-capsule' {
+  interface EngineProjectedAction {
+    readonly attackDelivery: EngineProjectedAttackDelivery | null;
+    readonly normalRangeFeet: number | null;
+    readonly longRangeFeet: number | null;
+  }
+}
+
 export type EngineTargetSelector =
   | { readonly kind: 'combatant'; readonly combatantId: CombatantId }
   | {
@@ -571,6 +581,38 @@ export function engineAttackRangeFeet(action: MonsterAttackAction): number {
   }
 }
 
+function projectedAttackRanges(action: MonsterAction): {
+  readonly attackDelivery: EngineProjectedAttackDelivery | null;
+  readonly normalRangeFeet: number | null;
+  readonly longRangeFeet: number | null;
+} {
+  if (action.kind !== 'attack') {
+    return { attackDelivery: null, normalRangeFeet: null, longRangeFeet: null };
+  }
+  switch (action.delivery.kind) {
+    case 'melee':
+      return {
+        attackDelivery: action.delivery.kind,
+        normalRangeFeet: action.delivery.reachFeet,
+        longRangeFeet: null,
+      };
+    case 'ranged':
+      return {
+        attackDelivery: action.delivery.kind,
+        normalRangeFeet: action.delivery.rangeFeet,
+        longRangeFeet: action.delivery.longRangeFeet.kind === 'present'
+          ? action.delivery.longRangeFeet.value
+          : null,
+      };
+    case 'melee_or_ranged':
+      return {
+        attackDelivery: action.delivery.kind,
+        normalRangeFeet: action.delivery.rangeFeet,
+        longRangeFeet: action.delivery.longRangeFeet,
+      };
+  }
+}
+
 export function engineActionRangeFeet(
   actions: readonly MonsterAction[],
   selected: MonsterAction,
@@ -599,6 +641,9 @@ export function engineActionRegistry(state: EncounterState): {
     readonly actionId: string;
     readonly kind: 'attack' | 'saving_throw' | 'multiattack' | 'spellcasting';
     readonly rangeFeet: number | null;
+    readonly attackDelivery: EngineProjectedAttackDelivery | null;
+    readonly normalRangeFeet: number | null;
+    readonly longRangeFeet: number | null;
   }[];
   approachesFor(combatantId: CombatantId): readonly {
     readonly actionId: string;
@@ -617,6 +662,7 @@ export function engineActionRegistry(state: EncounterState): {
         actionId: action.id,
         kind: action.kind,
         rangeFeet: engineActionRangeFeet(actions, action),
+        ...projectedAttackRanges(action),
       }));
     },
     approachesFor(combatantId) {

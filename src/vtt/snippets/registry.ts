@@ -76,7 +76,7 @@ interface RegistryDependencies {
 type ProjectedActor = EngineStateCapsule['projection']['combatants'][number];
 type ProjectedAction = ProjectedActor['actions'][number];
 
-const RUNTIME_VERSION = 'plays-v1-runtime-4';
+const RUNTIME_VERSION = 'plays-v1-runtime-5';
 const DODGE: EngineIntentBranch = {
   choice: { kind: 'dodge' },
   movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
@@ -199,6 +199,50 @@ function engagement(actor: ProjectedActor, target: ProjectedActor, action: Proje
     : { stance: 'close_to_melee', anchor: selector };
 }
 
+function isRangedAttack(action: ProjectedAction): boolean {
+  return action.kind === 'attack' &&
+    (action.attackDelivery === 'ranged' || action.attackDelivery === 'melee_or_ranged');
+}
+
+function isReachableLongRangeUpgrade(
+  actor: ProjectedActor,
+  target: ProjectedActor,
+  action: ProjectedAction,
+  requiredMovement: number | null,
+): boolean {
+  if (!isRangedAttack(action) || action.normalRangeFeet === null || action.longRangeFeet === null) return false;
+  const distance = gridDistance(actor.position, target.position);
+  return distance > action.normalRangeFeet && distance <= action.longRangeFeet &&
+    requiredMovement !== null && requiredMovement > 0 && requiredMovement <= actor.speedFeet;
+}
+
+function attackBranch(
+  actor: ProjectedActor,
+  target: ProjectedActor,
+  action: ProjectedAction,
+): EngineIntentBranch {
+  const requiredMovement = minimumMovement(actor, target, action);
+  if (requiredMovement === null || requiredMovement === 0) {
+    return {
+      choice: choice(action, target),
+      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
+      engagement: engagement(actor, target, action),
+    };
+  }
+  const ranged = isRangedAttack(action);
+  return {
+    choice: choice(action, target),
+    movement: {
+      willingness: isReachableLongRangeUpgrade(actor, target, action, requiredMovement)
+        ? 'for_clear_advantage'
+        : 'only_if_required',
+      maximumFeet: actor.speedFeet,
+      opportunityRisk: ranged ? 'avoid' : 'accept_if_needed',
+    },
+    engagement: engagement(actor, target, action),
+  };
+}
+
 function dash(actor: ProjectedActor, target: ProjectedActor): EngineIntentBranch {
   return {
     choice: { kind: 'dash' },
@@ -211,26 +255,40 @@ function dash(actor: ProjectedActor, target: ProjectedActor): EngineIntentBranch
   };
 }
 
-function intent(actor: ProjectedActor, target: ProjectedActor, action: ProjectedAction): EngineTurnIntent {
+function alternateBranch(actor: ProjectedActor, target: ProjectedActor): EngineIntentBranch | null {
+  const normalAction = bestAttack(actor, target, actor.speedFeet);
+  if (normalAction !== null) return attackBranch(actor, target, normalAction);
+  const dashAction = bestAttack(actor, target);
+  return dashAction === null ? null : dash(actor, target);
+}
+
+function bestAlternateBranch(
+  actor: ProjectedActor,
+  primaryTarget: ProjectedActor,
+  targets: readonly ProjectedActor[],
+): EngineIntentBranch | null {
+  const alternates = targets.filter((target) => target.id !== primaryTarget.id);
+  const normalTarget = alternates.find((target) => bestAttack(actor, target, actor.speedFeet) !== null);
+  if (normalTarget !== undefined) return alternateBranch(actor, normalTarget);
+  const dashTarget = alternates.find((target) => bestAttack(actor, target) !== null);
+  return dashTarget === undefined ? null : alternateBranch(actor, dashTarget);
+}
+
+function intent(
+  actor: ProjectedActor,
+  target: ProjectedActor,
+  action: ProjectedAction,
+  targets: readonly ProjectedActor[],
+): EngineTurnIntent {
   const requiredMovement = minimumMovement(actor, target, action);
-  const movementBudget = requiredMovement === null || requiredMovement === 0
-    ? 0
-    : actor.speedFeet;
+  const primary = attackBranch(actor, target, action);
   return {
     actorId: actor.id,
-    choice: choice(action, target),
-    movement: movementBudget === 0
-      ? { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' }
-      : {
-          willingness: 'only_if_required',
-          maximumFeet: movementBudget,
-          opportunityRisk: 'accept_if_needed',
-        },
-    engagement: engagement(actor, target, action),
+    ...primary,
     fallback: requiredMovement !== null && requiredMovement > actor.speedFeet &&
       requiredMovement <= actor.speedFeet * 2
       ? dash(actor, target)
-      : DODGE,
+      : bestAlternateBranch(actor, target, targets) ?? DODGE,
   };
 }
 
@@ -245,28 +303,14 @@ function attackPlan(
   const normalTarget = targets.find((target) => bestAttack(actor, target, actor.speedFeet) !== null);
   if (normalTarget !== undefined) {
     const action = bestAttack(actor, normalTarget, actor.speedFeet);
-    if (action !== null) return intent(actor, normalTarget, action);
+    if (action !== null) return intent(actor, normalTarget, action, targets);
   }
   const dashTarget = targets.find((target) => bestAttack(actor, target) !== null);
   if (dashTarget !== undefined) {
     const action = bestAttack(actor, dashTarget);
-    if (action !== null) return intent(actor, dashTarget, action);
+    if (action !== null) return intent(actor, dashTarget, action, targets);
   }
   return defensiveHold(actor);
-}
-
-function alternateBranch(actor: ProjectedActor, target: ProjectedActor): EngineIntentBranch | null {
-  const normalAction = bestAttack(actor, target, actor.speedFeet);
-  if (normalAction !== null) {
-    const alternate = intent(actor, target, normalAction);
-    return {
-      choice: alternate.choice,
-      movement: alternate.movement,
-      engagement: alternate.engagement,
-    };
-  }
-  const dashAction = bestAttack(actor, target);
-  return dashAction === null ? null : dash(actor, target);
 }
 
 function diversifyAnchors(
@@ -366,14 +410,15 @@ function obstacleApplicable(capsule: EngineStateCapsule): boolean {
 
 function expandObstacle(capsule: EngineStateCapsule): readonly EngineTurnIntent[] {
   const actors = requestedActors(capsule);
+  const targets = opposingTargets(capsule, actors);
   const target = blockerTargets(capsule, actors).find((candidate) => controlAction(actors, candidate) !== null);
   if (target === undefined) return phaseDraft(capsule, actors.map(defensiveHold));
   const controller = controlAction(actors, target);
   if (controller === null) return phaseDraft(capsule, actors.map(defensiveHold));
   return phaseDraft(capsule, actors.map((actor) => {
-    if (actor.id === controller.actor.id) return intent(actor, target, controller.action);
+    if (actor.id === controller.actor.id) return intent(actor, target, controller.action, targets);
     const action = bestAttack(actor, target);
-    return action === null ? defensiveHold(actor) : intent(actor, target, action);
+    return action === null ? defensiveHold(actor) : intent(actor, target, action, targets);
   }));
 }
 
@@ -426,7 +471,7 @@ export function createSnippetRegistry(dependencies: RegistryDependencies): Snipp
       name: 'focus_fire',
       description: 'Concentrate attacks on the ranked removal target, preferring attacks reachable at normal speed.',
       rank: 20,
-      strategy: 'prefer a normal-move attack before ranked dash-range attacks; Dash only when an attack position costs more than speed and no more than double speed; otherwise Dodge; diversify concentrated anchors through alternate-target fallbacks',
+      strategy: 'prefer a normal-move attack before ranked dash-range attacks; safely improve long-range attacks to normal range when reachable; avoid opportunity risk for ranged movement; Dash only when an attack position costs more than speed and no more than double speed; try alternate-target offense before Dodge; diversify concentrated anchors through alternate-target fallbacks',
       applicability: focusApplicable,
       expand: expandFocus,
     }),
@@ -434,7 +479,7 @@ export function createSnippetRegistry(dependencies: RegistryDependencies): Snipp
       name: 'basic_advance',
       description: 'Each actor attacks its best normal-speed target, Dashes only into a next-turn attack position, or Dodges.',
       rank: 30,
-      strategy: 'per actor prefer any normal-speed attack over a ranked dash-range attack; Dash only when attack-position path cost is above speed and at most double speed; otherwise Dodge; diversify concentrated anchors through alternate-target fallbacks',
+      strategy: 'per actor prefer any normal-speed attack over a ranked dash-range attack; safely improve long-range attacks to normal range when reachable; avoid opportunity risk for ranged movement; Dash only when attack-position path cost is above speed and at most double speed; try alternate-target offense before Dodge; diversify concentrated anchors through alternate-target fallbacks',
       applicability: basicApplicable,
       expand: expandBasic,
     }),
