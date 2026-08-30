@@ -7,6 +7,21 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D418 — OWNER: engine provides options/intel algorithmically; AI fills gaps only (2026-08-30)
+
+Verbatim: "I think the engine should provide these options to the dm. We want
+to do as much as we can algorithmicly so the ai only acts to fill gaps that
+the engine can't." Ruled while scoring R02, where the supervisor had to
+derive by hand the intel the DM lacked: range bands per attack, the
+unconscious+prone advantage/disadvantage cancellation (straight rolls at the
+dying fighter), death-save-failure consequences, per-monster option menus,
+and the bonus-action Bless the all-Dodge plan forfeited. Direction: the
+engine computes and surfaces decision intel; the LLM chooses among annotated
+options or overrides with justification. A consensus sweep (codex authors,
+Claude reviews) is commissioned to inventory what the engine already
+computes, what it could compute, and what it should surface, before any
+implementation.
+
 ## D417 — OWNER: no high-ground houserule; BG3 material stays private unless clean-room homebrew (2026-08-30)
 
 Verbatim: "No high ground. Keep the bg3 stuff in the private repo unless it
