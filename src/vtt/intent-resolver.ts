@@ -221,8 +221,11 @@ function targetActionResolution(
   const target = targetId === null ? null : queries.combatant(state, targetId);
   const origin = queries.tokenPosition(state, actorId);
   const targetPosition = targetId === null ? null : queries.tokenPosition(state, targetId);
-  if (targetId === null || target === null || target.life === 'dead') {
-    return { valid: false, code: 'TARGET_ABSENT', summary: `${actorId}: target is absent or dead` };
+  if (targetId === null || target === null) {
+    return { valid: false, code: 'TARGET_ABSENT', summary: `${actorId}: target is absent` };
+  }
+  if (target.life === 'dead') {
+    return { valid: false, code: 'TARGET_DEAD', summary: `${actorId}: target ${targetId} is dead` };
   }
   if (queries.sameSide(state, actorId, targetId)) {
     return { valid: false, code: 'TARGET_SAME_SIDE', summary: `${actorId}: target is on the actor's side` };
