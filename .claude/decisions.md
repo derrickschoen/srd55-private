@@ -7,6 +7,43 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D418.6 — OWNER: rerun 1 is diagnostic-only; rerun 2 gates (2026-08-31)
+
+Owner ruling from the three-way question consensus (Fable + codex + opus
+all independently ranked this #1): rerun 1 carries NO pass/fail gate.
+Increments 6-7 proceed regardless of its results; rerun 2, after the
+full program, carries the promotion decision. Pinned BEFORE any scores
+exist. Mixed-direction metric movements in rerun 1 are diagnostic
+material, not verdicts.
+
+## D418.7 — OWNER: auto-submit requires a resolved material frontier (2026-08-31)
+
+Refines D418.3: the engine may auto-submit its default only when the
+chosen plan AND every competitive top-K alternative are resolved. An
+unresolved competitor blocks auto-submit and defers to the normal
+LLM/controller path. (Codex found this gap while increment 5 was
+mid-implementation.)
+
+## D418.8 — OWNER: increment 7 scores via Pareto frontier + LLM choice (2026-08-31)
+
+When lethality, encounter objectives, resource conservation, and
+persona favor different team plans, the engine removes dominated plans
+and the LLM chooses among the non-dominated remainder. Fits D419.2
+human-DM emulation: judgment stays in the model seat; the engine owns
+legality and dominance only.
+
+## D418.9 — OWNER: PCs get the symmetric evaluator with player knowledge (2026-08-31)
+
+Resolves the question D418.1 deferred: scripted PCs use the SAME
+tactical/movement/concentration evaluators as the DM side, but their
+inputs pass through the actor-knowledge projection (actor-knowledge-v1)
+— only what players would perceive; no monster HP/AC/slots. The
+projection becomes load-bearing. TIMING NOT YET RULED: the owner chose
+the knowledge model only. Supervisor's proposal (pending owner check):
+build post-rerun-1 so rerun 1 stays the last one-variable DM-side
+measurement; but D418.6 making rerun 1 diagnostic-only weakens that
+argument, so an owner call either way is cheap.
+
 ## D418.5 — OWNER: rerun 1 judged by the cycle-2 panel (2026-08-30)
 
 Owner chose "Same panel as cycle 2" for the first R1-10 rerun: blind
