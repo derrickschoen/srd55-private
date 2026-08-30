@@ -10,7 +10,7 @@ import {
 } from '../simulation/contracts';
 import { attackRollProbabilities } from '../simulation/probability';
 
-export const TACTICAL_EVALUATOR_POLICY = 'tactical-evaluator-v1' as const;
+export const TACTICAL_EVALUATOR_POLICY = 'tactical-evaluator-v2' as const;
 
 /** Shared with damage resolution: damage at zero HP marks one failure, or two on a critical. */
 export function deathSaveFailuresFromZeroHitPointDamage(critical: false): 1;
@@ -80,6 +80,15 @@ export interface TacticalDamageTerm {
   };
 }
 
+/** Finite attack-roll modifiers are enumerated exactly, including multiple dice. */
+export interface TacticalAttackRollModifier {
+  readonly kind: 'die';
+  readonly count: number;
+  readonly sides: number;
+  readonly sign: 1 | -1;
+  readonly reason: 'bless' | 'effect';
+}
+
 export type TacticalUnresolvedReason =
   | 'attack_out_of_range'
   | 'long_range_unresolved'
@@ -104,6 +113,7 @@ export interface TacticalAttackInput {
   readonly attackerCanSeeTarget: boolean;
   readonly targetCanSeeAttacker: boolean;
   readonly rollModeSources: readonly AttackRollModeSource[];
+  readonly attackRollModifiers?: readonly TacticalAttackRollModifier[];
   readonly target: {
     readonly hitPoints: number;
     readonly usesDeathSaves: boolean;
@@ -187,6 +197,49 @@ export interface TacticalAttackEvaluation {
   readonly consequences: TacticalZeroHitPointConsequences;
   readonly unresolved: readonly TacticalUnresolvedReason[];
 }
+
+export type TacticalSequenceReasonCode =
+  | 'death_save_failures_resolved'
+  | 'living_damage_resolved'
+  | 'massive_damage_instant_death_unresolved'
+  | 'attack_probability_unresolved'
+  | 'attack_damage_unresolved';
+
+export type TacticalSequenceTarget =
+  | {
+      readonly kind: 'death_saves';
+      readonly existingFailures: 0 | 1 | 2;
+    }
+  | {
+      readonly kind: 'living_hit_points';
+      readonly hitPoints: number;
+    };
+
+export interface TacticalAttackSequenceInput {
+  readonly target: TacticalSequenceTarget;
+  /** Each attack owns its modifier set, so grants can be conditioned by order. */
+  readonly attacks: readonly TacticalAttackInput[];
+}
+
+export type TacticalAttackSequenceFold =
+  | {
+      readonly policy: typeof TACTICAL_EVALUATOR_POLICY;
+      readonly status: 'resolved';
+      readonly killProbability: number;
+      readonly expectedFailures: number | null;
+      readonly expectedDamage: number | null;
+      readonly reasonCodes: readonly TacticalSequenceReasonCode[];
+      readonly attacks: readonly TacticalAttackEvaluation[];
+    }
+  | {
+      readonly policy: typeof TACTICAL_EVALUATOR_POLICY;
+      readonly status: 'unresolved';
+      readonly killProbability: null;
+      readonly expectedFailures: number | null;
+      readonly expectedDamage: number | null;
+      readonly reasonCodes: readonly TacticalSequenceReasonCode[];
+      readonly attacks: readonly TacticalAttackEvaluation[];
+    };
 
 function conditionReason(
   condition: AppliedCondition,
@@ -390,6 +443,52 @@ function firstBlockingReason(
   return null;
 }
 
+function modifierDistribution(
+  modifiers: readonly TacticalAttackRollModifier[],
+): ReadonlyMap<number, number> {
+  let distribution = new Map<number, number>([[0, 1]]);
+  for (const modifier of modifiers) {
+    if (!Number.isSafeInteger(modifier.count) || modifier.count < 1) {
+      throw new RangeError('Attack-roll modifier count must be a positive integer.');
+    }
+    if (!Number.isSafeInteger(modifier.sides) || modifier.sides < 2) {
+      throw new RangeError('Attack-roll modifier sides must be an integer of at least 2.');
+    }
+    for (let die = 0; die < modifier.count; die += 1) {
+      const next = new Map<number, number>();
+      for (const [subtotal, subtotalProbability] of distribution) {
+        for (let face = 1; face <= modifier.sides; face += 1) {
+          const total = subtotal + modifier.sign * face;
+          next.set(total, (next.get(total) ?? 0) + subtotalProbability / modifier.sides);
+        }
+      }
+      distribution = next;
+    }
+  }
+  return distribution;
+}
+
+function modifiedAttackRollProbabilities(input: TacticalAttackInput, mode: RollMode) {
+  const distribution = modifierDistribution(input.attackRollModifiers ?? []);
+  let hit = 0;
+  let critical = 0;
+  let miss = 0;
+  for (const [modifier, weight] of distribution) {
+    const chances = attackRollProbabilities(
+      attackRollModifier(input.attackBonus + modifier),
+      targetArmorClass(input.targetArmorClass),
+      mode,
+      input.criticalFloor === 20
+        ? 20
+        : expandedCriticalMinimumRoll(input.criticalFloor),
+    );
+    hit += chances.hit * weight;
+    critical += chances.critical * weight;
+    miss += chances.miss * weight;
+  }
+  return { hit, critical, miss };
+}
+
 export function evaluateTacticalAttack(
   input: TacticalAttackInput,
 ): TacticalAttackEvaluation {
@@ -456,14 +555,7 @@ export function evaluateTacticalAttack(
       unresolved,
     };
   }
-  const chances = attackRollProbabilities(
-    attackRollModifier(input.attackBonus),
-    targetArmorClass(input.targetArmorClass),
-    rollMode.mode,
-    input.criticalFloor === 20
-      ? 20
-      : expandedCriticalMinimumRoll(input.criticalFloor),
-  );
+  const chances = modifiedAttackRollProbabilities(input, rollMode.mode);
   const critical = automaticCriticalOnHit ? chances.hit : chances.critical;
   const probabilities: TacticalProbabilityVerdict = {
     status: 'resolved',
@@ -471,7 +563,10 @@ export function evaluateTacticalAttack(
     critical,
     miss: chances.miss,
   };
-  if (input.damageTerms === null) {
+  if (
+    input.damageTerms === null ||
+    input.unresolvedReasons?.includes('conditional_damage_rider_unresolved') === true
+  ) {
     return {
       policy: TACTICAL_EVALUATOR_POLICY,
       range,
@@ -505,5 +600,175 @@ export function evaluateTacticalAttack(
     },
     consequences,
     unresolved,
+  };
+}
+
+function convolveDamageTerms(
+  terms: readonly TacticalDamageTerm[],
+  critical: boolean,
+): ReadonlyMap<number, number> {
+  let distribution = new Map<number, number>([[0, 1]]);
+  for (const term of terms) {
+    let termDistribution = new Map<number, number>([[0, 1]]);
+    const diceCount = term.dice.count * (critical ? 2 : 1);
+    for (let die = 0; die < diceCount; die += 1) {
+      const next = new Map<number, number>();
+      for (const [subtotal, subtotalProbability] of termDistribution) {
+        for (let face = 1; face <= term.dice.sides; face += 1) {
+          const total = subtotal + face;
+          next.set(total, (next.get(total) ?? 0) + subtotalProbability / term.dice.sides);
+        }
+      }
+      termDistribution = next;
+    }
+    const next = new Map<number, number>();
+    for (const [prior, priorProbability] of distribution) {
+      for (const [termTotal, termProbability] of termDistribution) {
+        const total = prior + Math.max(0, termTotal + term.dice.modifier);
+        next.set(total, (next.get(total) ?? 0) + priorProbability * termProbability);
+      }
+    }
+    distribution = next;
+  }
+  return distribution;
+}
+
+function foldDeathSaveFailures(
+  existingFailures: 0 | 1 | 2,
+  attacks: readonly TacticalAttackEvaluation[],
+): { readonly killProbability: number; readonly expectedFailures: number } {
+  let states = new Map<number, number>([[existingFailures, 1]]);
+  for (const attack of attacks) {
+    if (attack.probabilities.status !== 'resolved') continue;
+    const probabilities = attack.probabilities;
+    const next = new Map<number, number>();
+    for (const [failures, stateProbability] of states) {
+      const outcomes = [
+        { added: 0, probability: probabilities.miss },
+        { added: 1, probability: probabilities.hit - probabilities.critical },
+        { added: 2, probability: probabilities.critical },
+      ] as const;
+      for (const outcome of outcomes) {
+        const total = Math.min(3, failures + outcome.added);
+        next.set(total, (next.get(total) ?? 0) + stateProbability * outcome.probability);
+      }
+    }
+    states = next;
+  }
+  return {
+    killProbability: states.get(3) ?? 0,
+    expectedFailures: [...states].reduce(
+      (sum, [failures, probability]) => sum + failures * probability,
+      0,
+    ),
+  };
+}
+
+function foldLivingDamage(
+  hitPoints: number,
+  inputs: readonly TacticalAttackInput[],
+  attacks: readonly TacticalAttackEvaluation[],
+): number {
+  let accumulated = new Map<number, number>([[0, 1]]);
+  for (let index = 0; index < inputs.length; index += 1) {
+    const input = inputs[index];
+    const evaluation = attacks[index];
+    if (
+      input === undefined ||
+      evaluation?.probabilities.status !== 'resolved' ||
+      input.damageTerms === null
+    ) continue;
+    const normal = convolveDamageTerms(input.damageTerms, false);
+    const critical = convolveDamageTerms(input.damageTerms, true);
+    const attackOutcomes = new Map<number, number>([[0, evaluation.probabilities.miss]]);
+    for (const [damage, probability] of normal) {
+      attackOutcomes.set(
+        damage,
+        (attackOutcomes.get(damage) ?? 0) +
+          probability * (evaluation.probabilities.hit - evaluation.probabilities.critical),
+      );
+    }
+    for (const [damage, probability] of critical) {
+      attackOutcomes.set(
+        damage,
+        (attackOutcomes.get(damage) ?? 0) + probability * evaluation.probabilities.critical,
+      );
+    }
+    const next = new Map<number, number>();
+    for (const [priorDamage, priorProbability] of accumulated) {
+      for (const [attackDamage, attackProbability] of attackOutcomes) {
+        const total = Math.min(hitPoints, priorDamage + attackDamage);
+        next.set(total, (next.get(total) ?? 0) + priorProbability * attackProbability);
+      }
+    }
+    accumulated = next;
+  }
+  return accumulated.get(hitPoints) ?? 0;
+}
+
+export function foldTacticalAttackSequence(
+  input: TacticalAttackSequenceInput,
+): TacticalAttackSequenceFold {
+  const attacks = input.attacks.map(evaluateTacticalAttack);
+  const probabilityUnresolved = attacks.some((attack) => attack.probabilities.status === 'unresolved');
+  const damageUnresolved = attacks.some((attack) => attack.damage.status === 'unresolved');
+  const expectedDamage = damageUnresolved
+    ? null
+    : attacks.reduce((sum, attack) =>
+      sum + (attack.damage.status === 'resolved' ? attack.damage.expectedDamage : 0), 0);
+
+  if (input.target.kind === 'death_saves') {
+    const failureFold = foldDeathSaveFailures(input.target.existingFailures, attacks);
+    const reasonCodes: TacticalSequenceReasonCode[] = [
+      'death_save_failures_resolved',
+      'massive_damage_instant_death_unresolved',
+      ...(damageUnresolved ? ['attack_damage_unresolved' as const] : []),
+      ...(probabilityUnresolved ? ['attack_probability_unresolved' as const] : []),
+    ];
+    if (probabilityUnresolved) {
+      return {
+        policy: TACTICAL_EVALUATOR_POLICY,
+        status: 'unresolved',
+        killProbability: null,
+        expectedFailures: null,
+        expectedDamage,
+        reasonCodes,
+        attacks,
+      };
+    }
+    return {
+      policy: TACTICAL_EVALUATOR_POLICY,
+      status: 'resolved',
+      killProbability: failureFold.killProbability,
+      expectedFailures: failureFold.expectedFailures,
+      expectedDamage,
+      reasonCodes,
+      attacks,
+    };
+  }
+
+  const reasonCodes: TacticalSequenceReasonCode[] = [
+    ...(probabilityUnresolved ? ['attack_probability_unresolved' as const] : []),
+    ...(damageUnresolved ? ['attack_damage_unresolved' as const] : []),
+  ];
+  if (probabilityUnresolved || damageUnresolved) {
+    return {
+      policy: TACTICAL_EVALUATOR_POLICY,
+      status: 'unresolved',
+      killProbability: null,
+      expectedFailures: null,
+      expectedDamage,
+      reasonCodes,
+      attacks,
+    };
+  }
+  return {
+    policy: TACTICAL_EVALUATOR_POLICY,
+    status: 'resolved',
+    killProbability: foldLivingDamage(input.target.hitPoints, input.attacks, attacks),
+    expectedFailures: null,
+    expectedDamage,
+    reasonCodes: ['living_damage_resolved'],
+    attacks,
   };
 }

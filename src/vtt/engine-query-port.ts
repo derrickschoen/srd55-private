@@ -12,9 +12,13 @@ import { persistentAreaContains } from '../combat/persistent-areas';
 import type { EffectPayload, EncounterEffect } from '../combat/effects';
 import { monsterAttackRange, monsterAttackRollModeSources } from '../combat/monster-commands';
 import {
+  TACTICAL_EVALUATOR_POLICY,
   evaluateTacticalAttack,
+  foldTacticalAttackSequence,
   tacticalRangeVerdict,
   type AttackRollModeSource,
+  type TacticalAttackInput,
+  type TacticalAttackRollModifier,
   type TacticalAttackEvaluation,
   type TacticalRangeBand,
   type TacticalUnresolvedReason,
@@ -36,7 +40,52 @@ import {
   type CoverTier,
   type WorldObject,
 } from '../combat/world-objects';
-import { availableEngineActorOptions } from './intent-resolver';
+import { availableEngineActorOptions, resolveEngineActorOption } from './intent-resolver';
+import type { EngineActorOption, EngineOptionId } from './turn-proposal';
+
+export interface TacticalAllocationChoice {
+  readonly actorId: CombatantId;
+  readonly optionId: EngineOptionId;
+}
+
+export interface TacticalAllocationCandidate {
+  readonly allocationId: string;
+  readonly choices: readonly TacticalAllocationChoice[];
+  /** Query-only hypothetical grants; never expanded into ordinary registry options. */
+  readonly modifierGrants?: readonly TacticalAllocationModifierGrant[];
+}
+
+export interface TacticalAllocationModifierGrant {
+  readonly sourceActorId: CombatantId;
+  readonly kind: 'bless';
+  readonly targetIds: readonly CombatantId[];
+}
+
+export type TacticalAllocationReasonCode =
+  | import('../combat/tactical-evaluator').TacticalSequenceReasonCode
+  | 'allocation_resolved'
+  | 'option_not_offered'
+  | 'modifier_grant_not_in_option'
+  | 'initiative_order_mismatch'
+  | 'no_attacks_against_target'
+  | 'attack_modifier_applied_after_grant';
+
+export interface TacticalAllocationResult {
+  readonly allocationId: string;
+  readonly policy: typeof import('../combat/tactical-evaluator').TACTICAL_EVALUATOR_POLICY;
+  readonly status: 'resolved' | 'unresolved';
+  readonly killProbability: number | null;
+  readonly expectedFailures: number | null;
+  readonly expectedDamage: number | null;
+  readonly reasonCodes: readonly TacticalAllocationReasonCode[];
+}
+
+export interface TacticalAllocationComparison {
+  readonly policy: typeof import('../combat/tactical-evaluator').TACTICAL_EVALUATOR_POLICY;
+  readonly targetId: CombatantId;
+  readonly initiativeOrder: readonly CombatantId[];
+  readonly allocations: readonly TacticalAllocationResult[];
+}
 
 export type EngineProjectedAttackDelivery = 'melee' | 'ranged' | 'melee_or_ranged';
 
@@ -120,6 +169,12 @@ export interface EngineQueryPort {
     targetId: CombatantId,
     actionId: string,
   ): TacticalAttackEvaluation | null;
+  compareAllocations(
+    state: EncounterState,
+    targetId: CombatantId,
+    candidates: readonly TacticalAllocationCandidate[],
+    initiativeOrder: readonly CombatantId[],
+  ): TacticalAllocationComparison;
   cover(state: EncounterState, actorId: CombatantId, targetId: CombatantId): {
     readonly tier: 'none' | 'half' | 'three_quarters' | 'total';
     readonly sourceIds: readonly string[];
@@ -1102,6 +1157,270 @@ function reach(state: EncounterState, request: EngineReachRequest): EngineReachR
   };
 }
 
+/** Builds the immutable attack input shared by single-attack and sequence queries. */
+export function engineTacticalAttackInput(
+  state: EncounterState,
+  actorId: CombatantId,
+  targetId: CombatantId,
+  actionId: string,
+  additionalModifiers: readonly TacticalAttackRollModifier[] = [],
+): TacticalAttackInput | null {
+  const actor = combatant(state, actorId);
+  const target = combatant(state, targetId);
+  const actorPosition = state.tokens.find((entry) => entry.combatantId === actorId)?.position;
+  const targetPosition = state.tokens.find((entry) => entry.combatantId === targetId)?.position;
+  const action = monsterActions(state, actorId).find(
+    (candidate): candidate is MonsterAttackAction =>
+      candidate.kind === 'attack' && candidate.id === actionId,
+  );
+  if (
+    actor === null || target === null || actorPosition === undefined ||
+    targetPosition === undefined || action === undefined
+  ) return null;
+  const detection = detect(state, actorId, targetId);
+  const reciprocal = detect(state, targetId, actorId);
+  const visible = {
+    visible: detection?.kind === 'seen',
+    reciprocal: reciprocal?.kind === 'seen',
+  };
+  const cover = coverBetweenObjects(state.worldObjects, actorPosition, targetPosition);
+  const coverBonus = cover === 'half' ? 2 : cover === 'three_quarters' ? 5 : 0;
+  const madeRollDefense = state.effects.filter((effect): effect is PlanningRollDefenseEffect =>
+    isPlanningRollDefenseEffect(effect) &&
+    effect.payload.scopes.includes('attack_rolls_made') &&
+    planningRollDefenseApplies(state, effect, actorId, targetId));
+  const flatAttackBonus = madeRollDefense.reduce((sum, effect) =>
+    effect.payload.modifier.kind === 'flat'
+      ? sum + effect.payload.modifier.amount
+      : sum, 0);
+  const attackRollModifiers: TacticalAttackRollModifier[] = [
+    ...madeRollDefense.flatMap((effect) => effect.payload.modifier.kind === 'die_rider'
+      ? [{
+          kind: 'die' as const,
+          count: effect.payload.modifier.count,
+          sides: effect.payload.modifier.sides,
+          sign: effect.payload.modifier.sign,
+          reason: 'effect' as const,
+        }]
+      : []),
+    ...state.effects.flatMap((effect): readonly TacticalAttackRollModifier[] => {
+      if (!effect.targets.includes(actorId) || isPlanningRollDefenseEffect(effect)) return [];
+      const payload = effect.payload;
+      if (payload.kind === 'attack_roll_modifier') {
+        return [{ kind: 'die', count: payload.count, sides: payload.sides, sign: payload.sign, reason: 'effect' }];
+      }
+      if (payload.kind === 'd20_test_modifier' && payload.tests.includes('attack_roll')) {
+        return [{
+          kind: 'die', count: payload.count, sides: payload.sides, sign: payload.sign,
+          reason: payload.sign === 1 && payload.count === 1 && payload.sides === 4
+            ? 'bless'
+            : 'effect',
+        }];
+      }
+      return [];
+    }),
+    ...additionalModifiers,
+  ];
+  const unresolved: TacticalUnresolvedReason[] = [
+    ...(action.damage.some((term) => term.trigger.kind !== 'always')
+      ? ['conditional_damage_rider_unresolved' as const]
+      : []),
+    ...(cover === 'total' ? ['target_has_total_cover' as const] : []),
+  ];
+  return {
+    attackerId: actorId,
+    targetId,
+    attackerPosition: actorPosition,
+    targetPosition,
+    range: monsterAttackRange(action),
+    attackBonus: action.attackBonus +
+      exhaustionPenalty(enginePlanningConditions(state, actorId)) + flatAttackBonus,
+    targetArmorClass: planningArmorClass(state, target, actorId) + coverBonus,
+    criticalFloor: 20,
+    damageTerms: action.damage
+      .filter((term) => term.trigger.kind === 'always')
+      .map((term) => ({ dice: term.dice })),
+    attackerConditions: enginePlanningConditions(state, actorId),
+    targetConditions: enginePlanningConditions(state, targetId),
+    attackerCanSeeTarget: visible.visible,
+    targetCanSeeAttacker: visible.reciprocal,
+    rollModeSources: [
+      ...planningAttackRollSources(state, action, actorId, targetId, visible),
+      ...monsterAttackRollModeSources(
+        action,
+        actorId,
+        enginePlanningConditions(state, targetId),
+        enginePlanningHitPoints(state, targetId),
+        enginePlanningHitPointMaximum(state, targetId),
+      ),
+    ],
+    attackRollModifiers,
+    target: {
+      hitPoints: enginePlanningHitPoints(state, targetId),
+      usesDeathSaves: rulesFor(target).usesDeathSaves,
+    },
+    unresolvedReasons: unresolved,
+  };
+}
+
+function optionBlessTargets(option: EngineActorOption): readonly CombatantId[] {
+  return option.actionSlots.flatMap((slot) =>
+    slot.slot === 'bonus' && slot.use.kind === 'cast_spell' && slot.use.spellId === 'bless'
+      ? slot.use.targets.flatMap((targetSelector) => targetSelector.kind === 'combatant'
+        ? [targetSelector.combatantId]
+        : [])
+      : []);
+}
+
+function optionAttackActionIds(
+  option: EngineActorOption,
+  targetId: CombatantId,
+): readonly string[] {
+  return option.actionSlots.flatMap((slot) => {
+    if (slot.slot !== 'main') return [];
+    if (slot.use.kind === 'attack') {
+      return slot.use.target.kind === 'combatant' && slot.use.target.combatantId === targetId
+        ? [String(slot.use.actionId)]
+        : [];
+    }
+    if (slot.use.kind === 'multiattack') {
+      return slot.use.components.flatMap((component) =>
+        component.target.kind === 'combatant' && component.target.combatantId === targetId
+          ? [String(component.actionId)]
+          : []);
+    }
+    return [];
+  });
+}
+
+/** Pure allocation comparison over real registry option ids and explicit initiative order. */
+export function compareTacticalAllocations(
+  state: EncounterState,
+  targetId: CombatantId,
+  candidates: readonly TacticalAllocationCandidate[],
+  initiativeOrder: readonly CombatantId[],
+): TacticalAllocationComparison {
+  const orderIndex = new Map(initiativeOrder.map((actorId, index) => [actorId, index] as const));
+  const target = combatant(state, targetId);
+  const allocations = candidates.map((candidate): TacticalAllocationResult => {
+    const ordered = [...candidate.choices].sort((left, right) =>
+      (orderIndex.get(left.actorId) ?? Number.MAX_SAFE_INTEGER) -
+      (orderIndex.get(right.actorId) ?? Number.MAX_SAFE_INTEGER));
+    const orderMismatch = ordered.some((choice, index) => choice !== candidate.choices[index]) ||
+      ordered.some((choice) => !orderIndex.has(choice.actorId));
+    if (orderMismatch || new Set(ordered.map((choice) => choice.actorId)).size !== ordered.length) {
+      return {
+        allocationId: candidate.allocationId,
+        policy: TACTICAL_EVALUATOR_POLICY,
+        status: 'unresolved',
+        killProbability: null,
+        expectedFailures: null,
+        expectedDamage: null,
+        reasonCodes: ['initiative_order_mismatch'],
+      };
+    }
+    const options = ordered.map((choice) => availableEngineActorOptions(
+      state, choice.actorId, canonicalEngineQueryPort,
+    ).find((option) => option.optionId === choice.optionId));
+    if (options.some((option) => option === undefined)) {
+      return {
+        allocationId: candidate.allocationId,
+        policy: TACTICAL_EVALUATOR_POLICY,
+        status: 'unresolved',
+        killProbability: null,
+        expectedFailures: null,
+        expectedDamage: null,
+        reasonCodes: ['option_not_offered'],
+      };
+    }
+    const grants = candidate.modifierGrants ?? [];
+    const invalidGrant = grants.some((grant, grantIndex) => {
+      const sourceIndex = ordered.findIndex((choice) => choice.actorId === grant.sourceActorId);
+      const sourceOption = options[sourceIndex];
+      return grants.findIndex((candidateGrant) =>
+        candidateGrant.sourceActorId === grant.sourceActorId) !== grantIndex ||
+        sourceOption === undefined || optionBlessTargets(sourceOption).length === 0 ||
+        grant.targetIds.length < 1 || grant.targetIds.length > 3 ||
+        new Set(grant.targetIds).size !== grant.targetIds.length ||
+        grant.targetIds.some((grantTarget) => {
+          const targetState = combatant(state, grantTarget);
+          return targetState?.life !== 'living' ||
+            !combatantsAreAllies(state, grant.sourceActorId, grantTarget);
+        });
+    });
+    if (invalidGrant) {
+      return {
+        allocationId: candidate.allocationId,
+        policy: TACTICAL_EVALUATOR_POLICY,
+        status: 'unresolved',
+        killProbability: null,
+        expectedFailures: null,
+        expectedDamage: null,
+        reasonCodes: ['modifier_grant_not_in_option'],
+      };
+    }
+    const attackInputs: TacticalAttackInput[] = [];
+    const blessed = new Set<CombatantId>();
+    let modifierApplied = false;
+    for (let index = 0; index < ordered.length; index += 1) {
+      const choice = ordered[index];
+      const option = options[index];
+      if (choice === undefined || option === undefined) continue;
+      // A bonus action can precede the main action; granting first models that legal ordering.
+      const explicitGrant = grants.find((grant) => grant.sourceActorId === choice.actorId);
+      const blessTargets = explicitGrant?.targetIds ?? optionBlessTargets(option);
+      for (const blessedActor of blessTargets) blessed.add(blessedActor);
+      const modifiers = blessed.has(choice.actorId)
+        ? [{ kind: 'die' as const, count: 1, sides: 4, sign: 1 as const, reason: 'bless' as const }]
+        : [];
+      const actionIds = optionAttackActionIds(option, targetId);
+      if (modifiers.length > 0 && actionIds.length > 0) modifierApplied = true;
+      const resolution = resolveEngineActorOption(state, option, canonicalEngineQueryPort);
+      const attackState = resolution.valid ? {
+        ...state,
+        tokens: state.tokens.map((token) => token.combatantId === choice.actorId
+          ? { ...token, position: resolution.mechanics.finalPosition }
+          : token),
+      } : state;
+      for (const actionId of actionIds) {
+        const attackInput = engineTacticalAttackInput(
+          attackState, choice.actorId, targetId, actionId, modifiers,
+        );
+        if (attackInput !== null) attackInputs.push(attackInput);
+      }
+    }
+    const targetHitPoints = target === null ? 0 : enginePlanningHitPoints(state, targetId);
+    const targetUsesDeathSaves = target !== null && rulesFor(target).usesDeathSaves;
+    const existingFailures = target?.deathSaves?.failures ?? 0;
+    const fold = foldTacticalAttackSequence({
+      target: targetHitPoints === 0 && targetUsesDeathSaves
+        ? { kind: 'death_saves', existingFailures: existingFailures as 0 | 1 | 2 }
+        : { kind: 'living_hit_points', hitPoints: targetHitPoints },
+      attacks: attackInputs,
+    });
+    return {
+      allocationId: candidate.allocationId,
+      policy: fold.policy,
+      status: fold.status,
+      killProbability: fold.killProbability,
+      expectedFailures: fold.expectedFailures,
+      expectedDamage: fold.expectedDamage,
+      reasonCodes: [
+        'allocation_resolved',
+        ...(attackInputs.length === 0 ? ['no_attacks_against_target' as const] : []),
+        ...(modifierApplied ? ['attack_modifier_applied_after_grant' as const] : []),
+        ...fold.reasonCodes,
+      ],
+    };
+  });
+  return {
+    policy: TACTICAL_EVALUATOR_POLICY,
+    targetId,
+    initiativeOrder: [...initiativeOrder],
+    allocations,
+  };
+}
+
 const engineQueryPort: EngineQueryPort = {
   combatant: (state, id) => state.combatants.find((candidate) => candidate.profile.id === id) ?? null,
   tokenPosition: (state, id) => state.tokens.find((token) => token.combatantId === id)?.position ?? null,
@@ -1111,85 +1430,10 @@ const engineQueryPort: EngineQueryPort = {
   path,
   reach,
   tacticalAttack(state, actorId, targetId, actionId) {
-    const actor = combatant(state, actorId);
-    const target = combatant(state, targetId);
-    const actorPosition = state.tokens.find((entry) => entry.combatantId === actorId)?.position;
-    const targetPosition = state.tokens.find((entry) => entry.combatantId === targetId)?.position;
-    const action = monsterActions(state, actorId).find(
-      (candidate): candidate is MonsterAttackAction =>
-        candidate.kind === 'attack' && candidate.id === actionId,
-    );
-    if (
-      actor === null ||
-      target === null ||
-      actorPosition === undefined ||
-      targetPosition === undefined ||
-      action === undefined
-    ) return null;
-    const visible = engineQueryPort.visibility(state, actorId, targetId) ?? {
-      visible: false,
-      reciprocal: false,
-    };
-    const cover = coverBetweenObjects(state.worldObjects, actorPosition, targetPosition);
-    const coverBonus = cover === 'half' ? 2 : cover === 'three_quarters' ? 5 : 0;
-    const madeRollDefense = state.effects.filter((effect): effect is PlanningRollDefenseEffect =>
-      isPlanningRollDefenseEffect(effect) &&
-      effect.payload.scopes.includes('attack_rolls_made') &&
-      planningRollDefenseApplies(state, effect, actorId, targetId));
-    const flatAttackBonus = madeRollDefense.reduce((sum, effect) =>
-      effect.payload.kind === 'roll_defense_modifier' && effect.payload.modifier.kind === 'flat'
-        ? sum + effect.payload.modifier.amount
-        : sum, 0);
-    const randomAttackModifier = madeRollDefense.some((effect) =>
-      effect.payload.modifier.kind === 'die_rider') || state.effects.some((effect) => {
-      if (!effect.targets.includes(actorId) || isPlanningRollDefenseEffect(effect)) return false;
-      const payload = effect.payload;
-      return payload.kind === 'attack_roll_modifier' ||
-        (payload.kind === 'd20_test_modifier' && payload.tests.includes('attack_roll'));
-    });
-    const unresolved: TacticalUnresolvedReason[] = [
-      ...(randomAttackModifier ? ['random_attack_modifier_unresolved' as const] : []),
-      ...(action.damage.some((term) => term.trigger.kind !== 'always')
-        ? ['conditional_damage_rider_unresolved' as const]
-        : []),
-      ...(cover === 'total' ? ['target_has_total_cover' as const] : []),
-    ];
-    return evaluateTacticalAttack({
-      attackerId: actorId,
-      targetId,
-      attackerPosition: actorPosition,
-      targetPosition,
-      range: monsterAttackRange(action),
-      attackBonus:
-        action.attackBonus +
-        exhaustionPenalty(enginePlanningConditions(state, actorId)) +
-        flatAttackBonus,
-      targetArmorClass: planningArmorClass(state, target, actorId) + coverBonus,
-      criticalFloor: 20,
-      damageTerms: action.damage
-        .filter((term) => term.trigger.kind === 'always')
-        .map((term) => ({ dice: term.dice })),
-      attackerConditions: enginePlanningConditions(state, actorId),
-      targetConditions: enginePlanningConditions(state, targetId),
-      attackerCanSeeTarget: visible.visible,
-      targetCanSeeAttacker: visible.reciprocal,
-      rollModeSources: [
-        ...planningAttackRollSources(state, action, actorId, targetId, visible),
-        ...monsterAttackRollModeSources(
-          action,
-          actorId,
-          enginePlanningConditions(state, targetId),
-          enginePlanningHitPoints(state, targetId),
-          enginePlanningHitPointMaximum(state, targetId),
-        ),
-      ],
-      target: {
-        hitPoints: enginePlanningHitPoints(state, targetId),
-        usesDeathSaves: rulesFor(target).usesDeathSaves,
-      },
-      unresolvedReasons: unresolved,
-    });
+    const input = engineTacticalAttackInput(state, actorId, targetId, actionId);
+    return input === null ? null : evaluateTacticalAttack(input);
   },
+  compareAllocations: compareTacticalAllocations,
   cover(state, actorId, targetId) {
     const from = state.tokens.find((token) => token.combatantId === actorId)?.position;
     const to = state.tokens.find((token) => token.combatantId === targetId)?.position;

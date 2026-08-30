@@ -126,6 +126,7 @@ import {
   evaluateTacticalAttack,
   tacticalRangeVerdict,
   type AttackRollModeSource,
+  type TacticalAttackRollModifier,
   type TacticalAttackEvaluation,
   type TacticalUnresolvedReason,
 } from './tactical-evaluator';
@@ -2165,13 +2166,33 @@ export function evaluateMonsterTacticalAttack(
     effect.payload.modifier.kind === 'flat'
       ? sum + effect.payload.modifier.amount
       : sum, 0);
-  const hasRandomAttackModifier = madeRollDefense.some((effect) =>
-    effect.payload.modifier.kind === 'die_rider') || state.effects.some((effect) => {
-    if (!effect.targets.includes(actor) || isRollDefenseEffect(effect)) return false;
-    const payload = effect.payload;
-    return payload.kind === 'attack_roll_modifier' ||
-      (payload.kind === 'd20_test_modifier' && payload.tests.includes('attack_roll'));
-  });
+  const attackRollModifiers: TacticalAttackRollModifier[] = [
+    ...madeRollDefense.flatMap((effect) => effect.payload.modifier.kind === 'die_rider'
+      ? [{
+          kind: 'die' as const,
+          count: effect.payload.modifier.count,
+          sides: effect.payload.modifier.sides,
+          sign: effect.payload.modifier.sign,
+          reason: 'effect' as const,
+        }]
+      : []),
+    ...state.effects.flatMap((effect): readonly TacticalAttackRollModifier[] => {
+      if (!effect.targets.includes(actor) || isRollDefenseEffect(effect)) return [];
+      const payload = effect.payload;
+      if (payload.kind === 'attack_roll_modifier') {
+        return [{ kind: 'die', count: payload.count, sides: payload.sides, sign: payload.sign, reason: 'effect' }];
+      }
+      if (payload.kind === 'd20_test_modifier' && payload.tests.includes('attack_roll')) {
+        return [{
+          kind: 'die', count: payload.count, sides: payload.sides, sign: payload.sign,
+          reason: payload.sign === 1 && payload.count === 1 && payload.sides === 4
+            ? 'bless'
+            : 'effect',
+        }];
+      }
+      return [];
+    }),
+  ];
   const conditionalDamage = action.damage.some((term) => term.trigger.kind !== 'always');
   const targetCover = coverTierBetween(
     state,
@@ -2179,7 +2200,6 @@ export function evaluateMonsterTacticalAttack(
     token(state, target).position,
   );
   const unresolvedReasons: TacticalUnresolvedReason[] = [
-    ...(hasRandomAttackModifier ? ['random_attack_modifier_unresolved' as const] : []),
     ...(conditionalDamage ? ['conditional_damage_rider_unresolved' as const] : []),
     ...(targetCover === 'total' ? ['target_has_total_cover' as const] : []),
   ];
@@ -2219,6 +2239,7 @@ export function evaluateMonsterTacticalAttack(
         effectiveHitPointMaximum(state, target),
       ),
     ],
+    attackRollModifiers,
     target: {
       hitPoints: targetHitPoints,
       usesDeathSaves: targetState.profile.rules.usesDeathSaves,
