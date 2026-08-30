@@ -375,12 +375,17 @@ function preparedMonsterRoundRevision(initialState: EncounterState): {
   return { revision: state.revision, resolvedDeathSaves };
 }
 
+const LEGACY_BLOCK_ARGS = [
+  '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
+] as const;
+
 describe('AI-DM engine MCP conversation runner', () => {
   it('authorizes a serialized MCP use_action dodge proposal', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-serialized-dodge-'));
     const adapter = new SerializedRoundTripAdapter('use_action_dodge');
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -411,6 +416,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const adapter = new SerializedRoundTripAdapter('targeted_web');
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -439,6 +445,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const adapter = new SerializedRoundTripAdapter('option_shaped_end_turn');
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -470,6 +477,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const tieredAdapter = new SerializedRoundTripAdapter('invalid_then_dodge');
     const commonArgs = [
       '--rooms', '1', '--rounds', '1', '--model', 'gpt-base', '--effort', 'low',
+      ...LEGACY_BLOCK_ARGS,
     ] as const;
 
     await runConversation(parseConversationArgs([
@@ -523,6 +531,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       const config = parseConversationArgs([
         '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
         '--model', 'gpt-base', '--effort', 'low',
+        ...LEGACY_BLOCK_ARGS,
         ...escalationArgs,
       ]);
 
@@ -560,6 +569,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const adapter = new SerializedRoundTripAdapter('attack');
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -578,6 +588,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const adapter = new SerializedRoundTripAdapter('use_action_dodge');
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '2', '--out', join(directory, 'rows.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -604,6 +615,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', outPath,
       '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -668,6 +680,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       const config = parseConversationArgs([
         '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
         '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
+        ...LEGACY_BLOCK_ARGS,
       ]);
 
       const result = await runConversation(config, { roomStates: [generatedState] });
@@ -705,6 +718,7 @@ describe('AI-DM engine MCP conversation runner', () => {
         '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
         '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
         '--reaction-ask-default', askDefault,
+        ...LEGACY_BLOCK_ARGS,
       ]);
 
       const result = await runConversation(config, {
@@ -738,6 +752,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--rooms', '2', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
       '--reaction-ask-default', 'decline',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -774,6 +789,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--rooms', '2', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
       '--reaction-ask-default', 'decline',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -803,6 +819,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--out', outPath,
       '--cli-bin', 'definitely-not-a-model-binary',
       '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -851,6 +868,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', outPath,
       '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config);
@@ -867,6 +885,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-flap-recovery-'));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -885,6 +904,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-service-null-'));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -907,6 +927,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-engine-rejection-'));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -931,6 +952,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-context-trim-'));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, {
@@ -949,6 +971,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const adapter = new RecordingConversationAdapter();
     const config = parseConversationArgs([
       '--rooms', '3', '--rounds', '1', '--out', outPath, '--kb', kbPath,
+      ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, { adapter });
@@ -986,6 +1009,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-cold-plan-'));
     const result = await runConversation(parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
     ]));
 
     expect(result.rows[0]).toEqual(expect.objectContaining({
@@ -1024,14 +1048,21 @@ describe('AI-DM engine MCP conversation runner', () => {
   it('admits the active process and local OpenAI conversation adapters', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-cli-'));
     const outPath = join(directory, 'rows.jsonl');
-    expect(parseConversationArgs(['--rooms', '1', '--out', outPath]).combatModel)
-      .toBe('monster_block_v1');
-    expect(parseConversationArgs([
-      '--rooms', '1', '--out', outPath, '--combat-model', 'initiative_segments_v1',
-    ]).combatModel).toBe('initiative_segments_v1');
+    const defaults = parseConversationArgs(['--rooms', '1', '--out', outPath]);
+    expect(defaults.combatModel).toBe('initiative_segments_v1');
+    expect(defaults.initiativeProfile).toBe('derived_v1');
+    const block = parseConversationArgs([
+      '--rooms', '1', '--out', outPath,
+      '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
+    ]);
+    expect(block.combatModel).toBe('monster_block_v1');
+    expect(block.initiativeProfile).toBe('legacy');
     expect(() => parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--combat-model', 'unknown-model',
     ])).toThrow('--combat-model must be monster_block_v1 or initiative_segments_v1');
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--initiative-profile', 'synthetic',
+    ])).toThrow('--initiative-profile must be legacy or derived_v1');
     expect(parseConversationArgs(['--rooms', '1', '--out', outPath, '--cli', 'claude-code']).cli)
       .toBe('claude-code');
     expect(() => parseConversationArgs(['--rooms', '1', '--out', outPath, '--cli', 'pi']))
@@ -1074,14 +1105,18 @@ describe('AI-DM engine MCP conversation runner', () => {
     ])).toThrow('--kb cannot use content/cc-by-sa');
   });
 
-  it('fails loudly when an initiative-segment room uses a frozen block fixture', async () => {
+  it('derives per-combatant initiative for standalone fixtures and rejects an explicit legacy profile', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-fixture-constraint-'));
-    const config = parseConversationArgs([
-      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
-      '--combat-model', 'initiative_segments_v1', '--dry-run',
-    ]);
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'derived.jsonl'), '--dry-run',
+    ]));
+    expect(result.rows[0]?.combatModel).toBe('initiative_segments_v1');
 
-    await expect(runConversation(config)).rejects.toThrow(
+    const incompatible = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'legacy.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--initiative-profile', 'legacy', '--dry-run',
+    ]);
+    await expect(runConversation(incompatible)).rejects.toThrow(
       'initiative_segments_v1 fixture constraint: room 1 must declare config.initiativeMode="per_combatant"',
     );
   });

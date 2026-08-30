@@ -173,6 +173,7 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         '--local-model', 'quantized-SIMULATED', '--local-api-key', 'secret-SIMULATED',
         '--local-think', 'on',
         '--effort', 'low', '--kb', 'tests/fixtures/ai-dm-kb/k6.txt',
+        '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
       ]);
       const rows = await runArena(config);
 
