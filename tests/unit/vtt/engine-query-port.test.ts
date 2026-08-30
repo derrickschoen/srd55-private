@@ -95,12 +95,46 @@ describe('canonical engine query port', () => {
       });
       if (call.case === 'melee_reach') {
         // Two grid intervals are 10 feet, exactly the Bugbear Warrior's Grab reach.
-        expect(canonical).toEqual({ legal: true, distanceFeet: 10, rangeFeet: 10 });
+        expect(canonical).toEqual({
+          legal: true,
+          distanceFeet: 10,
+          rangeFeet: 10,
+          rangeBand: 'melee',
+          normalRangeFeet: 10,
+          longRangeFeet: null,
+        });
       } else {
         // Four grid intervals are 20 feet, exactly Light Hammer's normal thrown range.
-        expect(canonical).toEqual({ legal: true, distanceFeet: 20, rangeFeet: 20 });
+        expect(canonical).toEqual({
+          legal: true,
+          distanceFeet: 20,
+          rangeFeet: 20,
+          rangeBand: 'normal',
+          normalRangeFeet: 20,
+          longRangeFeet: 60,
+        });
       }
     }
+  });
+
+  it('keeps normal and long range distinct in the authoritative reach query', () => {
+    const state = placedState(SEED, new Map<CombatantId, GridCell>([
+      [ACTOR_ID, { column: 0, row: 0 }],
+      [TARGET_ID, { column: 5, row: 0 }],
+    ]));
+    // Five grid intervals are 25 feet: beyond 20 normal, within 60 long.
+    expect(canonicalEngineQueryPort.reach(state, {
+      actorId: ACTOR_ID,
+      targetId: TARGET_ID,
+      actionId: 'light-hammer',
+    })).toEqual({
+      legal: true,
+      distanceFeet: 25,
+      rangeFeet: 20,
+      rangeBand: 'long',
+      normalRangeFeet: 20,
+      longRangeFeet: 60,
+    });
   });
 
   it('derives fallback behavior independently from fixed geometry', () => {

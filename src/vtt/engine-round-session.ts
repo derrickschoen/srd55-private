@@ -1,5 +1,5 @@
 import { canonicalJson } from '../commands/canonical-json';
-import type { EncounterState } from '../combat/encounter';
+import { evaluateMonsterTacticalAttack, type EncounterState } from '../combat/encounter';
 import type { EncounterCommand } from '../combat/events';
 import { monsterAttackCommand, monsterSavingThrowCommand } from '../combat/monster-commands';
 import { restoreMulberry32, type SerializableRng } from '../combat/random';
@@ -360,7 +360,18 @@ function applyOneResolvedMechanic(
         .find((candidate): candidate is MonsterAttackAction =>
           candidate.kind === 'attack' && candidate.id === mechanics.actionId);
       if (action === undefined) throw new Error(`Resolved attack ${mechanics.actionId} is absent.`);
-      state = reduce(state, monsterAttackCommand(action, mechanics.actorId, mechanics.targetId));
+      const evaluation = evaluateMonsterTacticalAttack(
+        state,
+        action,
+        mechanics.actorId,
+        mechanics.targetId,
+      );
+      state = reduce(state, monsterAttackCommand(
+        action,
+        mechanics.actorId,
+        mechanics.targetId,
+        evaluation.rollMode.mode,
+      ));
       break;
     }
     case 'dodge': state = reduce(state, { type: 'dodge', actor: mechanics.actorId }); break;

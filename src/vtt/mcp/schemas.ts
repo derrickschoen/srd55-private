@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TACTICAL_EVALUATOR_POLICY } from '../../combat/tactical-evaluator';
 import { PLAY_NAMES } from '../snippet-registry-runtime';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
 
@@ -78,8 +79,10 @@ const risk = z.object({
 }).strict();
 const expectation = z.object({
   resolvable: z.boolean(), outcome_probability: z.number().min(0).max(1).nullable(),
+  critical_probability: z.number().min(0).max(1).nullable(),
   expected_value: z.number().finite().nullable(), metric: z.enum(['damage', 'healing', 'control', 'none']),
   assumption_codes: z.array(shortCode).max(20),
+  policy: z.literal(TACTICAL_EVALUATOR_POLICY),
 }).strict();
 const tacticalOption = z.object({
   action_id: identifier, kind: z.enum(['attack', 'cast_spell', 'use_action', 'dodge', 'disengage', 'dash', 'end_turn']),
@@ -194,7 +197,7 @@ function pairOutput(facts: z.ZodType<unknown>) {
   return z.object({ state_ref: stateRef, results: z.array(z.object({ query_id: z.string().min(1).max(100), status: z.enum(['yes', 'no', 'conditional', 'unknown']), facts, refusals: z.array(refusal).max(20) }).strict()).max(50) }).strict();
 }
 const metrics = z.object({ outcome_probability: z.number().min(0).max(1).nullable(), expected_damage: z.number().finite().nullable(), expected_healing: z.number().finite().nullable(), resource_cost: z.number().int().min(0).nullable(), distribution: z.array(z.object({ outcome: z.number().finite(), probability: z.number().min(0).max(1) }).strict()).max(100).nullable() }).strict();
-const diceOutput = z.object({ state_ref: stateRef, results: z.array(z.object({ candidate_id: z.string().min(1).max(100), resolvable: z.boolean(), metrics, assumptions: z.array(shortCode).max(20), refusals: z.array(refusal).max(20) }).strict()).max(20) }).strict();
+const diceOutput = z.object({ state_ref: stateRef, results: z.array(z.object({ candidate_id: z.string().min(1).max(100), policy: z.literal(TACTICAL_EVALUATOR_POLICY), resolvable: z.boolean(), metrics, assumptions: z.array(shortCode).max(20), refusals: z.array(refusal).max(20) }).strict()).max(20) }).strict();
 
 const resolutionPreview = z.object({ actor_id: identifier, action_id: identifier, target_id: identifier.nullable(), movement_feet: z.number().int().min(0), resolution_digest: z.string().min(64).max(128), summary: summaryText }).strict();
 const correctionGuidance = z.union([

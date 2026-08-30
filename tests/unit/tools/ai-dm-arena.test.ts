@@ -241,7 +241,7 @@ describe('AI-DM arena', () => {
       ['combatant:generated-3943001-monster-1', 'dagger'],
       ['combatant:generated-3943001-monster-2', 'grab'],
       ['combatant:generated-3943001-monster-3', 'longsword'],
-    ].map(([actorId, actionId]) => ({
+    ].map(([actorId, actionId], index) => ({
       actorId,
       acceptedIntent: {
         actor_id: actorId,
@@ -262,11 +262,13 @@ describe('AI-DM arena', () => {
           engagement: { stance: 'hold_position' },
         },
       },
-      selectedBranch: 'fallback',
-      resolutionSummary: { actionId: 'dodge', targetId: null, movementFeet: 0 },
+      selectedBranch: index === 0 ? 'primary' : 'fallback',
+      resolutionSummary: index === 0
+        ? { actionId: 'dagger', targetId: 'combatant:cleric', movementFeet: 10 }
+        : { actionId: 'dodge', targetId: null, movementFeet: 0 },
     })));
     expect(rows[0]?.roundNarrative).toBe(
-      'combatant:generated-3943001-monster-1 uses dodge; ' +
+      'combatant:generated-3943001-monster-1 moves 10 feet and uses dagger on combatant:cleric; ' +
       'combatant:generated-3943001-monster-2 uses dodge; ' +
       'combatant:generated-3943001-monster-3 uses dodge',
     );
