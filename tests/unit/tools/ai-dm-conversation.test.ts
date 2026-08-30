@@ -44,6 +44,7 @@ import {
   type RevisionDeltaOperation,
 } from '../../../src/vtt/dm-bridge/projection-transport';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 
 class RecordingConversationAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
@@ -1053,15 +1054,162 @@ describe('AI-DM engine MCP conversation runner', () => {
     ])).toThrow('--kb cannot use content/cc-by-sa');
   });
 
-  it('refuses initiative-segment execution explicitly until the later execution slice', async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-not-implemented-'));
+  it('fails loudly when an initiative-segment room uses a frozen block fixture', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-fixture-constraint-'));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
       '--combat-model', 'initiative_segments_v1', '--dry-run',
     ]);
 
     await expect(runConversation(config)).rejects.toThrow(
-      'NOT_IMPLEMENTED: initiative_segments_v1 conversation execution',
+      'initiative_segments_v1 fixture constraint: room 1 must declare config.initiativeMode="per_combatant"',
     );
+  });
+
+  it('walks an alternating initiative fixture without waking the DM for HP-only drift', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-no-drift-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, { roomStates: [await alternatingInitiativeRoom()] });
+    const row = result.rows[0];
+
+    expect(row).toEqual(expect.objectContaining({
+      combatModel: 'initiative_segments_v1',
+      outcome: 'authorized',
+      adjustments: [],
+      callsPerRound: 1,
+    }));
+    expect(row?.initiativeOrder).toHaveLength(6);
+    expect(row?.initiativeOrder).toEqual([
+      'combatant:cleric',
+      'combatant:generated-3943001-monster-3',
+      'combatant:fighter',
+      'combatant:wizard',
+      'combatant:generated-3943001-monster-2',
+      'combatant:generated-3943001-monster-1',
+    ]);
+    expect(row?.pcTurns).toHaveLength(3);
+    expect(row?.pcTurns?.every((turn) => !turn.material)).toBe(true);
+    expect(row?.monsterSegments?.map((segment) => segment.actors)).toEqual([
+      ['combatant:generated-3943001-monster-3'],
+      [
+        'combatant:generated-3943001-monster-2',
+        'combatant:generated-3943001-monster-1',
+      ],
+    ]);
+    expect(row?.monsterSegments?.every((segment) =>
+      Array.isArray(segment.deviationResolutions))).toBe(true);
+  });
+
+  it.each([
+    ['keep', 'baseline_kept'],
+    ['change', 'adjusted'],
+  ] as const)('records a material adjustment that chooses %s', { timeout: 30_000 }, async (response, outcome) => {
+    const directory = mkdtempSync(join(tmpdir(), `dnd-conversation-segments-${response}-`));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': response },
+    });
+    const row = result.rows[0];
+
+    expect(row?.adjustments?.[0]).toEqual(expect.objectContaining({
+      outcome,
+      granularity: 'turn_delta',
+      flapRetries: 0,
+    }));
+    expect(row?.adjustments?.[0]?.rawContext).toContain('"granularity":"turn_delta"');
+    expect(row?.adjustments?.[0]?.reasons).toContain('OPEN_MONSTER_SET_CHANGED');
+    expect(row?.adjustments).toHaveLength(1);
+    expect(row?.monsterSegments?.flatMap((segment) => segment.actors)).toHaveLength(2);
+  });
+
+  it('gives two material PC turns independent adjustment flap budgets', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-independent-flaps-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom({ monsterHitPoints: 1 })],
+      flapPrimaryByRequest: {
+        'room-1-round-1-pc-turn-2': 1,
+        'room-1-round-1-pc-turn-3': 1,
+      },
+    });
+
+    expect(result.rows[0]?.adjustments?.slice(0, 2)).toEqual([
+      expect.objectContaining({ flapRetries: 1, outcome: 'baseline_kept' }),
+      expect.objectContaining({ flapRetries: 1, outcome: 'baseline_kept' }),
+    ]);
+  });
+
+  it('runs one adjustment correction and retains the corrected replacement', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-correction-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'invalid' },
+    });
+
+    expect(result.rows[0]?.adjustments?.[0]).toEqual(expect.objectContaining({
+      outcome: 'adjusted',
+      flapRetries: 0,
+    }));
+    expect(result.rows[0]?.callsPerRound).toBeGreaterThanOrEqual(3);
+  });
+
+  it('keeps the baseline after three adjustment service nulls and continues the round', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-service-null-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      flapPrimaryByRequest: { 'room-1-round-1-pc-turn-1': 3 },
+    });
+
+    expect(result.rows[0]?.adjustments?.[0]).toEqual(expect.objectContaining({
+      outcome: 'service_null',
+      flapRetries: 2,
+    }));
+    expect(result.rows[0]?.pcTurns).toHaveLength(3);
+    expect(result.rows[0]?.monsterSegments?.flatMap((segment) => segment.actors).length)
+      .toBeGreaterThan(0);
+  });
+
+  it('treats adjustment correction no-response as protocol exhaustion, not a flap', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-correction-exhaustion-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'invalid' },
+      failCorrection: ['room-1-round-1-pc-turn-1'],
+    });
+
+    expect(result.rows[0]?.adjustments?.[0]).toEqual(expect.objectContaining({
+      outcome: 'baseline_kept',
+      flapRetries: 0,
+    }));
+    expect(result.rows[0]?.monsterSegments?.flatMap((segment) => segment.actors).length)
+      .toBeGreaterThan(0);
   });
 });

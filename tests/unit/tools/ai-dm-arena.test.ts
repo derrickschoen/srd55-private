@@ -118,7 +118,7 @@ describe('AI-DM arena', () => {
     const segments = parseArenaArgs([...common, '--combat-model', 'initiative_segments_v1']);
     expect(segments.combatModel).toBe('initiative_segments_v1');
     await expect(runArena(segments)).rejects.toThrow(
-      'NOT_IMPLEMENTED: initiative_segments_v1 conversation execution',
+      'initiative_segments_v1 fixture constraint: room 1 must declare config.initiativeMode="per_combatant"',
     );
     expect(() => parseArenaArgs([...common, '--combat-model', 'unknown-model']))
       .toThrow('--combat-model must be monster_block_v1 or initiative_segments_v1');
