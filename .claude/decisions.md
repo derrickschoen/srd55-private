@@ -7,6 +7,16 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D418.1 — OWNER: the AI DM is omniscient about PC capabilities and resources (2026-08-30)
+
+Verbatim: "A real dm will know what the pcs can do and how much hp and other
+resources they have left." Resolves the knowledge-tier questions in the
+D418 intel sweep (base doc Q2 and supplement Q9): monster-planning intel may
+use exact PC AC, HP, remaining slots, spell availability, and rescue/revive
+capability — no neutral-facts-only tier, no hidden-information channel to
+design around for the DM side. (PC-side controllers remain a separate
+question; nothing here grants PCs monster omniscience.)
+
 ## D418 — OWNER: engine provides options/intel algorithmically; AI fills gaps only (2026-08-30)
 
 Verbatim: "I think the engine should provide these options to the dm. We want
