@@ -7,6 +7,17 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D417.1 — OWNER: no high-ground to-hit, but fall damage is SRD and in scope (2026-08-30)
+
+Verbatim: "High ground bonus is not modeled in srd, but remember that fall
+damage is." Sharpens D417: when elevation lands, its RAW payoffs are fall
+damage (SRD 5.2.1 Falling [Hazard]: 1d6 Bludgeoning per 10 feet, max 20d6,
+landing prone — verified from docs/srd/full/srd-5.2.1.txt), forced-movement
+shoves off edges (the parity digest's forced-movement/edge-risk exploit
+class), and elevation-derived cover/line-of-sight — but NO to-hit modifier.
+The tactical evaluator prices edge proximity and fall EV when elevation
+modeling arrives.
+
 ## D419.1 — OWNER: parity is capability-class under RAW; catch-rate knob deferred; calibration waits for the rerun packet (2026-08-30)
 
 Three rulings on the supervisor's questions: (1) BG3 parity floor =
