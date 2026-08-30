@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D416.2 — OWNER: initiative_segments_v1 becomes the default combat model (2026-08-30)
+
+Owner answered "yes" to the supervisor's question "Flip initiative_segments_v1
+to the default combat model?", asked with the acceptance sample attached
+(docs/perf/2026-08-30-phase2-ab-acceptance.md: 8/8 authorized both arms,
+median adjustments 0.5, 0% full-context fallback, 0 corrections). Resolves
+Phase 2 plan open question 3. Scope: default combat model flips to
+initiative_segments_v1 across the driver tools; the initiative-profile
+default flips to derived_v1 in tandem (segments requires per_combatant
+initiative — the synthetic legacy profile would fake interleaving).
+monster_block_v1 remains selectable explicitly; existing corpus rows remain
+valid via their recorded combatModel/repoCommit provenance.
+
 ## D416.1 — OWNER: "Do your recommendations" — phasing adopted (2026-08-29)
 
 Owner adopted the supervisor's D416 recommendations verbatim ("Do your
