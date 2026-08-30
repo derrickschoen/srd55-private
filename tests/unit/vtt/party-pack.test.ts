@@ -4462,6 +4462,80 @@ describe('external party-pack batch 2b mutation boundaries', () => {
     });
   });
 
+  it('rejects a root array as a structural party-pack error', () => {
+    expect(loadExternalPartyPack([])).toEqual({
+      status: 'refused',
+      refusal: { kind: 'external_party_pack_refusal', reason: 'invalid_structure' },
+      gaps: [{
+        packEntry: 'party-pack:root',
+        featurePath: 'party-pack',
+        requestedCapability: 'field:party-pack',
+        engineRefusalReason: 'invalid_party_pack_structure',
+      }],
+    });
+  });
+
+  it('retains each allowed nested spellcasting and attack field while branding resource-backed effects', () => {
+    const candidate = effectPack();
+    const source = objectSpellcasting(candidate.members[0]!);
+    source.grants = [{ spellId: 'guidance', ability: 'wisdom' }];
+
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Nested spellcasting preservation pack was refused.');
+
+    expect(loaded.party.members[0]).toMatchObject({
+      sharedSpellSlots: [{ level: 1, maximum: 4, recharge: 'long_rest' }],
+      attacks: [{
+        damage: [{ type: 'Slashing', count: 1, sides: 8, modifier: 3 }],
+      }],
+      effects: [{
+        id: 'effect:precise-strike-damage',
+        resourcePoolId: 'resource:precise-strikes',
+      }],
+      spellcasting: [{
+        resourceSpellUses: [{
+          spellId: 'magic-missile',
+          resourcePoolId: 'resource:precise-strikes',
+        }],
+        grants: [{ spell: { id: 'guidance' } }],
+      }],
+    });
+  });
+
+  it('reserves healing slots for a multiclass Cleric when opening Bless is enabled', () => {
+    const candidate = structuredClone(pack());
+    const input = candidate.members[0]!;
+    input.classes = [
+      { classId: 'Fighter', level: 3 },
+      { classId: 'Cleric', level: 4 },
+    ];
+    const source = objectSpellcasting(input);
+    source.preparedSpellIds = ['cure-wounds'];
+    source.knownSpellIds = [];
+    source.spellSlots = [{ level: 1, count: 1, recharge: 'long_rest' }];
+    const loaded = loadExternalPartyPack(candidate);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Multiclass Cleric reserve pack was refused.');
+    const actor = loaded.party.members[0]!;
+    let state = createEncounter({
+      bounds: { columns: 2, rows: 1 },
+      combatants: [actor.profile],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 })],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = {
+      ...state,
+      combatants: state.combatants.map((combatant) => ({ ...combatant, hitPoints: 1 })),
+    };
+    const actions = loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: false,
+      openWithBless: false,
+      reserveClericSlotsForBless: true,
+    })(state, actor.profile.id).actions;
+    expect(actions.filter((action) => action.type === 'cast_spell' && action.spellId === 'cure-wounds')).toEqual([]);
+  });
+
   it('pins party-pack wire boundaries, whitespace handling, and loader-preserved hit dice', () => {
     const rejectedAt = (candidate: unknown, path: readonly (string | number)[]) => {
       const parsed = externalPartyPackSchema.safeParse(candidate);
