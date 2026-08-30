@@ -3,8 +3,10 @@ import type { EncounterState } from '../../../src/combat/encounter';
 import type { GridCell } from '../../../src/combat/grid';
 import { combatantId, type CombatantId } from '../../../src/combat/values';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
-import { pureIntentResolver } from '../../../src/vtt/intent-resolver';
+import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
+import { engineOptionId } from '../../../src/vtt/turn-proposal';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 
 const SEED = 3_943_001;
 const ACTOR_ID = combatantId('combatant:generated-3943001-monster-2');
@@ -17,7 +19,7 @@ function placedState(
   rows?: number,
 ): EncounterState {
   const state = generateRoom(seed).encounter.state;
-  return {
+  return freshMonsterPlanningState({
     ...state,
     bounds: rows === undefined ? state.bounds : { ...state.bounds, rows },
     blockedCells: [],
@@ -34,7 +36,7 @@ function placedState(
       const position = positions.get(token.combatantId);
       return position === undefined ? [] : [{ ...token, position }];
     }),
-  };
+  });
 }
 
 describe('canonical engine query port', () => {
@@ -143,31 +145,20 @@ describe('canonical engine query port', () => {
       [TARGET_ID, { column: 4, row: 0 }],
     ]));
 
-    const resolved = pureIntentResolver.resolve(state, {
-      actorId: ACTOR_ID,
-      choice: {
-        kind: 'attack',
-        actionId: 'grab',
-        target: { kind: 'combatant', combatantId: TARGET_ID },
-      },
-      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'accept_if_needed' },
-      engagement: { stance: 'close_to_melee' },
-      fallback: {
-        choice: {
-          kind: 'attack',
-          actionId: 'light-hammer',
-          target: { kind: 'combatant', combatantId: TARGET_ID },
-        },
-        movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'accept_if_needed' },
-        engagement: { stance: 'maintain_range' },
-      },
+    const fallback = availableEngineActorOptions(state, ACTOR_ID).find((option) =>
+      option.actionSlots.some((slot) => slot.use.kind === 'attack' && slot.use.actionId === 'light-hammer'));
+    if (fallback === undefined) throw new Error('Fixture omitted the Light Hammer option.');
+    const resolved = pureTurnProposalResolver.resolve(state, {
+      actorId: ACTOR_ID, expectedRevision: state.revision,
+      primaryOptionId: engineOptionId('option:missing-grab'), fallbackOptionId: fallback.optionId,
+      overrideJustification: null,
     });
 
-    // Grab reaches 10 feet, not the hand-computed 20; Light Hammer reaches 20 with zero movement.
+    // A missing revision-bound primary falls through to the offered Light Hammer option at 20 feet.
     expect(resolved).toMatchObject({
       valid: true,
       selectedBranch: 'fallback',
-      mechanics: { movementCostFeet: 0, actionId: 'light-hammer', targetId: TARGET_ID },
+      mechanics: { movementCostFeet: 0, actionSlots: [{ actionId: 'light-hammer', targetIds: [TARGET_ID] }] },
     });
   });
 
@@ -177,22 +168,18 @@ describe('canonical engine query port', () => {
       [TARGET_ID, { column: 4, row: 0 }],
     ]));
 
-    const resolved = pureIntentResolver.resolve(state, {
-      actorId: ACTOR_ID,
-      choice: {
-        kind: 'attack',
-        actionId: 'grab',
-        target: { kind: 'combatant', combatantId: TARGET_ID },
-      },
-      movement: { willingness: 'only_if_required', maximumFeet: 30, opportunityRisk: 'accept_if_needed' },
-      engagement: { stance: 'close_to_melee' },
-      fallback: null,
+    const grab = availableEngineActorOptions(state, ACTOR_ID).find((option) =>
+      option.actionSlots.some((slot) => slot.use.kind === 'attack' && slot.use.actionId === 'grab'));
+    if (grab === undefined) throw new Error('Fixture omitted the Grab option.');
+    const resolved = pureTurnProposalResolver.resolve(state, {
+      actorId: ACTOR_ID, expectedRevision: state.revision,
+      primaryOptionId: grab.optionId, fallbackOptionId: null, overrideJustification: null,
     });
 
     expect(resolved).toMatchObject({
       valid: true,
       selectedBranch: 'primary',
-      mechanics: { movementCostFeet: 10, actionId: 'grab', targetId: TARGET_ID },
+      mechanics: { movementCostFeet: 10, actionSlots: [{ actionId: 'grab', targetIds: [TARGET_ID] }] },
     });
   });
 
@@ -208,22 +195,17 @@ describe('canonical engine query port', () => {
         : candidate),
     };
 
-    expect(pureIntentResolver.resolve(state, {
-      actorId: ACTOR_ID,
-      choice: {
-        kind: 'attack', actionId: 'grab',
-        target: { kind: 'combatant', combatantId: TARGET_ID },
-      },
-      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-      engagement: { stance: 'hold_position' },
-      fallback: null,
+    expect(pureTurnProposalResolver.resolve(state, {
+      actorId: ACTOR_ID, expectedRevision: state.revision,
+      primaryOptionId: engineOptionId('option:dead-target-grab'), fallbackOptionId: null,
+      overrideJustification: null,
     })).toEqual({
       valid: false,
       selectedBranch: 'none',
       refusals: [{
         branch: 'primary',
-        code: 'TARGET_DEAD',
-        summary: `${ACTOR_ID}: target ${TARGET_ID} is dead`,
+        code: 'OPTION_NOT_OFFERED',
+        summary: `${ACTOR_ID}: primary option was not offered at revision ${String(state.revision)}`,
       }],
     });
   });

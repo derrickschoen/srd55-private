@@ -21,7 +21,8 @@ import {
   type RuleReference,
 } from '../engine-state-capsule';
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
-import type { EngineActionChoice, EngineEngagement, EngineIntentBranch, EngineMovementPreference, EngineTurnIntent, PureIntentResolver } from '../intent-resolver';
+import type { EngineMovementPreference, EngineTurnProposal, PureTurnProposalResolver } from '../intent-resolver';
+import { engineOptionId, type EngineActorOption } from '../turn-proposal';
 import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
 import { diffTurnContextValues } from '../dm-bridge/projection-transport';
 import { submitSpeculativeRoundPlan } from '../speculative-plan-submission';
@@ -44,13 +45,13 @@ import { ENGINE_TOOL_SPECS, schemaViolations } from './schemas';
 export const ENGINE_DM_TOOL_NAMES = Object.freeze([
   'engine.get_turn_context',
   'engine.propose_from_play',
-  'engine.validate_intent',
-  'engine.submit_round_intents',
+  'engine.validate_proposal',
+  'engine.submit_round_proposals',
   'engine.request_dm_adjudication',
 ] as const);
 export const ENGINE_ADJUSTMENT_DM_TOOL_NAMES = Object.freeze([
   'engine.get_turn_context',
-  'engine.validate_intent',
+  'engine.validate_proposal',
   'engine.submit_plan_adjustment',
   'engine.request_dm_adjudication',
 ] as const);
@@ -105,7 +106,7 @@ export interface AllowlistedRuleEntry extends RuleReference {
 
 export const SUGGESTED_PLAN_MAX_BYTES = 16 * 1024;
 export const TURN_CONTEXT_MAX_BYTES = 32 * 1024;
-const SUGGESTED_PLAN_ADVISORY = 'You may submit these intents as-is via engine.submit_round_intents, edit them, or ignore this suggested plan.';
+const SUGGESTED_PLAN_ADVISORY = 'You may submit these revision-bound option proposals as-is via engine.submit_round_proposals, edit the selected option ids, or ignore this suggested plan.';
 
 export function engineStateSummaryProofToken(capsuleDigest: string, granularity: string): string {
   return sha256(`${capsuleDigest}|${granularity}|state_summary_proof_v1`);
@@ -128,7 +129,7 @@ interface EngineMcpDependencies {
   readonly state: EncounterState;
   readonly stateSource: EngineCapsuleFeed;
   readonly queries: EngineQueryPort;
-  readonly intents: PureIntentResolver;
+  readonly turnProposals: PureTurnProposalResolver;
   readonly proposals: ProposalSink;
   readonly speculativePlans: SpeculativePlanSink;
   readonly narration: NarrationSink;
@@ -185,12 +186,18 @@ function decodeTarget(value: unknown): EngineTargetSelector {
     default: throw new TypeError('Unknown target selector.');
   }
 }
-function decodeChoice(value: unknown): EngineActionChoice {
+type QueryActionChoice =
+  | { readonly kind: 'attack'; readonly actionId: string; readonly target: EngineTargetSelector }
+  | { readonly kind: 'cast_spell'; readonly spellId: string; readonly target: EngineTargetSelector | null }
+  | { readonly kind: 'use_action'; readonly actionId: string; readonly target: EngineTargetSelector | null }
+  | { readonly kind: 'dodge' | 'disengage' | 'dash' | 'end_turn' };
+
+function decodeChoice(value: unknown): QueryActionChoice {
   const input = record(value, 'choice');
   const kind = stringField(input, 'kind');
   switch (kind) {
-    case 'attack': return { kind, actionId: stringField(input, 'action_id'), target: decodeTarget(input['target']), ...(input['resource_policy'] === undefined ? {} : { resourcePolicy: stringField(input, 'resource_policy') as 'conserve' | 'normal' | 'spend_if_useful' }) };
-    case 'cast_spell': return { kind, spellId: stringField(input, 'spell_id'), target: input['target'] === null ? null : decodeTarget(input['target']), ...(input['slot_policy'] === undefined ? {} : { slotPolicy: stringField(input, 'slot_policy') as 'lowest_legal' | 'conserve' | 'best_effect' }) };
+    case 'attack': return { kind, actionId: stringField(input, 'action_id'), target: decodeTarget(input['target']) };
+    case 'cast_spell': return { kind, spellId: stringField(input, 'spell_id'), target: input['target'] === null ? null : decodeTarget(input['target']) };
     case 'use_action': return { kind, actionId: stringField(input, 'action_id'), target: input['target'] === null ? null : decodeTarget(input['target']) };
     case 'dodge': case 'disengage': case 'dash': case 'end_turn': return { kind };
     default: throw new TypeError('Unknown action choice.');
@@ -203,17 +210,6 @@ function decodeMovement(value: unknown): EngineMovementPreference {
     ...(input['maximum_feet'] === undefined ? {} : { maximumFeet: numberField(input, 'maximum_feet') }),
     opportunityRisk: stringField(input, 'opportunity_risk') as EngineMovementPreference['opportunityRisk'],
   };
-}
-function decodeEngagement(value: unknown): EngineEngagement {
-  const input = record(value, 'engagement');
-  return {
-    stance: stringField(input, 'stance') as EngineEngagement['stance'],
-    ...(input['anchor'] === undefined ? {} : { anchor: input['anchor'] === null ? null : decodeTarget(input['anchor']) }),
-  };
-}
-function decodeBranch(value: unknown): Omit<EngineTurnIntent, 'actorId' | 'fallback'> {
-  const input = record(value, 'intent branch');
-  return { choice: decodeChoice(input['choice']), movement: decodeMovement(input['movement']), engagement: decodeEngagement(input['engagement']) };
 }
 function decodeReactionTriggerGuidance(value: unknown): ReactionTriggerGuidance {
   const input = record(value, 'reaction trigger guidance');
@@ -233,63 +229,37 @@ function decodeReactionGuidance(value: unknown): ReactionGuidanceDeclaration {
     }),
   };
 }
-function decodeIntent(value: unknown): EngineTurnIntent {
-  const input = record(value, 'intent');
-  const fallback = input['fallback'];
-  return { actorId: combatantId(stringField(input, 'actor_id')), ...decodeBranch(input), fallback: fallback === null ? null : decodeBranch(fallback) };
-}
-function externalTargetSelector(target: EngineTargetSelector): Readonly<Record<string, unknown>> {
-  switch (target.kind) {
-    case 'combatant': return { kind: target.kind, combatant_id: target.combatantId };
-    case 'enemy_threatening_ally': return { kind: target.kind, ally_id: target.allyId };
-    case 'nearest_visible_enemy':
-    case 'lowest_hp_visible_enemy':
-    case 'most_injured_visible_ally':
-    case 'current_threat': return { kind: target.kind };
-  }
-}
-function externalActionChoice(choice: EngineActionChoice): Readonly<Record<string, unknown>> {
-  switch (choice.kind) {
-    case 'attack': return {
-      kind: choice.kind, action_id: choice.actionId, target: externalTargetSelector(choice.target),
-      ...(choice.resourcePolicy === undefined ? {} : { resource_policy: choice.resourcePolicy }),
-    };
-    case 'cast_spell': return {
-      kind: choice.kind, spell_id: choice.spellId,
-      target: choice.target === null ? null : externalTargetSelector(choice.target),
-      ...(choice.slotPolicy === undefined ? {} : { slot_policy: choice.slotPolicy }),
-    };
-    case 'use_action': return {
-      kind: choice.kind, action_id: choice.actionId,
-      target: choice.target === null ? null : externalTargetSelector(choice.target),
-    };
-    case 'dodge':
-    case 'disengage':
-    case 'dash':
-    case 'end_turn': return { kind: choice.kind };
-  }
-}
-function externalIntentBranch(branch: EngineIntentBranch): Readonly<Record<string, unknown>> {
+function decodeProposal(value: unknown): EngineTurnProposal {
+  const input = record(value, 'proposal');
+  const justification = input['override_justification'];
   return {
-    choice: externalActionChoice(branch.choice),
-    movement: {
-      willingness: branch.movement.willingness,
-      ...(branch.movement.maximumFeet === undefined ? {} : { maximum_feet: branch.movement.maximumFeet }),
-      opportunity_risk: branch.movement.opportunityRisk,
-    },
-    engagement: {
-      stance: branch.engagement.stance,
-      ...(branch.engagement.anchor === undefined ? {} : {
-        anchor: branch.engagement.anchor === null ? null : externalTargetSelector(branch.engagement.anchor),
-      }),
-    },
+    actorId: combatantId(stringField(input, 'actor_id')),
+    expectedRevision: numberField(input, 'expected_revision'),
+    primaryOptionId: engineOptionId(stringField(input, 'primary_option_id')),
+    fallbackOptionId: input['fallback_option_id'] === null
+      ? null
+      : engineOptionId(stringField(input, 'fallback_option_id')),
+    overrideJustification: justification === null
+      ? null
+      : (() => {
+          const decoded = record(justification, 'override justification');
+          return {
+            reason: stringField(decoded, 'reason') as NonNullable<EngineTurnProposal['overrideJustification']>['reason'],
+            ...(decoded['note'] === undefined ? {} : { note: stringField(decoded, 'note') }),
+          };
+        })(),
   };
 }
-function externalIntent(intent: EngineTurnIntent): Readonly<Record<string, unknown>> {
+function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string, unknown>> {
   return {
-    actor_id: intent.actorId,
-    ...externalIntentBranch(intent),
-    fallback: intent.fallback === null ? null : externalIntentBranch(intent.fallback),
+    actor_id: proposal.actorId,
+    expected_revision: proposal.expectedRevision,
+    primary_option_id: proposal.primaryOptionId,
+    fallback_option_id: proposal.fallbackOptionId,
+    override_justification: proposal.overrideJustification === null ? null : {
+      reason: proposal.overrideJustification.reason,
+      ...(proposal.overrideJustification.note === undefined ? {} : { note: proposal.overrideJustification.note }),
+    },
   };
 }
 function hitPointBand(hitPoints: number, maximum: number): 'uninjured' | 'injured' | 'critical' | 'unknown' {
@@ -315,13 +285,6 @@ function tacticalSummary(capsule: EngineStateCapsule): Readonly<Record<string, u
 }
 function recentChanges(capsule: EngineStateCapsule): readonly Readonly<Record<string, unknown>>[] {
   return [...capsule.historyDelta].sort((left, right) => left.revision - right.revision).map((entry) => ({ revision: entry.revision, kind: entry.kind, summary: `${entry.kind} at encounter round ${String(entry.encounterRound)}`, branch_status: entry.branchStatus }));
-}
-function actionKind(kind: EngineStateCapsule['projection']['combatants'][number]['actions'][number]['kind']): 'attack' | 'cast_spell' | 'use_action' {
-  return kind === 'attack' ? 'attack' : kind === 'spellcasting' ? 'cast_spell' : 'use_action';
-}
-function optionTargets(state: EncounterState, queries: EngineQueryPort, actorId: CombatantId): readonly Readonly<Record<string, unknown>>[] {
-  const direct = state.combatants.filter((candidate) => candidate.life !== 'dead' && !queries.sameSide(state, actorId, candidate.profile.id)).map((candidate) => ({ kind: 'combatant', combatant_id: candidate.profile.id }));
-  return [...direct, { kind: 'nearest_visible_enemy' }, { kind: 'lowest_hp_visible_enemy' }, { kind: 'current_threat' }];
 }
 function expectationFor(state: EncounterState, queries: EngineQueryPort, actorId: CombatantId, actionId: string, targetId: CombatantId | null): Readonly<Record<string, unknown>> | null {
   const action = queries.actions(state, actorId).find((candidate): candidate is MonsterAttackAction => candidate.kind === 'attack' && candidate.id === actionId);
@@ -354,25 +317,80 @@ function expectationFor(state: EncounterState, queries: EngineQueryPort, actorId
     policy: evaluation.policy,
   };
 }
-function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsule: EngineStateCapsule, actorId: CombatantId, includeExpectations: boolean, includeUnavailable: boolean): readonly Readonly<Record<string, unknown>>[] {
+function externalOptionSlot(slot: EngineActorOption['actionSlots'][number]): Readonly<Record<string, unknown>> {
+  const use = slot.use;
+  const targetIds = use.kind === 'attack' || use.kind === 'saving_throw'
+    ? use.target.kind === 'combatant' ? [use.target.combatantId] : []
+    : use.kind === 'multiattack'
+      ? use.components.flatMap((component) => component.target.kind === 'combatant' ? [component.target.combatantId] : [])
+      : use.kind === 'cast_spell'
+        ? use.targets.flatMap((target) => target.kind === 'combatant' ? [target.combatantId] : [])
+        : [];
+  return {
+    slot: slot.slot,
+    kind: use.kind,
+    action_id: use.kind === 'cast_spell' ? use.sourceActionId
+      : 'actionId' in use ? use.actionId : use.kind,
+    component_action_ids: use.kind === 'multiattack'
+      ? use.components.map((component) => component.actionId)
+      : [],
+    spell_id: use.kind === 'cast_spell' ? use.spellId : null,
+    target_ids: targetIds,
+    world_object_id: use.kind === 'use_world_object' ? use.objectId : null,
+  };
+}
+function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsule: EngineStateCapsule, actorId: CombatantId, includeExpectations: boolean, _includeUnavailable: boolean): readonly Readonly<Record<string, unknown>>[] {
   const projected = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
   if (projected === undefined) return [];
-  const selectors = optionTargets(state, queries, actorId);
-  const target = queries.resolveTarget(state, actorId, { kind: 'nearest_visible_enemy' });
-  const actions = projected.actions.map((action) => {
-    const reach = target === null ? null : queries.reach(state, { actorId, targetId: target, actionId: action.actionId });
-    const usableNow = reach?.legal === true;
+  const informationRank = (option: EngineActorOption): number => {
+    const main = option.actionSlots.find((slot) => slot.slot === 'main')?.use;
+    if (main === undefined) return 6;
+    switch (main.kind) {
+      case 'multiattack': return 0;
+      case 'attack':
+      case 'saving_throw': return 1;
+      case 'cast_spell': return 2;
+      case 'use_world_object': return 3;
+      case 'dodge':
+      case 'disengage':
+      case 'dash': return 4;
+      case 'end_turn': return 5;
+    }
+  };
+  return [...projected.options]
+    .sort((left, right) => informationRank(left) - informationRank(right) || left.label.localeCompare(right.label))
+    .map((option) => {
+    const first = option.actionSlots[0];
+    if (first === undefined) throw new Error(`Composite option ${option.optionId} has no action slot use.`);
+    const firstUse = first.use;
+    const firstActionId = firstUse.kind === 'cast_spell' ? firstUse.sourceActionId
+      : 'actionId' in firstUse ? firstUse.actionId : firstUse.kind;
+    const kind = firstUse.kind === 'attack' || firstUse.kind === 'multiattack' ? 'attack'
+      : firstUse.kind === 'cast_spell' ? 'cast_spell'
+        : firstUse.kind === 'dodge' || firstUse.kind === 'disengage' || firstUse.kind === 'dash' || firstUse.kind === 'end_turn'
+          ? firstUse.kind
+          : 'use_action';
+    const firstTarget = firstUse.kind === 'attack' || firstUse.kind === 'saving_throw'
+      ? firstUse.target
+      : firstUse.kind === 'multiattack'
+        ? firstUse.components[0]?.target ?? null
+        : firstUse.kind === 'cast_spell'
+          ? firstUse.targets[0] ?? null
+          : null;
+    const targetId = firstTarget === null ? null : queries.resolveTarget(state, actorId, firstTarget);
+    const movementFeet = option.movement.preference.willingness === 'none' ? 0 : null;
     return {
-      action_id: action.actionId, kind: actionKind(action.kind), target_selectors: selectors, resource_cost_labels: [],
-      usable_now: usableNow, usable_after_movement: action.rangeFeet !== null, minimum_movement_feet: usableNow ? 0 : null,
-      visibility: target === null ? 'unknown' : queries.visibility(state, actorId, target)?.visible === true ? 'yes' : 'no',
-      cover: target === null ? 'unknown' : queries.cover(state, actorId, target)?.tier ?? 'unknown', risks: [],
-      expectation: includeExpectations ? expectationFor(state, queries, actorId, action.actionId, target) : null,
-      refusals: usableNow || includeUnavailable ? (usableNow ? [] : [{ code: 'NOT_USABLE_NOW', summary: `${action.actionId} is not usable from the current position` }]) : [],
+      option_id: option.optionId, actor_id: option.actorId, revision: option.revision, label: option.label,
+      action_slots: option.actionSlots.map(externalOptionSlot),
+      action_id: firstActionId, kind, target_selectors: [], resource_cost_labels: option.resourceCostLabels,
+      usable_now: movementFeet === 0, usable_after_movement: true, minimum_movement_feet: movementFeet,
+      visibility: targetId === null ? 'unknown' : queries.visibility(state, actorId, targetId)?.visible === true ? 'yes' : 'no',
+      cover: targetId === null ? 'unknown' : queries.cover(state, actorId, targetId)?.tier ?? 'unknown', risks: [],
+      expectation: includeExpectations && targetId !== null ? expectationFor(state, queries, actorId,
+        firstUse.kind === 'multiattack' ? firstUse.components[0]?.actionId ?? firstActionId : firstActionId, targetId) : null,
+      refusals: [],
     };
-  }).filter((option) => includeUnavailable || option.usable_now || option.usable_after_movement);
-  const basics = ['dodge', 'disengage', 'dash', 'end_turn'].map((kind) => ({ action_id: kind, kind, target_selectors: [], resource_cost_labels: [], usable_now: true, usable_after_movement: true, minimum_movement_feet: 0, visibility: 'unknown', cover: 'unknown', risks: [], expectation: null, refusals: [] }));
-  return [...actions, ...basics];
+    });
 }
 function distanceBand(distance: number): 'engaged' | 'near' | 'far' { return distance <= 5 ? 'engaged' : distance <= 30 ? 'near' : 'far' }
 function threats(state: EncounterState, queries: EngineQueryPort, actorId: CombatantId): readonly Readonly<Record<string, unknown>>[] {
@@ -394,15 +412,15 @@ function correctionGuidance(
   capsule: EngineStateCapsule,
   actorIds: readonly CombatantId[] = capsule.request?.actors ?? [],
 ): Readonly<Record<string, unknown>> {
-  if (capsule.request === null) throw new RangeError('No intent request is pending.');
+  if (capsule.request === null) throw new RangeError('No turn proposal request is pending.');
   return {
     remaining_corrections: capsule.request.phase === 'initial' ? 1 : 0,
     required_actor_ids: actorIds,
     replace_whole_round: capsule.request.phase === 'speculative' || capsule.request.kind !== 'plan_adjustment',
   };
 }
-function resolutionPreview(resolution: Extract<ReturnType<PureIntentResolver['resolve']>, { readonly valid: true }>): Readonly<Record<string, unknown>> {
-  return { actor_id: resolution.mechanics.actorId, action_id: resolution.mechanics.actionId, target_id: resolution.mechanics.targetId, movement_feet: resolution.mechanics.movementCostFeet, resolution_digest: resolution.resolutionDigest, summary: resolution.summary };
+function resolutionPreview(resolution: Extract<ReturnType<PureTurnProposalResolver['resolve']>, { readonly valid: true }>): Readonly<Record<string, unknown>> {
+  return { actor_id: resolution.mechanics.actorId, option_id: resolution.mechanics.optionId, action_slot_count: resolution.mechanics.actionSlots.length, movement_feet: resolution.mechanics.movementCostFeet, resolution_digest: resolution.resolutionDigest, summary: resolution.summary };
 }
 function disallowedLocator(locator: string): boolean {
   const normalized = locator.replaceAll('\\', '/').toLowerCase();
@@ -414,7 +432,7 @@ function allowedRule(rules: AllowlistedRulesSource, reference: { readonly rule_i
   return entry !== null && entry.sourceLocator === reference.source_locator && !disallowedLocator(entry.sourceLocator) && entry.attribution.trim().length > 0 ? entry : null;
 }
 
-export function renderEnginePrompt(kind: 'plan_round' | 'correct_intent', capsule: EngineStateCapsule, rules: AllowlistedRulesSource, voice?: string, turnContext?: unknown): string {
+export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal', capsule: EngineStateCapsule, rules: AllowlistedRulesSource, voice?: string, turnContext?: unknown): string {
   const entries = capsule.rulesIndex.flatMap((reference) => {
     const entry = allowedRule(rules, { rule_id: reference.ruleId, source_locator: reference.sourceLocator });
     return entry === null ? [] : [{ rule_id: entry.ruleId, source_locator: entry.sourceLocator, text: entry.text, attribution: entry.attribution }];
@@ -423,12 +441,12 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_intent', capsul
   const adjustment = capsule.request?.phase !== 'speculative' && capsule.request?.kind === 'plan_adjustment';
   const fixed = adjustment
     ? kind === 'plan_round'
-      ? 'Review the current remaining monster plan, then use engine.submit_plan_adjustment once. Submit zero to the stated adjustment budget of open-actor replacements; omitted actors keep their baseline intents and an empty updates list explicitly keeps the plan. Do not change reaction guidance. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
-      : 'Correct only the refused plan-adjustment actors once with engine.submit_plan_adjustment. Valid staged updates remain accepted. No fallback remains after this correction; every correction fallback must be null. Omitted refused actors keep their baseline intents.'
+      ? 'Review the current remaining monster plan, then use engine.submit_plan_adjustment once. Submit zero to the stated adjustment budget of open-actor replacement proposals; omitted actors keep their baseline proposals and an empty updates list explicitly keeps the plan. Do not change reaction guidance. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
+      : 'Correct only the refused plan-adjustment actors once with engine.submit_plan_adjustment. Valid staged updates remain accepted. No fallback remains after this correction; every correction fallback_option_id must be null. Omitted refused actors keep their baseline proposals.'
     : kind === 'plan_round'
-      ? 'Use engine.get_turn_context, then engine.submit_round_intents once for the complete required actor set. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
-      : 'Correct the complete refused intent request once. No fallback remains after this correction; correction fallback must be null. If you refresh context, use the get_turn_context request in current_context exactly.';
-  return [fixed, `Turn resource: ${uriBase}/turn/current`, `Intent schema: ${uriBase}/schema/intent-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: capsule.request, voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
+      ? 'Use engine.get_turn_context, then engine.submit_round_proposals once for the complete required actor set. Select only offered revision-bound option ids. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
+      : 'Correct the complete refused proposal request once. No fallback remains after this correction; correction fallback_option_id must be null. If you refresh context, use the get_turn_context request in current_context exactly.';
+  return [fixed, `Turn resource: ${uriBase}/turn/current`, `Proposal schema: ${uriBase}/schema/turn-proposal-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: capsule.request, voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
 }
 
 export function createEngineMcpApplication(dependencies: EngineMcpDependencies): EngineMcpApplication {
@@ -439,7 +457,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     throw new RangeError('maximumResourceBytes cannot exceed the 128 KiB hard limit.');
   }
   const { state, stateSource: feed, proposals, speculativePlans, narration, adjudications, rules } = dependencies;
-  const { queries, intents } = dependencies;
+  const { queries, turnProposals } = dependencies;
   const idempotency = new Map<string, { readonly bytes: string; readonly result: unknown }>();
   const applicationCursors = new Map<string, { readonly digest: string; readonly key: string; readonly offset: number }>();
   function applicationPage<T>(capsule: EngineStateCapsule, key: string, values: readonly T[], pageValue: unknown): { readonly values: readonly T[]; readonly truncated: boolean; readonly next: string | null } {
@@ -486,7 +504,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   ): Readonly<Record<string, unknown>> {
     const requested = Array.isArray(input['actor_ids']) ? input['actor_ids'].map((id) => combatantId(String(id))) : capsule.request?.actors ?? [];
     const required = input['scope'] === 'active_turn' && capsule.projection.activeCombatant !== null ? [capsule.projection.activeCombatant] : requested;
-    const maximum = typeof input['maximum_options_per_actor'] === 'number' ? input['maximum_options_per_actor'] : 8;
+    const maximum = typeof input['maximum_options_per_actor'] === 'number' ? input['maximum_options_per_actor'] : 20;
     const includeExpectations = input['include_expectations'] !== false;
     const actors = [...required].sort().map((actorId) => {
       const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
@@ -522,35 +540,48 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         current_plan: {
           parent_plan_id: adjustmentRequest.parentPlanId,
           baseline_plan_hash: adjustmentRequest.baselinePlanHash,
-          open_actor_intents: adjustmentRequest.baselineIntentDigests.map((entry) => ({
+          open_actor_proposals: adjustmentRequest.baselineProposalDigests.map((entry) => ({
             actor_id: entry.actorId,
-            intent_digest: entry.intentDigest,
+            proposal_digest: entry.proposalDigest,
           })),
         },
       }),
       truncated: actors.some((actor) => actor.omitted), next_cursor: null,
     };
-    while (new TextEncoder().encode(JSON.stringify(result)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+    const topPlay = applicablePlays[0];
+    const suggestedPlan = topPlay === undefined
+      ? null
+      : (() => {
+        const draft = SNIPPET_REGISTRY.expand(topPlay.name, capsule);
+        const plan = {
+          play_name: topPlay.name,
+          snippet_hash: topPlay.snippetHash,
+          proposals: draft.proposals.map(externalProposal),
+          advisory: SUGGESTED_PLAN_ADVISORY,
+        };
+        const bytes = new TextEncoder().encode(JSON.stringify(plan)).byteLength;
+        if (bytes > SUGGESTED_PLAN_MAX_BYTES) {
+          throw new RangeError(`SUGGESTED_PLAN_TOO_LARGE: ${String(bytes)} UTF-8 bytes exceeds the ${String(SUGGESTED_PLAN_MAX_BYTES)}-byte limit.`);
+        }
+        return plan;
+      })();
+    let output: Readonly<Record<string, unknown>> = suggestedPlan === null
+      ? result
+      : { ...result, suggested_plan: suggestedPlan };
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.options.length > 0);
       if (actor === undefined) break;
       actor.options.pop();
       result.truncated = true;
       result.context_trimmed = true;
     }
-    const topPlay = applicablePlays[0];
-    if (topPlay === undefined) return result;
-    const draft = SNIPPET_REGISTRY.expand(topPlay.name, capsule);
-    const suggestedPlan = {
-      play_name: topPlay.name,
-      snippet_hash: topPlay.snippetHash,
-      intents: draft.intents.map(externalIntent),
-      advisory: SUGGESTED_PLAN_ADVISORY,
-    };
-    const suggestedBytes = new TextEncoder().encode(JSON.stringify(suggestedPlan)).byteLength;
-    if (suggestedBytes > SUGGESTED_PLAN_MAX_BYTES) {
-      throw new RangeError(`SUGGESTED_PLAN_TOO_LARGE: ${String(suggestedBytes)} UTF-8 bytes exceeds the ${String(SUGGESTED_PLAN_MAX_BYTES)}-byte limit.`);
+    if (suggestedPlan !== null &&
+      new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+      result.truncated = true;
+      result.context_trimmed = true;
+      output = result;
     }
-    return { ...result, suggested_plan: suggestedPlan };
+    return output;
   }
   function execute(name: string, value: unknown): unknown {
     const input = record(value, `${name} arguments`);
@@ -601,7 +632,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         state_ref: externalStateRef(capsule),
         play_name: playName,
         snippet_hash: draft.definition.snippetHash,
-        intents: draft.intents.map(externalIntent),
+        proposals: draft.proposals.map(externalProposal),
       };
     }
     const capsule = feed.read(stateReference(input['state_ref']));
@@ -702,51 +733,51 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           : { candidate_id: stringField(candidate, 'candidate_id'), policy: expectation['policy'], resolvable: true, metrics: { outcome_probability: expectation['outcome_probability'], expected_damage: expectation['expected_value'], expected_healing: null, resource_cost: 0, distribution: includeDistribution ? [{ outcome: 0, probability: 1 - Number(expectation['outcome_probability']) }, { outcome: Number(expectation['expected_value']) / Number(expectation['outcome_probability']), probability: expectation['outcome_probability'] }] : null }, assumptions: expectation['assumption_codes'], refusals: [] };
       }) };
     }
-    if (name === 'engine.validate_intent') {
+    if (name === 'engine.validate_proposal') {
       const request = currentRequest(capsule, stringField(input, 'request_id'), stringField(input, 'phase'));
-      const intent = decodeIntent(input['intent']);
-      if (!request.actors.includes(intent.actorId)) throw new RangeError('ACTOR_NOT_PENDING');
-      const resolution = intents.resolve(state, intent);
+      const proposal = decodeProposal(input['proposal']);
+      if (!request.actors.includes(proposal.actorId)) throw new RangeError('ACTOR_NOT_PENDING');
+      if (proposal.expectedRevision !== capsule.revision) throw new RangeError('PROPOSAL_REVISION_MISMATCH');
+      const resolution = turnProposals.resolve(state, proposal);
       return resolution.valid
         ? { state_ref: externalStateRef(capsule), valid: true, selected_branch: resolution.selectedBranch, resolution: resolutionPreview(resolution), refusals: [], correction_guidance: null }
         : { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
     }
-    if (name === 'engine.submit_round_intents') {
+    if (name === 'engine.submit_round_proposals') {
       const request = currentRequest(capsule, stringField(input, 'request_id'), stringField(input, 'phase'));
       if (request.kind === 'plan_adjustment') throw new RangeError('REQUEST_KIND_MISMATCH');
-      const intentValues = input['intents'];
-      if (!Array.isArray(intentValues)) throw new TypeError('intents must be an array.');
-      const decoded = intentValues.map(decodeIntent);
-      const actual = decoded.map((intent) => intent.actorId);
+      const proposalValues = input['proposals'];
+      if (!Array.isArray(proposalValues)) throw new TypeError('proposals must be an array.');
+      const decoded = proposalValues.map(decodeProposal);
+      const actual = decoded.map((proposal) => proposal.actorId);
       const expected = [...request.actors].sort();
       const normalized = [...actual].sort();
       const actorSetValid = new Set(actual).size === actual.length && expected.length === normalized.length && expected.every((actor, index) => actor === normalized[index]);
       const canonical = actorSetValid
-        ? request.actors.map((actorId) => decoded.find((intent) => intent.actorId === actorId)).filter((intent): intent is EngineTurnIntent => intent !== undefined)
+        ? request.actors.map((actorId) => decoded.find((proposal) => proposal.actorId === actorId)).filter((proposal): proposal is EngineTurnProposal => proposal !== undefined)
         : decoded;
-      const resolved = canonical.map((intent) => ({ intent, resolution: intents.resolve(state, intent) }));
+      const resolved = canonical.map((proposal) => ({ proposal, resolution: turnProposals.resolve(state, proposal) }));
       const invalid = [
         ...(actorSetValid ? [] : [{
           actor_id: request.actors[0], codes: ['ROUND_ACTOR_SET_MISMATCH'],
-          summary: 'Round submission must contain each required actor exactly once.',
+          summary: 'Round submission must contain one proposal for each required actor exactly once.',
           attempt_rejections: [{
             attempt: 'primary' as const,
-            declared_intent: decoded[0] === undefined ? null : externalIntentBranch(decoded[0]),
-            rejection_reasons: ['Round submission must contain each required actor exactly once.'],
+            declared_option_id: decoded[0]?.primaryOptionId ?? null,
+            rejection_reasons: ['Round submission must contain one proposal for each required actor exactly once.'],
           }],
         }]),
-        ...resolved.flatMap(({ intent, resolution }) => resolution.valid ? [] : [{
-          actor_id: intent.actorId,
+        ...resolved.flatMap(({ proposal, resolution }) => resolution.valid ? [] : [{
+          actor_id: proposal.actorId,
           codes: resolution.refusals.map((entry) => entry.code),
           summary: resolution.refusals.map((entry) => entry.summary).join('; '),
           attempt_rejections: (['primary', 'fallback'] as const).flatMap((attempt) => {
             const reasons = resolution.refusals
               .filter((entry) => entry.branch === attempt)
               .map((entry) => entry.summary);
-            const declared = attempt === 'primary' ? intent : intent.fallback;
             return reasons.length === 0 ? [] : [{
               attempt,
-              declared_intent: declared === null ? null : externalIntentBranch(declared),
+              declared_option_id: attempt === 'primary' ? proposal.primaryOptionId : proposal.fallbackOptionId,
               rejection_reasons: reasons,
             }];
           }),
@@ -757,10 +788,10 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const reactionGuidance = input['reaction_guidance'] === undefined
         ? null : decodeReactionGuidance(input['reaction_guidance']);
       return idempotent(key, input, () => {
-        const valid = resolved.flatMap(({ intent, resolution }) => resolution.valid ? [{ intent, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
+        const valid = resolved.flatMap(({ proposal, resolution }) => resolution.valid ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
-        submitEngineProposal(feed, proposals, { kind: 'round_intent_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance, submittedArguments: structuredClone(input) });
-        return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.intent.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
+        submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance, submittedArguments: structuredClone(input) });
+        return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.proposal.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
       });
     }
     if (name === 'engine.submit_plan_adjustment') {
@@ -771,53 +802,56 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       }
       const updateValues = input['updates'];
       if (!Array.isArray(updateValues)) throw new TypeError('updates must be an array.');
-      const decoded = updateValues.map(decodeIntent);
+      const decoded = updateValues.map(decodeProposal);
       const counts = new Map<CombatantId, number>();
-      for (const intent of decoded) counts.set(intent.actorId, (counts.get(intent.actorId) ?? 0) + 1);
+      for (const proposal of decoded) counts.set(proposal.actorId, (counts.get(proposal.actorId) ?? 0) + 1);
       const overBudget = decoded.length > request.adjustmentBudget;
-      const evaluated = decoded.map((intent) => {
-        const actor = state.combatants.find((candidate) => candidate.profile.id === intent.actorId);
+      const evaluated = decoded.map((proposal) => {
+        const actor = state.combatants.find((candidate) => candidate.profile.id === proposal.actorId);
         const staticRefusal = overBudget
-          ? { code: 'ADJUSTMENT_BUDGET_EXCEEDED', summary: `Adjustment contains more than ${String(request.adjustmentBudget)} replacement intents.` }
-          : (counts.get(intent.actorId) ?? 0) > 1
+          ? { code: 'ADJUSTMENT_BUDGET_EXCEEDED', summary: `Adjustment contains more than ${String(request.adjustmentBudget)} replacement proposals.` }
+          : (counts.get(proposal.actorId) ?? 0) > 1
             ? { code: 'DUPLICATE_ACTOR_UPDATE', summary: 'An adjustment may replace an open actor at most once.' }
             : actor?.life === 'dead'
               ? { code: 'ACTOR_DEAD', summary: 'A dead actor cannot receive a plan adjustment.' }
-              : !request.actors.includes(intent.actorId)
+              : !request.actors.includes(proposal.actorId)
                 ? { code: 'ACTOR_NOT_OPEN', summary: 'Only actors whose turns remain open may receive an adjustment.' }
                 : null;
-        if (staticRefusal !== null) return { intent, resolution: null, staticRefusal };
-        return { intent, resolution: intents.resolve(state, intent), staticRefusal: null };
+        if (staticRefusal !== null) return { proposal, resolution: null, staticRefusal };
+        return { proposal, resolution: turnProposals.resolve(state, proposal), staticRefusal: null };
       });
       const valid = evaluated.flatMap((entry) => entry.resolution?.valid === true ? [{
-        intent: entry.intent,
+        proposal: entry.proposal,
+        option: entry.resolution.option,
+        primaryOption: entry.resolution.primaryOption,
+        fallbackOption: entry.resolution.fallbackOption,
+        mechanics: entry.resolution.mechanics,
         selectedBranch: entry.resolution.selectedBranch,
         resolutionDigest: entry.resolution.resolutionDigest,
         summary: entry.resolution.summary,
       }] : []);
       const refusals = evaluated.flatMap((entry) => {
         if (entry.staticRefusal !== null) return [{
-          actor_id: entry.intent.actorId,
+          actor_id: entry.proposal.actorId,
           codes: [entry.staticRefusal.code],
           summary: entry.staticRefusal.summary,
           attempt_rejections: [{
             attempt: 'primary' as const,
-            declared_intent: externalIntentBranch(entry.intent),
+            declared_option_id: entry.proposal.primaryOptionId,
             rejection_reasons: [entry.staticRefusal.summary],
           }],
         }];
         const resolution = entry.resolution;
         if (resolution === null || resolution.valid) return [];
         return [{
-          actor_id: entry.intent.actorId,
+          actor_id: entry.proposal.actorId,
           codes: resolution.refusals.map((refusal) => refusal.code),
           summary: resolution.refusals.map((refusal) => refusal.summary).join('; '),
           attempt_rejections: (['primary', 'fallback'] as const).flatMap((attempt) => {
             const reasons = resolution.refusals.filter((refusal) => refusal.branch === attempt).map((refusal) => refusal.summary);
-            const declared = attempt === 'primary' ? entry.intent : entry.intent.fallback;
             return reasons.length === 0 ? [] : [{
               attempt,
-              declared_intent: declared === null ? null : externalIntentBranch(declared),
+              declared_option_id: attempt === 'primary' ? entry.proposal.primaryOptionId : entry.proposal.fallbackOptionId,
               rejection_reasons: reasons,
             }];
           }),
@@ -828,7 +862,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const proposalId = `adjustment:${sha256(canonicalJson({ digest: capsule.digest, key, baselinePlanHash: request.baselinePlanHash, valid })).slice(0, 48)}`;
         if (refusals.length === 0 || valid.length > 0) {
           submitEngineProposal(feed, proposals, {
-            kind: 'plan_adjustment_proposal',
+            kind: 'plan_adjustment_turn_proposal',
             proposalId,
             runId: capsule.runId,
             branchId: capsule.branchId,
@@ -844,7 +878,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           });
         }
         const actorResolutions = valid.map((entry) => ({
-          actor_id: entry.intent.actorId,
+          actor_id: entry.proposal.actorId,
           selected_branch: entry.selectedBranch,
           resolution_digest: entry.resolutionDigest,
           summary: entry.summary,
@@ -872,11 +906,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (!Array.isArray(branchValues)) throw new TypeError('branches must be an array.');
       const branches = branchValues.map((value) => {
         const branch = record(value, 'speculative branch');
-        const intentValues = branch['intents'];
-        if (!Array.isArray(intentValues)) throw new TypeError('branch intents must be an array.');
+        const proposalValues = branch['proposals'];
+        if (!Array.isArray(proposalValues)) throw new TypeError('branch proposals must be an array.');
         return {
           scenarioId: stringField(branch, 'scenario_id'),
-          intents: intentValues.map(decodeIntent),
+          proposals: proposalValues.map(decodeProposal),
         };
       });
       const key = stringField(input, 'idempotency_key');
@@ -907,19 +941,19 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         };
       });
     }
-    if (name === 'engine.submit_intent') {
+    if (name === 'engine.submit_proposal') {
       const request = currentRequest(capsule, stringField(input, 'request_id'), stringField(input, 'phase'));
       if (request.kind === 'plan_adjustment') throw new RangeError('REQUEST_KIND_MISMATCH');
-      const intent = decodeIntent(input['intent']);
-      if (request.actors.length !== 1 || request.actors[0] !== intent.actorId) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: 'ACTOR_REQUIRES_WHOLE_ROUND', summary: 'This actor belongs to the pending shared-initiative whole-round request.' }], correction_guidance: correctionGuidance(capsule) };
-      const resolution = intents.resolve(state, intent);
+      const proposal = decodeProposal(input['proposal']);
+      if (request.actors.length !== 1 || request.actors[0] !== proposal.actorId) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: 'ACTOR_REQUIRES_WHOLE_ROUND', summary: 'This actor belongs to the pending shared-initiative whole-round request.' }], correction_guidance: correctionGuidance(capsule) };
+      const resolution = turnProposals.resolve(state, proposal);
       if (!resolution.valid) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
       const key = stringField(input, 'idempotency_key');
       const reactionGuidance = input['reaction_guidance'] === undefined
         ? null : decodeReactionGuidance(input['reaction_guidance']);
       return idempotent(key, input, () => {
-        const proposalId = `intent:${sha256(canonicalJson({ digest: capsule.digest, key, intent, reactionGuidance })).slice(0, 48)}`;
-        submitEngineProposal(feed, proposals, { kind: 'intent_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolution: { intent, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }, reactionGuidance });
+        const proposalId = `turn:${sha256(canonicalJson({ digest: capsule.digest, key, proposal, reactionGuidance })).slice(0, 48)}`;
+        submitEngineProposal(feed, proposals, { kind: 'turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolution: { proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }, reactionGuidance });
         return { status: 'proposed', proposal_id: proposalId, state_ref: externalStateRef(capsule), selected_branch: resolution.selectedBranch, resolution_summary: resolutionPreview(resolution) };
       });
     }
@@ -1016,7 +1050,7 @@ function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRules
       { uri: `${base}/revision/${String(capsule.revision)}/turn`, name: `Turn revision ${String(capsule.revision)}`, description: 'Immutable turn snapshot for a capsule revision.', mimeType: 'application/json' },
       { uri: `${base}/journal/${String(capsule.revision)}/${journalCursor(capsule, 0)}`, name: `Journal revision ${String(capsule.revision)}`, description: 'Immutable bounded journal chunk.', mimeType: 'application/json' },
       ...capsule.rulesIndex.flatMap((reference) => allowedRule(rules, { rule_id: reference.ruleId, source_locator: reference.sourceLocator }) === null ? [] : [{ uri: `${base}/rules/${encodeURIComponent(reference.ruleId)}`, name: `Rule ${reference.ruleId}`, description: 'Allowlisted attributed rule entry.', mimeType: 'application/json' as const }]),
-      { uri: `${base}/schema/intent-v1`, name: 'Intent v1', description: 'Human-readable coordinate-free intent contract.', mimeType: 'application/json' },
+      { uri: `${base}/schema/turn-proposal-v1`, name: 'Turn proposal v1', description: 'Revision-bound composite option-selection contract.', mimeType: 'application/json' },
     ];
   }
   return {
@@ -1074,7 +1108,7 @@ function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRules
         if (entry === null) throw new RangeError('Rule source is not allowlisted.');
         return content(uri, { rule_id: entry.ruleId, source_locator: entry.sourceLocator, text: entry.text, attribution: entry.attribution });
       }
-      if (uri === `${base}/schema/intent-v1`) return content(uri, { version: 1, constraints: ['Use engine-owned action IDs.', 'Use semantic target selectors.', 'Never send coordinates, cells, destinations, paths, attack modifiers, DCs, dice, damage, or commands.'], examples: [{ actor_id: 'monster-id', choice: { kind: 'dodge' }, movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' }, engagement: { stance: 'hold_position' }, fallback: null }] });
+      if (uri === `${base}/schema/turn-proposal-v1`) return content(uri, { version: 1, constraints: ['Select only engine-offered option ids from the exact revision.', 'Never send coordinates, cells, destinations, paths, attack modifiers, DCs, dice, damage, or commands.'], examples: [{ actor_id: 'monster-id', expected_revision: 42, primary_option_id: 'option:42:...', fallback_option_id: null, override_justification: null }] });
       throw new RangeError('Unknown or expired resource URI.');
     },
   };
@@ -1083,18 +1117,18 @@ function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRules
 function createPromptProvider(feed: EngineCapsuleFeed, rules: AllowlistedRulesSource, currentTurn: () => unknown): McpPromptProvider {
   const descriptors = Object.freeze([
     { name: 'engine.plan_round', description: 'Render the complete shared-initiative planning constraints and current resource links.', arguments: [{ name: 'run_id', description: 'Selected run identifier.', required: true }, { name: 'expected_revision', description: 'Exact current revision.', required: true }, { name: 'voice', description: 'Requested narration voice.', required: true }] },
-    { name: 'engine.correct_intent', description: 'Render the single bounded correction prompt with no remaining fallback.', arguments: [{ name: 'run_id', description: 'Selected run identifier.', required: true }, { name: 'expected_revision', description: 'Exact current revision.', required: true }, { name: 'request_id', description: 'Pending correction request.', required: true }] },
+    { name: 'engine.correct_proposal', description: 'Render the single bounded correction prompt with no remaining fallback.', arguments: [{ name: 'run_id', description: 'Selected run identifier.', required: true }, { name: 'expected_revision', description: 'Exact current revision.', required: true }, { name: 'request_id', description: 'Pending correction request.', required: true }] },
   ] as const);
   return {
     list: () => descriptors,
     get(name, value) {
       const input = record(value, 'prompt arguments');
-      const allowed = name === 'engine.plan_round' ? ['run_id', 'expected_revision', 'voice'] : name === 'engine.correct_intent' ? ['run_id', 'expected_revision', 'request_id'] : [];
+      const allowed = name === 'engine.plan_round' ? ['run_id', 'expected_revision', 'voice'] : name === 'engine.correct_proposal' ? ['run_id', 'expected_revision', 'request_id'] : [];
       if (allowed.length === 0) throw new RangeError('Unknown prompt.');
       if (!Object.keys(input).every((key) => allowed.includes(key)) || allowed.some((key) => input[key] === undefined)) throw new TypeError('Prompt arguments are missing or contain unknown properties.');
       const capsule = exactCurrent(feed, stringField(input, 'run_id'), numberField(input, 'expected_revision'));
-      if (name === 'engine.correct_intent' && (capsule.request === null || capsule.request.requestId !== input['request_id'] || capsule.request.phase !== 'correction')) throw new RangeError('REQUEST_MISMATCH');
-      const text = renderEnginePrompt(name === 'engine.plan_round' ? 'plan_round' : 'correct_intent', capsule, rules, typeof input['voice'] === 'string' ? input['voice'] : undefined, currentTurn());
+      if (name === 'engine.correct_proposal' && (capsule.request === null || capsule.request.requestId !== input['request_id'] || capsule.request.phase !== 'correction')) throw new RangeError('REQUEST_MISMATCH');
+      const text = renderEnginePrompt(name === 'engine.plan_round' ? 'plan_round' : 'correct_proposal', capsule, rules, typeof input['voice'] === 'string' ? input['voice'] : undefined, currentTurn());
       if (text.toLowerCase().includes('content/cc-by-sa')) throw new RangeError('Disallowed prompt source.');
       return { resultType: 'complete', description: descriptors.find((descriptor) => descriptor.name === name)?.description, messages: [{ role: 'user', content: { type: 'text', text } }] };
     },

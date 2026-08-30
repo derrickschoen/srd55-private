@@ -119,7 +119,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(started).toEqual({
       resumeSessionId: 'codex-thread-123',
       sessionId: 'codex-thread-123',
-      finalText: '{"intents":[]}',
+      finalText: '{"proposals":[]}',
       usage: { inputTokens: 101, cachedInputTokens: 55, outputTokens: 17, reasoningTokens: 9 },
       exit: 'completed',
     });
@@ -228,7 +228,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
 
     expect(started.resumeSessionId).toBe('claude-session-123');
     expect(started.sessionId).toBeNull();
-    expect(started.finalText).toBe('{"intents":[]}');
+    expect(started.finalText).toBe('{"proposals":[]}');
     expect(transcript).toContain('"Bash"');
     expect(transcript).toContain('"mcp_servers":[{"name":"engine","status":"connected"}]');
     const startArgv = runner.calls[0]?.spec.argv ?? [];
@@ -314,7 +314,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
         tools: [
           ...tools.filter((name) => typeof name === 'string' && !name.startsWith('mcp__engine__')),
           ...CLAUDE_DM_ENGINE_TOOLS.filter((name) =>
-            !name.endsWith('propose_from_play') && !name.endsWith('submit_round_intents')),
+            !name.endsWith('propose_from_play') && !name.endsWith('submit_round_proposals')),
         ],
       });
     }).join('\n');
@@ -323,7 +323,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
 
     await expect(adapter.start(invocation, new AbortController().signal)).resolves.toMatchObject({ exit: 'completed' });
     expect(runner.calls[0]?.spec.argv).toEqual(expect.arrayContaining([
-      'mcp__engine__engine_submit_round_intents',
+      'mcp__engine__engine_submit_round_proposals',
       'mcp__engine__engine_submit_plan_adjustment',
     ]));
   });

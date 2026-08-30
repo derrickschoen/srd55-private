@@ -19,7 +19,8 @@ import {
   type TacticalRangeBand,
   type TacticalUnresolvedReason,
 } from '../combat/tactical-evaluator';
-import type { MonsterAction, MonsterAttackAction } from '../combat/statblock';
+import type { MonsterAction, MonsterAttackAction, MonsterBonusAction, MonsterSpellReference } from '../combat/statblock';
+import { monsterSpellMaximumUses, monsterSpellResourcePoolId } from '../combat/statblock';
 import { lookupBundledMonster } from '../combat/statblocks/companions';
 import {
   engineZoneId,
@@ -35,6 +36,7 @@ import {
   type CoverTier,
   type WorldObject,
 } from '../combat/world-objects';
+import { availableEngineActorOptions } from './intent-resolver';
 
 export type EngineProjectedAttackDelivery = 'melee' | 'ranged' | 'melee_or_ranged';
 
@@ -529,7 +531,7 @@ export function enginePlanningSemanticZones(
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
-function monsterActions(state: EncounterState, actorId: CombatantId): readonly MonsterAction[] {
+export function monsterActions(state: EncounterState, actorId: CombatantId): readonly MonsterAction[] {
   const subject = combatant(state, actorId);
   if (subject === null) return [];
   if (subject.wildShape !== undefined) return subject.wildShape.physical.actions;
@@ -544,6 +546,26 @@ function monsterActions(state: EncounterState, actorId: CombatantId): readonly M
   if (lookup.status !== 'resolved' || lookup.entry.kind !== 'static') return [];
   const actions = lookup.entry.statblock.sourceDetails.actions;
   return actions.kind === 'present' ? actions.value : [];
+}
+
+export function monsterBonusActions(
+  state: EncounterState,
+  actorId: CombatantId,
+): readonly MonsterBonusAction[] {
+  const subject = combatant(state, actorId);
+  if (subject?.profile.kind !== 'monster' || subject.life === 'dead') return [];
+  const statblockId = subject.profile.statblockId;
+  for (const pack of state.contentPacks ?? []) {
+    const imported = pack.monsters.find((monster) => monster.statblock.id === statblockId);
+    if (imported !== undefined) {
+      const bonusActions = imported.statblock.sourceDetails.bonusActions;
+      return bonusActions.kind === 'present' ? bonusActions.value : [];
+    }
+  }
+  const lookup = lookupBundledMonster(String(statblockId));
+  if (lookup.status !== 'resolved' || lookup.entry.kind !== 'static') return [];
+  const bonusActions = lookup.entry.statblock.sourceDetails.bonusActions;
+  return bonusActions.kind === 'present' ? bonusActions.value : [];
 }
 
 function interveningCells(from: GridCell, to: GridCell): readonly GridCell[] {
@@ -785,10 +807,18 @@ export function engineActionRangeFeet(
 }
 
 /** Canonical registry lens used while minting a read-only state capsule. */
-export function engineActionRegistry(state: EncounterState): {
+export function engineActionRegistry(state: EncounterState, revision = state.revision): {
   actionsFor(combatantId: CombatantId): readonly {
     readonly actionId: string;
-    readonly kind: 'attack' | 'saving_throw' | 'multiattack' | 'spellcasting';
+    readonly slot: 'main' | 'bonus';
+    readonly kind: 'attack' | 'saving_throw' | 'multiattack' | 'spellcasting' | 'world_object';
+    readonly available: boolean;
+    readonly usesMaximum: number | null;
+    readonly usesRemaining: number | null;
+    readonly componentActionIds: readonly string[];
+    readonly combination: 'any' | 'fixed' | 'one_attack_may_be_replaced' | null;
+    readonly spellIds: readonly string[];
+    readonly worldObjectId: string | null;
     readonly rangeFeet: number | null;
     readonly attackDelivery: EngineProjectedAttackDelivery | null;
     readonly normalRangeFeet: number | null;
@@ -799,6 +829,7 @@ export function engineActionRegistry(state: EncounterState): {
     readonly targetId: CombatantId;
     readonly minimumMovementFeet: number | null;
   }[];
+  optionsFor(combatantId: CombatantId): ReturnType<typeof availableEngineActorOptions>;
   planningFactsFor(combatantId: CombatantId): EnginePlanningCombatantFacts;
   planningHitPointsFor(combatantId: CombatantId): number;
   planningHitPointMaximumFor(combatantId: CombatantId): number;
@@ -806,13 +837,51 @@ export function engineActionRegistry(state: EncounterState): {
 } {
   return {
     actionsFor(combatantId) {
+      const subject = combatant(state, combatantId);
       const actions = monsterActions(state, combatantId);
-      return actions.map((action) => ({
+      const mainAvailable = subject?.turn.action.kind === 'available';
+      const bonusAvailable = subject?.turn.bonusActionAvailable === true;
+      const project = (
+        action: MonsterAction | Extract<MonsterBonusAction, { readonly kind: 'saving_throw' | 'spellcasting' }>,
+        slot: 'main' | 'bonus',
+        spell: MonsterSpellReference | undefined,
+      ) => {
+        const poolId = action.kind === 'spellcasting' && spell !== undefined
+          ? monsterSpellResourcePoolId(action.id, spell)
+          : null;
+        const usesMaximum = spell === undefined ? null : monsterSpellMaximumUses(spell);
+        const usesRemaining = poolId === null
+          ? usesMaximum
+          : subject?.limitedResources?.find((pool) => pool.id === poolId)?.remaining ?? 0;
+        return {
         actionId: action.id,
         kind: action.kind,
+        slot,
+        available: (slot === 'main' ? mainAvailable : bonusAvailable) &&
+          (usesRemaining === null || usesRemaining > 0),
+        usesMaximum,
+        usesRemaining,
+        componentActionIds: action.kind === 'multiattack' ? action.actionIds : [],
+        combination: action.kind === 'multiattack' ? action.combination : null,
+        spellIds: spell === undefined ? [] : [spell.id],
+        worldObjectId: null,
         rangeFeet: engineActionRangeFeet(actions, action),
         ...projectedAttackRanges(action),
-      }));
+        };
+      };
+      const projectAction = (
+        action: MonsterAction | Extract<MonsterBonusAction, { readonly kind: 'saving_throw' | 'spellcasting' }>,
+        slot: 'main' | 'bonus',
+      ) => action.kind === 'spellcasting'
+        ? action.spells.map((spell) => project(action, slot, spell))
+        : [project(action, slot, undefined)];
+      return [
+        ...actions.flatMap((action) => projectAction(action, 'main')),
+        ...monsterBonusActions(state, combatantId).flatMap((action) =>
+          action.kind === 'saving_throw' || action.kind === 'spellcasting'
+            ? projectAction(action, 'bonus')
+            : []),
+      ].filter((action) => action.available);
     },
     approachesFor(combatantId) {
       const actor = combatant(state, combatantId);
@@ -852,6 +921,9 @@ export function engineActionRegistry(state: EncounterState): {
           minimumMovementFeet: result.kind === 'found' ? result.cost : null,
         }];
       }));
+    },
+    optionsFor(combatantId) {
+      return availableEngineActorOptions(state, combatantId, canonicalEngineQueryPort, revision);
     },
     planningFactsFor(combatantId) {
       return enginePlanningCombatantFacts(state, combatantId);

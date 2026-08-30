@@ -80,6 +80,7 @@ export type EncounterCommand =
   | {
       readonly type: 'hide';
       readonly actor: CombatantId;
+      readonly cost?: 'action' | 'bonus_action';
     }
   | {
       readonly type: 'search';
@@ -245,6 +246,7 @@ export type EncounterCommand =
   | {
       readonly type: 'dash' | 'disengage' | 'dodge';
       readonly actor: CombatantId;
+      readonly cost?: 'action' | 'bonus_action';
     }
   | {
       readonly type: 'spend_bonus_action' | 'spend_reaction';

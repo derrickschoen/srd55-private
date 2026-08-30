@@ -6,7 +6,7 @@ import type {
   EngineZoneId,
 } from '../combat/values';
 import type { EngineTargetSelector } from './engine-query-port';
-import type { EngineTurnIntent } from './intent-resolver';
+import type { EngineTurnProposal } from './intent-resolver';
 import type { ReactionGuidanceDeclaration } from './reaction-guidance';
 
 export type GuardConditionIdentity =
@@ -100,7 +100,7 @@ export interface HostSplitCandidate {
   readonly factKey: string;
   readonly baseline: ScenarioFactAtom;
   readonly flipped: ScenarioFactAtom;
-  readonly referencedIntentCount: number;
+  readonly referencedProposalCount: number;
   readonly influencingPlayerIds: readonly CombatantId[];
   readonly summedMovementRadiusFeet: number;
   readonly volatilityScore: number;
@@ -128,7 +128,7 @@ export interface SpeculativeRoundPlanV2 {
   readonly refreshGeneration: 0 | 1 | 2;
   readonly branches: readonly {
     readonly scenarioId: string;
-    readonly intents: readonly EngineTurnIntent[];
+    readonly proposals: readonly EngineTurnProposal[];
   }[];
   /** D401 remains inert until a materialized ordinary proposal is authorized. */
   readonly reactionGuidance: ReactionGuidanceDeclaration | null;

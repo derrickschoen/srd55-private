@@ -4183,10 +4183,14 @@ function passivePerceptionAgainst(
   return rules.passivePerception + (mode === 'advantage' ? 5 : mode === 'disadvantage' ? -5 : 0);
 }
 
-function processHide(context: ReductionContext, actor: CombatantId): void {
+function processHide(
+  context: ReductionContext,
+  actor: CombatantId,
+  cost: 'action' | 'bonus_action' = 'action',
+): void {
   assertActiveActor(context, actor);
   assertCanUseActions(context, actor);
-  spendAction(context, actor, 'Hide');
+  spendCost(context, actor, cost, 'Hide');
   const enemies = context.state.combatants.filter((candidate) =>
     candidate.life === 'living' && !combatantsAreAllies(context.state, actor, candidate.profile.id));
   const actorCell = token(context.state, actor).position;
@@ -6814,6 +6818,35 @@ function spendSpellCastingCost(
   if (command.castAsRitual) {
     if (definition.ritual !== true) throw new EncounterRuleError('validation', `${definition.name} cannot be cast as a ritual.`);
     if (context.state.activeCombatant !== null) throw new EncounterRuleError('validation', 'A ritual cannot resolve as a turn action.');
+    return;
+  }
+  if (command.monsterActionId !== undefined) {
+    const subject = combatant(context.state, actor);
+    if (subject.profile.kind !== 'monster') {
+      throw new EncounterRuleError('validation', 'Only a monster can use a statblock spellcasting action.');
+    }
+    const statblockId = subject.profile.statblockId;
+    const lookup = lookupBundledMonster(String(statblockId));
+    const imported = context.state.contentPacks?.flatMap((pack) => pack.monsters)
+      .find((monster) => monster.statblock.id === statblockId)?.statblock;
+    const statblock = imported ?? (lookup.status === 'resolved' && lookup.entry.kind === 'static'
+      ? lookup.entry.statblock
+      : null);
+    const declared = statblock === null ? null : [
+      ...(statblock.sourceDetails.actions.kind === 'present' ? statblock.sourceDetails.actions.value : []),
+      ...(statblock.sourceDetails.bonusActions.kind === 'present' ? statblock.sourceDetails.bonusActions.value : []),
+    ].find((action) => action.kind === 'spellcasting' && action.id === command.monsterActionId &&
+      action.spells.some((spell) => spell.id === definition.id));
+    if (declared?.kind !== 'spellcasting') {
+      throw new EncounterRuleError('validation', `${definition.name} is not declared by ${command.monsterActionId}.`);
+    }
+    assertActiveActor(context, actor);
+    spendCost(
+      context,
+      actor,
+      declared.actionEconomy === 'action' ? 'action' : 'bonus_action',
+      `Cast ${definition.name} via ${declared.id}`,
+    );
     return;
   }
   switch (definition.castingTime) {
@@ -11113,7 +11146,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       processMove(context, command);
       return;
     case 'hide':
-      processHide(context, command.actor);
+      processHide(context, command.actor, command.cost);
       return;
     case 'search':
       processSearch(context, command);
@@ -11367,7 +11400,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     }
     case 'dash': {
       assertActiveActor(context, command.actor);
-      spendAction(context, command.actor, 'Dash');
+      spendCost(context, command.actor, command.cost ?? 'action', 'Dash');
       const subject = combatant(context.state, command.actor);
       const extra = effectiveSpeed(context.state, command.actor);
       context.state = replaceCombatant(context.state, {
@@ -11386,7 +11419,12 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
     case 'disengage':
     case 'dodge': {
       assertActiveActor(context, command.actor);
-      spendAction(context, command.actor, command.type === 'dodge' ? 'Dodge' : 'Disengage');
+      spendCost(
+        context,
+        command.actor,
+        command.cost ?? 'action',
+        command.type === 'dodge' ? 'Dodge' : 'Disengage',
+      );
       const subject = combatant(context.state, command.actor);
       const stance = command.type === 'dodge' ? 'dodging' : 'disengaging';
       context.state = replaceCombatant(context.state, {

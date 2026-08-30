@@ -3,7 +3,14 @@ import type { CharacterSheet } from '../queries/character-sheet-builder';
 import type { CombatFeatureEffect } from './effects';
 import type { GridCell } from './grid';
 import type { DamageResponse } from './resolution';
-import type { CombatSense, MonsterLegendaryAction, MonsterStatblock } from './statblock';
+import {
+  monsterSpellMaximumUses,
+  monsterSpellResourcePoolId,
+  type CombatSense,
+  type MonsterLegendaryAction,
+  type MonsterSpellcastingAction,
+  type MonsterStatblock,
+} from './statblock';
 import type { WildShapeCharacterSheet } from './wild-shape';
 import {
   armorClass,
@@ -218,6 +225,27 @@ export function monsterCombatantProfile(
   statblock: MonsterStatblock,
   identity: MonsterCombatantIdentity,
 ): CombatantProfile {
+  const spellcastingActions: readonly MonsterSpellcastingAction[] = [
+    ...(statblock.sourceDetails.actions.kind === 'present'
+      ? statblock.sourceDetails.actions.value.filter(
+          (action): action is MonsterSpellcastingAction => action.kind === 'spellcasting',
+        )
+      : []),
+    ...(statblock.sourceDetails.bonusActions.kind === 'present'
+      ? statblock.sourceDetails.bonusActions.value.filter(
+          (action): action is MonsterSpellcastingAction => action.kind === 'spellcasting',
+        )
+      : []),
+  ];
+  const limitedResources = [...new Map(spellcastingActions.flatMap((action) =>
+    action.spells.flatMap((spell) => {
+      const id = monsterSpellResourcePoolId(action.id, spell);
+      const maximum = monsterSpellMaximumUses(spell);
+      return id === null || maximum === null
+        ? []
+        : [[id, { id, maximum, recharge: 'long_rest' as const }] as const];
+    }),
+  )).values()];
   return {
     kind: 'monster',
     id: combatantId(identity.combatantId),
@@ -273,6 +301,7 @@ export function monsterCombatantProfile(
         ? { creatureType: statblock.sourceDetails.classification.value.type }
         : {}),
       spellSlots: [],
+      ...(limitedResources.length === 0 ? {} : { limitedResources }),
       ...(statblock.sourceDetails.skills.kind === 'present'
         ? {
             skillBonuses: Object.fromEntries(statblock.sourceDetails.skills.value.flatMap((skill) => {

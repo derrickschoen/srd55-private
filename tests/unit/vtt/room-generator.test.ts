@@ -155,12 +155,14 @@ describe('seeded room generator', () => {
   });
 
   it.each(BASIS_SEEDS)('pins frozen arena basis seed %s byte-for-byte', (seed) => {
+    // Seed 3943005's Priest Acolyte derives three independent 1/day Divine Aid pools from its statblock.
     const path = `tests/fixtures/arena-basis/seed-${String(seed)}.json` as
       `tests/fixtures/arena-basis/seed-${typeof seed}.json`;
     expect(`${canonicalJson(generateRoom(seed))}\n`).toBe(inputs.fixtures.readText(path));
   });
 
   it.each(HARD_BASIS_SEEDS)('pins frozen hard arena basis seed %s byte-for-byte', (seed) => {
+    // Every hard basis seed has Priest monster-1: Spirit Guardians is 1/day and each Divine Aid spell is 3/day.
     const path = `tests/fixtures/arena-basis-hard/seed-${String(seed)}.json` as
       `tests/fixtures/arena-basis-hard/seed-${typeof seed}.json`;
     expect(`${canonicalJson(generateRoom(seed, { difficulty: 'hard' }))}\n`).toBe(

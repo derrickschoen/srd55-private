@@ -24,26 +24,26 @@ const ENGINE_TOOL_NAMES = [
   'engine.query_cover',
   'engine.query_visibility',
   'engine.query_dice_expectation',
-  'engine.validate_intent',
-  'engine.submit_round_intents',
+  'engine.validate_proposal',
+  'engine.submit_round_proposals',
   'engine.submit_plan_adjustment',
   'engine.submit_speculative_round_plan',
-  'engine.submit_intent',
+  'engine.submit_proposal',
   'engine.emit_narration',
   'engine.request_dm_adjudication',
 ] as const;
 const DM_ENGINE_TOOL_NAMES = [
   'engine.get_turn_context',
   'engine.propose_from_play',
-  'engine.validate_intent',
-  'engine.submit_round_intents',
+  'engine.validate_proposal',
+  'engine.submit_round_proposals',
   'engine.submit_plan_adjustment',
   'engine.request_dm_adjudication',
 ] as const;
 const ROUND_PLAN_DM_ENGINE_TOOL_NAMES = DM_ENGINE_TOOL_NAMES.filter((name) =>
   name !== 'engine.submit_plan_adjustment');
 const PLAN_ADJUSTMENT_DM_ENGINE_TOOL_NAMES = DM_ENGINE_TOOL_NAMES.filter((name) =>
-  name !== 'engine.propose_from_play' && name !== 'engine.submit_round_intents');
+  name !== 'engine.propose_from_play' && name !== 'engine.submit_round_proposals');
 
 export function claudeCodeEngineToolName(toolName: string): string {
   return `mcp__engine__${toolName.replaceAll('.', '_')}`;

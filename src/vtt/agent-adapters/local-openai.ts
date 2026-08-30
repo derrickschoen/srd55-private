@@ -290,7 +290,7 @@ export class LocalOpenAiAgentSessionAdapter {
         }
         messages.push({ role: 'tool', tool_call_id: call.id, content: toolResultText(result) });
         const status = record(result)?.['status'];
-        if ((engineName === 'engine.submit_round_intents' && status === 'proposed') ||
+        if ((engineName === 'engine.submit_round_proposals' && status === 'proposed') ||
           (engineName === 'engine.submit_plan_adjustment' && (status === 'proposed' || status === 'rejected'))) {
           return { resumeSessionId: sessionId, sessionId: null, finalText, usage, exit: 'completed' };
         }

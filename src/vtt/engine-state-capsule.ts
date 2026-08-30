@@ -15,10 +15,19 @@ import type {
   HostSplitCandidate,
 } from './speculative-plan-types';
 import type { PlanMaterialityReasonCode } from './plan-materiality';
+import type { EngineActorOption } from './turn-proposal';
 
 export interface EngineProjectedAction {
   readonly actionId: string;
-  readonly kind: 'attack' | 'saving_throw' | 'multiattack' | 'spellcasting';
+  readonly slot: 'main' | 'bonus';
+  readonly kind: 'attack' | 'saving_throw' | 'multiattack' | 'spellcasting' | 'world_object';
+  readonly available: boolean;
+  readonly usesMaximum: number | null;
+  readonly usesRemaining: number | null;
+  readonly componentActionIds: readonly string[];
+  readonly combination: 'any' | 'fixed' | 'one_attack_may_be_replaced' | null;
+  readonly spellIds: readonly string[];
+  readonly worldObjectId: string | null;
   readonly rangeFeet: number | null;
   readonly attackDelivery: import('./engine-query-port').EngineProjectedAttackDelivery | null;
   readonly normalRangeFeet: number | null;
@@ -35,6 +44,7 @@ export interface EngineProjectedActionApproach {
 export interface EngineActionRegistry {
   actionsFor(combatantId: CombatantId): readonly EngineProjectedAction[];
   approachesFor(combatantId: CombatantId): readonly EngineProjectedActionApproach[];
+  optionsFor(combatantId: CombatantId): readonly EngineActorOption[];
   planningFactsFor(combatantId: CombatantId): EngineProjectionCombatantFacts;
   planningHitPointsFor(combatantId: CombatantId): number;
   planningHitPointMaximumFor(combatantId: CombatantId): number;
@@ -73,6 +83,7 @@ export interface EngineProjectionCombatant {
   readonly movementRemainingFeet: number;
   readonly actions: readonly EngineProjectedAction[];
   readonly actionApproaches: readonly EngineProjectedActionApproach[];
+  readonly options: readonly EngineActorOption[];
   readonly planning: EngineProjectionCombatantFacts;
 }
 
@@ -121,9 +132,9 @@ export interface EngineStateCapsule {
 
 export type EngineOrdinaryRequestKind = 'round_plan' | 'plan_adjustment';
 
-export interface EngineBaselineIntentDigest {
+export interface EngineBaselineProposalDigest {
   readonly actorId: CombatantId;
-  readonly intentDigest: string;
+  readonly proposalDigest: string;
 }
 
 export interface EnginePlanAdjustmentMetadata {
@@ -133,7 +144,7 @@ export interface EnginePlanAdjustmentMetadata {
   readonly beforeRevision: number;
   readonly afterRevision: number;
   readonly materialityReasonCodes: readonly PlanMaterialityReasonCode[];
-  readonly baselineIntentDigests: readonly EngineBaselineIntentDigest[];
+  readonly baselineProposalDigests: readonly EngineBaselineProposalDigest[];
   readonly adjustmentBudget: 0 | 1 | 2;
 }
 
@@ -233,6 +244,7 @@ export function projectEngineDmProjection(
       movementRemainingFeet: combatant.turn.movement.remaining,
       actions: registry.actionsFor(combatant.id).map((action) => ({ ...action })),
       actionApproaches: registry.approachesFor(combatant.id).map((approach) => ({ ...approach })),
+      options: structuredClone(registry.optionsFor(combatant.id)),
       planning: structuredClone(registry.planningFactsFor(combatant.id)),
     })),
     semanticZones: structuredClone(registry.semanticZones()),
@@ -287,6 +299,7 @@ export function projectEngineEncounterState(
         movementRemainingFeet: combatant.turn.movement.remaining,
         actions: registry.actionsFor(combatant.profile.id).map((action) => ({ ...action })),
         actionApproaches: registry.approachesFor(combatant.profile.id).map((approach) => ({ ...approach })),
+        options: structuredClone(registry.optionsFor(combatant.profile.id)),
         planning: structuredClone(registry.planningFactsFor(combatant.profile.id)),
       };
     }),
@@ -346,23 +359,23 @@ function assertPlanAdjustmentRequest(
   request: Extract<EngineCapsuleRequest, { readonly kind: 'plan_adjustment' }>,
 ): void {
   const actorIds = [...request.actors];
-  const digestActors = request.baselineIntentDigests.map((entry) => entry.actorId);
+  const digestActors = request.baselineProposalDigests.map((entry) => entry.actorId);
   const expectedBudget = Math.min(actorIds.length, 2);
   if (
     actorIds.length === 0 ||
     new Set(actorIds).size !== actorIds.length ||
     request.adjustmentBudget !== expectedBudget ||
-    request.baselineIntentDigests.length !== actorIds.length ||
+    request.baselineProposalDigests.length !== actorIds.length ||
     new Set(digestActors).size !== digestActors.length ||
     actorIds.some((actorId) => !digestActors.includes(actorId))
   ) {
-    throw new RangeError('Plan adjustment actors, baseline intent digests, and budget must match exactly.');
+    throw new RangeError('Plan adjustment actors, baseline proposal digests, and budget must match exactly.');
   }
   if (
     request.parentPlanId.trim().length === 0 ||
     request.triggerPcTurnId.trim().length === 0 ||
     !/^[0-9a-f]{64}$/u.test(request.baselinePlanHash) ||
-    request.baselineIntentDigests.some((entry) => !/^[0-9a-f]{64}$/u.test(entry.intentDigest))
+    request.baselineProposalDigests.some((entry) => !/^[0-9a-f]{64}$/u.test(entry.proposalDigest))
   ) {
     throw new TypeError('Plan adjustment correlation ids and hashes must be non-empty and canonical.');
   }

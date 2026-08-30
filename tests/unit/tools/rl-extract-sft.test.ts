@@ -43,7 +43,7 @@ describe('RL SFT extractor', () => {
         { role: 'system', content: 'K6 fixture instructions\n' },
         {
           role: 'user',
-          content: canonicalJson({
+          content: JSON.stringify({
             granularity: 'full',
             context_trimmed: false,
             state_ref: {
@@ -69,13 +69,13 @@ describe('RL SFT extractor', () => {
             },
             request_id: 'request:room-1-round-1',
             phase: 'initial',
-            idempotency_key: 'fixture-round-intents-initial',
-            intents: [{
+            idempotency_key: 'fixture-round-proposals-initial',
+            proposals: [{
               actor_id: 'combatant:fixture-monster',
-              choice: { kind: 'dodge' },
-              movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
-              engagement: { stance: 'hold_position' },
-              fallback: null,
+              expected_revision: 6,
+              primary_option_id: 'option:fixture-monster:6:dodge',
+              fallback_option_id: null,
+              override_justification: null,
             }],
           }),
         },
@@ -90,8 +90,8 @@ describe('RL SFT extractor', () => {
         proposalId: 'round:fixture-authorized',
       },
       stateDigest: 'a'.repeat(64),
-      planHash: '736ca86563291fa686e06d91d055145c6cfde87b41ac11518622e0c4617b430a',
-      contextSource: 'reconstructed',
+      planHash: 'a6aea46082929ca6f4a70f82b0c3270971b5375da3744d99102398ca300da3f5',
+      contextSource: 'raw',
       sessionId: '019d1111-1111-7111-8111-111111111111',
       escalationSessionId: null,
     };
@@ -112,10 +112,17 @@ describe('RL SFT extractor', () => {
     const arenaPath = join(directory, 'raw.jsonl');
     const outPath = join(directory, 'sft.jsonl');
     const rawTurnContext = '{\n  "granularity": "turn_delta",\n  "exact": "payload bytes"\n}';
+    const row = fixtureRow();
+    const capture = row['rlData'] as Readonly<Record<string, unknown>>;
     writeFileSync(arenaPath, `${canonicalJson({
-      ...fixtureRow(),
+      ...row,
       rawTurnContext,
       turnContextGranularity: 'turn_delta',
+      rlData: {
+        ...capture,
+        rawTurnContext,
+        turnContext: JSON.parse(rawTurnContext) as Readonly<Record<string, unknown>>,
+      },
     })}\n`, 'utf8');
 
     await extractSft({ arenaPaths: [arenaPath], rolloutPaths: [], outPath });
@@ -141,10 +148,16 @@ describe('RL SFT extractor', () => {
     const directory = mkdtempSync(join(tmpdir(), 'd411-extract-session-metadata-'));
     const arenaPath = join(directory, 'session-linked.jsonl');
     const outPath = join(directory, 'sft.jsonl');
+    const row = fixtureRow();
+    const capture = row['rlData'] as Readonly<Record<string, unknown>>;
     writeFileSync(arenaPath, `${canonicalJson({
-      ...fixtureRow(),
+      ...row,
       sessionId: '019d2222-2222-7222-8222-222222222222',
       escalationSessionId: '019d3333-3333-7333-8333-333333333333',
+      rlData: {
+        ...capture,
+        sessionId: '019d2222-2222-7222-8222-222222222222',
+      },
     })}\n`, 'utf8');
 
     await extractSft({ arenaPaths: [arenaPath], rolloutPaths: [], outPath });
@@ -163,7 +176,7 @@ describe('RL SFT extractor', () => {
     const outPath = join(directory, 'sft.jsonl');
     const { rlData, ...legacyRow } = fixtureRow();
     const capture = rlData as Readonly<Record<string, unknown>>;
-    const submit = capture['submitRoundIntentsArguments'];
+    const submit = capture['submittedArguments'];
     const context = capture['turnContext'];
     writeFileSync(arenaPath, `${canonicalJson(legacyRow)}\n`, 'utf8');
     writeFileSync(rolloutPath, [
@@ -184,7 +197,7 @@ describe('RL SFT extractor', () => {
         payload: {
           type: 'custom_tool_call',
           call_id: 'call-submit',
-          name: 'mcp__engine__engine_submit_round_intents',
+          name: 'mcp__engine__engine_submit_round_proposals',
           arguments: submit,
         },
       },
@@ -204,7 +217,7 @@ describe('RL SFT extractor', () => {
 
     expect(stats.examples).toBe(1);
     const example = JSON.parse(readFileSync(outPath, 'utf8')) as SftExample;
-    expect(example.planHash).toBe('736ca86563291fa686e06d91d055145c6cfde87b41ac11518622e0c4617b430a');
+    expect(example.planHash).toBe('a6aea46082929ca6f4a70f82b0c3270971b5375da3744d99102398ca300da3f5');
     expect(example.sourceRow).toEqual({
       path: arenaPath,
       line: 1,
@@ -216,12 +229,12 @@ describe('RL SFT extractor', () => {
     });
   });
 
-  it('accepts v1 while separating v2 round-plan and adjustment tasks unless all is explicit', async () => {
+  it('separates v2 round-plan and adjustment tasks unless all is explicit', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'd416-extract-task-separation-'));
     const arenaPath = join(directory, 'tasks.jsonl');
-    const legacyCapture = fixtureRow()['rlData'] as Readonly<Record<string, unknown>>;
-    const turnContext = legacyCapture['turnContext'] as Readonly<Record<string, unknown>>;
-    const roundArguments = legacyCapture['submitRoundIntentsArguments'] as Readonly<Record<string, unknown>>;
+    const fixtureCapture = fixtureRow()['rlData'] as Readonly<Record<string, unknown>>;
+    const turnContext = fixtureCapture['turnContext'] as Readonly<Record<string, unknown>>;
+    const roundArguments = fixtureCapture['submittedArguments'] as Readonly<Record<string, unknown>>;
     const rawRound = canonicalJson(turnContext);
     const adjustmentArguments = {
       state_ref: {
@@ -243,7 +256,7 @@ describe('RL SFT extractor', () => {
       model: 'gpt-5.6-luna',
       effort: 'low',
       sessionId: null,
-      roundProtocolVersion: 2,
+      roundProtocolVersion: 3,
       partyPolicyHash: null,
       materialityPolicyHash: null,
     } as const;
@@ -252,7 +265,7 @@ describe('RL SFT extractor', () => {
       rlData: {
         ...commonCapture,
         task: 'round_plan',
-        submissionTool: 'engine.submit_round_intents',
+        submissionTool: 'engine.submit_round_proposals',
         rawTurnContext: rawRound,
         turnContext,
         submittedArguments: roundArguments,

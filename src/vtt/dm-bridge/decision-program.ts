@@ -7,7 +7,7 @@ import type { DmVisibleCombatant, DmVisibleEncounterState } from '../../combat/v
 import type { AgentSessionId, CombatantId, EncounterSessionId } from '../../combat/values';
 import type { DmBoardProjection } from '../encounter-projections';
 import type { SessionHistoryEntry } from '../session-persistence';
-import { MAX_INTENT_CORRECTIONS } from '../turn-exhaustion-coordinator';
+import { MAX_PROPOSAL_CORRECTIONS } from '../turn-exhaustion-coordinator';
 import {
   DEFAULT_DM_MODEL_CONFIG,
   DM_BRIDGE_PROTOCOL_VERSION,
@@ -264,15 +264,15 @@ export class DmRoundPlanSession {
     signal: AbortSignal,
   ): Promise<DecodedRoundPlanReply> {
     let current: DmBridgeRequest = request;
-    for (let correctionAttempt = 0; correctionAttempt <= MAX_INTENT_CORRECTIONS; correctionAttempt += 1) {
+    for (let correctionAttempt = 0; correctionAttempt <= MAX_PROPOSAL_CORRECTIONS; correctionAttempt += 1) {
       const reply = await this.exchange.exchange(current, signal);
       try {
         return decodeRoundPlanReply(reply, current, this.#jsLimits);
       } catch (error: unknown) {
         const validatorError = error instanceof Error ? error.message : String(error);
-        if (correctionAttempt === MAX_INTENT_CORRECTIONS) {
+        if (correctionAttempt === MAX_PROPOSAL_CORRECTIONS) {
           const exhausted = new RoundPlanCorrectionExhaustedError(
-            `Round plan validation failed after ${String(MAX_INTENT_CORRECTIONS)} corrections: ${validatorError}`,
+            `Round plan validation failed after ${String(MAX_PROPOSAL_CORRECTIONS)} corrections: ${validatorError}`,
             { cause: error },
           );
           this.onCorrectionExhausted(exhausted);

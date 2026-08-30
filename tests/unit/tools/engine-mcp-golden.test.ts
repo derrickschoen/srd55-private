@@ -38,7 +38,7 @@ function stateHandle(context: Readonly<Record<string, unknown>>): string {
 }
 
 describe('real-stdio engine MCP golden dungeon run', () => {
-  it('covers discovery, intent correction, adjudication, narration, and restart shapes', { timeout: 30_000 }, async () => {
+  it('covers discovery, proposal correction, adjudication, narration, and restart shapes', { timeout: 30_000 }, async () => {
     const report = await runEngineMcpDryClient(FIXTURE);
     expect(report).toMatchObject({ status: 'VERIFIED', protocolConformance: 'SUBSTITUTED_LOCAL' });
     const methods = report.initial.map((entry) => decoded(entry.request)['method']);
@@ -55,6 +55,8 @@ describe('real-stdio engine MCP golden dungeon run', () => {
     const queryArguments = record(record(decoded(pathEntry.request)['params'], 'query params')['arguments'], 'query arguments');
     const actorId = queryArguments['actor_id'];
     if (typeof actorId !== 'string') throw new TypeError('query actor_id is missing.');
+    expect(actorId).toBe('combatant:generated-3943006-monster-1');
+    expect(record(queryArguments['objective'], 'query objective')['action_id']).toBe('web');
     const state = await loadArenaFixture(FIXTURE);
     const actor = state.combatants.find((candidate) => candidate.profile.id === actorId);
     const actorToken = state.tokens.find((token) => token.combatantId === actorId);
@@ -62,21 +64,22 @@ describe('real-stdio engine MCP golden dungeon run', () => {
     const targetCells = targets.flatMap((target) => state.tokens.filter((token) => token.combatantId === target.profile.id).map((token) => token.position));
     if (actor === undefined || actorToken === undefined || targetCells.length === 0) throw new TypeError('Fixture geometry is incomplete.');
     const nearestCellDistance = Math.min(...targetCells.map((cell) => Math.max(Math.abs(cell.row - actorToken.position.row), Math.abs(cell.column - actorToken.position.column))));
-    const independentlyDerivedFeet = Math.max(0, nearestCellDistance * 5 - actor.profile.rules.reach);
+    // Giant Spider Web is sourced at 60 feet; its 40-foot nearest-target distance needs no movement.
+    const independentlyDerivedFeet = Math.max(0, nearestCellDistance * 5 - 60);
     const maximumFeet = record(queryArguments['movement'], 'query movement')['maximum_feet'];
     if (typeof maximumFeet !== 'number') throw new TypeError('query maximum_feet is missing.');
-    expect(independentlyDerivedFeet).toBe(35);
-    expect(independentlyDerivedFeet).toBeGreaterThan(maximumFeet);
-    expect(path).toMatchObject({ feasible: false, minimum_feet: null, refusals: [{ code: 'OBJECTIVE_UNREACHABLE' }] });
-    expect(structured(toolEntry(report.initial, 'engine.validate_intent'))).toMatchObject({ valid: true, selected_branch: 'fallback' });
+    expect(independentlyDerivedFeet).toBe(0);
+    expect(independentlyDerivedFeet).toBeLessThanOrEqual(maximumFeet);
+    expect(path).toMatchObject({ feasible: true, minimum_feet: 0, refusals: [] });
+    expect(structured(toolEntry(report.initial, 'engine.validate_proposal'))).toMatchObject({ valid: true, selected_branch: 'fallback' });
     const initialAfter = structured(toolEntry(report.initial, 'engine.get_turn_context', 1));
     expect(stateHandle(initialAfter)).toBe(stateHandle(initialBefore));
-    expect(structured(toolEntry(report.initial, 'engine.submit_round_intents'))).toMatchObject({ status: 'proposed' });
+    expect(structured(toolEntry(report.initial, 'engine.submit_round_proposals'))).toMatchObject({ status: 'proposed' });
     expect(structured(toolEntry(report.initial, 'engine.request_dm_adjudication'))).toMatchObject({ status: 'requested' });
     expect(structured(toolEntry(report.initial, 'engine.emit_narration'))).toMatchObject({ status: 'queued' });
 
     expect(structured(toolEntry(report.correction, 'engine.get_turn_context'))).toMatchObject({ request: { phase: 'correction', correction_number: 1 } });
-    expect(structured(toolEntry(report.correction, 'engine.submit_round_intents'))).toMatchObject({ status: 'proposed' });
+    expect(structured(toolEntry(report.correction, 'engine.submit_round_proposals'))).toMatchObject({ status: 'proposed' });
     expect(structured(toolEntry(report.roomTransition, 'engine.get_turn_context'))).toMatchObject({ summary: { room: 2 } });
     expect(report.roomTransition.map((entry) => decoded(entry.request)['method'])).toContain('resources/read');
     expect(report.stderrBytes).toBeLessThanOrEqual(16 * 1024);

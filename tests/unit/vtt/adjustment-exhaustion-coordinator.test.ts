@@ -3,8 +3,9 @@ import type { CombatantId } from '../../../src/combat/values';
 import { agentSessionIdFromCli } from '../../../src/vtt/agent-session';
 import type {
   PlanAdjustmentProposalEnvelope,
-  ProposedIntentResolution,
+  ProposedTurnResolution,
 } from '../../../src/vtt/engine-envelopes';
+import { engineActionId, engineOptionId } from '../../../src/vtt/turn-proposal';
 import type { EngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
 import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import {
@@ -22,18 +23,28 @@ function journal(initial: readonly AdjustmentExhaustionTransition[] = []) {
   };
 }
 
-function resolution(actorId: CombatantId, fallback = false): ProposedIntentResolution {
+function resolution(actorId: CombatantId, fallback = false): ProposedTurnResolution {
+  const option = {
+    optionId: engineOptionId(`option:${actorId}:dodge`), actorId, revision: 1, label: 'Dodge',
+    movement: {
+      preference: { willingness: 'none' as const, maximumFeet: 0, opportunityRisk: 'avoid' as const },
+      engagement: { stance: 'hold_position' as const },
+    },
+    actionSlots: [{ slot: 'main' as const, use: { kind: 'dodge' as const } }],
+    resourceCostLabels: [],
+  };
   return {
-    intent: {
-      actorId,
-      choice: { kind: 'dodge' },
-      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-      engagement: { stance: 'hold_position' },
-      fallback: fallback ? {
-        choice: { kind: 'end_turn' },
-        movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-        engagement: { stance: 'hold_position' },
-      } : null,
+    proposal: {
+      actorId, expectedRevision: 1, primaryOptionId: option.optionId,
+      fallbackOptionId: fallback ? engineOptionId(`option:${actorId}:fallback`) : null,
+      overrideJustification: null,
+    },
+    option,
+    primaryOption: option,
+    fallbackOption: fallback ? { ...option, optionId: engineOptionId(`option:${actorId}:fallback`) } : null,
+    mechanics: {
+      actorId, optionId: option.optionId, movementCostFeet: 0, path: [], finalPosition: { column: 0, row: 0 },
+      actionSlots: [{ slot: 'main', kind: 'dodge', actionId: engineActionId('dodge'), spellId: null, targetIds: [], objectId: null }],
     },
     selectedBranch: 'primary',
     resolutionDigest: 'c'.repeat(64),
@@ -53,7 +64,7 @@ function proposal(input: {
     throw new Error('Adjustment proposal fixture requires adjustment metadata.');
   }
   return {
-    kind: 'plan_adjustment_proposal',
+    kind: 'plan_adjustment_turn_proposal',
     proposalId: input.id,
     runId: capsule.runId,
     branchId: capsule.branchId,
@@ -83,8 +94,8 @@ async function fixture() {
     triggerPcTurnId: 'pc-turn:adjustment-coordinator',
     beforeRevision: 1,
     afterRevision: 2,
-    materialityReasonCodes: ['INTENT_RESOLUTION_CHANGED'] as const,
-    baselineIntentDigests: selected.map((actorId) => ({ actorId, intentDigest: 'b'.repeat(64) })),
+    materialityReasonCodes: ['PROPOSAL_RESOLUTION_CHANGED'] as const,
+    baselineProposalDigests: selected.map((actorId) => ({ actorId, proposalDigest: 'b'.repeat(64) })),
     adjustmentBudget: Math.min(selected.length, 2) as 1 | 2,
   });
   const initialRuntime = createEngineMcpRuntime(state, {
@@ -172,7 +183,7 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
     expect(activations.value).toBe(1);
     expect(dispatches).toHaveLength(1);
     expect(dispatches[0]).toContain('Correct only the refused plan-adjustment actors once');
-    expect(dispatches[0]).toContain('fallback must be null');
+    expect(dispatches[0]).toContain('fallback_option_id must be null');
     expect(transitions.transitions().filter((entry) => entry.kind === 'adjustment_correction_requested')).toHaveLength(1);
   });
 
@@ -192,7 +203,7 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
       correctionResult: 'no_response',
     });
     expect(outcome.updates).toHaveLength(1);
-    expect(outcome.updates[0]?.intent.actorId).toBe(f.first);
+    expect(outcome.updates[0]?.proposal.actorId).toBe(f.first);
   });
 
   it('leaves the complete baseline plan standing when no usable update survives', async () => {

@@ -15,7 +15,7 @@ export interface ArenaPromptEnvelope {
 
 /**
  * The prompt knows only this seam. Replacing the current JSON plan with the
- * adopted intent plan means supplying another surface, not changing arena
+ * adopted option proposal means supplying another surface, not changing arena
  * iteration, process management, provenance, or telemetry callers.
  */
 export interface ArenaPlanSurface<Plan> {

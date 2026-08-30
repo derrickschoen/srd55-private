@@ -84,13 +84,22 @@ export class EngineMcpStdioClient {
   }
 }
 
-function dodgeIntent(actorId: string): Readonly<Record<string, unknown>> {
+function proposal(actorContext: Readonly<Record<string, unknown>>, revision: number, preferAttack: boolean): Readonly<Record<string, unknown>> {
+  const actorId = actorContext['actor_id'];
+  const options = actorContext['options'];
+  if (typeof actorId !== 'string' || !Array.isArray(options)) throw new TypeError('Actor context cannot form a proposal.');
+  const candidates = options.map((option) => record(option, 'actor option'));
+  const primary = (preferAttack ? candidates.find((option) =>
+    option['kind'] === 'attack' || option['kind'] === 'use_action') : undefined) ??
+    candidates.find((option) => option['kind'] === 'dodge');
+  const fallback = candidates.find((option) => option['kind'] === 'dodge');
+  if (typeof primary?.['option_id'] !== 'string') throw new Error(`Actor ${actorId} has no usable option.`);
   return {
     actor_id: actorId,
-    choice: { kind: 'dodge' },
-    movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
-    engagement: { stance: 'hold_position' },
-    fallback: null,
+    expected_revision: revision,
+    primary_option_id: primary['option_id'],
+    fallback_option_id: typeof fallback?.['option_id'] === 'string' ? fallback['option_id'] : null,
+    override_justification: null,
   };
 }
 
@@ -121,7 +130,7 @@ export async function runEngineMcpDryClient(fixturePath: string): Promise<Engine
   await initial.request('resources/list');
   await initial.request('prompts/list');
   const initialContext = structured(await initial.tool('engine.get_turn_context', {
-    run_id: 'encounter:engine-mcp', expected_revision: 1, scope: 'round', maximum_options_per_actor: 8,
+    run_id: 'encounter:engine-mcp', expected_revision: 1, scope: 'round', maximum_options_per_actor: 20,
   }));
   const initialRef = stateReference(initialContext);
   const actors = requestedActors(initialContext);
@@ -130,37 +139,38 @@ export async function runEngineMcpDryClient(fixturePath: string): Promise<Engine
   const actorContexts = initialContext['actors'];
   if (!Array.isArray(actorContexts)) throw new TypeError('Turn context actors are invalid.');
   const firstContext = record(actorContexts[0], 'first actor context');
-  const options = firstContext['options'];
-  if (!Array.isArray(options)) throw new TypeError('Turn context options are invalid.');
-  const attack = options.map((option) => record(option, 'actor option')).find((option) => option['kind'] === 'attack');
-  if (attack === undefined || typeof attack['action_id'] !== 'string') throw new Error('Dry fixture has no attack option.');
+  const offensive = actorContexts.flatMap((actorContext) => {
+    const actor = record(actorContext, 'actor context');
+    const actorId = actor['actor_id'];
+    const options = actor['options'];
+    if (typeof actorId !== 'string' || !Array.isArray(options)) throw new TypeError('Turn context actor options are invalid.');
+    return options.map((option) => ({ actorId, option: record(option, 'actor option') }));
+  }).find(({ option }) => option['kind'] === 'attack' || option['kind'] === 'use_action');
+  if (offensive === undefined || typeof offensive.option['action_id'] !== 'string') {
+    throw new Error('Dry fixture has no offensive option.');
+  }
   await initial.tool('engine.query_path', {
     state_ref: initialRef,
-    actor_id: firstActor,
-    objective: { kind: 'enable_action', action_id: attack['action_id'], target: { kind: 'nearest_visible_enemy' } },
+    actor_id: offensive.actorId,
+    objective: { kind: 'enable_action', action_id: offensive.option['action_id'], target: { kind: 'nearest_visible_enemy' } },
     movement: { willingness: 'freely', maximum_feet: 30, opportunity_risk: 'accept_if_needed' },
     engagement: { stance: 'close_to_melee' },
   });
-  await initial.tool('engine.validate_intent', {
+  await initial.tool('engine.validate_proposal', {
     state_ref: initialRef,
     request_id: 'request:engine-mcp',
     phase: 'initial',
-    intent: {
-      ...dodgeIntent(firstActor),
-      choice: { kind: 'attack', action_id: 'missing-action', target: { kind: 'nearest_visible_enemy' } },
-      fallback: {
-        choice: { kind: 'dodge' },
-        movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
-        engagement: { stance: 'hold_position' },
-      },
+    proposal: {
+      ...proposal(firstContext, 1, false),
+      primary_option_id: 'missing-option',
     },
   });
-  await initial.tool('engine.submit_round_intents', {
+  await initial.tool('engine.submit_round_proposals', {
     state_ref: initialRef,
     request_id: 'request:engine-mcp',
     phase: 'initial',
     idempotency_key: 'dry-round-initial-0001',
-    intents: actors.map(dodgeIntent),
+    proposals: actorContexts.map((actorContext) => proposal(record(actorContext, 'actor context'), 1, false)),
   });
   await initial.tool('engine.request_dm_adjudication', {
     state_ref: initialRef,
@@ -190,13 +200,16 @@ export async function runEngineMcpDryClient(fixturePath: string): Promise<Engine
   const correctionContext = structured(await correction.tool('engine.get_turn_context', {
     run_id: 'encounter:engine-mcp', expected_revision: 2, scope: 'round',
   }));
-  const correctionActors = requestedActors(correctionContext);
-  await correction.tool('engine.submit_round_intents', {
+  const correctionContexts = correctionContext['actors'];
+  if (!Array.isArray(correctionContexts)) throw new TypeError('Correction actor contexts are invalid.');
+  await correction.tool('engine.submit_round_proposals', {
     state_ref: stateReference(correctionContext),
     request_id: 'request:engine-mcp',
     phase: 'correction',
     idempotency_key: 'dry-round-correction-0001',
-    intents: correctionActors.map(dodgeIntent),
+    proposals: correctionContexts.map((actorContext) => ({
+      ...proposal(record(actorContext, 'correction actor context'), 2, false), fallback_option_id: null,
+    })),
   });
   if (await correction.close() !== 0) throw new Error(`Correction dry server failed: ${correction.stderr}`);
 

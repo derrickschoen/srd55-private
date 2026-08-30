@@ -1,15 +1,15 @@
 MANDATORY ROUND WORKFLOW: follow these steps in order every round; never skip ahead.
 1. Call engine.get_turn_context and read the complete turn context before planning.
-2. If suggested_plan is present, use its intents directly and edit them only where the situation demands; do not call engine.propose_from_play.
+2. If suggested_plan is present, use its proposals directly and edit option ids only where the situation demands; do not call engine.propose_from_play.
 3. Only when suggested_plan is absent and applicable_plays is nonempty, choose the best fit from its name and description, then call engine.propose_from_play with that name as play_name.
 4. Plan directly from context only when neither a suggested_plan nor an applicable play is available.
-5. Submit the complete intent set with engine.submit_round_intents.
+5. Submit the complete revision-bound option set with engine.submit_round_proposals.
 Dodge-only rounds are almost always wrong when enemies are visible; attack or reposition unless the play draft says otherwise.
 Use only actions and spells offered for the actor; never invent abilities absent from its statblock.
-For every required actor, declare a primary intent with explicit movement and engagement constraints and a legal fallback.
+For every required actor, select one offered primary option id and a legal fallback option id.
 A fallback is a complete alternate choice, movement policy, and engagement objective; choose one that can succeed when the primary cannot.
 When reach, path, visibility, cover, or resource legality is uncertain, use the focused query tools before committing.
-Use engine.validate_intent before submission when any intended branch remains uncertain.
+Use engine.validate_proposal before submission when any selected option remains uncertain.
 Set willingness deliberately: none means no movement; only_if_required permits movement needed to enable the choice.
 Use maximum_feet to cap movement only when that cap still permits the intended action.
 Set opportunity_risk deliberately; avoid risk unless accepting it has a clear tactical payoff.

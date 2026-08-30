@@ -19,7 +19,8 @@ import {
 } from '../../../src/vtt/engine-state-capsule';
 import { engineActionRegistry } from '../../../src/vtt/engine-query-port';
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
-import { pureIntentResolver } from '../../../src/vtt/intent-resolver';
+import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
+import { freshMonsterPlanningState } from '../../../src/vtt/mcp/entrypoint';
 import { generateRoom } from '../../../src/vtt/room-generator';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
@@ -117,7 +118,7 @@ function forbiddenAdapterImportChain(): readonly string[] | null {
 }
 
 function capsuleFixture() {
-  const state = generateRoom(3_943_001).encounter.state;
+  const state = freshMonsterPlanningState(generateRoom(3_943_001).encounter.state);
   const actor = state.combatants.find((candidate) => candidate.profile.kind === 'monster');
   const target = state.combatants.find((candidate) => candidate.profile.kind === 'player_character');
   if (actor === undefined || target === undefined) throw new Error('Capsule fixture actors are absent.');
@@ -174,10 +175,10 @@ describe('read-only engine state capsule', () => {
       triggerPcTurnId: 'pc-turn:round-1-fighter',
       beforeRevision: 10,
       afterRevision: 12,
-      materialityReasonCodes: ['INTENT_RESOLUTION_CHANGED'] as const,
-      baselineIntentDigests: actors.map((actorId, index) => ({
+      materialityReasonCodes: ['PROPOSAL_RESOLUTION_CHANGED'] as const,
+      baselineProposalDigests: actors.map((actorId, index) => ({
         actorId,
-        intentDigest: index.toString(16).padStart(64, '0'),
+        proposalDigest: index.toString(16).padStart(64, '0'),
       })),
       adjustmentBudget: 2 as const,
     };
@@ -200,7 +201,7 @@ describe('read-only engine state capsule', () => {
       generatedAt: '2026-08-29T12:00:00.000Z',
       request: { ...request, adjustmentBudget: 1 },
       projection: fixture.capsule.projection,
-    })).toThrow('Plan adjustment actors, baseline intent digests, and budget must match exactly.');
+    })).toThrow('Plan adjustment actors, baseline proposal digests, and budget must match exactly.');
   });
 
   it('accepts an exactly bound empty adjustment patch as an explicit keep decision', () => {
@@ -224,9 +225,9 @@ describe('read-only engine state capsule', () => {
         beforeRevision: 6,
         afterRevision: 8,
         materialityReasonCodes: ['OPEN_MONSTER_SET_CHANGED'],
-        baselineIntentDigests: actors.map((actorId, index) => ({
+        baselineProposalDigests: actors.map((actorId, index) => ({
           actorId,
-          intentDigest: (index + 10).toString(16).padStart(64, '0'),
+          proposalDigest: (index + 10).toString(16).padStart(64, '0'),
         })),
         adjustmentBudget: 2,
       },
@@ -235,7 +236,7 @@ describe('read-only engine state capsule', () => {
     const source = new FixedReadonlyStateCapsuleSource(capsule);
     const accepted: EngineProposalEnvelope[] = [];
     const envelope: EngineProposalEnvelope = {
-      kind: 'plan_adjustment_proposal',
+      kind: 'plan_adjustment_turn_proposal',
       proposalId: 'proposal:explicit-keep',
       runId: capsule.runId,
       branchId: capsule.branchId,
@@ -259,17 +260,21 @@ describe('read-only engine state capsule', () => {
       baseline_plan_hash: 'c'.repeat(64),
     })).toThrow('Plan adjustment proposal does not match the baseline plan hash.');
     const updates = actors.map((actorId) => {
-      const intent = {
-        actorId,
-        choice: { kind: 'dodge' as const },
-        movement: { willingness: 'none' as const, maximumFeet: 0, opportunityRisk: 'avoid' as const },
-        engagement: { stance: 'hold_position' as const },
-        fallback: null,
+      const option = availableEngineActorOptions(fixture.state, actorId)
+        .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
+      if (option === undefined) throw new Error(`Fixture omitted Dodge for ${actorId}.`);
+      const proposal = {
+        actorId, expectedRevision: fixture.state.revision, primaryOptionId: option.optionId,
+        fallbackOptionId: null, overrideJustification: null,
       };
-      const resolution = pureIntentResolver.resolve(fixture.state, intent);
+      const resolution = pureTurnProposalResolver.resolve(fixture.state, proposal);
       if (!resolution.valid) throw new Error(resolution.refusals.map((entry) => entry.summary).join('\n'));
       return {
-        intent,
+        proposal,
+        option: resolution.option,
+        primaryOption: resolution.primaryOption,
+        fallbackOption: resolution.fallbackOption,
+        mechanics: resolution.mechanics,
         selectedBranch: resolution.selectedBranch,
         resolutionDigest: resolution.resolutionDigest,
         summary: resolution.summary,
@@ -326,16 +331,17 @@ describe('read-only engine state capsule', () => {
     const fixture = capsuleFixture();
     const source = new FixedReadonlyStateCapsuleSource(fixture.capsule);
     const stateHandle = engineStateHandle(fixture.capsule);
-    const resolution = pureIntentResolver.resolve(fixture.state, {
-      actorId: fixture.actor,
-      choice: { kind: 'dodge' },
-      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-      engagement: { stance: 'hold_position' },
-      fallback: null,
-    });
+    const option = availableEngineActorOptions(fixture.state, fixture.actor)
+      .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
+    if (option === undefined) throw new Error('Fixture omitted Dodge.');
+    const proposal = {
+      actorId: fixture.actor, expectedRevision: fixture.state.revision, primaryOptionId: option.optionId,
+      fallbackOptionId: null, overrideJustification: null,
+    };
+    const resolution = pureTurnProposalResolver.resolve(fixture.state, proposal);
     if (!resolution.valid) throw new Error(resolution.refusals.map((entry) => entry.summary).join('\n'));
     const envelope: EngineProposalEnvelope = {
-      kind: 'round_intent_proposal',
+      kind: 'round_turn_proposal',
       reactionGuidance: null,
       proposalId: 'proposal:mcp-migration',
       runId: fixture.capsule.runId,
@@ -347,13 +353,11 @@ describe('read-only engine state capsule', () => {
       phase: 'initial',
       idempotencyKey: 'mcp-migration-key-0001',
       resolutions: [{
-        intent: {
-          actorId: fixture.actor,
-          choice: { kind: 'dodge' },
-          movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-          engagement: { stance: 'hold_position' },
-          fallback: null,
-        },
+        proposal,
+        option: resolution.option,
+        primaryOption: resolution.primaryOption,
+        fallbackOption: resolution.fallbackOption,
+        mechanics: resolution.mechanics,
         selectedBranch: resolution.selectedBranch,
         resolutionDigest: resolution.resolutionDigest,
         summary: resolution.summary,

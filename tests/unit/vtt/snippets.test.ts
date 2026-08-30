@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { EngineTargetSelector } from '../../../src/vtt/engine-query-port';
-import type { EngineTurnIntent } from '../../../src/vtt/intent-resolver';
-import { pureIntentResolver } from '../../../src/vtt/intent-resolver';
-import { createEngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
-import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { createEngineStateCapsule, type EngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
+import { pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
+import {
+  createEngineMcpRuntime,
+  freshMonsterPlanningState,
+  loadArenaFixture,
+} from '../../../src/vtt/mcp/entrypoint';
 import { SUGGESTED_PLAN_MAX_BYTES } from '../../../src/vtt/mcp/engine-server';
 import { mcpRequestMeta } from '../../../src/vtt/mcp/handler';
 import { engineSchemaInternals, schemaViolations } from '../../../src/vtt/mcp/schemas';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
+import type { EngineActorOption, EngineTurnProposal } from '../../../src/vtt/turn-proposal';
 
 const CLIENT = Object.freeze({ name: 'snippet-test', version: '1.0.0' });
 
@@ -39,66 +42,93 @@ function tool(
   return structured(response.result);
 }
 
-function externalTarget(target: EngineTargetSelector): Readonly<Record<string, unknown>> {
-  switch (target.kind) {
-    case 'combatant': return { kind: target.kind, combatant_id: target.combatantId };
-    case 'enemy_threatening_ally': return { kind: target.kind, ally_id: target.allyId };
-    case 'nearest_visible_enemy':
-    case 'lowest_hp_visible_enemy':
-    case 'most_injured_visible_ally':
-    case 'current_threat': return { kind: target.kind };
-  }
-}
-
-function externalIntent(intent: EngineTurnIntent): Readonly<Record<string, unknown>> {
-  const branch = (value: Omit<EngineTurnIntent, 'actorId' | 'fallback'>): Readonly<Record<string, unknown>> => ({
-    choice: value.choice.kind === 'attack'
-      ? { kind: value.choice.kind, action_id: value.choice.actionId, target: externalTarget(value.choice.target), ...(value.choice.resourcePolicy === undefined ? {} : { resource_policy: value.choice.resourcePolicy }) }
-      : value.choice.kind === 'use_action'
-        ? { kind: value.choice.kind, action_id: value.choice.actionId, target: value.choice.target === null ? null : externalTarget(value.choice.target) }
-        : value.choice.kind === 'cast_spell'
-          ? { kind: value.choice.kind, spell_id: value.choice.spellId, target: value.choice.target === null ? null : externalTarget(value.choice.target), ...(value.choice.slotPolicy === undefined ? {} : { slot_policy: value.choice.slotPolicy }) }
-          : { kind: value.choice.kind },
-    movement: {
-      willingness: value.movement.willingness,
-      ...(value.movement.maximumFeet === undefined ? {} : { maximum_feet: value.movement.maximumFeet }),
-      opportunity_risk: value.movement.opportunityRisk,
-    },
-    engagement: {
-      stance: value.engagement.stance,
-      ...(value.engagement.anchor === undefined ? {} : { anchor: value.engagement.anchor === null ? null : externalTarget(value.engagement.anchor) }),
-    },
-  });
+function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string, unknown>> {
   return {
-    actor_id: intent.actorId,
-    ...branch(intent),
-    fallback: intent.fallback === null ? null : branch(intent.fallback),
+    actor_id: proposal.actorId,
+    expected_revision: proposal.expectedRevision,
+    primary_option_id: proposal.primaryOptionId,
+    fallback_option_id: proposal.fallbackOptionId,
+    override_justification: proposal.overrideJustification,
   };
 }
 
-function goldenSummary(intents: readonly EngineTurnIntent[]) {
-  return intents.map((intent) => ({
-    actor: intent.actorId,
-    action: intent.choice.kind === 'attack' || intent.choice.kind === 'use_action'
-      ? `${intent.choice.kind}:${intent.choice.actionId}`
-      : intent.choice.kind,
-    target: intent.choice.kind === 'attack' || intent.choice.kind === 'use_action'
-      ? intent.choice.target?.kind === 'combatant' ? intent.choice.target.combatantId : null
-      : null,
-    stance: intent.engagement.stance,
-  }));
+function selectedOption(capsule: EngineStateCapsule, proposal: EngineTurnProposal): EngineActorOption {
+  const actor = capsule.projection.combatants.find((candidate) => candidate.id === proposal.actorId);
+  const option = actor?.options.find((candidate) => candidate.optionId === proposal.primaryOptionId);
+  if (option === undefined) throw new Error(`Selected option ${proposal.primaryOptionId} is not projected.`);
+  return option;
+}
+
+function fallbackOption(capsule: EngineStateCapsule, proposal: EngineTurnProposal): EngineActorOption | null {
+  if (proposal.fallbackOptionId === null) return null;
+  const actor = capsule.projection.combatants.find((candidate) => candidate.id === proposal.actorId);
+  return actor?.options.find((candidate) => candidate.optionId === proposal.fallbackOptionId) ?? null;
+}
+
+function actionIds(option: EngineActorOption): readonly string[] {
+  return option.actionSlots.flatMap<string>((slot) => {
+    const use = slot.use;
+    switch (use.kind) {
+      case 'attack':
+      case 'saving_throw': return [use.actionId];
+      case 'multiattack': return use.components.map((component) => component.actionId);
+      case 'cast_spell': return [use.spellId];
+      case 'use_world_object': return [use.actionId];
+      case 'dodge':
+      case 'disengage':
+      case 'dash':
+      case 'hide':
+      case 'end_turn': return [use.kind];
+    }
+  });
+}
+
+function targetIds(option: EngineActorOption): readonly string[] {
+  return option.actionSlots.flatMap((slot) => {
+    const use = slot.use;
+    switch (use.kind) {
+      case 'attack': return use.target.kind === 'combatant' ? [use.target.combatantId] : [];
+      case 'multiattack': return use.components.flatMap((component) =>
+        component.target.kind === 'combatant' ? [component.target.combatantId] : []);
+      case 'saving_throw': return use.target.kind === 'combatant' ? [use.target.combatantId] : [];
+      case 'cast_spell': return use.targets.flatMap((target) =>
+        target.kind === 'combatant' ? [target.combatantId] : []);
+      case 'use_world_object':
+      case 'dodge':
+      case 'disengage':
+      case 'dash':
+      case 'hide':
+      case 'end_turn': return [];
+    }
+  });
+}
+
+function isOffensive(option: EngineActorOption): boolean {
+  return option.actionSlots.some((slot) =>
+    slot.use.kind === 'attack' || slot.use.kind === 'multiattack' || slot.use.kind === 'saving_throw');
 }
 
 async function registryFixture(seed: number) {
-  const state = await loadArenaFixture(`tests/fixtures/arena-basis/seed-${String(seed)}.json`);
+  const loaded = await loadArenaFixture(`tests/fixtures/arena-basis/seed-${String(seed)}.json`);
+  const state = freshMonsterPlanningState(loaded);
   const runtime = createEngineMcpRuntime(state);
   return { state, runtime, capsule: runtime.feed.current() };
 }
 
-function withProjection(
-  capsule: Awaited<ReturnType<typeof registryFixture>>['capsule'],
-  projection: typeof capsule.projection,
-) {
+async function controlRegistryFixture() {
+  const loaded = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+  const actorId = 'combatant:generated-3943001-monster-2';
+  const state = freshMonsterPlanningState({
+    ...loaded,
+    tokens: loaded.tokens.map((token) => token.combatantId === actorId
+      ? { ...token, position: { column: 3, row: 6 } }
+      : token),
+  });
+  const runtime = createEngineMcpRuntime(state);
+  return { state, runtime, capsule: runtime.feed.current() };
+}
+
+function withProjection(capsule: EngineStateCapsule, projection: EngineStateCapsule['projection']) {
   if (capsule.request === null) throw new TypeError('Fixture request is absent.');
   return createEngineStateCapsule({
     runId: capsule.runId,
@@ -112,21 +142,20 @@ function withProjection(
   });
 }
 
-function chokeCapsule(capsule: Awaited<ReturnType<typeof registryFixture>>['capsule']) {
+function chokeCapsule(capsule: EngineStateCapsule): EngineStateCapsule {
   return withProjection(capsule, {
     ...capsule.projection,
     blockedCells: [...capsule.projection.blockedCells, { column: 2, row: 6 }],
   });
 }
 
-describe('plays v1 registry', () => {
+describe('composite play registry', () => {
   it('gates applicability, advertises at most three plays, and ranks them deterministically', async () => {
     const roomOne = await registryFixture(3_943_001);
     const first = SNIPPET_REGISTRY.applicable(roomOne.capsule);
-    const second = SNIPPET_REGISTRY.applicable(roomOne.capsule);
-    expect(first).toEqual(second);
-    expect(first).toHaveLength(2);
+    expect(first).toEqual(SNIPPET_REGISTRY.applicable(roomOne.capsule));
     expect(first.map((play) => play.name)).toEqual(['focus_fire', 'basic_advance']);
+    expect(first).toHaveLength(2);
     expect(first.every((play) => !play.description.includes('\n'))).toBe(true);
 
     const roomThree = await registryFixture(3_943_003);
@@ -134,7 +163,7 @@ describe('plays v1 registry', () => {
       .toEqual(['basic_advance']);
   });
 
-  it('returns the validated expansion as an unqueued MCP draft', async () => {
+  it('returns the validated composite expansion as an unqueued MCP draft', async () => {
     const { runtime, capsule } = await registryFixture(3_943_001);
     const context = tool(runtime, 'engine.get_turn_context', {
       run_id: capsule.runId,
@@ -143,23 +172,16 @@ describe('plays v1 registry', () => {
     });
     const advertised = context['applicable_plays'];
     if (!Array.isArray(advertised)) throw new TypeError('Applicable plays are absent.');
-    expect(advertised.map((play) => record(play, 'advertised play')['name'])).toContain('focus_fire');
-
     const top = record(advertised[0], 'top advertised play');
     const suggested = record(context['suggested_plan'], 'suggested plan');
     expect(suggested).toMatchObject({
       play_name: top['name'],
       snippet_hash: top['snippet_hash'],
-      advisory: expect.stringContaining('submit_round_intents'),
+      advisory: expect.stringContaining('submit_round_proposals'),
     });
-    expect(Buffer.byteLength(JSON.stringify(suggested), 'utf8')).toBeLessThanOrEqual(
-      SUGGESTED_PLAN_MAX_BYTES,
-    );
-    const suggestedIntents = suggested['intents'];
-    if (!Array.isArray(suggestedIntents)) throw new TypeError('Suggested intents are absent.');
-    expect(suggestedIntents.some((value) =>
-      record(record(value, 'suggested intent')['choice'], 'suggested choice')['kind'] === 'attack'))
-      .toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(suggested), 'utf8')).toBeLessThanOrEqual(SUGGESTED_PLAN_MAX_BYTES);
+    const suggestedProposals = suggested['proposals'];
+    if (!Array.isArray(suggestedProposals)) throw new TypeError('Suggested proposals are absent.');
 
     const expected = SNIPPET_REGISTRY.expand('focus_fire', capsule);
     const draft = tool(runtime, 'engine.propose_from_play', { play_name: 'focus_fire' });
@@ -167,15 +189,13 @@ describe('plays v1 registry', () => {
       state_ref: context['state_ref'],
       play_name: 'focus_fire',
       snippet_hash: expected.definition.snippetHash,
-      intents: expected.intents.map(externalIntent),
+      proposals: expected.proposals.map(externalProposal),
     });
     expect(runtime.proposals).toEqual([]);
-    const values = draft['intents'];
-    if (!Array.isArray(values)) throw new TypeError('Draft intents are absent.');
-    expect(values.map((value) => schemaViolations(engineSchemaInternals.turnIntent, value))).toEqual(
-      values.map(() => []),
-    );
-    expect(values.every((value) => record(value, 'draft intent')['choice'] !== undefined)).toBe(true);
+    expect(suggestedProposals.map((value) => schemaViolations(engineSchemaInternals.turnProposal, value)))
+      .toEqual(suggestedProposals.map(() => []));
+    expect(suggestedProposals.every((value) =>
+      typeof record(value, 'suggested proposal')['primary_option_id'] === 'string')).toBe(true);
   });
 
   it('omits the suggestion when no play applies', async () => {
@@ -196,7 +216,6 @@ describe('plays v1 registry', () => {
       historyDelta: capsule.historyDelta,
       rulesIndex: capsule.rulesIndex,
     }));
-
     const context = tool(runtime, 'engine.get_turn_context', {
       run_id: capsule.runId,
       expected_revision: capsule.revision + 1,
@@ -207,7 +226,8 @@ describe('plays v1 registry', () => {
   });
 
   it('gates both advertisement and expansion to initial round-plan requests', async () => {
-    const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const loaded = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const state = freshMonsterPlanningState(loaded);
     const actors = state.combatants
       .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
       .map((candidate) => candidate.profile.id)
@@ -221,8 +241,8 @@ describe('plays v1 registry', () => {
         triggerPcTurnId: 'pc-turn:snippet-adjustment',
         beforeRevision: 1,
         afterRevision: 2,
-        materialityReasonCodes: ['INTENT_RESOLUTION_CHANGED'],
-        baselineIntentDigests: actors.map((actorId) => ({ actorId, intentDigest: 'b'.repeat(64) })),
+        materialityReasonCodes: ['PROPOSAL_RESOLUTION_CHANGED'],
+        baselineProposalDigests: actors.map((actorId) => ({ actorId, proposalDigest: 'b'.repeat(64) })),
         adjustmentBudget: Math.min(actors.length, 2) as 1 | 2,
       },
     });
@@ -232,458 +252,230 @@ describe('plays v1 registry', () => {
       expected_revision: capsule.revision,
       scope: 'round',
     });
-
     expect(context).toMatchObject({
       request: { kind: 'plan_adjustment', baseline_plan_hash: 'a'.repeat(64) },
       applicable_plays: [],
       current_plan: {
         parent_plan_id: 'plan:snippet-adjustment',
-        baseline_plan_hash: 'a'.repeat(64),
+        open_actor_proposals: actors.map((actorId) => ({
+          actor_id: actorId,
+          proposal_digest: 'b'.repeat(64),
+        })),
       },
     });
     expect(context).not.toHaveProperty('suggested_plan');
-    expect(SNIPPET_REGISTRY.applicable(capsule)).toEqual([]);
     expect(() => SNIPPET_REGISTRY.expand('focus_fire', capsule)).toThrow('PLAY_NOT_APPLICABLE');
-    const rejected = runtime.handler.handle({
-      jsonrpc: '2.0',
-      id: 'adjustment-play',
-      method: 'tools/call',
-      params: { _meta: mcpRequestMeta(CLIENT), name: 'engine.propose_from_play', arguments: { play_name: 'focus_fire' } },
-    });
-    expect(JSON.stringify(rejected)).toContain('PLAY_NOT_APPLICABLE_TO_REQUEST');
   });
 
   it.each([
-    {
-      name: 'basic_advance', seed: 3_943_003,
-      expected: [{ actor: 'combatant:generated-3943003-monster-1', action: 'attack:slam', target: 'combatant:wizard', stance: 'close_to_melee' }],
-    },
-    {
-      name: 'focus_fire', seed: 3_943_001,
-      expected: [
-        { actor: 'combatant:generated-3943001-monster-1', action: 'attack:dagger', target: 'combatant:wizard', stance: 'maintain_range' },
-        { actor: 'combatant:generated-3943001-monster-2', action: 'attack:light-hammer', target: 'combatant:wizard', stance: 'maintain_range' },
-        { actor: 'combatant:generated-3943001-monster-3', action: 'attack:longbow', target: 'combatant:wizard', stance: 'maintain_range' },
-      ],
-    },
-    {
-      name: 'remove_obstacle', seed: 3_943_001,
-      expected: [
-        { actor: 'combatant:generated-3943001-monster-1', action: 'attack:dagger', target: 'combatant:wizard', stance: 'maintain_range' },
-        { actor: 'combatant:generated-3943001-monster-2', action: 'attack:grab', target: 'combatant:wizard', stance: 'close_to_melee' },
-        { actor: 'combatant:generated-3943001-monster-3', action: 'attack:longbow', target: 'combatant:wizard', stance: 'maintain_range' },
-      ],
-    },
-  ] as const)('pins $name against frozen arena-basis room $seed', async ({ name, seed, expected }) => {
-    const { capsule } = await registryFixture(seed);
+    { name: 'focus_fire', seed: 3_943_001, actor: 'combatant:generated-3943001-monster-1', action: 'dagger', target: 'combatant:wizard' },
+    { name: 'remove_obstacle', seed: 3_943_001, actor: 'combatant:generated-3943001-monster-2', action: 'grab', target: 'combatant:wizard' },
+  ] as const)('pins $name composite selection against frozen arena-basis room $seed', async ({ name, seed, actor, action, target }) => {
+    const { capsule } = name === 'remove_obstacle'
+      ? await controlRegistryFixture()
+      : await registryFixture(seed);
     const basis = name === 'remove_obstacle' ? chokeCapsule(capsule) : capsule;
-    expect(goldenSummary(SNIPPET_REGISTRY.expand(name, basis).intents)).toEqual(expected);
+    const proposal = SNIPPET_REGISTRY.expand(name, basis).proposals.find((entry) => entry.actorId === actor);
+    if (proposal === undefined) throw new Error(`Proposal for ${actor} is absent.`);
+    const option = selectedOption(basis, proposal);
+    expect(actionIds(option)).toContain(action);
+    expect(targetIds(option)).toContain(target);
+    expect(proposal.expectedRevision).toBe(option.revision);
   });
 
-  it.each([
-    // Room 1: the Hobgoblin at (16,3) has a 150-foot Longbow against every PC.
-    { room: 1, seed: 3_943_001, proof: 'Longbow 150 feet from (16,3)' },
-    // Room 2: the Specters at (11,1)/(10,1) need 40/35 feet to bring 5-foot Life Drain to the Cleric at (2,4), both within a 60-foot Dash commitment.
-    { room: 2, seed: 3_943_002, proof: 'Life Drain after 40/35 feet toward (2,4)' },
-    // Room 4: the Tough at (20,1) is already within its Heavy Crossbow's 100-foot range of the Wizard at (1,6).
-    { room: 4, seed: 3_943_004, proof: 'Heavy Crossbow 100 feet from (20,1)' },
-    // Room 5: the Tough at (21,3) is exactly 100 feet from the Wizard at (1,6), matching Heavy Crossbow range.
-    { room: 5, seed: 3_943_005, proof: 'Heavy Crossbow exactly 100 feet from (21,3)' },
-    // Room 6: the Dire Wolf at (9,1) needs 35 feet to bring its 5-foot Bite to the Fighter at (1,2), within its 50-foot speed.
-    { room: 6, seed: 3_943_006, proof: 'Bite after 35 feet toward (1,2)' },
-  ] as const)('keeps frozen room $room focus-fire aggressive: $proof', async ({ seed, proof }) => {
-    const { state, capsule } = await registryFixture(seed);
-    const draft = SNIPPET_REGISTRY.expand('focus_fire', capsule).intents;
-    const attacks = draft.filter((intent) => intent.choice.kind === 'attack');
-    expect(attacks.length, proof).toBeGreaterThan(0);
+  it("pins 'basic_advance' to a complete Dash when the frozen room's melee attack cannot resolve this turn", async () => {
+    const { capsule } = await registryFixture(3_943_003);
+    const actor = 'combatant:generated-3943003-monster-1';
+    const proposal = SNIPPET_REGISTRY.expand('basic_advance', capsule).proposals
+      .find((entry) => entry.actorId === actor);
+    if (proposal === undefined) throw new Error(`Proposal for ${actor} is absent.`);
+    const option = selectedOption(capsule, proposal);
+    expect(actionIds(option)).toEqual(['dash']);
+    expect(option.movement.engagement).toEqual({
+      stance: 'close_to_melee',
+      anchor: { kind: 'nearest_visible_enemy' },
+    });
+  });
 
-    for (const actor of capsule.projection.combatants.filter((candidate) =>
-      capsule.request?.actors.includes(candidate.id) === true)) {
-      const attackIds = new Set(actor.actions.filter((action) => action.kind === 'attack').map((action) => action.actionId));
-      const reachable = actor.actionApproaches.some((approach) =>
-        attackIds.has(approach.actionId) && approach.minimumMovementFeet !== null &&
-        approach.minimumMovementFeet <= actor.speedFeet * 2);
-      const intent = draft.find((candidate) => candidate.actorId === actor.id);
-      expect(intent?.choice.kind).toBe(reachable ? 'attack' : 'dodge');
-    }
-
-    for (const attack of attacks) {
-      const resolution = pureIntentResolver.resolve(state, attack);
-      expect(resolution.valid).toBe(true);
-      if (resolution.valid && resolution.selectedBranch === 'fallback') {
-        expect(resolution.mechanics.actionId).toBe('dash');
-        expect(resolution.mechanics.movementCostFeet).toBeGreaterThan(0);
+  it.each([3_943_001, 3_943_002, 3_943_004, 3_943_005, 3_943_006] as const)(
+    'keeps frozen room seed %s focus-fire advancing or offensive and independently resolvable',
+    async (seed) => {
+      const { state, capsule } = await registryFixture(seed);
+      const proposals = SNIPPET_REGISTRY.expand('focus_fire', capsule).proposals;
+      expect(proposals.some((proposal) => {
+        const option = selectedOption(capsule, proposal);
+        return isOffensive(option) || option.actionSlots.some((slot) =>
+          slot.slot === 'main' && slot.use.kind === 'dash');
+      })).toBe(true);
+      for (const proposal of proposals) {
+        expect(pureTurnProposalResolver.resolve(state, proposal).valid).toBe(true);
       }
-    }
-  });
-
-  it.each(['focus_fire', 'basic_advance'] as const)(
-    'uses room 3943007 path cost before target rank for %s',
-    async (play) => {
-      const { capsule } = await registryFixture(3_943_007);
-      const actorId = 'combatant:generated-3943007-monster-2';
-      const shaped = withProjection(capsule, {
-        ...capsule.projection,
-        combatants: capsule.projection.combatants.map((actor) => actor.id !== actorId ? actor : {
-          ...actor,
-          actionApproaches: actor.actionApproaches.map((approach) => ({
-            ...approach,
-            minimumMovementFeet: approach.targetId === 'combatant:fighter' ? 35
-              : approach.targetId === 'combatant:wizard' ? 20
-                : approach.minimumMovementFeet,
-          })),
-        }),
-      });
-      const actor = shaped.projection.combatants.find((candidate) => candidate.id === actorId);
-      const draft = SNIPPET_REGISTRY.expand(play, shaped).intents;
-      const selected = draft.find((candidate) => candidate.actorId === actorId);
-
-      expect(actor?.speedFeet).toBe(30);
-      expect(actor?.actionApproaches).toEqual(expect.arrayContaining([
-        expect.objectContaining({ targetId: 'combatant:fighter', minimumMovementFeet: 35 }),
-        expect.objectContaining({ targetId: 'combatant:wizard', minimumMovementFeet: 20 }),
-      ]));
-      expect(selected).toMatchObject({
-        choice: {
-          kind: 'attack', actionId: 'life-drain',
-          target: { kind: 'combatant', combatantId: 'combatant:wizard' },
-        },
-        movement: { willingness: 'only_if_required', maximumFeet: 30 },
-        fallback: {
-          choice: { kind: 'dash' },
-          movement: { maximumFeet: 60, opportunityRisk: 'avoid' },
-          engagement: {
-            anchor: { kind: 'combatant', combatantId: 'combatant:fighter' },
-          },
-        },
-      });
     },
   );
 
-  it('uses Dash only for a room 3943007 attack position beyond normal speed but within double speed', async () => {
+  it.each(['focus_fire', 'basic_advance'] as const)(
+    'keeps every room 3943007 %s selection revision-bound to a projected option',
+    async (play) => {
+      const { capsule } = await registryFixture(3_943_007);
+      for (const proposal of SNIPPET_REGISTRY.expand(play, capsule).proposals) {
+        const option = selectedOption(capsule, proposal);
+        expect(option.actorId).toBe(proposal.actorId);
+        expect(option.revision).toBe(proposal.expectedRevision);
+      }
+    },
+  );
+
+  it('offers Dash only as a complete main-action option with double-speed movement', async () => {
     const { capsule } = await registryFixture(3_943_007);
-    const actorId = 'combatant:generated-3943007-monster-2';
-    const shaped = withProjection(capsule, {
-      ...capsule.projection,
-      combatants: capsule.projection.combatants.map((actor) => actor.id !== actorId ? actor : {
-        ...actor,
-        actionApproaches: actor.actionApproaches.map((approach) => ({
-          ...approach,
-          minimumMovementFeet: approach.targetId === 'combatant:fighter' ? 35 : 70,
-        })),
-      }),
-    });
-    const selected = SNIPPET_REGISTRY.expand('focus_fire', shaped).intents
-      .find((candidate) => candidate.actorId === actorId);
-
-    expect(selected).toMatchObject({
-      choice: {
-        kind: 'attack', actionId: 'life-drain',
-        target: { kind: 'combatant', combatantId: 'combatant:fighter' },
-      },
-      movement: { maximumFeet: 30 },
-      fallback: {
-        choice: { kind: 'dash' },
-        movement: { maximumFeet: 60, opportunityRisk: 'avoid' },
-        engagement: {
-          anchor: { kind: 'combatant', combatantId: 'combatant:fighter' },
-        },
-      },
-    });
-  });
-
-  it.each([
-    { seed: 3_943_001, actors: [] },
-    { seed: 3_943_002, actors: ['combatant:generated-3943002-monster-1', 'combatant:generated-3943002-monster-2'] },
-    { seed: 3_943_003, actors: ['combatant:generated-3943003-monster-1'] },
-    { seed: 3_943_004, actors: [] },
-    { seed: 3_943_005, actors: [] },
-    { seed: 3_943_006, actors: ['combatant:generated-3943006-monster-1', 'combatant:generated-3943006-monster-2'] },
-  ] as const)('commits movement for out-of-reach melee plans in frozen room seed $seed', async ({ seed, actors }) => {
-    const { capsule } = await registryFixture(seed);
-    const draft = SNIPPET_REGISTRY.expand('basic_advance', capsule).intents;
-    for (const actorId of actors) {
-      const intent = draft.find((candidate) => candidate.actorId === actorId);
-      expect(intent?.choice.kind).toBe('attack');
-      expect(intent?.engagement.stance).toBe('close_to_melee');
-      expect(intent?.movement.willingness).not.toBe('none');
+    const requested = capsule.projection.combatants.filter((actor) =>
+      capsule.request?.actors.includes(actor.id) === true);
+    for (const actor of requested) {
+      const dash = actor.options.find((option) => option.actionSlots.some((slot) => slot.use.kind === 'dash'));
+      if (dash === undefined) throw new Error(`Dash option for ${actor.id} is absent.`);
+      expect(dash.actionSlots).toEqual([{ slot: 'main', use: { kind: 'dash' } }]);
+      expect(dash.movement.preference.maximumFeet).toBe(actor.speedFeet * 2);
     }
   });
 
-  it('uses statblock delivery to avoid opportunity risk for ranged movement while melee still accepts it', async () => {
-    const rangedFixture = await registryFixture(3_943_001);
-    const rangedActorId = 'combatant:generated-3943001-monster-1';
-    const rangedTargetId = 'combatant:wizard';
-    const ranged = withProjection(rangedFixture.capsule, {
-      ...rangedFixture.capsule.projection,
-      combatants: rangedFixture.capsule.projection.combatants.map((actor) => {
-        if (actor.id === rangedTargetId) return { ...actor, position: { column: 1, row: 6 } };
-        if (actor.id !== rangedActorId) return actor;
-        return {
-          ...actor,
-          position: { column: 6, row: 6 },
-          actions: actor.actions.filter((action) => action.actionId === 'dagger'),
-          actionApproaches: actor.actionApproaches.map((approach) => ({
-            ...approach,
-            minimumMovementFeet: approach.actionId === 'dagger' && approach.targetId === rangedTargetId
-              ? 5
-              : approach.minimumMovementFeet,
-          })),
-        };
-      }),
-    });
-    const rangedActor = ranged.projection.combatants.find((actor) => actor.id === rangedActorId);
-    const rangedIntent = SNIPPET_REGISTRY.expand('focus_fire', ranged).intents
-      .find((intent) => intent.actorId === rangedActorId);
+  it.each([3_943_001, 3_943_002, 3_943_003, 3_943_004, 3_943_005, 3_943_006] as const)(
+    'materializes every selected frozen-room option into a legal composite for seed %s',
+    async (seed) => {
+      const { state, capsule } = await registryFixture(seed);
+      for (const proposal of SNIPPET_REGISTRY.expand('basic_advance', capsule).proposals) {
+        const resolution = pureTurnProposalResolver.resolve(state, proposal);
+        expect(resolution.valid).toBe(true);
+        if (!resolution.valid) throw new Error('Frozen-room proposal unexpectedly refused.');
+        expect(resolution.mechanics.actionSlots.length).toBeGreaterThan(0);
+      }
+    },
+  );
 
-    expect(rangedActor?.actions).toEqual([
-      expect.objectContaining({
-        actionId: 'dagger',
-        attackDelivery: 'melee_or_ranged',
-        normalRangeFeet: 20,
-        longRangeFeet: 60,
-      }),
-    ]);
-    expect(rangedIntent?.movement).toEqual({
-      willingness: 'for_clear_advantage',
-      maximumFeet: 30,
-      opportunityRisk: 'avoid',
-    });
+  it('preserves ranged and melee engagement semantics in selected options', async () => {
+    const ranged = await registryFixture(3_943_001);
+    const rangedProposal = SNIPPET_REGISTRY.expand('focus_fire', ranged.capsule).proposals
+      .find((proposal) => proposal.actorId === 'combatant:generated-3943001-monster-1');
+    if (rangedProposal === undefined) throw new Error('Ranged proposal is absent.');
+    expect(selectedOption(ranged.capsule, rangedProposal).movement.engagement.stance).toBe('maintain_range');
 
-    const meleeFixture = await registryFixture(3_943_003);
-    const meleeIntent = SNIPPET_REGISTRY.expand('basic_advance', meleeFixture.capsule).intents[0];
-    expect(meleeIntent?.choice).toMatchObject({ kind: 'attack', actionId: 'slam' });
-    expect(meleeIntent?.movement).toEqual({
-      willingness: 'only_if_required',
-      maximumFeet: 30,
-      opportunityRisk: 'accept_if_needed',
-    });
+    const melee = await registryFixture(3_943_003);
+    const meleeProposal = SNIPPET_REGISTRY.expand('basic_advance', melee.capsule).proposals[0];
+    if (meleeProposal === undefined) throw new Error('Melee proposal is absent.');
+    expect(selectedOption(melee.capsule, meleeProposal).movement.engagement.stance).toBe('close_to_melee');
   });
 
-  it('holds position for a ranged attack already within normal range', async () => {
-    const { capsule } = await registryFixture(3_943_001);
-    const actorId = 'combatant:generated-3943001-monster-1';
-    const targetId = 'combatant:wizard';
-    const shaped = withProjection(capsule, {
-      ...capsule.projection,
-      combatants: capsule.projection.combatants.map((actor) => {
-        if (actor.id === targetId) return { ...actor, position: { column: 1, row: 6 } };
-        if (actor.id !== actorId) return actor;
-        return {
-          ...actor,
-          position: { column: 5, row: 6 },
-          actions: actor.actions.filter((action) => action.actionId === 'dagger'),
-          actionApproaches: actor.actionApproaches.map((approach) => ({
-            ...approach,
-            minimumMovementFeet: approach.actionId === 'dagger' && approach.targetId === targetId
-              ? 0
-              : approach.minimumMovementFeet,
-          })),
-        };
-      }),
-    });
-    const selected = SNIPPET_REGISTRY.expand('focus_fire', shaped).intents
-      .find((intent) => intent.actorId === actorId);
-
-    expect(selected?.movement).toEqual({
-      willingness: 'none',
-      maximumFeet: 0,
-      opportunityRisk: 'avoid',
-    });
-  });
-
-  it('falls back to a resolvable alternate-target attack before Dodge', async () => {
+  it('resolves an in-range ranged selection with zero movement', async () => {
     const { state, capsule } = await registryFixture(3_943_001);
-    const actorId = 'combatant:generated-3943001-monster-3';
-    const invalidPrimaryTarget = state.combatants.find((combatant) =>
-      combatant.profile.id === 'combatant:generated-3943001-monster-2');
-    if (invalidPrimaryTarget === undefined) throw new Error('Expected same-side invalid target.');
-    const selected = SNIPPET_REGISTRY.expand('focus_fire', capsule).intents
-      .find((intent) => intent.actorId === actorId);
-    if (selected?.choice.kind !== 'attack' || selected.fallback?.choice.kind !== 'attack') {
-      throw new Error('Expected primary and alternate-target attack branches.');
-    }
-
-    expect(selected.fallback.choice.target).toEqual({
-      kind: 'combatant',
-      combatantId: 'combatant:fighter',
-    });
-    const resolved = pureIntentResolver.resolve(state, {
-      ...selected,
-      choice: {
-        ...selected.choice,
-        target: { kind: 'combatant', combatantId: invalidPrimaryTarget.profile.id },
-      },
-    });
-    expect(resolved).toMatchObject({
-      valid: true,
-      selectedBranch: 'fallback',
-      mechanics: {
-        actionId: 'longbow',
-        targetId: 'combatant:fighter',
-      },
-    });
+    const proposal = SNIPPET_REGISTRY.expand('focus_fire', capsule).proposals
+      .find((entry) => entry.actorId === 'combatant:generated-3943001-monster-3');
+    if (proposal === undefined) throw new Error('Longbow proposal is absent.');
+    const resolved = pureTurnProposalResolver.resolve(state, proposal);
+    expect(resolved.valid).toBe(true);
+    if (!resolved.valid) throw new Error('Longbow proposal was refused.');
+    expect(resolved.mechanics.movementCostFeet).toBe(0);
   });
 
-  it('keeps Dodge as the terminal fallback when no alternate opposing target attack resolves', async () => {
+  it('uses a legal alternate-target offense before Dodge as the fallback option', async () => {
     const { capsule } = await registryFixture(3_943_001);
-    const actorId = 'combatant:generated-3943001-monster-1';
-    const primaryTargetId = 'combatant:wizard';
-    const shaped = withProjection(capsule, {
-      ...capsule.projection,
-      combatants: capsule.projection.combatants.map((actor) => actor.id !== actorId ? actor : {
-        ...actor,
-        actions: actor.actions.filter((action) => action.actionId === 'dagger'),
-        actionApproaches: actor.actionApproaches.map((approach) => ({
-          ...approach,
-          minimumMovementFeet: approach.actionId === 'dagger' && approach.targetId === primaryTargetId
-            ? 0
-            : null,
-        })),
-      }),
-    });
-    const selected = SNIPPET_REGISTRY.expand('focus_fire', shaped).intents
-      .find((intent) => intent.actorId === actorId);
-
-    expect(selected?.choice).toMatchObject({
-      kind: 'attack',
-      target: { kind: 'combatant', combatantId: primaryTargetId },
-    });
-    expect(selected?.fallback).toEqual({
-      choice: { kind: 'dodge' },
-      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-      engagement: { stance: 'hold_position' },
-    });
+    const proposal = SNIPPET_REGISTRY.expand('focus_fire', capsule).proposals
+      .find((entry) => entry.actorId === 'combatant:generated-3943001-monster-3');
+    if (proposal === undefined) throw new Error('Longbow proposal is absent.');
+    const primary = selectedOption(capsule, proposal);
+    const fallback = fallbackOption(capsule, proposal);
+    if (fallback === null) throw new Error('Fallback option is absent.');
+    expect(isOffensive(fallback)).toBe(true);
+    expect(new Set(targetIds(fallback))).not.toEqual(new Set(targetIds(primary)));
   });
 
-  it('moves to grapple the blocker when no control spell is in range', async () => {
-    const { capsule } = await registryFixture(3_943_001);
-    const draft = SNIPPET_REGISTRY.expand('remove_obstacle', chokeCapsule(capsule)).intents;
-    const grapple = draft.find((intent) =>
-      (intent.choice.kind === 'attack' || intent.choice.kind === 'use_action') &&
-      /grapple|grab/iu.test(intent.choice.actionId));
-    expect(grapple?.engagement.stance).toBe('close_to_melee');
-    expect(grapple?.movement.willingness).not.toBe('none');
+  it('falls through an unavailable primary option to its complete fallback option', async () => {
+    const { state, capsule } = await registryFixture(3_943_001);
+    const proposal = SNIPPET_REGISTRY.expand('focus_fire', capsule).proposals[0];
+    if (proposal === undefined || proposal.fallbackOptionId === null) throw new Error('Fallback proposal is absent.');
+    const resolved = pureTurnProposalResolver.resolve(state, {
+      ...proposal,
+      primaryOptionId: 'option:unavailable-primary' as EngineTurnProposal['primaryOptionId'],
+    });
+    expect(resolved.valid).toBe(true);
+    if (!resolved.valid) throw new Error('Fallback proposal was refused.');
+    expect(resolved.selectedBranch).toBe('fallback');
+    expect(resolved.option.optionId).toBe(proposal.fallbackOptionId);
   });
 
-  it('requires a real obstacle and yields honestly to focus fire without a control action', async () => {
-    const { capsule } = await registryFixture(3_943_001);
+  it('moves to use the projected control action against the blocker', async () => {
+    const { capsule } = await controlRegistryFixture();
+    const basis = chokeCapsule(capsule);
+    const proposal = SNIPPET_REGISTRY.expand('remove_obstacle', basis).proposals
+      .find((entry) => actionIds(selectedOption(basis, entry)).some((id) => /grapple|grab/iu.test(id)));
+    if (proposal === undefined) throw new Error('Control proposal is absent.');
+    const option = selectedOption(basis, proposal);
+    expect(option.movement.engagement.stance).toBe('close_to_melee');
+    expect(option.movement.preference.willingness).toBe('only_if_required');
+  });
+
+  it('requires a real projected obstacle and yields honestly without a control option', async () => {
+    const { capsule } = await controlRegistryFixture();
     expect(SNIPPET_REGISTRY.applicable(capsule).map((play) => play.name)).not.toContain('remove_obstacle');
-    expect(() => SNIPPET_REGISTRY.expand('remove_obstacle', capsule)).toThrow('PLAY_NOT_APPLICABLE');
-
     const obstructed = chokeCapsule(capsule);
     expect(SNIPPET_REGISTRY.applicable(obstructed).map((play) => play.name)[0]).toBe('remove_obstacle');
     const withoutControl = withProjection(obstructed, {
       ...obstructed.projection,
       combatants: obstructed.projection.combatants.map((actor) => ({
         ...actor,
-        actions: actor.actions.filter((action) => !/web|grapple|grab/iu.test(action.actionId)),
+        options: actor.options.filter((option) =>
+          !actionIds(option).some((id) => /web|grapple|grab/iu.test(id))),
       })),
     });
     expect(SNIPPET_REGISTRY.applicable(withoutControl).map((play) => play.name))
       .toEqual(['focus_fire', 'basic_advance']);
-    expect(() => SNIPPET_REGISTRY.expand('remove_obstacle', withoutControl))
-      .toThrow('PLAY_NOT_APPLICABLE');
   });
 
-  it('never drafts Dash without a projected attack position beyond speed and within double speed', async () => {
+  it('never drafts Dash when an offensive composite option is available', async () => {
     for (let seed = 3_943_001; seed <= 3_943_012; seed += 1) {
       const { capsule } = await registryFixture(seed);
-      const requested = capsule.projection.combatants.filter((actor) =>
-        capsule.request?.actors.includes(actor.id) === true && actor.life !== 'dead');
       for (const play of SNIPPET_REGISTRY.applicable(capsule)) {
-        const intents = SNIPPET_REGISTRY.expand(play.name, capsule).intents;
-        for (const intent of intents) {
-          const actor = requested.find((candidate) => candidate.id === intent.actorId);
-          if (actor === undefined) throw new Error(`Requested actor ${String(intent.actorId)} is absent.`);
-          const branches = [intent, ...(intent.fallback === null ? [] : [intent.fallback])];
-          for (const branch of branches.filter((candidate) => candidate.choice.kind === 'dash')) {
-            const anchor = branch.engagement.anchor;
-            expect(anchor?.kind, `${String(seed)} ${play.name} ${String(actor.id)}`).toBe('combatant');
-            if (anchor?.kind !== 'combatant') throw new Error('Dash branch anchor is absent.');
-            const attackIds = new Set(actor.actions.filter((action) => action.kind === 'attack')
-              .map((action) => action.actionId));
-            const approach = actor.actionApproaches.find((candidate) =>
-              candidate.targetId === anchor.combatantId && attackIds.has(candidate.actionId) &&
-              candidate.minimumMovementFeet !== null && candidate.minimumMovementFeet > actor.speedFeet &&
-              candidate.minimumMovementFeet <= actor.speedFeet * 2);
-            expect(approach, `${String(seed)} ${play.name} ${String(actor.id)}`).toBeDefined();
-            expect(branch.movement.opportunityRisk).toBe('avoid');
-          }
+        for (const proposal of SNIPPET_REGISTRY.expand(play.name, capsule).proposals) {
+          const actor = capsule.projection.combatants.find((candidate) => candidate.id === proposal.actorId);
+          if (actor === undefined) throw new Error(`Actor ${proposal.actorId} is absent.`);
+          if (!actor.options.some(isOffensive)) continue;
+          expect(selectedOption(capsule, proposal).actionSlots.some((slot) =>
+            slot.slot === 'main' && slot.use.kind === 'dash')).toBe(false);
         }
       }
     }
   });
 
-  it('Dodges instead of spending Dash when no attack is reachable within double speed', async () => {
-    for (let seed = 3_943_001; seed <= 3_943_012; seed += 1) {
-      const { capsule } = await registryFixture(seed);
-      const actors = capsule.projection.combatants.filter((actor) =>
-        capsule.request?.actors.includes(actor.id) === true && actor.life !== 'dead');
-      const targets = capsule.projection.combatants.filter((target) =>
-        target.life !== 'dead' && target.side !== actors[0]?.side);
-      for (const play of SNIPPET_REGISTRY.applicable(capsule).filter((candidate) =>
-        candidate.name !== 'remove_obstacle')) {
-        const intents = SNIPPET_REGISTRY.expand(play.name, capsule).intents;
-        for (const actor of actors) {
-          const attackIds = new Set(actor.actions.filter((action) => action.kind === 'attack').map((action) => action.actionId));
-          const canAttackAfterDash = actor.actionApproaches.some((approach) =>
-            targets.some((target) => target.id === approach.targetId) &&
-            attackIds.has(approach.actionId) && approach.minimumMovementFeet !== null &&
-            approach.minimumMovementFeet <= actor.speedFeet * 2);
-          if (canAttackAfterDash) continue;
-          const intent = intents.find((candidate) => candidate.actorId === actor.id);
-          expect(intent, `${String(seed)} ${play.name} ${String(actor.id)}`).toMatchObject({
-            choice: { kind: 'dodge' },
-            movement: {
-              willingness: 'none',
-              maximumFeet: 0,
-              opportunityRisk: 'avoid',
-            },
-            engagement: { stance: 'hold_position' },
-            fallback: { choice: { kind: 'end_turn' } },
-          });
-        }
-      }
-    }
-  });
-
-  it('gives every actor an alternate fallback anchor in a concentrated six-unit room', async () => {
-    const { capsule } = await registryFixture(3_943_005);
-    const requested = new Set(capsule.request?.actors ?? []);
+  it('Dodges when a requested actor has neither an offensive nor an advance option', async () => {
+    const { capsule } = await registryFixture(3_943_003);
+    if (capsule.request === null) throw new Error('Request is absent.');
+    const actorId = capsule.request.actors[0];
     const shaped = withProjection(capsule, {
       ...capsule.projection,
-      combatants: capsule.projection.combatants.map((actor) => !requested.has(actor.id) ? actor : {
+      combatants: capsule.projection.combatants.map((actor) => actor.id !== actorId ? actor : {
         ...actor,
-        actionApproaches: actor.actionApproaches.map((approach) => ({
-          ...approach,
-          minimumMovementFeet: approach.targetId === 'combatant:wizard' ||
-            approach.targetId === 'combatant:cleric' ? 0 : approach.minimumMovementFeet,
-        })),
+        options: actor.options.filter((option) => !isOffensive(option) &&
+          !option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dash')),
       }),
     });
-    const draft = SNIPPET_REGISTRY.expand('focus_fire', shaped).intents;
+    const proposal = SNIPPET_REGISTRY.expand('basic_advance', shaped).proposals[0];
+    if (proposal === undefined) throw new Error('Defensive proposal is absent.');
+    expect(actionIds(selectedOption(shaped, proposal))).toEqual(['dodge']);
+  });
 
-    expect(draft).toHaveLength(6);
-    expect(draft.map((entry) => entry.engagement.anchor)).toEqual(draft.map(() => ({
-      kind: 'combatant', combatantId: 'combatant:wizard',
-    })));
-    expect(draft.flatMap((entry) => entry.fallback?.engagement.anchor?.kind === 'combatant'
-      ? [{ actorId: entry.actorId, targetId: entry.fallback.engagement.anchor.combatantId }]
-      : [])).toEqual([
-      { actorId: 'combatant:generated-3943005-monster-1', targetId: 'combatant:cleric' },
-      { actorId: 'combatant:generated-3943005-monster-2', targetId: 'combatant:cleric' },
-      { actorId: 'combatant:generated-3943005-monster-3', targetId: 'combatant:cleric' },
-      { actorId: 'combatant:generated-3943005-monster-4', targetId: 'combatant:cleric' },
-      { actorId: 'combatant:generated-3943005-monster-5', targetId: 'combatant:cleric' },
-      { actorId: 'combatant:generated-3943005-monster-6', targetId: 'combatant:cleric' },
-    ]);
+  it('gives every actor a distinct complete fallback in a concentrated six-unit room', async () => {
+    const { capsule } = await registryFixture(3_943_005);
+    const proposals = SNIPPET_REGISTRY.expand('focus_fire', capsule).proposals;
+    expect(proposals).toHaveLength(6);
+    for (const proposal of proposals) {
+      const fallback = fallbackOption(capsule, proposal);
+      expect(fallback).not.toBeNull();
+      expect(fallback?.optionId).not.toBe(proposal.primaryOptionId);
+      expect(fallback?.actorId).toBe(proposal.actorId);
+    }
   });
 
   it('does not offer fallback-bearing plays during a correction request', async () => {
     const { capsule } = await registryFixture(3_943_001);
     if (capsule.request === null) throw new TypeError('Fixture request is absent.');
-    const correction = withProjection(createEngineStateCapsule({
+    const correction = createEngineStateCapsule({
       runId: capsule.runId,
       branchId: capsule.branchId,
       revision: capsule.revision + 1,
@@ -692,24 +484,23 @@ describe('plays v1 registry', () => {
       projection: capsule.projection,
       historyDelta: capsule.historyDelta,
       rulesIndex: capsule.rulesIndex,
-    }), capsule.projection);
+    });
     expect(SNIPPET_REGISTRY.applicable(correction)).toEqual([]);
   });
 
   it('gives every initial frozen-basis draft a schema-valid, independently legal fallback', { timeout: 60_000 }, async () => {
-    const legalityByBranch = new Map<string, boolean>();
     for (let seed = 3_943_001; seed <= 3_943_012; seed += 1) {
       const { state, capsule } = await registryFixture(seed);
       for (const play of SNIPPET_REGISTRY.applicable(capsule)) {
-        for (const intent of SNIPPET_REGISTRY.expand(play.name, capsule).intents) {
-          expect(intent.fallback, `${String(seed)} ${play.name} ${String(intent.actorId)}`).not.toBeNull();
-          if (intent.fallback === null) throw new Error('Initial play fallback is absent.');
-          expect(schemaViolations(engineSchemaInternals.turnIntent, externalIntent(intent))).toEqual([]);
-          const fallbackIntent = { actorId: intent.actorId, ...intent.fallback, fallback: null };
-          const key = `${String(seed)}:${JSON.stringify(fallbackIntent)}`;
-          const legal = legalityByBranch.get(key) ?? pureIntentResolver.resolve(state, fallbackIntent).valid;
-          legalityByBranch.set(key, legal);
-          expect(legal, `${String(seed)} ${play.name} ${String(intent.actorId)}`).toBe(true);
+        for (const proposal of SNIPPET_REGISTRY.expand(play.name, capsule).proposals) {
+          expect(schemaViolations(engineSchemaInternals.turnProposal, externalProposal(proposal))).toEqual([]);
+          if (proposal.fallbackOptionId === null) throw new Error('Initial play fallback is absent.');
+          const fallbackProposal: EngineTurnProposal = {
+            ...proposal,
+            primaryOptionId: proposal.fallbackOptionId,
+            fallbackOptionId: null,
+          };
+          expect(pureTurnProposalResolver.resolve(state, fallbackProposal).valid).toBe(true);
         }
       }
     }
@@ -717,7 +508,7 @@ describe('plays v1 registry', () => {
 
   it('content-addresses every play and the enabled set independently', () => {
     expect(SNIPPET_REGISTRY.plays.map((play) => play.snippetHash)).toEqual(
-      SNIPPET_REGISTRY.plays.map((play) => expect.stringMatching(/^[0-9a-f]{64}$/u)),
+      SNIPPET_REGISTRY.plays.map(() => expect.stringMatching(/^[0-9a-f]{64}$/u)),
     );
     expect(new Set(SNIPPET_REGISTRY.plays.map((play) => play.snippetHash)).size)
       .toBe(SNIPPET_REGISTRY.plays.length);

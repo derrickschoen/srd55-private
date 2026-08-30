@@ -7,7 +7,8 @@ import {
   encounterSessionId,
 } from '../../../src/combat/values';
 import { AgentSessionLifecycle } from '../../../src/vtt/agent-session-lifecycle';
-import type { RoundIntentProposalEnvelope } from '../../../src/vtt/engine-envelopes';
+import type { RoundTurnProposalEnvelope } from '../../../src/vtt/engine-envelopes';
+import { engineActionId, engineOptionId } from '../../../src/vtt/turn-proposal';
 import {
   createEngineStateCapsule,
   projectEngineDmProjection,
@@ -21,11 +22,11 @@ import {
   MemoryMirrorSink,
 } from '../../../src/vtt/session-persistence';
 import {
-  MAX_INTENT_CORRECTIONS,
+  MAX_PROPOSAL_CORRECTIONS,
   TurnExhaustionCoordinator,
-  type AutoResolvedIntentMark,
-  type DeterministicIntentResolution,
-  type IntentFallbackResult,
+  type AutoResolvedProposalMark,
+  type DeterministicProposalResolution,
+  type ProposalFallbackResult,
   type TurnExhaustionCorrectionRuntime,
   type TurnExhaustionHost,
 } from '../../../src/vtt/turn-exhaustion-coordinator';
@@ -75,7 +76,7 @@ function fixture() {
     request: {
       requestId: 'request:exhaustion',
       phase: 'correction',
-      correctionNumber: MAX_INTENT_CORRECTIONS,
+      correctionNumber: MAX_PROPOSAL_CORRECTIONS,
       actors: [actor],
     },
     projection: projectEngineDmProjection(projection, engineActionRegistry(state), 1),
@@ -83,35 +84,28 @@ function fixture() {
   return { actor, branchId, capsule, journal, sessionId, state, store };
 }
 
-function intent(actor: ReturnType<typeof fixture>['actor']) {
-  return {
-    actorId: actor,
-    choice: { kind: 'dodge' as const },
-    movement: { willingness: 'none' as const, maximumFeet: 0, opportunityRisk: 'avoid' as const },
-    engagement: { stance: 'hold_position' as const },
-    fallback: null,
-  };
-}
-
 function proposal(
   f: ReturnType<typeof fixture>,
   phase: 'initial' | 'correction',
   selectedBranch: 'primary' | 'fallback',
   proposalId = `proposal:${phase}`,
-): RoundIntentProposalEnvelope {
-  const declared = intent(f.actor);
-  const selectedIntent = selectedBranch === 'fallback'
-    ? {
-        ...declared,
-        fallback: {
-          choice: { kind: 'end_turn' as const },
-          movement: declared.movement,
-          engagement: declared.engagement,
-        },
-      }
-    : declared;
+): RoundTurnProposalEnvelope {
+  const primaryOption = {
+    optionId: engineOptionId(`option:${phase}:primary`), actorId: f.actor, revision: f.state.revision,
+    label: 'Dodge',
+    movement: { preference: { willingness: 'none' as const, maximumFeet: 0, opportunityRisk: 'avoid' as const }, engagement: { stance: 'hold_position' as const } },
+    actionSlots: [{ slot: 'main' as const, use: { kind: 'dodge' as const } }], resourceCostLabels: [],
+  };
+  const fallbackOption = selectedBranch === 'fallback'
+    ? { ...primaryOption, optionId: engineOptionId(`option:${phase}:fallback`), label: 'End Turn', actionSlots: [{ slot: 'main' as const, use: { kind: 'end_turn' as const } }] }
+    : null;
+  const selectedOption = fallbackOption ?? primaryOption;
+  const turnProposal = {
+    actorId: f.actor, expectedRevision: f.state.revision, primaryOptionId: primaryOption.optionId,
+    fallbackOptionId: fallbackOption?.optionId ?? null, overrideJustification: null,
+  };
   return {
-    kind: 'round_intent_proposal',
+    kind: 'round_turn_proposal',
     proposalId,
     runId: f.sessionId,
     branchId: f.branchId,
@@ -123,7 +117,15 @@ function proposal(
     idempotencyKey: `idempotency:${phase}:0001`,
     reactionGuidance: null,
     resolutions: [{
-      intent: selectedIntent,
+      proposal: turnProposal,
+      option: selectedOption,
+      primaryOption,
+      fallbackOption,
+      mechanics: {
+        actorId: f.actor, optionId: selectedOption.optionId, movementCostFeet: 0, path: [],
+        finalPosition: { column: 0, row: 0 },
+        actionSlots: [{ slot: 'main', kind: selectedBranch === 'fallback' ? 'end_turn' : 'dodge', actionId: engineActionId(selectedBranch === 'fallback' ? 'end_turn' : 'dodge'), spellId: null, targetIds: [], objectId: null }],
+      },
       selectedBranch,
       resolutionDigest: 'a'.repeat(64),
       summary: 'The monster dodges.',
@@ -134,7 +136,7 @@ function proposal(
 function runtime(
   f: ReturnType<typeof fixture>,
   adapter: SIMULATEDAgentSessionAdapter,
-  queued: RoundIntentProposalEnvelope[],
+  queued: RoundTurnProposalEnvelope[],
   activated: { value: number },
 ): TurnExhaustionCorrectionRuntime {
   return {
@@ -158,8 +160,8 @@ function runtime(
 
 function host(input: {
   readonly authorization?: 'authorized' | 'invalidated' | 'invalid';
-  readonly deterministic?: DeterministicIntentResolution | null;
-  readonly marks?: AutoResolvedIntentMark[];
+  readonly deterministic?: DeterministicProposalResolution | null;
+  readonly marks?: AutoResolvedProposalMark[];
   readonly adjudications?: string[];
 } = {}): TurnExhaustionHost {
   return {
@@ -172,7 +174,7 @@ function host(input: {
   };
 }
 
-function exhausted(f: ReturnType<typeof fixture>, fallbackResult: IntentFallbackResult = 'invalid') {
+function exhausted(f: ReturnType<typeof fixture>, fallbackResult: ProposalFallbackResult = 'invalid') {
   return {
     kind: 'exhausted' as const,
     requestId: 'request:exhaustion',
@@ -194,12 +196,12 @@ describe('host turn exhaustion coordinator', () => {
     })).resolves.toEqual({ kind: 'authorized', proposalId: 'proposal:initial', phase: 'initial' });
 
     expect(adapter.resumeInvocations).toHaveLength(0);
-    expect(f.journal.history().map((entry) => entry.transition.kind)).toContain('intent_fallback_resolved');
+    expect(f.journal.history().map((entry) => entry.transition.kind)).toContain('proposal_fallback_resolved');
   });
 
-  it('dispatches exactly one engine.correct_intent correction and accepts its complete proposal', async () => {
+  it('dispatches exactly one proposal correction and accepts its complete proposal', async () => {
     const f = fixture();
-    const queued: RoundIntentProposalEnvelope[] = [];
+    const queued: RoundTurnProposalEnvelope[] = [];
     const adapter = new SIMULATEDAgentSessionAdapter({
       startIds: [],
       onResume: () => { queued.push(proposal(f, 'correction', 'primary')); },
@@ -215,19 +217,19 @@ describe('host turn exhaustion coordinator', () => {
 
     expect(activated.value).toBe(1);
     expect(adapter.resumeInvocations).toHaveLength(1);
-    expect(adapter.resumeInvocations[0]?.invocation.prompt).toContain('Correct the complete refused intent request once.');
-    expect(adapter.resumeInvocations[0]?.invocation.prompt).toContain('fallback must be null');
+    expect(adapter.resumeInvocations[0]?.invocation.prompt).toContain('Correct the complete refused proposal request once.');
+    expect(adapter.resumeInvocations[0]?.invocation.prompt).toContain('fallback_option_id must be null');
     expect(f.journal.history().map((entry) => entry.transition.kind)).toEqual(expect.arrayContaining([
-      'intent_correction_requested',
+      'proposal_correction_requested',
       'agent_session_dispatched',
-      'intent_correction_resolved',
+      'proposal_correction_resolved',
     ]));
   });
 
   it('marks deterministic controller output auto-resolved after the correction returns no proposal', async () => {
     const f = fixture();
     const adapter = new SIMULATEDAgentSessionAdapter({ startIds: [] });
-    const marks: AutoResolvedIntentMark[] = [];
+    const marks: AutoResolvedProposalMark[] = [];
     const coordinator = new TurnExhaustionCoordinator(f.journal.turnExhaustionPersistence());
 
     await expect(coordinator.coordinate({
@@ -263,20 +265,20 @@ describe('host turn exhaustion coordinator', () => {
     })).resolves.toEqual({ kind: 'awaiting_dm_adjudication', actorId: f.actor });
 
     expect(adjudications).toEqual([f.actor]);
-    expect(f.journal.history().map((entry) => entry.transition.kind)).toContain('intent_auto_resolution_failed');
+    expect(f.journal.history().map((entry) => entry.transition.kind)).toContain('proposal_auto_resolution_failed');
   });
 
   it('reconstructs a browser resume mid-chain without dispatching a second correction', async () => {
     const f = fixture();
     f.journal.recordHostTransition({
-      kind: 'intent_correction_requested',
+      kind: 'proposal_correction_requested',
       requestId: 'request:exhaustion',
       initialProposalId: 'proposal:initial-attempt',
       correctionNumber: 1,
       actorFailures: [{ actorId: f.actor, fallbackResult: 'invalid' }],
     });
     const adapter = new SIMULATEDAgentSessionAdapter({ startIds: [] });
-    const marks: AutoResolvedIntentMark[] = [];
+    const marks: AutoResolvedProposalMark[] = [];
     const resumed = new TurnExhaustionCoordinator(f.journal.turnExhaustionPersistence());
 
     expect(resumed.reconstruct('request:exhaustion')?.stage).toBe('correction_requested');
@@ -288,7 +290,7 @@ describe('host turn exhaustion coordinator', () => {
 
     expect(adapter.resumeInvocations).toHaveLength(0);
     expect(f.journal.history().filter((entry) =>
-      entry.transition.kind === 'intent_correction_requested')).toHaveLength(1);
+      entry.transition.kind === 'proposal_correction_requested')).toHaveLength(1);
     expect(marks).toHaveLength(1);
   });
 });

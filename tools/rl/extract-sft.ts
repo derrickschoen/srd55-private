@@ -9,22 +9,13 @@ import { buildArenaSessionInstructions } from './arena-session-instructions';
 const FORBIDDEN_SOURCE = /(?:^|[\\/])content[\\/]cc-by-sa(?:[\\/]|$)/iu;
 const FORBIDDEN_PAYLOAD = /content[\\/]cc-by-sa[\\/]/iu;
 
-interface ArenaRlCaptureV1 {
-  readonly format: 'arena-rl-capture-v1';
-  readonly sourceLicense: 'project-generated';
-  readonly sessionInstructions: string;
-  readonly turnContext: Readonly<Record<string, unknown>>;
-  readonly submitRoundIntentsArguments: Readonly<Record<string, unknown>>;
-  readonly stateDigest: string;
-}
-
 type SftTask = 'round_plan' | 'plan_adjustment';
 type SftTaskSelection = SftTask | 'all';
 
 interface ArenaRlCaptureV2 {
   readonly format: 'arena-rl-capture-v2';
   readonly task: SftTask;
-  readonly submissionTool: 'engine.submit_round_intents' | 'engine.submit_plan_adjustment';
+  readonly submissionTool: 'engine.submit_round_proposals' | 'engine.submit_plan_adjustment';
   readonly sourceLicense: 'project-generated';
   readonly sessionInstructions: string;
   readonly rawTurnContext: string;
@@ -38,7 +29,7 @@ interface ArenaRlCaptureV2 {
 
 interface NormalizedCapture {
   readonly task: SftTask;
-  readonly submissionTool: 'engine.submit_round_intents' | 'engine.submit_plan_adjustment';
+  readonly submissionTool: 'engine.submit_round_proposals' | 'engine.submit_plan_adjustment';
   readonly sessionInstructions: string;
   readonly rawTurnContext: string | null;
   readonly turnContext: Readonly<Record<string, unknown>>;
@@ -61,7 +52,7 @@ interface ExtractableArenaRow {
   readonly rawTurnContext?: string;
   readonly turnContextGranularity?: 'full' | 'turn_delta';
   readonly adjustments?: readonly Readonly<Record<string, unknown>>[];
-  readonly rlData?: ArenaRlCaptureV1 | ArenaRlCaptureV2;
+  readonly rlData?: ArenaRlCaptureV2;
 }
 
 export interface SftExample {
@@ -112,7 +103,7 @@ function stdoutHeartbeat(line: string): void {
 interface RolloutCapture {
   readonly sessionInstructions: string;
   readonly turnContext: Readonly<Record<string, unknown>>;
-  readonly submitRoundIntentsArguments: Readonly<Record<string, unknown>>;
+  readonly submitRoundProposalsArguments: Readonly<Record<string, unknown>>;
   readonly stateDigest: string;
 }
 
@@ -203,8 +194,8 @@ function rolloutCaptures(source: string): RolloutCaptureIndex {
         if (requestId !== null) contexts.set(requestId, structuredClone(structured));
       }
       const name = candidate['name'] ?? candidate['tool'];
-      if (typeof name !== 'string' || !name.endsWith('engine_submit_round_intents') &&
-        !name.endsWith('engine.submit_round_intents')) continue;
+      if (typeof name !== 'string' || !name.endsWith('engine_submit_round_proposals') &&
+        !name.endsWith('engine.submit_round_proposals')) continue;
       const rawArguments = candidate['arguments'] ?? candidate['input'];
       const argumentsValue = typeof rawArguments === 'string'
         ? record(parsedJson(rawArguments))
@@ -221,14 +212,14 @@ function rolloutCaptures(source: string): RolloutCaptureIndex {
   const byRequestId = new Map<string, RolloutCapture>();
   const ambiguousRequests = new Set<string>();
   for (const submission of submissions) {
-    const { requestId, argumentsValue: submitRoundIntentsArguments } = submission;
+    const { requestId, argumentsValue: submitRoundProposalsArguments } = submission;
     const turnContext = contexts.get(requestId);
-    const stateDigest = stateDigestFromArguments(submitRoundIntentsArguments);
+    const stateDigest = stateDigestFromArguments(submitRoundProposalsArguments);
     if (turnContext === undefined || stateDigest === null) continue;
     const capture: RolloutCapture = {
       sessionInstructions: instructions,
       turnContext,
-      submitRoundIntentsArguments,
+      submitRoundProposalsArguments,
       stateDigest,
     };
     if (!ambiguousRequests.has(requestId)) {
@@ -302,31 +293,14 @@ function requiredArenaRow(value: unknown, path: string, line: number): Extractab
 
 function validRowCapture(value: unknown): NormalizedCapture | null {
   const candidate = record(value);
-  if (candidate?.['format'] === 'arena-rl-capture-v1' &&
-    candidate['sourceLicense'] === 'project-generated' &&
-    typeof candidate['sessionInstructions'] === 'string' &&
-    record(candidate['turnContext']) !== null && record(candidate['submitRoundIntentsArguments']) !== null &&
-    typeof candidate['stateDigest'] === 'string') {
-    return {
-      task: 'round_plan',
-      submissionTool: 'engine.submit_round_intents',
-      sessionInstructions: candidate['sessionInstructions'],
-      rawTurnContext: null,
-      turnContext: candidate['turnContext'] as Readonly<Record<string, unknown>>,
-      submittedArguments: candidate['submitRoundIntentsArguments'] as Readonly<Record<string, unknown>>,
-      stateDigest: candidate['stateDigest'],
-      proposalId: null,
-      sessionId: null,
-    };
-  }
   const task = candidate?.['task'];
   const submissionTool = candidate?.['submissionTool'];
   if (candidate?.['format'] !== 'arena-rl-capture-v2' ||
     candidate['sourceLicense'] !== 'project-generated' ||
     (task !== 'round_plan' && task !== 'plan_adjustment') ||
-    (submissionTool !== 'engine.submit_round_intents' &&
+    (submissionTool !== 'engine.submit_round_proposals' &&
       submissionTool !== 'engine.submit_plan_adjustment') ||
-    (task === 'round_plan') !== (submissionTool === 'engine.submit_round_intents') ||
+    (task === 'round_plan') !== (submissionTool === 'engine.submit_round_proposals') ||
     typeof candidate['sessionInstructions'] !== 'string' ||
     typeof candidate['rawTurnContext'] !== 'string' ||
     record(candidate['turnContext']) === null || record(candidate['submittedArguments']) === null ||
@@ -367,11 +341,11 @@ function exampleFrom(
     ? undefined
     : {
         task: 'round_plan',
-        submissionTool: 'engine.submit_round_intents',
+        submissionTool: 'engine.submit_round_proposals',
         sessionInstructions: rolloutCapture.sessionInstructions,
         rawTurnContext: null,
         turnContext: rolloutCapture.turnContext,
-        submittedArguments: rolloutCapture.submitRoundIntentsArguments,
+        submittedArguments: rolloutCapture.submitRoundProposalsArguments,
         stateDigest: rolloutCapture.stateDigest,
         proposalId: row.proposalId,
         sessionId: row.sessionId,
