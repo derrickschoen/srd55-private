@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "packId": "cc-by:a5e",
+  "title": "A5E exploration and encounter-building ingredients",
+  "provenance": {
+    "source": "imported",
+    "licenseTag": "CC-BY-4.0",
+    "accessDate": "2026-08-30"
+  },
+  "sourceUrls": [
+    "https://a5esrd.com/s/a5e_srd_13.pdf",
+    "https://a5esrd.com/s/a5e_srd_15_exploration_challenges.pdf"
+  ],
+  "documents": [
+    { "kind": "exploration_challenges", "file": "exploration-challenges.json" },
+    { "kind": "encounter_building_tables", "file": "encounter-building-tables.json" }
+  ]
+}
