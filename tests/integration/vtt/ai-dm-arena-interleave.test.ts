@@ -25,6 +25,8 @@ describe('AI-DM arena interleave integration', () => {
         '--interleave',
         '--arm', 'control:model-control:low',
         '--arm', 'candidate:model-candidate:medium',
+        '--combat-model', 'monster_block_v1',
+        '--initiative-profile', 'legacy',
         '--cli-bin', 'definitely-not-a-real-codex-binary',
         '--dry-run',
       ],

@@ -7,6 +7,58 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D418 — OWNER: engine provides options/intel algorithmically; AI fills gaps only (2026-08-30)
+
+Verbatim: "I think the engine should provide these options to the dm. We want
+to do as much as we can algorithmicly so the ai only acts to fill gaps that
+the engine can't." Ruled while scoring R02, where the supervisor had to
+derive by hand the intel the DM lacked: range bands per attack, the
+unconscious+prone advantage/disadvantage cancellation (straight rolls at the
+dying fighter), death-save-failure consequences, per-monster option menus,
+and the bonus-action Bless the all-Dodge plan forfeited. Direction: the
+engine computes and surfaces decision intel; the LLM chooses among annotated
+options or overrides with justification. A consensus sweep (codex authors,
+Claude reviews) is commissioned to inventory what the engine already
+computes, what it could compute, and what it should surface, before any
+implementation.
+
+## D417 — OWNER: no high-ground houserule; BG3 material stays private unless clean-room homebrew (2026-08-30)
+
+Verbatim: "No high ground. Keep the bg3 stuff in the private repo unless it
+has been turned into very safe clean room homebrew. Only use the homebrew if
+you really need it." Effects: (1) when elevation lands, it implements RAW 5e
+only — the Larian ±2 to-hit rule is rejected, closing the open question in
+the BG3 parity audit; (2) the audit doc moved from the ignored loose file
+docs/design/bg3-combat-parity.md to ~/PhpstormProjects/dnd-research-private/
+(outside all git trees); the docs/design/bg3-*.md ignore pattern stays as a
+backstop; (3) any future BG3-derived mechanic enters the public repo only as
+clean-room homebrew, and only when genuinely needed.
+
+## D415.1 — OWNER: symlink auth.json into an isolated CODEX_HOME for DM/PC operators (2026-08-30)
+
+Verbatim: "Symlink just auth.json into the isolated home for ai dm and pc
+operators." Mechanism: ~/.codex-aidm/ = copied config.toml, NO AGENTS.md,
+auth.json -> ~/.codex/auth.json symlink; DM/PC operator processes (campaign,
+arena, conversation launches) run with CODEX_HOME=~/.codex-aidm; supervision
+lanes keep the standard home. Recorded risk: codex rewrites auth.json on
+token refresh — if a rewrite replaces the symlink with a regular file the two
+homes fork silently, so the supervisor verifies the symlink each tick and
+re-links from whichever copy is newest. Supersedes the D415 research
+conclusion that suppression was blocked on auth sharing.
+
+## D416.2 — OWNER: initiative_segments_v1 becomes the default combat model (2026-08-30)
+
+Owner answered "yes" to the supervisor's question "Flip initiative_segments_v1
+to the default combat model?", asked with the acceptance sample attached
+(docs/perf/2026-08-30-phase2-ab-acceptance.md: 8/8 authorized both arms,
+median adjustments 0.5, 0% full-context fallback, 0 corrections). Resolves
+Phase 2 plan open question 3. Scope: default combat model flips to
+initiative_segments_v1 across the driver tools; the initiative-profile
+default flips to derived_v1 in tandem (segments requires per_combatant
+initiative — the synthetic legacy profile would fake interleaving).
+monster_block_v1 remains selectable explicitly; existing corpus rows remain
+valid via their recorded combatModel/repoCommit provenance.
+
 ## D416.1 — OWNER: "Do your recommendations" — phasing adopted (2026-08-29)
 
 Owner adopted the supervisor's D416 recommendations verbatim ("Do your

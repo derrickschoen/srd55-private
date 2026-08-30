@@ -228,11 +228,11 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (!ARENA_BASES.includes(basis as ArenaBasis)) {
     throw new TypeError('--basis must be standard or hard.');
   }
-  const combatModel = values.get('--combat-model') ?? 'monster_block_v1';
+  const combatModel = values.get('--combat-model') ?? 'initiative_segments_v1';
   if (!COMBAT_MODELS.includes(combatModel as CombatModel)) {
     throw new TypeError('--combat-model must be monster_block_v1 or initiative_segments_v1.');
   }
-  const initiativeProfile = values.get('--initiative-profile') ?? 'legacy';
+  const initiativeProfile = values.get('--initiative-profile') ?? 'derived_v1';
   if (!ROOM_INITIATIVE_PROFILES.includes(initiativeProfile as RoomInitiativeProfile)) {
     throw new TypeError('--initiative-profile must be legacy or derived_v1.');
   }
@@ -425,6 +425,7 @@ function conversationConfig(
 ): import('./ai-dm-conversation').ConversationConfig {
   return {
     combatModel: overrides.combatModel ?? config.combatModel,
+    initiativeProfile: config.initiativeProfile,
     fixturesPath: basisFixturesPath(config),
     rooms: overrides.rooms,
     rounds: overrides.rounds,
