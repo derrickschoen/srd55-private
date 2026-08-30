@@ -5,8 +5,8 @@
   "room": { "number": 26, "name": "Xenobotanical Cavern", "sourcePage": 6 },
   "layout": { "kind": "source_map", "sourcePage": 7, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
   "monsterRefs": [
-    { "sourceName": "Astraldendon", "quantity": { "kind": "fixed", "value": 6 }, "reference": { "status": "unmapped", "reason": "no_srd_exact_match" }, "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "activation": "present" },
-    { "sourceName": "Astralmycon", "quantity": { "kind": "fixed", "value": 5 }, "reference": { "status": "unmapped", "reason": "no_srd_exact_match" }, "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "activation": "present" }
+    { "sourceName": "Astraldendon", "quantity": { "kind": "fixed", "value": 6 }, "reference": { "status": "mapped", "statblockId": "homebrew:escape-the-astral-tower/astraldendon" }, "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "activation": "present" },
+    { "sourceName": "Astralmycon", "quantity": { "kind": "fixed", "value": 5 }, "reference": { "status": "mapped", "statblockId": "homebrew:escape-the-astral-tower/astralmycon" }, "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "activation": "present" }
   ],
   "terrain": [
     { "kind": "terrain", "name": "Central pool", "position": { "kind": "relative", "area": "center" }, "mechanics": ["pool of water"] },

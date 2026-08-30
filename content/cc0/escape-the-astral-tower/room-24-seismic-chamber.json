@@ -5,7 +5,7 @@
   "room": { "number": 24, "name": "Seismic Chamber", "sourcePage": 6 },
   "layout": { "kind": "source_map", "sourcePage": 7, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
   "monsterRefs": [
-    { "sourceName": "Earth Elemental", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "relative", "area": "bound_area" }, "activation": "if_freed" }
+    { "sourceName": "Earth Elemental", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "mapped", "statblockId": "statblock:earth-elemental" }, "position": { "kind": "relative", "area": "bound_area" }, "activation": "if_freed" }
   ],
   "terrain": [
     { "kind": "blocking", "name": "Binding chains", "position": { "kind": "relative", "area": "bound_area" }, "mechanics": ["restrain the elemental"] },

@@ -74,7 +74,7 @@ const quantitySchema = z.discriminatedUnion('kind', [
 const monsterReferenceSchema = z.discriminatedUnion('status', [
   z.strictObject({
     status: z.literal('mapped'),
-    statblockId: z.string().regex(/^statblock:[a-z0-9][a-z0-9/-]*$/),
+    statblockId: z.string().regex(/^(?:statblock|homebrew):[a-z0-9][a-z0-9/-]*$/),
   }),
   z.strictObject({
     status: z.literal('unmapped'),
@@ -205,14 +205,19 @@ describe('Escape the Astral Tower CC0 encounter stock', () => {
     }
   });
 
-  it('resolves mapped monsters to bundled SRD statblocks and types every other reference as unmapped', () => {
+  it('resolves every room and random-table monster reference to a bundled statblock', () => {
     const index = loadIndex();
     const refs = allMonsterRefs(index, loadEncounters(index));
     const mapped = refs.filter((ref) => ref.reference.status === 'mapped');
     const unmapped = refs.filter((ref) => ref.reference.status === 'unmapped');
 
-    expect(mapped.map((ref) => ref.sourceName)).toEqual(['Giant Spider', 'Skeleton']);
-    expect(unmapped).toHaveLength(21);
+    expect(mapped.map((ref) => ref.sourceName)).toEqual([
+      'Astraldendon', 'Animated statue', 'Mimic', 'Air Elemental', 'Earth Elemental', 'Astraldendon', 'Astralmycon',
+      'Animated Broom', 'Black Pudding', 'Animated Armor', 'Stirge', 'Familiar', 'Giant Rat', "Will-o'-Wisp",
+      'Giant Spider', 'Ghost', 'Doppelganger', 'Astraldendon', 'Astralmycon', 'Roc', 'Stirge', 'Skeleton', 'Gargoyle',
+    ]);
+    expect(mapped).toHaveLength(23);
+    expect(unmapped).toHaveLength(0);
     for (const ref of mapped) {
       if (ref.reference.status !== 'mapped') throw new Error('Mapped-ref narrowing failed.');
       const lookup = lookupBundledMonster(ref.reference.statblockId);
@@ -220,10 +225,9 @@ describe('Escape the Astral Tower CC0 encounter stock', () => {
       if (lookup.status !== 'resolved') throw new Error(`Missing ${ref.reference.statblockId}.`);
       expect(lookup.entry.kind, ref.sourceName).toBe('static');
       if (lookup.entry.kind !== 'static') throw new Error(`${ref.reference.statblockId} is parameterized.`);
-      expect(lookup.entry.statblock.provenance.kind, ref.sourceName).toBe('srd_5_2_1_decoded');
-    }
-    for (const ref of unmapped) {
-      expect(ref.reference.status, ref.sourceName).toBe('unmapped');
+      expect(lookup.entry.statblock.provenance.kind, ref.sourceName).toBe(
+        ref.reference.statblockId.startsWith('homebrew:') ? 'original_homebrew' : 'srd_5_2_1_decoded',
+      );
     }
   });
 

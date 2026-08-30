@@ -12,6 +12,7 @@ export * from './vane-warren';
 export * from './mercenary-company';
 export * from './undead-crypt';
 export * from './wild-beasts';
+export * from './astral-tower';
 
 const SRD_PATH = 'docs/srd/full/srd-5.2.1.txt' as const;
 const present = <T>(value: T): DecodedField<T> => ({ kind: 'present', value });
