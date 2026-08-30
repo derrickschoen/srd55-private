@@ -132,6 +132,127 @@ describe('RL arena batch generator', () => {
     ])).toThrow('--combat-model must be monster_block_v1 or initiative_segments_v1');
   });
 
+  it('records a simulated per-seed generation failure and continues the batch', async () => {
+    const targetDirectory = mkdtempSync(join(tmpdir(), 'd410-generation-failure-'));
+    const calls: number[] = [];
+    const heartbeats: string[] = [];
+    const runner: ArenaBatchRunner = async (config) => {
+      calls.push(config.seed);
+      if (config.seed === 6_001_021) throw new Error('simulated room generation failure');
+      return [{ outcome: 'authorized', serviceNull: false, flapRetries: 0 }];
+    };
+
+    const [manifest] = await generateData(parseGenerateDataArgs([
+      '--seed-range', '6001020-6001022',
+      '--reps', '1',
+      '--target-dir', targetDirectory,
+      '--basis', 'hard',
+    ]), {
+      arenaRunner: runner,
+      heartbeat: (line) => { heartbeats.push(line); },
+    });
+
+    expect(calls).toEqual([6_001_020, 6_001_021, 6_001_022]);
+    expect(manifest?.seeds).toEqual([
+      {
+        seed: 6_001_020,
+        outputPath: join(targetDirectory, 'batch-6001020-6001022', 'seed-6001020.jsonl'),
+        status: 'complete',
+        rows: 1,
+        flapRetries: 0,
+        serviceNullRows: 0,
+        error: null,
+      },
+      {
+        seed: 6_001_021,
+        outputPath: join(targetDirectory, 'batch-6001020-6001022', 'seed-6001021.jsonl'),
+        status: 'failed',
+        rows: 0,
+        flapRetries: 0,
+        serviceNullRows: 0,
+        error: 'simulated room generation failure',
+      },
+      {
+        seed: 6_001_022,
+        outputPath: join(targetDirectory, 'batch-6001020-6001022', 'seed-6001022.jsonl'),
+        status: 'complete',
+        rows: 1,
+        flapRetries: 0,
+        serviceNullRows: 0,
+        error: null,
+      },
+    ]);
+    expect(manifest?.totals).toEqual({
+      seeds: 3,
+      completeSeeds: 2,
+      flappedSeeds: 0,
+      failedSeeds: 1,
+      rows: 2,
+      flapRetries: 0,
+      serviceNullRows: 0,
+    });
+    expect(heartbeats).toContain(
+      'seed=6001021 status=failed error="simulated room generation failure"',
+    );
+    expect(JSON.parse(readFileSync(
+      join(targetDirectory, 'batch-6001020-6001022.manifest.json'),
+      'utf8',
+    ))).toEqual(manifest);
+  });
+
+  it('finishes every seed before failing a batch with no successful seeds', async () => {
+    const targetDirectory = mkdtempSync(join(tmpdir(), 'd410-all-generation-failures-'));
+    const calls: number[] = [];
+    const generation = generateData(parseGenerateDataArgs([
+      '--seed-range', '6001030-6001031',
+      '--reps', '1',
+      '--target-dir', targetDirectory,
+      '--basis', 'hard',
+    ]), {
+      arenaRunner: async (config) => {
+        calls.push(config.seed);
+        throw new Error(`simulated failure ${String(config.seed)}`);
+      },
+      heartbeat: () => undefined,
+    });
+
+    await expect(generation).rejects.toThrow('Every seed in the generation batch failed.');
+    expect(calls).toEqual([6_001_030, 6_001_031]);
+    const saved = JSON.parse(readFileSync(
+      join(targetDirectory, 'batch-6001030-6001031.manifest.json'),
+      'utf8',
+    )) as Readonly<Record<string, unknown>>;
+    expect(saved['seeds']).toEqual([
+      {
+        seed: 6_001_030,
+        outputPath: join(targetDirectory, 'batch-6001030-6001031', 'seed-6001030.jsonl'),
+        status: 'failed',
+        rows: 0,
+        flapRetries: 0,
+        serviceNullRows: 0,
+        error: 'simulated failure 6001030',
+      },
+      {
+        seed: 6_001_031,
+        outputPath: join(targetDirectory, 'batch-6001030-6001031', 'seed-6001031.jsonl'),
+        status: 'failed',
+        rows: 0,
+        flapRetries: 0,
+        serviceNullRows: 0,
+        error: 'simulated failure 6001031',
+      },
+    ]);
+    expect(saved['totals']).toEqual({
+      seeds: 2,
+      completeSeeds: 0,
+      flappedSeeds: 0,
+      failedSeeds: 2,
+      rows: 0,
+      flapRetries: 0,
+      serviceNullRows: 0,
+    });
+  });
+
   it('generates an unfrozen seed deterministically and runs it through the simulated arena', { timeout: 30_000 }, async () => {
     const targetDirectory = mkdtempSync(join(tmpdir(), 'd410-generate-unfrozen-'));
     const [manifest] = await generateData(parseGenerateDataArgs([

@@ -70,6 +70,20 @@ const inputs = declareTestInputs({
   ],
 });
 
+function expectValidEnvironmentRegions(room: GeneratedRoom): void {
+  const environment = room.encounter.state.environment;
+  const regions = [
+    ...environment.difficultTerrainRegions,
+    ...environment.lightRegions,
+    ...environment.obscurementRegions,
+    ...(environment.movementRegions ?? []),
+  ];
+  for (const region of regions) {
+    expect(region.id.trim()).not.toBe('');
+    expect(region.cells.length).toBeGreaterThan(0);
+  }
+}
+
 describe('seeded room generator', () => {
   it('produces byte-identical reducer state for the same seed', () => {
     expect(canonicalJson(generateRoom(394_300))).toBe(canonicalJson(generateRoom(394_300)));
@@ -127,6 +141,16 @@ describe('seeded room generator', () => {
         token.position.column >= 0 && token.position.column < state.bounds.columns &&
         token.position.row >= 0 && token.position.row < state.bounds.rows,
       )).toBe(true);
+    }
+  });
+
+  it('generates a valid hard room for regression seed 6001021', () => {
+    expectValidEnvironmentRegions(generateRoom(6_001_021, { difficulty: 'hard' }));
+  });
+
+  it('keeps every generated environment region valid across 200 hard seeds', () => {
+    for (let seed = 6_001_001; seed < 6_001_201; seed += 1) {
+      expectValidEnvironmentRegions(generateRoom(seed, { difficulty: 'hard' }));
     }
   });
 
