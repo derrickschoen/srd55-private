@@ -4,10 +4,18 @@ import type { EncounterCommand } from '../combat/events';
 import { monsterAttackCommand, monsterSavingThrowCommand } from '../combat/monster-commands';
 import { restoreMulberry32, type SerializableRng } from '../combat/random';
 import type { MonsterAttackAction, MonsterSavingThrowAction } from '../combat/statblock';
-import type { CombatantId, EncounterBranchId, EncounterSessionId } from '../combat/values';
+import { combatantId, type CombatantId, type EncounterBranchId, type EncounterSessionId } from '../combat/values';
 import type { EngineStateCapsule } from './engine-state-capsule';
-import { canonicalEngineQueryPort } from './engine-query-port';
-import type { EngineActionChoice, ResolvedIntentMechanics } from './intent-resolver';
+import { canonicalEngineQueryPort, type EngineTargetSelector } from './engine-query-port';
+import {
+  createPureIntentResolver,
+  type EngineActionChoice,
+  type EngineEngagement,
+  type EngineIntentBranch,
+  type EngineMovementPreference,
+  type EngineTurnIntent,
+  type ResolvedIntentMechanics,
+} from './intent-resolver';
 import { createEngineMcpRuntime } from './mcp/entrypoint';
 import {
   unattendedReactionOfferResolution,
@@ -41,6 +49,24 @@ export interface EngineBoundaryResolutions {
   readonly guidedResolutions: readonly GuidedReactionResolution[];
 }
 
+export type EngineAppliedIntentBranch = 'primary' | 'fallback' | 'dodge';
+
+export interface EngineIntentDeviation {
+  readonly actorId: CombatantId;
+  readonly authorizedBranch: 'primary' | 'fallback';
+  readonly appliedBranch: EngineAppliedIntentBranch;
+  readonly authorizedTargetId: CombatantId | null;
+  readonly appliedTargetId: CombatantId | null;
+  readonly reasonCodes: readonly ('branch_changed' | 'target_changed' | 'degraded_to_dodge')[];
+  readonly refusalCodes: readonly string[];
+}
+
+export interface AuthorizedEngineTurnIntent {
+  readonly intent: EngineTurnIntent;
+  readonly mechanics: ResolvedIntentMechanics;
+  readonly selectedBranch: 'primary' | 'fallback';
+}
+
 export interface PreparedEngineRound extends EngineBoundaryResolutions {
   readonly snapshot: EngineRoundSnapshot;
   readonly revisionDelta: number;
@@ -48,7 +74,17 @@ export interface PreparedEngineRound extends EngineBoundaryResolutions {
 
 export interface AppliedEngineMechanics extends EngineBoundaryResolutions {
   readonly revisionDelta: number;
+  readonly deviationResolutions: readonly EngineIntentDeviation[];
 }
+
+interface ConversationEngineTurnIntent {
+  readonly mechanics: ResolvedIntentMechanics;
+  readonly choice: EngineActionChoice;
+  readonly acceptedIntent?: Readonly<Record<string, unknown>>;
+  readonly selectedBranch?: 'primary' | 'fallback';
+}
+
+type EngineTurnApplication = AuthorizedEngineTurnIntent | ConversationEngineTurnIntent;
 
 interface CanonicalEncounterState {
   readonly state: EncounterState;
@@ -149,13 +185,152 @@ function advanceToActor(
   return state;
 }
 
+function intentRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function intentString(input: Readonly<Record<string, unknown>>, field: string): string {
+  const value = input[field];
+  if (typeof value !== 'string') throw new TypeError(`Authorized intent ${field} must be a string.`);
+  return value;
+}
+
+function decodeTargetSelector(value: unknown): EngineTargetSelector {
+  const input = intentRecord(value, 'Authorized target selector');
+  const kind = intentString(input, 'kind');
+  switch (kind) {
+    case 'combatant': return { kind, combatantId: combatantId(intentString(input, 'combatant_id')) };
+    case 'enemy_threatening_ally': return { kind, allyId: combatantId(intentString(input, 'ally_id')) };
+    case 'nearest_visible_enemy':
+    case 'lowest_hp_visible_enemy':
+    case 'most_injured_visible_ally':
+    case 'current_threat': return { kind };
+    default: throw new TypeError(`Authorized target selector kind ${kind} is unknown.`);
+  }
+}
+
+function decodeActionChoice(value: unknown): EngineActionChoice {
+  const input = intentRecord(value, 'Authorized action choice');
+  const kind = intentString(input, 'kind');
+  switch (kind) {
+    case 'attack': return {
+      kind,
+      actionId: intentString(input, 'action_id'),
+      target: decodeTargetSelector(input['target']),
+      ...(input['resource_policy'] === undefined
+        ? {}
+        : { resourcePolicy: intentString(input, 'resource_policy') as 'conserve' | 'normal' | 'spend_if_useful' }),
+    };
+    case 'cast_spell': return {
+      kind,
+      spellId: intentString(input, 'spell_id'),
+      target: input['target'] === null ? null : decodeTargetSelector(input['target']),
+      ...(input['slot_policy'] === undefined
+        ? {}
+        : { slotPolicy: intentString(input, 'slot_policy') as 'lowest_legal' | 'conserve' | 'best_effect' }),
+    };
+    case 'use_action': return {
+      kind,
+      actionId: intentString(input, 'action_id'),
+      target: input['target'] === null ? null : decodeTargetSelector(input['target']),
+    };
+    case 'dodge':
+    case 'disengage':
+    case 'dash':
+    case 'end_turn': return { kind };
+    default: throw new TypeError(`Authorized action choice kind ${kind} is unknown.`);
+  }
+}
+
+function decodeMovement(value: unknown): EngineMovementPreference {
+  const input = intentRecord(value, 'Authorized movement');
+  const maximumFeet = input['maximum_feet'];
+  if (maximumFeet !== undefined && typeof maximumFeet !== 'number') {
+    throw new TypeError('Authorized intent maximum_feet must be a number.');
+  }
+  return {
+    willingness: intentString(input, 'willingness') as EngineMovementPreference['willingness'],
+    ...(maximumFeet === undefined ? {} : { maximumFeet }),
+    opportunityRisk: intentString(input, 'opportunity_risk') as EngineMovementPreference['opportunityRisk'],
+  };
+}
+
+function decodeEngagement(value: unknown): EngineEngagement {
+  const input = intentRecord(value, 'Authorized engagement');
+  return {
+    stance: intentString(input, 'stance') as EngineEngagement['stance'],
+    ...(input['anchor'] === undefined
+      ? {}
+      : { anchor: input['anchor'] === null ? null : decodeTargetSelector(input['anchor']) }),
+  };
+}
+
+function decodeIntentBranch(value: unknown): EngineIntentBranch {
+  const input = intentRecord(value, 'Authorized intent branch');
+  return {
+    choice: decodeActionChoice(input['choice']),
+    movement: decodeMovement(input['movement']),
+    engagement: decodeEngagement(input['engagement']),
+  };
+}
+
+function decodeAuthorizedIntent(value: Readonly<Record<string, unknown>>): EngineTurnIntent {
+  const fallback = value['fallback'];
+  return {
+    actorId: combatantId(intentString(value, 'actor_id')),
+    ...decodeIntentBranch(value),
+    fallback: fallback === null ? null : decodeIntentBranch(fallback),
+  };
+}
+
+function deterministicDodgeIntent(actorId: CombatantId): EngineTurnIntent {
+  return {
+    actorId,
+    choice: { kind: 'dodge' },
+    movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
+    engagement: { stance: 'hold_position' },
+    fallback: null,
+  };
+}
+
+function normalizedApplication(entry: EngineTurnApplication): AuthorizedEngineTurnIntent {
+  if ('intent' in entry) return entry;
+  if (entry.acceptedIntent !== undefined) {
+    return {
+      intent: decodeAuthorizedIntent(entry.acceptedIntent),
+      mechanics: entry.mechanics,
+      selectedBranch: entry.selectedBranch ?? 'primary',
+    };
+  }
+  if (entry.choice.kind !== 'dodge') {
+    throw new TypeError('Engine turn application requires the authorized intent.');
+  }
+  return {
+    intent: deterministicDodgeIntent(entry.mechanics.actorId),
+    mechanics: entry.mechanics,
+    selectedBranch: 'primary',
+  };
+}
+
+function selectedChoice(
+  intent: EngineTurnIntent,
+  branch: 'primary' | 'fallback',
+): EngineActionChoice {
+  if (branch === 'primary') return intent.choice;
+  if (intent.fallback === null) throw new Error('Resolved fallback omitted its declared branch.');
+  return intent.fallback.choice;
+}
+
 function applyOneResolvedMechanic(
   initialState: EncounterState,
   mechanics: ResolvedIntentMechanics,
   choice: EngineActionChoice,
   reduce: (state: EncounterState, command: EncounterCommand) => EncounterState,
 ): EncounterState {
-  let state = advanceToActor(initialState, mechanics.actorId, reduce);
+  let state = initialState;
   const dashBeforeMovement = choice.kind === 'dash' && mechanics.path.length > 0;
   if (dashBeforeMovement) state = reduce(state, { type: 'dash', actor: mechanics.actorId });
   if (mechanics.path.length > 0) {
@@ -176,8 +351,8 @@ function applyOneResolvedMechanic(
       state = reduce(state, monsterAttackCommand(action, mechanics.actorId, mechanics.targetId));
       break;
     }
-    case 'dodge':
-    case 'disengage':
+    case 'dodge': state = reduce(state, { type: 'dodge', actor: mechanics.actorId }); break;
+    case 'disengage': state = reduce(state, { type: 'disengage', actor: mechanics.actorId }); break;
     case 'dash': {
       if (!dashBeforeMovement) state = reduce(state, { type: 'dash', actor: mechanics.actorId });
       break;
@@ -278,13 +453,15 @@ export class EngineRoundSession {
   }
 
   applyResolvedMechanics(
-    entries: readonly { readonly mechanics: ResolvedIntentMechanics; readonly choice: EngineActionChoice }[],
+    entries: readonly EngineTurnApplication[],
     guidance: ReactionGuidanceDeclaration | null,
   ): AppliedEngineMechanics {
     const beforeRevision = this.#state.revision;
     const trialRng = restoreMulberry32(this.#rng.snapshot());
     const fallbackResolutions: AutoResolvedReactionOffer[] = [];
     const guidedResolutions: GuidedReactionResolution[] = [];
+    const deviationResolutions: EngineIntentDeviation[] = [];
+    const intents = createPureIntentResolver();
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
       const reduced = reduceOne(state, command, trialRng);
       const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance);
@@ -293,8 +470,47 @@ export class EngineRoundSession {
       return resolved.state;
     };
     let state = this.#state;
-    for (const entry of entries) {
-      state = applyOneResolvedMechanic(state, entry.mechanics, entry.choice, reduce);
+    for (const application of entries) {
+      const entry = normalizedApplication(application);
+      state = advanceToActor(state, entry.intent.actorId, reduce);
+      const resolution = intents.resolve(state, entry.intent);
+      let mechanics: ResolvedIntentMechanics;
+      let choice: EngineActionChoice;
+      let appliedBranch: EngineAppliedIntentBranch;
+      let refusalCodes: readonly string[];
+      if (resolution.valid) {
+        mechanics = resolution.mechanics;
+        choice = selectedChoice(entry.intent, resolution.selectedBranch);
+        appliedBranch = resolution.selectedBranch;
+        refusalCodes = resolution.refusals.map((refusal) => refusal.code);
+      } else {
+        const dodge = intents.resolve(state, deterministicDodgeIntent(entry.intent.actorId));
+        if (!dodge.valid) throw new Error(`Could not apply deterministic Dodge for ${entry.intent.actorId}.`);
+        mechanics = dodge.mechanics;
+        choice = { kind: 'dodge' };
+        appliedBranch = 'dodge';
+        refusalCodes = resolution.refusals.map((refusal) => refusal.code);
+      }
+
+      const reasonCodes: EngineIntentDeviation['reasonCodes'][number][] = [];
+      if (appliedBranch === 'dodge') {
+        reasonCodes.push('degraded_to_dodge');
+      } else {
+        if (appliedBranch !== entry.selectedBranch) reasonCodes.push('branch_changed');
+        if (mechanics.targetId !== entry.mechanics.targetId) reasonCodes.push('target_changed');
+      }
+      if (reasonCodes.length > 0) {
+        deviationResolutions.push({
+          actorId: entry.intent.actorId,
+          authorizedBranch: entry.selectedBranch,
+          appliedBranch,
+          authorizedTargetId: entry.mechanics.targetId,
+          appliedTargetId: mechanics.targetId,
+          reasonCodes,
+          refusalCodes,
+        });
+      }
+      state = applyOneResolvedMechanic(state, mechanics, choice, reduce);
     }
     this.#state = canonicalEncounterState(state).state;
     this.#rng = trialRng;
@@ -302,6 +518,7 @@ export class EngineRoundSession {
       revisionDelta: this.#state.revision - beforeRevision,
       fallbackResolutions,
       guidedResolutions,
+      deviationResolutions,
     };
   }
 

@@ -161,4 +161,36 @@ describe('canonical engine query port', () => {
       mechanics: { movementCostFeet: 10, actionId: 'grab', targetId: TARGET_ID },
     });
   });
+
+  it('refuses a declared dead target with a distinct code', () => {
+    const placed = placedState(SEED, new Map<CombatantId, GridCell>([
+      [ACTOR_ID, { column: 0, row: 0 }],
+      [TARGET_ID, { column: 1, row: 0 }],
+    ]));
+    const state: EncounterState = {
+      ...placed,
+      combatants: placed.combatants.map((candidate) => candidate.profile.id === TARGET_ID
+        ? { ...candidate, hitPoints: 0, life: 'dead', deathAt: { round: 1, initiativeIndex: 0 } }
+        : candidate),
+    };
+
+    expect(pureIntentResolver.resolve(state, {
+      actorId: ACTOR_ID,
+      choice: {
+        kind: 'attack', actionId: 'grab',
+        target: { kind: 'combatant', combatantId: TARGET_ID },
+      },
+      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
+      engagement: { stance: 'hold_position' },
+      fallback: null,
+    })).toEqual({
+      valid: false,
+      selectedBranch: 'none',
+      refusals: [{
+        branch: 'primary',
+        code: 'TARGET_DEAD',
+        summary: `${ACTOR_ID}: target ${TARGET_ID} is dead`,
+      }],
+    });
+  });
 });
