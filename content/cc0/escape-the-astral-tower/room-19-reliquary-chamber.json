@@ -5,7 +5,7 @@
   "room": { "number": 19, "name": "Reliquary Chamber", "sourcePage": 6 },
   "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
   "monsterRefs": [
-    { "sourceName": "Animated statue", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "no_srd_exact_match" }, "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "activation": "on_interaction" }
+    { "sourceName": "Animated statue", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "mapped", "statblockId": "homebrew:escape-the-astral-tower/animated-statue" }, "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "activation": "on_interaction" }
   ],
   "terrain": [
     { "kind": "access", "name": "Locked door", "position": { "kind": "relative", "area": "entrance" }, "mechanics": ["requires the Reliquary Chamber Key"] },

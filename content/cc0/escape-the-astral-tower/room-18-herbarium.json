@@ -5,7 +5,7 @@
   "room": { "number": 18, "name": "Herbarium", "sourcePage": 3 },
   "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
   "monsterRefs": [
-    { "sourceName": "Astraldendon", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "no_srd_exact_match" }, "position": { "kind": "relative", "area": "center" }, "activation": "present" }
+    { "sourceName": "Astraldendon", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "mapped", "statblockId": "homebrew:escape-the-astral-tower/astraldendon" }, "position": { "kind": "relative", "area": "center" }, "activation": "present" }
   ],
   "terrain": [
     { "kind": "obstacle", "name": "Wall shelving", "position": { "kind": "relative", "area": "walls" }, "mechanics": ["shelving lines the walls"] },
