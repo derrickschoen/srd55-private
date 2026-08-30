@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-05",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 5, "name": "Library", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "access", "name": "Outer walkway", "position": { "kind": "relative", "area": "perimeter" }, "mechanics": ["arched openings connect the walkway"] },
+    { "kind": "obstacle", "name": "Tall bookshelves", "position": { "kind": "relative", "area": "walls" }, "mechanics": ["line the walls"] },
+    { "kind": "light", "name": "Nine lit book pedestals", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["nine stone pedestals", "floating light above each open book"] },
+    { "kind": "resource", "name": "Book collection", "position": { "kind": "relative", "area": "shelves" }, "mechanics": ["1-in-10 chance to contain a specifically sought book"] }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-06",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 6, "name": "Side Entrance", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "access", "name": "Side entrance", "position": { "kind": "relative", "area": "entrance" }, "mechanics": ["exterior access"] },
+    { "kind": "terrain", "name": "Wall hangings", "position": { "kind": "relative", "area": "walls" }, "mechanics": ["banners and tapestries"] }
+  ]
+}

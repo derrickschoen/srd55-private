@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-12",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 12, "name": "Prismatic Workshop", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "obstacle", "name": "Crystal-covered fixtures", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["workbenches", "shelves"] },
+    { "kind": "hazard", "name": "Radiating crystals", "position": { "kind": "relative", "area": "throughout" }, "mechanics": ["starts after one round", "1d4 damage each round", "damage type unknown"] }
+  ]
+}

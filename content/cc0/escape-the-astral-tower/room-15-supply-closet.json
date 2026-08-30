@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-15",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 15, "name": "Supply Closet", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "obstacle", "name": "Supply barrels", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["four barrels"] },
+    { "kind": "resource", "name": "Maintenance supplies", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["ash", "lye", "straw", "tallow", "brooms", "brushes"] }
+  ]
+}

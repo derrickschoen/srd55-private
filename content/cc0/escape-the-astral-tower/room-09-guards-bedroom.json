@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-09",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 9, "name": "Guards' Bedroom", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "obstacle", "name": "Bedroom furniture", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["bed", "storage shelves", "round table"] },
+    { "kind": "resource", "name": "Guard notes", "position": { "kind": "relative", "area": "table" }, "mechanics": ["identify Observatory as the vault-key location"] }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-24",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 24, "name": "Seismic Chamber", "sourcePage": 6 },
+  "layout": { "kind": "source_map", "sourcePage": 7, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [
+    { "sourceName": "Earth Elemental", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "relative", "area": "bound_area" }, "activation": "if_freed" }
+  ],
+  "terrain": [
+    { "kind": "blocking", "name": "Binding chains", "position": { "kind": "relative", "area": "bound_area" }, "mechanics": ["restrain the elemental"] },
+    { "kind": "terrain", "name": "Stalagmites and stalactites", "position": { "kind": "relative", "area": "throughout" }, "mechanics": ["surround the binding area"] },
+    { "kind": "hazard", "name": "Gravity and atmosphere loss", "position": { "kind": "relative", "area": "global" }, "mechanics": ["starts if the elemental is freed", "breathing becomes harder after 10-30 minutes", "survival becomes impossible after 1-3 hours without intervention"] }
+  ]
+}

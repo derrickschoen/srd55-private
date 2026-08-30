@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-25",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 25, "name": "Crystal Caves", "sourcePage": 6 },
+  "layout": { "kind": "source_map", "sourcePage": 7, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "hazard", "name": "Radiating crystals", "position": { "kind": "relative", "area": "throughout" }, "mechanics": ["starts after one round", "1d8 damage each round", "damage type unknown"] },
+    { "kind": "access", "name": "Exterior stairs", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["carved stairs lead outside"] },
+    { "kind": "terrain", "name": "Creature skeleton", "position": { "kind": "relative", "area": "near_stairs" }, "mechanics": ["inert remains"] }
+  ]
+}

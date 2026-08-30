@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-17",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 17, "name": "Study", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "terrain", "name": "Fireplace", "position": { "kind": "relative", "area": "wall" }, "mechanics": ["fixed fireplace"] },
+    { "kind": "obstacle", "name": "Study furniture", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["large table with four chairs", "large chair", "circular table"] }
+  ]
+}

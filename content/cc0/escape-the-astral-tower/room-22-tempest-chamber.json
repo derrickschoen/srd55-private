@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-22",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 22, "name": "Tempest Chamber", "sourcePage": 6 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [
+    { "sourceName": "Air Elemental", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "relative", "area": "center" }, "activation": "if_freed" }
+  ],
+  "terrain": [
+    { "kind": "blocking", "name": "Elemental containment", "position": { "kind": "relative", "area": "center" }, "mechanics": ["transparent cylindrical barrier on a circular pedestal"] },
+    { "kind": "hazard", "name": "Atmosphere loss", "position": { "kind": "relative", "area": "global" }, "mechanics": ["starts if containment breaks", "air becomes unbreathable after 1d4+1 days"] }
+  ]
+}

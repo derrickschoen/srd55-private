@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-13",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 13, "name": "Apothecary", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "obstacle", "name": "Apothecary fixtures", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["workbench", "large cauldron", "shelves"] },
+    { "kind": "resource", "name": "Potion-brewing supplies", "position": { "kind": "relative", "area": "workbench_and_shelves" }, "mechanics": ["tools and ingredients sufficient for several potions"] }
+  ]
+}

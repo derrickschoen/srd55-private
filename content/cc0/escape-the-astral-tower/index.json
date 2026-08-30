@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "packId": "cc0:escape-the-astral-tower",
+  "title": "Escape the Astral Tower",
+  "licenseTag": "CC0-1.0",
+  "sourceUrl": "https://doomedzone.itch.io/the-astral-tower",
+  "accessDate": "2026-08-30",
+  "encounters": [
+    { "room": 1, "encounterId": "escape-the-astral-tower:room-01", "file": "room-01-main-hall.json" },
+    { "room": 2, "encounterId": "escape-the-astral-tower:room-02", "file": "room-02-larder.json" },
+    { "room": 3, "encounterId": "escape-the-astral-tower:room-03", "file": "room-03-kitchen.json" },
+    { "room": 4, "encounterId": "escape-the-astral-tower:room-04", "file": "room-04-first-floor-stairwell.json" },
+    { "room": 5, "encounterId": "escape-the-astral-tower:room-05", "file": "room-05-library.json" },
+    { "room": 6, "encounterId": "escape-the-astral-tower:room-06", "file": "room-06-side-entrance.json" },
+    { "room": 7, "encounterId": "escape-the-astral-tower:room-07", "file": "room-07-guardhouse-vault.json" },
+    { "room": 8, "encounterId": "escape-the-astral-tower:room-08", "file": "room-08-apprentices-bedroom.json" },
+    { "room": 9, "encounterId": "escape-the-astral-tower:room-09", "file": "room-09-guards-bedroom.json" },
+    { "room": 10, "encounterId": "escape-the-astral-tower:room-10", "file": "room-10-vivarium.json" },
+    { "room": 11, "encounterId": "escape-the-astral-tower:room-11", "file": "room-11-arboretum.json" },
+    { "room": 12, "encounterId": "escape-the-astral-tower:room-12", "file": "room-12-prismatic-workshop.json" },
+    { "room": 13, "encounterId": "escape-the-astral-tower:room-13", "file": "room-13-apothecary.json" },
+    { "room": 14, "encounterId": "escape-the-astral-tower:room-14", "file": "room-14-second-floor-stairwell.json" },
+    { "room": 15, "encounterId": "escape-the-astral-tower:room-15", "file": "room-15-supply-closet.json" },
+    { "room": 16, "encounterId": "escape-the-astral-tower:room-16", "file": "room-16-servants-quarters.json" },
+    { "room": 17, "encounterId": "escape-the-astral-tower:room-17", "file": "room-17-study.json" },
+    { "room": 18, "encounterId": "escape-the-astral-tower:room-18", "file": "room-18-herbarium.json" },
+    { "room": 19, "encounterId": "escape-the-astral-tower:room-19", "file": "room-19-reliquary-chamber.json" },
+    { "room": 20, "encounterId": "escape-the-astral-tower:room-20", "file": "room-20-opulent-bedroom.json" },
+    { "room": 21, "encounterId": "escape-the-astral-tower:room-21", "file": "room-21-arcane-library.json" },
+    { "room": 22, "encounterId": "escape-the-astral-tower:room-22", "file": "room-22-tempest-chamber.json" },
+    { "room": 23, "encounterId": "escape-the-astral-tower:room-23", "file": "room-23-observatory.json" },
+    { "room": 24, "encounterId": "escape-the-astral-tower:room-24", "file": "room-24-seismic-chamber.json" },
+    { "room": 25, "encounterId": "escape-the-astral-tower:room-25", "file": "room-25-crystal-caves.json" },
+    { "room": 26, "encounterId": "escape-the-astral-tower:room-26", "file": "room-26-xenobotanical-cavern.json" }
+  ],
+  "randomEncounterTables": [
+    {
+      "id": "tower",
+      "sourcePage": 2,
+      "die": "1d10",
+      "entries": [
+        { "roll": 1, "monsterRef": { "sourceName": "Animated Broom", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "no_srd_exact_match" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 2, "monsterRef": { "sourceName": "Black Pudding", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 3, "monsterRef": { "sourceName": "Animated Armor", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 4, "monsterRef": { "sourceName": "Stirge", "quantity": { "kind": "dice", "expression": "2d4" }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 5, "monsterRef": { "sourceName": "Familiar", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "no_srd_exact_match" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 6, "monsterRef": { "sourceName": "Giant Rat", "quantity": { "kind": "dice", "expression": "1d6" }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 7, "monsterRef": { "sourceName": "Will-o'-Wisp", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 8, "monsterRef": { "sourceName": "Giant Spider", "quantity": { "kind": "dice", "expression": "1d6" }, "reference": { "status": "mapped", "statblockId": "statblock:giant-spider" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 9, "monsterRef": { "sourceName": "Ghost", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 10, "monsterRef": { "sourceName": "Doppelganger", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } }
+      ]
+    },
+    {
+      "id": "asteroid",
+      "sourcePage": 2,
+      "die": "1d6",
+      "entries": [
+        { "roll": 1, "monsterRef": { "sourceName": "Astraldendon", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "no_srd_exact_match" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 2, "monsterRef": { "sourceName": "Astralmycon", "quantity": { "kind": "dice", "expression": "1d4" }, "reference": { "status": "unmapped", "reason": "no_srd_exact_match" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 3, "monsterRef": { "sourceName": "Roc", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 4, "monsterRef": { "sourceName": "Stirge", "quantity": { "kind": "dice", "expression": "2d4" }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 5, "monsterRef": { "sourceName": "Skeleton", "quantity": { "kind": "dice", "expression": "1d6" }, "reference": { "status": "mapped", "statblockId": "statblock:skeleton" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } },
+        { "roll": 6, "monsterRef": { "sourceName": "Gargoyle", "quantity": { "kind": "fixed", "value": 1 }, "reference": { "status": "unmapped", "reason": "srd_exact_match_not_bundled" }, "position": { "kind": "unknown", "reason": "random_encounter" }, "activation": "present" } }
+      ]
+    }
+  ]
+}

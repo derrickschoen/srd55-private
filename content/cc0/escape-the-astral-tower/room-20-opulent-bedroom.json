@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-20",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 20, "name": "Opulent Bedroom", "sourcePage": 6 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "obstacle", "name": "Bedroom furniture", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["large bed", "table and chair", "shelves", "wardrobe"] },
+    { "kind": "access", "name": "Concealed fireplace passage", "position": { "kind": "relative", "area": "fireplace" }, "mechanics": ["pushing the fireplace back opens passage to room 21", "scratches provide a discovery clue"] }
+  ]
+}

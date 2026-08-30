@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "encounterId": "escape-the-astral-tower:room-08",
+  "provenance": { "source": "imported", "licenseTag": "CC0-1.0", "seed": null },
+  "room": { "number": 8, "name": "Apprentice's Bedroom", "sourcePage": 3 },
+  "layout": { "kind": "source_map", "sourcePage": 5, "gridScale": { "kind": "unknown", "reason": "not_specified_by_source" } },
+  "monsterRefs": [],
+  "terrain": [
+    { "kind": "obstacle", "name": "Bedroom furniture", "position": { "kind": "unknown", "reason": "not_specified_by_source" }, "mechanics": ["bed", "shelf", "wardrobe", "table and chair"] },
+    { "kind": "resource", "name": "Apprentice research", "position": { "kind": "relative", "area": "shelves" }, "mechanics": ["incomplete notes", "failed spell scrolls", "Astraldendron observations"] }
+  ]
+}
