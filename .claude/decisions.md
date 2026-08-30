@@ -7,6 +7,36 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D419.2 — OWNER: exploit plugging emulates a human DM; no artificial catch roll (2026-08-30)
+
+Verbatim: "The intent is to have it act like a human dm would as much as
+possible and then live with the inconsistency of current llm options."
+Amends the D419 stochastic-plugging sketch: the engine still computes
+exploit-detection signals algorithmically (D418 division of labour), and
+presents them to the LLM DM the way a human DM would perceive the table —
+but there is NO engineered awareness-profile roll or seeded catch
+probability. The "sometimes catches it, sometimes doesn't" property the
+owner wants comes from the natural inconsistency of current LLMs, which
+we accept rather than simulate. Persona still shapes how the DM responds.
+Consequence: the D419.1 catch-rate knob is dissolved — fully deferred,
+no structure chosen (owner: "Fully defer"); revisit only if LLM variance
+proves to be the wrong shape of inconsistency in practice.
+
+## D421.5 — OWNER: fungible-PC-slots prototype queued after rerun 1 (2026-08-30)
+
+Owner chose "After rerun 1" for the popcorn-for-PCs prototype: queue it,
+start only once the first R1-10 rerun is harvested. Player-facing only —
+never in AI-DM testing (D421.4 stands).
+
+## D421.6 — OWNER: BFRD adoption lane deferred (2026-08-30)
+
+Owner chose "Defer" on opening a Tales of the Valiant / BFRD CC-BY
+adoption lane. The research stays on the shelf (private cache +
+digest); no optional-rule adoption work until the intel program and
+reruns are done. When it opens, the licensing terms recorded in the
+digest apply: attributed CC-BY layer, CC0 files never carry
+BFRD-derived text, no ToV trademarks/art/trade dress.
+
 ## D417.1 — OWNER: no high-ground to-hit, but fall damage is SRD and in scope (2026-08-30)
 
 Verbatim: "High ground bonus is not modeled in srd, but remember that fall
