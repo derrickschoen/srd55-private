@@ -480,6 +480,13 @@ describe('AI-DM engine MCP conversation runner', () => {
     }
     expect(primaryCodexArgvBytes(tieredPrimary)).toBe(primaryCodexArgvBytes(untieredPrimary));
     expect(tieredAdapter.startInvocations).toHaveLength(2);
+    expect(tieredAdapter.startInvocations[1]?.instructions).toContain('OFFENSIVE corrected round');
+    expect(tieredAdapter.startInvocations[1]?.instructions)
+      .toContain('every actor with a legal attack must attack');
+    expect(tieredAdapter.startInvocations[1]?.instructions)
+      .toContain('Dash-to-close counts as offense for out-of-reach melee');
+    expect(tieredAdapter.startInvocations[1]?.instructions)
+      .toContain('Dodge is allowed only when that actor has no resolvable action');
     expect(tieredAdapter.resumeInvocations).toHaveLength(0);
     expect(untieredAdapter.startInvocations).toHaveLength(1);
     expect(untieredAdapter.resumeInvocations).toHaveLength(1);

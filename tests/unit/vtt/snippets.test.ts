@@ -302,7 +302,13 @@ describe('plays v1 registry', () => {
           target: { kind: 'combatant', combatantId: 'combatant:wizard' },
         },
         movement: { willingness: 'only_if_required', maximumFeet: 30 },
-        fallback: { choice: { kind: 'dodge' } },
+        fallback: {
+          choice: { kind: 'dash' },
+          movement: { maximumFeet: 60, opportunityRisk: 'avoid' },
+          engagement: {
+            anchor: { kind: 'combatant', combatantId: 'combatant:fighter' },
+          },
+        },
       });
     },
   );
@@ -355,6 +361,152 @@ describe('plays v1 registry', () => {
       expect(intent?.engagement.stance).toBe('close_to_melee');
       expect(intent?.movement.willingness).not.toBe('none');
     }
+  });
+
+  it('uses statblock delivery to avoid opportunity risk for ranged movement while melee still accepts it', async () => {
+    const rangedFixture = await registryFixture(3_943_001);
+    const rangedActorId = 'combatant:generated-3943001-monster-1';
+    const rangedTargetId = 'combatant:wizard';
+    const ranged = withProjection(rangedFixture.capsule, {
+      ...rangedFixture.capsule.projection,
+      combatants: rangedFixture.capsule.projection.combatants.map((actor) => {
+        if (actor.id === rangedTargetId) return { ...actor, position: { column: 1, row: 6 } };
+        if (actor.id !== rangedActorId) return actor;
+        return {
+          ...actor,
+          position: { column: 6, row: 6 },
+          actions: actor.actions.filter((action) => action.actionId === 'dagger'),
+          actionApproaches: actor.actionApproaches.map((approach) => ({
+            ...approach,
+            minimumMovementFeet: approach.actionId === 'dagger' && approach.targetId === rangedTargetId
+              ? 5
+              : approach.minimumMovementFeet,
+          })),
+        };
+      }),
+    });
+    const rangedActor = ranged.projection.combatants.find((actor) => actor.id === rangedActorId);
+    const rangedIntent = SNIPPET_REGISTRY.expand('focus_fire', ranged).intents
+      .find((intent) => intent.actorId === rangedActorId);
+
+    expect(rangedActor?.actions).toEqual([
+      expect.objectContaining({
+        actionId: 'dagger',
+        attackDelivery: 'melee_or_ranged',
+        normalRangeFeet: 20,
+        longRangeFeet: 60,
+      }),
+    ]);
+    expect(rangedIntent?.movement).toEqual({
+      willingness: 'for_clear_advantage',
+      maximumFeet: 30,
+      opportunityRisk: 'avoid',
+    });
+
+    const meleeFixture = await registryFixture(3_943_003);
+    const meleeIntent = SNIPPET_REGISTRY.expand('basic_advance', meleeFixture.capsule).intents[0];
+    expect(meleeIntent?.choice).toMatchObject({ kind: 'attack', actionId: 'slam' });
+    expect(meleeIntent?.movement).toEqual({
+      willingness: 'only_if_required',
+      maximumFeet: 30,
+      opportunityRisk: 'accept_if_needed',
+    });
+  });
+
+  it('holds position for a ranged attack already within normal range', async () => {
+    const { capsule } = await registryFixture(3_943_001);
+    const actorId = 'combatant:generated-3943001-monster-1';
+    const targetId = 'combatant:wizard';
+    const shaped = withProjection(capsule, {
+      ...capsule.projection,
+      combatants: capsule.projection.combatants.map((actor) => {
+        if (actor.id === targetId) return { ...actor, position: { column: 1, row: 6 } };
+        if (actor.id !== actorId) return actor;
+        return {
+          ...actor,
+          position: { column: 5, row: 6 },
+          actions: actor.actions.filter((action) => action.actionId === 'dagger'),
+          actionApproaches: actor.actionApproaches.map((approach) => ({
+            ...approach,
+            minimumMovementFeet: approach.actionId === 'dagger' && approach.targetId === targetId
+              ? 0
+              : approach.minimumMovementFeet,
+          })),
+        };
+      }),
+    });
+    const selected = SNIPPET_REGISTRY.expand('focus_fire', shaped).intents
+      .find((intent) => intent.actorId === actorId);
+
+    expect(selected?.movement).toEqual({
+      willingness: 'none',
+      maximumFeet: 0,
+      opportunityRisk: 'avoid',
+    });
+  });
+
+  it('falls back to a resolvable alternate-target attack before Dodge', async () => {
+    const { state, capsule } = await registryFixture(3_943_001);
+    const actorId = 'combatant:generated-3943001-monster-3';
+    const invalidPrimaryTarget = state.combatants.find((combatant) =>
+      combatant.profile.id === 'combatant:generated-3943001-monster-2');
+    if (invalidPrimaryTarget === undefined) throw new Error('Expected same-side invalid target.');
+    const selected = SNIPPET_REGISTRY.expand('focus_fire', capsule).intents
+      .find((intent) => intent.actorId === actorId);
+    if (selected?.choice.kind !== 'attack' || selected.fallback?.choice.kind !== 'attack') {
+      throw new Error('Expected primary and alternate-target attack branches.');
+    }
+
+    expect(selected.fallback.choice.target).toEqual({
+      kind: 'combatant',
+      combatantId: 'combatant:fighter',
+    });
+    const resolved = pureIntentResolver.resolve(state, {
+      ...selected,
+      choice: {
+        ...selected.choice,
+        target: { kind: 'combatant', combatantId: invalidPrimaryTarget.profile.id },
+      },
+    });
+    expect(resolved).toMatchObject({
+      valid: true,
+      selectedBranch: 'fallback',
+      mechanics: {
+        actionId: 'longbow',
+        targetId: 'combatant:fighter',
+      },
+    });
+  });
+
+  it('keeps Dodge as the terminal fallback when no alternate opposing target attack resolves', async () => {
+    const { capsule } = await registryFixture(3_943_001);
+    const actorId = 'combatant:generated-3943001-monster-1';
+    const primaryTargetId = 'combatant:wizard';
+    const shaped = withProjection(capsule, {
+      ...capsule.projection,
+      combatants: capsule.projection.combatants.map((actor) => actor.id !== actorId ? actor : {
+        ...actor,
+        actions: actor.actions.filter((action) => action.actionId === 'dagger'),
+        actionApproaches: actor.actionApproaches.map((approach) => ({
+          ...approach,
+          minimumMovementFeet: approach.actionId === 'dagger' && approach.targetId === primaryTargetId
+            ? 0
+            : null,
+        })),
+      }),
+    });
+    const selected = SNIPPET_REGISTRY.expand('focus_fire', shaped).intents
+      .find((intent) => intent.actorId === actorId);
+
+    expect(selected?.choice).toMatchObject({
+      kind: 'attack',
+      target: { kind: 'combatant', combatantId: primaryTargetId },
+    });
+    expect(selected?.fallback).toEqual({
+      choice: { kind: 'dodge' },
+      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
+      engagement: { stance: 'hold_position' },
+    });
   });
 
   it('moves to grapple the blocker when no control spell is in range', async () => {
@@ -449,7 +601,7 @@ describe('plays v1 registry', () => {
     }
   });
 
-  it('spreads alternate fallback anchors across a concentrated six-unit room', async () => {
+  it('gives every actor an alternate fallback anchor in a concentrated six-unit room', async () => {
     const { capsule } = await registryFixture(3_943_005);
     const requested = new Set(capsule.request?.actors ?? []);
     const shaped = withProjection(capsule, {
@@ -472,6 +624,10 @@ describe('plays v1 registry', () => {
     expect(draft.flatMap((entry) => entry.fallback?.engagement.anchor?.kind === 'combatant'
       ? [{ actorId: entry.actorId, targetId: entry.fallback.engagement.anchor.combatantId }]
       : [])).toEqual([
+      { actorId: 'combatant:generated-3943005-monster-1', targetId: 'combatant:cleric' },
+      { actorId: 'combatant:generated-3943005-monster-2', targetId: 'combatant:cleric' },
+      { actorId: 'combatant:generated-3943005-monster-3', targetId: 'combatant:cleric' },
+      { actorId: 'combatant:generated-3943005-monster-4', targetId: 'combatant:cleric' },
       { actorId: 'combatant:generated-3943005-monster-5', targetId: 'combatant:cleric' },
       { actorId: 'combatant:generated-3943005-monster-6', targetId: 'combatant:cleric' },
     ]);
