@@ -22,3 +22,4 @@ rule:
             any:
               - pattern: import type $$$BINDINGS from '../engine-state-capsule'
               - pattern: import type $$$BINDINGS from '../intent-resolver'
+              - pattern: import type $$$BINDINGS from '../turn-proposal'

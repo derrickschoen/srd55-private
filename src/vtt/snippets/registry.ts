@@ -1,6 +1,5 @@
 import type { EngineStateCapsule } from '../engine-state-capsule';
-import type { EngineActorOption, EngineTurnProposal } from '../turn-proposal';
-import type { CombatantId } from '../../combat/values';
+import type { CombatantId, EngineActorOption, EngineTurnProposal } from '../turn-proposal';
 
 export const PLAY_NAMES = ['remove_obstacle', 'focus_fire', 'basic_advance'] as const;
 export type PlayName = (typeof PLAY_NAMES)[number];

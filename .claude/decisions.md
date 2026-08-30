@@ -18,6 +18,35 @@ class), and elevation-derived cover/line-of-sight — but NO to-hit modifier.
 The tactical evaluator prices edge proximity and fall EV when elevation
 modeling arrives.
 
+## D421.4 — OWNER: all AI-DM testing runs the standard initiative system (2026-08-30)
+
+Verbatim: "Do all of your ai dm testing with the standard initiative
+system." All AI-DM testing — smokes, arenas, A/Bs, the R1-10 reruns, and
+collection batches — uses the standard RAW per-combatant initiative
+(current default: initiative_segments_v1 + derived_v1). Initiative
+variants (fungible PC slots, zipper, etc.) never enter the testing
+pipeline; if a variant is ever trialed it runs as a separate, explicitly
+labeled experiment.
+
+## D421.3 — OWNER: add Tales of the Valiant to the research (2026-08-30)
+
+Verbatim: "Also look at tales of the valiant." Extend the D421 research:
+Tales of the Valiant (Kobold Press) — its changes vs 5e, licensing status
+(ORC license / Black Flag Reference Document openness makes it potentially
+usable prior art rather than clean-room-only), and which of its variants
+survive the D421.2 VTT-relevance filter.
+
+## D421.2 — OWNER: VTT-relevance filter on optional-rule rankings (2026-08-30)
+
+Verbatim: "A lot of these dice rolling conveniences are not really helpful
+for a vtt." Filter applied to all optional-rule shortlists (Nimble digest,
+initiative digest, clean-room package): mechanics whose main value is
+physical-dice convenience (batched/static rolls, players-roll-all,
+deterministic initiative scores) rank low — the VTT rolls instantly.
+Rank instead by decision speed, reduced whiff-feel, turn agency (e.g.
+fungible PC slots), death/dying drama, and AI-DM simplification. Rankings
+to be revised at the Nimble follow-up harvest.
+
 ## D421.1 — OWNER: initiative-systems research, clean-room derivation experiment, creator-opinion survey (2026-08-30)
 
 Three additions to D421, verbatim: "Also research different popular optional
