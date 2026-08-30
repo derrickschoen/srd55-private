@@ -184,7 +184,10 @@ positions/statblocks and independent probability formulas.
 1. **Should the engine ever prefer attacking a dying PC?** Recommended default: expose
    exact death-save consequences but leave target choice to the DM/encounter policy; add
    no universal “finish the dying” bonus.
-2. **How much exact defensive information may the monster planner see?** Recommended
+2. **How much exact defensive information may the monster planner see?** RESOLVED by
+   D418.1 (2026-08-30): the DM is omniscient about PC capabilities and resources — exact
+   AC, HP, slots, and spell availability are DM-known. Knowledge labels collapse to
+   known/`unresolved` (mechanics gaps only) on the DM side. Superseded recommendation
    default: use only DM-known values and label knowledge (`known`, `estimated`,
    `unresolved`); show probability rather than leaking a hidden AC/source statistic.
 3. **May the LLM override a dominated engine default?** Recommended default: yes, with
@@ -235,3 +238,43 @@ All three proposed grafts were adopted: every intel surface is policy-versioned;
 renderings use integer EV/coarse fractions while RL retains full precision; and increment
 3 requires the R02 straight-roll line plus reason codes in always-on context, not merely
 the query tool. No graft was rejected.
+
+Round 3 was a Fable-authored supplement, Codex-verified: refuted M2's state/revival claim,
+M3's future-OA premise, M4's dormant premise, and M7's path/rendering claims; amended M1,
+M5, M6, and Q9 as recorded below.
+
+## Round 3 supplement — time windows and adjacent option sources
+
+This additive review retains every item only as amended below. M1 is new despite G6/G10;
+M2 refines Q2; M3 is partly implied by G7/G12; M4 is absent; M5 generalizes G8/G11; M6
+adds prompt-budget migration; M7 makes G7/G12 boundaries explicit. All surfaces inherit
+the versioning and precision rules above.
+
+| Item / verdict | Verified or refuted current state | Negative space and accepted design |
+|---|---|---|
+| **M1 Initiative/consequence windows — accepted, amended** | Initiative carries combatant/total/roll/bonus/slot (`src/combat/encounter.ts:359-366`); the AI capsule exposes active side/combatant but no order (`src/vtt/engine-state-capsule.ts:79-94`). Fable missed the reusable DM-board timeline: it already types ordered combatants plus legendary, expiry, burn-away, and repeated-save boundaries (`src/vtt/session-timeline.ts:7-65`, `src/vtt/session-timeline.ts:119-180`) and is wired at `src/vtt/encounter-projections.ts:299-323`. | G6 predicts attack arrival, not who acts before a target/boundary. Reuse the timeline. Engine owns order/count **(iii)**; LLM owns target choice **(i)**. Always emit only a 6-12-token salient window when order changes a top option; pairwise/full order is on request. Include neutral target-turn/death-save/expiry timing, never a universal finish-dying-target incentive. Size M; join increment 3 and feed G10/G11/adjustments. |
+| **M2 Recovery-capability windows — accepted, substantially amended** | **Refuted:** encounter state does not hold full PC spell lists. It holds slots (`src/combat/combatant.ts:59-69`, `src/combat/encounter.ts:294-350`); prepared/known spells live in a separate loaded-party layer (`src/vtt/party-pack.ts:1285-1312`) that can enumerate healing/revival (`src/vtt/party-pack.ts:2825-2937`). Slots alone cannot prove capability. The draft also conflated healing a dying creature with revival: current healing excludes dead targets, while Revivify enumerates dead allies (`src/vtt/party-pack.ts:2838-2842`, `src/vtt/party-pack.ts:2916-2930`). | Q2 labels knowledge but has no capability window. After G7+M1, a shared canonical opponent-option provider may emit `known_recovery_before_boundary` with knowledge/source codes; otherwise typed `unresolved`. Neutral M1 timing may be always-on; rescuer/range/spell/resource is on-request and policy-gated. Engine owns proved capability **(iii)**, LLM response **(i)**. Cost 8-20 only when salient; size M, not S. |
+| **M3 Reaction spend/hold — accepted, amended to a current gap** | Policies and OA decisions exist (`src/combat/encounter.ts:384-394`, `src/combat/encounter.ts:421-471`), but Fable's cited lines do not prove Shield; its triggering attack reversal is at `src/combat/encounter.ts:6399-6411`. **Refuted:** OA has already landed: preview detects eligible windows and execution applies ask/always/never (`src/combat/encounter.ts:3571-3612`, `src/combat/encounter.ts:4500-4535`). | G7 reserves the slot and G12 marks path risk, but neither compares spend/hold nor improves sticky LLM guidance (`src/vtt/reaction-guidance.ts:11-30`). At an actual trigger, show immediate resolved value plus qualified possible future opportunities—never claim a PC will provoke. Engine default, LLM typed-policy override **(ii)**. Zero ordinary-turn tokens; 20-60 at a reaction prompt or compact material guidance. Size M after evaluator/G7. |
+| **M4 Legendary windows/resistance — accepted; dormant premise refuted** | Uses are projected but not rendered (`src/vtt/engine-state-capsule.ts:44-51`, `src/vtt/mcp/engine-server.ts:299-313`). **Refuted:** support is not awaiting imports. Unicorn is bundled (`src/combat/statblocks/monsters.ts:211-278`); the reducer queues/executes legendary actions and resistance (`src/combat/encounter.ts:4365-4477`, `src/combat/encounter.ts:3005-3057`). The AI boundary loop handles only reactions/death saves, omitting legendary decisions (`src/vtt/engine-round-session.ts:136-181`). | G7 is broad but does not name interleaved legendary choices; M1 gives timing, not value. Treat as current integration. Always show 8-16 compact tokens for relevant uses/next window; show 30-80-token alternatives only pending/on request. Engine scored default with LLM policy override **(ii)**; legality/charges **(iii)**. Size M after increments 1+3, not S after a future import. |
+| **M5 Submission dominance — accepted, amended** | Rows store suggested play/adoption (`tools/ai-dm-conversation.ts:282-307`, `tools/ai-dm-conversation.ts:2724-2735`), but the repo does not establish that R02 was an edited `focus_fire`. `edited` means only that one submitted choice matches (`tools/ai-dm-conversation.ts:740-755`), not quality/dominance. | G8/G11 imply dominance; the addition is submission-time enforcement. Do not compare only with a heuristic suggestion. Compare with the canonical resolved non-dominated frontier; trigger only if another plan is no worse on every declared metric and better on one. Unresolved/incomparable metrics block refusal. Return 20-60-token deltas under G8's override **(ii)**. Actor check S after increment 5; team check M after increment 7. |
+| **M6 KB/doctrine migration — accepted, amended** | K6 is 2,767 bytes mixing workflow, mechanics, and tactics (`tests/fixtures/ai-dm-kb/k6.txt:1-26`). It is loaded/hashed as session instructions and capture keeps instructions plus `kbHash` (`tools/ai-dm-conversation.ts:511-522`, `tools/ai-dm-conversation.ts:866-875`, `tools/ai-dm-conversation.ts:2185-2200`, `tools/ai-dm-conversation.ts:2724-2735`). The base did not budget it. | Do not strip doctrine inside every intel increment: that confounds evaluation, and session instructions are not per-turn context. Classify lines as workflow/mechanical fact/strategy/persona; remove facts only after typed enforcement, workflow after tool enforcement, strategy after G11 evidence. Run separate versioned one-variable A/B removals after increments 3/5/7, retaining KB/intel versions; gate on quality+authorization and total session input tokens. Size S/experiment. |
+| **M7 World objects/stealth — accepted, amended** | **Refuted:** cited `src/vtt/world-object-actions.ts` does not exist; the implementation enumerates class actions and separate DM overrides at `src/combat/world-object-actions.ts:16-89`. State carries objects/fog/hidden/pending decisions (`src/combat/encounter.ts:500-539`). Context does not render none: it exposes blocking object ids as terrain tags, but omits object actions and emits empty pending ids (`src/vtt/mcp/engine-server.ts:299-313`). | G7 implies non-statblock sources but omits them in acceptance; G12 omits stealth knowledge. Add eligible `use_world_object` choices to G7/increment 2, salient always or on request. Never offer `dm_use_world_object` as a monster option. Never expose raw hidden/fog state; a later actor-knowledge projection emits perceived or typed-unknown targets under Q9. World-object inventory M; stealth separately triggered. |
+
+### Supplement placement
+
+- M1 joins increment 3 with salience gating; M2 follows M1 and G7 after Q9.
+- M3 follows the evaluator/G7 and renders chiefly at reaction boundaries.
+- M4 follows increments 1 and 3 as a current pending-decision integration, not an import flag.
+- M5 extends increment 5 per actor and increment 7 at team level.
+- M6 is evaluated separately after increments 3, 5, and 7; it is not bundled into them.
+- M7 adds world-object class actions to increment 2; stealth waits for its knowledge projection.
+
+### Additional owner question
+
+9. **What may opponent-capability intel reveal?** RESOLVED by D418.1 with Q2: exact PC
+   capability intel is permitted; the M2 implementation note stands (PC spell data must be
+   threaded from the party pack into the intel layer — encounter state alone lacks it).
+   Superseded refinement text: may the monster planner
+   see PC prepared/known spells and remaining slots, or only neutral initiative/consequence
+   timing? Recommended default: neutral timing always; exact capability only when the
+   configured knowledge policy marks it known, with all other cases typed `unresolved`.
