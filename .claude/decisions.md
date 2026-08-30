@@ -7,6 +7,27 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D416 — OWNER: interleaved initiative is the target model; plan-then-adjust; one persona per PC (2026-08-29)
+
+Verbatim: "Interleaving is how most tables play. Ai for pc team and for
+npc team should still come up with a game plan at the top of the round
+and then dm ai will adjust the game plan as the pcs act. Each pc turn
+will be evaluated to see if they follow the game plan or alter it.
+Replicate the scenario of pc being played by a different person each.
+They still share the same goals and can communicate with each other."
+Ruling: (a) true interleaved PC/NPC initiative replaces the current
+declared-orders monster block as the target combat model; (b) both
+teams produce a top-of-round game plan (the plays/suggested-plan layer
+survives as the plan artifact); (c) the DM adjusts its plan per PC turn
+— each PC turn is evaluated for plan adherence vs alteration; (d) the
+PC team is one agent persona per PC with shared goals and an open
+communication channel. Discovered in the same exchange, bug regardless
+of model: frozen mechanics execute without apply-time range/LoS/target-
+liveness re-validation (monsterAttackCommand hardcodes
+attackerCanSeeTarget, engine-round-session replays frozen paths) — must
+re-validate and degrade to fallback. Phasing and scheduling vs the
+plays-v1 lane: supervisor proposal pending owner reply.
+
 ## D415 — OWNER: no global AGENTS.md injection into DM/PC codex turns (2026-08-29)
 
 Verbatim: "We need to not inject global agents.md to codex when acting as
