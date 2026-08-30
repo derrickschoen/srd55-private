@@ -4,6 +4,8 @@ import {
   type AlgorithmRoundProposal,
 } from '../../../src/combat/controllers';
 import type { TurnLegalActions } from '../../../src/combat/coordinator';
+import { reduceEncounter } from '../../../src/combat/encounter';
+import { mulberry32 } from '../../../src/combat/random';
 import type { DmVisibleEncounterState } from '../../../src/combat/visibility';
 import type { CombatantId } from '../../../src/combat/values';
 import type { DecisionProgram } from '../../../src/vtt/dm-bridge/round-plan-contract';
@@ -13,6 +15,8 @@ import {
   scriptedPartyProgramHash,
 } from '../../../src/vtt/scripted-party-round';
 import { loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import { generateRoom } from '../../../src/vtt/room-generator';
+import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 
 class FixedProgramController extends AlgorithmController {
   constructor(private readonly fixed: DecisionProgram) { super(); }
@@ -39,6 +43,26 @@ function livingPlayerId(state: Awaited<ReturnType<typeof fixture>>): CombatantId
 }
 
 describe('scripted party round planning and adherence', () => {
+  it('follows the first PC planned primary when no state drift occurred', async () => {
+    const generated = generateRoom(6_100_081, { initiativeProfile: 'derived_v1' }).encounter.state;
+    const state = reduceEncounter(
+      generated,
+      { type: 'roll_initiative' },
+      mulberry32(8_274_113),
+    ).state;
+    const plan = createScriptedPartyPlan(state);
+    const actorId = plan.programs[0]?.actorId;
+    if (actorId === undefined) throw new Error('Fixture has no planned player turn.');
+    expect(state.revision).toBe(1);
+    expect(state.activeCombatant).toBe(actorId);
+
+    const turn = materializeScriptedPartyTurn({ state, plan, actorId });
+
+    expect(turn.adherence).toBe('followed');
+    expect(turn.reasonCodes).toEqual(['PLANNED_PRIMARY_FOLLOWED']);
+    expect(turn.plannedProgramHash).toBe(turn.executedProgramHash);
+  });
+
   it('aggregates every living PC deterministically with stable policy, plan, and program hashes', async () => {
     const state = await fixture();
 
@@ -159,5 +183,58 @@ describe('scripted party round planning and adherence', () => {
     expect(turn.adherence).toBe('plan_invalidated');
     expect(turn.reasonCodes).toEqual(['PLANNED_PRIMARY_NO_LONGER_LEGAL']);
     expect(turn.reducerCommands).toEqual([{ type: 'end_turn', actor: actorId }]);
+  });
+
+  it('invalidates a planned targeted action when its target dies before the PC turn', async () => {
+    const unstarted = await alternatingInitiativeRoom();
+    const firstPlayerId = livingPlayerId(unstarted);
+    const boosted = {
+      ...unstarted,
+      combatants: unstarted.combatants.map((combatant) => ({
+        ...combatant,
+        profile: {
+          ...combatant.profile,
+          rules: {
+            ...combatant.profile.rules,
+            initiativeBonus: combatant.profile.id === firstPlayerId
+              ? 1_000
+              : combatant.profile.rules.initiativeBonus,
+          },
+        },
+      })),
+    };
+    const state = reduceEncounter(
+      boosted,
+      { type: 'roll_initiative' },
+      mulberry32(8_274_113),
+    ).state;
+    expect(state.activeCombatant).toBe(firstPlayerId);
+    const plan = createScriptedPartyPlan(state);
+    const planned = plan.programs[0];
+    if (planned === undefined) throw new Error('Fixture has no planned player turn.');
+    if (planned.program.kind !== 'action' ||
+      (planned.program.action.kind !== 'attack' && planned.program.action.kind !== 'force_save') ||
+      planned.program.action.target.kind !== 'combatant') {
+      throw new Error('Fixture first player did not plan a concrete targeted action.');
+    }
+    const actorId = planned.actorId;
+    const targetId = planned.program.action.target.combatantId;
+    const drifted = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === targetId
+        ? { ...combatant, hitPoints: 0, life: 'dead' as const }
+        : combatant),
+    };
+
+    const turn = materializeScriptedPartyTurn({
+      state: drifted,
+      plan,
+      actorId,
+    });
+
+    expect(turn.adherence).toBe('plan_invalidated');
+    expect(turn.reasonCodes).toEqual(['PLANNED_PRIMARY_NO_LONGER_LEGAL']);
+    expect(turn.reducerCommands).toHaveLength(1);
+    expect(turn.executedProgramHash).not.toBe(turn.plannedProgramHash);
   });
 });

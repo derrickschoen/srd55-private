@@ -15,7 +15,7 @@ import type {
 } from './dm-bridge/round-plan-contract';
 import { regretTurnLegalActions } from './regret/legal-actions';
 
-export const SCRIPTED_PARTY_POLICY_VERSION = 'scripted-party-policy-v1' as const;
+export const SCRIPTED_PARTY_POLICY_VERSION = 'scripted-party-policy-v2' as const;
 export const SCRIPTED_PARTY_PLAN_FORMAT = 'scripted-party-plan-v1' as const;
 export const DEFAULT_SCRIPTED_PARTY_OBJECTIVE = 'defeat_the_hostile_team' as const;
 
@@ -309,10 +309,16 @@ export function createScriptedPartyPlan(
   const projection = dmVisibleEncounter(projectDmView(state));
   const actors = orderedLivingPlayers(state);
   const programs = actors.map((actorId, initiativeIndex): ScriptedPartyProgram => {
-    if (legalActions(state, actorId).actions.length === 0) {
+    const actorLegalActions = legalActions(state, actorId).actions;
+    if (actorLegalActions.length === 0) {
       throw new Error(`Scripted party actor ${actorId} has no legal reducer commands.`);
     }
-    const program = controller.proposeRoundProgram(projection, actorId).program;
+    const proposed = controller.proposeRoundProgram(projection, actorId).program;
+    const selected = selectProgram(proposed, actorId, projection, actorLegalActions);
+    if (selected === null) {
+      throw new Error(`Scripted party policy produced no legal reducer command for ${actorId}.`);
+    }
+    const program = selected.program;
     return { actorId, initiativeIndex, program, programHash: scriptedPartyProgramHash(program) };
   });
   const policyHash = sha256(canonicalJson({
