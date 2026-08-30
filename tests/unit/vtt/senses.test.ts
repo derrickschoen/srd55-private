@@ -80,18 +80,23 @@ function castCommand(caster: CombatantProfile, spellId: 'blur' | 'invisibility')
   };
 }
 
-function startedWithSpell(observer: ImportedSightFixture, spellId: 'blur' | 'invisibility'): {
+function startedWithSpell(
+  observer: ImportedSightFixture,
+  spellId: 'blur' | 'invisibility',
+  distanceFeet = 30,
+): {
   readonly state: EncounterState;
   readonly target: CombatantProfile;
 } {
-  const setup = visibilityState(observer, 30);
+  const setup = visibilityState(observer, distanceFeet);
   let state = reduceEncounter(setup.state, { type: 'roll_initiative' }, () => 0.5).state;
   state = reduceEncounter(state, castCommand(setup.target, spellId), () => 0.5).state;
   return { state, target: setup.target };
 }
 
 function attackOutcome(observer: ImportedSightFixture): string | undefined {
-  const setup = startedWithSpell(observer, 'blur');
+  // Keep this senses-only attack inside the imported attack's 5-foot reach.
+  const setup = startedWithSpell(observer, 'blur', 5);
   let state = reduceEncounter(setup.state, { type: 'end_turn', actor: setup.target.id }, () => 0.5).state;
   const faces = [19, 2];
   let index = 0;

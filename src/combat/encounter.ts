@@ -44,7 +44,9 @@ import type {
 import type { EncounterCommand, EncounterEvent } from './events';
 import {
   executableMonsterOnHitEffects,
+  monsterAttackRange,
   monsterAttackCommand,
+  monsterAttackRollModeSources,
 } from './monster-commands';
 import {
   adjacentCells,
@@ -110,11 +112,23 @@ import type {
 import { FORM_REPLACEMENT_RETAINED_STATISTICS } from './spells/types';
 import type {
   MonsterAction,
+  MonsterAttackAction,
   MonsterDamageTrigger,
   MonsterEffectDuration,
   MonsterLegendaryAction,
   MonsterOnHitEffect,
 } from './statblock';
+import {
+  combineAttackRollMode,
+  combineRollModes,
+  conditionAttackRollModeSources,
+  deathSaveFailuresFromZeroHitPointDamage,
+  evaluateTacticalAttack,
+  tacticalRangeVerdict,
+  type AttackRollModeSource,
+  type TacticalAttackEvaluation,
+  type TacticalUnresolvedReason,
+} from './tactical-evaluator';
 import { lookupBundledMonster } from './statblocks/companions';
 import { affectedCells, creatureOccupiesAffectedCell, type AreaTemplate } from './templates';
 import {
@@ -1749,13 +1763,6 @@ function effectDiceModifier(
   }, 0);
 }
 
-function combineRollModes(modes: readonly RollMode[]): RollMode {
-  const advantage = modes.includes('advantage');
-  const disadvantage = modes.includes('disadvantage');
-  if (advantage === disadvantage) return 'normal';
-  return advantage ? 'advantage' : 'disadvantage';
-}
-
 function interveningCells(from: GridCell, to: GridCell): readonly GridCell[] {
   const columnDelta = to.column - from.column;
   const rowDelta = to.row - from.row;
@@ -2016,32 +2023,47 @@ function coverAdjustedArmorClass(
   return armorClass(effectiveArmorClass(state, target, attacker) + coverDefenseBonus(tier));
 }
 
-function attackRollMode(
+function attackRollModeSources(
   state: EncounterState,
   command: Extract<
     EncounterCommand,
     { readonly type: 'attack' | 'opportunity_attack' }
   >,
-): RollMode {
-  const modes: RollMode[] = [command.rollMode];
+  includeConditionSources = true,
+  includeRangeSource = true,
+): readonly AttackRollModeSource[] {
+  const sources: AttackRollModeSource[] = command.rollMode === 'normal'
+    ? []
+    : [{
+        mode: command.rollMode,
+        reason: command.rollMode === 'advantage'
+          ? 'declared_advantage'
+          : 'declared_disadvantage',
+      }];
   const attackerCanSeeTarget = command.attackerCanSeeTarget &&
     canCombatantSee(state, command.actor, command.target);
   const targetCanSeeAttacker = command.targetCanSeeAttacker &&
     canCombatantSee(state, command.target, command.actor);
   // Unseen attacker/target: docs/srd/full/srd-5.2.1.txt:884-894 and
   // docs/homebrew/ogl/srd-5.1/srd-5.1-ogl.txt:5426-5442.
-  if (!attackerCanSeeTarget) modes.push('disadvantage');
-  if (!targetCanSeeAttacker) modes.push('advantage');
+  if (!attackerCanSeeTarget) {
+    sources.push({ mode: 'disadvantage', reason: 'unseen_target_disadvantage' });
+  }
+  if (!targetCanSeeAttacker) {
+    sources.push({ mode: 'advantage', reason: 'unseen_attacker_advantage' });
+  }
   for (const effect of state.effects) {
     if (effect.payload.kind === 'faerie_fire') {
-      if (effect.targets.includes(command.target)) modes.push(effect.payload.attackModeAgainstTarget);
+      if (effect.targets.includes(command.target)) {
+        sources.push({ mode: effect.payload.attackModeAgainstTarget, reason: 'faerie_fire_advantage' });
+      }
       continue;
     }
     if (effect.payload.kind === 'attacks_against_target_roll_mode') {
       if (
         effect.targets.includes(command.target) &&
         !canCombatantPierceVisualIllusion(state, command.actor, command.target)
-      ) modes.push(effect.payload.mode);
+      ) sources.push({ mode: effect.payload.mode, reason: 'effect_disadvantage' });
       continue;
     }
     if (effect.payload.kind !== 'attack_roll_mode_modifier') continue;
@@ -2059,41 +2081,37 @@ function attackRollMode(
         command.type === 'attack' &&
         command.attackId !== undefined &&
         appliesTo.attackIds.includes(command.attackId));
-    if (applies) modes.push(effect.payload.mode);
-  }
-  const actorClauses = conditionMechanicalState(
-    combatantConditions(state, command.actor),
-  ).clauses;
-  const targetClauses = conditionMechanicalState(
-    combatantConditions(state, command.target),
-  ).clauses;
-
-  for (const clause of actorClauses) {
-    if (clause.kind !== 'roll_mode' || clause.roll !== 'attack_by') continue;
-    if (
-      clause.predicate === 'always' ||
-      (clause.predicate === 'target_not_source' && clause.source !== command.target) ||
-      (clause.predicate === 'source_visible' && clause.source === command.target &&
-        canCombatantSee(state, command.actor, clause.source)) ||
-      (clause.predicate === 'recipient_unseen' && !targetCanSeeAttacker)
-    ) {
-      modes.push(clause.mode);
+    if (applies) {
+      sources.push({
+        mode: effect.payload.mode,
+        reason: effect.payload.mode === 'advantage' ? 'effect_advantage' : 'effect_disadvantage',
+      });
     }
   }
   const distance = gridDistance(
     token(state, command.actor).position,
     token(state, command.target).position,
   );
-  for (const clause of targetClauses) {
-    if (clause.kind !== 'roll_mode' || clause.roll !== 'attack_against') continue;
-    if (
-      clause.predicate === 'always' ||
-      (clause.predicate === 'recipient_unseen' && !attackerCanSeeTarget) ||
-      (clause.predicate === 'attacker_within_5_feet' && distance <= 5) ||
-      (clause.predicate === 'attacker_beyond_5_feet' && distance > 5)
-    ) {
-      modes.push(clause.mode);
+  if (includeRangeSource && command.tacticalRange !== undefined) {
+    const range = tacticalRangeVerdict(
+      token(state, command.actor).position,
+      token(state, command.target).position,
+      command.tacticalRange,
+    );
+    if (range.status === 'resolved' && range.band === 'long') {
+      sources.push({ mode: 'disadvantage', reason: 'long_range_disadvantage' });
     }
+  }
+  if (includeConditionSources) {
+    sources.push(...conditionAttackRollModeSources({
+      attackerId: command.actor,
+      targetId: command.target,
+      attackerConditions: combatantConditions(state, command.actor),
+      targetConditions: combatantConditions(state, command.target),
+      distanceFeet: distance,
+      attackerCanSeeTarget,
+      targetCanSeeAttacker,
+    }));
   }
 
   const targetState = combatant(state, command.target);
@@ -2103,9 +2121,110 @@ function attackRollMode(
     effectiveSpeed(state, command.target) > 0 &&
     !isIncapacitated(combatantConditions(state, command.target))
   ) {
-    modes.push('disadvantage');
+    sources.push({ mode: 'disadvantage', reason: 'dodge_disadvantage' });
   }
-  return combineRollModes(modes);
+  return sources;
+}
+
+function attackRollMode(
+  state: EncounterState,
+  command: Extract<
+    EncounterCommand,
+    { readonly type: 'attack' | 'opportunity_attack' }
+  >,
+): RollMode {
+  return combineAttackRollMode(attackRollModeSources(state, command)).mode;
+}
+
+/** Read-only encounter adapter for the pure tactical evaluator. */
+export function evaluateMonsterTacticalAttack(
+  state: EncounterState,
+  action: MonsterAttackAction,
+  actor: CombatantId,
+  target: CombatantId,
+): TacticalAttackEvaluation {
+  const command = monsterAttackCommand(action, actor, target);
+  const madeRollDefense = qualifyingRollDefenseEffects(
+    state, 'attack_rolls_made', actor, target, 'other',
+  );
+  const againstRollDefense = qualifyingRollDefenseEffects(
+    state, 'attack_rolls_against', target, actor, 'other',
+  );
+  const rollDefenseSources: AttackRollModeSource[] = [
+    ...madeRollDefense,
+    ...againstRollDefense,
+  ].flatMap((effect) => effect.payload.modifier.kind === 'roll_mode'
+    ? [{
+        mode: effect.payload.modifier.mode,
+        reason: effect.payload.modifier.mode === 'advantage'
+          ? 'roll_defense_advantage' as const
+          : 'roll_defense_disadvantage' as const,
+      }]
+    : []);
+  const flatAttackBonus = madeRollDefense.reduce((sum, effect) =>
+    effect.payload.modifier.kind === 'flat'
+      ? sum + effect.payload.modifier.amount
+      : sum, 0);
+  const hasRandomAttackModifier = madeRollDefense.some((effect) =>
+    effect.payload.modifier.kind === 'die_rider') || state.effects.some((effect) => {
+    if (!effect.targets.includes(actor) || isRollDefenseEffect(effect)) return false;
+    const payload = effect.payload;
+    return payload.kind === 'attack_roll_modifier' ||
+      (payload.kind === 'd20_test_modifier' && payload.tests.includes('attack_roll'));
+  });
+  const conditionalDamage = action.damage.some((term) => term.trigger.kind !== 'always');
+  const targetCover = coverTierBetween(
+    state,
+    token(state, actor).position,
+    token(state, target).position,
+  );
+  const unresolvedReasons: TacticalUnresolvedReason[] = [
+    ...(hasRandomAttackModifier ? ['random_attack_modifier_unresolved' as const] : []),
+    ...(conditionalDamage ? ['conditional_damage_rider_unresolved' as const] : []),
+    ...(targetCover === 'total' ? ['target_has_total_cover' as const] : []),
+  ];
+  const attackerCanSeeTarget = canCombatantSee(state, actor, target);
+  const targetCanSeeAttacker = canCombatantSee(state, target, actor);
+  const targetState = combatant(state, target);
+  const targetHitPoints = targetState.wildShape?.physical.hitPoints ??
+    targetState.form?.hitPoints ??
+    targetState.hitPoints;
+  return evaluateTacticalAttack({
+    attackerId: actor,
+    targetId: target,
+    attackerPosition: token(state, actor).position,
+    targetPosition: token(state, target).position,
+    range: monsterAttackRange(action),
+    attackBonus:
+      action.attackBonus +
+      exhaustionPenalty(combatantConditions(state, actor)) +
+      flatAttackBonus,
+    targetArmorClass: coverAdjustedArmorClass(state, actor, target),
+    criticalFloor: 20,
+    damageTerms: action.damage
+      .filter((term) => term.trigger.kind === 'always')
+      .map((term) => ({ dice: term.dice })),
+    attackerConditions: combatantConditions(state, actor),
+    targetConditions: combatantConditions(state, target),
+    attackerCanSeeTarget,
+    targetCanSeeAttacker,
+    rollModeSources: [
+      ...attackRollModeSources(state, command, false, false),
+      ...rollDefenseSources,
+      ...monsterAttackRollModeSources(
+        action,
+        actor,
+        combatantConditions(state, target),
+        targetHitPoints,
+        effectiveHitPointMaximum(state, target),
+      ),
+    ],
+    target: {
+      hitPoints: targetHitPoints,
+      usesDeathSaves: targetState.profile.rules.usesDeathSaves,
+    },
+    unresolvedReasons,
+  });
 }
 
 function activateRecklessAttack(
@@ -2777,7 +2896,7 @@ function applyDamage(
     } else if (before.profile.rules.usesDeathSaves) {
       const failures =
         (deathSaves?.failures ?? 0) +
-        (critical ? NATURAL_ONE_FAILURES : DEATH_SAVE_SINGLE_MARK);
+        deathSaveFailuresFromZeroHitPointDamage(critical);
       if (failures >= DEATH_SAVE_RESOLUTION_COUNT) {
         life = 'dead';
         deathSaves = null;
@@ -6350,6 +6469,15 @@ function processAttack(
   }
   const actorPosition = token(context.state, command.actor).position;
   const targetPosition = token(context.state, command.target).position;
+  if (opportunityTrigger === null && command.tacticalRange !== undefined) {
+    const range = tacticalRangeVerdict(actorPosition, targetPosition, command.tacticalRange);
+    if (range.status === 'unresolved') {
+      throw new EncounterRuleError('validation', 'The attack long range is unresolved.');
+    }
+    if (!range.legal) {
+      throw new EncounterRuleError('validation', 'The target is out of attack range.');
+    }
+  }
   if (
     opportunityTrigger === null &&
     (!hasLineOfSight(context.state, actorPosition, targetPosition) ||

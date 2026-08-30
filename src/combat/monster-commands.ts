@@ -1,11 +1,13 @@
 import type { EncounterCommand } from './events';
+import type { AppliedCondition } from './conditions';
 import type { DamageRequest, RollMode } from './resolution';
 import type {
   MonsterAttackAction,
   MonsterOnHitEffect,
   MonsterSavingThrowAction,
 } from './statblock';
-import { damageType, dieSides, type CombatantId } from './values';
+import type { AttackRollModeSource, TacticalAttackRange } from './tactical-evaluator';
+import { damageType, dieSides, feet, type CombatantId } from './values';
 
 export function monsterActionDamage(
   terms: MonsterAttackAction['damage'] | MonsterSavingThrowAction['failure']['damage'],
@@ -22,6 +24,48 @@ export function monsterActionDamage(
     critical: false,
     responses: [],
   };
+}
+
+export function monsterAttackRange(action: MonsterAttackAction): TacticalAttackRange {
+  switch (action.delivery.kind) {
+    case 'melee': return { kind: 'melee', reachFeet: feet(action.delivery.reachFeet) };
+    case 'ranged': return {
+      kind: 'ranged',
+      normalRangeFeet: feet(action.delivery.rangeFeet),
+      longRangeFeet: action.delivery.longRangeFeet.kind === 'present'
+        ? feet(action.delivery.longRangeFeet.value)
+        : null,
+    };
+    case 'melee_or_ranged': return {
+      kind: 'melee_or_ranged',
+      reachFeet: feet(action.delivery.reachFeet),
+      normalRangeFeet: feet(action.delivery.rangeFeet),
+      longRangeFeet: feet(action.delivery.longRangeFeet),
+    };
+  }
+}
+
+/** Intrinsic statblock roll-mode clauses, evaluated against current target state. */
+export function monsterAttackRollModeSources(
+  action: MonsterAttackAction,
+  actor: CombatantId,
+  targetConditions: readonly AppliedCondition[],
+  targetHitPoints: number,
+  targetHitPointMaximum: number,
+): readonly AttackRollModeSource[] {
+  const clause = action.attackRollAdvantage;
+  if (clause === null) return [];
+  switch (clause.kind) {
+    case 'target_grappled_by_attacker':
+      return targetConditions.some((condition) =>
+        condition.name === 'Grappled' && condition.source === actor)
+        ? [{ mode: 'advantage', reason: 'target_grappled_by_attacker_advantage' }]
+        : [];
+    case 'target_not_full_hit_points':
+      return targetHitPoints < targetHitPointMaximum
+        ? [{ mode: 'advantage', reason: 'target_not_full_hit_points_advantage' }]
+        : [];
+  }
 }
 
 /**
@@ -68,6 +112,7 @@ export function monsterAttackCommand(
     rollMode,
     attackerCanSeeTarget: true,
     targetCanSeeAttacker: true,
+    tacticalRange: monsterAttackRange(action),
     damage: monsterActionDamage(action.damage),
     attackId: action.id,
     monsterOnHit: executableMonsterOnHitEffects(action.onHit),

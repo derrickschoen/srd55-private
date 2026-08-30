@@ -12,6 +12,7 @@ import type { EffectApplication, EffectPayload, TurnBoundary } from './effects';
 import type { PersistentAreaHook, PersistentAreaInput, PersistentAreaOrigin } from './persistent-areas';
 import type { SpellCastCommand } from './spells/types';
 import type { MonsterOnHitEffect } from './statblock';
+import type { TacticalAttackRange } from './tactical-evaluator';
 import type { AreaTemplate } from './templates';
 import type { CombatantId, EncounterEffectId, Feet, ItemId, LimitedResourcePoolId, ObjectTargetId, PersistentAreaId, WorldObjectId } from './values';
 import type { LightLevel, WorldObject, WorldOperation } from './world-objects';
@@ -159,6 +160,8 @@ export type EncounterCommand =
       readonly rollMode: RollMode;
       readonly attackerCanSeeTarget: boolean;
       readonly targetCanSeeAttacker: boolean;
+      /** Typed delivery ranges let resolution apply the same range verdict used by planning. */
+      readonly tacticalRange?: TacticalAttackRange;
       readonly requiresSight?: true;
       readonly damage: DamageRequest;
       /** Present for attacks selected from a typed party-pack attack form. */
@@ -195,6 +198,8 @@ export type EncounterCommand =
       readonly rollMode: RollMode;
       readonly attackerCanSeeTarget: boolean;
       readonly targetCanSeeAttacker: boolean;
+      /** Typed delivery ranges let resolution apply the same range verdict used by planning. */
+      readonly tacticalRange?: TacticalAttackRange;
       readonly requiresSight?: true;
       readonly damage: DamageRequest;
       /** Required while a form replacement limits attacks to its statblock. */

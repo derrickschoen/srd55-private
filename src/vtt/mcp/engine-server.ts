@@ -2,6 +2,7 @@ import { canonicalJson } from '../../commands/canonical-json';
 import type { EncounterState } from '../../combat/encounter';
 import { gridDistance, type GridCell } from '../../combat/grid';
 import type { MonsterAttackAction } from '../../combat/statblock';
+import { TACTICAL_EVALUATOR_POLICY } from '../../combat/tactical-evaluator';
 import { combatantId, encounterSessionId, type CombatantId } from '../../combat/values';
 import { sha256 } from '../../crypto/sha256';
 import {
@@ -326,9 +327,32 @@ function expectationFor(state: EncounterState, queries: EngineQueryPort, actorId
   const action = queries.actions(state, actorId).find((candidate): candidate is MonsterAttackAction => candidate.kind === 'attack' && candidate.id === actionId);
   const target = targetId === null ? null : queries.combatant(state, targetId);
   if (action === undefined || target === null) return null;
-  const probability = Math.max(0.05, Math.min(0.95, (21 + action.attackBonus - target.profile.rules.armorClass) / 20));
-  const average = action.damage.filter((term) => term.trigger.kind === 'always').reduce((sum, term) => sum + term.average, 0);
-  return { resolvable: true, outcome_probability: probability, expected_value: probability * average, metric: 'damage', assumption_codes: ['NORMAL_ATTACK_ROLL', 'ALWAYS_DAMAGE_TERMS'] };
+  const evaluation = queries.tacticalAttack(state, actorId, target.profile.id, action.id);
+  if (evaluation === null) return null;
+  if (
+    evaluation.probabilities.status === 'unresolved' ||
+    evaluation.damage.status === 'unresolved' ||
+    evaluation.unresolved.length > 0
+  ) {
+    return {
+      resolvable: false,
+      outcome_probability: null,
+      critical_probability: null,
+      expected_value: null,
+      metric: 'damage',
+      assumption_codes: evaluation.unresolved,
+      policy: evaluation.policy,
+    };
+  }
+  return {
+    resolvable: true,
+    outcome_probability: evaluation.probabilities.hit,
+    critical_probability: evaluation.probabilities.critical,
+    expected_value: evaluation.damage.expectedDamage,
+    metric: 'damage',
+    assumption_codes: evaluation.rollMode.reasons,
+    policy: evaluation.policy,
+  };
 }
 function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsule: EngineStateCapsule, actorId: CombatantId, includeExpectations: boolean, includeUnavailable: boolean): readonly Readonly<Record<string, unknown>>[] {
   const projected = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
@@ -673,9 +697,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const targetId = 'target' in choice && choice.target !== null ? queries.resolveTarget(state, actorId, choice.target) : null;
         const actionId = choice.kind === 'attack' || choice.kind === 'use_action' ? choice.actionId : choice.kind === 'cast_spell' ? choice.spellId : choice.kind;
         const expectation = expectationFor(state, queries, actorId, actionId, targetId);
-        return expectation === null
-          ? { candidate_id: stringField(candidate, 'candidate_id'), resolvable: false, metrics: { outcome_probability: null, expected_damage: null, expected_healing: null, resource_cost: null, distribution: null }, assumptions: [], refusals: [{ code: 'EXPECTATION_UNAVAILABLE', summary: 'The canonical mechanic does not expose an analytic expectation.' }] }
-          : { candidate_id: stringField(candidate, 'candidate_id'), resolvable: true, metrics: { outcome_probability: expectation['outcome_probability'], expected_damage: expectation['expected_value'], expected_healing: null, resource_cost: 0, distribution: includeDistribution ? [{ outcome: 0, probability: 1 - Number(expectation['outcome_probability']) }, { outcome: Number(expectation['expected_value']) / Number(expectation['outcome_probability']), probability: expectation['outcome_probability'] }] : null }, assumptions: expectation['assumption_codes'], refusals: [] };
+        return expectation === null || expectation['resolvable'] !== true
+          ? { candidate_id: stringField(candidate, 'candidate_id'), policy: TACTICAL_EVALUATOR_POLICY, resolvable: false, metrics: { outcome_probability: null, expected_damage: null, expected_healing: null, resource_cost: null, distribution: null }, assumptions: expectation?.['assumption_codes'] ?? [], refusals: [{ code: 'EXPECTATION_UNAVAILABLE', summary: 'The canonical mechanic does not expose an analytic expectation.' }] }
+          : { candidate_id: stringField(candidate, 'candidate_id'), policy: expectation['policy'], resolvable: true, metrics: { outcome_probability: expectation['outcome_probability'], expected_damage: expectation['expected_value'], expected_healing: null, resource_cost: 0, distribution: includeDistribution ? [{ outcome: 0, probability: 1 - Number(expectation['outcome_probability']) }, { outcome: Number(expectation['expected_value']) / Number(expectation['outcome_probability']), probability: expectation['outcome_probability'] }] : null }, assumptions: expectation['assumption_codes'], refusals: [] };
       }) };
     }
     if (name === 'engine.validate_intent') {

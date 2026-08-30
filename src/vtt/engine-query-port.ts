@@ -1,5 +1,5 @@
 import { combatantsAreAllies } from '../combat/allies';
-import { conditionSpeedPenaltyFeet } from '../combat/conditions';
+import { conditionSpeedPenaltyFeet, exhaustionPenalty, isIncapacitated } from '../combat/conditions';
 import { creatureSizes } from '../domain/enums';
 import type {
   EncounterCombatantState,
@@ -9,7 +9,16 @@ import type { AppliedCondition, ExhaustionLevel } from '../combat/conditions';
 import { gridDistance, type GridCell } from '../combat/grid';
 import { findPath, findPathToAny } from '../combat/movement';
 import { persistentAreaContains } from '../combat/persistent-areas';
-import { attackRangeVerdict } from '../combat/range';
+import type { EffectPayload, EncounterEffect } from '../combat/effects';
+import { monsterAttackRange, monsterAttackRollModeSources } from '../combat/monster-commands';
+import {
+  evaluateTacticalAttack,
+  tacticalRangeVerdict,
+  type AttackRollModeSource,
+  type TacticalAttackEvaluation,
+  type TacticalRangeBand,
+  type TacticalUnresolvedReason,
+} from '../combat/tactical-evaluator';
 import type { MonsterAction, MonsterAttackAction } from '../combat/statblock';
 import { lookupBundledMonster } from '../combat/statblocks/companions';
 import {
@@ -74,6 +83,9 @@ export type EngineReachResult =
       readonly legal: true;
       readonly distanceFeet: number;
       readonly rangeFeet: number;
+      readonly rangeBand: Exclude<TacticalRangeBand, 'out'>;
+      readonly normalRangeFeet: number;
+      readonly longRangeFeet: number | null;
     }
   | {
       readonly legal: false;
@@ -100,6 +112,12 @@ export interface EngineQueryPort {
   ): CombatantId | null;
   path(state: EncounterState, request: EnginePathRequest): EnginePathResult;
   reach(state: EncounterState, request: EngineReachRequest): EngineReachResult;
+  tacticalAttack(
+    state: EncounterState,
+    actorId: CombatantId,
+    targetId: CombatantId,
+    actionId: string,
+  ): TacticalAttackEvaluation | null;
   cover(state: EncounterState, actorId: CombatantId, targetId: CombatantId): {
     readonly tier: 'none' | 'half' | 'three_quarters' | 'total';
     readonly sourceIds: readonly string[];
@@ -110,6 +128,145 @@ export interface EngineQueryPort {
     readonly sense: 'normal_sight' | 'darkvision' | 'blindsight' | 'truesight' | 'unknown';
     readonly reason: string | null;
   } | null;
+}
+
+type PlanningRollDefenseEffect = EncounterEffect & {
+  readonly payload: Extract<EffectPayload, { readonly kind: 'roll_defense_modifier' }>;
+};
+
+function isPlanningRollDefenseEffect(effect: EncounterEffect): effect is PlanningRollDefenseEffect {
+  return effect.payload.kind === 'roll_defense_modifier';
+}
+
+function planningRollDefenseApplies(
+  state: EncounterState,
+  effect: PlanningRollDefenseEffect,
+  eligible: CombatantId,
+  opposing: CombatantId,
+): boolean {
+  const eligibility = effect.payload.eligibility;
+  switch (eligibility.kind) {
+    case 'effect_targets': return effect.targets.includes(eligible);
+    case 'source_against_effect_targets': return effect.source === eligible &&
+      effect.targets.includes(opposing);
+    case 'effect_targets_against_creatures_other_than_source': return effect.targets.includes(eligible) &&
+      opposing !== effect.source;
+    case 'allies_within_aura': {
+      const eligiblePosition = state.tokens.find((entry) => entry.combatantId === eligible)?.position;
+      const sourcePosition = state.tokens.find((entry) => entry.combatantId === effect.source)?.position;
+      return eligibility.savingThrowCause === 'any' &&
+        eligiblePosition !== undefined && sourcePosition !== undefined &&
+        combatantsAreAllies(state, eligible, effect.source) &&
+        gridDistance(eligiblePosition, sourcePosition) <= eligibility.radiusFeet;
+    }
+  }
+}
+
+function planningArmorClass(
+  state: EncounterState,
+  target: EncounterCombatantState,
+  attackerId: CombatantId,
+): number {
+  let bonus = 0;
+  let floor = 0;
+  let slowPenalty = 0;
+  for (const effect of state.effects) {
+    if (!effect.targets.includes(target.profile.id)) continue;
+    const payload = effect.payload;
+    if (payload.kind === 'armor_class_modifier') {
+      if ('minimum' in payload) floor = Math.max(floor, payload.minimum);
+      else if (payload.againstAttacker === undefined || payload.againstAttacker === attackerId) {
+        bonus += payload.amount;
+      }
+    } else if (payload.kind === 'shield_defense') {
+      bonus += payload.armorClassBonus;
+    } else if (payload.kind === 'slow') {
+      slowPenalty = Math.max(slowPenalty, payload.armorClassPenalty);
+    } else if (
+      isPlanningRollDefenseEffect(effect) &&
+      effect.payload.scopes.includes('armor_class') &&
+      effect.payload.modifier.kind === 'flat' &&
+      planningRollDefenseApplies(state, effect, target.profile.id, attackerId)
+    ) {
+      bonus += effect.payload.modifier.amount;
+    }
+  }
+  return Math.max(rulesFor(target).armorClass + bonus - slowPenalty, floor);
+}
+
+function planningAttackRollSources(
+  state: EncounterState,
+  action: MonsterAttackAction,
+  actorId: CombatantId,
+  targetId: CombatantId,
+  visible: { readonly visible: boolean; readonly reciprocal: boolean },
+): readonly AttackRollModeSource[] {
+  const sources: AttackRollModeSource[] = [];
+  if (!visible.visible) {
+    sources.push({ mode: 'disadvantage', reason: 'unseen_target_disadvantage' });
+  }
+  if (!visible.reciprocal) {
+    sources.push({ mode: 'advantage', reason: 'unseen_attacker_advantage' });
+  }
+  const actorPosition = state.tokens.find((entry) => entry.combatantId === actorId)?.position;
+  const targetPosition = state.tokens.find((entry) => entry.combatantId === targetId)?.position;
+  const distance = actorPosition === undefined || targetPosition === undefined
+    ? Number.POSITIVE_INFINITY
+    : gridDistance(actorPosition, targetPosition);
+  const actor = combatant(state, actorId);
+  const piercesVisualIllusion = actor !== null && rulesFor(actor).senses.some((sense) =>
+    (sense.kind === 'blindsight' || sense.kind === 'truesight') && distance <= sense.rangeFeet);
+  for (const effect of state.effects) {
+    const payload = effect.payload;
+    if (payload.kind === 'faerie_fire' && effect.targets.includes(targetId)) {
+      sources.push({ mode: payload.attackModeAgainstTarget, reason: 'faerie_fire_advantage' });
+      continue;
+    }
+    if (
+      payload.kind === 'attacks_against_target_roll_mode' &&
+      effect.targets.includes(targetId) &&
+      !piercesVisualIllusion
+    ) {
+      sources.push({ mode: payload.mode, reason: 'effect_disadvantage' });
+      continue;
+    }
+    if (payload.kind === 'attack_roll_mode_modifier') {
+      const appliesTo = payload.appliesTo;
+      const applies =
+        ((appliesTo.kind === 'next_attack_against_target' ||
+          appliesTo.kind === 'attacks_against_target') && effect.targets.includes(targetId)) ||
+        ((appliesTo.kind === 'next_attack_by_target' ||
+          appliesTo.kind === 'all_attacks_by_target') && effect.targets.includes(actorId)) ||
+        (appliesTo.kind === 'attacks_by_target' && effect.targets.includes(actorId) &&
+          appliesTo.attackIds.includes(action.id));
+      if (applies) sources.push({
+        mode: payload.mode,
+        reason: payload.mode === 'advantage' ? 'effect_advantage' : 'effect_disadvantage',
+      });
+      continue;
+    }
+    if (!isPlanningRollDefenseEffect(effect) || effect.payload.modifier.kind !== 'roll_mode') continue;
+    const made = effect.payload.scopes.includes('attack_rolls_made') &&
+      planningRollDefenseApplies(state, effect, actorId, targetId);
+    const against = effect.payload.scopes.includes('attack_rolls_against') &&
+      planningRollDefenseApplies(state, effect, targetId, actorId);
+    if (made || against) sources.push({
+      mode: effect.payload.modifier.mode,
+      reason: effect.payload.modifier.mode === 'advantage'
+        ? 'roll_defense_advantage'
+        : 'roll_defense_disadvantage',
+    });
+  }
+  const target = combatant(state, targetId);
+  if (
+    target?.turn.dodging === true &&
+    visible.reciprocal &&
+    enginePlanningSpeedFeet(state, targetId) > 0 &&
+    !isIncapacitated(enginePlanningConditions(state, targetId))
+  ) {
+    sources.push({ mode: 'disadvantage', reason: 'dodge_disadvantage' });
+  }
+  return sources;
 }
 
 function cellKey(cell: GridCell): string {
@@ -835,18 +992,42 @@ function reach(state: EncounterState, request: EngineReachRequest): EngineReachR
   if (action === undefined) codes.push('action_absent');
   const rangeFeet = action === undefined ? null : engineActionRangeFeet(actions, action);
   if (action !== undefined && rangeFeet === null) codes.push('action_range_unresolved');
-  if (codes.length > 0 || origin === undefined || targetPosition === undefined || rangeFeet === null) {
+  if (
+    codes.length > 0 ||
+    action === undefined ||
+    origin === undefined ||
+    targetPosition === undefined ||
+    rangeFeet === null
+  ) {
     return { legal: false, codes };
   }
   const distanceFeet = gridDistance(origin, targetPosition);
-  const verdict = action?.kind === 'attack' && action.delivery.kind === 'melee'
-    ? attackRangeVerdict(origin, targetPosition, { kind: 'melee', reach: feet(rangeFeet) })
-    : attackRangeVerdict(origin, targetPosition, {
-        kind: 'ranged', normal: feet(rangeFeet), long: feet(rangeFeet),
-      });
-  return verdict.kind === 'illegal'
-    ? { legal: false, codes: ['target_out_of_range'] }
-    : { legal: true, distanceFeet, rangeFeet };
+  if (action.kind === 'attack') {
+    const verdict = tacticalRangeVerdict(origin, targetPosition, monsterAttackRange(action));
+    if (verdict.status === 'unresolved') {
+      return { legal: false, codes: ['action_range_unresolved'] };
+    }
+    if (!verdict.legal || verdict.band === 'out') {
+      return { legal: false, codes: ['target_out_of_range'] };
+    }
+    const projected = projectedAttackRanges(action);
+    return {
+      legal: true,
+      distanceFeet,
+      rangeFeet,
+      rangeBand: verdict.band,
+      normalRangeFeet: projected.normalRangeFeet ?? rangeFeet,
+      longRangeFeet: projected.longRangeFeet,
+    };
+  }
+  return {
+    legal: true,
+    distanceFeet,
+    rangeFeet,
+    rangeBand: 'normal',
+    normalRangeFeet: rangeFeet,
+    longRangeFeet: null,
+  };
 }
 
 const engineQueryPort: EngineQueryPort = {
@@ -857,6 +1038,86 @@ const engineQueryPort: EngineQueryPort = {
   resolveTarget,
   path,
   reach,
+  tacticalAttack(state, actorId, targetId, actionId) {
+    const actor = combatant(state, actorId);
+    const target = combatant(state, targetId);
+    const actorPosition = state.tokens.find((entry) => entry.combatantId === actorId)?.position;
+    const targetPosition = state.tokens.find((entry) => entry.combatantId === targetId)?.position;
+    const action = monsterActions(state, actorId).find(
+      (candidate): candidate is MonsterAttackAction =>
+        candidate.kind === 'attack' && candidate.id === actionId,
+    );
+    if (
+      actor === null ||
+      target === null ||
+      actorPosition === undefined ||
+      targetPosition === undefined ||
+      action === undefined
+    ) return null;
+    const visible = engineQueryPort.visibility(state, actorId, targetId) ?? {
+      visible: false,
+      reciprocal: false,
+    };
+    const cover = coverBetweenObjects(state.worldObjects, actorPosition, targetPosition);
+    const coverBonus = cover === 'half' ? 2 : cover === 'three_quarters' ? 5 : 0;
+    const madeRollDefense = state.effects.filter((effect): effect is PlanningRollDefenseEffect =>
+      isPlanningRollDefenseEffect(effect) &&
+      effect.payload.scopes.includes('attack_rolls_made') &&
+      planningRollDefenseApplies(state, effect, actorId, targetId));
+    const flatAttackBonus = madeRollDefense.reduce((sum, effect) =>
+      effect.payload.kind === 'roll_defense_modifier' && effect.payload.modifier.kind === 'flat'
+        ? sum + effect.payload.modifier.amount
+        : sum, 0);
+    const randomAttackModifier = madeRollDefense.some((effect) =>
+      effect.payload.modifier.kind === 'die_rider') || state.effects.some((effect) => {
+      if (!effect.targets.includes(actorId) || isPlanningRollDefenseEffect(effect)) return false;
+      const payload = effect.payload;
+      return payload.kind === 'attack_roll_modifier' ||
+        (payload.kind === 'd20_test_modifier' && payload.tests.includes('attack_roll'));
+    });
+    const unresolved: TacticalUnresolvedReason[] = [
+      ...(randomAttackModifier ? ['random_attack_modifier_unresolved' as const] : []),
+      ...(action.damage.some((term) => term.trigger.kind !== 'always')
+        ? ['conditional_damage_rider_unresolved' as const]
+        : []),
+      ...(cover === 'total' ? ['target_has_total_cover' as const] : []),
+    ];
+    return evaluateTacticalAttack({
+      attackerId: actorId,
+      targetId,
+      attackerPosition: actorPosition,
+      targetPosition,
+      range: monsterAttackRange(action),
+      attackBonus:
+        action.attackBonus +
+        exhaustionPenalty(enginePlanningConditions(state, actorId)) +
+        flatAttackBonus,
+      targetArmorClass: planningArmorClass(state, target, actorId) + coverBonus,
+      criticalFloor: 20,
+      damageTerms: action.damage
+        .filter((term) => term.trigger.kind === 'always')
+        .map((term) => ({ dice: term.dice })),
+      attackerConditions: enginePlanningConditions(state, actorId),
+      targetConditions: enginePlanningConditions(state, targetId),
+      attackerCanSeeTarget: visible.visible,
+      targetCanSeeAttacker: visible.reciprocal,
+      rollModeSources: [
+        ...planningAttackRollSources(state, action, actorId, targetId, visible),
+        ...monsterAttackRollModeSources(
+          action,
+          actorId,
+          enginePlanningConditions(state, targetId),
+          enginePlanningHitPoints(state, targetId),
+          enginePlanningHitPointMaximum(state, targetId),
+        ),
+      ],
+      target: {
+        hitPoints: enginePlanningHitPoints(state, targetId),
+        usesDeathSaves: rulesFor(target).usesDeathSaves,
+      },
+      unresolvedReasons: unresolved,
+    });
+  },
   cover(state, actorId, targetId) {
     const from = state.tokens.find((token) => token.combatantId === actorId)?.position;
     const to = state.tokens.find((token) => token.combatantId === targetId)?.position;

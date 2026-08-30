@@ -242,11 +242,32 @@ function targetActionResolution(
   if (rangeFeet === null) {
     return { valid: false, code: 'ACTION_RANGE_UNRESOLVED', summary: `${actorId}: action range is unresolved` };
   }
+  const currentReach = queries.reach(state, { actorId, targetId, actionId });
+  const currentPositionFitsEngagement = engagement.stance !== 'maintain_range' ||
+    gridDistance(origin, targetPosition) > target.profile.rules.reach;
+  if (currentReach.legal && currentPositionFitsEngagement) {
+    return {
+      valid: true,
+      mechanics: {
+        actorId,
+        actionId,
+        targetId,
+        movementCostFeet: 0,
+        path: [],
+        finalPosition: origin,
+      },
+    };
+  }
   const positions: GridCell[] = [];
   for (let row = 0; row < state.bounds.rows; row += 1) {
     for (let column = 0; column < state.bounds.columns; column += 1) {
       const candidate = { column, row };
-      if (gridDistance(candidate, targetPosition) > rangeFeet) continue;
+      if (!queries.reach(state, {
+        actorId,
+        targetId,
+        actionId,
+        origin: candidate,
+      }).legal) continue;
       if (engagement.stance === 'hold_position' && gridDistance(candidate, origin) > 0) continue;
       if (
         engagement.stance === 'maintain_range' &&

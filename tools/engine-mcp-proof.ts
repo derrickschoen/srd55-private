@@ -17,7 +17,14 @@ function normalized(path: string): string {
 }
 
 async function existingModule(candidate: string): Promise<string | null> {
-  for (const path of [candidate, `${candidate}.ts`, `${candidate}.tsx`, resolve(candidate, 'index.ts')]) {
+  const queryIndex = candidate.indexOf('?');
+  const pathCandidate = queryIndex === -1 ? candidate : candidate.slice(0, queryIndex);
+  for (const path of [
+    pathCandidate,
+    `${pathCandidate}.ts`,
+    `${pathCandidate}.tsx`,
+    resolve(pathCandidate, 'index.ts'),
+  ]) {
     try {
       if ((await stat(path)).isFile()) return resolve(path);
     } catch {

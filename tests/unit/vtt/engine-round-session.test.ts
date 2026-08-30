@@ -118,6 +118,63 @@ function completeDodge(session: EngineRoundSession, actorId: CombatantId) {
 }
 
 describe('authoritative engine round session', () => {
+  it('applies canonical long-range disadvantage during attack resolution', () => {
+    const state = fixedPositions(new Map([
+      [ARCHER_ID, { column: 0, row: 0 }],
+      [CLERIC_ID, { column: 31, row: 0 }],
+    ]));
+    const archer = authorized(state, attackIntent(ARCHER_ID, 'longbow', CLERIC_ID));
+    const session = new EngineRoundSession(
+      state,
+      mulberry32(8_274_114),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    session.applyResolvedMechanics([archer], null);
+
+    const attack = session.currentState().eventLog.find((event) =>
+      event.type === 'attack_resolved' &&
+      event.actor === ARCHER_ID &&
+      event.target === CLERIC_ID);
+    expect(attack?.type).toBe('attack_resolved');
+    if (attack?.type !== 'attack_resolved') throw new Error('Missing long-range attack event.');
+    // 31 grid intervals are 155 ft: beyond Longbow normal 150, within long 600.
+    expect(attack.attack.roll.mode).toBe('disadvantage');
+    expect(attack.attack.roll.faces).toHaveLength(2);
+  });
+
+  it('applies the evaluator straight roll for an unconscious prone target beyond 5 feet', () => {
+    const positioned = fixedPositions(new Map([
+      [ARCHER_ID, { column: 0, row: 0 }],
+      [FOCUS_ID, { column: 6, row: 0 }],
+    ]));
+    const state: EncounterState = {
+      ...positioned,
+      combatants: positioned.combatants.map((candidate) => candidate.profile.id === FOCUS_ID
+        ? {
+            ...candidate,
+            hitPoints: 0,
+            life: 'dying',
+            deathSaves: { successes: 0, failures: 0 },
+          }
+        : candidate),
+    };
+    const archer = authorized(state, attackIntent(ARCHER_ID, 'longbow', FOCUS_ID));
+    const session = new EngineRoundSession(
+      state,
+      mulberry32(8_274_115),
+      { kind: 'unattended', askDefault: 'decline' },
+    );
+    session.applyResolvedMechanics([archer], null);
+
+    const attack = session.currentState().eventLog.find((event) =>
+      event.type === 'attack_resolved' && event.actor === ARCHER_ID);
+    expect(attack?.type).toBe('attack_resolved');
+    if (attack?.type !== 'attack_resolved') throw new Error('Missing attack against dying target.');
+    // Unconscious grants Advantage; its Prone state imposes Disadvantage beyond 5 feet.
+    expect(attack.attack.roll.mode).toBe('normal');
+    expect(attack.attack.roll.faces).toHaveLength(1);
+  });
+
   it('honors exact per-combatant order without skipping PCs and enforces maximal monster mini-blocks', () => {
     const session = new EngineRoundSession(
       segmentedState(),
@@ -368,12 +425,12 @@ describe('authoritative engine round session', () => {
       [KILLER_ID, { column: 10, row: 0 }],
       [ARCHER_ID, { column: 0, row: 0 }],
       [FOCUS_ID, { column: 30, row: 0 }],
-    ]));
+    ]), 130);
     const archer = authorized(authorizationState, attackIntent(ARCHER_ID, 'longbow', FOCUS_ID));
     const displacedState: EncounterState = {
       ...authorizationState,
       tokens: authorizationState.tokens.map((token) => token.combatantId === FOCUS_ID
-        ? { ...token, position: { column: 35, row: 0 } }
+        ? { ...token, position: { column: 121, row: 0 } }
         : token),
     };
     const earlierDodge = authorized(displacedState, {
@@ -422,7 +479,7 @@ describe('authoritative engine round session', () => {
     const authorizationState = fixedPositions(new Map([
       [ARCHER_ID, { column: 0, row: 0 }],
       [FOCUS_ID, { column: 4, row: 0 }],
-    ]));
+    ]), 130);
     const intent: EngineTurnIntent = {
       ...attackIntent(ARCHER_ID, 'longbow', FOCUS_ID),
       fallback: {
@@ -438,7 +495,7 @@ describe('authoritative engine round session', () => {
     const displacedState: EncounterState = {
       ...authorizationState,
       tokens: authorizationState.tokens.map((token) => token.combatantId === FOCUS_ID
-        ? { ...token, position: { column: 35, row: 0 } }
+        ? { ...token, position: { column: 121, row: 0 } }
         : token),
     };
     const session = new EngineRoundSession(displacedState, mulberry32(31), { kind: 'unattended', askDefault: 'decline' });
