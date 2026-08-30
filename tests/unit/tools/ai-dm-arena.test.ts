@@ -107,6 +107,23 @@ class OrderingNullAdapter implements AgentSessionAdapter {
 }
 
 describe('AI-DM arena', () => {
+  it('defaults the combat model and propagates an explicit initiative-segment selection', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-combat-model-'));
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'), '--dry-run',
+    ] as const;
+
+    expect(parseArenaArgs(common).combatModel).toBe('monster_block_v1');
+    const segments = parseArenaArgs([...common, '--combat-model', 'initiative_segments_v1']);
+    expect(segments.combatModel).toBe('initiative_segments_v1');
+    await expect(runArena(segments)).rejects.toThrow(
+      'NOT_IMPLEMENTED: initiative_segments_v1 conversation execution',
+    );
+    expect(() => parseArenaArgs([...common, '--combat-model', 'unknown-model']))
+      .toThrow('--combat-model must be monster_block_v1 or initiative_segments_v1');
+  });
+
   it('parses plain and per-arm escalation forms while retaining global fallback', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-parse-'));
     const config = parseArenaArgs([

@@ -70,6 +70,8 @@ export const CONVERSATION_CLIS = ['codex', 'claude-code', 'local-openai'] as con
 export type ConversationCli = (typeof CONVERSATION_CLIS)[number];
 export const CONVERSATION_EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const;
 export type ConversationEffort = (typeof CONVERSATION_EFFORTS)[number];
+export const COMBAT_MODELS = ['monster_block_v1', 'initiative_segments_v1'] as const;
+export type CombatModel = (typeof COMBAT_MODELS)[number];
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -81,6 +83,7 @@ const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
 const RULES_SOURCE = { get: () => null } as const;
 
 export interface ConversationConfig {
+  readonly combatModel: CombatModel;
   readonly fixturesPath: string;
   readonly rooms: number;
   readonly rounds: number;
@@ -264,6 +267,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
       '--fixtures', '--rooms', '--rounds', '--reps', '--cli', '--model', '--effort',
       '--escalation-model', '--escalation-effort',
       '--out', '--cli-bin', '--timeout-ms', '--kb', '--reaction-ask-default',
+      '--combat-model',
       '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
@@ -321,7 +325,12 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
     throw new TypeError('--reaction-ask-default must be decline or take.');
   }
+  const combatModel = values.get('--combat-model') ?? 'monster_block_v1';
+  if (!COMBAT_MODELS.includes(combatModel as CombatModel)) {
+    throw new TypeError('--combat-model must be monster_block_v1 or initiative_segments_v1.');
+  }
   return {
+    combatModel: combatModel as CombatModel,
     fixturesPath: resolve(values.get('--fixtures') ?? 'tests/fixtures/arena-basis'),
     rooms: positiveInteger(values.get('--rooms') ?? '12', '--rooms'),
     rounds: positiveInteger(values.get('--rounds') ?? values.get('--reps') ?? '1', '--rounds'),
@@ -1250,6 +1259,9 @@ async function roomStates(config: ConversationConfig, options: ConversationRunOp
 }
 
 export async function runConversation(config: ConversationConfig, options: ConversationRunOptions = {}): Promise<ConversationRunResult> {
+  if (config.combatModel === 'initiative_segments_v1') {
+    throw new Error('NOT_IMPLEMENTED: initiative_segments_v1 conversation execution is introduced in Phase 2 slice 4.');
+  }
   const knowledgeBase = await loadKnowledgeBase(config);
   const repoCommit = await readRepoCommit(config.cwd);
   await writeFile(config.outPath, '', 'utf8');

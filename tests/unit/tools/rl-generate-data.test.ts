@@ -41,6 +41,7 @@ describe('RL arena batch generator', () => {
       config.captureRlData && config.kbPath?.endsWith('/tests/fixtures/ai-dm-kb/k6.txt') === true,
     )).toBe(true);
     expect(firstCalls.every((config) => config.generateMissingRooms)).toBe(true);
+    expect(firstCalls.every((config) => config.combatModel === 'monster_block_v1')).toBe(true);
     expect(heartbeats).toContain(`start batches=1 reps=2 target=${targetDirectory}`);
     expect(heartbeats).toContain('batch start=3943001 end=3943003');
     expect(heartbeats).toContain('seed=3943002 status=start');
@@ -57,6 +58,7 @@ describe('RL arena batch generator', () => {
       adapterCliVersion: null,
       kbId: 'K6',
       basis: 'standard',
+      combatModel: 'monster_block_v1',
       toolArgv: args,
     });
     expect(firstManifest?.kbHash).toBe(createHash('sha256').update(readFileSync(
@@ -80,6 +82,36 @@ describe('RL arena batch generator', () => {
       join(targetDirectory, 'batch-3943001-3943003.manifest.json'),
       'utf8',
     ))).toEqual(resumedManifest);
+  });
+
+  it('records combat model propagation and hard-errors on a resume mismatch', async () => {
+    const targetDirectory = mkdtempSync(join(tmpdir(), 'd416-combat-model-manifest-'));
+    const common = [
+      '--seed-range', '7000001-7000001',
+      '--reps', '1',
+      '--target-dir', targetDirectory,
+    ] as const;
+    const calls: ArenaConfig[] = [];
+    const runner: ArenaBatchRunner = async (config) => {
+      calls.push(config);
+      return [{ outcome: 'authorized', serviceNull: false, flapRetries: 0 }];
+    };
+
+    const [manifest] = await generateData(parseGenerateDataArgs([
+      ...common, '--combat-model', 'initiative_segments_v1',
+    ]), { arenaRunner: runner, heartbeat: () => undefined });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.combatModel).toBe('initiative_segments_v1');
+    expect(manifest?.combatModel).toBe('initiative_segments_v1');
+    await expect(generateData(parseGenerateDataArgs([
+      ...common, '--combat-model', 'monster_block_v1', '--resume',
+    ]), { arenaRunner: runner, heartbeat: () => undefined })).rejects.toThrow(
+      'does not match this batch configuration',
+    );
+    expect(() => parseGenerateDataArgs([
+      ...common, '--combat-model', 'unknown-model',
+    ])).toThrow('--combat-model must be monster_block_v1 or initiative_segments_v1');
   });
 
   it('generates an unfrozen seed deterministically and runs it through the simulated arena', { timeout: 30_000 }, async () => {

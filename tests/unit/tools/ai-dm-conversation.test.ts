@@ -1003,6 +1003,14 @@ describe('AI-DM engine MCP conversation runner', () => {
   it('admits the active process and local OpenAI conversation adapters', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-cli-'));
     const outPath = join(directory, 'rows.jsonl');
+    expect(parseConversationArgs(['--rooms', '1', '--out', outPath]).combatModel)
+      .toBe('monster_block_v1');
+    expect(parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--combat-model', 'initiative_segments_v1',
+    ]).combatModel).toBe('initiative_segments_v1');
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--combat-model', 'unknown-model',
+    ])).toThrow('--combat-model must be monster_block_v1 or initiative_segments_v1');
     expect(parseConversationArgs(['--rooms', '1', '--out', outPath, '--cli', 'claude-code']).cli)
       .toBe('claude-code');
     expect(() => parseConversationArgs(['--rooms', '1', '--out', outPath, '--cli', 'pi']))
@@ -1043,5 +1051,17 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(() => parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--kb', 'content/cc-by-sa/forbidden.txt',
     ])).toThrow('--kb cannot use content/cc-by-sa');
+  });
+
+  it('refuses initiative-segment execution explicitly until the later execution slice', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-not-implemented-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    await expect(runConversation(config)).rejects.toThrow(
+      'NOT_IMPLEMENTED: initiative_segments_v1 conversation execution',
+    );
   });
 });

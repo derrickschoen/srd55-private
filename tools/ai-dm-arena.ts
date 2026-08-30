@@ -4,11 +4,13 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
   CONVERSATION_CLIS,
   CONVERSATION_EFFORTS,
+  COMBAT_MODELS,
   runConversation,
   type ConversationCli,
   type ConversationEffort,
   type ConversationRunOptions,
   type ConversationTokenCounts,
+  type CombatModel,
 } from './ai-dm-conversation';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
 import type { AgentSessionAdapter } from '../src/vtt/agent-session';
@@ -28,6 +30,7 @@ export interface ArenaArm {
 }
 
 export interface ArenaConfig {
+  readonly combatModel: CombatModel;
   readonly rooms: number;
   readonly reps: number;
   readonly seed: number;
@@ -138,6 +141,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--escalation-model', '--escalation-effort',
       '--cli-bin', '--timeout-ms', '--kb',
       '--reaction-ask-default',
+      '--combat-model',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
@@ -203,6 +207,10 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (!ARENA_BASES.includes(basis as ArenaBasis)) {
     throw new TypeError('--basis must be standard or hard.');
   }
+  const combatModel = values.get('--combat-model') ?? 'monster_block_v1';
+  if (!COMBAT_MODELS.includes(combatModel as CombatModel)) {
+    throw new TypeError('--combat-model must be monster_block_v1 or initiative_segments_v1.');
+  }
   const arms = rawArms.map((raw): ArenaArm => {
     const [label, armModel, armEffort, armEscalationModel, armEscalationEffort, extra] = raw.split(':');
     if (label === undefined || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) ||
@@ -238,6 +246,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     throw new TypeError('--arm is only valid with --interleave.');
   }
   return {
+    combatModel: combatModel as CombatModel,
     rooms: positiveInteger(values.get('--rooms') ?? '', '--rooms'),
     reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
     seed,
@@ -354,6 +363,7 @@ function conversationConfig(
   },
 ): import('./ai-dm-conversation').ConversationConfig {
   return {
+    combatModel: config.combatModel,
     fixturesPath: basisFixturesPath(config),
     rooms: overrides.rooms,
     rounds: overrides.rounds,
