@@ -7,6 +7,31 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D418.3 — OWNER: four intel-program rulings from the consolidated question set (2026-08-30)
+
+Dual-blind question consolidation (Claude sealed 543701b7..., codex terra
+independent) presented four decisions; owner ruled:
+1. Q4 AUTO-SUBMIT: yes — after the single failed correction the engine
+   submits its fully-resolved legal default; such rounds carry a distinct
+   'engine_default' label and never count as model-authorized. (Supersedes
+   the D418.2 Q4 exclusion.)
+2. DYING-PC TARGETING: score it into defaults — engine team defaults WEIGHT
+   removing dying PCs; LLM may still override. Owner overrode both agents'
+   annotate-only recommendation; doc Q1 must be amended to match.
+3. RERUN PROTOCOL: preregistered package adopted, run TWICE (after
+   increment 5 and after increment 7): same 10 seeds, frozen artifacts,
+   3 paired reps per room, interleaved blinded judging, metrics reported
+   separately, and R1-10 rooms become a PERMANENT HOLDOUT excluded from all
+   future training data.
+4. WIRE CONTRACT: replace EngineTurnIntent now (increment 2), no
+   compatibility layer.
+Supervisor-adopted defaults (presented, no objection): override-with-typed-
+reason + frontier logging; 32KiB cap and preregistered KB-removal bar (no
+quality loss + p90 session-token reduction); v1 EV scores only oracle-tested
+mechanics, rest typed unresolved; concentration annotate-only in v1;
+phase 3 stays parked through the rerun; collection continues through
+context-format churn (era tags).
+
 ## D418.2 — OWNER: implement the intel program and rerun R1-10 (2026-08-30)
 
 Verbatim: "We should fix everything we found so far and rerun r1-10."
