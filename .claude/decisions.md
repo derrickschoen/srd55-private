@@ -7,6 +7,25 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D419 — OWNER: BG3 NPC-AI deep research in the private lane; parity floor + AI-DM exploit plugging (2026-08-30)
+
+Verbatim: "In a private repo lane. Do deep research into how the bg3 ai npcs
+work. Look at user reports of how they found the algorithm to work. Look
+especially hard for different ways players cheese the npc fights in ways the
+developers probably didn't want. I want the algorithm to do at least every
+thing the bg3 one does. And I want our ai fm to be good at spotting the
+weaknesses that players can exploit in the algorithm and plugging the holes
+using the ai dm agent(even if only some of the time it catches it. A random
+factor means that the fights wouldn't be won using the same exploit every
+time)." Execution: research runs in ~/PhpstormProjects/dnd-research-private/
+(outside all git trees per the licensing wall, D417); deliverables are raw
+sourced notes plus a digest with (a) BG3 NPC-AI capability inventory as our
+algorithmic parity floor, (b) exploit/cheese taxonomy from player reports,
+(c) per-exploit detection signals and counterplay hooks for the AI DM agent
+with a STOCHASTIC catch rate (owner: randomness prevents the same exploit
+winning every fight). Public-repo design work derived from this must be
+clean-room homebrew per D417.
+
 ## D418.4 — OWNER: engine computes kill-sequence probability across action allocations (2026-08-30)
 
 Verbatim: "Have the engine do the bless math both ways so we know how bless
