@@ -18,6 +18,28 @@ class), and elevation-derived cover/line-of-sight — but NO to-hit modifier.
 The tactical evaluator prices edge proximity and fall EV when elevation
 modeling arrives.
 
+## D421 — OWNER: Nimble 5e research in the private lane; prior-art and licensing screen for optional rules (2026-08-30)
+
+Verbatim (garbled tail preserved): "Research in a private lane all of the
+changes made by nimble 5e and see which ones were prior art and ok for us to
+us E as optional r Lies" — read as "...ok for us to use as optional rules."
+Research all changes Nimble 5e makes to 5e, in the private lane; classify
+each as prior art (common houserule predating Nimble) vs Nimble-original;
+screen licensing (what license the Nimble material carries, what is legally
+usable in a public CC-BY/CC0 repo); recommend candidates for OPTIONAL,
+typed, flag-gated rules in our engine. Anything adopted publicly passes the
+D417 clean-room gate; the research itself stays in dnd-research-private.
+
+## D417.2 — OWNER: elevation can grant cover (2026-08-30)
+
+Verbatim: "Remember that being behind high elevations can act as cover."
+Joins D417/D417.1 elevation scope: RAW cover (half/three-quarters/total per
+SRD) derived from elevation geometry and line-of-sight — being below a
+ledge or behind a rise grants cover against attackers without RAW support
+for any to-hit elevation bonus. The tactical evaluator's cover pricing
+(increment-1 foundation, G12 risks) must consume elevation-derived cover
+when elevation lands.
+
 ## D420 — OWNER: search memory, help-calling, and a known-failure-modes manifest for the DM (2026-08-30)
 
 Verbatim: "I want our engine to have a memory for if something goes
