@@ -45,9 +45,20 @@ export interface RoundIntentProposalEnvelope extends EngineProposalBinding {
   readonly submittedArguments?: Readonly<Record<string, unknown>>;
 }
 
+export interface PlanAdjustmentProposalEnvelope extends EngineProposalBinding {
+  readonly kind: 'plan_adjustment_proposal';
+  readonly proposalId: string;
+  readonly baseline_plan_hash: string;
+  /** Omitted open actors retain their baseline intent; [] explicitly keeps the entire baseline. */
+  readonly updates: readonly ProposedIntentResolution[];
+  /** Validated wire arguments retained for opt-in model-training provenance. */
+  readonly submittedArguments?: Readonly<Record<string, unknown>>;
+}
+
 export type EngineProposalEnvelope =
   | IntentProposalEnvelope
-  | RoundIntentProposalEnvelope;
+  | RoundIntentProposalEnvelope
+  | PlanAdjustmentProposalEnvelope;
 
 export interface NarrationEnvelope {
   readonly kind: 'narration';
@@ -108,26 +119,45 @@ function assertProposalActors(
   envelope: EngineProposalEnvelope,
 ): void {
   const capsule = source.read(reference);
-  if (capsule.request === null) throw new RangeError('No intent request is pending.');
+  const request = capsule.request;
+  if (request === null) throw new RangeError('No intent request is pending.');
   const actual = envelope.kind === 'intent_proposal'
     ? [envelope.resolution.intent.actorId]
-    : envelope.resolutions.map((resolution) => resolution.intent.actorId);
+    : envelope.kind === 'round_intent_proposal'
+      ? envelope.resolutions.map((resolution) => resolution.intent.actorId)
+      : envelope.updates.map((resolution) => resolution.intent.actorId);
   if (new Set(actual).size !== actual.length) throw new RangeError('Proposal actors must be unique.');
   if (envelope.kind === 'round_intent_proposal') {
-    const expected = [...capsule.request.actors].sort((left, right) => left.localeCompare(right));
+    if (request.phase === 'speculative' || request.kind === 'plan_adjustment') {
+      throw new RangeError('Round proposal requires a round-plan request.');
+    }
+    const expected = [...request.actors].sort((left, right) => left.localeCompare(right));
     const normalizedActual = [...actual].sort((left, right) => left.localeCompare(right));
     if (
       expected.length !== normalizedActual.length ||
       expected.some((actor, index) => actor !== normalizedActual[index])
     ) throw new RangeError('Round proposal must contain exactly the requested actors.');
-  } else if (!capsule.request.actors.includes(actual[0] as CombatantId)) {
+  } else if (envelope.kind === 'plan_adjustment_proposal') {
+    if (request.phase === 'speculative' || request.kind !== 'plan_adjustment') {
+      throw new RangeError('Plan adjustment proposal requires a plan-adjustment request.');
+    }
+    if (envelope.baseline_plan_hash !== request.baselinePlanHash) {
+      throw new RangeError('Plan adjustment proposal does not match the baseline plan hash.');
+    }
+    if (actual.length > request.adjustmentBudget ||
+      actual.some((actor) => !request.actors.includes(actor))) {
+      throw new RangeError('Plan adjustment updates must be unique open actors within the adjustment budget.');
+    }
+  } else if (!request.actors.includes(actual[0] as CombatantId)) {
     throw new RangeError('Intent proposal actor is not pending.');
   }
   if (
     envelope.phase === 'correction' &&
     (envelope.kind === 'intent_proposal'
       ? envelope.resolution.intent.fallback !== null
-      : envelope.resolutions.some((resolution) => resolution.intent.fallback !== null))
+      : envelope.kind === 'round_intent_proposal'
+        ? envelope.resolutions.some((resolution) => resolution.intent.fallback !== null)
+        : envelope.updates.some((resolution) => resolution.intent.fallback !== null))
   ) throw new RangeError('Correction proposals cannot declare another fallback.');
 }
 

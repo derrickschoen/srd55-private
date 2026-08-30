@@ -3,7 +3,11 @@ import { mcpRequestMeta } from '../../../src/vtt/mcp/handler';
 import type { McpHandler } from '../../../src/vtt/mcp/handler';
 import { EngineMcpStdioClient } from '../../../tools/engine-mcp-dry-client';
 import { collectEngineMcpRuntimeGraph, engineMcpImportBoundaryFailures, scanEngineMcpArtifacts } from '../../../tools/engine-mcp-proof';
-import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import {
+  createEngineMcpRuntime,
+  decodeEngineMcpLauncherManifest,
+  loadArenaFixture,
+} from '../../../src/vtt/mcp/entrypoint';
 
 const FIXTURE = 'tests/fixtures/arena-basis/seed-3943006.json';
 const META = mcpRequestMeta({ name: 'SUBSTITUTED_LOCAL', version: '1.0.0' });
@@ -40,6 +44,72 @@ class SUBSTITUTED_LOCALAdapter {
   }
 }
 describe('engine MCP process mutation boundary', () => {
+  it('decodes legacy launchers as round plans and preserves adjustment correlation fields', async () => {
+    const state = await loadArenaFixture(FIXTURE);
+    const actors = state.combatants.flatMap((combatant) =>
+      combatant.profile.kind === 'monster' && combatant.life !== 'dead' ? [combatant.profile.id] : []);
+    const legacy = {
+      format: 'engine-mcp-launcher-v1',
+      fixturePath: FIXTURE,
+      proposalSpoolPath: '/tmp/engine-proposals.jsonl',
+      runId: 'encounter:legacy-launcher',
+      branchId: 'branch:legacy-launcher',
+      revision: 1,
+      requestId: 'request:legacy-launcher',
+      phase: 'initial',
+      correctionNumber: 0,
+      room: 1,
+      historyKind: 'room_ready',
+    };
+    expect(decodeEngineMcpLauncherManifest(legacy)).toEqual({
+      ...legacy,
+      requestKind: 'round_plan',
+    });
+
+    const adjustment = {
+      ...legacy,
+      requestId: 'request:adjustment-launcher',
+      requestKind: 'plan_adjustment',
+      requestedActorIds: actors,
+      planAdjustment: {
+        parentPlanId: 'monster-plan:parent',
+        baselinePlanHash: 'd'.repeat(64),
+        triggerPcTurnId: 'pc-turn:round-1-fighter',
+        beforeRevision: 4,
+        afterRevision: 6,
+        materialityReasonCodes: ['LIFE_STATE_CHANGED'],
+        baselineIntentDigests: actors.map((actorId, index) => ({
+          actorId,
+          intentDigest: (index + 20).toString(16).padStart(64, '0'),
+        })),
+        adjustmentBudget: 2,
+      },
+    };
+    const decoded = decodeEngineMcpLauncherManifest(adjustment);
+    if (decoded === null || decoded.requestKind !== 'plan_adjustment' ||
+      decoded.requestedActorIds === undefined || decoded.planAdjustment === undefined) {
+      throw new Error('Adjustment launcher did not decode.');
+    }
+    const runtime = createEngineMcpRuntime(state, {
+      runId: decoded.runId,
+      branchId: decoded.branchId,
+      revision: decoded.revision,
+      requestId: decoded.requestId,
+      requestKind: decoded.requestKind,
+      requestedActorIds: decoded.requestedActorIds,
+      planAdjustment: decoded.planAdjustment,
+    });
+
+    expect(runtime.feed.current().request).toEqual({
+      kind: 'plan_adjustment',
+      requestId: adjustment.requestId,
+      phase: 'initial',
+      correctionNumber: 0,
+      actors,
+      ...adjustment.planAdjustment,
+    });
+  });
+
   it('keeps the projection digest immutable and rejects every stale write shape', { timeout: 20_000 }, async () => {
     const client = new EngineMcpStdioClient(FIXTURE);
     const context = structured(await client.tool('engine.get_turn_context', { run_id: 'encounter:engine-mcp', expected_revision: 1, scope: 'round' }));

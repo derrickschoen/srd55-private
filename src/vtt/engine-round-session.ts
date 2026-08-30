@@ -28,6 +28,7 @@ import {
   type ReactionGuidanceDeclaration,
 } from './reaction-guidance';
 import { reduceSessionEncounter } from './session-encounter-reducer';
+import type { ScriptedPartyTurnMaterialization } from './scripted-party-round';
 
 export interface EngineRoundCapsuleRequest {
   readonly runId: EncounterSessionId;
@@ -75,6 +76,10 @@ export interface PreparedEngineRound extends EngineBoundaryResolutions {
 export interface AppliedEngineMechanics extends EngineBoundaryResolutions {
   readonly revisionDelta: number;
   readonly deviationResolutions: readonly EngineIntentDeviation[];
+}
+
+export interface AppliedScriptedPcTurn extends EngineBoundaryResolutions {
+  readonly revisionDelta: number;
 }
 
 interface ConversationEngineTurnIntent {
@@ -450,6 +455,114 @@ export class EngineRoundSession {
     this.#rng = trialRng;
     const snapshot = this.snapshot({ ...request, revision: request.revision + revisionDelta });
     return { snapshot, revisionDelta, fallbackResolutions, guidedResolutions };
+  }
+
+  beginRoundWithoutSkipping(
+    request: Omit<EngineRoundCapsuleRequest, 'revision'> & { readonly revision: number },
+    guidance: ReactionGuidanceDeclaration | null,
+  ): PreparedEngineRound {
+    if (this.#state.config.initiativeMode !== 'per_combatant') {
+      throw new Error('Initiative-segment rounds require per_combatant initiative.');
+    }
+    const beforeRevision = this.#state.revision;
+    const trialRng = restoreMulberry32(this.#rng.snapshot());
+    const fallbackResolutions: AutoResolvedReactionOffer[] = [];
+    const guidedResolutions: GuidedReactionResolution[] = [];
+    const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
+      const reduced = reduceOne(state, command, trialRng);
+      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance);
+      fallbackResolutions.push(...resolved.fallbackResolutions);
+      guidedResolutions.push(...resolved.guidedResolutions);
+      return resolved.state;
+    };
+    const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance);
+    fallbackResolutions.push(...initialBoundary.fallbackResolutions);
+    guidedResolutions.push(...initialBoundary.guidedResolutions);
+    const begun = initialBoundary.state.initiative.length === 0
+      ? reduce(initialBoundary.state, { type: 'roll_initiative' })
+      : initialBoundary.state;
+    if (begun.activeCombatant === null) throw new Error('Initiative has no active combatant.');
+    const revisionDelta = begun.revision - beforeRevision;
+    this.#state = begun;
+    this.#rng = trialRng;
+    const snapshot = this.snapshot({ ...request, revision: request.revision + revisionDelta });
+    return { snapshot, revisionDelta, fallbackResolutions, guidedResolutions };
+  }
+
+  completeScriptedPcTurn(
+    turn: Pick<ScriptedPartyTurnMaterialization, 'actorId' | 'reducerCommands'>,
+    guidance: ReactionGuidanceDeclaration | null,
+  ): AppliedScriptedPcTurn {
+    const active = this.#state.combatants.find((entry) => entry.profile.id === this.#state.activeCombatant);
+    if (this.#state.activeCombatant !== turn.actorId ||
+      active?.profile.kind !== 'player_character' || active.life !== 'living') {
+      throw new Error(`Scripted PC turn ${turn.actorId} is not the active living player character.`);
+    }
+    const beforeRevision = this.#state.revision;
+    const trialRng = restoreMulberry32(this.#rng.snapshot());
+    const fallbackResolutions: AutoResolvedReactionOffer[] = [];
+    const guidedResolutions: GuidedReactionResolution[] = [];
+    const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
+      const reduced = reduceOne(state, command, trialRng);
+      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance);
+      fallbackResolutions.push(...resolved.fallbackResolutions);
+      guidedResolutions.push(...resolved.guidedResolutions);
+      return resolved.state;
+    };
+    const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance);
+    fallbackResolutions.push(...initialBoundary.fallbackResolutions);
+    guidedResolutions.push(...initialBoundary.guidedResolutions);
+    let state = initialBoundary.state;
+    for (const command of turn.reducerCommands) {
+      if (state.activeCombatant !== turn.actorId) {
+        throw new Error(`Scripted PC turn ${turn.actorId} attempted to cross an initiative boundary.`);
+      }
+      if (!('actor' in command) || command.actor !== turn.actorId) {
+        throw new Error(`Scripted PC turn ${turn.actorId} may apply only that actor's reducer commands.`);
+      }
+      state = reduce(state, command);
+    }
+    if (state.activeCombatant === turn.actorId) {
+      state = reduce(state, { type: 'end_turn', actor: turn.actorId });
+    }
+    this.#state = canonicalEncounterState(state).state;
+    this.#rng = trialRng;
+    return {
+      revisionDelta: this.#state.revision - beforeRevision,
+      fallbackResolutions,
+      guidedResolutions,
+    };
+  }
+
+  applyConsecutiveMonsterSegment(
+    entries: readonly EngineTurnApplication[],
+    guidance: ReactionGuidanceDeclaration | null,
+  ): AppliedEngineMechanics {
+    if (this.#state.config.initiativeMode !== 'per_combatant') {
+      throw new Error('Monster initiative segments require per_combatant initiative.');
+    }
+    const activeIndex = this.#state.activeInitiativeIndex;
+    if (activeIndex === null || this.#state.activeCombatant === null) {
+      throw new Error('Monster initiative segment requires active initiative.');
+    }
+    const expectedActors: CombatantId[] = [];
+    for (let index = activeIndex; index < this.#state.initiative.length; index += 1) {
+      const initiative = this.#state.initiative[index];
+      if (initiative === undefined) throw new Error('Monster initiative segment encountered a missing entry.');
+      const combatant = this.#state.combatants.find((entry) => entry.profile.id === initiative.combatant);
+      if (combatant === undefined) throw new Error(`Initiative combatant ${initiative.combatant} is absent.`);
+      if (combatant.life === 'dead') continue;
+      if (combatant.profile.kind === 'player_character') break;
+      expectedActors.push(combatant.profile.id);
+    }
+    const actualActors = entries.map((entry) => normalizedApplication(entry).intent.actorId);
+    if (expectedActors.length === 0 || expectedActors.length !== actualActors.length ||
+      expectedActors.some((actorId, index) => actorId !== actualActors[index])) {
+      throw new Error(
+        `Monster initiative segment must contain the maximal consecutive actors: ${expectedActors.join(', ')}.`,
+      );
+    }
+    return this.applyResolvedMechanics(entries, guidance);
   }
 
   applyResolvedMechanics(
