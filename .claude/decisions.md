@@ -18,6 +18,17 @@ class), and elevation-derived cover/line-of-sight — but NO to-hit modifier.
 The tactical evaluator prices edge proximity and fall EV when elevation
 modeling arrives.
 
+## D421.2 — OWNER: VTT-relevance filter on optional-rule rankings (2026-08-30)
+
+Verbatim: "A lot of these dice rolling conveniences are not really helpful
+for a vtt." Filter applied to all optional-rule shortlists (Nimble digest,
+initiative digest, clean-room package): mechanics whose main value is
+physical-dice convenience (batched/static rolls, players-roll-all,
+deterministic initiative scores) rank low — the VTT rolls instantly.
+Rank instead by decision speed, reduced whiff-feel, turn agency (e.g.
+fungible PC slots), death/dying drama, and AI-DM simplification. Rankings
+to be revised at the Nimble follow-up harvest.
+
 ## D421.1 — OWNER: initiative-systems research, clean-room derivation experiment, creator-opinion survey (2026-08-30)
 
 Three additions to D421, verbatim: "Also research different popular optional
