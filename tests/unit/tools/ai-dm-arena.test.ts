@@ -237,41 +237,22 @@ describe('AI-DM arena', () => {
     expect(rows.every((row) => row.chainEvidence.autoResolvedTrigger === null)).toBe(true);
     expect(rows.every((row) => row.chainEvidence.failedAttempts.every((attempt) =>
       attempt.rejectionReasons.length > 0))).toBe(true);
-    expect(rows[0]?.authorizedPlan).toEqual([
-      ['combatant:generated-3943001-monster-1', 'dagger'],
-      ['combatant:generated-3943001-monster-2', 'grab'],
-      ['combatant:generated-3943001-monster-3', 'longsword'],
-    ].map(([actorId, actionId], index) => ({
-      actorId,
-      acceptedIntent: {
-        actor_id: actorId,
-        choice: {
-          kind: 'attack', action_id: actionId,
-          target: { kind: 'combatant', combatant_id: 'combatant:cleric' },
-        },
-        movement: {
-          willingness: 'only_if_required', maximum_feet: 30,
-          opportunity_risk: 'accept_if_needed',
-        },
-        engagement: { stance: 'close_to_melee' },
-        fallback: {
-          choice: { kind: 'dodge' },
-          movement: {
-            willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid',
-          },
-          engagement: { stance: 'hold_position' },
-        },
-      },
-      selectedBranch: index === 0 ? 'primary' : 'fallback',
-      resolutionSummary: index === 0
-        ? { actionId: 'dagger', targetId: 'combatant:cleric', movementFeet: 10 }
-        : { actionId: 'dodge', targetId: null, movementFeet: 0 },
-    })));
-    expect(rows[0]?.roundNarrative).toBe(
-      'combatant:generated-3943001-monster-1 moves 10 feet and uses dagger on combatant:cleric; ' +
-      'combatant:generated-3943001-monster-2 uses dodge; ' +
-      'combatant:generated-3943001-monster-3 uses dodge',
-    );
+    expect(rows[0]?.authorizedPlan?.map((entry) => entry.actorId)).toEqual([
+      'combatant:generated-3943001-monster-1',
+      'combatant:generated-3943001-monster-2',
+      'combatant:generated-3943001-monster-3',
+    ]);
+    expect(rows[0]?.authorizedPlan?.every((entry) =>
+      entry.acceptedProposal['actor_id'] === entry.actorId &&
+      typeof entry.acceptedProposal['expected_revision'] === 'number' &&
+      typeof entry.acceptedProposal['primary_option_id'] === 'string' &&
+      entry.acceptedProposal['override_justification'] === null &&
+      entry.resolutionSummary.actionSlots.length > 0)).toBe(true);
+    expect(rows[0]?.authorizedPlan?.map((entry) => entry.resolutionSummary.actionSlots[0]?.actionId))
+      .toEqual(['dagger', 'light-hammer', 'longbow']);
+    expect(rows[0]?.authorizedPlan?.map((entry) => entry.selectedBranch))
+      .toEqual(['primary', 'primary', 'primary']);
+    expect(rows[0]?.roundNarrative).toContain('combatant:generated-3943001-monster-1 expands Dagger');
     expect(rows[1]?.contextRevision).toBe(rows[0]?.projectionRevision);
     const kbHash = createHash('sha256').update(Buffer.from(kbText, 'utf8')).digest('hex');
     expect(rows.every((row) => row.kbHash === kbHash)).toBe(true);
@@ -393,13 +374,13 @@ describe('AI-DM arena', () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]).toEqual(expect.objectContaining({
       arm: 'plain',
-      plannedBy: 'sim_controller',
+      plannedBy: { model: 'model-plain', effort: 'low' },
       escalated: false,
       escalationModel: null,
     }));
     expect(rows[1]).toEqual(expect.objectContaining({
       arm: 'tiered',
-      plannedBy: 'sim_controller',
+      plannedBy: { model: 'model-escalation', effort: 'xhigh' },
       escalated: true,
       escalationModel: 'model-escalation',
     }));
@@ -428,7 +409,7 @@ describe('AI-DM arena', () => {
     }
   });
 
-  it('adopts the frozen room-two focus draft without collapsing the round to Dodge', { timeout: 60_000 }, async () => {
+  it('adopts the frozen room-two focus draft as complete legal options', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-aggressive-room-two-'));
     const config = parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943002', '--effort', 'low',
@@ -446,41 +427,25 @@ describe('AI-DM arena', () => {
       suggestedPlay: { name: 'focus_fire' },
       suggestionAdopted: 'as_is',
     });
-    expect(rows[0]?.authorizedPlan).toEqual([
-      ['combatant:generated-3943002-monster-1', 50],
-      ['combatant:generated-3943002-monster-2', 40],
-    ].map(([actorId, movementFeet]) => ({
-      actorId,
-      acceptedIntent: {
-        actor_id: actorId,
-        choice: {
-          kind: 'attack', action_id: 'life-drain', resource_policy: 'normal',
-          target: { kind: 'combatant', combatant_id: 'combatant:cleric' },
-        },
-        movement: {
-          willingness: 'only_if_required', maximum_feet: 30,
-          opportunity_risk: 'accept_if_needed',
-        },
-        engagement: {
-          stance: 'close_to_melee',
-          anchor: { kind: 'combatant', combatant_id: 'combatant:cleric' },
-        },
-        fallback: {
-          choice: { kind: 'dash' },
-          movement: {
-            willingness: 'freely', maximum_feet: 60, opportunity_risk: 'avoid',
-          },
-          engagement: {
-            stance: 'close_to_melee',
-            anchor: { kind: 'combatant', combatant_id: 'combatant:cleric' },
-          },
-        },
+    expect(rows[0]?.authorizedPlan?.map((entry) => ({
+      actorId: entry.actorId,
+      selectedBranch: entry.selectedBranch,
+      actionIds: entry.resolutionSummary.actionSlots.map((slot) => slot.actionId),
+      movementFeet: entry.resolutionSummary.movementFeet,
+    }))).toEqual([
+      {
+        actorId: 'combatant:generated-3943002-monster-1',
+        selectedBranch: 'primary',
+        actionIds: ['dash'],
+        movementFeet: 0,
       },
-      selectedBranch: 'fallback',
-      resolutionSummary: {
-        actionId: 'dash', targetId: 'combatant:cleric', movementFeet,
+      {
+        actorId: 'combatant:generated-3943002-monster-2',
+        selectedBranch: 'primary',
+        actionIds: ['dash'],
+        movementFeet: 0,
       },
-    })));
+    ]);
   });
 
   it('runs as a vite-node --dry-run CLI without contacting the model binary', { timeout: 30_000 }, () => {
@@ -601,7 +566,7 @@ describe('AI-DM arena', () => {
     }));
   });
 
-  it('records the engine actual primary and fallback rejection strings in chain evidence', { timeout: 30_000 }, async () => {
+  it('records the engine actual unavailable-option rejection strings in chain evidence', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-chain-evidence-'));
     const config = parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943001',
@@ -610,7 +575,10 @@ describe('AI-DM arena', () => {
       ...LEGACY_BLOCK_ARGS,
     ]);
 
-    const [row] = await runArena(config, { invalidInitial: ['room-1-round-1'] });
+    const [row] = await runArena(config, {
+      invalidInitial: ['room-1-round-1'],
+      failCorrection: ['room-1-round-1'],
+    });
 
     expect(row).toEqual(expect.objectContaining({
       outcome: 'auto_resolved', agentDispatched: true,
@@ -622,13 +590,13 @@ describe('AI-DM arena', () => {
           expect.objectContaining({
             attempt: 'primary',
             rejectionReasons: expect.arrayContaining([
-              expect.stringContaining('spell intent resolution is not yet available'),
+              expect.stringContaining('primary option was not offered'),
             ]),
           }),
           expect.objectContaining({
             attempt: 'fallback',
             rejectionReasons: expect.arrayContaining([
-              expect.stringContaining('spell intent resolution is not yet available'),
+              expect.stringContaining('fallback option was not offered'),
             ]),
           }),
         ]),
@@ -638,7 +606,7 @@ describe('AI-DM arena', () => {
     }));
     expect(row?.chainEvidence.failedAttempts.flatMap((entry) => entry.rejectionReasons)
       .some((reason) => reason.startsWith('No engine rejection'))).toBe(false);
-    expect(row?.chainEvidence.failedAttempts.every((entry) => entry.declaredIntent !== null)).toBe(true);
+    expect(row?.chainEvidence.failedAttempts.every((entry) => entry.declaredProposal !== null)).toBe(true);
   });
 
   it('rejects occupied movement and more than one slot-spending action on a path', () => {

@@ -21,7 +21,8 @@ import {
   type RuleReference,
 } from '../engine-state-capsule';
 import { canonicalEngineQueryPort, engineActionRegistry } from '../engine-query-port';
-import { pureIntentResolver } from '../intent-resolver';
+import { pureTurnProposalResolver } from '../intent-resolver';
+import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../monster-planning-state';
 import {
   createEngineMcpApplication,
   MutableEngineCapsuleFeed,
@@ -183,6 +184,7 @@ export function createEngineMcpRuntime(
   if (new Set(actors).size !== actors.length || actors.some((actorId) => !candidates.includes(actorId))) {
     throw new RangeError('Engine request actors must be unique living monsters.');
   }
+  const planningState = projectFutureMonsterTurns(state, actors);
   const revision = options.revision ?? 1;
   const phase = options.phase ?? 'initial';
   const correctionNumber = options.correctionNumber ?? (phase === 'correction' ? 1 : 0);
@@ -218,12 +220,12 @@ export function createEngineMcpRuntime(
     revision,
     generatedAt: '2026-08-27T12:00:00.000Z',
     request,
-    projection: projectEngineEncounterState(state, engineActionRegistry(state), options.room ?? 1),
+    projection: projectEngineEncounterState(planningState, engineActionRegistry(planningState, revision), options.room ?? 1),
     historyDelta: options.historyKind === undefined ? [] : [{
       revision,
       kind: options.historyKind,
       branchStatus: 'active',
-      encounterRound: state.round,
+      encounterRound: planningState.round,
     }],
     ...(options.rulesIndex === undefined ? {} : { rulesIndex: options.rulesIndex }),
   });
@@ -233,10 +235,10 @@ export function createEngineMcpRuntime(
   const narrations: NarrationEnvelope[] = [];
   const adjudications: AdjudicationEnvelope[] = [];
   const application = createEngineMcpApplication({
-    state,
+    state: planningState,
     stateSource: feed,
     queries: canonicalEngineQueryPort,
-    intents: pureIntentResolver,
+    turnProposals: pureTurnProposalResolver,
     proposals: {
       append: (envelope) => {
         proposals.push(envelope);
@@ -284,11 +286,15 @@ export async function loadArenaFixture(path: string): Promise<EncounterState> {
   return state as unknown as EncounterState;
 }
 
+export { freshMonsterPlanningState, projectFutureMonsterTurns } from '../monster-planning-state';
+
 export async function runEngineMcpServer(
   fixturePath: string,
   options: Parameters<typeof createEngineMcpRuntime>[1] = {},
+  directFixturePlanning = false,
 ): Promise<void> {
-  const state = await loadArenaFixture(resolve(fixturePath));
+  const loaded = await loadArenaFixture(resolve(fixturePath));
+  const state = directFixturePlanning ? freshMonsterPlanningState(loaded) : loaded;
   const handler = createEngineMcpRuntime(state, options).handler;
   const lines = createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY });
   for await (const line of lines) {
@@ -410,12 +416,12 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
     throw new TypeError('Engine MCP launcher token must contain 16 to 300 characters.');
   }
   const options: Parameters<typeof runEngineMcpServer>[1] = scenario === '--correction'
-    ? { revision: 2, phase: 'correction' as const, correctionNumber: 1, historyKind: 'intent_correction_requested', ...(selectedProfile === undefined ? {} : { toolProfile: selectedProfile }) }
+    ? { revision: 2, phase: 'correction' as const, correctionNumber: 1, historyKind: 'proposal_correction_requested', ...(selectedProfile === undefined ? {} : { toolProfile: selectedProfile }) }
     : scenario === '--room-transition'
       ? { revision: 3, room: 2, historyKind: 'room_transition', ...(selectedProfile === undefined ? {} : { toolProfile: selectedProfile }) }
       : selectedProfile === undefined ? {} : { toolProfile: selectedProfile };
   if (scenario !== undefined && scenario !== '--correction' && scenario !== '--room-transition') {
     throw new TypeError('Unknown engine MCP fixture scenario.');
   }
-  await runEngineMcpServer(fixturePath, options);
+  await runEngineMcpServer(fixturePath, options, true);
 }

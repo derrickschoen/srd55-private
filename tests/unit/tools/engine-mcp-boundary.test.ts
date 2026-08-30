@@ -6,6 +6,7 @@ import { collectEngineMcpRuntimeGraph, engineMcpImportBoundaryFailures, scanEngi
 import {
   createEngineMcpRuntime,
   decodeEngineMcpLauncherManifest,
+  freshMonsterPlanningState,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
 
@@ -25,8 +26,21 @@ function structured(response: Readonly<Record<string, unknown>>): Readonly<Recor
   return record(result(response)['structuredContent'], 'structured content');
 }
 
-function dodge(actorId: string): Readonly<Record<string, unknown>> {
-  return { actor_id: actorId, choice: { kind: 'dodge' }, movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' }, engagement: { stance: 'hold_position' }, fallback: null };
+function dodge(context: Readonly<Record<string, unknown>>, actorId: string): Readonly<Record<string, unknown>> {
+  const actors = context['actors'];
+  if (!Array.isArray(actors)) throw new TypeError('Turn context actors are missing.');
+  const actor = actors.map((value) => record(value, 'actor context')).find((value) => value['actor_id'] === actorId);
+  const options = actor?.['options'];
+  if (!Array.isArray(options)) throw new TypeError(`Turn context options are missing for ${actorId}.`);
+  const option = options.map((value) => record(value, 'actor option')).find((value) => value['kind'] === 'dodge');
+  const stateRef = record(context['state_ref'], 'state ref');
+  if (typeof option?.['option_id'] !== 'string' || typeof stateRef['expected_revision'] !== 'number') {
+    throw new TypeError(`Dodge option is missing for ${actorId}.`);
+  }
+  return {
+    actor_id: actorId, expected_revision: stateRef['expected_revision'], primary_option_id: option['option_id'],
+    fallback_option_id: null, override_justification: null,
+  };
 }
 
 function directTool(handler: McpHandler, name: string, argumentsValue: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
@@ -78,9 +92,9 @@ describe('engine MCP process mutation boundary', () => {
         beforeRevision: 4,
         afterRevision: 6,
         materialityReasonCodes: ['LIFE_STATE_CHANGED'],
-        baselineIntentDigests: actors.map((actorId, index) => ({
+        baselineProposalDigests: actors.map((actorId, index) => ({
           actorId,
-          intentDigest: (index + 20).toString(16).padStart(64, '0'),
+          proposalDigest: (index + 20).toString(16).padStart(64, '0'),
         })),
         adjustmentBudget: 2,
       },
@@ -121,12 +135,12 @@ describe('engine MCP process mutation boundary', () => {
     const firstActor = actors[0];
     if (firstActor === undefined) throw new TypeError('At least one actor is required.');
 
-    const proposal = await client.tool('engine.submit_round_intents', {
+    const proposal = await client.tool('engine.submit_round_proposals', {
       state_ref: fresh,
       request_id: 'request:engine-mcp',
       phase: 'initial',
       idempotency_key: 'proof-fresh-round-0001',
-      intents: actors.map(dodge),
+      proposals: actors.map((actorId) => dodge(context, actorId)),
     });
     expect(structured(proposal)).toMatchObject({ status: 'proposed' });
     const afterProposal = structured(await client.tool('engine.get_turn_context', { run_id: 'encounter:engine-mcp', expected_revision: 1, scope: 'round' }));
@@ -134,8 +148,8 @@ describe('engine MCP process mutation boundary', () => {
 
     const stale = { ...fresh, state_handle: `engine-state:${'0'.repeat(64)}` };
     const writeCases = [
-      ['engine.submit_round_intents', { state_ref: stale, request_id: 'request:engine-mcp', phase: 'initial', idempotency_key: 'proof-stale-round-0001', intents: actors.map(dodge) }],
-      ['engine.submit_intent', { state_ref: stale, request_id: 'request:engine-mcp', phase: 'initial', idempotency_key: 'proof-stale-intent-0001', intent: dodge(firstActor) }],
+      ['engine.submit_round_proposals', { state_ref: stale, request_id: 'request:engine-mcp', phase: 'initial', idempotency_key: 'proof-stale-round-0001', proposals: actors.map((actorId) => dodge(context, actorId)) }],
+      ['engine.submit_proposal', { state_ref: stale, request_id: 'request:engine-mcp', phase: 'initial', idempotency_key: 'proof-stale-proposal-0001', proposal: dodge(context, firstActor) }],
       ['engine.emit_narration', { state_ref: stale, request_id: 'request:engine-mcp', idempotency_key: 'proof-stale-narration-0001', voice: 'terse_tactical', text: 'Stale.', audience: 'shared', rule_references: [] }],
       ['engine.request_dm_adjudication', { state_ref: stale, request_id: 'request:engine-mcp', actor_id: firstActor, subject: 'Stale', reason: 'Must be rejected.', blocking: true, suggested_outcomes: [], idempotency_key: 'proof-stale-adjudication-0001' }],
     ] as const;
@@ -158,7 +172,7 @@ describe('SUBSTITUTED_LOCAL MCP conformance and artifacts', () => {
   });
 
   it('proves transport-neutral request parity through the test-only adapter', { timeout: 20_000 }, async () => {
-    const state = await loadArenaFixture(FIXTURE);
+    const state = freshMonsterPlanningState(await loadArenaFixture(FIXTURE));
     const runtime = createEngineMcpRuntime(state);
     const adapter = new SUBSTITUTED_LOCALAdapter(runtime.handler);
     expect(adapter.request('server/discover', {})).toHaveProperty('result');

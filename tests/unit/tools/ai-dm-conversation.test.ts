@@ -20,14 +20,10 @@ import { encounterSessionId, type CombatantId } from '../../../src/combat/values
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { generateRoom } from '../../../src/vtt/room-generator';
-import {
-  pureIntentResolver,
-  type EngineActionChoice,
-  type EngineTurnIntent,
-} from '../../../src/vtt/intent-resolver';
-import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
 import {
   createEngineMcpRuntime,
+  freshMonsterPlanningState,
   loadArenaFixture,
   parseEngineMcpJsonLine,
   type EngineMcpLauncherManifest,
@@ -99,86 +95,10 @@ function serializedToolCall(
   return objectValue(result['structuredContent'], `${name} structured content`);
 }
 
-function attackIntent(state: EncounterState, actorId: CombatantId): Readonly<Record<string, unknown>> | null {
-  const actor = canonicalEngineQueryPort.combatant(state, actorId);
-  if (actor === null) throw new Error(`Serialized attack actor ${actorId} is absent.`);
-  const targets = state.combatants.filter((candidate) =>
-    candidate.life !== 'dead' && !canonicalEngineQueryPort.sameSide(state, actorId, candidate.profile.id));
-  for (const action of canonicalEngineQueryPort.actions(state, actorId)) {
-    if (action.kind !== 'attack') continue;
-    for (const target of targets) {
-      const intent: EngineTurnIntent = {
-        actorId,
-        choice: {
-          kind: 'attack', actionId: action.id,
-          target: { kind: 'combatant', combatantId: target.profile.id },
-        },
-        movement: {
-          willingness: 'only_if_required', maximumFeet: actor.profile.rules.speed,
-          opportunityRisk: 'accept_if_needed',
-        },
-        engagement: { stance: 'close_to_melee' },
-        fallback: null,
-      };
-      if (!pureIntentResolver.resolve(state, intent).valid) continue;
-      return {
-        actor_id: actorId,
-        choice: {
-          kind: 'attack', action_id: action.id,
-          target: { kind: 'combatant', combatant_id: target.profile.id },
-        },
-        movement: {
-          willingness: 'only_if_required', maximum_feet: actor.profile.rules.speed,
-          opportunity_risk: 'accept_if_needed',
-        },
-        engagement: { stance: 'close_to_melee' },
-        fallback: null,
-      };
-    }
-  }
-  return null;
-}
-
-function targetedUtilityIntent(
-  state: EncounterState,
-  actorId: CombatantId,
-  actionId: string,
-): Readonly<Record<string, unknown>> | null {
-  const actor = canonicalEngineQueryPort.combatant(state, actorId);
-  if (actor === null || !canonicalEngineQueryPort.actions(state, actorId)
-    .some((action) => action.kind === 'saving_throw' && action.id === actionId)) return null;
-  const targets = state.combatants.filter((candidate) =>
-    candidate.life !== 'dead' && !canonicalEngineQueryPort.sameSide(state, actorId, candidate.profile.id));
-  for (const target of targets) {
-    const intent: EngineTurnIntent = {
-      actorId,
-      choice: {
-        kind: 'use_action', actionId,
-        target: { kind: 'combatant', combatantId: target.profile.id },
-      },
-      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-      engagement: { stance: 'hold_position' },
-      fallback: null,
-    };
-    if (!pureIntentResolver.resolve(state, intent).valid) continue;
-    return {
-      actor_id: actorId,
-      choice: {
-        kind: 'use_action', action_id: actionId,
-        target: { kind: 'combatant', combatant_id: target.profile.id },
-      },
-      movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
-      engagement: { stance: 'hold_position' },
-      fallback: null,
-    };
-  }
-  return null;
-}
-
 class SerializedRoundTripAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
-  readonly submittedChoices: Readonly<Record<string, unknown>>[] = [];
-  readonly decodedChoices: EngineActionChoice[] = [];
+  readonly submittedOptions: Readonly<Record<string, unknown>>[] = [];
+  readonly decodedOptions: Readonly<Record<string, unknown>>[] = [];
   readonly startInvocations: AgentInvocation[] = [];
   readonly resumeInvocations: AgentInvocation[] = [];
   #startCount = 0;
@@ -242,45 +162,49 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
     const actors = runtime.feed.current().request?.actors;
     if (actors === undefined) throw new Error('Serialized round request has no actors.');
     let specialSubmitted = false;
-    const intents = actors.map((actorId) => {
-      const attack = this.choice === 'attack' && !specialSubmitted
-        ? attackIntent(state, actorId)
-        : null;
-      const targetedUtility = this.choice === 'targeted_web' && !specialSubmitted
-        ? targetedUtilityIntent(state, actorId, 'web')
-        : null;
-      if (attack !== null || targetedUtility !== null) specialSubmitted = true;
-      const intent = attack ?? targetedUtility ?? {
+    const proposals = actors.map((actorId) => {
+      const options = runtime.feed.current().projection.combatants
+        .find((combatant) => combatant.id === actorId)?.options ?? [];
+      const special = !specialSubmitted ? options.find((option) => option.actionSlots.some((slot) =>
+        this.choice === 'attack'
+          ? slot.use.kind === 'attack' || slot.use.kind === 'multiattack'
+          : this.choice === 'targeted_web'
+            ? slot.use.kind === 'saving_throw' && slot.use.actionId === 'web'
+            : false)) : undefined;
+      if (special !== undefined) specialSubmitted = true;
+      const requestedKind = this.choice === 'option_shaped_end_turn' ? 'end_turn' : 'dodge';
+      const selected = special ?? options.find((option) => option.actionSlots.some((slot) =>
+        slot.slot === 'main' && slot.use.kind === requestedKind));
+      if (selected === undefined) throw new Error(`Serialized round has no ${requestedKind} option for ${actorId}.`);
+      this.submittedOptions.push({ option_id: selected.optionId, label: selected.label });
+      return {
         actor_id: actorId,
-        choice: this.choice === 'use_action_dodge' || this.choice === 'targeted_web' ||
-          this.choice === 'invalid_then_dodge'
-          ? { kind: 'use_action', action_id: 'dodge', target: null }
-          : this.choice === 'option_shaped_end_turn'
-            ? { kind: 'end_turn', action_id: 'end_turn' }
-            : { kind: 'dodge' },
-        movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
-        engagement: { stance: 'hold_position' },
-        fallback: null,
+        expected_revision: manifest.revision,
+        primary_option_id: selected.optionId,
+        fallback_option_id: null,
+        override_justification: null,
       };
-      this.submittedChoices.push(objectValue(intent['choice'], 'serialized intent choice'));
-      return intent;
     });
     if ((this.choice === 'attack' || this.choice === 'targeted_web') && !specialSubmitted) {
       throw new Error(`Serialized round has no requested actor with a resolvable ${this.choice}.`);
     }
-    const submitted = serializedToolCall(runtime.handler, 'engine.submit_round_intents', {
+    const submitted = serializedToolCall(runtime.handler, 'engine.submit_round_proposals', {
       state_ref: stateRef,
       request_id: manifest.requestId,
       phase: manifest.phase,
       idempotency_key: `serialized-${this.choice}-${manifest.phase}`,
-      intents,
+      proposals,
     });
     if (submitted['status'] !== 'proposed' || runtime.proposals.length !== 1) {
       throw new Error(`Serialized round was not proposed: ${JSON.stringify(submitted)}`);
     }
     const proposal = runtime.proposals[0];
-    if (proposal?.kind !== 'round_intent_proposal') throw new Error('Serialized handler omitted the round proposal.');
-    this.decodedChoices.push(...proposal.resolutions.map((resolution) => resolution.intent.choice));
+    if (proposal?.kind !== 'round_turn_proposal') throw new Error('Serialized handler omitted the round proposal.');
+    this.decodedOptions.push(...proposal.resolutions.map((resolution) => ({
+      option_id: resolution.option.optionId,
+      label: resolution.option.label,
+      action_slots: resolution.option.actionSlots,
+    })));
     const dispatchedProposal = this.choice === 'invalid_then_dodge' && manifest.phase === 'initial'
       ? {
           ...proposal,
@@ -330,13 +254,13 @@ function pendingArenaReactionState(): EncounterState {
 
 function oversizedTurnContextState(): EncounterState {
   const player = playerProfile('context-trim-player', { initiativeBonus: 20 });
-  const monsters = Array.from({ length: 30 }, (_value, index) =>
+  const monsters = Array.from({ length: 45 }, (_value, index) =>
     monsterProfile(`context-trim-monster-${String(index + 1)}`, { initiativeBonus: -20 }));
   return reduceEncounter(createEncounter({
-    bounds: { columns: 40, rows: 2 },
+    bounds: { columns: 50, rows: 2 },
     combatants: [player, ...monsters],
     tokens: [
-      placedToken(player, 39),
+      placedToken(player, 49),
       ...monsters.map((monster, index) => placedToken(monster, index)),
     ],
   }), { type: 'roll_initiative' }, () => 0.5).state;
@@ -380,7 +304,7 @@ const LEGACY_BLOCK_ARGS = [
 ] as const;
 
 describe('AI-DM engine MCP conversation runner', () => {
-  it('authorizes a serialized MCP use_action dodge proposal', { timeout: 60_000 }, async () => {
+  it('authorizes a serialized revision-bound Dodge proposal', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-serialized-dodge-'));
     const adapter = new SerializedRoundTripAdapter('use_action_dodge');
     const config = parseConversationArgs([
@@ -395,12 +319,10 @@ describe('AI-DM engine MCP conversation runner', () => {
     const rejectionReasons = result.rows[0]?.chainEvidence.failedAttempts
       .flatMap((attempt) => attempt.rejectionReasons) ?? [];
 
-    expect(adapter.submittedChoices).toContainEqual({
-      kind: 'use_action', action_id: 'dodge', target: null,
-    });
-    expect(adapter.decodedChoices).toContainEqual({
-      kind: 'use_action', actionId: 'dodge', target: null,
-    });
+    expect(adapter.submittedOptions).toContainEqual(expect.objectContaining({ label: 'Dodge' }));
+    expect(adapter.decodedOptions).toContainEqual(expect.objectContaining({
+      action_slots: [{ slot: 'main', use: { kind: 'dodge' } }],
+    }));
     expect(rejectionReasons).not.toContain('The engine could not authorize this proposal mechanic.');
     expect(result.rows[0]).toEqual(expect.objectContaining({ outcome: 'authorized', refusals: [] }));
     expect(result.rows[0]).toEqual(expect.objectContaining({
@@ -411,7 +333,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.stateBinding.authorization).toEqual(result.rows[0]?.stateBinding.capsule);
   });
 
-  it('authorizes targeted Web and non-targeted Dodge through serialized MCP use_action choices', { timeout: 60_000 }, async () => {
+  it('authorizes targeted Web and non-targeted Dodge through composite options', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-serialized-web-'));
     const adapter = new SerializedRoundTripAdapter('targeted_web');
     const config = parseConversationArgs([
@@ -424,23 +346,15 @@ describe('AI-DM engine MCP conversation runner', () => {
       roomStates: [generateRoom(3_943_006).encounter.state],
     });
 
-    expect(adapter.submittedChoices).toContainEqual(expect.objectContaining({
-      kind: 'use_action', action_id: 'web',
-      target: expect.objectContaining({ kind: 'combatant' }),
-    }));
-    expect(adapter.submittedChoices).toContainEqual({
-      kind: 'use_action', action_id: 'dodge', target: null,
-    });
-    expect(adapter.decodedChoices).toContainEqual(expect.objectContaining({
-      kind: 'use_action', actionId: 'web',
-      target: expect.objectContaining({ kind: 'combatant' }),
-    }));
+    expect(adapter.submittedOptions.some((option) => String(option['label']).includes('Web'))).toBe(true);
+    expect(adapter.submittedOptions).toContainEqual(expect.objectContaining({ label: 'Dodge' }));
+    expect(adapter.decodedOptions.some((option) => JSON.stringify(option['action_slots']).includes('web'))).toBe(true);
     expect(result.rows[0]).toEqual(expect.objectContaining({ outcome: 'authorized', refusals: [] }));
     expect(result.rows[0]?.chainEvidence.failedAttempts.flatMap((attempt) => attempt.rejectionReasons))
       .not.toContain('Utility action web cannot authorize a target.');
   });
 
-  it('round-trips the option-shaped end_turn choice emitted by the tactical context', { timeout: 60_000 }, async () => {
+  it('round-trips the End Turn option emitted by the tactical context', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-serialized-end-turn-'));
     const adapter = new SerializedRoundTripAdapter('option_shaped_end_turn');
     const config = parseConversationArgs([
@@ -453,8 +367,10 @@ describe('AI-DM engine MCP conversation runner', () => {
       roomStates: [generateRoom(3_943_006).encounter.state],
     });
 
-    expect(adapter.submittedChoices).toContainEqual({ kind: 'end_turn', action_id: 'end_turn' });
-    expect(adapter.decodedChoices).toContainEqual({ kind: 'end_turn' });
+    expect(adapter.submittedOptions).toContainEqual(expect.objectContaining({ label: 'End Turn' }));
+    expect(adapter.decodedOptions).toContainEqual(expect.objectContaining({
+      action_slots: [{ slot: 'main', use: { kind: 'end_turn' } }],
+    }));
     expect(result.rows[0]).toEqual(expect.objectContaining({ outcome: 'authorized', refusals: [] }));
   });
 
@@ -577,8 +493,8 @@ describe('AI-DM engine MCP conversation runner', () => {
       roomStates: [generateRoom(3_943_006).encounter.state],
     });
 
-    expect(adapter.submittedChoices.some((choice) => choice['kind'] === 'attack')).toBe(true);
-    expect(adapter.decodedChoices.some((choice) => choice.kind === 'attack')).toBe(true);
+    expect(adapter.submittedOptions.some((option) => !['Dodge', 'End Turn'].includes(String(option['label'])))).toBe(true);
+    expect(adapter.decodedOptions.some((option) => JSON.stringify(option['action_slots']).includes('attack'))).toBe(true);
     expect(result.rows[0]).toEqual(expect.objectContaining({ outcome: 'authorized', refusals: [] }));
     expect(result.rows[0]?.stateBinding.authorization).toEqual(result.rows[0]?.stateBinding.capsule);
   });
@@ -609,7 +525,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     }));
   });
 
-  it('preserves an accepted suggested fallback in the authorized SIMULATED row', { timeout: 60_000 }, async () => {
+  it('preserves accepted suggested composite proposals in the authorized SIMULATED row', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-accepted-fallback-'));
     const outPath = join(directory, 'rows.jsonl');
     const config = parseConversationArgs([
@@ -623,22 +539,21 @@ describe('AI-DM engine MCP conversation runner', () => {
       suggestionResponseByRequest: { 'room-1-round-1': 'as_is' },
     });
     const row = result.rows[0];
-    const fallbackPlan = row?.authorizedPlan?.find((entry) => entry.selectedBranch === 'fallback');
-
     expect(row).toEqual(expect.objectContaining({
       outcome: 'authorized', suggestionAdopted: 'as_is', refusals: [],
     }));
-    expect(fallbackPlan?.acceptedIntent).toEqual(expect.objectContaining({
-      actor_id: fallbackPlan?.actorId,
-      choice: expect.objectContaining({ kind: 'attack' }),
-      fallback: expect.objectContaining({ choice: { kind: 'dash' } }),
-    }));
+    expect(row?.authorizedPlan).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        acceptedProposal: expect.objectContaining({
+          actor_id: expect.any(String), primary_option_id: expect.any(String), expected_revision: expect.any(Number),
+        }),
+      }),
+    ]));
     expect(JSON.parse(readFileSync(outPath, 'utf8').trim())).toEqual(expect.objectContaining({
       authorizedPlan: expect.arrayContaining([
         expect.objectContaining({
-          selectedBranch: 'fallback',
-          acceptedIntent: expect.objectContaining({
-            fallback: expect.objectContaining({ choice: { kind: 'dash' } }),
+          acceptedProposal: expect.objectContaining({
+            primary_option_id: expect.any(String), fallback_option_id: expect.anything(),
           }),
         }),
       ]),
@@ -646,27 +561,31 @@ describe('AI-DM engine MCP conversation runner', () => {
   });
 
   it('identifies the divergent mechanic when room 3943006 cannot be re-resolved', () => {
-    const state = generateRoom(3_943_006).encounter.state;
+    const state = freshMonsterPlanningState(generateRoom(3_943_006).encounter.state);
     const actor = state.combatants.find((combatant) =>
       combatant.profile.kind === 'monster' && combatant.life !== 'dead');
     if (actor === undefined) throw new Error('Generated room 3943006 has no living monster.');
-    const intent: EngineTurnIntent = {
-      actorId: actor.profile.id,
-      choice: { kind: 'dodge' },
-      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-      engagement: { stance: 'hold_position' },
-      fallback: null,
+    const option = availableEngineActorOptions(state, actor.profile.id)
+      .find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
+    if (option === undefined) throw new Error('Room 3943006 Dodge option is absent.');
+    const proposal = {
+      actorId: actor.profile.id, expectedRevision: state.revision, primaryOptionId: option.optionId,
+      fallbackOptionId: null, overrideJustification: null,
     };
-    const proposalTime = pureIntentResolver.resolve(state, intent);
-    if (!proposalTime.valid) throw new Error('Room 3943006 dodge intent did not resolve.');
+    const proposalTime = pureTurnProposalResolver.resolve(state, proposal);
+    if (!proposalTime.valid) throw new Error('Room 3943006 Dodge proposal did not resolve.');
 
     expect(proposalResolutionDivergence(state, {
-      intent,
+      proposal,
+      option: proposalTime.option,
+      primaryOption: proposalTime.primaryOption,
+      fallbackOption: proposalTime.fallbackOption,
+      mechanics: proposalTime.mechanics,
       selectedBranch: proposalTime.selectedBranch,
       resolutionDigest: '0'.repeat(64),
       summary: proposalTime.summary,
     })).toEqual([
-      `${actor.profile.id}: path or final-position geometry diverged while action, target, and movement cost remained ${proposalTime.summary}.`,
+      `${actor.profile.id}: path or final-position geometry diverged while action sequence, targets, and movement cost remained ${proposalTime.summary}.`,
     ]);
   });
 
@@ -696,12 +615,9 @@ describe('AI-DM engine MCP conversation runner', () => {
       expect(row?.chainEvidence.failedAttempts.flatMap((attempt) =>
         attempt.rejectionReasons,
       ).some((reason) => reason.includes('Reaction offer'))).toBe(false);
-      expect(row?.chainEvidence.failedAttempts.find((attempt) =>
-        attempt.rejectionReasons.some((reason) => reason.includes('cannot reach')),
-      )?.declaredIntent).toEqual(expect.objectContaining({
-        movement: expect.objectContaining({ willingness: 'only_if_required' }),
-        engagement: { stance: 'close_to_melee' },
-      }));
+      expect(row?.chainEvidence.failedAttempts.every((attempt) =>
+        attempt.declaredProposal === null || typeof attempt.declaredProposal['option_id'] === 'string'))
+        .toBe(true);
     },
   );
 
@@ -824,6 +740,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     const result = await runConversation(config, {
       exhaustInitial: ['room-1-round-1'],
+      failCorrection: ['room-1-round-1'],
       restoreAfterRound: 1,
     });
 
@@ -834,7 +751,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows.every((row) => row.refusals.length === 0)).toBe(true);
     expect(result.rows.every((row) => row.sessionId === null && row.escalationSessionId === null)).toBe(true);
     expect(new Set(result.rows.map((row) => row.sessionIdHash)).size).toBe(1);
-    expect(result.rows[0]?.toolCalls).toBe(3);
+    expect(result.rows[0]?.toolCalls).toBe(2);
     expect(result.rows[0]?.agentDispatched).toBe(true);
     expect(result.rows[0]).toEqual(expect.objectContaining({
       plannedBy: 'sim_controller', escalated: false, escalationModel: null,
@@ -932,12 +849,13 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     const result = await runConversation(config, {
       invalidInitial: ['room-1-round-1'],
+      failCorrection: ['room-1-round-1'],
     });
 
     expect(result.rows).toEqual([
       expect.objectContaining({
         outcome: 'auto_resolved', flapRetries: 0, serviceNull: false,
-        toolCalls: 4,
+        toolCalls: 3,
         chainEvidence: expect.objectContaining({
           failedAttempts: expect.arrayContaining([
             expect.objectContaining({ attempt: 'primary' }),
@@ -1015,7 +933,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]).toEqual(expect.objectContaining({
       outcome: 'authorized', agentDispatched: true, callsPerRound: 1,
       combatModel: 'monster_block_v1',
-      roundProtocolVersion: 2,
+      roundProtocolVersion: 3,
       partyPolicyHash: null,
       materialityPolicyHash: null,
       adjustmentBudget: 0,
@@ -1040,7 +958,7 @@ describe('AI-DM engine MCP conversation runner', () => {
   it('directs K6 to consume an inline suggestion without fetching the same play again', () => {
     const k6 = readFileSync('tests/fixtures/ai-dm-kb/k6.txt', 'utf8');
 
-    expect(k6).toContain('If suggested_plan is present, use its intents directly');
+    expect(k6).toContain('If suggested_plan is present, use its proposals directly');
     expect(k6).toContain('do not call engine.propose_from_play');
     expect(k6).toContain('Only when suggested_plan is absent');
   });
@@ -1128,12 +1046,15 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--combat-model', 'initiative_segments_v1', '--dry-run',
     ]);
 
-    const result = await runConversation(config, { roomStates: [await alternatingInitiativeRoom()] });
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom()],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+    });
     const row = result.rows[0];
 
     expect(row).toEqual(expect.objectContaining({
       combatModel: 'initiative_segments_v1',
-      roundProtocolVersion: 2,
+      roundProtocolVersion: 3,
       outcome: 'authorized',
       adjustments: [],
       callsPerRound: 1,
@@ -1150,7 +1071,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(row?.teamPlans.monsters).toEqual(expect.objectContaining({
       initialProposalId: expect.any(String),
       initialProposalHash: expect.any(String),
-      authorizedIntents: expect.any(Array),
+      authorizedProposals: expect.any(Array),
     }));
     expect(row?.initiativeOrder).toHaveLength(6);
     expect(row?.initiativeOrder).toEqual([
@@ -1198,6 +1119,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     const result = await runConversation(config, {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
       adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': response },
     });
     const row = result.rows[0];
@@ -1230,8 +1152,8 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(row?.rlData).toEqual(expect.objectContaining({
       format: 'arena-rl-capture-v2',
       task: 'round_plan',
-      submissionTool: 'engine.submit_round_intents',
-      roundProtocolVersion: 2,
+      submissionTool: 'engine.submit_round_proposals',
+      roundProtocolVersion: 3,
     }));
     expect(row?.adjustments[0]?.rlData[0]).toEqual(expect.objectContaining({
       format: 'arena-rl-capture-v2',
@@ -1252,11 +1174,26 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--combat-model', 'initiative_segments_v1', '--dry-run',
     ]);
 
+    const base = await alternatingInitiativeRoom({ fragileMonsterCount: 1 });
+    const twoFragileMonsters: EncounterState = {
+      ...base,
+      combatants: base.combatants.map((combatant) =>
+        combatant.profile.id === 'combatant:generated-3943001-monster-3'
+          ? {
+            ...combatant,
+            hitPoints: 1,
+            profile: {
+              ...combatant.profile,
+              rules: { ...combatant.profile.rules, hitPointMaximum: 1 },
+            },
+          }
+          : combatant),
+    };
     const result = await runConversation(config, {
-      roomStates: [await alternatingInitiativeRoom({ monsterHitPoints: 1 })],
+      roomStates: [twoFragileMonsters],
       flapPrimaryByRequest: {
+        'room-1-round-1-pc-turn-1': 1,
         'room-1-round-1-pc-turn-2': 1,
-        'room-1-round-1-pc-turn-3': 1,
       },
     });
 

@@ -47,6 +47,7 @@ import type {
 } from '../../../src/vtt/speculative-plan-types';
 import { engineSchemaInternals, schemaViolations } from '../../../src/vtt/mcp/schemas';
 import { generateRoom, type GeneratedRoom } from '../../../src/vtt/room-generator';
+import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
@@ -115,7 +116,7 @@ function candidate(
     factKey: scenarioFactKey(baseline),
     baseline,
     flipped: complementScenarioFact(baseline),
-    referencedIntentCount: 1,
+    referencedProposalCount: 1,
     influencingPlayerIds: [],
     summedMovementRadiusFeet: 30,
     volatilityScore: 30,
@@ -242,7 +243,7 @@ describe('speculative host fact system', () => {
   });
 
   it('evaluates life, adjacency, action reach, and persistent-zone occupancy with exact complements', () => {
-    const hard = generateRoom(5_117_002, { difficulty: 'hard' }).encounter.state;
+    const hard = freshMonsterPlanningState(generateRoom(5_117_002, { difficulty: 'hard' }).encounter.state);
     const actor = hard.combatants.find((entry) =>
       entry.profile.kind === 'monster' && entry.life === 'living' &&
       engineActionRegistry(hard).actionsFor(entry.profile.id).length > 0);
@@ -482,14 +483,14 @@ describe('speculative host fact system', () => {
       .filter((entry) => entry.profile.kind === 'player_character' && entry.life === 'living')
       .map((entry) => entry.profile.id);
     const result = buildHostScenarioMenu(state, actors, players);
-    expect(result.baselineIntents.map((entry) => entry.actorId)).toEqual(actors);
+    expect(result.baselineProposals.map((entry) => entry.actorId)).toEqual(actors);
     expect(result.scenarioMenu.length).toBeGreaterThan(0);
     expect(result.scenarioMenu.length).toBeLessThanOrEqual(8);
     expect(result.scenarioMenu.map((entry) => entry.rank)).toEqual(
       result.scenarioMenu.map((_entry, index) => index + 1),
     );
     expect(result.scenarioMenu.every((entry) =>
-      entry.volatilityScore === entry.referencedIntentCount * entry.summedMovementRadiusFeet &&
+      entry.volatilityScore === entry.referencedProposalCount * entry.summedMovementRadiusFeet &&
       entry.influencingPlayerIds.length > 0)).toBe(true);
     expect(result.scenarios.length).toBe(result.scenarioMenu.length === 0
       ? 0
@@ -503,6 +504,7 @@ describe('speculative host fact system', () => {
       kind: 'resource_available_is', subject, resource: { kind: 'reaction' }, available: true,
     })];
     const scenarios = compileHostScenarios(menu);
+    const planningState = projectFutureMonsterTurns(fixture.state, [fixture.target.id]);
     const capsule = createEngineStateCapsule({
       runId: encounterSessionId('encounter:spec-submit'),
       branchId: encounterBranchId('branch:spec-submit'),
@@ -519,16 +521,16 @@ describe('speculative host fact system', () => {
         scenarioMenu: menu,
         scenarios,
       },
-      projection: projectEngineEncounterState(fixture.state, engineActionRegistry(fixture.state), 2),
+      projection: projectEngineEncounterState(planningState, engineActionRegistry(planningState), 2),
     });
     const source = new FixedReadonlyStateCapsuleSource(capsule);
     const accepted: Array<ReturnType<typeof submitSpeculativeRoundPlan>> = [];
-    const dodge = {
-      actorId: fixture.target.id,
-      choice: { kind: 'dodge' as const },
-      movement: { willingness: 'none' as const, maximumFeet: 0, opportunityRisk: 'avoid' as const },
-      engagement: { stance: 'hold_position' as const },
-      fallback: null,
+    const projectedActor = capsule.projection.combatants.find((combatant) => combatant.id === fixture.target.id);
+    const offered = projectedActor?.options[0];
+    if (offered === undefined) throw new Error('Speculative fixture omitted its actor option inventory.');
+    const turnProposal = {
+      actorId: fixture.target.id, expectedRevision: capsule.revision,
+      primaryOptionId: offered.optionId, fallbackOptionId: null, overrideJustification: null,
     };
     const envelope = submitSpeculativeRoundPlan(source, {
       append: (entry) => { accepted.push(entry); },
@@ -544,7 +546,7 @@ describe('speculative host fact system', () => {
       targetRoom: 2,
       targetMonsterRound: 3,
       refreshGeneration: 1,
-      branches: scenarios.map((scenario) => ({ scenarioId: scenario.scenarioId, intents: [dodge] })),
+      branches: scenarios.map((scenario) => ({ scenarioId: scenario.scenarioId, proposals: [turnProposal] })),
       reactionGuidance: { sideWide: { opportunity_attack: 'decline' }, actors: [] },
       idempotencyKey: 'spec-submit-idempotency-0001',
     });
@@ -570,12 +572,12 @@ describe('speculative host fact system', () => {
       refresh_generation: 0,
       branches: [{
         scenario_id: 'scenario:1',
-        intents: [{
+        proposals: [{
           actor_id: 'combatant:monster',
-          choice: { kind: 'dodge' },
-          movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
-          engagement: { stance: 'hold_position' },
-          fallback: null,
+          expected_revision: 1,
+          primary_option_id: 'option:monster:dodge',
+          fallback_option_id: null,
+          override_justification: null,
         }],
       }],
       idempotency_key: 'strict-speculation-0001',

@@ -152,12 +152,12 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
       const context = record(JSON.parse(toolMessage['content']) as unknown, 'turn context');
       const requestValue = record(context['request'], 'turn request');
       const suggestion = record(context['suggested_plan'], 'suggested plan');
-      return { body: assistantToolCall('call-submit', 'engine__submit_round_intents', {
+      return { body: assistantToolCall('call-submit', 'engine__submit_round_proposals', {
         state_ref: context['state_ref'],
         request_id: requestValue['request_id'],
         phase: requestValue['phase'],
         idempotency_key: 'SIMULATED-local-openai-round-submit',
-        intents: suggestion['intents'],
+        proposals: suggestion['proposals'],
       }, {
         prompt_tokens: 17, completion_tokens: 3,
         prompt_tokens_details: { cached_tokens: 2 },
@@ -235,8 +235,8 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
     expect(converted.map((tool) => tool.function.name)).toEqual([
       'engine__get_turn_context',
       'engine__propose_from_play',
-      'engine__validate_intent',
-      'engine__submit_round_intents',
+      'engine__validate_proposal',
+      'engine__submit_round_proposals',
       'engine__request_dm_adjudication',
     ]);
     expect(converted.map((tool) => tool.function.parameters))

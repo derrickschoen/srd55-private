@@ -189,12 +189,12 @@ export const SESSION_TRANSITION_KINDS = [
   'agent_session_dispatched',
   'agent_session_recovered',
   'session_ended',
-  'intent_fallback_resolved',
-  'intent_correction_requested',
-  'intent_correction_resolved',
-  'intent_correction_failed',
-  'intent_auto_resolved',
-  'intent_auto_resolution_failed',
+  'proposal_fallback_resolved',
+  'proposal_correction_requested',
+  'proposal_correction_resolved',
+  'proposal_correction_failed',
+  'proposal_auto_resolved',
+  'proposal_auto_resolution_failed',
   'unattended_reaction_auto_resolved',
   'reaction_guidance_replaced',
   'reaction_guidance_auto_resolved',
@@ -571,7 +571,7 @@ function validAdjudicationEnvelope(value: unknown): value is AdjudicationEnvelop
 
 function validActorFailures(value: unknown): value is Extract<
   TurnExhaustionTransition,
-  { readonly kind: 'intent_correction_requested' }
+  { readonly kind: 'proposal_correction_requested' }
 >['actorFailures'] {
   return Array.isArray(value) && value.length > 0 && value.every((entry) =>
     isRecord(entry) && hasExactlyKeys(entry, ['actorId', 'fallbackResult']) &&
@@ -641,36 +641,36 @@ function decodeTransition(value: unknown): SessionTransition {
     case 'session_ended':
       if (hasExactlyKeys(value, ['kind'])) return { kind: 'session_ended' };
       break;
-    case 'intent_fallback_resolved':
+    case 'proposal_fallback_resolved':
       if (hasExactlyKeys(value, ['kind', 'requestId', 'proposalId', 'actorId', 'resolutionDigest']) &&
         typeof value.requestId === 'string' && typeof value.proposalId === 'string' &&
         typeof value.actorId === 'string' && typeof value.resolutionDigest === 'string') {
-        return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_fallback_resolved' }>;
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'proposal_fallback_resolved' }>;
       }
       break;
-    case 'intent_correction_requested':
+    case 'proposal_correction_requested':
       if (hasExactlyKeys(value, ['kind', 'requestId', 'initialProposalId', 'correctionNumber', 'actorFailures']) &&
         typeof value.requestId === 'string' && typeof value.initialProposalId === 'string' &&
         value.correctionNumber === 1 && validActorFailures(value.actorFailures)) {
-        return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_correction_requested' }>;
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'proposal_correction_requested' }>;
       }
       break;
-    case 'intent_correction_resolved':
+    case 'proposal_correction_resolved':
       if (hasExactlyKeys(value, ['kind', 'requestId', 'proposalId', 'actorIds']) &&
         typeof value.requestId === 'string' && typeof value.proposalId === 'string' &&
         Array.isArray(value.actorIds) && value.actorIds.length > 0 &&
         value.actorIds.every((entry) => typeof entry === 'string') &&
         new Set(value.actorIds).size === value.actorIds.length) {
-        return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_correction_resolved' }>;
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'proposal_correction_resolved' }>;
       }
       break;
-    case 'intent_correction_failed':
+    case 'proposal_correction_failed':
       if (hasExactlyKeys(value, ['kind', 'requestId', 'result']) && typeof value.requestId === 'string' &&
         (value.result === 'invalid' || value.result === 'invalidated' || value.result === 'no_response')) {
-        return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_correction_failed' }>;
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'proposal_correction_failed' }>;
       }
       break;
-    case 'intent_auto_resolved':
+    case 'proposal_auto_resolved':
       if (hasExactlyKeys(value, [
         'kind', 'runId', 'branchId', 'expectedRevision', 'requestId', 'actorId',
         'initialProposalId', 'fallbackResult', 'correctionResult', 'controllerResolutionDigest',
@@ -680,13 +680,13 @@ function decodeTransition(value: unknown): SessionTransition {
         (value.fallbackResult === 'invalid' || value.fallbackResult === 'invalidated' || value.fallbackResult === 'absent') &&
         (value.correctionResult === 'invalid' || value.correctionResult === 'invalidated' || value.correctionResult === 'no_response') &&
         typeof value.controllerResolutionDigest === 'string') {
-        return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_auto_resolved' }>;
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'proposal_auto_resolved' }>;
       }
       break;
-    case 'intent_auto_resolution_failed':
+    case 'proposal_auto_resolution_failed':
       if (hasExactlyKeys(value, ['kind', 'requestId', 'actorId', 'reason']) &&
         typeof value.requestId === 'string' && typeof value.actorId === 'string' && typeof value.reason === 'string') {
-        return value as unknown as Extract<SessionTransition, { readonly kind: 'intent_auto_resolution_failed' }>;
+        return value as unknown as Extract<SessionTransition, { readonly kind: 'proposal_auto_resolution_failed' }>;
       }
       break;
     case 'unattended_reaction_auto_resolved':
@@ -1436,12 +1436,12 @@ export function replaySessionRevisions(
       case 'controller_response_refused':
       case 'coordinator_paused':
       case 'coordinator_resumed':
-      case 'intent_fallback_resolved':
-      case 'intent_correction_requested':
-      case 'intent_correction_resolved':
-      case 'intent_correction_failed':
-      case 'intent_auto_resolved':
-      case 'intent_auto_resolution_failed':
+      case 'proposal_fallback_resolved':
+      case 'proposal_correction_requested':
+      case 'proposal_correction_resolved':
+      case 'proposal_correction_failed':
+      case 'proposal_auto_resolved':
+      case 'proposal_auto_resolution_failed':
       case 'unattended_reaction_auto_resolved':
       case 'reaction_guidance_replaced':
       case 'reaction_guidance_auto_resolved':
@@ -1770,7 +1770,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
   turnExhaustionPersistence(): import('./turn-exhaustion-coordinator').TurnExhaustionPersistence {
     return {
       transitions: () => this.history().flatMap((entry) =>
-        !entry.void && entry.transition.kind.startsWith('intent_')
+        !entry.void && entry.transition.kind.startsWith('proposal_')
           ? [entry.transition as TurnExhaustionTransition]
           : []),
       record: (transition) => this.recordHostTransition(transition),

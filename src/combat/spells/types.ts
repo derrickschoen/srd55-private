@@ -1273,4 +1273,6 @@ export interface SpellCastCommand {
   }[];
   /** A declared class/feat pool can replace slot spending for this cast. */
   readonly resourcePoolId?: LimitedResourcePoolId;
+  /** Statblock source that may replace the spell definition's ordinary casting-time slot. */
+  readonly monsterActionId?: string;
 }

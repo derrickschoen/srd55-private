@@ -4,11 +4,16 @@ import { mulberry32 } from '../../../src/combat/random';
 import { armorClass, combatantId, encounterBranchId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
 import {
   EngineRoundSession,
-  type AuthorizedEngineTurnIntent,
+  type AuthorizedEngineTurnProposal,
   type EngineRoundCapsuleRequest,
 } from '../../../src/vtt/engine-round-session';
-import { pureIntentResolver, type EngineTurnIntent } from '../../../src/vtt/intent-resolver';
+import {
+  availableEngineActorOptions,
+  pureTurnProposalResolver,
+  type EngineTurnProposal,
+} from '../../../src/vtt/intent-resolver';
 import { generateRoom } from '../../../src/vtt/room-generator';
+import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../../../src/vtt/monster-planning-state';
 
 const REQUEST: EngineRoundCapsuleRequest = {
   runId: encounterSessionId('encounter:engine-round-session-test'),
@@ -32,7 +37,7 @@ function fixedPositions(
   columns = 40,
 ): EncounterState {
   const generated = generateRoom(3_943_001).encounter.state;
-  return {
+  return freshMonsterPlanningState({
     ...generated,
     bounds: { columns, rows: 20 },
     blockedCells: [],
@@ -45,31 +50,40 @@ function fixedPositions(
       ...token,
       position: positions.get(token.combatantId) ?? { column: 10 + index, row: 10 },
     })),
-  };
+  });
 }
 
-function attackIntent(
+function attackProposal(
+  state: EncounterState,
   actorId: CombatantId,
   actionId: string,
   targetId: CombatantId,
-): EngineTurnIntent {
+): EngineTurnProposal {
+  const planningState = projectFutureMonsterTurns(state, [actorId]);
+  const options = availableEngineActorOptions(planningState, actorId);
+  const primary = options.find((option) => option.actionSlots.some((slot) => {
+    const use = slot.use;
+    if (use.kind === 'attack') return use.actionId === actionId && use.target.kind === 'combatant' && use.target.combatantId === targetId;
+    return use.kind === 'multiattack' && use.components.some((component) =>
+      component.actionId === actionId && component.target.kind === 'combatant' && component.target.combatantId === targetId);
+  }));
+  const fallback = options.find((option) => option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge'));
+  if (primary === undefined) throw new Error(`Test fixture omitted ${actionId} for ${actorId}.`);
   return {
-    actorId,
-    choice: { kind: 'attack', actionId, target: { kind: 'combatant', combatantId: targetId } },
-    movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-    engagement: { stance: 'hold_position' },
-    fallback: {
-      choice: { kind: 'dodge' },
-      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-      engagement: { stance: 'hold_position' },
-    },
+    actorId, expectedRevision: state.revision, primaryOptionId: primary.optionId,
+    fallbackOptionId: fallback?.optionId ?? null, overrideJustification: null,
   };
 }
 
-function authorized(state: EncounterState, intent: EngineTurnIntent): AuthorizedEngineTurnIntent {
-  const resolution = pureIntentResolver.resolve(state, intent);
-  if (!resolution.valid) throw new Error(`Test intent was not authorizable: ${resolution.refusals.map((entry) => entry.code).join(', ')}`);
-  return { intent, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch };
+function authorized(state: EncounterState, proposal: EngineTurnProposal): AuthorizedEngineTurnProposal {
+  const planningState = projectFutureMonsterTurns(state, [proposal.actorId]);
+  const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
+  if (!resolution.valid) throw new Error(`Test proposal was not authorizable: ${resolution.refusals.map((entry) => entry.code).join(', ')}`);
+  return {
+    proposal, option: resolution.option, primaryOption: resolution.primaryOption,
+    fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics,
+    selectedBranch: resolution.selectedBranch,
+  };
 }
 
 function segmentedState(
@@ -100,13 +114,14 @@ function segmentedState(
   };
 }
 
-function dodgeIntent(actorId: CombatantId): EngineTurnIntent {
+function dodgeProposal(state: EncounterState, actorId: CombatantId): EngineTurnProposal {
+  const planningState = projectFutureMonsterTurns(state, [actorId]);
+  const dodge = availableEngineActorOptions(planningState, actorId)
+    .find((option) => option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge'));
+  if (dodge === undefined) throw new Error(`Test fixture omitted Dodge for ${actorId}.`);
   return {
-    actorId,
-    choice: { kind: 'dodge' },
-    movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-    engagement: { stance: 'hold_position' },
-    fallback: null,
+    actorId, expectedRevision: state.revision, primaryOptionId: dodge.optionId,
+    fallbackOptionId: null, overrideJustification: null,
   };
 }
 
@@ -123,7 +138,7 @@ describe('authoritative engine round session', () => {
       [ARCHER_ID, { column: 0, row: 0 }],
       [CLERIC_ID, { column: 31, row: 0 }],
     ]));
-    const archer = authorized(state, attackIntent(ARCHER_ID, 'longbow', CLERIC_ID));
+    const archer = authorized(state, attackProposal(state, ARCHER_ID, 'longbow', CLERIC_ID));
     const session = new EngineRoundSession(
       state,
       mulberry32(8_274_114),
@@ -158,7 +173,7 @@ describe('authoritative engine round session', () => {
           }
         : candidate),
     };
-    const archer = authorized(state, attackIntent(ARCHER_ID, 'longbow', FOCUS_ID));
+    const archer = authorized(state, attackProposal(state, ARCHER_ID, 'longbow', FOCUS_ID));
     const session = new EngineRoundSession(
       state,
       mulberry32(8_274_115),
@@ -190,8 +205,8 @@ describe('authoritative engine round session', () => {
 
     completeDodge(session, FOCUS_ID);
     const beforeRejectedSegment = session.currentState();
-    const killer = authorized(beforeRejectedSegment, dodgeIntent(KILLER_ID));
-    const archer = authorized(beforeRejectedSegment, dodgeIntent(ARCHER_ID));
+    const killer = authorized(beforeRejectedSegment, dodgeProposal(beforeRejectedSegment, KILLER_ID));
+    const archer = authorized(beforeRejectedSegment, dodgeProposal(beforeRejectedSegment, ARCHER_ID));
     expect(() => session.applyConsecutiveMonsterSegment([killer], null)).toThrow(
       `Monster initiative segment must contain the maximal consecutive actors: ${KILLER_ID}, ${ARCHER_ID}.`,
     );
@@ -217,12 +232,12 @@ describe('authoritative engine round session', () => {
       session.beginRoundWithoutSkipping(REQUEST, null);
       completeDodge(session, FOCUS_ID);
       session.applyConsecutiveMonsterSegment([
-        authorized(session.currentState(), dodgeIntent(KILLER_ID)),
-        authorized(session.currentState(), dodgeIntent(ARCHER_ID)),
+        authorized(session.currentState(), dodgeProposal(session.currentState(), KILLER_ID)),
+        authorized(session.currentState(), dodgeProposal(session.currentState(), ARCHER_ID)),
       ], null);
       completeDodge(session, CLERIC_ID);
       session.applyConsecutiveMonsterSegment([
-        authorized(session.currentState(), dodgeIntent(BRUTE_ID)),
+        authorized(session.currentState(), dodgeProposal(session.currentState(), BRUTE_ID)),
       ], null);
       completeDodge(session, WIZARD_ID);
       return session.currentState().eventLog;
@@ -247,8 +262,8 @@ describe('authoritative engine round session', () => {
       reducerCommands: [{ type: 'end_turn', actor: FOCUS_ID }],
     }, null);
     session.applyConsecutiveMonsterSegment([
-      authorized(session.currentState(), dodgeIntent(KILLER_ID)),
-      authorized(session.currentState(), dodgeIntent(ARCHER_ID)),
+      authorized(session.currentState(), dodgeProposal(session.currentState(), KILLER_ID)),
+      authorized(session.currentState(), dodgeProposal(session.currentState(), ARCHER_ID)),
     ], null);
 
     const applied = session.completeScriptedPcTurn({
@@ -300,13 +315,11 @@ describe('authoritative engine round session', () => {
       expect(session.currentState().pendingDecisions.some((decision) =>
         decision.kind === 'death_save')).toBe(false);
       for (const actorId of prepared.snapshot.capsule.request?.actors ?? []) {
-        const resolution = pureIntentResolver.resolve(session.currentState(), {
-          actorId,
-          choice: { kind: 'dodge' },
-          movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-          engagement: { stance: 'hold_position' },
-          fallback: null,
-        });
+        const proposal = dodgeProposal(session.currentState(), actorId);
+        const resolution = pureTurnProposalResolver.resolve(
+          projectFutureMonsterTurns(session.currentState(), [actorId]),
+          proposal,
+        );
         expect(resolution.valid).toBe(true);
       }
     },
@@ -352,8 +365,8 @@ describe('authoritative engine round session', () => {
           }
         : candidate),
     };
-    const killer = authorized(state, attackIntent(KILLER_ID, 'dagger', FOCUS_ID));
-    const archer = authorized(state, attackIntent(ARCHER_ID, 'longbow', FOCUS_ID));
+    const killer = authorized(state, attackProposal(state, KILLER_ID, 'dagger', FOCUS_ID));
+    const archer = authorized(state, attackProposal(state, ARCHER_ID, 'longbow', FOCUS_ID));
     const session = new EngineRoundSession(state, mulberry32(19), { kind: 'unattended', askDefault: 'decline' });
 
     const applied = session.applyResolvedMechanics([killer, archer], null);
@@ -365,10 +378,10 @@ describe('authoritative engine round session', () => {
       actorId: ARCHER_ID,
       authorizedBranch: 'primary',
       appliedBranch: 'fallback',
-      authorizedTargetId: FOCUS_ID,
-      appliedTargetId: null,
-      reasonCodes: ['branch_changed', 'target_changed'],
-      refusalCodes: ['TARGET_DEAD'],
+      authorizedOptionId: archer.option.optionId,
+      appliedOptionId: archer.fallbackOption?.optionId,
+      reasonCodes: ['branch_changed', 'option_changed'],
+      refusalCodes: ['ATTACK_UNAVAILABLE'],
     }]);
   });
 
@@ -401,8 +414,8 @@ describe('authoritative engine round session', () => {
       actorId: FOCUS_ID,
       reducerCommands: [{ type: 'end_turn', actor: FOCUS_ID }],
     }, null);
-    const killer = authorized(session.currentState(), attackIntent(KILLER_ID, 'dagger', FOCUS_ID));
-    const archer = authorized(session.currentState(), attackIntent(ARCHER_ID, 'longbow', FOCUS_ID));
+    const killer = authorized(session.currentState(), attackProposal(session.currentState(), KILLER_ID, 'dagger', FOCUS_ID));
+    const archer = authorized(session.currentState(), attackProposal(session.currentState(), ARCHER_ID, 'longbow', FOCUS_ID));
 
     const applied = session.applyConsecutiveMonsterSegment([killer, archer], null);
 
@@ -413,33 +426,27 @@ describe('authoritative engine round session', () => {
       actorId: ARCHER_ID,
       authorizedBranch: 'primary',
       appliedBranch: 'fallback',
-      authorizedTargetId: FOCUS_ID,
-      appliedTargetId: null,
-      reasonCodes: ['branch_changed', 'target_changed'],
-      refusalCodes: ['TARGET_DEAD'],
+      authorizedOptionId: archer.option.optionId,
+      appliedOptionId: archer.fallbackOption?.optionId,
+      reasonCodes: ['branch_changed', 'option_changed'],
+      refusalCodes: ['ATTACK_UNAVAILABLE'],
     }]);
   });
 
-  it('falls back after a forced displacement leaves a zero-movement archer out of range', () => {
+  it('falls back after a forced displacement leaves an archer out of range after its full movement', () => {
     const authorizationState = fixedPositions(new Map([
       [KILLER_ID, { column: 10, row: 0 }],
       [ARCHER_ID, { column: 0, row: 0 }],
       [FOCUS_ID, { column: 30, row: 0 }],
     ]), 130);
-    const archer = authorized(authorizationState, attackIntent(ARCHER_ID, 'longbow', FOCUS_ID));
+    const archer = authorized(authorizationState, attackProposal(authorizationState, ARCHER_ID, 'longbow', FOCUS_ID));
     const displacedState: EncounterState = {
       ...authorizationState,
       tokens: authorizationState.tokens.map((token) => token.combatantId === FOCUS_ID
-        ? { ...token, position: { column: 121, row: 0 } }
+        ? { ...token, position: { column: 129, row: 0 } }
         : token),
     };
-    const earlierDodge = authorized(displacedState, {
-      actorId: KILLER_ID,
-      choice: { kind: 'dodge' },
-      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-      engagement: { stance: 'hold_position' },
-      fallback: null,
-    });
+    const earlierDodge = authorized(displacedState, dodgeProposal(displacedState, KILLER_ID));
     const session = new EngineRoundSession(displacedState, mulberry32(23), { kind: 'unattended', askDefault: 'decline' });
 
     const applied = session.applyResolvedMechanics([earlierDodge, archer], null);
@@ -450,10 +457,10 @@ describe('authoritative engine round session', () => {
       actorId: ARCHER_ID,
       authorizedBranch: 'primary',
       appliedBranch: 'fallback',
-      authorizedTargetId: FOCUS_ID,
-      appliedTargetId: null,
-      reasonCodes: ['branch_changed', 'target_changed'],
-      refusalCodes: ['TARGET_UNREACHABLE'],
+      authorizedOptionId: archer.option.optionId,
+      appliedOptionId: archer.fallbackOption?.optionId,
+      reasonCodes: ['branch_changed', 'option_changed'],
+      refusalCodes: ['OPTION_UNREACHABLE'],
     })]);
   });
 
@@ -462,7 +469,7 @@ describe('authoritative engine round session', () => {
       [ARCHER_ID, { column: 0, row: 0 }],
       [FOCUS_ID, { column: 4, row: 0 }],
     ]));
-    const archer = authorized(state, attackIntent(ARCHER_ID, 'longbow', FOCUS_ID));
+    const archer = authorized(state, attackProposal(state, ARCHER_ID, 'longbow', FOCUS_ID));
     const session = new EngineRoundSession(state, mulberry32(29), { kind: 'unattended', askDefault: 'decline' });
 
     const applied = session.applyResolvedMechanics([archer], null);
@@ -470,7 +477,10 @@ describe('authoritative engine round session', () => {
       event.type === 'attack_resolved' && event.actor === ARCHER_ID);
 
     expect(applied.deviationResolutions).toEqual([]);
-    expect(attack).toEqual(expect.objectContaining({ actor: ARCHER_ID, target: archer.mechanics.targetId }));
+    expect(attack).toEqual(expect.objectContaining({
+      actor: ARCHER_ID,
+      target: archer.mechanics.actionSlots[0]?.targetIds[0],
+    }));
     expect(session.currentState().tokens.find((token) => token.combatantId === ARCHER_ID)?.position)
       .toEqual(archer.mechanics.finalPosition);
   });
@@ -480,23 +490,21 @@ describe('authoritative engine round session', () => {
       [ARCHER_ID, { column: 0, row: 0 }],
       [FOCUS_ID, { column: 4, row: 0 }],
     ]), 130);
-    const intent: EngineTurnIntent = {
-      ...attackIntent(ARCHER_ID, 'longbow', FOCUS_ID),
-      fallback: {
-        choice: {
-          kind: 'attack', actionId: 'longsword',
-          target: { kind: 'combatant', combatantId: FOCUS_ID },
-        },
-        movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-        engagement: { stance: 'hold_position' },
-      },
-    };
-    const archer = authorized(authorizationState, intent);
+    const baseProposal = attackProposal(authorizationState, ARCHER_ID, 'longbow', FOCUS_ID);
+    const secondOffense = availableEngineActorOptions(authorizationState, ARCHER_ID).find((option) =>
+      option.optionId !== baseProposal.primaryOptionId && option.actionSlots.some((slot) =>
+        slot.use.kind === 'attack' || slot.use.kind === 'multiattack'));
+    if (secondOffense === undefined) throw new Error('Fixture omitted a second offensive option.');
+    const proposal: EngineTurnProposal = { ...baseProposal, fallbackOptionId: secondOffense.optionId };
+    const archer = authorized(authorizationState, proposal);
     const displacedState: EncounterState = {
       ...authorizationState,
-      tokens: authorizationState.tokens.map((token) => token.combatantId === FOCUS_ID
-        ? { ...token, position: { column: 121, row: 0 } }
-        : token),
+      tokens: authorizationState.tokens.map((token) => {
+        if (token.combatantId === FOCUS_ID) return { ...token, position: { column: 129, row: 0 } };
+        if (token.combatantId === CLERIC_ID) return { ...token, position: { column: 128, row: 0 } };
+        if (token.combatantId === WIZARD_ID) return { ...token, position: { column: 127, row: 0 } };
+        return token;
+      }),
     };
     const session = new EngineRoundSession(displacedState, mulberry32(31), { kind: 'unattended', askDefault: 'decline' });
 
@@ -506,10 +514,10 @@ describe('authoritative engine round session', () => {
       actorId: ARCHER_ID,
       authorizedBranch: 'primary',
       appliedBranch: 'dodge',
-      authorizedTargetId: FOCUS_ID,
-      appliedTargetId: null,
+      authorizedOptionId: archer.option.optionId,
+      appliedOptionId: expect.any(String),
       reasonCodes: ['degraded_to_dodge'],
-      refusalCodes: ['TARGET_UNREACHABLE', 'TARGET_UNREACHABLE'],
+      refusalCodes: ['OPTION_UNREACHABLE', 'OPTION_UNREACHABLE'],
     }]);
     expect(session.currentState().combatants.find((entry) => entry.profile.id === ARCHER_ID)?.turn.dodging)
       .toBe(true);

@@ -1,8 +1,8 @@
 Use only actions and spells offered for the actor; never invent abilities absent from its statblock.
-For every required actor, declare a primary intent with explicit movement and engagement constraints and a legal fallback.
+For every required actor, select one offered primary option id and a legal fallback option id.
 A fallback is a complete alternate choice, movement policy, and engagement objective; choose one that can succeed when the primary cannot.
 When reach, path, visibility, cover, or resource legality is uncertain, use the focused query tools before committing.
-Use engine.validate_intent before submission when any intended branch remains uncertain.
+Use engine.validate_proposal before submission when any selected option remains uncertain.
 Use semantic target selectors and let the engine resolve all geometry.
 Set willingness deliberately: none means no movement; only_if_required permits movement needed to enable the choice.
 Use maximum_feet to cap movement only when that cap still permits the intended action.
@@ -19,5 +19,5 @@ Do not spend movement that does not improve reach, safety, line of attack, or th
 Keep ranged attackers at effective range unless closing creates a clear advantage.
 Prefer robust legal actions over fragile plans that depend on every uncertain condition succeeding.
 Prefer an advertised play when one fits the tactical situation.
-Edit its draft intent set rather than planning the whole round from scratch.
+Edit its draft proposal set rather than planning the whole round from scratch.
 Declare guidance for foreseeable reactions once, early, and rely on its persistence across later rounds and rooms.

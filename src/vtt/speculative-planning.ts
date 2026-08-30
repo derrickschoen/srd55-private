@@ -8,7 +8,6 @@ import {
 import { isIncapacitated } from '../combat/conditions';
 import { gridDistance } from '../combat/grid';
 import { persistentAreaContains } from '../combat/persistent-areas';
-import type { MonsterAction } from '../combat/statblock';
 import type { CombatantId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import {
@@ -20,7 +19,8 @@ import {
   enginePlanningSpeedFeet,
   type EngineQueryPort,
 } from './engine-query-port';
-import type { EngineIntentBranch, EngineTurnIntent } from './intent-resolver';
+import { availableEngineActorOptions, type EngineActorOption, type EngineTurnProposal } from './intent-resolver';
+import { projectFutureMonsterTurns } from './monster-planning-state';
 import type {
   EngineSelectorRef,
   GuardConditionIdentity,
@@ -275,133 +275,40 @@ function directRef(actorId: CombatantId, subjectId: CombatantId): EngineSelector
   return { actorId, selector: { kind: 'combatant', combatantId: subjectId } };
 }
 
-function noMovement(): EngineIntentBranch['movement'] {
-  return { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' };
-}
-
-function defensiveIntent(actorId: CombatantId): EngineTurnIntent {
-  return {
-    actorId,
-    choice: { kind: 'dodge' },
-    movement: noMovement(),
-    engagement: { stance: 'hold_position' },
-    fallback: {
-      choice: { kind: 'end_turn' },
-      movement: noMovement(),
-      engagement: { stance: 'hold_position' },
-    },
-  };
-}
-
-function actionChoice(action: MonsterAction, targetId: CombatantId): EngineIntentBranch['choice'] {
-  const target = { kind: 'combatant' as const, combatantId: targetId };
-  return action.kind === 'attack'
-    ? { kind: 'attack', actionId: action.id, target, resourcePolicy: 'normal' }
-    : { kind: 'use_action', actionId: action.id, target };
-}
-
-function minimumMovementToReach(
-  state: EncounterState,
-  actorId: CombatantId,
-  targetId: CombatantId,
-  actionId: string,
-  maximumFeet: number,
-  queries: EngineQueryPort,
-): number | null {
-  if (queries.reach(state, { actorId, targetId, actionId }).legal) return 0;
-  let minimum: number | null = null;
-  for (let row = 0; row < state.bounds.rows; row += 1) {
-    for (let column = 0; column < state.bounds.columns; column += 1) {
-      if (!queries.reach(state, {
-        actorId,
-        targetId,
-        actionId,
-        origin: { column, row },
-      }).legal) continue;
-      const path = queries.path(state, {
-        actorId,
-        destination: { column, row },
-        movement: 'normal',
-        maximumFeet,
-      });
-      if (!path.legal) continue;
-      minimum = minimum === null ? path.costFeet : Math.min(minimum, path.costFeet);
-    }
-  }
-  return minimum;
-}
-
-export interface HostBaselineIntentPlanner {
+export interface HostBaselineProposalPlanner {
   plan(
     state: EncounterState,
     actors: readonly CombatantId[],
     queries?: EngineQueryPort,
-  ): readonly EngineTurnIntent[];
+  ): readonly EngineTurnProposal[];
 }
 
-export const hostBaselineIntentPlanner: HostBaselineIntentPlanner = Object.freeze({
+function optionIsOffensive(option: EngineActorOption): boolean {
+  return option.actionSlots.some((slot) => slot.slot === 'main' &&
+    (slot.use.kind === 'attack' || slot.use.kind === 'multiattack' || slot.use.kind === 'saving_throw'));
+}
+
+export const hostBaselineProposalPlanner: HostBaselineProposalPlanner = Object.freeze({
   plan(
     state: EncounterState,
     actors: readonly CombatantId[],
     queries: EngineQueryPort = canonicalEngineQueryPort,
-  ): readonly EngineTurnIntent[] {
-    return actors.map((actorId) => {
-      const actor = queries.combatant(state, actorId);
-      if (actor?.life !== 'living' || actor.profile.kind !== 'monster') return defensiveIntent(actorId);
-      const origin = queries.tokenPosition(state, actorId);
-      if (origin === null) return defensiveIntent(actorId);
-      const targets = state.combatants
-        .filter((candidate) => candidate.life !== 'dead' && !queries.sameSide(state, actorId, candidate.profile.id))
-        .flatMap((candidate) => {
-          const position = queries.tokenPosition(state, candidate.profile.id);
-          return position === null ? [] : [{ id: candidate.profile.id, hitPoints: enginePlanningHitPoints(state, candidate.profile.id), position }];
-        });
-      const candidates = queries.actions(state, actorId).flatMap((action) => targets.flatMap((target) => {
-        const movement = minimumMovementToReach(
-          state,
-          actorId,
-          target.id,
-          action.id,
-          actor.profile.rules.speed,
-          queries,
-        );
-        return movement === null ? [] : [{ action, target, movement }];
-      }));
-      candidates.sort((left, right) =>
-        left.movement - right.movement ||
-        gridDistance(origin, left.target.position) - gridDistance(origin, right.target.position) ||
-        left.target.hitPoints - right.target.hitPoints ||
-        left.action.id.localeCompare(right.action.id) ||
-        left.target.id.localeCompare(right.target.id));
-      const selected = candidates[0];
-      if (selected === undefined) return defensiveIntent(actorId);
-      const target = { kind: 'combatant' as const, combatantId: selected.target.id };
-      return {
-        actorId,
-        choice: actionChoice(selected.action, selected.target.id),
-        movement: selected.movement === 0
-          ? noMovement()
-          : {
-              willingness: 'only_if_required' as const,
-              maximumFeet: actor.profile.rules.speed,
-              opportunityRisk: 'accept_if_needed' as const,
-            },
-        engagement: {
-          stance: selected.movement === 0 ? 'hold_position' as const : 'close_to_melee' as const,
-          anchor: target,
-        },
-        fallback: {
-          choice: { kind: 'dodge' as const },
-          movement: noMovement(),
-          engagement: { stance: 'hold_position' as const },
-        },
-      };
+  ): readonly EngineTurnProposal[] {
+    const planningState = projectFutureMonsterTurns(state, actors);
+    return actors.flatMap((actorId) => {
+      const options = availableEngineActorOptions(planningState, actorId, queries);
+      const primary = options.find(optionIsOffensive) ?? options[0];
+      if (primary === undefined) return [];
+      const fallback = options.find((option) => option.actionSlots.some((slot) =>
+        slot.slot === 'main' && slot.use.kind === 'dodge')) ?? null;
+      return [{ actorId, expectedRevision: state.revision, primaryOptionId: primary.optionId,
+        fallbackOptionId: fallback?.optionId ?? null, overrideJustification: null }];
     });
   },
 });
 
-export interface IntentFactDependency {
-  readonly intentActorId: CombatantId;
+export interface ProposalFactDependency {
+  readonly proposalActorId: CombatantId;
   readonly baseline: ScenarioFactAtom;
   readonly flipped: ScenarioFactAtom;
 }
@@ -414,57 +321,65 @@ function hpThreshold(current: number, maximum: number): HpThresholdPercent {
 }
 
 function addDependency(
-  entries: IntentFactDependency[],
-  intentActorId: CombatantId,
+  entries: ProposalFactDependency[],
+  proposalActorId: CombatantId,
   baseline: ScenarioFactAtom,
   lifeFlip?: LifeState,
 ): void {
   entries.push({
-    intentActorId,
+    proposalActorId,
     baseline,
     flipped: complementScenarioFact(baseline, lifeFlip),
   });
 }
 
-export function extractIntentFactDependencies(
+function optionSelectors(option: EngineActorOption): readonly EngineSelectorRef[] {
+  return option.actionSlots.flatMap((slot) => {
+    const use = slot.use;
+    const selectors = use.kind === 'attack' || use.kind === 'saving_throw' ? [use.target]
+      : use.kind === 'multiattack' ? use.components.map((component) => component.target)
+        : use.kind === 'cast_spell' ? use.targets : [];
+    return selectors.map((selector) => ({ actorId: option.actorId, selector }));
+  });
+}
+
+export function extractProposalFactDependencies(
   state: EncounterState,
-  intents: readonly EngineTurnIntent[],
+  options: readonly EngineActorOption[],
   queries: EngineQueryPort = canonicalEngineQueryPort,
-): readonly IntentFactDependency[] {
-  const entries: IntentFactDependency[] = [];
-  for (const intent of intents) {
-    const actorRef = directRef(intent.actorId, intent.actorId);
-    const actor = queries.combatant(state, intent.actorId);
+): readonly ProposalFactDependency[] {
+  const entries: ProposalFactDependency[] = [];
+  for (const option of options) {
+    const actorRef = directRef(option.actorId, option.actorId);
+    const actor = queries.combatant(state, option.actorId);
     if (actor === null) continue;
-    addDependency(entries, intent.actorId, {
+    addDependency(entries, option.actorId, {
       kind: 'life_state_is', subject: actorRef, value: actor.life,
     }, actor.life === 'living' ? 'dead' : 'living');
-    addDependency(entries, intent.actorId, {
+    addDependency(entries, option.actorId, {
       kind: 'resource_available_is', subject: actorRef,
       resource: { kind: 'reaction' }, available: actor.turn.reactionAvailable,
     });
-    addDependency(entries, intent.actorId, {
+    addDependency(entries, option.actorId, {
       kind: 'concentration_is', subject: actorRef,
-      active: engineConcentrationActive(state, intent.actorId),
+      active: engineConcentrationActive(state, option.actorId),
     });
     if (actor.legendary !== undefined) {
       for (const resource of [{ kind: 'legendary_action' }, { kind: 'legendary_resistance' }] as const) {
         const available = resource.kind === 'legendary_action'
           ? actor.legendary.actionUsesRemaining > 0
           : actor.legendary.resistanceUsesRemaining > 0;
-        addDependency(entries, intent.actorId, {
+        addDependency(entries, option.actorId, {
           kind: 'resource_available_is', subject: actorRef, resource, available,
         });
       }
     }
-    const targetSelector = 'target' in intent.choice ? intent.choice.target : null;
-    if (targetSelector === null) continue;
-    const targetRef = { actorId: intent.actorId, selector: targetSelector };
+    for (const targetRef of optionSelectors(option)) {
     const targetId = resolveSelector(state, targetRef, queries);
     if (targetId === null) continue;
     const target = queries.combatant(state, targetId);
     if (target === null) continue;
-    addDependency(entries, intent.actorId, {
+    addDependency(entries, option.actorId, {
       kind: 'life_state_is', subject: targetRef, value: target.life,
     }, target.life === 'living' ? 'dead' : 'living');
     if (target.life === 'living') {
@@ -474,50 +389,53 @@ export function extractIntentFactDependencies(
         const comparison = enginePlanningHitPoints(state, targetId) * 100 <= maximum * threshold
           ? 'at_most' as const
           : 'above' as const;
-        addDependency(entries, intent.actorId, {
+        addDependency(entries, option.actorId, {
           kind: 'hp_percent', subject: targetRef, comparison, threshold,
         });
       }
     }
-    const actorPosition = queries.tokenPosition(state, intent.actorId);
+    const actorPosition = queries.tokenPosition(state, option.actorId);
     const targetPosition = queries.tokenPosition(state, targetId);
     if (actorPosition !== null && targetPosition !== null) {
-      addDependency(entries, intent.actorId, {
+      addDependency(entries, option.actorId, {
         kind: 'adjacency_is', left: actorRef, right: targetRef,
         value: gridDistance(actorPosition, targetPosition) <= 5,
       });
     }
-    if (intent.choice.kind === 'attack' || intent.choice.kind === 'use_action') {
-      const actionId = intent.choice.actionId;
-      if (queries.actions(state, intent.actorId).some((action) => action.id === actionId)) {
-        addDependency(entries, intent.actorId, {
+    for (const slot of option.actionSlots) {
+      const use = slot.use;
+      const actionIds = use.kind === 'multiattack' ? use.components.map((component) => component.actionId)
+        : use.kind === 'attack' || use.kind === 'saving_throw' ? [use.actionId] : [];
+      for (const actionId of actionIds) if (queries.actions(state, option.actorId).some((action) => action.id === actionId)) {
+        addDependency(entries, option.actorId, {
           kind: 'within_action_reach_is', actor: actorRef, actionId, target: targetRef,
-          value: queries.reach(state, { actorId: intent.actorId, targetId, actionId }).legal,
+          value: queries.reach(state, { actorId: option.actorId, targetId, actionId }).legal,
         });
       }
     }
-    const visibility = queries.visibility(state, intent.actorId, targetId);
+    const visibility = queries.visibility(state, option.actorId, targetId);
     if (visibility !== null) {
-      addDependency(entries, intent.actorId, {
+      addDependency(entries, option.actorId, {
         kind: 'visibility_is', observer: actorRef, subject: targetRef, value: visibility.visible,
       });
     }
     for (const zone of enginePlanningSemanticZones(state)) {
       if (!zone.active) continue;
-      addDependency(entries, intent.actorId, {
+      addDependency(entries, option.actorId, {
         kind: 'zone_occupancy_is', subject: targetRef, zoneId: zone.id,
         value: zone.memberCombatantIds.includes(targetId) ? 'inside' : 'outside',
       });
     }
     for (const condition of combatantConditions(state, targetId)) {
-      addDependency(entries, intent.actorId, {
+      addDependency(entries, option.actorId, {
         kind: 'condition_is', subject: targetRef, condition, present: true,
       });
     }
-    addDependency(entries, intent.actorId, {
+    addDependency(entries, option.actorId, {
       kind: 'concentration_is', subject: targetRef,
       active: engineConcentrationActive(state, targetId),
     });
+    }
   }
   return entries;
 }
@@ -675,14 +593,14 @@ function shadowedBy(higher: ScenarioFactAtom, lower: ScenarioFactAtom): boolean 
 
 export function computeHostSplitCandidates(
   state: EncounterState,
-  dependencies: readonly IntentFactDependency[],
+  dependencies: readonly ProposalFactDependency[],
   unactedPlayerIds: readonly CombatantId[],
   queries: EngineQueryPort = canonicalEngineQueryPort,
 ): readonly HostSplitCandidate[] {
   const grouped = new Map<string, {
     readonly baseline: ScenarioFactAtom;
     readonly flipped: ScenarioFactAtom;
-    readonly intentActorIds: Set<CombatantId>;
+    readonly proposalActorIds: Set<CombatantId>;
   }>();
   const canonicalPlayerIds = [...new Set(unactedPlayerIds)].sort(compareCanonicalBytes);
   for (const dependency of dependencies) {
@@ -694,11 +612,11 @@ export function computeHostSplitCandidates(
       grouped.set(key, {
         baseline: dependency.baseline,
         flipped: dependency.flipped,
-        intentActorIds: new Set([dependency.intentActorId]),
+        proposalActorIds: new Set([dependency.proposalActorId]),
       });
     } else if (canonicalJson(prior.baseline) === canonicalJson(dependency.baseline) &&
       canonicalJson(prior.flipped) === canonicalJson(dependency.flipped)) {
-      prior.intentActorIds.add(dependency.intentActorId);
+      prior.proposalActorIds.add(dependency.proposalActorId);
     }
   }
   const scored = [...grouped.entries()].flatMap(([factKey, dependency]) => {
@@ -710,14 +628,14 @@ export function computeHostSplitCandidates(
           ? [{ playerId, radius }]
           : [];
       });
-    const referencedIntentCount = dependency.intentActorIds.size;
+    const referencedProposalCount = dependency.proposalActorIds.size;
     const summedMovementRadiusFeet = influences.reduce((sum, entry) => sum + entry.radius, 0);
-    const volatilityScore = referencedIntentCount * summedMovementRadiusFeet;
+    const volatilityScore = referencedProposalCount * summedMovementRadiusFeet;
     return volatilityScore === 0 ? [] : [{
       factKey,
       baseline: dependency.baseline,
       flipped: dependency.flipped,
-      referencedIntentCount,
+      referencedProposalCount,
       influencingPlayerIds: influences.map((entry) => entry.playerId),
       summedMovementRadiusFeet,
       volatilityScore,
@@ -725,7 +643,7 @@ export function computeHostSplitCandidates(
   });
   scored.sort((left, right) =>
     right.volatilityScore - left.volatilityScore ||
-    right.referencedIntentCount - left.referencedIntentCount ||
+    right.referencedProposalCount - left.referencedProposalCount ||
     compareCanonicalBytes(left.factKey, right.factKey));
   const retained: typeof scored = [];
   for (const candidate of scored) {
@@ -749,18 +667,22 @@ export function buildHostScenarioMenu(
   unactedPlayerIds: readonly CombatantId[],
   queries: EngineQueryPort = canonicalEngineQueryPort,
 ): {
-  readonly baselineIntents: readonly EngineTurnIntent[];
+  readonly baselineProposals: readonly EngineTurnProposal[];
   readonly scenarioMenu: readonly HostSplitCandidate[];
   readonly scenarios: readonly HostScenario[];
 } {
-  const baselineIntents = hostBaselineIntentPlanner.plan(state, actors, queries);
+  const planningState = projectFutureMonsterTurns(state, actors);
+  const baselineProposals = hostBaselineProposalPlanner.plan(planningState, actors, queries);
+  const baselineOptions = baselineProposals.flatMap((proposal) =>
+    availableEngineActorOptions(planningState, proposal.actorId, queries).filter((option) =>
+      option.optionId === proposal.primaryOptionId));
   const scenarioMenu = computeHostSplitCandidates(
     state,
-    extractIntentFactDependencies(state, baselineIntents, queries),
+    extractProposalFactDependencies(state, baselineOptions, queries),
     unactedPlayerIds,
     queries,
   );
-  return { baselineIntents, scenarioMenu, scenarios: compileHostScenarios(scenarioMenu) };
+  return { baselineProposals, scenarioMenu, scenarios: compileHostScenarios(scenarioMenu) };
 }
 
 export function compileHostScenarios(

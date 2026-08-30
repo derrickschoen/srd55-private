@@ -7,6 +7,7 @@ import { gridDistance, type GridCell } from '../combat/grid';
 import { dmVisibleEncounter, projectDmView, type DmVisibleEncounterState } from '../combat/visibility';
 import type { CombatantId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
+import { spellDefinition } from '../combat/spells/definitions';
 import type {
   DecisionProgram,
   PlanAction,
@@ -15,7 +16,7 @@ import type {
 } from './dm-bridge/round-plan-contract';
 import { regretTurnLegalActions } from './regret/legal-actions';
 
-export const SCRIPTED_PARTY_POLICY_VERSION = 'scripted-party-policy-v2' as const;
+export const SCRIPTED_PARTY_POLICY_VERSION = 'scripted-party-policy-v3-composite' as const;
 export const SCRIPTED_PARTY_PLAN_FORMAT = 'scripted-party-plan-v1' as const;
 export const DEFAULT_SCRIPTED_PARTY_OBJECTIVE = 'defeat_the_hostile_team' as const;
 
@@ -58,6 +59,10 @@ export interface ScriptedPartyTurnMaterialization {
   readonly plannedProgramHash: string;
   readonly executedProgramHash: string;
   readonly executedProgram: DecisionProgram;
+  readonly actionSlotUses: readonly {
+    readonly slot: 'main' | 'bonus';
+    readonly commandCount: number;
+  }[];
   readonly reducerCommands: readonly EncounterCommand[];
 }
 
@@ -380,6 +385,16 @@ export function materializeScriptedPartyTurn(
     : adherence === 'altered'
       ? ['POLICY_SELECTED_DIFFERENT_LEGAL_PROGRAM']
       : ['PLANNED_PRIMARY_NO_LONGER_LEGAL'];
+  const primaryCommand = liveSelection.command;
+  const mainCommands = primaryCommand.type === 'attack'
+    ? Array.from({ length: actor.profile.rules.attacksPerAction }, () => structuredClone(primaryCommand))
+    : [primaryCommand];
+  const bonusSpell = legal.find((command): command is Extract<EncounterCommand, { readonly type: 'cast_spell' }> =>
+    command.type === 'cast_spell' && spellDefinition(command.spellId)?.castingTime === 'bonus_action' &&
+    !(primaryCommand.type === 'cast_spell' && primaryCommand.spellId === command.spellId));
+  const reducerCommands: readonly EncounterCommand[] = bonusSpell === undefined
+    ? mainCommands
+    : [...mainCommands, bonusSpell];
   return {
     actorId: input.actorId,
     adherence,
@@ -387,7 +402,11 @@ export function materializeScriptedPartyTurn(
     plannedProgramHash,
     executedProgramHash: liveProgramHash,
     executedProgram: liveSelection.program,
-    reducerCommands: [liveSelection.command],
+    actionSlotUses: [
+      { slot: 'main', commandCount: mainCommands.length },
+      ...(bonusSpell === undefined ? [] : [{ slot: 'bonus' as const, commandCount: 1 }]),
+    ],
+    reducerCommands,
   };
 }
 

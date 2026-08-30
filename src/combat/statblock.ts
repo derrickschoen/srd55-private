@@ -17,10 +17,12 @@ import {
   armorClass,
   damageType,
   feet,
+  limitedResourcePoolId,
   statblockId,
   type ArmorClass,
   type DamageType,
   type Feet,
+  type LimitedResourcePoolId,
   type StatblockId,
 } from './values';
 
@@ -212,6 +214,27 @@ export interface MonsterSpellReference {
   readonly id: string;
   readonly availability: 'at_will' | '1_per_day' | '3_per_day' | 'shared_3_per_day';
   readonly manifestStatus: SpellManifestStatus | 'not_in_manifest';
+}
+
+export function monsterSpellResourcePoolId(
+  actionId: string,
+  spell: MonsterSpellReference,
+): LimitedResourcePoolId | null {
+  switch (spell.availability) {
+    case 'at_will': return null;
+    case '1_per_day':
+    case '3_per_day': return limitedResourcePoolId(`monster-spell:${actionId}:${spell.id}`);
+    case 'shared_3_per_day': return limitedResourcePoolId(`monster-spell:${actionId}:shared`);
+  }
+}
+
+export function monsterSpellMaximumUses(spell: MonsterSpellReference): number | null {
+  switch (spell.availability) {
+    case 'at_will': return null;
+    case '1_per_day': return 1;
+    case '3_per_day':
+    case 'shared_3_per_day': return 3;
+  }
 }
 
 export interface MonsterSpellcastingAction {

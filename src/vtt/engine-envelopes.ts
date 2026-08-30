@@ -8,7 +8,11 @@ import {
   type EngineStateReference,
   type ReadonlyStateCapsuleSource,
 } from './engine-state-capsule';
-import type { EngineTurnIntent } from './intent-resolver';
+import type {
+  EngineActorOption,
+  EngineTurnProposal,
+  ResolvedTurnMechanics,
+} from './intent-resolver';
 import type { ReactionGuidanceDeclaration } from './reaction-guidance';
 
 export interface EngineProposalBinding {
@@ -22,42 +26,46 @@ export interface EngineProposalBinding {
   readonly idempotencyKey: string;
 }
 
-export interface ProposedIntentResolution {
-  readonly intent: EngineTurnIntent;
+export interface ProposedTurnResolution {
+  readonly proposal: EngineTurnProposal;
+  readonly option: EngineActorOption;
+  readonly primaryOption: EngineActorOption;
+  readonly fallbackOption: EngineActorOption | null;
+  readonly mechanics: ResolvedTurnMechanics;
   readonly selectedBranch: 'primary' | 'fallback';
   readonly resolutionDigest: string;
   readonly summary: string;
 }
 
-export interface IntentProposalEnvelope extends EngineProposalBinding {
-  readonly kind: 'intent_proposal';
+export interface TurnProposalEnvelope extends EngineProposalBinding {
+  readonly kind: 'turn_proposal';
   readonly proposalId: string;
-  readonly resolution: ProposedIntentResolution;
+  readonly resolution: ProposedTurnResolution;
   readonly reactionGuidance: ReactionGuidanceDeclaration | null;
 }
 
-export interface RoundIntentProposalEnvelope extends EngineProposalBinding {
-  readonly kind: 'round_intent_proposal';
+export interface RoundTurnProposalEnvelope extends EngineProposalBinding {
+  readonly kind: 'round_turn_proposal';
   readonly proposalId: string;
-  readonly resolutions: readonly ProposedIntentResolution[];
+  readonly resolutions: readonly ProposedTurnResolution[];
   readonly reactionGuidance: ReactionGuidanceDeclaration | null;
   /** Validated wire arguments retained for opt-in model-training provenance. */
   readonly submittedArguments?: Readonly<Record<string, unknown>>;
 }
 
 export interface PlanAdjustmentProposalEnvelope extends EngineProposalBinding {
-  readonly kind: 'plan_adjustment_proposal';
+  readonly kind: 'plan_adjustment_turn_proposal';
   readonly proposalId: string;
   readonly baseline_plan_hash: string;
-  /** Omitted open actors retain their baseline intent; [] explicitly keeps the entire baseline. */
-  readonly updates: readonly ProposedIntentResolution[];
+  /** Omitted open actors retain their baseline proposal; [] explicitly keeps the entire baseline. */
+  readonly updates: readonly ProposedTurnResolution[];
   /** Validated wire arguments retained for opt-in model-training provenance. */
   readonly submittedArguments?: Readonly<Record<string, unknown>>;
 }
 
 export type EngineProposalEnvelope =
-  | IntentProposalEnvelope
-  | RoundIntentProposalEnvelope
+  | TurnProposalEnvelope
+  | RoundTurnProposalEnvelope
   | PlanAdjustmentProposalEnvelope;
 
 export interface NarrationEnvelope {
@@ -120,14 +128,14 @@ function assertProposalActors(
 ): void {
   const capsule = source.read(reference);
   const request = capsule.request;
-  if (request === null) throw new RangeError('No intent request is pending.');
-  const actual = envelope.kind === 'intent_proposal'
-    ? [envelope.resolution.intent.actorId]
-    : envelope.kind === 'round_intent_proposal'
-      ? envelope.resolutions.map((resolution) => resolution.intent.actorId)
-      : envelope.updates.map((resolution) => resolution.intent.actorId);
+  if (request === null) throw new RangeError('No turn-proposal request is pending.');
+  const actual = envelope.kind === 'turn_proposal'
+    ? [envelope.resolution.proposal.actorId]
+    : envelope.kind === 'round_turn_proposal'
+      ? envelope.resolutions.map((resolution) => resolution.proposal.actorId)
+      : envelope.updates.map((resolution) => resolution.proposal.actorId);
   if (new Set(actual).size !== actual.length) throw new RangeError('Proposal actors must be unique.');
-  if (envelope.kind === 'round_intent_proposal') {
+  if (envelope.kind === 'round_turn_proposal') {
     if (request.phase === 'speculative' || request.kind === 'plan_adjustment') {
       throw new RangeError('Round proposal requires a round-plan request.');
     }
@@ -137,7 +145,7 @@ function assertProposalActors(
       expected.length !== normalizedActual.length ||
       expected.some((actor, index) => actor !== normalizedActual[index])
     ) throw new RangeError('Round proposal must contain exactly the requested actors.');
-  } else if (envelope.kind === 'plan_adjustment_proposal') {
+  } else if (envelope.kind === 'plan_adjustment_turn_proposal') {
     if (request.phase === 'speculative' || request.kind !== 'plan_adjustment') {
       throw new RangeError('Plan adjustment proposal requires a plan-adjustment request.');
     }
@@ -149,16 +157,16 @@ function assertProposalActors(
       throw new RangeError('Plan adjustment updates must be unique open actors within the adjustment budget.');
     }
   } else if (!request.actors.includes(actual[0] as CombatantId)) {
-    throw new RangeError('Intent proposal actor is not pending.');
+    throw new RangeError('Turn proposal actor is not pending.');
   }
   if (
     envelope.phase === 'correction' &&
-    (envelope.kind === 'intent_proposal'
-      ? envelope.resolution.intent.fallback !== null
-      : envelope.kind === 'round_intent_proposal'
-        ? envelope.resolutions.some((resolution) => resolution.intent.fallback !== null)
-        : envelope.updates.some((resolution) => resolution.intent.fallback !== null))
-  ) throw new RangeError('Correction proposals cannot declare another fallback.');
+    (envelope.kind === 'turn_proposal'
+      ? envelope.resolution.proposal.fallbackOptionId !== null
+      : envelope.kind === 'round_turn_proposal'
+        ? envelope.resolutions.some((resolution) => resolution.proposal.fallbackOptionId !== null)
+        : envelope.updates.some((resolution) => resolution.proposal.fallbackOptionId !== null))
+  ) throw new RangeError('Correction proposals cannot declare another fallback option.');
 }
 
 /** Queue a closed proposal without exposing the capsule projection to the sink. */

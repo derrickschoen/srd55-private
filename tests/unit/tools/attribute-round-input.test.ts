@@ -19,8 +19,8 @@ function output(text: string): string {
 const renderedTools = [
   'engine_get_turn_context',
   'engine_propose_from_play',
-  'engine_validate_intent',
-  'engine_submit_round_intents',
+  'engine_validate_proposal',
+  'engine_submit_round_proposals',
   'engine_request_dm_adjudication',
 ].map((name) => ({
   name: `mcp__engine__${name}`,

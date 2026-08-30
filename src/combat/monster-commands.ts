@@ -123,7 +123,7 @@ export function monsterSavingThrowCommand(
   action: MonsterSavingThrowAction,
   actor: CombatantId,
   target: CombatantId,
-  cost: 'action' | 'none' = 'action',
+  cost: 'action' | 'bonus_action' | 'none' = 'action',
 ): Extract<EncounterCommand, { readonly type: 'force_save' }> {
   return {
     type: 'force_save',

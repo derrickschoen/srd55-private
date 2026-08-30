@@ -3,7 +3,7 @@ import type { AgentInvocation } from './agent-session';
 import type { AgentSessionLifecycle } from './agent-session-lifecycle';
 import type {
   PlanAdjustmentProposalEnvelope,
-  ProposedIntentResolution,
+  ProposedTurnResolution,
 } from './engine-envelopes';
 import type { EngineStateCapsule } from './engine-state-capsule';
 import {
@@ -19,8 +19,8 @@ export interface AdjustmentCompletion {
   readonly kind: 'adjusted' | 'baseline_kept';
   readonly requestId: string;
   readonly baselinePlanHash: string;
-  /** The complete usable patch. Actors absent here retain their baseline intent. */
-  readonly updates: readonly ProposedIntentResolution[];
+  /** The complete usable patch. Actors absent here retain their baseline proposal. */
+  readonly updates: readonly ProposedTurnResolution[];
   readonly stagedActorIds: readonly CombatantId[];
   readonly correctedActorIds: readonly CombatantId[];
   readonly baselineActorIds: readonly CombatantId[];
@@ -92,30 +92,30 @@ function exactProposal(
     proposal.baseline_plan_hash !== input.baselinePlanHash ||
     proposal.phase !== input.phase
   ) return false;
-  const actual = proposal.updates.map((entry) => entry.intent.actorId);
+  const actual = proposal.updates.map((entry) => entry.proposal.actorId);
   return new Set(actual).size === actual.length &&
     actual.every((actorId) => input.allowedActorIds.includes(actorId)) &&
     proposal.updates.every((entry) =>
       validResolutionDigest(entry.resolutionDigest) &&
-      (entry.selectedBranch !== 'fallback' || entry.intent.fallback !== null) &&
-      (input.phase !== 'correction' || entry.intent.fallback === null));
+      (entry.selectedBranch !== 'fallback' || entry.proposal.fallbackOptionId !== null) &&
+      (input.phase !== 'correction' || entry.proposal.fallbackOptionId === null));
 }
 
 function completion(input: {
   readonly initial: InitialAdjustmentAttempt;
-  readonly staged: readonly ProposedIntentResolution[];
-  readonly corrected: readonly ProposedIntentResolution[];
+  readonly staged: readonly ProposedTurnResolution[];
+  readonly corrected: readonly ProposedTurnResolution[];
   readonly correctionResult: AdjustmentCorrectionResult;
 }): AdjustmentCompletion {
   const updates = [...input.staged, ...input.corrected];
-  const updated = new Set(updates.map((entry) => entry.intent.actorId));
+  const updated = new Set(updates.map((entry) => entry.proposal.actorId));
   return {
     kind: updates.length === 0 ? 'baseline_kept' : 'adjusted',
     requestId: input.initial.requestId,
     baselinePlanHash: input.initial.baselinePlanHash,
     updates,
-    stagedActorIds: input.staged.map((entry) => entry.intent.actorId).sort((left, right) => left.localeCompare(right)),
-    correctedActorIds: input.corrected.map((entry) => entry.intent.actorId).sort((left, right) => left.localeCompare(right)),
+    stagedActorIds: input.staged.map((entry) => entry.proposal.actorId).sort((left, right) => left.localeCompare(right)),
+    correctedActorIds: input.corrected.map((entry) => entry.proposal.actorId).sort((left, right) => left.localeCompare(right)),
     baselineActorIds: input.initial.openActorIds.filter((actorId) => !updated.has(actorId)).sort((left, right) => left.localeCompare(right)),
     correctionResult: input.correctionResult,
   };
@@ -154,7 +154,7 @@ export class AdjustmentExhaustionCoordinator {
     if (staged.length > adjustmentBudget) {
       throw new RangeError('Staged adjustment proposal exceeds the original adjustment budget.');
     }
-    if (staged.some((entry) => refusedActors.includes(entry.intent.actorId))) {
+    if (staged.some((entry) => refusedActors.includes(entry.proposal.actorId))) {
       throw new RangeError('A staged adjustment actor cannot also be refused.');
     }
 
@@ -213,7 +213,7 @@ export class AdjustmentExhaustionCoordinator {
       await input.correction.lifecycle.resumeCorrection({
         ...input.correction.invocation,
         prompt: renderEnginePrompt(
-          'correct_intent',
+          'correct_proposal',
           input.correction.capsule,
           input.correction.rules,
           undefined,

@@ -855,12 +855,12 @@ export function replayBundle(
       case 'controller_response_refused':
       case 'coordinator_paused':
       case 'coordinator_resumed':
-      case 'intent_fallback_resolved':
-      case 'intent_correction_requested':
-      case 'intent_correction_resolved':
-      case 'intent_correction_failed':
-      case 'intent_auto_resolved':
-      case 'intent_auto_resolution_failed':
+      case 'proposal_fallback_resolved':
+      case 'proposal_correction_requested':
+      case 'proposal_correction_resolved':
+      case 'proposal_correction_failed':
+      case 'proposal_auto_resolved':
+      case 'proposal_auto_resolution_failed':
       case 'unattended_reaction_auto_resolved':
       case 'reaction_guidance_replaced':
       case 'reaction_guidance_auto_resolved':

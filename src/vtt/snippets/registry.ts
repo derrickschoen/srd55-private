@@ -1,10 +1,6 @@
 import type { EngineStateCapsule } from '../engine-state-capsule';
-import type {
-  EngineActionChoice,
-  EngineEngagement,
-  EngineIntentBranch,
-  EngineTurnIntent,
-} from '../intent-resolver';
+import type { EngineActorOption, EngineTurnProposal } from '../turn-proposal';
+import type { CombatantId } from '../../combat/values';
 
 export const PLAY_NAMES = ['remove_obstacle', 'focus_fire', 'basic_advance'] as const;
 export type PlayName = (typeof PLAY_NAMES)[number];
@@ -14,7 +10,6 @@ export interface SnippetSchema<Value> {
 }
 
 export interface ReservedSnippetContext {
-  /** Increment 3 activates this capability; no v1 value can be constructed. */
   readonly call: never;
 }
 
@@ -27,11 +22,11 @@ interface SnippetBase<Args, Out> {
   readonly snippetHash: string;
 }
 
-export interface PlaySnippetDefinition extends SnippetBase<EngineStateCapsule, readonly EngineTurnIntent[]> {
+export interface PlaySnippetDefinition extends SnippetBase<EngineStateCapsule, readonly EngineTurnProposal[]> {
   readonly exposure: 'play';
   readonly rank: number;
   readonly applicability: (capsule: EngineStateCapsule) => boolean;
-  readonly expand: (capsule: EngineStateCapsule) => readonly EngineTurnIntent[];
+  readonly expand: (capsule: EngineStateCapsule) => readonly EngineTurnProposal[];
 }
 
 export interface AutoSnippetDefinition<Args, Out> extends SnippetBase<Args, Out> {
@@ -63,44 +58,19 @@ export interface SnippetRegistry {
   applicable(capsule: EngineStateCapsule): readonly AdvertisedPlay[];
   expand(name: PlayName, capsule: EngineStateCapsule): {
     readonly definition: PlaySnippetDefinition;
-    readonly intents: readonly EngineTurnIntent[];
+    readonly proposals: readonly EngineTurnProposal[];
   };
 }
 
 interface RegistryDependencies {
   readonly inputSchema: SnippetSchema<EngineStateCapsule>;
-  readonly outputSchema: SnippetSchema<readonly EngineTurnIntent[]>;
+  readonly outputSchema: SnippetSchema<readonly EngineTurnProposal[]>;
   readonly hash: (content: string) => string;
 }
 
 type ProjectedActor = EngineStateCapsule['projection']['combatants'][number];
-type ProjectedAction = ProjectedActor['actions'][number];
 
-const RUNTIME_VERSION = 'plays-v1-runtime-6';
-const DODGE: EngineIntentBranch = {
-  choice: { kind: 'dodge' },
-  movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-  engagement: { stance: 'hold_position' },
-};
-const END_TURN: EngineIntentBranch = {
-  choice: { kind: 'end_turn' },
-  movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-  engagement: { stance: 'hold_position' },
-};
-
-function targetSelector(target: ProjectedActor) {
-  return { kind: 'combatant' as const, combatantId: target.id };
-}
-
-function gridDistance(
-  left: ProjectedActor['position'],
-  right: ProjectedActor['position'],
-): number {
-  return Math.max(
-    Math.abs(left.column - right.column),
-    Math.abs(left.row - right.row),
-  ) * 5;
-}
+const RUNTIME_VERSION = 'plays-v2-composite-options-1';
 
 function requestedActors(capsule: EngineStateCapsule): readonly ProjectedActor[] {
   if (capsule.request === null) return [];
@@ -110,320 +80,131 @@ function requestedActors(capsule: EngineStateCapsule): readonly ProjectedActor[]
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
-function opposingTargets(capsule: EngineStateCapsule, actors: readonly ProjectedActor[]): readonly ProjectedActor[] {
-  const side = actors[0]?.side;
-  if (side === undefined) return [];
-  return capsule.projection.combatants
-    .filter((candidate) => candidate.life !== 'dead' && candidate.side !== side)
-    .sort((left, right) =>
-      left.hitPoints - right.hitPoints ||
-      right.reachFeet - left.reachFeet ||
-      left.id.localeCompare(right.id));
-}
-
-function blockerTargets(capsule: EngineStateCapsule, actors: readonly ProjectedActor[]): readonly ProjectedActor[] {
-  const chokeCells = [
-    ...capsule.projection.blockedCells,
-    ...capsule.projection.movementBlockingObjects.flatMap((object) => object.cells),
-  ];
-  const obstacleRank = (target: ProjectedActor) => ({
-    adjacentAllies: actors.filter((actor) => gridDistance(actor.position, target.position) === 5).length,
-    adjacentChoke: chokeCells.some((cell) => gridDistance(cell, target.position) === 5),
-  });
-  return [...opposingTargets(capsule, actors)]
-    .filter((target) => {
-      const rank = obstacleRank(target);
-      return rank.adjacentAllies > 0 || rank.adjacentChoke;
-    })
-    .sort((left, right) => {
-      const leftRank = obstacleRank(left);
-      const rightRank = obstacleRank(right);
-      return rightRank.adjacentAllies - leftRank.adjacentAllies ||
-        Number(rightRank.adjacentChoke) - Number(leftRank.adjacentChoke) ||
-        right.reachFeet - left.reachFeet ||
-        left.hitPoints - right.hitPoints ||
-        left.id.localeCompare(right.id);
-    });
-}
-
-function attackActions(actor: ProjectedActor): readonly ProjectedAction[] {
-  return actor.actions.filter((action) => action.kind === 'attack' && action.rangeFeet !== null);
-}
-
-function minimumMovement(
-  actor: ProjectedActor,
-  target: ProjectedActor,
-  action: ProjectedAction,
-): number | null {
-  return actor.actionApproaches.find((approach) =>
-    approach.actionId === action.actionId && approach.targetId === target.id,
-  )?.minimumMovementFeet ?? null;
-}
-
-function canAttackThisTurn(
-  actor: ProjectedActor,
-  target: ProjectedActor,
-  action: ProjectedAction,
-  maximumMovementFeet = actor.speedFeet * 2,
-): boolean {
-  const movement = minimumMovement(actor, target, action);
-  return movement !== null && movement <= maximumMovementFeet;
-}
-
-function bestAttack(
-  actor: ProjectedActor,
-  target: ProjectedActor,
-  maximumMovementFeet = actor.speedFeet * 2,
-): ProjectedAction | null {
-  const actions = attackActions(actor).filter((action) =>
-    canAttackThisTurn(actor, target, action, maximumMovementFeet));
-  actions.sort((left, right) =>
-    (minimumMovement(actor, target, left) ?? Number.POSITIVE_INFINITY) -
-      (minimumMovement(actor, target, right) ?? Number.POSITIVE_INFINITY) ||
-    (right.rangeFeet ?? 0) - (left.rangeFeet ?? 0) ||
-    left.actionId.localeCompare(right.actionId));
-  return actions[0] ?? null;
-}
-
-function choice(action: ProjectedAction, target: ProjectedActor): EngineActionChoice {
-  const selector = targetSelector(target);
-  return action.kind === 'attack'
-    ? { kind: 'attack', actionId: action.actionId, target: selector, resourcePolicy: 'normal' }
-    : { kind: 'use_action', actionId: action.actionId, target: selector };
-}
-
-function engagement(actor: ProjectedActor, target: ProjectedActor, action: ProjectedAction): EngineEngagement {
-  const selector = targetSelector(target);
-  return action.rangeFeet !== null && action.rangeFeet > actor.reachFeet
-    ? { stance: 'maintain_range', anchor: selector }
-    : { stance: 'close_to_melee', anchor: selector };
-}
-
-function isRangedAttack(action: ProjectedAction): boolean {
-  return action.kind === 'attack' &&
-    (action.attackDelivery === 'ranged' || action.attackDelivery === 'melee_or_ranged');
-}
-
-function isReachableLongRangeUpgrade(
-  actor: ProjectedActor,
-  target: ProjectedActor,
-  action: ProjectedAction,
-  requiredMovement: number | null,
-): boolean {
-  if (!isRangedAttack(action) || action.normalRangeFeet === null || action.longRangeFeet === null) return false;
-  const distance = gridDistance(actor.position, target.position);
-  return distance > action.normalRangeFeet && distance <= action.longRangeFeet &&
-    requiredMovement !== null && requiredMovement > 0 && requiredMovement <= actor.speedFeet;
-}
-
-function attackBranch(
-  actor: ProjectedActor,
-  target: ProjectedActor,
-  action: ProjectedAction,
-): EngineIntentBranch {
-  const requiredMovement = minimumMovement(actor, target, action);
-  if (requiredMovement === null || requiredMovement === 0) {
-    return {
-      choice: choice(action, target),
-      movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-      engagement: engagement(actor, target, action),
-    };
-  }
-  const ranged = isRangedAttack(action);
-  return {
-    choice: choice(action, target),
-    movement: {
-      willingness: isReachableLongRangeUpgrade(actor, target, action, requiredMovement)
-        ? 'for_clear_advantage'
-        : 'only_if_required',
-      maximumFeet: actor.speedFeet,
-      opportunityRisk: ranged ? 'avoid' : 'accept_if_needed',
-    },
-    engagement: engagement(actor, target, action),
-  };
-}
-
-function dash(actor: ProjectedActor, target: ProjectedActor): EngineIntentBranch {
-  return {
-    choice: { kind: 'dash' },
-    movement: {
-      willingness: 'freely',
-      maximumFeet: actor.speedFeet * 2,
-      opportunityRisk: 'avoid',
-    },
-    engagement: { stance: 'close_to_melee', anchor: targetSelector(target) },
-  };
-}
-
-function alternateBranch(actor: ProjectedActor, target: ProjectedActor): EngineIntentBranch | null {
-  const normalAction = bestAttack(actor, target, actor.speedFeet);
-  if (normalAction !== null) return attackBranch(actor, target, normalAction);
-  const dashAction = bestAttack(actor, target);
-  return dashAction === null ? null : dash(actor, target);
-}
-
-function bestAlternateBranch(
-  actor: ProjectedActor,
-  primaryTarget: ProjectedActor,
-  targets: readonly ProjectedActor[],
-): EngineIntentBranch | null {
-  const alternates = targets.filter((target) => target.id !== primaryTarget.id);
-  const normalTarget = alternates.find((target) => bestAttack(actor, target, actor.speedFeet) !== null);
-  if (normalTarget !== undefined) return alternateBranch(actor, normalTarget);
-  const dashTarget = alternates.find((target) => bestAttack(actor, target) !== null);
-  return dashTarget === undefined ? null : alternateBranch(actor, dashTarget);
-}
-
-function intent(
-  actor: ProjectedActor,
-  target: ProjectedActor,
-  action: ProjectedAction,
-  targets: readonly ProjectedActor[],
-): EngineTurnIntent {
-  const requiredMovement = minimumMovement(actor, target, action);
-  const primary = attackBranch(actor, target, action);
-  return {
-    actorId: actor.id,
-    ...primary,
-    fallback: requiredMovement !== null && requiredMovement > actor.speedFeet &&
-      requiredMovement <= actor.speedFeet * 2
-      ? dash(actor, target)
-      : bestAlternateBranch(actor, target, targets) ?? DODGE,
-  };
-}
-
-function defensiveHold(actor: ProjectedActor): EngineTurnIntent {
-  return { actorId: actor.id, ...DODGE, fallback: END_TURN };
-}
-
-function attackPlan(
-  actor: ProjectedActor,
-  targets: readonly ProjectedActor[],
-): EngineTurnIntent {
-  const normalTarget = targets.find((target) => bestAttack(actor, target, actor.speedFeet) !== null);
-  if (normalTarget !== undefined) {
-    const action = bestAttack(actor, normalTarget, actor.speedFeet);
-    if (action !== null) return intent(actor, normalTarget, action, targets);
-  }
-  const dashTarget = targets.find((target) => bestAttack(actor, target) !== null);
-  if (dashTarget !== undefined) {
-    const action = bestAttack(actor, dashTarget);
-    if (action !== null) return intent(actor, dashTarget, action, targets);
-  }
-  return defensiveHold(actor);
-}
-
-function diversifyAnchors(
-  capsule: EngineStateCapsule,
-  intents: readonly EngineTurnIntent[],
-): readonly EngineTurnIntent[] {
-  const actors = requestedActors(capsule);
-  const targets = opposingTargets(capsule, actors);
-  const byActor = new Map(actors.map((actor) => [actor.id, actor]));
-  const replacements = new Map<EngineTurnIntent, EngineIntentBranch>();
-  for (const primaryTarget of targets) {
-    const concentrated = intents.filter((entry) =>
-      entry.engagement.anchor?.kind === 'combatant' &&
-      entry.engagement.anchor.combatantId === primaryTarget.id);
-    if (concentrated.length < 4) continue;
-    const secondary = targets.find((target) => target.id !== primaryTarget.id);
-    if (secondary === undefined) continue;
-    const candidates = concentrated.flatMap((entry) => {
-      const actor = byActor.get(entry.actorId);
-      if (actor === undefined) return [];
-      const alternate = alternateBranch(actor, secondary);
-      return alternate === null ? [] : [{ entry, alternate }];
-    });
-    const count = Math.min(Math.ceil(concentrated.length / 4), concentrated.length - 1, candidates.length);
-    for (const candidate of candidates.slice(-count)) {
-      replacements.set(candidate.entry, candidate.alternate);
+function explicitTargetIds(option: EngineActorOption): readonly CombatantId[] {
+  return option.actionSlots.flatMap((slot) => {
+    const use = slot.use;
+    switch (use.kind) {
+      case 'attack': return use.target.kind === 'combatant' ? [use.target.combatantId] : [];
+      case 'multiattack': return use.components.flatMap((component) =>
+        component.target.kind === 'combatant' ? [component.target.combatantId] : []);
+      case 'saving_throw': return use.target.kind === 'combatant' ? [use.target.combatantId] : [];
+      case 'cast_spell': return use.targets.flatMap((target) => target.kind === 'combatant' ? [target.combatantId] : []);
+      case 'use_world_object':
+      case 'dodge':
+      case 'disengage':
+      case 'dash':
+      case 'hide':
+      case 'end_turn': return [];
     }
-  }
-  return intents.map((entry) => {
-    const fallback = replacements.get(entry);
-    return fallback === undefined ? entry : { ...entry, fallback };
   });
 }
 
-function phaseDraft(
-  capsule: EngineStateCapsule,
-  intents: readonly EngineTurnIntent[],
-): readonly EngineTurnIntent[] {
-  return capsule.request?.phase === 'correction'
-    ? intents.map((entry) => ({ ...entry, fallback: null }))
-    : intents;
+function isDefense(option: EngineActorOption): boolean {
+  return option.actionSlots.some((slot) => slot.slot === 'main' &&
+    (slot.use.kind === 'dodge' || slot.use.kind === 'end_turn'));
+}
+
+function isAdvance(option: EngineActorOption): boolean {
+  return option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dash');
+}
+
+function isOffense(option: EngineActorOption): boolean {
+  return option.actionSlots.some((slot) => slot.slot === 'main' &&
+    (slot.use.kind === 'attack' || slot.use.kind === 'multiattack' || slot.use.kind === 'saving_throw'));
+}
+
+function isControl(option: EngineActorOption): boolean {
+  return option.actionSlots.some((slot) => {
+    const use = slot.use;
+    const ids = use.kind === 'multiattack'
+      ? [use.actionId, ...use.components.map((component) => component.actionId)]
+      : 'actionId' in use ? [use.actionId] : [];
+    return ids.some((id) => /web|grapple|grab/iu.test(id));
+  });
+}
+
+function rankedTargets(capsule: EngineStateCapsule, actors: readonly ProjectedActor[]): readonly ProjectedActor[] {
+  const side = actors[0]?.side;
+  return capsule.projection.combatants
+    .filter((actor) => actor.life !== 'dead' && actor.side !== side)
+    .sort((left, right) => left.hitPoints - right.hitPoints ||
+      right.reachFeet - left.reachFeet || left.id.localeCompare(right.id));
+}
+
+function chooseOption(
+  actor: ProjectedActor,
+  targets: readonly ProjectedActor[],
+  controlOnly: boolean,
+): EngineActorOption | null {
+  const targetRank = new Map(targets.map((target, index) => [target.id, index] as const));
+  const candidates = actor.options.filter((option) => controlOnly ? isControl(option) : isOffense(option));
+  candidates.sort((left, right) => {
+    const leftRank = Math.min(...explicitTargetIds(left).map((id) => targetRank.get(id) ?? Number.MAX_SAFE_INTEGER));
+    const rightRank = Math.min(...explicitTargetIds(right).map((id) => targetRank.get(id) ?? Number.MAX_SAFE_INTEGER));
+    const leftUses = left.actionSlots.reduce((count, slot) =>
+      count + (slot.use.kind === 'multiattack' ? slot.use.components.length : 1), 0);
+    const rightUses = right.actionSlots.reduce((count, slot) =>
+      count + (slot.use.kind === 'multiattack' ? slot.use.components.length : 1), 0);
+    return leftRank - rightRank || rightUses - leftUses || left.label.localeCompare(right.label);
+  });
+  return candidates[0] ?? actor.options.find(isAdvance) ?? actor.options.find(isDefense) ?? null;
+}
+
+function alternateOffense(
+  actor: ProjectedActor,
+  primary: EngineActorOption,
+  targets: readonly ProjectedActor[],
+): EngineActorOption | null {
+  const primaryTargets = new Set(explicitTargetIds(primary));
+  const targetRank = new Map(targets.map((target, index) => [target.id, index] as const));
+  return actor.options
+    .filter((option) => isOffense(option) && option.optionId !== primary.optionId &&
+      explicitTargetIds(option).some((targetId) => !primaryTargets.has(targetId)))
+    .sort((left, right) => {
+      const leftRank = Math.min(...explicitTargetIds(left).map((id) => targetRank.get(id) ?? Number.MAX_SAFE_INTEGER));
+      const rightRank = Math.min(...explicitTargetIds(right).map((id) => targetRank.get(id) ?? Number.MAX_SAFE_INTEGER));
+      return leftRank - rightRank || left.label.localeCompare(right.label);
+    })[0] ?? null;
+}
+
+function proposals(capsule: EngineStateCapsule, controlActorOnly: boolean): readonly EngineTurnProposal[] {
+  const actors = requestedActors(capsule);
+  const targets = rankedTargets(capsule, actors);
+  const controllingActor = controlActorOnly
+    ? actors.find((actor) => actor.options.some(isControl))?.id ?? null
+    : null;
+  return actors.flatMap((actor) => {
+    const primary = chooseOption(actor, targets, actor.id === controllingActor);
+    if (primary === null) return [];
+    const fallback = capsule.request?.phase === 'correction'
+      ? null
+      : alternateOffense(actor, primary, targets) ?? actor.options.find((option) =>
+          option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge')) ?? null;
+    return [{
+      actorId: actor.id,
+      expectedRevision: primary.revision,
+      primaryOptionId: primary.optionId,
+      fallbackOptionId: fallback?.optionId ?? null,
+      overrideJustification: null,
+    }];
+  });
 }
 
 function isInitialRoundPlan(capsule: EngineStateCapsule): boolean {
   return capsule.request?.phase === 'initial' && capsule.request.kind !== 'plan_adjustment';
 }
 
-function basicApplicable(capsule: EngineStateCapsule): boolean {
+function ordinaryApplicable(capsule: EngineStateCapsule): boolean {
   const actors = requestedActors(capsule);
-  const targets = opposingTargets(capsule, actors);
-  return isInitialRoundPlan(capsule) && actors.length > 0 && targets.length > 0 &&
-    actors.every((actor) => attackActions(actor).length > 0);
+  return isInitialRoundPlan(capsule) && actors.length > 0 && actors.every((actor) => actor.options.length > 0);
 }
 
-function expandBasic(capsule: EngineStateCapsule): readonly EngineTurnIntent[] {
+function hasProjectedObstacle(capsule: EngineStateCapsule): boolean {
   const actors = requestedActors(capsule);
-  const targets = opposingTargets(capsule, actors);
-  return phaseDraft(capsule, diversifyAnchors(capsule, actors.map((actor) =>
-    attackPlan(actor, targets))));
-}
-
-function focusApplicable(capsule: EngineStateCapsule): boolean {
-  const actors = requestedActors(capsule);
-  return isInitialRoundPlan(capsule) && actors.length >= 2 && opposingTargets(capsule, actors).length > 0 &&
-    actors.every((actor) => attackActions(actor).length > 0);
-}
-
-function expandFocus(capsule: EngineStateCapsule): readonly EngineTurnIntent[] {
-  const actors = requestedActors(capsule);
-  const targets = opposingTargets(capsule, actors);
-  return phaseDraft(capsule, diversifyAnchors(capsule, actors.map((actor) =>
-    attackPlan(actor, targets))));
-}
-
-function controlAction(actors: readonly ProjectedActor[], target: ProjectedActor): {
-  readonly actor: ProjectedActor;
-  readonly action: ProjectedAction;
-} | null {
-  const candidates = actors.flatMap((actor) => actor.actions.flatMap((action) => {
-    const id = action.actionId.toLowerCase();
-    const movement = minimumMovement(actor, target, action);
-    if (movement === null || movement > actor.speedFeet * 2) return [];
-    if (id.includes('web') && movement !== 0) return [];
-    return id.includes('web') || id.includes('grapple') || id.includes('grab')
-      ? [{ actor, action }]
-      : [];
-  }));
-  candidates.sort((left, right) =>
-    Number(right.action.actionId.toLowerCase().includes('web')) -
-      Number(left.action.actionId.toLowerCase().includes('web')) ||
-    left.actor.id.localeCompare(right.actor.id) ||
-    left.action.actionId.localeCompare(right.action.actionId));
-  return candidates[0] ?? null;
-}
-
-function obstacleApplicable(capsule: EngineStateCapsule): boolean {
-  const actors = requestedActors(capsule);
-  return isInitialRoundPlan(capsule) &&
-    blockerTargets(capsule, actors).some((target) => controlAction(actors, target) !== null);
-}
-
-function expandObstacle(capsule: EngineStateCapsule): readonly EngineTurnIntent[] {
-  const actors = requestedActors(capsule);
-  const targets = opposingTargets(capsule, actors);
-  const target = blockerTargets(capsule, actors).find((candidate) => controlAction(actors, candidate) !== null);
-  if (target === undefined) return phaseDraft(capsule, actors.map(defensiveHold));
-  const controller = controlAction(actors, target);
-  if (controller === null) return phaseDraft(capsule, actors.map(defensiveHold));
-  return phaseDraft(capsule, actors.map((actor) => {
-    if (actor.id === controller.actor.id) return intent(actor, target, controller.action, targets);
-    const action = bestAttack(actor, target);
-    return action === null ? defensiveHold(actor) : intent(actor, target, action, targets);
-  }));
+  const side = actors[0]?.side;
+  const targets = capsule.projection.combatants.filter((actor) => actor.life !== 'dead' && actor.side !== side);
+  return capsule.projection.blockedCells.some((cell) => targets.some((target) =>
+    Math.max(Math.abs(cell.column - target.position.column), Math.abs(cell.row - target.position.row)) <= 1));
 }
 
 function definition(
@@ -434,7 +215,7 @@ function definition(
     readonly rank: number;
     readonly strategy: string;
     readonly applicability: (capsule: EngineStateCapsule) => boolean;
-    readonly expand: (capsule: EngineStateCapsule) => readonly EngineTurnIntent[];
+    readonly expand: (capsule: EngineStateCapsule) => readonly EngineTurnProposal[];
   },
 ): PlaySnippetDefinition {
   const snippetHash = dependencies.hash(JSON.stringify({
@@ -445,79 +226,58 @@ function definition(
     rank: input.rank,
     strategy: input.strategy,
     inputSchema: 'engine-state-capsule-v1',
-    outputSchema: 'engine-turn-intent-v1-array',
+    outputSchema: 'engine-turn-proposal-v1-array',
   }));
   return Object.freeze({
-    exposure: 'play',
-    name: input.name,
-    description: input.description,
-    rank: input.rank,
-    inputSchema: dependencies.inputSchema,
-    outputSchema: dependencies.outputSchema,
-    ctx: null,
-    snippetHash,
-    applicability: input.applicability,
-    expand: input.expand,
+    exposure: 'play', name: input.name, description: input.description, rank: input.rank,
+    inputSchema: dependencies.inputSchema, outputSchema: dependencies.outputSchema,
+    ctx: null, snippetHash, applicability: input.applicability, expand: input.expand,
   });
 }
 
 export function createSnippetRegistry(dependencies: RegistryDependencies): SnippetRegistry {
   const plays = Object.freeze([
     definition(dependencies, {
-      name: 'remove_obstacle',
-      description: 'Control an enemy obstructing an ally or choke with Web, a statblock grapple, or a grab.',
-      rank: 10,
-      strategy: 'require blocker adjacency to an ally or choke; rank ally pressure then choke, reach, and removal; prefer in-range web, then reachable grapple/grab; allies attack or advance on blocker',
-      applicability: obstacleApplicable,
-      expand: expandObstacle,
+      name: 'remove_obstacle', description: 'Use a legal composite control sequence against an obstructing enemy.', rank: 10,
+      strategy: 'prefer an engine-offered control option; retain every ordered main and bonus slot use',
+      applicability: (capsule) => ordinaryApplicable(capsule) && hasProjectedObstacle(capsule) &&
+        requestedActors(capsule).some((actor) => actor.options.some(isControl)),
+      expand: (capsule) => proposals(capsule, true),
     }),
     definition(dependencies, {
-      name: 'focus_fire',
-      description: 'Concentrate attacks on the ranked removal target, preferring attacks reachable at normal speed.',
-      rank: 20,
-      strategy: 'prefer a normal-move attack before ranked dash-range attacks; safely improve long-range attacks to normal range when reachable; avoid opportunity risk for ranged movement; Dash only when an attack position costs more than speed and no more than double speed; try alternate-target offense before Dodge; diversify concentrated anchors through alternate-target fallbacks',
-      applicability: focusApplicable,
-      expand: expandFocus,
+      name: 'focus_fire', description: 'Concentrate complete executable action sequences on the ranked removal target.', rank: 20,
+      strategy: 'prefer maximum legal ordered uses against the lowest-HP ranked target',
+      applicability: (capsule) => ordinaryApplicable(capsule) && requestedActors(capsule).length >= 2,
+      expand: (capsule) => proposals(capsule, false),
     }),
     definition(dependencies, {
-      name: 'basic_advance',
-      description: 'Each actor attacks its best normal-speed target, Dashes only into a next-turn attack position, or Dodges.',
-      rank: 30,
-      strategy: 'per actor prefer any normal-speed attack over a ranked dash-range attack; safely improve long-range attacks to normal range when reachable; avoid opportunity risk for ranged movement; Dash only when attack-position path cost is above speed and at most double speed; try alternate-target offense before Dodge; diversify concentrated anchors through alternate-target fallbacks',
-      applicability: basicApplicable,
-      expand: expandBasic,
+      name: 'basic_advance', description: 'Select each actor’s complete legal offensive or defensive engine option.', rank: 30,
+      strategy: 'prefer an offensive composite option, otherwise an offered defense',
+      applicability: ordinaryApplicable,
+      expand: (capsule) => proposals(capsule, false),
     }),
   ] satisfies readonly PlaySnippetDefinition[]);
   const snippetHash = dependencies.hash(JSON.stringify({
-    runtime: RUNTIME_VERSION,
-    snippets: plays.map((play) => ({ name: play.name, hash: play.snippetHash })),
+    runtime: RUNTIME_VERSION, snippets: plays.map((play) => ({ name: play.name, hash: play.snippetHash })),
   }));
   const snippetSetHash = dependencies.hash(JSON.stringify({
-    exposure: 'play',
-    enabled: plays.map((play) => `${play.name}:${play.snippetHash}`).sort(),
+    exposure: 'play', enabled: plays.map((play) => `${play.name}:${play.snippetHash}`).sort(),
   }));
   return Object.freeze({
-    plays,
-    snippetHash,
-    snippetSetHash,
+    plays, snippetHash, snippetSetHash,
     applicable(capsule: EngineStateCapsule) {
       const parsed = dependencies.inputSchema.parse(capsule);
-      return plays
-        .filter((play) => play.applicability(parsed))
+      return plays.filter((play) => play.applicability(parsed))
         .sort((left, right) => left.rank - right.rank || left.name.localeCompare(right.name))
         .slice(0, 3)
-        .map((play) => ({
-          name: play.name as PlayName,
-          description: play.description,
-          snippetHash: play.snippetHash,
-        }));
+        .map((play) => ({ name: play.name as PlayName, description: play.description, snippetHash: play.snippetHash }));
     },
     expand(name: PlayName, capsule: EngineStateCapsule) {
       const parsed = dependencies.inputSchema.parse(capsule);
       const selected = plays.find((play) => play.name === name);
       if (selected === undefined) throw new RangeError(`Unknown play ${name}.`);
       if (!selected.applicability(parsed)) throw new RangeError(`PLAY_NOT_APPLICABLE:${name}`);
-      return { definition: selected, intents: dependencies.outputSchema.parse(selected.expand(parsed)) };
+      return { definition: selected, proposals: dependencies.outputSchema.parse(selected.expand(parsed)) };
     },
   });
 }

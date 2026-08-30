@@ -21,6 +21,7 @@ import {
   applyRevisionDelta,
   type RevisionDeltaOperation,
 } from '../../../src/vtt/dm-bridge/projection-transport';
+import { feet } from '../../../src/combat/values';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
 const TOOL_NAMES = [
@@ -33,11 +34,11 @@ const TOOL_NAMES = [
   'engine.query_cover',
   'engine.query_visibility',
   'engine.query_dice_expectation',
-  'engine.validate_intent',
-  'engine.submit_round_intents',
+  'engine.validate_proposal',
+  'engine.submit_round_proposals',
   'engine.submit_plan_adjustment',
   'engine.submit_speculative_round_plan',
-  'engine.submit_intent',
+  'engine.submit_proposal',
   'engine.emit_narration',
   'engine.request_dm_adjudication',
 ] as const;
@@ -147,7 +148,22 @@ function referencedDefinitionKeys(value: unknown): ReadonlySet<string> {
 }
 
 async function fixtureRuntime(options: Parameters<typeof createEngineMcpRuntime>[1] = { requestedActorCount: 1 }): Promise<{ readonly state: EncounterState; readonly runtime: EngineMcpRuntime }> {
-  const state = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+  const loaded = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+  const state: EncounterState = {
+    ...loaded,
+    combatants: loaded.combatants.map((combatant) => combatant.profile.kind !== 'monster' ? combatant : ({
+      ...combatant,
+      turn: {
+        ...combatant.turn,
+        action: { kind: 'available' }, bonusActionAvailable: true, reactionAvailable: true,
+        movement: {
+          speed: combatant.profile.rules.speed,
+          remaining: combatant.profile.rules.speed,
+          spent: feet(0),
+        },
+      },
+    })),
+  };
   return { state, runtime: createEngineMcpRuntime(state, options) };
 }
 function contextArguments(): Readonly<Record<string, unknown>> {
@@ -167,14 +183,17 @@ function fixtureFacts(state: EncounterState, runtime: EngineMcpRuntime) {
   const target = state.combatants.find((candidate) => candidate.profile.kind === 'player_character')?.profile.id;
   const action = actor === undefined ? undefined : capsule.projection.combatants.find((candidate) => candidate.id === actor)?.actions[0]?.actionId;
   if (actor === undefined || target === undefined || action === undefined || capsule.request === null) throw new Error('Fixture facts are absent.');
-  const intent = {
+  const option = capsule.projection.combatants.find((candidate) => candidate.id === actor)?.options
+    .find((candidate) => candidate.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge'));
+  if (option === undefined) throw new Error('Fixture Dodge option is absent.');
+  const proposal = {
     actor_id: actor,
-    choice: { kind: 'dodge' },
-    movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
-    engagement: { stance: 'hold_position' },
-    fallback: null,
+    expected_revision: capsule.revision,
+    primary_option_id: option.optionId,
+    fallback_option_id: null,
+    override_justification: null,
   } as const;
-  return { actor, target, action, request: capsule.request, intent, ref: stateRef(runtime) };
+  return { actor, target, action, request: capsule.request, proposal, ref: stateRef(runtime) };
 }
 function adjustmentMetadata(actorIds: readonly import('../../../src/combat/values').CombatantId[]) {
   return {
@@ -183,18 +202,19 @@ function adjustmentMetadata(actorIds: readonly import('../../../src/combat/value
     triggerPcTurnId: 'pc-turn:mcp-adjustment',
     beforeRevision: 1,
     afterRevision: 2,
-    materialityReasonCodes: ['INTENT_RESOLUTION_CHANGED'] as const,
-    baselineIntentDigests: actorIds.map((actorId) => ({ actorId, intentDigest: 'b'.repeat(64) })),
+    materialityReasonCodes: ['PROPOSAL_RESOLUTION_CHANGED'] as const,
+    baselineProposalDigests: actorIds.map((actorId) => ({ actorId, proposalDigest: 'b'.repeat(64) })),
     adjustmentBudget: Math.min(actorIds.length, 2) as 1 | 2,
   };
 }
-function dodgeUpdate(actorId: string, fallback: Readonly<Record<string, unknown>> | null = null) {
+function dodgeUpdate(runtime: EngineMcpRuntime, actorId: string, fallbackOptionId: string | null = null) {
+  const capsule = runtime.feed.current();
+  const option = capsule.projection.combatants.find((candidate) => candidate.id === actorId)?.options
+    .find((candidate) => candidate.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge'));
+  if (option === undefined) throw new Error(`Fixture Dodge option is absent for ${actorId}.`);
   return {
-    actor_id: actorId,
-    choice: { kind: 'dodge' },
-    movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
-    engagement: { stance: 'hold_position' },
-    fallback,
+    actor_id: actorId, expected_revision: capsule.revision, primary_option_id: option.optionId,
+    fallback_option_id: fallbackOptionId, override_justification: null,
   };
 }
 function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, runtime: EngineMcpRuntime): Readonly<Record<string, unknown>> {
@@ -214,7 +234,7 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
       factKey: `reaction:${actor}`,
       baseline: atom,
       flipped: { ...atom, available: false },
-      referencedIntentCount: 1,
+      referencedProposalCount: 1,
       influencingPlayerIds: [],
       summedMovementRadiusFeet: 30,
       volatilityScore: 30,
@@ -270,13 +290,7 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
       refresh_generation: 0,
       branches: scenarios.map((scenario) => ({
         scenario_id: scenario.scenarioId,
-        intents: [{
-          actor_id: actor,
-          choice: { kind: 'dodge' },
-          movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
-          engagement: { stance: 'hold_position' },
-          fallback: null,
-        }],
+        proposals: [{ ...dodgeUpdate(runtime, actor), expected_revision: speculative.revision }],
       })),
       reaction_guidance: { side_wide: { opportunity_attack: 'decline' } },
       idempotency_key: 'mcp-speculative-idempotency-0001',
@@ -302,7 +316,7 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
         beforeRevision: 1,
         afterRevision: 2,
         materialityReasonCodes: ['OPEN_MONSTER_SET_CHANGED'],
-        baselineIntentDigests: capsule.request.actors.map((actorId) => ({ actorId, intentDigest: 'b'.repeat(64) })),
+        baselineProposalDigests: capsule.request.actors.map((actorId) => ({ actorId, proposalDigest: 'b'.repeat(64) })),
         adjustmentBudget: Math.min(capsule.request.actors.length, 2) as 1 | 2,
       },
       projection: capsule.projection,
@@ -330,9 +344,9 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
     case 'engine.query_cover':
     case 'engine.query_visibility': return { state_ref: facts.ref, queries: [{ query_id: 'q1', actor_id: facts.actor, target: { kind: 'combatant', combatant_id: facts.target }, action_id: facts.action }] };
     case 'engine.query_dice_expectation': return { state_ref: facts.ref, candidates: [{ candidate_id: 'c1', actor_id: facts.actor, choice: { kind: 'attack', action_id: facts.action, target: { kind: 'combatant', combatant_id: facts.target } } }], include_distribution: true };
-    case 'engine.validate_intent': return { state_ref: facts.ref, request_id: facts.request.requestId, phase: 'initial', intent: facts.intent };
-    case 'engine.submit_round_intents': return { state_ref: facts.ref, request_id: facts.request.requestId, phase: 'initial', idempotency_key: 'round-idempotency-0001', intents: [facts.intent] };
-    case 'engine.submit_intent': return { state_ref: facts.ref, request_id: facts.request.requestId, phase: 'initial', idempotency_key: 'intent-idempotency-0001', intent: facts.intent };
+    case 'engine.validate_proposal': return { state_ref: facts.ref, request_id: facts.request.requestId, phase: 'initial', proposal: facts.proposal };
+    case 'engine.submit_round_proposals': return { state_ref: facts.ref, request_id: facts.request.requestId, phase: 'initial', idempotency_key: 'round-idempotency-0001', proposals: [facts.proposal] };
+    case 'engine.submit_proposal': return { state_ref: facts.ref, request_id: facts.request.requestId, phase: 'initial', idempotency_key: 'proposal-idempotency-0001', proposal: facts.proposal };
     case 'engine.emit_narration': return { state_ref: facts.ref, request_id: facts.request.requestId, idempotency_key: 'narration-key-0001', voice: 'terse_tactical', text: 'The monster holds its ground.', audience: 'shared', rule_references: [] };
     case 'engine.request_dm_adjudication': return { state_ref: facts.ref, request_id: facts.request.requestId, actor_id: facts.actor, subject: 'Ambiguous terrain interaction', reason: 'The engine has no modeled consequence for this interaction.', blocking: true, suggested_outcomes: ['Allow the interaction', 'Refuse the interaction'], idempotency_key: 'adjudication-key-0001' };
   }
@@ -503,11 +517,11 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     if (!Array.isArray(adjustmentList)) throw new TypeError('Adjustment DM tools/list omitted tools.');
     expect(adjustmentList.map((tool) => record(tool)['name'])).toEqual([
       'engine.get_turn_context',
-      'engine.validate_intent',
+      'engine.validate_proposal',
       'engine.submit_plan_adjustment',
       'engine.request_dm_adjudication',
     ]);
-    expect(JSON.stringify(adjustmentList)).not.toContain('engine.submit_round_intents');
+    expect(JSON.stringify(adjustmentList)).not.toContain('engine.submit_round_proposals');
     expect(JSON.stringify(adjustmentList)).not.toContain('engine.propose_from_play');
   });
 
@@ -529,7 +543,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       revision: 2,
       phase: 'correction' as const,
       correctionNumber: 1 as const,
-      historyKind: 'intent_correction_requested',
+      historyKind: 'proposal_correction_requested',
     };
     const recomputedRuntime = createEngineMcpRuntime(state, currentOptions);
     const recomputed = structured(toolCall(recomputedRuntime.handler, 'engine.get_turn_context', {
@@ -600,14 +614,14 @@ describe('engine MCP dual-handshake full surface conformance', () => {
 
   it('queues a whole round once, canonicalizes idempotency, and never partially queues an invalid round', async () => {
     const { state, runtime } = await fixtureRuntime();
-    const valid = happyArguments('engine.submit_round_intents', state, runtime);
-    const first = structured(toolCall(runtime.handler, 'engine.submit_round_intents', valid));
-    const repeated = structured(toolCall(runtime.handler, 'engine.submit_round_intents', valid));
+    const valid = happyArguments('engine.submit_round_proposals', state, runtime);
+    const first = structured(toolCall(runtime.handler, 'engine.submit_round_proposals', valid));
+    const repeated = structured(toolCall(runtime.handler, 'engine.submit_round_proposals', valid));
     expect(first).toEqual(repeated);
     expect(runtime.proposals).toHaveLength(1);
     const facts = fixtureFacts(state, runtime);
-    const rejected = structured(toolCall(runtime.handler, 'engine.submit_round_intents', {
-      ...valid, idempotency_key: 'round-idempotency-0002', intents: [{ ...facts.intent, actor_id: 'extra-actor' }],
+    const rejected = structured(toolCall(runtime.handler, 'engine.submit_round_proposals', {
+      ...valid, idempotency_key: 'round-idempotency-0002', proposals: [{ ...facts.proposal, actor_id: 'extra-actor' }],
     }));
     expect(rejected['status']).toBe('rejected');
     expect(runtime.proposals).toHaveLength(1);
@@ -654,24 +668,22 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       updates: [],
     }));
     expect(emptyKeep).toMatchObject({ status: 'proposed', actor_resolutions: [] });
-    expect(runtime.proposals[0]).toMatchObject({ kind: 'plan_adjustment_proposal', updates: [] });
+    expect(runtime.proposals[0]).toMatchObject({ kind: 'plan_adjustment_turn_proposal', updates: [] });
     expect(structured(toolCall(runtime.handler, 'engine.submit_plan_adjustment', {
       ...base,
       idempotency_key: 'adjustment-empty-keep-0001',
       updates: [],
     }))).toEqual(emptyKeep);
 
-    const fallback = {
-      choice: { kind: 'end_turn' },
-      movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' },
-      engagement: { stance: 'hold_position' },
-    };
+    const fallbackOptionId = capsule.projection.combatants.find((candidate) => candidate.id === first)?.options
+      .find((option) => option.actionSlots.some((slot) => slot.use.kind === 'end_turn'))?.optionId;
+    if (fallbackOptionId === undefined) throw new Error('Fixture End Turn fallback is absent.');
     const partial = structured(toolCall(runtime.handler, 'engine.submit_plan_adjustment', {
       ...base,
       idempotency_key: 'adjustment-partial-stage-0001',
       updates: [
-        dodgeUpdate(first, fallback),
-        { ...dodgeUpdate(second), choice: { kind: 'attack', action_id: 'missing-action', target: { kind: 'nearest_visible_enemy' } } },
+        dodgeUpdate(runtime, first, fallbackOptionId),
+        { ...dodgeUpdate(runtime, second), primary_option_id: 'missing-option' },
       ],
     }));
     expect(partial).toMatchObject({
@@ -682,14 +694,20 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       correction_guidance: { required_actor_ids: [second], replace_whole_round: false },
     });
     expect(runtime.proposals[1]).toMatchObject({
-      kind: 'plan_adjustment_proposal',
-      updates: [{ intent: { actorId: first, fallback: expect.objectContaining({ choice: { kind: 'end_turn' } }) } }],
+      kind: 'plan_adjustment_turn_proposal',
+      updates: [{ proposal: { actorId: first, fallbackOptionId } }],
     });
 
     const closedResult = structured(toolCall(runtime.handler, 'engine.submit_plan_adjustment', {
       ...base,
       idempotency_key: 'adjustment-closed-actor-0001',
-      updates: [dodgeUpdate(closed)],
+      updates: [{
+        actor_id: closed,
+        expected_revision: capsule.revision,
+        primary_option_id: fallbackOptionId,
+        fallback_option_id: null,
+        override_justification: null,
+      }],
     }));
     expect(closedResult).toMatchObject({ status: 'rejected', actor_refusals: [{ actor_id: closed, codes: ['ACTOR_NOT_OPEN'] }] });
 
@@ -718,7 +736,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       phase: 'initial',
       baseline_plan_hash: 'a'.repeat(64),
       idempotency_key: 'adjustment-over-budget-0001',
-      updates: [dodgeUpdate(first), dodgeUpdate(second)],
+      updates: [dodgeUpdate(oneActorRuntime, first), dodgeUpdate(runtime, second)],
     }));
     expect(overBudget).toMatchObject({
       status: 'rejected',
@@ -750,7 +768,13 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       phase: 'initial',
       baseline_plan_hash: 'a'.repeat(64),
       idempotency_key: 'adjustment-dead-actor-0001',
-      updates: [dodgeUpdate(closed)],
+      updates: [{
+        actor_id: closed,
+        expected_revision: capsule.revision,
+        primary_option_id: fallbackOptionId,
+        fallback_option_id: null,
+        override_justification: null,
+      }],
     }));
     expect(deadResult).toMatchObject({ status: 'rejected', actor_refusals: [{ actor_id: closed, codes: ['ACTOR_DEAD'] }] });
 
@@ -772,7 +796,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       phase: 'correction',
       baseline_plan_hash: 'a'.repeat(64),
       idempotency_key: 'adjustment-correction-0001',
-      updates: [dodgeUpdate(second)],
+      updates: [dodgeUpdate(correctionRuntime, second)],
     }))).toMatchObject({ status: 'proposed', actor_resolutions: [{ actor_id: second }] });
     const fallbackCorrection = toolCall(correctionRuntime.handler, 'engine.submit_plan_adjustment', {
       state_ref: correctionContext['state_ref'],
@@ -780,7 +804,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       phase: 'correction',
       baseline_plan_hash: 'a'.repeat(64),
       idempotency_key: 'adjustment-correction-fallback-0001',
-      updates: [dodgeUpdate(second, fallback)],
+      updates: [dodgeUpdate(correctionRuntime, second, fallbackOptionId)],
     });
     expect(fallbackCorrection['isError']).toBe(true);
     expect(JSON.stringify(fallbackCorrection)).toContain('fallback');
@@ -811,8 +835,8 @@ describe('engine MCP dual-handshake full surface conformance', () => {
 
   it('queues closed reaction guidance on both submission tools and rejects free text', async () => {
     const roundFixture = await fixtureRuntime();
-    const roundArguments = happyArguments('engine.submit_round_intents', roundFixture.state, roundFixture.runtime);
-    expect(structured(toolCall(roundFixture.runtime.handler, 'engine.submit_round_intents', {
+    const roundArguments = happyArguments('engine.submit_round_proposals', roundFixture.state, roundFixture.runtime);
+    expect(structured(toolCall(roundFixture.runtime.handler, 'engine.submit_round_proposals', {
       ...roundArguments,
       reaction_guidance: { side_wide: { opportunity_attack: 'only_when_target_visible' } },
     }))['status']).toBe('proposed');
@@ -824,8 +848,8 @@ describe('engine MCP dual-handshake full surface conformance', () => {
 
     const singleFixture = await fixtureRuntime({ requestedActorCount: 1 });
     const facts = fixtureFacts(singleFixture.state, singleFixture.runtime);
-    expect(structured(toolCall(singleFixture.runtime.handler, 'engine.submit_intent', {
-      ...happyArguments('engine.submit_intent', singleFixture.state, singleFixture.runtime),
+    expect(structured(toolCall(singleFixture.runtime.handler, 'engine.submit_proposal', {
+      ...happyArguments('engine.submit_proposal', singleFixture.state, singleFixture.runtime),
       reaction_guidance: {
         actors: [{ actor_id: facts.actor, triggers: { hit_by_attack: 'decline' } }],
       },
@@ -838,9 +862,9 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       }),
     }));
 
-    expect(toolCall(singleFixture.runtime.handler, 'engine.submit_intent', {
-      ...happyArguments('engine.submit_intent', singleFixture.state, singleFixture.runtime),
-      idempotency_key: 'intent-idempotency-invalid-guidance',
+    expect(toolCall(singleFixture.runtime.handler, 'engine.submit_proposal', {
+      ...happyArguments('engine.submit_proposal', singleFixture.state, singleFixture.runtime),
+      idempotency_key: 'proposal-idempotency-invalid-guidance',
       reaction_guidance: { side_wide: { opportunity_attack: 'ask the agent synchronously' } },
     })['isError']).toBe(true);
   });
@@ -893,7 +917,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       cursor = typeof result['nextCursor'] === 'string' ? result['nextCursor'] : undefined;
     } while (cursor !== undefined);
     expect(resources.map((resource) => resource['name'])).toEqual([
-      'Current turn', 'Current room', 'Turn revision 1', 'Journal revision 1', 'Rule rule:allowed', 'Intent v1',
+      'Current turn', 'Current room', 'Turn revision 1', 'Journal revision 1', 'Rule rule:allowed', 'Turn proposal v1',
     ]);
     for (const resource of resources) {
       const read = record(request(runtime.handler, `read:${String(resource['name'])}`, 'resources/read', { uri: resource['uri'] }).result);
@@ -913,7 +937,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       name: 'engine.plan_round', arguments: { run_id: 'encounter:engine-mcp', expected_revision: 1, voice: 'terse_tactical' },
     }).result);
     expect(JSON.stringify(plan)).toContain('engine.get_turn_context');
-    expect(JSON.stringify(plan)).toContain('engine.submit_round_intents');
+    expect(JSON.stringify(plan)).toContain('engine.submit_round_proposals');
     expect(JSON.stringify(plan)).toContain('reaction_guidance');
     expect(JSON.stringify(plan)).toContain('persists until replaced');
     const capsule = runtime.feed.current();
@@ -925,9 +949,9 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       projection: capsule.projection, historyDelta: capsule.historyDelta, rulesIndex: capsule.rulesIndex,
     }));
     const correction = record(request(runtime.handler, 401, 'prompts/get', {
-      name: 'engine.correct_intent', arguments: { run_id: 'encounter:engine-mcp', expected_revision: 2, request_id: 'request:engine-mcp' },
+      name: 'engine.correct_proposal', arguments: { run_id: 'encounter:engine-mcp', expected_revision: 2, request_id: 'request:engine-mcp' },
     }).result);
-    expect(JSON.stringify(correction)).toContain('fallback must be null');
+    expect(JSON.stringify(correction)).toContain('fallback_option_id must be null');
     expect(request(runtime.handler, 402, 'prompts/get', {
       name: 'engine.plan_round', arguments: { run_id: 'encounter:engine-mcp', expected_revision: 2, voice: 'terse_tactical', coordinate: 1 },
     })).toMatchObject({ error: { code: -32602 } });
@@ -957,7 +981,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(secondBody['truncated']).toBe(true);
   });
 
-  it.each(['engine.validate_intent', 'engine.submit_intent', 'engine.submit_round_intents'] as const)('%s rejects a second fallback during correction', async (name) => {
+  it.each(['engine.validate_proposal', 'engine.submit_proposal', 'engine.submit_round_proposals'] as const)('%s rejects a second fallback during correction', async (name) => {
     const { state, runtime } = await fixtureRuntime();
     const capsule = runtime.feed.current();
     runtime.feed.replace(createEngineStateCapsule({
@@ -966,13 +990,12 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       projection: capsule.projection, historyDelta: capsule.historyDelta, rulesIndex: capsule.rulesIndex,
     }));
     const freshFacts = fixtureFacts(state, runtime);
-    const branch = { choice: { kind: 'end_turn' }, movement: { willingness: 'none', maximum_feet: 0, opportunity_risk: 'avoid' }, engagement: { stance: 'hold_position' } };
-    const intent = { ...freshFacts.intent, fallback: branch };
-    const args = name === 'engine.submit_round_intents'
-      ? { state_ref: freshFacts.ref, request_id: freshFacts.request.requestId, phase: 'correction', idempotency_key: 'correction-round-0001', intents: [intent] }
-      : name === 'engine.submit_intent'
-        ? { state_ref: freshFacts.ref, request_id: freshFacts.request.requestId, phase: 'correction', idempotency_key: 'correction-intent-0001', intent }
-        : { state_ref: freshFacts.ref, request_id: freshFacts.request.requestId, phase: 'correction', intent };
+    const proposal = { ...freshFacts.proposal, fallback_option_id: freshFacts.proposal.primary_option_id };
+    const args = name === 'engine.submit_round_proposals'
+      ? { state_ref: freshFacts.ref, request_id: freshFacts.request.requestId, phase: 'correction', idempotency_key: 'correction-round-0001', proposals: [proposal] }
+      : name === 'engine.submit_proposal'
+        ? { state_ref: freshFacts.ref, request_id: freshFacts.request.requestId, phase: 'correction', idempotency_key: 'correction-proposal-0001', proposal }
+        : { state_ref: freshFacts.ref, request_id: freshFacts.request.requestId, phase: 'correction', proposal };
     const result = toolCall(runtime.handler, name, args);
     expect(result['isError']).toBe(true);
     expect(JSON.stringify(result)).toContain('fallback');

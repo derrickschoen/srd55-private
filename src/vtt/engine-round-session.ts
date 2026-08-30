@@ -3,22 +3,27 @@ import { evaluateMonsterTacticalAttack, type EncounterState } from '../combat/en
 import type { EncounterCommand } from '../combat/events';
 import { monsterAttackCommand, monsterSavingThrowCommand } from '../combat/monster-commands';
 import { restoreMulberry32, type SerializableRng } from '../combat/random';
-import type { MonsterAttackAction, MonsterSavingThrowAction } from '../combat/statblock';
-import { combatantId, type CombatantId, type EncounterBranchId, type EncounterSessionId } from '../combat/values';
+import {
+  monsterSpellResourcePoolId,
+  type MonsterAttackAction,
+  type MonsterSavingThrowAction,
+  type MonsterSpellcastingAction,
+} from '../combat/statblock';
+import { spellDefinition } from '../combat/spells/definitions';
+import { type CombatantId, type EncounterBranchId, type EncounterSessionId } from '../combat/values';
 import type {
   EngineOrdinaryRequestKind,
   EnginePlanAdjustmentMetadata,
   EngineStateCapsule,
 } from './engine-state-capsule';
-import { canonicalEngineQueryPort, type EngineTargetSelector } from './engine-query-port';
+import { canonicalEngineQueryPort, monsterActions, monsterBonusActions } from './engine-query-port';
 import {
-  createPureIntentResolver,
-  type EngineActionChoice,
-  type EngineEngagement,
-  type EngineIntentBranch,
-  type EngineMovementPreference,
-  type EngineTurnIntent,
-  type ResolvedIntentMechanics,
+  availableEngineActorOptions,
+  resolveEngineActorOption,
+  type EngineActorOption,
+  type EngineTurnProposal,
+  type ResolvedActionSlotUse,
+  type ResolvedTurnMechanics,
 } from './intent-resolver';
 import { createEngineMcpRuntime } from './mcp/entrypoint';
 import {
@@ -57,21 +62,24 @@ export interface EngineBoundaryResolutions {
   readonly guidedResolutions: readonly GuidedReactionResolution[];
 }
 
-export type EngineAppliedIntentBranch = 'primary' | 'fallback' | 'dodge';
+export type EngineAppliedProposalBranch = 'primary' | 'fallback' | 'dodge';
 
-export interface EngineIntentDeviation {
+export interface EngineProposalDeviation {
   readonly actorId: CombatantId;
   readonly authorizedBranch: 'primary' | 'fallback';
-  readonly appliedBranch: EngineAppliedIntentBranch;
-  readonly authorizedTargetId: CombatantId | null;
-  readonly appliedTargetId: CombatantId | null;
-  readonly reasonCodes: readonly ('branch_changed' | 'target_changed' | 'degraded_to_dodge')[];
+  readonly appliedBranch: EngineAppliedProposalBranch;
+  readonly authorizedOptionId: string;
+  readonly appliedOptionId: string;
+  readonly reasonCodes: readonly ('branch_changed' | 'option_changed' | 'degraded_to_dodge')[];
   readonly refusalCodes: readonly string[];
 }
 
-export interface AuthorizedEngineTurnIntent {
-  readonly intent: EngineTurnIntent;
-  readonly mechanics: ResolvedIntentMechanics;
+export interface AuthorizedEngineTurnProposal {
+  readonly proposal: EngineTurnProposal;
+  readonly option: EngineActorOption;
+  readonly primaryOption: EngineActorOption;
+  readonly fallbackOption: EngineActorOption | null;
+  readonly mechanics: ResolvedTurnMechanics;
   readonly selectedBranch: 'primary' | 'fallback';
 }
 
@@ -82,21 +90,14 @@ export interface PreparedEngineRound extends EngineBoundaryResolutions {
 
 export interface AppliedEngineMechanics extends EngineBoundaryResolutions {
   readonly revisionDelta: number;
-  readonly deviationResolutions: readonly EngineIntentDeviation[];
+  readonly deviationResolutions: readonly EngineProposalDeviation[];
 }
 
 export interface AppliedScriptedPcTurn extends EngineBoundaryResolutions {
   readonly revisionDelta: number;
 }
 
-interface ConversationEngineTurnIntent {
-  readonly mechanics: ResolvedIntentMechanics;
-  readonly choice: EngineActionChoice;
-  readonly acceptedIntent?: Readonly<Record<string, unknown>>;
-  readonly selectedBranch?: 'primary' | 'fallback';
-}
-
-type EngineTurnApplication = AuthorizedEngineTurnIntent | ConversationEngineTurnIntent;
+type EngineTurnApplication = AuthorizedEngineTurnProposal;
 
 interface CanonicalEncounterState {
   readonly state: EncounterState;
@@ -197,154 +198,53 @@ function advanceToActor(
   return state;
 }
 
-function intentRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+function monsterSpellCommand(
+  state: EncounterState,
+  use: ResolvedActionSlotUse,
+): Extract<EncounterCommand, { readonly type: 'cast_spell' }> {
+  if (use.spellId === null) throw new Error('Resolved spell use omitted its spell id.');
+  const caster = state.combatants.find((candidate) => candidate.profile.id === state.activeCombatant);
+  if (caster?.profile.kind !== 'monster') throw new Error('Resolved statblock spell caster is absent.');
+  const sources = use.slot === 'main' ? monsterActions(state, caster.profile.id) : monsterBonusActions(state, caster.profile.id);
+  const source = sources.find((candidate): candidate is MonsterSpellcastingAction =>
+    candidate.kind === 'spellcasting' && candidate.id === use.actionId);
+  const reference = source?.spells.find((spell) => spell.id === use.spellId);
+  const definition = spellDefinition(use.spellId);
+  if (source === undefined || reference === undefined || definition === null) {
+    throw new Error(`Resolved spell ${use.spellId} is absent from ${use.actionId}.`);
   }
-  return value as Readonly<Record<string, unknown>>;
-}
-
-function intentString(input: Readonly<Record<string, unknown>>, field: string): string {
-  const value = input[field];
-  if (typeof value !== 'string') throw new TypeError(`Authorized intent ${field} must be a string.`);
-  return value;
-}
-
-function decodeTargetSelector(value: unknown): EngineTargetSelector {
-  const input = intentRecord(value, 'Authorized target selector');
-  const kind = intentString(input, 'kind');
-  switch (kind) {
-    case 'combatant': return { kind, combatantId: combatantId(intentString(input, 'combatant_id')) };
-    case 'enemy_threatening_ally': return { kind, allyId: combatantId(intentString(input, 'ally_id')) };
-    case 'nearest_visible_enemy':
-    case 'lowest_hp_visible_enemy':
-    case 'most_injured_visible_ally':
-    case 'current_threat': return { kind };
-    default: throw new TypeError(`Authorized target selector kind ${kind} is unknown.`);
-  }
-}
-
-function decodeActionChoice(value: unknown): EngineActionChoice {
-  const input = intentRecord(value, 'Authorized action choice');
-  const kind = intentString(input, 'kind');
-  switch (kind) {
-    case 'attack': return {
-      kind,
-      actionId: intentString(input, 'action_id'),
-      target: decodeTargetSelector(input['target']),
-      ...(input['resource_policy'] === undefined
-        ? {}
-        : { resourcePolicy: intentString(input, 'resource_policy') as 'conserve' | 'normal' | 'spend_if_useful' }),
-    };
-    case 'cast_spell': return {
-      kind,
-      spellId: intentString(input, 'spell_id'),
-      target: input['target'] === null ? null : decodeTargetSelector(input['target']),
-      ...(input['slot_policy'] === undefined
-        ? {}
-        : { slotPolicy: intentString(input, 'slot_policy') as 'lowest_legal' | 'conserve' | 'best_effect' }),
-    };
-    case 'use_action': return {
-      kind,
-      actionId: intentString(input, 'action_id'),
-      target: input['target'] === null ? null : decodeTargetSelector(input['target']),
-    };
-    case 'dodge':
-    case 'disengage':
-    case 'dash':
-    case 'end_turn': return { kind };
-    default: throw new TypeError(`Authorized action choice kind ${kind} is unknown.`);
-  }
-}
-
-function decodeMovement(value: unknown): EngineMovementPreference {
-  const input = intentRecord(value, 'Authorized movement');
-  const maximumFeet = input['maximum_feet'];
-  if (maximumFeet !== undefined && typeof maximumFeet !== 'number') {
-    throw new TypeError('Authorized intent maximum_feet must be a number.');
-  }
+  const abilityScore = caster.profile.rules.abilityScores?.[source.ability] ?? 10;
+  const modifier = Math.floor((abilityScore - 10) / 2);
+  const proficiency = caster.profile.rules.proficiencyBonus ?? 2;
+  const saveDc = source.saveDc.kind === 'present' ? source.saveDc.value : 8 + proficiency + modifier;
+  const attackBonus = source.spellAttackBonus.kind === 'present' ? source.spellAttackBonus.value : proficiency + modifier;
+  const resourcePoolId = monsterSpellResourcePoolId(source.id, reference);
   return {
-    willingness: intentString(input, 'willingness') as EngineMovementPreference['willingness'],
-    ...(maximumFeet === undefined ? {} : { maximumFeet }),
-    opportunityRisk: intentString(input, 'opportunity_risk') as EngineMovementPreference['opportunityRisk'],
+    type: 'cast_spell', actor: caster.profile.id, spellId: use.spellId,
+    slotLevel: definition.level === 0 ? null : definition.level,
+    castAsRitual: false, casterLevel: 1, attackBonus, saveDc, spellcastingModifier: modifier,
+    targets: use.targetIds, area: null, weaponAttack: null, selectedOption: null,
+    ...(resourcePoolId === null ? {} : { resourcePoolId }),
+    monsterActionId: source.id,
   };
 }
 
-function decodeEngagement(value: unknown): EngineEngagement {
-  const input = intentRecord(value, 'Authorized engagement');
-  return {
-    stance: intentString(input, 'stance') as EngineEngagement['stance'],
-    ...(input['anchor'] === undefined
-      ? {}
-      : { anchor: input['anchor'] === null ? null : decodeTargetSelector(input['anchor']) }),
-  };
-}
-
-function decodeIntentBranch(value: unknown): EngineIntentBranch {
-  const input = intentRecord(value, 'Authorized intent branch');
-  return {
-    choice: decodeActionChoice(input['choice']),
-    movement: decodeMovement(input['movement']),
-    engagement: decodeEngagement(input['engagement']),
-  };
-}
-
-function decodeAuthorizedIntent(value: Readonly<Record<string, unknown>>): EngineTurnIntent {
-  const fallback = value['fallback'];
-  return {
-    actorId: combatantId(intentString(value, 'actor_id')),
-    ...decodeIntentBranch(value),
-    fallback: fallback === null ? null : decodeIntentBranch(fallback),
-  };
-}
-
-function deterministicDodgeIntent(actorId: CombatantId): EngineTurnIntent {
-  return {
-    actorId,
-    choice: { kind: 'dodge' },
-    movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
-    engagement: { stance: 'hold_position' },
-    fallback: null,
-  };
-}
-
-function normalizedApplication(entry: EngineTurnApplication): AuthorizedEngineTurnIntent {
-  if ('intent' in entry) return entry;
-  if (entry.acceptedIntent !== undefined) {
-    return {
-      intent: decodeAuthorizedIntent(entry.acceptedIntent),
-      mechanics: entry.mechanics,
-      selectedBranch: entry.selectedBranch ?? 'primary',
-    };
-  }
-  if (entry.choice.kind !== 'dodge') {
-    throw new TypeError('Engine turn application requires the authorized intent.');
-  }
-  return {
-    intent: deterministicDodgeIntent(entry.mechanics.actorId),
-    mechanics: entry.mechanics,
-    selectedBranch: 'primary',
-  };
-}
-
-function selectedChoice(
-  intent: EngineTurnIntent,
-  branch: 'primary' | 'fallback',
-): EngineActionChoice {
-  if (branch === 'primary') return intent.choice;
-  if (intent.fallback === null) throw new Error('Resolved fallback omitted its declared branch.');
-  return intent.fallback.choice;
-}
-
-function applyOneResolvedMechanic(
+function applyOneResolvedProposal(
   initialState: EncounterState,
-  mechanics: ResolvedIntentMechanics,
-  choice: EngineActionChoice,
+  mechanics: ResolvedTurnMechanics,
   reduce: (state: EncounterState, command: EncounterCommand) => EncounterState,
 ): EncounterState {
   let state = initialState;
-  const dashBeforeMovement = choice.kind === 'dash' && mechanics.path.length > 0;
-  if (dashBeforeMovement) state = reduce(state, { type: 'dash', actor: mechanics.actorId });
+  const dashesBeforeMovement = mechanics.path.length === 0
+    ? []
+    : mechanics.actionSlots.filter((use) => use.kind === 'dash');
+  for (const dash of dashesBeforeMovement) {
+    state = reduce(state, {
+      type: 'dash',
+      actor: mechanics.actorId,
+      cost: dash.slot === 'bonus' ? 'bonus_action' : 'action',
+    });
+  }
   if (mechanics.path.length > 0) {
     state = reduce(state, {
       type: 'move', actor: mechanics.actorId, path: mechanics.path, cause: 'voluntary',
@@ -353,62 +253,65 @@ function applyOneResolvedMechanic(
   if (state.combatants.find((entry) => entry.profile.id === mechanics.actorId)?.life !== 'living') {
     return state;
   }
-  switch (choice.kind) {
+  for (const use of mechanics.actionSlots) {
+    if (state.combatants.find((entry) => entry.profile.id === mechanics.actorId)?.life !== 'living') break;
+    switch (use.kind) {
     case 'attack': {
-      if (mechanics.targetId === null) throw new Error('Resolved attack omitted its target.');
+      const targetId = use.targetIds[0];
+      if (targetId === undefined) throw new Error('Resolved attack omitted its target.');
       const action = canonicalEngineQueryPort.actions(state, mechanics.actorId)
         .find((candidate): candidate is MonsterAttackAction =>
-          candidate.kind === 'attack' && candidate.id === mechanics.actionId);
-      if (action === undefined) throw new Error(`Resolved attack ${mechanics.actionId} is absent.`);
-      const evaluation = evaluateMonsterTacticalAttack(
-        state,
-        action,
-        mechanics.actorId,
-        mechanics.targetId,
-      );
-      state = reduce(state, monsterAttackCommand(
-        action,
-        mechanics.actorId,
-        mechanics.targetId,
-        evaluation.rollMode.mode,
-      ));
+          candidate.kind === 'attack' && candidate.id === use.actionId);
+      if (action === undefined) throw new Error(`Resolved attack ${use.actionId} is absent.`);
+      const evaluation = evaluateMonsterTacticalAttack(state, action, mechanics.actorId, targetId);
+      state = reduce(state, monsterAttackCommand(action, mechanics.actorId, targetId, evaluation.rollMode.mode));
       break;
     }
-    case 'dodge': state = reduce(state, { type: 'dodge', actor: mechanics.actorId }); break;
-    case 'disengage': state = reduce(state, { type: 'disengage', actor: mechanics.actorId }); break;
+    case 'dodge': state = reduce(state, { type: 'dodge', actor: mechanics.actorId, cost: 'action' }); break;
+    case 'disengage': state = reduce(state, {
+      type: 'disengage',
+      actor: mechanics.actorId,
+      cost: use.slot === 'bonus' ? 'bonus_action' : 'action',
+    }); break;
     case 'dash': {
-      if (!dashBeforeMovement) state = reduce(state, { type: 'dash', actor: mechanics.actorId });
+      if (!dashesBeforeMovement.includes(use)) {
+        state = reduce(state, {
+          type: 'dash',
+          actor: mechanics.actorId,
+          cost: use.slot === 'bonus' ? 'bonus_action' : 'action',
+        });
+      }
       break;
     }
+    case 'hide': state = reduce(state, { type: 'hide', actor: mechanics.actorId, cost: 'bonus_action' }); break;
     case 'end_turn': return reduce(state, { type: 'end_turn', actor: mechanics.actorId });
-    case 'use_action': {
-      if (choice.target !== null || mechanics.targetId !== null) {
-        if (choice.target === null || mechanics.targetId === null) {
-          throw new Error(`Resolved utility action ${choice.actionId} has inconsistent target bookkeeping.`);
-        }
+    case 'saving_throw': {
+        const targetId = use.targetIds[0];
+        if (targetId === undefined) throw new Error(`Resolved save action ${use.actionId} omitted its target.`);
+        const sources = use.slot === 'main' ? monsterActions(state, mechanics.actorId) : monsterBonusActions(state, mechanics.actorId);
         const action = canonicalEngineQueryPort.actions(state, mechanics.actorId)
           .find((candidate): candidate is MonsterSavingThrowAction =>
-            candidate.kind === 'saving_throw' && candidate.id === mechanics.actionId);
+            candidate.kind === 'saving_throw' && candidate.id === use.actionId) ??
+          sources.find((candidate): candidate is MonsterSavingThrowAction =>
+            candidate.kind === 'saving_throw' && candidate.id === use.actionId);
         if (action === undefined) {
-          throw new Error(`Targeted utility action ${choice.actionId} is absent or has no executable target definition.`);
+          throw new Error(`Saving-throw action ${use.actionId} is absent.`);
         }
         state = reduce(state, monsterSavingThrowCommand(
           action,
           mechanics.actorId,
-          mechanics.targetId,
+          targetId,
+          use.slot === 'bonus' ? 'bonus_action' : 'action',
         ));
         break;
-      }
-      switch (choice.actionId) {
-        case 'dodge':
-        case 'disengage':
-        case 'dash': state = reduce(state, { type: choice.actionId, actor: mechanics.actorId }); break;
-        case 'end_turn': return reduce(state, { type: 'end_turn', actor: mechanics.actorId });
-        default: throw new Error(`Engine round session cannot authorize utility action ${choice.actionId}.`);
-      }
+    }
+    case 'cast_spell': state = reduce(state, monsterSpellCommand(state, use)); break;
+    case 'use_world_object': {
+      if (use.objectId === null) throw new Error(`Resolved world-object action ${use.actionId} omitted its object.`);
+      state = reduce(state, { type: 'use_world_object', actor: mechanics.actorId, objectId: use.objectId, actionId: use.actionId });
       break;
     }
-    case 'cast_spell': throw new Error(`Engine round session cannot authorize unresolved ${choice.kind} mechanics.`);
+    }
   }
   return reduce(state, { type: 'end_turn', actor: mechanics.actorId });
 }
@@ -573,7 +476,7 @@ export class EngineRoundSession {
       if (combatant.profile.kind === 'player_character') break;
       expectedActors.push(combatant.profile.id);
     }
-    const actualActors = entries.map((entry) => normalizedApplication(entry).intent.actorId);
+    const actualActors = entries.map((entry) => entry.proposal.actorId);
     if (expectedActors.length === 0 || expectedActors.length !== actualActors.length ||
       expectedActors.some((actorId, index) => actorId !== actualActors[index])) {
       throw new Error(
@@ -591,8 +494,7 @@ export class EngineRoundSession {
     const trialRng = restoreMulberry32(this.#rng.snapshot());
     const fallbackResolutions: AutoResolvedReactionOffer[] = [];
     const guidedResolutions: GuidedReactionResolution[] = [];
-    const deviationResolutions: EngineIntentDeviation[] = [];
-    const intents = createPureIntentResolver();
+    const deviationResolutions: EngineProposalDeviation[] = [];
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
       const reduced = reduceOne(state, command, trialRng);
       const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance);
@@ -602,46 +504,53 @@ export class EngineRoundSession {
     };
     let state = this.#state;
     for (const application of entries) {
-      const entry = normalizedApplication(application);
-      state = advanceToActor(state, entry.intent.actorId, reduce);
-      const resolution = intents.resolve(state, entry.intent);
-      let mechanics: ResolvedIntentMechanics;
-      let choice: EngineActionChoice;
-      let appliedBranch: EngineAppliedIntentBranch;
+      const entry = application;
+      state = advanceToActor(state, entry.proposal.actorId, reduce);
+      const primary = resolveEngineActorOption(state, entry.primaryOption);
+      const fallback = primary.valid || entry.fallbackOption === null
+        ? null
+        : resolveEngineActorOption(state, entry.fallbackOption);
+      let mechanics: ResolvedTurnMechanics;
+      let appliedBranch: EngineAppliedProposalBranch;
       let refusalCodes: readonly string[];
-      if (resolution.valid) {
-        mechanics = resolution.mechanics;
-        choice = selectedChoice(entry.intent, resolution.selectedBranch);
-        appliedBranch = resolution.selectedBranch;
-        refusalCodes = resolution.refusals.map((refusal) => refusal.code);
+      if (primary.valid) {
+        mechanics = primary.mechanics;
+        appliedBranch = 'primary';
+        refusalCodes = [];
+      } else if (fallback?.valid === true) {
+        mechanics = fallback.mechanics;
+        appliedBranch = 'fallback';
+        refusalCodes = [primary.code];
       } else {
-        const dodge = intents.resolve(state, deterministicDodgeIntent(entry.intent.actorId));
-        if (!dodge.valid) throw new Error(`Could not apply deterministic Dodge for ${entry.intent.actorId}.`);
+        const dodgeOption = availableEngineActorOptions(state, entry.proposal.actorId).find((option) =>
+          option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge')) ?? null;
+        if (dodgeOption === null) throw new Error(`Could not apply deterministic Dodge for ${entry.proposal.actorId}.`);
+        const dodge = resolveEngineActorOption(state, dodgeOption);
+        if (!dodge.valid) throw new Error(`Could not apply deterministic Dodge for ${entry.proposal.actorId}.`);
         mechanics = dodge.mechanics;
-        choice = { kind: 'dodge' };
         appliedBranch = 'dodge';
-        refusalCodes = resolution.refusals.map((refusal) => refusal.code);
+        refusalCodes = [primary.code, ...(fallback !== null && !fallback.valid ? [fallback.code] : [])];
       }
 
-      const reasonCodes: EngineIntentDeviation['reasonCodes'][number][] = [];
+      const reasonCodes: EngineProposalDeviation['reasonCodes'][number][] = [];
       if (appliedBranch === 'dodge') {
         reasonCodes.push('degraded_to_dodge');
       } else {
         if (appliedBranch !== entry.selectedBranch) reasonCodes.push('branch_changed');
-        if (mechanics.targetId !== entry.mechanics.targetId) reasonCodes.push('target_changed');
+        if (mechanics.optionId !== entry.mechanics.optionId) reasonCodes.push('option_changed');
       }
       if (reasonCodes.length > 0) {
         deviationResolutions.push({
-          actorId: entry.intent.actorId,
+          actorId: entry.proposal.actorId,
           authorizedBranch: entry.selectedBranch,
           appliedBranch,
-          authorizedTargetId: entry.mechanics.targetId,
-          appliedTargetId: mechanics.targetId,
+          authorizedOptionId: entry.mechanics.optionId,
+          appliedOptionId: mechanics.optionId,
           reasonCodes,
           refusalCodes,
         });
       }
-      state = applyOneResolvedMechanic(state, mechanics, choice, reduce);
+      state = applyOneResolvedProposal(state, mechanics, reduce);
     }
     this.#state = canonicalEncounterState(state).state;
     this.#rng = trialRng;
