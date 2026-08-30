@@ -103,9 +103,27 @@ const tacticalSummary = z.object({
   room: z.number().int().min(1).nullable(), round: z.number().int().min(0), active_side: z.enum(['players', 'monsters', 'none']),
   living_allies: z.number().int().min(0), living_enemies: z.number().int().min(0), terrain_tags: z.array(shortCode).max(100),
 }).strict();
-const turnRequest = z.object({
-  request_id: identifier, phase: z.enum(['initial', 'correction']), correction_number: z.union([z.literal(0), z.literal(1)]),
-  required_actor_ids: z.array(identifier).min(1).max(50),
+const turnRequest = z.union([
+  z.object({
+    kind: z.literal('round_plan'), request_id: identifier,
+    phase: z.enum(['initial', 'correction']), correction_number: z.union([z.literal(0), z.literal(1)]),
+    required_actor_ids: z.array(identifier).min(1).max(50),
+  }).strict(),
+  z.object({
+    kind: z.literal('plan_adjustment'), request_id: identifier,
+    phase: z.enum(['initial', 'correction']), correction_number: z.union([z.literal(0), z.literal(1)]),
+    required_actor_ids: z.array(identifier).min(1).max(50),
+    baseline_plan_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+    adjustment_budget: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+  }).strict(),
+]);
+const currentPlanSummary = z.object({
+  parent_plan_id: identifier,
+  baseline_plan_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+  open_actor_intents: z.array(z.object({
+    actor_id: identifier,
+    intent_digest: z.string().regex(/^[0-9a-f]{64}$/u),
+  }).strict()).min(1).max(50),
 }).strict();
 const actorContext = z.object({ actor_id: identifier, status: actorStatus, options: z.array(tacticalOption).max(20), threats: z.array(threat).max(50) }).strict();
 const advertisedPlay = z.object({
@@ -124,6 +142,7 @@ const fullTurnContextOutput = z.object({
   state_ref: stateRef, request: turnRequest, summary: tacticalSummary, actors: z.array(actorContext).min(1).max(50),
   applicable_plays: z.array(advertisedPlay).max(3),
   suggested_plan: suggestedPlan.optional(),
+  current_plan: currentPlanSummary.optional(),
   recent_changes: z.array(recentChange).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable(),
 }).strict();
 const revisionDeltaOperation = z.union([
@@ -178,7 +197,10 @@ const metrics = z.object({ outcome_probability: z.number().min(0).max(1).nullabl
 const diceOutput = z.object({ state_ref: stateRef, results: z.array(z.object({ candidate_id: z.string().min(1).max(100), resolvable: z.boolean(), metrics, assumptions: z.array(shortCode).max(20), refusals: z.array(refusal).max(20) }).strict()).max(20) }).strict();
 
 const resolutionPreview = z.object({ actor_id: identifier, action_id: identifier, target_id: identifier.nullable(), movement_feet: z.number().int().min(0), resolution_digest: z.string().min(64).max(128), summary: summaryText }).strict();
-const correctionGuidance = z.object({ remaining_corrections: z.union([z.literal(0), z.literal(1)]), required_actor_ids: z.array(identifier).min(1).max(50), replace_whole_round: z.literal(true) }).strict();
+const correctionGuidance = z.union([
+  z.object({ remaining_corrections: z.union([z.literal(0), z.literal(1)]), required_actor_ids: z.array(identifier).min(1).max(50), replace_whole_round: z.literal(true) }).strict(),
+  z.object({ remaining_corrections: z.union([z.literal(0), z.literal(1)]), required_actor_ids: z.array(identifier).min(1).max(50), replace_whole_round: z.literal(false) }).strict(),
+]);
 const validateOutput = z.object({ state_ref: stateRef, valid: z.boolean(), selected_branch: z.enum(['primary', 'fallback', 'none']), resolution: resolutionPreview.nullable(), refusals: z.array(refusal).max(20), correction_guidance: correctionGuidance.nullable() }).strict();
 const actorResolution = z.object({ actor_id: identifier, selected_branch: z.enum(['primary', 'fallback']), resolution_digest: z.string().min(64).max(128), summary: summaryText }).strict();
 const actorRefusal = z.object({
@@ -214,6 +236,34 @@ const submitRoundInput = z.object({ ...refInput, request_id: identifier, phase: 
     if (intent.fallback !== null) context.addIssue({ code: 'custom', path: ['intents', index, 'fallback'], message: 'Correction intent fallback must be null.' });
   });
 });
+const submitPlanAdjustmentInput = z.object({
+  ...refInput,
+  request_id: identifier,
+  phase: z.enum(['initial', 'correction']),
+  idempotency_key: z.string().min(16).max(200),
+  baseline_plan_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+  updates: z.array(turnIntent).max(2),
+}).strict().superRefine((value, context) => {
+  if (value.phase === 'correction') value.updates.forEach((intent, index) => {
+    if (intent.fallback !== null) context.addIssue({ code: 'custom', path: ['updates', index, 'fallback'], message: 'Adjustment correction fallback must be null.' });
+  });
+});
+const adjustmentOutput = z.union([
+  z.object({
+    status: z.literal('proposed'),
+    adjustment_proposal_id: identifier,
+    state_ref: stateRef,
+    actor_resolutions: z.array(actorResolution).max(2),
+  }).strict(),
+  z.object({
+    status: z.literal('rejected'),
+    staged_proposal_id: identifier.nullable(),
+    state_ref: stateRef,
+    staged_actor_resolutions: z.array(actorResolution).max(2),
+    actor_refusals: z.array(actorRefusal).min(1).max(50),
+    correction_guidance: correctionGuidance,
+  }).strict(),
+]);
 const speculativeBranch = z.object({
   scenario_id: identifier,
   intents: z.array(turnIntent).min(1).max(50),
@@ -297,7 +347,9 @@ function spec(name: string, description: string, input: z.ZodType<unknown>, outp
   const inputSchema = jsonSchema(input);
   const correctionRule = name === 'engine.submit_round_intents'
     ? [{ if: { properties: { phase: { const: 'correction' } } }, then: { properties: { intents: { items: { properties: { fallback: { type: 'null' } } } } } } }]
-    : name === 'engine.validate_intent' || name === 'engine.submit_intent'
+    : name === 'engine.submit_plan_adjustment'
+      ? [{ if: { properties: { phase: { const: 'correction' } } }, then: { properties: { updates: { items: { properties: { fallback: { type: 'null' } } } } } } }]
+      : name === 'engine.validate_intent' || name === 'engine.submit_intent'
       ? [{ if: { properties: { phase: { const: 'correction' } } }, then: { properties: { intent: { properties: { fallback: { type: 'null' } } } } } }]
       : null;
   return {
@@ -329,6 +381,7 @@ export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.query_dice_expectation', 'Compare bounded analytic outcomes without consuming RNG.', z.object({ ...refInput, candidates: z.array(z.object({ candidate_id: z.string().min(1).max(100), actor_id: identifier, choice: actionChoice, movement: movementPreference.optional(), engagement: engagement.optional() }).strict()).min(1).max(20), include_distribution: z.boolean().optional() }).strict(), diceOutput),
   spec('engine.validate_intent', 'Purely validate and preview one revision-bound intent.', phaseIntentInput, validateOutput),
   spec('engine.submit_round_intents', 'Validate and queue one all-or-nothing shared-initiative round proposal.', submitRoundInput, roundOutput, true),
+  spec('engine.submit_plan_adjustment', 'Validate and queue a bounded patch over the remaining open monster plan.', submitPlanAdjustmentInput, adjustmentOutput, true),
   spec('engine.submit_speculative_round_plan', 'Structurally validate and queue one host-guarded contingent monster-round plan.', submitSpeculativeRoundPlanInput, speculativeRoundPlanOutput, true),
   spec('engine.submit_intent', 'Validate and queue one separately controlled seat proposal.', submitIntentInput, singleOutput, true),
   spec('engine.emit_narration', 'Queue one bounded presentation-only narration chunk.', z.object({ ...refInput, request_id: identifier, idempotency_key: z.string().min(16).max(200), voice: z.enum(['cinematic_visible_rolls', 'terse_tactical', 'rules_explicit', 'terse_rule_citing_validation']), text: z.string().min(1).max(12_000), audience: z.enum(['shared', 'dm_only']), rule_references: z.array(z.object({ rule_id: identifier, source_locator: z.string().min(1).max(300) }).strict()).max(20).optional() }).strict(), narrationOutput, true),

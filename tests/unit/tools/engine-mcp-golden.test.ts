@@ -43,6 +43,11 @@ describe('real-stdio engine MCP golden dungeon run', () => {
     expect(report).toMatchObject({ status: 'VERIFIED', protocolConformance: 'SUBSTITUTED_LOCAL' });
     const methods = report.initial.map((entry) => decoded(entry.request)['method']);
     expect(methods).toEqual(expect.arrayContaining(['server/discover', 'tools/list', 'resources/list', 'prompts/list']));
+    const listed = report.initial.find((entry) => decoded(entry.request)['method'] === 'tools/list');
+    if (listed === undefined) throw new Error('Golden transcript omitted tools/list.');
+    const listedTools = record(decoded(listed.response)['result'], 'tools/list result')['tools'];
+    if (!Array.isArray(listedTools)) throw new Error('Golden tools/list omitted tools.');
+    expect(listedTools.map((tool) => record(tool, 'listed tool')['name'])).toContain('engine.submit_plan_adjustment');
 
     const pathEntry = toolEntry(report.initial, 'engine.query_path');
     const path = structured(pathEntry);

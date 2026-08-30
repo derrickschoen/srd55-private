@@ -76,7 +76,7 @@ interface RegistryDependencies {
 type ProjectedActor = EngineStateCapsule['projection']['combatants'][number];
 type ProjectedAction = ProjectedActor['actions'][number];
 
-const RUNTIME_VERSION = 'plays-v1-runtime-5';
+const RUNTIME_VERSION = 'plays-v1-runtime-6';
 const DODGE: EngineIntentBranch = {
   choice: { kind: 'dodge' },
   movement: { willingness: 'none', maximumFeet: 0, opportunityRisk: 'avoid' },
@@ -354,10 +354,14 @@ function phaseDraft(
     : intents;
 }
 
+function isInitialRoundPlan(capsule: EngineStateCapsule): boolean {
+  return capsule.request?.phase === 'initial' && capsule.request.kind !== 'plan_adjustment';
+}
+
 function basicApplicable(capsule: EngineStateCapsule): boolean {
   const actors = requestedActors(capsule);
   const targets = opposingTargets(capsule, actors);
-  return capsule.request?.phase === 'initial' && actors.length > 0 && targets.length > 0 &&
+  return isInitialRoundPlan(capsule) && actors.length > 0 && targets.length > 0 &&
     actors.every((actor) => attackActions(actor).length > 0);
 }
 
@@ -370,7 +374,7 @@ function expandBasic(capsule: EngineStateCapsule): readonly EngineTurnIntent[] {
 
 function focusApplicable(capsule: EngineStateCapsule): boolean {
   const actors = requestedActors(capsule);
-  return capsule.request?.phase === 'initial' && actors.length >= 2 && opposingTargets(capsule, actors).length > 0 &&
+  return isInitialRoundPlan(capsule) && actors.length >= 2 && opposingTargets(capsule, actors).length > 0 &&
     actors.every((actor) => attackActions(actor).length > 0);
 }
 
@@ -404,7 +408,7 @@ function controlAction(actors: readonly ProjectedActor[], target: ProjectedActor
 
 function obstacleApplicable(capsule: EngineStateCapsule): boolean {
   const actors = requestedActors(capsule);
-  return capsule.request?.phase === 'initial' &&
+  return isInitialRoundPlan(capsule) &&
     blockerTargets(capsule, actors).some((target) => controlAction(actors, target) !== null);
 }
 
