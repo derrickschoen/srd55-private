@@ -990,6 +990,26 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows[0]).toEqual(expect.objectContaining({
       outcome: 'authorized', agentDispatched: true, callsPerRound: 1,
+      combatModel: 'monster_block_v1',
+      roundProtocolVersion: 2,
+      partyPolicyHash: null,
+      materialityPolicyHash: null,
+      adjustmentBudget: 0,
+      pcTurns: [],
+      adjustments: [],
+      monsterSegments: [],
+    }));
+    expect(result.rows[0]?.startingRoomDigest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(result.rows[0]?.teamPlans).toEqual({
+      party: null,
+      monsters: expect.objectContaining({ initialProposalId: expect.any(String) }),
+    });
+    expect(result.rows[0]?.roundTotals).toEqual(expect.objectContaining({
+      initialCalls: 1,
+      adjustmentCalls: 0,
+      correctionCalls: 0,
+      serviceNullAdjustments: 0,
+      tokens: result.rows[0]?.tokens,
     }));
   });
 
@@ -1078,9 +1098,24 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(row).toEqual(expect.objectContaining({
       combatModel: 'initiative_segments_v1',
+      roundProtocolVersion: 2,
       outcome: 'authorized',
       adjustments: [],
       callsPerRound: 1,
+      adjustmentBudget: 2,
+    }));
+    expect(row?.partyPolicyHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(row?.materialityPolicyHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(row?.teamPlans.party).toEqual(expect.objectContaining({
+      planId: expect.any(String),
+      planHash: expect.any(String),
+      sharedObjective: 'defeat_the_hostile_team',
+      programs: expect.any(Array),
+    }));
+    expect(row?.teamPlans.monsters).toEqual(expect.objectContaining({
+      initialProposalId: expect.any(String),
+      initialProposalHash: expect.any(String),
+      authorizedIntents: expect.any(Array),
     }));
     expect(row?.initiativeOrder).toHaveLength(6);
     expect(row?.initiativeOrder).toEqual([
@@ -1093,6 +1128,10 @@ describe('AI-DM engine MCP conversation runner', () => {
     ]);
     expect(row?.pcTurns).toHaveLength(3);
     expect(row?.pcTurns?.every((turn) => !turn.material)).toBe(true);
+    expect(row?.pcTurns?.every((turn) =>
+      turn.initiativeIndex >= 0 && turn.afterRevision > turn.beforeRevision &&
+      turn.plannedProgramHash.length === 64 && turn.executedProgramHash.length === 64 &&
+      turn.commandSequence.length > 0 && turn.adherenceReasons.length > 0)).toBe(true);
     expect(row?.monsterSegments?.map((segment) => segment.actors)).toEqual([
       ['combatant:generated-3943001-monster-3'],
       [
@@ -1101,7 +1140,15 @@ describe('AI-DM engine MCP conversation runner', () => {
       ],
     ]);
     expect(row?.monsterSegments?.every((segment) =>
-      Array.isArray(segment.deviationResolutions))).toBe(true);
+      Array.isArray(segment.deviationResolutions) &&
+      segment.initiativeIndexes.length === segment.actors.length &&
+      segment.afterRevision > segment.beforeRevision && segment.appliedPlanHash.length === 64)).toBe(true);
+    expect(row?.roundTotals).toEqual(expect.objectContaining({
+      initialCalls: 1,
+      adjustmentCalls: 0,
+      correctionCalls: 0,
+      serviceNullAdjustments: 0,
+    }));
   });
 
   it.each([
@@ -1111,7 +1158,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     const directory = mkdtempSync(join(tmpdir(), `dnd-conversation-segments-${response}-`));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
-      '--combat-model', 'initiative_segments_v1', '--dry-run',
+      '--combat-model', 'initiative_segments_v1', '--capture-rl-data', '--dry-run',
     ]);
 
     const result = await runConversation(config, {
@@ -1124,10 +1171,42 @@ describe('AI-DM engine MCP conversation runner', () => {
       outcome,
       granularity: 'turn_delta',
       flapRetries: 0,
+      triggerPcTurnOrdinal: 1,
+      triggerInitiativeIndex: 0,
+      requestId: 'request:room-1-round-1-pc-turn-1',
+      openActors: expect.any(Array),
+      proposalId: expect.any(String),
+      baselinePlanHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      resultPlanHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      changedActors: expect.any(Array),
+      correctionSessionId: null,
+      usage: expect.objectContaining({ input: expect.any(Number) }),
+      toolCalls: expect.any(Number),
+      modelCalls: 1,
+      refusals: [],
+      correctionChain: null,
+      rlData: expect.any(Array),
     }));
+    expect(row?.adjustments?.[0]?.stateBinding).toEqual({
+      request: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
+      result: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
+    });
     expect(row?.adjustments?.[0]?.rawContext).toContain('"granularity":"turn_delta"');
+    expect(row?.rlData).toEqual(expect.objectContaining({
+      format: 'arena-rl-capture-v2',
+      task: 'round_plan',
+      submissionTool: 'engine.submit_round_intents',
+      roundProtocolVersion: 2,
+    }));
+    expect(row?.adjustments[0]?.rlData[0]).toEqual(expect.objectContaining({
+      format: 'arena-rl-capture-v2',
+      task: 'plan_adjustment',
+      submissionTool: 'engine.submit_plan_adjustment',
+      parentPlanId: expect.any(String),
+    }));
     expect(row?.adjustments?.[0]?.reasons).toContain('OPEN_MONSTER_SET_CHANGED');
     expect(row?.adjustments).toHaveLength(1);
+    expect(row?.roundTotals.adjustmentCalls).toBe(1);
     expect(row?.monsterSegments?.flatMap((segment) => segment.actors)).toHaveLength(2);
   });
 

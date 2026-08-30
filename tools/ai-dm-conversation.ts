@@ -72,9 +72,12 @@ import {
   createScriptedPartyPlan,
   materializeScriptedPartyTurn,
   type ScriptedPartyAdherence,
+  type ScriptedPartyAdherenceReasonCode,
+  type ScriptedPartyPlan,
 } from '../src/vtt/scripted-party-round';
 import {
   evaluatePlanMateriality,
+  PLAN_MATERIALITY_POLICY_HASH,
   type PlanMaterialityReasonCode,
 } from '../src/vtt/plan-materiality';
 import {
@@ -90,6 +93,7 @@ export const CONVERSATION_EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const;
 export type ConversationEffort = (typeof CONVERSATION_EFFORTS)[number];
 export const COMBAT_MODELS = ['monster_block_v1', 'initiative_segments_v1'] as const;
 export type CombatModel = (typeof COMBAT_MODELS)[number];
+export const ROUND_PROTOCOL_VERSION = 2 as const;
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -121,7 +125,7 @@ export interface ConversationConfig {
   readonly localOpenAi: LocalOpenAiConfig | null;
 }
 
-export interface ConversationRlData {
+export interface ConversationRlDataV1 {
   readonly format: 'arena-rl-capture-v1';
   readonly sourceLicense: 'project-generated';
   readonly sessionInstructions: string;
@@ -129,6 +133,35 @@ export interface ConversationRlData {
   readonly submitRoundIntentsArguments: Readonly<Record<string, unknown>>;
   readonly stateDigest: string;
 }
+
+export type ConversationRlTask = 'round_plan' | 'plan_adjustment';
+export type ConversationRlSubmissionTool =
+  | 'engine.submit_round_intents'
+  | 'engine.submit_plan_adjustment';
+
+export interface ConversationRlDataV2 {
+  readonly format: 'arena-rl-capture-v2';
+  readonly task: ConversationRlTask;
+  readonly submissionTool: ConversationRlSubmissionTool;
+  readonly sourceLicense: 'project-generated';
+  readonly sessionInstructions: string;
+  readonly rawTurnContext: string;
+  readonly turnContext: Readonly<Record<string, unknown>>;
+  readonly submittedArguments: Readonly<Record<string, unknown>>;
+  readonly stateDigest: string;
+  readonly requestId: string;
+  readonly proposalId: string;
+  readonly parentPlanId: string | null;
+  readonly repoCommit: string;
+  readonly model: string;
+  readonly effort: ConversationEffort;
+  readonly sessionId: string | null;
+  readonly roundProtocolVersion: typeof ROUND_PROTOCOL_VERSION;
+  readonly partyPolicyHash: string | null;
+  readonly materialityPolicyHash: string | null;
+}
+
+export type ConversationRlData = ConversationRlDataV1 | ConversationRlDataV2;
 
 export interface ConversationTokenCounts {
   readonly input: number;
@@ -163,25 +196,76 @@ export interface ConversationAuthorizedActorPlan {
 
 export interface ConversationPcTurn {
   readonly actor: CombatantId;
+  readonly initiativeIndex: number;
+  readonly beforeRevision: number;
+  readonly afterRevision: number;
+  readonly plannedProgramHash: string;
+  readonly executedProgramHash: string;
+  readonly commandSequence: readonly import('../src/combat/events').EncounterCommand[];
   readonly adherence: ScriptedPartyAdherence;
+  readonly adherenceReasons: readonly ScriptedPartyAdherenceReasonCode[];
   readonly beforeDigest: string;
   readonly afterDigest: string;
   readonly material: boolean;
+  readonly materialityReasons: readonly PlanMaterialityReasonCode[];
 }
 
 export interface ConversationAdjustment {
   readonly trigger: CombatantId;
+  readonly triggerPcTurnOrdinal: number;
+  readonly triggerInitiativeIndex: number;
   readonly reasons: readonly PlanMaterialityReasonCode[];
+  readonly openActors: readonly CombatantId[];
+  readonly requestId: string;
+  readonly proposalId: string | null;
+  readonly baselinePlanHash: string;
+  readonly resultPlanHash: string;
+  readonly changedActors: readonly CombatantId[];
   readonly outcome: 'adjusted' | 'baseline_kept' | 'service_null';
   readonly sessionId: string | null;
+  readonly correctionSessionId: string | null;
   readonly rawContext: string;
   readonly granularity: 'full' | 'turn_delta';
+  readonly stateBinding: {
+    readonly request: { readonly revision: number; readonly digest: string };
+    readonly result: { readonly revision: number; readonly digest: string };
+  };
+  readonly usage: ConversationTokenCounts;
+  readonly toolCalls: number;
+  readonly modelCalls: number;
   readonly flapRetries: 0 | 1 | 2;
+  readonly refusals: readonly ConversationChainAttemptEvidence[];
+  readonly correctionChain: {
+    readonly refusedActorIds: readonly CombatantId[];
+    readonly result: import('../src/vtt/adjustment-exhaustion-coordinator').AdjustmentCorrectionResult;
+    readonly proposalId: string | null;
+    readonly rawContext: string;
+    readonly granularity: 'full' | 'turn_delta';
+  } | null;
+  readonly rlData: readonly ConversationRlDataV2[];
 }
 
 export interface ConversationMonsterSegment {
   readonly actors: readonly CombatantId[];
+  readonly initiativeIndexes: readonly number[];
+  readonly beforeRevision: number;
+  readonly afterRevision: number;
+  readonly appliedPlanHash: string;
   readonly deviationResolutions: readonly EngineIntentDeviation[];
+}
+
+export interface ConversationTeamPlans {
+  readonly party: null | {
+    readonly planId: string;
+    readonly planHash: string;
+    readonly sharedObjective: string;
+    readonly programs: ScriptedPartyPlan['programs'];
+  };
+  readonly monsters: null | {
+    readonly initialProposalId: string;
+    readonly initialProposalHash: string;
+    readonly authorizedIntents: readonly EngineTurnIntent[];
+  };
 }
 
 export interface ConversationSuggestedPlay {
@@ -194,6 +278,8 @@ type SimulatedSuggestionResponse = ConversationSuggestionAdoption | 'legacy';
 
 export interface ConversationRow {
   readonly combatModel: CombatModel;
+  readonly roundProtocolVersion: typeof ROUND_PROTOCOL_VERSION;
+  readonly startingRoomDigest: string;
   readonly room: number;
   readonly round: number;
   readonly cli: ConversationCli;
@@ -235,10 +321,22 @@ export interface ConversationRow {
   readonly authorizedPlan: readonly ConversationAuthorizedActorPlan[] | null;
   readonly roundNarrative: string | null;
   readonly chainEvidence: ConversationChainEvidence;
-  readonly initiativeOrder?: readonly CombatantId[];
-  readonly pcTurns?: readonly ConversationPcTurn[];
-  readonly adjustments?: readonly ConversationAdjustment[];
-  readonly monsterSegments?: readonly ConversationMonsterSegment[];
+  readonly initiativeOrder: readonly CombatantId[];
+  readonly partyPolicyHash: string | null;
+  readonly materialityPolicyHash: string | null;
+  readonly adjustmentBudget: number;
+  readonly teamPlans: ConversationTeamPlans;
+  readonly pcTurns: readonly ConversationPcTurn[];
+  readonly adjustments: readonly ConversationAdjustment[];
+  readonly monsterSegments: readonly ConversationMonsterSegment[];
+  readonly roundTotals: {
+    readonly initialCalls: number;
+    readonly adjustmentCalls: number;
+    readonly correctionCalls: number;
+    readonly serviceNullAdjustments: number;
+    readonly contextBytes: number;
+    readonly tokens: ConversationTokenCounts;
+  };
   readonly rlData?: ConversationRlData;
 }
 
@@ -740,18 +838,43 @@ function externalReactionGuidance(guidance: ReactionGuidanceDeclaration): Readon
 function rlCapture(
   knowledgeBase: string | null,
   turnContext: CapturedTurnContext,
-  proposal: RoundIntentProposalEnvelope,
-): ConversationRlData {
+  proposal: RoundIntentProposalEnvelope | PlanAdjustmentProposalEnvelope,
+  metadata: {
+    readonly repoCommit: string;
+    readonly model: string;
+    readonly effort: ConversationEffort;
+    readonly sessionId: string | null;
+    readonly parentPlanId: string | null;
+    readonly partyPolicyHash: string | null;
+    readonly materialityPolicyHash: string | null;
+  },
+): ConversationRlDataV2 {
   if (proposal.submittedArguments === undefined) {
-    throw new Error('Accepted round proposal omitted its validated submit_round_intents arguments.');
+    throw new Error('Accepted proposal omitted its validated submission arguments.');
   }
+  const adjustment = proposal.kind === 'plan_adjustment_proposal';
   return {
-    format: 'arena-rl-capture-v1',
+    format: 'arena-rl-capture-v2',
+    task: adjustment ? 'plan_adjustment' : 'round_plan',
+    submissionTool: adjustment
+      ? 'engine.submit_plan_adjustment'
+      : 'engine.submit_round_intents',
     sourceLicense: 'project-generated',
     sessionInstructions: buildArenaSessionInstructions(knowledgeBase),
+    rawTurnContext: turnContext.raw,
     turnContext: structuredClone(turnContext.value),
-    submitRoundIntentsArguments: structuredClone(proposal.submittedArguments),
+    submittedArguments: structuredClone(proposal.submittedArguments),
     stateDigest: proposal.stateDigest,
+    requestId: proposal.requestId,
+    proposalId: proposal.proposalId,
+    parentPlanId: metadata.parentPlanId,
+    repoCommit: metadata.repoCommit,
+    model: metadata.model,
+    effort: metadata.effort,
+    sessionId: metadata.sessionId,
+    roundProtocolVersion: ROUND_PROTOCOL_VERSION,
+    partyPolicyHash: metadata.partyPolicyHash,
+    materialityPolicyHash: metadata.materialityPolicyHash,
   };
 }
 
@@ -1610,9 +1733,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
       const segmentPartyPlan = config.combatModel === 'initiative_segments_v1'
         ? createScriptedPartyPlan(engineSession.currentState())
         : null;
-      const initiativeOrder = config.combatModel === 'initiative_segments_v1'
-        ? engineSession.currentState().initiative.map((entry) => entry.combatant)
-        : [];
+      const initiativeOrder = engineSession.currentState().initiative.map((entry) => entry.combatant);
+      const initiativeIndexByActor = new Map(
+        initiativeOrder.map((actorId, index) => [actorId, index] as const),
+      );
+      const startingRoomDigest = sha256(canonicalJson(states[room - 1]!));
       const contextRevision = capsule.revision;
       const authoritativeInitialRequest = { ...initialRequest, revision: contextRevision };
       const currentTurnContext = fullTurnContextBase(engineSession.currentState(), initialSnapshot);
@@ -1664,6 +1789,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let authorizationStateBinding: ConversationRow['stateBinding']['authorization'] = null;
       let authorizedPlan: ConversationRow['authorizedPlan'] = null;
       let acceptedSubmission: readonly EngineTurnIntent[] | null = null;
+      let authorizedMonsterProposalHash: string | null = null;
       let roundNarrative: ConversationRow['roundNarrative'] = null;
       let initialDispatchPlanner: ConversationPlannerAttribution | null = null;
       let correctionDispatchPlanner: ConversationPlannerAttribution | null = null;
@@ -1674,6 +1800,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let escalationSessionId: string | null = null;
       let capturedRlData: ConversationRlData | undefined;
       let correctionTurnContextSpoolPath: string | null = null;
+      let recordedCorrectionTurnContext: CapturedTurnContext | null = null;
+      let initialCalls = 0;
+      let adjustmentCalls = 0;
+      let correctionCalls = 0;
+      let serviceNullAdjustments = 0;
       const pcTurns: ConversationPcTurn[] = [];
       const adjustments: ConversationAdjustment[] = [];
       const monsterSegments: ConversationMonsterSegment[] = [];
@@ -1758,8 +1889,13 @@ export async function runConversation(config: ConversationConfig, options: Conve
         const rejectionsBeforeAdjustment = adjustmentRejections().length;
         let adjustmentProposal: PlanAdjustmentProposalEnvelope | null = null;
         let adjustmentSessionId: string | null = null;
+        let adjustmentCorrectionSessionId: string | null = null;
         let adjustmentFlapRetries: 0 | 1 | 2 = 0;
         let adjustmentServiceNull = false;
+        let adjustmentUsage: AgentUsage | null = null;
+        const modelCallsBeforeAdjustment = adapter.modelCalls;
+        const toolCallsBeforeAdjustment = adjustmentToolCalls();
+        const adjustmentRlData: ConversationRlDataV2[] = [];
         for (let attempt = 0; attempt < 3; attempt += 1) {
           const callsBefore = adjustmentToolCalls();
           const rejectionsBefore = adjustmentRejections().length;
@@ -1775,12 +1911,14 @@ export async function runConversation(config: ConversationConfig, options: Conve
             adjustmentLauncher.recoveryManifestPath,
             adjustmentToolSession,
           );
+          adjustmentCalls += 1;
           const turn = await lifecycle.resumeRound(
             adjustmentInvocation,
             new AbortController().signal,
           );
           adjustmentSessionId = turn.sessionId;
           roundUsage = addAgentUsage(roundUsage, turn.usage);
+          adjustmentUsage = addAgentUsage(adjustmentUsage, turn.usage);
           adjustmentTurnContext = takeTurnContext(adjustmentLauncher.turnContextSpoolPath) ??
             adjustmentTurnContext;
           adjustmentProposal = localAdjustmentProposal ??
@@ -1795,14 +1933,41 @@ export async function runConversation(config: ConversationConfig, options: Conve
           adjustmentFlapRetries = attempt === 0 ? 1 : 2;
         }
         if (adjustmentServiceNull) {
+          serviceNullAdjustments += 1;
+          const resultCapsule = engineSession.authorizationCapsule({
+            ...adjustmentRequest,
+            revision: capsuleRevision,
+          });
           adjustments.push({
             trigger: input.triggerActor,
+            triggerPcTurnOrdinal: input.pcTurnOrdinal,
+            triggerInitiativeIndex: initiativeIndexByActor.get(input.triggerActor) ?? -1,
             reasons: input.reasons,
+            openActors: input.openActorIds,
+            requestId: adjustmentRequestId,
+            proposalId: null,
+            baselinePlanHash,
+            resultPlanHash: baselinePlanHash,
+            changedActors: [],
             outcome: 'service_null',
             sessionId: adjustmentSessionId,
+            correctionSessionId: null,
             rawContext: adjustmentTurnContext.raw,
             granularity: adjustmentTurnContext.granularity,
+            stateBinding: {
+              request: {
+                revision: adjustmentSnapshot.capsule.revision,
+                digest: adjustmentSnapshot.capsule.digest,
+              },
+              result: { revision: resultCapsule.revision, digest: resultCapsule.digest },
+            },
+            usage: tokenCounts(adjustmentUsage),
+            toolCalls: adjustmentToolCalls() - toolCallsBeforeAdjustment,
+            modelCalls: adapter.modelCalls - modelCallsBeforeAdjustment,
             flapRetries: adjustmentFlapRetries,
+            refusals: [],
+            correctionChain: null,
+            rlData: [],
           });
           return;
         }
@@ -1812,6 +1977,10 @@ export async function runConversation(config: ConversationConfig, options: Conve
           entry.actorId === null || !input.openActorIds.includes(entry.actorId) ? [] : [entry.actorId]))]
           .sort((left, right) => left.localeCompare(right));
         let correctionRuntime: Parameters<AdjustmentExhaustionCoordinator['coordinate']>[0]['correction'] = null;
+        let adjustmentCorrectionProposal: PlanAdjustmentProposalEnvelope | null = null;
+        const recordedAdjustmentCorrectionProposal = (): PlanAdjustmentProposalEnvelope | null =>
+          adjustmentCorrectionProposal;
+        let adjustmentCorrectionContext: CapturedTurnContext | null = null;
         if (refusedActorIds.length > 0) {
           const correctionRequest: EngineRoundCapsuleRequest = {
             runId, branchId, revision: capsuleRevision, requestId: adjustmentRequestId,
@@ -1823,6 +1992,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
           const correctionContext = plannedTurnContext(
             engineSession.currentState(), correctionSnapshot, lastSeenTurnContext,
           );
+          adjustmentCorrectionContext = correctionContext;
           const correctionLauncher = await writeLauncher({
             directory: artifacts,
             name: `${adjustmentKey}-correction`,
@@ -1838,7 +2008,10 @@ export async function runConversation(config: ConversationConfig, options: Conve
                 snapshot: correctionSnapshot,
                 ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
                 onProposal: (proposal) => {
-                  if (isPlanAdjustmentProposal(proposal)) localCorrection = proposal;
+                  if (isPlanAdjustmentProposal(proposal)) {
+                    localCorrection = proposal;
+                    adjustmentCorrectionProposal = proposal;
+                  }
                 },
                 onToolResult: (name, result) => {
                   observedToolCalls += 1;
@@ -1854,9 +2027,13 @@ export async function runConversation(config: ConversationConfig, options: Conve
             turnContext: correctionContext.value,
             lifecycle: {
               resumeCorrection: async (correctionInvocation, signal) => {
+                correctionCalls += 1;
                 const turn = await lifecycle.resumeCorrection(correctionInvocation, signal);
-                adjustmentSessionId = turn.sessionId;
+                adjustmentCorrectionSessionId = turn.sessionId;
                 roundUsage = addAgentUsage(roundUsage, turn.usage);
+                adjustmentUsage = addAgentUsage(adjustmentUsage, turn.usage);
+                adjustmentCorrectionContext =
+                  takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? adjustmentCorrectionContext;
                 return turn;
               },
             },
@@ -1872,8 +2049,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
             ),
             signal: new AbortController().signal,
             activateCapsule: () => undefined,
-            takeProposal: () => localCorrection ??
-              takePlanAdjustmentProposal(correctionLauncher.spoolPath),
+            takeProposal: () => {
+              const proposal = localCorrection ?? takePlanAdjustmentProposal(correctionLauncher.spoolPath);
+              adjustmentCorrectionProposal = proposal;
+              return proposal;
+            },
           };
         }
         const completion = await new AdjustmentExhaustionCoordinator(adjustmentPersistence).coordinate({
@@ -1886,6 +2066,41 @@ export async function runConversation(config: ConversationConfig, options: Conve
           },
           correction: correctionRuntime,
         });
+        const completedCorrectionProposal = recordedAdjustmentCorrectionProposal();
+        if (config.captureRlData && adjustmentProposal?.submittedArguments !== undefined) {
+          adjustmentRlData.push(rlCapture(
+            knowledgeBase?.text ?? null,
+            adjustmentTurnContext,
+            adjustmentProposal,
+            {
+              repoCommit,
+              model: config.model,
+              effort: config.effort,
+              sessionId: adjustmentSessionId,
+              parentPlanId: metadataFor(input.openActorIds).parentPlanId,
+              partyPolicyHash: segmentPartyPlan?.policyHash ?? null,
+              materialityPolicyHash: PLAN_MATERIALITY_POLICY_HASH,
+            },
+          ));
+        }
+        if (config.captureRlData && completion.correctionResult === 'accepted' &&
+          completedCorrectionProposal?.submittedArguments !== undefined &&
+          adjustmentCorrectionContext !== null) {
+          adjustmentRlData.push(rlCapture(
+            knowledgeBase?.text ?? null,
+            adjustmentCorrectionContext,
+            completedCorrectionProposal,
+            {
+              repoCommit,
+              model: config.model,
+              effort: config.effort,
+              sessionId: adjustmentCorrectionSessionId,
+              parentPlanId: metadataFor(input.openActorIds).parentPlanId,
+              partyPolicyHash: segmentPartyPlan?.policyHash ?? null,
+              materialityPolicyHash: PLAN_MATERIALITY_POLICY_HASH,
+            },
+          ));
+        }
         for (const update of completion.updates) {
           const resolution = pureIntentResolver.resolve(engineSession.currentState(), update.intent);
           if (!resolution.valid) {
@@ -1897,15 +2112,48 @@ export async function runConversation(config: ConversationConfig, options: Conve
             selectedBranch: resolution.selectedBranch,
           });
         }
-        segmentPlanId = `monster-plan:${monsterPlanHash(segmentMonsterPlan)}`;
+        const resultPlanHash = monsterPlanHash(segmentMonsterPlan);
+        segmentPlanId = `monster-plan:${resultPlanHash}`;
+        const resultCapsule = engineSession.authorizationCapsule({
+          ...adjustmentRequest,
+          revision: capsuleRevision,
+        });
         adjustments.push({
           trigger: input.triggerActor,
+          triggerPcTurnOrdinal: input.pcTurnOrdinal,
+          triggerInitiativeIndex: initiativeIndexByActor.get(input.triggerActor) ?? -1,
           reasons: input.reasons,
+          openActors: input.openActorIds,
+          requestId: adjustmentRequestId,
+          proposalId: adjustmentProposal?.proposalId ?? completedCorrectionProposal?.proposalId ?? null,
+          baselinePlanHash,
+          resultPlanHash,
+          changedActors: completion.updates.map((entry) => entry.intent.actorId),
           outcome: completion.kind,
           sessionId: adjustmentSessionId,
+          correctionSessionId: adjustmentCorrectionSessionId,
           rawContext: adjustmentTurnContext.raw,
           granularity: adjustmentTurnContext.granularity,
+          stateBinding: {
+            request: {
+              revision: adjustmentSnapshot.capsule.revision,
+              digest: adjustmentSnapshot.capsule.digest,
+            },
+            result: { revision: resultCapsule.revision, digest: resultCapsule.digest },
+          },
+          usage: tokenCounts(adjustmentUsage),
+          toolCalls: adjustmentToolCalls() - toolCallsBeforeAdjustment,
+          modelCalls: adapter.modelCalls - modelCallsBeforeAdjustment,
           flapRetries: adjustmentFlapRetries,
+          refusals: currentAdjustmentRejections,
+          correctionChain: refusedActorIds.length === 0 ? null : {
+            refusedActorIds,
+            result: completion.correctionResult,
+            proposalId: completedCorrectionProposal?.proposalId ?? null,
+            rawContext: adjustmentCorrectionContext?.raw ?? adjustmentTurnContext.raw,
+            granularity: adjustmentCorrectionContext?.granularity ?? adjustmentTurnContext.granularity,
+          },
+          rlData: adjustmentRlData,
         });
       };
       try {
@@ -1938,6 +2186,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
             );
             initialDispatchPlanner = plannerAttribution(primaryInvocation);
             options.onPrimaryDispatchStart?.();
+            initialCalls += 1;
             const turn = journal.agentSession() === null
               ? await lifecycle.coldStartRound(primaryInvocation, new AbortController().signal)
               : await lifecycle.resumeRound(primaryInvocation, new AbortController().signal);
@@ -1986,11 +2235,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
         const correctionTurnContextBase = escalationPlanner === null
           ? lastSeenTurnContext
           : undefined;
-        const plannedCorrectionTurnContext = plannedTurnContext(
-          engineSession.currentState(),
-          correctionSnapshot,
-          correctionTurnContextBase,
-        );
+          const plannedCorrectionTurnContext = plannedTurnContext(
+            engineSession.currentState(),
+            correctionSnapshot,
+            correctionTurnContextBase,
+          );
         const correctionLauncher = await writeLauncher({
           directory: artifacts, name: `${key}-correction`, snapshot: correctionSnapshot,
           room, historyKind: 'intent_correction_requested',
@@ -2014,7 +2263,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
               observedToolCalls += 1;
               if (name === 'engine.get_turn_context') observedTurnContextCalls += 1;
               if (name === 'engine.get_turn_context') {
-                rowTurnContext = capturedTurnContext(JSON.stringify(result));
+                recordedCorrectionTurnContext = capturedTurnContext(JSON.stringify(result));
               }
                 if (eventContextTrimmed(result)) observedContextTruncated = true;
                 observedRejections.push(...rejectionEvidence(result));
@@ -2052,7 +2301,17 @@ export async function runConversation(config: ConversationConfig, options: Conve
               : null;
             const proposalRlData = proposalTurnContext === null
               ? undefined
-              : rlCapture(knowledgeBase?.text ?? null, proposalTurnContext, proposal);
+              : rlCapture(knowledgeBase?.text ?? null, proposalTurnContext, proposal, {
+                  repoCommit,
+                  model: config.model,
+                  effort: config.effort,
+                  sessionId: rolloutSessionId,
+                  parentPlanId: null,
+                  partyPolicyHash: segmentPartyPlan?.policyHash ?? null,
+                  materialityPolicyHash: config.combatModel === 'initiative_segments_v1'
+                    ? PLAN_MATERIALITY_POLICY_HASH
+                    : null,
+                });
             const checkedProposal = authorizedMechanics(engineSession.currentState(), proposal);
             if (checkedProposal.entries === null) {
               failedAttempts.push(...(checkedProposal.divergences.length > 0
@@ -2106,6 +2365,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
               return 'invalid';
             }
             proposalId = proposal.proposalId;
+            authorizedMonsterProposalHash = sha256(canonicalJson(proposal));
             acceptedSubmission = proposal.resolutions.map((entry) => structuredClone(entry.intent));
             authorizedPlan = mechanics.map((entry): ConversationAuthorizedActorPlan => ({
               actorId: entry.mechanics.actorId,
@@ -2191,6 +2451,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
                  * but dispatch configured escalation as a fresh, repair-brief-seeded session. */
                 const contextCallsBeforeCorrection = simulated?.contextCallsByRequest.get(requestId) ??
                   observedTurnContextCalls;
+                correctionCalls += 1;
+                recordedCorrectionTurnContext = plannedCorrectionTurnContext;
                 const correctionTurn = escalationPlanner === null
                   ? await lifecycle.resumeCorrection(correctionInvocation, signal)
                   : await adapter.start({
@@ -2207,7 +2469,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
                 if (escalationPlanner === null) rolloutSessionId = correctionTurn.sessionId;
                 else escalationSessionId = correctionTurn.sessionId;
                 roundUsage = addAgentUsage(roundUsage, correctionTurn.usage);
-                rowTurnContext = takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? rowTurnContext;
+                recordedCorrectionTurnContext =
+                  takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? recordedCorrectionTurnContext;
                 const contextCallsAfterCorrection = simulated?.contextCallsByRequest.get(requestId) ??
                   observedTurnContextCalls;
                 if (escalationPlanner === null &&
@@ -2335,10 +2598,18 @@ export async function runConversation(config: ConversationConfig, options: Conve
               });
               pcTurns.push({
                 actor: activeActorId,
+                initiativeIndex: initiativeIndexByActor.get(activeActorId) ?? -1,
+                beforeRevision: beforeState.revision,
+                afterRevision: afterState.revision,
+                plannedProgramHash: materialized.plannedProgramHash,
+                executedProgramHash: materialized.executedProgramHash,
+                commandSequence: structuredClone(materialized.reducerCommands),
                 adherence: materialized.adherence,
+                adherenceReasons: materialized.reasonCodes,
                 beforeDigest: materiality.beforeDigest,
                 afterDigest: materiality.afterDigest,
                 material: materiality.material,
+                materialityReasons: materiality.reasonCodes,
               });
               if (materiality.material && afterOpenActorIds.length > 0) {
                 await dispatchPlanAdjustment({
@@ -2367,6 +2638,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
               acted.add(actorId);
               return entry;
             });
+            const segmentBeforeRevision = state.revision;
+            const appliedPlanHash = monsterPlanHash(segmentMonsterPlan);
             const applied = engineSession.applyConsecutiveMonsterSegment(
               applications,
               journal.reactionGuidance(),
@@ -2375,6 +2648,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
             recordAutoResolvedReactions(journal, applied);
             monsterSegments.push({
               actors: segmentActors,
+              initiativeIndexes: segmentActors.map((actorId) =>
+                initiativeIndexByActor.get(actorId) ?? -1),
+              beforeRevision: segmentBeforeRevision,
+              afterRevision: engineSession.currentState().revision,
+              appliedPlanHash,
               deviationResolutions: applied.deviationResolutions,
             });
           }
@@ -2389,12 +2667,43 @@ export async function runConversation(config: ConversationConfig, options: Conve
       }
       const wall = performance.now() - started;
       const binding = journal.agentSession();
-      rowTurnContext = (correctionTurnContextSpoolPath === null
-        ? null
-        : takeTurnContext(correctionTurnContextSpoolPath)) ??
-        takeTurnContext(initialLauncher.turnContextSpoolPath) ?? rowTurnContext;
+      rowTurnContext = takeTurnContext(initialLauncher.turnContextSpoolPath) ?? rowTurnContext;
+      if (correctionTurnContextSpoolPath !== null) {
+        recordedCorrectionTurnContext = takeTurnContext(correctionTurnContextSpoolPath) ??
+          recordedCorrectionTurnContext;
+      }
+      const recordedMonsterIntents = acceptedSubmission ??
+        (segmentMonsterPlan.size === 0
+          ? null
+          : [...segmentMonsterPlan.values()].map((entry) => structuredClone(entry.intent)));
+      const teamPlans: ConversationTeamPlans = {
+        party: segmentPartyPlan === null ? null : {
+          planId: segmentPartyPlan.planId,
+          planHash: segmentPartyPlan.planHash,
+          sharedObjective: segmentPartyPlan.sharedObjective,
+          programs: structuredClone(segmentPartyPlan.programs),
+        },
+        monsters: proposalId === null || authorizedMonsterProposalHash === null ||
+          recordedMonsterIntents === null ? null : {
+          initialProposalId: proposalId,
+          initialProposalHash: authorizedMonsterProposalHash,
+          authorizedIntents: recordedMonsterIntents,
+        },
+      };
+      const totalsTokens = tokenCounts(roundUsage);
+      const contextBytes = [
+        rowTurnContext.raw,
+        ...(recordedCorrectionTurnContext === null ? [] : [recordedCorrectionTurnContext.raw]),
+        ...adjustments.flatMap((entry) => [
+          entry.rawContext,
+          ...(entry.correctionChain === null ? [] : [entry.correctionChain.rawContext]),
+        ]),
+      ]
+        .reduce((total, context) => total + new TextEncoder().encode(context).byteLength, 0);
       const row: ConversationRow = {
         combatModel: config.combatModel,
+        roundProtocolVersion: ROUND_PROTOCOL_VERSION,
+        startingRoomDigest,
         room, round, cli: config.cli, model: config.model,
         thinkMode: config.localOpenAi?.thinkMode ?? null,
         contextRevision, projectionRevision: capsuleRevision,
@@ -2411,7 +2720,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
         suggestionAdopted: classifySuggestionAdoption(suggestedPlan?.intents ?? null, acceptedSubmission),
         timeToFirstAction: wall,
         wallPerCreature: wall / Math.max(1, livingMonsterIds(engineSession.currentState()).length),
-        tokens: tokenCounts(roundUsage), refusals,
+        tokens: totalsTokens, refusals,
         toolCalls: simulated?.callsByRequest.get(requestId) ?? observedToolCalls,
         callsPerRound: adapter.modelCalls - modelCallsBeforeRound,
         agentDispatched, flapRetries, serviceNull,
@@ -2424,12 +2733,24 @@ export async function runConversation(config: ConversationConfig, options: Conve
         authorizedPlan,
         roundNarrative,
         chainEvidence: { failedAttempts, autoResolvedTrigger, correctionFinalText },
-        ...(config.combatModel === 'initiative_segments_v1' ? {
-          initiativeOrder,
-          pcTurns,
-          adjustments,
-          monsterSegments,
-        } : {}),
+        initiativeOrder,
+        partyPolicyHash: segmentPartyPlan?.policyHash ?? null,
+        materialityPolicyHash: config.combatModel === 'initiative_segments_v1'
+          ? PLAN_MATERIALITY_POLICY_HASH
+          : null,
+        adjustmentBudget: config.combatModel === 'initiative_segments_v1' ? 2 : 0,
+        teamPlans,
+        pcTurns,
+        adjustments,
+        monsterSegments,
+        roundTotals: {
+          initialCalls,
+          adjustmentCalls,
+          correctionCalls,
+          serviceNullAdjustments,
+          contextBytes,
+          tokens: totalsTokens,
+        },
         ...(capturedRlData === undefined ? {} : { rlData: capturedRlData }),
       };
       rows.push(row);

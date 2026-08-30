@@ -9,13 +9,43 @@ import { buildArenaSessionInstructions } from './arena-session-instructions';
 const FORBIDDEN_SOURCE = /(?:^|[\\/])content[\\/]cc-by-sa(?:[\\/]|$)/iu;
 const FORBIDDEN_PAYLOAD = /content[\\/]cc-by-sa[\\/]/iu;
 
-interface ArenaRlCapture {
+interface ArenaRlCaptureV1 {
   readonly format: 'arena-rl-capture-v1';
   readonly sourceLicense: 'project-generated';
   readonly sessionInstructions: string;
   readonly turnContext: Readonly<Record<string, unknown>>;
   readonly submitRoundIntentsArguments: Readonly<Record<string, unknown>>;
   readonly stateDigest: string;
+}
+
+type SftTask = 'round_plan' | 'plan_adjustment';
+type SftTaskSelection = SftTask | 'all';
+
+interface ArenaRlCaptureV2 {
+  readonly format: 'arena-rl-capture-v2';
+  readonly task: SftTask;
+  readonly submissionTool: 'engine.submit_round_intents' | 'engine.submit_plan_adjustment';
+  readonly sourceLicense: 'project-generated';
+  readonly sessionInstructions: string;
+  readonly rawTurnContext: string;
+  readonly turnContext: Readonly<Record<string, unknown>>;
+  readonly submittedArguments: Readonly<Record<string, unknown>>;
+  readonly stateDigest: string;
+  readonly requestId: string;
+  readonly proposalId: string;
+  readonly sessionId: string | null;
+}
+
+interface NormalizedCapture {
+  readonly task: SftTask;
+  readonly submissionTool: 'engine.submit_round_intents' | 'engine.submit_plan_adjustment';
+  readonly sessionInstructions: string;
+  readonly rawTurnContext: string | null;
+  readonly turnContext: Readonly<Record<string, unknown>>;
+  readonly submittedArguments: Readonly<Record<string, unknown>>;
+  readonly stateDigest: string;
+  readonly proposalId: string | null;
+  readonly sessionId: string | null;
 }
 
 interface ExtractableArenaRow {
@@ -30,10 +60,12 @@ interface ExtractableArenaRow {
   readonly escalationSessionId: string | null;
   readonly rawTurnContext?: string;
   readonly turnContextGranularity?: 'full' | 'turn_delta';
-  readonly rlData?: ArenaRlCapture;
+  readonly adjustments?: readonly Readonly<Record<string, unknown>>[];
+  readonly rlData?: ArenaRlCaptureV1 | ArenaRlCaptureV2;
 }
 
 export interface SftExample {
+  readonly task: SftTask;
   readonly messages: readonly [
     { readonly role: 'system'; readonly content: string },
     { readonly role: 'user'; readonly content: string },
@@ -60,6 +92,7 @@ export interface ExtractSftConfig {
   readonly arenaPaths: readonly string[];
   readonly rolloutPaths: readonly string[];
   readonly outPath: string;
+  readonly task?: SftTaskSelection;
 }
 
 export interface ExtractSftStats {
@@ -267,15 +300,49 @@ function requiredArenaRow(value: unknown, path: string, line: number): Extractab
   return candidate as unknown as ExtractableArenaRow;
 }
 
-function validRowCapture(value: unknown): ArenaRlCapture | null {
+function validRowCapture(value: unknown): NormalizedCapture | null {
   const candidate = record(value);
-  return candidate?.['format'] === 'arena-rl-capture-v1' &&
+  if (candidate?.['format'] === 'arena-rl-capture-v1' &&
     candidate['sourceLicense'] === 'project-generated' &&
     typeof candidate['sessionInstructions'] === 'string' &&
     record(candidate['turnContext']) !== null && record(candidate['submitRoundIntentsArguments']) !== null &&
-    typeof candidate['stateDigest'] === 'string'
-    ? candidate as unknown as ArenaRlCapture
-    : null;
+    typeof candidate['stateDigest'] === 'string') {
+    return {
+      task: 'round_plan',
+      submissionTool: 'engine.submit_round_intents',
+      sessionInstructions: candidate['sessionInstructions'],
+      rawTurnContext: null,
+      turnContext: candidate['turnContext'] as Readonly<Record<string, unknown>>,
+      submittedArguments: candidate['submitRoundIntentsArguments'] as Readonly<Record<string, unknown>>,
+      stateDigest: candidate['stateDigest'],
+      proposalId: null,
+      sessionId: null,
+    };
+  }
+  const task = candidate?.['task'];
+  const submissionTool = candidate?.['submissionTool'];
+  if (candidate?.['format'] !== 'arena-rl-capture-v2' ||
+    candidate['sourceLicense'] !== 'project-generated' ||
+    (task !== 'round_plan' && task !== 'plan_adjustment') ||
+    (submissionTool !== 'engine.submit_round_intents' &&
+      submissionTool !== 'engine.submit_plan_adjustment') ||
+    (task === 'round_plan') !== (submissionTool === 'engine.submit_round_intents') ||
+    typeof candidate['sessionInstructions'] !== 'string' ||
+    typeof candidate['rawTurnContext'] !== 'string' ||
+    record(candidate['turnContext']) === null || record(candidate['submittedArguments']) === null ||
+    typeof candidate['stateDigest'] !== 'string' || typeof candidate['requestId'] !== 'string' ||
+    typeof candidate['proposalId'] !== 'string' || !isNullableSessionId(candidate['sessionId'])) return null;
+  return {
+    task,
+    submissionTool,
+    sessionInstructions: candidate['sessionInstructions'],
+    rawTurnContext: candidate['rawTurnContext'],
+    turnContext: candidate['turnContext'] as Readonly<Record<string, unknown>>,
+    submittedArguments: candidate['submittedArguments'] as Readonly<Record<string, unknown>>,
+    stateDigest: candidate['stateDigest'],
+    proposalId: candidate['proposalId'],
+    sessionId: candidate['sessionId'],
+  };
 }
 
 function requestId(row: ExtractableArenaRow): string {
@@ -293,41 +360,103 @@ function exampleFrom(
     throw new TypeError(`Arena row ${path}:${String(line)} is not licensed for RL extraction.`);
   }
   const inline = validRowCapture(row.rlData);
-  const capture = inline ?? (row.proposalId === null
+  const rolloutCapture = (row.proposalId === null
     ? undefined
     : rollout.byProposalId.get(row.proposalId)) ?? rollout.byRequestId.get(requestId(row));
+  const capture: NormalizedCapture | undefined = inline ?? (rolloutCapture === undefined
+    ? undefined
+    : {
+        task: 'round_plan',
+        submissionTool: 'engine.submit_round_intents',
+        sessionInstructions: rolloutCapture.sessionInstructions,
+        rawTurnContext: null,
+        turnContext: rolloutCapture.turnContext,
+        submittedArguments: rolloutCapture.submitRoundIntentsArguments,
+        stateDigest: rolloutCapture.stateDigest,
+        proposalId: row.proposalId,
+        sessionId: row.sessionId,
+      });
   if (capture === undefined) {
     throw new Error(
       `Authorized arena row ${path}:${String(line)} lacks --capture-rl-data fields and no matching rollout was supplied.`,
     );
   }
-  if (row.proposalId === null) throw new TypeError(`Authorized arena row ${path}:${String(line)} has no proposalId.`);
-  const assistant = canonicalJson(capture.submitRoundIntentsArguments);
+  const proposalId = capture.proposalId ?? row.proposalId;
+  if (proposalId === null) throw new TypeError(`Authorized arena row ${path}:${String(line)} has no proposalId.`);
+  const assistant = canonicalJson(capture.submittedArguments);
   const planHash = sha256(assistant);
-  const contextSource = row.rawTurnContext === undefined ? 'reconstructed' : 'raw';
+  const rawTurnContext = capture.rawTurnContext ?? row.rawTurnContext;
+  const contextSource = rawTurnContext === undefined || rawTurnContext === null ? 'reconstructed' : 'raw';
   const example: SftExample = {
+    task: capture.task,
     messages: [
       { role: 'system', content: buildArenaSessionInstructions(capture.sessionInstructions) },
       {
         role: 'user',
-        content: contextSource === 'raw' ? row.rawTurnContext ?? '' : canonicalJson(capture.turnContext),
+        content: contextSource === 'raw' ? rawTurnContext ?? '' : canonicalJson(capture.turnContext),
       },
       { role: 'assistant', content: assistant },
     ],
     sourceRow: {
       path: resolve(path), line, seed: row.seed, basis: row.basis,
-      room: row.room, round: row.round, proposalId: row.proposalId,
+      room: row.room, round: row.round, proposalId,
     },
     stateDigest: capture.stateDigest,
     planHash,
     contextSource,
-    sessionId: row.sessionId,
+    sessionId: capture.sessionId ?? row.sessionId,
     escalationSessionId: row.escalationSessionId,
   };
   if (FORBIDDEN_PAYLOAD.test(canonicalJson(example))) {
     throw new TypeError(`Arena row ${path}:${String(line)} contains prohibited CC-BY-SA provenance.`);
   }
   return example;
+}
+
+function adjustmentExamplesFrom(
+  row: ExtractableArenaRow,
+  path: string,
+  line: number,
+): readonly SftExample[] {
+  return (row.adjustments ?? []).flatMap((adjustment) => {
+    const captures = adjustment['rlData'];
+    if (captures === undefined) return [];
+    if (!Array.isArray(captures)) {
+      throw new TypeError(`Arena row ${path}:${String(line)} has invalid adjustment RL captures.`);
+    }
+    return captures.map((value): SftExample => {
+      const raw = record(value);
+      if (raw !== null && raw['sourceLicense'] !== 'project-generated') {
+        throw new TypeError(`Arena row ${path}:${String(line)} is not licensed for RL extraction.`);
+      }
+      const capture = validRowCapture(value);
+      if (capture === null || capture.task !== 'plan_adjustment' || capture.proposalId === null) {
+        throw new TypeError(`Arena row ${path}:${String(line)} has an invalid adjustment RL capture.`);
+      }
+      const assistant = canonicalJson(capture.submittedArguments);
+      const example: SftExample = {
+        task: 'plan_adjustment',
+        messages: [
+          { role: 'system', content: buildArenaSessionInstructions(capture.sessionInstructions) },
+          { role: 'user', content: capture.rawTurnContext ?? canonicalJson(capture.turnContext) },
+          { role: 'assistant', content: assistant },
+        ],
+        sourceRow: {
+          path: resolve(path), line, seed: row.seed, basis: row.basis,
+          room: row.room, round: row.round, proposalId: capture.proposalId,
+        },
+        stateDigest: capture.stateDigest,
+        planHash: sha256(assistant),
+        contextSource: capture.rawTurnContext === null ? 'reconstructed' : 'raw',
+        sessionId: capture.sessionId,
+        escalationSessionId: null,
+      };
+      if (FORBIDDEN_PAYLOAD.test(canonicalJson(example))) {
+        throw new TypeError(`Arena row ${path}:${String(line)} contains prohibited CC-BY-SA provenance.`);
+      }
+      return example;
+    });
+  });
 }
 
 async function* arenaRows(path: string): AsyncGenerator<{ readonly row: ExtractableArenaRow; readonly line: number }> {
@@ -349,6 +478,7 @@ export async function extractSft(
   dependencies: ExtractSftDependencies = {},
 ): Promise<ExtractSftStats> {
   if (config.arenaPaths.length === 0) throw new TypeError('At least one arena JSONL path is required.');
+  const selectedTask = config.task ?? 'round_plan';
   const heartbeat = dependencies.heartbeat ?? stdoutHeartbeat;
   heartbeat(
     `start batches=${String(config.arenaPaths.length)} rollouts=${String(config.rolloutPaths.length)} ` +
@@ -366,14 +496,23 @@ export async function extractSft(
       const examplesBefore = examples;
       heartbeat(`batch path=${resolve(path)} status=start`);
       for await (const { row, line } of arenaRows(path)) {
-        if (row.outcome !== 'authorized' || row.serviceNull) continue;
-        const example = exampleFrom(row, path, line, rollout);
-        const key = `${example.stateDigest}:${example.planHash}`;
-        if (dedupe.has(key)) { deduplicated += 1; continue; }
-        dedupe.add(key);
-        rooms.add(`${row.basis}:${String(row.seed)}`);
-        await output.write(`${canonicalJson(example)}\n`);
-        examples += 1;
+        if (row.serviceNull) continue;
+        const candidates: SftExample[] = [];
+        if ((selectedTask === 'round_plan' || selectedTask === 'all') && row.outcome === 'authorized') {
+          candidates.push(exampleFrom(row, path, line, rollout));
+        }
+        if ((selectedTask === 'plan_adjustment' || selectedTask === 'all') &&
+          (row.outcome === 'authorized' || row.outcome === 'auto_resolved')) {
+          candidates.push(...adjustmentExamplesFrom(row, path, line));
+        }
+        for (const example of candidates) {
+          const key = `${example.task}:${example.stateDigest}:${example.planHash}`;
+          if (dedupe.has(key)) { deduplicated += 1; continue; }
+          dedupe.add(key);
+          rooms.add(`${row.basis}:${String(row.seed)}`);
+          await output.write(`${canonicalJson(example)}\n`);
+          examples += 1;
+        }
       }
       heartbeat(
         `batch path=${resolve(path)} status=complete examples=${String(examples - examplesBefore)}`,
@@ -393,14 +532,21 @@ export function parseExtractSftArgs(argv: readonly string[]): ExtractSftConfig {
   const arenaPaths: string[] = [];
   const rolloutPaths: string[] = [];
   let outPath: string | null = null;
+  let task: SftTaskSelection = 'round_plan';
   const args = argv[0] === '--' ? argv.slice(1) : argv;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
-    if (argument === '--out' || argument === '--rollout') {
+    if (argument === '--out' || argument === '--rollout' || argument === '--task') {
       const value = args[index + 1];
-      if (value === undefined || value.startsWith('--')) throw new TypeError(`${argument} requires a path.`);
+      if (value === undefined || value.startsWith('--')) throw new TypeError(`${argument} requires a value.`);
       if (argument === '--out') outPath = resolve(value);
-      else rolloutPaths.push(resolve(value));
+      else if (argument === '--rollout') rolloutPaths.push(resolve(value));
+      else {
+        if (value !== 'round_plan' && value !== 'plan_adjustment' && value !== 'all') {
+          throw new TypeError('--task must be round_plan, plan_adjustment, or all.');
+        }
+        task = value;
+      }
       index += 1;
       continue;
     }
@@ -408,7 +554,7 @@ export function parseExtractSftArgs(argv: readonly string[]): ExtractSftConfig {
     if (argument !== undefined) arenaPaths.push(resolve(argument));
   }
   if (outPath === null) throw new TypeError('--out is required.');
-  return { arenaPaths, rolloutPaths, outPath };
+  return { arenaPaths, rolloutPaths, outPath, task };
 }
 
 async function main(): Promise<void> {
@@ -420,7 +566,7 @@ async function main(): Promise<void> {
 }
 
 const EXTRACT_SFT_USAGE =
-  'Usage: rl:extract-sft <arena.jsonl> [arena.jsonl ...] [--rollout codex-rollout.jsonl ...] --out PATH';
+  'Usage: rl:extract-sft <arena.jsonl> [arena.jsonl ...] [--rollout codex-rollout.jsonl ...] [--task round_plan|plan_adjustment|all] --out PATH';
 
 async function runCli(): Promise<void> {
   try { await main(); }
