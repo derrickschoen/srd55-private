@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D418.2 — OWNER: implement the intel program and rerun R1-10 (2026-08-30)
+
+Verbatim: "We should fix everything we found so far and rerun r1-10."
+Green-lights implementation of the consensus intel doc
+(docs/design/2026-08-30-engine-intel-for-ai-dm.md): increments 1-7 in
+dependency order plus the round-3 supplement items at their assigned
+placements. Acceptance: rerun the ten judged calibration rooms (R01-R10,
+cycle-3 seeds) on the improved system and compare. Exception kept: the doc's
+Q4 (engine auto-submits its own default after failed correction) stays
+flagged for separate owner approval and is NOT implemented under this
+ruling.
+
 ## D418.1 — OWNER: the AI DM is omniscient about PC capabilities and resources (2026-08-30)
 
 Verbatim: "A real dm will know what the pcs can do and how much hp and other
