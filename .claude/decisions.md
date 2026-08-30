@@ -7,6 +7,24 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D416.1 — OWNER: "Do your recommendations" — phasing adopted (2026-08-29)
+
+Owner adopted the supervisor's D416 recommendations verbatim ("Do your
+recommendations"). Execution order: (1) engine lane NOW — phases 0+1
+merged into one unit: monster-block application re-resolves each intent
+at the actor's turn against live state, primary→fallback→Dodge, with
+structured deviation evidence (subsumes the apply-time re-validation
+bug fix); packed-refs fallback for repo-commit.ts rides along. (2)
+plays-v1 quality lane NOW, in parallel (disjoint files) — R01 fixes
+folded in: attack-type-aware OA policy, safe advance for ranged, no
+bare-Dodge fallback when attacks are resolvable, offensive escalation
+repair brief. (3) Phase 2 (initiative segments + scripted party on PC
+turns + delta-context DM adjustment) after both land. (4) Phase 3
+(persona-per-PC agents + comms) last. Campaign continues collecting
+block-model rows meanwhile — rows are era-tagged by repoCommit since
+0b55e2c6. Also merged lane-wt/mutshard (parked D410 training tooling)
+into main so the plan-of-record artifact is not stranded on a lane.
+
 ## D416 — OWNER: interleaved initiative is the target model; plan-then-adjust; one persona per PC (2026-08-29)
 
 Verbatim: "Interleaving is how most tables play. Ai for pc team and for
