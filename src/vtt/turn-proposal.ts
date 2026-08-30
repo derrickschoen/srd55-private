@@ -3,6 +3,8 @@ import type { GridCell } from '../combat/grid';
 import type { CombatantId, WorldObjectId } from '../combat/values';
 import type { EngineTargetSelector } from './engine-query-port';
 
+export type { CombatantId } from '../combat/values';
+
 /** Stable passthrough ids remain distinct even when supplied by homebrew content. */
 export type EngineOptionId = Brand<string, 'EngineOptionId'>;
 export type EngineActionId = Brand<string, 'EngineActionId'>;
