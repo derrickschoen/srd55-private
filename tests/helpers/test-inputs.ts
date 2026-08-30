@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
 const testInputBrand: unique symbol = Symbol('test-input');
@@ -12,6 +12,8 @@ type SchemaSqlPath =
 type SrdTextPath = `docs/srd/${string}`;
 type GuidePath = `docs/guides/${string}`;
 type PublicDataPath = `public/${string}`;
+type ContentPath = `content/${string}`;
+type ContentDirectoryPath = `content/${string}`;
 
 export interface TestInputSpec {
   readonly fixtures?: readonly FixturePath[];
@@ -19,13 +21,17 @@ export interface TestInputSpec {
   readonly srdText?: readonly SrdTextPath[];
   readonly guides?: readonly GuidePath[];
   readonly publicData?: readonly PublicDataPath[];
+  readonly content?: readonly ContentPath[];
+  readonly contentDirectories?: readonly ContentDirectoryPath[];
 }
 
-type TestInputCategory = keyof TestInputSpec;
+type TestInputCategory = Exclude<keyof TestInputSpec, 'contentDirectories'>;
 type DeclaredPath<
   Spec extends TestInputSpec,
   Category extends TestInputCategory,
 > = Spec[Category] extends readonly (infer Path extends string)[] ? Path : never;
+type DeclaredContentDirectory<Spec extends TestInputSpec> =
+  Spec['contentDirectories'] extends readonly (infer Path extends string)[] ? Path : never;
 
 export type TestInputText<
   Category extends TestInputCategory,
@@ -47,6 +53,13 @@ export type TestInputBytes<
   };
 };
 
+export type TestInputDirectoryEntries<Path extends string> = readonly string[] & {
+  readonly [testInputBrand]: {
+    readonly category: 'contentDirectories';
+    readonly path: Path;
+  };
+};
+
 export interface DeclaredInputReader<
   Category extends TestInputCategory,
   Path extends string,
@@ -58,11 +71,17 @@ export interface DeclaredInputReader<
   readBytes<Selected extends Path>(path: Selected): TestInputBytes<Category, Selected>;
 }
 
+export interface DeclaredContentDirectoryReader<Path extends string> {
+  list<Selected extends Path>(path: Selected): TestInputDirectoryEntries<Selected>;
+}
+
 export type DeclaredTestInputs<Spec extends TestInputSpec> = {
   readonly [Category in TestInputCategory]: DeclaredInputReader<
     Category,
     DeclaredPath<Spec, Category>
   >;
+} & {
+  readonly contentDirectories: DeclaredContentDirectoryReader<DeclaredContentDirectory<Spec>>;
 };
 
 interface RecorderFileState {
@@ -80,6 +99,7 @@ const categoryPrefixes = {
   srdText: ['docs/srd/'],
   guides: ['docs/guides/'],
   publicData: ['public/'],
+  content: ['content/'],
 } as const satisfies Record<TestInputCategory, readonly string[]>;
 
 function repositoryRoot(): string {
@@ -108,6 +128,18 @@ function absoluteInputPath(path: string): string {
   return absolute;
 }
 
+function validateContentDirectoryPath(path: string): void {
+  if (
+    !path.startsWith('content/') ||
+    path === 'content/' ||
+    path.endsWith('/') ||
+    path.includes('\\') ||
+    path.split('/').includes('..')
+  ) {
+    throw new TypeError(`Invalid content test input directory: ${path}`);
+  }
+}
+
 function reader<
   Category extends TestInputCategory,
   Path extends string,
@@ -129,6 +161,20 @@ function reader<
   };
 }
 
+function contentDirectoryReader<Path extends string>(
+  allowed: ReadonlySet<string>,
+): DeclaredContentDirectoryReader<Path> {
+  return {
+    list<Selected extends Path>(path: Selected): TestInputDirectoryEntries<Selected> {
+      if (!allowed.has(path)) {
+        throw new TypeError(`Undeclared content test input directory: ${path}`);
+      }
+      return readdirSync(absoluteInputPath(path), { encoding: 'utf8' }) as unknown as
+        TestInputDirectoryEntries<Selected>;
+    },
+  };
+}
+
 /**
  * Declares every stable repository input a test file may read. The returned
  * readers accept only paths enumerated in this spec, and recording runs attach
@@ -143,7 +189,9 @@ export function declareTestInputs<const Spec extends TestInputSpec>(
     srdText: new Set<string>(spec.srdText ?? []),
     guides: new Set<string>(spec.guides ?? []),
     publicData: new Set<string>(spec.publicData ?? []),
+    content: new Set<string>(spec.content ?? []),
   } satisfies Record<TestInputCategory, Set<string>>;
+  const contentDirectories = new Set<string>(spec.contentDirectories ?? []);
 
   const declared = new Set<string>();
   for (const category of Object.keys(byCategory) as TestInputCategory[]) {
@@ -155,6 +203,14 @@ export function declareTestInputs<const Spec extends TestInputSpec>(
       }
       declared.add(observation);
     }
+  }
+  for (const path of contentDirectories) {
+    validateContentDirectoryPath(path);
+    const observation = `directory:${path}`;
+    if (declared.has(observation)) {
+      throw new TypeError(`Test input directory is declared more than once: ${path}`);
+    }
+    declared.add(observation);
   }
 
   const recorder = (globalThis as typeof globalThis & {
@@ -173,5 +229,7 @@ export function declareTestInputs<const Spec extends TestInputSpec>(
     srdText: reader('srdText', byCategory.srdText),
     guides: reader('guides', byCategory.guides),
     publicData: reader('publicData', byCategory.publicData),
+    content: reader('content', byCategory.content),
+    contentDirectories: contentDirectoryReader(contentDirectories),
   } as DeclaredTestInputs<Spec>;
 }
