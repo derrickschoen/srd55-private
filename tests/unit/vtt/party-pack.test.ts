@@ -4669,6 +4669,256 @@ describe('external party-pack batch 2b mutation boundaries', () => {
     });
   });
 
+  it('keeps healing-potion and Bless tactics disabled by the default policy', () => {
+    const candidate = structuredClone(pack());
+    const source = objectSpellcasting(candidate.members[0]!);
+    source.preparedSpellIds = ['bless'];
+    source.knownSpellIds = [];
+    source.spellSlots = [{ level: 1, count: 1, recharge: 'long_rest' }];
+    const loaded = loadedV2(candidate);
+    const actor = loaded.party.members[0]!;
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 1 },
+      combatants: loaded.party.members.map((member) => member.profile),
+      tokens: loaded.party.members.map((member, index) =>
+        combatToken(member.profile, { column: index, row: 0 })),
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? { ...combatant, hitPoints: 1 }
+        : combatant),
+      effects: [{
+        id: encounterEffectId('effect:default-policy-potion'), source: actor.profile.id,
+        targets: [actor.profile.id], createdRevision: state.revision,
+        duration: { kind: 'permanent' }, concentrationOwner: null,
+        stackingIdentity: effectStackingIdentity('item:default-policy-potion'), stacking: 'coexist',
+        repeatedSave: null, damageBreak: null,
+        payload: {
+          kind: 'healing_potion', itemId: itemId('item:default-policy-potion'), remainingUses: 1,
+          dice: { count: 2, sides: 4, modifier: 2 }, activation: 'bonus_action',
+        },
+      }],
+    };
+
+    const defaultActions = loadedPartyTurnLegalActions(loaded.party.members)(state, actor.profile.id).actions;
+    expect(defaultActions.some((action) => action.type === 'drink_healing_potion')).toBe(false);
+    expect(defaultActions.some((action) => action.type === 'cast_spell' && action.spellId === 'bless')).toBe(false);
+
+    const enabledActions = loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: true, openWithBless: true,
+    })(state, actor.profile.id).actions;
+    expect(enabledActions.some((action) => action.type === 'drink_healing_potion')).toBe(true);
+    expect(enabledActions.some((action) => action.type === 'cast_spell' && action.spellId === 'bless')).toBe(true);
+  });
+
+  it('keeps every combat feature behind its exact action, identity, and positive-resource gate', () => {
+    const candidate = typedShapePack([{
+      effectId: 'effect:matrix-smite', kind: 'slot_spend_damage_rider', trigger: 'on_hit',
+      spendGate: 'slot_spent', criticalGate: 'crit_confirmed', damageTypeId: 'Radiant',
+      baseCount: 1, countPerSlotLevel: 1, sides: 8, modifier: 0,
+    }, {
+      effectId: 'effect:matrix-type-first', kind: 'attack_damage_type_choice',
+      attackId: 'attack:pack-member-1', damageTermIndex: 0, damageTypeIds: ['Cold', 'Fire'],
+    }, {
+      effectId: 'effect:matrix-type-second', kind: 'attack_damage_type_choice',
+      attackId: 'attack:matrix-second', damageTermIndex: 0, damageTypeIds: ['Acid', 'Lightning'],
+    }, {
+      effectId: 'effect:matrix-maneuver', kind: 'resource_die_maneuver', trigger: 'on_hit',
+      resourcePoolId: 'resource:matrix-maneuver', sides: 6, damageType: 'attack_primary',
+      conditionId: 'Prone', conditionDuration: 'until_end_of_target_next_turn',
+    }, {
+      effectId: 'effect:matrix-reckless', kind: 'reckless_attack_mode',
+      strengthBasedMeleeAttackIds: ['attack:pack-member-1'],
+    }, {
+      effectId: 'effect:matrix-paid-bonus', kind: 'bonus_action_attack_grant',
+      resourcePoolId: 'resource:matrix-paid-bonus', attackCount: 2,
+    }, {
+      effectId: 'effect:matrix-free-bonus', kind: 'bonus_action_attack_grant', attackCount: 1,
+    }, {
+      effectId: 'effect:matrix-surge', kind: 'action_surge',
+      resourcePoolId: 'resource:matrix-surge',
+    }, {
+      effectId: 'effect:matrix-timed', kind: 'timed_spellcasting_mode', trigger: 'bonus_action',
+      resourcePoolId: 'resource:matrix-timed', additionalLeveledSpellActions: 1,
+      duration: 'this_turn',
+    }, {
+      effectId: 'effect:matrix-action-area', kind: 'persistent_area', trigger: 'action', origin: 'self',
+      shape: { kind: 'emanation', radiusFeet: 5 }, duration: { kind: 'rounds', rounds: 1 },
+      targetFilter: 'all', difficultTerrain: false, movableFeet: null, hooks: [],
+    }, {
+      effectId: 'effect:matrix-bonus-area', kind: 'persistent_area', trigger: 'bonus_action', origin: 'self',
+      resourcePoolId: 'resource:matrix-bonus-area',
+      shape: { kind: 'emanation', radiusFeet: 10 }, duration: { kind: 'rounds', rounds: 1 },
+      targetFilter: 'enemies', difficultTerrain: false, movableFeet: null, hooks: [],
+    }, {
+      effectId: 'effect:matrix-reaction-area', kind: 'persistent_area', trigger: 'reaction', origin: 'self',
+      shape: { kind: 'emanation', radiusFeet: 15 }, duration: { kind: 'rounds', rounds: 1 },
+      targetFilter: 'allies', difficultTerrain: false, movableFeet: null, hooks: [],
+    }], [{ resourcePoolId: 'resource:matrix-decoy', maximum: 1, recharge: 'short_rest' },
+      { resourcePoolId: 'resource:matrix-maneuver', maximum: 1, recharge: 'short_rest' },
+      { resourcePoolId: 'resource:matrix-paid-bonus', maximum: 1, recharge: 'short_rest' },
+      { resourcePoolId: 'resource:matrix-surge', maximum: 1, recharge: 'short_rest' },
+      { resourcePoolId: 'resource:matrix-timed', maximum: 1, recharge: 'long_rest' },
+      { resourcePoolId: 'resource:matrix-bonus-area', maximum: 1, recharge: 'short_rest' },
+    ]);
+    const input = candidate.members[0]!;
+    objectSpellcasting(input).spellSlots = [{ level: 1, count: 1, recharge: 'long_rest' }];
+    input.attacks.push({ ...input.attacks[0]!, attackId: 'attack:matrix-second' });
+
+    const loadedResult = loadExternalPartyPack(candidate);
+    if (loadedResult.status !== 'loaded') {
+      throw new Error(`Feature-gate matrix was refused: ${JSON.stringify(loadedResult)}`);
+    }
+    const loaded = loadedResult;
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('feature-gate-matrix-target', { initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 2 },
+      combatants: [actor.profile, target],
+      tokens: [combatToken(actor.profile, { column: 0, row: 0 }), placedToken(target, 1)],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const legal = loadedPartyTurnLegalActions(loaded.party.members);
+    const featureSummary = (candidateState: typeof state) => {
+      const actions = legal(candidateState, actor.profile.id).actions;
+      return {
+        paidBonusAttacks: actions.filter((action) => action.type === 'attack' &&
+          action.bonusActionGrantEffectId === 'effect:matrix-paid-bonus').length,
+        freeBonusAttacks: actions.filter((action) => action.type === 'attack' &&
+          action.bonusActionGrantEffectId === 'effect:matrix-free-bonus').length,
+        surges: actions.flatMap((action) => action.type === 'activate_action_surge' ? [action.effectId] : []),
+        timed: actions.flatMap((action) => action.type === 'activate_timed_spellcasting_mode' ? [action.effectId] : []),
+        areas: actions.flatMap((action) => action.type === 'create_persistent_area'
+          ? [action.featureEffectId]
+          : []),
+      };
+    };
+
+    const attackChoiceState = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? { ...combatant, turn: { ...combatant.turn, bonusActionAvailable: false } }
+        : combatant),
+    };
+    const firstAttackActions = legal(attackChoiceState, actor.profile.id).actions.filter((action) =>
+      action.type === 'attack' && action.attackId === 'attack:pack-member-1' &&
+      action.bonusActionGrantEffectId === undefined);
+    expect([...new Set(firstAttackActions.map((action) => action.riderSelections?.[0]?.effectId ?? null))])
+      .toEqual([null, 'effect:matrix-smite']);
+    expect([...new Set(firstAttackActions.map((action) => action.damageTypeSelection?.damageType ?? null))])
+      .toEqual(['Cold', 'Fire']);
+    expect([...new Set(firstAttackActions.map((action) => action.maneuverEffectId ?? null))])
+      .toEqual([null, 'effect:matrix-maneuver']);
+    expect([...new Set(firstAttackActions.map((action) => action.recklessAttackEffectId ?? null))])
+      .toEqual([null, 'effect:matrix-reckless']);
+    expect(firstAttackActions.filter((action) => action.riderSelections !== undefined)).toHaveLength(8);
+    expect(firstAttackActions.filter((action) => action.recklessAttackEffectId !== undefined)).toHaveLength(8);
+    expect(featureSummary(state)).toEqual({
+      paidBonusAttacks: 16,
+      freeBonusAttacks: 16,
+      surges: [],
+      timed: ['effect:matrix-timed'],
+      areas: ['effect:matrix-action-area', 'effect:matrix-bonus-area'],
+    });
+
+    const depleted = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? {
+            ...combatant,
+            spellSlots: combatant.spellSlots.map((slot) => ({ ...slot, remaining: 0 })),
+            limitedResources: combatant.limitedResources?.map((pool) => ({
+              ...pool,
+              remaining: pool.id === 'resource:matrix-decoy' ? 1 : 0,
+            })),
+            turn: {
+              ...combatant.turn,
+              bonusActionAvailable: true,
+              additionalLeveledSpellActionsRemaining: 1,
+            },
+          }
+        : combatant),
+    };
+    const depletedAttackChoiceState = {
+      ...depleted,
+      combatants: depleted.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? { ...combatant, turn: { ...combatant.turn, bonusActionAvailable: false } }
+        : combatant),
+    };
+    const depletedFirstAttacks = legal(depletedAttackChoiceState, actor.profile.id).actions.filter((action) =>
+      action.type === 'attack' && action.attackId === 'attack:pack-member-1' &&
+      action.bonusActionGrantEffectId === undefined);
+    expect(depletedFirstAttacks).toHaveLength(4);
+    expect(depletedFirstAttacks.every((action) => action.riderSelections === undefined)).toBe(true);
+    expect(depletedFirstAttacks.every((action) => action.maneuverEffectId === undefined)).toBe(true);
+    expect(featureSummary(depleted)).toEqual({
+      paidBonusAttacks: 0,
+      freeBonusAttacks: 4,
+      surges: [],
+      timed: [],
+      areas: ['effect:matrix-action-area'],
+    });
+
+    const withTurn = (
+      candidateState: typeof state,
+      turn: Partial<(typeof state.combatants)[number]['turn']>,
+      remaining: Readonly<Record<string, number>> = {},
+    ): typeof state => ({
+      ...candidateState,
+      combatants: candidateState.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? {
+            ...combatant,
+            turn: { ...combatant.turn, ...turn },
+            limitedResources: combatant.limitedResources?.map((pool) => ({
+              ...pool, remaining: remaining[pool.id] ?? pool.remaining,
+            })),
+          }
+        : combatant),
+    });
+    const bonusUnavailable = withTurn(state, {
+      bonusActionAvailable: false, bonusAttacksRemaining: 0,
+    });
+    expect(featureSummary(bonusUnavailable)).toMatchObject({
+      paidBonusAttacks: 0, freeBonusAttacks: 0, timed: [],
+    });
+    const timedLimitReached = withTurn(state, { additionalLeveledSpellActionsRemaining: 1 });
+    expect(featureSummary(timedLimitReached).timed).toEqual([]);
+
+    const correctContinuation = withTurn(depleted, {
+      action: { kind: 'spent' },
+      bonusActionAvailable: false, bonusAttacksRemaining: 1,
+      bonusAttackGrantEffectId: encounterEffectId('effect:matrix-paid-bonus'),
+    });
+    expect(featureSummary(correctContinuation)).toMatchObject({ paidBonusAttacks: 4, freeBonusAttacks: 0 });
+    expect(legal(correctContinuation, actor.profile.id).actions.some((action) =>
+      action.type === 'attack' && action.recklessAttackEffectId !== undefined)).toBe(false);
+    const wrongContinuation = withTurn(depleted, {
+      bonusActionAvailable: false, bonusAttacksRemaining: 1,
+      bonusAttackGrantEffectId: encounterEffectId('effect:not-the-paid-bonus'),
+    });
+    expect(featureSummary(wrongContinuation)).toMatchObject({ paidBonusAttacks: 0, freeBonusAttacks: 0 });
+    const exhaustedContinuation = withTurn(depleted, {
+      bonusActionAvailable: false, bonusAttacksRemaining: 0,
+      bonusAttackGrantEffectId: encounterEffectId('effect:matrix-paid-bonus'),
+    });
+    expect(featureSummary(exhaustedContinuation)).toMatchObject({ paidBonusAttacks: 0, freeBonusAttacks: 0 });
+
+    const spent = withTurn(state, {
+      action: { kind: 'spent' }, bonusActionAvailable: false, bonusAttacksRemaining: 0,
+    });
+    expect(featureSummary(spent)).toEqual({
+      paidBonusAttacks: 0, freeBonusAttacks: 0,
+      surges: ['effect:matrix-surge'], timed: [], areas: [],
+    });
+    const spentDepleted = withTurn(spent, {}, {
+      'resource:matrix-surge': 0,
+      'resource:matrix-decoy': 1,
+    });
+    expect(featureSummary(spentDepleted).surges).toEqual([]);
+  });
+
   it('reserves healing slots for a multiclass Cleric when opening Bless is enabled', () => {
     const candidate = structuredClone(pack());
     const input = candidate.members[0]!;
