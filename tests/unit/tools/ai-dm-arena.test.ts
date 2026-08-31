@@ -19,6 +19,7 @@ import { availableEngineActorOptions, resolveEngineActorOption } from '../../../
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import {
+  basisFixturesPath,
   parseArenaArgs,
   runArena,
 } from '../../../tools/ai-dm-arena';
@@ -112,6 +113,15 @@ const LEGACY_BLOCK_ARGS = [
 ] as const;
 
 describe('AI-DM arena', () => {
+  it.each([
+    ['standard', 'tests/fixtures/arena-basis'],
+    ['hard', 'tests/fixtures/arena-basis-hard'],
+    ['brutal', 'tests/fixtures/arena-basis-brutal'],
+  ] as const)('maps the %s basis to its frozen fixture directory', (basis, directory) => {
+    expect(basisFixturesPath({ cwd: process.cwd(), basis }))
+      .toBe(join(process.cwd(), directory));
+  });
+
   it('parses both scripted-party policies, defaults to symmetric, and rejects unknown policies', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-party-policy-parse-'));
     const common = [

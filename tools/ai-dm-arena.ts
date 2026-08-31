@@ -353,10 +353,15 @@ function stdoutHeartbeat(line: string): void {
   process.stdout.write(`[arena] ${line}\n`);
 }
 
-function basisFixturesPath(config: ArenaConfig): string {
-  return resolve(config.cwd, config.basis === 'hard'
-    ? 'tests/fixtures/arena-basis-hard'
-    : 'tests/fixtures/arena-basis');
+export function basisFixturesPath(config: Pick<ArenaConfig, 'cwd' | 'basis'>): string {
+  const basis = config.basis;
+  switch (basis) {
+    case 'standard': return resolve(config.cwd, 'tests/fixtures/arena-basis');
+    case 'hard': return resolve(config.cwd, 'tests/fixtures/arena-basis-hard');
+    case 'brutal': return resolve(config.cwd, 'tests/fixtures/arena-basis-brutal');
+  }
+  basis satisfies never;
+  throw new TypeError(`Unknown arena basis ${String(basis)}.`);
 }
 
 async function frozenRoomStates(config: ArenaConfig): Promise<readonly import('../src/combat/encounter').EncounterState[]> {
