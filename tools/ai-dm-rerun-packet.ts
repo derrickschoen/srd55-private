@@ -54,7 +54,9 @@ const arenaRowSchema = z.object({
   plannedBy: plannerSchema,
   roundNarrative: z.string().nullable(),
   authorizedPlan: z.array(authorizedPlanEntrySchema).nullable(),
-  engineIntel: engineIntelSchema,
+  // Optional: pre-intel-era arms have no engineIntel. It must never reach the
+  // blinded packet — its mere presence identifies the arm.
+  engineIntel: engineIntelSchema.optional(),
 }).passthrough();
 
 export interface RerunProtocol {
@@ -81,7 +83,6 @@ interface ValidatedArenaRow {
   readonly plannedBy: z.infer<typeof plannerSchema>;
   readonly roundNarrative: string | null;
   readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
-  readonly engineIntel: z.infer<typeof engineIntelSchema>;
 }
 
 export interface BlindRubric {
@@ -99,7 +100,6 @@ export interface JudgePacketEntry {
   readonly attribution: 'model_authorized' | 'engine_default' | 'not_model_authorized';
   readonly roundNarrative: string | null;
   readonly executedPlan: readonly JsonRecord[] | null;
-  readonly engineIntel: JsonRecord;
   readonly rubric: BlindRubric;
 }
 
@@ -127,6 +127,9 @@ export interface RerunAnswerKey {
 const MODEL_IDENTITY_FIELDS = new Set([
   'arm', 'model', 'cli', 'thinkMode', 'sessionId', 'escalationSessionId',
   'escalationModel', 'kbHash', 'repoCommit', 'rawTurnContext', 'rlData', 'plannedBy',
+  // Era-identifying: only post-intel arms produce engineIntel, so its presence
+  // (not just its contents) unblinds the arm.
+  'engineIntel',
 ]);
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -214,7 +217,6 @@ function validateRow(source: JsonRecord, sourceLabel: string, protocol: RerunPro
     plannedBy: row.plannedBy,
     roundNarrative: row.roundNarrative,
     authorizedPlan: row.authorizedPlan,
-    engineIntel: row.engineIntel,
   };
 }
 
@@ -337,7 +339,6 @@ export function buildRerunPacket(
       attribution: engineAttribution(row),
       roundNarrative: row.roundNarrative,
       executedPlan: executedPlan(row.authorizedPlan),
-      engineIntel: row.engineIntel,
       rubric: rubric(),
     })),
   };
@@ -368,5 +369,8 @@ async function main(): Promise<void> {
 
 const invokedPath = process.argv[1];
 if (process.env['VITEST'] !== 'true' && invokedPath !== undefined && (
-  invokedPath.endsWith('/ai-dm-rerun-packet.ts') || invokedPath.endsWith('\\ai-dm-rerun-packet.ts')
+  invokedPath.endsWith('/ai-dm-rerun-packet.ts') || invokedPath.endsWith('\\ai-dm-rerun-packet.ts') ||
+  ((invokedPath.endsWith('/vite-node') || invokedPath.endsWith('\\vite-node') ||
+    invokedPath.endsWith('/vite-node.mjs') || invokedPath.endsWith('\\vite-node.mjs')) &&
+    process.argv.includes('--packet') && process.argv.includes('--answer-key'))
 )) await main();

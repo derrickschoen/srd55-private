@@ -47,11 +47,15 @@ function registeredRows(): JsonRecord[] {
       plannedBy: { model: `${arm}-model`, effort: 'medium' },
       roundNarrative: null,
       authorizedPlan: null,
-      engineIntel: {
-        policy: 'dm-intel-capture-v1',
-        policyVersions: { initiative: 'initiative-intel-v1' },
-        actors: [],
-      },
+      // Era asymmetry is the real R1-10 shape: only the post-intel arm
+      // produces engineIntel. Validation must accept both.
+      ...(arm === 'intel' ? {
+        engineIntel: {
+          policy: 'dm-intel-capture-v1',
+          policyVersions: { initiative: 'initiative-intel-v1' },
+          actors: [],
+        },
+      } : {}),
     } satisfies JsonRecord)
   )));
 }
@@ -79,22 +83,12 @@ describe('AI-DM R1-10 rerun packet', () => {
               actionSlots: [{ slot: 'main', kind: 'attack', targetIds: ['pc:fighter'] }],
             },
           }],
-          engineIntel: {
-            policy: 'dm-intel-capture-v1',
-            policyVersions: { initiative: 'initiative-intel-v1' },
-            actors: [],
-          },
           rubric: { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null },
         },
         {
           blindId: 'blind-002', caseId: 'case-01-1', outcome: 'auto_resolved',
           attribution: 'engine_default', roundNarrative: 'The ogre takes Dodge.',
           executedPlan: null,
-          engineIntel: {
-            policy: 'dm-intel-capture-v1',
-            policyVersions: { initiative: 'initiative-intel-v1' },
-            actors: [],
-          },
           rubric: { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null },
         },
       ],
@@ -111,6 +105,7 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(result.answerKey).toEqual(expectedAnswerKey);
     expect(JSON.stringify(result.packet)).not.toContain('baseline-model');
     expect(JSON.stringify(result.packet)).not.toContain('intel-model');
+    expect(JSON.stringify(result.packet)).not.toContain('engineIntel');
 
     const mutatedRows = rows.map((row, index) => index === 0
       ? { ...row, roundNarrative: 'The ogre retreats.' }
@@ -137,6 +132,8 @@ describe('AI-DM R1-10 rerun packet', () => {
 
   it('rejects an identity field if one reaches the blinded packet', () => {
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', model: 'leaked-model' }] }))
+      .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', engineIntel: { actors: [] } }] }))
       .toThrow('leaks a model-identifying field');
   });
 
