@@ -7,6 +7,16 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## Stryker verification window result — SUPERVISOR (2026-08-31)
+
+Exclusive quiet-machine run at main 347b1d88: 7,530 mutants / 7-file vtt
+scope / 5h11m. Score 90.83%. Per-file: survival-policy 99.64,
+session-record 98.41, stable-dom-render 97.44, vane-warren 96.18,
+local-session-store 94.13, party-pack 87.11 with 231 survivors — the
+known kill-batch-2b backlog (old queue item 6), now freshly sized. The
+two previously-unverified merged kill-batch test sets held everywhere
+outside party-pack. Report on disk at reports/mutation/ (gitignored).
+
 ## D423 — OWNER: four post-rerun-2 rulings (2026-08-31)
 
 1. **Calibration sitting (D418.11): 20-entry sample, prepared now** —
