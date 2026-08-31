@@ -277,7 +277,7 @@ describe('AI-DM arena', () => {
       hash: SNIPPET_REGISTRY.expand('focus_fire',
         createEngineMcpRuntime(generateRoom(3_943_001).encounter.state).feed.current()).definition.snippetHash,
     });
-    expect(rows[0]?.suggestionAdopted).toBe('ignored');
+    expect(rows[0]?.suggestionAdopted).toBe('edited');
     expect(readFileSync(outPath, 'utf8').trim().split('\n').every((line) =>
       (JSON.parse(line) as { readonly kbHash?: unknown }).kbHash === kbHash)).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n').every((line) => {
@@ -581,10 +581,10 @@ describe('AI-DM arena', () => {
     });
 
     expect(row).toEqual(expect.objectContaining({
-      outcome: 'auto_resolved', agentDispatched: true,
-      plannedBy: 'sim_controller', escalated: true, escalationModel: 'gpt-escalation',
-      authorizedPlan: null,
-      roundNarrative: null,
+      outcome: 'authorized', agentDispatched: true,
+      plannedBy: null, plannerLabel: 'engine_default', escalated: true, escalationModel: 'gpt-escalation',
+      authorizedPlan: expect.any(Array),
+      roundNarrative: expect.any(String),
       chainEvidence: {
         failedAttempts: expect.arrayContaining([
           expect.objectContaining({
@@ -600,7 +600,7 @@ describe('AI-DM arena', () => {
             ]),
           }),
         ]),
-        autoResolvedTrigger: expect.stringContaining('deterministic controller'),
+        autoResolvedTrigger: expect.stringContaining('engine auto-submitted'),
         correctionFinalText: 'SIMULATED — proposal delivered through engine MCP spool',
       },
     }));

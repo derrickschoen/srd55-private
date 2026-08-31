@@ -36,6 +36,20 @@ import {
   topDmActorIntelRows,
 } from '../dm-tactical-intel';
 import { renderEngineFailureModes } from '../engine-failure-modes';
+import {
+  movementOptionsIntel,
+  renderMovementContextRow,
+  renderMovementIntelRow,
+  MOVEMENT_OPTIONS_INTEL_POLICY,
+} from '../intel/movement-options';
+import {
+  actorOpportunityReport,
+  renderDodgeOpportunityCost,
+  renderMaterialityContext,
+  submissionDominance,
+  DOMINANCE_CORRECTION_POLICY,
+  OPPORTUNITY_COST_POLICY,
+} from '../intel/opportunity-cost';
 import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
 import { diffTurnContextValues } from '../dm-bridge/projection-transport';
 import { submitSpeculativeRoundPlan } from '../speculative-plan-submission';
@@ -475,6 +489,15 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   const { queries, turnProposals } = dependencies;
   const idempotency = new Map<string, { readonly bytes: string; readonly result: unknown }>();
   const applicationCursors = new Map<string, { readonly digest: string; readonly key: string; readonly offset: number }>();
+  const opportunityReports = new Map<string, ReturnType<typeof actorOpportunityReport>>();
+  function opportunityReport(capsule: EngineStateCapsule, actorId: CombatantId) {
+    const key = `${capsule.digest}:${actorId}`;
+    const prior = opportunityReports.get(key);
+    if (prior !== undefined) return prior;
+    const report = actorOpportunityReport(state, actorId, queries, capsule.revision);
+    opportunityReports.set(key, report);
+    return report;
+  }
   function applicationPage<T>(capsule: EngineStateCapsule, key: string, values: readonly T[], pageValue: unknown): { readonly values: readonly T[]; readonly truncated: boolean; readonly next: string | null } {
     const pageInput = pageValue === undefined ? {} : record(pageValue, 'page');
     const maximum = typeof pageInput['maximum_items'] === 'number' ? pageInput['maximum_items'] : 100;
@@ -513,6 +536,25 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     idempotency.set(key, { bytes, result: structuredClone(result) });
     return result;
   }
+  function proposalWithPlayObjective(
+    capsule: EngineStateCapsule,
+    proposal: EngineTurnProposal,
+  ): EngineTurnProposal {
+    if (proposal.overrideJustification !== null) return proposal;
+    const dominance = submissionDominance(
+      opportunityReport(capsule, proposal.actorId),
+      proposal.primaryOptionId,
+    );
+    return dominance.status === 'dominated'
+      ? {
+          ...proposal,
+          overrideJustification: {
+            reason: 'objective',
+            note: 'The engine-authored tactical play intentionally coordinates this option.',
+          },
+        }
+      : proposal;
+  }
   function fullTurnContext(
     capsule: EngineStateCapsule,
     input: Readonly<Record<string, unknown>>,
@@ -522,11 +564,18 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     const maximum = typeof input['maximum_options_per_actor'] === 'number' ? input['maximum_options_per_actor'] : 20;
     const includeExpectations = input['include_expectations'] !== false;
     const exactIntel = exactDmIntelMatrix(state, capsule, queries, required);
+    const contextualIntel = required.flatMap((actorId) => {
+      const rows = topDmActorIntelRows(exactIntel, actorId);
+      const repositioning = rows.find((row) => row.rangeBand === 'long' || !row.rangeLegal);
+      return repositioning === undefined ? rows.slice(0, 1) : [repositioning];
+    });
+    const movementIntel = movementOptionsIntel(state, capsule, queries, contextualIntel);
     const actors = [...required].sort().map((actorId) => {
       const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
       if (actor === undefined) throw new RangeError(`ACTOR_ABSENT:${actorId}`);
       const all = tacticalOptions(state, queries, capsule, actorId, includeExpectations, true);
       const intelRows = topDmActorIntelRows(exactIntel, actorId);
+      const opportunity = opportunityReport(capsule, actorId);
       return {
         actor_id: actorId,
         status: actorStatus(actor),
@@ -537,6 +586,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           zero_movement_offense_count: exactIntel.filter((row) =>
             row.actorId === actorId && row.minimumMovementFeet === 0).length,
           rows: intelRows.map(renderDmContextIntelRow),
+          movement: movementIntel.status === 'resolved'
+            ? movementIntel.rows.filter((row) => row.actorId === actorId)
+              .slice(0, 3).map(renderMovementContextRow)
+            : [],
+          opportunity_cost: renderDodgeOpportunityCost(opportunity),
           salient_window: salientInitiativeWindow(capsule, intelRows),
         },
         omitted: all.length > maximum,
@@ -570,6 +624,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         snippet_hash: play.snippetHash,
       })),
       ...(adjustmentRequest === null ? {} : {
+        materiality: renderMaterialityContext(adjustmentRequest.materialityReasonCodes, state),
         current_plan: {
           parent_plan_id: adjustmentRequest.parentPlanId,
           baseline_plan_hash: adjustmentRequest.baselinePlanHash,
@@ -589,7 +644,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const plan = {
           play_name: topPlay.name,
           snippet_hash: topPlay.snippetHash,
-          proposals: draft.proposals.map(externalProposal),
+          proposals: draft.proposals.map((proposal) =>
+            externalProposal(proposalWithPlayObjective(capsule, proposal))),
           advisory: SUGGESTED_PLAN_ADVISORY,
         };
         const bytes = new TextEncoder().encode(JSON.stringify(plan)).byteLength;
@@ -615,6 +671,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       markContextTrimmed();
     }
     while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+      const actor = [...result.actors].reverse().find((candidate) => candidate.intel.movement.length > 1);
+      if (actor === undefined) break;
+      actor.intel.movement.pop();
+      markContextTrimmed();
+    }
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.intel.rows.length > 1);
       if (actor === undefined) break;
       actor.intel.rows.pop();
@@ -634,6 +696,24 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
       result.summary.terrain_tags.length > 0) {
       result.summary.terrain_tags.pop();
+      markContextTrimmed();
+    }
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+      const actor = [...result.actors].reverse().find((candidate) => candidate.intel.rows.length > 0);
+      if (actor === undefined) break;
+      actor.intel.rows.pop();
+      markContextTrimmed();
+    }
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+      const actor = [...result.actors].reverse().find((candidate) => candidate.intel.movement.length > 0);
+      if (actor === undefined) break;
+      actor.intel.movement.pop();
+      markContextTrimmed();
+    }
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+      const actor = [...result.actors].reverse().find((candidate) => candidate.intel.opportunity_cost !== null);
+      if (actor === undefined) break;
+      actor.intel.opportunity_cost = null;
       markContextTrimmed();
     }
     if (suggestedPlan !== null &&
@@ -693,7 +773,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         state_ref: externalStateRef(capsule),
         play_name: playName,
         snippet_hash: draft.definition.snippetHash,
-        proposals: draft.proposals.map(externalProposal),
+        proposals: draft.proposals.map((proposal) =>
+          externalProposal(proposalWithPlayObjective(capsule, proposal))),
       };
     }
     const capsule = feed.read(stateReference(input['state_ref']));
@@ -718,6 +799,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         matrix,
         pageInput,
       );
+      const movement = movementOptionsIntel(state, capsule, queries, paged.values);
       const initiativeInput = input['initiative'] === undefined
         ? null : record(input['initiative'], 'initiative');
       const initiativeMode = initiativeInput === null ? 'none' : stringField(initiativeInput, 'mode');
@@ -740,6 +822,16 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         renderer_policy: DM_TURN_INTEL_POLICY,
         evaluator_policy: TACTICAL_EVALUATOR_POLICY,
         rows: paged.values.map(renderDmIntelRow),
+        movement_policy: MOVEMENT_OPTIONS_INTEL_POLICY,
+        movement_rows: movement.status === 'resolved'
+          ? movement.rows.filter((row) => paged.values.some((value) =>
+            value.actorId === row.actorId && value.targetId === row.targetId)).map(renderMovementIntelRow)
+          : [],
+        opportunity_policy: OPPORTUNITY_COST_POLICY,
+        correction_policy: DOMINANCE_CORRECTION_POLICY,
+        opportunity_costs: actorIds.map((actorId) =>
+          renderDodgeOpportunityCost(opportunityReport(capsule, actorId)))
+          .filter((value): value is Readonly<Record<string, unknown>> => value !== null),
         initiative,
         truncated: paged.truncated,
         next_cursor: paged.next,
@@ -866,6 +958,23 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         ? request.actors.map((actorId) => decoded.find((proposal) => proposal.actorId === actorId)).filter((proposal): proposal is EngineTurnProposal => proposal !== undefined)
         : decoded;
       const resolved = canonical.map((proposal) => ({ proposal, resolution: turnProposals.resolve(state, proposal) }));
+      const dominanceRefusals = resolved.flatMap(({ proposal, resolution }) => {
+        if (!resolution.valid || proposal.overrideJustification !== null) return [];
+        const dominance = submissionDominance(
+          opportunityReport(capsule, proposal.actorId),
+          resolution.option.optionId,
+        );
+        return dominance.status !== 'dominated' ? [] : [{
+          actor_id: proposal.actorId,
+          codes: ['DOMINATED_OPTION_REQUIRES_OVERRIDE'],
+          summary: dominance.delta,
+          attempt_rejections: [{
+            attempt: resolution.selectedBranch,
+            declared_option_id: resolution.option.optionId,
+            rejection_reasons: [dominance.delta],
+          }],
+        }];
+      });
       const invalid = [
         ...(actorSetValid ? [] : [{
           actor_id: request.actors[0], codes: ['ROUND_ACTOR_SET_MISMATCH'],
@@ -891,6 +1000,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             }];
           }),
         }]),
+        ...dominanceRefusals,
       ];
       if (invalid.length > 0) return { status: 'rejected', state_ref: externalStateRef(capsule), actor_refusals: invalid, correction_guidance: correctionGuidance(capsule) };
       const key = stringField(input, 'idempotency_key');
@@ -927,7 +1037,21 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
                 ? { code: 'ACTOR_NOT_OPEN', summary: 'Only actors whose turns remain open may receive an adjustment.' }
                 : null;
         if (staticRefusal !== null) return { proposal, resolution: null, staticRefusal };
-        return { proposal, resolution: turnProposals.resolve(state, proposal), staticRefusal: null };
+        const resolution = turnProposals.resolve(state, proposal);
+        if (resolution.valid && proposal.overrideJustification === null) {
+          const dominance = submissionDominance(
+            opportunityReport(capsule, proposal.actorId),
+            resolution.option.optionId,
+          );
+          if (dominance.status === 'dominated') {
+            return {
+              proposal,
+              resolution: null,
+              staticRefusal: { code: 'DOMINATED_OPTION_REQUIRES_OVERRIDE', summary: dominance.delta },
+            };
+          }
+        }
+        return { proposal, resolution, staticRefusal: null };
       });
       const valid = evaluated.flatMap((entry) => entry.resolution?.valid === true ? [{
         proposal: entry.proposal,
