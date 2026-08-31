@@ -130,7 +130,8 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
     }
   });
 
-  it('drives a full authorized round through one context tool round and the in-process proposer', { timeout: 30_000 }, async () => {
+  it('drives a full authorized round through context, frontier expansion, and submission', { timeout: 30_000 }, async () => {
+    let contextForSubmission: Readonly<Record<string, unknown>> | null = null;
     const endpoint = await fakeServer((request, index) => {
       const requestMessages = messages(request.body['messages']);
       if (index === 0) {
@@ -149,19 +150,31 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
       }
       const toolMessage = requestMessages.findLast((message) => message['role'] === 'tool');
       if (typeof toolMessage?.['content'] !== 'string') throw new Error('Follow-up omitted context tool output.');
-      const context = record(JSON.parse(toolMessage['content']) as unknown, 'turn context');
-      const requestValue = record(context['request'], 'turn request');
-      const suggestion = record(context['suggested_plan'], 'suggested plan');
+      if (index === 1) {
+        const context = record(JSON.parse(toolMessage['content']) as unknown, 'turn context');
+        const advertised = context['applicable_plays'];
+        if (!Array.isArray(advertised)) throw new Error('Turn context omitted frontier plays.');
+        const playName = record(advertised[0], 'frontier play')['name'];
+        contextForSubmission = context;
+        return { body: assistantToolCall('call-expand', 'engine__propose_from_play', {
+          play_name: playName,
+        }, {
+          prompt_tokens: 17, completion_tokens: 3,
+          prompt_tokens_details: { cached_tokens: 2 },
+          completion_tokens_details: { reasoning_tokens: 1 },
+        }) };
+      }
+      const expansion = record(JSON.parse(toolMessage['content']) as unknown, 'frontier expansion');
+      if (contextForSubmission === null) throw new Error('Frontier expansion arrived without its turn context.');
+      const requestValue = record(contextForSubmission['request'], 'turn request');
       return { body: assistantToolCall('call-submit', 'engine__submit_round_proposals', {
-        state_ref: context['state_ref'],
+        state_ref: contextForSubmission['state_ref'],
         request_id: requestValue['request_id'],
         phase: requestValue['phase'],
         idempotency_key: 'SIMULATED-local-openai-round-submit',
-        proposals: suggestion['proposals'],
+        proposals: expansion['proposals'],
       }, {
-        prompt_tokens: 17, completion_tokens: 3,
-        prompt_tokens_details: { cached_tokens: 2 },
-        completion_tokens_details: { reasoning_tokens: 1 },
+        prompt_tokens: 7, completion_tokens: 2,
       }) };
     });
     const directory = mkdtempSync(join(tmpdir(), 'dnd-local-openai-round-'));
@@ -179,14 +192,14 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
 
       expect(rows).toEqual([expect.objectContaining({
         cli: 'local-openai', model: 'quantized-SIMULATED', thinkMode: 'on', outcome: 'authorized',
-        toolCalls: 2, callsPerRound: 1, flapRetries: 0, serviceNull: false,
+        toolCalls: 3, callsPerRound: 1, flapRetries: 0, serviceNull: false,
         plannedBy: { model: 'quantized-SIMULATED', effort: 'low' },
         refusals: [],
-        tokens: { input: 28, cachedInput: 3, output: 5, reasoning: 1 },
+        tokens: { input: 35, cachedInput: 3, output: 7, reasoning: 1 },
       })]);
-      expect(endpoint.requests).toHaveLength(2);
+      expect(endpoint.requests).toHaveLength(3);
       expect(endpoint.requests.map((request) => request.path)).toEqual([
-        '/v1/chat/completions', '/v1/chat/completions',
+        '/v1/chat/completions', '/v1/chat/completions', '/v1/chat/completions',
       ]);
       expect(endpoint.requests.every((request) => request.body['model'] === 'quantized-SIMULATED')).toBe(true);
       expect(endpoint.requests.every((request) => request.body['reasoning_effort'] === 'low')).toBe(true);
@@ -197,6 +210,9 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         }),
         expect.objectContaining({ role: 'assistant' }),
         expect.objectContaining({ role: 'tool', tool_call_id: 'call-context' }),
+      ]));
+      expect(messages(endpoint.requests[2]?.body['messages'])).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: 'tool', tool_call_id: 'call-expand' }),
       ]));
     } finally {
       await close(endpoint.server);

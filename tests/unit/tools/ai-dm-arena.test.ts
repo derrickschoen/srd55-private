@@ -259,10 +259,20 @@ describe('AI-DM arena', () => {
     expect(rows.every((row) => /^[0-9a-f]{40}$/u.test(row.repoCommit))).toBe(true);
     expect(rows[0]?.turnContextGranularity).toBe('full');
     expect(rows[1]?.turnContextGranularity).toBe('turn_delta');
-    expect(JSON.parse(rows[0]?.rawTurnContext ?? '')).toMatchObject({
+    const firstTurnContext = JSON.parse(rows[0]?.rawTurnContext ?? '') as unknown;
+    expect(firstTurnContext).toMatchObject({
       granularity: 'full',
-      suggested_plan: { play_name: 'focus_fire' },
+      team_plan_frontier: {
+        policy: 'team-scorer-v1',
+        frontier_resolution: 'contains_unresolved',
+        candidates: [
+          { candidate_id: 'focus_fire', status: 'unresolved' },
+          { candidate_id: 'basic_advance', status: 'unresolved' },
+        ],
+        removed: [],
+      },
     });
+    expect(firstTurnContext).not.toHaveProperty('suggested_plan');
     expect(JSON.parse(rows[1]?.rawTurnContext ?? '')).toMatchObject({
       granularity: 'turn_delta',
       anchor: { base_revision: rows[0]?.contextRevision },

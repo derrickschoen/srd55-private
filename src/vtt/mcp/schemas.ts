@@ -11,6 +11,7 @@ import {
   MATERIALITY_CONTEXT_POLICY,
   OPPORTUNITY_COST_POLICY,
 } from '../intel/opportunity-cost';
+import { TEAM_SCORER_POLICY } from '../intel/team-scorer';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
 
 const identifier = z.string().min(1).max(200).describe('Engine-owned stable identifier.');
@@ -240,6 +241,128 @@ const advertisedPlay = z.object({
   description: z.string().min(1).max(200),
   snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
 }).strict();
+const teamPlanMetric = z.enum([
+  'lethality',
+  'objective_progress',
+  'resource_conservation',
+  'dying_pc_removal',
+  'wasted_turn',
+]);
+const exactRational = z.object({
+  numerator: z.number().int().safe(),
+  denominator: z.number().int().positive().safe(),
+}).strict();
+const dominanceCoordinate = z.object({
+  exact: exactRational,
+  objective: z.enum(['maximize', 'minimize']),
+}).strict();
+const teamPlanDominanceVector = z.object({
+  lethality: dominanceCoordinate,
+  objective_progress: dominanceCoordinate,
+  resource_conservation: dominanceCoordinate,
+  dying_pc_removal: dominanceCoordinate,
+  wasted_turn: dominanceCoordinate,
+}).strict();
+const wastedTurnMarker = z.object({
+  kind: z.literal('wasted_turn'),
+  actor_id: identifier,
+  option_id: identifier,
+  reason: z.enum(['zero_feet_dash', 'no_effect_turn']),
+}).strict();
+const resolvedTeamPlanCandidate = z.object({
+  candidate_id: identifier,
+  label: summaryText,
+  status: z.literal('resolved'),
+  dominance_vector: teamPlanDominanceVector,
+  markers: z.array(wastedTurnMarker).max(50),
+}).strict();
+const unresolvedTeamPlanCandidate = z.object({
+  candidate_id: identifier,
+  label: summaryText,
+  status: z.literal('unresolved'),
+  unresolved_metrics: z.array(teamPlanMetric).min(1).max(5),
+  reason_codes: z.array(z.enum([
+    'duplicate_actor',
+    'option_not_offered',
+    'option_illegal',
+    'actor_absent',
+    'mixed_team_sides',
+    'declared_outcome_unresolved',
+    'semantic_attack_target_unresolved',
+    'attack_allocation_unresolved',
+  ])).min(1).max(20),
+}).strict();
+const fullTeamPlanFrontier = z.object({
+  policy: z.literal(TEAM_SCORER_POLICY),
+  frontier_resolution: z.enum(['fully_resolved', 'contains_unresolved']),
+  candidates: z.array(z.discriminatedUnion('status', [
+    resolvedTeamPlanCandidate,
+    unresolvedTeamPlanCandidate,
+  ])).max(3),
+  removed: z.array(z.object({
+    candidate_id: identifier,
+    dominated_by_candidate_id: identifier,
+    better_metrics: z.array(teamPlanMetric).min(1).max(5),
+    dominance_vector: teamPlanDominanceVector,
+    markers: z.array(wastedTurnMarker).max(50),
+  }).strict()).max(3),
+}).strict();
+const candidateSummaryTeamPlanFrontier = z.object({
+  policy: z.literal(TEAM_SCORER_POLICY),
+  frontier_resolution: z.enum(['fully_resolved', 'contains_unresolved']),
+  detail_level: z.literal('candidate_summary'),
+  candidates: z.array(z.discriminatedUnion('status', [
+    z.object({
+      candidate_id: identifier,
+      label: summaryText,
+      status: z.literal('resolved'),
+      wasted_turn_count: z.number().int().min(0).max(50),
+    }).strict(),
+    z.object({
+      candidate_id: identifier,
+      label: summaryText,
+      status: z.literal('unresolved'),
+      unresolved_metrics: z.array(teamPlanMetric).min(1).max(5),
+      reason_codes: z.array(z.enum([
+        'duplicate_actor',
+        'option_not_offered',
+        'option_illegal',
+        'actor_absent',
+        'mixed_team_sides',
+        'declared_outcome_unresolved',
+        'semantic_attack_target_unresolved',
+        'attack_allocation_unresolved',
+      ])).min(1).max(20),
+    }).strict(),
+  ])).max(3),
+  removed: z.array(z.object({
+    candidate_id: identifier,
+    dominated_by_candidate_id: identifier,
+    better_metrics: z.array(teamPlanMetric).min(1).max(5),
+    wasted_turn_count: z.number().int().min(0).max(50),
+  }).strict()).max(3),
+}).strict();
+const summaryTeamPlanFrontier = z.object({
+  policy: z.literal(TEAM_SCORER_POLICY),
+  frontier_resolution: z.enum(['fully_resolved', 'contains_unresolved']),
+  detail_level: z.literal('summary'),
+  frontier_candidate_ids: z.array(identifier).max(3),
+  removed_candidate_ids: z.array(identifier).max(3),
+}).strict();
+const omittedTeamPlanFrontier = z.object({
+  policy: z.literal(TEAM_SCORER_POLICY),
+  frontier_resolution: z.enum(['fully_resolved', 'contains_unresolved']),
+  detail_level: z.literal('omitted'),
+  frontier_candidate_count: z.number().int().min(0).max(3),
+  removed_candidate_count: z.number().int().min(0).max(3),
+  reason: z.literal('context_size_limit'),
+}).strict();
+const teamPlanFrontier = z.union([
+  fullTeamPlanFrontier,
+  candidateSummaryTeamPlanFrontier,
+  summaryTeamPlanFrontier,
+  omittedTeamPlanFrontier,
+]);
 const suggestedPlan = z.object({
   play_name: z.enum(PLAY_NAMES),
   snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
@@ -250,6 +373,7 @@ const fullTurnContextOutput = z.object({
   granularity: z.literal('full'), context_trimmed: z.boolean(),
   state_ref: stateRef, request: turnRequest, summary: tacticalSummary, actors: z.array(actorContext).min(1).max(50),
   applicable_plays: z.array(advertisedPlay).max(3),
+  team_plan_frontier: teamPlanFrontier.nullable(),
   suggested_plan: suggestedPlan.optional(),
   current_plan: currentPlanSummary.optional(),
   materiality: materialityContext.nullable().optional(),
