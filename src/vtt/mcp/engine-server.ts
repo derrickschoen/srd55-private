@@ -68,8 +68,10 @@ import { submitSpeculativeRoundPlan } from '../speculative-plan-submission';
 import type { SpeculativePlanSink } from '../speculative-plan-types';
 import {
   PLAY_NAMES,
+  SKILL_NAMES,
   SNIPPET_REGISTRY,
   type PlayName,
+  type SkillName,
 } from '../snippet-registry-runtime';
 import {
   createMcpHandler,
@@ -92,6 +94,7 @@ export const ENGINE_DM_TOOL_NAMES = Object.freeze([
   'engine.get_turn_context',
   'engine.query_tactical_intel',
   'engine.propose_from_play',
+  'engine.load_skill',
   'engine.validate_proposal',
   'engine.submit_round_proposals',
   'engine.request_dm_adjudication',
@@ -99,9 +102,14 @@ export const ENGINE_DM_TOOL_NAMES = Object.freeze([
 export const ENGINE_ADJUSTMENT_DM_TOOL_NAMES = Object.freeze([
   'engine.get_turn_context',
   'engine.query_tactical_intel',
+  'engine.load_skill',
   'engine.validate_proposal',
   'engine.submit_plan_adjustment',
   'engine.request_dm_adjudication',
+] as const);
+export const ENGINE_SPECULATIVE_DM_TOOL_NAMES = Object.freeze([
+  'engine.load_skill',
+  'engine.submit_speculative_round_plan',
 ] as const);
 export type EngineMcpToolProfile = 'full' | 'dm';
 export const INTEL_MODES = ['full', 'off'] as const;
@@ -156,6 +164,10 @@ export interface AllowlistedRuleEntry extends RuleReference {
 
 export const SUGGESTED_PLAN_MAX_BYTES = 16 * 1024;
 export const TURN_CONTEXT_MAX_BYTES = 32 * 1024;
+
+function encodedJsonBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
 const SUGGESTED_PLAN_ADVISORY = 'You may submit these revision-bound option proposals as-is via engine.submit_round_proposals, edit the selected option ids, or ignore this suggested plan.';
 
 export function engineStateSummaryProofToken(capsuleDigest: string, granularity: string): string {
@@ -497,14 +509,16 @@ function allowedRule(rules: AllowlistedRulesSource, reference: { readonly rule_i
   return entry !== null && entry.sourceLocator === reference.source_locator && !disallowedLocator(entry.sourceLocator) && entry.attribution.trim().length > 0 ? entry : null;
 }
 
-export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal', capsule: EngineStateCapsule, rules: AllowlistedRulesSource, voice?: string, turnContext?: unknown): string {
+export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal' | 'speculate_round', capsule: EngineStateCapsule, rules: AllowlistedRulesSource, voice?: string, turnContext?: unknown): string {
   const entries = capsule.rulesIndex.flatMap((reference) => {
     const entry = allowedRule(rules, { rule_id: reference.ruleId, source_locator: reference.sourceLocator });
     return entry === null ? [] : [{ rule_id: entry.ruleId, source_locator: entry.sourceLocator, text: entry.text, attribution: entry.attribution }];
   });
   const uriBase = `engine://run/${encodeURIComponent(capsule.runId)}`;
   const adjustment = capsule.request?.phase !== 'speculative' && capsule.request?.kind === 'plan_adjustment';
-  const fixed = adjustment
+  const fixed = kind === 'speculate_round'
+    ? 'Plan every advertised speculative scenario, then use engine.submit_speculative_round_plan once. Each branch must cover the complete required monster actor set using only revision-bound option ids offered in current_context. The host alone evaluates conditions and validates the selected branch; never infer or execute outcomes, coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
+    : adjustment
     ? kind === 'plan_round'
       ? 'Review the current remaining monster plan, then use engine.submit_plan_adjustment once. Submit zero to the stated adjustment budget of open-actor replacement proposals; omitted actors keep their baseline proposals and an empty updates list explicitly keeps the plan. Do not change reaction guidance. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
       : 'Correct only the refused plan-adjustment actors once with engine.submit_plan_adjustment. Valid staged updates remain accepted. No fallback remains after this correction; every correction fallback_option_id must be null. Omitted refused actors keep their baseline proposals.'
@@ -972,6 +986,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         ? capsule.request
         : null;
       const applicablePlays = adjustmentRequest === null ? SNIPPET_REGISTRY.applicable(capsule) : [];
+      const applicableSkills = SNIPPET_REGISTRY.applicableSkills(capsule);
       const result = {
         granularity: 'full' as const,
         context_trimmed: false,
@@ -993,6 +1008,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           name: play.name,
           description: play.description,
           snippet_hash: play.snippetHash,
+        })),
+        applicable_skills: applicableSkills.map((skill) => ({
+          name: skill.name,
+          description: skill.description,
+          skill_hash: skill.skillHash,
         })),
         ...(adjustmentRequest === null ? {} : {
           current_plan: {
@@ -1032,6 +1052,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         result.context_trimmed = true;
         output = suggestedPlan === null ? result : { ...result, suggested_plan: suggestedPlan };
       };
+      if (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+        result.applicable_skills.length > 0) {
+        result.applicable_skills.splice(0);
+        markContextTrimmed();
+      }
       while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
         const actor = [...result.actors].reverse().find((candidate) => candidate.options.length > 0);
         if (actor === undefined) break;
@@ -1042,6 +1067,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const actor = [...result.actors].reverse().find((candidate) => candidate.threats.length > 0);
         if (actor === undefined) break;
         actor.threats.pop();
+        markContextTrimmed();
+      }
+      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+        result.applicable_skills.length > 0) {
+        result.applicable_skills.pop();
         markContextTrimmed();
       }
       while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
@@ -1064,6 +1094,28 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         result.actors.length > 1) {
         result.actors.pop();
         markContextTrimmed();
+      }
+      if (encodedJsonBytes(output) > TURN_CONTEXT_MAX_BYTES) {
+        const actor = result.actors[0];
+        if (actor === undefined) throw new Error('Turn context requires at least one actor.');
+        return {
+          granularity: 'full',
+          context_trimmed: true,
+          state_ref: result.state_ref,
+          request: result.request,
+          summary: { ...result.summary, terrain_tags: [] },
+          actors: [{
+            actor_id: actor.actor_id,
+            status: { ...actor.status, effect_tags: [], pending_decision_ids: [] },
+            options: [],
+            threats: [],
+          }],
+          applicable_plays: [],
+          applicable_skills: [],
+          recent_changes: [],
+          truncated: true,
+          next_cursor: null,
+        };
       }
       return output;
     }
@@ -1104,6 +1156,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       ? capsule.request
       : null;
     const advertisedPlays = adjustmentRequest === null ? SNIPPET_REGISTRY.applicable(capsule) : [];
+    const applicableSkills = SNIPPET_REGISTRY.applicableSkills(capsule);
     const teamReport = teamPlanReport(capsule, advertisedPlays);
     const frontierCandidateIds = new Set(teamReport?.frontier.map((entry) =>
       entry.candidate.candidateId) ?? []);
@@ -1151,6 +1204,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         name: play.name,
         description: play.description,
         snippet_hash: play.snippetHash,
+      })),
+      applicable_skills: applicableSkills.map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+        skill_hash: skill.skillHash,
       })),
       team_plan_frontier: teamReport === null ? null : renderTeamPlanFrontier(teamReport),
       ...(adjustmentRequest === null ? {} : {
@@ -1208,6 +1266,10 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       }
       return true;
     };
+    if (initialContextUnderPressure && result.applicable_skills.length > 0) {
+      result.applicable_skills.splice(0);
+      markContextTrimmed();
+    }
     // These reports can contain board-sized regions or event histories. Compact
     // them once at the first pressure signal, before iterative trimming performs
     // repeated JSON measurements over the remaining context.
@@ -1264,6 +1326,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       markContextTrimmed();
     }
     while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+      result.applicable_skills.length > 0) {
+      result.applicable_skills.pop();
+      markContextTrimmed();
+    }
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
       result.recent_changes.length > 0) {
       result.recent_changes.pop();
       markContextTrimmed();
@@ -1291,6 +1358,27 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       actor.intel.opportunity_cost = null;
       markContextTrimmed();
     }
+    while (encodedJsonBytes(output) > TURN_CONTEXT_MAX_BYTES) {
+      const actor = [...result.actors].reverse().find((candidate) => candidate.intel.salient_window !== null);
+      if (actor === undefined) break;
+      actor.intel.salient_window = null;
+      markContextTrimmed();
+    }
+    while (encodedJsonBytes(output) > TURN_CONTEXT_MAX_BYTES && result.applicable_plays.length > 0) {
+      result.applicable_plays.pop();
+      markContextTrimmed();
+    }
+    while (encodedJsonBytes(output) > TURN_CONTEXT_MAX_BYTES) {
+      const actor = [...result.actors].reverse().find((candidate) =>
+        (Array.isArray(candidate.status.effect_tags) && candidate.status.effect_tags.length > 0) ||
+        (Array.isArray(candidate.status.pending_decision_ids) && candidate.status.pending_decision_ids.length > 0));
+      if (actor === undefined) break;
+      const effectTags = actor.status.effect_tags;
+      const pendingDecisionIds = actor.status.pending_decision_ids;
+      if (Array.isArray(effectTags)) effectTags.splice(0);
+      if (Array.isArray(pendingDecisionIds)) pendingDecisionIds.splice(0);
+      markContextTrimmed();
+    }
     if (suggestedPlan !== null &&
       new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
       result.truncated = true;
@@ -1302,6 +1390,43 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       result.actors.pop();
       markContextTrimmed();
     }
+    if (encodedJsonBytes(output) > TURN_CONTEXT_MAX_BYTES) {
+      const actor = result.actors[0];
+      if (actor === undefined) throw new Error('Turn context requires at least one actor.');
+      return {
+        granularity: 'full',
+        context_trimmed: true,
+        state_ref: result.state_ref,
+        request: result.request,
+        summary: { ...result.summary, terrain_tags: [] },
+        actors: [{
+          actor_id: actor.actor_id,
+          status: { ...actor.status, effect_tags: [], pending_decision_ids: [] },
+          options: [],
+          threats: [],
+          intel: {
+            policy: actor.intel.policy,
+            zero_movement_offense_count: actor.intel.zero_movement_offense_count,
+            rows: [],
+            movement: [],
+            opportunity_cost: null,
+            salient_window: null,
+          },
+        }],
+        actor_knowledge: { policy: ENGINE_ACTOR_KNOWLEDGE_POLICY, actors: [] },
+        reaction_spend_hold: { policy: ENGINE_REACTION_SPEND_HOLD_POLICY, windows: [] },
+        legendary_windows: contextReports.legendaryWindowsCompact,
+        recovery_capabilities: { policy: ENGINE_RECOVERY_CAPABILITY_POLICY, targets: [] },
+        search_memory: { policy: SEARCH_MEMORY_POLICY, memories: [] },
+        alert_state: contextReports.alertStateCompact,
+        applicable_plays: [],
+        applicable_skills: [],
+        team_plan_frontier: null,
+        recent_changes: [],
+        truncated: true,
+        next_cursor: null,
+      };
+    }
     return output;
   }
   function execute(name: string, value: unknown): unknown {
@@ -1312,7 +1437,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (capsule.request.phase === 'speculative') throw new RangeError('SPECULATIVE_CONTEXT_USES_CAPSULE_MENU');
       const full = fullTurnContext(capsule, input);
       const base = dependencies.turnContextDeltaBase;
-      const context = input['granularity'] !== 'turn_delta' || base === undefined ||
+      const contextCandidate = input['granularity'] !== 'turn_delta' || base === undefined ||
         input['since_revision'] !== base.revision ||
         base.context['granularity'] !== 'full'
         ? full
@@ -1334,6 +1459,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
               context_trimmed: full['context_trimmed'],
             };
           })();
+      const context = encodedJsonBytes(contextCandidate) <= TURN_CONTEXT_MAX_BYTES
+        ? contextCandidate
+        : { ...full, context_trimmed: true, truncated: true };
       dependencies.onTurnContext?.(structuredClone(context));
       return context;
     }
@@ -1361,6 +1489,26 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         snippet_hash: draft.definition.snippetHash,
         proposals: draft.proposals.map((proposal) =>
           externalProposal(proposalWithPlayObjective(capsule, proposal))),
+      };
+    }
+    if (name === 'engine.load_skill') {
+      const capsule = feed.current();
+      const requestedName = stringField(input, 'skill_name');
+      if (!SKILL_NAMES.some((candidate) => candidate === requestedName)) {
+        throw new RangeError(`Unknown skill ${requestedName}.`);
+      }
+      const loaded = SNIPPET_REGISTRY.loadSkill(requestedName as SkillName, capsule);
+      return {
+        state_ref: externalStateRef(capsule),
+        skill_name: loaded.name,
+        skill_hash: loaded.skillHash,
+        description: loaded.description,
+        procedure: loaded.procedure,
+        plays: loaded.plays.map((play) => ({
+          name: play.name,
+          description: play.description,
+          snippet_hash: play.snippetHash,
+        })),
       };
     }
     const capsule = feed.read(stateReference(input['state_ref']));
@@ -1809,9 +1957,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
 
   const profileRequest = feed.current().request;
   const advertisedNames: ReadonlySet<string> | null = dependencies.toolProfile === 'dm'
-    ? new Set(profileRequest?.phase !== 'speculative' && profileRequest?.kind === 'plan_adjustment'
-      ? ENGINE_ADJUSTMENT_DM_TOOL_NAMES
-      : ENGINE_DM_TOOL_NAMES)
+    ? new Set(profileRequest?.phase === 'speculative'
+      ? ENGINE_SPECULATIVE_DM_TOOL_NAMES
+      : profileRequest?.kind === 'plan_adjustment'
+        ? ENGINE_ADJUSTMENT_DM_TOOL_NAMES
+        : ENGINE_DM_TOOL_NAMES)
     : null;
   const bindings: readonly McpToolBinding[] = ENGINE_TOOL_SPECS
     .filter((spec) => advertisedNames === null || advertisedNames.has(spec.descriptor.name))

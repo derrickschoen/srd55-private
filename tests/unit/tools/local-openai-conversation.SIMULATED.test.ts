@@ -252,6 +252,7 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
       'engine__get_turn_context',
       'engine__query_tactical_intel',
       'engine__propose_from_play',
+      'engine__load_skill',
       'engine__validate_proposal',
       'engine__submit_round_proposals',
       'engine__request_dm_adjudication',

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { TACTICAL_EVALUATOR_POLICY } from '../../combat/tactical-evaluator';
-import { PLAY_NAMES } from '../snippet-registry-runtime';
+import { PLAY_NAMES, SKILL_NAMES } from '../snippet-registry-runtime';
 import { DM_INTEL_QUERY_POLICY, DM_TURN_INTEL_POLICY } from '../dm-tactical-intel';
 import { ENGINE_FAILURE_MODES_POLICY } from '../engine-failure-modes';
 import { ENGINE_INITIATIVE_PROJECTION_POLICY } from '../engine-state-capsule';
@@ -412,6 +412,11 @@ const advertisedPlay = z.object({
   description: z.string().min(1).max(200),
   snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
 }).strict();
+const advertisedSkill = z.object({
+  name: z.enum(SKILL_NAMES),
+  description: z.string().min(1).max(200),
+  skill_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+}).strict();
 const teamPlanMetric = z.enum([
   'lethality',
   'objective_progress',
@@ -544,6 +549,7 @@ const fullTurnContextOutput = z.object({
   granularity: z.literal('full'), context_trimmed: z.boolean(),
   state_ref: stateRef, request: turnRequest, summary: tacticalSummary, actors: z.array(actorContext).min(1).max(50),
   applicable_plays: z.array(advertisedPlay).max(3),
+  applicable_skills: z.array(advertisedSkill).max(3),
   team_plan_frontier: teamPlanFrontier.nullable(),
   suggested_plan: suggestedPlan.optional(),
   current_plan: currentPlanSummary.optional(),
@@ -562,6 +568,7 @@ const intelSuppressedTurnContextOutput = z.object({
   state_ref: stateRef, request: turnRequest, summary: tacticalSummary,
   actors: z.array(intelSuppressedActorContext).min(1).max(50),
   applicable_plays: z.array(advertisedPlay).max(3),
+  applicable_skills: z.array(advertisedSkill).max(3),
   suggested_plan: suggestedPlan.optional(),
   current_plan: currentPlanSummary.optional(),
   recent_changes: z.array(recentChange).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable(),
@@ -587,6 +594,14 @@ const proposeFromPlayOutput = z.object({
   play_name: z.enum(PLAY_NAMES),
   snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
   proposals: z.array(turnProposal).min(1).max(50),
+}).strict();
+const loadSkillOutput = z.object({
+  state_ref: stateRef,
+  skill_name: z.enum(SKILL_NAMES),
+  skill_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+  description: z.string().min(1).max(200),
+  procedure: z.string().min(1).max(2_000),
+  plays: z.array(advertisedPlay).max(3),
 }).strict();
 
 const combatantSummary = z.object({
@@ -834,6 +849,7 @@ export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
     ]).optional(),
   }).strict(), tacticalIntelOutput),
   spec('engine.propose_from_play', 'Expand one advertised play into an editable, unqueued composite proposal set.', z.object({ play_name: z.enum(PLAY_NAMES) }).strict(), proposeFromPlayOutput),
+  spec('engine.load_skill', 'Load one advertised tactical skill procedure and its referenced plays.', z.object({ skill_name: z.enum(SKILL_NAMES) }).strict(), loadSkillOutput),
   spec('engine.get_state_summary', 'Read one bounded state projection or journal delta using an opaque application cursor.', z.object({ ...refInput, granularity: z.enum(['turn_minimal', 'room_tactical', 'combatant_detail', 'journal_delta']), combatant_ids: z.array(identifier).max(50).optional(), since_revision: z.number().int().min(1).optional(), page: page.optional() }).strict(), stateSummaryOutput),
   spec('engine.get_combatant_options', 'List canonical legal and unavailable action options for one combatant.', z.object({ ...refInput, actor_id: identifier, include_unavailable: z.boolean().optional(), page: page.optional() }).strict(), optionsOutput),
   spec('engine.query_path', 'Resolve a semantic movement objective without accepting or returning coordinates.', z.object({ ...refInput, actor_id: identifier, objective: z.union([z.object({ kind: z.literal('enable_action'), action_id: identifier, target: targetSelector }).strict(), z.object({ kind: z.enum(['approach', 'maintain_range_from', 'withdraw_from']), target: targetSelector }).strict()]), movement: movementPreference, engagement: engagement.optional() }).strict(), pathOutput),

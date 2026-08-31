@@ -1242,7 +1242,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       roundProtocolVersion: 3,
       outcome: 'authorized',
       adjustments: [],
-      callsPerRound: 1,
+      callsPerRound: 2,
       adjustmentBudget: 2,
     }));
     expect(row?.partyPolicyHash).toMatch(/^[a-f0-9]{64}$/u);
@@ -1289,6 +1289,15 @@ describe('AI-DM engine MCP conversation runner', () => {
       adjustmentCalls: 0,
       correctionCalls: 0,
       serviceNullAdjustments: 0,
+    }));
+    expect(row?.speculations).toContainEqual(expect.objectContaining({
+      status: 'adopted', proposed: true, adopted: true, discarded: false,
+      budgetMs: 60_000,
+      branchCount: expect.any(Number),
+      planningWallMs: expect.any(Number),
+      boundaryWaitMs: expect.any(Number),
+      source: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
+      decision: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
     }));
   });
 
@@ -1434,6 +1443,63 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(adjustment?.reasons).toEqual(['LIFE_STATE_CHANGED', 'OPEN_MONSTER_SET_CHANGED']);
     expect(adjustment?.outcome).toBe('baseline_kept');
     expect(row?.roundTotals.adjustmentCalls).toBe(1);
+    expect(row?.speculations).toContainEqual(expect.objectContaining({
+      status: 'adopted', proposed: true, adopted: true, discarded: false,
+    }));
+  });
+
+  it('discards speculation when the actual board invalidates the planned option structure', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-speculation-material-change-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+    let mutated = false;
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom()],
+      mutateBeforeSpeculationBoundary: (state) => {
+        if (mutated) return state;
+        mutated = true;
+        return {
+          ...state,
+          revision: state.revision + 1,
+          combatants: state.combatants.map((combatant) => combatant.profile.kind === 'player_character'
+            ? { ...combatant, hitPoints: 0, life: 'dead' as const }
+            : combatant),
+        };
+      },
+    });
+
+    expect(result.rows[0]?.speculations).toContainEqual(expect.objectContaining({
+      status: 'discarded', proposed: true, adopted: false, discarded: true,
+      discardReason: expect.stringMatching(/^(?:no_scenario_match|option_mapping_failed|proposal_validation_failed)$/u),
+      decision: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
+    }));
+    expect(result.rows[0]?.refusals).not.toContainEqual(expect.stringContaining('SPECULATION_RECALC_REQUIRED'));
+  });
+
+  it('aborts speculative planning at the D407 pacing deadline', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-speculation-budget-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom()],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+      speculationBudgetMs: 5,
+      speculationDispatchDelayMs: 25,
+    });
+    const expired = result.rows[0]?.speculations.find((entry) =>
+      entry.status === 'discarded' && entry.discardReason === 'budget_expired');
+
+    expect(expired).toEqual(expect.objectContaining({
+      status: 'discarded', budgetMs: 5, proposed: true, adopted: false, discarded: true,
+      planningWallMs: expect.any(Number), boundaryWaitMs: expect.any(Number),
+    }));
+    expect(expired?.status === 'discarded' ? expired.planningWallMs : Number.POSITIVE_INFINITY)
+      .toBeLessThan(1_000);
   });
 
   it('gives two material PC turns independent adjustment flap budgets', { timeout: 30_000 }, async () => {

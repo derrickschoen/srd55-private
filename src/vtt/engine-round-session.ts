@@ -39,8 +39,9 @@ import {
 } from './reaction-guidance';
 import { reduceSessionEncounter } from './session-encounter-reducer';
 import type { ScriptedPartyTurnMaterialization } from './scripted-party-round';
+import type { HostScenario, HostSplitCandidate } from './speculative-plan-types';
 
-export interface EngineRoundCapsuleRequest {
+export interface EngineOrdinaryRoundCapsuleRequest {
   readonly runId: EncounterSessionId;
   readonly branchId: EncounterBranchId;
   readonly revision: number;
@@ -52,6 +53,25 @@ export interface EngineRoundCapsuleRequest {
   readonly requestedActorIds?: readonly CombatantId[];
   readonly planAdjustment?: EnginePlanAdjustmentMetadata;
 }
+
+export interface EngineSpeculativeRoundCapsuleRequest {
+  readonly runId: EncounterSessionId;
+  readonly branchId: EncounterBranchId;
+  readonly revision: number;
+  readonly requestId: string;
+  readonly phase: 'speculative';
+  readonly room: number;
+  readonly historyKind: string;
+  readonly requestedActorIds: readonly CombatantId[];
+  readonly targetMonsterRound: number;
+  readonly refreshGeneration: 0 | 1 | 2;
+  readonly scenarioMenu: readonly HostSplitCandidate[];
+  readonly scenarios: readonly HostScenario[];
+}
+
+export type EngineRoundCapsuleRequest =
+  | EngineOrdinaryRoundCapsuleRequest
+  | EngineSpeculativeRoundCapsuleRequest;
 
 export interface EngineRoundSnapshot {
   readonly capsule: EngineStateCapsule;
@@ -352,7 +372,7 @@ export class EngineRoundSession {
   }
 
   prepareRound(
-    request: Omit<EngineRoundCapsuleRequest, 'revision'> & { readonly revision: number },
+    request: Omit<EngineOrdinaryRoundCapsuleRequest, 'revision'> & { readonly revision: number },
     guidance: ReactionGuidanceDeclaration | null,
   ): PreparedEngineRound {
     const beforeRevision = this.#state.revision;
@@ -380,7 +400,7 @@ export class EngineRoundSession {
   }
 
   beginRoundWithoutSkipping(
-    request: Omit<EngineRoundCapsuleRequest, 'revision'> & { readonly revision: number },
+    request: Omit<EngineOrdinaryRoundCapsuleRequest, 'revision'> & { readonly revision: number },
     guidance: ReactionGuidanceDeclaration | null,
   ): PreparedEngineRound {
     if (this.#state.config.initiativeMode !== 'per_combatant') {
@@ -564,6 +584,26 @@ export class EngineRoundSession {
   }
 
   #capsule(request: EngineRoundCapsuleRequest): EngineStateCapsule {
+    if (request.phase === 'speculative') {
+      return createEngineMcpRuntime(this.#state, {
+        runId: request.runId,
+        branchId: request.branchId,
+        revision: request.revision,
+        requestId: request.requestId,
+        phase: 'speculative',
+        room: request.room,
+        historyKind: request.historyKind,
+        requestedActorIds: request.requestedActorIds,
+        initiativeProjection: projectEngineInitiativeIntel(this.#state, []),
+        speculativeRequest: {
+          targetRoom: request.room,
+          targetMonsterRound: request.targetMonsterRound,
+          refreshGeneration: request.refreshGeneration,
+          scenarioMenu: request.scenarioMenu,
+          scenarios: request.scenarios,
+        },
+      }).feed.current();
+    }
     return createEngineMcpRuntime(this.#state, {
       runId: request.runId,
       branchId: request.branchId,
