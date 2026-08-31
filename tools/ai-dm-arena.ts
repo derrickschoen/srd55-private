@@ -497,16 +497,28 @@ export async function runArena(
   const { adapterByArm, heartbeat = stdoutHeartbeat, ...conversationOptions } = options;
   let rows: readonly ArenaRow[];
   if (!config.interleave) {
-    const result = await runConversation(conversationConfig(config, {
-      rooms: config.rooms,
-      rounds: config.reps,
-      model: config.model,
-      effort: config.effort,
-      escalationModel: config.escalationModel,
-      escalationEffort: config.escalationEffort,
-      outPath: config.outPath,
-    }), { ...conversationOptions, roomStates: states });
-    rows = arenaRows(config, result.rows, 'single', seeds);
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-arena-independent-'));
+    const independent: ArenaRow[] = [];
+    for (let room = 1; room <= config.rooms; room += 1) {
+      for (let rep = 1; rep <= config.reps; rep += 1) {
+        const result = await runConversation(conversationConfig(config, {
+          rooms: 1,
+          rounds: 1,
+          model: config.model,
+          effort: config.effort,
+          escalationModel: config.escalationModel,
+          escalationEffort: config.escalationEffort,
+          outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-single.jsonl`),
+        }), {
+          ...conversationOptions,
+          roomStates: [structuredClone(states[room - 1]!)],
+        });
+        const [row] = arenaRows(config, result.rows, 'single', [seeds[room - 1]!]);
+        if (row === undefined) throw new Error('Independent arena unit produced no row.');
+        independent.push({ ...row, room, round: rep });
+      }
+    }
+    rows = independent;
   } else {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-arena-interleaved-'));
     const interleaved: ArenaRow[] = [];

@@ -14,7 +14,11 @@ import {
 import { decodeCodexTurn } from '../../../src/vtt/agent-adapters/codex';
 import type { RoundPlan } from '../../../src/vtt/dm-bridge/round-plan-contract';
 import { generateRoom } from '../../../src/vtt/room-generator';
-import { createEngineMcpRuntime, freshMonsterPlanningState } from '../../../src/vtt/mcp/entrypoint';
+import {
+  createEngineMcpRuntime,
+  freshMonsterPlanningState,
+  type EngineMcpLauncherManifest,
+} from '../../../src/vtt/mcp/entrypoint';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
@@ -28,6 +32,13 @@ import {
   readFileSync,
   writeFileSync,
 } from '../../helpers/test-filesystem';
+
+function objectValue(value: unknown, label: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
 
 class FakeCodexUsageAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
@@ -106,6 +117,84 @@ class OrderingNullAdapter implements AgentSessionAdapter {
   }
 
   classifyFailure(): 'unknown' { return 'unknown'; }
+}
+
+class InProcessArenaAdapter implements AgentSessionAdapter {
+  readonly kind = 'local-openai' as const;
+  #starts = 0;
+
+  async probe() { return { present: true, version: 'SIMULATED-in-process' }; }
+
+  async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
+    this.#starts += 1;
+    return this.#dispatch(
+      agentSessionIdFromCli(`local-openai:SIMULATED-arena-${String(this.#starts)}`),
+      invocation,
+    );
+  }
+
+  async resume(
+    binding: AgentSessionBinding,
+    invocation: AgentInvocation,
+  ): Promise<AgentTurnResult> {
+    return this.#dispatch(binding.sessionId, invocation);
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+
+  #dispatch(
+    sessionId: AgentTurnResult['resumeSessionId'],
+    invocation: AgentInvocation,
+  ): AgentTurnResult {
+    const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+    const tools = invocation.toolSession;
+    if (tools === undefined) throw new Error('SIMULATED in-process arena dispatch omitted its tool session.');
+    if (manifest.phase === 'speculative') return this.#completed(sessionId);
+
+    const context = objectValue(tools.execute('engine.get_turn_context', {
+      run_id: manifest.runId,
+      expected_revision: manifest.revision,
+      scope: 'round',
+      ...(manifest.turnContextDeltaBase === undefined
+        ? { granularity: 'full' }
+        : { granularity: 'turn_delta', since_revision: manifest.turnContextDeltaBase.revision }),
+    }), 'SIMULATED in-process turn context');
+    const stateRef = context['granularity'] === 'turn_delta'
+      ? objectValue(
+          objectValue(context['anchor'], 'SIMULATED delta anchor')['state_ref'],
+          'SIMULATED delta state ref',
+        )
+      : objectValue(context['state_ref'], 'SIMULATED full state ref');
+    const plays = context['applicable_plays'];
+    const firstPlay = Array.isArray(plays) ? objectValue(plays[0], 'SIMULATED applicable play') : null;
+    const playName = firstPlay?.['name'];
+    if (typeof playName !== 'string') throw new Error('SIMULATED in-process turn context offered no play.');
+    const expansion = objectValue(
+      tools.execute('engine.propose_from_play', { play_name: playName }),
+      'SIMULATED play expansion',
+    );
+    if (!Array.isArray(expansion['proposals'])) {
+      throw new Error('SIMULATED play expansion omitted proposals.');
+    }
+    tools.execute('engine.submit_round_proposals', {
+      state_ref: stateRef,
+      request_id: manifest.requestId,
+      phase: manifest.phase,
+      idempotency_key: `SIMULATED-in-process-${manifest.requestId}-${manifest.phase}`,
+      proposals: expansion['proposals'],
+    });
+    return this.#completed(sessionId);
+  }
+
+  #completed(sessionId: AgentTurnResult['resumeSessionId']): AgentTurnResult {
+    return {
+      resumeSessionId: sessionId,
+      sessionId: null,
+      finalText: 'SIMULATED in-process arena proposal',
+      usage: null,
+      exit: 'completed',
+    };
+  }
 }
 
 const LEGACY_BLOCK_ARGS = [
@@ -391,12 +480,13 @@ describe('AI-DM arena', () => {
     expect(rows[0]?.authorizedPlan?.map((entry) => entry.selectedBranch))
       .toEqual(['primary', 'primary', 'primary']);
     expect(rows[0]?.roundNarrative).toContain('combatant:generated-3943001-monster-1 expands Dagger');
-    expect(rows[1]?.contextRevision).toBe(rows[0]?.projectionRevision);
+    expect(rows[1]?.contextRevision).toBe(rows[0]?.contextRevision);
+    expect(rows[1]?.projectionRevision).toBe(rows[0]?.projectionRevision);
+    expect(rows[1]?.startingRoomDigest).toBe(rows[0]?.startingRoomDigest);
     const kbHash = createHash('sha256').update(Buffer.from(kbText, 'utf8')).digest('hex');
     expect(rows.every((row) => row.kbHash === kbHash)).toBe(true);
     expect(rows.every((row) => /^[0-9a-f]{40}$/u.test(row.repoCommit))).toBe(true);
-    expect(rows[0]?.turnContextGranularity).toBe('full');
-    expect(rows[1]?.turnContextGranularity).toBe('turn_delta');
+    expect(rows.every((row) => row.turnContextGranularity === 'full')).toBe(true);
     const firstTurnContext = JSON.parse(rows[0]?.rawTurnContext ?? '') as unknown;
     expect(firstTurnContext).toMatchObject({
       granularity: 'full',
@@ -412,8 +502,8 @@ describe('AI-DM arena', () => {
     });
     expect(firstTurnContext).not.toHaveProperty('suggested_plan');
     expect(JSON.parse(rows[1]?.rawTurnContext ?? '')).toMatchObject({
-      granularity: 'turn_delta',
-      anchor: { base_revision: rows[0]?.contextRevision },
+      granularity: 'full',
+      state_ref: { expected_revision: rows[1]?.contextRevision },
     });
     expect(new TextEncoder().encode(rows[0]?.rawTurnContext).byteLength).toBeLessThanOrEqual(32 * 1024);
     expect(new TextEncoder().encode(rows[1]?.rawTurnContext).byteLength).toBeLessThanOrEqual(32 * 1024);
@@ -434,6 +524,46 @@ describe('AI-DM arena', () => {
         row.snippetSetHash === SNIPPET_REGISTRY.snippetSetHash;
     })).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n')).toHaveLength(4);
+  });
+
+  describe('brutal room-4 full-intel regression', () => {
+    it('reloads the fixture and full context for each of three SIMULATED reps', async () => {
+      const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-room-4-full-intel-'));
+      const rows = await runArena(parseArenaArgs([
+        '--rooms', '1',
+        '--reps', '3',
+        '--seed', '6203004',
+        '--basis', 'brutal',
+        '--intel-mode', 'full',
+        '--cli', 'local-openai',
+        '--local-base-url', 'http://SIMULATED.invalid',
+        '--local-model', 'SIMULATED-model',
+        '--out', join(directory, 'arena.jsonl'),
+      ]), { adapter: new InProcessArenaAdapter() });
+
+      expect(rows).toHaveLength(3);
+      expect(rows.map((row) => ({
+        round: row.round,
+        outcome: row.outcome,
+        granularity: row.turnContextGranularity,
+        contextRevision: row.contextRevision,
+        startingRoomDigest: row.startingRoomDigest,
+        failedAttempts: row.chainEvidence.failedAttempts,
+      }))).toEqual([
+        {
+          round: 1, outcome: 'authorized', granularity: 'full', contextRevision: 3,
+          startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
+        },
+        {
+          round: 2, outcome: 'authorized', granularity: 'full', contextRevision: 3,
+          startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
+        },
+        {
+          round: 3, outcome: 'authorized', granularity: 'full', contextRevision: 3,
+          startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
+        },
+      ]);
+    });
   });
 
   it('runs configured arms round-robin for every room-rep unit with basis and arm tags', async () => {
