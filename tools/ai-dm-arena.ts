@@ -12,6 +12,7 @@ import {
   type ConversationTokenCounts,
   type CombatModel,
 } from './ai-dm-conversation';
+import type { IntelMode } from '../src/vtt/mcp/engine-server';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
 import type { AgentSessionAdapter } from '../src/vtt/agent-session';
 import type { DmIntelCapture } from '../src/vtt/dm-tactical-intel';
@@ -42,6 +43,7 @@ export interface ArenaArm {
 }
 
 export interface ArenaConfig {
+  readonly intelMode: IntelMode;
   readonly combatModel: CombatModel;
   readonly initiativeProfile: RoomInitiativeProfile;
   readonly partyPolicy: ScriptedPartyDecisionPolicy;
@@ -69,6 +71,7 @@ export interface ArenaConfig {
 }
 
 export interface ArenaRow {
+  readonly intelMode: IntelMode;
   readonly combatModel: CombatModel;
   readonly roundProtocolVersion: import('./ai-dm-conversation').ConversationRow['roundProtocolVersion'];
   readonly startingRoomDigest: string;
@@ -173,6 +176,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--reaction-ask-default',
       '--combat-model', '--initiative-profile', '--arm-combat-model',
       '--party-policy',
+      '--intel-mode',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
@@ -251,6 +255,10 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (!SCRIPTED_PARTY_DECISION_POLICIES.includes(partyPolicy as ScriptedPartyDecisionPolicy)) {
     throw new TypeError('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
   }
+  const intelMode = values.get('--intel-mode') ?? 'full';
+  if (intelMode !== 'full' && intelMode !== 'off') {
+    throw new TypeError('--intel-mode must be full or off.');
+  }
   const armCombatModels = new Map<string, CombatModel>();
   for (const raw of rawArmCombatModels) {
     const [label, model, extra] = raw.split(':');
@@ -305,6 +313,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     throw new TypeError('--arm-combat-model is only valid with --interleave.');
   }
   return {
+    intelMode,
     combatModel: combatModel as CombatModel,
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
     partyPolicy: partyPolicy as ScriptedPartyDecisionPolicy,
@@ -344,10 +353,15 @@ function stdoutHeartbeat(line: string): void {
   process.stdout.write(`[arena] ${line}\n`);
 }
 
-function basisFixturesPath(config: ArenaConfig): string {
-  return resolve(config.cwd, config.basis === 'hard'
-    ? 'tests/fixtures/arena-basis-hard'
-    : 'tests/fixtures/arena-basis');
+export function basisFixturesPath(config: Pick<ArenaConfig, 'cwd' | 'basis'>): string {
+  const basis = config.basis;
+  switch (basis) {
+    case 'standard': return resolve(config.cwd, 'tests/fixtures/arena-basis');
+    case 'hard': return resolve(config.cwd, 'tests/fixtures/arena-basis-hard');
+    case 'brutal': return resolve(config.cwd, 'tests/fixtures/arena-basis-brutal');
+  }
+  basis satisfies never;
+  throw new TypeError(`Unknown arena basis ${String(basis)}.`);
 }
 
 async function frozenRoomStates(config: ArenaConfig): Promise<readonly import('../src/combat/encounter').EncounterState[]> {
@@ -376,6 +390,7 @@ function arenaRows(
   seeds: readonly number[],
 ): readonly ArenaRow[] {
   return rows.map((row): ArenaRow => ({
+    intelMode: row.intelMode,
     combatModel: row.combatModel,
     roundProtocolVersion: row.roundProtocolVersion,
     startingRoomDigest: row.startingRoomDigest,
@@ -446,6 +461,7 @@ function conversationConfig(
   },
 ): import('./ai-dm-conversation').ConversationConfig {
   return {
+    intelMode: config.intelMode,
     combatModel: overrides.combatModel ?? config.combatModel,
     initiativeProfile: config.initiativeProfile,
     partyPolicy: config.partyPolicy,

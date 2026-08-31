@@ -104,6 +104,8 @@ export const ENGINE_ADJUSTMENT_DM_TOOL_NAMES = Object.freeze([
   'engine.request_dm_adjudication',
 ] as const);
 export type EngineMcpToolProfile = 'full' | 'dm';
+export const INTEL_MODES = ['full', 'off'] as const;
+export type IntelMode = (typeof INTEL_MODES)[number];
 
 export interface EngineCapsuleFeed extends ReadonlyStateCapsuleSource {
   current(): EngineStateCapsule;
@@ -847,6 +849,16 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   const opportunityReports = new Map<string, ReturnType<typeof actorOpportunityReport>>();
   const teamPlanReports = new Map<string, TeamPlanFrontierReport>();
   const contextIntelReports = new Map<string, CapsuleIntelReports>();
+  const forcedIntelMode: IntelMode | null = process.env['DND_LANE_INTEL_MODE'] === 'off' ? 'off' : null;
+  let activeIntelMode: IntelMode = forcedIntelMode ?? 'full';
+  function requestedIntelMode(input: Readonly<Record<string, unknown>>): IntelMode {
+    if (forcedIntelMode !== null) return forcedIntelMode;
+    const requested = input['intel_mode'];
+    if (requested === undefined) return activeIntelMode;
+    if (requested !== 'full' && requested !== 'off') throw new TypeError('intel_mode must be full or off.');
+    activeIntelMode = requested;
+    return requested;
+  }
   function contextIntelReport(capsule: EngineStateCapsule): CapsuleIntelReports {
     const prior = contextIntelReports.get(capsule.digest);
     if (prior !== undefined) return prior;
@@ -943,6 +955,118 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     const required = input['scope'] === 'active_turn' && capsule.projection.activeCombatant !== null ? [capsule.projection.activeCombatant] : requested;
     const maximum = typeof input['maximum_options_per_actor'] === 'number' ? input['maximum_options_per_actor'] : 20;
     const includeExpectations = input['include_expectations'] !== false;
+    if (requestedIntelMode(input) === 'off') {
+      const actors = [...required].sort().map((actorId) => {
+        const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
+        if (actor === undefined) throw new RangeError(`ACTOR_ABSENT:${actorId}`);
+        const all = tacticalOptions(state, queries, capsule, actorId, false, true);
+        return {
+          actor_id: actorId,
+          status: actorStatus(actor),
+          options: all.slice(0, maximum),
+          threats: [...threats(state, queries, actorId)],
+          omitted: all.length > maximum,
+        };
+      });
+      const adjustmentRequest = capsule.request?.phase !== 'speculative' && capsule.request?.kind === 'plan_adjustment'
+        ? capsule.request
+        : null;
+      const applicablePlays = adjustmentRequest === null ? SNIPPET_REGISTRY.applicable(capsule) : [];
+      const result = {
+        granularity: 'full' as const,
+        context_trimmed: false,
+        state_ref: externalStateRef(capsule),
+        request: capsule.request === null || capsule.request.phase === 'speculative' ? null : {
+          kind: capsule.request.kind ?? 'round_plan',
+          request_id: capsule.request.requestId, phase: capsule.request.phase,
+          correction_number: capsule.request.correctionNumber,
+          required_actor_ids: capsule.request.actors,
+          ...(adjustmentRequest === null ? {} : {
+            baseline_plan_hash: adjustmentRequest.baselinePlanHash,
+            adjustment_budget: adjustmentRequest.adjustmentBudget,
+          }),
+        },
+        summary: tacticalSummary(capsule),
+        actors: actors.map(({ omitted: _omitted, ...actor }) => actor),
+        recent_changes: [...recentChanges(capsule)],
+        applicable_plays: applicablePlays.map((play) => ({
+          name: play.name,
+          description: play.description,
+          snippet_hash: play.snippetHash,
+        })),
+        ...(adjustmentRequest === null ? {} : {
+          current_plan: {
+            parent_plan_id: adjustmentRequest.parentPlanId,
+            baseline_plan_hash: adjustmentRequest.baselinePlanHash,
+            open_actor_proposals: adjustmentRequest.baselineProposalDigests.map((entry) => ({
+              actor_id: entry.actorId,
+              proposal_digest: entry.proposalDigest,
+            })),
+          },
+        }),
+        truncated: actors.some((actor) => actor.omitted),
+        next_cursor: null,
+      };
+      const topPlay = applicablePlays[0];
+      const suggestedPlan = topPlay === undefined
+        ? null
+        : (() => {
+          const draft = SNIPPET_REGISTRY.expand(topPlay.name, capsule);
+          const plan = {
+            play_name: topPlay.name,
+            snippet_hash: topPlay.snippetHash,
+            proposals: draft.proposals.map(externalProposal),
+            advisory: SUGGESTED_PLAN_ADVISORY,
+          };
+          const bytes = new TextEncoder().encode(JSON.stringify(plan)).byteLength;
+          if (bytes > SUGGESTED_PLAN_MAX_BYTES) {
+            throw new RangeError(`SUGGESTED_PLAN_TOO_LARGE: ${String(bytes)} UTF-8 bytes exceeds the ${String(SUGGESTED_PLAN_MAX_BYTES)}-byte limit.`);
+          }
+          return plan;
+        })();
+      let output: Readonly<Record<string, unknown>> = suggestedPlan === null
+        ? result
+        : { ...result, suggested_plan: suggestedPlan };
+      const markContextTrimmed = (): void => {
+        result.truncated = true;
+        result.context_trimmed = true;
+        output = suggestedPlan === null ? result : { ...result, suggested_plan: suggestedPlan };
+      };
+      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+        const actor = [...result.actors].reverse().find((candidate) => candidate.options.length > 0);
+        if (actor === undefined) break;
+        actor.options.pop();
+        markContextTrimmed();
+      }
+      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+        const actor = [...result.actors].reverse().find((candidate) => candidate.threats.length > 0);
+        if (actor === undefined) break;
+        actor.threats.pop();
+        markContextTrimmed();
+      }
+      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+        result.recent_changes.length > 0) {
+        result.recent_changes.pop();
+        markContextTrimmed();
+      }
+      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+        result.summary.terrain_tags.length > 0) {
+        result.summary.terrain_tags.pop();
+        markContextTrimmed();
+      }
+      if (suggestedPlan !== null &&
+        new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+        result.truncated = true;
+        result.context_trimmed = true;
+        output = result;
+      }
+      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+        result.actors.length > 1) {
+        result.actors.pop();
+        markContextTrimmed();
+      }
+      return output;
+    }
     const exactIntel = exactDmIntelMatrix(state, capsule, queries, required);
     const contextualIntel = required.flatMap((actorId) => {
       const rows = topDmActorIntelRows(exactIntel, actorId);
@@ -1471,7 +1595,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       return idempotent(key, input, () => {
         const valid = resolved.flatMap(({ proposal, resolution }) => resolution.valid ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
-        submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance, submittedArguments: structuredClone(input), intelCapture: captureDmIntel(state, capsule, queries) });
+        submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance, submittedArguments: structuredClone(input), ...(activeIntelMode === 'off' ? {} : { intelCapture: captureDmIntel(state, capsule, queries) }) });
         return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.proposal.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
       });
     }
@@ -1570,7 +1694,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             baseline_plan_hash: request.baselinePlanHash,
             updates: valid,
             submittedArguments: structuredClone(input),
-            intelCapture: captureDmIntel(state, capsule, queries),
+            ...(activeIntelMode === 'off' ? {} : { intelCapture: captureDmIntel(state, capsule, queries) }),
           });
         }
         const actorResolutions = valid.map((entry) => ({
