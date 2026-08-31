@@ -194,6 +194,11 @@ describe('AI-DM R1-10 rerun packet', () => {
       1, { seeds: [5_117_001], reps: 1 },
     )).toThrow('matches neither known era shape');
 
+    expect(() => buildRerunPacket(
+      paired([{ actorId: 'combatant:m1', resolutionSummary: { actionId: 'longbow', targetId: 'combatant:cleric' } }]),
+      1, { seeds: [5_117_001], reps: 1 },
+    )).toThrow('refusing to fabricate an action kind');
+
     const exhaustion = buildRerunPacket(
       paired(null, { plannedBy: null, plannerLabel: 'engine_default', roundNarrative: 'Dodge.' }),
       1, { seeds: [5_117_001], reps: 1 },

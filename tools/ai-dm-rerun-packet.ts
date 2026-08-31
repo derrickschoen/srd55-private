@@ -391,8 +391,12 @@ function neutralActions(plan: z.infer<typeof authorizedPlanEntrySchema>): readon
     const baseline = baselineResolutionSummarySchema.safeParse(summary);
     if (baseline.success) {
       // Baseline-era executed summary; the action kind lives on the intent.
+      // Never fabricate a kind — a summary without its intent is malformed.
+      if (plan.acceptedIntent === undefined) {
+        throw new TypeError('baseline resolutionSummary without acceptedIntent; refusing to fabricate an action kind.');
+      }
       return [{
-        kind: plan.acceptedIntent?.choice.kind ?? 'action',
+        kind: plan.acceptedIntent.choice.kind,
         actionId: baseline.data.actionId,
         targetIds: baseline.data.targetId === null ? [] : [baseline.data.targetId],
       }];
