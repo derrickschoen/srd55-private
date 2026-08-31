@@ -78,6 +78,7 @@ describe('engine MCP stdio protocol', () => {
       'engine.get_turn_context',
       'engine.query_tactical_intel',
       'engine.propose_from_play',
+      'engine.load_skill',
       'engine.get_state_summary',
       'engine.get_combatant_options',
       'engine.query_path',

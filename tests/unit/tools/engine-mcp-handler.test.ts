@@ -14,7 +14,10 @@ import {
 } from '../../../src/vtt/mcp/handler';
 import { createEngineStateCapsule, engineStateHandle } from '../../../src/vtt/engine-state-capsule';
 import { engineStateSummaryProofToken } from '../../../src/vtt/mcp/engine-server';
-import { ENGINE_DM_TOOL_NAMES } from '../../../src/vtt/mcp/engine-server';
+import {
+  ENGINE_DM_TOOL_NAMES,
+  ENGINE_SPECULATIVE_DM_TOOL_NAMES,
+} from '../../../src/vtt/mcp/engine-server';
 import { createEngineMcpRuntime, loadArenaFixture, type EngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import {
@@ -22,12 +25,14 @@ import {
   type RevisionDeltaOperation,
 } from '../../../src/vtt/dm-bridge/projection-transport';
 import { feet } from '../../../src/combat/values';
+import { buildHostScenarioMenu } from '../../../src/vtt/speculative-planning';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
 const TOOL_NAMES = [
   'engine.get_turn_context',
   'engine.query_tactical_intel',
   'engine.propose_from_play',
+  'engine.load_skill',
   'engine.get_state_summary',
   'engine.get_combatant_options',
   'engine.query_path',
@@ -43,7 +48,8 @@ const TOOL_NAMES = [
   'engine.emit_narration',
   'engine.request_dm_adjudication',
 ] as const;
-const REVISION_BOUND_TOOL_NAMES = TOOL_NAMES.filter((name) => name !== 'engine.propose_from_play');
+const REVISION_BOUND_TOOL_NAMES = TOOL_NAMES.filter((name) =>
+  name !== 'engine.propose_from_play' && name !== 'engine.load_skill');
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError('Expected an object.');
@@ -348,6 +354,7 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
       initiative: { mode: 'none' },
     };
     case 'engine.propose_from_play': return { play_name: 'basic_advance' };
+    case 'engine.load_skill': return { skill_name: 'core_tactics' };
     case 'engine.get_state_summary': return { state_ref: facts.ref, granularity: 'room_tactical', page: { maximum_items: 1 } };
     case 'engine.get_combatant_options': return { state_ref: facts.ref, actor_id: facts.actor, include_unavailable: true, page: { maximum_items: 2 } };
     case 'engine.query_path': return { state_ref: facts.ref, actor_id: facts.actor, objective: { kind: 'approach', target: { kind: 'combatant', combatant_id: facts.target } }, movement: { willingness: 'freely', maximum_feet: 30, opportunity_risk: 'accept_if_needed' }, engagement: { stance: 'close_to_melee' } };
@@ -529,12 +536,38 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(adjustmentList.map((tool) => record(tool)['name'])).toEqual([
       'engine.get_turn_context',
       'engine.query_tactical_intel',
+      'engine.load_skill',
       'engine.validate_proposal',
       'engine.submit_plan_adjustment',
       'engine.request_dm_adjudication',
     ]);
     expect(JSON.stringify(adjustmentList)).not.toContain('engine.submit_round_proposals');
     expect(JSON.stringify(adjustmentList)).not.toContain('engine.propose_from_play');
+  });
+
+  it('keeps skill loading available to the bounded speculative planner', async () => {
+    const { state } = await fixtureRuntime({ toolProfile: 'dm' });
+    const actors = state.combatants.flatMap((combatant) =>
+      combatant.profile.kind === 'monster' ? [combatant.profile.id] : []).slice(0, 1);
+    const players = state.combatants.flatMap((combatant) =>
+      combatant.profile.kind === 'player_character' ? [combatant.profile.id] : []);
+    const menu = buildHostScenarioMenu(state, actors, players);
+    const runtime = createEngineMcpRuntime(state, {
+      toolProfile: 'dm',
+      phase: 'speculative',
+      requestedActorIds: actors,
+      speculativeRequest: {
+        targetRoom: 1,
+        targetMonsterRound: 1,
+        refreshGeneration: 0,
+        scenarioMenu: menu.scenarioMenu,
+        scenarios: menu.scenarios,
+      },
+    });
+    const result = record(request(runtime.handler, 105, 'tools/list').result);
+    const tools = result['tools'];
+    if (!Array.isArray(tools)) throw new TypeError('Speculative DM tools/list omitted tools.');
+    expect(tools.map((tool) => record(tool)['name'])).toEqual(ENGINE_SPECULATIVE_DM_TOOL_NAMES);
   });
 
   it.each(TOOL_NAMES)('%s has a direct happy path with output-schema-conforming structured content', async (name) => {

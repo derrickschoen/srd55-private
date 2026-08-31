@@ -11,7 +11,11 @@ import {
   type EncounterSessionId,
 } from '../../combat/values';
 import type { EngineProposalEnvelope, NarrationEnvelope } from '../engine-envelopes';
-import type { QueuedSpeculativePlanEnvelope } from '../speculative-plan-types';
+import type {
+  HostScenario,
+  HostSplitCandidate,
+  QueuedSpeculativePlanEnvelope,
+} from '../speculative-plan-types';
 import {
   createEngineStateCapsule,
   projectEngineEncounterState,
@@ -136,7 +140,7 @@ export interface EngineMcpLauncherManifest {
   readonly branchId: EncounterBranchId;
   readonly revision: number;
   readonly requestId: string;
-  readonly phase: 'initial' | 'correction';
+  readonly phase: 'initial' | 'correction' | 'speculative';
   readonly correctionNumber: 0 | 1;
   readonly room: number;
   readonly historyKind: string;
@@ -144,6 +148,13 @@ export interface EngineMcpLauncherManifest {
   readonly requestKind?: EngineOrdinaryRequestKind;
   readonly requestedActorIds?: readonly import('../../combat/values').CombatantId[];
   readonly planAdjustment?: EnginePlanAdjustmentMetadata;
+  readonly speculativeRequest?: {
+    readonly targetRoom: number;
+    readonly targetMonsterRound: number;
+    readonly refreshGeneration: 0 | 1 | 2;
+    readonly scenarioMenu: readonly HostSplitCandidate[];
+    readonly scenarios: readonly HostScenario[];
+  };
   readonly toolProfile?: EngineMcpToolProfile;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly initiativeProjection?: EngineInitiativeProjection;
@@ -159,7 +170,7 @@ export function createEngineMcpRuntime(
     readonly rulesIndex?: readonly RuleReference[];
     readonly rules?: AllowlistedRulesSource;
     readonly revision?: number;
-    readonly phase?: 'initial' | 'correction';
+    readonly phase?: 'initial' | 'correction' | 'speculative';
     readonly correctionNumber?: 0 | 1;
     readonly room?: number | null;
     readonly historyKind?: string;
@@ -169,7 +180,9 @@ export function createEngineMcpRuntime(
     readonly requestKind?: EngineOrdinaryRequestKind;
     readonly requestedActorIds?: readonly import('../../combat/values').CombatantId[];
     readonly planAdjustment?: EnginePlanAdjustmentMetadata;
+    readonly speculativeRequest?: EngineMcpLauncherManifest['speculativeRequest'];
     readonly onProposal?: (proposal: EngineProposalEnvelope) => void;
+    readonly onSpeculativePlan?: (plan: QueuedSpeculativePlanEnvelope) => void;
     readonly toolProfile?: EngineMcpToolProfile;
     readonly turnContextDeltaBase?: TurnContextDeltaBase;
     readonly initiativeProjection?: EngineInitiativeProjection;
@@ -192,7 +205,19 @@ export function createEngineMcpRuntime(
   const phase = options.phase ?? 'initial';
   const correctionNumber = options.correctionNumber ?? (phase === 'correction' ? 1 : 0);
   let request: EngineCapsuleRequest;
-  if (options.requestKind === 'plan_adjustment') {
+  if (phase === 'speculative') {
+    const speculative = options.speculativeRequest;
+    if (speculative === undefined) {
+      throw new TypeError('Speculative engine requests require a scenario menu.');
+    }
+    request = {
+      requestId: options.requestId ?? 'request:engine-mcp-speculative',
+      phase: 'speculative',
+      correctionNumber: 0,
+      actors,
+      ...speculative,
+    };
+  } else if (options.requestKind === 'plan_adjustment') {
     const metadata = options.planAdjustment;
     if (metadata === undefined) {
       throw new TypeError('Plan-adjustment engine requests require correlation metadata.');
@@ -206,7 +231,7 @@ export function createEngineMcpRuntime(
       ...metadata,
     };
   } else {
-    if (options.planAdjustment !== undefined) {
+    if (options.planAdjustment !== undefined || options.speculativeRequest !== undefined) {
       throw new TypeError('Round-plan engine requests cannot carry plan-adjustment metadata.');
     }
     request = {
@@ -264,7 +289,10 @@ export function createEngineMcpRuntime(
         options.onProposal?.(structuredClone(envelope));
       },
     },
-    speculativePlans: { append: (envelope) => { speculativePlans.push(envelope); } },
+    speculativePlans: { append: (envelope) => {
+      speculativePlans.push(envelope);
+      options.onSpeculativePlan?.(structuredClone(envelope));
+    } },
     narration: { append: (envelope) => { narrations.push(envelope); } },
     adjudications: { append: (envelope) => { adjudications.push(envelope); } },
     rules: options.rules ?? { get: () => null },
@@ -339,7 +367,7 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
     typeof input['branchId'] === 'string' && input['branchId'].length > 0 &&
     Number.isSafeInteger(input['revision']) && typeof input['revision'] === 'number' && input['revision'] >= 1 &&
     typeof input['requestId'] === 'string' && input['requestId'].length > 0 &&
-    (input['phase'] === 'initial' || input['phase'] === 'correction') &&
+    (input['phase'] === 'initial' || input['phase'] === 'correction' || input['phase'] === 'speculative') &&
     (input['correctionNumber'] === 0 || input['correctionNumber'] === 1) &&
     Number.isSafeInteger(input['room']) && typeof input['room'] === 'number' && input['room'] >= 1 &&
     typeof input['historyKind'] === 'string' && input['historyKind'].length > 0 &&
@@ -349,6 +377,11 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
       Array.isArray(input['requestedActorIds']) && input['requestedActorIds'].length > 0 &&
       input['requestedActorIds'].every((actorId) => typeof actorId === 'string') &&
       new Set(input['requestedActorIds']).size === input['requestedActorIds'].length) &&
+    (input['phase'] === 'speculative'
+      ? input['correctionNumber'] === 0 && typeof input['speculativeRequest'] === 'object' &&
+        input['speculativeRequest'] !== null && !Array.isArray(input['speculativeRequest']) &&
+        input['planAdjustment'] === undefined
+      : input['speculativeRequest'] === undefined) &&
     (input['requestKind'] === 'plan_adjustment'
       ? typeof input['planAdjustment'] === 'object' && input['planAdjustment'] !== null &&
         !Array.isArray(input['planAdjustment']) && Array.isArray(input['requestedActorIds'])
@@ -420,6 +453,10 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
         requestedActorIds: manifest.requestedActorIds,
         planAdjustment: manifest.planAdjustment,
       } : {}),
+      ...(manifest.phase === 'speculative' ? {
+        requestedActorIds: manifest.requestedActorIds,
+        speculativeRequest: manifest.speculativeRequest,
+      } : {}),
       ...(manifest.turnContextDeltaBase === undefined ? {} : {
         turnContextDeltaBase: manifest.turnContextDeltaBase,
       }),
@@ -431,6 +468,9 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
         : { toolProfile: selectedProfile ?? manifest.toolProfile }),
       onProposal: (proposal) => {
         appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(proposal)}\n`, 'utf8');
+      },
+      onSpeculativePlan: (plan) => {
+        appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(plan)}\n`, 'utf8');
       },
       ...(manifest.turnContextSpoolPath === undefined ? {} : {
         onTurnContext: (context: Readonly<Record<string, unknown>>) => {

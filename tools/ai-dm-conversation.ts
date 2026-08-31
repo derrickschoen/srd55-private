@@ -31,12 +31,16 @@ import type {
   ProposedTurnResolution,
   RoundTurnProposalEnvelope,
 } from '../src/vtt/engine-envelopes';
-import { engineStateHandle, type EnginePlanAdjustmentMetadata } from '../src/vtt/engine-state-capsule';
+import {
+  engineStateHandle,
+  type EnginePlanAdjustmentMetadata,
+  type EngineStateCapsule,
+} from '../src/vtt/engine-state-capsule';
 import {
   EngineRoundSession,
   type EngineBoundaryResolutions,
+  type EngineOrdinaryRoundCapsuleRequest,
   type EngineProposalDeviation,
-  type EngineRoundCapsuleRequest,
   type EngineRoundSnapshot,
 } from '../src/vtt/engine-round-session';
 import { canonicalEngineQueryPort } from '../src/vtt/engine-query-port';
@@ -46,6 +50,11 @@ import {
 } from '../src/vtt/intent-resolver';
 import { projectFutureMonsterTurns } from '../src/vtt/monster-planning-state';
 import { SNIPPET_REGISTRY, type PlayName } from '../src/vtt/snippet-registry-runtime';
+import {
+  buildHostScenarioMenu,
+  evaluateHostScenarios,
+} from '../src/vtt/speculative-planning';
+import type { QueuedSpeculativePlanEnvelope } from '../src/vtt/speculative-plan-types';
 import { mcpRequestMeta } from '../src/vtt/mcp/handler';
 import {
   createEngineMcpRuntime, loadArenaFixture, type EngineMcpLauncherManifest,
@@ -114,6 +123,8 @@ export type ConversationEffort = (typeof CONVERSATION_EFFORTS)[number];
 export const COMBAT_MODELS = ['monster_block_v1', 'initiative_segments_v1'] as const;
 export type CombatModel = (typeof COMBAT_MODELS)[number];
 export const ROUND_PROTOCOL_VERSION = 3 as const;
+export const SPECULATION_MS_PER_PLAYER_TURN = 60_000 as const;
+export const SPECULATION_MAX_BUDGET_MS = 300_000 as const;
 
 const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
   requestSequence: 1,
@@ -284,6 +295,62 @@ export interface ConversationMonsterSegment {
   readonly deviationResolutions: readonly EngineProposalDeviation[];
 }
 
+export type ConversationSpeculationDiscardReason =
+  | 'empty_scenario_menu'
+  | 'budget_expired'
+  | 'dispatch_failed'
+  | 'target_disappeared'
+  | 'actor_set_changed'
+  | 'newer_adjustment_present'
+  | 'no_scenario_match'
+  | 'ambiguous_scenario_match'
+  | 'option_mapping_failed'
+  | 'proposal_validation_failed';
+
+export type ConversationSpeculation =
+  | {
+      readonly status: 'not_proposed';
+      readonly reason: 'no_eligible_player_window' | 'empty_scenario_menu';
+      readonly budgetMs: number;
+    }
+  | {
+      readonly status: 'proposed' | 'adopted' | 'discarded';
+      readonly proposed: true;
+      readonly adopted: boolean;
+      readonly discarded: boolean;
+      readonly discardReason: ConversationSpeculationDiscardReason | null;
+      readonly targetMonsterRound: number;
+      readonly targetActorIds: readonly CombatantId[];
+      readonly branchCount: number;
+      readonly budgetMs: number;
+      readonly planningWallMs: number;
+      readonly boundaryWaitMs: number;
+      readonly plannedBy: ConversationPlannerAttribution;
+      readonly source: { readonly revision: number; readonly digest: string };
+      readonly decision: { readonly revision: number; readonly digest: string } | null;
+    };
+
+interface SpeculativeDispatchCompletion {
+  readonly plan: QueuedSpeculativePlanEnvelope | null;
+  readonly turn: AgentTurnResult | null;
+  readonly planningWallMs: number;
+  readonly timedOut: boolean;
+  readonly error: string | null;
+}
+
+interface InFlightSpeculation {
+  readonly sourceSnapshot: EngineRoundSnapshot;
+  readonly sourceTurnContext: TurnContextDeltaBase;
+  readonly targetActorIds: readonly CombatantId[];
+  readonly targetMonsterRound: number;
+  readonly branchCount: number;
+  readonly budgetMs: number;
+  readonly planner: ConversationPlannerAttribution;
+  readonly baselinePlanHash: string;
+  readonly controller: AbortController;
+  readonly completion: Promise<SpeculativeDispatchCompletion>;
+}
+
 export interface ConversationTeamPlans {
   readonly party: null | {
     readonly planId: string;
@@ -363,6 +430,8 @@ export interface ConversationRow {
   readonly pcTurns: readonly ConversationPcTurn[];
   readonly adjustments: readonly ConversationAdjustment[];
   readonly monsterSegments: readonly ConversationMonsterSegment[];
+  readonly speculation: ConversationSpeculation;
+  readonly speculations: readonly ConversationSpeculation[];
   readonly roundTotals: {
     readonly initialCalls: number;
     readonly adjustmentCalls: number;
@@ -391,6 +460,13 @@ export interface ConversationRunOptions {
   readonly store?: BrowserSessionStore;
   readonly adapter?: AgentSessionAdapter;
   readonly onPrimaryDispatchStart?: () => void;
+  readonly onSpeculationDispatchStart?: () => void;
+  /** Test-only lower pacing cap; production derives 60 seconds per eligible PC, capped at five minutes. */
+  readonly speculationBudgetMs?: number;
+  /** SIMULATED-only delay injected before speculative dispatch. */
+  readonly speculationDispatchDelayMs?: number;
+  /** SIMULATED-only immutable state replacement immediately before speculative boundary validation. */
+  readonly mutateBeforeSpeculationBoundary?: (state: EncounterState) => EncounterState;
   /** Test-only explicit override; takes precedence over the configured arena policy. */
   readonly partyPolicyOverride?: ScriptedPartyDecisionPolicy;
   /** Test-only browser-reload proof point; one-based completed round count. */
@@ -772,6 +848,166 @@ function maximalLivingMonsterSegment(state: EncounterState): readonly CombatantI
   return actors;
 }
 
+function playerWindowBeforeNextMonster(state: EncounterState): {
+  readonly players: readonly CombatantId[];
+  readonly monsters: readonly CombatantId[];
+} {
+  if (state.activeInitiativeIndex === null) return { players: [], monsters: [] };
+  const players: CombatantId[] = [];
+  const monsters: CombatantId[] = [];
+  let reachedMonsters = false;
+  for (let index = state.activeInitiativeIndex; index < state.initiative.length; index += 1) {
+    const slot = state.initiative[index];
+    if (slot === undefined) throw new Error('Speculative initiative window encountered a missing slot.');
+    const combatant = state.combatants.find((entry) => entry.profile.id === slot.combatant);
+    if (combatant === undefined) throw new Error(`Speculative initiative actor ${slot.combatant} is absent.`);
+    if (combatant.life === 'dead') continue;
+    if (combatant.profile.kind === 'player_character') {
+      if (reachedMonsters) break;
+      players.push(combatant.profile.id);
+      continue;
+    }
+    reachedMonsters = true;
+    monsters.push(combatant.profile.id);
+  }
+  return { players, monsters };
+}
+
+function sameCombatantSet(left: readonly CombatantId[], right: readonly CombatantId[]): boolean {
+  const a = [...left].sort((one, two) => one.localeCompare(two));
+  const b = [...right].sort((one, two) => one.localeCompare(two));
+  return a.length === b.length && a.every((actorId, index) => actorId === b[index]);
+}
+
+function optionStructure(option: EngineActorOption): string {
+  const { optionId: _optionId, revision: _revision, ...structure } = option;
+  return canonicalJson(structure);
+}
+
+function rebaseStoredPlanEntries(input: {
+  readonly state: EncounterState;
+  readonly actualRevision: number;
+  readonly entries: readonly SegmentMonsterPlanEntry[];
+}): readonly SegmentMonsterPlanEntry[] | null {
+  const actors = input.entries.map((entry) => entry.proposal.actorId);
+  const planningState = projectFutureMonsterTurns(input.state, actors);
+  const rebound: SegmentMonsterPlanEntry[] = [];
+  for (const entry of input.entries) {
+    const options = availableEngineActorOptions(
+      planningState,
+      entry.proposal.actorId,
+      canonicalEngineQueryPort,
+      input.actualRevision,
+    );
+    const primary = options.filter((option) => optionStructure(option) === optionStructure(entry.primaryOption));
+    const fallback = entry.fallbackOption === null ? [] : options.filter((option) =>
+      optionStructure(option) === optionStructure(entry.fallbackOption!));
+    if (primary.length !== 1 || (entry.fallbackOption !== null && fallback.length !== 1)) return null;
+    const proposal: EngineTurnProposal = {
+      ...structuredClone(entry.proposal),
+      expectedRevision: input.actualRevision,
+      primaryOptionId: primary[0]!.optionId,
+      fallbackOptionId: entry.fallbackOption === null ? null : fallback[0]!.optionId,
+    };
+    const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
+    if (!resolution.valid) return null;
+    rebound.push({
+      proposal,
+      option: structuredClone(resolution.option),
+      primaryOption: structuredClone(resolution.primaryOption),
+      fallbackOption: structuredClone(resolution.fallbackOption),
+      mechanics: resolution.mechanics,
+      selectedBranch: resolution.selectedBranch,
+    });
+  }
+  return rebound;
+}
+
+function adoptSpeculativeBranch(input: {
+  readonly state: EncounterState;
+  readonly actualRevision: number;
+  readonly targetRoom: number;
+  readonly targetMonsterRound: number;
+  readonly targetActorIds: readonly CombatantId[];
+  readonly plan: QueuedSpeculativePlanEnvelope;
+  readonly sourceCapsule: EngineStateCapsule;
+}): { readonly entries: readonly SegmentMonsterPlanEntry[]; readonly scenarioId: string } | {
+  readonly entries: null;
+  readonly reason: Exclude<ConversationSpeculationDiscardReason, 'empty_scenario_menu' | 'budget_expired' | 'dispatch_failed'>;
+} {
+  if (input.plan.targetRoom !== input.targetRoom ||
+    input.plan.targetMonsterRound !== input.targetMonsterRound) {
+    return { entries: null, reason: 'target_disappeared' };
+  }
+  const livingTargets = input.targetActorIds.filter((actorId) => input.state.combatants.some((entry) =>
+    entry.profile.id === actorId && entry.profile.kind === 'monster' && entry.life !== 'dead'));
+  if (!sameCombatantSet(input.plan.actorIds, livingTargets)) {
+    return { entries: null, reason: 'actor_set_changed' };
+  }
+  const selection = evaluateHostScenarios(input.state, input.plan.scenarios, canonicalEngineQueryPort);
+  if (selection.kind === 'no_match') {
+    return {
+      entries: null,
+      reason: selection.reason === 'OVERLAPPING_SCENARIOS'
+        ? 'ambiguous_scenario_match'
+        : 'no_scenario_match',
+    };
+  }
+  const branch = input.plan.branches.find((candidate) => candidate.scenarioId === selection.scenario.scenarioId);
+  if (branch === undefined || !sameCombatantSet(
+    branch.proposals.map((proposal) => proposal.actorId),
+    livingTargets,
+  )) return { entries: null, reason: 'actor_set_changed' };
+  const planningState = projectFutureMonsterTurns(input.state, livingTargets);
+  const entries: SegmentMonsterPlanEntry[] = [];
+  for (const proposed of branch.proposals) {
+    const actorOptions = availableEngineActorOptions(
+      planningState,
+      proposed.actorId,
+      canonicalEngineQueryPort,
+      input.actualRevision,
+    );
+    const sourceOptions = input.sourceCapsule.projection.combatants
+      .find((actor) => actor.id === proposed.actorId)?.options ?? [];
+    const sourcePrimary = sourceOptions.find((option) => option.optionId === proposed.primaryOptionId);
+    const sourceFallback = proposed.fallbackOptionId === null ? null : sourceOptions.find((option) =>
+      option.optionId === proposed.fallbackOptionId);
+    if (sourcePrimary === undefined || sourceFallback === undefined) return {
+      entries: null, reason: 'option_mapping_failed',
+    };
+    const primaryMatches = actorOptions.filter((option) =>
+      optionStructure(option) === optionStructure(sourcePrimary));
+    const fallbackMatches = sourceFallback === null ? [] : actorOptions.filter((option) =>
+      optionStructure(option) === optionStructure(sourceFallback));
+    if (primaryMatches.length !== 1 ||
+      (proposed.fallbackOptionId !== null && fallbackMatches.length !== 1)) {
+      return { entries: null, reason: 'option_mapping_failed' };
+    }
+    const primary = primaryMatches[0];
+    const fallback = proposed.fallbackOptionId === null ? null : fallbackMatches[0];
+    if (primary === undefined || (proposed.fallbackOptionId !== null && fallback === undefined)) {
+      return { entries: null, reason: 'option_mapping_failed' };
+    }
+    const rebound: EngineTurnProposal = {
+      ...structuredClone(proposed),
+      expectedRevision: input.actualRevision,
+      primaryOptionId: primary.optionId,
+      fallbackOptionId: fallback?.optionId ?? null,
+    };
+    const resolution = pureTurnProposalResolver.resolve(planningState, rebound);
+    if (!resolution.valid) return { entries: null, reason: 'proposal_validation_failed' };
+    entries.push({
+      proposal: rebound,
+      option: structuredClone(resolution.option),
+      primaryOption: structuredClone(resolution.primaryOption),
+      fallbackOption: structuredClone(resolution.fallbackOption),
+      mechanics: resolution.mechanics,
+      selectedBranch: resolution.selectedBranch,
+    });
+  }
+  return { entries, scenarioId: selection.scenario.scenarioId };
+}
+
 function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string, unknown>> {
   return {
     actor_id: proposal.actorId,
@@ -910,11 +1146,13 @@ async function mcpRequest(client: McpClient, method: string, params: unknown): P
   return response['result'];
 }
 
-async function stopMcpClient(client: McpClient): Promise<void> {
+async function stopMcpClient(client: McpClient, allowNonzero = false): Promise<void> {
   client.child.stdin.end();
   const code = await client.exit;
   client.lines.close();
-  if (code !== 0) throw new Error(`Engine MCP server exited ${String(code)}: ${client.stderr}`);
+  if (code !== 0 && !allowNonzero) {
+    throw new Error(`Engine MCP server exited ${String(code)}: ${client.stderr}`);
+  }
 }
 
 function externalReactionGuidance(guidance: ReactionGuidanceDeclaration): Readonly<Record<string, unknown>> {
@@ -1087,6 +1325,8 @@ async function driveScriptedMcp(
   reactionGuidance: ReactionGuidanceDeclaration | null,
   suggestionResponse: SimulatedSuggestionResponse,
   adjustmentResponse: 'keep' | 'change' | 'invalid',
+  signal?: AbortSignal,
+  speculativeDelayMs = 0,
 ): Promise<{
   readonly calls: number;
   readonly rejections: readonly ConversationChainAttemptEvidence[];
@@ -1095,9 +1335,52 @@ async function driveScriptedMcp(
   const manifest = JSON.parse(await readFile(launcherPath, 'utf8')) as EngineMcpLauncherManifest;
   const state = await loadArenaFixture(manifest.fixturePath);
   const client = startMcpClient(cwd, launcherPath);
+  const abortClient = (): void => { client.child.kill('SIGTERM'); };
+  if (signal?.aborted === true) abortClient();
+  else signal?.addEventListener('abort', abortClient, { once: true });
   let calls = 0;
   try {
     await mcpRequest(client, 'server/discover', {});
+    if (manifest.phase === 'speculative') {
+      await abortableDelay(speculativeDelayMs, signal ?? new AbortController().signal);
+      const speculative = manifest.speculativeRequest;
+      const actors = manifest.requestedActorIds;
+      if (speculative === undefined || actors === undefined) {
+        throw new Error('SIMULATED speculative launcher omitted its bounded request.');
+      }
+      const resource = asRecord(await mcpRequest(client, 'resources/read', {
+        uri: `engine://run/${encodeURIComponent(manifest.runId)}/revision/${String(manifest.revision)}/turn`,
+      }));
+      const contents = resource?.['contents'];
+      const firstContent = Array.isArray(contents) ? asRecord(contents[0]) : null;
+      const revision = firstContent === null ? null : asRecord(
+        JSON.parse(String(firstContent['text'])) as unknown,
+      );
+      const stateRef = asRecord(revision?.['state_ref']);
+      if (stateRef === null) throw new Error('Speculative revision resource omitted state_ref.');
+      const proposals = actors.map((actorId) =>
+        externalProposal(engineDefaultPlanEntry(state, actorId, manifest.revision).proposal));
+      const result = asRecord(await mcpRequest(client, 'tools/call', {
+        name: 'engine.submit_speculative_round_plan',
+        arguments: {
+          state_ref: stateRef,
+          request_id: manifest.requestId,
+          target_room: speculative.targetRoom,
+          target_monster_round: speculative.targetMonsterRound,
+          refresh_generation: speculative.refreshGeneration,
+          branches: speculative.scenarios.map((scenario) => ({
+            scenario_id: scenario.scenarioId,
+            proposals,
+          })),
+          idempotency_key: `SIMULATED-${manifest.requestId}`.slice(0, 200),
+        },
+      }));
+      calls += 1;
+      if (result === null || result['isError'] !== false) {
+        throw new Error('engine.submit_speculative_round_plan failed in the SIMULATED client.');
+      }
+      return { calls, rejections: rejectionEvidence(result), contextTruncated: false };
+    }
     const contextResult = asRecord(await mcpRequest(client, 'tools/call', {
       name: 'engine.get_turn_context',
       arguments: {
@@ -1227,7 +1510,8 @@ async function driveScriptedMcp(
       contextTruncated: eventContextTrimmed(contextResult),
     };
   } finally {
-    await stopMcpClient(client);
+    signal?.removeEventListener('abort', abortClient);
+    await stopMcpClient(client, signal?.aborted === true);
   }
 }
 
@@ -1244,6 +1528,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   readonly #reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>;
   readonly #suggestionResponseByRequest: Readonly<Record<string, ConversationSuggestionAdoption>>;
   readonly #adjustmentResponseByRequest: Readonly<Record<string, 'keep' | 'change' | 'invalid'>>;
+  readonly #speculativeDelayMs: number;
   #starts = 0;
 
   constructor(
@@ -1257,6 +1542,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>,
     suggestionResponseByRequest: Readonly<Record<string, ConversationSuggestionAdoption>>,
     adjustmentResponseByRequest: Readonly<Record<string, 'keep' | 'change' | 'invalid'>>,
+    speculativeDelayMs: number,
   ) {
     this.kind = kind;
     this.#exhaustInitial = new Set(exhaust);
@@ -1266,27 +1552,38 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     this.#reactionGuidanceByRequest = reactionGuidanceByRequest;
     this.#suggestionResponseByRequest = suggestionResponseByRequest;
     this.#adjustmentResponseByRequest = adjustmentResponseByRequest;
+    this.#speculativeDelayMs = speculativeDelayMs;
   }
 
   async probe() { return { present: true, version: 'SIMULATED' }; }
 
-  async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
+  async start(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
     this.#starts += 1;
     const sessionId = this.#starts === 1
       ? `agent-session:SIMULATED:${invocation.runId}`
       : `agent-session:SIMULATED:${invocation.runId}:fresh-${String(this.#starts)}`;
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
-    return this.#dispatch(sessionId, invocation, false);
+    return this.#dispatch(sessionId, invocation, false, signal);
   }
 
-  async resume(binding: AgentSessionBinding, invocation: AgentInvocation): Promise<AgentTurnResult> {
-    return this.#dispatch(binding.sessionId, invocation, invocation.prompt.startsWith('[ROOM_TRANSITION]'));
+  async resume(
+    binding: AgentSessionBinding,
+    invocation: AgentInvocation,
+    signal: AbortSignal,
+  ): Promise<AgentTurnResult> {
+    return this.#dispatch(
+      binding.sessionId,
+      invocation,
+      invocation.prompt.startsWith('[ROOM_TRANSITION]'),
+      signal,
+    );
   }
 
   async #dispatch(
     sessionId: string,
     invocation: AgentInvocation,
     roomTransition: boolean,
+    signal: AbortSignal,
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const key = manifest.requestId.replace(/^request:/u, '');
@@ -1306,6 +1603,8 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
       manifest.phase === 'initial' ? this.#reactionGuidanceByRequest[key] ?? null : null,
       manifest.phase === 'initial' ? this.#suggestionResponseByRequest[key] ?? 'legacy' : 'legacy',
       this.#adjustmentResponseByRequest[key] ?? 'keep',
+      signal,
+      manifest.phase === 'speculative' ? this.#speculativeDelayMs : 0,
     );
     this.callsByRequest.set(manifest.requestId, (this.callsByRequest.get(manifest.requestId) ?? 0) + driven.calls);
     this.contextCallsByRequest.set(
@@ -1363,6 +1662,22 @@ function completedSimulated(value: string): AgentTurnResult {
   };
 }
 
+async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (milliseconds <= 0) return;
+  await new Promise<void>((resolvePromise, reject) => {
+    const abort = (): void => {
+      clearTimeout(timer);
+      reject(new Error('SPECULATION_ABORTED'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolvePromise();
+    }, milliseconds);
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
+  });
+}
+
 function isRoundProposal(value: unknown): value is RoundTurnProposalEnvelope {
   const input = asRecord(value);
   return input?.['kind'] === 'round_turn_proposal' &&
@@ -1387,6 +1702,18 @@ function isPlanAdjustmentProposal(value: unknown): value is PlanAdjustmentPropos
     typeof input['baseline_plan_hash'] === 'string' && Array.isArray(input['updates']);
 }
 
+function isSpeculativePlan(value: unknown): value is QueuedSpeculativePlanEnvelope {
+  const input = asRecord(value);
+  return input?.['kind'] === 'speculative_round_plan' &&
+    input['status'] === 'QUEUED-SPECULATIVE' &&
+    typeof input['speculativePlanId'] === 'string' &&
+    typeof input['requestId'] === 'string' &&
+    typeof input['sourceRevision'] === 'number' &&
+    typeof input['sourceDigest'] === 'string' &&
+    Array.isArray(input['actorIds']) && Array.isArray(input['branches']) &&
+    Array.isArray(input['scenarios']);
+}
+
 function takeRoundProposal(path: string): RoundTurnProposalEnvelope | null {
   let source: string;
   try { source = readFileSync(path, 'utf8'); } catch { return null; }
@@ -1401,6 +1728,14 @@ function takePlanAdjustmentProposal(path: string): PlanAdjustmentProposalEnvelop
   const proposal = source.split('\n').filter((line) => line.trim().length > 0)
     .map((line): unknown => JSON.parse(line) as unknown).findLast(isPlanAdjustmentProposal) ?? null;
   return proposal === null ? null : structuredClone(proposal);
+}
+
+function takeSpeculativePlan(path: string): QueuedSpeculativePlanEnvelope | null {
+  let source: string;
+  try { source = readFileSync(path, 'utf8'); } catch { return null; }
+  const plan = source.split('\n').filter((line) => line.trim().length > 0)
+    .map((line): unknown => JSON.parse(line) as unknown).findLast(isSpeculativePlan) ?? null;
+  return plan === null ? null : structuredClone(plan);
 }
 
 async function writeLauncher(input: {
@@ -1426,9 +1761,7 @@ async function writeLauncher(input: {
   await writeFile(turnContextSpoolPath, '', 'utf8');
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
-  if (request === null || request.phase === 'speculative') {
-    throw new Error('Conversation launcher requires an ordinary pending request.');
-  }
+  if (request === null) throw new Error('Conversation launcher requires a pending request.');
   const manifest: EngineMcpLauncherManifest = {
     format: 'engine-mcp-launcher-v1', fixturePath, proposalSpoolPath: spoolPath,
     turnContextSpoolPath,
@@ -1437,7 +1770,16 @@ async function writeLauncher(input: {
     phase: request.phase, correctionNumber: request.correctionNumber,
     room: input.room, historyKind: input.historyKind, toolProfile: 'dm',
     initiativeProjection: capsule.projection.initiative,
-    ...(request.kind === 'plan_adjustment' ? {
+    ...(request.phase === 'speculative' ? {
+      requestedActorIds: request.actors,
+      speculativeRequest: {
+        targetRoom: request.targetRoom,
+        targetMonsterRound: request.targetMonsterRound,
+        refreshGeneration: request.refreshGeneration,
+        scenarioMenu: request.scenarioMenu,
+        scenarios: request.scenarios,
+      },
+    } : request.kind === 'plan_adjustment' ? {
       requestKind: request.kind,
       requestedActorIds: request.actors,
       planAdjustment: {
@@ -1581,6 +1923,46 @@ function inProcessDmToolSession(input: {
         input.onToolResult(name, { error: error instanceof Error ? error.message : String(error) });
         throw error;
       }
+    },
+  };
+}
+
+function inProcessSpeculativeToolSession(input: {
+  readonly state: EncounterState;
+  readonly snapshot: EngineRoundSnapshot;
+  readonly onPlan: (plan: QueuedSpeculativePlanEnvelope) => void;
+}): AgentToolSession {
+  const capsule = input.snapshot.capsule;
+  const request = capsule.request;
+  if (request?.phase !== 'speculative') {
+    throw new Error('Speculative tool session requires a speculative pending request.');
+  }
+  const runtime = createEngineMcpRuntime(input.state, {
+    runId: capsule.runId,
+    branchId: capsule.branchId,
+    revision: capsule.revision,
+    requestId: request.requestId,
+    phase: 'speculative',
+    room: request.targetRoom,
+    ...(capsule.historyDelta[0] === undefined ? {} : {
+      historyKind: capsule.historyDelta[0].kind,
+    }),
+    requestedActorIds: request.actors,
+    speculativeRequest: {
+      targetRoom: request.targetRoom,
+      targetMonsterRound: request.targetMonsterRound,
+      refreshGeneration: request.refreshGeneration,
+      scenarioMenu: request.scenarioMenu,
+      scenarios: request.scenarios,
+    },
+    toolProfile: 'dm',
+    initiativeProjection: capsule.projection.initiative,
+    onSpeculativePlan: (plan) => input.onPlan(structuredClone(plan)),
+  });
+  return {
+    tools: runtime.toolSurface.tools,
+    execute(name, argumentsValue) {
+      return runtime.toolSurface.execute(name, argumentsValue);
     },
   };
 }
@@ -1769,6 +2151,7 @@ async function runConversationWithConfiguredIntel(
     options.reactionGuidanceByRequest ?? {},
     options.suggestionResponseByRequest ?? {},
     options.adjustmentResponseByRequest ?? {},
+    options.speculationDispatchDelayMs ?? 0,
   ) : null;
   const selectedAdapter = options.adapter ?? simulated ?? (config.cli === 'local-openai'
     ? new LocalOpenAiAgentSessionAdapter({
@@ -1816,19 +2199,19 @@ async function runConversationWithConfiguredIntel(
       : { model: config.escalationModel, effort: config.escalationEffort };
   const escalationInstructions =
     'This is a fresh one-shot escalation session for the supplied repair brief. Submit one complete OFFENSIVE corrected round: every actor with a legal attack must attack; Dash-to-close counts as offense for out-of-reach melee; Dodge is allowed only when that actor has no resolvable action. Use only the correction launcher; no fallback remains.';
-  const prepareRound = (request: EngineRoundCapsuleRequest): EngineRoundSnapshot => {
+  const prepareRound = (request: EngineOrdinaryRoundCapsuleRequest): EngineRoundSnapshot => {
     const prepared = engineSession.prepareRound(request, journal.reactionGuidance());
     recordAutoResolvedReactions(journal, prepared);
     capsuleRevision += prepared.revisionDelta;
     return prepared.snapshot;
   };
-  const beginSegmentRound = (request: EngineRoundCapsuleRequest): EngineRoundSnapshot => {
+  const beginSegmentRound = (request: EngineOrdinaryRoundCapsuleRequest): EngineRoundSnapshot => {
     const prepared = engineSession.beginRoundWithoutSkipping(request, journal.reactionGuidance());
     recordAutoResolvedReactions(journal, prepared);
     capsuleRevision += prepared.revisionDelta;
     return prepared.snapshot;
   };
-  const prepareConfiguredRound = (request: EngineRoundCapsuleRequest): EngineRoundSnapshot =>
+  const prepareConfiguredRound = (request: EngineOrdinaryRoundCapsuleRequest): EngineRoundSnapshot =>
     config.combatModel === 'initiative_segments_v1'
       ? beginSegmentRound(request)
       : prepareRound(request);
@@ -1860,7 +2243,7 @@ async function runConversationWithConfiguredIntel(
       observedRejections = [];
       const requestId = `request:room-${String(room)}-round-${String(round)}`;
       const key = `room-${String(room)}-round-${String(round)}`;
-      const initialRequest: EngineRoundCapsuleRequest = {
+      const initialRequest: EngineOrdinaryRoundCapsuleRequest = {
         runId, branchId, revision: capsuleRevision, requestId,
         phase: 'initial', room, historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
       };
@@ -1968,12 +2351,161 @@ async function runConversationWithConfiguredIntel(
       const autoSubmitBlocks = new Map<CombatantId, ConversationAutoSubmitBlock>();
       let exhaustionIntelCapture: DmIntelCapture | null = null;
       let segmentPlanId: string | null = null;
+      let speculation: ConversationSpeculation = {
+        status: 'not_proposed', reason: 'no_eligible_player_window', budgetMs: 0,
+      };
+      const speculations: ConversationSpeculation[] = [];
+      const inFlightSpeculation: { current: InFlightSpeculation | null } = { current: null };
       const adjustmentTransitions: AdjustmentExhaustionTransition[] = [];
       const adjustmentPersistence = {
         transitions: (): readonly AdjustmentExhaustionTransition[] => adjustmentTransitions,
         record: (transition: AdjustmentExhaustionTransition): void => {
           adjustmentTransitions.push(structuredClone(transition));
         },
+      };
+      const startSpeculation = async (
+        sourceState: EncounterState,
+        window: ReturnType<typeof playerWindowBeforeNextMonster>,
+      ): Promise<void> => {
+        if (inFlightSpeculation.current !== null || window.players.length === 0 || window.monsters.length === 0) return;
+        const derivedBudget = Math.min(
+          window.players.length * SPECULATION_MS_PER_PLAYER_TURN,
+          SPECULATION_MAX_BUDGET_MS,
+        );
+        const budgetMs = Math.min(derivedBudget, options.speculationBudgetMs ?? derivedBudget);
+        const menu = buildHostScenarioMenu(
+          sourceState,
+          window.monsters,
+          window.players,
+          canonicalEngineQueryPort,
+        );
+        if (menu.scenarios.length === 0) {
+          if (speculations.length === 0) {
+            speculation = { status: 'not_proposed', reason: 'empty_scenario_menu', budgetMs };
+          }
+          return;
+        }
+        const speculativeRequestId = `${requestId}:speculative:${String(window.monsters[0])}`;
+        const sourceSnapshot = engineSession.snapshot({
+          runId, branchId, revision: capsuleRevision,
+          requestId: speculativeRequestId,
+          phase: 'speculative',
+          room,
+          historyKind: 'speculative_plan_requested',
+          requestedActorIds: window.monsters,
+          targetMonsterRound: round,
+          refreshGeneration: 0,
+          scenarioMenu: menu.scenarioMenu,
+          scenarios: menu.scenarios,
+        });
+        const ordinaryContextSnapshot = engineSession.snapshot({
+          runId, branchId, revision: capsuleRevision,
+          requestId: `${speculativeRequestId}:context`,
+          phase: 'initial',
+          room,
+          historyKind: 'speculative_context_projected',
+          requestedActorIds: window.monsters,
+        });
+        const ordinaryContext = plannedTurnContext(
+          sourceState,
+          ordinaryContextSnapshot,
+          undefined,
+          config.intelMode,
+        ).value;
+        const speculativeContext = {
+          ...ordinaryContext,
+          state_ref: {
+            run_id: sourceSnapshot.capsule.runId,
+            state_handle: engineStateHandle(sourceSnapshot.capsule),
+            expected_revision: sourceSnapshot.capsule.revision,
+          },
+          speculative_request: sourceSnapshot.capsule.request,
+        };
+        const launcher = await writeLauncher({
+          directory: artifacts,
+          name: `${key}-speculative-${String(window.monsters[0])}`,
+          snapshot: sourceSnapshot,
+          room,
+          historyKind: 'speculative_plan_requested',
+        });
+        let localPlan: QueuedSpeculativePlanEnvelope | null = null;
+        const toolSession = config.cli === 'local-openai'
+          ? inProcessSpeculativeToolSession({
+              state: sourceState,
+              snapshot: sourceSnapshot,
+              onPlan: (plan) => { localPlan = plan; },
+            })
+          : undefined;
+        const planner = escalationPlanner ?? basePlanner;
+        const controller = new AbortController();
+        const dispatchStarted = performance.now();
+        const timeout = setTimeout(() => controller.abort(), budgetMs);
+        const completion = (async (): Promise<SpeculativeDispatchCompletion> => {
+          try {
+            options.onSpeculationDispatchStart?.();
+            const turn = await adapter.start(invocation(
+              config,
+              runId,
+              renderEnginePrompt(
+                'speculate_round', sourceSnapshot.capsule, RULES_SOURCE, undefined, speculativeContext,
+              ),
+              launcher.manifestPath,
+              knowledgeBase?.text ?? null,
+              planner,
+              launcher.recoveryManifestPath,
+              toolSession,
+            ), controller.signal);
+            const planningWallMs = performance.now() - dispatchStarted;
+            return {
+              plan: localPlan ?? takeSpeculativePlan(launcher.spoolPath),
+              turn,
+              planningWallMs,
+              timedOut: controller.signal.aborted || planningWallMs > budgetMs,
+              error: null,
+            };
+          } catch (error) {
+            return {
+              plan: null,
+              turn: null,
+              planningWallMs: performance.now() - dispatchStarted,
+              timedOut: controller.signal.aborted,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          } finally {
+            clearTimeout(timeout);
+          }
+        })();
+        inFlightSpeculation.current = {
+          sourceSnapshot,
+          sourceTurnContext: {
+            revision: ordinaryContextSnapshot.capsule.revision,
+            context: structuredClone(ordinaryContext),
+          },
+          targetActorIds: window.monsters,
+          targetMonsterRound: round,
+          branchCount: menu.scenarios.length,
+          budgetMs,
+          planner,
+          baselinePlanHash: monsterPlanHash(segmentMonsterPlan),
+          controller,
+          completion,
+        };
+        speculation = {
+          status: 'proposed', proposed: true, adopted: false, discarded: false,
+          discardReason: null,
+          targetMonsterRound: round,
+          targetActorIds: window.monsters,
+          branchCount: menu.scenarios.length,
+          budgetMs,
+          planningWallMs: 0,
+          boundaryWaitMs: 0,
+          plannedBy: planner,
+          source: {
+            revision: sourceSnapshot.capsule.revision,
+            digest: sourceSnapshot.capsule.digest,
+          },
+          decision: null,
+        };
       };
       const dispatchPlanAdjustment = async (input: {
         readonly triggerActor: CombatantId;
@@ -2001,7 +2533,7 @@ async function runConversationWithConfiguredIntel(
           }),
           adjustmentBudget: Math.min(actors.length, 2) as 1 | 2,
         });
-        const adjustmentRequest: EngineRoundCapsuleRequest = {
+        const adjustmentRequest: EngineOrdinaryRoundCapsuleRequest = {
           runId, branchId, revision: capsuleRevision, requestId: adjustmentRequestId,
           phase: 'initial', room, historyKind: 'plan_adjustment_requested',
           requestKind: 'plan_adjustment', requestedActorIds: input.openActorIds,
@@ -2141,7 +2673,7 @@ async function runConversationWithConfiguredIntel(
           adjustmentCorrectionProposal;
         let adjustmentCorrectionContext: CapturedTurnContext | null = null;
         if (refusedActorIds.length > 0) {
-          const correctionRequest: EngineRoundCapsuleRequest = {
+          const correctionRequest: EngineOrdinaryRoundCapsuleRequest = {
             runId, branchId, revision: capsuleRevision, requestId: adjustmentRequestId,
             phase: 'correction', room, historyKind: 'plan_adjustment_correction_requested',
             requestKind: 'plan_adjustment', requestedActorIds: refusedActorIds,
@@ -2394,7 +2926,7 @@ async function runConversationWithConfiguredIntel(
             return { actorId, fallbackResult: 'absent' };
           }),
         } : { kind: 'proposal', proposal: proposed };
-        const correctionRequest: EngineRoundCapsuleRequest = {
+        const correctionRequest: EngineOrdinaryRoundCapsuleRequest = {
           runId, branchId, revision: contextRevision, requestId,
           phase: 'correction', room, historyKind: 'proposal_correction_requested',
         };
@@ -2840,7 +3372,7 @@ async function runConversationWithConfiguredIntel(
           const acted = new Set<CombatantId>();
           let pcTurnOrdinal = 0;
           while (true) {
-            const state = engineSession.currentState();
+            let state = engineSession.currentState();
             const activeActorId = state.activeCombatant;
             if (activeActorId === null || acted.has(activeActorId)) break;
             const active = state.combatants.find((entry) => entry.profile.id === activeActorId);
@@ -2849,6 +3381,7 @@ async function runConversationWithConfiguredIntel(
               throw new Error(`Dead initiative actor ${activeActorId} remained active.`);
             }
             if (active.profile.kind === 'player_character') {
+              await startSpeculation(state, playerWindowBeforeNextMonster(state));
               pcTurnOrdinal += 1;
               const beforeState = state;
               const beforeOpenActorIds = [...openMonsters]
@@ -2928,6 +3461,180 @@ async function runConversationWithConfiguredIntel(
             if (segmentActors.length === 0) {
               throw new Error(`Active monster ${activeActorId} did not produce a monster initiative segment.`);
             }
+            if (inFlightSpeculation.current !== null &&
+              inFlightSpeculation.current.targetActorIds.includes(segmentActors[0]!)) {
+              if (options.mutateBeforeSpeculationBoundary !== undefined) {
+                engineSession.replaceEncounterState(options.mutateBeforeSpeculationBoundary(state));
+                state = engineSession.currentState();
+                capsuleRevision = Math.max(capsuleRevision, state.revision);
+              }
+              const pending = inFlightSpeculation.current;
+              const boundaryStarted = performance.now();
+              const completed = await pending.completion;
+              roundUsage = addAgentUsage(roundUsage, completed.turn?.usage ?? null);
+              const decisionSnapshot = engineSession.snapshot({
+                runId, branchId, revision: capsuleRevision,
+                requestId: `${requestId}:speculation-decision`,
+                phase: 'initial', room,
+                historyKind: 'speculative_plan_decided',
+                requestedActorIds: segmentActors,
+              });
+              let discardReason: ConversationSpeculationDiscardReason | null = null;
+              let adoptedEntries: readonly SegmentMonsterPlanEntry[] | null = null;
+              if (completed.timedOut) discardReason = 'budget_expired';
+              else if (completed.error !== null || completed.plan === null) discardReason = 'dispatch_failed';
+              else if (!sameCombatantSet(segmentActors, pending.targetActorIds)) {
+                discardReason = 'target_disappeared';
+              } else if (monsterPlanHash(segmentMonsterPlan) !== pending.baselinePlanHash) {
+                discardReason = 'newer_adjustment_present';
+              } else {
+                const adoption = adoptSpeculativeBranch({
+                  state,
+                  actualRevision: capsuleRevision,
+                  targetRoom: room,
+                  targetMonsterRound: round,
+                  targetActorIds: segmentActors,
+                  plan: completed.plan,
+                  sourceCapsule: pending.sourceSnapshot.capsule,
+                });
+                if (adoption.entries === null) discardReason = adoption.reason;
+                else adoptedEntries = adoption.entries;
+              }
+              if (adoptedEntries !== null) {
+                for (const entry of adoptedEntries) {
+                  segmentMonsterPlan.set(entry.proposal.actorId, entry);
+                }
+                segmentPlanId = `speculative:${monsterPlanHash(segmentMonsterPlan)}`;
+              } else {
+                const currentEntries = segmentActors.map((actorId) => segmentMonsterPlan.get(actorId))
+                  .filter((entry): entry is SegmentMonsterPlanEntry => entry !== undefined);
+                const rebound = currentEntries.length === segmentActors.length
+                  ? rebaseStoredPlanEntries({ state, actualRevision: capsuleRevision, entries: currentEntries })
+                  : null;
+                if (rebound === null) {
+                  let recalculated: readonly SegmentMonsterPlanEntry[] | null = null;
+                  if (completed.turn !== null) {
+                    const recalculationRequestId = `${requestId}:speculation-recalc:${String(segmentActors[0])}`;
+                    const recalculationSnapshot = engineSession.snapshot({
+                      runId,
+                      branchId,
+                      revision: capsuleRevision,
+                      requestId: recalculationRequestId,
+                      phase: 'initial',
+                      room,
+                      historyKind: 'speculative_plan_recalculated',
+                      requestedActorIds: segmentActors,
+                    });
+                    const recalculationLauncher = await writeLauncher({
+                      directory: artifacts,
+                      name: `${key}-speculation-recalc-${String(segmentActors[0])}`,
+                      snapshot: recalculationSnapshot,
+                      room,
+                      historyKind: 'speculative_plan_recalculated',
+                      turnContextDeltaBase: pending.sourceTurnContext,
+                    });
+                    let localRecalculationProposal: RoundTurnProposalEnvelope | null = null;
+                    const recalculationToolSession = config.cli === 'local-openai'
+                      ? inProcessDmToolSession({
+                          state,
+                          snapshot: recalculationSnapshot,
+                          intelMode: config.intelMode,
+                          turnContextDeltaBase: pending.sourceTurnContext,
+                          onProposal: (proposal) => {
+                            if (isRoundProposal(proposal)) localRecalculationProposal = proposal;
+                          },
+                          onToolResult: (name, result) => {
+                            observedToolCalls += 1;
+                            if (name === 'engine.get_turn_context') observedTurnContextCalls += 1;
+                            if (eventContextTrimmed(result)) observedContextTruncated = true;
+                            observedRejections.push(...rejectionEvidence(result));
+                          },
+                        })
+                      : undefined;
+                    const binding: AgentSessionBinding = {
+                      cli: adapter.kind,
+                      sessionId: completed.turn.resumeSessionId,
+                      adapterVersion: AGENT_ADAPTER_VERSION,
+                      recoveryGeneration: 0,
+                      predecessorSessionHash: null,
+                      startedAtRevision: pending.sourceSnapshot.capsule.revision,
+                      lastDispatchedRevision: pending.sourceSnapshot.capsule.revision,
+                      status: 'active',
+                    };
+                    try {
+                      const recalculationTurn = await adapter.resume(
+                        binding,
+                        invocation(
+                          config,
+                          runId,
+                          `${turnContextPrompt(pending.sourceTurnContext, config.intelMode)}\n\n${renderEnginePrompt('plan_round', recalculationSnapshot.capsule, RULES_SOURCE)}`,
+                          recalculationLauncher.manifestPath,
+                          null,
+                          pending.planner,
+                          recalculationLauncher.recoveryManifestPath,
+                          recalculationToolSession,
+                        ),
+                        new AbortController().signal,
+                      );
+                      roundUsage = addAgentUsage(roundUsage, recalculationTurn.usage);
+                      const proposal = localRecalculationProposal ??
+                        takeRoundProposal(recalculationLauncher.spoolPath);
+                      if (proposal !== null) {
+                        const checked = authorizedMechanics(state, proposal);
+                        if (checked.entries !== null && sameCombatantSet(
+                          checked.entries.map((entry) => entry.proposal.actorId),
+                          segmentActors,
+                        )) {
+                          recalculated = checked.entries.map((entry) => ({
+                            proposal: structuredClone(entry.proposal),
+                            option: structuredClone(entry.option),
+                            primaryOption: structuredClone(entry.primaryOption),
+                            fallbackOption: structuredClone(entry.fallbackOption),
+                            mechanics: entry.mechanics,
+                            selectedBranch: entry.selectedBranch,
+                          }));
+                        }
+                      }
+                    } catch {
+                      recalculated = null;
+                    }
+                  }
+                  recalculated ??= segmentActors.map((actorId) =>
+                    engineDefaultPlanEntry(state, actorId, capsuleRevision));
+                  for (const entry of recalculated) {
+                    segmentMonsterPlan.set(entry.proposal.actorId, entry);
+                  }
+                  segmentPlanId = `recalculated:${monsterPlanHash(segmentMonsterPlan)}`;
+                } else {
+                  for (const entry of rebound) segmentMonsterPlan.set(entry.proposal.actorId, entry);
+                }
+              }
+              const boundaryWaitMs = performance.now() - boundaryStarted;
+              speculation = {
+                status: adoptedEntries === null ? 'discarded' : 'adopted',
+                proposed: true,
+                adopted: adoptedEntries !== null,
+                discarded: adoptedEntries === null,
+                discardReason,
+                targetMonsterRound: pending.targetMonsterRound,
+                targetActorIds: pending.targetActorIds,
+                branchCount: pending.branchCount,
+                budgetMs: pending.budgetMs,
+                planningWallMs: completed.planningWallMs,
+                boundaryWaitMs,
+                plannedBy: pending.planner,
+                source: {
+                  revision: pending.sourceSnapshot.capsule.revision,
+                  digest: pending.sourceSnapshot.capsule.digest,
+                },
+                decision: {
+                  revision: decisionSnapshot.capsule.revision,
+                  digest: decisionSnapshot.capsule.digest,
+                },
+              };
+              speculations.push(speculation);
+              inFlightSpeculation.current = null;
+            }
             const applications = segmentActors.map((actorId) => {
               if (!openMonsters.has(actorId)) {
                 throw new Error(`Monster ${actorId} began a second turn in one initiative-segment round.`);
@@ -2956,8 +3663,54 @@ async function runConversationWithConfiguredIntel(
               deviationResolutions: applied.deviationResolutions,
             });
           }
+          if (inFlightSpeculation.current !== null) {
+            const pending = inFlightSpeculation.current;
+            pending.controller.abort();
+            const completed = await pending.completion;
+            speculation = {
+              status: 'discarded', proposed: true, adopted: false, discarded: true,
+              discardReason: 'target_disappeared',
+              targetMonsterRound: pending.targetMonsterRound,
+              targetActorIds: pending.targetActorIds,
+              branchCount: pending.branchCount,
+              budgetMs: pending.budgetMs,
+              planningWallMs: completed.planningWallMs,
+              boundaryWaitMs: 0,
+              plannedBy: pending.planner,
+              source: {
+                revision: pending.sourceSnapshot.capsule.revision,
+                digest: pending.sourceSnapshot.capsule.digest,
+              },
+              decision: null,
+            };
+            speculations.push(speculation);
+            inFlightSpeculation.current = null;
+          }
         }
       } catch (error) {
+        if (inFlightSpeculation.current !== null) {
+          const pending = inFlightSpeculation.current;
+          pending.controller.abort();
+          const completed = await pending.completion;
+          speculation = {
+            status: 'discarded', proposed: true, adopted: false, discarded: true,
+            discardReason: 'target_disappeared',
+            targetMonsterRound: pending.targetMonsterRound,
+            targetActorIds: pending.targetActorIds,
+            branchCount: pending.branchCount,
+            budgetMs: pending.budgetMs,
+            planningWallMs: completed.planningWallMs,
+            boundaryWaitMs: 0,
+            plannedBy: pending.planner,
+            source: {
+              revision: pending.sourceSnapshot.capsule.revision,
+              digest: pending.sourceSnapshot.capsule.digest,
+            },
+            decision: null,
+          };
+          speculations.push(speculation);
+          inFlightSpeculation.current = null;
+        }
         if (config.cli === 'local-openai' && selectedAdapter.classifyFailure(error) !== 'unknown') {
           outcome = 'local_error';
           serviceNull = false;
@@ -3049,6 +3802,8 @@ async function runConversationWithConfiguredIntel(
         pcTurns,
         adjustments,
         monsterSegments,
+        speculation,
+        speculations,
         roundTotals: {
           initialCalls,
           adjustmentCalls,

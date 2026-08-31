@@ -2,10 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { damageType, dieSides, effectStackingIdentity } from '../../../src/combat/values';
+import { encounterBranchId, encounterSessionId } from '../../../src/combat/values';
+import { mulberry32 } from '../../../src/combat/random';
 import { UNICORN } from '../../../src/combat/statblocks/monsters';
 import { createEngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
-import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
-import { TURN_CONTEXT_MAX_BYTES } from '../../../src/vtt/mcp/engine-server';
+import { createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
+import {
+  TURN_CONTEXT_MAX_BYTES,
+  type TurnContextDeltaBase,
+} from '../../../src/vtt/mcp/engine-server';
+import { EngineRoundSession } from '../../../src/vtt/engine-round-session';
+import { applyRoomInitiativeProfile } from '../../../src/vtt/room-generator';
 import { projectEncounterTimeline } from '../../../src/vtt/session-timeline';
 import { engineOptionId } from '../../../src/vtt/turn-proposal';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
@@ -116,10 +123,99 @@ function contextFor(setup: ReturnType<typeof integratedState>) {
   return { runtime, capsule, context };
 }
 
+async function brutalTurnContext(
+  seed: number,
+  revision: number,
+  base?: TurnContextDeltaBase,
+): Promise<Readonly<Record<string, unknown>>> {
+  const state = await loadArenaFixture(
+    `tests/fixtures/arena-basis-brutal/seed-${String(seed)}.json`,
+  );
+  const session = new EngineRoundSession(
+    applyRoomInitiativeProfile(state, 'derived_v1'),
+    mulberry32(seed),
+    { kind: 'unattended', askDefault: 'decline' },
+  );
+  const prepared = session.beginRoundWithoutSkipping({
+    runId: encounterSessionId('encounter:brutal-context'),
+    branchId: encounterBranchId('branch:brutal-context'),
+    revision,
+    requestId: `request:brutal-context-${String(seed)}`,
+    phase: 'initial', room: 1, historyKind: 'room_ready',
+  }, null);
+  const request = prepared.snapshot.capsule.request;
+  if (request === null || request.phase === 'speculative') {
+    throw new Error(`Brutal ${String(seed)} did not produce an ordinary round request.`);
+  }
+  const runtime = createEngineMcpRuntime(session.currentState(), {
+    toolProfile: 'dm',
+    runId: prepared.snapshot.capsule.runId,
+    branchId: prepared.snapshot.capsule.branchId,
+    revision: prepared.snapshot.capsule.revision,
+    requestId: request.requestId,
+    phase: request.phase,
+    correctionNumber: request.correctionNumber,
+    room: 1,
+    historyKind: 'room_ready',
+    requestedActorCount: request.actors.length,
+    initiativeProjection: prepared.snapshot.capsule.projection.initiative,
+    ...(base === undefined ? {} : { turnContextDeltaBase: base }),
+  });
+  const capsule = runtime.feed.current();
+  return record(runtime.toolSurface.execute('engine.get_turn_context', {
+    run_id: capsule.runId,
+    expected_revision: capsule.revision,
+    scope: 'round',
+    granularity: base === undefined ? 'full' : 'turn_delta',
+    intel_mode: 'full',
+    ...(base === undefined ? {} : { since_revision: base.revision }),
+  }), `brutal ${String(seed)} turn context`);
+}
+
+function denseDeltaBase(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(denseDeltaBase);
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, denseDeltaBase(nested)]));
+  }
+  if (typeof value === 'string') return `${value}:prior`;
+  if (typeof value === 'number') return value + 1;
+  if (typeof value === 'boolean') return !value;
+  return value;
+}
+
 describe('M-core and D420 turn-context rendering', () => {
+  it.each(Array.from({ length: 10 }, (_unused, index) => 6_203_001 + index))(
+    'keeps brutal-basis seed %i full-intel round context within the hard byte cap',
+    async (seed) => {
+      const context = await brutalTurnContext(seed, seed - 6_203_000);
+      const bytes = new TextEncoder().encode(JSON.stringify(context)).byteLength;
+      expect(bytes, `seed ${String(seed)}`).toBeLessThanOrEqual(TURN_CONTEXT_MAX_BYTES);
+    },
+  );
+
+  it('falls back to the capped full context when the brutal seed 6203003 delta is larger', async () => {
+    const baseContext = await brutalTurnContext(6_203_002, 2);
+    const baseStateRef = record(baseContext['state_ref'], 'brutal delta base state ref');
+    const baseRevision = baseStateRef['expected_revision'];
+    if (typeof baseRevision !== 'number') throw new TypeError('Brutal delta base revision is absent.');
+    const pressuredBase = record(denseDeltaBase(baseContext), 'pressured brutal delta base');
+    const context = await brutalTurnContext(6_203_003, baseRevision + 1, {
+      revision: baseRevision,
+      context: {
+        ...pressuredBase,
+        granularity: 'full',
+        state_ref: baseContext['state_ref'],
+      },
+    });
+    const bytes = new TextEncoder().encode(JSON.stringify(context)).byteLength;
+    expect(context['granularity']).toBe('full');
+    expect(context['context_trimmed']).toBe(true);
+    expect(bytes).toBeLessThanOrEqual(TURN_CONTEXT_MAX_BYTES);
+  });
+
   it('renders hand-computed core reports through engine.get_turn_context', () => {
     const setup = integratedState();
-    const { context } = contextFor(setup);
+    const { runtime, context } = contextFor(setup);
 
     expect(context['actor_knowledge']).toEqual({
       policy: 'actor-knowledge-v1',
@@ -164,6 +260,25 @@ describe('M-core and D420 turn-context rendering', () => {
     expect(context['recovery_capabilities']).toEqual({
       policy: 'recovery-capability-v1',
       targets: [{ target: setup.pc.id, status: 'unresolved', reason: 'party_data_unavailable' }],
+    });
+    expect(array(context['applicable_skills'], 'applicable skills')).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'core_tactics',
+        description: expect.any(String),
+        skill_hash: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      }),
+    ]));
+
+    const loaded = record(runtime.toolSurface.execute('engine.load_skill', {
+      skill_name: 'core_tactics',
+    }), 'loaded skill');
+    expect(loaded).toMatchObject({
+      state_ref: context['state_ref'],
+      skill_name: 'core_tactics',
+      skill_hash: record(array(context['applicable_skills'], 'applicable skills')[0], 'advertised skill')['skill_hash'],
+      description: expect.any(String),
+      procedure: expect.any(String),
+      plays: [expect.objectContaining({ name: 'basic_advance', snippet_hash: expect.stringMatching(/^[0-9a-f]{64}$/u) })],
     });
   });
 
@@ -278,5 +393,6 @@ describe('M-core and D420 turn-context rendering', () => {
     expect(context['recovery_capabilities']).toEqual({ policy: 'recovery-capability-v1', targets: [] });
     expect(context['search_memory']).toEqual({ policy: 'search-memory-v1', memories: [] });
     expect(context['alert_state']).toMatchObject({ calls: [], joined: [] });
+    expect(context['applicable_skills']).toEqual([]);
   });
 });
