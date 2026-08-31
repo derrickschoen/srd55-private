@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## R1-10 rerun-2 result — SUPERVISOR (2026-08-31)
+
+The D418.3/D418.6 promotion-gating rerun PASSED: current era (70f034e8,
+per D422.1) pooled 9.17/10 vs baseline (b4cf6b63) 7.51, 28 wins / 1 loss
+/ 1 tie across 30 paired cases, judge agreement r 0.79-0.96. Measured
+pipeline noise floor: rerun-1 vs rerun-2 baseline scores differ by 0.05.
+Sole loss = the room-8 mass-zero-feet-dash round, still emitted by the
+current era despite inc7's wasted-turn domination — localized to
+movement options for enclosed spawns (no non-wasted alternative reached
+the frontier), queued as a post-rerun fix. D418.11's owner calibration
+sitting is now due at the owner's convenience. Full report:
+job-tmp rerun2-report.md; protocol/artifacts as recorded in the rerun-1
+execution record plus D422.
+
 ## D422 — OWNER: four rerun-2 program rulings (2026-08-31)
 
 1. **Rerun-2 era INCLUDES D420**: inc6 rendering + inc7 + D420
