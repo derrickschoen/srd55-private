@@ -17,6 +17,7 @@ import type {
   TacticalProbabilityVerdict,
   UnresolvedIntel,
 } from '../../src/vtt/intel/contracts';
+import type { TeamPlanMetric, TeamPlanVector } from '../../src/vtt/intel/team-scorer';
 
 type Assert<Condition extends true> = Condition;
 type Exact<Left, Right> =
@@ -109,6 +110,15 @@ type _MismatchedDominanceSetsAreRejected = Assert<
 type _MismatchedDominanceComparisonCannotExist = Assert<
   Exact<DominanceComparisonFor<DamageAndCost, DamageAndRisk>, never>
 >;
+type TeamPlanVectorWithoutWastedTurn = DominanceVector<Exclude<TeamPlanMetric, 'wasted_turn'>>;
+type _TeamPlanMetricSetIncludesWastedTurn = Assert<
+  SameDominanceMetricSet<TeamPlanVector, TeamPlanVectorWithoutWastedTurn> extends false
+    ? true
+    : false
+>;
+type _TeamPlanVectorCannotCompareWithoutWastedTurn = Assert<
+  Exact<DominanceComparisonFor<TeamPlanVector, TeamPlanVectorWithoutWastedTurn>, never>
+>;
 
 type _ReactionOptionIdsStayClosed = Assert<
   Exact<ReactionPendingDecisionOption['id'], 'accept' | 'decline'>
@@ -153,6 +163,8 @@ export type VttIntelContractProof = [
   _MatchingDominanceSetsCompare,
   _MismatchedDominanceSetsAreRejected,
   _MismatchedDominanceComparisonCannotExist,
+  _TeamPlanMetricSetIncludesWastedTurn,
+  _TeamPlanVectorCannotCompareWithoutWastedTurn,
   _ReactionOptionIdsStayClosed,
   _LegendaryActionOptionIdsStayClosed,
   _LegendaryResistanceOptionIdsStayClosed,

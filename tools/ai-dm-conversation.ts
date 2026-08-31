@@ -73,6 +73,7 @@ import {
   OPPORTUNITY_COST_POLICY,
 } from '../src/vtt/intel/opportunity-cost';
 import { MOVEMENT_OPTIONS_INTEL_POLICY } from '../src/vtt/intel/movement-options';
+import { TEAM_SCORER_POLICY } from '../src/vtt/intel/team-scorer';
 import {
   type ReactionGuidanceDeclaration,
 } from '../src/vtt/reaction-guidance';
@@ -169,6 +170,7 @@ export interface ConversationRlDataV2 {
   readonly intelPolicyVersions: {
     readonly movement: typeof MOVEMENT_OPTIONS_INTEL_POLICY;
     readonly opportunityCost: typeof OPPORTUNITY_COST_POLICY;
+    readonly teamScorer: typeof TEAM_SCORER_POLICY;
     readonly correction: typeof DOMINANCE_CORRECTION_POLICY;
     readonly materialityContext: typeof MATERIALITY_CONTEXT_POLICY;
   };
@@ -922,6 +924,7 @@ function rlCapture(
     intelPolicyVersions: {
       movement: MOVEMENT_OPTIONS_INTEL_POLICY,
       opportunityCost: OPPORTUNITY_COST_POLICY,
+      teamScorer: TEAM_SCORER_POLICY,
       correction: DOMINANCE_CORRECTION_POLICY,
       materialityContext: MATERIALITY_CONTEXT_POLICY,
     },
@@ -1100,15 +1103,37 @@ async function driveScriptedMcp(
     }
     const suggestion = asRecord(context['suggested_plan']);
     const suggestedProposals = suggestion?.['proposals'];
-    const useSuggestion = (suggestionResponse === 'as_is' || suggestionResponse === 'edited') &&
-      Array.isArray(suggestedProposals);
-    const proposals = useSuggestion
-      ? structuredClone(suggestedProposals) as readonly Readonly<Record<string, unknown>>[]
+    let frontierProposals: readonly unknown[] | undefined;
+    if ((suggestionResponse === 'as_is' || suggestionResponse === 'edited') &&
+      !Array.isArray(suggestedProposals)) {
+      const advertised = context['applicable_plays'];
+      const firstPlay = Array.isArray(advertised) ? asRecord(advertised[0]) : null;
+      const playName = firstPlay?.['name'];
+      if (typeof playName === 'string') {
+        const expansionResult = asRecord(await mcpRequest(client, 'tools/call', {
+          name: 'engine.propose_from_play',
+          arguments: { play_name: playName },
+        }));
+        calls += 1;
+        if (expansionResult === null || expansionResult['isError'] !== false) {
+          throw new Error('engine.propose_from_play failed for the chosen team-frontier play.');
+        }
+        const expansion = asRecord(expansionResult['structuredContent']);
+        if (Array.isArray(expansion?.['proposals'])) frontierProposals = expansion['proposals'];
+      }
+    }
+    const enginePlanProposals = Array.isArray(suggestedProposals)
+      ? suggestedProposals
+      : frontierProposals;
+    const useEnginePlan = (suggestionResponse === 'as_is' || suggestionResponse === 'edited') &&
+      Array.isArray(enginePlanProposals);
+    const proposals = useEnginePlan
+      ? structuredClone(enginePlanProposals) as readonly Readonly<Record<string, unknown>>[]
       : suggestionResponse === 'ignored'
         ? livingMonsterIds(state).map((actorId) =>
             externalProposal(engineDefaultPlanEntry(state, actorId, manifest.revision).proposal))
         : scriptedProposals(state, manifest.phase, manifest.revision).map(externalProposal);
-    const responseProposals = suggestionResponse !== 'edited' || !useSuggestion
+    const responseProposals = suggestionResponse !== 'edited' || !useEnginePlan
       ? proposals
       : proposals.map((proposal, index) => index !== 0 ? proposal : {
           ...proposal,

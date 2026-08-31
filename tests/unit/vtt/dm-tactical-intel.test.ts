@@ -235,9 +235,19 @@ describe('versioned DM tactical intel', () => {
   it('attaches full-precision offered-set and all intel policy versions to accepted capture', async () => {
     const { runtime, capsule } = await r02Runtime();
     const context = fullContext(runtime, capsule);
-    const suggested = record(context['suggested_plan'], 'suggested plan');
-    const proposals = suggested['proposals'];
-    if (!Array.isArray(proposals)) throw new TypeError('Suggested proposals are absent.');
+    const suggested = context['suggested_plan'];
+    const plan = suggested === undefined
+      ? (() => {
+          const advertised = context['applicable_plays'];
+          if (!Array.isArray(advertised)) throw new TypeError('Applicable frontier plays are absent.');
+          const playName = record(advertised[0], 'first frontier play')['name'];
+          return record(runtime.toolSurface.execute('engine.propose_from_play', {
+            play_name: playName,
+          }), 'chosen frontier plan');
+        })()
+      : record(suggested, 'suggested plan');
+    const proposals = plan['proposals'];
+    if (!Array.isArray(proposals)) throw new TypeError('Frontier plan proposals are absent.');
     runtime.toolSurface.execute('engine.submit_round_proposals', {
       state_ref: context['state_ref'],
       request_id: record(context['request'], 'request')['request_id'],

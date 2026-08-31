@@ -50,6 +50,11 @@ import {
   DOMINANCE_CORRECTION_POLICY,
   OPPORTUNITY_COST_POLICY,
 } from '../intel/opportunity-cost';
+import {
+  renderTeamPlanFrontier,
+  scoreTeamPlans,
+  type TeamPlanFrontierReport,
+} from '../intel/team-scorer';
 import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
 import { diffTurnContextValues } from '../dm-bridge/projection-transport';
 import { submitSpeculativeRoundPlan } from '../speculative-plan-submission';
@@ -490,12 +495,29 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   const idempotency = new Map<string, { readonly bytes: string; readonly result: unknown }>();
   const applicationCursors = new Map<string, { readonly digest: string; readonly key: string; readonly offset: number }>();
   const opportunityReports = new Map<string, ReturnType<typeof actorOpportunityReport>>();
+  const teamPlanReports = new Map<string, TeamPlanFrontierReport>();
   function opportunityReport(capsule: EngineStateCapsule, actorId: CombatantId) {
     const key = `${capsule.digest}:${actorId}`;
     const prior = opportunityReports.get(key);
     if (prior !== undefined) return prior;
     const report = actorOpportunityReport(state, actorId, queries, capsule.revision);
     opportunityReports.set(key, report);
+    return report;
+  }
+  function teamPlanReport(
+    capsule: EngineStateCapsule,
+    plays: ReturnType<typeof SNIPPET_REGISTRY.applicable>,
+  ): TeamPlanFrontierReport | null {
+    if (plays.length === 0) return null;
+    const key = `${capsule.digest}:${plays.map((play) => play.snippetHash).join(':')}`;
+    const prior = teamPlanReports.get(key);
+    if (prior !== undefined) return prior;
+    const report = scoreTeamPlans(state, plays.map((play) => ({
+      candidateId: play.name,
+      label: play.description,
+      proposals: SNIPPET_REGISTRY.expand(play.name, capsule).proposals,
+    })), queries);
+    teamPlanReports.set(key, report);
     return report;
   }
   function applicationPage<T>(capsule: EngineStateCapsule, key: string, values: readonly T[], pageValue: unknown): { readonly values: readonly T[]; readonly truncated: boolean; readonly next: string | null } {
@@ -599,7 +621,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     const adjustmentRequest = capsule.request?.phase !== 'speculative' && capsule.request?.kind === 'plan_adjustment'
       ? capsule.request
       : null;
-    const applicablePlays = adjustmentRequest === null ? SNIPPET_REGISTRY.applicable(capsule) : [];
+    const advertisedPlays = adjustmentRequest === null ? SNIPPET_REGISTRY.applicable(capsule) : [];
+    const teamReport = teamPlanReport(capsule, advertisedPlays);
+    const frontierCandidateIds = new Set(teamReport?.frontier.map((entry) =>
+      entry.candidate.candidateId) ?? []);
+    const applicablePlays = advertisedPlays.filter((play) => frontierCandidateIds.has(play.name));
     const result = {
       granularity: 'full' as const,
       context_trimmed: false,
@@ -623,6 +649,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         description: play.description,
         snippet_hash: play.snippetHash,
       })),
+      team_plan_frontier: teamReport === null ? null : renderTeamPlanFrontier(teamReport),
       ...(adjustmentRequest === null ? {} : {
         materiality: renderMaterialityContext(adjustmentRequest.materialityReasonCodes, state),
         current_plan: {
@@ -636,7 +663,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       }),
       truncated: actors.some((actor) => actor.omitted), next_cursor: null,
     };
-    const topPlay = applicablePlays[0];
+    const topPlay = applicablePlays.length === 1 ? applicablePlays[0] : undefined;
     const suggestedPlan = topPlay === undefined
       ? null
       : (() => {
@@ -664,11 +691,28 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         output = { ...output, truncated: true, context_trimmed: true };
       }
     };
+    const frontierDetailLevels = ['candidate_summary', 'summary', 'omitted'] as const;
+    let frontierDetailIndex = 0;
+    const compactTeamPlanFrontier = (): boolean => {
+      const detailLevel = frontierDetailLevels[frontierDetailIndex];
+      if (teamReport === null || detailLevel === undefined) return false;
+      frontierDetailIndex += 1;
+      result.team_plan_frontier = renderTeamPlanFrontier(teamReport, detailLevel);
+      markContextTrimmed();
+      if (suggestedPlan !== null && output !== result) {
+        output = { ...result, suggested_plan: suggestedPlan };
+      }
+      return true;
+    };
     while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.options.length > 0);
       if (actor === undefined) break;
       actor.options.pop();
       markContextTrimmed();
+    }
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+      compactTeamPlanFrontier()) {
+      // Each iteration advances to the next schema-valid compact representation.
     }
     while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.intel.movement.length > 1);
@@ -722,6 +766,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       result.context_trimmed = true;
       output = result;
     }
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+      result.actors.length > 1) {
+      result.actors.pop();
+      markContextTrimmed();
+    }
     return output;
   }
   function execute(name: string, value: unknown): unknown {
@@ -768,6 +817,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         throw new RangeError(`Unknown play ${requestedName}.`);
       }
       const playName = requestedName as PlayName;
+      const advertised = SNIPPET_REGISTRY.applicable(capsule);
+      const report = teamPlanReport(capsule, advertised);
+      if (report === null || !report.frontier.some((entry) =>
+        entry.candidate.candidateId === playName)) {
+        throw new RangeError(`PLAY_DOMINATED:${playName}`);
+      }
       const draft = SNIPPET_REGISTRY.expand(playName, capsule);
       return {
         state_ref: externalStateRef(capsule),

@@ -99,6 +99,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
   readonly submittedOptions: Readonly<Record<string, unknown>>[] = [];
   readonly decodedOptions: Readonly<Record<string, unknown>>[] = [];
+  readonly turnContexts: Readonly<Record<string, unknown>>[] = [];
   readonly startInvocations: AgentInvocation[] = [];
   readonly resumeInvocations: AgentInvocation[] = [];
   #startCount = 0;
@@ -161,6 +162,7 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
             changes as readonly RevisionDeltaOperation[],
           );
     if (context === null) throw new Error('Serialized turn delta could not be reconstructed.');
+    this.turnContexts.push(context);
     const stateRef = objectValue(context['state_ref'], 'serialized state ref');
     const actors = runtime.feed.current().request?.actors;
     if (actors === undefined) throw new Error('Serialized round request has no actors.');
@@ -500,6 +502,21 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(adapter.submittedOptions.some((option) => !['Dodge', 'End Turn'].includes(String(option['label'])))).toBe(true);
     expect(adapter.decodedOptions.some((option) => JSON.stringify(option['action_slots']).includes('attack'))).toBe(true);
+    const context = adapter.turnContexts[0];
+    if (context === undefined) throw new Error('Serialized public flow omitted its turn context.');
+    const frontier = objectValue(context['team_plan_frontier'], 'serialized team plan frontier');
+    const frontierCandidates = frontier['candidates'];
+    const advertisedPlays = context['applicable_plays'];
+    if (!Array.isArray(frontierCandidates) || !Array.isArray(advertisedPlays)) {
+      throw new Error('Serialized public flow omitted team frontier candidates or advertised plays.');
+    }
+    expect(frontier).toMatchObject({
+      policy: 'team-scorer-v1',
+      frontier_resolution: 'contains_unresolved',
+    });
+    expect(advertisedPlays.map((entry) => objectValue(entry, 'advertised play')['name']))
+      .toEqual(frontierCandidates.map((entry) =>
+        objectValue(entry, 'team frontier candidate')['candidate_id']));
     expect(result.rows[0]).toEqual(expect.objectContaining({ outcome: 'authorized', refusals: [] }));
     expect(result.rows[0]?.stateBinding.authorization).toEqual(result.rows[0]?.stateBinding.capsule);
   });
@@ -779,6 +796,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       intelPolicyVersions: {
         movement: 'movement-options-v1',
         opportunityCost: 'opportunity-cost-v1',
+        teamScorer: 'team-scorer-v1',
         correction: 'dominance-correction-v1',
         materialityContext: 'materiality-context-v1',
       },
@@ -945,6 +963,25 @@ describe('AI-DM engine MCP conversation runner', () => {
     });
 
     expect(result.rows[0]).toEqual(expect.objectContaining({ contextTruncated: true }));
+    const rawTurnContext = result.rows[0]?.rawTurnContext;
+    if (rawTurnContext === undefined) throw new Error('Trimmed row omitted its raw turn context.');
+    const turnContext = objectValue(JSON.parse(rawTurnContext) as unknown, 'trimmed turn context');
+    expect(new TextEncoder().encode(rawTurnContext).byteLength).toBeLessThanOrEqual(32 * 1024);
+    expect(turnContext).toMatchObject({
+      granularity: 'full',
+      context_trimmed: true,
+      team_plan_frontier: {
+        policy: 'team-scorer-v1',
+        frontier_resolution: 'fully_resolved',
+        detail_level: 'omitted',
+        frontier_candidate_count: 2,
+        removed_candidate_count: 0,
+        reason: 'context_size_limit',
+      },
+    });
+    const frontier = objectValue(turnContext['team_plan_frontier'], 'trimmed team plan frontier');
+    expect(frontier).not.toHaveProperty('candidates');
+    expect(frontier).not.toHaveProperty('removed');
   });
 
   it('injects a KB only on cold start and attributes every output row to its bytes', async () => {

@@ -6,9 +6,9 @@ import {
   freshMonsterPlanningState,
   loadArenaFixture,
 } from '../../../src/vtt/mcp/entrypoint';
-import { SUGGESTED_PLAN_MAX_BYTES } from '../../../src/vtt/mcp/engine-server';
 import { mcpRequestMeta } from '../../../src/vtt/mcp/handler';
 import { engineSchemaInternals, schemaViolations } from '../../../src/vtt/mcp/schemas';
+import { SUGGESTED_PLAN_MAX_BYTES } from '../../../src/vtt/mcp/engine-server';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import type { EngineActorOption, EngineTurnProposal } from '../../../src/vtt/turn-proposal';
 
@@ -163,7 +163,7 @@ describe('composite play registry', () => {
       .toEqual(['basic_advance']);
   });
 
-  it('returns the validated composite expansion as an unqueued MCP draft', async () => {
+  it('advertises the team frontier and returns a chosen composite expansion as an unqueued MCP draft', async () => {
     const { runtime, capsule } = await registryFixture(3_943_001);
     const context = tool(runtime, 'engine.get_turn_context', {
       run_id: capsule.runId,
@@ -172,16 +172,17 @@ describe('composite play registry', () => {
     });
     const advertised = context['applicable_plays'];
     if (!Array.isArray(advertised)) throw new TypeError('Applicable plays are absent.');
-    const top = record(advertised[0], 'top advertised play');
-    const suggested = record(context['suggested_plan'], 'suggested plan');
-    expect(suggested).toMatchObject({
-      play_name: top['name'],
-      snippet_hash: top['snippet_hash'],
-      advisory: expect.stringContaining('submit_round_proposals'),
+    const frontier = record(context['team_plan_frontier'], 'team plan frontier');
+    const frontierCandidates = frontier['candidates'];
+    if (!Array.isArray(frontierCandidates)) throw new TypeError('Team frontier candidates are absent.');
+    expect(frontier).toMatchObject({
+      policy: 'team-scorer-v1',
+      frontier_resolution: 'contains_unresolved',
+      removed: [],
     });
-    expect(Buffer.byteLength(JSON.stringify(suggested), 'utf8')).toBeLessThanOrEqual(SUGGESTED_PLAN_MAX_BYTES);
-    const suggestedProposals = suggested['proposals'];
-    if (!Array.isArray(suggestedProposals)) throw new TypeError('Suggested proposals are absent.');
+    expect(frontierCandidates.map((entry) => record(entry, 'frontier candidate')['candidate_id']))
+      .toEqual(advertised.map((entry) => record(entry, 'advertised play')['name']));
+    expect(context).not.toHaveProperty('suggested_plan');
 
     const expected = SNIPPET_REGISTRY.expand('focus_fire', capsule);
     const draft = tool(runtime, 'engine.propose_from_play', { play_name: 'focus_fire' });
@@ -192,10 +193,35 @@ describe('composite play registry', () => {
       proposals: expected.proposals.map(externalProposal),
     });
     expect(runtime.proposals).toEqual([]);
-    expect(suggestedProposals.map((value) => schemaViolations(engineSchemaInternals.turnProposal, value)))
-      .toEqual(suggestedProposals.map(() => []));
-    expect(suggestedProposals.every((value) =>
-      typeof record(value, 'suggested proposal')['primary_option_id'] === 'string')).toBe(true);
+    const proposals = draft['proposals'];
+    if (!Array.isArray(proposals)) throw new TypeError('Chosen play proposals are absent.');
+    expect(proposals.map((value) => schemaViolations(engineSchemaInternals.turnProposal, value)))
+      .toEqual(proposals.map(() => []));
+    expect(proposals.every((value) =>
+      typeof record(value, 'chosen proposal')['primary_option_id'] === 'string')).toBe(true);
+  });
+
+  it('emits a size-capped inline suggestion when exactly one team play applies', async () => {
+    const { runtime, capsule } = await registryFixture(3_943_003);
+    const context = tool(runtime, 'engine.get_turn_context', {
+      run_id: capsule.runId,
+      expected_revision: capsule.revision,
+      scope: 'round',
+    });
+    expect(context['applicable_plays']).toEqual([
+      expect.objectContaining({ name: 'basic_advance' }),
+    ]);
+    const suggestion = record(context['suggested_plan'], 'single-play suggested plan');
+    expect(suggestion).toMatchObject({
+      play_name: 'basic_advance',
+      advisory: expect.any(String),
+    });
+    expect(new TextEncoder().encode(JSON.stringify(suggestion)).byteLength)
+      .toBeLessThanOrEqual(SUGGESTED_PLAN_MAX_BYTES);
+    const proposals = suggestion['proposals'];
+    if (!Array.isArray(proposals)) throw new TypeError('Suggested plan proposals are absent.');
+    expect(proposals.map((value) => schemaViolations(engineSchemaInternals.turnProposal, value)))
+      .toEqual(proposals.map(() => []));
   });
 
   it('omits the suggestion when no play applies', async () => {
