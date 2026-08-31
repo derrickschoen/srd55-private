@@ -7,6 +7,27 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## Arena rep-semantics reinterpretation — SUPERVISOR (2026-09-01)
+
+The room-4 diagnosis found that in EVERY non-interleaved arena run to
+date, reps 2-3 of a room were NOT fresh replays: they continued one
+persistent conversation (encounter state and full-context delta anchor
+survived), i.e. they were later rounds of the same fight. Consequences,
+recorded honestly:
+1. All PAIRED verdicts stand (reruns 1-2, party-policy A/B, cycles
+   3a/3b): both arms shared the semantics identically, so comparisons
+   remain one-variable-valid. The "3 independent reps" labeling was
+   wrong; reps were round-1/round-2/round-3 of one encounter.
+2. The cycle-3 "refused rounds" sub-claims are SUPERSEDED: all four
+   refusals were this harness defect (rep-2+ state breaking the
+   full-context delta path in room 4), not model failures. The 3a/3b
+   headline numbers keep those zeros in-sample for both arms; the
+   inversion (19/30 paired losses) does not rest on them.
+3. Fixed at the arena layer (merged): every room x rep is now an
+   independent one-round conversation over a cloned frozen fixture.
+   Post-fix runs are a NEW measurement era; pre-fix reps 2-3 must not
+   be compared to post-fix reps.
+
 ## Cycle-3b result — SUPERVISOR (2026-09-01): tier helps, presentation still loses
 
 sol-low 7.62 vs luna-low 6.91 on full intel (19W/2L/9T), but both lose
