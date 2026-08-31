@@ -98,7 +98,9 @@ export interface ArenaRow {
   readonly flapRetries: 0 | 1 | 2;
   readonly serviceNull: boolean;
   readonly contextTruncated: boolean;
-  readonly plannedBy: import('./ai-dm-conversation').ConversationPlannerAttribution | 'sim_controller' | null;
+  readonly plannedBy: import('./ai-dm-conversation').ConversationPlannerAttribution | null;
+  readonly plannerLabel: import('./ai-dm-conversation').ConversationRow['plannerLabel'];
+  readonly autoSubmitBlocks: import('./ai-dm-conversation').ConversationRow['autoSubmitBlocks'];
   readonly escalated: boolean;
   readonly escalationModel: string | null;
   readonly authorizedPlan: readonly import('./ai-dm-conversation').ConversationAuthorizedActorPlan[] | null;
@@ -394,6 +396,8 @@ function arenaRows(
     serviceNull: row.serviceNull,
     contextTruncated: row.contextTruncated,
     plannedBy: row.plannedBy,
+    plannerLabel: row.plannerLabel,
+    autoSubmitBlocks: row.autoSubmitBlocks,
     escalated: row.escalated,
     escalationModel: row.escalationModel,
     authorizedPlan: row.authorizedPlan,

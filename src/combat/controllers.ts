@@ -610,10 +610,16 @@ export class AlgorithmController implements Controller {
         score: 50 - gridDistance(actor.position, nearest.position),
       });
     }
-    candidates.push(
-      { program: { kind: 'action', action: { kind: 'use_action', action: 'dodge' } }, score: 20 },
-      { program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } }, score: 0 },
-    );
+    if (candidates.length === 0) {
+      candidates.push({
+        program: { kind: 'action', action: { kind: 'use_action', action: 'dodge' } },
+        score: 0,
+      });
+    }
+    candidates.push({
+      program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } },
+      score: 0,
+    });
     return candidates
       .map((candidate) => ({
         ...candidate,

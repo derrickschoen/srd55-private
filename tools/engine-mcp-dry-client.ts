@@ -99,7 +99,9 @@ function proposal(actorContext: Readonly<Record<string, unknown>>, revision: num
     expected_revision: revision,
     primary_option_id: primary['option_id'],
     fallback_option_id: typeof fallback?.['option_id'] === 'string' ? fallback['option_id'] : null,
-    override_justification: null,
+    override_justification: primary['kind'] === 'dodge'
+      ? { reason: 'objective', note: 'The dry client intentionally exercises a defensive plan.' }
+      : null,
   };
 }
 

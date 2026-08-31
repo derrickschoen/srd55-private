@@ -65,7 +65,14 @@ import {
   type InitialProposalAttempt, type TurnExhaustionHost,
 } from '../src/vtt/turn-exhaustion-coordinator';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
-import type { DmIntelCapture } from '../src/vtt/dm-tactical-intel';
+import { captureDmIntel, type DmIntelCapture } from '../src/vtt/dm-tactical-intel';
+import {
+  actorOpportunityReport,
+  DOMINANCE_CORRECTION_POLICY,
+  MATERIALITY_CONTEXT_POLICY,
+  OPPORTUNITY_COST_POLICY,
+} from '../src/vtt/intel/opportunity-cost';
+import { MOVEMENT_OPTIONS_INTEL_POLICY } from '../src/vtt/intel/movement-options';
 import {
   type ReactionGuidanceDeclaration,
 } from '../src/vtt/reaction-guidance';
@@ -157,6 +164,14 @@ export interface ConversationRlDataV2 {
   readonly roundProtocolVersion: typeof ROUND_PROTOCOL_VERSION;
   readonly partyPolicyHash: string | null;
   readonly materialityPolicyHash: string | null;
+  readonly plannerLabel: 'model' | ExhaustionPlannerLabel;
+  readonly autoSubmitBlocks: readonly ConversationAutoSubmitBlock[];
+  readonly intelPolicyVersions: {
+    readonly movement: typeof MOVEMENT_OPTIONS_INTEL_POLICY;
+    readonly opportunityCost: typeof OPPORTUNITY_COST_POLICY;
+    readonly correction: typeof DOMINANCE_CORRECTION_POLICY;
+    readonly materialityContext: typeof MATERIALITY_CONTEXT_POLICY;
+  };
   readonly engineIntel: DmIntelCapture;
 }
 
@@ -310,7 +325,9 @@ export interface ConversationRow {
   readonly flapRetries: 0 | 1 | 2;
   readonly serviceNull: boolean;
   readonly contextTruncated: boolean;
-  readonly plannedBy: ConversationPlannerAttribution | 'sim_controller' | null;
+  readonly plannedBy: ConversationPlannerAttribution | null;
+  readonly plannerLabel: 'model' | ExhaustionPlannerLabel | null;
+  readonly autoSubmitBlocks: readonly ConversationAutoSubmitBlock[];
   readonly escalated: boolean;
   readonly escalationModel: string | null;
   readonly stateBinding: {
@@ -626,27 +643,47 @@ interface SegmentMonsterPlanEntry {
   readonly selectedBranch: 'primary' | 'fallback';
 }
 
+type ExhaustionPlannerLabel = 'engine_default' | 'sim_controller';
+export type ConversationAutoSubmitBlockReason = 'auto_submit_blocked_unresolved_frontier';
+
+export interface ConversationAutoSubmitBlock {
+  readonly actorId: CombatantId;
+  readonly reason: ConversationAutoSubmitBlockReason;
+}
+
+interface ExhaustionPlanEntry extends SegmentMonsterPlanEntry {
+  readonly resolutionDigest: string;
+  readonly summary: string;
+  readonly plannerLabel: ExhaustionPlannerLabel;
+}
+
 function monsterPlanHash(plan: ReadonlyMap<CombatantId, SegmentMonsterPlanEntry>): string {
   return sha256(canonicalJson([...plan.values()]
     .map((entry) => entry.proposal)
     .sort((left, right) => left.actorId.localeCompare(right.actorId))));
 }
 
-function deterministicDodgePlanEntry(
+function engineDefaultPlanEntry(
   state: EncounterState,
   actorId: CombatantId,
   revision = state.revision,
-): SegmentMonsterPlanEntry {
+): ExhaustionPlanEntry & {
+  readonly frontierResolution: 'fully_resolved' | 'contains_unresolved';
+} {
   const planningState = projectFutureMonsterTurns(state, [actorId]);
-  const option = availableEngineActorOptions(planningState, actorId, canonicalEngineQueryPort, revision)
-    .find((candidate) => candidate.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge'));
-  if (option === undefined) throw new Error(`Could not find deterministic Dodge for ${actorId}.`);
+  const report = actorOpportunityReport(
+    planningState,
+    actorId,
+    canonicalEngineQueryPort,
+    revision,
+  );
+  const option = report.defaultOption;
   const proposal: EngineTurnProposal = {
     actorId, expectedRevision: revision, primaryOptionId: option.optionId,
     fallbackOptionId: null, overrideJustification: null,
   };
   const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
-  if (!resolution.valid) throw new Error(`Could not stage deterministic Dodge for ${actorId}.`);
+  if (!resolution.valid) throw new Error(`Could not stage engine default for ${actorId}.`);
   return {
     proposal,
     option: resolution.option,
@@ -654,6 +691,43 @@ function deterministicDodgePlanEntry(
     fallbackOption: resolution.fallbackOption,
     mechanics: resolution.mechanics,
     selectedBranch: resolution.selectedBranch,
+    resolutionDigest: resolution.resolutionDigest,
+    summary: resolution.summary,
+    plannerLabel: 'engine_default',
+    frontierResolution: report.frontierResolution,
+  };
+}
+
+function simControllerPlanEntry(
+  state: EncounterState,
+  actorId: CombatantId,
+  revision = state.revision,
+): ExhaustionPlanEntry {
+  const planningState = projectFutureMonsterTurns(state, [actorId]);
+  const option = availableEngineActorOptions(
+    planningState,
+    actorId,
+    canonicalEngineQueryPort,
+    revision,
+  ).find((candidate) => candidate.actionSlots.some((slot) =>
+    slot.slot === 'main' && slot.use.kind === 'dodge'));
+  if (option === undefined) throw new Error(`Could not stage deterministic-controller Dodge for ${actorId}.`);
+  const proposal: EngineTurnProposal = {
+    actorId, expectedRevision: revision, primaryOptionId: option.optionId,
+    fallbackOptionId: null, overrideJustification: null,
+  };
+  const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
+  if (!resolution.valid) throw new Error(`Could not resolve deterministic-controller Dodge for ${actorId}.`);
+  return {
+    proposal,
+    option: resolution.option,
+    primaryOption: resolution.primaryOption,
+    fallbackOption: resolution.fallbackOption,
+    mechanics: resolution.mechanics,
+    selectedBranch: resolution.selectedBranch,
+    resolutionDigest: resolution.resolutionDigest,
+    summary: resolution.summary,
+    plannerLabel: 'sim_controller',
   };
 }
 
@@ -716,23 +790,21 @@ export function classifySuggestionAdoption(
 
 function scriptedProposals(
   state: EncounterState,
-  phase: 'initial' | 'correction',
+  _phase: 'initial' | 'correction',
   revision = state.revision,
 ): readonly EngineTurnProposal[] {
   const actors = livingMonsterIds(state);
   const planningState = projectFutureMonsterTurns(state, actors);
   return actors.map((actorId): EngineTurnProposal => {
-    const options = availableEngineActorOptions(planningState, actorId, canonicalEngineQueryPort, revision);
-    const primary = options.find((candidate) => candidate.actionSlots.some((slot) =>
-      slot.use.kind === 'attack' || slot.use.kind === 'multiattack' || slot.use.kind === 'saving_throw'))
-      ?? options.find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge'));
-    if (primary === undefined) throw new Error(`No legal turn option exists for ${actorId}.`);
-    const fallback = phase === 'initial'
-      ? options.find((candidate) => candidate.actionSlots.some((slot) => slot.use.kind === 'dodge')) ?? null
-      : null;
+    const primary = actorOpportunityReport(
+      planningState,
+      actorId,
+      canonicalEngineQueryPort,
+      revision,
+    ).defaultOption;
     return {
       actorId, expectedRevision: revision, primaryOptionId: primary.optionId,
-      fallbackOptionId: fallback?.optionId ?? null, overrideJustification: null,
+      fallbackOptionId: null, overrideJustification: null,
     };
   });
 }
@@ -812,6 +884,8 @@ function rlCapture(
     readonly parentPlanId: string | null;
     readonly partyPolicyHash: string | null;
     readonly materialityPolicyHash: string | null;
+    readonly plannerLabel?: 'model' | ExhaustionPlannerLabel;
+    readonly autoSubmitBlocks?: readonly ConversationAutoSubmitBlock[];
   },
 ): ConversationRlDataV2 {
   if (proposal.submittedArguments === undefined) {
@@ -843,6 +917,14 @@ function rlCapture(
     roundProtocolVersion: ROUND_PROTOCOL_VERSION,
     partyPolicyHash: metadata.partyPolicyHash,
     materialityPolicyHash: metadata.materialityPolicyHash,
+    plannerLabel: metadata.plannerLabel ?? 'model',
+    autoSubmitBlocks: structuredClone(metadata.autoSubmitBlocks ?? []),
+    intelPolicyVersions: {
+      movement: MOVEMENT_OPTIONS_INTEL_POLICY,
+      opportunityCost: OPPORTUNITY_COST_POLICY,
+      correction: DOMINANCE_CORRECTION_POLICY,
+      materialityContext: MATERIALITY_CONTEXT_POLICY,
+    },
     engineIntel: structuredClone(proposal.intelCapture),
   };
 }
@@ -866,6 +948,13 @@ function capturedTurnContext(raw: string): CapturedTurnContext {
     throw new TypeError('Recorded turn context has no supported granularity marker.');
   }
   return { raw, granularity, value };
+}
+
+function unrequestedTurnContext(): CapturedTurnContext {
+  return capturedTurnContext(JSON.stringify({
+    granularity: 'full',
+    context_not_requested: true,
+  }));
 }
 
 function plannedTurnContext(
@@ -983,7 +1072,7 @@ async function driveScriptedMcp(
         : actorId === undefined
           ? []
           : [externalProposal({
-              ...deterministicDodgePlanEntry(state, actorId, manifest.revision).proposal,
+              ...engineDefaultPlanEntry(state, actorId, manifest.revision).proposal,
               ...(invalidAdjustment ? {
                 primaryOptionId: 'SIMULATED-unavailable-adjustment' as EngineTurnProposal['primaryOptionId'],
               } : {}),
@@ -1017,7 +1106,7 @@ async function driveScriptedMcp(
       ? structuredClone(suggestedProposals) as readonly Readonly<Record<string, unknown>>[]
       : suggestionResponse === 'ignored'
         ? livingMonsterIds(state).map((actorId) =>
-            externalProposal(deterministicDodgePlanEntry(state, actorId, manifest.revision).proposal))
+            externalProposal(engineDefaultPlanEntry(state, actorId, manifest.revision).proposal))
         : scriptedProposals(state, manifest.phase, manifest.revision).map(externalProposal);
     const responseProposals = suggestionResponse !== 'edited' || !useSuggestion
       ? proposals
@@ -1692,13 +1781,21 @@ export async function runConversation(config: ConversationConfig, options: Conve
       const startingRoomDigest = sha256(canonicalJson(states[room - 1]!));
       const contextRevision = capsule.revision;
       const authoritativeInitialRequest = { ...initialRequest, revision: contextRevision };
-      const currentTurnContext = fullTurnContextBase(engineSession.currentState(), initialSnapshot);
-      const plannedInitialTurnContext = plannedTurnContext(
-        engineSession.currentState(),
-        initialSnapshot,
-        lastSeenTurnContext,
-      );
-      let rowTurnContext = plannedInitialTurnContext;
+      let currentTurnContext: TurnContextDeltaBase | undefined;
+      const getCurrentTurnContext = (): TurnContextDeltaBase => {
+        currentTurnContext ??= fullTurnContextBase(engineSession.currentState(), initialSnapshot);
+        return currentTurnContext;
+      };
+      let plannedInitialTurnContext: CapturedTurnContext | undefined;
+      const getPlannedInitialTurnContext = (): CapturedTurnContext => {
+        plannedInitialTurnContext ??= plannedTurnContext(
+          engineSession.currentState(),
+          initialSnapshot,
+          lastSeenTurnContext,
+        );
+        return plannedInitialTurnContext;
+      };
+      let rowTurnContext = unrequestedTurnContext();
       const initialLauncher = await writeLauncher({
         directory: artifacts, name: `${key}-initial`, snapshot: initialSnapshot, room,
         historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
@@ -1747,6 +1844,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
       let initialDispatchPlanner: ConversationPlannerAttribution | null = null;
       let correctionDispatchPlanner: ConversationPlannerAttribution | null = null;
       let plannedBy: ConversationRow['plannedBy'] = null;
+      let plannerLabel: ConversationRow['plannerLabel'] = null;
       let escalated = false;
       let firedEscalationModel: string | null = null;
       let rolloutSessionId: string | null = null;
@@ -1762,6 +1860,9 @@ export async function runConversation(config: ConversationConfig, options: Conve
       const adjustments: ConversationAdjustment[] = [];
       const monsterSegments: ConversationMonsterSegment[] = [];
       const segmentMonsterPlan = new Map<CombatantId, SegmentMonsterPlanEntry>();
+      const exhaustionEntries = new Map<CombatantId, ExhaustionPlanEntry>();
+      const autoSubmitBlocks = new Map<CombatantId, ConversationAutoSubmitBlock>();
+      let exhaustionIntelCapture: DmIntelCapture | null = null;
       let segmentPlanId: string | null = null;
       const adjustmentTransitions: AdjustmentExhaustionTransition[] = [];
       const adjustmentPersistence = {
@@ -2156,7 +2257,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
             const flapped = turn.exit === 'completed' && proposed === null &&
               toolCallsObserved() === callsBefore && rejectionsObserved().length === rejectionsBefore;
             if (contextCallsObserved() > contextCallsBefore || proposed !== null) {
-              lastSeenTurnContext = currentTurnContext;
+              lastSeenTurnContext = getCurrentTurnContext();
             }
             if (!flapped) break;
             if (attempt === 2) {
@@ -2191,6 +2292,8 @@ export async function runConversation(config: ConversationConfig, options: Conve
         };
         const correctionSnapshot = engineSession.snapshot(correctionRequest);
         const correctionCapsule = correctionSnapshot.capsule;
+        const correctionActorIds = correctionCapsule.request?.actors;
+        if (correctionActorIds === undefined) throw new Error('Correction capsule has no actor set.');
         const correctionTurnContextBase = escalationPlanner === null
           ? lastSeenTurnContext
           : undefined;
@@ -2255,7 +2358,7 @@ export async function runConversation(config: ConversationConfig, options: Conve
             }
             const proposalTurnContext = config.captureRlData
               ? proposal.phase === 'initial'
-                ? takeTurnContext(initialLauncher.turnContextSpoolPath) ?? plannedInitialTurnContext
+                ? takeTurnContext(initialLauncher.turnContextSpoolPath) ?? getPlannedInitialTurnContext()
                 : takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? plannedCorrectionTurnContext
               : null;
             const proposalRlData = proposalTurnContext === null
@@ -2359,29 +2462,55 @@ export async function runConversation(config: ConversationConfig, options: Conve
             }
             return 'authorized';
           },
-          resolveDeterministically: async (actorId): Promise<DeterministicProposalResolution> => ({
-            actorId, expectedRevision: capsuleRevision,
-            resolutionDigest: sha256(canonicalJson({ actorId, option: 'dodge', revision: capsuleRevision })),
-          }),
+          resolveDeterministically: async (actorId): Promise<DeterministicProposalResolution> => {
+            const defaultEntry = engineDefaultPlanEntry(
+              engineSession.currentState(),
+              actorId,
+              capsuleRevision,
+            );
+            const exhaustionEntry = defaultEntry.frontierResolution === 'fully_resolved'
+              ? defaultEntry
+              : simControllerPlanEntry(
+                  engineSession.currentState(),
+                  actorId,
+                  capsuleRevision,
+                );
+            if (defaultEntry.frontierResolution === 'contains_unresolved') {
+              autoSubmitBlocks.set(actorId, {
+                actorId,
+                reason: 'auto_submit_blocked_unresolved_frontier',
+              });
+            }
+            exhaustionEntries.set(actorId, exhaustionEntry);
+            exhaustionIntelCapture ??= captureDmIntel(
+              engineSession.currentState(),
+              correctionCapsule,
+              canonicalEngineQueryPort,
+            );
+            return {
+              actorId,
+              expectedRevision: capsuleRevision,
+              resolutionDigest: exhaustionEntry.resolutionDigest,
+            };
+          },
           applyAutoResolved: async (resolution) => {
-            const dodge = deterministicDodgePlanEntry(engineSession.currentState(), resolution.actorId);
+            const exhaustionEntry = exhaustionEntries.get(resolution.actorId);
+            if (exhaustionEntry === undefined || exhaustionEntry.resolutionDigest !== resolution.resolutionDigest) {
+              throw new Error(`Exhaustion resolution was not retained for ${resolution.actorId}.`);
+            }
             if (config.combatModel === 'initiative_segments_v1') {
-              segmentMonsterPlan.set(resolution.actorId, dodge);
-              segmentPlanId = `auto-plan:${requestId}`;
-              plannedBy = 'sim_controller';
+              segmentMonsterPlan.set(resolution.actorId, exhaustionEntry);
               return;
             }
-            const applied = engineSession.applyResolvedMechanics([{
-              proposal: dodge.proposal,
-              option: dodge.option,
-              primaryOption: dodge.primaryOption,
-              fallbackOption: dodge.fallbackOption,
-              mechanics: dodge.mechanics,
-              selectedBranch: dodge.selectedBranch,
-            }], journal.reactionGuidance());
+            if (exhaustionEntries.size < correctionActorIds.length) return;
+            const entries = correctionActorIds.map((actorId) => {
+              const entry = exhaustionEntries.get(actorId);
+              if (entry === undefined) throw new Error(`Exhaustion resolution is absent for ${actorId}.`);
+              return entry;
+            });
+            const applied = engineSession.applyResolvedMechanics(entries, journal.reactionGuidance());
             capsuleRevision += Math.max(1, applied.revisionDelta);
             recordAutoResolvedReactions(journal, applied);
-            plannedBy = 'sim_controller';
           },
           pauseForDmAdjudication: ({ actorId, reason }) => { refusals.push(`${actorId}: ${reason}`); },
         };
@@ -2486,7 +2615,105 @@ export async function runConversation(config: ConversationConfig, options: Conve
             correctionFailure.result === 'no_response' && correctionFinalText !== null
             ? truncateAgentFinalText(correctionFinalText)
             : null;
-          autoResolvedTrigger = 'The initial primary/fallback chain and single correction were exhausted; the deterministic controller resolved the turn.';
+          const entries = coordinated.actorIds.map((actorId) => {
+            const entry = exhaustionEntries.get(actorId);
+            if (entry === undefined) throw new Error(`Exhaustion resolution is absent for ${actorId}.`);
+            return entry;
+          });
+          const blockFacts = [...autoSubmitBlocks.values()]
+            .sort((left, right) => left.actorId.localeCompare(right.actorId));
+          const exhaustionPlannerLabel: ExhaustionPlannerLabel = blockFacts.length === 0
+            ? 'engine_default'
+            : 'sim_controller';
+          const exhaustionProposalId = `${exhaustionPlannerLabel === 'engine_default'
+            ? 'engine-default'
+            : 'sim-controller'}:${requestId}`;
+          proposalId = exhaustionProposalId;
+          acceptedSubmission = entries.map((entry) => structuredClone(entry.proposal));
+          acceptedIntelCapture = exhaustionIntelCapture;
+          authorizedMonsterProposalHash = sha256(canonicalJson(acceptedSubmission));
+          authorizationStateBinding = {
+            revision: correctionCapsule.revision,
+            digest: correctionCapsule.digest,
+          };
+          authorizedPlan = entries.map((entry) => ({
+            actorId: entry.proposal.actorId,
+            acceptedProposal: externalProposal(entry.proposal),
+            selectedBranch: entry.selectedBranch,
+            resolutionSummary: {
+              optionId: entry.mechanics.optionId,
+              movementFeet: entry.mechanics.movementCostFeet,
+              actionSlots: structuredClone(entry.mechanics.actionSlots),
+            },
+          }));
+          roundNarrative = entries.map((entry) => entry.summary).join('; ');
+          plannerLabel = exhaustionPlannerLabel;
+          if (config.combatModel === 'initiative_segments_v1') {
+            segmentPlanId = exhaustionProposalId;
+          }
+          if (config.captureRlData) {
+            if (exhaustionIntelCapture === null) {
+              throw new Error('Exhaustion resolution omitted intel capture.');
+            }
+            const submittedArguments = {
+              state_ref: {
+                run_id: correctionCapsule.runId,
+                state_handle: engineStateHandle(correctionCapsule),
+                expected_revision: correctionCapsule.revision,
+              },
+              request_id: requestId,
+              phase: 'correction',
+              idempotency_key: `${exhaustionPlannerLabel}-${requestId}`,
+              proposals: entries.map((entry) => externalProposal(entry.proposal)),
+            };
+            const syntheticProposal: RoundTurnProposalEnvelope = {
+              kind: 'round_turn_proposal',
+              proposalId: exhaustionProposalId,
+              runId,
+              branchId,
+              requestId,
+              expectedRevision: correctionCapsule.revision,
+              stateDigest: correctionCapsule.digest,
+              stateHandle: engineStateHandle(correctionCapsule),
+              phase: 'correction',
+              idempotencyKey: `${exhaustionPlannerLabel}-${requestId}`,
+              resolutions: entries.map((entry) => ({
+                proposal: entry.proposal,
+                option: entry.option,
+                primaryOption: entry.primaryOption,
+                fallbackOption: entry.fallbackOption,
+                mechanics: entry.mechanics,
+                selectedBranch: entry.selectedBranch,
+                resolutionDigest: entry.resolutionDigest,
+                summary: entry.summary,
+              })),
+              reactionGuidance: journal.reactionGuidance(),
+              submittedArguments,
+              intelCapture: exhaustionIntelCapture,
+            };
+            capturedRlData = rlCapture(
+              knowledgeBase?.text ?? null,
+              recordedCorrectionTurnContext ?? plannedCorrectionTurnContext,
+              syntheticProposal,
+              {
+                repoCommit,
+                model: config.model,
+                effort: config.effort,
+                sessionId: rolloutSessionId,
+                parentPlanId: null,
+                partyPolicyHash: segmentPartyPlan?.policyHash ?? null,
+                materialityPolicyHash: config.combatModel === 'initiative_segments_v1'
+                  ? PLAN_MATERIALITY_POLICY_HASH
+                  : null,
+                plannerLabel: exhaustionPlannerLabel,
+                autoSubmitBlocks: blockFacts,
+              },
+            );
+          }
+          outcome = 'authorized';
+          autoResolvedTrigger = blockFacts.length === 0
+            ? 'The initial primary/fallback chain and single correction were exhausted; the engine auto-submitted its non-dominated default.'
+            : 'The initial primary/fallback chain and single correction were exhausted; unresolved frontier competition blocked engine auto-submit, so the deterministic controller resolved the affected actor turns.';
         }
         if (coordinated.kind !== 'auto_resolved') correctionFinalText = null;
         }
@@ -2684,7 +2911,11 @@ export async function runConversation(config: ConversationConfig, options: Conve
         callsPerRound: adapter.modelCalls - modelCallsBeforeRound,
         agentDispatched, flapRetries, serviceNull,
         contextTruncated: simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated,
-        plannedBy, escalated, escalationModel: firedEscalationModel,
+        plannedBy,
+        plannerLabel: plannerLabel ?? (plannedBy === null ? null : 'model'),
+        autoSubmitBlocks: [...autoSubmitBlocks.values()]
+          .sort((left, right) => left.actorId.localeCompare(right.actorId)),
+        escalated, escalationModel: firedEscalationModel,
         stateBinding: {
           capsule: { revision: capsule.revision, digest: capsule.digest },
           authorization: authorizationStateBinding,

@@ -192,18 +192,22 @@ function fixtureFacts(state: EncounterState, runtime: EngineMcpRuntime) {
     expected_revision: capsule.revision,
     primary_option_id: option.optionId,
     fallback_option_id: null,
-    override_justification: null,
+    override_justification: { reason: 'objective' as const, note: 'Fixture intentionally exercises the defensive override path.' },
   } as const;
   return { actor, target, action, request: capsule.request, proposal, ref: stateRef(runtime) };
 }
-function adjustmentMetadata(actorIds: readonly import('../../../src/combat/values').CombatantId[]) {
+function adjustmentMetadata(
+  actorIds: readonly import('../../../src/combat/values').CombatantId[],
+  materialityReasonCodes: readonly import('../../../src/vtt/plan-materiality').PlanMaterialityReasonCode[] =
+    ['PROPOSAL_RESOLUTION_CHANGED'],
+) {
   return {
     parentPlanId: 'plan:mcp-adjustment',
     baselinePlanHash: 'a'.repeat(64),
     triggerPcTurnId: 'pc-turn:mcp-adjustment',
     beforeRevision: 1,
     afterRevision: 2,
-    materialityReasonCodes: ['PROPOSAL_RESOLUTION_CHANGED'] as const,
+    materialityReasonCodes,
     baselineProposalDigests: actorIds.map((actorId) => ({ actorId, proposalDigest: 'b'.repeat(64) })),
     adjustmentBudget: Math.min(actorIds.length, 2) as 1 | 2,
   };
@@ -215,7 +219,8 @@ function dodgeUpdate(runtime: EngineMcpRuntime, actorId: string, fallbackOptionI
   if (option === undefined) throw new Error(`Fixture Dodge option is absent for ${actorId}.`);
   return {
     actor_id: actorId, expected_revision: capsule.revision, primary_option_id: option.optionId,
-    fallback_option_id: fallbackOptionId, override_justification: null,
+    fallback_option_id: fallbackOptionId,
+    override_justification: { reason: 'objective' as const, note: 'Fixture intentionally exercises the defensive override path.' },
   };
 }
 function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, runtime: EngineMcpRuntime): Readonly<Record<string, unknown>> {
@@ -632,6 +637,63 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     }));
     expect(rejected['status']).toBe('rejected');
     expect(runtime.proposals).toHaveLength(1);
+  });
+
+  it('rejects a dominated Dodge without a typed override and accepts the typed fixture override', async () => {
+    const { state, runtime } = await fixtureRuntime();
+    const valid = happyArguments('engine.submit_round_proposals', state, runtime);
+    const facts = fixtureFacts(state, runtime);
+    const rejected = structured(toolCall(runtime.handler, 'engine.submit_round_proposals', {
+      ...valid,
+      idempotency_key: 'round-dominated-dodge-0001',
+      proposals: [{ ...facts.proposal, override_justification: null }],
+    }));
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      actor_refusals: [{ codes: ['DOMINATED_OPTION_REQUIRES_OVERRIDE'] }],
+    });
+
+    const acceptedFixture = await fixtureRuntime();
+    const accepted = structured(toolCall(
+      acceptedFixture.runtime.handler,
+      'engine.submit_round_proposals',
+      happyArguments('engine.submit_round_proposals', acceptedFixture.state, acceptedFixture.runtime),
+    ));
+    expect(accepted['status']).toBe('proposed');
+  });
+
+  it('renders versioned materiality detail for a newly dying target in adjustment context', async () => {
+    const loaded = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const fighter = loaded.combatants.find((combatant) => combatant.profile.id === 'combatant:fighter');
+    const actor = loaded.combatants.find((combatant) => combatant.profile.kind === 'monster')?.profile.id;
+    if (fighter === undefined || actor === undefined) throw new Error('Materiality fixture actors are absent.');
+    const state: EncounterState = {
+      ...loaded,
+      combatants: loaded.combatants.map((combatant) => combatant.profile.id === fighter.profile.id
+        ? { ...combatant, life: 'dying' as const, hitPoints: 0 }
+        : combatant),
+    };
+    const runtime = createEngineMcpRuntime(state, {
+      requestKind: 'plan_adjustment',
+      requestedActorIds: [actor],
+      planAdjustment: adjustmentMetadata([actor], ['LIFE_STATE_CHANGED']),
+    });
+    const capsule = runtime.feed.current();
+    const context = structured(toolCall(runtime.handler, 'engine.get_turn_context', {
+      run_id: capsule.runId,
+      expected_revision: capsule.revision,
+      scope: 'round',
+    }));
+    expect(context).toMatchObject({
+      materiality: {
+        policy: 'materiality-context-v1',
+        reasons: [{
+          code: 'LIFE_STATE_CHANGED',
+          affected_actor_ids: ['combatant:fighter'],
+          summary: expect.stringContaining('combatant:fighter now dying'),
+        }],
+      },
+    });
   });
 
   it('binds, budgets, stages, corrects, and explicitly keeps plan adjustments per actor', async () => {

@@ -908,7 +908,6 @@ describe('player-character AlgorithmController policy', () => {
         },
         score: 35,
       },
-      { program: { kind: 'action', action: { kind: 'use_action', action: 'dodge' } }, score: 20 },
       { program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } }, score: 0 },
     ]);
   });

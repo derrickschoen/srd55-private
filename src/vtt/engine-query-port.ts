@@ -6,8 +6,13 @@ import type {
   EncounterState,
 } from '../combat/encounter';
 import type { AppliedCondition, ExhaustionLevel } from '../combat/conditions';
-import { gridDistance, type GridCell } from '../combat/grid';
+import { adjacentCells, gridDistance, type GridCell } from '../combat/grid';
 import { findPath, findPathToAny } from '../combat/movement';
+import {
+  evaluateMovementOptions,
+  MOVEMENT_EVALUATOR_POLICY,
+  type MovementEvaluation,
+} from '../combat/movement-evaluator';
 import { persistentAreaContains } from '../combat/persistent-areas';
 import type { EffectPayload, EncounterEffect } from '../combat/effects';
 import { monsterAttackRange, monsterAttackRollModeSources } from '../combat/monster-commands';
@@ -169,6 +174,12 @@ export interface EngineQueryPort {
     targetId: CombatantId,
     actionId: string,
   ): TacticalAttackEvaluation | null;
+  movementOptions(
+    state: EncounterState,
+    actorId: CombatantId,
+    targetId: CombatantId,
+    actionId: string,
+  ): MovementEvaluation | null;
   compareAllocations(
     state: EncounterState,
     targetId: CombatantId,
@@ -1263,6 +1274,144 @@ export function engineTacticalAttackInput(
   };
 }
 
+function stateWithActorAt(
+  state: EncounterState,
+  actorId: CombatantId,
+  position: GridCell,
+): EncounterState {
+  return {
+    ...state,
+    tokens: state.tokens.map((token) => token.combatantId === actorId
+      ? { ...token, position: { ...position } }
+      : token),
+  };
+}
+
+function movementHazards(state: EncounterState): readonly {
+  readonly cell: GridCell;
+  readonly kind: 'burning_surface' | 'persistent_area_damage' | 'environmental_hazard';
+}[] {
+  const values: {
+    readonly cell: GridCell;
+    readonly kind: 'burning_surface' | 'persistent_area_damage' | 'environmental_hazard';
+  }[] = [];
+  for (const area of state.persistentAreas) {
+    values.push(...area.burningCells.map((burning) => ({
+      cell: burning.cell,
+      kind: 'burning_surface' as const,
+    })));
+    if (area.hooks.some((hook) => hook.effect.payload.kind === 'damage')) {
+      const origin = area.origin;
+      const anchor = origin.kind === 'anchored'
+        ? state.tokens.find((token) => token.combatantId === origin.combatant)?.position ?? null
+        : origin.kind === 'anchored_to_object'
+          ? state.worldObjects.find((object) => object.id === origin.object)?.position ?? null
+          : null;
+      for (let row = 0; row < state.bounds.rows; row += 1) {
+        for (let column = 0; column < state.bounds.columns; column += 1) {
+          const cell = { column, row };
+          if (persistentAreaContains(area, cell, anchor, state)) {
+            values.push({ cell, kind: 'persistent_area_damage' });
+          }
+        }
+      }
+    }
+  }
+  for (const object of state.worldObjects) {
+    if (object.kind !== 'hazard') continue;
+    values.push(...object.footprint.map((cell) => ({
+      cell,
+      kind: 'environmental_hazard' as const,
+    })));
+  }
+  return values;
+}
+
+function movementOptions(
+  state: EncounterState,
+  actorId: CombatantId,
+  targetId: CombatantId,
+  actionId: string,
+): MovementEvaluation | null {
+  const actor = combatant(state, actorId);
+  const start = state.tokens.find((token) => token.combatantId === actorId)?.position;
+  if (actor === null || start === undefined ||
+    engineTacticalAttackInput(state, actorId, targetId, actionId) === null) return null;
+  const world = movementWorld(state);
+  const attackAt = (position: GridCell) => {
+    const input = engineTacticalAttackInput(
+      stateWithActorAt(state, actorId, position),
+      actorId,
+      targetId,
+      actionId,
+    );
+    return input === null
+      ? { status: 'unresolved' as const, reason: 'attack_context_unresolved' as const }
+      : {
+          status: 'resolved' as const,
+          input: (({ attackerPosition: _attackerPosition, ...withoutPosition }) => withoutPosition)(input),
+        };
+  };
+  const firstLegal = findPathToAny(world, {
+    actorId,
+    start,
+    maximumCost: feet(maximumPathCost(state)),
+    isGoal: (position) => {
+      const verdict = attackAt(position);
+      if (verdict.status === 'unresolved') return false;
+      const evaluation = evaluateTacticalAttack({ ...verdict.input, attackerPosition: position });
+      return evaluation.range.status === 'resolved' && evaluation.range.legal &&
+        !evaluation.unresolved.includes('target_has_total_cover');
+    },
+  });
+  const candidateMap = new Map<string, GridCell>();
+  for (const candidate of adjacentCells(state.bounds, start)) {
+    candidateMap.set(cellKey(candidate), candidate);
+  }
+  if (firstLegal.kind === 'found') {
+    const destination = firstLegal.cells.at(-1) ?? start;
+    candidateMap.set(cellKey(destination), destination);
+  }
+  const reachSources = state.combatants.flatMap((candidate) => {
+    const position = state.tokens.find((token) => token.combatantId === candidate.profile.id)?.position;
+    if (
+      candidate.profile.id === actorId || candidate.life === 'dead' || position === undefined ||
+      combatantsAreAllies(state, actorId, candidate.profile.id) ||
+      isIncapacitatedByState(state, candidate.profile.id) ||
+      detect(state, candidate.profile.id, actorId)?.kind !== 'seen'
+    ) return [];
+    return [{
+      reactorId: candidate.profile.id,
+      cell: position,
+      reach: feet(candidate.profile.rules.reach),
+      reactionAvailable: candidate.turn.reactionAvailable,
+      hostile: true,
+    }];
+  });
+  return evaluateMovementOptions({
+    policy: MOVEMENT_EVALUATOR_POLICY,
+    actorId,
+    start,
+    candidates: [...candidateMap.values()],
+    world,
+    speedPerTurn: feet(enginePlanningSpeedFeet(state, actorId)),
+    currentMovementRemaining: actor.turn.movement.remaining,
+    projection: {
+      currentAttackActionAvailable: actor.turn.action.kind === 'available',
+      currentDashAvailable: actor.turn.action.kind === 'available',
+      futureAttackActionAvailable: true,
+      futureDashAvailable: true,
+    },
+    opportunityAttackRisk: {
+      status: 'resolved',
+      cause: actor.turn.disengaging ? 'disengaged' : 'voluntary',
+      reachSources,
+    },
+    hazards: { status: 'resolved', cells: movementHazards(state) },
+    attackAt,
+  });
+}
+
 function optionBlessTargets(option: EngineActorOption): readonly CombatantId[] {
   return option.actionSlots.flatMap((slot) =>
     slot.slot === 'bonus' && slot.use.kind === 'cast_spell' && slot.use.spellId === 'bless'
@@ -1433,6 +1582,7 @@ const engineQueryPort: EngineQueryPort = {
     const input = engineTacticalAttackInput(state, actorId, targetId, actionId);
     return input === null ? null : evaluateTacticalAttack(input);
   },
+  movementOptions,
   compareAllocations: compareTacticalAllocations,
   cover(state, actorId, targetId) {
     const from = state.tokens.find((token) => token.combatantId === actorId)?.position;

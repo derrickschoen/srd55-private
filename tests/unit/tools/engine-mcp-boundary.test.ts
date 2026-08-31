@@ -39,7 +39,11 @@ function dodge(context: Readonly<Record<string, unknown>>, actorId: string): Rea
   }
   return {
     actor_id: actorId, expected_revision: stateRef['expected_revision'], primary_option_id: option['option_id'],
-    fallback_option_id: null, override_justification: null,
+    fallback_option_id: null,
+    override_justification: {
+      reason: 'objective',
+      note: 'The mutation-boundary fixture intentionally exercises a defensive plan.',
+    },
   };
 }
 

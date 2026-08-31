@@ -185,7 +185,9 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
         expected_revision: manifest.revision,
         primary_option_id: selected.optionId,
         fallback_option_id: null,
-        override_justification: null,
+        override_justification: requestedKind === 'dodge' || requestedKind === 'end_turn'
+          ? { reason: 'objective', note: 'Serialized fixture intentionally selects a dominated option.' }
+          : null,
       };
     });
     if ((this.choice === 'attack' || this.choice === 'targeted_web') && !specialSubmitted) {
@@ -737,6 +739,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--rounds', '2',
       '--out', outPath,
       '--cli-bin', 'definitely-not-a-model-binary',
+      '--capture-rl-data',
       '--dry-run',
       ...LEGACY_BLOCK_ARGS,
     ]);
@@ -749,7 +752,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows).toHaveLength(4);
     expect(result.rows.map((row) => row.outcome)).toEqual([
-      'auto_resolved', 'authorized', 'authorized', 'authorized',
+      'authorized', 'authorized', 'authorized', 'authorized',
     ]);
     expect(result.rows.every((row) => row.refusals.length === 0)).toBe(true);
     expect(result.rows.every((row) => row.sessionId === null && row.escalationSessionId === null)).toBe(true);
@@ -757,7 +760,8 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.toolCalls).toBe(2);
     expect(result.rows[0]?.agentDispatched).toBe(true);
     expect(result.rows[0]).toEqual(expect.objectContaining({
-      plannedBy: 'sim_controller', escalated: false, escalationModel: null,
+      plannedBy: null, plannerLabel: 'engine_default', autoSubmitBlocks: [],
+      escalated: false, escalationModel: null,
     }));
     expect(result.rows[0]?.chainEvidence).toEqual({
       failedAttempts: expect.arrayContaining([
@@ -765,10 +769,22 @@ describe('AI-DM engine MCP conversation runner', () => {
         expect.objectContaining({ attempt: 'fallback' }),
         expect.objectContaining({ attempt: 'correction' }),
       ]),
-      autoResolvedTrigger: expect.stringContaining('deterministic controller'),
+      autoResolvedTrigger: expect.stringContaining('engine auto-submitted'),
       correctionFinalText: 'SIMULATED — proposal delivered through engine MCP spool',
     });
-    expect(result.rows[0]?.proposalId).toBeNull();
+    expect(result.rows[0]?.proposalId).toContain('engine-default:');
+    expect(result.rows[0]?.rlData).toEqual(expect.objectContaining({
+      plannerLabel: 'engine_default',
+      autoSubmitBlocks: [],
+      intelPolicyVersions: {
+        movement: 'movement-options-v1',
+        opportunityCost: 'opportunity-cost-v1',
+        correction: 'dominance-correction-v1',
+        materialityContext: 'materiality-context-v1',
+      },
+    }));
+    expect(result.rows[0]?.authorizedPlan?.some((entry) =>
+      entry.resolutionSummary.actionSlots.some((slot) => slot.kind === 'dodge'))).toBe(false);
     expect(result.rows[1]?.proposalId).toContain('round:');
     expect(result.rows[0]?.projectionRevision).toBeGreaterThan(result.rows[0]?.contextRevision ?? 0);
     expect(result.rows[1]?.contextRevision).toBe(result.rows[0]?.projectionRevision);
@@ -780,6 +796,54 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.restoredMidRun).toBe(true);
     expect(result.journalExport).toContain('agent-session:SIMULATED:encounter:ai-dm-conversation');
     expect(readFileSync(outPath, 'utf8').trim().split('\n')).toHaveLength(4);
+  });
+
+  it('uses sim_controller and records a typed block when an unresolved frontier prevents auto-submit', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-unresolved-frontier-'));
+    const state = await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117009.json');
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--capture-rl-data', '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [state],
+      exhaustInitial: ['room-1-round-1'],
+      failCorrection: ['room-1-round-1'],
+    });
+
+    const row = result.rows[0];
+    expect(row).toEqual(expect.objectContaining({
+      outcome: 'authorized',
+      plannedBy: null,
+      plannerLabel: 'sim_controller',
+      proposalId: expect.stringContaining('sim-controller:'),
+      autoSubmitBlocks: expect.arrayContaining([
+        {
+          actorId: 'combatant:generated-5117009-monster-1',
+          reason: 'auto_submit_blocked_unresolved_frontier',
+        },
+      ]),
+      chainEvidence: expect.objectContaining({
+        autoResolvedTrigger: expect.stringContaining('unresolved frontier competition blocked engine auto-submit'),
+      }),
+    }));
+    expect(row?.rlData).toEqual(expect.objectContaining({
+      plannerLabel: 'sim_controller',
+      autoSubmitBlocks: expect.arrayContaining([
+        {
+          actorId: 'combatant:generated-5117009-monster-1',
+          reason: 'auto_submit_blocked_unresolved_frontier',
+        },
+      ]),
+    }));
+    const priestPlan = row?.authorizedPlan?.find((entry) =>
+      entry.actorId === 'combatant:generated-5117009-monster-1');
+    expect(priestPlan?.resolutionSummary.actionSlots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'dodge' }),
+    ]));
+    expect(row?.projectionRevision).toBeGreaterThan(row?.contextRevision ?? 0);
   });
 
   it('runs a model-free stdio MCP dry-run smoke', { timeout: 30_000 }, async () => {
@@ -857,7 +921,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows).toEqual([
       expect.objectContaining({
-        outcome: 'auto_resolved', flapRetries: 0, serviceNull: false,
+        outcome: 'authorized', plannerLabel: 'engine_default', flapRetries: 0, serviceNull: false,
         toolCalls: 3,
         chainEvidence: expect.objectContaining({
           failedAttempts: expect.arrayContaining([

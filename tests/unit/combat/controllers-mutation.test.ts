@@ -1541,7 +1541,6 @@ describe('controller mutation contract: turn-program enumeration', () => {
         program: { kind: 'action', action: { kind: 'move_toward', target: { kind: 'combatant', combatantId: near.id } } },
         score: 40,
       },
-      { program: { kind: 'action', action: { kind: 'use_action', action: 'dodge' } }, score: 20 },
       { program: { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } }, score: 0 },
     ]);
     expect(controller.enumerateTurnPrograms(

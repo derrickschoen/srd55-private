@@ -4,6 +4,13 @@ import { PLAY_NAMES } from '../snippet-registry-runtime';
 import { DM_INTEL_QUERY_POLICY, DM_TURN_INTEL_POLICY } from '../dm-tactical-intel';
 import { ENGINE_FAILURE_MODES_POLICY } from '../engine-failure-modes';
 import { ENGINE_INITIATIVE_PROJECTION_POLICY } from '../engine-state-capsule';
+import { MOVEMENT_EVALUATOR_POLICY } from '../../combat/movement-evaluator';
+import { MOVEMENT_OPTIONS_INTEL_POLICY } from '../intel/movement-options';
+import {
+  DOMINANCE_CORRECTION_POLICY,
+  MATERIALITY_CONTEXT_POLICY,
+  OPPORTUNITY_COST_POLICY,
+} from '../intel/opportunity-cost';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
 
 const identifier = z.string().min(1).max(200).describe('Engine-owned stable identifier.');
@@ -51,7 +58,7 @@ const engagement = z.object({
 const overrideJustification = z.object({
   reason: z.enum(['morale', 'objective', 'roleplay', 'resource_conservation', 'unknown_engine_gap']),
   note: z.string().min(1).max(500).optional(),
-}).strict();
+}).strict().describe('Required when a selected option is strictly dominated on every resolved declared metric.');
 const turnProposal = z.object({
   actor_id: identifier,
   expected_revision: z.number().int().min(0),
@@ -149,10 +156,48 @@ const contextIntelRow = compactIntelRow
     reason_codes: z.array(shortCode).max(50).optional(),
     consequence_codes: z.array(shortCode).max(20).optional(),
   });
+const movementSnapshot = z.object({
+  range: z.enum(['MELEE', 'NORMAL', 'LONG', 'OUT', 'UNRESOLVED']),
+  roll: z.enum(['STRAIGHT', 'ADVANTAGE', 'DISADVANTAGE', 'MIXED', 'UNRESOLVED']),
+  ev: z.number().int().nullable(),
+}).strict();
+const movementIntelRow = z.object({
+  policy: z.literal(MOVEMENT_OPTIONS_INTEL_POLICY),
+  evaluator_policy: z.literal(MOVEMENT_EVALUATOR_POLICY),
+  actor_id: identifier,
+  target_id: identifier,
+  option_id: identifier.nullable(),
+  action_id: identifier,
+  semantic: z.enum(['move_5_to_normal_range', 'move_within_speed_to_enable_attack', 'maintain_range', 'other_reposition', 'no_reposition']),
+  move_feet: z.number().int().min(0).nullable(),
+  before: movementSnapshot,
+  after: movementSnapshot.nullable(),
+  opportunity_risk: z.enum(['none', 'opportunity_attack', 'hazard', 'unresolved']),
+  hazard_risk: z.enum(['none', 'opportunity_attack', 'hazard', 'unresolved']),
+  attack_eta: z.string().min(1).max(200),
+}).strict();
+const contextMovementIntelRow = movementIntelRow.omit({
+  policy: true,
+  evaluator_policy: true,
+  actor_id: true,
+  option_id: true,
+});
+const opportunityCost = z.object({
+  policy: z.literal(OPPORTUNITY_COST_POLICY),
+  correction_policy: z.literal(DOMINANCE_CORRECTION_POLICY),
+  dodge_option_id: identifier,
+  engine_default_option_id: identifier,
+  status: z.enum(['dominated', 'not_dominated', 'blocked_unresolved', 'blocked_incomparable']),
+  better_option_id: identifier.optional(),
+  delta: z.string().min(1).max(1_000).optional(),
+  reason_codes: z.array(shortCode).max(50).optional(),
+}).strict();
 const actorIntel = z.object({
   policy: z.literal(DM_TURN_INTEL_POLICY),
   zero_movement_offense_count: z.number().int().min(0),
   rows: z.array(contextIntelRow).max(3),
+  movement: z.array(contextMovementIntelRow).max(3),
+  opportunity_cost: opportunityCost.nullable(),
   salient_window: z.string().min(1).max(500).nullable(),
 }).strict();
 const failureModesManifest = z.object({
@@ -181,6 +226,14 @@ const currentPlanSummary = z.object({
     proposal_digest: z.string().regex(/^[0-9a-f]{64}$/u),
   }).strict()).min(1).max(50),
 }).strict();
+const materialityContext = z.object({
+  policy: z.literal(MATERIALITY_CONTEXT_POLICY),
+  reasons: z.array(z.object({
+    code: shortCode,
+    affected_actor_ids: z.array(identifier).max(100),
+    summary: z.string().min(1).max(1_000),
+  }).strict()).min(1).max(20),
+}).strict();
 const actorContext = z.object({ actor_id: identifier, status: actorStatus, options: z.array(tacticalOption).max(20), threats: z.array(threat).max(50), intel: actorIntel }).strict();
 const advertisedPlay = z.object({
   name: z.enum(PLAY_NAMES),
@@ -199,6 +252,7 @@ const fullTurnContextOutput = z.object({
   applicable_plays: z.array(advertisedPlay).max(3),
   suggested_plan: suggestedPlan.optional(),
   current_plan: currentPlanSummary.optional(),
+  materiality: materialityContext.nullable().optional(),
   known_failure_modes: failureModesManifest.optional(),
   recent_changes: z.array(recentChange).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable(),
 }).strict();
@@ -273,6 +327,11 @@ const tacticalIntelOutput = z.object({
   renderer_policy: z.literal(DM_TURN_INTEL_POLICY),
   evaluator_policy: z.literal(TACTICAL_EVALUATOR_POLICY),
   rows: z.array(compactIntelRow).max(20),
+  movement_policy: z.literal(MOVEMENT_OPTIONS_INTEL_POLICY),
+  movement_rows: z.array(movementIntelRow).max(100),
+  opportunity_policy: z.literal(OPPORTUNITY_COST_POLICY),
+  correction_policy: z.literal(DOMINANCE_CORRECTION_POLICY),
+  opportunity_costs: z.array(opportunityCost).max(50),
   initiative: tacticalIntelInitiative.nullable(),
   truncated: z.boolean(),
   next_cursor: z.string().max(500).nullable(),
