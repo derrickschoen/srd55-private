@@ -108,7 +108,7 @@ const arenaRowSchema = z.object({
   engineIntel: engineIntelSchema.nullable().optional(),
   // Post-intel rows label the planner ('model' | 'engine_default'); pre-intel
   // rows have no such field. Attribution uses it when present.
-  plannerLabel: z.string().optional(),
+  plannerLabel: z.string().nullable().optional(),
   // Required in cross-era mode, where it is the arm partition key.
   repoCommit: z.string().min(1).optional(),
 }).passthrough();
@@ -148,7 +148,7 @@ interface ValidatedArenaRow {
   readonly startingRoomDigest: string;
   readonly outcome: string;
   readonly plannedBy: z.infer<typeof plannerSchema>;
-  readonly plannerLabel: string | undefined;
+  readonly plannerLabel: string | null | undefined;
   readonly roundNarrative: string | null;
   readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
 }
