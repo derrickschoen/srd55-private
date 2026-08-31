@@ -75,18 +75,20 @@ describe('AI-DM R1-10 rerun packet', () => {
       entries: [
         {
           blindId: 'blind-001', caseId: 'case-01-1', outcome: 'authorized',
-          attribution: 'model_authorized', roundNarrative: 'The ogre attacks the fighter.',
+          attribution: 'model_authorized',
           // Era-neutral form only: the raw resolutionSummary shape from the
-          // fixture must never survive into the packet.
+          // fixture must never survive into the packet, and neither may the
+          // renderer-templated roundNarrative.
           executedPlan: [{
             actorId: 'monster:ogre',
             actions: [{ kind: 'attack', actionId: null, targetIds: ['pc:fighter'] }],
+            movementFeet: 0,
           }],
           rubric: { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null },
         },
         {
           blindId: 'blind-002', caseId: 'case-01-1', outcome: 'auto_resolved',
-          attribution: 'engine_default', roundNarrative: 'The ogre takes Dodge.',
+          attribution: 'engine_default',
           executedPlan: null,
           rubric: { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null },
         },
@@ -106,12 +108,27 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(JSON.stringify(result.packet)).not.toContain('intel-model');
     expect(JSON.stringify(result.packet)).not.toContain('engineIntel');
     expect(JSON.stringify(result.packet)).not.toContain('resolutionSummary');
-    expect(JSON.stringify(result.packet)).not.toContain('movementFeet');
+    expect(JSON.stringify(result.packet)).not.toContain('roundNarrative');
 
-    const mutatedRows = rows.map((row, index) => index === 0
+    // The narrative is deliberately dropped, so mutating it must NOT change
+    // the packet; mutating the executed plan must.
+    const narrativeMutated = rows.map((row, index) => index === 0
       ? { ...row, roundNarrative: 'The ogre retreats.' }
       : row);
-    expect(buildRerunPacket(mutatedRows, 1, tinyProtocol).packet).not.toEqual(expectedPacket);
+    expect(buildRerunPacket(narrativeMutated, 1, tinyProtocol).packet).toEqual(expectedPacket);
+    const planMutated = rows.map((row, index) => index === 0
+      ? {
+          ...row,
+          authorizedPlan: [{
+            actorId: 'monster:ogre',
+            resolutionSummary: {
+              optionId: 'club-fighter', movementFeet: 10,
+              actionSlots: [{ slot: 'main', kind: 'attack', targetIds: ['pc:wizard'] }],
+            },
+          }],
+        }
+      : row);
+    expect(buildRerunPacket(planMutated, 1, tinyProtocol).packet).not.toEqual(expectedPacket);
   });
 
   it('validates the preregistered seed set, three paired reps, frozen artifacts, holdout status, and initiative evidence', () => {
@@ -165,12 +182,12 @@ describe('AI-DM R1-10 rerun packet', () => {
       ]), 1, { seeds: [5_117_001], reps: 1 });
     for (const entry of oldEra.packet.entries) {
       expect(entry.executedPlan).toEqual([
-        { actorId: 'combatant:m1', actions: [{ kind: 'attack', actionId: 'radiant-flame', targetIds: ['combatant:cleric'] }] },
-        { actorId: 'combatant:m2', actions: [{ kind: 'dodge', actionId: 'dodge', targetIds: [] }] },
-        { actorId: 'combatant:m3', actions: [{ kind: 'dodge', actionId: null, targetIds: [] }] },
+        { actorId: 'combatant:m1', actions: [{ kind: 'attack', actionId: 'radiant-flame', targetIds: ['combatant:cleric'] }], movementFeet: 5 },
+        { actorId: 'combatant:m2', actions: [{ kind: 'dodge', actionId: 'dodge', targetIds: [] }], movementFeet: 0 },
+        { actorId: 'combatant:m3', actions: [{ kind: 'dodge', actionId: null, targetIds: [] }], movementFeet: null },
       ]);
     }
-    expect(JSON.stringify(oldEra.packet)).not.toContain('movementFeet');
+    expect(JSON.stringify(oldEra.packet)).not.toContain('roundNarrative');
 
     const newEra = buildRerunPacket(paired([{
       actorId: 'combatant:m1',
@@ -183,7 +200,7 @@ describe('AI-DM R1-10 rerun packet', () => {
     }], { plannerLabel: 'model', engineIntel: null }), 1, { seeds: [5_117_001], reps: 1 });
     for (const entry of newEra.packet.entries) {
       expect(entry.executedPlan).toEqual([
-        { actorId: 'combatant:m1', actions: [{ kind: 'attack', actionId: 'radiant-flame', targetIds: ['combatant:cleric'] }] },
+        { actorId: 'combatant:m1', actions: [{ kind: 'attack', actionId: 'radiant-flame', targetIds: ['combatant:cleric'] }], movementFeet: 5 },
       ]);
     }
     expect(JSON.stringify(newEra.packet)).not.toContain('acceptedProposal');

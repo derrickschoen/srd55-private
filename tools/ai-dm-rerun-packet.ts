@@ -49,6 +49,7 @@ const currentActionSlotSchema = z.object({
 // Post-intel executed summary: multi-slot.
 const currentResolutionSummarySchema = z.object({
   actionSlots: z.array(currentActionSlotSchema),
+  movementFeet: z.number().optional(),
 }).passthrough();
 
 // Baseline-era executed summary: single action. Real baseline rows carry BOTH
@@ -57,6 +58,7 @@ const currentResolutionSummarySchema = z.object({
 const baselineResolutionSummarySchema = z.object({
   actionId: z.string().nullable(),
   targetId: z.string().nullable(),
+  movementFeet: z.number().optional(),
 }).passthrough();
 
 const authorizedPlanEntrySchema = z.object({
@@ -81,6 +83,8 @@ export interface NeutralAction {
 export interface NeutralPlanEntry {
   readonly actorId: unknown;
   readonly actions: readonly NeutralAction[];
+  /** Executed movement, present in both eras' summaries; null when unrecorded. */
+  readonly movementFeet: number | null;
 }
 
 const arenaRowSchema = z.object({
@@ -162,7 +166,6 @@ export interface JudgePacketEntry {
   readonly caseId: string;
   readonly outcome: string;
   readonly attribution: 'model_authorized' | 'engine_default' | 'not_model_authorized';
-  readonly roundNarrative: string | null;
   readonly executedPlan: readonly NeutralPlanEntry[] | null;
   readonly rubric: BlindRubric;
 }
@@ -197,7 +200,12 @@ const MODEL_IDENTITY_FIELDS = new Set([
   // Era-specific plan-shape keys: any of these surviving into the packet means
   // the executed-plan normalization failed and the entry identifies its era.
   'acceptedIntent', 'acceptedProposal', 'resolutionSummary', 'actionSlots',
-  'selectedBranch', 'optionId', 'movementFeet', 'plannerLabel',
+  'selectedBranch', 'optionId', 'plannerLabel',
+  // The round narrative is a deterministic era-specific renderer template
+  // ("expands X + X -> Y into N ordered use(s)" vs "moves N feet and uses x"),
+  // verified trivially arm-separable on real R1-10 rows. It adds nothing
+  // beyond the neutral plan + movementFeet, so it is banned from the packet.
+  'roundNarrative',
 ]);
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -372,7 +380,7 @@ function engineAttribution(row: ValidatedArenaRow): JudgePacketEntry['attributio
   return 'not_model_authorized';
 }
 
-function neutralActions(plan: z.infer<typeof authorizedPlanEntrySchema>): readonly NeutralAction[] {
+function neutralPlanEntry(plan: z.infer<typeof authorizedPlanEntrySchema>): NeutralPlanEntry {
   // Id preference (actionId over spellId over objectId) is deterministic but
   // only data-verified for the action kinds present in R1-10 rows (attack,
   // dodge, direct combatant targets). A rerun whose rows include spell or
@@ -382,11 +390,15 @@ function neutralActions(plan: z.infer<typeof authorizedPlanEntrySchema>): readon
   if (summary !== undefined) {
     const current = currentResolutionSummarySchema.safeParse(summary);
     if (current.success) {
-      return current.data.actionSlots.map((slot) => ({
-        kind: slot.kind,
-        actionId: slot.actionId ?? slot.spellId ?? slot.objectId ?? null,
-        targetIds: slot.targetIds ?? [],
-      }));
+      return {
+        actorId: plan.actorId,
+        actions: current.data.actionSlots.map((slot) => ({
+          kind: slot.kind,
+          actionId: slot.actionId ?? slot.spellId ?? slot.objectId ?? null,
+          targetIds: slot.targetIds ?? [],
+        })),
+        movementFeet: current.data.movementFeet ?? null,
+      };
     }
     const baseline = baselineResolutionSummarySchema.safeParse(summary);
     if (baseline.success) {
@@ -395,21 +407,29 @@ function neutralActions(plan: z.infer<typeof authorizedPlanEntrySchema>): readon
       if (plan.acceptedIntent === undefined) {
         throw new TypeError('baseline resolutionSummary without acceptedIntent; refusing to fabricate an action kind.');
       }
-      return [{
-        kind: plan.acceptedIntent.choice.kind,
-        actionId: baseline.data.actionId,
-        targetIds: baseline.data.targetId === null ? [] : [baseline.data.targetId],
-      }];
+      return {
+        actorId: plan.actorId,
+        actions: [{
+          kind: plan.acceptedIntent.choice.kind,
+          actionId: baseline.data.actionId,
+          targetIds: baseline.data.targetId === null ? [] : [baseline.data.targetId],
+        }],
+        movementFeet: baseline.data.movementFeet ?? null,
+      };
     }
   }
   if (plan.acceptedIntent !== undefined) {
     const choice = plan.acceptedIntent.choice;
     const target = choice.target;
-    return [{
-      kind: choice.kind,
-      actionId: choice.action_id ?? choice.spell_id ?? null,
-      targetIds: target?.combatant_id === undefined ? [] : [target.combatant_id],
-    }];
+    return {
+      actorId: plan.actorId,
+      actions: [{
+        kind: choice.kind,
+        actionId: choice.action_id ?? choice.spell_id ?? null,
+        targetIds: target?.combatant_id === undefined ? [] : [target.combatant_id],
+      }],
+      movementFeet: null,
+    };
   }
   // Fail loud: an unrecognized plan shape must never silently become an empty
   // (and thereby era-identifying) entry.
@@ -420,10 +440,7 @@ function executedPlan(
   value: ValidatedArenaRow['authorizedPlan'],
 ): readonly NeutralPlanEntry[] | null {
   if (value === null) return null;
-  return value.map((plan) => ({
-    actorId: plan.actorId,
-    actions: neutralActions(plan),
-  }));
+  return value.map(neutralPlanEntry);
 }
 
 function rubric(): BlindRubric {
@@ -487,7 +504,6 @@ export function buildRerunPacket(
       caseId: `case-${String(row.room).padStart(2, '0')}-${String(row.rep)}`,
       outcome: row.outcome,
       attribution: engineAttribution(row),
-      roundNarrative: row.roundNarrative,
       executedPlan: executedPlan(row.authorizedPlan),
       rubric: rubric(),
     })),
