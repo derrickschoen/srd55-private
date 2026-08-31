@@ -332,3 +332,44 @@ export type LegendaryResistanceBoundaryIntel<
   Metrics extends NormalizedOptionMetrics<string, string>,
   Reason extends string,
 > = BoundaryIntel<LegendaryResistancePendingDecision, Policy, Metrics, Reason>;
+
+/** Conditions whose physical manifestation can be projected without exposing a hidden cause. */
+export type PerceivedConditionName =
+  | 'Blinded'
+  | 'Grappled'
+  | 'Paralyzed'
+  | 'Petrified'
+  | 'Prone'
+  | 'Restrained'
+  | 'Stunned'
+  | 'Unconscious';
+
+/** One positively observed condition; absence from the list does not prove absence. */
+export interface PerceivedConditionMarker {
+  readonly kind: 'perceived';
+  readonly condition: PerceivedConditionName;
+}
+
+export type ProjectedArmorClassKnowledge =
+  | { readonly kind: 'unknown' }
+  | {
+      readonly kind: 'perceived_band';
+      readonly band: 'lightly_defended' | 'guarded' | 'heavily_defended';
+    };
+
+export type ProjectedHitPointKnowledge =
+  | { readonly kind: 'unknown' }
+  | {
+      readonly kind: 'perceived_band';
+      readonly band: 'uninjured' | 'bloodied' | 'near_death';
+    };
+
+/** A positive sight observation is public; lack of one does not prove blindness. */
+export type ProjectedReciprocalVisibility =
+  | { readonly kind: 'unknown' }
+  | { readonly kind: 'perceived'; readonly targetCanSeeActor: true };
+
+/** Only a public spend is knowable; an apparently unspent reaction remains unknown. */
+export type ProjectedReactionKnowledge =
+  | { readonly kind: 'unknown' }
+  | { readonly kind: 'observed_spent' };

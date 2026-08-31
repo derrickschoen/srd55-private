@@ -96,7 +96,12 @@ export type TacticalUnresolvedReason =
   | 'damage_unresolved'
   | 'conditional_damage_rider_unresolved'
   | 'random_attack_modifier_unresolved'
+  | 'target_hit_points_unresolved'
   | 'target_has_total_cover';
+
+export interface TacticalUnknownTargetFact {
+  readonly kind: 'unknown';
+}
 
 export interface TacticalAttackInput {
   readonly attackerId: CombatantId;
@@ -115,8 +120,8 @@ export interface TacticalAttackInput {
   readonly rollModeSources: readonly AttackRollModeSource[];
   readonly attackRollModifiers?: readonly TacticalAttackRollModifier[];
   readonly target: {
-    readonly hitPoints: number;
-    readonly usesDeathSaves: boolean;
+    readonly hitPoints: number | TacticalUnknownTargetFact;
+    readonly usesDeathSaves: boolean | TacticalUnknownTargetFact;
   };
   readonly unresolvedReasons?: readonly TacticalUnresolvedReason[];
 }
@@ -180,13 +185,27 @@ export type TacticalDamageVerdict =
       >;
     };
 
-export interface TacticalZeroHitPointConsequences {
+export interface TacticalResolvedZeroHitPointConsequences {
   readonly deathFailureOnHit: boolean;
   readonly failuresOnHit: 0 | 1;
   readonly failuresOnCritical: 0 | 2;
   readonly automaticCriticalOnHit: boolean;
   readonly automaticCriticalMaximumDistanceFeet: number | null;
 }
+
+export interface TacticalUnresolvedZeroHitPointConsequences {
+  readonly status: 'unresolved';
+  readonly reason: 'target_hit_points_unresolved';
+  readonly deathFailureOnHit: null;
+  readonly failuresOnHit: null;
+  readonly failuresOnCritical: null;
+  readonly automaticCriticalOnHit: boolean;
+  readonly automaticCriticalMaximumDistanceFeet: number | null;
+}
+
+export type TacticalZeroHitPointConsequences =
+  | TacticalResolvedZeroHitPointConsequences
+  | TacticalUnresolvedZeroHitPointConsequences;
 
 export interface TacticalAttackEvaluation {
   readonly policy: typeof TACTICAL_EVALUATOR_POLICY;
@@ -202,6 +221,7 @@ export type TacticalSequenceReasonCode =
   | 'death_save_failures_resolved'
   | 'living_damage_resolved'
   | 'massive_damage_instant_death_unresolved'
+  | 'target_hit_points_unresolved'
   | 'attack_probability_unresolved'
   | 'attack_damage_unresolved';
 
@@ -213,6 +233,9 @@ export type TacticalSequenceTarget =
   | {
       readonly kind: 'living_hit_points';
       readonly hitPoints: number;
+    }
+  | {
+      readonly kind: 'unknown_hit_points';
     };
 
 export interface TacticalAttackSequenceInput {
@@ -524,14 +547,27 @@ export function evaluateTacticalAttack(
     : Math.max(...criticalDistances);
   const automaticCriticalOnHit = automaticCriticalMaximumDistanceFeet !== null &&
     distanceFeet <= automaticCriticalMaximumDistanceFeet;
-  const zeroHitPoints = input.target.hitPoints === 0 && input.target.usesDeathSaves;
-  const consequences: TacticalZeroHitPointConsequences = {
-    deathFailureOnHit: zeroHitPoints,
-    failuresOnHit: zeroHitPoints ? deathSaveFailuresFromZeroHitPointDamage(false) : 0,
-    failuresOnCritical: zeroHitPoints ? deathSaveFailuresFromZeroHitPointDamage(true) : 0,
-    automaticCriticalOnHit,
-    automaticCriticalMaximumDistanceFeet,
-  };
+  const targetHitPointsKnown = typeof input.target.hitPoints === 'number' &&
+    typeof input.target.usesDeathSaves === 'boolean';
+  const zeroHitPoints = targetHitPointsKnown &&
+    input.target.hitPoints === 0 && input.target.usesDeathSaves;
+  const consequences: TacticalZeroHitPointConsequences = targetHitPointsKnown
+    ? {
+        deathFailureOnHit: zeroHitPoints,
+        failuresOnHit: zeroHitPoints ? deathSaveFailuresFromZeroHitPointDamage(false) : 0,
+        failuresOnCritical: zeroHitPoints ? deathSaveFailuresFromZeroHitPointDamage(true) : 0,
+        automaticCriticalOnHit,
+        automaticCriticalMaximumDistanceFeet,
+      }
+    : {
+        status: 'unresolved',
+        reason: 'target_hit_points_unresolved',
+        deathFailureOnHit: null,
+        failuresOnHit: null,
+        failuresOnCritical: null,
+        automaticCriticalOnHit,
+        automaticCriticalMaximumDistanceFeet,
+      };
   const blockingReason = firstBlockingReason(range, input.targetArmorClass);
   const probabilityBlockingReason = blockingReason ??
     (input.unresolvedReasons?.includes('random_attack_modifier_unresolved') === true
@@ -542,6 +578,7 @@ export function evaluateTacticalAttack(
   const unresolved = [...new Set([
     ...(input.unresolvedReasons ?? []),
     ...(blockingReason === null ? [] : [blockingReason]),
+    ...(targetHitPointsKnown ? [] : ['target_hit_points_unresolved' as const]),
     ...(input.damageTerms === null ? ['damage_unresolved' as const] : []),
   ])];
   if (probabilityBlockingReason !== null) {
@@ -716,6 +753,22 @@ export function foldTacticalAttackSequence(
     ? null
     : attacks.reduce((sum, attack) =>
       sum + (attack.damage.status === 'resolved' ? attack.damage.expectedDamage : 0), 0);
+
+  if (input.target.kind === 'unknown_hit_points') {
+    return {
+      policy: TACTICAL_EVALUATOR_POLICY,
+      status: 'unresolved',
+      killProbability: null,
+      expectedFailures: null,
+      expectedDamage,
+      reasonCodes: [
+        'target_hit_points_unresolved',
+        ...(damageUnresolved ? ['attack_damage_unresolved' as const] : []),
+        ...(probabilityUnresolved ? ['attack_probability_unresolved' as const] : []),
+      ],
+      attacks,
+    };
+  }
 
   if (input.target.kind === 'death_saves') {
     const failureFold = foldDeathSaveFailures(input.target.existingFailures, attacks);

@@ -11,6 +11,12 @@ import type {
   LegendaryResistancePendingDecisionOption,
   MovementEvaluation,
   NormalizedOptionMetrics,
+  PerceivedConditionMarker,
+  PerceivedConditionName,
+  ProjectedArmorClassKnowledge,
+  ProjectedHitPointKnowledge,
+  ProjectedReactionKnowledge,
+  ProjectedReciprocalVisibility,
   ReactionBoundaryIntel,
   ReactionPendingDecisionOption,
   SameDominanceMetricSet,
@@ -150,6 +156,50 @@ type _ReactionBoundaryOptionCarriesMetrics = Assert<
     : false
 >;
 
+type _PerceivedConditionMarkerIsClosed = Assert<
+  Exact<PerceivedConditionMarker, {
+    readonly kind: 'perceived';
+    readonly condition: PerceivedConditionName;
+  }>
+>;
+type _PerceivedConditionNamesAreClosed = Assert<
+  Exact<PerceivedConditionName,
+    | 'Blinded'
+    | 'Grappled'
+    | 'Paralyzed'
+    | 'Petrified'
+    | 'Prone'
+    | 'Restrained'
+    | 'Stunned'
+    | 'Unconscious'>
+>;
+type _ProjectedArmorClassNeverCarriesANumber = Assert<
+  Exact<ProjectedArmorClassKnowledge,
+    | { readonly kind: 'unknown' }
+    | {
+        readonly kind: 'perceived_band';
+        readonly band: 'lightly_defended' | 'guarded' | 'heavily_defended';
+      }>
+>;
+type _ProjectedHitPointsNeverCarryANumber = Assert<
+  Exact<ProjectedHitPointKnowledge,
+    | { readonly kind: 'unknown' }
+    | {
+        readonly kind: 'perceived_band';
+        readonly band: 'uninjured' | 'bloodied' | 'near_death';
+      }>
+>;
+type _ProjectedReactionCannotClaimAvailable = Assert<
+  Exact<ProjectedReactionKnowledge,
+    | { readonly kind: 'unknown' }
+    | { readonly kind: 'observed_spent' }>
+>;
+type _ProjectedReciprocalVisibilityCannotClaimFalse = Assert<
+  Exact<ProjectedReciprocalVisibility,
+    | { readonly kind: 'unknown' }
+    | { readonly kind: 'perceived'; readonly targetCanSeeActor: true }>
+>;
+
 export type VttIntelContractProof = [
   _TacticalVerdictUsesSharedDiscriminant,
   _MovementVerdictUsesSharedUnresolvedShape,
@@ -170,4 +220,10 @@ export type VttIntelContractProof = [
   _LegendaryResistanceOptionIdsStayClosed,
   _ReactionBoundaryRetainsEngineTuple,
   _ReactionBoundaryOptionCarriesMetrics,
+  _PerceivedConditionNamesAreClosed,
+  _PerceivedConditionMarkerIsClosed,
+  _ProjectedArmorClassNeverCarriesANumber,
+  _ProjectedHitPointsNeverCarryANumber,
+  _ProjectedReactionCannotClaimAvailable,
+  _ProjectedReciprocalVisibilityCannotClaimFalse,
 ];

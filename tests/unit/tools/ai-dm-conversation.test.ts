@@ -39,6 +39,7 @@ import {
   applyRevisionDelta,
   type RevisionDeltaOperation,
 } from '../../../src/vtt/dm-bridge/projection-transport';
+import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 
@@ -766,6 +767,10 @@ describe('AI-DM engine MCP conversation runner', () => {
       failCorrection: ['room-1-round-1'],
       restoreAfterRound: 1,
     });
+    const firstRoom = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const capturedActorKnowledge = firstRoom.combatants
+      .filter((combatant) => combatant.profile.kind === 'monster')
+      .map((combatant) => projectActorKnowledge(firstRoom, combatant.profile.id));
 
     expect(result.rows).toHaveLength(4);
     expect(result.rows.map((row) => row.outcome)).toEqual([
@@ -799,12 +804,65 @@ describe('AI-DM engine MCP conversation runner', () => {
         teamScorer: 'team-scorer-v1',
         correction: 'dominance-correction-v1',
         materialityContext: 'materiality-context-v1',
-        actorKnowledge: 'actor-knowledge-v1',
+        actorKnowledge: 'actor-knowledge-v2',
         reactionSpendHold: 'reaction-spend-hold-v1',
         legendaryWindows: 'legendary-windows-v1',
         recoveryCapability: 'recovery-capability-v1',
       },
     }));
+    // Fixture bands, hand-computed:
+    // cleric hp 52 of max 52 = 100% -> band uninjured; effective AC 18 + 1 = 19 -> heavily_defended.
+    // fighter hp 51 of max 67 = 76.1% -> band bloodied; AC 18 -> heavily_defended.
+    // wizard hp 38 of max 38 = 100% -> band uninjured; AC 15 -> guarded.
+    const projectedTargets = [
+      {
+        kind: 'perceived',
+        targetId: 'combatant:cleric',
+        position: { column: 2, row: 4 },
+        conditions: [],
+        armorClass: { kind: 'perceived_band', band: 'heavily_defended' },
+        hitPoints: { kind: 'perceived_band', band: 'uninjured' },
+        reciprocalVisibility: { kind: 'perceived', targetCanSeeActor: true },
+        reaction: { kind: 'unknown' },
+      },
+      {
+        kind: 'perceived',
+        targetId: 'combatant:fighter',
+        position: { column: 1, row: 2 },
+        conditions: [],
+        armorClass: { kind: 'perceived_band', band: 'heavily_defended' },
+        hitPoints: { kind: 'perceived_band', band: 'bloodied' },
+        reciprocalVisibility: { kind: 'perceived', targetCanSeeActor: true },
+        reaction: { kind: 'unknown' },
+      },
+      {
+        kind: 'perceived',
+        targetId: 'combatant:wizard',
+        position: { column: 1, row: 6 },
+        conditions: [],
+        armorClass: { kind: 'perceived_band', band: 'guarded' },
+        hitPoints: { kind: 'perceived_band', band: 'uninjured' },
+        reciprocalVisibility: { kind: 'perceived', targetCanSeeActor: true },
+        reaction: { kind: 'unknown' },
+      },
+    ];
+    expect(capturedActorKnowledge).toEqual([
+      {
+        policy: 'actor-knowledge-v2',
+        actorId: 'combatant:generated-3943001-monster-1',
+        targets: projectedTargets,
+      },
+      {
+        policy: 'actor-knowledge-v2',
+        actorId: 'combatant:generated-3943001-monster-2',
+        targets: projectedTargets,
+      },
+      {
+        policy: 'actor-knowledge-v2',
+        actorId: 'combatant:generated-3943001-monster-3',
+        targets: projectedTargets,
+      },
+    ]);
     expect(result.rows[0]?.authorizedPlan?.some((entry) =>
       entry.resolutionSummary.actionSlots.some((slot) => slot.kind === 'dodge'))).toBe(false);
     expect(result.rows[1]?.proposalId).toContain('round:');
