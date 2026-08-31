@@ -144,6 +144,8 @@ function actionLabel(action: EncounterCommand): string {
       return 'Arm weapon rider';
     case 'attack':
       return 'Attack';
+    case 'attack_suspected_square':
+      return `Attack suspected square ${action.square.column},${action.square.row}`;
     case 'opportunity_attack':
       return 'Use reaction';
     case 'decline_reaction':

@@ -5,9 +5,17 @@ import type {
   AttackRollResult,
   DamageRequest,
   DamageResult,
+  D20Roll,
   RollMode,
   SavingThrowResult,
 } from './resolution';
+import type { SoundPropagationModel, YellingDistance } from './alerting';
+import type {
+  SearchEscalationOption,
+  SearchMemoryCause,
+  SearchMemoryExpiry,
+  SuspicionRegion,
+} from './search-memory';
 import type { EffectApplication, EffectPayload, TurnBoundary } from './effects';
 import type { PersistentAreaHook, PersistentAreaInput, PersistentAreaOrigin } from './persistent-areas';
 import type { SpellCastCommand } from './spells/types';
@@ -191,6 +199,19 @@ export type EncounterCommand =
       readonly rollModifierEffectIds?: readonly EncounterEffectId[];
     }
   | {
+      readonly type: 'attack_suspected_square';
+      readonly actor: CombatantId;
+      readonly suspectedTarget: CombatantId;
+      readonly square: GridCell;
+      readonly attackBonus: number;
+      readonly criticalFloor: number;
+      /** The reducer adds unseen-target Disadvantage; callers cannot override it. */
+      readonly tacticalRange?: TacticalAttackRange;
+      readonly damage: DamageRequest;
+      readonly attackId?: string;
+      readonly monsterOnHit?: readonly MonsterOnHitEffect[];
+    }
+  | {
       readonly type: 'opportunity_attack';
       readonly actor: CombatantId;
       readonly target: CombatantId;
@@ -317,6 +338,60 @@ interface SequencedEvent {
 }
 
 export type EncounterEvent =
+  | (SequencedEvent & {
+      readonly type: 'search_memory_recorded';
+      readonly visibility: 'dm_only';
+      readonly observer: CombatantId;
+      readonly target: CombatantId;
+      readonly cause: SearchMemoryCause;
+      readonly lastKnownPosition: GridCell;
+      readonly suspicion: SuspicionRegion;
+      readonly expires: SearchMemoryExpiry;
+      readonly legalOptions: readonly SearchEscalationOption[];
+    })
+  | (SequencedEvent & {
+      readonly type: 'suspicion_region_expanded';
+      readonly visibility: 'dm_only';
+      readonly observer: CombatantId;
+      readonly target: CombatantId;
+      readonly suspicion: SuspicionRegion;
+      readonly expires: SearchMemoryExpiry;
+    })
+  | (SequencedEvent & {
+      readonly type: 'search_memory_cleared';
+      readonly visibility: 'dm_only';
+      readonly observer: CombatantId;
+      readonly target: CombatantId;
+      readonly reason: 'target_reacquired' | 'expired';
+    })
+  | (SequencedEvent & {
+      readonly type: 'suspected_square_attacked';
+      readonly visibility: 'dm_only';
+      readonly actor: CombatantId;
+      readonly suspectedTarget: CombatantId;
+      readonly square: GridCell;
+      readonly outcome: 'target_present' | 'empty';
+      readonly roll: D20Roll;
+    })
+  | (SequencedEvent & {
+      readonly type: 'npc_called_for_help';
+      readonly visibility: 'dm_only';
+      readonly caller: CombatantId;
+      readonly attacker: CombatantId;
+      readonly origin: GridCell;
+      readonly yellingDistance: YellingDistance;
+      readonly soundPropagation: SoundPropagationModel;
+      readonly round: number;
+    })
+  | (SequencedEvent & {
+      readonly type: 'combatant_joined_encounter';
+      readonly visibility: 'dm_only';
+      readonly combatant: CombatantId;
+      readonly calledBy: CombatantId;
+      readonly distance: Feet;
+      readonly initiative: { readonly kind: 'callers_slot'; readonly slot: number };
+      readonly round: number;
+    })
   | (SequencedEvent & {
       readonly type: 'world_object_used';
       readonly actor: CombatantId;
