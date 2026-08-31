@@ -7,6 +7,44 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## R1-10 rerun-1 execution record — SUPERVISOR (2026-08-30)
+
+Deviations and decisions taken executing D418.5/.6, recorded before any
+judging result exists:
+
+1. **Both arms fresh** (frozen cycle-3 corpus had 2 rounds/room, not the
+   3 preregistered reps): baseline arm from a worktree pinned at
+   b4cf6b63 (pre-intel), current arm from main 8100101b; luna low,
+   `--basis hard`, k6, identical command shape; code era the only
+   variable.
+2. **First current arm DISCARDED as unpaired** (rerun1-current.jsonl,
+   30 rows spent): the frozen room fixtures for the R1-10 seeds were
+   regenerated between eras, so every pair played different rooms
+   (sha256 of fixture files + 30/30 state-digest mismatch). Re-run with
+   the baseline-era fixture files byte-copied into a worktree at
+   8100101b (all 10 verified identical); that arm (rerun1-current2) is
+   the current arm of record.
+3. **Cross-era packet mode**: canonical-state digests cannot match
+   across eras (state shape changed), so the packet tool gained
+   `--cross-era` — arms partition by repoCommit, digest consistency
+   enforced within arm, room-INPUT identity attested by the fixture
+   byte-comparison above. 4 codex review rounds, consensus at aa69758d.
+4. **Two external judge dispatches VOIDED** (quarantined
+   *.VOID-unblinded.*): the first packet leaked arm identity — the
+   roundNarrative is an era-specific renderer template, and before that
+   engineIntel/raw plan shapes leaked. Narrative is now banned from the
+   packet (d9e8e9bd); judges score outcome + attribution + era-neutral
+   executed plan with movementFeet.
+5. **Accepted residual**: entries stay group-separable by behavioral
+   richness (current era executes Multiattack expansions: 85
+   multi-action actors vs 0). That is the measured treatment effect;
+   judges can group but not label. Also accepted: repoCommit-partition
+   validates structure only (provenance attested here), and recorded
+   digests cannot catch a deterministically wrong load.
+6. Fable panel seat caveat: the supervisor harvested both raw arms
+   before judging; never read the blindId→arm key. Sol/opus judge from
+   fresh contexts.
+
 ## D388.1 — OWNER: merge-track direction reconfirmed; track re-staffed (2026-08-31)
 
 Asked whether the idle engine-merge track restarts, owner: "I think I
