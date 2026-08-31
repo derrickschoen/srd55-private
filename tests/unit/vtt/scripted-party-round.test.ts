@@ -68,8 +68,11 @@ describe('scripted party round planning and adherence', () => {
 
     const first = createScriptedPartyPlan(state);
     const second = createScriptedPartyPlan(structuredClone(state));
+    const heuristic = createScriptedPartyPlan(state, { decisionPolicy: 'heuristic_v0' });
 
     expect(second).toEqual(first);
+    expect(first.decisionPolicy).toBe('symmetric_evaluator_v1');
+    expect(heuristic.decisionPolicy).toBe('heuristic_v0');
     expect(first.programs.map((entry) => entry.actorId)).toEqual([
       'combatant:cleric',
       'combatant:fighter',
