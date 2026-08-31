@@ -819,6 +819,34 @@ function scriptedProposals(
   });
 }
 
+function intentionallyIgnoredProposals(
+  state: EncounterState,
+  revision = state.revision,
+): readonly EngineTurnProposal[] {
+  const actors = livingMonsterIds(state);
+  const planningState = projectFutureMonsterTurns(state, actors);
+  return actors.map((actorId): EngineTurnProposal => {
+    const option = availableEngineActorOptions(
+      planningState,
+      actorId,
+      canonicalEngineQueryPort,
+      revision,
+    ).find((candidate) => candidate.actionSlots.some((slot) =>
+      slot.slot === 'main' && slot.use.kind === 'end_turn'));
+    if (option === undefined) throw new Error(`Could not stage intentionally ignored response for ${actorId}.`);
+    return {
+      actorId,
+      expectedRevision: revision,
+      primaryOptionId: option.optionId,
+      fallbackOptionId: null,
+      overrideJustification: {
+        reason: 'objective',
+        note: 'SIMULATED response intentionally ignores the suggested play.',
+      },
+    };
+  });
+}
+
 interface McpClient {
   readonly child: ChildProcessWithoutNullStreams;
   readonly lines: Interface;
@@ -1142,8 +1170,7 @@ async function driveScriptedMcp(
     const proposals = useEnginePlan
       ? structuredClone(enginePlanProposals) as readonly Readonly<Record<string, unknown>>[]
       : suggestionResponse === 'ignored'
-        ? livingMonsterIds(state).map((actorId) =>
-            externalProposal(engineDefaultPlanEntry(state, actorId, manifest.revision).proposal))
+        ? intentionallyIgnoredProposals(state, manifest.revision).map(externalProposal)
         : scriptedProposals(state, manifest.phase, manifest.revision).map(externalProposal);
     const responseProposals = suggestionResponse !== 'edited' || !useEnginePlan
       ? proposals

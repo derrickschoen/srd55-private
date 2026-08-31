@@ -41,7 +41,10 @@ function placedState(
 
 describe('canonical engine query port', () => {
   it('withholds typed-but-unavailable statblock actions from executable engine queries', () => {
-    const generated = placedState(SEED, new Map<CombatantId, GridCell>([[ACTOR_ID, { column: 0, row: 0 }]]));
+    const generated = placedState(SEED, new Map<CombatantId, GridCell>([
+      [ACTOR_ID, { column: 0, row: 0 }],
+      [TARGET_ID, { column: 5, row: 0 }],
+    ]));
     const state: EncounterState = {
       ...generated,
       combatants: generated.combatants.map((combatant) => combatant.profile.id === ACTOR_ID && combatant.profile.kind === 'monster'
@@ -95,6 +98,31 @@ describe('canonical engine query port', () => {
         expect(canonical).toEqual({ legal: false, code: 'destination_unreachable' });
       }
     }
+  });
+
+  it('withholds Dash when an enclosed actor has no endpoint closer to its target', () => {
+    const generated = placedState(
+      SEED,
+      new Map<CombatantId, GridCell>([
+        [ACTOR_ID, { column: 0, row: 0 }],
+        [TARGET_ID, { column: 20, row: 0 }],
+      ]),
+      [],
+      1,
+    );
+    const state: EncounterState = {
+      ...generated,
+      blockedCells: [{ column: 1, row: 0 }],
+    };
+
+    expect(canonicalEngineQueryPort.approach(state, {
+      actorId: ACTOR_ID,
+      target: { column: 20, row: 0 },
+      movement: 'dash',
+      maximumFeet: 60,
+    })).toEqual({ legal: false, code: 'destination_unreachable' });
+    expect(availableEngineActorOptions(state, ACTOR_ID).map(({ label }) => label))
+      .toEqual(['Disengage', 'Dodge', 'End Turn']);
   });
 
   it('returns independently hand-computed melee reach and thrown normal range', () => {

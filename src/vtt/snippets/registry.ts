@@ -195,7 +195,8 @@ function isInitialRoundPlan(capsule: EngineStateCapsule): boolean {
 
 function ordinaryApplicable(capsule: EngineStateCapsule): boolean {
   const actors = requestedActors(capsule);
-  return isInitialRoundPlan(capsule) && actors.length > 0 && actors.every((actor) => actor.options.length > 0);
+  return isInitialRoundPlan(capsule) && actors.length > 0 && actors.every((actor) =>
+    actor.options.some((option) => isOffense(option) || isAdvance(option) || isDefense(option)));
 }
 
 function hasProjectedObstacle(capsule: EngineStateCapsule): boolean {

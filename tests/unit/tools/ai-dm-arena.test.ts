@@ -14,7 +14,8 @@ import {
 import { decodeCodexTurn } from '../../../src/vtt/agent-adapters/codex';
 import type { RoundPlan } from '../../../src/vtt/dm-bridge/round-plan-contract';
 import { generateRoom } from '../../../src/vtt/room-generator';
-import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
+import { createEngineMcpRuntime, freshMonsterPlanningState } from '../../../src/vtt/mcp/entrypoint';
+import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import {
@@ -447,13 +448,48 @@ describe('AI-DM arena', () => {
         actorId: 'combatant:generated-3943002-monster-1',
         selectedBranch: 'primary',
         actionIds: ['dash'],
-        movementFeet: 0,
+        movementFeet: 40,
       },
       {
         actorId: 'combatant:generated-3943002-monster-2',
         selectedBranch: 'primary',
         actionIds: ['dash'],
-        movementFeet: 0,
+        movementFeet: 35,
+      },
+    ]);
+    const planningState = freshMonsterPlanningState(generateRoom(3_943_002).encounter.state);
+    const dashMechanics = rows[0]?.authorizedPlan?.map((entry) => {
+      const expectedRevision = entry.acceptedProposal.expected_revision;
+      if (typeof expectedRevision !== 'number') {
+        throw new TypeError(`Frozen room-two revision is absent for ${entry.actorId}.`);
+      }
+      const options = availableEngineActorOptions(
+        planningState,
+        entry.actorId,
+        undefined,
+        expectedRevision,
+      );
+      const option = options.find((candidate) => candidate.optionId === entry.resolutionSummary.optionId);
+      if (option === undefined) throw new Error(`Frozen room-two option is absent for ${entry.actorId}.`);
+      const resolution = resolveEngineActorOption(planningState, option);
+      if (!resolution.valid) throw new Error(`Frozen room-two option is illegal for ${entry.actorId}.`);
+      return {
+        actorId: entry.actorId,
+        movementFeet: resolution.mechanics.movementCostFeet,
+        finalPosition: resolution.mechanics.finalPosition,
+        pathCells: resolution.mechanics.path.length,
+      };
+    });
+    // Monster 1 takes eight ordinary 5-foot cells from (11,0), and Monster 2
+    // takes seven from (10,0); both closest-reachable paths end at (3,3).
+    expect(dashMechanics).toEqual([
+      {
+        actorId: 'combatant:generated-3943002-monster-1',
+        movementFeet: 40, finalPosition: { column: 3, row: 3 }, pathCells: 8,
+      },
+      {
+        actorId: 'combatant:generated-3943002-monster-2',
+        movementFeet: 35, finalPosition: { column: 3, row: 3 }, pathCells: 7,
       },
     ]);
   });
