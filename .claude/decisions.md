@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## Slimming-program consensus plan — SUPERVISOR+SOL (2026-09-01)
+
+Dual-blind brainstorm -> verification (A2 falsified: options carry no
+target-permutation duplicates; the permutation mass and the null dead
+weight live in intel.rows) -> cross-critique -> merge -> explicit sol
+CONSENSUS with six adopted amendments. Plan: P0 no-spend (null-row fix +
+flagged experiment renderers + calibration byte table) then five live
+rounds (re-anchor; wire compaction; four-arm category screen;
+alternatives K/stub round with hidden-but-legal resolution; binding
+confirmation vs fresh intel-off under the D425 must-beat rule + sol's
+numeric thresholds). Full plan: job-tmp slim-consensus-plan.md. P0
+dispatches when the running Stryker window completes.
+
 ## D426 — OWNER: three slimming-program follow-ups (2026-09-01)
 
 1. **Interim production default: TOO EARLY TO DECIDE** (owner's words) —
