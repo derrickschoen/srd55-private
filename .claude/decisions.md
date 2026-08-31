@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## Party-policy A/B result — SUPERVISOR (2026-08-31)
+
+D423.3 executed: full blinded panel on 60 entries, same rooms
+(digest-identical by seeded determinism), party policy the only
+variable. DM round quality: symmetric 9.24 vs heuristic 8.97 pooled,
+7W/2L/21T — small positive, largely party-independent (the
+de-confounding the ruling wanted). Operational: refusal rows 19 vs 24,
+tool calls 228 vs 254, wall -28%. symmetric_evaluator_v1 confirmed as
+default. Secondary finding: both arms' DM play is near-ceiling on the
+'hard' basis (zero dodges/wasted dashes in 60 entries) — 'brutal'
+(cycle-3, in flight) is the next discriminating measuring stick. Full
+report: job-tmp ab-party-policy-report.md.
+
 ## Stryker verification window result — SUPERVISOR (2026-08-31)
 
 Exclusive quiet-machine run at main 347b1d88: 7,530 mutants / 7-file vtt
