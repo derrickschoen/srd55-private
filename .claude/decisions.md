@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## Cycle-3a result — SUPERVISOR (2026-09-01): INVERTED
+
+On the brutal basis at era 4deae1fc, the full intel stack LOST to the
+intel-off control: pooled 6.79 vs 8.08, 6W/19L/5T, all three judges
+agreeing; both refused rounds were full-arm. Read together with reruns
+1-2 (full stack dominant on simpler rooms): intel value inverts with
+room complexity at luna-low. Candidate mechanisms recorded (post-trim
+context quality, small-model saturation, surface prioritization);
+cycle 3b (model tiers, same rooms) tests the capacity hypothesis
+directly and runs next. Intel-stack changes held until 3b lands. Full
+report: job-tmp cycle3a-report.md.
+
 ## D424 — OWNER: cycle-3 design, parallel capability, Stryker timing (2026-08-31)
 
 1. **Cycle-3 is TWO sequenced cycles on the same frozen brutal rooms**:
