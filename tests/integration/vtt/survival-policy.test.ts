@@ -1294,7 +1294,11 @@ describe('D382 survival package', () => {
       SURVIVAL_MEASUREMENT_SEEDS,
       'survival_package',
     );
-    expect({ successes: measurement.successes, total: measurement.total }).toEqual({ successes: 29, total: 30 });
+    // D239 re-pin 2026-08-31: 29/30 -> 30/30. Cause: symmetric_evaluator_v1
+    // became the scripted-PC default (D418.9); the previously-lost seed's party
+    // now survives. Measured twice on a quiet machine (lane run + independent
+    // supervisor run, identical), sanctioned in the merge commit.
+    expect({ successes: measurement.successes, total: measurement.total }).toEqual({ successes: 30, total: 30 });
     expect(measurement.fraction).toBeGreaterThanOrEqual(2 / 3);
   }, 600_000);
 

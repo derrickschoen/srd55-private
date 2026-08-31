@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   agentSessionIdFromCli,
   type AgentInvocation,
@@ -16,7 +16,7 @@ import {
 } from '../../../tools/ai-dm-conversation';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
-import { encounterSessionId, type CombatantId } from '../../../src/combat/values';
+import { armorClass, encounterSessionId, type CombatantId } from '../../../src/combat/values';
 import type { EncounterCommand } from '../../../src/combat/events';
 import { mulberry32 } from '../../../src/combat/random';
 import { generateRoom } from '../../../src/vtt/room-generator';
@@ -39,8 +39,50 @@ import {
   applyRevisionDelta,
   type RevisionDeltaOperation,
 } from '../../../src/vtt/dm-bridge/projection-transport';
+import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
+
+const scriptedPartyPolicyFixture = vi.hoisted(() => ({
+  value: null as 'heuristic_v0' | 'symmetric_evaluator_v1' | null,
+  lastApplied: null as 'heuristic_v0' | 'symmetric_evaluator_v1' | null,
+}));
+
+vi.mock('../../../src/vtt/scripted-party-round', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/vtt/scripted-party-round')>();
+  return {
+    ...actual,
+    createScriptedPartyPlan(
+      state: Parameters<typeof actual.createScriptedPartyPlan>[0],
+      options: Parameters<typeof actual.createScriptedPartyPlan>[1] = {},
+    ) {
+      const decisionPolicy = scriptedPartyPolicyFixture.value;
+      const plan = actual.createScriptedPartyPlan(state, {
+        ...options,
+        ...(decisionPolicy === null ? {} : { decisionPolicy }),
+      });
+      scriptedPartyPolicyFixture.lastApplied = plan.decisionPolicy;
+      return plan;
+    },
+  };
+});
+
+async function runConversationWithPartyPolicy(
+  decisionPolicy: 'heuristic_v0' | 'symmetric_evaluator_v1',
+  config: Parameters<typeof runConversation>[0],
+  options?: Parameters<typeof runConversation>[1],
+): Promise<Awaited<ReturnType<typeof runConversation>>> {
+  if (scriptedPartyPolicyFixture.value !== null) {
+    throw new Error('A scripted-party policy fixture is already active.');
+  }
+  scriptedPartyPolicyFixture.lastApplied = null;
+  scriptedPartyPolicyFixture.value = decisionPolicy;
+  try {
+    return await runConversation(config, options);
+  } finally {
+    scriptedPartyPolicyFixture.value = null;
+  }
+}
 
 class RecordingConversationAdapter implements AgentSessionAdapter {
   readonly kind = 'codex' as const;
@@ -766,6 +808,10 @@ describe('AI-DM engine MCP conversation runner', () => {
       failCorrection: ['room-1-round-1'],
       restoreAfterRound: 1,
     });
+    const firstRoom = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+    const capturedActorKnowledge = firstRoom.combatants
+      .filter((combatant) => combatant.profile.kind === 'monster')
+      .map((combatant) => projectActorKnowledge(firstRoom, combatant.profile.id));
 
     expect(result.rows).toHaveLength(4);
     expect(result.rows.map((row) => row.outcome)).toEqual([
@@ -799,12 +845,65 @@ describe('AI-DM engine MCP conversation runner', () => {
         teamScorer: 'team-scorer-v1',
         correction: 'dominance-correction-v1',
         materialityContext: 'materiality-context-v1',
-        actorKnowledge: 'actor-knowledge-v1',
+        actorKnowledge: 'actor-knowledge-v2',
         reactionSpendHold: 'reaction-spend-hold-v1',
         legendaryWindows: 'legendary-windows-v1',
         recoveryCapability: 'recovery-capability-v1',
       },
     }));
+    // Fixture bands, hand-computed:
+    // cleric hp 52 of max 52 = 100% -> band uninjured; effective AC 18 + 1 = 19 -> heavily_defended.
+    // fighter hp 51 of max 67 = 76.1% -> band bloodied; AC 18 -> heavily_defended.
+    // wizard hp 38 of max 38 = 100% -> band uninjured; AC 15 -> guarded.
+    const projectedTargets = [
+      {
+        kind: 'perceived',
+        targetId: 'combatant:cleric',
+        position: { column: 2, row: 4 },
+        conditions: [],
+        armorClass: { kind: 'perceived_band', band: 'heavily_defended' },
+        hitPoints: { kind: 'perceived_band', band: 'uninjured' },
+        reciprocalVisibility: { kind: 'perceived', targetCanSeeActor: true },
+        reaction: { kind: 'unknown' },
+      },
+      {
+        kind: 'perceived',
+        targetId: 'combatant:fighter',
+        position: { column: 1, row: 2 },
+        conditions: [],
+        armorClass: { kind: 'perceived_band', band: 'heavily_defended' },
+        hitPoints: { kind: 'perceived_band', band: 'bloodied' },
+        reciprocalVisibility: { kind: 'perceived', targetCanSeeActor: true },
+        reaction: { kind: 'unknown' },
+      },
+      {
+        kind: 'perceived',
+        targetId: 'combatant:wizard',
+        position: { column: 1, row: 6 },
+        conditions: [],
+        armorClass: { kind: 'perceived_band', band: 'guarded' },
+        hitPoints: { kind: 'perceived_band', band: 'uninjured' },
+        reciprocalVisibility: { kind: 'perceived', targetCanSeeActor: true },
+        reaction: { kind: 'unknown' },
+      },
+    ];
+    expect(capturedActorKnowledge).toEqual([
+      {
+        policy: 'actor-knowledge-v2',
+        actorId: 'combatant:generated-3943001-monster-1',
+        targets: projectedTargets,
+      },
+      {
+        policy: 'actor-knowledge-v2',
+        actorId: 'combatant:generated-3943001-monster-2',
+        targets: projectedTargets,
+      },
+      {
+        policy: 'actor-knowledge-v2',
+        actorId: 'combatant:generated-3943001-monster-3',
+        targets: projectedTargets,
+      },
+    ]);
     expect(result.rows[0]?.authorizedPlan?.some((entry) =>
       entry.resolutionSummary.actionSlots.some((slot) => slot.kind === 'dodge'))).toBe(false);
     expect(result.rows[1]?.proposalId).toContain('round:');
@@ -1225,7 +1324,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--combat-model', 'initiative_segments_v1', '--capture-rl-data', '--dry-run',
     ]);
 
-    const result = await runConversation(config, {
+    const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
       suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
       adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': response },
@@ -1289,6 +1388,74 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(row?.monsterSegments?.flatMap((segment) => segment.actors)).toHaveLength(2);
   });
 
+  it('fires the adjustment machinery for a material symmetric-evaluator PC turn', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-symmetric-material-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+    const base = await alternatingInitiativeRoom({ fragileMonsterCount: 1 });
+    const symmetricMaterialState: EncounterState = {
+      ...base,
+      combatants: base.combatants.map((combatant) => {
+        switch (combatant.profile.id) {
+          case 'combatant:cleric':
+            return {
+              ...combatant,
+              profile: {
+                ...combatant.profile,
+                rules: { ...combatant.profile.rules, attacksPerAction: 1 },
+              },
+            };
+          case 'combatant:generated-3943001-monster-1':
+            return {
+              ...combatant,
+              hitPoints: 1,
+              profile: {
+                ...combatant.profile,
+                rules: {
+                  ...combatant.profile.rules,
+                  armorClass: armorClass(0),
+                  hitPointMaximum: 1,
+                },
+              },
+            };
+          default: return combatant;
+        }
+      }),
+      tokens: base.tokens.map((token) => token.combatantId === 'combatant:generated-3943001-monster-1'
+        ? { ...token, position: { column: 4, row: 7 } }
+        : token),
+    };
+
+    // Cleric and monster-1 are adjacent, so the symmetric evaluator ranks its
+    // unknown-AC melee attack (rank 2) ahead of force_save (rank 3). Monster-1
+    // has AC 0 and 1 HP; the generic attack is +7 and 1d8 + 4, so the fixed
+    // transcript's non-natural-1 hit deals at least 5 and changes the open set [m1,m2,m3]
+    // to [m2,m3]. That is hand-computed OPEN_MONSTER_SET_CHANGED materiality.
+    const result = await runConversationWithPartyPolicy('symmetric_evaluator_v1', config, {
+      roomStates: [symmetricMaterialState],
+      adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'keep' },
+    });
+    const row = result.rows[0];
+    const firstTurn = row?.pcTurns?.[0];
+    const adjustment = row?.adjustments?.[0];
+
+    expect(scriptedPartyPolicyFixture.lastApplied).toBe('symmetric_evaluator_v1');
+    expect(firstTurn?.actor).toBe('combatant:cleric');
+    expect(firstTurn?.commandSequence).toHaveLength(1);
+    expect(firstTurn?.commandSequence.every((command) =>
+      command.type === 'attack' && command.target === 'combatant:generated-3943001-monster-1')).toBe(true);
+    expect(firstTurn?.material).toBe(true);
+    expect(firstTurn?.materialityReasons).toEqual(['LIFE_STATE_CHANGED', 'OPEN_MONSTER_SET_CHANGED']);
+    expect(row?.adjustments).toHaveLength(1);
+    expect(adjustment?.trigger).toBe('combatant:cleric');
+    expect(adjustment?.triggerPcTurnOrdinal).toBe(1);
+    expect(adjustment?.reasons).toEqual(['LIFE_STATE_CHANGED', 'OPEN_MONSTER_SET_CHANGED']);
+    expect(adjustment?.outcome).toBe('baseline_kept');
+    expect(row?.roundTotals.adjustmentCalls).toBe(1);
+  });
+
   it('gives two material PC turns independent adjustment flap budgets', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-independent-flaps-'));
     const config = parseConversationArgs([
@@ -1311,7 +1478,7 @@ describe('AI-DM engine MCP conversation runner', () => {
           }
           : combatant),
     };
-    const result = await runConversation(config, {
+    const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
       roomStates: [twoFragileMonsters],
       flapPrimaryByRequest: {
         'room-1-round-1-pc-turn-1': 1,
@@ -1332,7 +1499,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--combat-model', 'initiative_segments_v1', '--dry-run',
     ]);
 
-    const result = await runConversation(config, {
+    const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
       adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'invalid' },
     });
@@ -1351,7 +1518,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--combat-model', 'initiative_segments_v1', '--dry-run',
     ]);
 
-    const result = await runConversation(config, {
+    const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
       flapPrimaryByRequest: { 'room-1-round-1-pc-turn-1': 3 },
     });
@@ -1372,7 +1539,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--combat-model', 'initiative_segments_v1', '--dry-run',
     ]);
 
-    const result = await runConversation(config, {
+    const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
       roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
       adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'invalid' },
       failCorrection: ['room-1-round-1-pc-turn-1'],

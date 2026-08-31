@@ -8,6 +8,11 @@ import { dmVisibleEncounter, projectDmView, type DmVisibleEncounterState } from 
 import type { CombatantId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import { spellDefinition } from '../combat/spells/definitions';
+import {
+  DEFAULT_SCRIPTED_PC_DECISION_POLICY,
+  evaluateSymmetricPcDecision,
+  type ScriptedPcDecisionPolicy,
+} from './symmetric-pc-evaluator';
 import type {
   DecisionProgram,
   PlanAction,
@@ -16,7 +21,7 @@ import type {
 } from './dm-bridge/round-plan-contract';
 import { regretTurnLegalActions } from './regret/legal-actions';
 
-export const SCRIPTED_PARTY_POLICY_VERSION = 'scripted-party-policy-v3-composite' as const;
+export const SCRIPTED_PARTY_POLICY_VERSION = 'scripted-party-policy-v4-symmetric-evaluator' as const;
 export const SCRIPTED_PARTY_PLAN_FORMAT = 'scripted-party-plan-v1' as const;
 export const DEFAULT_SCRIPTED_PARTY_OBJECTIVE = 'defeat_the_hostile_team' as const;
 
@@ -30,6 +35,7 @@ export interface ScriptedPartyProgram {
 export interface ScriptedPartyPlan {
   readonly format: typeof SCRIPTED_PARTY_PLAN_FORMAT;
   readonly policyVersion: typeof SCRIPTED_PARTY_POLICY_VERSION;
+  readonly decisionPolicy: ScriptedPcDecisionPolicy;
   readonly round: number;
   readonly sharedObjective: string;
   readonly policyHash: string;
@@ -39,6 +45,8 @@ export interface ScriptedPartyPlan {
 }
 
 export interface ScriptedPartyPlanOptions {
+  /** Defaults to the actor-knowledge-v2 symmetric evaluator; v0 remains A/B selectable. */
+  readonly decisionPolicy?: ScriptedPcDecisionPolicy;
   readonly controller?: AlgorithmController;
   readonly turnLegalActions?: TurnLegalActions;
   readonly legalActionsProviderId?: string;
@@ -71,6 +79,7 @@ export interface ScriptedPartyTurnInput {
   readonly plan: ScriptedPartyPlan;
   readonly actorId: CombatantId;
   readonly controller?: AlgorithmController;
+  readonly decisionPolicy?: ScriptedPcDecisionPolicy;
   readonly turnLegalActions?: TurnLegalActions;
 }
 
@@ -82,6 +91,70 @@ interface ProgramSelection {
 interface SemanticProgramRecord {
   readonly action: string;
   readonly target: CombatantId | GridCell | null;
+}
+
+function symmetricProgram(command: EncounterCommand): Extract<DecisionProgram, { readonly kind: 'action' }> {
+  switch (command.type) {
+    case 'attack': return {
+      kind: 'action', action: {
+        kind: 'attack', target: { kind: 'combatant', combatantId: command.target },
+        ...(command.attackId === undefined ? {} : { attackId: command.attackId }),
+      },
+    };
+    case 'force_save': return {
+      kind: 'action', action: { kind: 'force_save', target: { kind: 'combatant', combatantId: command.target } },
+    };
+    case 'cast_spell': return {
+      kind: 'action', action: {
+        kind: 'cast_spell', spellId: command.spellId,
+        target: command.targets[0] === undefined ? null : { kind: 'combatant', combatantId: command.targets[0] },
+      },
+    };
+    case 'move': {
+      const destination = command.path.at(-1);
+      if (destination === undefined) throw new Error('Symmetric PC evaluator selected an empty movement path.');
+      return { kind: 'action', action: { kind: 'retreat_toward', destination } };
+    }
+    case 'dash': return { kind: 'action', action: { kind: 'use_action', action: 'dash' } };
+    case 'disengage': return { kind: 'action', action: { kind: 'use_action', action: 'disengage' } };
+    case 'dodge': return { kind: 'action', action: { kind: 'use_action', action: 'dodge' } };
+    case 'end_turn': return { kind: 'action', action: { kind: 'use_action', action: 'end_turn' } };
+    case 'drink_healing_potion':
+      throw new Error('Symmetric PC scripted plans cannot encode a healing-potion program.');
+    default:
+      throw new Error(`Symmetric PC scripted plans cannot encode ${command.type}.`);
+  }
+}
+
+/** Checks the stored PC program against already-derived legal commands without a DM projection. */
+function symmetricProgramIsLegal(
+  program: DecisionProgram,
+  legal: readonly EncounterCommand[],
+): boolean {
+  if (program.kind !== 'action') return false;
+  const action = program.action;
+  switch (action.kind) {
+    case 'attack': {
+      if (action.target.kind !== 'combatant') return false;
+      const targetId = action.target.combatantId;
+      return legal.some((command) => command.type === 'attack' && command.target === targetId &&
+        (action.attackId === undefined || command.attackId === action.attackId));
+    }
+    case 'force_save': {
+      if (action.target.kind !== 'combatant') return false;
+      const targetId = action.target.combatantId;
+      return legal.some((command) => command.type === 'force_save' && command.target === targetId);
+    }
+    case 'cast_spell': return legal.some((command) => command.type === 'cast_spell' &&
+      command.spellId === action.spellId && (action.target === null ||
+        action.target.kind !== 'combatant' || command.targets.includes(action.target.combatantId)));
+    case 'retreat_toward': return legal.some((command) => command.type === 'move' &&
+      command.path.at(-1)?.column === action.destination.column &&
+      command.path.at(-1)?.row === action.destination.row);
+    case 'move_toward':
+    case 'bonus_attack': return false;
+    case 'use_action': return legal.some((command) => command.type === action.action);
+  }
 }
 
 function subject(state: DmVisibleEncounterState, id: CombatantId) {
@@ -306,6 +379,13 @@ export function createScriptedPartyPlan(
   state: EncounterState,
   options: ScriptedPartyPlanOptions = {},
 ): ScriptedPartyPlan {
+  if (options.controller !== undefined && options.decisionPolicy === 'symmetric_evaluator_v1') {
+    throw new TypeError('A symmetric scripted party plan cannot inject the heuristic controller.');
+  }
+  // An injected AlgorithmController is an explicit test/arena request for the
+  // retained v0 behavior; ordinary callers receive the symmetric default.
+  const decisionPolicy = options.decisionPolicy ??
+    (options.controller === undefined ? DEFAULT_SCRIPTED_PC_DECISION_POLICY : 'heuristic_v0');
   const controller = options.controller ?? new AlgorithmController();
   const legalActions = options.turnLegalActions ?? regretTurnLegalActions;
   const providerId = options.legalActionsProviderId ?? 'regret-turn-legal-actions-v1';
@@ -318,23 +398,33 @@ export function createScriptedPartyPlan(
     if (actorLegalActions.length === 0) {
       throw new Error(`Scripted party actor ${actorId} has no legal reducer commands.`);
     }
-    const proposed = controller.proposeRoundProgram(projection, actorId).program;
-    const selected = selectProgram(proposed, actorId, projection, actorLegalActions);
-    if (selected === null) {
-      throw new Error(`Scripted party policy produced no legal reducer command for ${actorId}.`);
-    }
-    const program = selected.program;
+    const program = options.controller === undefined && decisionPolicy === 'symmetric_evaluator_v1'
+      ? symmetricProgram(evaluateSymmetricPcDecision({
+          state, actorId, legalActions: actorLegalActions,
+        }).selected.command)
+      : (() => {
+          const proposed = controller.proposeRoundProgram(projection, actorId).program;
+          const selected = selectProgram(proposed, actorId, projection, actorLegalActions);
+          if (selected === null) {
+            throw new Error(`Scripted party policy produced no legal reducer command for ${actorId}.`);
+          }
+          return selected.program;
+        })();
     return { actorId, initiativeIndex, program, programHash: scriptedPartyProgramHash(program) };
   });
   const policyHash = sha256(canonicalJson({
     version: SCRIPTED_PARTY_POLICY_VERSION,
-    controller: 'AlgorithmController.proposeRoundProgram',
+    decisionPolicy,
+    controller: decisionPolicy === 'heuristic_v0'
+      ? 'AlgorithmController.proposeRoundProgram'
+      : 'symmetric-pc-evaluator-v1',
     legalActionsProviderId: providerId,
     sharedObjective,
   }));
   const body = {
     format: SCRIPTED_PARTY_PLAN_FORMAT,
     policyVersion: SCRIPTED_PARTY_POLICY_VERSION,
+    decisionPolicy,
     round: state.round,
     sharedObjective,
     policyHash,
@@ -359,6 +449,55 @@ export function materializeScriptedPartyTurn(
   }
   const legalProvider = input.turnLegalActions ?? regretTurnLegalActions;
   const legal = legalProvider(input.state, input.actorId).actions;
+  const decisionPolicy = input.decisionPolicy ?? input.plan.decisionPolicy;
+  if (decisionPolicy !== input.plan.decisionPolicy) {
+    throw new Error('Scripted party turn policy must match the planned decision policy.');
+  }
+  if (input.controller !== undefined && decisionPolicy === 'symmetric_evaluator_v1') {
+    throw new TypeError('A symmetric scripted party turn cannot inject the heuristic controller.');
+  }
+  if (input.controller === undefined && decisionPolicy === 'symmetric_evaluator_v1') {
+    const live = evaluateSymmetricPcDecision({
+      state: input.state, actorId: input.actorId, legalActions: legal,
+    });
+    const liveProgram = symmetricProgram(live.selected.command);
+    const liveProgramHash = scriptedPartyProgramHash(liveProgram);
+    const plannedIsLegal = symmetricProgramIsLegal(planned.program, legal);
+    const adherence: ScriptedPartyAdherence = !plannedIsLegal
+      ? 'plan_invalidated'
+      : planned.programHash === liveProgramHash ? 'followed' : 'altered';
+    const bonusCandidates = legal.filter((command): command is Extract<EncounterCommand, { readonly type: 'cast_spell' }> =>
+      command.type === 'cast_spell' && spellDefinition(command.spellId)?.castingTime === 'bonus_action' &&
+      !(live.selected.command.type === 'cast_spell' && live.selected.command.spellId === command.spellId));
+    const bonusSpell = bonusCandidates.length === 0
+      ? undefined
+      : evaluateSymmetricPcDecision({
+          state: input.state, actorId: input.actorId, legalActions: bonusCandidates,
+        }).selected.command;
+    const mainCommands = live.selected.command.type === 'attack'
+      ? Array.from({ length: actor.profile.rules.attacksPerAction }, () => structuredClone(live.selected.command))
+      : [live.selected.command];
+    const reducerCommands: readonly EncounterCommand[] = bonusSpell === undefined
+      ? mainCommands
+      : [...mainCommands, bonusSpell];
+    return {
+      actorId: input.actorId,
+      adherence,
+      reasonCodes: adherence === 'followed'
+        ? ['PLANNED_PRIMARY_FOLLOWED']
+        : adherence === 'altered'
+          ? ['POLICY_SELECTED_DIFFERENT_LEGAL_PROGRAM']
+          : ['PLANNED_PRIMARY_NO_LONGER_LEGAL'],
+      plannedProgramHash: planned.programHash,
+      executedProgramHash: liveProgramHash,
+      executedProgram: liveProgram,
+      actionSlotUses: [
+        { slot: 'main', commandCount: mainCommands.length },
+        ...(bonusSpell === undefined ? [] : [{ slot: 'bonus' as const, commandCount: 1 }]),
+      ],
+      reducerCommands,
+    };
+  }
   const projection = dmVisibleEncounter(projectDmView(input.state));
   const plannedPrimary = primaryProgram(planned.program, projection);
   const plannedSelection = plannedPrimary === null

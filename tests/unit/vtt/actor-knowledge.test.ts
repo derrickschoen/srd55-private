@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import type { CombatantProfile } from '../../../src/combat/combatant';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { effectStackingIdentity, encounterEffectId } from '../../../src/combat/values';
 import {
   ACTOR_KNOWLEDGE_POLICY,
   projectActorKnowledge,
   type ActorTargetKnowledge,
 } from '../../../src/vtt/intel/actor-knowledge';
+import { declareTestInputs } from '../../helpers/test-inputs';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+
+declareTestInputs({});
 
 function encounter(overrides: Partial<Pick<
   Parameters<typeof createEncounter>[0],
@@ -29,7 +34,7 @@ function encounter(overrides: Partial<Pick<
   };
 }
 
-function onlyTarget(state: EncounterState, actor: ReturnType<typeof monsterProfile>): ActorTargetKnowledge {
+function onlyTarget(state: EncounterState, actor: CombatantProfile): ActorTargetKnowledge {
   const projection = projectActorKnowledge(state, actor.id);
   expect(projection.policy).toBe(ACTOR_KNOWLEDGE_POLICY);
   expect(projection.targets).toHaveLength(1);
@@ -38,7 +43,7 @@ function onlyTarget(state: EncounterState, actor: ReturnType<typeof monsterProfi
   return target;
 }
 
-describe('actor-knowledge-v1', () => {
+describe('actor-knowledge-v2', () => {
   it('projects a visible target as perceived with its current position', () => {
     const setup = encounter();
 
@@ -46,6 +51,110 @@ describe('actor-knowledge-v1', () => {
       kind: 'perceived',
       targetId: setup.target.id,
       position: { column: 2, row: 0 },
+      conditions: [],
+      armorClass: { kind: 'perceived_band', band: 'guarded' },
+      hitPoints: { kind: 'perceived_band', band: 'uninjured' },
+      reciprocalVisibility: { kind: 'perceived', targetCanSeeActor: true },
+      reaction: { kind: 'unknown' },
+    });
+  });
+
+  it('projects PC actor knowledge as hand-computed bands without numeric AC or HP', () => {
+    const actor = playerProfile('actor-knowledge-pc');
+    const uninjured = monsterProfile('actor-knowledge-uninjured', { hitPoints: 12 });
+    const bloodied = monsterProfile('actor-knowledge-bloodied', { hitPoints: 12 });
+    const nearDeath = monsterProfile('actor-knowledge-near-death', { hitPoints: 12 });
+    const created = createEncounter({
+      bounds: { columns: 5, rows: 1 },
+      combatants: [actor, uninjured, bloodied, nearDeath],
+      tokens: [
+        placedToken(actor, 0),
+        placedToken(uninjured, 1),
+        placedToken(bloodied, 2),
+        placedToken(nearDeath, 3),
+      ],
+    });
+    const state: EncounterState = {
+      ...created,
+      combatants: created.combatants.map((combatant) =>
+        combatant.profile.id === bloodied.id
+          ? { ...combatant, hitPoints: 7 }
+          : combatant.profile.id === nearDeath.id
+            ? { ...combatant, hitPoints: 3 }
+            : combatant),
+    };
+
+    const projection = projectActorKnowledge(state, actor.id);
+    expect(projection.policy).toBe('actor-knowledge-v2');
+    expect(projection.targets.map((target) => target.kind === 'perceived'
+      ? [target.targetId, target.armorClass, target.hitPoints]
+      : [target.targetId, target.kind])).toEqual([
+      [bloodied.id, { kind: 'perceived_band', band: 'lightly_defended' },
+        { kind: 'perceived_band', band: 'bloodied' }],
+      [nearDeath.id, { kind: 'perceived_band', band: 'lightly_defended' },
+        { kind: 'perceived_band', band: 'near_death' }],
+      [uninjured.id, { kind: 'perceived_band', band: 'lightly_defended' },
+        { kind: 'perceived_band', band: 'uninjured' }],
+    ]);
+    for (const target of projection.targets) {
+      if (target.kind !== 'perceived') throw new Error('Expected a perceived target.');
+      expect('value' in target.armorClass).toBe(false);
+      expect('value' in target.hitPoints).toBe(false);
+    }
+  });
+
+  it('projects only visibly manifest conditions as positive markers', () => {
+    const setup = encounter();
+    const state: EncounterState = {
+      ...setup.state,
+      effects: [{
+        id: encounterEffectId('effect:actor-knowledge-prone'),
+        source: setup.actor.id,
+        targets: [setup.target.id],
+        createdRevision: 0,
+        duration: { kind: 'permanent' },
+        concentrationOwner: null,
+        stackingIdentity: effectStackingIdentity('actor-knowledge-prone'),
+        stacking: 'replace_same_source',
+        repeatedSave: null,
+        payload: { kind: 'condition', condition: 'Prone' },
+      }],
+    };
+
+    expect(onlyTarget(state, setup.actor)).toMatchObject({
+      kind: 'perceived',
+      conditions: [{ kind: 'perceived', condition: 'Prone' }],
+    });
+  });
+
+  it('observes a public reaction spend but never infers availability from no spend', () => {
+    const setup = encounter();
+    const unobserved: EncounterState = {
+      ...setup.state,
+      combatants: setup.state.combatants.map((combatant) =>
+        combatant.profile.id === setup.target.id
+          ? { ...combatant, turn: { ...combatant.turn, reactionAvailable: false } }
+          : combatant),
+    };
+    expect(onlyTarget(unobserved, setup.actor)).toMatchObject({
+      kind: 'perceived', reaction: { kind: 'unknown' },
+    });
+
+    const observed: EncounterState = {
+      ...unobserved,
+      eventLog: [
+        { sequence: 1, type: 'turn_started', combatant: setup.target.id, round: 1 },
+        {
+          sequence: 2,
+          type: 'resource_spent',
+          combatant: setup.target.id,
+          resource: 'reaction',
+          purpose: 'Opportunity Attack',
+        },
+      ],
+    };
+    expect(onlyTarget(observed, setup.actor)).toMatchObject({
+      kind: 'perceived', reaction: { kind: 'observed_spent' },
     });
   });
 

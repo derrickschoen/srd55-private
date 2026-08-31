@@ -23,6 +23,11 @@ import {
   shouldSpendHitDie,
 } from './survival-policy';
 import {
+  DEFAULT_SCRIPTED_PC_DECISION_POLICY,
+  SymmetricEvaluatorPcController,
+  type ScriptedPcDecisionPolicy,
+} from './symmetric-pc-evaluator';
+import {
   composeVaneWarrenFight,
   reduceVaneWarrenEncounter,
   VANE_WARREN_FIGHT_IDS,
@@ -36,6 +41,11 @@ export const SURVIVAL_MEASUREMENT_SEEDS = Array.from(
 );
 
 export type SurvivalCampaignMode = 'rehearsal_baseline' | 'survival_package';
+
+/** Exposes the same typed PC policy switch used by scripted initiative arenas. */
+export interface SurvivalCampaignOptions {
+  readonly pcDecisionPolicy?: ScriptedPcDecisionPolicy;
+}
 
 export interface SurvivalFightMeasurement {
   readonly id: string;
@@ -124,13 +134,20 @@ async function runFight(
   id: string,
   name: string,
   useVaneReducer: boolean,
+  pcDecisionPolicy: ScriptedPcDecisionPolicy,
 ): Promise<{ readonly state: EncounterState; readonly measurement: SurvivalFightMeasurement }> {
   const entering = hitPointsByName(encounter.state);
+  let coordinator: TurnCoordinator | null = null;
   const registry = new ControllerRegistry(encounter.state.combatants.map((candidate) => ({
     combatantId: candidate.profile.id,
-    controller: new AlgorithmController(),
+    controller: candidate.profile.kind === 'player_character' && pcDecisionPolicy === 'symmetric_evaluator_v1'
+      ? new SymmetricEvaluatorPcController(() => {
+          if (coordinator === null) throw new Error('Survival PC evaluator was asked before coordinator creation.');
+          return coordinator.state();
+        })
+      : new AlgorithmController(),
   })));
-  const coordinator = new TurnCoordinator(
+  coordinator = new TurnCoordinator(
     encounter.state,
     registry,
     rng,
@@ -264,7 +281,9 @@ export async function runSurvivalCampaign(
   displayNames: ReadonlyMap<number, string>,
   seed: number,
   mode: SurvivalCampaignMode,
+  options: SurvivalCampaignOptions = {},
 ): Promise<SurvivalCampaignMeasurement> {
+  const pcDecisionPolicy = options.pcDecisionPolicy ?? DEFAULT_SCRIPTED_PC_DECISION_POLICY;
   const rng = mulberry32(seed);
   let partyState = mode === 'survival_package'
     ? createD365SurvivalPartySessionState(members).state
@@ -318,6 +337,7 @@ export async function runSurvivalCampaign(
       `dungeon-room-${String(room)}`,
       manifest,
       false,
+      pcDecisionPolicy,
     );
     if (!finishFight(result, true)) return summarize(seed, mode, fights);
     if (room < 4) partyState = enterNextRoom(partyState);
@@ -332,6 +352,7 @@ export async function runSurvivalCampaign(
       `vane-warren:${fightId}`,
       `Vane Warren — ${fight.name}`,
       true,
+      pcDecisionPolicy,
     );
     if (!finishFight(result, fightId !== 'last-muster')) return summarize(seed, mode, fights);
   }
@@ -371,12 +392,15 @@ export async function measureSurvivalFraction(
   displayNames: ReadonlyMap<number, string>,
   seeds: readonly number[],
   mode: SurvivalCampaignMode,
+  options: SurvivalCampaignOptions = {},
 ): Promise<SurvivalFractionMeasurement> {
   if (seeds.length === 0 || new Set(seeds).size !== seeds.length) {
     throw new RangeError('Survival measurement requires a nonempty list of distinct seeds.');
   }
   const campaigns: SurvivalCampaignMeasurement[] = [];
-  for (const seed of seeds) campaigns.push(await runSurvivalCampaign(members, displayNames, seed, mode));
+  for (const seed of seeds) {
+    campaigns.push(await runSurvivalCampaign(members, displayNames, seed, mode, options));
+  }
   const successes = campaigns.filter((campaign) => campaign.finalEncounterCompleted).length;
   return {
     seeds: [...seeds],

@@ -12,6 +12,7 @@ import {
   evaluateMovementOptions,
   MOVEMENT_EVALUATOR_POLICY,
   type MovementEvaluation,
+  type MovementEvaluationInput,
 } from '../combat/movement-evaluator';
 import { persistentAreaContains } from '../combat/persistent-areas';
 import type { EffectPayload, EncounterEffect } from '../combat/effects';
@@ -23,7 +24,9 @@ import {
   tacticalRangeVerdict,
   type AttackRollModeSource,
   type TacticalAttackInput,
+  type TacticalAttackRange,
   type TacticalAttackRollModifier,
+  type TacticalDamageTerm,
   type TacticalAttackEvaluation,
   type TacticalRangeBand,
   type TacticalUnresolvedReason,
@@ -46,6 +49,10 @@ import {
   type WorldObject,
 } from '../combat/world-objects';
 import { availableEngineActorOptions, resolveEngineActorOption } from './intent-resolver';
+import type {
+  ActorKnowledgeProjection,
+  PerceivedTargetKnowledge,
+} from './intel/actor-knowledge';
 import type { EngineActorOption, EngineOptionId } from './turn-proposal';
 
 export interface TacticalAllocationChoice {
@@ -141,6 +148,23 @@ export interface EngineReachRequest {
   readonly origin?: GridCell;
 }
 
+/** Actor-owned attack facts; opponent facts are deliberately absent. */
+export interface EngineProjectedMovementAttackProfile {
+  readonly range: TacticalAttackRange;
+  readonly attackBonus: number;
+  readonly criticalFloor: 20 | 18 | 19;
+  readonly damageTerms: readonly TacticalDamageTerm[] | null;
+  readonly attackerConditions: readonly AppliedCondition[];
+  readonly rollModeSources: readonly AttackRollModeSource[];
+  readonly attackRollModifiers?: readonly TacticalAttackRollModifier[];
+}
+
+export interface EngineProjectedMovementRequest {
+  readonly actorId: CombatantId;
+  readonly targetId: CombatantId;
+  readonly attack: EngineProjectedMovementAttackProfile;
+}
+
 export type EngineReachResult =
   | {
       readonly legal: true;
@@ -187,6 +211,11 @@ export interface EngineQueryPort {
     actorId: CombatantId,
     targetId: CombatantId,
     actionId: string,
+  ): MovementEvaluation | null;
+  projectedMovementOptions(
+    state: EncounterState,
+    projection: ActorKnowledgeProjection,
+    request: EngineProjectedMovementRequest,
   ): MovementEvaluation | null;
   compareAllocations(
     state: EncounterState,
@@ -1451,6 +1480,141 @@ function movementOptions(
   });
 }
 
+function projectedTargetConditions(
+  target: PerceivedTargetKnowledge,
+): readonly AppliedCondition[] {
+  return target.conditions.flatMap((marker): readonly AppliedCondition[] => {
+    switch (marker.condition) {
+      case 'Blinded':
+      case 'Paralyzed':
+      case 'Petrified':
+      case 'Prone':
+      case 'Restrained':
+      case 'Stunned':
+      case 'Unconscious': return [{ name: marker.condition }];
+      case 'Grappled': return [];
+    }
+  });
+}
+
+function projectedMovementState(
+  state: EncounterState,
+  projection: ActorKnowledgeProjection,
+): EncounterState {
+  const visibleOpponents = new Set(projection.targets.flatMap((target) =>
+    target.kind === 'perceived' ? [target.targetId] : []));
+  const retainedIds = new Set(state.combatants.flatMap((candidate) =>
+    candidate.profile.id === projection.actorId ||
+    combatantsAreAllies(state, projection.actorId, candidate.profile.id) ||
+    visibleOpponents.has(candidate.profile.id)
+      ? [candidate.profile.id]
+      : []));
+  return {
+    ...state,
+    combatants: state.combatants.filter((candidate) => retainedIds.has(candidate.profile.id)),
+    tokens: state.tokens.filter((token) => retainedIds.has(token.combatantId)),
+    effects: state.effects.filter((effect) =>
+      effect.targets.every((targetId) =>
+        targetId === projection.actorId || combatantsAreAllies(state, projection.actorId, targetId))),
+  };
+}
+
+/**
+ * Movement evaluation over actor-local knowledge. The full encounter is used
+ * only for the actor and public board geometry; every opponent fact comes from
+ * the supplied projection.
+ */
+export function projectedMovementOptions(
+  state: EncounterState,
+  projection: ActorKnowledgeProjection,
+  request: EngineProjectedMovementRequest,
+): MovementEvaluation | null {
+  if (projection.actorId !== request.actorId) return null;
+  const actor = combatant(state, request.actorId);
+  const start = state.tokens.find((token) => token.combatantId === request.actorId)?.position;
+  const target = projection.targets.find((candidate): candidate is PerceivedTargetKnowledge =>
+    candidate.targetId === request.targetId && candidate.kind === 'perceived');
+  if (actor === null || start === undefined || target === undefined) return null;
+
+  const restrictedState = projectedMovementState(state, projection);
+  const world = movementWorld(restrictedState);
+  const targetConditions = projectedTargetConditions(target);
+  const attackAt: MovementEvaluationInput['attackAt'] = (position) => {
+    if (target.reciprocalVisibility.kind === 'unknown') {
+      return { status: 'unresolved', reason: 'visibility_unresolved' };
+    }
+    const cover = coverBetweenObjects(state.worldObjects, position, target.position);
+    return {
+      status: 'resolved',
+      input: {
+        attackerId: request.actorId,
+        targetId: request.targetId,
+        targetPosition: target.position,
+        range: request.attack.range,
+        attackBonus: request.attack.attackBonus,
+        targetArmorClass: null,
+        criticalFloor: request.attack.criticalFloor,
+        damageTerms: request.attack.damageTerms,
+        attackerConditions: request.attack.attackerConditions,
+        targetConditions,
+        attackerCanSeeTarget: true,
+        targetCanSeeAttacker: true,
+        rollModeSources: request.attack.rollModeSources,
+        ...(request.attack.attackRollModifiers === undefined
+          ? {}
+          : { attackRollModifiers: request.attack.attackRollModifiers }),
+        target: {
+          hitPoints: { kind: 'unknown' },
+          usesDeathSaves: { kind: 'unknown' },
+        },
+        unresolvedReasons: cover === 'total' ? ['target_has_total_cover'] : [],
+      },
+    };
+  };
+  const firstLegal = findPathToAny(world, {
+    actorId: request.actorId,
+    start,
+    maximumCost: feet(maximumPathCost(restrictedState)),
+    isGoal: (position) => {
+      const verdict = attackAt(position);
+      if (verdict.status === 'unresolved') return false;
+      const evaluation = evaluateTacticalAttack({ ...verdict.input, attackerPosition: position });
+      return evaluation.range.status === 'resolved' && evaluation.range.legal &&
+        !evaluation.unresolved.includes('target_has_total_cover');
+    },
+  });
+  const candidateMap = new Map<string, GridCell>();
+  for (const candidate of adjacentCells(state.bounds, start)) {
+    candidateMap.set(cellKey(candidate), candidate);
+  }
+  if (firstLegal.kind === 'found') {
+    const destination = firstLegal.cells.at(-1) ?? start;
+    candidateMap.set(cellKey(destination), destination);
+  }
+  const reactionUnknown = projection.targets.some((candidate) =>
+    candidate.kind !== 'perceived' || candidate.reaction.kind === 'unknown');
+  return evaluateMovementOptions({
+    policy: MOVEMENT_EVALUATOR_POLICY,
+    actorId: request.actorId,
+    start,
+    candidates: [...candidateMap.values()],
+    world,
+    speedPerTurn: feet(enginePlanningSpeedFeet(state, request.actorId)),
+    currentMovementRemaining: actor.turn.movement.remaining,
+    projection: {
+      currentAttackActionAvailable: actor.turn.action.kind === 'available',
+      currentDashAvailable: actor.turn.action.kind === 'available',
+      futureAttackActionAvailable: true,
+      futureDashAvailable: true,
+    },
+    opportunityAttackRisk: reactionUnknown
+      ? { status: 'unresolved', reason: 'opportunity_attack_eligibility_unresolved' }
+      : { status: 'resolved', cause: actor.turn.disengaging ? 'disengaged' : 'voluntary', reachSources: [] },
+    hazards: { status: 'resolved', cells: movementHazards(restrictedState) },
+    attackAt,
+  });
+}
+
 function optionBlessTargets(option: EngineActorOption): readonly CombatantId[] {
   return option.actionSlots.flatMap((slot) =>
     slot.slot === 'bonus' && slot.use.kind === 'cast_spell' && slot.use.spellId === 'bless'
@@ -1623,6 +1787,7 @@ const engineQueryPort: EngineQueryPort = {
     return input === null ? null : evaluateTacticalAttack(input);
   },
   movementOptions,
+  projectedMovementOptions,
   compareAllocations: compareTacticalAllocations,
   cover(state, actorId, targetId) {
     const from = state.tokens.find((token) => token.combatantId === actorId)?.position;
