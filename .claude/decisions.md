@@ -7,6 +7,17 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D424 — OWNER: cycle-3 design, parallel capability, Stryker timing (2026-08-31)
+
+1. **Cycle-3 is TWO sequenced cycles on the same frozen brutal rooms**:
+   3a = intel-off control vs full stack (same model) quantifying the
+   whole program; 3b = model tiers (luna-low vs sol-low) on the identical
+   rooms afterward.
+2. **Plays v1 (D405.4/.5) and speculation (D403/D407) dispatch in
+   parallel lanes**; trunk landings serialize at merge as usual.
+3. **The ~5h Stryker verification window (2b campaign) runs after
+   cycle-3 completes.**
+
 ## Party-policy A/B result — SUPERVISOR (2026-08-31)
 
 D423.3 executed: full blinded panel on 60 entries, same rooms
