@@ -2,6 +2,16 @@ import { creatureSizes, skills, type Ability, type Skill } from '../domain/enums
 import { canonicalJson } from '../commands/canonical-json';
 import { combatantSide, combatantsAreAllies } from './allies';
 import {
+  ALERTING_POLICY,
+  DEFAULT_YELLING_DISTANCE,
+  RADIAL_SOUND_PROPAGATION,
+  defaultEncounterAlertingState,
+  helpCallResponders,
+  isEncounterParticipant,
+  type EncounterAlertingSetup,
+  type EncounterAlertingState,
+} from './alerting';
+import {
   importedMonsterProfile,
   importedSpellDefinition,
   type LoadedContentPack,
@@ -77,6 +87,12 @@ import {
 } from './persistent-areas';
 import { rollDice, rollDie, transactionalRng, type Rng, type TransactionalRng } from './random';
 import type { HiddenRollCategory } from './roll-visibility';
+import {
+  createSearchMemory,
+  expandSearchMemory,
+  type SearchMemory,
+  type SearchMemoryCause,
+} from './search-memory';
 import {
   applyDamageResponse,
   resolveAttackRoll,
@@ -550,6 +566,10 @@ export interface EncounterState {
   readonly reevaluatedBranches?: readonly ReevaluatedSpellBranch[];
   readonly eventLog: readonly EncounterEvent[];
   readonly hiddenCombatants: readonly HiddenCombatant[];
+  /** Monster-side memory retained after a visible enemy becomes undetected. */
+  readonly searchMemories?: readonly SearchMemory[];
+  /** Reducer-owned active/nearby membership and help-call propagation policy. */
+  readonly alerting?: EncounterAlertingState;
   readonly pendingDecisions: readonly PendingDecision[];
   readonly reactionPolicies: readonly CombatantReactionPolicy[];
   /** Exact imported records plus their reducer-ready projections. */
@@ -581,6 +601,7 @@ export interface EncounterSetup {
   readonly environment?: EncounterEnvironment;
   readonly foggedCells?: readonly GridCell[];
   readonly dmNotes?: readonly string[];
+  readonly alerting?: EncounterAlertingSetup;
   readonly combatants: readonly CombatantProfile[];
   readonly tokens: readonly CombatToken[];
   readonly contentPacks?: readonly LoadedContentPack[];
@@ -649,6 +670,28 @@ export interface EncounterReductionOptions {
   readonly reactionDecision?: ReactionDecisionHook;
 }
 
+function encounterSearchMemories(state: EncounterState): readonly SearchMemory[] {
+  return state.searchMemories ?? [];
+}
+
+function encounterAlertingState(state: EncounterState): EncounterAlertingState {
+  return state.alerting ?? defaultEncounterAlertingState(
+    state.combatants.map((subject) => subject.profile.id),
+  );
+}
+
+/** Canonical state omits D420's empty/default values to preserve frozen artifact bytes. */
+function compactD420State(state: EncounterState): EncounterState {
+  const { searchMemories, alerting, ...base } = state;
+  const persistAlerting = alerting !== undefined && alerting.membership.some((entry) =>
+    entry.kind === 'nearby_npc' || entry.joinedBy.kind === 'help_call');
+  return {
+    ...base,
+    ...(searchMemories !== undefined && searchMemories.length > 0 ? { searchMemories } : {}),
+    ...(persistAlerting ? { alerting } : {}),
+  };
+}
+
 export type EncounterCommandReducer = (
   state: EncounterState,
   command: EncounterCommand,
@@ -663,7 +706,8 @@ export function nonDeadEncounterSides(
   state: EncounterState,
 ): ReadonlySet<'player_character' | 'monster'> {
   return new Set(state.combatants
-    .filter((subject) => subject.life !== 'dead')
+    .filter((subject) =>
+      subject.life !== 'dead' && isEncounterParticipant(state.alerting, subject.profile.id))
     .map((subject) => combatantSide(state, subject.profile.id)));
 }
 
@@ -890,6 +934,29 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
       'Every combatant must have exactly one matching board token.',
     );
   }
+  const nearbyNpcIds = setup.alerting?.nearbyNpcIds ?? [];
+  assertUnique(nearbyNpcIds, 'Nearby NPC ids');
+  for (const id of nearbyNpcIds) {
+    const profile = setup.combatants.find((candidate) => candidate.id === id);
+    if (profile?.kind !== 'monster') {
+      throw new EncounterRuleError('validation', 'Only a known monster can start as a nearby NPC.');
+    }
+  }
+  const configuredYellingDistance = setup.alerting?.yellingDistance ?? DEFAULT_YELLING_DISTANCE;
+  if (
+    configuredYellingDistance.kind !== 'yelling_distance' ||
+    !Number.isFinite(configuredYellingDistance.radius) ||
+    configuredYellingDistance.radius <= 0
+  ) {
+    throw new EncounterRuleError('validation', 'The alerting yelling distance must be a positive finite radius.');
+  }
+  const configuredSoundPropagation = setup.alerting?.soundPropagation ?? RADIAL_SOUND_PROPAGATION;
+  if (
+    configuredSoundPropagation.kind !== 'radial' ||
+    configuredSoundPropagation.occlusion !== 'not_modeled'
+  ) {
+    throw new EncounterRuleError('validation', 'The alerting sound-propagation model is unsupported.');
+  }
   for (const token of setup.tokens) {
     const profile = setup.combatants.find((candidate) => candidate.id === token.combatantId);
     if (profile?.tokenId !== token.id) {
@@ -1075,6 +1142,22 @@ export function createEncounter(setup: EncounterSetup): EncounterState {
     nextPersistentAreaSequence: 1,
     eventLog: [],
     hiddenCombatants: [],
+    ...(nearbyNpcIds.length === 0
+      ? {}
+      : {
+          alerting: {
+            policy: ALERTING_POLICY,
+            yellingDistance: { ...configuredYellingDistance },
+            soundPropagation: { ...configuredSoundPropagation },
+            membership: setup.combatants.map((subject) => nearbyNpcIds.includes(subject.id)
+              ? { kind: 'nearby_npc' as const, combatant: subject.id }
+              : {
+                  kind: 'participant' as const,
+                  combatant: subject.id,
+                  joinedBy: { kind: 'encounter_start' as const },
+                }),
+          },
+        }),
     pendingDecisions: [],
     reactionPolicies: structuredClone(reactionPolicies),
     ...(setup.contentPacks === undefined
@@ -1970,6 +2053,163 @@ export function canCombatantSee(
   return detectCombatant(state, observer, subject).kind === 'seen';
 }
 
+interface MonsterVisibilitySnapshot {
+  readonly observer: CombatantId;
+  readonly target: CombatantId;
+  readonly seen: boolean;
+  readonly targetPosition: GridCell;
+}
+
+function monsterVisibilitySnapshot(state: EncounterState): readonly MonsterVisibilitySnapshot[] {
+  const observers = state.combatants
+    .filter((subject) =>
+      subject.profile.kind === 'monster' &&
+      subject.life === 'living' &&
+      isEncounterParticipant(state.alerting, subject.profile.id) &&
+      isCombatantOnBoard(state, subject.profile.id))
+    .sort((left, right) => left.profile.id.localeCompare(right.profile.id));
+  const targets = state.combatants
+    .filter((subject) =>
+      subject.life !== 'dead' &&
+      isEncounterParticipant(state.alerting, subject.profile.id) &&
+      isCombatantOnBoard(state, subject.profile.id))
+    .sort((left, right) => left.profile.id.localeCompare(right.profile.id));
+  return observers.flatMap((observer) => targets.flatMap((target): readonly MonsterVisibilitySnapshot[] => {
+    if (combatantsAreAllies(state, observer.profile.id, target.profile.id)) return [];
+    return [{
+      observer: observer.profile.id,
+      target: target.profile.id,
+      seen: canCombatantSee(state, observer.profile.id, target.profile.id),
+      targetPosition: { ...token(state, target.profile.id).position },
+    }];
+  }));
+}
+
+function searchMemoryCause(
+  state: EncounterState,
+  observer: CombatantId,
+  result: DetectionResult,
+): SearchMemoryCause | null {
+  if (result.kind !== 'undetected') return null;
+  if (combatantConditions(state, observer).some((condition) => condition.name === 'Blinded')) {
+    return null;
+  }
+  switch (result.reason) {
+    case 'hidden': return 'hiding';
+    case 'invisible': return 'invisibility';
+    case 'obscured':
+    case 'darkness':
+      return 'obscurement';
+    case 'blocked':
+    case 'out_of_range':
+      return null;
+  }
+}
+
+function reconcileSearchMemories(
+  context: ReductionContext,
+  before: readonly MonsterVisibilitySnapshot[],
+  command: EncounterCommand,
+): void {
+  const beforeByPair = new Map(before.map((entry) =>
+    [`${String(entry.observer)}\u0000${String(entry.target)}`, entry] as const));
+  for (const current of monsterVisibilitySnapshot(context.state)) {
+    const prior = beforeByPair.get(`${String(current.observer)}\u0000${String(current.target)}`);
+    const existing = encounterSearchMemories(context.state).find((memory) =>
+      memory.observer === current.observer && memory.target === current.target);
+    if (current.seen) {
+      if (existing === undefined) continue;
+      context.state = {
+        ...context.state,
+        searchMemories: encounterSearchMemories(context.state).filter((memory) => memory !== existing),
+      };
+      emit(context, {
+        type: 'search_memory_cleared',
+        visibility: 'dm_only',
+        observer: existing.observer,
+        target: existing.target,
+        reason: 'target_reacquired',
+      });
+      continue;
+    }
+    const hiddenNow = command.type === 'hide' && command.actor === current.target &&
+      context.events.some((event) =>
+        event.type === 'hide_resolved' &&
+        event.combatant === current.target &&
+        event.outcome === 'hidden');
+    if (prior?.seen !== true && !hiddenNow) continue;
+    const cause = hiddenNow
+      ? 'hiding' as const
+      : searchMemoryCause(
+          context.state,
+          current.observer,
+          detectCombatant(context.state, current.observer, current.target),
+        );
+    if (cause === null) continue;
+    const memory = createSearchMemory({
+      bounds: context.state.bounds,
+      observer: current.observer,
+      target: current.target,
+      cause,
+      lastKnownPosition: prior?.targetPosition ?? current.targetPosition,
+      round: context.state.round,
+    });
+    context.state = {
+      ...context.state,
+      searchMemories: [
+        ...encounterSearchMemories(context.state).filter((candidate) =>
+          candidate.observer !== current.observer || candidate.target !== current.target),
+        memory,
+      ],
+    };
+    emit(context, {
+      type: 'search_memory_recorded',
+      visibility: 'dm_only',
+      observer: memory.observer,
+      target: memory.target,
+      cause: memory.cause,
+      lastKnownPosition: memory.lastKnownPosition,
+      suspicion: memory.suspicion,
+      expires: memory.expires,
+      legalOptions: memory.legalOptions,
+    });
+  }
+}
+
+function advanceSearchMemories(context: ReductionContext): void {
+  for (const memory of [...encounterSearchMemories(context.state)]) {
+    if (context.state.round >= memory.expires.round) {
+      context.state = {
+        ...context.state,
+        searchMemories: encounterSearchMemories(context.state).filter((candidate) => candidate !== memory),
+      };
+      emit(context, {
+        type: 'search_memory_cleared',
+        visibility: 'dm_only',
+        observer: memory.observer,
+        target: memory.target,
+        reason: 'expired',
+      });
+      continue;
+    }
+    const expanded = expandSearchMemory(context.state.bounds, memory, context.state.round);
+    if (expanded === memory) continue;
+    context.state = {
+      ...context.state,
+      searchMemories: encounterSearchMemories(context.state).map((candidate) =>
+        candidate === memory ? expanded : candidate),
+    };
+    emit(context, {
+      type: 'suspicion_region_expanded',
+      visibility: 'dm_only',
+      observer: expanded.observer,
+      target: expanded.target,
+      suspicion: expanded.suspicion,
+      expires: expanded.expires,
+    });
+  }
+}
+
 function canCombatantPierceVisualIllusion(
   state: EncounterState,
   observer: CombatantId,
@@ -2568,6 +2808,12 @@ function despawnOwnedCombatants(
     activeCombatant: initiative.length === 0 ? null : replacementActive,
     effects: context.state.effects.filter((candidate) => !ids.has(candidate.source)),
     persistentAreas: context.state.persistentAreas.filter((area) => !ids.has(area.owner)),
+    searchMemories: encounterSearchMemories(context.state).filter((memory) =>
+      !ids.has(memory.observer) && !ids.has(memory.target)),
+    alerting: {
+      ...encounterAlertingState(context.state),
+      membership: encounterAlertingState(context.state).membership.filter((entry) => !ids.has(entry.combatant)),
+    },
     ...(context.state.equipment === undefined
       ? {}
       : { equipment: context.state.equipment.filter((entry) => !ids.has(entry.combatant)) }),
@@ -3270,6 +3516,9 @@ function assertActiveActor(context: ReductionContext, actor: CombatantId): Encou
   }
   if (!isCombatantOnBoard(context.state, actor)) {
     throw new EncounterRuleError('validation', `Combatant ${actor} is absent from the board.`);
+  }
+  if (!isEncounterParticipant(context.state.alerting, actor)) {
+    throw new EncounterRuleError('validation', `Combatant ${actor} has not joined the encounter.`);
   }
   return subject;
 }
@@ -4213,7 +4462,9 @@ function processHide(
   assertCanUseActions(context, actor);
   spendCost(context, actor, cost, 'Hide');
   const enemies = context.state.combatants.filter((candidate) =>
-    candidate.life === 'living' && !combatantsAreAllies(context.state, actor, candidate.profile.id));
+    candidate.life === 'living' &&
+    isEncounterParticipant(context.state.alerting, candidate.profile.id) &&
+    !combatantsAreAllies(context.state, actor, candidate.profile.id));
   const actorCell = token(context.state, actor).position;
   const outOfEnemySight = enemies.every((enemy) => !canCombatantSee(context.state, enemy.profile.id, actor));
   const obscurement = environmentObscurementAt(context.state.environment, actorCell);
@@ -4343,6 +4594,7 @@ function opportunityAttackReachSources(
   return state.combatants
     .filter((candidate) =>
       candidate.life === 'living' &&
+      isEncounterParticipant(state.alerting, candidate.profile.id) &&
       !combatantsAreAllies(state, candidate.profile.id, mover) &&
       candidate.profile.id !== mover)
     .map((candidate) => ({
@@ -4460,6 +4712,7 @@ function legendaryActionTarget(state: EncounterState, actor: CombatantId): Comba
   return state.combatants
     .filter((candidate) =>
       candidate.profile.id !== actor && candidate.life === 'living' &&
+      isEncounterParticipant(state.alerting, candidate.profile.id) &&
       isCombatantOnBoard(state, candidate.profile.id) &&
       !combatantsAreAllies(state, actor, candidate.profile.id))
     .sort((left, right) =>
@@ -4584,6 +4837,7 @@ function queueLegendaryActionWindows(context: ReductionContext, activeCombatant:
     const actions = subject.profile.rules.legendary?.actions ?? [];
     if (
       actor === activeCombatant || subject.life !== 'living' || pool === undefined ||
+      !isEncounterParticipant(context.state.alerting, actor) ||
       pool.actionUsesRemaining < 1 || !isCombatantOnBoard(context.state, actor) ||
       isIncapacitated(combatantConditions(context.state, actor))
     ) continue;
@@ -5750,6 +6004,7 @@ function hasAdjacentAlly(
 ): boolean {
   return state.combatants.some((candidate) =>
     candidate.profile.id !== actor &&
+    isEncounterParticipant(state.alerting, candidate.profile.id) &&
     combatantsAreAllies(state, candidate.profile.id, actor) &&
     candidate.life === 'living' &&
     gridDistance(token(state, candidate.profile.id).position, token(state, target).position) <= 5);
@@ -6385,6 +6640,82 @@ function declaredMonsterDamage(
   };
 }
 
+function callForHelpWhenNpcAttacked(
+  context: ReductionContext,
+  attacker: CombatantId,
+  caller: CombatantId,
+): void {
+  const callerState = combatant(context.state, caller);
+  if (
+    callerState.profile.kind !== 'monster' ||
+    callerState.life !== 'living' ||
+    combatantsAreAllies(context.state, attacker, caller) ||
+    !isEncounterParticipant(context.state.alerting, caller)
+  ) return;
+  const callerInitiative = context.state.initiative.find((entry) => entry.combatant === caller);
+  if (callerInitiative === undefined) return;
+  const alerting = encounterAlertingState(context.state);
+  if (!alerting.membership.some((entry) => entry.kind === 'nearby_npc')) return;
+  const origin = { ...token(context.state, caller).position };
+  emit(context, {
+    type: 'npc_called_for_help',
+    visibility: 'dm_only',
+    caller,
+    attacker,
+    origin,
+    yellingDistance: { ...alerting.yellingDistance },
+    soundPropagation: { ...alerting.soundPropagation },
+    round: context.state.round,
+  });
+  const responders = helpCallResponders({
+    alerting,
+    caller,
+    callerPosition: origin,
+    positions: new Map(context.state.tokens.map((placed) =>
+      [placed.combatantId, placed.position] as const)),
+  }).filter(({ combatant: responder }) => {
+    const subject = combatant(context.state, responder);
+    return subject.profile.kind === 'monster' && subject.life === 'living';
+  });
+  if (responders.length === 0) return;
+  const joining = new Set(responders.map((entry) => entry.combatant));
+  context.state = {
+    ...context.state,
+    alerting: {
+      ...alerting,
+      membership: alerting.membership.map((entry) =>
+        joining.has(entry.combatant)
+          ? {
+              kind: 'participant' as const,
+              combatant: entry.combatant,
+              joinedBy: { kind: 'help_call' as const, caller, round: context.state.round },
+            }
+          : entry),
+    },
+    initiative: [
+      ...context.state.initiative,
+      ...responders.map(({ combatant: responder }) => ({
+        combatant: responder,
+        total: callerInitiative.total,
+        roll: callerInitiative.roll,
+        bonus: initiativeBonusFor(context.state, combatant(context.state, responder)),
+        slot: callerInitiative.slot,
+      })),
+    ],
+  };
+  for (const responder of responders) {
+    emit(context, {
+      type: 'combatant_joined_encounter',
+      visibility: 'dm_only',
+      combatant: responder.combatant,
+      calledBy: caller,
+      distance: responder.distance,
+      initiative: { kind: 'callers_slot', slot: callerInitiative.slot },
+      round: context.state.round,
+    });
+  }
+}
+
 function processAttack(
   context: ReductionContext,
   command: Extract<
@@ -6428,6 +6759,7 @@ function processAttack(
   if (!isCombatantOnBoard(context.state, command.target)) {
     throw new EncounterRuleError('validation', `Combatant ${command.target} is absent from the board.`);
   }
+  callForHelpWhenNpcAttacked(context, command.actor, command.target);
   if (
     opportunityTrigger === null && command.requiresSight === true &&
     !canCombatantSee(context.state, command.actor, command.target)
@@ -6742,6 +7074,94 @@ function processAttack(
     target: command.target,
     attack,
     damage: damageResult,
+  });
+}
+
+function processSuspectedSquareAttack(
+  context: ReductionContext,
+  command: Extract<EncounterCommand, { readonly type: 'attack_suspected_square' }>,
+): void {
+  const actor = combatant(context.state, command.actor);
+  if (actor.profile.kind !== 'monster') {
+    throw new EncounterRuleError('validation', 'Only a monster-side controller can attack a suspected square.');
+  }
+  const memory = encounterSearchMemories(context.state).find((entry) =>
+    entry.observer === command.actor && entry.target === command.suspectedTarget);
+  if (memory === undefined) {
+    throw new EncounterRuleError('validation', 'A suspected-square attack requires active search memory.');
+  }
+  if (canCombatantSee(context.state, command.actor, command.suspectedTarget)) {
+    throw new EncounterRuleError('validation', 'A visible target must be attacked directly, not through search memory.');
+  }
+  if (!isCellInside(context.state.bounds, command.square)) {
+    throw new EncounterRuleError('validation', 'A suspected square must be inside the encounter grid.');
+  }
+  if (!memory.suspicion.cells.some((cell) => cellKey(cell) === cellKey(command.square))) {
+    throw new EncounterRuleError('validation', 'The selected square is outside the active suspicion region.');
+  }
+  const actorPosition = token(context.state, command.actor).position;
+  if (command.tacticalRange !== undefined) {
+    const range = tacticalRangeVerdict(actorPosition, command.square, command.tacticalRange);
+    if (range.status === 'unresolved') {
+      throw new EncounterRuleError('validation', 'The suspected-square attack long range is unresolved.');
+    }
+    if (!range.legal) {
+      throw new EncounterRuleError('validation', 'The suspected square is out of attack range.');
+    }
+  }
+  if (
+    !hasLineOfSight(context.state, actorPosition, command.square) ||
+    coverTierBetween(context.state, actorPosition, command.square) === 'total'
+  ) {
+    throw new EncounterRuleError('validation', 'The suspected square has Total Cover or is outside line of sight.');
+  }
+  const ordinaryAttack: Extract<EncounterCommand, { readonly type: 'attack' }> = {
+    type: 'attack',
+    actor: command.actor,
+    target: command.suspectedTarget,
+    attackBonus: command.attackBonus,
+    criticalFloor: command.criticalFloor,
+    rollMode: 'normal',
+    attackerCanSeeTarget: false,
+    targetCanSeeAttacker: true,
+    ...(command.tacticalRange === undefined ? {} : { tacticalRange: command.tacticalRange }),
+    damage: command.damage,
+    ...(command.attackId === undefined ? {} : { attackId: command.attackId }),
+    ...(command.monsterOnHit === undefined ? {} : { monsterOnHit: command.monsterOnHit }),
+  };
+  const targetPosition = token(context.state, command.suspectedTarget).position;
+  if (cellKey(targetPosition) === cellKey(command.square)) {
+    processAttack(context, ordinaryAttack);
+    const resolved = [...context.events].reverse().find((event) =>
+      event.type === 'attack_resolved' &&
+      event.actor === command.actor &&
+      event.target === command.suspectedTarget);
+    if (resolved?.type !== 'attack_resolved') {
+      throw new EncounterRuleError('validation', 'The suspected-square attack did not resolve an attack roll.');
+    }
+    emit(context, {
+      type: 'suspected_square_attacked',
+      visibility: 'dm_only',
+      actor: command.actor,
+      suspectedTarget: command.suspectedTarget,
+      square: { ...command.square },
+      outcome: 'target_present',
+      roll: resolved.attack.roll,
+    });
+    return;
+  }
+  assertActiveActor(context, command.actor);
+  beginAttack(context, ordinaryAttack);
+  const roll = rollD20(context.rng, attackRollMode(context.state, ordinaryAttack));
+  endHidden(context, command.actor, 'attack_roll');
+  emit(context, {
+    type: 'suspected_square_attacked',
+    visibility: 'dm_only',
+    actor: command.actor,
+    suspectedTarget: command.suspectedTarget,
+    square: { ...command.square },
+    outcome: 'empty',
+    roll,
   });
 }
 
@@ -8510,7 +8930,10 @@ function offerReaction(
 ): ReactionResolution | null {
   const fixedReactor = reactionEventTarget(event);
   const possibleReactors = fixedReactor === null
-    ? context.state.combatants.map((subject) => subject.profile.id)
+    ? context.state.combatants.flatMap((subject) =>
+        isEncounterParticipant(context.state.alerting, subject.profile.id)
+          ? [subject.profile.id]
+          : [])
     : [fixedReactor];
   const candidates = possibleReactors.flatMap((reactor) =>
     importedReactionDefinitions(context.state).flatMap(({ definition, operation }) =>
@@ -10553,15 +10976,17 @@ function sortInitiativeSlots(slots: readonly InitiativeSlotDraft[]): InitiativeS
 }
 
 function rollInitiativeSlots(context: ReductionContext): readonly InitiativeSlotDraft[] {
+  const participants = context.state.combatants.filter((subject) =>
+    isEncounterParticipant(context.state.alerting, subject.profile.id));
   if (context.state.config.initiativeMode === 'per_combatant') {
     return sortInitiativeSlots(
-      context.state.combatants.map((subject) => rollIndividualInitiative(context, subject)),
+      participants.map((subject) => rollIndividualInitiative(context, subject)),
     );
   }
-  const players = context.state.combatants.filter(
+  const players = participants.filter(
     (subject) => subject.profile.kind === 'player_character',
   );
-  const monsters = context.state.combatants.filter(
+  const monsters = participants.filter(
     (subject) => subject.profile.kind === 'monster',
   );
   const playerSlots = sortInitiativeSlots(
@@ -11145,6 +11570,7 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
           turn: {
             ...subject.turn,
             reactionAvailable:
+              isEncounterParticipant(context.state.alerting, subject.profile.id) &&
               subject.life === 'living' &&
               !isIncapacitated(
                 combatantConditions(context.state, subject.profile.id),
@@ -11300,6 +11726,9 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
       processAttack(context, command);
       return;
     }
+    case 'attack_suspected_square':
+      processSuspectedSquareAttack(context, command);
+      return;
     case 'decline_reaction': {
       const reactor = combatant(context.state, command.actor);
       if (reactor.life !== 'living' || !canTakeReaction(context.state, command.actor)) {
@@ -11715,6 +12144,7 @@ export function reduceEncounter(
   rng: Rng,
   options: EncounterReductionOptions = {},
 ): EncounterReduction {
+  const visibilityBefore = monsterVisibilitySnapshot(state);
   const context: ReductionContext = {
     state: { ...state, revision: state.revision + 1 },
     rng: transactionalRng(rng),
@@ -11728,6 +12158,8 @@ export function reduceEncounter(
   const resumedLegendaryBoundary = command.type === 'end_turn' &&
     resumesLegendaryTurnBoundary(state, command.actor);
   processCommand(context, command);
+  reconcileSearchMemories(context, visibilityBefore, command);
+  advanceSearchMemories(context);
   const conclusion = deferredLegendaryBoundary
     ? null
     : encounterConclusionAfter(state, context.state) ??
@@ -11735,5 +12167,5 @@ export function reduceEncounter(
         ? encounterConclusionFromCurrentState(context.state)
         : null);
   if (conclusion !== null) context.state = { ...context.state, phase: conclusion };
-  return { state: context.state, events: context.events };
+  return { state: compactD420State(context.state), events: context.events };
 }

@@ -46,6 +46,8 @@ export const ENCOUNTER_VIEW_CLASSIFICATION = {
   reevaluatedBranches: 'dm_only',
   eventLog: 'per_seat',
   hiddenCombatants: 'per_seat',
+  searchMemories: 'dm_only',
+  alerting: 'dm_only',
   pendingDecisions: 'per_seat',
   reactionPolicies: 'dm_only',
   contentPacks: 'dm_only',
@@ -248,6 +250,12 @@ function allCells(bounds: EncounterState['bounds']): readonly GridCell[] {
 function eventCombatants(event: EncounterEvent): readonly CombatantId[] {
   switch (event.type) {
     case 'adjudicated': return [event.target];
+    case 'search_memory_recorded':
+    case 'suspicion_region_expanded':
+    case 'search_memory_cleared': return [event.observer, event.target];
+    case 'suspected_square_attacked': return [event.actor, event.suspectedTarget];
+    case 'npc_called_for_help': return [event.caller, event.attacker];
+    case 'combatant_joined_encounter': return [event.combatant, event.calledBy];
     case 'initiative_rolled':
     case 'turn_started':
     case 'movement_completed':
@@ -439,6 +447,8 @@ export function projectDmView(state: EncounterState): DmView {
       ...(state.reevaluatedBranches === undefined ? {} : { reevaluatedBranches: structuredClone(state.reevaluatedBranches) }),
       eventLog: structuredClone(state.eventLog),
       hiddenCombatants: structuredClone(state.hiddenCombatants),
+      ...(state.searchMemories === undefined ? {} : { searchMemories: structuredClone(state.searchMemories) }),
+      ...(state.alerting === undefined ? {} : { alerting: structuredClone(state.alerting) }),
       pendingDecisions: structuredClone(state.pendingDecisions),
       reactionPolicies: structuredClone(state.reactionPolicies),
       ...(state.contentPacks === undefined ? {} : { contentPacks: structuredClone(state.contentPacks) }),
