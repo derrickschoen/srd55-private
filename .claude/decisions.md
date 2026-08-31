@@ -7,6 +7,22 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D423 — OWNER: four post-rerun-2 rulings (2026-08-31)
+
+1. **Calibration sitting (D418.11): 20-entry sample, prepared now** —
+   blinded subset of the rerun-2 packet with the panel rubric; key stays
+   sealed until the owner finishes scoring.
+2. **Next thrust: INTERLEAVE** — cycle-3 harder-basis construction runs
+   as one lane while capability lanes (D419 parity, fungible slots, M6
+   KB A/Bs) run beside it; the cycle-3 measurement fires when both are
+   ready.
+3. **Party-policy A/B: YES, WITH judge panel** — heuristic_v0 vs
+   symmetric_evaluator_v1, same rooms, one variable, full blinded panel;
+   runs before the next baseline is cut so PC and DM effects never
+   confound.
+4. **Engine-merge: continue interleaved** from stage 2 (main-sync
+   first), same cadence as stages 0-1.
+
 ## R1-10 rerun-2 result — SUPERVISOR (2026-08-31)
 
 The D418.3/D418.6 promotion-gating rerun PASSED: current era (70f034e8,
