@@ -7,6 +7,23 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D422 — OWNER: four rerun-2 program rulings (2026-08-31)
+
+1. **Rerun-2 era INCLUDES D420**: inc6 rendering + inc7 + D420
+   search-memory/help-calling all merge before rerun 2 runs. The owner
+   chose the bigger measured delta over isolating increment 7; rerun 2
+   measures the combined program.
+2. **Rerun-2 arms**: same pre-intel baseline b4cf6b63 on the
+   baseline-era frozen rooms (byte-attested, as in rerun 1) — rerun 1
+   and rerun 2 current-era scores read against a common anchor. Pinned
+   before any rerun-2 data exists.
+3. **Post-rerun-2 queue order is the supervisor's call per tick**
+   (PC evaluator, parity Missing rows, fungible slots, M6 KB A/Bs —
+   sequenced by lane availability and collision risk, reported as gone).
+4. **Statblock vocabulary lane opens NOW**: parallel codex lane types
+   the ~20 unsupported SRD mechanics from the D395.3 import; no rerun
+   contamination (R1-10 rooms are frozen).
+
 ## R1-10 rerun-1 execution record — SUPERVISOR (2026-08-30)
 
 Deviations and decisions taken executing D418.5/.6, recorded before any
