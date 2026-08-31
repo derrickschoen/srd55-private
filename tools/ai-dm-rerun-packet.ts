@@ -35,7 +35,7 @@ const baselineChoiceSchema = z.object({
   kind: z.string(),
   action_id: z.string().optional(),
   spell_id: z.string().optional(),
-  target: z.object({ kind: z.string(), combatant_id: z.string().optional() }).passthrough().optional(),
+  target: z.object({ kind: z.string(), combatant_id: z.string().optional() }).passthrough().nullable().optional(),
 }).passthrough();
 
 const currentActionSlotSchema = z.object({
@@ -46,10 +46,23 @@ const currentActionSlotSchema = z.object({
   targetIds: z.array(z.string()).optional(),
 }).passthrough();
 
+// Post-intel executed summary: multi-slot.
+const currentResolutionSummarySchema = z.object({
+  actionSlots: z.array(currentActionSlotSchema),
+}).passthrough();
+
+// Baseline-era executed summary: single action. Real baseline rows carry BOTH
+// acceptedIntent and this summary (round-2 review finding, verified against
+// harvested R1-10 rows).
+const baselineResolutionSummarySchema = z.object({
+  actionId: z.string().nullable(),
+  targetId: z.string().nullable(),
+}).passthrough();
+
 const authorizedPlanEntrySchema = z.object({
   actorId: z.unknown(),
   acceptedIntent: z.object({ choice: baselineChoiceSchema }).passthrough().optional(),
-  resolutionSummary: z.object({ actionSlots: z.array(currentActionSlotSchema) }).passthrough().optional(),
+  resolutionSummary: z.union([currentResolutionSummarySchema, baselineResolutionSummarySchema]).optional(),
 }).passthrough();
 
 const plannerSchema = z.union([
@@ -360,12 +373,30 @@ function engineAttribution(row: ValidatedArenaRow): JudgePacketEntry['attributio
 }
 
 function neutralActions(plan: z.infer<typeof authorizedPlanEntrySchema>): readonly NeutralAction[] {
-  if (plan.resolutionSummary !== undefined) {
-    return plan.resolutionSummary.actionSlots.map((slot) => ({
-      kind: slot.kind,
-      actionId: slot.actionId ?? slot.spellId ?? slot.objectId ?? null,
-      targetIds: slot.targetIds ?? [],
-    }));
+  // Id preference (actionId over spellId over objectId) is deterministic but
+  // only data-verified for the action kinds present in R1-10 rows (attack,
+  // dodge, direct combatant targets). A rerun whose rows include spell or
+  // world-object actions must re-verify id equivalence across eras first
+  // (round-2 review finding 5, accepted as a known limitation).
+  const summary = plan.resolutionSummary;
+  if (summary !== undefined) {
+    const current = currentResolutionSummarySchema.safeParse(summary);
+    if (current.success) {
+      return current.data.actionSlots.map((slot) => ({
+        kind: slot.kind,
+        actionId: slot.actionId ?? slot.spellId ?? slot.objectId ?? null,
+        targetIds: slot.targetIds ?? [],
+      }));
+    }
+    const baseline = baselineResolutionSummarySchema.safeParse(summary);
+    if (baseline.success) {
+      // Baseline-era executed summary; the action kind lives on the intent.
+      return [{
+        kind: plan.acceptedIntent?.choice.kind ?? 'action',
+        actionId: baseline.data.actionId,
+        targetIds: baseline.data.targetId === null ? [] : [baseline.data.targetId],
+      }];
+    }
   }
   if (plan.acceptedIntent !== undefined) {
     const choice = plan.acceptedIntent.choice;

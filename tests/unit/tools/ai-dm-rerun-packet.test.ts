@@ -139,6 +139,9 @@ describe('AI-DM R1-10 rerun packet', () => {
     };
     const paired = (plan: unknown, extra: Record<string, unknown> = {}): Record<string, unknown>[] =>
       ['a', 'b'].map((arm) => ({ ...base, arm, authorizedPlan: plan, ...extra }));
+    // Real baseline rows carry BOTH acceptedIntent and the old single-action
+    // resolutionSummary {actionId, targetId, movementFeet} (verified against
+    // harvested R1-10 rows); the executed summary wins.
     const oldEra = buildRerunPacket(paired([
         {
           actorId: 'combatant:m1',
@@ -150,15 +153,24 @@ describe('AI-DM R1-10 rerun packet', () => {
             },
             movement: { willingness: 'only_if_required' },
           },
+          resolutionSummary: { actionId: 'radiant-flame', targetId: 'combatant:cleric', movementFeet: 5 },
         },
-        { actorId: 'combatant:m2', acceptedIntent: { actor_id: 'combatant:m2', choice: { kind: 'dodge' } } },
+        {
+          actorId: 'combatant:m2',
+          acceptedIntent: { actor_id: 'combatant:m2', choice: { kind: 'dodge', target: null } },
+          resolutionSummary: { actionId: 'dodge', targetId: null, movementFeet: 0 },
+        },
+        // Intent-only fallback (no executed summary recorded).
+        { actorId: 'combatant:m3', acceptedIntent: { actor_id: 'combatant:m3', choice: { kind: 'dodge' } } },
       ]), 1, { seeds: [5_117_001], reps: 1 });
     for (const entry of oldEra.packet.entries) {
       expect(entry.executedPlan).toEqual([
         { actorId: 'combatant:m1', actions: [{ kind: 'attack', actionId: 'radiant-flame', targetIds: ['combatant:cleric'] }] },
-        { actorId: 'combatant:m2', actions: [{ kind: 'dodge', actionId: null, targetIds: [] }] },
+        { actorId: 'combatant:m2', actions: [{ kind: 'dodge', actionId: 'dodge', targetIds: [] }] },
+        { actorId: 'combatant:m3', actions: [{ kind: 'dodge', actionId: null, targetIds: [] }] },
       ]);
     }
+    expect(JSON.stringify(oldEra.packet)).not.toContain('movementFeet');
 
     const newEra = buildRerunPacket(paired([{
       actorId: 'combatant:m1',
