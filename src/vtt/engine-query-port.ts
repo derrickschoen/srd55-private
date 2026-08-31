@@ -7,7 +7,7 @@ import type {
 } from '../combat/encounter';
 import type { AppliedCondition, ExhaustionLevel } from '../combat/conditions';
 import { adjacentCells, gridDistance, type GridCell } from '../combat/grid';
-import { findPath, findPathToAny } from '../combat/movement';
+import { findPath, findPathToAny, findPathToBest } from '../combat/movement';
 import {
   evaluateMovementOptions,
   MOVEMENT_EVALUATOR_POLICY,
@@ -115,6 +115,13 @@ export interface EnginePathRequest {
   readonly maximumFeet?: number;
 }
 
+export interface EngineApproachRequest {
+  readonly actorId: CombatantId;
+  readonly target: GridCell;
+  readonly movement: 'normal' | 'dash';
+  readonly maximumFeet?: number;
+}
+
 export type EnginePathResult =
   | {
       readonly legal: true;
@@ -167,6 +174,7 @@ export interface EngineQueryPort {
     selector: EngineTargetSelector,
   ): CombatantId | null;
   path(state: EncounterState, request: EnginePathRequest): EnginePathResult;
+  approach(state: EncounterState, request: EngineApproachRequest): EnginePathResult;
   reach(state: EncounterState, request: EngineReachRequest): EngineReachResult;
   tacticalAttack(
     state: EncounterState,
@@ -1113,6 +1121,33 @@ function path(state: EncounterState, request: EnginePathRequest): EnginePathResu
   return { legal: false, code: 'destination_unreachable' };
 }
 
+function approach(state: EncounterState, request: EngineApproachRequest): EnginePathResult {
+  const actor = state.combatants.find((candidate) => candidate.profile.id === request.actorId);
+  const start = state.tokens.find((token) => token.combatantId === request.actorId)?.position;
+  if (actor === undefined || start === undefined) return { legal: false, code: 'actor_not_placed' };
+  const ordinaryBudget = state.activeCombatant === request.actorId
+    ? actor.turn.movement.remaining
+    : actor.profile.rules.speed;
+  const availableBudget = request.maximumFeet ?? (
+    request.movement === 'dash'
+      ? ordinaryBudget + actor.profile.rules.speed
+      : ordinaryBudget
+  );
+  const originDistance = gridDistance(start, request.target);
+  const result = findPathToBest(movementWorld(state), {
+    actorId: request.actorId,
+    start,
+    maximumCost: feet(Math.min(availableBudget, maximumPathCost(state))),
+    rank: (cell) => {
+      const distance = gridDistance(cell, request.target);
+      return distance < originDistance ? [distance] : null;
+    },
+  });
+  return result.kind === 'found'
+    ? { legal: true, cells: result.cells, costFeet: result.cost, budgetFeet: availableBudget }
+    : { legal: false, code: 'destination_unreachable' };
+}
+
 function reach(state: EncounterState, request: EngineReachRequest): EngineReachResult {
   const actor = state.combatants.find((candidate) => candidate.profile.id === request.actorId);
   const target = state.combatants.find((candidate) => candidate.profile.id === request.targetId);
@@ -1581,6 +1616,7 @@ const engineQueryPort: EngineQueryPort = {
   actions: monsterActions,
   resolveTarget,
   path,
+  approach,
   reach,
   tacticalAttack(state, actorId, targetId, actionId) {
     const input = engineTacticalAttackInput(state, actorId, targetId, actionId);

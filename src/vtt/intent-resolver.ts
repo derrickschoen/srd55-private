@@ -210,23 +210,49 @@ function positionFits(
   return true;
 }
 
+interface MovementResolution {
+  readonly costFeet: number;
+  readonly path: readonly GridCell[];
+  readonly finalPosition: GridCell;
+}
+
 function movementResolution(
   state: EncounterState,
   actorId: CombatantId,
   movement: EngineMovementObjective,
   slots: readonly EngineActionSlotUse[],
   queries: EngineQueryPort,
-): { readonly costFeet: number; readonly path: readonly GridCell[]; readonly finalPosition: GridCell } | null {
+): MovementResolution | null {
   const origin = queries.tokenPosition(state, actorId);
   const actor = queries.combatant(state, actorId);
   const constraints = targetConstraints(state, actorId, slots, queries);
   if (origin === null || actor === null || constraints === null) return null;
-  if (positionFits(state, actorId, origin, constraints, movement, queries)) {
+  const anchor = movement.engagement.anchor;
+  const productiveClose = constraints.length === 0 &&
+    movement.engagement.stance === 'close_to_melee' && anchor !== undefined && anchor !== null;
+  if (!productiveClose && positionFits(state, actorId, origin, constraints, movement, queries)) {
     return { costFeet: 0, path: [], finalPosition: origin };
   }
   if (movement.preference.willingness === 'none') return null;
   const maximumFeet = movement.preference.maximumFeet ?? actor.profile.rules.speed;
   const movementKind = slots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dash') ? 'dash' : 'normal';
+  if (productiveClose) {
+    const anchorId = resolveSelector(state, actorId, anchor, queries);
+    const anchorPosition = anchorId === null ? null : queries.tokenPosition(state, anchorId);
+    if (anchorPosition === null) return null;
+    const approach = queries.approach(state, {
+      actorId,
+      target: anchorPosition,
+      movement: movementKind,
+      maximumFeet,
+    });
+    if (!approach.legal) return null;
+    return {
+      costFeet: approach.costFeet,
+      path: approach.cells,
+      finalPosition: approach.cells.at(-1) ?? origin,
+    };
+  }
   const candidateCells: { readonly lowerBoundFeet: number; readonly finalPosition: GridCell }[] = [];
   for (let row = 0; row < state.bounds.rows; row += 1) {
     for (let column = 0; column < state.bounds.columns; column += 1) {

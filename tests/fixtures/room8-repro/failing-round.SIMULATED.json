@@ -1,0 +1,142 @@
+[
+ {
+  "actorId": "combatant:generated-5117008-monster-1",
+  "acceptedProposal": {
+   "actor_id": "combatant:generated-5117008-monster-1",
+   "expected_revision": 203,
+   "primary_option_id": "option:203:7ea810345b1048eabc579bed3f95105da1c07c91f07ea357",
+   "fallback_option_id": "option:203:e44179f359ff09ddc7aaa8396a5b7add58224ccf3db33fb5",
+   "override_justification": null
+  },
+  "selectedBranch": "primary",
+  "resolutionSummary": {
+   "optionId": "option:203:7ea810345b1048eabc579bed3f95105da1c07c91f07ea357",
+   "movementFeet": 0,
+   "actionSlots": [
+    {
+     "slot": "main",
+     "kind": "dash",
+     "actionId": "dash",
+     "spellId": null,
+     "targetIds": [],
+     "objectId": null
+    }
+   ]
+  }
+ },
+ {
+  "actorId": "combatant:generated-5117008-monster-2",
+  "acceptedProposal": {
+   "actor_id": "combatant:generated-5117008-monster-2",
+   "expected_revision": 203,
+   "primary_option_id": "option:203:35be7046654bffb774050ea48d3439694da3e37b7d23e9dc",
+   "fallback_option_id": "option:203:ffdefce6f41203e2deb4233885ccfc9903179ac1d58b3861",
+   "override_justification": null
+  },
+  "selectedBranch": "primary",
+  "resolutionSummary": {
+   "optionId": "option:203:35be7046654bffb774050ea48d3439694da3e37b7d23e9dc",
+   "movementFeet": 0,
+   "actionSlots": [
+    {
+     "slot": "main",
+     "kind": "dash",
+     "actionId": "dash",
+     "spellId": null,
+     "targetIds": [],
+     "objectId": null
+    }
+   ]
+  }
+ },
+ {
+  "actorId": "combatant:generated-5117008-monster-3",
+  "acceptedProposal": {
+   "actor_id": "combatant:generated-5117008-monster-3",
+   "expected_revision": 203,
+   "primary_option_id": "option:203:d27daf3b19e80a3a235d51654b20049cd22e02cb291239ed",
+   "fallback_option_id": "option:203:f8f7dd84cdb56fc849a92a787471d8e67afec3b141696b20",
+   "override_justification": {
+    "reason": "objective",
+    "note": "The engine-authored tactical play intentionally coordinates this option."
+   }
+  },
+  "selectedBranch": "primary",
+  "resolutionSummary": {
+   "optionId": "option:203:d27daf3b19e80a3a235d51654b20049cd22e02cb291239ed",
+   "movementFeet": 0,
+   "actionSlots": [
+    {
+     "slot": "main",
+     "kind": "attack",
+     "actionId": "longbow",
+     "spellId": null,
+     "targetIds": [
+      "combatant:cleric"
+     ],
+     "objectId": null
+    },
+    {
+     "slot": "main",
+     "kind": "attack",
+     "actionId": "longbow",
+     "spellId": null,
+     "targetIds": [
+      "combatant:cleric"
+     ],
+     "objectId": null
+    }
+   ]
+  }
+ },
+ {
+  "actorId": "combatant:generated-5117008-monster-4",
+  "acceptedProposal": {
+   "actor_id": "combatant:generated-5117008-monster-4",
+   "expected_revision": 203,
+   "primary_option_id": "option:203:14cc27b27c97714b4dcb5bddd534f5a6669dec2e7e1307de",
+   "fallback_option_id": "option:203:ff8435be9db56223c0e68c07d5e19ed61ee1e71c4cca334d",
+   "override_justification": null
+  },
+  "selectedBranch": "primary",
+  "resolutionSummary": {
+   "optionId": "option:203:14cc27b27c97714b4dcb5bddd534f5a6669dec2e7e1307de",
+   "movementFeet": 0,
+   "actionSlots": [
+    {
+     "slot": "main",
+     "kind": "dash",
+     "actionId": "dash",
+     "spellId": null,
+     "targetIds": [],
+     "objectId": null
+    }
+   ]
+  }
+ },
+ {
+  "actorId": "combatant:generated-5117008-monster-5",
+  "acceptedProposal": {
+   "actor_id": "combatant:generated-5117008-monster-5",
+   "expected_revision": 203,
+   "primary_option_id": "option:203:1ce43d1d7a7289a6df70460ec0ca41a2f159b7aa9ac1743f",
+   "fallback_option_id": "option:203:7edb398a44f166592fb9e9b94300febee319554790657832",
+   "override_justification": null
+  },
+  "selectedBranch": "primary",
+  "resolutionSummary": {
+   "optionId": "option:203:1ce43d1d7a7289a6df70460ec0ca41a2f159b7aa9ac1743f",
+   "movementFeet": 0,
+   "actionSlots": [
+    {
+     "slot": "main",
+     "kind": "dash",
+     "actionId": "dash",
+     "spellId": null,
+     "targetIds": [],
+     "objectId": null
+    }
+   ]
+  }
+ }
+]

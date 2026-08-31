@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EncounterState } from '../../../src/combat/encounter';
 import { combatantId } from '../../../src/combat/values';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import {
   actorOpportunityReport,
   submissionDominance,
@@ -15,7 +16,11 @@ import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
 const inputs = declareTestInputs({
-  fixtures: ['tests/fixtures/arena-basis-hard/seed-5117009.json'],
+  fixtures: [
+    'tests/fixtures/arena-basis-hard/seed-5117009.json',
+    'tests/fixtures/room8-repro/seed-5117008.SIMULATED.json',
+    'tests/fixtures/room8-repro/failing-round.SIMULATED.json',
+  ],
 });
 
 const BANDIT = combatantId('combatant:generated-5117009-monster-4');
@@ -23,10 +28,26 @@ const GUARD = combatantId('combatant:generated-5117009-monster-2');
 const PRIEST = combatantId('combatant:generated-5117009-monster-1');
 const WIZARD = combatantId('combatant:wizard');
 const FIGHTER = combatantId('combatant:fighter');
+const CLERIC = combatantId('combatant:cleric');
+
+interface FailedRoundEntry {
+  readonly actorId: string;
+  readonly resolutionSummary: {
+    readonly movementFeet: number;
+    readonly actionSlots: readonly { readonly kind: string }[];
+  };
+}
 
 function frozenState(): EncounterState {
   const generated = JSON.parse(inputs.fixtures.readText(
     'tests/fixtures/arena-basis-hard/seed-5117009.json',
+  )) as GeneratedRoom;
+  return freshMonsterPlanningState(generated.encounter.state);
+}
+
+function room8State(): EncounterState {
+  const generated = JSON.parse(inputs.fixtures.readText(
+    'tests/fixtures/room8-repro/seed-5117008.SIMULATED.json',
   )) as GeneratedRoom;
   return freshMonsterPlanningState(generated.encounter.state);
 }
@@ -39,6 +60,99 @@ function record(value: unknown): Readonly<Record<string, unknown>> {
 }
 
 describe('engine movement and opportunity-cost intel', () => {
+  it('does not repeat the frozen Room-8 four-actor zero-feet Dash plan', () => {
+    const state = room8State();
+    const failedRound = JSON.parse(inputs.fixtures.readText(
+      'tests/fixtures/room8-repro/failing-round.SIMULATED.json',
+    )) as readonly FailedRoundEntry[];
+    const dashZeroActorIds = failedRound.filter((entry) =>
+      entry.resolutionSummary.movementFeet === 0 &&
+      entry.resolutionSummary.actionSlots.some((slot) => slot.kind === 'dash'))
+      .map((entry) => combatantId(entry.actorId));
+    expect(dashZeroActorIds).toHaveLength(4);
+
+    const runtime = createEngineMcpRuntime(state, {
+      requestedActorIds: dashZeroActorIds,
+      revision: 203,
+      room: 8,
+    });
+    const capsule = runtime.feed.current();
+    const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
+      run_id: capsule.runId,
+      expected_revision: capsule.revision,
+      scope: 'round',
+      granularity: 'full',
+      maximum_options_per_actor: 20,
+    }));
+    const actors = context['actors'];
+    if (!Array.isArray(actors)) throw new TypeError('Room-8 actor contexts are absent.');
+    expect(actors).toHaveLength(4);
+    const frontier = record(context['team_plan_frontier']);
+    const frontierCandidates = frontier['candidates'];
+    if (!Array.isArray(frontierCandidates)) throw new TypeError('Room-8 team frontier is absent.');
+    expect(frontierCandidates.map((candidate) => record(candidate)['candidate_id']))
+      .toEqual(['focus_fire', 'basic_advance']);
+    const play = record(runtime.toolSurface.execute('engine.propose_from_play', {
+      play_name: 'basic_advance',
+    }));
+    const proposals = play['proposals'];
+    if (!Array.isArray(proposals)) throw new TypeError('Room-8 play proposals are absent.');
+
+    for (const actorId of dashZeroActorIds) {
+      const options = availableEngineActorOptions(state, actorId, canonicalEngineQueryPort, 203);
+      expect(options.some((option) => option.actionSlots.some((slot) =>
+        slot.use.kind === 'attack' || slot.use.kind === 'multiattack'))).toBe(false);
+    }
+    const guardAttackArrival = [
+      [combatantId('combatant:generated-5117008-monster-2'), 35],
+      [combatantId('combatant:generated-5117008-monster-4'), 35],
+      [combatantId('combatant:generated-5117008-monster-5'), 40],
+    ] as const;
+    for (const [actorId, expectedMovementFeet] of guardAttackArrival) {
+      const movement = canonicalEngineQueryPort.movementOptions(state, actorId, CLERIC, 'spear');
+      expect(movement?.earliestAttackTurn).toMatchObject({
+        status: 'resolved', movementCost: expectedMovementFeet, turns: 1,
+      });
+    }
+
+    const selected = proposals.map((value) => {
+      const proposal = record(value);
+      const actorId = combatantId(String(proposal['actor_id']));
+      const optionId = String(proposal['primary_option_id']);
+      const option = availableEngineActorOptions(state, actorId, canonicalEngineQueryPort, 203)
+        .find((candidate) => candidate.optionId === optionId);
+      if (option === undefined) throw new Error(`Room-8 proposal option is absent for ${actorId}.`);
+      const resolution = resolveEngineActorOption(state, option, canonicalEngineQueryPort);
+      if (!resolution.valid) throw new Error(`Room-8 proposal option is illegal for ${actorId}.`);
+      return {
+        actorId,
+        movementFeet: resolution.mechanics.movementCostFeet,
+        finalPosition: resolution.mechanics.finalPosition,
+        actions: resolution.mechanics.actionSlots.map((slot) => slot.kind),
+      };
+    });
+    // None can attack this turn, but the wall opening at (12,6) makes each
+    // closest-reachable Dash productive rather than a zero-foot wasted action.
+    expect(selected).toEqual([
+      {
+        actorId: combatantId('combatant:generated-5117008-monster-1'),
+        movementFeet: 55, finalPosition: { column: 12, row: 6 }, actions: ['dash'],
+      },
+      {
+        actorId: combatantId('combatant:generated-5117008-monster-2'),
+        movementFeet: 60, finalPosition: { column: 11, row: 5 }, actions: ['dash'],
+      },
+      {
+        actorId: combatantId('combatant:generated-5117008-monster-4'),
+        movementFeet: 60, finalPosition: { column: 11, row: 5 }, actions: ['dash'],
+      },
+      {
+        actorId: combatantId('combatant:generated-5117008-monster-5'),
+        movementFeet: 55, finalPosition: { column: 12, row: 6 }, actions: ['dash'],
+      },
+    ]);
+  });
+
   it('renders the hand-computed R02 one-square Bandit upgrade and Guard attack ETA', () => {
     const state = frozenState();
     const bandit = canonicalEngineQueryPort.movementOptions(

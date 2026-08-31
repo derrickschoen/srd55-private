@@ -98,6 +98,14 @@ export interface PathToAnyRequest<TActorId extends string> {
   readonly isGoal: (cell: GridCell) => boolean;
 }
 
+export interface PathToBestRequest<TActorId extends string> {
+  readonly actorId: TActorId;
+  readonly start: GridCell;
+  readonly maximumCost: Feet;
+  /** Null excludes an endpoint; otherwise lower lexicographic values are better. */
+  readonly rank: (cell: GridCell) => readonly number[] | null;
+}
+
 export type PathResult =
   | {
       readonly kind: 'found';
@@ -236,6 +244,62 @@ export function findPathToAny<TActorId extends string>(
   }
 
   return { kind: 'unreachable' };
+}
+
+/** Explores one bounded movement region and returns its best ranked legal endpoint. */
+export function findPathToBest<TActorId extends string>(
+  world: MovementWorld<TActorId>,
+  request: PathToBestRequest<TActorId>,
+): PathResult {
+  const maximumCost = validatedCost(request.maximumCost);
+  if (!isCellInside(world.bounds, request.start)) return { kind: 'unreachable' };
+
+  const compareRank = (left: readonly number[], right: readonly number[]): number => {
+    for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+      const difference = (left[index] ?? 0) - (right[index] ?? 0);
+      if (difference !== 0) return difference;
+    }
+    return 0;
+  };
+  const startKey = cellKey(request.start);
+  const distances = new Map<string, number>([[startKey, 0]]);
+  const previous = new Map<string, GridCell>();
+  const frontier: FrontierCell[] = [{ cell: request.start, cost: 0, canEnd: true }];
+  let best: { readonly cell: GridCell; readonly cost: number; readonly rank: readonly number[] } | null = null;
+
+  while (frontier.length > 0) {
+    frontier.sort(frontierOrder);
+    const current = frontier.shift();
+    if (current === undefined) break;
+    if (distances.get(cellKey(current.cell)) !== current.cost) continue;
+    const rank = current.canEnd ? request.rank(current.cell) : null;
+    if (rank !== null && (best === null || compareRank(rank, best.rank) < 0 ||
+      compareRank(rank, best.rank) === 0 && (current.cost < best.cost ||
+        current.cost === best.cost && (current.cell.row < best.cell.row ||
+          current.cell.row === best.cell.row && current.cell.column < best.cell.column)))) {
+      best = { cell: current.cell, cost: current.cost, rank };
+    }
+    for (const neighbor of adjacentCells(world.bounds, current.cell)) {
+      if (!world.canTraverseStep(request.actorId, current.cell, neighbor)) continue;
+      const traversal = world.traversal(request.actorId, current.cell, neighbor);
+      if (traversal.kind === 'blocked') continue;
+      const nextCost = current.cost + validatedCost(traversal.cost);
+      if (nextCost > maximumCost) continue;
+      const neighborKey = cellKey(neighbor);
+      const knownCost = distances.get(neighborKey);
+      if (knownCost !== undefined && knownCost <= nextCost) continue;
+      distances.set(neighborKey, nextCost);
+      previous.set(neighborKey, current.cell);
+      frontier.push({ cell: neighbor, cost: nextCost, canEnd: traversal.canEnd });
+    }
+  }
+  return best === null
+    ? { kind: 'unreachable' }
+    : {
+        kind: 'found',
+        cells: reconstructPath(request.start, best.cell, previous),
+        cost: feet(best.cost),
+      };
 }
 
 function isAdjacent(from: GridCell, to: GridCell): boolean {
