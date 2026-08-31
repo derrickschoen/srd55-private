@@ -291,6 +291,8 @@ describe('AI-DM R1-10 rerun packet', () => {
       .toThrow('leaks a model-identifying field');
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', engineIntel: { actors: [] } }] }))
       .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', roundNarrative: 'uses dodge' }] }))
+      .toThrow('leaks a model-identifying field');
   });
 
   it('requires explicit, separate CLI paths and a deterministic shuffle seed', () => {
