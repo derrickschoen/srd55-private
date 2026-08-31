@@ -7,6 +7,18 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## Cycle-3b result — SUPERVISOR (2026-09-01): tier helps, presentation still loses
+
+sol-low 7.62 vs luna-low 6.91 on full intel (19W/2L/9T), but both lose
+to luna-low intel-OFF (8.08). Three-point picture: capacity real but
+insufficient; the intel presentation costs more than it gives on brutal
+density at both tiers. All four refused rounds in the study are room-4
+reps 2-3 under BOTH models — a deterministic room-conditioned
+full-intel-path defect, diagnosis lane dispatched (dry-run
+reproducible). Direction question (density-aware intel presentation;
+interim production defaults) queued for the owner. Full report:
+job-tmp cycle3b-report.md.
+
 ## Cycle-3a result — SUPERVISOR (2026-09-01): INVERTED
 
 On the brutal basis at era 4deae1fc, the full intel stack LOST to the
