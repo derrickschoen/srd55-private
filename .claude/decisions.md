@@ -20,6 +20,28 @@ confirmation vs fresh intel-off under the D425 must-beat rule + sol's
 numeric thresholds). Full plan: job-tmp slim-consensus-plan.md. P0
 dispatches when the running Stryker window completes.
 
+## D427 — OWNER: circumstance-conditioned slimming + adaptive end-goal (2026-09-01)
+
+Verbatim intent: "pay attention to when certain seam combinations work
+better in certain circumstances and other seam combinations are better in
+different aspects or circumstances. Collect enough data so that we can
+try to build an adaptive setting seam changer that is based on
+circumstances or a prompt for Luna low that is very fast that increases
+results without adding too much time." Consequences, binding on the
+slimming program:
+1. Every live-round arena row records a typed CIRCUMSTANCE feature vector
+   (room density features, caster/terrain load, engagement distances,
+   turn granularity, delta size, trim pressure, etc.).
+2. Every unsealing reports per-circumstance sliced results (which profile
+   wins WHERE), not only pooled means.
+3. Rounds accumulate into one dataset for the end-goal decision:
+   adaptive seam selector keyed on circumstances, and/or a fast luna-low
+   context-reading prompt (KB variant) — that choice returns to the
+   owner when the data exists.
+4. Density-axis spread: small metrics-only hard-basis satellites ride the
+   live rounds so the dataset spans simple->brutal (no extra panel cost;
+   round verdicts stay brutal-only per D426.2).
+
 ## D426 — OWNER: three slimming-program follow-ups (2026-09-01)
 
 1. **Interim production default: TOO EARLY TO DECIDE** (owner's words) —
