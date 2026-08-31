@@ -40,6 +40,16 @@ describe('arena basis generator', () => {
       '--seed', '5117001',
       '--rooms', '12',
       '--out', tmpdir(),
-    ])).toThrow('--difficulty must be standard or hard.');
+    ])).toThrow('--difficulty must be standard, hard, or brutal.');
+  });
+
+  it('accepts the brutal difficulty profile', () => {
+    const outPath = mkdtempSync(join(tmpdir(), 'dnd-brutal-basis-generator-'));
+    expect(parseBasisGenerationArgs([
+      '--difficulty', 'brutal',
+      '--seed', '6203001',
+      '--rooms', '3',
+      '--out', outPath,
+    ])).toEqual({ difficulty: 'brutal', seed: 6_203_001, rooms: 3, outPath });
   });
 });

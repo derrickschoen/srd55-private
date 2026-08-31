@@ -124,6 +124,9 @@ describe('AI-DM arena', () => {
       .toBe('heuristic_v0');
     expect(parseArenaArgs([...common, '--party-policy', 'symmetric_evaluator_v1']).partyPolicy)
       .toBe('symmetric_evaluator_v1');
+    expect(parseArenaArgs([...common, '--basis', 'brutal']).basis).toBe('brutal');
+    expect(() => parseArenaArgs([...common, '--basis', 'nightmare']))
+      .toThrow('--basis must be standard, hard, or brutal.');
     expect(() => parseArenaArgs([...common, '--party-policy', 'unknown-policy']))
       .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
   });

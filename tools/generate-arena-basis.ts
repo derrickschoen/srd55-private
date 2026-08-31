@@ -41,7 +41,7 @@ export function parseBasisGenerationArgs(argv: readonly string[]): BasisGenerati
   }
   const difficulty = values.get('--difficulty');
   if (!ROOM_DIFFICULTY_PROFILES.includes(difficulty as RoomDifficultyProfile)) {
-    throw new TypeError('--difficulty must be standard or hard.');
+    throw new TypeError('--difficulty must be standard, hard, or brutal.');
   }
   const out = values.get('--out');
   if (out === undefined) throw new TypeError('--out is required.');

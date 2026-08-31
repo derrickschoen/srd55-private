@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
 import { reduceEncounter } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
-import { STARTER_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
+import { BUNDLED_MONSTER_ROSTER, STARTER_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
 import { spellDefinition } from '../../../src/combat/spells/definitions';
+import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
+import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import {
+  BRUTAL_CHALLENGE_BUDGET_SCALE,
+  BRUTAL_TERRAIN_FEATURE_COUNT_BAND,
   generateRoom,
   ROOM_GRID_DIMENSIONS,
   type GeneratedRoom,
@@ -41,6 +45,12 @@ const HARD_BASIS_SEEDS = [
   5_117_012,
 ] as const;
 
+const BRUTAL_BASIS_SEEDS = [6_203_001, 6_203_002, 6_203_003] as const;
+const BRUTAL_PRODUCTIVITY_SEEDS = [
+  6_203_001, 6_203_002, 6_203_003, 6_203_004, 6_203_005,
+  6_203_006, 6_203_007, 6_203_008, 6_203_009, 6_203_010,
+] as const;
+
 const inputs = declareTestInputs({
   fixtures: [
     'tests/fixtures/arena-basis/seed-3943001.json',
@@ -67,6 +77,9 @@ const inputs = declareTestInputs({
     'tests/fixtures/arena-basis-hard/seed-5117010.json',
     'tests/fixtures/arena-basis-hard/seed-5117011.json',
     'tests/fixtures/arena-basis-hard/seed-5117012.json',
+    'tests/fixtures/arena-basis-brutal/seed-6203001.json',
+    'tests/fixtures/arena-basis-brutal/seed-6203002.json',
+    'tests/fixtures/arena-basis-brutal/seed-6203003.json',
   ],
 });
 
@@ -89,6 +102,9 @@ describe('seeded room generator', () => {
     expect(canonicalJson(generateRoom(394_300))).toBe(canonicalJson(generateRoom(394_300)));
     expect(canonicalJson(generateRoom(511_700, { difficulty: 'hard' }))).toBe(
       canonicalJson(generateRoom(511_700, { difficulty: 'hard' })),
+    );
+    expect(canonicalJson(generateRoom(620_300, { difficulty: 'brutal' }))).toBe(
+      canonicalJson(generateRoom(620_300, { difficulty: 'brutal' })),
     );
   });
 
@@ -214,4 +230,74 @@ describe('seeded room generator', () => {
     expect(barrier).toHaveLength(room.spec.dimensions.rows - 1);
     expect(barrier.some((cell) => cell.row === gate.row)).toBe(false);
   });
+
+  it.each(BRUTAL_BASIS_SEEDS)('pins frozen brutal arena basis seed %s byte-for-byte', (seed) => {
+    const path = `tests/fixtures/arena-basis-brutal/seed-${String(seed)}.json` as
+      `tests/fixtures/arena-basis-brutal/seed-${typeof seed}.json`;
+    expect(`${canonicalJson(generateRoom(seed, { difficulty: 'brutal' }))}\n`).toBe(
+      inputs.fixtures.readText(path),
+    );
+  });
+
+  it.each(BRUTAL_PRODUCTIVITY_SEEDS)(
+    'generates brutal seed %s with executable casters, dense terrain, scaled pressure, and productive monsters',
+    (seed) => {
+      const hard = generateRoom(seed, { difficulty: 'hard' });
+      const brutal = generateRoom(seed, { difficulty: 'brutal' });
+      expect(brutal.spec.challengeBudgetEighths).toBe(
+        hard.spec.challengeBudgetEighths * BRUTAL_CHALLENGE_BUDGET_SCALE,
+      );
+      expect(brutal.spec.challengeSpentEighths).toBeGreaterThanOrEqual(
+        brutal.spec.challengeBudgetEighths * 0.9,
+      );
+      expect(brutal.spec.challengeSpentEighths).toBeLessThanOrEqual(
+        brutal.spec.challengeBudgetEighths,
+      );
+
+      const rosterRows = brutal.spec.monsterRoster.map((entry) => {
+        const row = BUNDLED_MONSTER_ROSTER.find((candidate) => candidate.id === entry.statblockId);
+        if (row === undefined) throw new Error(`Brutal room references unknown ${entry.statblockId}.`);
+        return row;
+      });
+      expect(rosterRows.some((row) => {
+        const actions = row.statblock.sourceDetails.actions;
+        return actions.kind === 'present' && actions.value.some((action) =>
+          action.kind === 'spellcasting' && action.execution?.kind !== 'absent' &&
+          action.spells.some((spell) => spell.manifestStatus === 'implemented'));
+      })).toBe(true);
+
+      const terrainCounts = {
+        difficult: brutal.spec.terrain.filter((feature) =>
+          feature.kind === 'difficult-terrain-patch').length,
+        hazards: brutal.spec.terrain.filter((feature) => feature.kind === 'hazard-object').length,
+        lights: brutal.spec.terrain.filter((feature) => feature.kind === 'light-source').length,
+        obscurement: brutal.spec.terrain.filter((feature) =>
+          feature.kind === 'obscurement-patch').length,
+      };
+      expect(terrainCounts.difficult).toBeGreaterThanOrEqual(3);
+      expect(terrainCounts.hazards).toBeGreaterThanOrEqual(3);
+      expect(terrainCounts.lights).toBeGreaterThanOrEqual(2);
+      expect(terrainCounts.obscurement).toBeGreaterThanOrEqual(2);
+      expect(brutal.spec.terrain.length).toBeGreaterThan(hard.spec.terrain.length);
+      expect(Object.values(terrainCounts).reduce((total, count) => total + count, 0))
+        .toBeGreaterThanOrEqual(BRUTAL_TERRAIN_FEATURE_COUNT_BAND.minimum);
+      expect(Object.values(terrainCounts).reduce((total, count) => total + count, 0))
+        .toBeLessThanOrEqual(BRUTAL_TERRAIN_FEATURE_COUNT_BAND.maximum);
+
+      const planningState = freshMonsterPlanningState(brutal.encounter.state);
+      const monsters = planningState.combatants.filter((combatant) =>
+        combatant.profile.kind === 'monster');
+      for (const monster of monsters) {
+        const productive = availableEngineActorOptions(planningState, monster.profile.id)
+          .some((option) => {
+            const resolution = resolveEngineActorOption(planningState, option);
+            return resolution.valid && (resolution.mechanics.movementCostFeet > 0 ||
+              resolution.mechanics.actionSlots.some((slot) =>
+                slot.kind === 'attack' || slot.kind === 'saving_throw' || slot.kind === 'cast_spell' ||
+                slot.kind === 'use_world_object'));
+          });
+        expect(productive, `${monster.profile.id} has no productive first-turn option`).toBe(true);
+      }
+    },
+  );
 });

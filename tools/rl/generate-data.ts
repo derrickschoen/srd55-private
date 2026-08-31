@@ -3,8 +3,10 @@ import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { canonicalJson } from '../../src/commands/canonical-json';
 import {
+  ARENA_BASES,
   parseArenaArgs,
   runArena,
+  type ArenaBasis,
   type ArenaConfig,
   type ArenaRow,
 } from '../ai-dm-arena';
@@ -29,7 +31,7 @@ export interface GenerateDataConfig {
   readonly resume: boolean;
   readonly cwd: string;
   readonly timeoutMs: number;
-  readonly basis: 'standard' | 'hard';
+  readonly basis: ArenaBasis;
   readonly toolArgv: readonly string[];
 }
 
@@ -56,7 +58,7 @@ export interface GenerateDataManifest {
   readonly repoCommit: string;
   readonly toolArgv: readonly string[];
   readonly flapPolicy: 'arena-retry-then-resume-seed';
-  readonly basis: 'standard' | 'hard';
+  readonly basis: ArenaBasis;
   readonly combatModel: CombatModel;
   readonly initiativeProfile: RoomInitiativeProfile;
   readonly seeds: readonly SeedManifestEntry[];
@@ -129,8 +131,10 @@ export function parseGenerateDataArgs(
     else if (option === '--target-dir') targetDirectory = resolve(value);
     else if (option === '--timeout-ms') timeoutMs = positiveInteger(value, '--timeout-ms');
     else if (option === '--basis') {
-      if (value !== 'standard' && value !== 'hard') throw new TypeError('--basis must be standard or hard.');
-      basis = value;
+      if (!ARENA_BASES.includes(value as ArenaBasis)) {
+        throw new TypeError('--basis must be standard, hard, or brutal.');
+      }
+      basis = value as ArenaBasis;
     } else if (option === '--combat-model') {
       if (!COMBAT_MODELS.includes(value as CombatModel)) {
         throw new TypeError('--combat-model must be monster_block_v1 or initiative_segments_v1.');
@@ -379,7 +383,7 @@ async function main(): Promise<void> {
 }
 
 const GENERATE_DATA_USAGE =
-  'Usage: rl:generate-data --seed-range START-END [--seed-range START-END ...] --reps N --target-dir PATH [--basis standard|hard] [--combat-model monster_block_v1|initiative_segments_v1] [--initiative-profile legacy|derived_v1] [--timeout-ms N] [--resume]';
+  'Usage: rl:generate-data --seed-range START-END [--seed-range START-END ...] --reps N --target-dir PATH [--basis standard|hard|brutal] [--combat-model monster_block_v1|initiative_segments_v1] [--initiative-profile legacy|derived_v1] [--timeout-ms N] [--resume]';
 
 async function runCli(): Promise<void> {
   try { await main(); }
