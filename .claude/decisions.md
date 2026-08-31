@@ -7,6 +7,21 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D425 — OWNER: intel-slimming experiment program rulings (2026-09-01)
+
+From the coaching-lossy-comprehension question round:
+1. **Success bar: slimmed full-intel must BEAT intel-off** on the brutal
+   rooms before production defaults change.
+2. **Render-side first**: rounds 1-3 slim rendering only; the
+   reply-contract change (canonical option + AI picks target) becomes
+   its own later round only if render-side cannot close the gap.
+3. **All-null coaching rows are a DEFECT, fixed now** (before the
+   experiment rounds); the intel-off baseline re-measures in-era after.
+4. **Scale: as drafted, spend freely** — free rendering calibration pass
+   plus ~4 live A/Bs with full blind panels, one variable each.
+Also standing from the same directive: dual-blind Fable+sol
+brainstorm -> critique -> consensus produces the experiment plan.
+
 ## Arena rep-semantics reinterpretation — SUPERVISOR (2026-09-01)
 
 The room-4 diagnosis found that in EVERY non-interleaved arena run to
