@@ -120,6 +120,10 @@ describe('AI-DM arena', () => {
     ] as const;
 
     expect(parseArenaArgs(common).partyPolicy).toBe('symmetric_evaluator_v1');
+    expect(parseArenaArgs(common).intelMode).toBe('full');
+    expect(parseArenaArgs([...common, '--intel-mode', 'off']).intelMode).toBe('off');
+    expect(() => parseArenaArgs([...common, '--intel-mode', 'partial']))
+      .toThrow('--intel-mode must be full or off.');
     expect(parseArenaArgs([...common, '--party-policy', 'heuristic_v0']).partyPolicy)
       .toBe('heuristic_v0');
     expect(parseArenaArgs([...common, '--party-policy', 'symmetric_evaluator_v1']).partyPolicy)
@@ -129,6 +133,87 @@ describe('AI-DM arena', () => {
       .toThrow('--basis must be standard, hard, or brutal.');
     expect(() => parseArenaArgs([...common, '--party-policy', 'unknown-policy']))
       .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
+  });
+
+  it('suppresses every intel context surface while attributing off rows and preserving full bytes', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-intel-mode-'));
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--dry-run',
+      '--capture-rl-data', ...LEGACY_BLOCK_ARGS,
+    ] as const;
+    const defaultPath = join(directory, 'default.jsonl');
+    const fullPath = join(directory, 'full.jsonl');
+    const offPath = join(directory, 'off.jsonl');
+    const [defaultRow] = await runArena(parseArenaArgs([
+      ...common, '--out', defaultPath,
+    ]));
+    const [explicitFullRow] = await runArena(parseArenaArgs([
+      ...common, '--out', fullPath, '--intel-mode', 'full',
+    ]));
+    const [offRow] = await runArena(parseArenaArgs([
+      ...common, '--out', offPath, '--intel-mode', 'off',
+    ]));
+    if (defaultRow === undefined || explicitFullRow === undefined || offRow === undefined) {
+      throw new Error('Intel-mode fixture did not produce all three rows.');
+    }
+
+    expect(defaultRow.rawTurnContext).toBe(explicitFullRow.rawTurnContext);
+    expect(defaultRow.intelMode).toBe('full');
+    expect(explicitFullRow.intelMode).toBe('full');
+    expect(offRow).toEqual(expect.objectContaining({ intelMode: 'off', engineIntel: null }));
+    expect(offRow.rlData).toEqual(expect.objectContaining({
+      intelPolicyVersions: { intel_mode: 'off' },
+      engineIntel: null,
+    }));
+    expect(JSON.parse(readFileSync(offPath, 'utf8').trim())).toEqual(expect.objectContaining({
+      intelMode: 'off',
+      engineIntel: null,
+      rlData: expect.objectContaining({ intelPolicyVersions: { intel_mode: 'off' } }),
+    }));
+
+    const context = JSON.parse(offRow.rawTurnContext) as unknown;
+    const keys = new Set<string>();
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        value.forEach(visit);
+        return;
+      }
+      if (typeof value !== 'object' || value === null) return;
+      for (const [key, child] of Object.entries(value)) {
+        keys.add(key);
+        visit(child);
+      }
+    };
+    visit(context);
+    const forbiddenIntelKeys = [
+      'intel',
+      'movement',
+      'concentration',
+      'opportunity_cost',
+      'team_plan_frontier',
+      'materiality',
+      'known_failure_modes',
+      'actor_knowledge',
+      'reaction_spend_hold',
+      'legendary_windows',
+      'recovery_capabilities',
+      'search_memory',
+      'alert_state',
+    ] as const;
+    expect(forbiddenIntelKeys.filter((key) => keys.has(key))).toEqual([]);
+    expect(context).toMatchObject({
+      granularity: 'full',
+      actors: expect.arrayContaining([expect.objectContaining({
+        actor_id: expect.any(String),
+        status: expect.any(Object),
+        options: expect.arrayContaining([expect.objectContaining({ expectation: null })]),
+      })]),
+      applicable_plays: expect.any(Array),
+      suggested_plan: expect.objectContaining({
+        play_name: 'focus_fire',
+        proposals: expect.any(Array),
+      }),
+    });
   });
 
   it('threads each party policy through a SIMULATED arena row with distinct hashes and plans', { timeout: 30_000 }, async () => {

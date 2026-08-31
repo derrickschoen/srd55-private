@@ -1147,6 +1147,13 @@ describe('AI-DM engine MCP conversation runner', () => {
     const defaults = parseConversationArgs(['--rooms', '1', '--out', outPath]);
     expect(defaults.combatModel).toBe('initiative_segments_v1');
     expect(defaults.initiativeProfile).toBe('derived_v1');
+    expect(defaults.intelMode).toBe('full');
+    expect(parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--intel-mode', 'off',
+    ]).intelMode).toBe('off');
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--intel-mode', 'partial',
+    ])).toThrow('--intel-mode must be full or off.');
     const block = parseConversationArgs([
       '--rooms', '1', '--out', outPath,
       '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',

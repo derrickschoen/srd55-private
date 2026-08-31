@@ -401,6 +401,12 @@ const materialityContext = z.object({
   }).strict()).min(1).max(20),
 }).strict();
 const actorContext = z.object({ actor_id: identifier, status: actorStatus, options: z.array(tacticalOption).max(20), threats: z.array(threat).max(50), intel: actorIntel }).strict();
+const intelSuppressedActorContext = z.object({
+  actor_id: identifier,
+  status: actorStatus,
+  options: z.array(tacticalOption).max(20),
+  threats: z.array(threat).max(50),
+}).strict();
 const advertisedPlay = z.object({
   name: z.enum(PLAY_NAMES),
   description: z.string().min(1).max(200),
@@ -551,6 +557,15 @@ const fullTurnContextOutput = z.object({
   alert_state: alertStateContext,
   recent_changes: z.array(recentChange).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable(),
 }).strict();
+const intelSuppressedTurnContextOutput = z.object({
+  granularity: z.literal('full'), context_trimmed: z.boolean(),
+  state_ref: stateRef, request: turnRequest, summary: tacticalSummary,
+  actors: z.array(intelSuppressedActorContext).min(1).max(50),
+  applicable_plays: z.array(advertisedPlay).max(3),
+  suggested_plan: suggestedPlan.optional(),
+  current_plan: currentPlanSummary.optional(),
+  recent_changes: z.array(recentChange).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable(),
+}).strict();
 const revisionDeltaOperation = z.union([
   z.object({ kind: z.literal('set'), path: z.array(z.string()).min(1).max(20), value: z.unknown() }).strict(),
   z.object({ kind: z.literal('delete'), path: z.array(z.string()).min(1).max(20) }).strict(),
@@ -566,7 +581,7 @@ const turnDeltaOutput = z.object({
   changes: z.array(revisionDeltaOperation).max(10_000),
   context_trimmed: z.boolean(),
 }).strict();
-const turnContextOutput = z.union([fullTurnContextOutput, turnDeltaOutput]);
+const turnContextOutput = z.union([fullTurnContextOutput, intelSuppressedTurnContextOutput, turnDeltaOutput]);
 const proposeFromPlayOutput = z.object({
   state_ref: stateRef,
   play_name: z.enum(PLAY_NAMES),
@@ -802,7 +817,7 @@ function spec(name: string, description: string, input: z.ZodType<unknown>, outp
 }
 
 export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
-  spec('engine.get_turn_context', 'Return full bounded tactical context, or a revision-addressed delta for a resumed session.', z.object({ run_id: identifier, expected_revision: z.number().int().min(1), scope: z.enum(['active_turn', 'round']), granularity: z.enum(['full', 'turn_delta']).optional(), since_revision: z.number().int().min(1).optional(), actor_ids: z.array(identifier).min(1).max(50).optional(), include_expectations: z.boolean().optional(), maximum_options_per_actor: z.number().int().min(1).max(20).optional() }).strict().superRefine((value, context) => {
+  spec('engine.get_turn_context', 'Return full bounded tactical context, or a revision-addressed delta for a resumed session.', z.object({ run_id: identifier, expected_revision: z.number().int().min(1), scope: z.enum(['active_turn', 'round']), granularity: z.enum(['full', 'turn_delta']).optional(), since_revision: z.number().int().min(1).optional(), actor_ids: z.array(identifier).min(1).max(50).optional(), include_expectations: z.boolean().optional(), maximum_options_per_actor: z.number().int().min(1).max(20).optional(), intel_mode: z.enum(['full', 'off']).optional() }).strict().superRefine((value, context) => {
     if (value.granularity === 'turn_delta' && value.since_revision === undefined) {
       context.addIssue({ code: 'custom', path: ['since_revision'], message: 'since_revision is required for turn_delta.' });
     }
