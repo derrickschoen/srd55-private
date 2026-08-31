@@ -7,6 +7,19 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D426 — OWNER: three slimming-program follow-ups (2026-09-01)
+
+1. **Interim production default: TOO EARLY TO DECIDE** (owner's words) —
+   no change now; the question returns to the owner once the program
+   produces data. Full coaching remains default meanwhile.
+2. **Success bar stays brutal-only** — no simple-room non-regression
+   requirement added to the confirmation round; simple-room behavior is
+   a post-promotion watch item.
+3. **Calibration sitting: REGENERATE post-slimming** — the rerun-2-era
+   20-entry sheet is retired unscored; a fresh owner sample comes from
+   the slimming confirmation round's packet (supersedes the prepared
+   sheet from D423.1).
+
 ## D425 — OWNER: intel-slimming experiment program rulings (2026-09-01)
 
 From the coaching-lossy-comprehension question round:
