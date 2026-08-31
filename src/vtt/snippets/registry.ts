@@ -4,6 +4,9 @@ import type { CombatantId, EngineActorOption, EngineTurnProposal } from '../turn
 export const PLAY_NAMES = ['remove_obstacle', 'focus_fire', 'basic_advance'] as const;
 export type PlayName = (typeof PLAY_NAMES)[number];
 
+export const SKILL_NAMES = ['core_tactics', 'remove_obstacle', 'focus_fire'] as const;
+export type SkillName = (typeof SKILL_NAMES)[number];
+
 export interface SnippetSchema<Value> {
   readonly parse: (value: unknown) => Value;
 }
@@ -50,15 +53,64 @@ export interface AdvertisedPlay {
   readonly snippetHash: string;
 }
 
+export interface SkillDefinition {
+  readonly name: SkillName;
+  readonly description: string;
+  readonly procedure: string;
+  readonly playNames: readonly PlayName[];
+  readonly rank: number;
+  readonly alwaysOn: boolean;
+  readonly skillHash: string;
+  readonly applicability: (capsule: EngineStateCapsule) => boolean;
+}
+
+export interface AdvertisedSkill {
+  readonly name: SkillName;
+  readonly description: string;
+  readonly skillHash: string;
+}
+
+export interface LoadedSkill extends AdvertisedSkill {
+  readonly procedure: string;
+  readonly plays: readonly AdvertisedPlay[];
+}
+
+export type PlayShadowIssue =
+  | 'DUPLICATE_ACTOR'
+  | 'MISSING_ACTOR'
+  | 'UNREQUESTED_ACTOR'
+  | 'ACTOR_NOT_PROJECTED'
+  | 'ACTOR_NOT_LIVING'
+  | 'PRIMARY_OPTION_NOT_PROJECTED'
+  | 'PRIMARY_REVISION_MISMATCH'
+  | 'FALLBACK_EQUALS_PRIMARY'
+  | 'FALLBACK_OPTION_NOT_PROJECTED'
+  | 'FALLBACK_REVISION_MISMATCH';
+
+export interface PlayShadowRun {
+  readonly playName: PlayName;
+  readonly snippetHash: string;
+  readonly capsuleDigest: string;
+  readonly proposals: readonly EngineTurnProposal[];
+  readonly valid: boolean;
+  readonly issues: readonly PlayShadowIssue[];
+}
+
 export interface SnippetRegistry {
   readonly plays: readonly PlaySnippetDefinition[];
+  readonly skills: readonly SkillDefinition[];
   readonly snippetHash: string;
   readonly snippetSetHash: string;
+  readonly skillHash: string;
+  readonly skillSetHash: string;
   applicable(capsule: EngineStateCapsule): readonly AdvertisedPlay[];
+  applicableSkills(capsule: EngineStateCapsule): readonly AdvertisedSkill[];
+  loadSkill(name: SkillName, capsule: EngineStateCapsule): LoadedSkill;
   expand(name: PlayName, capsule: EngineStateCapsule): {
     readonly definition: PlaySnippetDefinition;
     readonly proposals: readonly EngineTurnProposal[];
   };
+  shadowRun(name: PlayName, capsule: EngineStateCapsule): PlayShadowRun;
 }
 
 interface RegistryDependencies {
@@ -69,7 +121,7 @@ interface RegistryDependencies {
 
 type ProjectedActor = EngineStateCapsule['projection']['combatants'][number];
 
-const RUNTIME_VERSION = 'plays-v2-composite-options-1';
+const RUNTIME_VERSION = 'plays-v1-skills-shadow-1';
 
 function requestedActors(capsule: EngineStateCapsule): readonly ProjectedActor[] {
   if (capsule.request === null) return [];
@@ -158,6 +210,7 @@ function alternateOffense(
   const targetRank = new Map(targets.map((target, index) => [target.id, index] as const));
   return actor.options
     .filter((option) => isOffense(option) && option.optionId !== primary.optionId &&
+      option.revision === primary.revision &&
       explicitTargetIds(option).some((targetId) => !primaryTargets.has(targetId)))
     .sort((left, right) => {
       const leftRank = Math.min(...explicitTargetIds(left).map((id) => targetRank.get(id) ?? Number.MAX_SAFE_INTEGER));
@@ -178,6 +231,7 @@ function proposals(capsule: EngineStateCapsule, controlActorOnly: boolean): read
     const fallback = capsule.request?.phase === 'correction'
       ? null
       : alternateOffense(actor, primary, targets) ?? actor.options.find((option) =>
+          option.optionId !== primary.optionId && option.revision === primary.revision &&
           option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge')) ?? null;
     return [{
       actorId: actor.id,
@@ -235,6 +289,82 @@ function definition(
   });
 }
 
+function skillDefinition(
+  dependencies: RegistryDependencies,
+  plays: readonly PlaySnippetDefinition[],
+  input: {
+    readonly name: SkillName;
+    readonly description: string;
+    readonly procedure: string;
+    readonly playNames: readonly PlayName[];
+    readonly rank: number;
+    readonly alwaysOn: boolean;
+    readonly trigger: string;
+    readonly applicability: (capsule: EngineStateCapsule) => boolean;
+  },
+): SkillDefinition {
+  const referencedPlays = input.playNames.map((name) => {
+    const play = plays.find((candidate) => candidate.name === name);
+    if (play === undefined) throw new RangeError(`Skill ${input.name} references unknown play ${name}.`);
+    return { name, snippetHash: play.snippetHash };
+  });
+  const skillHash = dependencies.hash(JSON.stringify({
+    runtime: RUNTIME_VERSION,
+    artifact: 'skill',
+    name: input.name,
+    description: input.description,
+    procedure: input.procedure,
+    rank: input.rank,
+    alwaysOn: input.alwaysOn,
+    trigger: input.trigger,
+    plays: referencedPlays,
+  }));
+  return Object.freeze({
+    name: input.name,
+    description: input.description,
+    procedure: input.procedure,
+    playNames: Object.freeze([...input.playNames]),
+    rank: input.rank,
+    alwaysOn: input.alwaysOn,
+    skillHash,
+    applicability: input.applicability,
+  });
+}
+
+function shadowIssues(
+  capsule: EngineStateCapsule,
+  expanded: readonly EngineTurnProposal[],
+): readonly PlayShadowIssue[] {
+  const issues: PlayShadowIssue[] = [];
+  const actors = requestedActors(capsule);
+  const required = new Set(actors.map((actor) => actor.id));
+  const proposed = new Set<CombatantId>();
+  for (const proposal of expanded) {
+    if (proposed.has(proposal.actorId)) issues.push('DUPLICATE_ACTOR');
+    proposed.add(proposal.actorId);
+    if (!required.has(proposal.actorId)) issues.push('UNREQUESTED_ACTOR');
+    const actor = capsule.projection.combatants.find((candidate) => candidate.id === proposal.actorId);
+    if (actor === undefined) {
+      issues.push('ACTOR_NOT_PROJECTED');
+      continue;
+    }
+    if (actor.life === 'dead') issues.push('ACTOR_NOT_LIVING');
+    const primary = actor.options.find((option) => option.optionId === proposal.primaryOptionId);
+    if (primary === undefined) issues.push('PRIMARY_OPTION_NOT_PROJECTED');
+    else if (primary.revision !== proposal.expectedRevision) issues.push('PRIMARY_REVISION_MISMATCH');
+    if (proposal.fallbackOptionId === proposal.primaryOptionId) issues.push('FALLBACK_EQUALS_PRIMARY');
+    if (proposal.fallbackOptionId !== null) {
+      const fallback = actor.options.find((option) => option.optionId === proposal.fallbackOptionId);
+      if (fallback === undefined) issues.push('FALLBACK_OPTION_NOT_PROJECTED');
+      else if (fallback.revision !== proposal.expectedRevision) issues.push('FALLBACK_REVISION_MISMATCH');
+    }
+  }
+  for (const actor of actors) {
+    if (!proposed.has(actor.id)) issues.push('MISSING_ACTOR');
+  }
+  return Object.freeze([...new Set(issues)]);
+}
+
 export function createSnippetRegistry(dependencies: RegistryDependencies): SnippetRegistry {
   const plays = Object.freeze([
     definition(dependencies, {
@@ -257,14 +387,54 @@ export function createSnippetRegistry(dependencies: RegistryDependencies): Snipp
       expand: (capsule) => proposals(capsule, false),
     }),
   ] satisfies readonly PlaySnippetDefinition[]);
+  const playApplicable = (name: PlayName, capsule: EngineStateCapsule): boolean =>
+    plays.find((play) => play.name === name)?.applicability(capsule) === true;
+  const skills = Object.freeze([
+    skillDefinition(dependencies, plays, {
+      name: 'core_tactics',
+      description: 'Always-on procedure for selecting a complete legal turn before adding tactical specialization.',
+      procedure: 'Start from basic_advance. Keep each actor revision-bound, prefer a complete offensive option, and retain a distinct legal fallback. Load a narrower skill only when its trigger is advertised.',
+      playNames: ['basic_advance'],
+      rank: 0,
+      alwaysOn: true,
+      trigger: 'always',
+      applicability: () => true,
+    }),
+    skillDefinition(dependencies, plays, {
+      name: 'remove_obstacle',
+      description: 'Load when a projected blocker can be displaced or controlled by an engine-offered option.',
+      procedure: 'Use remove_obstacle when the obstruction blocks access to a live opponent. Prefer the offered control sequence for one capable actor; let the remaining actors use their complete legal options. Edit or discard the draft if the obstacle is not the tactical bottleneck.',
+      playNames: ['remove_obstacle'],
+      rank: 10,
+      alwaysOn: false,
+      trigger: 'remove_obstacle is applicable',
+      applicability: (capsule) => playApplicable('remove_obstacle', capsule),
+    }),
+    skillDefinition(dependencies, plays, {
+      name: 'focus_fire',
+      description: 'Load when multiple actors can concentrate legal complete turns on a ranked removal target.',
+      procedure: 'Use focus_fire when removing one vulnerable opponent improves the team position. Preserve each complete engine option and its alternate-target fallback. Edit or discard the draft when objectives, morale, or resource conservation outweigh concentration.',
+      playNames: ['focus_fire'],
+      rank: 20,
+      alwaysOn: false,
+      trigger: 'focus_fire is applicable',
+      applicability: (capsule) => playApplicable('focus_fire', capsule),
+    }),
+  ] satisfies readonly SkillDefinition[]);
   const snippetHash = dependencies.hash(JSON.stringify({
     runtime: RUNTIME_VERSION, snippets: plays.map((play) => ({ name: play.name, hash: play.snippetHash })),
   }));
   const snippetSetHash = dependencies.hash(JSON.stringify({
     exposure: 'play', enabled: plays.map((play) => `${play.name}:${play.snippetHash}`).sort(),
   }));
+  const skillHash = dependencies.hash(JSON.stringify({
+    runtime: RUNTIME_VERSION, skills: skills.map((skill) => ({ name: skill.name, hash: skill.skillHash })),
+  }));
+  const skillSetHash = dependencies.hash(JSON.stringify({
+    exposure: 'skill', enabled: skills.map((skill) => `${skill.name}:${skill.skillHash}`).sort(),
+  }));
   return Object.freeze({
-    plays, snippetHash, snippetSetHash,
+    plays, skills, snippetHash, snippetSetHash, skillHash, skillSetHash,
     applicable(capsule: EngineStateCapsule) {
       const parsed = dependencies.inputSchema.parse(capsule);
       return plays.filter((play) => play.applicability(parsed))
@@ -272,12 +442,52 @@ export function createSnippetRegistry(dependencies: RegistryDependencies): Snipp
         .slice(0, 3)
         .map((play) => ({ name: play.name as PlayName, description: play.description, snippetHash: play.snippetHash }));
     },
+    applicableSkills(capsule: EngineStateCapsule) {
+      const parsed = dependencies.inputSchema.parse(capsule);
+      return skills.filter((skill) => skill.applicability(parsed))
+        .sort((left, right) => left.rank - right.rank || left.name.localeCompare(right.name))
+        .map((skill) => ({ name: skill.name, description: skill.description, skillHash: skill.skillHash }));
+    },
+    loadSkill(name: SkillName, capsule: EngineStateCapsule) {
+      const parsed = dependencies.inputSchema.parse(capsule);
+      const selected = skills.find((skill) => skill.name === name);
+      if (selected === undefined) throw new RangeError(`Unknown skill ${name}.`);
+      if (!selected.applicability(parsed)) throw new RangeError(`SKILL_NOT_APPLICABLE:${name}`);
+      const referenced = selected.playNames.map((playName) => {
+        const play = plays.find((candidate) => candidate.name === playName);
+        if (play === undefined) throw new RangeError(`Skill ${name} references unknown play ${playName}.`);
+        return { name: play.name as PlayName, description: play.description, snippetHash: play.snippetHash };
+      });
+      return Object.freeze({
+        name: selected.name,
+        description: selected.description,
+        skillHash: selected.skillHash,
+        procedure: selected.procedure,
+        plays: Object.freeze(referenced),
+      });
+    },
     expand(name: PlayName, capsule: EngineStateCapsule) {
       const parsed = dependencies.inputSchema.parse(capsule);
       const selected = plays.find((play) => play.name === name);
       if (selected === undefined) throw new RangeError(`Unknown play ${name}.`);
       if (!selected.applicability(parsed)) throw new RangeError(`PLAY_NOT_APPLICABLE:${name}`);
       return { definition: selected, proposals: dependencies.outputSchema.parse(selected.expand(parsed)) };
+    },
+    shadowRun(name: PlayName, capsule: EngineStateCapsule) {
+      const parsed = dependencies.inputSchema.parse(capsule);
+      const selected = plays.find((play) => play.name === name);
+      if (selected === undefined) throw new RangeError(`Unknown play ${name}.`);
+      if (!selected.applicability(parsed)) throw new RangeError(`PLAY_NOT_APPLICABLE:${name}`);
+      const expanded = dependencies.outputSchema.parse(selected.expand(parsed));
+      const issues = shadowIssues(parsed, expanded);
+      return Object.freeze({
+        playName: name,
+        snippetHash: selected.snippetHash,
+        capsuleDigest: parsed.digest,
+        proposals: expanded,
+        valid: issues.length === 0,
+        issues,
+      });
     },
   });
 }

@@ -3,7 +3,7 @@ import type { CombatantId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import { verifyEngineStateCapsule, type EngineStateCapsule } from './engine-state-capsule';
 import type { EngineOptionId, EngineTurnProposal } from './turn-proposal';
-import { createSnippetRegistry, PLAY_NAMES, type SnippetSchema } from './snippets/registry';
+import { createSnippetRegistry, PLAY_NAMES, SKILL_NAMES, type SnippetSchema } from './snippets/registry';
 
 const combatantIdSchema = z.custom<CombatantId>((value) =>
   typeof value === 'string' && value.trim() === value && value.length > 0 && value.length <= 200);
@@ -43,5 +43,14 @@ export const SNIPPET_REGISTRY = createSnippetRegistry({
   hash: sha256,
 });
 
-export { PLAY_NAMES };
-export type { AdvertisedPlay, PlayName, SnippetDefinition } from './snippets/registry';
+export { PLAY_NAMES, SKILL_NAMES };
+export type {
+  AdvertisedPlay,
+  AdvertisedSkill,
+  LoadedSkill,
+  PlayName,
+  PlayShadowIssue,
+  PlayShadowRun,
+  SkillName,
+  SnippetDefinition,
+} from './snippets/registry';
