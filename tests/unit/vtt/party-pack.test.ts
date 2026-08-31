@@ -12,6 +12,7 @@ import {
   encounterEffectId,
   encounterSessionId,
   effectStackingIdentity,
+  feet,
   itemId,
   limitedResourcePoolId,
 } from '../../../src/combat/values';
@@ -4802,9 +4803,13 @@ describe('external party-pack batch 2b mutation boundaries', () => {
         ? { ...combatant, turn: { ...combatant.turn, bonusActionAvailable: false } }
         : combatant),
     };
-    const firstAttackActions = legal(attackChoiceState, actor.profile.id).actions.filter((action) =>
-      action.type === 'attack' && action.attackId === 'attack:pack-member-1' &&
-      action.bonusActionGrantEffectId === undefined);
+    const firstAttackActions = legal(attackChoiceState, actor.profile.id).actions.flatMap((action) => {
+      if (
+        action.type !== 'attack' || action.attackId !== 'attack:pack-member-1' ||
+        action.bonusActionGrantEffectId !== undefined
+      ) return [];
+      return [action];
+    });
     expect([...new Set(firstAttackActions.map((action) => action.riderSelections?.[0]?.effectId ?? null))])
       .toEqual([null, 'effect:matrix-smite']);
     expect([...new Set(firstAttackActions.map((action) => action.damageTypeSelection?.damageType ?? null))])
@@ -4823,16 +4828,20 @@ describe('external party-pack batch 2b mutation boundaries', () => {
       areas: ['effect:matrix-action-area', 'effect:matrix-bonus-area'],
     });
 
-    const depleted = {
+    const depleted: typeof state = {
       ...state,
       combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
         ? {
             ...combatant,
             spellSlots: combatant.spellSlots.map((slot) => ({ ...slot, remaining: 0 })),
-            limitedResources: combatant.limitedResources?.map((pool) => ({
-              ...pool,
-              remaining: pool.id === 'resource:matrix-decoy' ? 1 : 0,
-            })),
+            ...(combatant.limitedResources === undefined
+              ? {}
+              : {
+                  limitedResources: combatant.limitedResources.map((pool) => ({
+                    ...pool,
+                    remaining: pool.id === 'resource:matrix-decoy' ? 1 : 0,
+                  })),
+                }),
             turn: {
               ...combatant.turn,
               bonusActionAvailable: true,
@@ -4841,15 +4850,19 @@ describe('external party-pack batch 2b mutation boundaries', () => {
           }
         : combatant),
     };
-    const depletedAttackChoiceState = {
+    const depletedAttackChoiceState: typeof state = {
       ...depleted,
       combatants: depleted.combatants.map((combatant) => combatant.profile.id === actor.profile.id
         ? { ...combatant, turn: { ...combatant.turn, bonusActionAvailable: false } }
         : combatant),
     };
-    const depletedFirstAttacks = legal(depletedAttackChoiceState, actor.profile.id).actions.filter((action) =>
-      action.type === 'attack' && action.attackId === 'attack:pack-member-1' &&
-      action.bonusActionGrantEffectId === undefined);
+    const depletedFirstAttacks = legal(depletedAttackChoiceState, actor.profile.id).actions.flatMap((action) => {
+      if (
+        action.type !== 'attack' || action.attackId !== 'attack:pack-member-1' ||
+        action.bonusActionGrantEffectId !== undefined
+      ) return [];
+      return [action];
+    });
     expect(depletedFirstAttacks).toHaveLength(4);
     expect(depletedFirstAttacks.every((action) => action.riderSelections === undefined)).toBe(true);
     expect(depletedFirstAttacks.every((action) => action.maneuverEffectId === undefined)).toBe(true);
@@ -4871,9 +4884,13 @@ describe('external party-pack batch 2b mutation boundaries', () => {
         ? {
             ...combatant,
             turn: { ...combatant.turn, ...turn },
-            limitedResources: combatant.limitedResources?.map((pool) => ({
-              ...pool, remaining: remaining[pool.id] ?? pool.remaining,
-            })),
+            ...(combatant.limitedResources === undefined
+              ? {}
+              : {
+                  limitedResources: combatant.limitedResources.map((pool) => ({
+                    ...pool, remaining: remaining[pool.id] ?? pool.remaining,
+                  })),
+                }),
           }
         : combatant),
     });
@@ -4917,6 +4934,330 @@ describe('external party-pack batch 2b mutation boundaries', () => {
       'resource:matrix-decoy': 1,
     });
     expect(featureSummary(spentDepleted).surges).toEqual([]);
+  });
+
+  it('normalizes duplicate slots and preserves optional spellcasting field presence exactly', () => {
+    const legacy = v1Pack();
+    legacy.allowPartial = true;
+    legacy.members[0]!.spellSlots = [
+      { level: 1, maximum: 2 },
+      { level: 1, maximum: 5 },
+    ];
+    const loadedLegacy = loadExternalPartyPack(legacy);
+    expect(loadedLegacy.status).toBe('loaded');
+    if (loadedLegacy.status !== 'loaded') throw new Error('Duplicate v1 slot fixture was refused.');
+    const normalizedLegacyPack = loadedLegacy.party.pack;
+    if (normalizedLegacyPack.schemaVersion !== 1) throw new Error('Expected a normalized v1 pack.');
+    expect(normalizedLegacyPack.members[0]!.spellSlots).toEqual([{ level: 1, maximum: 2 }]);
+
+    const candidate = structuredClone(pack(3, true));
+    const source = objectSpellcasting(candidate.members[0]!);
+    source.spellSlots = [
+      { level: 1, count: 2, recharge: 'long_rest' },
+      { level: 1, count: 5, recharge: 'long_rest' },
+    ];
+    source.grants = [{ spellId: 'guidance', ability: 'wisdom' }];
+    source.resourceSpellUses = [{ spellId: 'magic-missile', resourcePoolId: 'resource:normalization' }];
+    candidate.members[0]!.resources = [{
+      resourcePoolId: 'resource:normalization', maximum: 1, recharge: 'long_rest',
+    }];
+    const loaded = loadedV2(candidate);
+    const normalizedPack = loaded.party.pack;
+    if (normalizedPack.schemaVersion !== 2) throw new Error('Expected a normalized v2 pack.');
+    const normalizedMember = normalizedPack.members[0]!;
+    const normalized = spellcastingSources(normalizedMember)[0]!;
+    expect(normalizedMember.sharedSpellSlots).toEqual([{ level: 1, count: 2, recharge: 'long_rest' }]);
+    expect(normalized.grants).toEqual([{ spellId: 'guidance', ability: 'wisdom' }]);
+    expect(normalized.resourceSpellUses).toEqual([{
+      spellId: 'magic-missile', resourcePoolId: 'resource:normalization',
+    }]);
+
+    const absentCandidate = structuredClone(pack());
+    const absentSource = objectSpellcasting(absentCandidate.members[0]!);
+    delete absentSource.grants;
+    delete absentSource.resourceSpellUses;
+    const absentLoaded = loadedV2(absentCandidate);
+    const normalizedAbsentPack = absentLoaded.party.pack;
+    if (normalizedAbsentPack.schemaVersion !== 2) throw new Error('Expected a normalized v2 pack.');
+    const normalizedAbsent = spellcastingSources(normalizedAbsentPack.members[0]!)[0]!;
+    expect(Object.hasOwn(normalizedAbsent, 'grants')).toBe(false);
+    expect(Object.hasOwn(normalizedAbsent, 'resourceSpellUses')).toBe(false);
+  });
+
+  it('deduplicates grants by spell role and resource uses by the complete identity pair', () => {
+    const candidate = structuredClone(pack(3, true));
+    const input = candidate.members[0]!;
+    const source = objectSpellcasting(input);
+    source.preparedSpellIds = ['magic-missile'];
+    source.knownSpellIds = ['fire-bolt'];
+    source.grants = [
+      { spellId: 'guidance', ability: 'wisdom' },
+      { spellId: 'magic-missile', ability: 'wisdom' },
+      { spellId: 'fire-bolt', ability: 'wisdom' },
+    ];
+    source.resourceSpellUses = [
+      { spellId: 'magic-missile', resourcePoolId: 'resource:pair-a' },
+      { spellId: 'magic-missile', resourcePoolId: 'resource:pair-b' },
+      { spellId: 'fire-bolt', resourcePoolId: 'resource:pair-a' },
+      { spellId: 'magic-missile', resourcePoolId: 'resource:pair-a' },
+    ];
+    input.resources = [
+      { resourcePoolId: 'resource:pair-a', maximum: 2, recharge: 'long_rest' },
+      { resourcePoolId: 'resource:pair-b', maximum: 2, recharge: 'long_rest' },
+    ];
+
+    const loaded = loadedV2(candidate);
+    expect(loaded.party.members[0]!.spellcasting[0]).toMatchObject({
+      grants: [{ spell: { id: 'guidance' }, ability: 'wisdom' }],
+      resourceSpellUses: [
+        { spellId: 'magic-missile', resourcePoolId: 'resource:pair-a' },
+        { spellId: 'magic-missile', resourcePoolId: 'resource:pair-b' },
+        { spellId: 'fire-bolt', resourcePoolId: 'resource:pair-a' },
+      ],
+    });
+    const normalizedPack = loaded.party.pack;
+    if (normalizedPack.schemaVersion !== 2) throw new Error('Expected a normalized v2 pack.');
+    expect(spellcastingSources(normalizedPack.members[0]!)[0]).toMatchObject({
+      grants: [{ spellId: 'guidance', ability: 'wisdom' }],
+      resourceSpellUses: [
+        { spellId: 'magic-missile', resourcePoolId: 'resource:pair-a' },
+        { spellId: 'magic-missile', resourcePoolId: 'resource:pair-b' },
+        { spellId: 'fire-bolt', resourcePoolId: 'resource:pair-a' },
+      ],
+    });
+
+    const unknown = structuredClone(pack(3, true)) as unknown as {
+      members: Array<Record<string, unknown>>;
+    };
+    const unknownSource = unknown.members[0]!.spellcasting as Record<string, unknown>;
+    unknownSource.resourceSpellUses = [{
+      spellId: 'not-in-the-manifest', resourcePoolId: 'resource:pair-a',
+    }];
+    unknown.members[0]!.resources = [{
+      resourcePoolId: 'resource:pair-a', maximum: 1, recharge: 'long_rest',
+    }];
+    expect(loadExternalPartyPack(unknown)).toMatchObject({
+      status: 'refused', refusal: { reason: 'unknown_spell_id' },
+      gaps: [{ featurePath: 'members.0.spellcasting.resourceSpellUses.0.spellId' }],
+    });
+  });
+
+  it('validates each effect reference against the matching attack, spell, source, level, and form key', () => {
+    const candidate = structuredClone(pack(3, true));
+    const input = candidate.members[0]!;
+    input.attacks = [{
+      ...input.attacks[0]!,
+      damage: [
+        { damageTypeId: 'Slashing', count: 1, sides: 8, modifier: 3 },
+        { damageTypeId: 'Fire', count: 1, sides: 6, modifier: 1 },
+        { damageTypeId: 'Cold', count: 1, sides: 4, modifier: 0 },
+      ],
+    }, {
+      ...input.attacks[0]!, attackId: 'attack:integrity-ranged', kind: 'ranged', rangeFeet: 60,
+    }];
+    const legacySource = objectSpellcasting(input);
+    const { spellSlots, ...firstSource } = legacySource;
+    input.spellcasting = [{
+      ...firstSource,
+      ability: 'intelligence',
+      preparedSpellIds: ['magic-missile'],
+      knownSpellIds: ['fire-bolt'],
+      grants: [{ spellId: 'guidance', ability: 'wisdom' }],
+    }, {
+      ability: 'wisdom', spellSaveDc: 13, spellAttackBonus: 5,
+      preparedSpellIds: [], knownSpellIds: [],
+    }];
+    input.sharedSpellSlots = spellSlots;
+    input.effects = [{
+      effectId: 'effect:integrity-reckless', kind: 'reckless_attack_mode',
+      strengthBasedMeleeAttackIds: ['attack:pack-member-1'],
+    }, {
+      effectId: 'effect:integrity-ranged-reckless', kind: 'reckless_attack_mode',
+      strengthBasedMeleeAttackIds: ['attack:integrity-ranged'],
+    }, {
+      effectId: 'effect:integrity-elemental', kind: 'elemental_fury',
+      attackIds: ['attack:pack-member-1'], damageTypeIds: ['Fire', 'Cold'],
+      selectedDamageTypeId: 'Fire', amount: 2, gate: 'first_hit_this_turn',
+    }, {
+      effectId: 'effect:integrity-cantrip', kind: 'spell_damage_ability_modifier',
+      spellId: 'fire-bolt', application: 'one_damage_roll_per_turn',
+    }, {
+      effectId: 'effect:integrity-leveled', kind: 'spell_damage_ability_modifier',
+      spellId: 'magic-missile', application: 'one_damage_roll_per_turn',
+    }, {
+      effectId: 'effect:integrity-wrong-grant', kind: 'spell_damage_ability_modifier',
+      spellId: 'eldritch-blast', application: 'one_damage_roll_per_turn',
+    }, {
+      effectId: 'effect:integrity-ability-one', kind: 'attack_ability_substitution',
+      attackId: 'attack:pack-member-1', damageTermIndex: 1,
+      replacesAbility: 'strength', spellcastingAbility: 'intelligence',
+    }, {
+      effectId: 'effect:integrity-ability-two', kind: 'attack_ability_substitution',
+      attackId: 'attack:pack-member-1', damageTermIndex: 2,
+      replacesAbility: 'strength', spellcastingAbility: 'intelligence',
+    }, {
+      effectId: 'effect:integrity-level', kind: 'attack_damage_die_override',
+      attackId: 'attack:pack-member-1', damageTermIndex: 0,
+      levels: [
+        { minimumLevel: 7, count: 2, sides: 10 },
+        { minimumLevel: 8, count: 3, sides: 12 },
+      ],
+    }];
+
+    const loaded = loadedV2(candidate);
+    expect(loaded.party.members[0]!.effects.map((effect) => effect.id)).toEqual([
+      'effect:integrity-reckless',
+      'effect:integrity-elemental',
+      'effect:integrity-cantrip',
+      'effect:integrity-ability-one',
+      'effect:integrity-ability-two',
+      'effect:integrity-level',
+    ]);
+    expect(gapSummary(loaded)).toEqual([
+      { featurePath: 'members.0.effects.1.strengthBasedMeleeAttackIds', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.effects.4.spellId', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.effects.5.spellId', reason: 'value_not_in_engine_vocabulary' },
+    ]);
+  });
+
+  it('reports a non-string effect kind at the exact discriminant path', () => {
+    const candidate = structuredClone(pack(3, true)) as unknown as {
+      members: Array<Record<string, unknown>>;
+    };
+    candidate.members[0]!.effects = [{ effectId: 'effect:numeric-kind', kind: 42 }];
+    expect(gapSummary(loadExternalPartyPack(candidate))).toEqual([{
+      featurePath: 'members.0.effects.0.kind',
+      reason: 'capability_not_implemented',
+    }]);
+  });
+
+  it('requires the declared spell weapon and derives short-rest recharge only from an exclusive pact pool', () => {
+    const caster = loadedV2(effectPack()).party.members[0]!;
+    expect(() => loadedPartySpellCastCommand(caster, 'magic-missile', {
+      ...castDetails(),
+      weaponAttack: { attackId: 'attack:not-declared', damageTermIndex: 0 },
+    })).toThrow('The requested attack is not referenced by the loaded party member.');
+
+    const sharedOnly = loadedPartySpellCastCommand(caster, 'magic-missile', castDetails());
+    expect(sharedOnly).not.toHaveProperty('slotRecharge');
+
+    const pactOnly = {
+      ...caster,
+      sharedSpellSlots: [],
+      pactSpellSlots: [{ level: 1 as const, maximum: 1, recharge: 'short_rest' as const }],
+    };
+    expect(loadedPartySpellCastCommand(pactOnly, 'magic-missile', castDetails()))
+      .toMatchObject({ slotRecharge: 'short_rest' });
+
+    const mixed = {
+      ...caster,
+      pactSpellSlots: [{ level: 1 as const, maximum: 1, recharge: 'short_rest' as const }],
+    };
+    expect(loadedPartySpellCastCommand(mixed, 'magic-missile', castDetails()))
+      .not.toHaveProperty('slotRecharge');
+    expect(loadedPartySpellCastCommand(mixed, 'magic-missile', {
+      ...castDetails(), slotRecharge: 'short_rest',
+    })).toMatchObject({ slotRecharge: 'short_rest' });
+  });
+
+  it('refuses null, primitive, and array roots through the single root diagnostic', () => {
+    const expected = {
+      status: 'refused',
+      refusal: { kind: 'external_party_pack_refusal', reason: 'invalid_structure' },
+      gaps: [{
+        packEntry: 'party-pack:root', featurePath: 'party-pack',
+        requestedCapability: 'field:party-pack',
+        engineRefusalReason: 'invalid_party_pack_structure',
+      }],
+    };
+    expect(loadExternalPartyPack(null)).toEqual(expected);
+    expect(loadExternalPartyPack('not-an-object')).toEqual(expected);
+    expect(loadExternalPartyPack([pack()])).toEqual(expected);
+  });
+
+  it('keeps nested sanitization paths and rejects attack options bound to another effect or attack', () => {
+    const malformed = structuredClone(pack(3, true)) as unknown as {
+      members: Array<Record<string, unknown>>;
+    };
+    const attacks = malformed.members[0]!.attacks as Array<Record<string, unknown>>;
+    const damage = attacks[0]!.damage as Array<Record<string, unknown>>;
+    damage[0]!.unsupportedDamageField = true;
+    expect(gapSummary(loadExternalPartyPack(malformed))).toEqual([{
+      featurePath: 'members.0.attacks.0.damage.0.unsupportedDamageField',
+      reason: 'field_not_in_engine_vocabulary',
+    }]);
+
+    const candidate = typedShapePack([{
+      effectId: 'effect:other-attack-type', kind: 'attack_damage_type_choice',
+      attackId: 'attack:option-second', damageTermIndex: 0,
+      damageTypeIds: ['Cold', 'Fire'],
+    }, {
+      effectId: 'effect:not-a-maneuver', kind: 'bonus_action_attack_grant',
+      resourcePoolId: 'resource:not-a-maneuver', attackCount: 1,
+    }], [{
+      resourcePoolId: 'resource:not-a-maneuver', maximum: 1, recharge: 'short_rest',
+    }]);
+    candidate.members[0]!.attacks.push({
+      ...candidate.members[0]!.attacks[0]!, attackId: 'attack:option-second',
+    });
+    const member = loadedV2(candidate).party.members[0]!;
+    const target = combatantId('combatant:option-target');
+    expect(() => loadedPartyAttackCommand(member, 'attack:pack-member-1', target)).not.toThrow();
+    expect(() => loadedPartyAttackCommand(member, 'attack:pack-member-1', target, {
+      damageTypeSelection: {
+        effectId: encounterEffectId('effect:other-attack-type'), damageTypeId: 'Cold',
+      },
+    })).toThrow('The requested attack is not referenced by the loaded party member.');
+    expect(() => loadedPartyAttackCommand(member, 'attack:pack-member-1', target, {
+      maneuverEffectId: encounterEffectId('effect:not-a-maneuver'),
+    })).toThrow('The requested attack is not referenced by the loaded party member.');
+  });
+
+  it('requires movement budget, ignores same-actor token occupancy, and enumerates only damaging cantrips', () => {
+    const candidate = structuredClone(pack());
+    const source = objectSpellcasting(candidate.members[0]!);
+    source.preparedSpellIds = ['guiding-bolt'];
+    source.knownSpellIds = [];
+    source.grants = [{ spellId: 'sacred-flame', ability: 'wisdom' }];
+    source.spellSlots = [{ level: 1, count: 1, recharge: 'long_rest' }];
+    const loaded = loadedV2(candidate);
+    const actor = loaded.party.members[0]!;
+    const target = monsterProfile('movement-cantrip-target', { initiativeBonus: -10 });
+    let state = createEncounter({
+      bounds: { columns: 4, rows: 2 },
+      combatants: [actor.profile, target],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(target, { column: 2, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const legal = loadedPartyTurnLegalActions(loaded.party.members);
+    const withDuplicateActorToken = {
+      ...state,
+      tokens: [...state.tokens, combatToken(actor.profile, { column: 1, row: 0 })],
+    };
+    expect(legal(withDuplicateActorToken, actor.profile.id).actions.flatMap((action) =>
+      action.type === 'move' ? action.path : [])).toContainEqual({ column: 1, row: 0 });
+
+    const noMovement: typeof state = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? {
+            ...combatant,
+            turn: {
+              ...combatant.turn,
+              movement: { ...combatant.turn.movement, remaining: feet(0) },
+            },
+          }
+        : combatant),
+    };
+    expect(legal(noMovement, actor.profile.id).actions.some((action) => action.type === 'move')).toBe(false);
+
+    const nullSlotSpells = legal(state, actor.profile.id).actions.flatMap((action) =>
+      action.type === 'cast_spell' && action.slotLevel === null ? [action.spellId] : []);
+    expect(nullSlotSpells).toContain('sacred-flame');
+    expect(nullSlotSpells).not.toContain('guiding-bolt');
   });
 
   it('reserves healing slots for a multiclass Cleric when opening Bless is enabled', () => {
@@ -5048,5 +5389,195 @@ describe('external party-pack batch 2b mutation boundaries', () => {
       ...fourMemberV1.members[0]!, combatantId: 'combatant:legacy-four', tokenId: 'token:legacy-four', characterId: 40_004,
     }];
     expect(externalPartyPackSchema.parse(fourMemberV1).members).toHaveLength(4);
+  });
+
+  it('routes each healing spell through the source that actually declares its role', () => {
+    const candidate = structuredClone(pack());
+    const input = candidate.members[0]!;
+    input.classes = [{ classId: 'Cleric', level: 7 }];
+    input.abilities.intelligence = 20;
+    input.abilities.wisdom = 8;
+    const legacy = objectSpellcasting(input);
+    const { spellSlots: _spellSlots, ...sourceShape } = legacy;
+    input.spellcasting = [{
+      ...sourceShape,
+      ability: 'intelligence',
+      spellSaveDc: 17,
+      spellAttackBonus: 9,
+      preparedSpellIds: ['magic-missile'],
+      knownSpellIds: ['sacred-flame'],
+      grants: [{ spellId: 'light', ability: 'intelligence' }],
+    }, {
+      ability: 'wisdom',
+      spellSaveDc: 11,
+      spellAttackBonus: 3,
+      preparedSpellIds: ['cure-wounds'],
+      knownSpellIds: ['healing-word'],
+      grants: [
+        { spellId: 'mass-healing-word', ability: 'wisdom' },
+        { spellId: 'guidance', ability: 'wisdom' },
+      ],
+    }];
+    input.sharedSpellSlots = [
+      { level: 1, count: 1, recharge: 'long_rest' },
+      { level: 3, count: 1, recharge: 'long_rest' },
+    ];
+
+    const loaded = loadedV2(candidate);
+    const healer = loaded.party.members[0]!;
+    const ally = loaded.party.members[2]!;
+    let state = createEncounter({
+      bounds: { columns: 2, rows: 1 },
+      combatants: [healer.profile, ally.profile],
+      tokens: [
+        combatToken(healer.profile, { column: 0, row: 0 }),
+        combatToken(ally.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === ally.profile.id
+        ? { ...combatant, hitPoints: combatant.profile.rules.hitPointMaximum - 8 }
+        : combatant),
+    };
+
+    expect(loadedPartyTurnLegalActions(loaded.party.members)(state, healer.profile.id).actions
+      .flatMap((action) => action.type === 'cast_spell' &&
+        (action.spellId === 'cure-wounds' || action.spellId === 'healing-word' ||
+          action.spellId === 'mass-healing-word')
+        ? [{ spellId: action.spellId, slotLevel: action.slotLevel, targets: action.targets }]
+        : [])).toEqual([
+      { spellId: 'cure-wounds', slotLevel: 1, targets: [ally.profile.id] },
+      { spellId: 'healing-word', slotLevel: 1, targets: [ally.profile.id] },
+      { spellId: 'mass-healing-word', slotLevel: 3, targets: [ally.profile.id] },
+    ]);
+  });
+
+  it('honors the separate action and bonus-action budgets for leveled healing', () => {
+    const candidate = structuredClone(pack());
+    const input = candidate.members[0]!;
+    input.abilities.wisdom = 1;
+    const source = objectSpellcasting(input);
+    source.ability = 'wisdom';
+    source.preparedSpellIds = ['cure-wounds'];
+    source.knownSpellIds = ['healing-word'];
+    source.spellSlots = [{ level: 1, count: 1, recharge: 'long_rest' }];
+    const loaded = loadedV2(candidate);
+    const healer = loaded.party.members[0]!;
+    const ally = loaded.party.members[2]!;
+    let state = createEncounter({
+      bounds: { columns: 2, rows: 1 },
+      combatants: [healer.profile, ally.profile],
+      tokens: [
+        combatToken(healer.profile, { column: 0, row: 0 }),
+        combatToken(ally.profile, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    expect(loadedPartyTurnLegalActions(loaded.party.members)(state, healer.profile.id).actions
+      .filter((action) => action.type === 'cast_spell' && action.spellId === 'healing-word')).toEqual([]);
+    state = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === healer.profile.id
+        ? {
+            ...combatant,
+            turn: {
+              ...combatant.turn,
+              action: { kind: 'spent' },
+              additionalLeveledSpellActionsRemaining: 1,
+              bonusActionAvailable: false,
+            },
+          }
+        : { ...combatant, hitPoints: 1 }),
+    };
+
+    const healingSpellIds = loadedPartyTurnLegalActions(loaded.party.members)(state, healer.profile.id).actions
+      .flatMap((action) => action.type === 'cast_spell' &&
+        (action.spellId === 'cure-wounds' || action.spellId === 'healing-word')
+        ? [action.spellId]
+        : []);
+    expect(healingSpellIds).toContain('cure-wounds');
+    expect(healingSpellIds).not.toContain('healing-word');
+  });
+
+  it('requires a usable revivify action and slot and sorts only genuinely dead targets', () => {
+    const candidate = structuredClone(pack(4));
+    const input = candidate.members[0]!;
+    const source = objectSpellcasting(input);
+    source.preparedSpellIds = ['revivify', 'guidance'];
+    source.knownSpellIds = [];
+    source.spellSlots = [
+      { level: 2, count: 1, recharge: 'long_rest' },
+      { level: 4, count: 1, recharge: 'long_rest' },
+      { level: 3, count: 1, recharge: 'long_rest' },
+    ];
+    const loaded = loadedV2(candidate);
+    const [actor, firstDead, secondDead, living] = loaded.party.members;
+    if (actor === undefined || firstDead === undefined || secondDead === undefined || living === undefined) {
+      throw new Error('Expected four revivify fixtures.');
+    }
+    let state = createEncounter({
+      bounds: { columns: 2, rows: 2 },
+      combatants: [actor.profile, firstDead.profile, secondDead.profile, living.profile],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(firstDead.profile, { column: 1, row: 0 }),
+        combatToken(secondDead.profile, { column: 0, row: 1 }),
+        combatToken(living.profile, { column: 1, row: 1 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = {
+      ...state,
+      round: 4,
+      combatants: [
+        state.combatants.find((combatant) => combatant.profile.id === actor.profile.id)!,
+        {
+          ...state.combatants.find((combatant) => combatant.profile.id === secondDead.profile.id)!,
+          hitPoints: 0,
+          life: 'dead',
+          deathAt: { round: 3, initiativeIndex: 0 },
+        },
+        {
+          ...state.combatants.find((combatant) => combatant.profile.id === firstDead.profile.id)!,
+          hitPoints: 0,
+          life: 'dead',
+          deathAt: { round: 3, initiativeIndex: 0 },
+        },
+        {
+          ...state.combatants.find((combatant) => combatant.profile.id === living.profile.id)!,
+          deathAt: { round: 3, initiativeIndex: 0 },
+        },
+      ],
+    };
+    const legal = loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: false, openWithBless: false, useClericContingency: true,
+    });
+    const revivify = (candidateState: typeof state) => legal(candidateState, actor.profile.id).actions
+      .flatMap((action) => action.type === 'cast_spell' && action.spellId === 'revivify'
+        ? [{ slotLevel: action.slotLevel, targets: action.targets }]
+        : []);
+
+    expect(revivify(state)).toEqual([
+      { slotLevel: 3, targets: [firstDead.profile.id] },
+      { slotLevel: 3, targets: [secondDead.profile.id] },
+    ]);
+
+    const spentAction = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? { ...combatant, turn: { ...combatant.turn, action: { kind: 'spent' as const } } }
+        : combatant),
+    };
+    expect(revivify(spentAction)).toEqual([]);
+
+    const depleted = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? { ...combatant, spellSlots: combatant.spellSlots.map((slot) => ({ ...slot, remaining: 0 })) }
+        : combatant),
+    };
+    expect(revivify(depleted)).toEqual([]);
   });
 });
