@@ -3,8 +3,8 @@ import {
   type DecodedField,
   type MonsterAction,
   type MonsterProvenance,
-  type MonsterSourceDetails,
   type MonsterStatblock,
+  type MonsterTypedUnavailableMechanic,
   type SourceSpan,
 } from '../statblock';
 import {
@@ -21,6 +21,11 @@ import {
 } from './monster-helpers';
 
 const unsupported = <T>(note: string): DecodedField<T> => ({ kind: 'absent', note });
+const typedUnavailable = (source: SourceSpan, note: string): MonsterTypedUnavailableMechanic => ({
+  source,
+  execution: { kind: 'absent', note },
+});
+const actionUnavailable = (note: string) => ({ execution: { kind: 'absent' as const, note } });
 
 type OriginalHomebrewProvenance = Extract<MonsterProvenance, { readonly kind: 'original_homebrew' }>;
 
@@ -72,7 +77,11 @@ export const AIR_ELEMENTAL = monsterStatblock({
       { type: 'Poison', response: 'immune' }, { type: 'Thunder', response: 'immune' },
     ]),
     conditionImmunities: present(['Exhaustion', 'Grappled', 'Paralyzed', 'Petrified', 'Poisoned', 'Prone', 'Restrained', 'Unconscious']),
-    traits: unsupported('Air Form is transcribed in ASTRAL_TOWER_UNSUPPORTED_ENTRIES; the trait vocabulary cannot express occupied-space movement or one-inch passage.'),
+    traits: present([{
+      kind: 'air_form', canEnterCreatureSpace: true, canStopInCreatureSpace: true,
+      narrowestPassageInches: 1, extraMovementCost: false,
+      ...typedUnavailable(AIR_ELEMENTAL_SOURCE, 'Air Form movement awaits occupied-space and narrow-passage reducer support.'),
+    }]),
     actions: [
       { kind: 'multiattack', id: 'multiattack', count: 2, actionIds: ['thunderous-slam'], combination: 'any' },
       melee('thunderous-slam', 'Thunderous Slam', 8, [damage(14, 2, 8, 5, 'Thunder')], [], 10),
@@ -81,6 +90,12 @@ export const AIR_ELEMENTAL = monsterStatblock({
         target: { rangeFeet: 5, maximumSize: 'Medium', excludedKinds: [] },
         failure: { damage: [damage(24, 4, 10, 2, 'Thunder')], effects: [conditionOnHit('Prone', 'Medium')] },
         success: { kind: 'half_damage' },
+        mechanics: [{
+          kind: 'whirlwind', recharge: { dieSides: 6, minimumRoll: 4 }, targetLocation: 'in_monster_space',
+          failurePush: { maximumFeet: 20, direction: 'straight_away_from_monster' },
+          ...typedUnavailable(AIR_ELEMENTAL_SOURCE, 'Whirlwind awaits recharge and forced-movement reducer support.'),
+        }],
+        ...actionUnavailable('Whirlwind is withheld until its recharge and forced movement execute together.'),
       },
     ],
     bonusActions: notListed('bonus actions'), reactions: notListed('reactions'),
@@ -120,10 +135,39 @@ export const BLACK_PUDDING = monsterStatblock({
     languages: present([]), damageResponses: present([
       { type: 'Acid', response: 'immune' }, { type: 'Cold', response: 'immune' }, { type: 'Lightning', response: 'immune' }, { type: 'Slashing', response: 'immune' },
     ]), conditionImmunities: present(['Charmed', 'Deafened', 'Exhaustion', 'Frightened', 'Grappled', 'Prone', 'Restrained']),
-    traits: present([{ kind: 'spider_climb' }]),
-    actions: [melee('dissolving-pseudopod', 'Dissolving Pseudopod', 5, [damage(17, 4, 6, 3, 'Acid')], [], 10)],
+    traits: present([{
+      kind: 'amorphous', narrowestPassageInches: 1, extraMovementCost: false,
+      ...typedUnavailable(BLACK_PUDDING_SOURCE, 'Amorphous awaits narrow-passage movement support.'),
+    }, {
+      kind: 'corrosive_form', meleeAttackerDamage: damage(4, 1, 8, 0, 'Acid'),
+      ammunition: { material: 'nonmagical', destroyed: 'immediately_after_hit_that_deals_damage' },
+      weapon: {
+        material: 'nonmagical', trigger: 'after_dealing_damage_with_contact', cumulativeAttackPenalty: -1,
+        destroyedAtPenalty: -5, repair: { spell: 'mending', removesAllPenalty: true },
+      },
+      consumption: { durationMinutes: 1, depthFeet: 2, materials: ['nonmagical_wood', 'nonmagical_metal'] },
+      ...typedUnavailable(BLACK_PUDDING_SOURCE, 'Corrosive Form awaits contact damage, equipment durability, and material-consumption support.'),
+    }, { kind: 'spider_climb' }]),
+    actions: [{
+      ...melee('dissolving-pseudopod', 'Dissolving Pseudopod', 5, [damage(17, 4, 6, 3, 'Acid')], [], 10),
+      mechanics: [{
+        kind: 'equipment_corrosion', equipment: 'nonmagical_armor', trigger: 'after_target_takes_damage',
+        cumulativeArmorClassPenalty: -1, destroyedAtArmorClass: 10,
+        repair: { spell: 'mending', removesAllPenalty: true },
+        ...typedUnavailable(BLACK_PUDDING_SOURCE, 'Dissolving Pseudopod awaits equipment durability and Mending support.'),
+      }],
+      ...actionUnavailable('Dissolving Pseudopod is withheld until its armor corrosion executes with its damage.'),
+    }],
     bonusActions: notListed('bonus actions'),
-    reactions: unsupported('Split is transcribed in ASTRAL_TOWER_UNSUPPORTED_ENTRIES; the reaction vocabulary cannot create replacement creatures or divide Hit Points.'),
+    reactions: present([{
+      kind: 'split', requirements: { sizes: ['Large', 'Medium'], minimumHitPoints: 10 },
+      triggers: [{ kind: 'becomes_bloodied' }, { kind: 'takes_damage', types: ['Lightning', 'Slashing'] }],
+      replacement: {
+        count: 2, statblock: 'same_as_original', size: 'one_smaller_than_original',
+        initiative: 'original_initiative', hitPoints: { kind: 'divide_original_evenly', rounding: 'down' },
+      },
+      ...typedUnavailable(BLACK_PUDDING_SOURCE, 'Split awaits reaction triggers, replacement-creature creation, and Hit Point division support.'),
+    }]),
   },
 });
 
@@ -138,11 +182,42 @@ export const DOPPELGANGER = monsterStatblock({
     languages: present([{ kind: 'named', name: 'Common', canSpeak: true }, { kind: 'choice', count: 3, qualifier: 'other languages', canSpeak: true }]),
     damageResponses: notListed('damage vulnerabilities, resistances, or immunities'), conditionImmunities: present(['Charmed']), traits: notListed('traits'),
     actions: [
-      { kind: 'multiattack', id: 'multiattack', count: 2, actionIds: ['slam'], combination: 'any' },
-      melee('slam', 'Slam', 6, [damage(11, 2, 6, 4, 'Bludgeoning')]),
+      {
+        kind: 'multiattack', id: 'multiattack', count: 2, actionIds: ['slam'], combination: 'any',
+        mechanics: [{
+          kind: 'also_uses_action_if_available', actionId: 'unsettling-visage',
+          ...typedUnavailable(DOPPELGANGER_SOURCE, 'Multiattack awaits coupled non-attack action use.'),
+        }],
+        ...actionUnavailable('Multiattack is withheld until Unsettling Visage coupling is supported.'),
+      },
+      {
+        ...melee('slam', 'Slam', 6, [damage(11, 2, 6, 4, 'Bludgeoning')]),
+        mechanics: [{
+          kind: 'attack_roll_advantage_window', window: 'first_round_of_each_combat',
+          ...typedUnavailable(DOPPELGANGER_SOURCE, 'Slam awaits first-round combat-window advantage support.'),
+        }],
+        ...actionUnavailable('Slam is withheld until its first-round advantage is included.'),
+      },
       { kind: 'spellcasting', id: 'read-thoughts', actionEconomy: 'action', ability: 'charisma', saveDc: present(12), spellAttackBonus: notListed('a spell attack bonus for Read Thoughts'), spells: [{ id: 'detect-thoughts', availability: 'at_will', manifestStatus: 'implemented' }] },
+      {
+        kind: 'saving_throw', id: 'unsettling-visage', name: 'Unsettling Visage', savingThrow: { ability: 'wisdom', dc: 12 },
+        target: { rangeFeet: 15, maximumSize: null, excludedKinds: [] },
+        failure: { damage: [], effects: [conditionOnHit('Frightened', null)] }, success: { kind: 'none' },
+        mechanics: [{
+          kind: 'unsettling_visage', recharge: { dieSides: 6, minimumRoll: 6 },
+          targetArea: { kind: 'emanation', feet: 15, requiresSightOfMonster: true },
+          repeatSave: { timing: 'end_of_each_target_turn', endsOnSuccess: true }, automaticSuccessAfterMinutes: 1,
+          ...typedUnavailable(DOPPELGANGER_SOURCE, 'Unsettling Visage awaits recharge, area targeting, and repeated-save support.'),
+        }],
+        ...actionUnavailable('Unsettling Visage is withheld until its complete save lifecycle is supported.'),
+      },
     ],
-    bonusActions: unsupported('Shape-Shift is transcribed in ASTRAL_TOWER_UNSUPPORTED_ENTRIES; the bonus-action vocabulary cannot express retained-statistics shape-shifting.'),
+    bonusActions: present([{
+      kind: 'shape_shift_retained_statistics',
+      form: { kind: 'humanoid', sizes: ['Medium', 'Small'], retainedStatistics: 'all_except_size' },
+      canReturnToTrueForm: true, equipmentTransforms: false,
+      ...typedUnavailable(DOPPELGANGER_SOURCE, 'Shape-Shift awaits retained-statistics form-state support.'),
+    }]),
     reactions: notListed('reactions'),
   },
 });
@@ -159,7 +234,13 @@ export const EARTH_ELEMENTAL = monsterStatblock({
     skills: notListed('skills'), gear: notListed('gear'), senses: present([{ kind: 'darkvision', rangeFeet: 60 }, { kind: 'tremorsense', rangeFeet: 60 }]), passivePerception: 10,
     languages: present([{ kind: 'named', name: 'Primordial (Terran)', canSpeak: true }]), damageResponses: present([{ type: 'Thunder', response: 'vulnerable' }, { type: 'Poison', response: 'immune' }]),
     conditionImmunities: present(['Exhaustion', 'Paralyzed', 'Petrified', 'Poisoned', 'Unconscious']),
-    traits: unsupported('Earth Glide and Siege Monster are transcribed in ASTRAL_TOWER_UNSUPPORTED_ENTRIES; neither has a matching trait variant.'),
+    traits: present([{
+      kind: 'earth_glide', material: ['nonmagical_unworked_earth', 'nonmagical_unworked_stone'], disturbsMaterial: false,
+      ...typedUnavailable(EARTH_ELEMENTAL_SOURCE, 'Earth Glide awaits material-aware burrowing support.'),
+    }, {
+      kind: 'siege_monster', targetKinds: ['objects', 'structures'], damageMultiplier: 2,
+      ...typedUnavailable(EARTH_ELEMENTAL_SOURCE, 'Siege Monster awaits object and structure damage multiplier support.'),
+    }]),
     actions: [
       { kind: 'multiattack', id: 'multiattack', count: 2, actionIds: ['slam', 'rock-launch'], combination: 'any' },
       melee('slam', 'Slam', 8, [damage(14, 2, 8, 5, 'Bludgeoning')], [], 10),
@@ -203,15 +284,53 @@ export const GHOST = monsterStatblock({
       ...(['Acid', 'Bludgeoning', 'Cold', 'Fire', 'Lightning', 'Piercing', 'Slashing', 'Thunder'] as const).map((type) => ({ type, response: 'resistant' as const })),
       { type: 'Necrotic', response: 'immune' as const }, { type: 'Poison', response: 'immune' as const },
     ]), conditionImmunities: present(['Charmed', 'Exhaustion', 'Frightened', 'Grappled', 'Paralyzed', 'Petrified', 'Poisoned', 'Prone', 'Restrained']),
-    traits: present([{ kind: 'incorporeal_movement', difficultTerrain: true, endingInObjectDamage: damage(5, 1, 10, 0, 'Force') }]),
+    traits: present([{
+      kind: 'ethereal_sight', rangeFeet: 60, seesPlane: 'Ethereal', whileOnPlane: 'Material',
+      ...typedUnavailable(GHOST_SOURCE, 'Ethereal Sight awaits plane-aware perception support.'),
+    }, { kind: 'incorporeal_movement', difficultTerrain: true, endingInObjectDamage: damage(5, 1, 10, 0, 'Force') }]),
     actions: [
       { kind: 'multiattack', id: 'multiattack', count: 2, actionIds: ['withering-touch'], combination: 'any' },
       melee('withering-touch', 'Withering Touch', 5, [damage(19, 3, 10, 3, 'Necrotic')]),
+      {
+        kind: 'spellcasting', id: 'etherealness', actionEconomy: 'action', ability: 'charisma',
+        saveDc: notListed('a spell save DC for Etherealness'), spellAttackBonus: notListed('a spell attack bonus for Etherealness'),
+        spells: [{ id: 'etherealness', availability: 'at_will', manifestStatus: 'not_in_manifest' }],
+        mechanics: [{
+          kind: 'ghost_etherealness', crossPlaneVisibility: 'material_and_border_ethereal_mutual',
+          crossPlaneInteraction: 'neither_direction',
+          ...typedUnavailable(GHOST_SOURCE, 'Ghost Etherealness awaits spell-manifest and plane-interaction support.'),
+        }],
+        ...actionUnavailable('Etherealness is withheld until plane state and its ghost-specific exceptions are supported.'),
+      },
       {
         kind: 'saving_throw', id: 'horrific-visage', name: 'Horrific Visage', savingThrow: { ability: 'wisdom', dc: 13 },
         target: { rangeFeet: 60, maximumSize: null, excludedKinds: ['Undead'] },
         failure: { damage: [damage(10, 2, 6, 3, 'Psychic')], effects: [conditionOnHit('Frightened', null, { duration: 'until_start_of_monster_next_turn' })] },
         success: { kind: 'none' },
+        mechanics: [{
+          kind: 'horrific_visage', targetArea: { kind: 'cone', feet: 60, requiresSightOfMonster: true },
+          successImmunity: { action: 'horrific_visage', sourceMonsterOnly: true, hours: 24 },
+          ...typedUnavailable(GHOST_SOURCE, 'Horrific Visage awaits cone targeting and source-specific success immunity support.'),
+        }],
+        ...actionUnavailable('Horrific Visage is withheld until its cone and success immunity execute together.'),
+      },
+      {
+        kind: 'saving_throw', id: 'possession', name: 'Possession', savingThrow: { ability: 'charisma', dc: 13 },
+        target: { rangeFeet: 5, maximumSize: null, excludedKinds: [] },
+        failure: { damage: [], effects: [] }, success: { kind: 'none' },
+        mechanics: [{
+          kind: 'possession', recharge: { dieSides: 6, minimumRoll: 6 }, targetKind: 'Humanoid', requiresVisibleTarget: true,
+          failure: {
+            ghostDisappears: true, targetCondition: 'Incapacitated', targetLosesBodyControl: true,
+            targetRetainsAwareness: true, ghostControlsBody: true,
+            ghostTargetability: 'only_effects_specifically_targeting_undead', retainedGhostStatistics: true,
+            borrowedTargetStatistics: ['speed', 'strength_modifier', 'dexterity_modifier', 'constitution_modifier'],
+          },
+          endsWhen: ['body_zero_hit_points', 'ghost_bonus_action'],
+          onEnd: { ghostAppearsWithinFeet: 5, space: 'unoccupied', targetImmunityHours: 24 }, successImmunityHours: 24,
+          ...typedUnavailable(GHOST_SOURCE, 'Possession awaits body-control, stat borrowing, targetability, and exit-state support.'),
+        }],
+        ...actionUnavailable('Possession is withheld until its full state transfer and immunity lifecycle is supported.'),
       },
     ],
     bonusActions: notListed('bonus actions'), reactions: notListed('reactions'),
@@ -241,12 +360,36 @@ export const MIMIC = monsterStatblock({
     ...baseDetails([MIMIC_SOURCE], { sizes: ['Medium'], type: 'Monstrosity', subtype: null, alignment: 'Neutral' }, { rating: 2, experiencePoints: 450, proficiencyBonus: 2 }, { count: 9, sides: 8, modifier: 18 }, 20, mimicAbilities),
     skills: present([{ name: 'Stealth', bonus: 5 }]), gear: notListed('gear'), senses: present([{ kind: 'darkvision', rangeFeet: 60 }]), passivePerception: 11,
     languages: present([]), damageResponses: present([{ type: 'Acid', response: 'immune' }]), conditionImmunities: present(['Prone']),
-    traits: unsupported('Adhesive is transcribed in ASTRAL_TOWER_UNSUPPORTED_ENTRIES; the trait vocabulary cannot express touch-triggered adhesion and disadvantaged escape checks.'),
+    traits: present([{
+      kind: 'adhesive', requiredForm: 'object', trigger: 'anything_touches_monster', maximumCreatureSize: 'Huge',
+      condition: 'Grappled', escapeDc: 13, escapeChecksHaveDisadvantage: true,
+      ...typedUnavailable(MIMIC_SOURCE, 'Adhesive awaits touch-triggered grappling and disadvantaged escape-check support.'),
+    }]),
     actions: [
-      melee('bite', 'Bite', 5, [damage(7, 1, 8, 3, 'Piercing'), damage(4, 1, 8, 0, 'Acid')], [], 5, { kind: 'target_grappled_by_attacker' }),
-      melee('pseudopod', 'Pseudopod', 5, [damage(7, 1, 8, 3, 'Bludgeoning'), damage(4, 1, 8, 0, 'Acid')], [conditionOnHit('Grappled', 'Large', { escapeDc: 13, duration: 'until_escape' })]),
+      {
+        ...melee('bite', 'Bite', 5, [damage(7, 1, 8, 3, 'Piercing'), damage(4, 1, 8, 0, 'Acid')], [], 5, { kind: 'target_grappled_by_attacker' }),
+        mechanics: [{
+          kind: 'conditional_damage_replacement', condition: 'target_grappled_by_attacker', replacesDamageType: 'Piercing',
+          replacement: damage(12, 2, 8, 3, 'Piercing'),
+          ...typedUnavailable(MIMIC_SOURCE, 'Bite awaits grapple-dependent replacement damage support.'),
+        }],
+        ...actionUnavailable('Bite is withheld until grapple-dependent replacement damage is supported.'),
+      },
+      {
+        ...melee('pseudopod', 'Pseudopod', 5, [damage(7, 1, 8, 3, 'Bludgeoning'), damage(4, 1, 8, 0, 'Acid')], [conditionOnHit('Grappled', 'Large', { escapeDc: 13, duration: 'until_escape' })]),
+        mechanics: [{
+          kind: 'grapple_escape_disadvantage', appliesToCondition: 'Grappled', appliesToEscapeDc: 13,
+          ...typedUnavailable(MIMIC_SOURCE, 'Pseudopod awaits disadvantaged escape-check support.'),
+        }],
+        ...actionUnavailable('Pseudopod is withheld until its disadvantaged escape checks are supported.'),
+      },
     ],
-    bonusActions: unsupported('Shape-Shift is transcribed in ASTRAL_TOWER_UNSUPPORTED_ENTRIES; the bonus-action vocabulary cannot express object-form shape-shifting.'),
+    bonusActions: present([{
+      kind: 'shape_shift_retained_statistics',
+      form: { kind: 'object', sizes: ['Medium', 'Small'], retainedStatistics: 'all' },
+      canReturnToTrueForm: true, equipmentTransforms: false,
+      ...typedUnavailable(MIMIC_SOURCE, 'Shape-Shift awaits retained-statistics object-form state support.'),
+    }]),
     reactions: notListed('reactions'),
   },
 });
@@ -260,24 +403,25 @@ const rocActions: readonly MonsterAction[] = [
     conditionOnHit('Restrained', 'Huge', { duration: 'until_escape' }),
   ]),
 ];
-const rocCore = monsterStatblock({
+export const ROC = monsterStatblock({
   id: 'statblock:roc', name: 'Roc', armorClass: 15, hitPointMaximum: 248, speedFeet: 20, initiativeBonus: 8,
   savingThrowBonuses: savingThrowBonuses(rocAbilities), attacksPerAction: 2, usesDeathSaves: false,
   provenance: srdProvenance(ROC_SOURCE),
+  sourceDetails: {
+    ...baseDetails([ROC_SOURCE], { sizes: ['Gargantuan'], type: 'Monstrosity', subtype: null, alignment: 'Unaligned' }, { rating: 11, experiencePoints: 7_200, proficiencyBonus: 4 }, { count: 16, sides: 20, modifier: 80 }, 20, rocAbilities, [{ kind: 'fly', feet: 120, hover: false }]),
+    skills: present([{ name: 'Perception', bonus: 8 }]), gear: notListed('gear'), senses: present([]), passivePerception: 18,
+    languages: present([]), damageResponses: notListed('damage vulnerabilities, resistances, or immunities'),
+    conditionImmunities: notListed('condition immunities'), traits: notListed('traits'), actions: rocActions,
+    bonusActions: present([{
+      kind: 'swoop', recharge: { kind: 'recharge_roll', dieSides: 6, minimumRoll: 5 },
+      requires: 'creature_grappled_by_monster',
+      movement: { kind: 'fly', distance: 'half_speed', provokesOpportunityAttacks: false },
+      releases: 'selected_grappled_creature',
+      ...typedUnavailable(ROC_SOURCE, 'Swoop awaits recharge, grapple selection, movement, and release support.'),
+    }]),
+    reactions: notListed('reactions'), legendaryActions: notListed('Legendary Actions'), legendaryResistance: notListed('Legendary Resistance'),
+  },
 });
-const rocSourceDetails: MonsterSourceDetails = {
-  source: present([ROC_SOURCE]),
-  classification: present({ sizes: ['Gargantuan'], type: 'Monstrosity', subtype: null, alignment: 'Unaligned' }),
-  challenge: unsupported('The source value is CR 11 (XP 7,200; PB +4), transcribed in ASTRAL_TOWER_UNSUPPORTED_ENTRIES because the shared ChallengeRating type currently ends at CR 6.'),
-  hitPointDice: present({ count: 16, sides: 20, modifier: 80 }),
-  movement: present([{ kind: 'walk', feet: 20, hover: false }, { kind: 'fly', feet: 120, hover: false }]),
-  abilities: present(rocAbilities), skills: present([{ name: 'Perception', bonus: 8 }]), gear: notListed('gear'), senses: present([]),
-  passivePerception: present(18), languages: present([]), damageResponses: notListed('damage vulnerabilities, resistances, or immunities'),
-  conditionImmunities: notListed('condition immunities'), traits: notListed('traits'), actions: present(rocActions),
-  bonusActions: unsupported('Swoop is transcribed in ASTRAL_TOWER_UNSUPPORTED_ENTRIES; the bonus-action vocabulary cannot express recharge, movement, opportunity-attack immunity, and dropping a grappled target.'),
-  reactions: notListed('reactions'), legendaryActions: notListed('Legendary Actions'), legendaryResistance: notListed('Legendary Resistance'),
-};
-export const ROC: MonsterStatblock = { ...rocCore, sourceDetails: rocSourceDetails };
 
 const stirgeAbilities = abilityLines([4, -3, -3], [16, 3, 3], [11, 0, 0], [2, -4, -4], [8, -1, -1], [6, -2, -2]);
 export const STIRGE = monsterStatblock({
@@ -288,7 +432,16 @@ export const STIRGE = monsterStatblock({
     ...baseDetails([STIRGE_SOURCE], { sizes: ['Tiny'], type: 'Monstrosity', subtype: null, alignment: 'Unaligned' }, { rating: '1/8', experiencePoints: 25, proficiencyBonus: 2 }, { count: 2, sides: 4, modifier: 0 }, 10, stirgeAbilities, [{ kind: 'fly', feet: 40, hover: false }]),
     skills: notListed('skills'), gear: notListed('gear'), senses: present([{ kind: 'darkvision', rangeFeet: 60 }]), passivePerception: 9,
     languages: present([]), damageResponses: notListed('damage vulnerabilities, resistances, or immunities'), conditionImmunities: notListed('condition immunities'), traits: notListed('traits'),
-    actions: [melee('proboscis', 'Proboscis', 5, [damage(6, 1, 6, 3, 'Piercing')])], bonusActions: notListed('bonus actions'), reactions: notListed('reactions'),
+    actions: [{
+      ...melee('proboscis', 'Proboscis', 5, [damage(6, 1, 6, 3, 'Piercing')]),
+      mechanics: [{
+        kind: 'attachment', targetRelation: 'attached_to_target', blocksActionIdWhileAttached: 'proboscis',
+        recurringDamage: damage(5, 2, 4, 0, 'Necrotic'), recurringDamageTiming: 'start_of_monster_turn',
+        selfDetachMovementFeet: 5, otherDetach: { action: true, rangeFeet: 5, actors: ['target', 'other_creature'] },
+        ...typedUnavailable(STIRGE_SOURCE, 'Proboscis attachment awaits relation state, recurring damage, and detach operations.'),
+      }],
+      ...actionUnavailable('Proboscis is withheld until attachment and detach state are supported.'),
+    }], bonusActions: notListed('bonus actions'), reactions: notListed('reactions'),
   },
 });
 
@@ -309,9 +462,25 @@ export const WILL_O_WISP = monsterStatblock({
       ...(['Acid', 'Bludgeoning', 'Cold', 'Fire', 'Necrotic', 'Piercing', 'Slashing'] as const).map((type) => ({ type, response: 'resistant' as const })),
       { type: 'Lightning', response: 'immune' as const }, { type: 'Poison', response: 'immune' as const },
     ]), conditionImmunities: present(['Exhaustion', 'Grappled', 'Paralyzed', 'Petrified', 'Poisoned', 'Prone', 'Restrained', 'Unconscious']),
-    traits: present([{ kind: 'incorporeal_movement', difficultTerrain: true, endingInObjectDamage: damage(5, 1, 10, 0, 'Force') }]),
+    traits: present([{
+      kind: 'ephemeral', canWearEquipment: false, canCarryEquipment: false,
+      ...typedUnavailable(WILL_O_WISP_SOURCE, 'Ephemeral awaits equipment-capability enforcement.'),
+    }, {
+      kind: 'illumination', brightLightFeet: 20, additionalDimLightFeet: 20,
+      ...typedUnavailable(WILL_O_WISP_SOURCE, 'Illumination awaits emitted-light world state.'),
+    }, { kind: 'incorporeal_movement', difficultTerrain: true, endingInObjectDamage: damage(5, 1, 10, 0, 'Force') }]),
     actions: [melee('shock', 'Shock', 4, [damage(11, 2, 8, 2, 'Lightning')])],
-    bonusActions: unsupported('Consume Life and Vanish are transcribed in ASTRAL_TOWER_UNSUPPORTED_ENTRIES; the vocabulary cannot express instant death with healing or concentration-bound invisibility.'),
+    bonusActions: present([{
+      kind: 'consume_life', savingThrow: { ability: 'constitution', dc: 10 },
+      target: { kind: 'visible_living_creature', rangeFeet: 5, requiredHitPoints: 0 },
+      failure: { targetDies: true, healing: { average: 10, dice: { count: 3, sides: 6, modifier: 0 } } },
+      success: { kind: 'none' },
+      ...typedUnavailable(WILL_O_WISP_SOURCE, 'Consume Life awaits zero-Hit-Point targeting, instant death, and self-healing support.'),
+    }, {
+      kind: 'vanish', appliesInvisibleTo: ['monster', 'monster_light'], duration: 'until_concentration_ends',
+      endsEarlyImmediatelyAfter: ['attack_roll', 'consume_life'],
+      ...typedUnavailable(WILL_O_WISP_SOURCE, 'Vanish awaits concentration-bound invisibility and light-state support.'),
+    }]),
     reactions: notListed('reactions'),
   },
 });
@@ -396,24 +565,6 @@ export const FAMILIAR = monsterStatblock({
 });
 
 export const ASTRAL_TOWER_UNSUPPORTED_ENTRIES: readonly UnsupportedStatblockEntry[] = [
-  { monsterId: 'statblock:air-elemental', category: 'trait', name: 'Air Form', represented: 'Fly speed and hover are represented.', unsupported: 'Creature-space occupancy and one-inch passage.', source: AIR_ELEMENTAL_SOURCE },
-  { monsterId: 'statblock:air-elemental', category: 'action', name: 'Whirlwind', represented: 'DC 13 Strength save, target size, 24 (4d10 + 2) Thunder damage, half damage, and Prone are represented.', unsupported: 'Recharge 4–6 and the 20-foot push.', source: AIR_ELEMENTAL_SOURCE },
-  { monsterId: 'statblock:black-pudding', category: 'trait', name: 'Amorphous and Corrosive Form', represented: 'Spider Climb is represented.', unsupported: 'One-inch passage, contact damage, equipment corrosion/destruction, material consumption, and Mending recovery.', source: BLACK_PUDDING_SOURCE },
-  { monsterId: 'statblock:black-pudding', category: 'action', name: 'Dissolving Pseudopod', represented: 'Attack roll, reach, and Acid damage are represented.', unsupported: 'Armor corrosion/destruction and Mending recovery.', source: BLACK_PUDDING_SOURCE },
-  { monsterId: 'statblock:black-pudding', category: 'reaction', name: 'Split', represented: 'No false stand-in is encoded.', unsupported: 'Bloodied/damage trigger, creature creation, size reduction, Initiative inheritance, and Hit Point division.', source: BLACK_PUDDING_SOURCE },
-  { monsterId: 'statblock:doppelganger', category: 'action', name: 'Slam and Unsettling Visage', represented: 'Slam and its normal damage are represented; Multiattack makes two Slams; Read Thoughts is represented by Detect Thoughts.', unsupported: 'First-round Slam advantage, Unsettling Visage recharge, repeated saves, one-minute expiry, and Multiattack coupling.', source: DOPPELGANGER_SOURCE },
-  { monsterId: 'statblock:doppelganger', category: 'bonus_action', name: 'Shape-Shift', represented: 'No false stand-in is encoded.', unsupported: 'Humanoid form selection, size change, retained statistics, and untransformed equipment.', source: DOPPELGANGER_SOURCE },
-  { monsterId: 'statblock:earth-elemental', category: 'trait', name: 'Earth Glide and Siege Monster', represented: 'Burrow speed is represented.', unsupported: 'Unworked-earth passage without disturbance and double object/structure damage.', source: EARTH_ELEMENTAL_SOURCE },
-  { monsterId: 'statblock:ghost', category: 'trait', name: 'Ethereal Sight', represented: 'Darkvision and Incorporeal Movement are represented.', unsupported: 'Seeing into the Ethereal Plane.', source: GHOST_SOURCE },
-  { monsterId: 'statblock:ghost', category: 'action', name: 'Etherealness, Horrific Visage, and Possession', represented: 'Horrific Visage save, cone range, target exclusion, damage, Frightened condition, and duration are represented.', unsupported: 'Etherealness plane interaction; Horrific Visage success immunity; all Possession state transfer, recharge, immunity, and exit behavior.', source: GHOST_SOURCE },
-  { monsterId: 'statblock:mimic', category: 'trait', name: 'Adhesive', represented: 'Pseudopod Grappled condition and escape DC are represented.', unsupported: 'Touch-triggered adhesion and disadvantaged escape checks.', source: MIMIC_SOURCE },
-  { monsterId: 'statblock:mimic', category: 'action', name: 'Bite and Pseudopod', represented: 'Attack rolls, reach, base damage, Acid damage, grapple-target advantage, Grappled condition, and escape DC are represented.', unsupported: 'Bite replacement damage while grappled and disadvantaged Pseudopod escape checks.', source: MIMIC_SOURCE },
-  { monsterId: 'statblock:mimic', category: 'bonus_action', name: 'Shape-Shift', represented: 'No false stand-in is encoded.', unsupported: 'Object-form selection, size change, retained statistics, and untransformed equipment.', source: MIMIC_SOURCE },
-  { monsterId: 'statblock:roc', category: 'challenge', name: 'Challenge Rating', represented: 'The exact source value is retained here.', unsupported: 'CR 11 (XP 7,200; PB +4) exceeds the shared ChallengeRating and XP vocabularies, which currently stop at CR 6.', source: ROC_SOURCE },
-  { monsterId: 'statblock:roc', category: 'bonus_action', name: 'Swoop', represented: 'Fly speed and Talons grapple are represented.', unsupported: 'Recharge 5–6, half-speed movement, opportunity-attack immunity, and dropping a grappled creature.', source: ROC_SOURCE },
-  { monsterId: 'statblock:stirge', category: 'action', name: 'Proboscis', represented: 'Attack roll, reach, and initial Piercing damage are represented.', unsupported: 'Attachment state, attack lockout, recurring Necrotic damage, movement-based detach, and action-based detach.', source: STIRGE_SOURCE },
-  { monsterId: 'statblock:will-o-wisp', category: 'trait', name: 'Ephemeral and Illumination', represented: 'Fly speed, hover, and Incorporeal Movement are represented.', unsupported: 'Equipment prohibition and emitted light radii.', source: WILL_O_WISP_SOURCE },
-  { monsterId: 'statblock:will-o-wisp', category: 'bonus_action', name: 'Consume Life and Vanish', represented: 'No false stand-in is encoded.', unsupported: 'Zero-HP target gating, instant death, self-healing, concentration-bound invisibility, light suppression, and early termination.', source: WILL_O_WISP_SOURCE },
 ] as const;
 
 const SRD_ROWS = [

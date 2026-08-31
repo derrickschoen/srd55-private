@@ -188,7 +188,8 @@ function challengeValue(rating: ChallengeRating): number {
     case 3:
     case 4:
     case 5:
-    case 6: return rating;
+    case 6:
+    case 11: return rating;
   }
 }
 
