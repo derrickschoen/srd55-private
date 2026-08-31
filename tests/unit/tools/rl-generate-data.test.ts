@@ -117,6 +117,9 @@ describe('RL arena batch generator', () => {
     ]);
     expect(block.combatModel).toBe('monster_block_v1');
     expect(block.initiativeProfile).toBe('legacy');
+    expect(parseGenerateDataArgs([...common, '--basis', 'brutal']).basis).toBe('brutal');
+    expect(() => parseGenerateDataArgs([...common, '--basis', 'nightmare']))
+      .toThrow('--basis must be standard, hard, or brutal.');
 
     const [manifest] = await generateData(parseGenerateDataArgs([
       ...common, '--combat-model', 'initiative_segments_v1',

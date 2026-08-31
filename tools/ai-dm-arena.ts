@@ -29,7 +29,7 @@ import {
   type ScriptedPartyDecisionPolicy,
 } from '../src/vtt/scripted-party-round';
 
-export const ARENA_BASES = ['standard', 'hard'] as const;
+export const ARENA_BASES = ['standard', 'hard', 'brutal'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
 
 export interface ArenaArm {
@@ -237,7 +237,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   }
   const basis = values.get('--basis') ?? 'standard';
   if (!ARENA_BASES.includes(basis as ArenaBasis)) {
-    throw new TypeError('--basis must be standard or hard.');
+    throw new TypeError('--basis must be standard, hard, or brutal.');
   }
   const combatModel = values.get('--combat-model') ?? 'initiative_segments_v1';
   if (!COMBAT_MODELS.includes(combatModel as CombatModel)) {

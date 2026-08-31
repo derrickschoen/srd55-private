@@ -3,7 +3,12 @@ import { createEncounter, type EncounterCombatantState, type EncounterState } fr
 import type { GridCell } from '../combat/grid';
 import { mulberry32, type Rng } from '../combat/random';
 import type { ChallengeRating } from '../combat/statblock';
-import { STARTER_MONSTER_ROSTER, type StarterMonsterFamily } from '../combat/statblocks/roster';
+import {
+  BUNDLED_MONSTER_ROSTER,
+  STARTER_MONSTER_ROSTER,
+  type BundledMonsterRosterRow,
+  type StarterMonsterFamily,
+} from '../combat/statblocks/roster';
 import {
   armorClass,
   effectStackingIdentity,
@@ -20,8 +25,11 @@ export type RoomGridDimension = (typeof ROOM_GRID_DIMENSIONS)[number];
 export const PARTY_HIT_POINT_FRACTIONS = [1, 0.75, 0.5, 0.25, 0] as const;
 export type PartyHitPointFraction = (typeof PARTY_HIT_POINT_FRACTIONS)[number];
 
-export const ROOM_DIFFICULTY_PROFILES = ['standard', 'hard'] as const;
+export const ROOM_DIFFICULTY_PROFILES = ['standard', 'hard', 'brutal'] as const;
 export type RoomDifficultyProfile = (typeof ROOM_DIFFICULTY_PROFILES)[number];
+
+export const BRUTAL_CHALLENGE_BUDGET_SCALE = 2 as const;
+export const BRUTAL_TERRAIN_FEATURE_COUNT_BAND = { minimum: 10, maximum: 14 } as const;
 
 export const ROOM_INITIATIVE_PROFILES = ['legacy', 'derived_v1'] as const;
 export type RoomInitiativeProfile = (typeof ROOM_INITIATIVE_PROFILES)[number];
@@ -40,6 +48,12 @@ export type RoomTerrainFeature =
       readonly kind: 'light-source';
       readonly object: WorldObject & { readonly kind: 'light-source' };
       readonly level: LightLevel;
+      readonly cells: readonly GridCell[];
+    }
+  | {
+      readonly kind: 'obscurement-patch';
+      readonly id: string;
+      readonly obscurement: 'light' | 'heavy';
       readonly cells: readonly GridCell[];
     };
 
@@ -74,7 +88,7 @@ export interface SampledPartySeat {
 export interface RoomSpec {
   readonly seed: number;
   /** Omitted for the original standard profile so its frozen bytes remain stable. */
-  readonly difficultyProfile?: 'hard';
+  readonly difficultyProfile?: Exclude<RoomDifficultyProfile, 'standard'>;
   readonly dimensions: {
     readonly columns: RoomGridDimension;
     readonly rows: RoomGridDimension;
@@ -360,6 +374,77 @@ function sampledHardRoster(
   return { budget: spent + integer(rng, 0, 8), spent, entries, profiles };
 }
 
+function bundledChallengeRating(row: BundledMonsterRosterRow): ChallengeRating {
+  const challenge = row.statblock.sourceDetails.challenge;
+  if (challenge.kind === 'absent' || challenge.value.rating === 'none') {
+    throw new Error(`Bundled monster ${row.id} has no challenge rating.`);
+  }
+  return challenge.value.rating;
+}
+
+function hasExecutableAction(row: BundledMonsterRosterRow): boolean {
+  const actions = row.statblock.sourceDetails.actions;
+  return actions.kind === 'present' && actions.value.some((action) =>
+    action.execution?.kind !== 'absent');
+}
+
+function hasExecutableSpellcasting(row: BundledMonsterRosterRow): boolean {
+  const actions = row.statblock.sourceDetails.actions;
+  return actions.kind === 'present' && actions.value.some((action) =>
+    action.kind === 'spellcasting' && action.execution?.kind !== 'absent' &&
+    action.spells.some((spell) => spell.manifestStatus === 'implemented'));
+}
+
+const BRUTAL_EXECUTABLE_ROSTER = BUNDLED_MONSTER_ROSTER.filter(hasExecutableAction);
+const BRUTAL_EXECUTABLE_CASTERS = BUNDLED_MONSTER_ROSTER.filter(hasExecutableSpellcasting);
+
+function sampledBrutalRoster(
+  rng: Rng,
+  seed: number,
+): {
+  readonly budget: number;
+  readonly spent: number;
+  readonly entries: readonly RoomMonsterRosterEntry[];
+  readonly profiles: readonly CombatantProfile[];
+} {
+  const hardBaseline = sampledHardRoster(rng, seed);
+  const budget = hardBaseline.budget * BRUTAL_CHALLENGE_BUDGET_SCALE;
+  const caster = pick(rng, BRUTAL_EXECUTABLE_CASTERS.filter((row) =>
+    challengeEighths(bundledChallengeRating(row)) <= budget));
+  const rows: BundledMonsterRosterRow[] = [caster];
+  let remaining = budget - challengeEighths(bundledChallengeRating(caster));
+
+  while (remaining > 0 && rows.length < 8) {
+    const affordable = BRUTAL_EXECUTABLE_ROSTER.filter((row) =>
+      challengeEighths(bundledChallengeRating(row)) <= remaining);
+    if (affordable.length === 0) break;
+    const largestAffordable = Math.max(...affordable.map((row) =>
+      challengeEighths(bundledChallengeRating(row))));
+    const pressureRows = affordable.filter((row) =>
+      challengeEighths(bundledChallengeRating(row)) >= Math.ceil(largestAffordable / 2));
+    const row = pick(rng, pressureRows);
+    rows.push(row);
+    remaining -= challengeEighths(bundledChallengeRating(row));
+  }
+
+  const entries = rows.map((row, index): RoomMonsterRosterEntry => {
+    const challengeRating = bundledChallengeRating(row);
+    const sequence = index + 1;
+    return {
+      combatantId: `combatant:generated-${String(seed)}-monster-${String(sequence)}`,
+      tokenId: `token:generated-${String(seed)}-monster-${String(sequence)}`,
+      statblockId: row.id,
+      challengeRating,
+      challengeEighths: challengeEighths(challengeRating),
+    };
+  });
+  const profiles = rows.map((row, index) => monsterCombatantProfile(row.statblock, {
+    combatantId: entries[index]!.combatantId,
+    tokenId: entries[index]!.tokenId,
+  }));
+  return { budget, spent: budget - remaining, entries, profiles };
+}
+
 function hardChokepoint(
   rng: Rng,
   seed: number,
@@ -483,9 +568,11 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
     (profile) => profile.kind === 'player_character',
   );
   const difficulty = options.difficulty ?? 'standard';
-  const roster = difficulty === 'hard'
-    ? sampledHardRoster(rng, normalizedSeed)
-    : sampledRoster(rng, normalizedSeed);
+  const roster = difficulty === 'brutal'
+    ? sampledBrutalRoster(rng, normalizedSeed)
+    : difficulty === 'hard'
+      ? sampledHardRoster(rng, normalizedSeed)
+      : sampledRoster(rng, normalizedSeed);
   const partyPositions = partyProfiles.map((_profile, index) => ({
     column: 1 + index % 2,
     row: 2 + index * 2,
@@ -496,7 +583,7 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
   }));
   const reserved = new Set([...partyPositions, ...monsterPositions].map(cellKey));
 
-  const hardLayout = difficulty === 'hard'
+  const hardLayout = difficulty === 'hard' || difficulty === 'brutal'
     ? hardChokepoint(rng, normalizedSeed, dimensions)
     : null;
   if (hardLayout !== null) {
@@ -520,9 +607,19 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
         cells: patchCells(rng, dimensions, reserved),
       });
     }
+  } else if (difficulty === 'brutal') {
+    for (let sequence = 1; sequence <= integer(rng, 2, 3); sequence += 1) {
+      terrain.push({
+        kind: 'difficult-terrain-patch',
+        id: `difficult:generated-${String(normalizedSeed)}-brutal-${String(sequence)}`,
+        cells: patchCells(rng, dimensions, reserved),
+      });
+    }
   }
   let objectSequence = 1;
-  for (let sequence = 1; sequence <= integer(rng, 1, 2); sequence += 1) {
+  const brutalHazardCount = difficulty === 'brutal' ? integer(rng, 3, 4) : null;
+  for (let sequence = 1;
+    sequence <= (brutalHazardCount ?? integer(rng, 1, 2)); sequence += 1) {
     const object = generatedWorldObject(
       normalizedSeed,
       objectSequence++,
@@ -531,7 +628,9 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
     );
     terrain.push({ kind: 'hazard-object', object });
   }
-  for (let sequence = 1; sequence <= integer(rng, 1, 2); sequence += 1) {
+  const brutalLightCount = difficulty === 'brutal' ? integer(rng, 2, 3) : null;
+  for (let sequence = 1;
+    sequence <= (brutalLightCount ?? integer(rng, 1, 2)); sequence += 1) {
     const object = generatedWorldObject(
       normalizedSeed,
       objectSequence++,
@@ -545,6 +644,16 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
       cells: patchCells(rng, dimensions, reserved),
     });
   }
+  if (difficulty === 'brutal') {
+    for (let sequence = 1; sequence <= integer(rng, 2, 3); sequence += 1) {
+      terrain.push({
+        kind: 'obscurement-patch',
+        id: `obscurement:generated-${String(normalizedSeed)}-${String(sequence)}`,
+        obscurement: pick(rng, ['light', 'heavy'] as const),
+        cells: patchCells(rng, dimensions, reserved),
+      });
+    }
+  }
   const combatants = [...partyProfiles, ...roster.profiles];
   const positions = [...partyPositions, ...monsterPositions];
   const fresh = createEncounter({
@@ -557,7 +666,7 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
     })),
     blockedCells,
     worldObjects: terrain.flatMap((feature) =>
-      feature.kind === 'difficult-terrain-patch' ? [] : [feature.object]),
+      feature.kind === 'hazard-object' || feature.kind === 'light-source' ? [feature.object] : []),
     environment: {
       difficultTerrainRegions: terrain.flatMap((feature) =>
         feature.kind === 'difficult-terrain-patch'
@@ -567,7 +676,10 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
         feature.kind === 'light-source'
           ? [{ id: `light:${feature.object.id}`, cells: feature.cells, level: feature.level }]
           : []),
-      obscurementRegions: [],
+      obscurementRegions: terrain.flatMap((feature) =>
+        feature.kind === 'obscurement-patch'
+          ? [{ id: feature.id, cells: feature.cells, obscurement: feature.obscurement }]
+          : []),
       movementRegions: [],
     },
     dmNotes: [`Deterministic generated room seed ${String(normalizedSeed)}.`],
@@ -579,7 +691,7 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
   );
   const spec: RoomSpec = {
     seed: normalizedSeed,
-    ...(difficulty === 'hard' ? { difficultyProfile: difficulty } : {}),
+    ...(difficulty === 'standard' ? {} : { difficultyProfile: difficulty }),
     dimensions,
     terrain,
     blockedCells,
