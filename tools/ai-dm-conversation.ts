@@ -83,9 +83,11 @@ import {
 } from '../src/vtt/reaction-guidance';
 import {
   createScriptedPartyPlan,
+  DEFAULT_SCRIPTED_PARTY_DECISION_POLICY,
   materializeScriptedPartyTurn,
   type ScriptedPartyAdherence,
   type ScriptedPartyAdherenceReasonCode,
+  type ScriptedPartyDecisionPolicy,
   type ScriptedPartyPlan,
 } from '../src/vtt/scripted-party-round';
 import {
@@ -125,6 +127,7 @@ const RULES_SOURCE = { get: () => null } as const;
 export interface ConversationConfig {
   readonly combatModel: CombatModel;
   readonly initiativeProfile: RoomInitiativeProfile;
+  readonly partyPolicy: ScriptedPartyDecisionPolicy;
   readonly fixturesPath: string;
   readonly rooms: number;
   readonly rounds: number;
@@ -384,6 +387,8 @@ export interface ConversationRunOptions {
   readonly store?: BrowserSessionStore;
   readonly adapter?: AgentSessionAdapter;
   readonly onPrimaryDispatchStart?: () => void;
+  /** Test-only explicit override; takes precedence over the configured arena policy. */
+  readonly partyPolicyOverride?: ScriptedPartyDecisionPolicy;
   /** Test-only browser-reload proof point; one-based completed round count. */
   readonly restoreAfterRound?: number;
   /** SIMULATED-only exhaustion cases, encoded as `room-N-round-N`. */
@@ -509,6 +514,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   return {
     combatModel: combatModel as CombatModel,
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
+    partyPolicy: DEFAULT_SCRIPTED_PARTY_DECISION_POLICY,
     fixturesPath: resolve(values.get('--fixtures') ?? 'tests/fixtures/arena-basis'),
     rooms: positiveInteger(values.get('--rooms') ?? '12', '--rooms'),
     rounds: positiveInteger(values.get('--rounds') ?? values.get('--reps') ?? '1', '--rounds'),
@@ -1704,6 +1710,7 @@ async function roomStates(config: ConversationConfig, options: ConversationRunOp
 }
 
 export async function runConversation(config: ConversationConfig, options: ConversationRunOptions = {}): Promise<ConversationRunResult> {
+  const partyPolicy = options.partyPolicyOverride ?? config.partyPolicy;
   const knowledgeBase = await loadKnowledgeBase(config);
   const repoCommit = await readRepoCommit(config.cwd);
   await writeFile(config.outPath, '', 'utf8');
@@ -1836,7 +1843,9 @@ export async function runConversation(config: ConversationConfig, options: Conve
       const capsule = initialSnapshot.capsule;
       const suggestedPlan = suggestedPlanBookkeeping(capsule);
       const segmentPartyPlan = config.combatModel === 'initiative_segments_v1'
-        ? createScriptedPartyPlan(engineSession.currentState())
+        ? createScriptedPartyPlan(engineSession.currentState(), {
+            decisionPolicy: partyPolicy,
+          })
         : null;
       const initiativeOrder = engineSession.currentState().initiative.map((entry) => entry.combatant);
       const initiativeIndexByActor = new Map(

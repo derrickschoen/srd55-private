@@ -24,6 +24,13 @@ import { regretTurnLegalActions } from './regret/legal-actions';
 export const SCRIPTED_PARTY_POLICY_VERSION = 'scripted-party-policy-v4-symmetric-evaluator' as const;
 export const SCRIPTED_PARTY_PLAN_FORMAT = 'scripted-party-plan-v1' as const;
 export const DEFAULT_SCRIPTED_PARTY_OBJECTIVE = 'defeat_the_hostile_team' as const;
+export const SCRIPTED_PARTY_DECISION_POLICIES = [
+  'heuristic_v0',
+  'symmetric_evaluator_v1',
+] as const satisfies readonly ScriptedPcDecisionPolicy[];
+export const DEFAULT_SCRIPTED_PARTY_DECISION_POLICY: ScriptedPcDecisionPolicy =
+  DEFAULT_SCRIPTED_PC_DECISION_POLICY;
+export type ScriptedPartyDecisionPolicy = ScriptedPcDecisionPolicy;
 
 export interface ScriptedPartyProgram {
   readonly actorId: CombatantId;
