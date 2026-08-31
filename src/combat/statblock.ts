@@ -26,7 +26,7 @@ import {
   type StatblockId,
 } from './values';
 
-export type ChallengeRating = '1/8' | '1/4' | '1/2' | 1 | 2 | 3 | 4 | 5 | 6;
+export type ChallengeRating = '1/8' | '1/4' | '1/2' | 1 | 2 | 3 | 4 | 5 | 6 | 11;
 export type MovementKind = 'walk' | 'burrow' | 'climb' | 'fly' | 'swim';
 export type SenseKind = 'blindsight' | 'darkvision' | 'tremorsense' | 'truesight';
 export type CombatSense =
@@ -73,6 +73,16 @@ export type DecodedField<T> =
   | { readonly kind: 'present'; readonly value: T }
   | { readonly kind: 'absent'; readonly note: string };
 
+/**
+ * A decoded SRD mechanic whose reducer support has not landed yet. Keeping the
+ * execution gap on the typed form lets engine-facing projections refuse it
+ * without discarding the lossless transcription.
+ */
+export interface MonsterTypedUnavailableMechanic {
+  readonly source: SourceSpan;
+  readonly execution: Extract<DecodedField<'implemented'>, { readonly kind: 'absent' }>;
+}
+
 export interface MonsterDice {
   readonly count: number;
   readonly sides: 4 | 6 | 8 | 10 | 12 | 20;
@@ -115,8 +125,8 @@ export interface MonsterClassification {
 
 export interface MonsterChallenge {
   readonly rating: ChallengeRating | 'none';
-  readonly experiencePoints: 0 | 25 | 50 | 100 | 200 | 450 | 700 | 1_100 | 1_800 | 2_300;
-  readonly proficiencyBonus: 2 | 3 | 'caster';
+  readonly experiencePoints: 0 | 25 | 50 | 100 | 200 | 450 | 700 | 1_100 | 1_800 | 2_300 | 7_200;
+  readonly proficiencyBonus: 2 | 3 | 4 | 'caster';
 }
 
 export type MonsterDamageTrigger =
@@ -148,7 +158,43 @@ export interface MonsterAttackAction {
     readonly kind: 'target_grappled_by_attacker' | 'target_not_full_hit_points';
   };
   readonly onHit: readonly MonsterOnHitEffect[];
+  readonly mechanics?: readonly MonsterAttackMechanic[];
+  readonly execution?: Extract<DecodedField<'implemented'>, { readonly kind: 'absent' }>;
 }
+
+export type MonsterAttackMechanic =
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'attack_roll_advantage_window';
+      readonly window: 'first_round_of_each_combat';
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'equipment_corrosion';
+      readonly equipment: 'nonmagical_armor';
+      readonly trigger: 'after_target_takes_damage';
+      readonly cumulativeArmorClassPenalty: -1;
+      readonly destroyedAtArmorClass: 10;
+      readonly repair: { readonly spell: 'mending'; readonly removesAllPenalty: true };
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'conditional_damage_replacement';
+      readonly condition: 'target_grappled_by_attacker';
+      readonly replacesDamageType: 'Piercing';
+      readonly replacement: MonsterDamageTerm;
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'grapple_escape_disadvantage';
+      readonly appliesToCondition: 'Grappled';
+      readonly appliesToEscapeDc: 13;
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'attachment';
+      readonly targetRelation: 'attached_to_target';
+      readonly blocksActionIdWhileAttached: 'proboscis';
+      readonly recurringDamage: MonsterDamageTerm;
+      readonly recurringDamageTiming: 'start_of_monster_turn';
+      readonly selfDetachMovementFeet: 5;
+      readonly otherDetach: { readonly action: true; readonly rangeFeet: 5; readonly actors: readonly ['target', 'other_creature'] };
+    });
 
 export interface MonsterSavingThrow {
   readonly ability: Ability;
@@ -195,6 +241,11 @@ export interface MonsterMultiattackAction {
   readonly count: number;
   readonly actionIds: readonly string[];
   readonly combination: 'any' | 'fixed' | 'one_attack_may_be_replaced';
+  readonly mechanics?: readonly (MonsterTypedUnavailableMechanic & {
+    readonly kind: 'also_uses_action_if_available';
+    readonly actionId: string;
+  })[];
+  readonly execution?: Extract<DecodedField<'implemented'>, { readonly kind: 'absent' }>;
 }
 
 export interface MonsterSavingThrowAction {
@@ -208,7 +259,48 @@ export interface MonsterSavingThrowAction {
     readonly effects: readonly MonsterOnHitEffect[];
   };
   readonly success: { readonly kind: 'none' } | { readonly kind: 'half_damage' };
+  readonly mechanics?: readonly MonsterSavingThrowMechanic[];
+  readonly execution?: Extract<DecodedField<'implemented'>, { readonly kind: 'absent' }>;
 }
+
+export type MonsterSavingThrowMechanic =
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'whirlwind';
+      readonly recharge: { readonly dieSides: 6; readonly minimumRoll: 4 };
+      readonly targetLocation: 'in_monster_space';
+      readonly failurePush: { readonly maximumFeet: 20; readonly direction: 'straight_away_from_monster' };
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'unsettling_visage';
+      readonly recharge: { readonly dieSides: 6; readonly minimumRoll: 6 };
+      readonly targetArea: { readonly kind: 'emanation'; readonly feet: 15; readonly requiresSightOfMonster: true };
+      readonly repeatSave: { readonly timing: 'end_of_each_target_turn'; readonly endsOnSuccess: true };
+      readonly automaticSuccessAfterMinutes: 1;
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'horrific_visage';
+      readonly targetArea: { readonly kind: 'cone'; readonly feet: 60; readonly requiresSightOfMonster: true };
+      readonly successImmunity: { readonly action: 'horrific_visage'; readonly sourceMonsterOnly: true; readonly hours: 24 };
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'possession';
+      readonly recharge: { readonly dieSides: 6; readonly minimumRoll: 6 };
+      readonly targetKind: 'Humanoid';
+      readonly requiresVisibleTarget: true;
+      readonly failure: {
+        readonly ghostDisappears: true;
+        readonly targetCondition: 'Incapacitated';
+        readonly targetLosesBodyControl: true;
+        readonly targetRetainsAwareness: true;
+        readonly ghostControlsBody: true;
+        readonly ghostTargetability: 'only_effects_specifically_targeting_undead';
+        readonly retainedGhostStatistics: true;
+        readonly borrowedTargetStatistics: readonly ['speed', 'strength_modifier', 'dexterity_modifier', 'constitution_modifier'];
+      };
+      readonly endsWhen: readonly ['body_zero_hit_points', 'ghost_bonus_action'];
+      readonly onEnd: { readonly ghostAppearsWithinFeet: 5; readonly space: 'unoccupied'; readonly targetImmunityHours: 24 };
+      readonly successImmunityHours: 24;
+    });
 
 export interface MonsterSpellReference {
   readonly id: string;
@@ -245,6 +337,12 @@ export interface MonsterSpellcastingAction {
   readonly saveDc: DecodedField<number>;
   readonly spellAttackBonus: DecodedField<number>;
   readonly spells: readonly MonsterSpellReference[];
+  readonly mechanics?: readonly (MonsterTypedUnavailableMechanic & {
+    readonly kind: 'ghost_etherealness';
+    readonly crossPlaneVisibility: 'material_and_border_ethereal_mutual';
+    readonly crossPlaneInteraction: 'neither_direction';
+  })[];
+  readonly execution?: Extract<DecodedField<'implemented'>, { readonly kind: 'absent' }>;
 }
 
 /** SRD legendary window, one-at-a-time use, and refresh: docs/srd/full/srd-5.2.1.txt:16703-16716. */
@@ -309,7 +407,79 @@ export type MonsterTrait =
   /** SRD 5.2.1: docs/srd/full/srd-5.2.1.txt:23236-23237. */
   | { readonly kind: 'flyby' }
   | { readonly kind: 'magic_resistance'; readonly advantageOn: 'spells_and_magical_effects' }
-  | { readonly kind: 'life_bond'; readonly rangeFeet: 5; readonly spellMinimumLevel: 1 };
+  | { readonly kind: 'life_bond'; readonly rangeFeet: 5; readonly spellMinimumLevel: 1 }
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'air_form';
+      readonly canEnterCreatureSpace: true;
+      readonly canStopInCreatureSpace: true;
+      readonly narrowestPassageInches: 1;
+      readonly extraMovementCost: false;
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'earth_glide';
+      readonly material: readonly ['nonmagical_unworked_earth', 'nonmagical_unworked_stone'];
+      readonly disturbsMaterial: false;
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'siege_monster';
+      readonly targetKinds: readonly ['objects', 'structures'];
+      readonly damageMultiplier: 2;
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'adhesive';
+      readonly requiredForm: 'object';
+      readonly trigger: 'anything_touches_monster';
+      readonly maximumCreatureSize: 'Huge';
+      readonly condition: 'Grappled';
+      readonly escapeDc: 13;
+      readonly escapeChecksHaveDisadvantage: true;
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'amorphous';
+      readonly narrowestPassageInches: 1;
+      readonly extraMovementCost: false;
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'corrosive_form';
+      readonly meleeAttackerDamage: MonsterDamageTerm;
+      readonly ammunition: { readonly material: 'nonmagical'; readonly destroyed: 'immediately_after_hit_that_deals_damage' };
+      readonly weapon: {
+        readonly material: 'nonmagical';
+        readonly trigger: 'after_dealing_damage_with_contact';
+        readonly cumulativeAttackPenalty: -1;
+        readonly destroyedAtPenalty: -5;
+        readonly repair: { readonly spell: 'mending'; readonly removesAllPenalty: true };
+      };
+      readonly consumption: { readonly durationMinutes: 1; readonly depthFeet: 2; readonly materials: readonly ['nonmagical_wood', 'nonmagical_metal'] };
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'ethereal_sight';
+      readonly rangeFeet: 60;
+      readonly seesPlane: 'Ethereal';
+      readonly whileOnPlane: 'Material';
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'ephemeral';
+      readonly canWearEquipment: false;
+      readonly canCarryEquipment: false;
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'illumination';
+      readonly brightLightFeet: 20;
+      readonly additionalDimLightFeet: 20;
+    });
+
+export type MonsterShapeShiftForm =
+  | {
+      readonly kind: 'humanoid';
+      readonly sizes: readonly ['Medium', 'Small'];
+      readonly retainedStatistics: 'all_except_size';
+    }
+  | {
+      readonly kind: 'object';
+      readonly sizes: readonly ['Medium', 'Small'];
+      readonly retainedStatistics: 'all';
+    };
 
 export type MonsterBonusAction =
   | { readonly kind: 'nimble_escape'; readonly actions: readonly ['Disengage', 'Hide'] }
@@ -325,6 +495,43 @@ export type MonsterBonusAction =
       readonly ability: Ability;
       readonly spells: readonly MonsterSpellReference[];
     }
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'shape_shift_retained_statistics';
+      readonly form: MonsterShapeShiftForm;
+      readonly canReturnToTrueForm: true;
+      readonly equipmentTransforms: false;
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'swoop';
+      readonly recharge: { readonly kind: 'recharge_roll'; readonly dieSides: 6; readonly minimumRoll: 5 };
+      readonly requires: 'creature_grappled_by_monster';
+      readonly movement: {
+        readonly kind: 'fly';
+        readonly distance: 'half_speed';
+        readonly provokesOpportunityAttacks: false;
+      };
+      readonly releases: 'selected_grappled_creature';
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'consume_life';
+      readonly savingThrow: { readonly ability: 'constitution'; readonly dc: 10 };
+      readonly target: {
+        readonly kind: 'visible_living_creature';
+        readonly rangeFeet: 5;
+        readonly requiredHitPoints: 0;
+      };
+      readonly failure: {
+        readonly targetDies: true;
+        readonly healing: { readonly average: 10; readonly dice: { readonly count: 3; readonly sides: 6; readonly modifier: 0 } };
+      };
+      readonly success: { readonly kind: 'none' };
+    })
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'vanish';
+      readonly appliesInvisibleTo: readonly ['monster', 'monster_light'];
+      readonly duration: 'until_concentration_ends';
+      readonly endsEarlyImmediatelyAfter: readonly ['attack_roll', 'consume_life'];
+    })
   | MonsterSavingThrowAction
   | MonsterSpellcastingAction;
 
@@ -341,9 +548,27 @@ export type MonsterReaction =
     readonly trigger: 'targeted_by_visible_attack_roll';
     readonly allyDistanceFeet: number;
     readonly maximumAllySize: CreatureSize;
-    readonly swapsPlaces: true;
-    readonly allyBecomesTarget: true;
-  };
+      readonly swapsPlaces: true;
+      readonly allyBecomesTarget: true;
+  }
+  | (MonsterTypedUnavailableMechanic & {
+      readonly kind: 'split';
+      readonly requirements: {
+        readonly sizes: readonly ['Large', 'Medium'];
+        readonly minimumHitPoints: 10;
+      };
+      readonly triggers: readonly [
+        { readonly kind: 'becomes_bloodied' },
+        { readonly kind: 'takes_damage'; readonly types: readonly ['Lightning', 'Slashing'] },
+      ];
+      readonly replacement: {
+        readonly count: 2;
+        readonly statblock: 'same_as_original';
+        readonly size: 'one_smaller_than_original';
+        readonly initiative: 'original_initiative';
+        readonly hitPoints: { readonly kind: 'divide_original_evenly'; readonly rounding: 'down' };
+      };
+    });
 
 export interface MonsterSourceDetailsInput {
   readonly source: readonly SourceSpan[];
@@ -463,6 +688,37 @@ function validateDecoded<T>(field: DecodedField<T>, label: string, validate: (va
     : present(validate(field.value));
 }
 
+function exactValue<T extends string | number | boolean>(value: T, expected: T, label: string): T {
+  if (value !== expected) throw new RangeError(`${label} must be ${JSON.stringify(expected)}.`);
+  return value;
+}
+
+function exactTuple(
+  value: readonly (string | number | boolean)[],
+  expected: readonly (string | number | boolean)[],
+  label: string,
+): void {
+  if (JSON.stringify(value) !== JSON.stringify(expected)) {
+    throw new RangeError(`${label} must be ${JSON.stringify(expected)}.`);
+  }
+}
+
+function validateSourceSpan(span: SourceSpan, label: string): SourceSpan {
+  exactValue(span.path, 'docs/srd/full/srd-5.2.1.txt', `${label} path`);
+  positiveInteger(span.lineStart, `${label} start line`);
+  if (span.lineEnd < span.lineStart) throw new RangeError(`${label} must end after it starts.`);
+  return span;
+}
+
+function validateTypedUnavailable(
+  mechanic: MonsterTypedUnavailableMechanic,
+  label: string,
+): MonsterTypedUnavailableMechanic {
+  validateSourceSpan(mechanic.source, `${label} source`);
+  nonEmptyText(mechanic.execution.note, `${label} execution note`);
+  return mechanic;
+}
+
 function validateSpell(reference: MonsterSpellReference): MonsterSpellReference {
   const row = SPELL_MANIFEST.find(({ id }) => id === reference.id);
   if (reference.manifestStatus === 'not_in_manifest') {
@@ -514,6 +770,198 @@ function validateEffect(effect: MonsterOnHitEffect, label: string): MonsterOnHit
   }
 }
 
+function validateTrait(trait: MonsterTrait): MonsterTrait {
+  switch (trait.kind) {
+    case 'air_form':
+      validateTypedUnavailable(trait, 'Air Form');
+      exactValue(trait.canEnterCreatureSpace, true, 'Air Form creature-space entry');
+      exactValue(trait.canStopInCreatureSpace, true, 'Air Form creature-space stop');
+      exactValue(trait.narrowestPassageInches, 1, 'Air Form narrowest passage');
+      exactValue(trait.extraMovementCost, false, 'Air Form extra movement cost');
+      return trait;
+    case 'earth_glide':
+      validateTypedUnavailable(trait, 'Earth Glide');
+      exactTuple(trait.material, ['nonmagical_unworked_earth', 'nonmagical_unworked_stone'], 'Earth Glide material');
+      exactValue(trait.disturbsMaterial, false, 'Earth Glide material disturbance');
+      return trait;
+    case 'siege_monster':
+      validateTypedUnavailable(trait, 'Siege Monster');
+      exactTuple(trait.targetKinds, ['objects', 'structures'], 'Siege Monster targets');
+      exactValue(trait.damageMultiplier, 2, 'Siege Monster damage multiplier');
+      return trait;
+    case 'adhesive':
+      validateTypedUnavailable(trait, 'Adhesive');
+      exactValue(trait.requiredForm, 'object', 'Adhesive required form');
+      exactValue(trait.trigger, 'anything_touches_monster', 'Adhesive trigger');
+      exactValue(trait.maximumCreatureSize, 'Huge', 'Adhesive maximum creature size');
+      exactValue(trait.condition, 'Grappled', 'Adhesive condition');
+      exactValue(trait.escapeDc, 13, 'Adhesive escape DC');
+      exactValue(trait.escapeChecksHaveDisadvantage, true, 'Adhesive escape-check disadvantage');
+      return trait;
+    case 'amorphous':
+      validateTypedUnavailable(trait, 'Amorphous');
+      exactValue(trait.narrowestPassageInches, 1, 'Amorphous narrowest passage');
+      exactValue(trait.extraMovementCost, false, 'Amorphous extra movement cost');
+      return trait;
+    case 'corrosive_form':
+      validateTypedUnavailable(trait, 'Corrosive Form');
+      validateDamageTerm(trait.meleeAttackerDamage, 'Corrosive Form contact');
+      exactValue(trait.meleeAttackerDamage.average, 4, 'Corrosive Form contact average');
+      exactValue(trait.meleeAttackerDamage.type, 'Acid', 'Corrosive Form contact damage type');
+      exactValue(trait.ammunition.material, 'nonmagical', 'Corrosive Form ammunition material');
+      exactValue(trait.ammunition.destroyed, 'immediately_after_hit_that_deals_damage', 'Corrosive Form ammunition destruction');
+      exactValue(trait.weapon.material, 'nonmagical', 'Corrosive Form weapon material');
+      exactValue(trait.weapon.trigger, 'after_dealing_damage_with_contact', 'Corrosive Form weapon trigger');
+      exactValue(trait.weapon.cumulativeAttackPenalty, -1, 'Corrosive Form weapon penalty');
+      exactValue(trait.weapon.destroyedAtPenalty, -5, 'Corrosive Form weapon destruction');
+      exactValue(trait.weapon.repair.spell, 'mending', 'Corrosive Form repair spell');
+      exactValue(trait.weapon.repair.removesAllPenalty, true, 'Corrosive Form repair result');
+      exactValue(trait.consumption.durationMinutes, 1, 'Corrosive Form consumption duration');
+      exactValue(trait.consumption.depthFeet, 2, 'Corrosive Form consumption depth');
+      exactTuple(trait.consumption.materials, ['nonmagical_wood', 'nonmagical_metal'], 'Corrosive Form consumed materials');
+      return trait;
+    case 'ethereal_sight':
+      validateTypedUnavailable(trait, 'Ethereal Sight');
+      exactValue(trait.rangeFeet, 60, 'Ethereal Sight range');
+      exactValue(trait.seesPlane, 'Ethereal', 'Ethereal Sight seen plane');
+      exactValue(trait.whileOnPlane, 'Material', 'Ethereal Sight origin plane');
+      return trait;
+    case 'ephemeral':
+      validateTypedUnavailable(trait, 'Ephemeral');
+      exactValue(trait.canWearEquipment, false, 'Ephemeral wear equipment');
+      exactValue(trait.canCarryEquipment, false, 'Ephemeral carry equipment');
+      return trait;
+    case 'illumination':
+      validateTypedUnavailable(trait, 'Illumination');
+      exactValue(trait.brightLightFeet, 20, 'Illumination bright light');
+      exactValue(trait.additionalDimLightFeet, 20, 'Illumination dim light');
+      return trait;
+    default:
+      return trait;
+  }
+}
+
+function validateActionExecution(
+  execution: Extract<DecodedField<'implemented'>, { readonly kind: 'absent' }> | undefined,
+  label: string,
+): void {
+  if (execution !== undefined) nonEmptyText(execution.note, `${label} execution note`);
+}
+
+function validateAttackMechanic(mechanic: MonsterAttackMechanic, label: string): MonsterAttackMechanic {
+  validateTypedUnavailable(mechanic, label);
+  switch (mechanic.kind) {
+    case 'attack_roll_advantage_window':
+      exactValue(mechanic.window, 'first_round_of_each_combat', `${label} advantage window`);
+      return mechanic;
+    case 'equipment_corrosion':
+      exactValue(mechanic.equipment, 'nonmagical_armor', `${label} corroded equipment`);
+      exactValue(mechanic.trigger, 'after_target_takes_damage', `${label} corrosion trigger`);
+      exactValue(mechanic.cumulativeArmorClassPenalty, -1, `${label} Armor Class penalty`);
+      exactValue(mechanic.destroyedAtArmorClass, 10, `${label} destruction Armor Class`);
+      exactValue(mechanic.repair.spell, 'mending', `${label} repair spell`);
+      exactValue(mechanic.repair.removesAllPenalty, true, `${label} repair result`);
+      return mechanic;
+    case 'conditional_damage_replacement':
+      exactValue(mechanic.condition, 'target_grappled_by_attacker', `${label} replacement condition`);
+      exactValue(mechanic.replacesDamageType, 'Piercing', `${label} replaced damage type`);
+      validateDamageTerm(mechanic.replacement, `${label} replacement`);
+      return mechanic;
+    case 'grapple_escape_disadvantage':
+      exactValue(mechanic.appliesToCondition, 'Grappled', `${label} escape condition`);
+      exactValue(mechanic.appliesToEscapeDc, 13, `${label} escape DC`);
+      return mechanic;
+    case 'attachment':
+      exactValue(mechanic.targetRelation, 'attached_to_target', `${label} attachment relation`);
+      exactValue(mechanic.blocksActionIdWhileAttached, 'proboscis', `${label} blocked action`);
+      validateDamageTerm(mechanic.recurringDamage, `${label} recurring damage`);
+      exactValue(mechanic.recurringDamageTiming, 'start_of_monster_turn', `${label} recurring timing`);
+      exactValue(mechanic.selfDetachMovementFeet, 5, `${label} self-detach movement`);
+      exactValue(mechanic.otherDetach.action, true, `${label} other-detach action`);
+      exactValue(mechanic.otherDetach.rangeFeet, 5, `${label} other-detach range`);
+      exactTuple(mechanic.otherDetach.actors, ['target', 'other_creature'], `${label} detaching actors`);
+      return mechanic;
+  }
+}
+
+function validateSavingThrowMechanic(mechanic: MonsterSavingThrowMechanic, label: string): MonsterSavingThrowMechanic {
+  validateTypedUnavailable(mechanic, label);
+  switch (mechanic.kind) {
+    case 'whirlwind':
+      exactValue(mechanic.recharge.dieSides, 6, `${label} recharge die`);
+      exactValue(mechanic.recharge.minimumRoll, 4, `${label} recharge minimum`);
+      exactValue(mechanic.targetLocation, 'in_monster_space', `${label} target location`);
+      exactValue(mechanic.failurePush.maximumFeet, 20, `${label} push distance`);
+      exactValue(mechanic.failurePush.direction, 'straight_away_from_monster', `${label} push direction`);
+      return mechanic;
+    case 'unsettling_visage':
+      exactValue(mechanic.recharge.dieSides, 6, `${label} recharge die`);
+      exactValue(mechanic.recharge.minimumRoll, 6, `${label} recharge minimum`);
+      exactValue(mechanic.targetArea.kind, 'emanation', `${label} area`);
+      exactValue(mechanic.targetArea.feet, 15, `${label} area distance`);
+      exactValue(mechanic.targetArea.requiresSightOfMonster, true, `${label} sight requirement`);
+      exactValue(mechanic.repeatSave.timing, 'end_of_each_target_turn', `${label} repeat timing`);
+      exactValue(mechanic.repeatSave.endsOnSuccess, true, `${label} repeat success`);
+      exactValue(mechanic.automaticSuccessAfterMinutes, 1, `${label} automatic success`);
+      return mechanic;
+    case 'horrific_visage':
+      exactValue(mechanic.targetArea.kind, 'cone', `${label} area`);
+      exactValue(mechanic.targetArea.feet, 60, `${label} area distance`);
+      exactValue(mechanic.targetArea.requiresSightOfMonster, true, `${label} sight requirement`);
+      exactValue(mechanic.successImmunity.action, 'horrific_visage', `${label} immunity action`);
+      exactValue(mechanic.successImmunity.sourceMonsterOnly, true, `${label} immunity source`);
+      exactValue(mechanic.successImmunity.hours, 24, `${label} immunity duration`);
+      return mechanic;
+    case 'possession':
+      exactValue(mechanic.recharge.dieSides, 6, `${label} recharge die`);
+      exactValue(mechanic.recharge.minimumRoll, 6, `${label} recharge minimum`);
+      exactValue(mechanic.targetKind, 'Humanoid', `${label} target kind`);
+      exactValue(mechanic.requiresVisibleTarget, true, `${label} visibility`);
+      exactValue(mechanic.failure.ghostDisappears, true, `${label} disappearance`);
+      exactValue(mechanic.failure.targetCondition, 'Incapacitated', `${label} target condition`);
+      exactValue(mechanic.failure.targetLosesBodyControl, true, `${label} body control`);
+      exactValue(mechanic.failure.targetRetainsAwareness, true, `${label} awareness`);
+      exactValue(mechanic.failure.ghostControlsBody, true, `${label} ghost control`);
+      exactValue(mechanic.failure.ghostTargetability, 'only_effects_specifically_targeting_undead', `${label} ghost targetability`);
+      exactValue(mechanic.failure.retainedGhostStatistics, true, `${label} retained statistics`);
+      exactTuple(mechanic.failure.borrowedTargetStatistics, ['speed', 'strength_modifier', 'dexterity_modifier', 'constitution_modifier'], `${label} borrowed statistics`);
+      exactTuple(mechanic.endsWhen, ['body_zero_hit_points', 'ghost_bonus_action'], `${label} endings`);
+      exactValue(mechanic.onEnd.ghostAppearsWithinFeet, 5, `${label} reappearance distance`);
+      exactValue(mechanic.onEnd.space, 'unoccupied', `${label} reappearance space`);
+      exactValue(mechanic.onEnd.targetImmunityHours, 24, `${label} end immunity`);
+      exactValue(mechanic.successImmunityHours, 24, `${label} success immunity`);
+      return mechanic;
+  }
+}
+
+function validateShapeShift(action: Extract<MonsterBonusAction, { readonly kind: 'shape_shift_retained_statistics' }>): void {
+  validateTypedUnavailable(action, 'Shape-Shift');
+  exactTuple(action.form.sizes, ['Medium', 'Small'], 'Shape-Shift sizes');
+  switch (action.form.kind) {
+    case 'humanoid': exactValue(action.form.retainedStatistics, 'all_except_size', 'Humanoid Shape-Shift statistics'); break;
+    case 'object': exactValue(action.form.retainedStatistics, 'all', 'Object Shape-Shift statistics'); break;
+  }
+  exactValue(action.canReturnToTrueForm, true, 'Shape-Shift true-form return');
+  exactValue(action.equipmentTransforms, false, 'Shape-Shift equipment transformation');
+}
+
+function validateReaction(reaction: MonsterReaction): MonsterReaction {
+  if (reaction.kind !== 'split') return reaction;
+  validateTypedUnavailable(reaction, 'Split');
+  exactTuple(reaction.requirements.sizes, ['Large', 'Medium'], 'Split eligible sizes');
+  exactValue(reaction.requirements.minimumHitPoints, 10, 'Split minimum Hit Points');
+  exactValue(reaction.triggers[0].kind, 'becomes_bloodied', 'Split first trigger');
+  exactValue(reaction.triggers[1].kind, 'takes_damage', 'Split second trigger');
+  exactTuple(reaction.triggers[1].types, ['Lightning', 'Slashing'], 'Split damage types');
+  exactValue(reaction.replacement.count, 2, 'Split replacement count');
+  exactValue(reaction.replacement.statblock, 'same_as_original', 'Split replacement statblock');
+  exactValue(reaction.replacement.size, 'one_smaller_than_original', 'Split replacement size');
+  exactValue(reaction.replacement.initiative, 'original_initiative', 'Split replacement Initiative');
+  exactValue(reaction.replacement.hitPoints.kind, 'divide_original_evenly', 'Split Hit Point division');
+  exactValue(reaction.replacement.hitPoints.rounding, 'down', 'Split Hit Point rounding');
+  return reaction;
+}
+
 function validateAction<T extends MonsterAction | MonsterBonusAction>(action: T): T {
   switch (action.kind) {
     case 'attack':
@@ -522,6 +970,8 @@ function validateAction<T extends MonsterAction | MonsterBonusAction>(action: T)
       finiteInteger(action.attackBonus, `${action.name} attack bonus`);
       action.damage.forEach((term) => validateDamageTerm(term, action.name));
       action.onHit.forEach((effect) => validateEffect(effect, action.name));
+      action.mechanics?.forEach((mechanic) => validateAttackMechanic(mechanic, action.name));
+      validateActionExecution(action.execution, action.name);
       switch (action.delivery.kind) {
         case 'melee':
           positiveInteger(action.delivery.reachFeet, `${action.name} reach`);
@@ -544,6 +994,12 @@ function validateAction<T extends MonsterAction | MonsterBonusAction>(action: T)
       if (action.combination === 'fixed' && action.actionIds.length !== action.count) {
         throw new RangeError('Fixed Multiattack must list each action in order.');
       }
+      action.mechanics?.forEach((mechanic) => {
+        validateTypedUnavailable(mechanic, 'Multiattack additional action');
+        exactValue(mechanic.kind, 'also_uses_action_if_available', 'Multiattack mechanic');
+        nonEmptyText(mechanic.actionId, 'Multiattack additional action id');
+      });
+      validateActionExecution(action.execution, 'Multiattack');
       return action;
     case 'saving_throw':
       nonEmptyText(action.id, 'Saving throw action id');
@@ -553,12 +1009,21 @@ function validateAction<T extends MonsterAction | MonsterBonusAction>(action: T)
       if (action.target.maximumSize !== null) creatureSize(action.target.maximumSize);
       action.failure.damage.forEach((term) => validateDamageTerm(term, action.name));
       action.failure.effects.forEach((effect) => validateEffect(effect, action.name));
+      action.mechanics?.forEach((mechanic) => validateSavingThrowMechanic(mechanic, action.name));
+      validateActionExecution(action.execution, action.name);
       return action;
     case 'spellcasting':
       nonEmptyText(action.id, 'Spellcasting id');
       validateDecoded(action.saveDc, 'Spell save DC', (dc) => positiveInteger(dc, 'Spell save DC'));
       validateDecoded(action.spellAttackBonus, 'Spell attack bonus', (bonus) => finiteInteger(bonus, 'Spell attack bonus'));
       action.spells.forEach(validateSpell);
+      action.mechanics?.forEach((mechanic) => {
+        validateTypedUnavailable(mechanic, 'Ghost Etherealness');
+        exactValue(mechanic.kind, 'ghost_etherealness', 'Ghost Etherealness mechanic');
+        exactValue(mechanic.crossPlaneVisibility, 'material_and_border_ethereal_mutual', 'Ghost Etherealness visibility');
+        exactValue(mechanic.crossPlaneInteraction, 'neither_direction', 'Ghost Etherealness interaction');
+      });
+      validateActionExecution(action.execution, 'Spellcasting');
       return action;
     case 'nimble_escape':
       return action;
@@ -578,6 +1043,41 @@ function validateAction<T extends MonsterAction | MonsterBonusAction>(action: T)
       positiveInteger(action.uses, 'Spell-choice uses');
       action.spells.forEach(validateSpell);
       return action;
+    case 'shape_shift_retained_statistics':
+      validateShapeShift(action);
+      return action;
+    case 'swoop':
+      validateTypedUnavailable(action, 'Swoop');
+      exactValue(action.recharge.kind, 'recharge_roll', 'Swoop recharge kind');
+      exactValue(action.recharge.dieSides, 6, 'Swoop recharge die');
+      exactValue(action.recharge.minimumRoll, 5, 'Swoop recharge minimum');
+      exactValue(action.requires, 'creature_grappled_by_monster', 'Swoop requirement');
+      exactValue(action.movement.kind, 'fly', 'Swoop movement kind');
+      exactValue(action.movement.distance, 'half_speed', 'Swoop movement distance');
+      exactValue(action.movement.provokesOpportunityAttacks, false, 'Swoop Opportunity Attacks');
+      exactValue(action.releases, 'selected_grappled_creature', 'Swoop release');
+      return action;
+    case 'consume_life':
+      validateTypedUnavailable(action, 'Consume Life');
+      exactValue(action.savingThrow.ability, 'constitution', 'Consume Life save ability');
+      exactValue(action.savingThrow.dc, 10, 'Consume Life save DC');
+      exactValue(action.target.kind, 'visible_living_creature', 'Consume Life target kind');
+      exactValue(action.target.rangeFeet, 5, 'Consume Life range');
+      exactValue(action.target.requiredHitPoints, 0, 'Consume Life target Hit Points');
+      exactValue(action.failure.targetDies, true, 'Consume Life death result');
+      exactValue(action.failure.healing.average, 10, 'Consume Life healing average');
+      validateDice(action.failure.healing.dice, 'Consume Life healing');
+      exactValue(action.failure.healing.dice.count, 3, 'Consume Life healing dice count');
+      exactValue(action.failure.healing.dice.sides, 6, 'Consume Life healing die');
+      exactValue(action.failure.healing.dice.modifier, 0, 'Consume Life healing modifier');
+      exactValue(action.success.kind, 'none', 'Consume Life success');
+      return action;
+    case 'vanish':
+      validateTypedUnavailable(action, 'Vanish');
+      exactTuple(action.appliesInvisibleTo, ['monster', 'monster_light'], 'Vanish invisible subjects');
+      exactValue(action.duration, 'until_concentration_ends', 'Vanish duration');
+      exactTuple(action.endsEarlyImmediatelyAfter, ['attack_roll', 'consume_life'], 'Vanish early endings');
+      return action;
   }
 }
 
@@ -593,16 +1093,16 @@ function emptySourceDetails(): MonsterSourceDetails {
 function validateSourceDetails(input: MonsterSourceDetailsInput | undefined, speedFeet: number): MonsterSourceDetails {
   if (input === undefined) return emptySourceDetails();
   if (input.source.length === 0) throw new RangeError('Monster source must have at least one span.');
-  for (const span of input.source) {
-    positiveInteger(span.lineStart, 'Source start line');
-    if (span.lineEnd < span.lineStart) throw new RangeError('Source span must end after it starts.');
-  }
+  for (const span of input.source) validateSourceSpan(span, 'Monster source');
   if (input.classification.sizes.length === 0) throw new RangeError('Monster must have at least one size.');
   input.classification.sizes.forEach((size) => creatureSize(size));
   creatureType(input.classification.type);
   nonEmptyText(input.classification.alignment, 'Alignment');
   const experienceByChallenge: Readonly<Record<ChallengeRating, MonsterChallenge['experiencePoints']>> = {
-    '1/8': 25, '1/4': 50, '1/2': 100, 1: 200, 2: 450, 3: 700, 4: 1_100, 5: 1_800, 6: 2_300,
+    '1/8': 25, '1/4': 50, '1/2': 100, 1: 200, 2: 450, 3: 700, 4: 1_100, 5: 1_800, 6: 2_300, 11: 7_200,
+  };
+  const proficiencyByChallenge: Readonly<Record<ChallengeRating, Exclude<MonsterChallenge['proficiencyBonus'], 'caster'>>> = {
+    '1/8': 2, '1/4': 2, '1/2': 2, 1: 2, 2: 2, 3: 2, 4: 2, 5: 3, 6: 3, 11: 4,
   };
   if (input.challenge.rating === 'none') {
     if (input.challenge.experiencePoints !== 0 || input.challenge.proficiencyBonus !== 'caster') {
@@ -610,7 +1110,7 @@ function validateSourceDetails(input: MonsterSourceDetailsInput | undefined, spe
     }
   } else if (input.challenge.experiencePoints !== experienceByChallenge[input.challenge.rating]) {
     throw new RangeError('Monster XP must match its Challenge Rating.');
-  } else if (input.challenge.proficiencyBonus !== (typeof input.challenge.rating === 'number' && input.challenge.rating >= 5 ? 3 : 2)) {
+  } else if (input.challenge.proficiencyBonus !== proficiencyByChallenge[input.challenge.rating]) {
     throw new RangeError('Monster proficiency bonus must match its Challenge Rating.');
   }
   const decodedHitPointDice = 'kind' in input.hitPointDice
@@ -629,6 +1129,9 @@ function validateSourceDetails(input: MonsterSourceDetailsInput | undefined, spe
   const actionIds = new Set(actions.filter((action) => action.kind !== 'multiattack').map(({ id }) => id));
   for (const action of actions) {
     if (action.kind === 'multiattack' && action.actionIds.some((id) => !actionIds.has(id))) throw new RangeError('Multiattack references an unknown action.');
+    if (action.kind === 'multiattack' && action.mechanics?.some(({ actionId }) => !actionIds.has(actionId)) === true) {
+      throw new RangeError('Multiattack additional use references an unknown action.');
+    }
   }
   const legendaryActions = validateDecoded(
     input.legendaryActions ?? absent<MonsterLegendaryActions>('The bundled SRD statblock does not list Legendary Actions.'),
@@ -683,9 +1186,9 @@ function validateSourceDetails(input: MonsterSourceDetailsInput | undefined, spe
     })),
     damageResponses: decodedDamageResponses,
     conditionImmunities: decodedConditionImmunities,
-    traits: validateDecoded(input.traits, 'Traits', (traits) => traits), actions: present(actions),
+    traits: validateDecoded(input.traits, 'Traits', (traits) => traits.map(validateTrait)), actions: present(actions),
     bonusActions: validateDecoded(input.bonusActions, 'Bonus actions', (bonusActions) => bonusActions.map((action) => validateAction(action))),
-    reactions: validateDecoded(input.reactions, 'Reactions', (reactions) => reactions),
+    reactions: validateDecoded(input.reactions, 'Reactions', (reactions) => reactions.map(validateReaction)),
     legendaryActions,
     legendaryResistance,
   };

@@ -278,7 +278,11 @@ function bonusUses(state: EncounterState, actorId: CombatantId): readonly BonusU
       }));
       case 'teleport':
       case 'healing':
-      case 'spell_choice': return [];
+      case 'spell_choice':
+      case 'shape_shift_retained_statistics':
+      case 'swoop':
+      case 'consume_life':
+      case 'vanish': return [];
     }
   });
 }

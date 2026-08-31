@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EncounterState } from '../../../src/combat/encounter';
 import type { GridCell } from '../../../src/combat/grid';
-import { combatantId, type CombatantId } from '../../../src/combat/values';
+import { combatantId, statblockId, type CombatantId } from '../../../src/combat/values';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../src/vtt/intent-resolver';
 import { engineOptionId } from '../../../src/vtt/turn-proposal';
@@ -40,6 +40,23 @@ function placedState(
 }
 
 describe('canonical engine query port', () => {
+  it('withholds typed-but-unavailable statblock actions from executable engine queries', () => {
+    const generated = placedState(SEED, new Map<CombatantId, GridCell>([[ACTOR_ID, { column: 0, row: 0 }]]));
+    const state: EncounterState = {
+      ...generated,
+      combatants: generated.combatants.map((combatant) => combatant.profile.id === ACTOR_ID && combatant.profile.kind === 'monster'
+        ? { ...combatant, profile: { ...combatant.profile, statblockId: statblockId('statblock:black-pudding') } }
+        : combatant),
+    };
+
+    expect(canonicalEngineQueryPort.actions(state, ACTOR_ID)).toEqual([]);
+    const options = availableEngineActorOptions(state, ACTOR_ID);
+    expect(options.map(({ label }) => label)).toEqual(['Dash', 'Disengage', 'Dodge', 'End Turn']);
+    expect(options.flatMap(({ actionSlots }) => actionSlots.map(({ use }) => use.kind))).toEqual([
+      'dash', 'disengage', 'dodge', 'end_turn',
+    ]);
+  });
+
   it('returns independently hand-computed path legality and movement costs', () => {
     const occupantId = TARGET_ID;
     const calls = [

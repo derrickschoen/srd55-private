@@ -187,6 +187,7 @@ function challengeEighths(challenge: ChallengeRating): number {
     case 4: return 32;
     case 5: return 40;
     case 6: return 48;
+    case 11: return 88;
   }
 }
 

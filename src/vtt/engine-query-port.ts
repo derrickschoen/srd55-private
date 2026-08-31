@@ -600,18 +600,22 @@ export function enginePlanningSemanticZones(
 export function monsterActions(state: EncounterState, actorId: CombatantId): readonly MonsterAction[] {
   const subject = combatant(state, actorId);
   if (subject === null) return [];
-  if (subject.wildShape !== undefined) return subject.wildShape.physical.actions;
-  if (subject.form !== undefined) return subject.form.availableActions;
+  if (subject.wildShape !== undefined) return subject.wildShape.physical.actions.filter((action) => action.execution?.kind !== 'absent');
+  if (subject.form !== undefined) return subject.form.availableActions.filter((action) => action.execution?.kind !== 'absent');
   if (subject.profile.kind !== 'monster') return [];
   const statblockId = subject.profile.statblockId;
   for (const pack of state.contentPacks ?? []) {
     const imported = pack.monsters.find((monster) => monster.statblock.id === statblockId);
-    if (imported !== undefined) return imported.actions;
+    if (imported !== undefined) return imported.actions.filter((action) => action.execution?.kind !== 'absent');
   }
   const lookup = lookupBundledMonster(String(statblockId));
   if (lookup.status !== 'resolved' || lookup.entry.kind !== 'static') return [];
   const actions = lookup.entry.statblock.sourceDetails.actions;
-  return actions.kind === 'present' ? actions.value : [];
+  return actions.kind === 'present' ? actions.value.filter((action) => action.execution?.kind !== 'absent') : [];
+}
+
+function executableBonusActions(actions: readonly MonsterBonusAction[]): readonly MonsterBonusAction[] {
+  return actions.filter((action) => !('execution' in action) || action.execution.kind !== 'absent');
 }
 
 export function monsterBonusActions(
@@ -625,13 +629,13 @@ export function monsterBonusActions(
     const imported = pack.monsters.find((monster) => monster.statblock.id === statblockId);
     if (imported !== undefined) {
       const bonusActions = imported.statblock.sourceDetails.bonusActions;
-      return bonusActions.kind === 'present' ? bonusActions.value : [];
+      return bonusActions.kind === 'present' ? executableBonusActions(bonusActions.value) : [];
     }
   }
   const lookup = lookupBundledMonster(String(statblockId));
   if (lookup.status !== 'resolved' || lookup.entry.kind !== 'static') return [];
   const bonusActions = lookup.entry.statblock.sourceDetails.bonusActions;
-  return bonusActions.kind === 'present' ? bonusActions.value : [];
+  return bonusActions.kind === 'present' ? executableBonusActions(bonusActions.value) : [];
 }
 
 function interveningCells(from: GridCell, to: GridCell): readonly GridCell[] {
