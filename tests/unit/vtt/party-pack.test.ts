@@ -18,9 +18,12 @@ import {
 import {
   externalPartyPackFeatureEffectSchema,
   externalPartyPackSchema,
+  PartyFeatureEffectError,
+  PartySpellcastingError,
   partySourceSchema,
   loadExternalPartyPack,
   loadExternalPartyPackBytes,
+  loadedFeatureEffect,
   loadedPartyAttackCommand,
   loadedPartyEffectCommand,
   loadedPartySpellCastCommand,
@@ -4500,6 +4503,169 @@ describe('external party-pack batch 2b mutation boundaries', () => {
         }],
         grants: [{ spell: { id: 'guidance' } }],
       }],
+    });
+  });
+
+  it('projects loaded-member identity and derived rules without corrupting defaults', () => {
+    const candidate = structuredClone(pack());
+    const input = candidate.members[0]!;
+    input.classes = [{ classId: 'Fighter', level: 7 }];
+    input.attacks[0]!.reachFeet = 15;
+    input.passives = { skillBonuses: [{ skillId: 'perception', bonus: 4 }] };
+
+    const loaded = loadedV2(candidate);
+    const member = loaded.party.members[0]!;
+    expect(member.profile.name).toBe('pack-member-1');
+    expect(member.profile.rules).toMatchObject({
+      proficiencyBonus: 3,
+      reach: 15,
+      skillBonuses: { perception: 4 },
+      passivePerception: 14,
+    });
+    expect(member.profile.rules.conditionImmunities).toEqual([]);
+    expect(member.profile.rules.senses).toEqual([{ kind: 'normal_sight' }]);
+    expect(member.profile.rules.skillBonuses).toEqual({ perception: 4 });
+  });
+
+  it('preserves effect dice options, false critical flags, persistence, and exact level selection', () => {
+    const rerollBelow = { threshold: 2, maximumRerollsPerDie: 1 as const };
+    const packet = {
+      damageType: { kind: 'fixed' as const, damageType: 'Force' as const },
+      dice: {
+        baseCount: 1, sides: 6 as const, modifier: 2,
+        perSlotCount: 0, perSlotModifier: 0, cantripUpgrade: false,
+        rerollBelow,
+      },
+      scaling: { kind: 'none' as const },
+      thresholdRider: null,
+    };
+    const translate = (effect: unknown, totalLevel = 7) => loadedFeatureEffect(
+      externalPartyPackFeatureEffectSchema.parse(effect),
+      totalLevel,
+    );
+
+    expect(translate({
+      effectId: 'effect:operation-options', kind: 'damage_operation', trigger: 'action',
+      saveDc: 15, delivery: { kind: 'automatic' }, instancesPerTarget: 1,
+      packets: [packet], timing: { kind: 'immediate' },
+    }).payload).toMatchObject({
+      packets: [{ dice: { rerollBelow } }],
+    });
+
+    const consumed = translate({
+      effectId: 'effect:armed-consumed', kind: 'armed_weapon_hit_rider', trigger: 'bonus_action',
+      saveDc: 15, damage: packet, durationRounds: 2, concentration: false,
+      persistence: 'consume_on_hit',
+      saveGatedRider: {
+        ability: 'wisdom', rollMode: 'normal', condition: 'Frightened',
+        durationRounds: 1, expiresAt: 'target_end',
+      },
+    });
+    expect(consumed.payload).toMatchObject({
+      damage: { terms: [{ dice: { rerollBelow } }], critical: false },
+      consumeOnHit: true,
+      followUp: {
+        kind: 'save_then_condition', saveAbility: 'wisdom', saveDc: 15,
+        condition: 'Frightened', durationRounds: 1, expiresAt: 'target_end',
+      },
+    });
+    expect(translate({
+      effectId: 'effect:armed-persistent', kind: 'armed_weapon_hit_rider', trigger: 'bonus_action',
+      saveDc: 15, damage: null, durationRounds: 2, concentration: false,
+      persistence: 'duration', saveGatedRider: null,
+    }).payload).toMatchObject({ damage: { critical: false }, consumeOnHit: false });
+
+    const ordinaryCriticalFlags = [{
+      effectId: 'effect:ordinary-critical', kind: 'damage_rider', trigger: 'on_hit',
+      damage: [{ damageTypeId: 'Force', count: 1, sides: 6, modifier: 0 }],
+    }, {
+      effectId: 'effect:once-critical', kind: 'once_per_turn_damage_rider', trigger: 'on_hit',
+      oncePerTurnGate: 'first_hit_this_turn', qualifyingGates: ['advantage_on_attack'],
+      damage: [{ damageTypeId: 'Force', count: 1, sides: 6, modifier: 0 }],
+    }, {
+      effectId: 'effect:slot-critical', kind: 'slot_spend_damage_rider', trigger: 'on_hit',
+      spendGate: 'slot_spent', criticalGate: 'crit_confirmed', damageTypeId: 'Radiant',
+      baseCount: 1, countPerSlotLevel: 1, sides: 8, modifier: 0,
+    }, {
+      effectId: 'effect:first-critical', kind: 'first_hit_damage_rider', trigger: 'on_hit',
+      gate: 'first_hit_this_turn', damageTypeId: 'Psychic', amount: 3,
+    }].map((effect) => translate(effect).payload);
+    expect(ordinaryCriticalFlags.map((payload) =>
+      payload.kind === 'damage_rider' ? payload.damage.critical : null)).toEqual([
+      false, false, false, false,
+    ]);
+
+    expect(translate({
+      effectId: 'effect:exact-level', kind: 'extra_attack_count_override',
+      levels: [{ minimumLevel: 1, attackCount: 2 }, { minimumLevel: 7, attackCount: 3 }],
+    }).payload).toMatchObject({ kind: 'extra_attack_count_override', attackCount: 3 });
+    expect(translate({
+      effectId: 'effect:timed-resource', kind: 'timed_spellcasting_mode', trigger: 'bonus_action',
+      resourcePoolId: 'resource:timed-resource', additionalLeveledSpellActions: 1,
+      duration: 'this_turn',
+    }).resourcePoolId).toBe('resource:timed-resource');
+    expect(translate({
+      effectId: 'effect:range-only', kind: 'attack_reach_range_override',
+      attackId: 'attack:pack-member-1', rangeFeet: 45,
+    }).payload).toMatchObject({ rangeFeet: 45 });
+  });
+
+  it('keeps every public party error reason paired with its exact diagnostic', () => {
+    expect(new PartySpellcastingError('spellcasting_unavailable')).toMatchObject({
+      name: 'PartySpellcastingError', reason: 'spellcasting_unavailable',
+      message: 'The loaded party member has no v2 spellcasting capability.',
+    });
+    expect(new PartySpellcastingError('spell_not_referenced')).toMatchObject({
+      name: 'PartySpellcastingError', reason: 'spell_not_referenced',
+      message: 'The requested spell is not referenced by the loaded party member.',
+    });
+    expect(new PartySpellcastingError('ambiguous_spell_source')).toMatchObject({
+      name: 'PartySpellcastingError', reason: 'ambiguous_spell_source',
+      message: 'The requested spell is referenced by multiple spellcasting sources.',
+    });
+    expect(new PartyFeatureEffectError('effect_not_referenced')).toMatchObject({
+      name: 'PartyFeatureEffectError', reason: 'effect_not_referenced',
+      message: 'The requested effect is not referenced by the loaded party member.',
+    });
+    expect(new PartyFeatureEffectError('effect_is_automatic')).toMatchObject({
+      name: 'PartyFeatureEffectError', reason: 'effect_is_automatic',
+      message: 'The requested effect is driven automatically by its trigger.',
+    });
+  });
+
+  it('applies an attack substitution only to its declared attack identity', () => {
+    const candidate = structuredClone(pack());
+    const input = candidate.members[0]!;
+    input.abilities.strength = 9;
+    input.abilities.intelligence = 16;
+    input.attacks.push({
+      ...input.attacks[0]!,
+      attackId: 'attack:substituted-only',
+    });
+    input.effects = [{
+      effectId: 'effect:substituted-only', kind: 'attack_ability_substitution',
+      attackId: 'attack:substituted-only', damageTermIndex: 0,
+      replacesAbility: 'strength', spellcastingAbility: 'intelligence',
+    }];
+
+    const member = loadedV2(candidate).party.members[0]!;
+    const untouched = loadedPartyAttackCommand(
+      member,
+      'attack:pack-member-1',
+      combatantId('combatant:substitution-target'),
+    );
+    expect(untouched).toMatchObject({
+      attackBonus: 6,
+      damage: { terms: [{ dice: { modifier: 3 } }] },
+    });
+    const substituted = loadedPartyAttackCommand(
+      member,
+      'attack:substituted-only',
+      combatantId('combatant:substitution-target'),
+    );
+    expect(substituted).toMatchObject({
+      attackBonus: 10,
+      damage: { terms: [{ dice: { modifier: 7 } }] },
     });
   });
 
