@@ -12,7 +12,14 @@ import {
   OPPORTUNITY_COST_POLICY,
 } from '../intel/opportunity-cost';
 import { TEAM_SCORER_POLICY } from '../intel/team-scorer';
+import { ALERTING_POLICY } from '../../combat/alerting';
+import { SEARCH_MEMORY_POLICY } from '../../combat/search-memory';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
+
+export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v1' as const;
+export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v1' as const;
+export const ENGINE_REACTION_SPEND_HOLD_POLICY = 'reaction-spend-hold-v1' as const;
+export const ENGINE_RECOVERY_CAPABILITY_POLICY = 'recovery-capability-v1' as const;
 
 const identifier = z.string().min(1).max(200).describe('Engine-owned stable identifier.');
 const shortCode = z.string().min(1).max(100).describe('Stable machine-readable code.');
@@ -204,6 +211,164 @@ const actorIntel = z.object({
 const failureModesManifest = z.object({
   policy: z.literal(ENGINE_FAILURE_MODES_POLICY),
   modes: z.array(z.string().min(1).max(500)).min(1).max(20),
+  covered_blind_spot_classes: z.array(z.object({
+    class: z.enum(['combat_membership_leash', 'stealth_search']),
+    covered_by_policy: z.enum([ALERTING_POLICY, SEARCH_MEMORY_POLICY]),
+  }).strict()).length(2),
+}).strict();
+
+const gridCell = z.object({
+  column: z.number().int().min(0),
+  row: z.number().int().min(0),
+}).strict();
+const actorKnowledgeTarget = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('perceived'), target_id: identifier }).strict(),
+  z.object({
+    kind: z.literal('suspected'), target_id: identifier,
+    last_seen: z.object({ status: z.literal('resolved'), lastSeenPosition: gridCell }).strict(),
+  }).strict(),
+  z.object({
+    kind: z.literal('unknown'), target_id: identifier,
+    last_seen: z.object({
+      status: z.literal('unresolved'), reason: z.literal('last_seen_position_not_modeled'),
+    }).strict(),
+  }).strict(),
+]);
+const actorKnowledgeContext = z.object({
+  policy: z.literal(ENGINE_ACTOR_KNOWLEDGE_POLICY),
+  actors: z.array(z.object({
+    actor_id: identifier,
+    targets: z.array(actorKnowledgeTarget).max(100),
+  }).strict()).max(50),
+}).strict();
+const reactionSpendHoldContext = z.object({
+  policy: z.literal(ENGINE_REACTION_SPEND_HOLD_POLICY),
+  windows: z.array(z.object({
+    policy: z.literal(ENGINE_REACTION_SPEND_HOLD_POLICY),
+    status: z.enum(['resolved', 'unresolved']),
+    reason: shortCode.optional(),
+    trigger_id: identifier,
+    reaction_kind: z.literal('opportunity_attack'),
+    spend: z.union([
+      z.object({ status: z.literal('resolved'), expected_damage: z.number().finite().min(0) }).strict(),
+      z.object({ status: z.literal('unresolved'), reason: shortCode }).strict(),
+    ]),
+    hold: z.object({
+      immediate_value: z.literal(0),
+      possible_opportunities: z.array(z.object({
+        mover: identifier,
+        source_turn: z.object({ combatant: identifier, round: z.number().int().min(0) }).strict(),
+        certainty: z.literal('possible'),
+        condition: z.literal('mover_voluntarily_leaves_reactor_reach'),
+      }).strict()).max(100),
+      unqualified_future_triggers: z.object({
+        status: z.literal('unresolved'), reason: z.literal('future_movement_choice_unknown'),
+      }).strict(),
+    }).strict(),
+  }).strict()).max(50),
+}).strict();
+const usePool = z.object({ remaining: z.number().int().min(0), maximum: z.number().int().min(0) }).strict();
+const legendaryNextWindow = z.union([
+  z.object({
+    status: z.literal('resolved'), afterCombatant: identifier, round: z.number().int().min(0),
+    source: z.enum(['pending_decision', 'timeline']),
+  }).strict(),
+  z.object({ status: z.literal('unresolved'), reason: shortCode }).strict(),
+]);
+const legendaryActor = z.union([
+  z.object({
+    status: z.literal('unresolved'), reason: shortCode, combatant: identifier, name: summaryText,
+  }).strict(),
+  z.object({
+    status: z.literal('resolved'), combatant: identifier, name: summaryText,
+    action_uses: usePool, resistance_uses: usePool, next_window: legendaryNextWindow,
+    pending_window: z.object({
+      decision_id: identifier, after_combatant: identifier, round: z.number().int().min(0),
+      options: z.array(z.union([
+        z.object({ id: identifier, label: summaryText, status: z.literal('unresolved'), reason: shortCode }).strict(),
+        z.object({
+          id: identifier, label: summaryText, status: z.literal('resolved'),
+          kind: z.enum(['attack', 'temporary_defense', 'pass']),
+          target: identifier.optional(), expected_damage: z.number().finite().min(0).nullable().optional(),
+        }).strict(),
+      ])).max(50),
+    }).strict().nullable(),
+  }).strict(),
+]);
+const legendaryWindowsContext = z.union([
+  z.object({
+    policy: z.literal(ENGINE_LEGENDARY_WINDOWS_POLICY), status: z.enum(['resolved', 'unresolved']),
+    reason: shortCode.optional(), compact: z.array(z.string().min(1).max(200)).length(10),
+    detail_level: z.literal('compact'),
+  }).strict(),
+  z.object({
+    policy: z.literal(ENGINE_LEGENDARY_WINDOWS_POLICY), status: z.enum(['resolved', 'unresolved']),
+    reason: shortCode.optional(), compact: z.array(z.string().min(1).max(200)).length(10),
+    detail_level: z.literal('full'), actors: z.array(legendaryActor).max(50),
+    resistance_spend_inputs: z.array(z.union([
+      z.object({ status: z.literal('unresolved'), reason: shortCode }).strict(),
+      z.object({
+        status: z.literal('resolved'), decision_id: identifier, combatant: identifier,
+        source: identifier, failed_ability: shortCode, save_dc: z.number().int(),
+        effect_severity: z.object({
+          damageExpected: z.number().finite().nullable(), imposedConditions: z.array(shortCode).max(50),
+          forcedMovementFeet: z.number().int().min(0).nullable(), removesTurn: z.boolean(),
+        }).strict(),
+      }).strict(),
+    ])).max(50),
+  }).strict(),
+]);
+const recoveryCapabilitiesContext = z.object({
+  policy: z.literal(ENGINE_RECOVERY_CAPABILITY_POLICY),
+  targets: z.array(z.union([
+    z.object({ target: identifier, status: z.literal('unresolved'), reason: shortCode }).strict(),
+    z.object({
+      target: identifier, status: z.literal('resolved'),
+      boundary: z.object({
+        round: z.number().int().min(0), combatant: identifier,
+        boundary: z.enum(['start', 'after_start', 'end']),
+      }).strict(),
+      knowledge: z.literal('dm_omniscient_party_resources'),
+      source: z.literal('encounter_state_and_loaded_party'),
+      options: z.array(z.object({
+        rescuer: identifier, spell_id: identifier, kind: z.enum(['healing', 'revival']),
+        slot_level: z.number().int().min(1).max(9), casting_time: z.enum(['action', 'bonus_action']),
+        turn_round: z.number().int().min(0), reach: z.enum(['in_range', 'movement_qualified']),
+        movement_feet: z.number().int().min(0),
+      }).strict()).max(100),
+    }).strict(),
+  ])).max(100),
+}).strict();
+const searchMemoryContext = z.object({
+  policy: z.literal(SEARCH_MEMORY_POLICY),
+  memories: z.array(z.object({
+    observer: identifier, target: identifier, cause: z.enum(['hiding', 'invisibility', 'obscurement']),
+    last_known_position: gridCell, lost_at_round: z.number().int().min(0),
+    expires: z.object({ kind: z.literal('start_of_round'), round: z.number().int().min(0) }).strict(),
+    suspicion: z.object({
+      kind: z.literal('grid_radius'), center: gridCell, radius_feet: z.number().int().min(0),
+      cells: z.array(gridCell).max(100_000),
+    }).strict(),
+    legal_escalations: z.array(z.union([
+      z.object({ kind: z.literal('move_and_search'), citation: z.string().min(1).max(300) }).strict(),
+      z.object({ kind: z.literal('ready_action'), citation: z.string().min(1).max(300) }).strict(),
+      z.object({
+        kind: z.literal('attack_suspected_square'), roll_mode: z.literal('disadvantage'),
+        citation: z.string().min(1).max(300),
+      }).strict(),
+      z.object({ kind: z.literal('area_effect_over_region') }).strict(),
+    ])).max(4),
+  }).strict()).max(1_000),
+}).strict();
+const alertStateContext = z.object({
+  policy: z.literal(ALERTING_POLICY), yelling_distance_feet: z.number().int().positive(),
+  sound_propagation: z.object({ kind: z.literal('radial'), occlusion: z.literal('not_modeled') }).strict(),
+  calls: z.array(z.object({
+    caller: identifier, attacker: identifier, origin: gridCell, round: z.number().int().min(0),
+  }).strict()).max(10_000),
+  joined: z.array(z.object({
+    combatant: identifier, called_by: identifier, round: z.number().int().min(0),
+  }).strict()).max(1_000),
 }).strict();
 const turnRequest = z.union([
   z.object({
@@ -378,6 +543,12 @@ const fullTurnContextOutput = z.object({
   current_plan: currentPlanSummary.optional(),
   materiality: materialityContext.nullable().optional(),
   known_failure_modes: failureModesManifest.optional(),
+  actor_knowledge: actorKnowledgeContext,
+  reaction_spend_hold: reactionSpendHoldContext,
+  legendary_windows: legendaryWindowsContext,
+  recovery_capabilities: recoveryCapabilitiesContext,
+  search_memory: searchMemoryContext,
+  alert_state: alertStateContext,
   recent_changes: z.array(recentChange).max(100), truncated: z.boolean(), next_cursor: z.string().max(500).nullable(),
 }).strict();
 const revisionDeltaOperation = z.union([

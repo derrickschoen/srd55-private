@@ -1,8 +1,15 @@
 import { canonicalJson } from '../../commands/canonical-json';
 import type { EncounterState } from '../../combat/encounter';
+import { ALERTING_POLICY, type EncounterAlertingState } from '../../combat/alerting';
+import type { EncounterEvent } from '../../combat/events';
 import { gridDistance, type GridCell } from '../../combat/grid';
+import { SEARCH_MEMORY_POLICY, type SearchMemory } from '../../combat/search-memory';
 import type { MonsterAttackAction } from '../../combat/statblock';
-import { TACTICAL_EVALUATOR_POLICY } from '../../combat/tactical-evaluator';
+import {
+  evaluateTacticalAttack,
+  TACTICAL_EVALUATOR_POLICY,
+  type TacticalAttackInput,
+} from '../../combat/tactical-evaluator';
 import { combatantId, encounterSessionId, type CombatantId } from '../../combat/values';
 import { sha256 } from '../../crypto/sha256';
 import {
@@ -72,7 +79,14 @@ import {
   type McpResourceProvider,
   type McpToolBinding,
 } from './handler';
-import { ENGINE_TOOL_SPECS, schemaViolations } from './schemas';
+import {
+  ENGINE_ACTOR_KNOWLEDGE_POLICY,
+  ENGINE_LEGENDARY_WINDOWS_POLICY,
+  ENGINE_REACTION_SPEND_HOLD_POLICY,
+  ENGINE_RECOVERY_CAPABILITY_POLICY,
+  ENGINE_TOOL_SPECS,
+  schemaViolations,
+} from './schemas';
 
 export const ENGINE_DM_TOOL_NAMES = Object.freeze([
   'engine.get_turn_context',
@@ -157,6 +171,21 @@ export interface AdjudicationSink { readonly append: (envelope: AdjudicationEnve
 export interface TurnContextDeltaBase {
   readonly revision: number;
   readonly context: Readonly<Record<string, unknown>>;
+}
+
+interface CapsuleIntelReports {
+  readonly actorKnowledge: readonly Readonly<Record<string, unknown>>[];
+  readonly reactionSpendHold: readonly Readonly<Record<string, unknown>>[];
+  readonly legendaryWindows: Readonly<Record<string, unknown>>;
+  readonly legendaryWindowsCompact: Readonly<Record<string, unknown>>;
+  readonly legendaryHasDetails: boolean;
+  readonly recoveryCapabilities: Readonly<Record<string, unknown>>;
+  readonly hasRecoveryTargets: boolean;
+  readonly searchMemory: Readonly<Record<string, unknown>>;
+  readonly hasSearchMemories: boolean;
+  readonly alertState: Readonly<Record<string, unknown>>;
+  readonly alertStateCompact: Readonly<Record<string, unknown>>;
+  readonly hasAlertDetails: boolean;
 }
 
 interface EngineMcpDependencies {
@@ -483,6 +512,327 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal', caps
   return [fixed, `Turn resource: ${uriBase}/turn/current`, `Proposal schema: ${uriBase}/schema/turn-proposal-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: capsule.request, voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
 }
 
+function reactionAttackInput(
+  state: EncounterState,
+  decision: Extract<EncounterState['pendingDecisions'][number], { readonly kind: 'reaction_offer' }>,
+): TacticalAttackInput | null {
+  const command = decision.opportunityAttack.command;
+  const attacker = state.combatants.find((candidate) => candidate.profile.id === command.actor);
+  const target = state.combatants.find((candidate) => candidate.profile.id === command.target);
+  const attackerPosition = state.tokens.find((token) => token.combatantId === command.actor)?.position;
+  if (attacker === undefined || target === undefined || attackerPosition === undefined) return null;
+  const criticalFloor = command.criticalFloor === 18 || command.criticalFloor === 19 ? command.criticalFloor : 20;
+  return {
+    attackerId: command.actor,
+    targetId: command.target,
+    attackerPosition,
+    targetPosition: decision.opportunityAttack.from,
+    range: command.tacticalRange ?? { kind: 'melee', reachFeet: attacker.profile.rules.reach },
+    attackBonus: command.attackBonus,
+    targetArmorClass: target.profile.rules.armorClass,
+    criticalFloor,
+    damageTerms: command.damage.terms.map((term) => ({ dice: term.dice })),
+    attackerConditions: attacker.life === 'dying' || attacker.life === 'stable'
+      ? [{ name: 'Unconscious' as const }]
+      : [],
+    targetConditions: target.life === 'dying' || target.life === 'stable'
+      ? [{ name: 'Unconscious' as const }]
+      : [],
+    attackerCanSeeTarget: command.attackerCanSeeTarget,
+    targetCanSeeAttacker: command.targetCanSeeAttacker,
+    rollModeSources: [],
+    target: {
+      hitPoints: target.hitPoints,
+      usesDeathSaves: target.profile.rules.usesDeathSaves,
+    },
+    ...(command.rollMode === 'normal' ? {} : {
+      unresolvedReasons: ['random_attack_modifier_unresolved' as const],
+    }),
+  };
+}
+
+function actorKnowledgeReports(
+  state: EncounterState,
+  queries: EngineQueryPort,
+): readonly Readonly<Record<string, unknown>>[] {
+  return state.combatants
+    .filter((candidate) => candidate.profile.kind === 'monster' && candidate.life !== 'dead')
+    .map((actor) => ({
+      actor_id: actor.profile.id,
+      targets: state.combatants
+        .filter((target) => target.profile.kind !== actor.profile.kind && target.life !== 'dead')
+        .map((target) => {
+          const visibility = queries.visibility(state, actor.profile.id, target.profile.id);
+          return visibility?.visible === true
+            ? { kind: 'perceived', target_id: target.profile.id }
+            : {
+                kind: 'unknown',
+                target_id: target.profile.id,
+                last_seen: { status: 'unresolved', reason: 'last_seen_position_not_modeled' },
+              };
+        })
+        .sort((left, right) => left.target_id.localeCompare(right.target_id)),
+    }))
+    .sort((left, right) => left.actor_id.localeCompare(right.actor_id));
+}
+
+function reactionSpendHoldReports(state: EncounterState): readonly Readonly<Record<string, unknown>>[] {
+  const futureTurnStarts = state.initiative
+    .slice(state.activeInitiativeIndex === null ? state.initiative.length : state.activeInitiativeIndex + 1)
+    .map((entry) => ({ combatant: entry.combatant, round: state.round }));
+  return state.pendingDecisions.flatMap((decision): readonly Readonly<Record<string, unknown>>[] => {
+    if (decision.kind !== 'reaction_offer') return [];
+    const tacticalAttack = reactionAttackInput(state, decision);
+    if (tacticalAttack === null) return [];
+    const evaluation = evaluateTacticalAttack(tacticalAttack);
+    const spend = evaluation.damage.status === 'resolved'
+      ? { status: 'resolved' as const, expected_damage: evaluation.damage.expectedDamage }
+      : { status: 'unresolved' as const, reason: evaluation.damage.reason };
+    return [{
+      policy: ENGINE_REACTION_SPEND_HOLD_POLICY,
+      status: evaluation.damage.status,
+      ...(evaluation.damage.status === 'unresolved' ? { reason: evaluation.damage.reason } : {}),
+      trigger_id: decision.id,
+      reaction_kind: decision.reactionKind,
+      spend,
+      hold: {
+        immediate_value: 0,
+        possible_opportunities: futureTurnStarts.flatMap((turn) =>
+          turn.combatant === decision.combatant || turn.combatant === decision.opportunityAttack.mover
+            ? []
+            : [{
+                mover: turn.combatant,
+                source_turn: turn,
+                certainty: 'possible',
+                condition: 'mover_voluntarily_leaves_reactor_reach',
+              }]),
+        unqualified_future_triggers: {
+          status: 'unresolved',
+          reason: 'future_movement_choice_unknown',
+        },
+      },
+    }];
+  });
+}
+
+function compactLegendaryToken(value: string): string {
+  return value.trim().replaceAll(/\s+/gu, '-') || 'unnamed';
+}
+
+function legendaryWindowReports(
+  state: EncounterState,
+  capsule: EngineStateCapsule,
+): {
+  readonly full: Readonly<Record<string, unknown>>;
+  readonly compact: Readonly<Record<string, unknown>>;
+  readonly hasDetails: boolean;
+} {
+  const candidates = state.combatants.filter((subject) =>
+    subject.legendary !== undefined || subject.profile.rules.legendary !== undefined);
+  const resolved = candidates.find((subject) =>
+    subject.legendary !== undefined && subject.profile.rules.legendary !== undefined);
+  const pending = resolved === undefined ? null : state.pendingDecisions.find((decision) =>
+    decision.kind === 'legendary_action_window' && decision.combatant === resolved.profile.id) ?? null;
+  const upcoming = resolved === undefined ? undefined : capsule.projection.initiative.timeline.upcoming.find((event) =>
+    event.kind === 'legendary_action_window' && event.legendaryCombatant === resolved.profile.id);
+  const compactTokens = resolved === undefined
+    ? ['legendary', 'unresolved', 'actions', '0/0', 'resistance', '0/0', 'next', 'unresolved', 'pending', 'none']
+    : [
+        'legendary', compactLegendaryToken(resolved.profile.name),
+        'actions', `${String(resolved.legendary?.actionUsesRemaining ?? 0)}/${String(resolved.legendary?.actionUsesMaximum ?? 0)}`,
+        'resistance', `${String(resolved.legendary?.resistanceUsesRemaining ?? 0)}/${String(resolved.legendary?.resistanceUsesMaximum ?? 0)}`,
+        'next', String(pending?.boundary.activeCombatant ?? upcoming?.boundary.combatant ?? 'unresolved'),
+        'pending', pending === null ? 'none' : 'action',
+      ];
+  const compact = {
+    policy: ENGINE_LEGENDARY_WINDOWS_POLICY,
+    status: candidates.length === 0 ? 'unresolved' : 'resolved',
+    ...(candidates.length === 0 ? { reason: 'no_legendary_actor' } : {}),
+    compact: compactTokens,
+    detail_level: 'compact',
+  };
+  if (candidates.length === 0) return { full: compact, compact, hasDetails: false };
+  const actors = candidates.map((actor) => {
+    const pool = actor.legendary;
+    const legendary = actor.profile.rules.legendary;
+    if (pool === undefined || legendary === undefined) {
+      return {
+        status: 'unresolved',
+        reason: pool === undefined ? 'legendary_pool_unavailable' : 'legendary_actions_unavailable',
+        combatant: actor.profile.id,
+        name: actor.profile.name,
+      };
+    }
+    const actorPending = state.pendingDecisions.find((decision) =>
+      decision.kind === 'legendary_action_window' && decision.combatant === actor.profile.id) ?? null;
+    const actorUpcoming = capsule.projection.initiative.timeline.upcoming.find((event) =>
+      event.kind === 'legendary_action_window' && event.legendaryCombatant === actor.profile.id);
+    const nextWindow = actorPending !== null
+      ? {
+          status: 'resolved', afterCombatant: actorPending.boundary.activeCombatant,
+          round: actorPending.boundary.round, source: 'pending_decision',
+        }
+      : actorUpcoming !== undefined
+        ? {
+            status: 'resolved', afterCombatant: actorUpcoming.boundary.combatant,
+            round: actorUpcoming.boundary.round, source: 'timeline',
+          }
+        : { status: 'unresolved', reason: 'next_legendary_window_unavailable' };
+    return {
+      status: 'resolved',
+      combatant: actor.profile.id,
+      name: actor.profile.name,
+      action_uses: { remaining: pool.actionUsesRemaining, maximum: pool.actionUsesMaximum },
+      resistance_uses: { remaining: pool.resistanceUsesRemaining, maximum: pool.resistanceUsesMaximum },
+      next_window: nextWindow,
+      pending_window: actorPending === null ? null : {
+        decision_id: actorPending.id,
+        after_combatant: actorPending.boundary.activeCombatant,
+        round: actorPending.boundary.round,
+        options: actorPending.options.map((option) => {
+          if (option.id === 'pass') {
+            return { id: option.id, label: option.label, status: 'resolved', kind: 'pass' };
+          }
+          const action = legendary.actions.find((candidate) =>
+            `legendary_action:${candidate.id}` === option.id);
+          return action === undefined
+            ? {
+                id: option.id, label: option.label, status: 'unresolved',
+                reason: 'legendary_action_missing_from_statblock',
+              }
+            : {
+                id: option.id, label: option.label, status: 'resolved',
+                kind: action.kind === 'move_and_attack' ? 'attack' : 'temporary_defense',
+              };
+        }),
+      },
+    };
+  });
+  return {
+    full: {
+      ...compact,
+      detail_level: 'full',
+      actors,
+      resistance_spend_inputs: state.pendingDecisions.flatMap((decision) =>
+        decision.kind === 'legendary_resistance'
+          ? [{ status: 'unresolved', reason: 'effect_severity_unavailable' }]
+          : []),
+    },
+    compact,
+    hasDetails: true,
+  };
+}
+
+function capsuleIntelReports(
+  state: EncounterState,
+  capsule: EngineStateCapsule,
+  queries: EngineQueryPort,
+): CapsuleIntelReports {
+  const legendary = legendaryWindowReports(state, capsule);
+  const recoveryTargets = state.combatants
+    .filter((candidate) => candidate.life === 'dying' || candidate.life === 'dead')
+    .map((candidate) => ({
+      target: candidate.profile.id,
+      status: 'unresolved',
+      reason: 'party_data_unavailable',
+    }));
+  const searchMemories = state.searchMemories ?? [];
+  const alerting = state.alerting;
+  const helpCalls = state.eventLog.filter(
+    (event): event is Extract<EncounterEvent, { readonly type: 'npc_called_for_help' }> =>
+      event.type === 'npc_called_for_help',
+  );
+  const hasHelpCallJoins = alerting?.membership.some(
+    (entry) => entry.kind === 'participant' && entry.joinedBy.kind === 'help_call',
+  ) === true;
+  return {
+    actorKnowledge: actorKnowledgeReports(state, queries),
+    reactionSpendHold: reactionSpendHoldReports(state),
+    legendaryWindows: legendary.full,
+    legendaryWindowsCompact: legendary.compact,
+    legendaryHasDetails: legendary.hasDetails,
+    recoveryCapabilities: {
+      policy: ENGINE_RECOVERY_CAPABILITY_POLICY,
+      targets: recoveryTargets,
+    },
+    hasRecoveryTargets: recoveryTargets.length > 0,
+    searchMemory: renderSearchMemory(searchMemories),
+    hasSearchMemories: searchMemories.length > 0,
+    alertState: renderAlertState(alerting, helpCalls),
+    alertStateCompact: renderAlertState(alerting, [], false),
+    hasAlertDetails: helpCalls.length > 0 || hasHelpCallJoins,
+  };
+}
+
+function renderSearchMemory(memories: readonly SearchMemory[]): Readonly<Record<string, unknown>> {
+  return {
+    policy: SEARCH_MEMORY_POLICY,
+    memories: memories.map((memory) => ({
+      observer: memory.observer,
+      target: memory.target,
+      cause: memory.cause,
+      last_known_position: memory.lastKnownPosition,
+      lost_at_round: memory.lostAtRound,
+      expires: memory.expires,
+      suspicion: {
+        kind: memory.suspicion.kind,
+        center: memory.suspicion.center,
+        radius_feet: memory.suspicion.radius,
+        cells: [...memory.suspicion.cells],
+      },
+      legal_escalations: memory.legalOptions.map((option) => {
+        switch (option.kind) {
+          case 'move_and_search': return { kind: option.kind, citation: option.searchCitation };
+          case 'ready_action': return { kind: option.kind, citation: option.readyCitation };
+          case 'attack_suspected_square': return {
+            kind: option.kind,
+            roll_mode: option.rollMode,
+            citation: option.unseenTargetCitation,
+          };
+          case 'area_effect_over_region': return { kind: option.kind };
+        }
+      }),
+    })),
+  };
+}
+
+function renderAlertState(
+  alerting: EncounterAlertingState | undefined,
+  helpCalls: readonly Extract<EncounterEvent, { readonly type: 'npc_called_for_help' }>[],
+  includeJoins = true,
+): Readonly<Record<string, unknown>> {
+  return {
+    policy: ALERTING_POLICY,
+    yelling_distance_feet: alerting?.yellingDistance.radius ?? 60,
+    sound_propagation: alerting?.soundPropagation ?? { kind: 'radial', occlusion: 'not_modeled' },
+    calls: helpCalls.map((event) => ({
+      caller: event.caller,
+      attacker: event.attacker,
+      origin: event.origin,
+      round: event.round,
+    })),
+    joined: (alerting?.membership ?? []).flatMap((entry) =>
+      includeJoins && entry.kind === 'participant' && entry.joinedBy.kind === 'help_call'
+        ? [{ combatant: entry.combatant, called_by: entry.joinedBy.caller, round: entry.joinedBy.round }]
+        : []),
+  };
+}
+
+function renderFailureModesWithCoverage(): Readonly<Record<string, unknown>> {
+  const rendered = renderEngineFailureModes();
+  const modes = rendered['modes'];
+  if (!Array.isArray(modes)) throw new TypeError('Failure-mode renderer returned no modes.');
+  const coveredCodes = new Set(['no_help_calling_plan', 'no_invisibility_search_plan']);
+  return {
+    policy: rendered['policy'],
+    modes: modes.filter((mode) => typeof mode === 'string' && !coveredCodes.has(mode.split(':', 1)[0] ?? '')),
+    covered_blind_spot_classes: [
+      { class: 'combat_membership_leash', covered_by_policy: ALERTING_POLICY },
+      { class: 'stealth_search', covered_by_policy: SEARCH_MEMORY_POLICY },
+    ],
+  };
+}
+
 export function createEngineMcpApplication(dependencies: EngineMcpDependencies): EngineMcpApplication {
   if (dependencies.maximumToolResultBytes !== undefined && dependencies.maximumToolResultBytes > 64 * 1024) {
     throw new RangeError('maximumToolResultBytes cannot exceed the 64 KiB hard limit.');
@@ -496,6 +846,14 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   const applicationCursors = new Map<string, { readonly digest: string; readonly key: string; readonly offset: number }>();
   const opportunityReports = new Map<string, ReturnType<typeof actorOpportunityReport>>();
   const teamPlanReports = new Map<string, TeamPlanFrontierReport>();
+  const contextIntelReports = new Map<string, CapsuleIntelReports>();
+  function contextIntelReport(capsule: EngineStateCapsule): CapsuleIntelReports {
+    const prior = contextIntelReports.get(capsule.digest);
+    if (prior !== undefined) return prior;
+    const report = capsuleIntelReports(state, capsule, queries);
+    contextIntelReports.set(capsule.digest, report);
+    return report;
+  }
   function opportunityReport(capsule: EngineStateCapsule, actorId: CombatantId) {
     const key = `${capsule.digest}:${actorId}`;
     const prior = opportunityReports.get(key);
@@ -626,6 +984,21 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     const frontierCandidateIds = new Set(teamReport?.frontier.map((entry) =>
       entry.candidate.candidateId) ?? []);
     const applicablePlays = advertisedPlays.filter((play) => frontierCandidateIds.has(play.name));
+    const contextReports = contextIntelReport(capsule);
+    const requiredActors = new Set(required);
+    const actorKnowledge = {
+      policy: ENGINE_ACTOR_KNOWLEDGE_POLICY,
+      actors: contextReports.actorKnowledge
+        .filter((report) => requiredActors.has(combatantId(String(report['actor_id'])))),
+    };
+    const reactionSpendHoldContext = {
+      policy: ENGINE_REACTION_SPEND_HOLD_POLICY,
+      windows: [...contextReports.reactionSpendHold],
+    };
+    const legendaryWindowsContext = contextReports.legendaryWindows;
+    const recoveryCapabilitiesContext = contextReports.recoveryCapabilities;
+    const searchMemoryContext = contextReports.searchMemory;
+    const alertStateContext = contextReports.alertState;
     const result = {
       granularity: 'full' as const,
       context_trimmed: false,
@@ -642,8 +1015,14 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       },
       summary: tacticalSummary(capsule), actors: actors.map(({ omitted: _omitted, ...actor }) => actor), recent_changes: [...recentChanges(capsule)],
       ...(dependencies.toolProfile === 'dm' ? {
-        known_failure_modes: renderEngineFailureModes(),
+        known_failure_modes: renderFailureModesWithCoverage(),
       } : {}),
+      actor_knowledge: actorKnowledge,
+      reaction_spend_hold: reactionSpendHoldContext,
+      legendary_windows: legendaryWindowsContext,
+      recovery_capabilities: recoveryCapabilitiesContext,
+      search_memory: searchMemoryContext,
+      alert_state: alertStateContext,
       applicable_plays: applicablePlays.map((play) => ({
         name: play.name,
         description: play.description,
@@ -684,11 +1063,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     let output: Readonly<Record<string, unknown>> = suggestedPlan === null
       ? result
       : { ...result, suggested_plan: suggestedPlan };
+    const initialContextUnderPressure = new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES;
     const markContextTrimmed = (): void => {
       result.truncated = true;
       result.context_trimmed = true;
       if (suggestedPlan !== null && output !== result) {
-        output = { ...output, truncated: true, context_trimmed: true };
+        output = { ...result, suggested_plan: suggestedPlan };
       }
     };
     const frontierDetailLevels = ['candidate_summary', 'summary', 'omitted'] as const;
@@ -704,6 +1084,33 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       }
       return true;
     };
+    // These reports can contain board-sized regions or event histories. Compact
+    // them once at the first pressure signal, before iterative trimming performs
+    // repeated JSON measurements over the remaining context.
+    if (initialContextUnderPressure && contextReports.legendaryHasDetails) {
+      result.legendary_windows = contextReports.legendaryWindowsCompact;
+      markContextTrimmed();
+    }
+    if (initialContextUnderPressure && result.reaction_spend_hold.windows.length > 0) {
+      result.reaction_spend_hold = { policy: ENGINE_REACTION_SPEND_HOLD_POLICY, windows: [] };
+      markContextTrimmed();
+    }
+    if (initialContextUnderPressure && contextReports.hasRecoveryTargets) {
+      result.recovery_capabilities = { policy: ENGINE_RECOVERY_CAPABILITY_POLICY, targets: [] };
+      markContextTrimmed();
+    }
+    if (initialContextUnderPressure && result.actor_knowledge.actors.length > 0) {
+      result.actor_knowledge = { policy: ENGINE_ACTOR_KNOWLEDGE_POLICY, actors: [] };
+      markContextTrimmed();
+    }
+    if (initialContextUnderPressure && contextReports.hasSearchMemories) {
+      result.search_memory = { policy: SEARCH_MEMORY_POLICY, memories: [] };
+      markContextTrimmed();
+    }
+    if (initialContextUnderPressure && contextReports.hasAlertDetails) {
+      result.alert_state = contextReports.alertStateCompact;
+      markContextTrimmed();
+    }
     while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.options.length > 0);
       if (actor === undefined) break;

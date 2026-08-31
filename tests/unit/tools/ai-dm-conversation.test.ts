@@ -799,6 +799,10 @@ describe('AI-DM engine MCP conversation runner', () => {
         teamScorer: 'team-scorer-v1',
         correction: 'dominance-correction-v1',
         materialityContext: 'materiality-context-v1',
+        actorKnowledge: 'actor-knowledge-v1',
+        reactionSpendHold: 'reaction-spend-hold-v1',
+        legendaryWindows: 'legendary-windows-v1',
+        recoveryCapability: 'recovery-capability-v1',
       },
     }));
     expect(result.rows[0]?.authorizedPlan?.some((entry) =>

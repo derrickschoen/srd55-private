@@ -1,0 +1,282 @@
+import { describe, expect, it } from 'vitest';
+import { monsterCombatantProfile } from '../../../src/combat/combatant';
+import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
+import { damageType, dieSides, effectStackingIdentity } from '../../../src/combat/values';
+import { UNICORN } from '../../../src/combat/statblocks/monsters';
+import { createEngineStateCapsule } from '../../../src/vtt/engine-state-capsule';
+import { createEngineMcpRuntime } from '../../../src/vtt/mcp/entrypoint';
+import { TURN_CONTEXT_MAX_BYTES } from '../../../src/vtt/mcp/engine-server';
+import { projectEncounterTimeline } from '../../../src/vtt/session-timeline';
+import { engineOptionId } from '../../../src/vtt/turn-proposal';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+
+const fixedD20 = (face: number) => () => (face - 0.5) / 20;
+
+function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function array(value: unknown, label: string): readonly unknown[] {
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array.`);
+  return value;
+}
+
+function integratedState(): {
+  readonly state: EncounterState;
+  readonly pc: ReturnType<typeof playerProfile>;
+  readonly unicorn: ReturnType<typeof monsterCombatantProfile>;
+  readonly responder: ReturnType<typeof monsterProfile>;
+} {
+  const pc = playerProfile('context-target', { initiativeBonus: 20 });
+  const unicorn = monsterCombatantProfile(UNICORN, {
+    combatantId: 'combatant:context-unicorn',
+    tokenId: 'token:context-unicorn',
+  });
+  const responder = monsterProfile('context-responder', { initiativeBonus: -20 });
+  let state = createEncounter({
+    bounds: { columns: 8, rows: 3 },
+    alerting: { nearbyNpcIds: [responder.id] },
+    combatants: [pc, unicorn, responder],
+    tokens: [placedToken(pc, 0, 1), placedToken(unicorn, 2, 1), placedToken(responder, 4, 1)],
+  });
+  state = reduceEncounter(state, { type: 'roll_initiative' }, fixedD20(10)).state;
+  state = reduceEncounter(state, {
+    type: 'attack', actor: pc.id, target: unicorn.id,
+    attackBonus: 100, criticalFloor: 20, rollMode: 'normal',
+    attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+    damage: {
+      terms: [{ type: damageType('Force'), dice: { count: 0, sides: dieSides(6), modifier: 0 } }],
+      critical: false, responses: [],
+    },
+  }, fixedD20(10)).state;
+  state = reduceEncounter(state, {
+    type: 'apply_effect', actor: pc.id, cost: 'none',
+    effect: {
+      targets: [pc.id], duration: { kind: 'permanent' }, concentration: false,
+      stackingIdentity: effectStackingIdentity('context-invisible'),
+      stacking: 'replace_same_source', repeatedSave: null,
+      payload: { kind: 'condition', condition: 'Invisible' },
+    },
+  }, fixedD20(10)).state;
+  state = reduceEncounter(state, { type: 'end_turn', actor: pc.id }, fixedD20(10)).state;
+  state = {
+    ...state,
+    combatants: state.combatants.map((combatant) => combatant.profile.id === pc.id
+      ? { ...combatant, hitPoints: 0, life: 'dying' as const, deathSaves: { successes: 0, failures: 1 } }
+      : combatant),
+    pendingDecisions: [
+      ...state.pendingDecisions,
+      {
+        id: 'decision:context-reaction',
+        kind: 'reaction_offer',
+        combatant: unicorn.id,
+        boundary: { activeCombatant: pc.id, round: state.round },
+        reactionKind: 'opportunity_attack',
+        options: [{ id: 'accept', label: 'Accept' }, { id: 'decline', label: 'Decline' }],
+        opportunityAttack: {
+          mover: pc.id,
+          from: { column: 1, row: 1 },
+          to: { column: 0, row: 1 },
+          command: {
+            type: 'opportunity_attack', actor: unicorn.id, target: pc.id,
+            attackBonus: 5, criticalFloor: 20, rollMode: 'normal',
+            attackerCanSeeTarget: true, targetCanSeeAttacker: true,
+            damage: {
+              terms: [{
+                type: damageType('Piercing'),
+                dice: { count: 1, sides: dieSides(8), modifier: 2 },
+              }],
+              critical: false, responses: [],
+            },
+          },
+        },
+      },
+    ],
+  };
+  return { state, pc, unicorn, responder };
+}
+
+function contextFor(setup: ReturnType<typeof integratedState>) {
+  const timeline = projectEncounterTimeline(setup.state, []);
+  const runtime = createEngineMcpRuntime(setup.state, {
+    toolProfile: 'dm',
+    requestedActorIds: [setup.unicorn.id],
+    initiativeProjection: { policy: 'initiative-intel-v1', timeline },
+  });
+  const capsule = runtime.feed.current();
+  const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
+    run_id: capsule.runId,
+    expected_revision: capsule.revision,
+    scope: 'round',
+    granularity: 'full',
+  }), 'turn context');
+  return { runtime, capsule, context };
+}
+
+describe('M-core and D420 turn-context rendering', () => {
+  it('renders hand-computed core reports through engine.get_turn_context', () => {
+    const setup = integratedState();
+    const { context } = contextFor(setup);
+
+    expect(context['actor_knowledge']).toEqual({
+      policy: 'actor-knowledge-v1',
+      actors: [{
+        actor_id: setup.unicorn.id,
+        targets: [{
+          kind: 'unknown', target_id: setup.pc.id,
+          last_seen: { status: 'unresolved', reason: 'last_seen_position_not_modeled' },
+        }],
+      }],
+    });
+
+    const reaction = record(context['reaction_spend_hold'], 'reaction spend/hold');
+    expect(reaction['policy']).toBe('reaction-spend-hold-v1');
+    expect(array(reaction['windows'], 'reaction windows')).toEqual([
+      expect.objectContaining({
+        policy: 'reaction-spend-hold-v1',
+        status: 'resolved',
+        trigger_id: 'decision:context-reaction',
+        // AC 14 needs 9+, Unconscious grants Advantage, and a hit from 5 feet is
+        // automatically critical: .84 × (2d8 + 2 = 11) = 9.24.
+        spend: { status: 'resolved', expected_damage: 9.24 },
+      }),
+    ]);
+
+    const legendary = record(context['legendary_windows'], 'legendary windows');
+    expect(legendary).toMatchObject({
+      policy: 'legendary-windows-v1', status: 'resolved', detail_level: 'full',
+      compact: [
+        'legendary', 'Unicorn', 'actions', '3/3', 'resistance', '3/3',
+        'next', String(setup.pc.id), 'pending', 'action',
+      ],
+    });
+    expect(array(legendary['actors'], 'legendary actors')).toEqual([
+      expect.objectContaining({
+        combatant: setup.unicorn.id,
+        action_uses: { remaining: 3, maximum: 3 },
+        resistance_uses: { remaining: 3, maximum: 3 },
+      }),
+    ]);
+
+    expect(context['recovery_capabilities']).toEqual({
+      policy: 'recovery-capability-v1',
+      targets: [{ target: setup.pc.id, status: 'unresolved', reason: 'party_data_unavailable' }],
+    });
+  });
+
+  it('renders actionable search memory, help calls, and joined membership', () => {
+    const setup = integratedState();
+    const { context } = contextFor(setup);
+    const search = record(context['search_memory'], 'search memory');
+    expect(search['policy']).toBe('search-memory-v1');
+    expect(array(search['memories'], 'search memories')).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        observer: setup.unicorn.id,
+        target: setup.pc.id,
+        cause: 'invisibility',
+        last_known_position: { column: 0, row: 1 },
+        suspicion: {
+          kind: 'grid_radius', center: { column: 0, row: 1 }, radius_feet: 0,
+          cells: [{ column: 0, row: 1 }],
+        },
+        legal_escalations: [
+          { kind: 'move_and_search', citation: 'docs/srd/full/srd-5.2.1.txt:12016-12027' },
+          { kind: 'ready_action', citation: 'docs/srd/full/srd-5.2.1.txt:11997-12015' },
+          {
+            kind: 'attack_suspected_square', roll_mode: 'disadvantage',
+            citation: 'docs/srd/full/srd-5.2.1.txt:884-889',
+          },
+          { kind: 'area_effect_over_region' },
+        ],
+      }),
+    ]));
+
+    expect(context['alert_state']).toEqual({
+      policy: 'npc-help-calling-v1',
+      yelling_distance_feet: 60,
+      sound_propagation: { kind: 'radial', occlusion: 'not_modeled' },
+      calls: [{
+        caller: setup.unicorn.id, attacker: setup.pc.id,
+        origin: { column: 2, row: 1 }, round: 1,
+      }],
+      joined: [{ combatant: setup.responder.id, called_by: setup.unicorn.id, round: 1 }],
+    });
+  });
+
+  it('shrinks the manifest by recording the two D420 blind spots as covered', () => {
+    const { context } = contextFor(integratedState());
+    const manifest = record(context['known_failure_modes'], 'known failure modes');
+    const modes = array(manifest['modes'], 'failure modes');
+    expect(modes).toEqual([
+      'no_repeated_player_pattern_memory:No persistent tactical memory of repeated player patterns.',
+      'rigid_engagement_objectives:Engagement stances do not model flexible leash or aggro changes.',
+      'summon_economy_unscored:Future action economy from summons is not scored as tactical value.',
+    ]);
+    expect(modes.some((mode) => String(mode).startsWith('no_help_calling_plan:'))).toBe(false);
+    expect(modes.some((mode) => String(mode).startsWith('no_invisibility_search_plan:'))).toBe(false);
+    expect(manifest['covered_blind_spot_classes']).toEqual([
+      { class: 'combat_membership_leash', covered_by_policy: 'npc-help-calling-v1' },
+      { class: 'stealth_search', covered_by_policy: 'search-memory-v1' },
+    ]);
+  });
+
+  it('degrades every new surface under byte pressure before returning the capped context', () => {
+    const setup = integratedState();
+    const { runtime, capsule } = contextFor(setup);
+    const firstActor = capsule.projection.combatants.find((actor) => actor.id === setup.unicorn.id);
+    if (firstActor?.options[0] === undefined) throw new Error('Unicorn context has no option to bloat.');
+    const bloated = createEngineStateCapsule({
+      runId: capsule.runId,
+      branchId: capsule.branchId,
+      revision: capsule.revision + 1,
+      generatedAt: capsule.generatedAt,
+      request: capsule.request,
+      projection: {
+        ...capsule.projection,
+        movementBlockingObjects: Array.from({ length: 98 }, (_unused, index) => ({
+          id: `world-object:context-pressure:${String(index)}:${'y'.repeat(60)}`,
+          name: `Pressure ${String(index)}`,
+          cells: [],
+        })),
+        combatants: capsule.projection.combatants.map((actor) => actor.id !== setup.unicorn.id
+          ? actor
+          : {
+              ...actor,
+              options: Array.from({ length: 20 }, (_unused, index) => ({
+                ...firstActor.options[0]!,
+                optionId: engineOptionId(`option:context-pressure:${String(index)}`),
+                label: `${String(index)}:${'x'.repeat(490)}`,
+              })),
+            }),
+      },
+      historyDelta: Array.from({ length: 100 }, (_unused, index) => ({
+        revision: index + 1,
+        kind: `pressure-${String(index)}-${'z'.repeat(70)}`,
+        branchStatus: 'active' as const,
+        encounterRound: 999_999,
+      })),
+      rulesIndex: capsule.rulesIndex,
+    });
+    runtime.feed.replace(bloated);
+    const context = record(runtime.toolSurface.execute('engine.get_turn_context', {
+      run_id: bloated.runId,
+      expected_revision: bloated.revision,
+      scope: 'round',
+      granularity: 'full',
+    }), 'trimmed context');
+    const bytes = new TextEncoder().encode(JSON.stringify(context)).byteLength;
+    expect(context['context_trimmed'], `rendered ${String(bytes)} bytes`).toBe(true);
+    expect(bytes).toBeLessThanOrEqual(TURN_CONTEXT_MAX_BYTES);
+    expect(context['actor_knowledge']).toEqual({ policy: 'actor-knowledge-v1', actors: [] });
+    expect(context['reaction_spend_hold']).toEqual({ policy: 'reaction-spend-hold-v1', windows: [] });
+    expect(context['legendary_windows']).toMatchObject({
+      policy: 'legendary-windows-v1', detail_level: 'compact',
+    });
+    expect(context['recovery_capabilities']).toEqual({ policy: 'recovery-capability-v1', targets: [] });
+    expect(context['search_memory']).toEqual({ policy: 'search-memory-v1', memories: [] });
+    expect(context['alert_state']).toMatchObject({ calls: [], joined: [] });
+  });
+});

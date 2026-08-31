@@ -74,6 +74,10 @@ import {
 } from '../src/vtt/intel/opportunity-cost';
 import { MOVEMENT_OPTIONS_INTEL_POLICY } from '../src/vtt/intel/movement-options';
 import { TEAM_SCORER_POLICY } from '../src/vtt/intel/team-scorer';
+import { ACTOR_KNOWLEDGE_POLICY } from '../src/vtt/intel/actor-knowledge';
+import { LEGENDARY_WINDOWS_POLICY } from '../src/vtt/intel/legendary-windows';
+import { REACTION_SPEND_HOLD_POLICY } from '../src/vtt/intel/reaction-spend-hold';
+import { RECOVERY_CAPABILITY_POLICY } from '../src/vtt/intel/recovery-capability';
 import {
   type ReactionGuidanceDeclaration,
 } from '../src/vtt/reaction-guidance';
@@ -173,6 +177,10 @@ export interface ConversationRlDataV2 {
     readonly teamScorer: typeof TEAM_SCORER_POLICY;
     readonly correction: typeof DOMINANCE_CORRECTION_POLICY;
     readonly materialityContext: typeof MATERIALITY_CONTEXT_POLICY;
+    readonly actorKnowledge: typeof ACTOR_KNOWLEDGE_POLICY;
+    readonly reactionSpendHold: typeof REACTION_SPEND_HOLD_POLICY;
+    readonly legendaryWindows: typeof LEGENDARY_WINDOWS_POLICY;
+    readonly recoveryCapability: typeof RECOVERY_CAPABILITY_POLICY;
   };
   readonly engineIntel: DmIntelCapture;
 }
@@ -927,6 +935,10 @@ function rlCapture(
       teamScorer: TEAM_SCORER_POLICY,
       correction: DOMINANCE_CORRECTION_POLICY,
       materialityContext: MATERIALITY_CONTEXT_POLICY,
+      actorKnowledge: ACTOR_KNOWLEDGE_POLICY,
+      reactionSpendHold: REACTION_SPEND_HOLD_POLICY,
+      legendaryWindows: LEGENDARY_WINDOWS_POLICY,
+      recoveryCapability: RECOVERY_CAPABILITY_POLICY,
     },
     engineIntel: structuredClone(proposal.intelCapture),
   };
