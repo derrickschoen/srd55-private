@@ -27,10 +27,29 @@ const engineIntelSchema = z.object({
   actors: z.array(z.unknown()),
 }).passthrough();
 
+// The two era-specific authorized-plan shapes. Baseline-era entries carry
+// acceptedIntent (single choice); post-intel entries carry resolutionSummary
+// with actionSlots. Both normalize to NeutralPlanEntry below — the packet must
+// never expose either raw shape, because the shape itself identifies the era.
+const baselineChoiceSchema = z.object({
+  kind: z.string(),
+  action_id: z.string().optional(),
+  spell_id: z.string().optional(),
+  target: z.object({ kind: z.string(), combatant_id: z.string().optional() }).passthrough().optional(),
+}).passthrough();
+
+const currentActionSlotSchema = z.object({
+  kind: z.string(),
+  actionId: z.string().nullable().optional(),
+  spellId: z.string().nullable().optional(),
+  objectId: z.string().nullable().optional(),
+  targetIds: z.array(z.string()).optional(),
+}).passthrough();
+
 const authorizedPlanEntrySchema = z.object({
   actorId: z.unknown(),
-  selectedBranch: z.unknown(),
-  resolutionSummary: z.unknown(),
+  acceptedIntent: z.object({ choice: baselineChoiceSchema }).passthrough().optional(),
+  resolutionSummary: z.object({ actionSlots: z.array(currentActionSlotSchema) }).passthrough().optional(),
 }).passthrough();
 
 const plannerSchema = z.union([
@@ -38,6 +57,18 @@ const plannerSchema = z.union([
   z.object({ model: z.string(), effort: z.string() }).passthrough(),
   z.null(),
 ]);
+
+export interface NeutralAction {
+  readonly kind: string;
+  readonly actionId: string | null;
+  readonly targetIds: readonly string[];
+}
+
+/** Era-neutral executed-plan entry: the only plan shape a judge may see. */
+export interface NeutralPlanEntry {
+  readonly actorId: unknown;
+  readonly actions: readonly NeutralAction[];
+}
 
 const arenaRowSchema = z.object({
   seed: safeIntegerSchema,
@@ -54,9 +85,15 @@ const arenaRowSchema = z.object({
   plannedBy: plannerSchema,
   roundNarrative: z.string().nullable(),
   authorizedPlan: z.array(authorizedPlanEntrySchema).nullable(),
-  // Optional: pre-intel-era arms have no engineIntel. It must never reach the
-  // blinded packet — its mere presence identifies the arm.
-  engineIntel: engineIntelSchema.optional(),
+  // Optional/nullable: pre-intel-era arms have no engineIntel, and the current
+  // producer writes null on failed rows. It must never reach the blinded
+  // packet — its mere presence identifies the arm.
+  engineIntel: engineIntelSchema.nullable().optional(),
+  // Post-intel rows label the planner ('model' | 'engine_default'); pre-intel
+  // rows have no such field. Attribution uses it when present.
+  plannerLabel: z.string().optional(),
+  // Required in cross-era mode, where it is the arm partition key.
+  repoCommit: z.string().min(1).optional(),
 }).passthrough();
 
 export interface RerunProtocol {
@@ -71,6 +108,19 @@ export interface RerunPacketConfig {
   readonly packetPath: string;
   readonly answerKeyPath: string;
   readonly shuffleSeed: number;
+  /**
+   * Cross-era comparison mode: the two arms ran DIFFERENT code eras against
+   * byte-identical frozen room inputs. Arms are partitioned by repoCommit
+   * (which every row must carry), because the arena's `arm` label and the
+   * canonical-state startingRoomDigest are both era-dependent — the digest
+   * hashes the loaded EncounterState, whose shape changes across eras, so
+   * cross-arm digest equality is impossible by construction. In this mode the
+   * digest check becomes per-arm consistency (same seed must produce the same
+   * digest across reps within an arm); room-INPUT identity across eras is an
+   * external precondition the runner must verify (byte-compare the frozen
+   * seed files) and record.
+   */
+  readonly crossEra: boolean;
 }
 
 interface ValidatedArenaRow {
@@ -81,6 +131,7 @@ interface ValidatedArenaRow {
   readonly startingRoomDigest: string;
   readonly outcome: string;
   readonly plannedBy: z.infer<typeof plannerSchema>;
+  readonly plannerLabel: string | undefined;
   readonly roundNarrative: string | null;
   readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
 }
@@ -99,7 +150,7 @@ export interface JudgePacketEntry {
   readonly outcome: string;
   readonly attribution: 'model_authorized' | 'engine_default' | 'not_model_authorized';
   readonly roundNarrative: string | null;
-  readonly executedPlan: readonly JsonRecord[] | null;
+  readonly executedPlan: readonly NeutralPlanEntry[] | null;
   readonly rubric: BlindRubric;
 }
 
@@ -130,6 +181,10 @@ const MODEL_IDENTITY_FIELDS = new Set([
   // Era-identifying: only post-intel arms produce engineIntel, so its presence
   // (not just its contents) unblinds the arm.
   'engineIntel',
+  // Era-specific plan-shape keys: any of these surviving into the packet means
+  // the executed-plan normalization failed and the entry identifies its era.
+  'acceptedIntent', 'acceptedProposal', 'resolutionSummary', 'actionSlots',
+  'selectedBranch', 'optionId', 'movementFeet', 'plannerLabel',
 ]);
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -148,8 +203,10 @@ export function parseRerunPacketArgs(argv: readonly string[]): RerunPacketConfig
   const argumentsValue = argv[0] === '--' ? argv.slice(1) : argv;
   const inputPaths: string[] = [];
   const values = new Map<string, string>();
+  let crossEra = false;
   for (let index = 0; index < argumentsValue.length; index += 1) {
     const option = argumentsValue[index];
+    if (option === '--cross-era') { crossEra = true; continue; }
     if (!['--input', '--packet', '--answer-key', '--shuffle-seed'].includes(option ?? '')) {
       throw new TypeError(`Unknown rerun-packet option ${option ?? '<missing>'}.`);
     }
@@ -171,6 +228,7 @@ export function parseRerunPacketArgs(argv: readonly string[]): RerunPacketConfig
     packetPath,
     answerKeyPath,
     shuffleSeed: parseSafeInteger(values.get('--shuffle-seed') ?? '', '--shuffle-seed'),
+    crossEra,
   };
 }
 
@@ -193,7 +251,12 @@ function parseJsonl(text: string, source: string): readonly JsonRecord[] {
   });
 }
 
-function validateRow(source: JsonRecord, sourceLabel: string, protocol: RerunProtocol): ValidatedArenaRow {
+function validateRow(
+  source: JsonRecord,
+  sourceLabel: string,
+  protocol: RerunProtocol,
+  crossEra: boolean,
+): ValidatedArenaRow {
   if ('rlData' in source) {
     throw new TypeError(`${sourceLabel} contains rlData; R1-10 is a permanent holdout and cannot contain training data.`);
   }
@@ -204,7 +267,11 @@ function validateRow(source: JsonRecord, sourceLabel: string, protocol: RerunPro
     throw new TypeError(`${sourceLabel}${property} is invalid: ${issue?.message ?? 'unknown schema failure'}.`);
   }
   const row = parsed.data;
-  const { seed, room, arm } = row;
+  if (crossEra && row.repoCommit === undefined) {
+    throw new TypeError(`${sourceLabel}.repoCommit is required in cross-era mode (it is the arm partition key).`);
+  }
+  const { seed, room } = row;
+  const arm = crossEra ? `era:${row.repoCommit ?? ''}` : row.arm;
   const rep = row.round;
   const expectedRoom = protocol.seeds.indexOf(seed) + 1;
   if (expectedRoom === 0) throw new TypeError(`${sourceLabel}.seed=${String(seed)} is not an R1-10 holdout seed.`);
@@ -215,6 +282,7 @@ function validateRow(source: JsonRecord, sourceLabel: string, protocol: RerunPro
     startingRoomDigest: row.startingRoomDigest,
     outcome: row.outcome,
     plannedBy: row.plannedBy,
+    plannerLabel: row.plannerLabel,
     roundNarrative: row.roundNarrative,
     authorizedPlan: row.authorizedPlan,
   };
@@ -224,8 +292,9 @@ function validateRow(source: JsonRecord, sourceLabel: string, protocol: RerunPro
 export function validateRerunRows(
   rows: readonly JsonRecord[],
   protocol: RerunProtocol = R1_10_PROTOCOL,
+  crossEra = false,
 ): readonly ValidatedArenaRow[] {
-  const validated = rows.map((row, index) => validateRow(row, `row ${String(index + 1)}`, protocol));
+  const validated = rows.map((row, index) => validateRow(row, `row ${String(index + 1)}`, protocol, crossEra));
   const arms = [...new Set(validated.map((row) => row.arm))].sort((left, right) => left.localeCompare(right));
   if (arms.length !== 2) throw new TypeError(`R1-10 requires exactly two paired arms; found ${String(arms.length)}.`);
   const byCase = new Map<string, ValidatedArenaRow[]>();
@@ -246,9 +315,29 @@ export function validateRerunRows(
       if (seenArms.size !== arms.length || arms.some((arm) => !seenArms.has(arm))) {
         throw new TypeError(`R1-10 requires paired arms for seed ${String(seed)} rep ${String(rep)}.`);
       }
-      const digests = new Set(caseRows.map((row) => row.startingRoomDigest));
+      if (!crossEra) {
+        const digests = new Set(caseRows.map((row) => row.startingRoomDigest));
+        if (digests.size !== 1) {
+          throw new TypeError(`Paired arms for seed ${String(seed)} rep ${String(rep)} must use the same frozen room artifact.`);
+        }
+      }
+    }
+  }
+  if (crossEra) {
+    // Cross-era arms cannot share canonical-state digests (state shape differs
+    // by era), so the digest invariant becomes: within an arm, every rep of a
+    // seed must load the identical room. Cross-era room-INPUT identity is an
+    // external precondition, verified by byte-comparing the frozen seed files.
+    const perArmSeed = new Map<string, Set<string>>();
+    for (const row of validated) {
+      const key = `${row.arm}|${String(row.seed)}`;
+      const digests = perArmSeed.get(key) ?? new Set<string>();
+      digests.add(row.startingRoomDigest);
+      perArmSeed.set(key, digests);
+    }
+    for (const [key, digests] of perArmSeed) {
       if (digests.size !== 1) {
-        throw new TypeError(`Paired arms for seed ${String(seed)} rep ${String(rep)} must use the same frozen room artifact.`);
+        throw new TypeError(`Cross-era arm/seed ${key} loaded ${String(digests.size)} distinct room states across reps; the frozen room must be identical within an arm.`);
       }
     }
   }
@@ -259,21 +348,46 @@ export function validateRerunRows(
 }
 
 function engineAttribution(row: ValidatedArenaRow): JudgePacketEntry['attribution'] {
-  if (row.outcome === 'auto_resolved' || row.plannedBy === 'sim_controller') return 'engine_default';
+  if (
+    row.outcome === 'auto_resolved' ||
+    row.plannedBy === 'sim_controller' ||
+    row.plannerLabel === 'engine_default'
+  ) return 'engine_default';
   if (row.outcome === 'authorized' && row.plannedBy !== null && typeof row.plannedBy === 'object') {
     return 'model_authorized';
   }
   return 'not_model_authorized';
 }
 
+function neutralActions(plan: z.infer<typeof authorizedPlanEntrySchema>): readonly NeutralAction[] {
+  if (plan.resolutionSummary !== undefined) {
+    return plan.resolutionSummary.actionSlots.map((slot) => ({
+      kind: slot.kind,
+      actionId: slot.actionId ?? slot.spellId ?? slot.objectId ?? null,
+      targetIds: slot.targetIds ?? [],
+    }));
+  }
+  if (plan.acceptedIntent !== undefined) {
+    const choice = plan.acceptedIntent.choice;
+    const target = choice.target;
+    return [{
+      kind: choice.kind,
+      actionId: choice.action_id ?? choice.spell_id ?? null,
+      targetIds: target?.combatant_id === undefined ? [] : [target.combatant_id],
+    }];
+  }
+  // Fail loud: an unrecognized plan shape must never silently become an empty
+  // (and thereby era-identifying) entry.
+  throw new TypeError('authorizedPlan entry matches neither known era shape.');
+}
+
 function executedPlan(
   value: ValidatedArenaRow['authorizedPlan'],
-): readonly JsonRecord[] | null {
+): readonly NeutralPlanEntry[] | null {
   if (value === null) return null;
   return value.map((plan) => ({
     actorId: plan.actorId,
-    selectedBranch: plan.selectedBranch,
-    resolutionSummary: plan.resolutionSummary,
+    actions: neutralActions(plan),
   }));
 }
 
@@ -317,9 +431,10 @@ export function buildRerunPacket(
   rows: readonly JsonRecord[],
   shuffleSeed: number,
   protocol: RerunProtocol = R1_10_PROTOCOL,
+  crossEra = false,
 ): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
   if (!Number.isSafeInteger(shuffleSeed)) throw new TypeError('shuffleSeed must be a safe integer.');
-  const validated = [...validateRerunRows(rows, protocol)]
+  const validated = [...validateRerunRows(rows, protocol, crossEra)]
     .sort((left, right) => left.seed - right.seed || left.rep - right.rep || left.arm.localeCompare(right.arm));
   const blinded = shuffled(validated, shuffleSeed).map((row, index) => ({
     blindId: `blind-${String(index + 1).padStart(3, '0')}`,
@@ -353,7 +468,7 @@ export function buildRerunPacket(
 export async function createRerunPacket(config: RerunPacketConfig): Promise<{ readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey }> {
   const sources = await Promise.all(config.inputPaths.map(async (path) => ({ path, text: await readFile(path, 'utf8') })));
   const rows = sources.flatMap(({ path, text }) => parseJsonl(text, path));
-  const result = buildRerunPacket(rows, config.shuffleSeed);
+  const result = buildRerunPacket(rows, config.shuffleSeed, R1_10_PROTOCOL, config.crossEra);
   await Promise.all([
     writeFile(config.packetPath, `${canonicalJson(result.packet)}\n`, 'utf8'),
     writeFile(config.answerKeyPath, `${canonicalJson(result.answerKey)}\n`, 'utf8'),
@@ -368,9 +483,12 @@ async function main(): Promise<void> {
 }
 
 const invokedPath = process.argv[1];
+const PACKET_FLAGS = ['--input', '--packet', '--answer-key', '--shuffle-seed', '--cross-era'];
 if (process.env['VITEST'] !== 'true' && invokedPath !== undefined && (
   invokedPath.endsWith('/ai-dm-rerun-packet.ts') || invokedPath.endsWith('\\ai-dm-rerun-packet.ts') ||
   ((invokedPath.endsWith('/vite-node') || invokedPath.endsWith('\\vite-node') ||
     invokedPath.endsWith('/vite-node.mjs') || invokedPath.endsWith('\\vite-node.mjs')) &&
-    process.argv.includes('--packet') && process.argv.includes('--answer-key'))
+    // Any recognized flag routes into main(), so an incomplete command fails
+    // loudly in the parser instead of silently exiting 0.
+    PACKET_FLAGS.some((flag) => process.argv.includes(flag)))
 )) await main();

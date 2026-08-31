@@ -76,12 +76,11 @@ describe('AI-DM R1-10 rerun packet', () => {
         {
           blindId: 'blind-001', caseId: 'case-01-1', outcome: 'authorized',
           attribution: 'model_authorized', roundNarrative: 'The ogre attacks the fighter.',
+          // Era-neutral form only: the raw resolutionSummary shape from the
+          // fixture must never survive into the packet.
           executedPlan: [{
-            actorId: 'monster:ogre', selectedBranch: 'primary',
-            resolutionSummary: {
-              optionId: 'club-fighter', movementFeet: 0,
-              actionSlots: [{ slot: 'main', kind: 'attack', targetIds: ['pc:fighter'] }],
-            },
+            actorId: 'monster:ogre',
+            actions: [{ kind: 'attack', actionId: null, targetIds: ['pc:fighter'] }],
           }],
           rubric: { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null },
         },
@@ -106,6 +105,8 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(JSON.stringify(result.packet)).not.toContain('baseline-model');
     expect(JSON.stringify(result.packet)).not.toContain('intel-model');
     expect(JSON.stringify(result.packet)).not.toContain('engineIntel');
+    expect(JSON.stringify(result.packet)).not.toContain('resolutionSummary');
+    expect(JSON.stringify(result.packet)).not.toContain('movementFeet');
 
     const mutatedRows = rows.map((row, index) => index === 0
       ? { ...row, roundNarrative: 'The ogre retreats.' }
@@ -130,6 +131,127 @@ describe('AI-DM R1-10 rerun packet', () => {
     )).toThrow('permanent holdout');
   });
 
+  it('normalizes both era plan shapes to the same neutral form and fails loud on an unknown shape', () => {
+    const base = {
+      seed: 5_117_001, room: 1, round: 1, startingRoomDigest: 'd1',
+      combatModel: 'initiative_segments_v1', initiativeOrder: [], outcome: 'authorized',
+      plannedBy: { model: 'm', effort: 'low' }, roundNarrative: null,
+    };
+    const paired = (plan: unknown, extra: Record<string, unknown> = {}): Record<string, unknown>[] =>
+      ['a', 'b'].map((arm) => ({ ...base, arm, authorizedPlan: plan, ...extra }));
+    const oldEra = buildRerunPacket(paired([
+        {
+          actorId: 'combatant:m1',
+          acceptedIntent: {
+            actor_id: 'combatant:m1',
+            choice: {
+              kind: 'attack', action_id: 'radiant-flame', resource_policy: 'normal',
+              target: { kind: 'combatant', combatant_id: 'combatant:cleric' },
+            },
+            movement: { willingness: 'only_if_required' },
+          },
+        },
+        { actorId: 'combatant:m2', acceptedIntent: { actor_id: 'combatant:m2', choice: { kind: 'dodge' } } },
+      ]), 1, { seeds: [5_117_001], reps: 1 });
+    for (const entry of oldEra.packet.entries) {
+      expect(entry.executedPlan).toEqual([
+        { actorId: 'combatant:m1', actions: [{ kind: 'attack', actionId: 'radiant-flame', targetIds: ['combatant:cleric'] }] },
+        { actorId: 'combatant:m2', actions: [{ kind: 'dodge', actionId: null, targetIds: [] }] },
+      ]);
+    }
+
+    const newEra = buildRerunPacket(paired([{
+      actorId: 'combatant:m1',
+      acceptedProposal: { primary_option_id: 'option:2:aa' },
+      selectedBranch: 'primary',
+      resolutionSummary: {
+        optionId: 'option:2:aa', movementFeet: 5,
+        actionSlots: [{ slot: 'main', kind: 'attack', actionId: 'radiant-flame', spellId: null, objectId: null, targetIds: ['combatant:cleric'] }],
+      },
+    }], { plannerLabel: 'model', engineIntel: null }), 1, { seeds: [5_117_001], reps: 1 });
+    for (const entry of newEra.packet.entries) {
+      expect(entry.executedPlan).toEqual([
+        { actorId: 'combatant:m1', actions: [{ kind: 'attack', actionId: 'radiant-flame', targetIds: ['combatant:cleric'] }] },
+      ]);
+    }
+    expect(JSON.stringify(newEra.packet)).not.toContain('acceptedProposal');
+    expect(JSON.stringify(newEra.packet)).not.toContain('selectedBranch');
+
+    expect(() => buildRerunPacket(
+      paired([{ actorId: 'combatant:m1', unrecognized: true }]),
+      1, { seeds: [5_117_001], reps: 1 },
+    )).toThrow('matches neither known era shape');
+
+    const exhaustion = buildRerunPacket(
+      paired(null, { plannedBy: null, plannerLabel: 'engine_default', roundNarrative: 'Dodge.' }),
+      1, { seeds: [5_117_001], reps: 1 },
+    );
+    for (const entry of exhaustion.packet.entries) expect(entry.attribution).toBe('engine_default');
+    expect(JSON.stringify(exhaustion.packet)).not.toContain('plannerLabel');
+  });
+
+  it('cross-era mode partitions arms by repoCommit and requires within-arm digest consistency only', () => {
+    const crossEraRows = (mutate?: (row: JsonRecord, era: string) => JsonRecord): JsonRecord[] =>
+      R1_10_SEEDS.flatMap((seed, room) => [1, 2, 3].flatMap((round) =>
+        ['commit-old', 'commit-new'].map((era) => {
+          const row: JsonRecord = {
+            seed,
+            room: room + 1,
+            round,
+            // Cross-era reality: the arena labels both eras identically.
+            arm: 'single',
+            repoCommit: era,
+            model: 'shared-model',
+            cli: 'codex',
+            // Era-dependent canonical-state digest: differs ACROSS arms even
+            // on identical room inputs, but must be stable WITHIN an arm.
+            startingRoomDigest: `state-${era}-${String(seed)}`,
+            combatModel: 'initiative_segments_v1',
+            initiativeOrder: ['monster', 'fighter'],
+            outcome: 'authorized',
+            plannedBy: { model: 'shared-model', effort: 'low' },
+            roundNarrative: null,
+            authorizedPlan: null,
+            ...(era === 'commit-new' ? {
+              engineIntel: {
+                policy: 'dm-intel-capture-v1',
+                policyVersions: { initiative: 'initiative-intel-v1' },
+                actors: [],
+              },
+            } : {}),
+          };
+          return mutate ? mutate(row, era) : row;
+        })
+      ));
+
+    // Strict mode refuses this data twice over: one arm label, unequal digests.
+    expect(() => validateRerunRows(crossEraRows(), R1_10_PROTOCOL)).toThrow();
+
+    const result = buildRerunPacket(crossEraRows(), 7, R1_10_PROTOCOL, true);
+    expect(result.packet.entries).toHaveLength(60);
+    expect(JSON.stringify(result.packet)).not.toContain('engineIntel');
+    expect(JSON.stringify(result.packet)).not.toContain('commit-old');
+    expect(new Set(result.answerKey.entries.map((entry) => entry.arm)))
+      .toEqual(new Set(['era:commit-old', 'era:commit-new']));
+
+    const missingCommit = crossEraRows((row, era) => {
+      if (era === 'commit-old' && row['seed'] === 5_117_001 && row['round'] === 1) {
+        const { repoCommit: _unused, ...rest } = row;
+        return rest;
+      }
+      return row;
+    });
+    expect(() => validateRerunRows(missingCommit, R1_10_PROTOCOL, true))
+      .toThrow('repoCommit is required in cross-era mode');
+
+    const driftingRoom = crossEraRows((row, era) =>
+      era === 'commit-new' && row['seed'] === 5_117_002 && row['round'] === 3
+        ? { ...row, startingRoomDigest: 'state-commit-new-drifted' }
+        : row);
+    expect(() => validateRerunRows(driftingRoom, R1_10_PROTOCOL, true))
+      .toThrow('distinct room states across reps');
+  });
+
   it('rejects an identity field if one reaches the blinded packet', () => {
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', model: 'leaked-model' }] }))
       .toThrow('leaks a model-identifying field');
@@ -143,7 +265,12 @@ describe('AI-DM R1-10 rerun packet', () => {
       '--input', join(directory, 'arena-a.jsonl'), '--input', join(directory, 'arena-b.jsonl'),
       '--packet', join(directory, 'packet.json'), '--answer-key', join(directory, 'answer-key.json'),
       '--shuffle-seed', '41',
-    ])).toMatchObject({ shuffleSeed: 41, inputPaths: [join(directory, 'arena-a.jsonl'), join(directory, 'arena-b.jsonl')] });
+    ])).toMatchObject({ shuffleSeed: 41, crossEra: false, inputPaths: [join(directory, 'arena-a.jsonl'), join(directory, 'arena-b.jsonl')] });
+    expect(parseRerunPacketArgs([
+      '--input', join(directory, 'arena-a.jsonl'), '--input', join(directory, 'arena-b.jsonl'),
+      '--packet', join(directory, 'packet.json'), '--answer-key', join(directory, 'answer-key.json'),
+      '--shuffle-seed', '41', '--cross-era',
+    ])).toMatchObject({ crossEra: true });
     expect(() => parseRerunPacketArgs(['--input', 'arena.jsonl', '--packet', 'same.json', '--answer-key', 'same.json', '--shuffle-seed', '1']))
       .toThrow('must be different files');
   });
