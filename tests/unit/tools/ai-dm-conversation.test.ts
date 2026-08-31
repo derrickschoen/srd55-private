@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   agentSessionIdFromCli,
   type AgentInvocation,
@@ -42,46 +42,17 @@ import {
 import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
-
-const scriptedPartyPolicyFixture = vi.hoisted(() => ({
-  value: null as 'heuristic_v0' | 'symmetric_evaluator_v1' | null,
-  lastApplied: null as 'heuristic_v0' | 'symmetric_evaluator_v1' | null,
-}));
-
-vi.mock('../../../src/vtt/scripted-party-round', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../src/vtt/scripted-party-round')>();
-  return {
-    ...actual,
-    createScriptedPartyPlan(
-      state: Parameters<typeof actual.createScriptedPartyPlan>[0],
-      options: Parameters<typeof actual.createScriptedPartyPlan>[1] = {},
-    ) {
-      const decisionPolicy = scriptedPartyPolicyFixture.value;
-      const plan = actual.createScriptedPartyPlan(state, {
-        ...options,
-        ...(decisionPolicy === null ? {} : { decisionPolicy }),
-      });
-      scriptedPartyPolicyFixture.lastApplied = plan.decisionPolicy;
-      return plan;
-    },
-  };
-});
+import {
+  createScriptedPartyPlan,
+  type ScriptedPartyDecisionPolicy,
+} from '../../../src/vtt/scripted-party-round';
 
 async function runConversationWithPartyPolicy(
-  decisionPolicy: 'heuristic_v0' | 'symmetric_evaluator_v1',
+  decisionPolicy: ScriptedPartyDecisionPolicy,
   config: Parameters<typeof runConversation>[0],
   options?: Parameters<typeof runConversation>[1],
 ): Promise<Awaited<ReturnType<typeof runConversation>>> {
-  if (scriptedPartyPolicyFixture.value !== null) {
-    throw new Error('A scripted-party policy fixture is already active.');
-  }
-  scriptedPartyPolicyFixture.lastApplied = null;
-  scriptedPartyPolicyFixture.value = decisionPolicy;
-  try {
-    return await runConversation(config, options);
-  } finally {
-    scriptedPartyPolicyFixture.value = null;
-  }
+  return runConversation(config, { ...options, partyPolicyOverride: decisionPolicy });
 }
 
 class RecordingConversationAdapter implements AgentSessionAdapter {
@@ -1441,7 +1412,9 @@ describe('AI-DM engine MCP conversation runner', () => {
     const firstTurn = row?.pcTurns?.[0];
     const adjustment = row?.adjustments?.[0];
 
-    expect(scriptedPartyPolicyFixture.lastApplied).toBe('symmetric_evaluator_v1');
+    expect(row?.partyPolicyHash).toBe(createScriptedPartyPlan(symmetricMaterialState, {
+      decisionPolicy: 'symmetric_evaluator_v1',
+    }).policyHash);
     expect(firstTurn?.actor).toBe('combatant:cleric');
     expect(firstTurn?.commandSequence).toHaveLength(1);
     expect(firstTurn?.commandSequence.every((command) =>

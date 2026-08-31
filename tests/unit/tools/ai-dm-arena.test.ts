@@ -112,6 +112,45 @@ const LEGACY_BLOCK_ARGS = [
 ] as const;
 
 describe('AI-DM arena', () => {
+  it('parses both scripted-party policies, defaults to symmetric, and rejects unknown policies', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-party-policy-parse-'));
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'), '--dry-run',
+    ] as const;
+
+    expect(parseArenaArgs(common).partyPolicy).toBe('symmetric_evaluator_v1');
+    expect(parseArenaArgs([...common, '--party-policy', 'heuristic_v0']).partyPolicy)
+      .toBe('heuristic_v0');
+    expect(parseArenaArgs([...common, '--party-policy', 'symmetric_evaluator_v1']).partyPolicy)
+      .toBe('symmetric_evaluator_v1');
+    expect(() => parseArenaArgs([...common, '--party-policy', 'unknown-policy']))
+      .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
+  });
+
+  it('threads each party policy through a SIMULATED arena row with distinct hashes and plans', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-party-policy-thread-'));
+    const rows: Awaited<ReturnType<typeof runArena>>[number][] = [];
+
+    for (const policy of ['heuristic_v0', 'symmetric_evaluator_v1'] as const) {
+      const config = parseArenaArgs([
+        '--rooms', '1', '--reps', '1', '--seed', '3943001',
+        '--out', join(directory, `${policy}.jsonl`), '--dry-run',
+        '--party-policy', policy,
+      ]);
+      const [row] = await runArena(config);
+      if (row === undefined) throw new Error(`SIMULATED ${policy} arena produced no row.`);
+      rows.push(row);
+    }
+
+    const [heuristic, symmetric] = rows;
+    expect(heuristic?.partyPolicyHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(symmetric?.partyPolicyHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(heuristic?.partyPolicyHash).not.toBe(symmetric?.partyPolicyHash);
+    expect(heuristic?.teamPlans.party?.planHash).not.toBe(symmetric?.teamPlans.party?.planHash);
+    expect(heuristic?.teamPlans.party?.programs).not.toEqual(symmetric?.teamPlans.party?.programs);
+  });
+
   it('defaults to initiative segments while retaining the explicit legacy block selection', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-combat-model-'));
     const common = [

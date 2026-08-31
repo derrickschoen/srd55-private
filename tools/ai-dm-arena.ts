@@ -23,6 +23,11 @@ import {
   ROOM_INITIATIVE_PROFILES,
   type RoomInitiativeProfile,
 } from '../src/vtt/room-generator';
+import {
+  DEFAULT_SCRIPTED_PARTY_DECISION_POLICY,
+  SCRIPTED_PARTY_DECISION_POLICIES,
+  type ScriptedPartyDecisionPolicy,
+} from '../src/vtt/scripted-party-round';
 
 export const ARENA_BASES = ['standard', 'hard'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
@@ -39,6 +44,7 @@ export interface ArenaArm {
 export interface ArenaConfig {
   readonly combatModel: CombatModel;
   readonly initiativeProfile: RoomInitiativeProfile;
+  readonly partyPolicy: ScriptedPartyDecisionPolicy;
   readonly rooms: number;
   readonly reps: number;
   readonly seed: number;
@@ -166,6 +172,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--cli-bin', '--timeout-ms', '--kb',
       '--reaction-ask-default',
       '--combat-model', '--initiative-profile', '--arm-combat-model',
+      '--party-policy',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
@@ -240,6 +247,10 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (!ROOM_INITIATIVE_PROFILES.includes(initiativeProfile as RoomInitiativeProfile)) {
     throw new TypeError('--initiative-profile must be legacy or derived_v1.');
   }
+  const partyPolicy = values.get('--party-policy') ?? DEFAULT_SCRIPTED_PARTY_DECISION_POLICY;
+  if (!SCRIPTED_PARTY_DECISION_POLICIES.includes(partyPolicy as ScriptedPartyDecisionPolicy)) {
+    throw new TypeError('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
+  }
   const armCombatModels = new Map<string, CombatModel>();
   for (const raw of rawArmCombatModels) {
     const [label, model, extra] = raw.split(':');
@@ -296,6 +307,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   return {
     combatModel: combatModel as CombatModel,
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
+    partyPolicy: partyPolicy as ScriptedPartyDecisionPolicy,
     rooms: positiveInteger(values.get('--rooms') ?? '', '--rooms'),
     reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
     seed,
@@ -320,7 +332,10 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   };
 }
 
-export interface ArenaRunOptions extends Omit<ConversationRunOptions, 'roomStates' | 'onPrimaryDispatchStart'> {
+export interface ArenaRunOptions extends Omit<
+  ConversationRunOptions,
+  'roomStates' | 'onPrimaryDispatchStart' | 'partyPolicyOverride'
+> {
   readonly adapterByArm?: Readonly<Record<string, AgentSessionAdapter>>;
   readonly heartbeat?: (line: string) => void;
 }
@@ -433,6 +448,7 @@ function conversationConfig(
   return {
     combatModel: overrides.combatModel ?? config.combatModel,
     initiativeProfile: config.initiativeProfile,
+    partyPolicy: config.partyPolicy,
     fixturesPath: basisFixturesPath(config),
     rooms: overrides.rooms,
     rounds: overrides.rounds,
