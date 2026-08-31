@@ -7,6 +7,34 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D388.1 — OWNER: merge-track direction reconfirmed; track re-staffed (2026-08-31)
+
+Asked whether the idle engine-merge track restarts, owner: "I think I
+asked for the sim engine to be replaced by importing the vtt engine."
+Verified against D388 verbatim ("Both should import the same engine") —
+recollection correct; no new ruling. Consequence: the D388/D389/D390
+program stands as ruled — parallel track in wt/engine-merge, FABLE
+implements directly (D390 exception to codex-implements). Supervisor
+restarts the track now, interleaved with supervision ticks.
+
+## D418.10 — OWNER: R1-10 stays the only holdout (2026-08-31)
+
+Owner chose "R1-10 only" over adding a second sealed holdout: every
+improvement is judged on the ten preregistered rooms; the
+inspection-contamination concern is accepted.
+
+## D418.11 — OWNER: calibration sitting after rerun 2 only (2026-08-31)
+
+One owner scoring sitting, after rerun 2; rerun 1 is judged entirely by
+the model panel (D418.5). Supersedes the D419.1 parking of R01/R02
+scores — those fold into the post-rerun-2 sitting.
+
+## D418.12 — OWNER: PC intel timing confirmed post-rerun-1 (2026-08-31)
+
+Confirms the supervisor proposal in D418.9: the PC-side symmetric
+evaluator with player knowledge is built after rerun 1; rerun 1 runs
+against heuristic PCs.
+
 ## D418.6 — OWNER: rerun 1 is diagnostic-only; rerun 2 gates (2026-08-31)
 
 Owner ruling from the three-way question consensus (Fable + codex + opus
