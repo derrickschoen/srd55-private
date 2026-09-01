@@ -1,5 +1,25 @@
 # Binding scope decisions
 
+## P2 wire compaction UNSEALED: FAILS promotion — SUPERVISOR (2026-09-01)
+
+Compact-wire (sparse slots + short-ref ids + sparse status + derivable
+labels) vs P1-full control, same era, blinded panel (sol 7.77/6.32,
+opus 5.10/4.18, fable 6.43/5.50 control/compact), shuffle 163. POOLED:
+control 6.43 vs compact 5.33 (−1.10), paired W10/L15/T3. Sensitivity
+excluding the two symmetric CLI-timeout pairs: −0.90, W9/L14/T3. Byte
+cut delivered: 19.1% p50 / 20.5% p90 pre-trim — the ≥8% bar met — but
+quality misses the ≤0.2 band by 4x. VERDICT: not promoted; P3's common
+control remains the full presentation. PROGRAM FINDING: "same
+information, fewer bytes" HURTS at luna-low — the volume hypothesis
+(A1/A7) is refuted in its pure form; representation legibility matters
+more than byte count. Slices: compact WINS rooms 01/02/03/05 (+0.2 to
++1.4) and collapses on 04/06/10 (−2.1 to −7.3) — D427 heterogeneity
+again. One packet-builder inconsistency found and recorded: CLI-timeout
+rows are classified 'refused' (scored 0) while silent service faults
+are 'service_null' (excluded); symmetric this round, to be unified
+before P5. P3 (four-arm category screen: rows/opportunity/movement/
+threats one-seam briefs vs full control) dispatched.
+
 ## D429 — OWNER: three post-P1 rulings (2026-09-01)
 
 1. **Standing post-merge behavioral gate: SHAPE-STAT MINI-A/B** — after
