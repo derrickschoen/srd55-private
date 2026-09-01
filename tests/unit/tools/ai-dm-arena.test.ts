@@ -22,6 +22,7 @@ import {
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
+import { engineActionId, engineSpellId } from '../../../src/vtt/turn-proposal';
 import {
   circumstanceFeatureVectorSchema,
   DEFAULT_RENDERER_PROFILE,
@@ -29,6 +30,7 @@ import {
 } from '../../../src/vtt/renderer-profile';
 import {
   basisFixturesPath,
+  extractArenaProbeVerdict,
   parseArenaArgs,
   runArena,
 } from '../../../tools/ai-dm-arena';
@@ -211,6 +213,7 @@ describe('AI-DM arena', () => {
     ['standard', 'tests/fixtures/arena-basis'],
     ['hard', 'tests/fixtures/arena-basis-hard'],
     ['brutal', 'tests/fixtures/arena-basis-brutal'],
+    ['scenario', 'tests/fixtures/arena-scenarios'],
   ] as const)('maps the %s basis to its frozen fixture directory', (basis, directory) => {
     expect(basisFixturesPath({ cwd: process.cwd(), basis }))
       .toBe(join(process.cwd(), directory));
@@ -234,9 +237,69 @@ describe('AI-DM arena', () => {
       .toBe('symmetric_evaluator_v1');
     expect(parseArenaArgs([...common, '--basis', 'brutal']).basis).toBe('brutal');
     expect(() => parseArenaArgs([...common, '--basis', 'nightmare']))
-      .toThrow('--basis must be standard, hard, or brutal.');
+      .toThrow('--basis must be standard, hard, brutal, or scenario.');
     expect(() => parseArenaArgs([...common, '--party-policy', 'unknown-policy']))
       .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
+  });
+
+  it('runs the frozen control probe through the arena and emits a deterministic mechanical verdict', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-hypnotic-pattern-probe-'));
+    const run = async (name: string) => {
+      const [row] = await runArena(parseArenaArgs([
+        '--rooms', '1', '--reps', '1', '--seed', '432', '--basis', 'scenario', '--dry-run',
+        '--out', join(directory, `${name}.jsonl`),
+      ]));
+      if (row === undefined) throw new Error('Scenario arena produced no row.');
+      return row;
+    };
+    const first = await run('first');
+    const second = await run('second');
+
+    expect(first.probeVerdict).toEqual({
+      scenario: 'hypnotic-pattern-cc',
+      chose_control: false,
+      selected_instead: { kind: 'action', id: 'restless-touch' },
+    });
+    expect(extractArenaProbeVerdict(first.basis, first.authorizedPlan)).toEqual(first.probeVerdict);
+    if (first.authorizedPlan === null) throw new Error('Scenario arena omitted its authorized plan.');
+    const controlPlan = first.authorizedPlan.map((entry) => entry.actorId !== 'combatant:d432-incubus'
+      ? entry
+      : {
+          ...entry,
+          resolutionSummary: {
+            ...entry.resolutionSummary,
+            actionSlots: [{
+              slot: 'main' as const,
+              kind: 'cast_spell' as const,
+              actionId: engineActionId('spellcasting'),
+              spellId: engineSpellId('hypnotic-pattern'),
+              targetIds: [],
+              objectId: null,
+            }],
+          },
+        });
+    expect(extractArenaProbeVerdict('scenario', controlPlan)).toEqual({
+      scenario: 'hypnotic-pattern-cc',
+      chose_control: true,
+      selected_instead: null,
+    });
+    expect(second.probeVerdict).toEqual(first.probeVerdict);
+    expect(second.startingRoomDigest).toBe(first.startingRoomDigest);
+    expect(second.rawTurnContext).toBe(first.rawTurnContext);
+
+    const context = objectValue(JSON.parse(first.rawTurnContext) as unknown, 'scenario turn context');
+    const actors = context['actors'];
+    if (!Array.isArray(actors)) throw new TypeError('Scenario turn context omitted actors.');
+    const actor = actors.map((entry) => objectValue(entry, 'scenario actor'))
+      .find((entry) => entry['actor_id'] === 'combatant:d432-incubus');
+    if (actor === undefined || !Array.isArray(actor['options'])) {
+      throw new Error('Scenario turn context omitted Incubus options.');
+    }
+    const labels = actor['options'].map((entry) => objectValue(entry, 'scenario option')['label']);
+    expect(labels).toContain(
+      'spellcasting/hypnotic-pattern (1/1) [30-ft cube -> combatant:d432-cleric, combatant:d432-fighter, combatant:d432-rogue, combatant:d432-wizard]',
+    );
+    expect(labels).toContain('Restless Touch + Restless Touch -> combatant:d432-wizard');
   });
 
   it('threads inline renderer-profile JSON through dry-run rows while keeping arena metadata', { timeout: 30_000 }, async () => {

@@ -1,5 +1,6 @@
 import type { Brand } from '../domain/ids';
 import type { GridCell } from '../combat/grid';
+import type { AreaTemplate } from '../combat/templates';
 import type { CombatantId, WorldObjectId } from '../combat/values';
 import type { EngineTargetSelector } from './engine-query-port';
 
@@ -53,6 +54,8 @@ export type EngineMainActionUse =
       readonly sourceActionId: EngineActionId;
       readonly spellId: EngineSpellId;
       readonly targets: readonly EngineTargetSelector[];
+      /** Exact engine-owned placement; null for spells without a placed area. */
+      readonly area: AreaTemplate | null;
     }
   | {
       readonly kind: 'use_world_object';
@@ -67,6 +70,8 @@ export type EngineBonusActionUse =
       readonly sourceActionId: EngineActionId;
       readonly spellId: EngineSpellId;
       readonly targets: readonly EngineTargetSelector[];
+      /** Exact engine-owned placement; null for spells without a placed area. */
+      readonly area: AreaTemplate | null;
     }
   | {
       readonly kind: 'saving_throw';
@@ -121,6 +126,8 @@ export interface ResolvedActionSlotUse {
   readonly spellId: EngineSpellId | null;
   readonly targetIds: readonly CombatantId[];
   readonly objectId: WorldObjectId | null;
+  /** Present only for a placed-area spell. */
+  readonly area?: AreaTemplate;
 }
 
 export interface ResolvedTurnMechanics {
