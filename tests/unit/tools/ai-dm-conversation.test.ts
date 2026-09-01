@@ -40,6 +40,8 @@ import {
   type RevisionDeltaOperation,
 } from '../../../src/vtt/dm-bridge/projection-transport';
 import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
+import { actorOpportunityReport } from '../../../src/vtt/intel/opportunity-cost';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 import {
@@ -936,6 +938,34 @@ describe('AI-DM engine MCP conversation runner', () => {
       expect.objectContaining({ kind: 'dodge' }),
     ]));
     expect(row?.projectionRevision).toBeGreaterThan(row?.contextRevision ?? 0);
+  });
+
+  it('does not depend on turn-context rendering to resolve a brutal exhaustion frontier', async () => {
+    const state = freshMonsterPlanningState(
+      await loadArenaFixture('tests/fixtures/arena-basis-brutal/seed-6203001.json'),
+    );
+    const actorIds = state.combatants.flatMap((combatant) =>
+      combatant.profile.kind === 'monster' ? [combatant.profile.id] : []);
+    const resolutions = () => actorIds.map((actorId) =>
+      actorOpportunityReport(state, actorId, canonicalEngineQueryPort, state.revision).frontierResolution);
+    const beforeRender = resolutions();
+    const runtime = createEngineMcpRuntime(state, { toolProfile: 'dm', requestedActorIds: actorIds });
+    const capsule = runtime.feed.current();
+    runtime.toolSurface.execute('engine.get_turn_context', {
+      run_id: capsule.runId,
+      expected_revision: capsule.revision,
+      scope: 'round',
+      granularity: 'full',
+      intel_mode: 'full',
+    });
+
+    expect(beforeRender).toEqual([
+      'contains_unresolved',
+      'fully_resolved',
+      'fully_resolved',
+      'contains_unresolved',
+    ]);
+    expect(resolutions()).toEqual(beforeRender);
   });
 
   it('runs a model-free stdio MCP dry-run smoke', { timeout: 30_000 }, async () => {

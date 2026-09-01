@@ -9,13 +9,24 @@ const combatantIdSchema = z.custom<CombatantId>((value) =>
   typeof value === 'string' && value.trim() === value && value.length > 0 && value.length <= 200);
 const optionIdSchema = z.custom<EngineOptionId>((value) =>
   typeof value === 'string' && value.startsWith('option:') && value.length <= 200);
-const overrideJustificationSchema: z.ZodType<EngineTurnProposal['overrideJustification']> = z.union([
-  z.null(),
+const overrideJustificationValueSchema = z.discriminatedUnion('reason', [
   z.object({
-    reason: z.enum(['morale', 'objective', 'roleplay', 'resource_conservation', 'unknown_engine_gap']),
+    reason: z.enum(['morale', 'objective', 'roleplay', 'resource_conservation']),
     note: z.string().min(1).max(500).optional(),
-  }).strict().transform((value): NonNullable<EngineTurnProposal['overrideJustification']> =>
-    value.note === undefined ? { reason: value.reason } : { reason: value.reason, note: value.note }),
+  }).strict(),
+  z.object({
+    reason: z.literal('unknown_engine_gap'),
+    note: z.string().min(1).max(500),
+  }).strict(),
+]).transform((value): NonNullable<EngineTurnProposal['overrideJustification']> => {
+  if (value.reason === 'unknown_engine_gap') return value;
+  return value.note === undefined
+    ? { reason: value.reason }
+    : { reason: value.reason, note: value.note };
+});
+const overrideJustificationSchema = z.union([
+  z.null(),
+  overrideJustificationValueSchema,
 ]);
 
 const proposalSchema: z.ZodType<EngineTurnProposal> = z.object({

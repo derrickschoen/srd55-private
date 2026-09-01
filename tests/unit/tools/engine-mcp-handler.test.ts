@@ -695,6 +695,47 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(accepted['status']).toBe('proposed');
   });
 
+  it('rejects passive dominance overrides that contradict or omit their mechanical rationale', async () => {
+    const resourceFixture = await fixtureRuntime({ requestedActorCount: 1 });
+    const resourceFacts = fixtureFacts(resourceFixture.state, resourceFixture.runtime);
+    const endTurn = resourceFixture.runtime.feed.current().projection.combatants
+      .find((combatant) => combatant.id === resourceFacts.actor)?.options
+      .find((option) => option.actionSlots.some((slot) => slot.use.kind === 'end_turn'));
+    if (endTurn === undefined) throw new Error('Fixture End Turn option is absent.');
+    const resourceResult = structured(toolCall(
+      resourceFixture.runtime.handler,
+      'engine.submit_round_proposals',
+      {
+        ...happyArguments('engine.submit_round_proposals', resourceFixture.state, resourceFixture.runtime),
+        idempotency_key: 'round-end-turn-resource-override-0001',
+        proposals: [{
+          ...resourceFacts.proposal,
+          primary_option_id: endTurn.optionId,
+          override_justification: { reason: 'resource_conservation' },
+        }],
+      },
+    ));
+    expect(resourceResult).toMatchObject({
+      status: 'rejected',
+      actor_refusals: [{ codes: ['DOMINANCE_OVERRIDE_CONTRADICTS_METRICS'] }],
+    });
+    expect(resourceFixture.runtime.proposals).toEqual([]);
+
+    const gapFixture = await fixtureRuntime({ requestedActorCount: 1 });
+    const gapFacts = fixtureFacts(gapFixture.state, gapFixture.runtime);
+    const gapResult = toolCall(gapFixture.runtime.handler, 'engine.submit_round_proposals', {
+      ...happyArguments('engine.submit_round_proposals', gapFixture.state, gapFixture.runtime),
+      idempotency_key: 'round-vacuous-engine-gap-override-0001',
+      proposals: [{
+        ...gapFacts.proposal,
+        override_justification: { reason: 'unknown_engine_gap' },
+      }],
+    });
+    expect(gapResult['isError']).toBe(true);
+    expect(JSON.stringify(gapResult)).toContain('note');
+    expect(gapFixture.runtime.proposals).toEqual([]);
+  });
+
   it('renders versioned materiality detail for a newly dying target in adjustment context', async () => {
     const loaded = await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
     const fighter = loaded.combatants.find((combatant) => combatant.profile.id === 'combatant:fighter');
@@ -725,6 +766,57 @@ describe('engine MCP dual-handshake full surface conformance', () => {
           affected_actor_ids: ['combatant:fighter'],
           summary: expect.stringContaining('combatant:fighter now dying'),
         }],
+      },
+    });
+  });
+
+  it('keeps active-turn adjustment context on the requested brutal monster frontier at a PC boundary', async () => {
+    const loaded = await loadArenaFixture('tests/fixtures/arena-basis-brutal/seed-6203001.json');
+    const activePc = loaded.combatants.find((combatant) =>
+      combatant.profile.id === 'combatant:cleric');
+    const actors = loaded.combatants.flatMap((combatant) =>
+      combatant.profile.kind === 'monster' && combatant.life !== 'dead'
+        ? [combatant.profile.id]
+        : []);
+    if (activePc === undefined || actors.length === 0) {
+      throw new Error('Brutal adjustment fixture actors are absent.');
+    }
+    const state: EncounterState = {
+      ...loaded,
+      activeCombatant: activePc.profile.id,
+      activeInitiativeIndex: 0,
+    };
+    let renderCount = 0;
+    const runtime = createEngineMcpRuntime(state, {
+      toolProfile: 'dm',
+      requestKind: 'plan_adjustment',
+      requestedActorIds: actors,
+      planAdjustment: adjustmentMetadata(actors),
+      onTurnContextRendered: () => { renderCount += 1; },
+    });
+    const capsule = runtime.feed.current();
+    const context = structured(toolCall(runtime.handler, 'engine.get_turn_context', {
+      run_id: capsule.runId,
+      expected_revision: capsule.revision,
+      scope: 'active_turn',
+      granularity: 'full',
+      intel_mode: 'full',
+      actor_ids: [activePc.profile.id],
+    }));
+    const renderedActors = context['actors'];
+    if (!Array.isArray(renderedActors)) throw new TypeError('Turn context actors are absent.');
+
+    expect(renderedActors.map((actor) => record(actor)['actor_id'])).toEqual([...actors].sort());
+    expect(renderedActors.every((actor) => {
+      const options = record(actor)['options'];
+      return Array.isArray(options) && options.length > 0;
+    })).toBe(true);
+    expect(renderCount).toBe(1);
+    expect(JSON.stringify(context)).not.toContain('No legal engine option exists for combatant:cleric');
+    expect(context).toMatchObject({
+      request: {
+        kind: 'plan_adjustment',
+        required_actor_ids: actors,
       },
     });
   });

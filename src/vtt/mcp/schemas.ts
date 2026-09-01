@@ -64,10 +64,16 @@ const engagement = z.object({
   anchor: targetSelector.nullable().optional(),
 }).strict().describe('Semantic engagement objective resolved by the engine.');
 
-const overrideJustification = z.object({
-  reason: z.enum(['morale', 'objective', 'roleplay', 'resource_conservation', 'unknown_engine_gap']),
-  note: z.string().min(1).max(500).optional(),
-}).strict().describe('Required when a selected option is strictly dominated on every resolved declared metric.');
+const overrideJustification = z.discriminatedUnion('reason', [
+  z.object({
+    reason: z.enum(['morale', 'objective', 'roleplay', 'resource_conservation']),
+    note: z.string().min(1).max(500).optional(),
+  }).strict(),
+  z.object({
+    reason: z.literal('unknown_engine_gap'),
+    note: z.string().min(1).max(500),
+  }).strict(),
+]).describe('Required when a selected option is strictly dominated on every resolved declared metric; unknown engine gaps must be identified in note.');
 const turnProposal = z.object({
   actor_id: identifier,
   expected_revision: z.number().int().min(0),
