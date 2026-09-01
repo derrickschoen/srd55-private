@@ -11,6 +11,7 @@ import {
   type ConversationRunOptions,
   type ConversationTokenCounts,
   type CombatModel,
+  type TurnContextRenderEvidence,
 } from './ai-dm-conversation';
 import type { IntelMode } from '../src/vtt/mcp/engine-server';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
@@ -29,6 +30,13 @@ import {
   SCRIPTED_PARTY_DECISION_POLICIES,
   type ScriptedPartyDecisionPolicy,
 } from '../src/vtt/scripted-party-round';
+import {
+  DEFAULT_RENDERER_PROFILE,
+  circumstanceFeatureVectorSchema,
+  rendererProfileSchema,
+  type CircumstanceFeatureVector,
+  type RendererProfile,
+} from '../src/vtt/renderer-profile';
 
 export const ARENA_BASES = ['standard', 'hard', 'brutal'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
@@ -44,6 +52,7 @@ export interface ArenaArm {
 
 export interface ArenaConfig {
   readonly intelMode: IntelMode;
+  readonly rendererProfile: RendererProfile;
   readonly combatModel: CombatModel;
   readonly initiativeProfile: RoomInitiativeProfile;
   readonly partyPolicy: ScriptedPartyDecisionPolicy;
@@ -72,6 +81,8 @@ export interface ArenaConfig {
 
 export interface ArenaRow {
   readonly intelMode: IntelMode;
+  readonly rendererAttribution: import('./ai-dm-conversation').ConversationRow['rendererAttribution'];
+  readonly circumstanceFeatures: CircumstanceFeatureVector;
   readonly combatModel: CombatModel;
   readonly roundProtocolVersion: import('./ai-dm-conversation').ConversationRow['roundProtocolVersion'];
   readonly startingRoomDigest: string;
@@ -177,6 +188,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--combat-model', '--initiative-profile', '--arm-combat-model',
       '--party-policy',
       '--intel-mode',
+      '--renderer-profile',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
@@ -259,6 +271,9 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (intelMode !== 'full' && intelMode !== 'off') {
     throw new TypeError('--intel-mode must be full or off.');
   }
+  const rendererProfile = values.has('--renderer-profile')
+    ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
+    : DEFAULT_RENDERER_PROFILE;
   const armCombatModels = new Map<string, CombatModel>();
   for (const raw of rawArmCombatModels) {
     const [label, model, extra] = raw.split(':');
@@ -314,6 +329,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   }
   return {
     intelMode,
+    rendererProfile,
     combatModel: combatModel as CombatModel,
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
     partyPolicy: partyPolicy as ScriptedPartyDecisionPolicy,
@@ -391,6 +407,11 @@ function arenaRows(
 ): readonly ArenaRow[] {
   return rows.map((row): ArenaRow => ({
     intelMode: row.intelMode,
+    rendererAttribution: {
+      policyVersion: row.rendererAttribution.policyVersion,
+      profile: rendererProfileSchema.parse(row.rendererAttribution.profile),
+    },
+    circumstanceFeatures: circumstanceFeatureVectorSchema.parse(row.circumstanceFeatures),
     combatModel: row.combatModel,
     roundProtocolVersion: row.roundProtocolVersion,
     startingRoomDigest: row.startingRoomDigest,
@@ -462,6 +483,7 @@ function conversationConfig(
 ): import('./ai-dm-conversation').ConversationConfig {
   return {
     intelMode: config.intelMode,
+    rendererProfile: config.rendererProfile,
     combatModel: overrides.combatModel ?? config.combatModel,
     initiativeProfile: config.initiativeProfile,
     partyPolicy: config.partyPolicy,
@@ -494,7 +516,12 @@ export async function runArena(
 ): Promise<readonly ArenaRow[]> {
   const states = await frozenRoomStates(config);
   const seeds = Array.from({ length: config.rooms }, (_unused, index) => config.seed + index);
-  const { adapterByArm, heartbeat = stdoutHeartbeat, ...conversationOptions } = options;
+  const {
+    adapterByArm,
+    heartbeat = stdoutHeartbeat,
+    rendererEvidenceCache = new Map<string, TurnContextRenderEvidence>(),
+    ...conversationOptions
+  } = options;
   let rows: readonly ArenaRow[];
   if (!config.interleave) {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-arena-independent-'));
@@ -511,6 +538,7 @@ export async function runArena(
           outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-single.jsonl`),
         }), {
           ...conversationOptions,
+          rendererEvidenceCache,
           roomStates: [structuredClone(states[room - 1]!)],
         });
         const [row] = arenaRows(config, result.rows, 'single', [seeds[room - 1]!]);
@@ -548,6 +576,7 @@ export async function runArena(
             combatModel: arm.combatModel,
           }), {
             ...conversationOptions,
+            rendererEvidenceCache,
             ...(adapterByArm?.[arm.label] === undefined ? {} : { adapter: adapterByArm[arm.label] }),
             roomStates: [structuredClone(states[room - 1]!)],
             onPrimaryDispatchStart: () => {

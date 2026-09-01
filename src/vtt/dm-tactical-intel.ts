@@ -317,7 +317,29 @@ export function topDmActorIntelRows(
   actorId: CombatantId,
   maximum = 3,
 ): readonly DmTargetIntelRow[] {
-  return rows.filter((row) => row.actorId === actorId).sort(compareRows).slice(0, maximum);
+  return rows.filter((row) => row.actorId === actorId && isInformativeDmIntelRow(row))
+    .sort(compareRows).slice(0, maximum);
+}
+
+/**
+ * Identity and an unresolved reason do not make a tactical row informative.
+ * This predicate deliberately ignores why the providers returned absence; the
+ * caller may report the unresolved reasons separately, but must not ship a row
+ * whose tactical payload is entirely absence/unknown.
+ */
+export function isInformativeDmIntelRow(row: DmTargetIntelRow): boolean {
+  return row.visible !== null || row.cover !== 'unknown' || row.distanceFeet !== null ||
+    row.rangeBand !== 'unresolved' || row.rollMode !== 'unresolved' ||
+    row.hitProbability !== null || row.criticalProbability !== null ||
+    row.expectedDamage !== null || row.minimumMovementFeet !== null ||
+    row.deathFailureOnHit || row.failuresOnHit !== 0 || row.failuresOnCritical !== 0 ||
+    row.automaticCriticalMaximumDistanceFeet !== null;
+}
+
+export function informativeDmIntelRows(
+  rows: readonly DmTargetIntelRow[],
+): readonly DmTargetIntelRow[] {
+  return rows.filter(isInformativeDmIntelRow);
 }
 
 const PROBABILITY_MARKS = [
@@ -375,6 +397,13 @@ export function renderDmContextIntelRow(row: DmTargetIntelRow): Readonly<Record<
   if (!row.deathFailureOnHit && row.automaticCriticalMaximumDistanceFeet === null) {
     delete compact['consequence_codes'];
   }
+  for (const key of ['action_id', 'distance_feet', 'p_hit', 'ev', 'movement_need_feet'] as const) {
+    if (compact[key] === null) delete compact[key];
+  }
+  if (compact['visibility'] === 'UNKNOWN') delete compact['visibility'];
+  if (compact['cover'] === 'UNKNOWN') delete compact['cover'];
+  if (compact['range'] === 'UNRESOLVED') delete compact['range'];
+  if (compact['roll_mode'] === 'UNRESOLVED') delete compact['roll_mode'];
   return compact;
 }
 

@@ -15,6 +15,7 @@ import { TEAM_SCORER_POLICY } from '../intel/team-scorer';
 import { ALERTING_POLICY } from '../../combat/alerting';
 import { SEARCH_MEMORY_POLICY } from '../../combat/search-memory';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
+import { rendererAttributionSchema } from '../renderer-profile';
 
 export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v1' as const;
 export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v1' as const;
@@ -579,16 +580,39 @@ const revisionDeltaOperation = z.union([
 ]);
 const turnDeltaOutput = z.object({
   granularity: z.literal('turn_delta'),
-  anchor: z.object({
-    base_revision: z.number().int().min(1), revision: z.number().int().min(1),
-    base_context_hash: z.string().regex(/^[0-9a-f]{64}$/u),
-    context_hash: z.string().regex(/^[0-9a-f]{64}$/u),
-    state_ref: stateRef, request: turnRequest,
-  }).strict(),
+  anchor: z.union([
+    z.object({
+      base_revision: z.number().int().min(1), revision: z.number().int().min(1),
+      base_context_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+      context_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+      state_ref: stateRef, request: turnRequest,
+    }).strict(),
+    z.object({
+      base_revision: z.number().int().min(1), revision: z.number().int().min(1),
+      base_context_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+      context_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+    }).strict(),
+  ]),
   changes: z.array(revisionDeltaOperation).max(10_000),
   context_trimmed: z.boolean(),
+  renderer_attribution: rendererAttributionSchema.optional(),
 }).strict();
-const turnContextOutput = z.union([fullTurnContextOutput, intelSuppressedTurnContextOutput, turnDeltaOutput]);
+const profiledFullTurnContextOutput = z.object({
+  granularity: z.literal('full'),
+  context_trimmed: z.boolean(),
+  state_ref: stateRef,
+  request: turnRequest,
+  actors: z.array(z.record(z.string(), z.unknown())).min(1).max(50),
+  renderer_attribution: rendererAttributionSchema,
+  truncated: z.boolean(),
+  next_cursor: z.string().max(500).nullable(),
+}).passthrough();
+const turnContextOutput = z.union([
+  fullTurnContextOutput,
+  intelSuppressedTurnContextOutput,
+  profiledFullTurnContextOutput,
+  turnDeltaOutput,
+]);
 const proposeFromPlayOutput = z.object({
   state_ref: stateRef,
   play_name: z.enum(PLAY_NAMES),
@@ -652,6 +676,12 @@ const tacticalIntelOutput = z.object({
   renderer_policy: z.literal(DM_TURN_INTEL_POLICY),
   evaluator_policy: z.literal(TACTICAL_EVALUATOR_POLICY),
   rows: z.array(compactIntelRow).max(20),
+  unresolved_findings: z.array(z.object({
+    actor_id: identifier,
+    target_id: identifier,
+    action_id: identifier.nullable(),
+    reason_codes: z.array(shortCode).min(1).max(50),
+  }).strict()).max(1_000),
   movement_policy: z.literal(MOVEMENT_OPTIONS_INTEL_POLICY),
   movement_rows: z.array(movementIntelRow).max(100),
   opportunity_policy: z.literal(OPPORTUNITY_COST_POLICY),

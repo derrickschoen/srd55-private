@@ -36,6 +36,8 @@ import {
   captureDmIntel,
   exactDmIntelMatrix,
   fullInitiativeIntel,
+  informativeDmIntelRows,
+  isInformativeDmIntelRow,
   pairwiseInitiativeIntel,
   renderDmContextIntelRow,
   renderDmIntelRow,
@@ -64,6 +66,17 @@ import {
 } from '../intel/team-scorer';
 import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
 import { diffTurnContextValues } from '../dm-bridge/projection-transport';
+import {
+  DEFAULT_RENDERER_PROFILE,
+  extractCircumstanceFeatures,
+  renderBytes,
+  rendererProfileSchema,
+  renderTurnContextProfile,
+  resolveOptionReference,
+  type CircumstanceFeatureVector,
+  type RendererProfile,
+  type RendererRemovalCounts,
+} from '../renderer-profile';
 import { submitSpeculativeRoundPlan } from '../speculative-plan-submission';
 import type { SpeculativePlanSink } from '../speculative-plan-types';
 import {
@@ -218,6 +231,14 @@ interface EngineMcpDependencies {
   readonly toolProfile?: EngineMcpToolProfile;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
+  readonly rendererProfile?: RendererProfile;
+  readonly turnContextMaximumBytes?: number;
+  readonly onTurnContextRendered?: (result: {
+    readonly preTrimBytes: number;
+    readonly postTrimBytes: number;
+    readonly features: CircumstanceFeatureVector;
+    readonly removals: RendererRemovalCounts;
+  }) => void;
 }
 
 export interface EngineToolSurface {
@@ -858,6 +879,16 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   }
   const { state, stateSource: feed, proposals, speculativePlans, narration, adjudications, rules } = dependencies;
   const { queries, turnProposals } = dependencies;
+  const rendererProfile = rendererProfileSchema.parse(
+    dependencies.rendererProfile ?? DEFAULT_RENDERER_PROFILE,
+  );
+  const turnContextMaximumBytes = dependencies.turnContextMaximumBytes ?? TURN_CONTEXT_MAX_BYTES;
+  if (!Number.isSafeInteger(turnContextMaximumBytes) || turnContextMaximumBytes < 1) {
+    throw new RangeError('turnContextMaximumBytes must be a positive safe integer.');
+  }
+  // Profile and measure the complete incumbent context before the one authoritative cap pass.
+  const fullContextAssemblyMaximumBytes = Number.MAX_SAFE_INTEGER;
+  let optionReferences: ReadonlyMap<string, string> = new Map();
   const idempotency = new Map<string, { readonly bytes: string; readonly result: unknown }>();
   const applicationCursors = new Map<string, { readonly digest: string; readonly key: string; readonly offset: number }>();
   const opportunityReports = new Map<string, ReturnType<typeof actorOpportunityReport>>();
@@ -1052,50 +1083,50 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         result.context_trimmed = true;
         output = suggestedPlan === null ? result : { ...result, suggested_plan: suggestedPlan };
       };
-      if (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+      if (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes &&
         result.applicable_skills.length > 0) {
         result.applicable_skills.splice(0);
         markContextTrimmed();
       }
-      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes) {
         const actor = [...result.actors].reverse().find((candidate) => candidate.options.length > 0);
         if (actor === undefined) break;
         actor.options.pop();
         markContextTrimmed();
       }
-      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes) {
         const actor = [...result.actors].reverse().find((candidate) => candidate.threats.length > 0);
         if (actor === undefined) break;
         actor.threats.pop();
         markContextTrimmed();
       }
-      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes &&
         result.applicable_skills.length > 0) {
         result.applicable_skills.pop();
         markContextTrimmed();
       }
-      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes &&
         result.recent_changes.length > 0) {
         result.recent_changes.pop();
         markContextTrimmed();
       }
-      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes &&
         result.summary.terrain_tags.length > 0) {
         result.summary.terrain_tags.pop();
         markContextTrimmed();
       }
       if (suggestedPlan !== null &&
-        new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+        new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes) {
         result.truncated = true;
         result.context_trimmed = true;
         output = result;
       }
-      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+      while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes &&
         result.actors.length > 1) {
         result.actors.pop();
         markContextTrimmed();
       }
-      if (encodedJsonBytes(output) > TURN_CONTEXT_MAX_BYTES) {
+      if (encodedJsonBytes(output) > fullContextAssemblyMaximumBytes) {
         const actor = result.actors[0];
         if (actor === undefined) throw new Error('Turn context requires at least one actor.');
         return {
@@ -1131,6 +1162,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (actor === undefined) throw new RangeError(`ACTOR_ABSENT:${actorId}`);
       const all = tacticalOptions(state, queries, capsule, actorId, includeExpectations, true);
       const intelRows = topDmActorIntelRows(exactIntel, actorId);
+      const unresolvedFindings = exactIntel.filter((row) =>
+        row.actorId === actorId && !isInformativeDmIntelRow(row)).map((row) => ({
+          target_id: row.targetId,
+          action_id: row.actionId,
+          reason_codes: row.unresolvedReasons,
+        }));
       const opportunity = opportunityReport(capsule, actorId);
       return {
         actor_id: actorId,
@@ -1148,6 +1185,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             : [],
           opportunity_cost: renderDodgeOpportunityCost(opportunity),
           salient_window: salientInitiativeWindow(capsule, intelRows),
+          ...(unresolvedFindings.length === 0 ? {} : { unresolved_findings: unresolvedFindings }),
         },
         omitted: all.length > maximum,
       };
@@ -1245,7 +1283,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     let output: Readonly<Record<string, unknown>> = suggestedPlan === null
       ? result
       : { ...result, suggested_plan: suggestedPlan };
-    const initialContextUnderPressure = new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES;
+    const initialContextUnderPressure = new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes;
     const markContextTrimmed = (): void => {
       result.truncated = true;
       result.context_trimmed = true;
@@ -1297,78 +1335,78 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       result.alert_state = contextReports.alertStateCompact;
       markContextTrimmed();
     }
-    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.options.length > 0);
       if (actor === undefined) break;
       actor.options.pop();
       markContextTrimmed();
     }
-    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes &&
       compactTeamPlanFrontier()) {
       // Each iteration advances to the next schema-valid compact representation.
     }
-    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.intel.movement.length > 1);
       if (actor === undefined) break;
       actor.intel.movement.pop();
       markContextTrimmed();
     }
-    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.intel.rows.length > 1);
       if (actor === undefined) break;
       actor.intel.rows.pop();
       markContextTrimmed();
     }
-    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.threats.length > 0);
       if (actor === undefined) break;
       actor.threats.pop();
       markContextTrimmed();
     }
-    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes &&
       result.applicable_skills.length > 0) {
       result.applicable_skills.pop();
       markContextTrimmed();
     }
-    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes &&
       result.recent_changes.length > 0) {
       result.recent_changes.pop();
       markContextTrimmed();
     }
-    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes &&
       result.summary.terrain_tags.length > 0) {
       result.summary.terrain_tags.pop();
       markContextTrimmed();
     }
-    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.intel.rows.length > 0);
       if (actor === undefined) break;
       actor.intel.rows.pop();
       markContextTrimmed();
     }
-    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.intel.movement.length > 0);
       if (actor === undefined) break;
       actor.intel.movement.pop();
       markContextTrimmed();
     }
-    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.intel.opportunity_cost !== null);
       if (actor === undefined) break;
       actor.intel.opportunity_cost = null;
       markContextTrimmed();
     }
-    while (encodedJsonBytes(output) > TURN_CONTEXT_MAX_BYTES) {
+    while (encodedJsonBytes(output) > fullContextAssemblyMaximumBytes) {
       const actor = [...result.actors].reverse().find((candidate) => candidate.intel.salient_window !== null);
       if (actor === undefined) break;
       actor.intel.salient_window = null;
       markContextTrimmed();
     }
-    while (encodedJsonBytes(output) > TURN_CONTEXT_MAX_BYTES && result.applicable_plays.length > 0) {
+    while (encodedJsonBytes(output) > fullContextAssemblyMaximumBytes && result.applicable_plays.length > 0) {
       result.applicable_plays.pop();
       markContextTrimmed();
     }
-    while (encodedJsonBytes(output) > TURN_CONTEXT_MAX_BYTES) {
+    while (encodedJsonBytes(output) > fullContextAssemblyMaximumBytes) {
       const actor = [...result.actors].reverse().find((candidate) =>
         (Array.isArray(candidate.status.effect_tags) && candidate.status.effect_tags.length > 0) ||
         (Array.isArray(candidate.status.pending_decision_ids) && candidate.status.pending_decision_ids.length > 0));
@@ -1380,17 +1418,17 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       markContextTrimmed();
     }
     if (suggestedPlan !== null &&
-      new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES) {
+      new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes) {
       result.truncated = true;
       result.context_trimmed = true;
       output = result;
     }
-    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > TURN_CONTEXT_MAX_BYTES &&
+    while (new TextEncoder().encode(JSON.stringify(output)).byteLength > fullContextAssemblyMaximumBytes &&
       result.actors.length > 1) {
       result.actors.pop();
       markContextTrimmed();
     }
-    if (encodedJsonBytes(output) > TURN_CONTEXT_MAX_BYTES) {
+    if (encodedJsonBytes(output) > fullContextAssemblyMaximumBytes) {
       const actor = result.actors[0];
       if (actor === undefined) throw new Error('Turn context requires at least one actor.');
       return {
@@ -1429,39 +1467,312 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     }
     return output;
   }
+  const decodeRenderedProposal = (value: unknown): EngineTurnProposal => {
+    const input = record(value, 'proposal');
+    const primary = stringField(input, 'primary_option_id');
+    const fallback = input['fallback_option_id'];
+    return decodeProposal({
+      ...input,
+      primary_option_id: resolveOptionReference(primary, optionReferences),
+      fallback_option_id: typeof fallback === 'string'
+        ? resolveOptionReference(fallback, optionReferences)
+        : fallback,
+    });
+  };
   function execute(name: string, value: unknown): unknown {
     const input = record(value, `${name} arguments`);
     if (name === 'engine.get_turn_context') {
       const capsule = exactCurrent(feed, stringField(input, 'run_id'), numberField(input, 'expected_revision'));
       if (capsule.request === null) throw new RangeError('NO_PENDING_REQUEST');
       if (capsule.request.phase === 'speculative') throw new RangeError('SPECULATIVE_CONTEXT_USES_CAPSULE_MENU');
-      const full = fullTurnContext(capsule, input);
+      const incumbentFull = fullTurnContext(capsule, input);
+      const rendered = renderTurnContextProfile(incumbentFull, rendererProfile);
+      optionReferences = rendered.optionRefs;
+      const preTrimBytes = renderBytes(rendered.context);
+      const trimToLimit = (source: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => {
+        const sourceBytes = source === rendered.context ? preTrimBytes : renderBytes(source);
+        if (sourceBytes <= turnContextMaximumBytes) return source;
+        const candidate = structuredClone(source) as Record<string, unknown>;
+        candidate['context_trimmed'] = true;
+        candidate['truncated'] = true;
+        const actorValues = Array.isArray(candidate['actors']) ? candidate['actors'] : [];
+        const actorRecords = actorValues.filter((actor): actor is Record<string, unknown> =>
+          typeof actor === 'object' && actor !== null && !Array.isArray(actor));
+        const arrays = (key: 'options' | 'threats', actor: Record<string, unknown>): unknown[] =>
+          Array.isArray(actor[key]) ? actor[key] as unknown[] : [];
+        const objectAt = (parent: Record<string, unknown>, key: string): Record<string, unknown> | null => {
+          const value = parent[key];
+          return typeof value === 'object' && value !== null && !Array.isArray(value)
+            ? value as Record<string, unknown>
+            : null;
+        };
+        const clearArrayField = (parent: Record<string, unknown>, key: string): void => {
+          if (Array.isArray(parent[key])) parent[key] = [];
+        };
+        clearArrayField(candidate, 'applicable_skills');
+        const knowledge = objectAt(candidate, 'actor_knowledge');
+        if (knowledge !== null) clearArrayField(knowledge, 'actors');
+        const reactions = objectAt(candidate, 'reaction_spend_hold');
+        if (reactions !== null) clearArrayField(reactions, 'windows');
+        const recovery = objectAt(candidate, 'recovery_capabilities');
+        if (recovery !== null) clearArrayField(recovery, 'targets');
+        const search = objectAt(candidate, 'search_memory');
+        if (search !== null) clearArrayField(search, 'memories');
+        const alert = objectAt(candidate, 'alert_state');
+        if (alert !== null) {
+          clearArrayField(alert, 'calls');
+          clearArrayField(alert, 'joined');
+          clearArrayField(alert, 'membership');
+        }
+        const legendary = objectAt(candidate, 'legendary_windows');
+        if (legendary !== null && legendary['detail_level'] !== 'compact') {
+          candidate['legendary_windows'] = {
+            policy: legendary['policy'],
+            status: legendary['status'],
+            detail_level: 'compact',
+            compact: Array.isArray(legendary['compact']) ? legendary['compact'] : [],
+          };
+        }
+        const compactFallback = (): Readonly<Record<string, unknown>> => {
+          const fallbackReferences = new Map(optionReferences);
+          let referenceSequence = 1;
+          const sourceActors = Array.isArray(source['actors']) ? source['actors'] : [];
+          const compactActors = sourceActors.flatMap((actorValue) => {
+            const actor = typeof actorValue === 'object' && actorValue !== null && !Array.isArray(actorValue)
+              ? actorValue as Record<string, unknown>
+              : null;
+            if (actor === null) return [];
+            const intel = objectAt(actor, 'intel');
+            const opportunity = objectAt(intel ?? {}, 'opportunity_cost');
+            const defaultId = opportunity?.['engine_default_option_id'];
+            const actorOptions = Array.isArray(actor['options'])
+              ? actor['options'].flatMap((optionValue) => {
+                  const option = typeof optionValue === 'object' && optionValue !== null && !Array.isArray(optionValue)
+                    ? optionValue as Record<string, unknown>
+                    : null;
+                  return option === null ? [] : [option];
+                })
+              : [];
+            const exactId = (option: Record<string, unknown>): string | null => {
+              if (typeof option['option_id'] === 'string') return option['option_id'];
+              return typeof option['option_ref'] === 'string'
+                ? optionReferences.get(option['option_ref']) ?? null
+                : null;
+            };
+            const defaultOption = actorOptions.find((option) => exactId(option) === defaultId);
+            const floorOptions = [
+              ...(defaultOption === undefined ? [] : [defaultOption]),
+              ...actorOptions.filter((option) => option !== defaultOption),
+            ].slice(0, Math.min(2, actorOptions.length));
+            const compactOptions = floorOptions.flatMap((option) => {
+              const optionId = exactId(option);
+              if (optionId === null) return [];
+              const reference = `k${String(referenceSequence)}`;
+              referenceSequence += 1;
+              fallbackReferences.set(reference, optionId);
+              return [{
+                option_id: reference,
+                action_id: option['action_id'],
+                kind: option['kind'],
+                usable_now: option['usable_now'],
+                usable_after_movement: option['usable_after_movement'],
+                minimum_movement_feet: option['minimum_movement_feet'],
+              }];
+            });
+            const status = objectAt(actor, 'status');
+            return [{
+              actor_id: actor['actor_id'],
+              status: status === null ? {} : {
+                life: status['life'], hit_point_band: status['hit_point_band'],
+                movement_feet: status['movement_feet'],
+              },
+              options: compactOptions,
+              threats: [],
+              intel: {
+                policy: intel?.['policy'],
+                zero_movement_offense_count: intel?.['zero_movement_offense_count'],
+                rows: [], movement: [], opportunity_cost: null, salient_window: null,
+              },
+            }];
+          });
+          optionReferences = fallbackReferences;
+          const sourceSummary = objectAt(source as Record<string, unknown>, 'summary');
+          const sourceFrontier = objectAt(source as Record<string, unknown>, 'team_plan_frontier');
+          const sourceFailures = objectAt(source as Record<string, unknown>, 'known_failure_modes');
+          const compact = {
+            granularity: 'full' as const,
+            context_trimmed: true,
+            state_ref: source['state_ref'],
+            request: source['request'],
+            summary: sourceSummary === null ? undefined : {
+              room: sourceSummary['room'], round: sourceSummary['round'],
+              active_side: sourceSummary['active_side'], living_allies: sourceSummary['living_allies'],
+              living_enemies: sourceSummary['living_enemies'], terrain_tags: [],
+            },
+            actors: compactActors,
+            actor_knowledge: { policy: objectAt(source as Record<string, unknown>, 'actor_knowledge')?.['policy'], actors: [] },
+            reaction_spend_hold: { policy: objectAt(source as Record<string, unknown>, 'reaction_spend_hold')?.['policy'], windows: [] },
+            legendary_windows: {
+              policy: objectAt(source as Record<string, unknown>, 'legendary_windows')?.['policy'],
+              detail_level: 'compact', compact: [],
+            },
+            recovery_capabilities: { policy: objectAt(source as Record<string, unknown>, 'recovery_capabilities')?.['policy'], targets: [] },
+            search_memory: { policy: objectAt(source as Record<string, unknown>, 'search_memory')?.['policy'], memories: [] },
+            alert_state: {
+              policy: objectAt(source as Record<string, unknown>, 'alert_state')?.['policy'], calls: [], joined: [],
+            },
+            applicable_plays: [], applicable_skills: [], recent_changes: [],
+            team_plan_frontier: sourceFrontier === null ? null : {
+              policy: sourceFrontier['policy'],
+              frontier_resolution: sourceFrontier['frontier_resolution'],
+              detail_level: 'omitted',
+              frontier_candidate_count: Array.isArray(sourceFrontier['candidates'])
+                ? sourceFrontier['candidates'].length
+                : sourceFrontier['frontier_candidate_count'] ?? 0,
+              removed_candidate_count: Array.isArray(sourceFrontier['removed'])
+                ? sourceFrontier['removed'].length
+                : sourceFrontier['removed_candidate_count'] ?? 0,
+              reason: 'context_size_limit',
+            },
+            ...(sourceFailures === null ? {} : {
+              known_failure_modes: { policy: sourceFailures['policy'] },
+            }),
+            renderer_attribution: source['renderer_attribution'],
+            compact_fallback: true,
+            truncated: true,
+            next_cursor: null,
+          };
+          const compactBytes = renderBytes(compact);
+          return compactBytes <= turnContextMaximumBytes
+            ? compact
+            : { ...compact, renderer_defect: {
+                code: 'K_SET_FLOOR_EXCEEDS_CONTEXT_CAP',
+                measured_bytes: compactBytes,
+                configured_cap_bytes: turnContextMaximumBytes,
+              } };
+        };
+        while (renderBytes(candidate) > turnContextMaximumBytes) {
+          const actor = [...actorRecords].reverse().find((entry) => arrays('options', entry).length > 2);
+          if (actor === undefined) break;
+          arrays('options', actor).pop();
+        }
+        while (renderBytes(candidate) > turnContextMaximumBytes) {
+          const actor = [...actorRecords].reverse().find((entry) => {
+            const intel = objectAt(entry, 'intel');
+            return intel !== null && Array.isArray(intel['movement']) && intel['movement'].length > 0;
+          });
+          if (actor === undefined) break;
+          const intel = objectAt(actor, 'intel');
+          if (intel !== null && Array.isArray(intel['movement'])) intel['movement'].pop();
+        }
+        while (renderBytes(candidate) > turnContextMaximumBytes) {
+          const actor = [...actorRecords].reverse().find((entry) => {
+            const intel = entry['intel'];
+            return typeof intel === 'object' && intel !== null && !Array.isArray(intel) &&
+              Array.isArray((intel as Record<string, unknown>)['rows']) &&
+              ((intel as Record<string, unknown>)['rows'] as unknown[]).length > 0;
+          });
+          if (actor === undefined) break;
+          const intel = record(actor['intel'], 'profiled actor intel');
+          (intel['rows'] as unknown[]).pop();
+        }
+        while (renderBytes(candidate) > turnContextMaximumBytes) {
+          const actor = [...actorRecords].reverse().find((entry) => arrays('threats', entry).length > 0);
+          if (actor === undefined) break;
+          arrays('threats', actor).pop();
+        }
+        if (renderBytes(candidate) > turnContextMaximumBytes) clearArrayField(candidate, 'recent_changes');
+        const summary = objectAt(candidate, 'summary');
+        if (renderBytes(candidate) > turnContextMaximumBytes && summary !== null) clearArrayField(summary, 'terrain_tags');
+        if (renderBytes(candidate) > turnContextMaximumBytes) candidate['team_plan_frontier'] = null;
+        if (renderBytes(candidate) > turnContextMaximumBytes) clearArrayField(candidate, 'applicable_plays');
+        while (renderBytes(candidate) > turnContextMaximumBytes) {
+          const actor = [...actorRecords].reverse().find((entry) =>
+            objectAt(objectAt(entry, 'intel') ?? {}, 'opportunity_cost') !== null);
+          if (actor === undefined) break;
+          const intel = objectAt(actor, 'intel');
+          if (intel !== null) intel['opportunity_cost'] = null;
+        }
+        if (renderBytes(candidate) > turnContextMaximumBytes) {
+          for (const actor of actorRecords) {
+            const status = objectAt(actor, 'status');
+            if (status !== null) {
+              clearArrayField(status, 'effect_tags');
+              clearArrayField(status, 'pending_decision_ids');
+            }
+          }
+        }
+        if (renderBytes(candidate) > turnContextMaximumBytes) delete candidate['suggested_plan'];
+        if (renderBytes(candidate) > turnContextMaximumBytes) {
+          return compactFallback();
+        }
+        return candidate;
+      };
+      const untrimmedFull = rendered.context;
+      let trimmedFull: Readonly<Record<string, unknown>> | undefined;
+      const full = (): Readonly<Record<string, unknown>> => {
+        trimmedFull ??= trimToLimit(untrimmedFull);
+        return trimmedFull;
+      };
       const base = dependencies.turnContextDeltaBase;
-      const contextCandidate = input['granularity'] !== 'turn_delta' || base === undefined ||
+      const wantsDelta = rendererProfile.delta !== 'off' && input['granularity'] === 'turn_delta';
+      const contextCandidate = !wantsDelta || base === undefined ||
         input['since_revision'] !== base.revision ||
         base.context['granularity'] !== 'full'
-        ? full
+        ? untrimmedFull
         : (() => {
             const baseStateRef = record(base.context['state_ref'], 'turn context delta base state_ref');
             if (baseStateRef['run_id'] !== capsule.runId ||
-              baseStateRef['expected_revision'] !== base.revision) return full;
-            return {
+              baseStateRef['expected_revision'] !== base.revision) return untrimmedFull;
+            const anchor = rendererProfile.anchor === 'hash_only'
+              ? {
+                  base_revision: base.revision,
+                  revision: capsule.revision,
+                  base_context_hash: sha256(canonicalJson(base.context)),
+                  context_hash: sha256(canonicalJson(untrimmedFull)),
+                }
+              : {
+                  base_revision: base.revision,
+                  revision: capsule.revision,
+                  base_context_hash: sha256(canonicalJson(base.context)),
+                  context_hash: sha256(canonicalJson(untrimmedFull)),
+                  state_ref: untrimmedFull['state_ref'],
+                  request: untrimmedFull['request'],
+                };
+            const delta = {
               granularity: 'turn_delta' as const,
-              anchor: {
-                base_revision: base.revision,
-                revision: capsule.revision,
-                base_context_hash: sha256(canonicalJson(base.context)),
-                context_hash: sha256(canonicalJson(full)),
-                state_ref: full['state_ref'],
-                request: full['request'],
-              },
-              changes: diffTurnContextValues(base.context, full),
-              context_trimmed: full['context_trimmed'],
+              anchor,
+              changes: diffTurnContextValues(base.context, untrimmedFull),
+              context_trimmed: untrimmedFull['context_trimmed'],
+              renderer_attribution: untrimmedFull['renderer_attribution'],
             };
+            return rendererProfile.delta === 'guarded' && renderBytes(delta) >= renderBytes(untrimmedFull) * 0.8
+              ? untrimmedFull
+              : delta;
           })();
-      const context = encodedJsonBytes(contextCandidate) <= TURN_CONTEXT_MAX_BYTES
-        ? contextCandidate
-        : { ...full, context_trimmed: true, truncated: true };
+      const context = contextCandidate['granularity'] === 'full'
+        ? trimToLimit(contextCandidate)
+        : encodedJsonBytes(contextCandidate) <= turnContextMaximumBytes
+          ? contextCandidate
+          : { ...full(), context_trimmed: true, truncated: true };
+      const postTrimBytes = renderBytes(context);
+      const featurePreTrimBytes = context['granularity'] === 'turn_delta'
+        ? renderBytes(contextCandidate)
+        : preTrimBytes;
+      const features = extractCircumstanceFeatures({
+        state,
+        capsule,
+        renderedContext: untrimmedFull,
+        granularity: context['granularity'] === 'turn_delta' ? 'turn_delta' : 'full',
+        preTrimBytes: featurePreTrimBytes,
+        postTrimBytes,
+      });
+      dependencies.onTurnContextRendered?.({
+        preTrimBytes: featurePreTrimBytes,
+        postTrimBytes,
+        features,
+        removals: rendered.removals,
+      });
       dependencies.onTurnContext?.(structuredClone(context));
       return context;
     }
@@ -1527,10 +1838,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         maximum_items: typeof requestedPage['maximum_items'] === 'number'
           ? requestedPage['maximum_items'] : 20,
       };
+      const informativeMatrix = informativeDmIntelRows(matrix);
       const paged = applicationPage(
         capsule,
         canonicalJson({ actorIds, targetIds: targetIds === null ? null : [...targetIds].sort() }),
-        matrix,
+        informativeMatrix,
         pageInput,
       );
       const movement = movementOptionsIntel(state, capsule, queries, paged.values);
@@ -1556,6 +1868,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         renderer_policy: DM_TURN_INTEL_POLICY,
         evaluator_policy: TACTICAL_EVALUATOR_POLICY,
         rows: paged.values.map(renderDmIntelRow),
+        unresolved_findings: matrix.filter((row) => !isInformativeDmIntelRow(row)).map((row) => ({
+          actor_id: row.actorId,
+          target_id: row.targetId,
+          action_id: row.actionId,
+          reason_codes: row.unresolvedReasons,
+        })),
         movement_policy: MOVEMENT_OPTIONS_INTEL_POLICY,
         movement_rows: movement.status === 'resolved'
           ? movement.rows.filter((row) => paged.values.some((value) =>
@@ -1670,7 +1988,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     }
     if (name === 'engine.validate_proposal') {
       const request = currentRequest(capsule, stringField(input, 'request_id'), stringField(input, 'phase'));
-      const proposal = decodeProposal(input['proposal']);
+      const proposal = decodeRenderedProposal(input['proposal']);
       if (!request.actors.includes(proposal.actorId)) throw new RangeError('ACTOR_NOT_PENDING');
       if (proposal.expectedRevision !== capsule.revision) throw new RangeError('PROPOSAL_REVISION_MISMATCH');
       const resolution = turnProposals.resolve(state, proposal);
@@ -1683,7 +2001,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (request.kind === 'plan_adjustment') throw new RangeError('REQUEST_KIND_MISMATCH');
       const proposalValues = input['proposals'];
       if (!Array.isArray(proposalValues)) throw new TypeError('proposals must be an array.');
-      const decoded = proposalValues.map(decodeProposal);
+      const decoded = proposalValues.map(decodeRenderedProposal);
       const actual = decoded.map((proposal) => proposal.actorId);
       const expected = [...request.actors].sort();
       const normalized = [...actual].sort();
@@ -1878,7 +2196,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         if (!Array.isArray(proposalValues)) throw new TypeError('branch proposals must be an array.');
         return {
           scenarioId: stringField(branch, 'scenario_id'),
-          proposals: proposalValues.map(decodeProposal),
+          proposals: proposalValues.map(decodeRenderedProposal),
         };
       });
       const key = stringField(input, 'idempotency_key');
@@ -1912,7 +2230,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     if (name === 'engine.submit_proposal') {
       const request = currentRequest(capsule, stringField(input, 'request_id'), stringField(input, 'phase'));
       if (request.kind === 'plan_adjustment') throw new RangeError('REQUEST_KIND_MISMATCH');
-      const proposal = decodeProposal(input['proposal']);
+      const proposal = decodeRenderedProposal(input['proposal']);
       if (request.actors.length !== 1 || request.actors[0] !== proposal.actorId) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: 'ACTOR_REQUIRES_WHOLE_ROUND', summary: 'This actor belongs to the pending shared-initiative whole-round request.' }], correction_guidance: correctionGuidance(capsule) };
       const resolution = turnProposals.resolve(state, proposal);
       if (!resolution.valid) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };

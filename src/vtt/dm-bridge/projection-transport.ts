@@ -96,11 +96,22 @@ function diffValues(
 ): readonly RevisionDeltaOperation[] {
   if (canonicalJson(before) === canonicalJson(after)) return [];
   if (Array.isArray(before) && Array.isArray(after)) {
-    if (!granularArrays || before.length !== after.length) {
+    if (!granularArrays) {
       return [{ kind: 'set', path, value: structuredClone(after) }];
     }
-    return before.flatMap((value, index) =>
+    const shared = Math.min(before.length, after.length);
+    const changed = before.slice(0, shared).flatMap((value, index) =>
       diffValues(value, after[index], [...path, String(index)], true));
+    const removed = Array.from({ length: Math.max(0, before.length - after.length) }, (_value, index) => ({
+      kind: 'delete' as const,
+      path: [...path, String(before.length - index - 1)],
+    }));
+    const inserted = after.slice(shared).map((value, index) => ({
+      kind: 'set' as const,
+      path: [...path, String(shared + index)],
+      value: structuredClone(value),
+    }));
+    return [...changed, ...removed, ...inserted];
   }
   if (!isRecord(before) || !isRecord(after)) {
     return [{ kind: 'set', path, value: structuredClone(after) }];
@@ -162,7 +173,8 @@ function applyOperation(
   const key: string | number = Array.isArray(parent) ? Number(leaf) : leaf;
   if (Array.isArray(parent)) {
     const index = Number(leaf);
-    if (!Number.isSafeInteger(index) || index < 0 || index >= parent.length) {
+    const maximum = operation.kind === 'set' ? parent.length : parent.length - 1;
+    if (!Number.isSafeInteger(index) || index < 0 || index > maximum) {
       throw new TypeError('Revision delta array index is invalid.');
     }
   }
@@ -171,8 +183,8 @@ function applyOperation(
       Reflect.set(parent, key, structuredClone(operation.value));
       break;
     case 'delete':
-      if (Array.isArray(parent)) throw new TypeError('Revision delta cannot delete an array element.');
-      delete parent[leaf];
+      if (Array.isArray(parent)) parent.splice(Number(leaf), 1);
+      else delete parent[leaf];
       break;
   }
 }
