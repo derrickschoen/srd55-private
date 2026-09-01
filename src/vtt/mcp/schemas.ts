@@ -613,10 +613,22 @@ const profiledFullTurnContextOutput = z.object({
   truncated: z.boolean(),
   next_cursor: z.string().max(500).nullable(),
 }).passthrough();
+const proseTurnContextOutput = z.object({
+  format: z.enum(['caveman_prose', 'regular_prose']),
+  granularity: z.literal('full'),
+  context_trimmed: z.boolean(),
+  state_ref: stateRef,
+  request: turnRequest,
+  document: z.string().min(1).max(32 * 1024),
+  renderer_attribution: rendererAttributionSchema.optional(),
+  truncated: z.boolean(),
+  next_cursor: z.null(),
+}).strict();
 const turnContextOutput = z.union([
   fullTurnContextOutput,
   intelSuppressedTurnContextOutput,
   profiledFullTurnContextOutput,
+  proseTurnContextOutput,
   turnDeltaOutput,
 ]);
 const proposeFromPlayOutput = z.object({

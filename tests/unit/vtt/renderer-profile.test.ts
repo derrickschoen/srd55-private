@@ -104,7 +104,9 @@ function actorContext() {
 describe('renderer profile', () => {
   it('schema-validates every complete planned profile and rejects open or incomplete profiles', () => {
     expect(rendererProfileSchema.parse(DEFAULT_RENDERER_PROFILE)).toEqual(DEFAULT_RENDERER_PROFILE);
-    expect(DEFAULT_RENDERER_PROFILE).toMatchObject({ nullFields: 'explicit', attribution: 'off' });
+    expect(DEFAULT_RENDERER_PROFILE).toMatchObject({
+      format: 'structured', nullFields: 'explicit', attribution: 'off',
+    });
     expect(Object.values(PLANNED_COMBINED_RENDERER_PROFILES).every((profile) =>
       rendererProfileSchema.safeParse(profile).success)).toBe(true);
     expect(rendererProfileSchema.safeParse({ ...DEFAULT_RENDERER_PROFILE, delta: 'maybe' }).success).toBe(false);
@@ -417,6 +419,6 @@ describe('renderer profile', () => {
       options_per_actor_mean: 2,
       options_per_actor_max: 3,
     });
-    expect(RENDERER_POLICY_VERSION).toBe('turn-context-renderer-v2');
+    expect(RENDERER_POLICY_VERSION).toBe('turn-context-renderer-v3');
   });
 });

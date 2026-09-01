@@ -1265,18 +1265,24 @@ interface CapturedTurnContext {
 }
 
 function capturedTurnContext(raw: string): CapturedTurnContext {
-  const bytes = new TextEncoder().encode(raw).byteLength;
+  const value = requiredRecord(JSON.parse(raw) as unknown, 'recorded turn context');
+  const proseDocument =
+    (value['format'] === 'caveman_prose' || value['format'] === 'regular_prose') &&
+    typeof value['document'] === 'string'
+      ? value['document']
+      : null;
+  const modelVisibleRaw = proseDocument ?? raw;
+  const bytes = new TextEncoder().encode(modelVisibleRaw).byteLength;
   if (bytes > TURN_CONTEXT_MAX_BYTES) {
     throw new RangeError(
       `Recorded turn context is ${String(bytes)} UTF-8 bytes; maximum is ${String(TURN_CONTEXT_MAX_BYTES)}.`,
     );
   }
-  const value = requiredRecord(JSON.parse(raw) as unknown, 'recorded turn context');
   const granularity = value['granularity'];
   if (granularity !== 'full' && granularity !== 'turn_delta') {
     throw new TypeError('Recorded turn context has no supported granularity marker.');
   }
-  return { raw, granularity, value };
+  return { raw: modelVisibleRaw, granularity, value };
 }
 
 function unrequestedTurnContext(): CapturedTurnContext {
