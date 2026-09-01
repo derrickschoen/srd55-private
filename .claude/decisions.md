@@ -1,5 +1,26 @@
 # Binding scope decisions
 
+## D443 — OWNER: P3 arms at both luna low AND luna medium (2026-09-01)
+
+Verbatim: "Check all of the p3 arms with both Luna low effort and Luna
+medium effort." (Same message asked whether luna sessions run in
+parallel — answer recorded: rooms within an arm run fully parallel via
+Promise.all at ai-dm-arena.ts:402, ~21 codex processes per arm on the
+24-core box; arms are deliberately sequential because concurrent arena
+streams historically produced fake CLI-timeout weather.)
+
+Program: the seven P3 arms — structured full control, the five
+structured reductions (rows/opp/move/threats/gating), caveman full —
+each at BOTH efforts, all on the CURRENT era so low-vs-medium is a
+clean paired comparison. Reuse: p3-caveman (caveman full, low, current
+era). New runs: 13 arms x 30 rounds (6 structured at low rerun on this
+era + all 7 at medium). D406's "luna low is the intelligence floor"
+becomes testable: does the P3 conclusion (content removal hurts,
+caveman format doesn't) survive a smarter model? Queue: after the D441
+pairs/triples chain (D442's sensitivity analysis needs D441 first; the
+owner set no explicit priority override). Judging pipelines per
+D442.1; keys sealed until program end.
+
 ## D442 — OWNER: sensitivity analysis after all arms; push the winners deeper (2026-09-01)
 
 Verbatim: "After all of the arms and do sensitivity analysis and try
