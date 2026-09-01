@@ -1,5 +1,28 @@
 # Binding scope decisions
 
+## D445 — OWNER: post-merge ranking-invariance check on P3 arms (2026-09-01)
+
+Verbatim: "After the merge, take a random sample of p3 winners and
+losers and medium and see if the merge would have changed the
+rankings." Supervisor reading: after the D436 era-shift merge, re-run
+P3 winners AND losers on the new era (at low, plus medium) and test
+whether the P3 ranking (caveman >= full > gating > threats > move >
+rows > opp) survives the merged code. Integration: D443 already
+re-runs ALL seven P3 arms at both efforts post-merge, which subsumes
+the requested random sample — running all seven is strictly stronger
+and already ruled, so no separate sampled chain. Two additions D445
+forces:
+1. cav-full-low added to the D443 chain (14th arm). D443's original
+   plan reused old-era p3-caveman as the caveman-full/low point; once
+   the merge shifts eras that reuse would put the one winner on the
+   old era while every loser is on the new — exactly the confound
+   this ruling asks about. All 14 arms now run on the new era.
+   d443-profiles.tsv updated before any D443 launch.
+2. Explicit deliverable at unsealing: a three-column ranking table —
+   old-era low (P3 as unsealed) vs new-era low vs new-era medium —
+   with rank-order comparison (did the merge reorder any arms beyond
+   the +-0.2 judge-noise band) reported as the D445 verdict.
+
 ## D444 — OWNER rulings: merge between chains; quads run; winners re-verified at medium (2026-09-01)
 
 Question round (AskUserQuestion):
