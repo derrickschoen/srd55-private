@@ -94,15 +94,15 @@ export interface EngineTurnProposal {
   readonly expectedRevision: number;
   readonly primaryOptionId: EngineOptionId;
   readonly fallbackOptionId: EngineOptionId | null;
-  readonly overrideJustification: null | {
-    readonly reason:
-      | 'morale'
-      | 'objective'
-      | 'roleplay'
-      | 'resource_conservation'
-      | 'unknown_engine_gap';
-    readonly note?: string;
-  };
+  readonly overrideJustification: null | (
+    {
+      readonly reason: 'morale' | 'objective' | 'roleplay' | 'resource_conservation';
+      readonly note?: string;
+    } | {
+      readonly reason: 'unknown_engine_gap';
+      readonly note: string;
+    }
+  );
 }
 
 export interface ResolvedActionSlotUse {

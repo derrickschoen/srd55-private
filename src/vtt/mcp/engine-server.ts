@@ -327,6 +327,24 @@ function decodeReactionGuidance(value: unknown): ReactionGuidanceDeclaration {
     }),
   };
 }
+function decodeOverrideJustification(
+  value: unknown,
+): NonNullable<EngineTurnProposal['overrideJustification']> {
+  const input = record(value, 'override justification');
+  const reason = stringField(input, 'reason');
+  const note = input['note'] === undefined ? undefined : stringField(input, 'note');
+  switch (reason) {
+    case 'morale':
+    case 'objective':
+    case 'roleplay':
+    case 'resource_conservation':
+      return note === undefined ? { reason } : { reason, note };
+    case 'unknown_engine_gap':
+      return { reason, note: stringField(input, 'note') };
+    default:
+      throw new RangeError(`Unknown override justification reason ${reason}.`);
+  }
+}
 function decodeProposal(value: unknown): EngineTurnProposal {
   const input = record(value, 'proposal');
   const justification = input['override_justification'];
@@ -339,13 +357,7 @@ function decodeProposal(value: unknown): EngineTurnProposal {
       : engineOptionId(stringField(input, 'fallback_option_id')),
     overrideJustification: justification === null
       ? null
-      : (() => {
-          const decoded = record(justification, 'override justification');
-          return {
-            reason: stringField(decoded, 'reason') as NonNullable<EngineTurnProposal['overrideJustification']>['reason'],
-            ...(decoded['note'] === undefined ? {} : { note: stringField(decoded, 'note') }),
-          };
-        })(),
+      : decodeOverrideJustification(justification),
   };
 }
 function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string, unknown>> {
@@ -992,12 +1004,45 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         }
       : proposal;
   }
+  function dominanceRefusal(
+    capsule: EngineStateCapsule,
+    proposal: EngineTurnProposal,
+    selectedOptionId: EngineActorOption['optionId'],
+  ): { readonly code: string; readonly summary: string } | null {
+    const dominance = submissionDominance(
+      opportunityReport(capsule, proposal.actorId),
+      selectedOptionId,
+    );
+    if (dominance.status !== 'dominated') return null;
+    if (proposal.overrideJustification === null) {
+      return { code: 'DOMINATED_OPTION_REQUIRES_OVERRIDE', summary: dominance.delta };
+    }
+    if (proposal.overrideJustification.reason === 'resource_conservation') {
+      return {
+        code: 'DOMINANCE_OVERRIDE_CONTRADICTS_METRICS',
+        summary: `${dominance.delta} Resource conservation cannot justify this override because the dominating option has no greater declared resource cost.`,
+      };
+    }
+    return null;
+  }
   function fullTurnContext(
     capsule: EngineStateCapsule,
     input: Readonly<Record<string, unknown>>,
   ): Readonly<Record<string, unknown>> {
-    const requested = Array.isArray(input['actor_ids']) ? input['actor_ids'].map((id) => combatantId(String(id))) : capsule.request?.actors ?? [];
-    const required = input['scope'] === 'active_turn' && capsule.projection.activeCombatant !== null ? [capsule.projection.activeCombatant] : requested;
+    const requestActors = capsule.request?.actors ?? [];
+    const actorFilter = Array.isArray(input['actor_ids'])
+      ? input['actor_ids'].map((id) => combatantId(String(id)))
+      : null;
+    const requested = actorFilter !== null && actorFilter.every((actorId) => requestActors.includes(actorId))
+      ? actorFilter
+      : requestActors;
+    const activeRequestedActor = capsule.projection.activeCombatant !== null &&
+      requested.includes(capsule.projection.activeCombatant)
+      ? capsule.projection.activeCombatant
+      : null;
+    const required = input['scope'] === 'active_turn' && activeRequestedActor !== null
+      ? [activeRequestedActor]
+      : requested;
     const maximum = typeof input['maximum_options_per_actor'] === 'number' ? input['maximum_options_per_actor'] : 20;
     const includeExpectations = input['include_expectations'] !== false;
     if (requestedIntelMode(input) === 'off') {
@@ -1992,9 +2037,13 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (!request.actors.includes(proposal.actorId)) throw new RangeError('ACTOR_NOT_PENDING');
       if (proposal.expectedRevision !== capsule.revision) throw new RangeError('PROPOSAL_REVISION_MISMATCH');
       const resolution = turnProposals.resolve(state, proposal);
-      return resolution.valid
+      if (!resolution.valid) {
+        return { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
+      }
+      const refusal = dominanceRefusal(capsule, proposal, resolution.option.optionId);
+      return refusal === null
         ? { state_ref: externalStateRef(capsule), valid: true, selected_branch: resolution.selectedBranch, resolution: resolutionPreview(resolution), refusals: [], correction_guidance: null }
-        : { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
+        : { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: [refusal], correction_guidance: correctionGuidance(capsule) };
     }
     if (name === 'engine.submit_round_proposals') {
       const request = currentRequest(capsule, stringField(input, 'request_id'), stringField(input, 'phase'));
@@ -2011,19 +2060,16 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         : decoded;
       const resolved = canonical.map((proposal) => ({ proposal, resolution: turnProposals.resolve(state, proposal) }));
       const dominanceRefusals = resolved.flatMap(({ proposal, resolution }) => {
-        if (!resolution.valid || proposal.overrideJustification !== null) return [];
-        const dominance = submissionDominance(
-          opportunityReport(capsule, proposal.actorId),
-          resolution.option.optionId,
-        );
-        return dominance.status !== 'dominated' ? [] : [{
+        if (!resolution.valid) return [];
+        const refusal = dominanceRefusal(capsule, proposal, resolution.option.optionId);
+        return refusal === null ? [] : [{
           actor_id: proposal.actorId,
-          codes: ['DOMINATED_OPTION_REQUIRES_OVERRIDE'],
-          summary: dominance.delta,
+          codes: [refusal.code],
+          summary: refusal.summary,
           attempt_rejections: [{
             attempt: resolution.selectedBranch,
             declared_option_id: resolution.option.optionId,
-            rejection_reasons: [dominance.delta],
+            rejection_reasons: [refusal.summary],
           }],
         }];
       });
@@ -2090,18 +2136,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
                 : null;
         if (staticRefusal !== null) return { proposal, resolution: null, staticRefusal };
         const resolution = turnProposals.resolve(state, proposal);
-        if (resolution.valid && proposal.overrideJustification === null) {
-          const dominance = submissionDominance(
-            opportunityReport(capsule, proposal.actorId),
-            resolution.option.optionId,
-          );
-          if (dominance.status === 'dominated') {
-            return {
-              proposal,
-              resolution: null,
-              staticRefusal: { code: 'DOMINATED_OPTION_REQUIRES_OVERRIDE', summary: dominance.delta },
-            };
-          }
+        if (resolution.valid) {
+          const refusal = dominanceRefusal(capsule, proposal, resolution.option.optionId);
+          if (refusal !== null) return { proposal, resolution: null, staticRefusal: refusal };
         }
         return { proposal, resolution, staticRefusal: null };
       });
@@ -2234,6 +2271,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (request.actors.length !== 1 || request.actors[0] !== proposal.actorId) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: 'ACTOR_REQUIRES_WHOLE_ROUND', summary: 'This actor belongs to the pending shared-initiative whole-round request.' }], correction_guidance: correctionGuidance(capsule) };
       const resolution = turnProposals.resolve(state, proposal);
       if (!resolution.valid) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
+      const dominance = dominanceRefusal(capsule, proposal, resolution.option.optionId);
+      if (dominance !== null) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [dominance], correction_guidance: correctionGuidance(capsule) };
       const key = stringField(input, 'idempotency_key');
       const reactionGuidance = input['reaction_guidance'] === undefined
         ? null : decodeReactionGuidance(input['reaction_guidance']);
