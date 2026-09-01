@@ -12,7 +12,8 @@ import {
   monsterSpellResourcePoolId,
 } from '../combat/statblock';
 import { spellDefinition } from '../combat/spells/definitions';
-import type { CombatantId } from '../combat/values';
+import { cubeAffectedCellsAmong, feetPoint, type AreaTemplate } from '../combat/templates';
+import { feet, type CombatantId } from '../combat/values';
 import { worldObjectActionWasUsed } from '../combat/world-object-actions';
 import { gridDistance } from '../combat/grid';
 import { sha256 } from '../crypto/sha256';
@@ -54,6 +55,91 @@ function livingAllies(state: EncounterState, actorId: CombatantId): readonly Com
     .filter((candidate) => candidate.life === 'living' && candidate.profile.kind === actor?.profile.kind)
     .map((candidate) => candidate.profile.id)
     .sort((left, right) => left.localeCompare(right));
+}
+
+interface SpellUseSelection {
+  readonly targets: readonly ReturnType<typeof target>[];
+  readonly area: AreaTemplate | null;
+  readonly labelSuffix: string;
+}
+
+function hypnoticPatternSelection(
+  state: EncounterState,
+  actorId: CombatantId,
+): SpellUseSelection | null {
+  const actorPosition = state.tokens.find((token) => token.combatantId === actorId)?.position;
+  if (actorPosition === undefined) return null;
+  const enemies = new Set(livingEnemies(state, actorId));
+  const allies = new Set(livingAllies(state, actorId));
+  const positioned = state.tokens.filter((token) =>
+    state.combatants.some((candidate) =>
+      candidate.profile.id === token.combatantId && candidate.life !== 'dead'));
+  const templateGrid = {
+    bounds: state.bounds,
+    blockedCells: [
+      ...state.blockedCells,
+      ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
+    ],
+  };
+  const halfSizeFeet = 15;
+  const minimumCenterColumn = halfSizeFeet / 5;
+  const maximumCenterColumn = state.bounds.columns - minimumCenterColumn;
+  const minimumCenterRow = halfSizeFeet / 5;
+  const maximumCenterRow = state.bounds.rows - minimumCenterRow;
+  const candidates = Array.from(
+    { length: Math.max(0, maximumCenterColumn - minimumCenterColumn + 1) },
+    (_column, index) => index + minimumCenterColumn,
+  ).flatMap((column) => Array.from(
+    { length: Math.max(0, maximumCenterRow - minimumCenterRow + 1) },
+    (_row, index) => index + minimumCenterRow,
+  ).flatMap((row) => {
+    const area: AreaTemplate = {
+      shape: 'cube',
+      template: {
+        origin: feetPoint(column * 5 - halfSizeFeet, row * 5),
+        center: feetPoint(column * 5, row * 5),
+        axis: { x: 1, y: 0 },
+        size: feet(30),
+        includeOrigin: false,
+      },
+    };
+    const origin = area.template.origin;
+    const actorMinimumX = actorPosition.column * 5;
+    const actorMaximumX = actorMinimumX + 5;
+    const actorMinimumY = actorPosition.row * 5;
+    const actorMaximumY = actorMinimumY + 5;
+    const horizontal = Math.max(actorMinimumX - origin.x, 0, origin.x - actorMaximumX);
+    const vertical = Math.max(actorMinimumY - origin.y, 0, origin.y - actorMaximumY);
+    if (Math.max(horizontal, vertical) > 120) return [];
+    const affectedCells = new Set(cubeAffectedCellsAmong(
+      templateGrid,
+      area.template,
+      positioned.map((token) => token.position),
+    ).map((cell) => `${String(cell.column)},${String(cell.row)}`));
+    const affected = positioned.filter((token) =>
+      affectedCells.has(`${String(token.position.column)},${String(token.position.row)}`));
+    const affectedEnemies = affected.filter((token) => enemies.has(token.combatantId))
+      .map((token) => token.combatantId)
+      .sort((left, right) => left.localeCompare(right));
+    if (affectedEnemies.length === 0) return [];
+    const affectedAllies = affected.filter((token) => allies.has(token.combatantId))
+      .map((token) => token.combatantId)
+      .sort((left, right) => left.localeCompare(right));
+    return [{ area, affectedEnemies, affectedAllies, column, row }];
+  }));
+  const chosen = candidates.sort((left, right) =>
+    right.affectedEnemies.length - left.affectedEnemies.length ||
+    left.affectedAllies.length - right.affectedAllies.length ||
+    left.affectedEnemies.join('|').localeCompare(right.affectedEnemies.join('|')) ||
+    left.affectedAllies.join('|').localeCompare(right.affectedAllies.join('|')) ||
+    left.row - right.row || left.column - right.column)[0];
+  if (chosen === undefined) return null;
+  return {
+    targets: chosen.affectedEnemies.map(target),
+    area: chosen.area,
+    labelSuffix: ` [30-ft cube -> ${chosen.affectedEnemies.join(', ')}${
+      chosen.affectedAllies.length === 0 ? '' : `; allies ${chosen.affectedAllies.join(', ')}`}]`,
+  };
 }
 
 function combinations<T>(values: readonly T[], count: number): readonly (readonly T[])[] {
@@ -183,28 +269,29 @@ function mainUses(state: EncounterState, actorId: CombatantId): readonly {
   ];
 }
 
-function spellTargets(
+function spellSelection(
   state: EncounterState,
   actorId: CombatantId,
   spellId: string,
-): readonly ReturnType<typeof target>[] | null {
+): SpellUseSelection | null {
   const definition = spellDefinition(spellId);
   if (definition === null) return null;
   const allies = livingAllies(state, actorId);
   const enemies = livingEnemies(state, actorId);
   switch (spellId) {
-    case 'bless': return allies.slice(0, 3).map(target);
+    case 'hypnotic-pattern': return hypnoticPatternSelection(state, actorId);
+    case 'bless': return { targets: allies.slice(0, 3).map(target), area: null, labelSuffix: '' };
     case 'healing-word':
     case 'cure-wounds':
     case 'lesser-restoration':
-    case 'sanctuary': return allies.slice(0, 1).map(target);
+    case 'sanctuary': return { targets: allies.slice(0, 1).map(target), area: null, labelSuffix: '' };
   }
   switch (definition.targeting.kind) {
-    case 'self': return [target(actorId)];
+    case 'self': return { targets: [target(actorId)], area: null, labelSuffix: '' };
     case 'single':
     case 'multiple':
-    case 'selected': return enemies.slice(0, 1).map(target);
-    case 'all_in_range': return enemies.map(target);
+    case 'selected': return { targets: enemies.slice(0, 1).map(target), area: null, labelSuffix: '' };
+    case 'all_in_range': return { targets: enemies.map(target), area: null, labelSuffix: '' };
     case 'area':
     case 'area_selected':
     case 'remote':
@@ -231,15 +318,16 @@ function spellcastingUses(
       ? null
       : subject?.limitedResources?.find((pool) => pool.id === poolId)?.remaining ?? 0;
     if (remaining !== null && remaining < 1) return [];
-    const targets = spellTargets(state, actorId, spell.id);
-    if (targets === null || targets.length === 0) return [];
+    const selection = spellSelection(state, actorId, spell.id);
+    if (selection === null || selection.targets.length === 0) return [];
     return [{
-      label: `${action.id}/${spell.id}${maximum === null ? '' : ` (${String(remaining)}/${String(maximum)})`}`,
+      label: `${action.id}/${spell.id}${maximum === null ? '' : ` (${String(remaining)}/${String(maximum)})`}${selection.labelSuffix}`,
       use: {
         kind: 'cast_spell',
         sourceActionId: engineActionId(action.id),
         spellId: engineSpellId(spell.id),
-        targets,
+        targets: selection.targets,
+        area: selection.area,
       },
       movement: HOLD,
       resourceCostLabels: poolId === null ? [] : [`${String(poolId)}:${String(remaining)}/${String(maximum)}`],

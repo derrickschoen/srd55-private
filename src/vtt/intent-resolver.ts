@@ -337,7 +337,10 @@ function validateUse(
     case 'cast_spell': {
       const action = sourceSpellcastingAction(state, actorId, slot, use);
       const reference = action?.spells.find((spell) => spell.id === use.spellId);
-      if (action === null || reference === undefined || useTargets(state, actorId, use, queries) === null) {
+      const definition = spellDefinition(use.spellId);
+      const requiresArea = definition?.targeting.kind === 'area' || definition?.targeting.kind === 'area_selected';
+      if (action === null || reference === undefined || definition === null ||
+        requiresArea !== (use.area !== null) || useTargets(state, actorId, use, queries) === null) {
         return 'SPELL_ACTION_UNAVAILABLE';
       }
       const poolId = monsterSpellResourcePoolId(action.id, reference);
@@ -385,7 +388,15 @@ function resolvedUses(
           resolved.push({ slot: slot.slot, kind: 'attack', actionId: component.actionId, spellId: null, targetIds: [targetId], objectId: null });
         }
         break;
-      case 'cast_spell': resolved.push({ slot: slot.slot, kind: use.kind, actionId: use.sourceActionId, spellId: use.spellId, targetIds: targets, objectId: null }); break;
+      case 'cast_spell': resolved.push({
+        slot: slot.slot,
+        kind: use.kind,
+        actionId: use.sourceActionId,
+        spellId: use.spellId,
+        targetIds: targets,
+        objectId: null,
+        ...(use.area === null ? {} : { area: use.area }),
+      }); break;
       case 'use_world_object': resolved.push({ slot: slot.slot, kind: use.kind, actionId: use.actionId, spellId: null, targetIds: [], objectId: use.objectId }); break;
       case 'attack':
       case 'saving_throw': resolved.push({ slot: slot.slot, kind: use.kind, actionId: use.actionId, spellId: null, targetIds: targets, objectId: null }); break;

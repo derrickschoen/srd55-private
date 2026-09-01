@@ -1,0 +1,464 @@
+{
+  "encounter": {
+    "provenance": {
+      "licenseTag": "CC-BY-4.0",
+      "seed": 432,
+      "source": "hand-authored from bundled SRD 5.2.1 Incubus and Hypnotic Pattern"
+    },
+    "schemaVersion": 1,
+    "state": {
+      "activeCombatant": "combatant:d432-incubus",
+      "activeInitiativeIndex": 0,
+      "blockedCells": [],
+      "bounds": { "columns": 17, "rows": 11 },
+      "combatants": [
+        {
+          "deathAt": null,
+          "deathSaves": null,
+          "hitPoints": 66,
+          "life": "living",
+          "limitedResources": [
+            {
+              "id": "monster-spell:spellcasting:hypnotic-pattern",
+              "maximum": 1,
+              "recharge": "long_rest",
+              "remaining": 1
+            }
+          ],
+          "profile": {
+            "id": "combatant:d432-incubus",
+            "kind": "monster",
+            "name": "Incubus",
+            "rules": {
+              "abilityScores": {
+                "charisma": 20,
+                "constitution": 13,
+                "dexterity": 17,
+                "intelligence": 15,
+                "strength": 8,
+                "wisdom": 12
+              },
+              "armorClass": 15,
+              "attacksPerAction": 2,
+              "conditionImmunities": [],
+              "contactMedium": "surface",
+              "creatureType": "Fiend",
+              "damageResponses": [
+                { "type": "Cold", "response": "resistant" },
+                { "type": "Fire", "response": "resistant" },
+                { "type": "Poison", "response": "resistant" },
+                { "type": "Psychic", "response": "resistant" }
+              ],
+              "detectionTraits": [],
+              "hitPointMaximum": 66,
+              "initiativeBonus": 3,
+              "limitedResources": [
+                {
+                  "id": "monster-spell:spellcasting:hypnotic-pattern",
+                  "maximum": 1,
+                  "recharge": "long_rest"
+                }
+              ],
+              "magicResistance": true,
+              "passivePerception": 15,
+              "proficiencyBonus": 2,
+              "reach": 5,
+              "savingThrowBonuses": {
+                "charisma": 5,
+                "constitution": 1,
+                "dexterity": 3,
+                "intelligence": 2,
+                "strength": -1,
+                "wisdom": 1
+              },
+              "senses": [
+                { "kind": "normal_sight" },
+                { "kind": "darkvision", "rangeFeet": 60 }
+              ],
+              "skillBonuses": {
+                "deception": 9,
+                "insight": 5,
+                "perception": 5,
+                "persuasion": 9,
+                "stealth": 7
+              },
+              "speed": 30,
+              "spellSlots": [{ "level": 3, "maximum": 1 }],
+              "usesDeathSaves": false
+            },
+            "statblockId": "d432_srd:incubus",
+            "tokenId": "token:d432-incubus"
+          },
+          "spellSlots": [{ "level": 3, "maximum": 1, "remaining": 1 }],
+          "temporaryHitPoints": 0,
+          "turn": {
+            "action": { "kind": "available" },
+            "bonusActionAvailable": true,
+            "disengaging": false,
+            "dodging": false,
+            "movement": { "remaining": 30, "speed": 30, "spent": 0 },
+            "reactionAvailable": true
+          },
+          "wildShapeUses": null
+        },
+        {
+          "deathAt": null,
+          "deathSaves": null,
+          "hitPoints": 60,
+          "life": "living",
+          "profile": {
+            "characterId": 4321,
+            "id": "combatant:d432-fighter",
+            "kind": "player_character",
+            "name": "Clustered Fighter",
+            "rules": {
+              "abilityScores": { "charisma": 10, "constitution": 16, "dexterity": 10, "intelligence": 10, "strength": 18, "wisdom": 6 },
+              "armorClass": 17,
+              "attacksPerAction": 2,
+              "conditionImmunities": [],
+              "contactMedium": "surface",
+              "damageResponses": [],
+              "detectionTraits": [],
+              "hitPointMaximum": 60,
+              "initiativeBonus": 0,
+              "passivePerception": 8,
+              "reach": 5,
+              "savingThrowBonuses": { "charisma": 0, "constitution": 3, "dexterity": 0, "intelligence": 0, "strength": 4, "wisdom": -2 },
+              "senses": [{ "kind": "normal_sight" }],
+              "speed": 30,
+              "spellSlots": [],
+              "usesDeathSaves": true
+            },
+            "tokenId": "token:d432-fighter",
+            "wildShape": null
+          },
+          "spellSlots": [],
+          "temporaryHitPoints": 0,
+          "turn": { "action": { "kind": "spent" }, "bonusActionAvailable": false, "disengaging": false, "dodging": false, "movement": { "remaining": 0, "speed": 30, "spent": 30 }, "reactionAvailable": true },
+          "wildShapeUses": null
+        },
+        {
+          "deathAt": null,
+          "deathSaves": null,
+          "hitPoints": 60,
+          "life": "living",
+          "profile": {
+            "characterId": 4322,
+            "id": "combatant:d432-cleric",
+            "kind": "player_character",
+            "name": "Clustered Cleric",
+            "rules": {
+              "abilityScores": { "charisma": 10, "constitution": 16, "dexterity": 10, "intelligence": 10, "strength": 14, "wisdom": 6 },
+              "armorClass": 18,
+              "attacksPerAction": 1,
+              "conditionImmunities": [],
+              "contactMedium": "surface",
+              "damageResponses": [],
+              "detectionTraits": [],
+              "hitPointMaximum": 60,
+              "initiativeBonus": 0,
+              "passivePerception": 8,
+              "reach": 5,
+              "savingThrowBonuses": { "charisma": 0, "constitution": 3, "dexterity": 0, "intelligence": 0, "strength": 2, "wisdom": -2 },
+              "senses": [{ "kind": "normal_sight" }],
+              "speed": 30,
+              "spellSlots": [],
+              "usesDeathSaves": true
+            },
+            "tokenId": "token:d432-cleric",
+            "wildShape": null
+          },
+          "spellSlots": [],
+          "temporaryHitPoints": 0,
+          "turn": { "action": { "kind": "spent" }, "bonusActionAvailable": false, "disengaging": false, "dodging": false, "movement": { "remaining": 0, "speed": 30, "spent": 30 }, "reactionAvailable": true },
+          "wildShapeUses": null
+        },
+        {
+          "deathAt": null,
+          "deathSaves": null,
+          "hitPoints": 60,
+          "life": "living",
+          "profile": {
+            "characterId": 4323,
+            "id": "combatant:d432-rogue",
+            "kind": "player_character",
+            "name": "Clustered Rogue",
+            "rules": {
+              "abilityScores": { "charisma": 12, "constitution": 14, "dexterity": 18, "intelligence": 12, "strength": 10, "wisdom": 6 },
+              "armorClass": 16,
+              "attacksPerAction": 1,
+              "conditionImmunities": [],
+              "contactMedium": "surface",
+              "damageResponses": [],
+              "detectionTraits": [],
+              "hitPointMaximum": 60,
+              "initiativeBonus": 4,
+              "passivePerception": 8,
+              "reach": 5,
+              "savingThrowBonuses": { "charisma": 1, "constitution": 2, "dexterity": 4, "intelligence": 1, "strength": 0, "wisdom": -2 },
+              "senses": [{ "kind": "normal_sight" }],
+              "speed": 30,
+              "spellSlots": [],
+              "usesDeathSaves": true
+            },
+            "tokenId": "token:d432-rogue",
+            "wildShape": null
+          },
+          "spellSlots": [],
+          "temporaryHitPoints": 0,
+          "turn": { "action": { "kind": "spent" }, "bonusActionAvailable": false, "disengaging": false, "dodging": false, "movement": { "remaining": 0, "speed": 30, "spent": 30 }, "reactionAvailable": true },
+          "wildShapeUses": null
+        },
+        {
+          "deathAt": null,
+          "deathSaves": null,
+          "hitPoints": 60,
+          "life": "living",
+          "profile": {
+            "characterId": 4324,
+            "id": "combatant:d432-wizard",
+            "kind": "player_character",
+            "name": "Clustered Wizard",
+            "rules": {
+              "abilityScores": { "charisma": 10, "constitution": 14, "dexterity": 12, "intelligence": 18, "strength": 8, "wisdom": 6 },
+              "armorClass": 15,
+              "attacksPerAction": 1,
+              "conditionImmunities": [],
+              "contactMedium": "surface",
+              "damageResponses": [],
+              "detectionTraits": [],
+              "hitPointMaximum": 60,
+              "initiativeBonus": 1,
+              "passivePerception": 8,
+              "reach": 5,
+              "savingThrowBonuses": { "charisma": 0, "constitution": 2, "dexterity": 1, "intelligence": 4, "strength": -1, "wisdom": -2 },
+              "senses": [{ "kind": "normal_sight" }],
+              "speed": 30,
+              "spellSlots": [],
+              "usesDeathSaves": true
+            },
+            "tokenId": "token:d432-wizard",
+            "wildShape": null
+          },
+          "spellSlots": [],
+          "temporaryHitPoints": 0,
+          "turn": { "action": { "kind": "spent" }, "bonusActionAvailable": false, "disengaging": false, "dodging": false, "movement": { "remaining": 0, "speed": 30, "spent": 30 }, "reactionAvailable": true },
+          "wildShapeUses": null
+        }
+      ],
+      "config": { "initiativeMode": "per_combatant" },
+      "contentPacks": [
+        {
+          "pack": {
+            "schemaVersion": 1,
+            "packId": "d432-srd-incubus",
+            "provenance": { "sourceName": "System Reference Document 5.2.1", "sourceKind": "srd", "importedAt": "2026-09-01T00:00:00Z" },
+            "namespaces": ["d432_srd"],
+            "spells": [],
+            "features": [],
+            "items": [],
+            "species": [],
+            "backgrounds": [],
+            "subclasses": [],
+            "monsters": [
+              {
+                "sourceId": "d432_srd",
+                "recordId": "incubus",
+                "name": "Incubus",
+                "statblock": {
+                  "creatureType": "Fiend",
+                  "armorClass": 15,
+                  "hitPointMaximum": 66,
+                  "speedFeet": 30,
+                  "initiativeBonus": 3,
+                  "savingThrowBonuses": { "strength": -1, "dexterity": 3, "constitution": 1, "intelligence": 2, "wisdom": 1, "charisma": 5 },
+                  "attacksPerAction": 2,
+                  "reachFeet": 5,
+                  "damageResponses": [
+                    { "type": "Cold", "response": "resistant" },
+                    { "type": "Fire", "response": "resistant" },
+                    { "type": "Poison", "response": "resistant" },
+                    { "type": "Psychic", "response": "resistant" }
+                  ],
+                  "conditionImmunities": [],
+                  "usesDeathSaves": false,
+                  "senses": [{ "kind": "normal_sight" }, { "kind": "darkvision", "rangeFeet": 60 }]
+                },
+                "actions": [
+                  { "kind": "multiattack", "id": "multiattack", "count": 2, "actionIds": ["restless-touch"], "combination": "any" },
+                  {
+                    "kind": "attack",
+                    "id": "restless-touch",
+                    "name": "Restless Touch",
+                    "attackBonus": 7,
+                    "delivery": { "kind": "melee", "reachFeet": 5 },
+                    "damage": [{ "average": 15, "dice": { "count": 3, "sides": 6, "modifier": 5 }, "type": "Psychic", "trigger": { "kind": "always" } }],
+                    "attackRollAdvantage": null,
+                    "onHit": []
+                  },
+                  {
+                    "kind": "spellcasting",
+                    "id": "spellcasting",
+                    "actionEconomy": "action",
+                    "ability": "charisma",
+                    "saveDc": { "kind": "present", "value": 15 },
+                    "spellAttackBonus": { "kind": "absent", "note": "The SRD Incubus spell list does not use a spell attack roll." },
+                    "spells": [{ "id": "hypnotic-pattern", "availability": "1_per_day", "manifestStatus": "implemented" }]
+                  }
+                ]
+              }
+            ]
+          },
+          "provenance": { "sourceName": "System Reference Document 5.2.1", "sourceKind": "srd", "importedAt": "2026-09-01T00:00:00Z" },
+          "diagnostics": [],
+          "spells": [],
+          "features": [],
+          "items": [],
+          "species": [],
+          "backgrounds": [],
+          "subclasses": [],
+          "monsters": [
+            {
+              "id": "d432_srd:incubus",
+              "sourceId": "d432_srd",
+              "recordId": "incubus",
+              "name": "Incubus",
+              "creatureType": "Fiend",
+              "statblock": {
+                "id": "d432_srd:incubus",
+                "name": "Incubus",
+                "armorClass": 15,
+                "hitPointMaximum": 66,
+                "speed": 30,
+                "initiativeBonus": 3,
+                "savingThrowBonuses": { "strength": -1, "dexterity": 3, "constitution": 1, "intelligence": 2, "wisdom": 1, "charisma": 5 },
+                "attacksPerAction": 2,
+                "reach": 5,
+                "damageResponses": [
+                  { "type": "Cold", "response": "resistant" },
+                  { "type": "Fire", "response": "resistant" },
+                  { "type": "Poison", "response": "resistant" },
+                  { "type": "Psychic", "response": "resistant" }
+                ],
+                "conditionImmunities": [],
+                "usesDeathSaves": false,
+                "senses": [{ "kind": "normal_sight" }, { "kind": "darkvision", "rangeFeet": 60 }],
+                "provenance": { "kind": "srd_5_2_1_decoded", "source": [{ "path": "docs/srd/full/srd-5.2.1.txt", "lineStart": 21742, "lineEnd": 21787 }] },
+                "sourceDetails": {
+                  "source": { "kind": "present", "value": [{ "path": "docs/srd/full/srd-5.2.1.txt", "lineStart": 21742, "lineEnd": 21787 }] },
+                  "classification": { "kind": "present", "value": { "sizes": ["Medium"], "type": "Fiend", "subtype": null, "alignment": "Neutral Evil" } },
+                  "challenge": { "kind": "present", "value": { "rating": 4, "experiencePoints": 1100, "proficiencyBonus": 2 } },
+                  "hitPointDice": { "kind": "present", "value": { "count": 12, "sides": 8, "modifier": 12 } },
+                  "movement": { "kind": "present", "value": [{ "kind": "walk", "feet": 30, "hover": false }, { "kind": "fly", "feet": 60, "hover": false }] },
+                  "abilities": { "kind": "present", "value": {
+                    "strength": { "score": 8, "modifier": -1, "saveBonus": -1 },
+                    "dexterity": { "score": 17, "modifier": 3, "saveBonus": 3 },
+                    "constitution": { "score": 13, "modifier": 1, "saveBonus": 1 },
+                    "intelligence": { "score": 15, "modifier": 2, "saveBonus": 2 },
+                    "wisdom": { "score": 12, "modifier": 1, "saveBonus": 1 },
+                    "charisma": { "score": 20, "modifier": 5, "saveBonus": 5 }
+                  } },
+                  "skills": { "kind": "present", "value": [{ "name": "Deception", "bonus": 9 }, { "name": "Insight", "bonus": 5 }, { "name": "Perception", "bonus": 5 }, { "name": "Persuasion", "bonus": 9 }, { "name": "Stealth", "bonus": 7 }] },
+                  "gear": { "kind": "absent", "note": "The bundled SRD statblock does not list gear." },
+                  "senses": { "kind": "present", "value": [{ "kind": "darkvision", "rangeFeet": 60 }] },
+                  "passivePerception": { "kind": "present", "value": 15 },
+                  "languages": { "kind": "present", "value": [{ "kind": "named", "name": "Abyssal", "canSpeak": true }, { "kind": "named", "name": "Common", "canSpeak": true }, { "kind": "named", "name": "Infernal", "canSpeak": true }, { "kind": "telepathy", "rangeFeet": 60 }] },
+                  "damageResponses": { "kind": "present", "value": [{ "type": "Cold", "response": "resistant" }, { "type": "Fire", "response": "resistant" }, { "type": "Poison", "response": "resistant" }, { "type": "Psychic", "response": "resistant" }] },
+                  "conditionImmunities": { "kind": "absent", "note": "The bundled SRD statblock does not list condition immunities." },
+                  "traits": { "kind": "present", "value": [{ "kind": "magic_resistance", "advantageOn": "spells_and_magical_effects" }] },
+                  "actions": { "kind": "present", "value": [
+                    { "kind": "multiattack", "id": "multiattack", "count": 2, "actionIds": ["restless-touch"], "combination": "any" },
+                    { "kind": "attack", "id": "restless-touch", "name": "Restless Touch", "attackBonus": 7, "delivery": { "kind": "melee", "reachFeet": 5 }, "damage": [{ "average": 15, "dice": { "count": 3, "sides": 6, "modifier": 5 }, "type": "Psychic", "trigger": { "kind": "always" } }], "attackRollAdvantage": null, "onHit": [] },
+                    { "kind": "spellcasting", "id": "spellcasting", "actionEconomy": "action", "ability": "charisma", "saveDc": { "kind": "present", "value": 15 }, "spellAttackBonus": { "kind": "absent", "note": "The SRD Incubus spell list does not use a spell attack roll." }, "spells": [{ "id": "hypnotic-pattern", "availability": "1_per_day", "manifestStatus": "implemented" }] }
+                  ] },
+                  "bonusActions": { "kind": "absent", "note": "The probe excludes the Incubus Nightmare bonus action so the frozen decision remains control versus damage." },
+                  "reactions": { "kind": "absent", "note": "The bundled SRD statblock does not list reactions." },
+                  "legendaryActions": { "kind": "absent", "note": "The bundled SRD statblock does not list Legendary Actions." },
+                  "legendaryResistance": { "kind": "absent", "note": "The bundled SRD statblock does not list Legendary Resistance." }
+                }
+              },
+              "actions": [
+                { "kind": "multiattack", "id": "multiattack", "count": 2, "actionIds": ["restless-touch"], "combination": "any" },
+                { "kind": "attack", "id": "restless-touch", "name": "Restless Touch", "attackBonus": 7, "delivery": { "kind": "melee", "reachFeet": 5 }, "damage": [{ "average": 15, "dice": { "count": 3, "sides": 6, "modifier": 5 }, "type": "Psychic", "trigger": { "kind": "always" } }], "attackRollAdvantage": null, "onHit": [] },
+                { "kind": "spellcasting", "id": "spellcasting", "actionEconomy": "action", "ability": "charisma", "saveDc": { "kind": "present", "value": 15 }, "spellAttackBonus": { "kind": "absent", "note": "The SRD Incubus spell list does not use a spell attack roll." }, "spells": [{ "id": "hypnotic-pattern", "availability": "1_per_day", "manifestStatus": "implemented" }] }
+              ]
+            }
+          ]
+        }
+      ],
+      "dmNotes": [
+        "D432 guardrail: the lone Incubus should cast Hypnotic Pattern over the four clustered PCs.",
+        "The alternative is two Restless Touch attacks against one 60-HP PC from the Incubus's adjacent starting square."
+      ],
+      "effects": [],
+      "environment": { "difficultTerrainRegions": [], "lightRegions": [], "movementRegions": [], "obscurementRegions": [] },
+      "eventLog": [],
+      "foggedCells": [],
+      "hiddenCombatants": [],
+      "hiddenRolls": [],
+      "initiative": [
+        { "combatant": "combatant:d432-incubus", "total": 23, "roll": 20, "bonus": 3, "slot": 0 },
+        { "combatant": "combatant:d432-rogue", "total": 14, "roll": 10, "bonus": 4, "slot": 1 },
+        { "combatant": "combatant:d432-wizard", "total": 11, "roll": 10, "bonus": 1, "slot": 2 },
+        { "combatant": "combatant:d432-cleric", "total": 10, "roll": 10, "bonus": 0, "slot": 3 },
+        { "combatant": "combatant:d432-fighter", "total": 10, "roll": 10, "bonus": 0, "slot": 4 }
+      ],
+      "nextDecisionSequence": 1,
+      "nextEffectSequence": 1,
+      "nextEventSequence": 1,
+      "nextPersistentAreaSequence": 1,
+      "nextWorldObjectSequence": 1,
+      "pendingDecisions": [],
+      "persistentAreas": [],
+      "phase": { "kind": "active" },
+      "reactionPolicies": [],
+      "revision": 0,
+      "round": 1,
+      "rulesEdition": "2024",
+      "tokens": [
+        { "combatantId": "combatant:d432-incubus", "id": "token:d432-incubus", "position": { "column": 8, "row": 6 } },
+        { "combatantId": "combatant:d432-fighter", "id": "token:d432-fighter", "position": { "column": 2, "row": 2 } },
+        { "combatantId": "combatant:d432-cleric", "id": "token:d432-cleric", "position": { "column": 7, "row": 2 } },
+        { "combatantId": "combatant:d432-rogue", "id": "token:d432-rogue", "position": { "column": 2, "row": 7 } },
+        { "combatantId": "combatant:d432-wizard", "id": "token:d432-wizard", "position": { "column": 7, "row": 7 } }
+      ],
+      "worldObjects": []
+    }
+  },
+  "spec": {
+    "scenarioId": "hypnotic-pattern-cc",
+    "purpose": "Mechanical guardrail: did the monster AI cast Hypnotic Pattern on the clustered PCs instead of choosing ordinary single-target damage?",
+    "licensedCaster": {
+      "name": "Incubus",
+      "contentPackSourceKind": "srd",
+      "source": "bundled SRD 5.2.1, Incubus statblock, page 301 / normalized text lines 21742-21787",
+      "preparedSpell": "hypnotic-pattern",
+      "availableSlot": { "level": 3, "remaining": 1 },
+      "statblockUse": { "resource": "monster-spell:spellcasting:hypnotic-pattern", "remaining": 1 }
+    },
+    "humanReadableReasoning": [
+      "One 66-HP Incubus faces four healthy 60-HP PCs. If it spends the turn on damage, it can make two Restless Touch attacks against only one PC; even two hits do not remove that PC, and all four PCs retain their next actions.",
+      "Hypnotic Pattern can cover all four PCs in one legal 30-foot cube while leaving the Incubus outside. Each PC has a -2 Wisdom save against DC 15, so the control is expected to remove most of the opposing actions immediately.",
+      "The PCs occupy the four corners of the cluster, 25 feet apart along each edge. A PC who resists must move and spend an action to wake only one affected ally; that rescue trades away the successful PC's own action and cannot restore the whole party at once.",
+      "With no monster ally available to be caught or to exploit plain damage, mass incapacitation is the decisive action-economy play and Restless Touch is the deliberately inferior comparison."
+    ],
+    "positions": {
+      "pcCorners": [
+        { "combatantId": "combatant:d432-fighter", "column": 2, "row": 2 },
+        { "combatantId": "combatant:d432-cleric", "column": 7, "row": 2 },
+        { "combatantId": "combatant:d432-rogue", "column": 2, "row": 7 },
+        { "combatantId": "combatant:d432-wizard", "column": 7, "row": 7 }
+      ],
+      "caster": { "combatantId": "combatant:d432-incubus", "column": 8, "row": 6 },
+      "edgeDistanceFeet": 25
+    },
+    "damageAlternative": {
+      "action": "multiattack/restless-touch",
+      "targets": 1,
+      "attacks": 2,
+      "averageDamagePerHit": 15,
+      "targetHitPoints": 60,
+      "note": "The SRD short-rest curse has no in-fight action-economy value in this full-health, no-rest scenario."
+    }
+  }
+}

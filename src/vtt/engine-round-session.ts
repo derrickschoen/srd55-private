@@ -240,11 +240,15 @@ function monsterSpellCommand(
   const saveDc = source.saveDc.kind === 'present' ? source.saveDc.value : 8 + proficiency + modifier;
   const attackBonus = source.spellAttackBonus.kind === 'present' ? source.spellAttackBonus.value : proficiency + modifier;
   const resourcePoolId = monsterSpellResourcePoolId(source.id, reference);
+  const placedArea = use.area ?? null;
+  const usesPlacedArea = definition.targeting.kind === 'area' || definition.targeting.kind === 'area_selected';
   return {
     type: 'cast_spell', actor: caster.profile.id, spellId: use.spellId,
     slotLevel: definition.level === 0 ? null : definition.level,
     castAsRitual: false, casterLevel: 1, attackBonus, saveDc, spellcastingModifier: modifier,
-    targets: use.targetIds, area: null, weaponAttack: null, selectedOption: null,
+    targets: usesPlacedArea ? [] : use.targetIds,
+    area: usesPlacedArea ? placedArea : null,
+    weaponAttack: null, selectedOption: null,
     ...(resourcePoolId === null ? {} : { resourcePoolId }),
     monsterActionId: source.id,
   };

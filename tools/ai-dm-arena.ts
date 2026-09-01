@@ -38,8 +38,17 @@ import {
   type RendererProfile,
 } from '../src/vtt/renderer-profile';
 
-export const ARENA_BASES = ['standard', 'hard', 'brutal'] as const;
+export const ARENA_BASES = ['standard', 'hard', 'brutal', 'scenario'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
+
+export interface ArenaProbeVerdict {
+  readonly scenario: 'hypnotic-pattern-cc';
+  readonly chose_control: boolean;
+  readonly selected_instead: null | {
+    readonly kind: 'cast_spell' | 'action';
+    readonly id: string;
+  };
+}
 
 export interface ArenaArm {
   readonly label: string;
@@ -88,6 +97,7 @@ export interface ArenaRow {
   readonly startingRoomDigest: string;
   readonly seed: number;
   readonly basis: ArenaBasis;
+  readonly probeVerdict: ArenaProbeVerdict | null;
   readonly arm: string;
   readonly room: number;
   readonly round: number;
@@ -253,7 +263,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   }
   const basis = values.get('--basis') ?? 'standard';
   if (!ARENA_BASES.includes(basis as ArenaBasis)) {
-    throw new TypeError('--basis must be standard, hard, or brutal.');
+    throw new TypeError('--basis must be standard, hard, brutal, or scenario.');
   }
   const combatModel = values.get('--combat-model') ?? 'initiative_segments_v1';
   if (!COMBAT_MODELS.includes(combatModel as CombatModel)) {
@@ -375,16 +385,25 @@ export function basisFixturesPath(config: Pick<ArenaConfig, 'cwd' | 'basis'>): s
     case 'standard': return resolve(config.cwd, 'tests/fixtures/arena-basis');
     case 'hard': return resolve(config.cwd, 'tests/fixtures/arena-basis-hard');
     case 'brutal': return resolve(config.cwd, 'tests/fixtures/arena-basis-brutal');
+    case 'scenario': return resolve(config.cwd, 'tests/fixtures/arena-scenarios');
   }
   basis satisfies never;
   throw new TypeError(`Unknown arena basis ${String(basis)}.`);
 }
 
 async function frozenRoomStates(config: ArenaConfig): Promise<readonly import('../src/combat/encounter').EncounterState[]> {
+  if (config.basis === 'scenario' && config.rooms !== 1) {
+    throw new RangeError('The scenario basis contains exactly one hypnotic-pattern-cc room.');
+  }
+  if (config.basis === 'scenario' && config.generateMissingRooms) {
+    throw new TypeError('--generate-missing-rooms is unavailable for the frozen scenario basis.');
+  }
   const fixturesPath = basisFixturesPath(config);
   return Promise.all(Array.from({ length: config.rooms }, async (_unused, index) => {
     const seed = config.seed + index;
-    const fixturePath = resolve(fixturesPath, `seed-${String(seed)}.json`);
+    const fixturePath = resolve(fixturesPath, config.basis === 'scenario'
+      ? 'hypnotic-pattern-cc.json'
+      : `seed-${String(seed)}.json`);
     try {
       await access(fixturePath);
       return applyRoomInitiativeProfile(await loadArenaFixture(fixturePath), config.initiativeProfile);
@@ -392,11 +411,31 @@ async function frozenRoomStates(config: ArenaConfig): Promise<readonly import('.
       if (!config.generateMissingRooms || !(error instanceof Error) ||
         !('code' in error) || error.code !== 'ENOENT') throw error;
       return generateRoom(seed, {
-        difficulty: config.basis,
+        difficulty: config.basis === 'scenario' ? 'standard' : config.basis,
         initiativeProfile: config.initiativeProfile,
       }).encounter.state;
     }
   }));
+}
+
+export function extractArenaProbeVerdict(
+  basis: ArenaBasis,
+  authorizedPlan: readonly import('./ai-dm-conversation').ConversationAuthorizedActorPlan[] | null,
+): ArenaProbeVerdict | null {
+  if (basis !== 'scenario') return null;
+  const caster = authorizedPlan?.find((entry) => entry.actorId === 'combatant:d432-incubus') ?? null;
+  const main = caster?.resolutionSummary.actionSlots.find((slot) => slot.slot === 'main') ?? null;
+  const choseControl = main?.kind === 'cast_spell' && main.spellId === 'hypnotic-pattern';
+  return {
+    scenario: 'hypnotic-pattern-cc',
+    chose_control: choseControl,
+    selected_instead: choseControl || main === null
+      ? null
+      : {
+          kind: main.kind === 'cast_spell' ? 'cast_spell' : 'action',
+          id: main.spellId ?? String(main.actionId),
+        },
+  };
 }
 
 function arenaRows(
@@ -417,6 +456,7 @@ function arenaRows(
     startingRoomDigest: row.startingRoomDigest,
     seed: seeds[row.room - 1]!,
     basis: config.basis,
+    probeVerdict: extractArenaProbeVerdict(config.basis, row.authorizedPlan),
     arm,
     room: row.room,
     round: row.round,
