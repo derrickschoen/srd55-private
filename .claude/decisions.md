@@ -1,5 +1,39 @@
 # Binding scope decisions
 
+## Supervisor record — prose formats merged; control-valuation consensus reached round 1 (2026-09-01)
+
+**Prose renderer merge (D434/D435).** lane-wt/caveman-prose merged
+3bf6b49f after, in order: my full gates on the lane (tsc 0, sg 0,
+9,406/9,406), pre-read of every production diff, and a pre-merge live
+smoke — 2 brutal rooms structured default + 2 rooms caveman_prose from
+the lane. Smoke evidence: default context bytes byte-count-identical to
+live main on both rooms (28815, 32742 exact matches to the hp-probe
+mini-A/B rows); caveman live path end-to-end (model consumed 25352/22150-
+byte prose contexts, authorized real plans via exact option ids, 0
+blocks, 0 service nulls). Post-merge full main gate mine: tsc 0, sg 0,
+9,413/9,413, build clean, :4173 200. Its own D429.1 mini-A/B launched.
+
+**Control valuation (D436.2): dual-blind consensus reached in one
+cross-critique round.** Sealed supervisor doc + sol blind doc converged
+on: typed outcome evaluator with branded exact rationals; net
+action-equivalents as the common progress unit (damage converted too —
+kill = horizon credit, full HP bar capped at 1); exact Poisson-binomial
++ capped wake recursion; concentration exposure-band discounting; V1
+scope = hard turn-denial only; family-partitioned dominance (legacy
+damage comparator preserved verbatim within-family, action-equivalents
+cross-family only, with a compareV2===compareV1 property invariant on
+all legacy pairs). Round 1 findings against our own work, at full
+length: sol found a kill-branch double-count in its own pressure
+formula (corrected to H*P(D>=hp) + sum_{d<hp} P(D=d)*d/hp) AND an error
+in MY sealed doc — I wrote "expected caught 4" where 4 is the target
+count and 3.2 the expectation. My dispute killed sol's original
+axis-replacement (it contradicted its own damage-only regression
+guard). Probe oracles: Hypnotic Pattern net 5.714656; Restless Touch
+0.3538501601 exact. Merged spec: job-tmp ctrl-value-consensus.md +
+sol's base doc. Implementation lane (with the D436.1 honesty fixes,
+one combined era shift) dispatches at the next quiet-machine window,
+after the P3 caveman arm.
+
 ## Supervisor record — hp-probe merge D429.1 mini-A/B PASSED; process slip owned (2026-09-01)
 
 **Mini-A/B verdict (22cea413 era, 10 brutal rooms x 1 round, full
