@@ -1,5 +1,33 @@
 # Binding scope decisions
 
+## Regression fixed and confirmed live; finding chain closed — SUPERVISOR (2026-09-01)
+
+lane-wt/frontier-regress merged (7a9b1a29, 3 review rounds; my tsc -b
+caught 4 type errors codex's --noEmit run missed). TRUE root causes,
+both codex-proven with a fail-pre-fix repro: (1) at PC initiative
+boundaries the correction context refresh selected the ACTIVE PC instead
+of the pending monsters — full-intel context construction failed
+pre-submission (100 failed attempts vs 0 old-era), driving conversations
+into deterministic exhaustion and passive sim_controller plans; pending
+request's monsters are now authoritative. (2) Dominance validation was
+BYPASSED whenever any typed override was present; note-less
+unknown_engine_gap and vacuous resource_conservation overrides
+authorized model-chosen all-end_turn rounds; validation centralized and
+the required-note branch is schema+type-encoded. My render-side-effect
+hypothesis from the isolation note below was REFUTED by codex with a
+retained negative-control test — recorded as my wrong hypothesis; the
+exhaustion framing was right, the mechanism was not. Frontier safeguard
+untouched. LIVE CONFIRMATION (my run, 10 brutal rooms x 3 reps, full
+intel, post-fix): mean offense 2.03, zero-offense 3/29 (matches healthy
+c3a 3/28), all-end_turn rounds 0 (the 2 rounds containing an end_turn
+are mixed rounds with one actor passing under an 'objective' override —
+present in the healthy old era too), blocks 3 (residual distinct
+failures: reaction-schema x2, tools-unavailable x1, pre-existing class).
+Gates: tsc 0, sg 0, vitest 9390/9390, build clean, :4173 200. P1
+unblocks: the confirmation arm stands as P1's fresh full arm; off arm
+and hard-basis satellites rerun on the fixed era (pre-fix versions
+discarded as tainted).
+
 ## Regression isolated to exhaustion-path frontier resolution — SUPERVISOR (2026-09-01)
 
 Amends the finding below with the completed isolation chain (all my own
