@@ -1,5 +1,37 @@
 # Binding scope decisions
 
+## D442 — OWNER: sensitivity analysis after all arms; push the winners deeper (2026-09-01)
+
+Verbatim: "After all of the arms and do sensitivity analysis and try
+reducing the most promising arms even more." Binding plan:
+1. JUDGING PIPELINES with the runs: as each D440/D441 arm lands and
+   passes profile/weather verification, its pairwise blinded packet
+   (vs cav-full) is built and judged (sol/opus/fable) immediately —
+   but ALL keys stay sealed until the last packet is scored, so the
+   supervisor-judge stays blind to arm identity across the whole
+   program. One unsealing at the end.
+2. SENSITIVITY ANALYSIS at unsealing, over the 27-arm one-era grid
+   (control, 5 singles, 10 pairs, 10 triples, union):
+   - additivity: fit main effects + pairwise interactions of the five
+     reductions on pooled scores; report which interactions are real
+     vs additive;
+   - per-room heterogeneity slices (the D427 axis);
+   - weather sensitivity: scores with refused rows included (0) vs
+     excluded;
+   - judge-level agreement and per-judge arm rankings.
+3. DEEPER ROUND on the most promising arms (non-losing or least-bad):
+   next-rung seam settings — e.g. rows best_exception -> top_target ->
+   off, opportunityCost conditional -> status_ids, frontier
+   candidates_summary -> off, plus so-far-untouched seams (status
+   sparse, labels derivable, shortlist k3/k2, optionDetail top2_stubs,
+   delta guarded) — composed onto the winning combination(s). HARD
+   FLOORS unchanged: exact option ids verbatim (prose round-trip
+   contract), K-set floor, schema validity. ids=short_refs stays
+   EXCLUDED (P2 failure + exact-id contract).
+4. Quads remain parked pending the sensitivity read (if triples show
+   additive costs, quads are predictable and may be skipped; if
+   interactions appear, quads answer them).
+
 ## D441 — OWNER: D440 extends to pairs and triples of reductions (2026-09-01)
 
 Owner: "What about combinations of 2 and 3 different reductions?"
