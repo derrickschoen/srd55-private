@@ -1,5 +1,29 @@
 # Binding scope decisions
 
+## D432 — OWNER: Hypnotic Pattern control-vs-damage probe scenario (2026-09-01)
+
+Directive: build a scenario where the AI DM must choose between casting
+Hypnotic Pattern (crowd control) and dealing plain damage, constructed
+so the judges AGREE the crowd control is the superior choice — the
+probe exists to make sure damage is not chosen over something
+fight-winning like Hypnotic Pattern. Execution plan:
+1. Codex lane builds the frozen fixture: a monster caster with Hypnotic
+   Pattern prepared and slots; 3+ PCs clustered inside a legal 30-ft
+   cube placement with NO monsters caught in it; a damage option
+   present but clearly inferior (single-target). Mechanical checks:
+   the option list must advertise the cast with a legal cube; the
+   effect must resolve (Charmed+Incapacitated, concentration).
+2. The lane REPORTS how the intel stack prices the option (EV model,
+   dominance status, team-scorer axes) — if the coaching itself calls
+   the control dominated because it deals no damage, that is a core
+   finding about the scorer, not something to patch silently.
+3. Supervisor validates judge agreement ONCE (blinded panel on the two
+   candidate plans); after agreement, the scenario becomes a
+   mechanical guardrail probe (was Hypnotic Pattern cast: yes/no) run
+   per profile arm in P3+ rounds and recorded in the dataset.
+Engine support verified before recording: KB R-SPELL-124, dedicated
+hypnotic_pattern payload kind in engine-query-port, manifest entry.
+
 ## D431 — OWNER: human-readable optimization only; DM context is coaching for humans (2026-09-01)
 
 Verbatim: "For the p# rounds, treat the ai dm like it was human. Keep it
