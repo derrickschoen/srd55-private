@@ -1,5 +1,35 @@
 # Binding scope decisions
 
+## D444 — OWNER rulings: merge between chains; quads run; winners re-verified at medium (2026-09-01)
+
+Question round (AskUserQuestion):
+1. **D436 merge timing: BETWEEN D441 and D443.** The combos program
+   (control + 5 singles + 10 pairs + 10 triples + 5 quads + union)
+   completes on the current era; then the ctrl-value/honesty merge is
+   THE ERA SHIFT (full vitest + live smoke + merge + main gate +
+   mini-A/B + supervisor G-sweep); the D443 effort study then runs
+   entirely on the new era, internally paired low-vs-medium.
+2. **Quads: RUN REGARDLESS** — all 5 four-way combos join the
+   pre-merge program (chain queued behind D441), completing the 2^5
+   grid on one era.
+3. **Effort scope: WINNERS AT MEDIUM** — after unsealing, the top
+   combo arms re-run at luna medium (new era, alongside the D442.3
+   deeper round, which needs fresh new-era controls anyway).
+
+**Supervisor infrastructure finding (mine, full length):** the D441
+and D443 chain waiters deadlocked for ~40 minutes. Cause: the D443
+waiter's outer bash wrapper carried the whole launch heredoc —
+including the literal string "ai-dm-arena.ts" — in its own command
+line, so the D441 waiter's `pgrep -f "ai-dm-arena"` matched it
+forever, and D443's poll matched its own ancestor. My scripts, my
+bug, caught by noticing "2 arena processes" with no arena log. Fix:
+kill both waiters; bracket-pattern all polls (`ai-dm-aren[a].ts --`,
+`run-d44X-arm[s].sh`) so patterns cannot match text-carrying
+wrappers; relaunched clean. The earlier weather-gate `[: integer
+expression` bug in the D440 chain (grep -c || echo double-print) is
+the same class — quoting/composition bugs in supervisor glue; both
+now fixed in every script.
+
 ## D443 — OWNER: P3 arms at both luna low AND luna medium (2026-09-01)
 
 Verbatim: "Check all of the p3 arms with both Luna low effort and Luna
