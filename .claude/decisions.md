@@ -1,5 +1,24 @@
 # Binding scope decisions
 
+## P1 re-anchor UNSEALED (fixed era 7a9b1a29) — SUPERVISOR (2026-09-01)
+
+Both arms fresh, 10 brutal rooms x 3 reps, luna-low; blinded 3-judge
+panel (sol 7.17/8.41, opus 5.53/6.41, fable 6.37/7.07 full/off), sealed
+key, shuffle 149. POOLED: full 6.36 vs off 7.30 (diff −0.94), paired
+W6/L19/T4, rooms won by full 2/10. The off arm was rerun once untuned
+after a 5/30 CLI-timeout weather event (discarded); one off row lost to
+a silent service fault is excluded as service_null (both-arm case
+dropped). Era baselines for the slimming program: FULL 6.36 / OFF 7.30.
+The cycle-3a inversion REPRODUCES era-clean at smaller magnitude (−0.94
+vs −1.29): full-intel presentation still net-hurts on brutal at
+luna-low. First D427 slices: full does least-bad on trim-engaged rooms
+(−0.87, 6 wins/20) and worst on small/untrimmed rooms (−1.48 to −1.50,
+0 wins); rooms 04/10 flip positive — per-circumstance heterogeneity is
+real. Hard-basis satellites (3 rooms x 1 rep per arm, seeds 5117011-13,
+metrics-only) recorded into the dataset. P2 (wire compaction: sparse
+slots + short refs + sparse status + derivable labels vs P1-full
+control) dispatched on the same era.
+
 ## Regression fixed and confirmed live; finding chain closed — SUPERVISOR (2026-09-01)
 
 lane-wt/frontier-regress merged (7a9b1a29, 3 review rounds; my tsc -b
