@@ -24,6 +24,18 @@ verified before exit:
    (30 rows each, durable). Harvest + packet + judge next session.
    The :4173 server dies with the CLI; restart it next session.
 
+Owner asked for a double-check; it found two real gaps (mine, full
+length): (a) the durable copy used `*.json` and missed ALL sol
+judgments, which live in `*-judge-sol-*.log` files (raw codex exec
+stdout) — the sealed report agent correctly stopped loudly with
+"BLOCKED, no substitute judgments fabricated" instead of inventing a
+sol column. Logs/errs copied, brief corrected, agent relaunched.
+(b) The first resumer wrote arm outputs into the claude job tmp,
+which a reinstall could clean mid-run. Rewritten to live entirely in
+dnd-slim-runs (one no-clobber sweep of the job tmp at takeover),
+relaunched, session isolation re-verified (setsid leader). Next
+session: arm outputs and logs are in dnd-slim-runs, NOT the job tmp.
+
 ## D445 — OWNER: post-merge ranking-invariance check on P3 arms (2026-09-01)
 
 Verbatim: "After the merge, take a random sample of p3 winners and
