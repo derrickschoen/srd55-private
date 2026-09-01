@@ -1044,6 +1044,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(turnContext).toMatchObject({
       granularity: 'full',
       context_trimmed: true,
+      compact_fallback: true,
       team_plan_frontier: {
         policy: 'team-scorer-v1',
         frontier_resolution: 'fully_resolved',
@@ -1056,6 +1057,15 @@ describe('AI-DM engine MCP conversation runner', () => {
     const frontier = objectValue(turnContext['team_plan_frontier'], 'trimmed team plan frontier');
     expect(frontier).not.toHaveProperty('candidates');
     expect(frontier).not.toHaveProperty('removed');
+    expect(turnContext).not.toHaveProperty('renderer_defect');
+    const actors = turnContext['actors'];
+    if (!Array.isArray(actors)) throw new Error('Compact fallback omitted actors.');
+    expect(actors).toHaveLength(45);
+    expect(actors.every((value) => {
+      const options = objectValue(value, 'compact fallback actor')['options'];
+      return Array.isArray(options) && options.length === 2 && options.every((option) =>
+        /^k\d+$/u.test(String(objectValue(option, 'compact fallback option')['option_id'])));
+    })).toBe(true);
   });
 
   it('injects a KB only on cold start and attributes every output row to its bytes', async () => {

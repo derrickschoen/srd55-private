@@ -29,6 +29,12 @@ import { canonicalEngineQueryPort, engineActionRegistry } from '../engine-query-
 import { pureTurnProposalResolver } from '../intent-resolver';
 import { freshMonsterPlanningState, projectFutureMonsterTurns } from '../monster-planning-state';
 import {
+  rendererProfileSchema,
+  type CircumstanceFeatureVector,
+  type RendererProfile,
+  type RendererRemovalCounts,
+} from '../renderer-profile';
+import {
   createEngineMcpApplication,
   MutableEngineCapsuleFeed,
   type AdjudicationEnvelope,
@@ -157,6 +163,7 @@ export interface EngineMcpLauncherManifest {
   };
   readonly toolProfile?: EngineMcpToolProfile;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
+  readonly rendererProfile?: RendererProfile;
   readonly initiativeProjection?: EngineInitiativeProjection;
 }
 
@@ -185,6 +192,14 @@ export function createEngineMcpRuntime(
     readonly onSpeculativePlan?: (plan: QueuedSpeculativePlanEnvelope) => void;
     readonly toolProfile?: EngineMcpToolProfile;
     readonly turnContextDeltaBase?: TurnContextDeltaBase;
+    readonly rendererProfile?: RendererProfile;
+    readonly turnContextMaximumBytes?: number;
+    readonly onTurnContextRendered?: (result: {
+      readonly preTrimBytes: number;
+      readonly postTrimBytes: number;
+      readonly features: CircumstanceFeatureVector;
+      readonly removals: RendererRemovalCounts;
+    }) => void;
     readonly initiativeProjection?: EngineInitiativeProjection;
     readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
   } = {},
@@ -303,6 +318,13 @@ export function createEngineMcpRuntime(
     ...(options.turnContextDeltaBase === undefined ? {} : {
       turnContextDeltaBase: structuredClone(options.turnContextDeltaBase),
     }),
+    ...(options.rendererProfile === undefined ? {} : { rendererProfile: options.rendererProfile }),
+    ...(options.turnContextMaximumBytes === undefined ? {} : {
+      turnContextMaximumBytes: options.turnContextMaximumBytes,
+    }),
+    ...(options.onTurnContextRendered === undefined ? {} : {
+      onTurnContextRendered: options.onTurnContextRendered,
+    }),
     ...(options.onTurnContext === undefined ? {} : { onTurnContext: options.onTurnContext }),
   });
   return {
@@ -404,7 +426,8 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
         candidate['context'] !== null && !Array.isArray(candidate['context']) &&
         (candidate['context'] as Readonly<Record<string, unknown>>)['granularity'] === 'full';
     })()) &&
-    (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm');
+    (input['toolProfile'] === undefined || input['toolProfile'] === 'full' || input['toolProfile'] === 'dm') &&
+    (input['rendererProfile'] === undefined || rendererProfileSchema.safeParse(input['rendererProfile']).success);
 }
 
 export type DecodedEngineMcpLauncherManifest = EngineMcpLauncherManifest & {
@@ -459,6 +482,9 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       } : {}),
       ...(manifest.turnContextDeltaBase === undefined ? {} : {
         turnContextDeltaBase: manifest.turnContextDeltaBase,
+      }),
+      ...(manifest.rendererProfile === undefined ? {} : {
+        rendererProfile: manifest.rendererProfile,
       }),
       ...(manifest.initiativeProjection === undefined ? {} : {
         initiativeProjection: manifest.initiativeProjection,

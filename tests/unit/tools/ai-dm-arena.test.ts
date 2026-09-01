@@ -23,6 +23,11 @@ import { availableEngineActorOptions, resolveEngineActorOption } from '../../../
 import { validateArenaPlan } from '../../../src/vtt/arena-legality';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
 import {
+  circumstanceFeatureVectorSchema,
+  DEFAULT_RENDERER_PROFILE,
+  RENDERER_POLICY_VERSION,
+} from '../../../src/vtt/renderer-profile';
+import {
   basisFixturesPath,
   parseArenaArgs,
   runArena,
@@ -260,6 +265,11 @@ describe('AI-DM arena', () => {
     expect(defaultRow.intelMode).toBe('full');
     expect(explicitFullRow.intelMode).toBe('full');
     expect(offRow).toEqual(expect.objectContaining({ intelMode: 'off', engineIntel: null }));
+    expect(offRow.rendererAttribution).toEqual({
+      policyVersion: RENDERER_POLICY_VERSION,
+      profile: DEFAULT_RENDERER_PROFILE,
+    });
+    expect(circumstanceFeatureVectorSchema.safeParse(offRow.circumstanceFeatures).success).toBe(true);
     expect(offRow.rlData).toEqual(expect.objectContaining({
       intelPolicyVersions: { intel_mode: 'off' },
       engineIntel: null,
@@ -267,6 +277,11 @@ describe('AI-DM arena', () => {
     expect(JSON.parse(readFileSync(offPath, 'utf8').trim())).toEqual(expect.objectContaining({
       intelMode: 'off',
       engineIntel: null,
+      rendererAttribution: {
+        policyVersion: RENDERER_POLICY_VERSION,
+        profile: DEFAULT_RENDERER_PROFILE,
+      },
+      circumstanceFeatures: offRow.circumstanceFeatures,
       rlData: expect.objectContaining({ intelPolicyVersions: { intel_mode: 'off' } }),
     }));
 

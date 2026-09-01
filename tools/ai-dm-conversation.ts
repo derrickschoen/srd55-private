@@ -115,6 +115,14 @@ import {
 } from '../src/vtt/adjustment-exhaustion-coordinator';
 import { buildArenaSessionInstructions } from './rl/arena-session-instructions';
 import { readRepoCommit } from './rl/repo-commit';
+import {
+  DEFAULT_RENDERER_PROFILE,
+  RENDERER_POLICY_VERSION,
+  rendererProfileSchema,
+  type CircumstanceFeatureVector,
+  type RendererProfile,
+  type RendererRemovalCounts,
+} from '../src/vtt/renderer-profile';
 
 export const CONVERSATION_CLIS = ['codex', 'claude-code', 'local-openai'] as const;
 export type ConversationCli = (typeof CONVERSATION_CLIS)[number];
@@ -137,6 +145,7 @@ const RULES_SOURCE = { get: () => null } as const;
 
 export interface ConversationConfig {
   readonly intelMode: IntelMode;
+  readonly rendererProfile: RendererProfile;
   readonly combatModel: CombatModel;
   readonly initiativeProfile: RoomInitiativeProfile;
   readonly partyPolicy: ScriptedPartyDecisionPolicy;
@@ -375,6 +384,11 @@ type SimulatedSuggestionResponse = ConversationSuggestionAdoption | 'legacy';
 
 export interface ConversationRow {
   readonly intelMode: IntelMode;
+  readonly rendererAttribution: {
+    readonly policyVersion: typeof RENDERER_POLICY_VERSION;
+    readonly profile: RendererProfile;
+  };
+  readonly circumstanceFeatures: CircumstanceFeatureVector;
   readonly combatModel: CombatModel;
   readonly roundProtocolVersion: typeof ROUND_PROTOCOL_VERSION;
   readonly startingRoomDigest: string;
@@ -455,6 +469,13 @@ export interface ConversationRunResult {
   readonly restoredMidRun: boolean;
 }
 
+export interface TurnContextRenderEvidence {
+  readonly preTrimBytes: number;
+  readonly postTrimBytes: number;
+  readonly features: CircumstanceFeatureVector;
+  readonly removals: RendererRemovalCounts;
+}
+
 export interface ConversationRunOptions {
   readonly roomStates?: readonly EncounterState[];
   readonly store?: BrowserSessionStore;
@@ -471,6 +492,8 @@ export interface ConversationRunOptions {
   readonly partyPolicyOverride?: ScriptedPartyDecisionPolicy;
   /** Test-only browser-reload proof point; one-based completed round count. */
   readonly restoreAfterRound?: number;
+  /** Arena-scoped memo for identical no-tool renders; actual tool evidence always wins. */
+  readonly rendererEvidenceCache?: Map<string, TurnContextRenderEvidence>;
   /** SIMULATED-only exhaustion cases, encoded as `room-N-round-N`. */
   readonly exhaustInitial?: readonly string[];
   readonly invalidInitial?: readonly string[];
@@ -527,6 +550,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
       '--out', '--cli-bin', '--timeout-ms', '--kb', '--reaction-ask-default',
       '--combat-model', '--initiative-profile',
       '--intel-mode',
+      '--renderer-profile',
       '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
     values.set(option ?? '', requiredValue(argv, index, option ?? '<missing>'));
@@ -596,8 +620,12 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   if (intelMode !== 'full' && intelMode !== 'off') {
     throw new TypeError('--intel-mode must be full or off.');
   }
+  const rendererProfile = values.has('--renderer-profile')
+    ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
+    : DEFAULT_RENDERER_PROFILE;
   return {
     intelMode,
+    rendererProfile,
     combatModel: combatModel as CombatModel,
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
     partyPolicy: DEFAULT_SCRIPTED_PARTY_DECISION_POLICY,
@@ -1233,6 +1261,7 @@ interface CapturedTurnContext {
   readonly raw: string;
   readonly granularity: 'full' | 'turn_delta';
   readonly value: Readonly<Record<string, unknown>>;
+  readonly rendering?: TurnContextRenderEvidence;
 }
 
 function capturedTurnContext(raw: string): CapturedTurnContext {
@@ -1262,12 +1291,14 @@ function plannedTurnContext(
   snapshot: EngineRoundSnapshot,
   base: TurnContextDeltaBase | undefined,
   intelMode: IntelMode,
+  rendererProfile: RendererProfile,
 ): CapturedTurnContext {
   const capsule = snapshot.capsule;
   const request = capsule.request;
   if (request === null || request.phase === 'speculative') {
     throw new Error('Recorded turn context requires an ordinary pending request.');
   }
+  let rendering: CapturedTurnContext['rendering'];
   const runtime = createEngineMcpRuntime(state, {
     runId: capsule.runId,
     branchId: capsule.branchId,
@@ -1294,6 +1325,8 @@ function plannedTurnContext(
       },
     } : { requestedActorCount: request.actors.length }),
     toolProfile: 'dm',
+    rendererProfile,
+    onTurnContextRendered: (value) => { rendering = value; },
     initiativeProjection: capsule.projection.initiative,
     ...(base === undefined ? {} : { turnContextDeltaBase: base }),
   });
@@ -1306,7 +1339,7 @@ function plannedTurnContext(
       ? { granularity: 'full' }
       : { granularity: 'turn_delta', since_revision: base.revision }),
   });
-  return capturedTurnContext(JSON.stringify(value));
+  return { ...capturedTurnContext(JSON.stringify(value)), ...(rendering === undefined ? {} : { rendering }) };
 }
 
 function takeTurnContext(path: string): CapturedTurnContext | null {
@@ -1741,6 +1774,7 @@ function takeSpeculativePlan(path: string): QueuedSpeculativePlanEnvelope | null
 async function writeLauncher(input: {
   readonly directory: string;
   readonly name: string;
+  readonly rendererProfile: RendererProfile;
   readonly snapshot: EngineRoundSnapshot;
   readonly room: number;
   readonly historyKind: string;
@@ -1769,6 +1803,7 @@ async function writeLauncher(input: {
     revision: capsule.revision, requestId: request.requestId,
     phase: request.phase, correctionNumber: request.correctionNumber,
     room: input.room, historyKind: input.historyKind, toolProfile: 'dm',
+    rendererProfile: input.rendererProfile,
     initiativeProjection: capsule.projection.initiative,
     ...(request.phase === 'speculative' ? {
       requestedActorIds: request.actors,
@@ -1807,6 +1842,7 @@ function fullTurnContextBase(
   state: EncounterState,
   snapshot: EngineRoundSnapshot,
   intelMode: IntelMode,
+  rendererProfile: RendererProfile,
 ): TurnContextDeltaBase {
   const capsule = snapshot.capsule;
   const request = capsule.request;
@@ -1839,6 +1875,7 @@ function fullTurnContextBase(
       },
     } : { requestedActorCount: request.actors.length }),
     toolProfile: 'dm',
+    rendererProfile,
     initiativeProjection: capsule.projection.initiative,
   });
   const response = runtime.handler.handle({
@@ -1865,9 +1902,11 @@ function inProcessDmToolSession(input: {
   readonly state: EncounterState;
   readonly snapshot: EngineRoundSnapshot;
   readonly intelMode: IntelMode;
+  readonly rendererProfile: RendererProfile;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly onProposal: (proposal: RoundTurnProposalEnvelope | PlanAdjustmentProposalEnvelope) => void;
   readonly onToolResult: (name: string, result: unknown) => void;
+  readonly onTurnContextRendered?: (evidence: NonNullable<CapturedTurnContext['rendering']>) => void;
 }): AgentToolSession {
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
@@ -1900,6 +1939,10 @@ function inProcessDmToolSession(input: {
       },
     } : { requestedActorCount: request.actors.length }),
     toolProfile: 'dm',
+    rendererProfile: input.rendererProfile,
+    ...(input.onTurnContextRendered === undefined ? {} : {
+      onTurnContextRendered: input.onTurnContextRendered,
+    }),
     initiativeProjection: capsule.projection.initiative,
     ...(input.turnContextDeltaBase === undefined ? {} : {
       turnContextDeltaBase: input.turnContextDeltaBase,
@@ -2250,6 +2293,8 @@ async function runConversationWithConfiguredIntel(
       const initialSnapshot = round === 1
         ? engineSession.snapshot(initialRequest)
         : prepareConfiguredRound(initialRequest);
+      const rendererState = structuredClone(engineSession.currentState());
+      const rendererDeltaBase = lastSeenTurnContext;
       const capsule = initialSnapshot.capsule;
       const suggestedPlan = suggestedPlanBookkeeping(capsule);
       const segmentPartyPlan = config.combatModel === 'initiative_segments_v1'
@@ -2267,22 +2312,25 @@ async function runConversationWithConfiguredIntel(
       let currentTurnContext: TurnContextDeltaBase | undefined;
       const getCurrentTurnContext = (): TurnContextDeltaBase => {
         currentTurnContext ??= fullTurnContextBase(
-          engineSession.currentState(), initialSnapshot, config.intelMode,
+          engineSession.currentState(), initialSnapshot, config.intelMode, config.rendererProfile,
         );
         return currentTurnContext;
       };
       let plannedInitialTurnContext: CapturedTurnContext | undefined;
+      let initialRendererEvidence: CapturedTurnContext['rendering'];
       const getPlannedInitialTurnContext = (): CapturedTurnContext => {
         plannedInitialTurnContext ??= plannedTurnContext(
           engineSession.currentState(),
           initialSnapshot,
           lastSeenTurnContext,
           config.intelMode,
+          config.rendererProfile,
         );
         return plannedInitialTurnContext;
       };
       let rowTurnContext = unrequestedTurnContext();
       const initialLauncher = await writeLauncher({
+        rendererProfile: config.rendererProfile,
         directory: artifacts, name: `${key}-initial`, snapshot: initialSnapshot, room,
         historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
         ...(lastSeenTurnContext === undefined ? {} : {
@@ -2295,17 +2343,25 @@ async function runConversationWithConfiguredIntel(
             state: engineSession.currentState(),
             snapshot: initialSnapshot,
             intelMode: config.intelMode,
+            rendererProfile: config.rendererProfile,
             ...(lastSeenTurnContext === undefined ? {} : {
               turnContextDeltaBase: lastSeenTurnContext,
             }),
             onProposal: (proposal) => {
               if (isRoundProposal(proposal)) localInitialProposal = proposal;
             },
+            onTurnContextRendered: (evidence) => { initialRendererEvidence = evidence; },
             onToolResult: (name, result) => {
               observedToolCalls += 1;
               if (name === 'engine.get_turn_context') observedTurnContextCalls += 1;
               if (name === 'engine.get_turn_context') {
                 rowTurnContext = capturedTurnContext(JSON.stringify(result));
+                if (rowTurnContext.granularity === 'full') {
+                  currentTurnContext = {
+                    revision: initialSnapshot.capsule.revision,
+                    context: structuredClone(rowTurnContext.value),
+                  };
+                }
               }
               if (eventContextTrimmed(result)) observedContextTruncated = true;
               observedRejections.push(...rejectionEvidence(result));
@@ -2411,6 +2467,7 @@ async function runConversationWithConfiguredIntel(
           ordinaryContextSnapshot,
           undefined,
           config.intelMode,
+          config.rendererProfile,
         ).value;
         const speculativeContext = {
           ...ordinaryContext,
@@ -2422,6 +2479,7 @@ async function runConversationWithConfiguredIntel(
           speculative_request: sourceSnapshot.capsule.request,
         };
         const launcher = await writeLauncher({
+          rendererProfile: config.rendererProfile,
           directory: artifacts,
           name: `${key}-speculative-${String(window.monsters[0])}`,
           snapshot: sourceSnapshot,
@@ -2542,9 +2600,11 @@ async function runConversationWithConfiguredIntel(
         const adjustmentSnapshot = engineSession.snapshot(adjustmentRequest);
         const plannedAdjustmentContext = plannedTurnContext(
           engineSession.currentState(), adjustmentSnapshot, lastSeenTurnContext, config.intelMode,
+          config.rendererProfile,
         );
         let adjustmentTurnContext = plannedAdjustmentContext;
         const adjustmentLauncher = await writeLauncher({
+          rendererProfile: config.rendererProfile,
           directory: artifacts,
           name: `${adjustmentKey}-initial`,
           snapshot: adjustmentSnapshot,
@@ -2558,6 +2618,7 @@ async function runConversationWithConfiguredIntel(
               state: engineSession.currentState(),
               snapshot: adjustmentSnapshot,
               intelMode: config.intelMode,
+              rendererProfile: config.rendererProfile,
               ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
               onProposal: (proposal) => {
                 if (isPlanAdjustmentProposal(proposal)) localAdjustmentProposal = proposal;
@@ -2682,9 +2743,11 @@ async function runConversationWithConfiguredIntel(
           const correctionSnapshot = engineSession.snapshot(correctionRequest);
           const correctionContext = plannedTurnContext(
             engineSession.currentState(), correctionSnapshot, lastSeenTurnContext, config.intelMode,
+            config.rendererProfile,
           );
           adjustmentCorrectionContext = correctionContext;
           const correctionLauncher = await writeLauncher({
+            rendererProfile: config.rendererProfile,
             directory: artifacts,
             name: `${adjustmentKey}-correction`,
             snapshot: correctionSnapshot,
@@ -2698,6 +2761,7 @@ async function runConversationWithConfiguredIntel(
                 state: engineSession.currentState(),
                 snapshot: correctionSnapshot,
                 intelMode: config.intelMode,
+                rendererProfile: config.rendererProfile,
                 ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
                 onProposal: (proposal) => {
                   if (isPlanAdjustmentProposal(proposal)) {
@@ -2937,13 +3001,19 @@ async function runConversationWithConfiguredIntel(
         const correctionTurnContextBase = escalationPlanner === null
           ? lastSeenTurnContext
           : undefined;
-          const plannedCorrectionTurnContext = plannedTurnContext(
-            engineSession.currentState(),
-            correctionSnapshot,
-            correctionTurnContextBase,
-            config.intelMode,
-          );
+          let plannedCorrectionTurnContext: CapturedTurnContext | undefined;
+          const getPlannedCorrectionTurnContext = (): CapturedTurnContext => {
+            plannedCorrectionTurnContext ??= plannedTurnContext(
+              engineSession.currentState(),
+              correctionSnapshot,
+              correctionTurnContextBase,
+              config.intelMode,
+              config.rendererProfile,
+            );
+            return plannedCorrectionTurnContext;
+          };
         const correctionLauncher = await writeLauncher({
+          rendererProfile: config.rendererProfile,
           directory: artifacts, name: `${key}-correction`, snapshot: correctionSnapshot,
           room, historyKind: 'proposal_correction_requested',
           ...(correctionTurnContextBase === undefined ? {} : {
@@ -2957,6 +3027,7 @@ async function runConversationWithConfiguredIntel(
               state: engineSession.currentState(),
               snapshot: correctionSnapshot,
               intelMode: config.intelMode,
+              rendererProfile: config.rendererProfile,
               ...(correctionTurnContextBase === undefined ? {} : {
                 turnContextDeltaBase: correctionTurnContextBase,
               }),
@@ -3001,7 +3072,7 @@ async function runConversationWithConfiguredIntel(
             const proposalTurnContext = config.captureRlData
               ? proposal.phase === 'initial'
                 ? takeTurnContext(initialLauncher.turnContextSpoolPath) ?? getPlannedInitialTurnContext()
-                : takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? plannedCorrectionTurnContext
+                : takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? getPlannedCorrectionTurnContext()
               : null;
             const proposalRlData = proposalTurnContext === null
               ? undefined
@@ -3184,7 +3255,7 @@ async function runConversationWithConfiguredIntel(
                 const contextCallsBeforeCorrection = simulated?.contextCallsByRequest.get(requestId) ??
                   observedTurnContextCalls;
                 correctionCalls += 1;
-                recordedCorrectionTurnContext = plannedCorrectionTurnContext;
+                recordedCorrectionTurnContext = getPlannedCorrectionTurnContext();
                 const correctionTurn = escalationPlanner === null
                   ? await lifecycle.resumeCorrection(correctionInvocation, signal)
                   : await adapter.start({
@@ -3211,6 +3282,7 @@ async function runConversationWithConfiguredIntel(
                     engineSession.currentState(),
                     correctionSnapshot,
                     config.intelMode,
+                    config.rendererProfile,
                   );
                 }
                 correctionFinalText = correctionTurn.finalText;
@@ -3338,7 +3410,7 @@ async function runConversationWithConfiguredIntel(
             };
             capturedRlData = rlCapture(
               knowledgeBase?.text ?? null,
-              recordedCorrectionTurnContext ?? plannedCorrectionTurnContext,
+              recordedCorrectionTurnContext ?? getPlannedCorrectionTurnContext(),
               syntheticProposal,
               config.intelMode,
               {
@@ -3526,6 +3598,7 @@ async function runConversationWithConfiguredIntel(
                       requestedActorIds: segmentActors,
                     });
                     const recalculationLauncher = await writeLauncher({
+                      rendererProfile: config.rendererProfile,
                       directory: artifacts,
                       name: `${key}-speculation-recalc-${String(segmentActors[0])}`,
                       snapshot: recalculationSnapshot,
@@ -3539,6 +3612,7 @@ async function runConversationWithConfiguredIntel(
                           state,
                           snapshot: recalculationSnapshot,
                           intelMode: config.intelMode,
+                          rendererProfile: config.rendererProfile,
                           turnContextDeltaBase: pending.sourceTurnContext,
                           onProposal: (proposal) => {
                             if (isRoundProposal(proposal)) localRecalculationProposal = proposal;
@@ -3753,8 +3827,37 @@ async function runConversationWithConfiguredIntel(
         ]),
       ]
         .reduce((total, context) => total + new TextEncoder().encode(context).byteLength, 0);
+      const rendererEvidenceCacheKey = canonicalJson({
+        startingRoomDigest,
+        revision: initialSnapshot.capsule.revision,
+        requestPhase: initialSnapshot.capsule.request?.phase ?? null,
+        requestKind: initialSnapshot.capsule.request === null
+          ? null
+          : 'kind' in initialSnapshot.capsule.request
+            ? initialSnapshot.capsule.request.kind ?? 'round_plan'
+            : 'speculative',
+        combatModel: config.combatModel,
+        intelMode: config.intelMode,
+        rendererProfile: config.rendererProfile,
+        deltaBaseRevision: rendererDeltaBase?.revision ?? null,
+      });
+      const rendererEvidence = initialRendererEvidence ?? plannedInitialTurnContext?.rendering ??
+        options.rendererEvidenceCache?.get(rendererEvidenceCacheKey) ?? plannedTurnContext(
+          rendererState,
+          initialSnapshot,
+          rendererDeltaBase,
+          config.intelMode,
+          config.rendererProfile,
+        ).rendering;
+      if (rendererEvidence === undefined) throw new Error('Turn-context renderer emitted no attribution evidence.');
+      options.rendererEvidenceCache?.set(rendererEvidenceCacheKey, rendererEvidence);
       const row: ConversationRow = {
         intelMode: config.intelMode,
+        rendererAttribution: {
+          policyVersion: RENDERER_POLICY_VERSION,
+          profile: config.rendererProfile,
+        },
+        circumstanceFeatures: rendererEvidence.features,
         combatModel: config.combatModel,
         roundProtocolVersion: ROUND_PROTOCOL_VERSION,
         startingRoomDigest,
