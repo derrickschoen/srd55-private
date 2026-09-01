@@ -1,5 +1,33 @@
 # Binding scope decisions
 
+## D437 — OWNER: add grappling for PC and NPC if not already present (2026-09-01)
+
+Verbatim: "We need to add grappling for pc and npc if we don't already
+have it." Supervisor census of what exists (grepped, not recalled):
+- HAVE: the Grappled condition fully modeled with SRD citations
+  (conditions.ts:231 — speed 0, disadvantage vs non-source, drag cost,
+  Tiny/two-size exemption); monster statblock-SPECIFIC grapples
+  (conditionOnHit with escapeDc, quick-grapple bonus action,
+  grapple_escape_disadvantage, grapple_movable, Swoop/abduct);
+  tactical-evaluator advantage/disadvantage interactions.
+- MISSING: (1) generic grapple INITIATION — the SRD 5.2.1 Unarmed
+  Strike Grapple option (save DC 8+Str+prof, target's choice Str/Dex
+  save, one-size-larger limit, free hand, one grapple per hand;
+  srd-5.2.1.txt:12243-12280) for both PCs and NPCs; (2) the ESCAPE
+  action — no turn option anywhere lets a grappled creature spend its
+  action on Str(Athletics)/Dex(Acrobatics) vs escape DC
+  (srd-5.2.1.txt:11704-11730); grappled PCs currently just sit at
+  speed 0 (symmetric-pc-evaluator returns [] for Grappled); (3) grapple
+  END conditions — grappler Incapacitated ends it, range exceeded ends
+  it, grappler may release free; (4) Monk Dex-substitution for the DC.
+Scope notes: Unarmed Strike Damage option comes along as the carrier;
+SHOVE shares the machinery but was not ordered — parked as a question.
+Intel: grapple is movement denial, not hard turn denial, so it stays
+outside control-valuation V1 scope (advertises unresolved) — consistent
+with D436's classification table.
+Sequencing: after the P3 caveman arm and the D436 lane (both touch
+turn-option-registry; sequential merges).
+
 ## Supervisor record — prose formats merged; control-valuation consensus reached round 1 (2026-09-01)
 
 **Prose renderer merge (D434/D435).** lane-wt/caveman-prose merged
