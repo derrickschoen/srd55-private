@@ -36,6 +36,19 @@ dnd-slim-runs (one no-clobber sweep of the job tmp at takeover),
 relaunched, session isolation re-verified (setsid leader). Next
 session: arm outputs and logs are in dnd-slim-runs, NOT the job tmp.
 
+Post-reinstall session (2026-09-01, later): the old claude-child D441
+chain SURVIVED the CLI exit (still running d441-rows-gating); the
+resumer is waiting behind it as designed; :4173 never died. Harvested
+d441-rows-opp, rows-move, rows-threats (rows-threats landed after the
+note): 30 rows each, rendererAttribution.profile == d441-profiles.tsv
+on every row, weather clean (rows-move: 1 timeout + 1 service_null).
+Packets built from dnd-slim-runs via build-d44x-packet-dur.ts (absolute
+import; shuffle seeds 241/251/257), zero leaks. Judged sol/opus/fable:
+all nine outputs parse to 60 sequential blindIds (rows-move carries the
+one expected null). Keys remain sealed and unread. Next: harvest
+rows-gating when it lands, then the remaining D441 pairs/triples as the
+chains deliver them.
+
 ## D445 — OWNER: post-merge ranking-invariance check on P3 arms (2026-09-01)
 
 Verbatim: "After the merge, take a random sample of p3 winners and
