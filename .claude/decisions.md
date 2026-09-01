@@ -1,5 +1,32 @@
 # Binding scope decisions
 
+## D439 — OWNER: optional-grappler probe monster; monk-inspired NPC (2026-09-01)
+
+Owner: "Find an srd or homebrew monster that grapples optionally" then
+"A monk inspired npc makes a good grappler."
+Supervisor census of bundled optional grapplers (read from statblocks,
+not recalled):
+- BUGBEAR WARRIOR (SRD, CR 1, goblinoid-warband.ts:50): the best
+  existing fit — a real CHOICE between Grab (2d6+2 bludgeoning +
+  Grappled, escape DC 12, reach 10) and Light Hammer (3d4+2, advantage
+  vs targets it grapples), plus the abduct trait with NO extra movement
+  cost while dragging — the drag showcase the owner emphasized in D438.
+- BUGBEAR STALKER (SRD, CR 3): Quick Grapple as a BONUS action (Dex
+  save DC 13) alongside a morningstar multiattack — grapple at
+  bonus-action price, maximally optional.
+- Mimic pseudopod grapples but is currently withheld
+  (typedUnavailable pending escape-disadvantage support); Roc talons
+  grapple as an on-hit rider (not a choice); homebrew ursine Bear Hug
+  grapples but has no alternative action.
+RULING RECORDED: the D437 lane additionally builds an ORIGINAL
+monk-inspired homebrew NPC grappler (licensing-safe original like the
+existing Vane Warren NPCs; monk features are SRD): unarmed-strike
+Grapple with the monk Dex-substituted DC, high speed for dragging,
+Grab-vs-damage as a genuine tactical choice. The D438 grapple probe
+scenario is built around it (bugbears as secondary probes), mirroring
+the hypnotic-pattern probe pattern: judges must agree grappling+drag
+is the superior line in the fixture.
+
 ## D438 — OWNER: grappling is control; it must be priced in the AI coaching (2026-09-01)
 
 Verbatim: "We need grappling in the ai coaching options. It is a type
