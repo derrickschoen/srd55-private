@@ -1,5 +1,20 @@
 # Binding scope decisions
 
+## D436 — OWNER: honesty fixes now + control valuation built immediately; re-anchor before P4 (2026-09-01)
+
+1. **Coaching-honesty defects: FIX NOW** — multiattack EV undercount
+   (10.6 shown vs 21.2 real), usable_now:false contradicting the
+   resolver, Incubus 1/day-vs-slot spend. One lane.
+2. **Control valuation: BUILD IMMEDIATELY** — unpriceable save-or-suffer
+   control is a defect of the null-row class, not a deferred design
+   project. Supersedes D433.1's wait-for-probe trigger. Design goes
+   through a dual-blind consensus round (supervisor + sol) before
+   implementation, per the standing protocol for medium+ complexity.
+3. **One combined era shift**: both land together, then a RE-ANCHOR
+   (fresh full vs off) runs before P4. P3's panel still unseals on its
+   own era (internally consistent); its winner is re-verified in the
+   new era within P4 rather than assumed.
+
 ## D435 — OWNER: P4 and P5 run regular prose vs caveman prose vs JSON (2026-09-01)
 
 Verbatim: "Run p4 and p5 with regular prose vs caveman prose vs json."
