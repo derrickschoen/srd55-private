@@ -1,5 +1,29 @@
 # Binding scope decisions
 
+## Supervisor continuity note — detached runners for the CLI reinstall (2026-09-01)
+
+Owner is exiting Claude Code to reinstall. Survival arrangements, all
+verified before exit:
+1. All run artifacts copied from the job tmp to the durable dir
+   `/home/vagrant/dnd-slim-runs/` (87MB: arm jsonls, packets, sealed
+   keys, judgments, scripts, briefs).
+2. `run-resume-arms.sh` launched via setsid (own session, survives
+   the CLI exit). It waits for the old claude-child chains/arena to
+   die, then re-runs any D441/D444 arm whose jsonl has <30 rows —
+   idempotent, so completed arms are never re-run. The in-flight arm
+   at exit time restarts from scratch (jsonl is written only at arm
+   end). Progress log: dnd-slim-runs/resume-chain.log.
+3. Owner asked for a report on the BLINDED panel without unsealing
+   the supervisor-judge: a codex exec session (detached, workspace
+   dnd-slim-runs) is compiling `blinded-runs-report.md` from the
+   sealed keys + judgments per `brief-blinded-report.md`. Its stdout
+   is constrained to carry no scores. The supervisor must NOT read
+   that report, the keys, or report-codex.log beyond checking
+   existence/row counts, until the program-end unsealing (D442.1).
+4. Landed-but-unharvested arms at exit: d441-rows-opp, d441-rows-move
+   (30 rows each, durable). Harvest + packet + judge next session.
+   The :4173 server dies with the CLI; restart it next session.
+
 ## D445 — OWNER: post-merge ranking-invariance check on P3 arms (2026-09-01)
 
 Verbatim: "After the merge, take a random sample of p3 winners and
