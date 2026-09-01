@@ -1,5 +1,26 @@
 # Binding scope decisions
 
+## D435 — OWNER: P4 and P5 run regular prose vs caveman prose vs JSON (2026-09-01)
+
+Verbatim: "Run p4 and p5 with regular prose vs caveman prose vs json."
+Format becomes a first-class arm dimension for the remaining rounds:
+1. The renderer lane builds BOTH prose registers in one increment:
+   format: structured | caveman_prose | regular_prose. Regular prose =
+   normal readable coaching paragraphs (complete sentences, still
+   concise); caveman = maximally terse simple sentences (D434). Both
+   under the same hard constraints (exact ids/revision verbatim,
+   content completeness vs the seam-filtered structured form,
+   determinism, trim-by-sentence never-throw, default unchanged).
+2. P4 (alternatives): content arms K3 / K2 / top-K-stubs each run in
+   all three formats (9 new arms); the incumbent x 3 formats reuses the
+   P3-era control and format arms where era-identical. One blinded
+   panel, sliced unsealing (content x format attribution).
+3. P5 (binding confirmation): the accumulated winner runs in all three
+   formats vs fresh intel-off; the confirmation picks content AND
+   format together under the D425 must-beat rule.
+4. Spend authorized freely per D381/D425.4; wall-clock is the
+   constraint, arms run sequentially per quiet-machine rule.
+
 ## D434 — OWNER: caveman-prose arm joins the P3 comparison (2026-09-01)
 
 Verbatim: "Run p3 again with caveman prose to compare." Partially
