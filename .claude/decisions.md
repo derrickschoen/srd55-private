@@ -1,5 +1,20 @@
 # Binding scope decisions
 
+## D434 — OWNER: caveman-prose arm joins the P3 comparison (2026-09-01)
+
+Verbatim: "Run p3 again with caveman prose to compare." Partially
+supersedes D433.3 (prose was queued after the removal rounds): a
+CAVEMAN-PROSE rendering — the full turn-context content rewritten as
+maximally terse, simple-sentence, human-readable prose — runs on the
+same rooms/reps/era as the P3 arms and joins the SAME blinded panel
+against the same control, isolating FORMAT (prose vs structured) as the
+single variable. Execution: codex lane builds a format rung
+(structured | caveman_prose) with binding constraints — exact option
+ids and state revision preserved verbatim in the prose (the submission
+contract depends on them), all numbers kept, deterministic, 32KB cap
+respected by sentence-dropping (never throw), default unchanged.
+D433.3's fuller prose round after P5 remains for richer prose styles.
+
 ## D433 — OWNER: three probe/format rulings (2026-09-01)
 
 1. **Scorer mispricing (if confirmed): FIX ONLY IF THE PROBE FAILS
