@@ -15,6 +15,7 @@ import {
   feet,
   itemId,
   limitedResourcePoolId,
+  persistentAreaId,
 } from '../../../src/combat/values';
 import {
   externalPartyPackFeatureEffectSchema,
@@ -2511,6 +2512,24 @@ describe('external party-pack boundary', () => {
       effectId: 'effect:second-reach', kind: 'attack_reach_range_override',
       attackId: 'attack:pack-member-1', reachFeet: 15,
     }], 'members.0.effects.1.kind');
+    expectOnlyGap([{
+      effectId: 'effect:first-exact-level-die', kind: 'attack_damage_die_override',
+      attackId: 'attack:pack-member-1', damageTermIndex: 0,
+      levels: [{ minimumLevel: 7, count: 2, sides: 8 }],
+    }, {
+      effectId: 'effect:second-exact-level-die', kind: 'attack_damage_die_override',
+      attackId: 'attack:pack-member-1', damageTermIndex: 0,
+      levels: [{ minimumLevel: 7, count: 3, sides: 10 }],
+    }], 'members.0.effects.1.kind');
+    expectOnlyGap([{
+      effectId: 'effect:first-sourced-ability', kind: 'attack_ability_substitution',
+      attackId: 'attack:pack-member-1', damageTermIndex: 0,
+      replacesAbility: 'strength', spellcastingAbility: 'intelligence',
+    }, {
+      effectId: 'effect:second-sourced-ability', kind: 'attack_ability_substitution',
+      attackId: 'attack:pack-member-1', damageTermIndex: 0,
+      replacesAbility: 'strength', spellcastingAbility: 'intelligence',
+    }], 'members.0.effects.1.kind');
   });
 
   it('accepts a cantrip effect through a prepared grant and strips dangling resource spell uses', () => {
@@ -3482,6 +3501,7 @@ describe('external party-pack boundary', () => {
     source.spellSlots = [
       { level: 4, count: 1, recharge: 'long_rest' },
       { level: 3, count: 1, recharge: 'long_rest' },
+      { level: 1, count: 5, recharge: 'long_rest' },
     ];
     const loaded = loadExternalPartyPack(candidate);
     expect(loaded.status).toBe('loaded');
@@ -3813,6 +3833,77 @@ describe('external party-pack boundary', () => {
       },
       selectedOption: 'Radiant',
     }]);
+    expect(commandValues({ ...state, eventLog: [bless, concentrationBreak] })).toHaveLength(1);
+    expect(loadedPartyTurnLegalActions(loaded.party.members)(
+      { ...state, eventLog: [bless, concentrationBreak] },
+      actor.profile.id,
+    ).actions.some((action) =>
+      action.type === 'cast_spell' && action.spellId === 'spirit-guardians')).toBe(false);
+    expect(commandValues({
+      ...state,
+      eventLog: [
+        { ...bless, spellId: 'magic-missile' },
+        { ...bless, sequence: state.nextEventSequence + 1, spellId: 'guidance' },
+        concentrationBreak,
+      ],
+    })).toEqual([]);
+    expect(commandValues({
+      ...state,
+      eventLog: [{ ...bless, caster: distant.id }, concentrationBreak],
+    })).toEqual([]);
+    expect(commandValues({
+    ...state,
+    eventLog: [
+      {
+        sequence: concentrationBreak.sequence,
+        type: 'spell_cast_intercepted',
+        caster: actor.profile.id,
+        spellId: 'bless',
+        reactor: distant.id,
+        reactionSpellId: 'counterspell',
+      },
+      { ...concentrationBreak, sequence: state.nextEventSequence + 3 },
+    ],
+    })).toEqual([]);
+    expect(commandValues({
+      ...state,
+      eventLog: [
+        bless,
+        concentrationBreak,
+        { ...priorGuardians, sequence: state.nextEventSequence + 3, caster: distant.id },
+      ],
+    })).toHaveLength(1);
+    expect(commandValues({
+      ...state,
+      eventLog: [
+        bless,
+        concentrationBreak,
+        {
+          sequence: state.nextEventSequence + 3,
+          type: 'spell_cast_intercepted',
+          caster: actor.profile.id,
+          spellId: 'spirit-guardians',
+          reactor: distant.id,
+          reactionSpellId: 'counterspell',
+        },
+      ],
+    })).toHaveLength(1);
+    expect(commandValues({
+      ...state,
+      eventLog: [bless, {
+        sequence: state.nextEventSequence + 1,
+        type: 'persistent_area_ended',
+        areaId: persistentAreaId('area:unrelated-concentration'),
+        reason: 'concentration_broken',
+      }],
+    })).toEqual([]);
+    expect(commandValues({
+      ...state,
+      eventLog: [bless, {
+        ...concentrationBreak,
+        reason: 'duration_expired',
+      }],
+    })).toEqual([]);
     expect(commandValues({ ...state, eventLog: [concentrationBreak] })).toEqual([]);
     expect(commandValues({ ...state, eventLog: [bless] })).toEqual([]);
     expect(commandValues({ ...state, eventLog: [concentrationBreak, bless] })).toEqual([]);
@@ -3832,6 +3923,63 @@ describe('external party-pack boundary', () => {
           }
         : combatant),
     })).toEqual([]);
+
+    const oneHighSlot = {
+      ...state,
+      eventLog: [bless, concentrationBreak],
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? {
+            ...combatant,
+            spellSlots: combatant.spellSlots.map((slot) => slot.level === 4
+              ? { ...slot, remaining: 0 }
+              : slot),
+          }
+        : combatant),
+    };
+    const withoutReserve = loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: false,
+      openWithBless: false,
+      useClericContingency: true,
+      reserveClericSlotForRevivify: false,
+    });
+    expect(withoutReserve(oneHighSlot, actor.profile.id).actions.some((action) =>
+      action.type === 'cast_spell' && action.spellId === 'spirit-guardians')).toBe(true);
+
+    const spentAction = {
+      ...state,
+      eventLog: [bless, concentrationBreak],
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? { ...combatant, turn: { ...combatant.turn, action: { kind: 'spent' as const } } }
+        : combatant),
+    };
+    expect(commandValues(spentAction)).toEqual([]);
+    const concentrating = {
+      ...state,
+      eventLog: [bless, concentrationBreak],
+      effects: [{
+        id: encounterEffectId('effect:guardians-existing-concentration'), source: actor.profile.id,
+        targets: [actor.profile.id], createdRevision: state.revision,
+        duration: { kind: 'permanent' as const }, concentrationOwner: actor.profile.id,
+        stackingIdentity: effectStackingIdentity('feature:guardians-existing-concentration'),
+        stacking: 'coexist' as const, repeatedSave: null, damageBreak: null,
+        payload: { kind: 'condition' as const, condition: 'Blinded' as const },
+      }],
+    };
+    expect(commandValues(concentrating)).toEqual([]);
+
+    const memberWithoutGuardians = {
+      ...actor,
+      spells: actor.spells.filter((spell) => spell.id !== 'spirit-guardians'),
+    };
+    const withoutGuardians = loadedPartyTurnLegalActions([
+      memberWithoutGuardians, ...loaded.party.members.slice(1),
+    ], {
+      useHealingPotions: false, openWithBless: false, useClericContingency: true,
+    });
+    expect(() => withoutGuardians({ ...state, eventLog: [bless, concentrationBreak] }, actor.profile.id))
+      .not.toThrow();
+    expect(withoutGuardians({ ...state, eventLog: [bless, concentrationBreak] }, actor.profile.id).actions
+      .some((action) => action.type === 'cast_spell' && action.spellId === 'spirit-guardians')).toBe(false);
   });
 
   it('chooses the lowest-HP adjacent Command target, lexically breaking exact ties', () => {
@@ -3880,6 +4028,16 @@ describe('external party-pack boundary', () => {
       targets: [tiedEarlier.id],
       selectedOption: 'flee',
     }]);
+    const spent = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? { ...combatant, turn: { ...combatant.turn, action: { kind: 'spent' as const } } }
+        : combatant),
+    };
+    expect(loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: false, openWithBless: false, useClericContingency: true,
+    })(spent, actor.profile.id).actions.some((action) =>
+      action.type === 'cast_spell' && action.spellId === 'command')).toBe(false);
   });
 
   it('schema_missing_variant refuses malformed JSON and pins the complete Zod union in the public schema', () => {
@@ -5579,5 +5737,421 @@ describe('external party-pack batch 2b mutation boundaries', () => {
         : combatant),
     };
     expect(revivify(depleted)).toEqual([]);
+  });
+
+  it('requires a real cantrip source and never converts a long-cast heal into a turn action', () => {
+    const candidate = structuredClone(pack());
+    const input = candidate.members[0]!;
+    const source = objectSpellcasting(input);
+    source.preparedSpellIds = ['fire-bolt', 'magic-missile', 'prayer-of-healing'];
+    source.knownSpellIds = ['sacred-flame'];
+    source.grants = [{ spellId: 'guidance', ability: 'wisdom' }];
+    source.spellSlots = [{ level: 2, count: 1, recharge: 'long_rest' }];
+    const loaded = loadedV2(candidate);
+    const actor = loaded.party.members[0]!;
+    const ally = loaded.party.members[1]!;
+    const enemy = monsterProfile('source-ownership-enemy', { initiativeBonus: -20 });
+    let state = createEncounter({
+      bounds: { columns: 3, rows: 1 },
+      combatants: [actor.profile, ally.profile, enemy],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(ally.profile, { column: 1, row: 0 }),
+        combatToken(enemy, { column: 2, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === ally.profile.id
+        ? { ...combatant, hitPoints: 1 }
+        : combatant),
+    };
+    const detachedSource = {
+      ...actor,
+      spellcasting: actor.spellcasting.map((casting) => ({
+        ...casting,
+        preparedSpells: casting.preparedSpells.filter((spell) => spell.id !== 'fire-bolt'),
+      })),
+    };
+    const actions = loadedPartyTurnLegalActions([
+      detachedSource, ...loaded.party.members.slice(1),
+    ])(state, actor.profile.id).actions;
+    expect(actions.flatMap((action) => action.type === 'cast_spell'
+      ? [action.spellId]
+      : [])).not.toContain('fire-bolt');
+    expect(actions.flatMap((action) => action.type === 'cast_spell'
+      ? [action.spellId]
+      : [])).not.toContain('prayer-of-healing');
+  });
+
+  it('excludes dead Bless candidates, includes 30 feet, and promotes the actor over lexical ties', () => {
+    const candidate = structuredClone(pack(5));
+    const actorInput = candidate.members[0]!;
+    actorInput.combatantId = 'combatant:z-bless-actor';
+    actorInput.tokenId = 'token:z-bless-actor';
+    actorInput.attacksPerAction = 2;
+    actorInput.initiativeBonus = 30;
+    candidate.members[1]!.combatantId = 'combatant:a-bless-tie';
+    candidate.members[1]!.tokenId = 'token:a-bless-tie';
+    candidate.members[1]!.attacksPerAction = 2;
+    candidate.members[2]!.attacksPerAction = 20;
+    candidate.members[3]!.attacksPerAction = 1;
+    candidate.members[4]!.attacksPerAction = 1;
+    const source = objectSpellcasting(actorInput);
+    source.preparedSpellIds = ['bless'];
+    source.knownSpellIds = [];
+    source.spellSlots = [{ level: 1, count: 1, recharge: 'long_rest' }];
+    const loaded = loadedV2(candidate);
+    const [actor, exactTie, deadPriority, living, extra] = loaded.party.members;
+    if (actor === undefined || exactTie === undefined || deadPriority === undefined ||
+      living === undefined || extra === undefined) throw new Error('Expected five Bless boundary members.');
+    let state = createEncounter({
+      bounds: { columns: 7, rows: 2 },
+      combatants: loaded.party.members.map((member) => member.profile),
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(exactTie.profile, { column: 6, row: 0 }),
+        combatToken(deadPriority.profile, { column: 1, row: 0 }),
+        combatToken(living.profile, { column: 2, row: 0 }),
+        combatToken(extra.profile, { column: 3, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    state = {
+      ...state,
+      combatants: state.combatants.map((combatant) => combatant.profile.id === deadPriority.profile.id
+        ? { ...combatant, hitPoints: 0, life: 'dead', deathAt: { round: 1, initiativeIndex: 0 } }
+        : combatant),
+    };
+    const legal = loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: false, openWithBless: true,
+    });
+    const blessTargets = (candidateState: typeof state) => legal(candidateState, actor.profile.id).actions
+      .flatMap((action) => action.type === 'cast_spell' && action.spellId === 'bless'
+        ? [action.targets]
+        : []);
+    expect(blessTargets(state)).toEqual([[
+      actor.profile.id, exactTie.profile.id, living.profile.id,
+    ]]);
+
+    const allDead = {
+      ...state,
+      combatants: state.combatants.map((combatant) => ({
+        ...combatant,
+        hitPoints: 0,
+        life: 'dead' as const,
+        deathAt: combatant.deathAt ?? { round: 1, initiativeIndex: 0 },
+      })),
+    };
+    expect(blessTargets(allDead)).toEqual([]);
+  });
+
+  it('requires an available unconcentrated Slow action and a cube containing three targets', () => {
+    const candidate = structuredClone(pack());
+    const source = objectSpellcasting(candidate.members[0]!);
+    source.preparedSpellIds = ['slow'];
+    source.knownSpellIds = [];
+    source.spellSlots = [{ level: 3, count: 1, recharge: 'long_rest' }];
+    const loaded = loadedV2(candidate);
+    const actor = loaded.party.members[0]!;
+    const targets = [
+      monsterProfile('slow-spread-a', { initiativeBonus: -10 }),
+      monsterProfile('slow-spread-b', { initiativeBonus: -11 }),
+      monsterProfile('slow-spread-c', { initiativeBonus: -12 }),
+    ];
+    let state = createEncounter({
+      bounds: { columns: 20, rows: 1 },
+      combatants: [actor.profile, ...targets],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(targets[0]!, { column: 1, row: 0 }),
+        combatToken(targets[1]!, { column: 10, row: 0 }),
+        combatToken(targets[2]!, { column: 19, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const legal = loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: false, openWithBless: false, useWizardTactics: true,
+    });
+    const slow = (candidateState: typeof state) => legal(candidateState, actor.profile.id).actions
+      .filter((action) => action.type === 'cast_spell' && action.spellId === 'slow');
+    expect(slow(state)).toEqual([]);
+
+    const clustered = {
+      ...state,
+      tokens: state.tokens.map((token, index) => index === 0
+        ? token
+        : { ...token, position: { column: index, row: 0 } }),
+    };
+    expect(slow(clustered)).toHaveLength(1);
+    expect(loadedPartyTurnLegalActions(loaded.party.members)(clustered, actor.profile.id).actions
+      .some((action) => action.type === 'cast_spell' && action.spellId === 'slow')).toBe(false);
+    const spent = {
+      ...clustered,
+      combatants: clustered.combatants.map((combatant) => combatant.profile.id === actor.profile.id
+        ? { ...combatant, turn: { ...combatant.turn, action: { kind: 'spent' as const } } }
+        : combatant),
+    };
+    expect(slow(spent)).toEqual([]);
+    const concentrating = {
+      ...clustered,
+      effects: [{
+        id: encounterEffectId('effect:slow-existing-concentration'), source: actor.profile.id,
+        targets: [actor.profile.id], createdRevision: clustered.revision,
+        duration: { kind: 'permanent' as const }, concentrationOwner: actor.profile.id,
+        stackingIdentity: effectStackingIdentity('feature:slow-existing-concentration'),
+        stacking: 'coexist' as const, repeatedSave: null, damageBreak: null,
+        payload: { kind: 'condition' as const, condition: 'Blinded' as const },
+      }],
+    };
+    expect(slow(concentrating)).toEqual([]);
+  });
+
+  it('pins increment-1 schema messages and every nested sanitizer path', () => {
+    const validManifestPack = v1Pack();
+    const invalidManifest: unknown = {
+      ...validManifestPack,
+      members: validManifestPack.members.map((member, index) => index === 0
+        ? { ...member, spellSelections: ['not-a-manifest-spell'] }
+        : member),
+    };
+    const schemaResult = externalPartyPackSchema.safeParse(invalidManifest);
+    expect(schemaResult.success).toBe(false);
+    if (schemaResult.success) throw new Error('Invalid manifest spell unexpectedly parsed.');
+    expect(schemaResult.error.issues.map((issue) => ({ path: issue.path, message: issue.message })))
+      .toContainEqual({
+        path: ['members', 0, 'spellSelections', 0],
+        message: 'Spell selection must use a manifest spell id.',
+      });
+
+    const malformed = structuredClone(pack(3, true)) as unknown as {
+      members: Array<Record<string, unknown>>;
+    };
+    const first = malformed.members[0]!;
+    first.hitDice = [{ sides: 8, maximum: 2, unexpectedHitDieField: true }];
+    const spellcasting = first.spellcasting as Record<string, unknown>;
+    spellcasting.spellSlots = [{
+      level: 1, count: 2, recharge: 'long_rest', unexpectedSlotField: true,
+    }];
+    spellcasting.grants = [{
+      spellId: 'guidance', ability: 'wisdom', unexpectedGrantField: true,
+    }];
+    spellcasting.resourceSpellUses = [{
+      spellId: 'magic-missile', resourcePoolId: 'resource:nested-path',
+      unexpectedResourceUseField: true,
+    }];
+    first.resources = [{
+      resourcePoolId: 'resource:nested-path', maximum: 1, recharge: 'long_rest',
+    }];
+    first.pactSpellSlots = [{
+      level: 2, count: 1, recharge: 'short_rest', unexpectedPactField: true,
+    }];
+    const loaded = loadExternalPartyPack(malformed);
+    expect(loaded.status).toBe('loaded');
+    if (loaded.status !== 'loaded') throw new Error('Nested sanitizer fixture was refused.');
+    expect(gapSummary(loaded)).toEqual([
+      { featurePath: 'members.0.hitDice.0.unexpectedHitDieField', reason: 'field_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.pactSpellSlots.0.unexpectedPactField', reason: 'field_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.spellcasting.spellSlots.0.unexpectedSlotField', reason: 'field_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.spellcasting.resourceSpellUses.0.unexpectedResourceUseField', reason: 'field_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.spellcasting.grants.0.unexpectedGrantField', reason: 'field_not_in_engine_vocabulary' },
+    ]);
+    const normalizedPack = loaded.party.pack;
+    if (normalizedPack.schemaVersion !== 2) throw new Error('Expected normalized v2 sanitizer pack.');
+    const normalized = normalizedPack.members[0]!;
+    expect(normalized.hitDice).toEqual([{ sides: 8, maximum: 2 }]);
+    expect(normalized.pactSpellSlots).toEqual([{ level: 2, count: 1, recharge: 'short_rest' }]);
+    expect(spellcastingSources(normalized)[0]).toMatchObject({
+      grants: [{ spellId: 'guidance', ability: 'wisdom' }],
+      resourceSpellUses: [{
+        spellId: 'magic-missile', resourcePoolId: 'resource:nested-path',
+      }],
+    });
+  });
+
+  it('keeps v1 extensions absent and projects passive initiative and skills as exact values', () => {
+    const legacy = loadExternalPartyPack(v1Pack());
+    expect(legacy.status).toBe('loaded');
+    if (legacy.status !== 'loaded') throw new Error('Legacy extension fixture was refused.');
+    const legacyRules = legacy.party.members[0]!.profile.rules;
+    expect(Object.hasOwn(legacyRules, 'sizeCategory')).toBe(false);
+    expect(Object.hasOwn(legacyRules, 'featureEffects')).toBe(false);
+    expect(Object.hasOwn(legacyRules, 'limitedResources')).toBe(false);
+
+    const candidate = structuredClone(pack());
+    candidate.members[0]!.initiativeBonus = 3;
+    candidate.members[0]!.passives = {
+      initiativeBonus: 2,
+      skillBonuses: [{ skillId: 'perception', bonus: 4 }],
+    };
+    const loaded = loadedV2(candidate).party.members[0]!;
+    expect(loaded.profile.rules.initiativeBonus).toBe(5);
+    expect(loaded.profile.rules.skillBonuses).toEqual({ perception: 4 });
+    expect(loaded.profile.rules.passivePerception).toBe(14);
+
+    const withoutSkills = loadedV2(pack()).party.members[0]!.profile.rules;
+    expect(Object.hasOwn(withoutSkills, 'skillBonuses')).toBe(false);
+    expect(withoutSkills.passivePerception).toBe(10);
+  });
+
+  it('retains distinct slot levels and deduplicates every spell role by its exact identity', () => {
+    const legacy = v1Pack();
+    legacy.members[0]!.spellSlots = [
+      { level: 1, maximum: 2 },
+      { level: 2, maximum: 3 },
+    ];
+    const loadedLegacy = loadExternalPartyPack(legacy);
+    expect(loadedLegacy.status).toBe('loaded');
+    if (loadedLegacy.status !== 'loaded') throw new Error('Distinct legacy slots were refused.');
+    expect(loadedLegacy.party.members[0]!.profile.rules.spellSlots).toEqual([
+      { level: 1, maximum: 2 },
+      { level: 2, maximum: 3 },
+    ]);
+
+    const candidate = structuredClone(pack(3, true));
+    const input = candidate.members[0]!;
+    const legacySource = objectSpellcasting(input);
+    const { spellSlots: _spellSlots, ...source } = legacySource;
+    input.spellcasting = [{
+      ...source,
+      preparedSpellIds: ['magic-missile', 'magic-missile'],
+      knownSpellIds: ['fire-bolt', 'fire-bolt'],
+      grants: [{ spellId: 'guidance', ability: 'wisdom' }],
+    }, {
+      ability: 'wisdom', spellSaveDc: 13, spellAttackBonus: 5,
+      preparedSpellIds: ['magic-missile'], knownSpellIds: [],
+    }];
+    input.sharedSpellSlots = [
+      { level: 1, count: 2, recharge: 'long_rest' },
+      { level: 2, count: 3, recharge: 'long_rest' },
+    ];
+    input.pactSpellSlots = [
+      { level: 1, count: 1, recharge: 'short_rest' },
+      { level: 2, count: 2, recharge: 'short_rest' },
+    ];
+    const loaded = loadedV2(candidate);
+    expect(loaded.party.members[0]!.spells.map((spell) => spell.id)).toEqual([
+      'magic-missile', 'fire-bolt', 'guidance',
+    ]);
+    const normalizedPack = loaded.party.pack;
+    if (normalizedPack.schemaVersion !== 2) throw new Error('Expected normalized v2 role pack.');
+    const sources = spellcastingSources(normalizedPack.members[0]!);
+    expect(sources[0]).toMatchObject({
+      preparedSpellIds: ['magic-missile'],
+      knownSpellIds: ['fire-bolt'],
+      grants: [{ spellId: 'guidance', ability: 'wisdom' }],
+    });
+    expect(normalizedPack.members[0]!.sharedSpellSlots).toEqual([
+      { level: 1, count: 2, recharge: 'long_rest' },
+      { level: 2, count: 3, recharge: 'long_rest' },
+    ]);
+    expect(normalizedPack.members[0]!.pactSpellSlots).toEqual([
+      { level: 1, count: 1, recharge: 'short_rest' },
+      { level: 2, count: 2, recharge: 'short_rest' },
+    ]);
+  });
+
+  it('reports duplicate legacy, shared, and pact slot levels at their owning paths', () => {
+    const legacyCandidate = structuredClone(pack(3, true));
+    objectSpellcasting(legacyCandidate.members[0]!).spellSlots = [
+      { level: 1, count: 2, recharge: 'long_rest' },
+      { level: 1, count: 3, recharge: 'long_rest' },
+    ];
+    legacyCandidate.members[0]!.pactSpellSlots = [
+      { level: 2, count: 1, recharge: 'short_rest' },
+      { level: 2, count: 2, recharge: 'short_rest' },
+    ];
+    expect(gapSummary(loadedV2(legacyCandidate))).toEqual([
+      { featurePath: 'members.0.pactSpellSlots.1.level', reason: 'value_not_in_engine_vocabulary' },
+      { featurePath: 'members.0.spellcasting.spellSlots.1.level', reason: 'value_not_in_engine_vocabulary' },
+    ]);
+
+    const sharedCandidate = structuredClone(pack(3, true));
+    const legacy = objectSpellcasting(sharedCandidate.members[0]!);
+    const { spellSlots: _spellSlots, ...source } = legacy;
+    sharedCandidate.members[0]!.spellcasting = [source];
+    sharedCandidate.members[0]!.sharedSpellSlots = [
+      { level: 1, count: 2, recharge: 'long_rest' },
+      { level: 1, count: 3, recharge: 'long_rest' },
+    ];
+    expect(gapSummary(loadedV2(sharedCandidate))).toEqual([{
+      featurePath: 'members.0.sharedSpellSlots.1.level',
+      reason: 'value_not_in_engine_vocabulary',
+    }]);
+  });
+
+  it('never treats an ordinary damage rider as a slot choice or an empty slot pool as pact magic', () => {
+    const loaded = loadedV2(effectPack());
+    const actor = loaded.party.members[0]!;
+    const enemy = monsterProfile('ordinary-rider-enemy', { initiativeBonus: -20 });
+    let state = createEncounter({
+      bounds: { columns: 2, rows: 1 },
+      combatants: [actor.profile, enemy],
+      tokens: [
+        combatToken(actor.profile, { column: 0, row: 0 }),
+        combatToken(enemy, { column: 1, row: 0 }),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const attacks = loadedPartyTurnLegalActions(loaded.party.members)(state, actor.profile.id).actions
+      .filter((action) => action.type === 'attack');
+    expect(attacks.length).toBeGreaterThan(0);
+    expect(attacks.every((attack) => attack.riderSelections === undefined)).toBe(true);
+
+    const withoutSlotPools = { ...actor, sharedSpellSlots: [], pactSpellSlots: [] };
+    expect(loadedPartySpellCastCommand(withoutSlotPools, 'magic-missile', castDetails()))
+      .not.toHaveProperty('slotRecharge');
+  });
+
+  it('does not run v2 effect-shape handling against a partial v1 member', () => {
+    const candidate = v1Pack() as unknown as {
+      allowPartial: boolean;
+      members: Array<Record<string, unknown>>;
+    };
+    candidate.allowPartial = true;
+    candidate.members[0]!.effects = [{ kind: 'homebrew-v1-effect' }];
+    const result = loadExternalPartyPack(candidate);
+    expect(result.status).toBe('loaded');
+    if (result.status !== 'loaded') throw new Error('Partial v1 extension fixture was refused.');
+    expect(gapSummary(result)).toEqual([{
+      featurePath: 'members.0.effects',
+      reason: 'field_not_in_engine_vocabulary',
+    }]);
+  });
+
+  it('breaks equal-size Slow placements by the selected combatant identities', () => {
+    const candidate = structuredClone(pack());
+    const source = objectSpellcasting(candidate.members[0]!);
+    source.preparedSpellIds = ['slow'];
+    source.knownSpellIds = [];
+    source.spellSlots = [{ level: 3, count: 1, recharge: 'long_rest' }];
+    const loaded = loadedV2(candidate);
+    const actor = loaded.party.members[0]!;
+    const left = [
+      monsterProfile('slow-lex-z1', { initiativeBonus: -10 }),
+      monsterProfile('slow-lex-z2', { initiativeBonus: -11 }),
+      monsterProfile('slow-lex-z3', { initiativeBonus: -12 }),
+    ];
+    const right = [
+      monsterProfile('slow-lex-a1', { initiativeBonus: -13 }),
+      monsterProfile('slow-lex-a2', { initiativeBonus: -14 }),
+      monsterProfile('slow-lex-a3', { initiativeBonus: -15 }),
+    ];
+    let state = createEncounter({
+      bounds: { columns: 14, rows: 1 },
+      combatants: [actor.profile, ...left, ...right],
+      tokens: [
+        combatToken(actor.profile, { column: 6, row: 0 }),
+        ...left.map((target, index) => combatToken(target, { column: index, row: 0 })),
+        ...right.map((target, index) => combatToken(target, { column: index + 11, row: 0 })),
+      ],
+    });
+    state = reduceEncounter(state, { type: 'roll_initiative' }, () => 0.5).state;
+    const targets = loadedPartyTurnLegalActions(loaded.party.members, {
+      useHealingPotions: false, openWithBless: false, useWizardTactics: true,
+    })(state, actor.profile.id).actions.flatMap((action) =>
+      action.type === 'cast_spell' && action.spellId === 'slow' ? [action.targets] : []);
+    expect(targets).toEqual([right.map((target) => target.id)]);
   });
 });
