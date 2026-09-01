@@ -244,6 +244,8 @@ describe('AI-DM arena', () => {
     const profiles = [
       { ...DEFAULT_RENDERER_PROFILE, nullFields: 'omit' as const },
       { ...DEFAULT_RENDERER_PROFILE, attribution: 'stamped' as const },
+      { ...DEFAULT_RENDERER_PROFILE, format: 'caveman_prose' as const },
+      { ...DEFAULT_RENDERER_PROFILE, format: 'regular_prose' as const },
     ] as const;
 
     for (const [index, profile] of profiles.entries()) {
@@ -262,13 +264,21 @@ describe('AI-DM arena', () => {
         profile,
       });
       expect(circumstanceFeatureVectorSchema.safeParse(row.circumstanceFeatures).success).toBe(true);
-      const modelVisibleContext = objectValue(JSON.parse(row.rawTurnContext), 'raw turn context');
-      if (profile.attribution === 'off') {
-        expect(modelVisibleContext).not.toHaveProperty('renderer_attribution');
+      if (profile.format === 'structured') {
+        const modelVisibleContext = objectValue(JSON.parse(row.rawTurnContext), 'raw turn context');
+        if (profile.attribution === 'off') {
+          expect(modelVisibleContext).not.toHaveProperty('renderer_attribution');
+        } else {
+          expect(modelVisibleContext['renderer_attribution']).toEqual({
+            policy_version: RENDERER_POLICY_VERSION,
+          });
+        }
       } else {
-        expect(modelVisibleContext['renderer_attribution']).toEqual({
-          policy_version: RENDERER_POLICY_VERSION,
-        });
+        expect(row.rawTurnContext).toMatch(/[Rr]evision \d+/u);
+        expect(row.rawTurnContext).toMatch(/\[option:\d+:[0-9a-f]+\]/u);
+        expect(() => JSON.parse(row.rawTurnContext)).toThrow();
+        expect(row.circumstanceFeatures.pre_trim_bytes)
+          .toBeGreaterThanOrEqual(new TextEncoder().encode(row.rawTurnContext).byteLength);
       }
     }
   });

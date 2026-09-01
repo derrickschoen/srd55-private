@@ -26,6 +26,7 @@ import {
 } from '../../../src/vtt/dm-bridge/projection-transport';
 import { feet } from '../../../src/combat/values';
 import { buildHostScenarioMenu } from '../../../src/vtt/speculative-planning';
+import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
 const TOOL_NAMES = [
@@ -576,6 +577,21 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     const value = structured(result);
     expect(record((result['content'] as readonly unknown[])[0])['text']).toBe(JSON.stringify(value));
     expect(forbiddenAgentKeys(value)).toEqual([]);
+  });
+
+  it.each(['caveman_prose', 'regular_prose'] as const)('makes %s the model-visible tool text while retaining schema-valid structured metadata', async (format) => {
+    const { state } = await fixtureRuntime();
+    const runtime = createEngineMcpRuntime(state, {
+      requestedActorCount: 1,
+      rendererProfile: { ...DEFAULT_RENDERER_PROFILE, format },
+    });
+    const result = toolCall(runtime.handler, 'engine.get_turn_context', contextArguments());
+    const value = structured(result);
+    const content = result['content'];
+    if (!Array.isArray(content)) throw new TypeError('Prose tool result omitted content.');
+    expect(value).toMatchObject({ format, granularity: 'full' });
+    expect(record(content[0])['text']).toBe(value['document']);
+    expect(String(record(content[0])['text'])).not.toBe(JSON.stringify(value));
   });
 
   it('returns a revision delta that reconstructs the independently recomputed full turn context', async () => {

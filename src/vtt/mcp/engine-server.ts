@@ -70,6 +70,7 @@ import {
   DEFAULT_RENDERER_PROFILE,
   extractCircumstanceFeatures,
   renderBytes,
+  renderProseTurnContext,
   rendererProfileSchema,
   renderTurnContextProfile,
   resolveOptionReference,
@@ -1533,6 +1534,30 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const incumbentFull = fullTurnContext(capsule, input);
       const rendered = renderTurnContextProfile(incumbentFull, rendererProfile);
       optionReferences = rendered.optionRefs;
+      if (rendererProfile.format !== 'structured') {
+        const prose = renderProseTurnContext(
+          rendered.context,
+          rendererProfile.format,
+          rendered.optionRefs,
+          turnContextMaximumBytes,
+        );
+        const features = extractCircumstanceFeatures({
+          state,
+          capsule,
+          renderedContext: rendered.context,
+          granularity: 'full',
+          preTrimBytes: prose.preTrimBytes,
+          postTrimBytes: prose.postTrimBytes,
+        });
+        dependencies.onTurnContextRendered?.({
+          preTrimBytes: prose.preTrimBytes,
+          postTrimBytes: prose.postTrimBytes,
+          features,
+          removals: rendered.removals,
+        });
+        dependencies.onTurnContext?.(structuredClone(prose.context));
+        return prose.context;
+      }
       const preTrimBytes = renderBytes(rendered.context);
       const trimToLimit = (source: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => {
         const sourceBytes = source === rendered.context ? preTrimBytes : renderBytes(source);

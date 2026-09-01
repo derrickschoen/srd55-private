@@ -110,7 +110,12 @@ function completeList(field: string, values: readonly unknown[], nextCursor: str
     : { resultType: 'complete', ...page, ttlMs: MCP_STATIC_LIST_TTL_MS, cacheScope: 'public', _meta: RESPONSE_META };
 }
 function toolResult(value: unknown, maximumBytes: number, classic: boolean): unknown {
-  const text = JSON.stringify(value);
+  const proseDocument = isRecord(value) &&
+    (value['format'] === 'caveman_prose' || value['format'] === 'regular_prose') &&
+    typeof value['document'] === 'string'
+    ? value['document']
+    : null;
+  const text = proseDocument ?? JSON.stringify(value);
   if (text === undefined) throw new TypeError('Tool result is not JSON serializable.');
   const bytes = new TextEncoder().encode(text).byteLength;
   const result = bytes > maximumBytes
