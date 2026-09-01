@@ -1,5 +1,26 @@
 # Binding scope decisions
 
+## D441 — OWNER: D440 extends to pairs and triples of reductions (2026-09-01)
+
+Owner: "What about combinations of 2 and 3 different reductions?"
+This corrects the supervisor's narrowed reading of D440 — the original
+wording was "ALL of the possible information reduced combinations" and
+the supervisor ran only the 5 singles + the 5-way union (my scoping
+error, owned). Extension: all C(5,2)=10 pairs and C(5,3)=10 triples of
+{rows, opp, move, threats, gating} under caveman format — 20 further
+arms, 10 brutal rooms x 3 reps each, same seeds, SAME ERA as the
+running D440 chain. Quads (5 combos) remain unrequested; parked as a
+question. Consequences accepted:
+1. The pairs/triples chain queues BEHIND the running singles chain
+   (one arena stream; quiet machine).
+2. The D436 ctrl-value merge and the era-shift re-anchor move behind
+   the full combination program — merging mid-program would split the
+   era and reintroduce the confound this design avoids. P4 timing
+   flexes accordingly.
+3. With singles + pairs + triples + union + control all on one era,
+   the dataset supports interaction-effect analysis, not just
+   per-arm rankings.
+
 ## Supervisor record — D436 lane round 1 accepted; merge holds for D440 chain (2026-09-01)
 
 Codex round 1 harvested. MY verification (distinct from codex claims):
