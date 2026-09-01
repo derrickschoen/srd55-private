@@ -1,5 +1,19 @@
 # Binding scope decisions
 
+## D433 — OWNER: three probe/format rulings (2026-09-01)
+
+1. **Scorer mispricing (if confirmed): FIX ONLY IF THE PROBE FAILS
+   BROADLY** — if most profiles still choose control despite a
+   dominated-label on Hypnotic Pattern, the scorer stays as-is through
+   P5 (era stability); if damage wins everywhere, fix immediately and
+   accept the era shift.
+2. **Probe family: SINGLE SCENARIO NOW** — validate and wire the
+   Hypnotic Pattern probe first; grow a control-vs-damage family later
+   if it proves useful.
+3. **Prose rendering arm: AFTER THE REMOVAL ROUNDS** — P3-P5 finish on
+   the structured format so removals stay attributable; a prose
+   (paragraph-form) coaching rendering then gets its own round.
+
 ## D432 — OWNER: Hypnotic Pattern control-vs-damage probe scenario (2026-09-01)
 
 Directive: build a scenario where the AI DM must choose between casting
