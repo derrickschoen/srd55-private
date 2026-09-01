@@ -1,5 +1,25 @@
 # Binding scope decisions
 
+## Supervisor record — hp-probe merge D429.1 mini-A/B PASSED; process slip owned (2026-09-01)
+
+**Mini-A/B verdict (22cea413 era, 10 brutal rooms x 1 round, full
+profile, luna low):** mean offense 1.70/round, zero-offense 2/10,
+all-end_turn rounds 0, service nulls 0, one auto_submit_blocked
+unresolved-frontier block (room 5; round still authorized). Paired
+round-1-only slices of the healthy references, computed by the same
+script: confirm-full 1.60 / 2 / 0, p1b-full 1.60 / 2 / 0. Shape
+identical, mean marginally better. The hp-probe merge keeps its
+behavioral control. All numbers are my own runs and my own extraction.
+
+**Process slip (mine):** the hp-probe merge went to main after dry-run
+verification and full gates but WITHOUT the required pre-merge live
+smoke on its host-path production changes (turn-option-registry,
+intent-resolver area plumbing), and without pre-reading the production
+diffs. Compensating controls applied after the fact: post-merge diff
+review, full main gate green, and this mini-A/B. The rule stands as
+written — smoke BEFORE merge; the prose-renderer merge queued behind
+this verdict runs its live smoke first.
+
 ## D436 — OWNER: honesty fixes now + control valuation built immediately; re-anchor before P4 (2026-09-01)
 
 1. **Coaching-honesty defects: FIX NOW** — multiattack EV undercount
