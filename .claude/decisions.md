@@ -52,6 +52,8 @@ Later same session: d441-rows-gating landed (30 rows, profile==tsv,
 1 timeout, 1 refused), packet seed 263, zero leaks; sol/opus/fable
 all 60 sequential entries. Four of ten D441 pairs judged; chain is on
 opp-move. Keys still sealed.
+Owner (asked): harvesting runs ROLLING with this session left open;
+each arm is judged as it lands through the D444 quads. No batching.
 
 ## D445 — OWNER: post-merge ranking-invariance check on P3 arms (2026-09-01)
 
