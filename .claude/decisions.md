@@ -1,5 +1,23 @@
 # Binding scope decisions
 
+## Supervisor record — D438 grapple-valuation amendment consented (2026-09-01)
+
+Sol's amendment harvested and ACCEPTED after my own verification:
+- I re-derived every oracle number by hand (q=3/5, p=1/2, EVs
+  4.35/2.28, B_1=957/1000, U=1623/2500=0.6492) — all exact.
+- Key honesty property: the Bellman victim-best-response chooses FIGHT
+  in the oracle, so escape-action credit is exactly 0 — grapple cannot
+  be inflated with credit for actions a rational victim never spends.
+- Family partition extends to legacy | hard_turn_denial |
+  grapple_control; legacy-pair invariant untouched.
+- Sol's engine finding VERIFIED by me: projectedTargetConditions drops
+  Grappled ('return []', engine-query-port.ts:1495) because projection
+  carries no grappler source — D437 must thread the source through or
+  attack-impairment cannot be evaluated. Real integration constraint.
+Amended spec appended to job-tmp ctrl-value-consensus.md. Lane order
+stands: D436 framework -> D437/D438/D439 grapple lane. Dispatch waits
+for the P3 caveman arm to finish (quiet machine).
+
 ## D439 — OWNER: optional-grappler probe monster; monk-inspired NPC (2026-09-01)
 
 Owner: "Find an srd or homebrew monster that grapples optionally" then
