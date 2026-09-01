@@ -7,6 +7,21 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## D428 — OWNER: queue priorities around the slimming program (2026-08-31)
+
+1. **Kill-2c (party-pack survivor remainder): PARALLEL QUIET-STRETCH
+   LANES** — dispatch increments alongside slim P1–P5 during waits;
+   Stryker verification windows still take the exclusive machine and
+   queue behind live rounds.
+2. **D395 imports (Astral Tower CC0 first): AFTER SLIM PROGRAM** — the
+   queue stays serial; imports start when P5 unseals.
+3. **Speculation (D403/D407) live verification: MULTI-ROUND ARENA LANE**
+   — extend the arena to 3+ rounds on a few rooms specifically so
+   speculation trigger conditions fire, then verify behavior (modest
+   spend). Cycle-3 recorded 'none' on every row because 1-round arenas
+   never meet the triggers; the feature has shipped but never been
+   observed live.
+
 ## Slimming-program consensus plan — SUPERVISOR+SOL (2026-09-01)
 
 Dual-blind brainstorm -> verification (A2 falsified: options carry no
