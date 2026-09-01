@@ -1,5 +1,37 @@
 # Binding scope decisions
 
+## Supervisor record — D436 lane round 1 accepted; merge holds for D440 chain (2026-09-01)
+
+Codex round 1 harvested. MY verification (distinct from codex claims):
+tsc -b 0, sg scan 0, targeted suites 49/49 my own run; every exact
+rational in the probe test matches the consensus oracle (net
+178583/31250 = 5.714656, pi(k) table, wake 4368/3125, burden
+97104/15625); both classification tables use `satisfies Record` with
+NO default arm; legacy-pair V1/V2 byte-identity property test present;
+frozen contracts.ts untouched; no forbidden patterns in new files.
+
+**Finding against my own work (full length):** brief item A3 told the
+lane the Incubus resolver "spends a slot" where the statblock models
+1/day. That premise was INVERTED — the original hp-probe finding was
+that the resolver spends the 1/day resource, and whether that was a
+defect was never established. Codex checked reality instead of
+patching: the reducer already spends the daily pool and leaves the
+slot; it added a regression (daily use -> 0, level-3 slot stays 1,
+probe test lines 321-323) and reported the premise wrong. My brief
+error, codex's correct refusal.
+
+**G sweep**: infeasible in-lane — the "D428-era sweep" fixtures were
+supervisor-side ephemeral artifacts never committed. Compensating
+check owned by me: pre-merge dry-run unresolved-actor count on the 10
+brutal fixtures, lane vs main, expecting a drop for the
+incapacitation-class subset and no legacy changes.
+
+**MERGE HOLD**: the D440 arm chain is running from the main working
+tree; merging mid-chain risks mixed-era module loading in the live
+vite-node process. Order: D440 completes -> full vitest on lane +
+live smoke 2-4 rooms -> merge -> full main gate -> mini-A/B -> G
+sweep -> THE ERA SHIFT re-anchor (fresh full vs off) before P4.
+
 ## D440 — OWNER: P3 caveman again with all information-reduced combinations (2026-09-01)
 
 Verbatim: "Try p3 caveman again with all of the possible information
