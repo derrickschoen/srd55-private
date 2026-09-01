@@ -1,5 +1,44 @@
 # Binding scope decisions
 
+## Supervisor record — P3 UNSEALED: caveman prose is the only non-losing arm (2026-09-01)
+
+Six pairwise blinded packets (control = P1b full arm, era 7a9b1a29;
+distinct shuffle seeds; leak scans clean; packets carry executed plans
+only, so the format arm cannot unblind itself). Judges: sol high, opus,
+fable — 18 judgments, all 60/60 valid. Pooled arm minus its packet
+control, paired W/L/T:
+
+| arm | diff | W/L/T |
+|---|---|---|
+| caveman (format only) | +0.13 | 32/24/34 |
+| gating | -0.58 | 32/27/31 |
+| threats | -0.76 | 24/35/31 |
+| move | -1.21 | 21/37/32 |
+| rows | -1.48 | 29/42/19 |
+| opp | -1.60 | 17/49/24 |
+
+FINDINGS:
+1. Every CONTENT-removal arm loses. Removing rows verdicts and
+   opportunity-cost context hurts most; relevance gating least.
+2. CAVEMAN PROSE — same content, terse human prose — is the only arm
+   that does not lose (+0.13, positive for sol and opus), with 21-32%
+   fewer bytes AND 2 weather-refused rounds scored zero against it.
+   Refines P2: byte volume was never the lever; JSON-vs-prose FORMAT
+   is. D431's human-readability bet validated at P3 scale.
+3. Variance slice: caveman is uniform per-room (worst -1.44); gating
+   swings -5.89 to +2.56. Content removal is high-variance,
+   circumstance-sensitive; format change is low-variance.
+4. Judge-noise floor from the 6x re-judged control: pooled control
+   spread 6.24-6.67 (+-0.2). Caveman's +0.13 is INSIDE that band —
+   claim is "does not lose", not "wins". Fable control score was 5.90
+   in all six packets (internal consistency check passed).
+CAVEATS: caveman ran on the post-merge era 3bf6b49f (it requires the
+prose renderer); the five content arms ran on 7a9b1a29. Mini-A/Bs and
+the byte-identity proof bound that confound but do not remove it —
+P4 re-verifies the winner in one era per D436.3. Dataset: 360 rows
+appended (486 total). P4 next: content K3/K2/top-K-stubs x 3 formats
+after the honesty-fix/control-valuation era shift and re-anchor.
+
 ## Supervisor record — D438 grapple-valuation amendment consented (2026-09-01)
 
 Sol's amendment harvested and ACCEPTED after my own verification:
