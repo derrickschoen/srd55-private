@@ -48,6 +48,10 @@ all nine outputs parse to 60 sequential blindIds (rows-move carries the
 one expected null). Keys remain sealed and unread. Next: harvest
 rows-gating when it lands, then the remaining D441 pairs/triples as the
 chains deliver them.
+Later same session: d441-rows-gating landed (30 rows, profile==tsv,
+1 timeout, 1 refused), packet seed 263, zero leaks; sol/opus/fable
+all 60 sequential entries. Four of ten D441 pairs judged; chain is on
+opp-move. Keys still sealed.
 
 ## D445 — OWNER: post-merge ranking-invariance check on P3 arms (2026-09-01)
 
