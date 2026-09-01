@@ -1,5 +1,34 @@
 # Binding scope decisions
 
+## FINDING against merged P0: full-intel behavioral regression — SUPERVISOR (2026-09-01)
+
+The P1 re-anchor unsealed at full 4.38 vs off 7.46 pooled (W3/L25/T2,
+0/10 rooms, all three judges agree) — far beyond cycle-3a's −1.29 on the
+same rooms. My verification, in order: (1) D427 slices refute the
+trimmer-fallback hypothesis (paired deficit −3.13 trim-engaged vs −2.96
+untrimmed; untrimmed full rows score WORSE, 2.93 vs 5.00). (2) Dry-run
+render diff old-era 4deae1fc vs new era on seed 6203001: contexts
+near-byte-identical — options byte-identical per actor, row/actor counts
+equal; the ONLY model-visible deltas are omission of explicit-null
+p_hit/ev fields from intel rows and the new renderer_attribution stamp.
+(3) An untuned full-arm rerun REPRODUCES the collapse (zero-offense
+10/30, all-end_turn rounds 4, mean offense 1.53) — not weather. (4) The
+rep-semantics confound is quantified away: cycle-3a REP-1-ONLY fresh
+rows give full 2.00 offense, 0 zero-offense, 0 end_turn, move 150; the
+new full arms give ~1.4/10-12 zero-offense/2-4 end_turn/move 70-101,
+while off arms are era-stable (2.40 rep-1 c3a vs 2.31 P1). (5) An
+all-end_turn round was model-chosen (primary=fallback=pass option,
+callsPerRound 1, no refusals) — the model selects passes under the new
+presentation; the pass options themselves are unchanged and were never
+chosen in c3a. This regression shipped in my P0 merge after all gates
+and a 2-room live smoke passed — the smoke's rooms authorized plans and
+showed no pathology, so presentation-quality regressions of this kind
+are invisible to gates and small smokes; only the paired A/B caught it.
+CONSEQUENCES: P1's verdict is NOT recorded as the era anchor; P1 repeats
+after diagnosis. Next: a diagnostic lane adds two renderer rungs
+(explicit-nulls restore; attribution-stamp off) and a 3-arm mini A/B
+isolates the cause; the losing change reverts or becomes default-off.
+
 ## P0 slimming landed — new measurement era at c2c5ef63 — SUPERVISOR (2026-08-31)
 
 Merged lane-wt/slim-p0 (2 review rounds; my full gate caught 3 defects
