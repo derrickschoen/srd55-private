@@ -89,6 +89,15 @@ byte prose contexts, authorized real plans via exact option ids, 0
 blocks, 0 service nulls). Post-merge full main gate mine: tsc 0, sg 0,
 9,413/9,413, build clean, :4173 200. Its own D429.1 mini-A/B launched.
 
+**Prose merge D429.1 mini-A/B PASSED** (10 brutal rooms x 1 rep, full
+structured default, my run + extraction): 1.90 mean offense, 1/10
+zero-offense, 0 all-end_turn, 0 service nulls, 0 blocks — equal or
+better than both references (hp-probe era 1.70/2/0/1 block, p1b rep-1
+1.60/2/0/2 blocks). Correction to the smoke note above: per-room
+contextBytes totals vary with correction-call counts and cannot prove
+render neutrality; the byte-identity claim rests on the lane's
+mechanical proof test, not on run byte totals.
+
 **Control valuation (D436.2): dual-blind consensus reached in one
 cross-critique round.** Sealed supervisor doc + sol blind doc converged
 on: typed outcome evaluator with branded exact rationals; net
