@@ -4,7 +4,7 @@ import { gridDistance } from '../combat/grid';
 import { BUNDLED_MONSTER_ROSTER } from '../combat/statblocks/roster';
 import type { EngineStateCapsule } from './engine-state-capsule';
 
-export const RENDERER_POLICY_VERSION = 'turn-context-renderer-v1' as const;
+export const RENDERER_POLICY_VERSION = 'turn-context-renderer-v2' as const;
 
 export const rendererProfileSchema = z.strictObject({
   delta: z.enum(['path_granular', 'guarded', 'off']),
@@ -25,9 +25,12 @@ export const rendererProfileSchema = z.strictObject({
   misc: z.enum(['separate', 'merged']),
   shortlist: z.enum(['all', 'k3', 'k2']),
   optionDetail: z.enum(['full', 'top2_stubs']),
+  nullFields: z.enum(['omit', 'explicit']),
+  attribution: z.enum(['stamped', 'off']),
 });
 
 export type RendererProfile = z.infer<typeof rendererProfileSchema>;
+export type RendererNullFields = RendererProfile['nullFields'];
 
 export const DEFAULT_RENDERER_PROFILE: RendererProfile = Object.freeze({
   delta: 'path_granular',
@@ -48,6 +51,8 @@ export const DEFAULT_RENDERER_PROFILE: RendererProfile = Object.freeze({
   misc: 'separate',
   shortlist: 'all',
   optionDetail: 'full',
+  nullFields: 'explicit',
+  attribution: 'off',
 });
 
 export const PLANNED_COMBINED_RENDERER_PROFILES = Object.freeze({
@@ -541,9 +546,13 @@ export function renderTurnContextProfile(
     delete context['recent_changes'];
     removedTopLevel += 2;
   }
-  context['renderer_attribution'] = rendererAttributionSchema.parse({
-    policy_version: RENDERER_POLICY_VERSION,
-  });
+  if (profile.attribution === 'stamped') {
+    context['renderer_attribution'] = rendererAttributionSchema.parse({
+      policy_version: RENDERER_POLICY_VERSION,
+    });
+  } else {
+    delete context['renderer_attribution'];
+  }
   return {
     context,
     optionRefs,

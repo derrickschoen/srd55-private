@@ -1178,7 +1178,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           policy: DM_TURN_INTEL_POLICY,
           zero_movement_offense_count: exactIntel.filter((row) =>
             row.actorId === actorId && row.minimumMovementFeet === 0).length,
-          rows: intelRows.map(renderDmContextIntelRow),
+          rows: intelRows.map((row) => renderDmContextIntelRow(row, rendererProfile.nullFields)),
           movement: movementIntel.status === 'resolved'
             ? movementIntel.rows.filter((row) => row.actorId === actorId)
               .slice(0, 3).map(renderMovementContextRow)

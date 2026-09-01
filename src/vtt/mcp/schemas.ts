@@ -603,7 +603,7 @@ const profiledFullTurnContextOutput = z.object({
   state_ref: stateRef,
   request: turnRequest,
   actors: z.array(z.record(z.string(), z.unknown())).min(1).max(50),
-  renderer_attribution: rendererAttributionSchema,
+  renderer_attribution: rendererAttributionSchema.optional(),
   truncated: z.boolean(),
   next_cursor: z.string().max(500).nullable(),
 }).passthrough();
