@@ -1,5 +1,27 @@
 # Binding scope decisions
 
+## D440 — OWNER: P3 caveman again with all information-reduced combinations (2026-09-01)
+
+Verbatim: "Try p3 caveman again with all of the possible information
+reduced combinations." Supervisor reading: cross the caveman format
+(P3's only non-losing arm) with the defined content reductions — the
+five P3 reduction arms plus their full union:
+1. cav-rows (rows=best_exception)
+2. cav-opp (opportunityCost=conditional)
+3. cav-move (movement=material_only)
+4. cav-threats (threats=counts_exception_ids)
+5. cav-gating (frontier=candidates_summary, knowledge=relevance_gated,
+   failures=headline_codes, adverts=stubs, rare=triggered, misc=merged)
+6. cav-all (union of arms 1-5)
+All with format=caveman_prose, everything else default full. 10 brutal
+rooms x 3 reps each, luna low, seeds 6203001-10. CONTROL = the existing
+p3-caveman run (caveman full content) — same era (code-identical
+3bf6b49f) and same seeds, so this round is confound-free internally.
+Blinded pairwise panel (sol/opus/fable) as in P3. Arms run
+sequentially; the ctrl-value lane is API-bound — if arena CLI-timeout
+weather exceeds the P3 rate in an early arm, the run is discarded and
+rescheduled, per gates-need-a-quiet-machine.
+
 ## Supervisor record — P3 UNSEALED: caveman prose is the only non-losing arm (2026-09-01)
 
 Six pairwise blinded packets (control = P1b full arm, era 7a9b1a29;
