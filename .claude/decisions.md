@@ -7,6 +7,20 @@
 > entries contradicted by a later ruling are one-line tombstones pointing at
 > the ruling that replaced them. Newest first.
 
+## Stryker 2b verification window — SUPERVISOR (2026-08-31)
+
+Exclusive-machine window, 167m53s, 3,424 mutants in scope (I ran it and
+read the final report myself). All-files score 94.81% (3,482 killed / 7
+timeout / 171 survived / 20 no-coverage). party-pack.ts 93.17% with 122
+survivors — down from 231 pre-kill-2b, verifying the campaign's net
+effect (~109 survivors eliminated; ~45 were deliberately deferred
+unclassified, so the live remainder is the kill-2c backlog per D428.1).
+Other files: controllers 96.64%, vane-warren 96.18% (15 surv),
+local-session-store 94.13% (15 surv), survival-policy 99.64%,
+session-record 98.41%, stable-dom-render 97.44%. Known restore artifact
+recurred: exec bits dropped on two fixture .mjs files, restored by hand;
+tree otherwise clean. Survivor detail in reports/mutation/mutation.json.
+
 ## D428 — OWNER: queue priorities around the slimming program (2026-08-31)
 
 1. **Kill-2c (party-pack survivor remainder): PARALLEL QUIET-STRETCH
