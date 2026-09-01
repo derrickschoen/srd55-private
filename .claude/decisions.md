@@ -1,5 +1,23 @@
 # Binding scope decisions
 
+## P0 slimming landed — new measurement era at c2c5ef63 — SUPERVISOR (2026-08-31)
+
+Merged lane-wt/slim-p0 (2 review rounds; my full gate caught 3 defects
+codex's targeted runs missed: a trimmer RangeError replacing the
+degrade-never-throw contract, and two arena test timeouts from redundant
+rendering — all fixed without weakening) and lane-wt/kill-2c increment 1
+(3 rounds; caught an unverified error-shape guess and a false "tsc exit
+0" claim; final 84 addressed / 35 equivalent-proven / 3 unaddressed;
+mutant 2370 shown misreported by Stryker). Gates I ran on main
+post-merge: tsc 0, sg 0, vitest 9384/9384, build clean, :4173 200. Live
+smoke 2 brutal rooms: plans authorized, 0 refusals, renderer attribution
++ circumstance features stamped, trimmer exercised live without throw.
+Consequences: null-row fix and path-granular delta are now production
+default — P1 re-anchor (full vs off) measures THIS era; all prior
+brutal-tier numbers (8.08 / 7.62 / 6.79) are cross-era from here on.
+Calibration artifacts: lane .tmp-calibration-table.{json,md},
+supervisor-regenerated.
+
 > **Compacted 2026-07-30 at the owner's instruction** ("remove older decisions
 > contradicted by the new one and duplicate decisions; compact the text to be
 > more terse"). The full unabridged history is in git at commit `808f902` and
