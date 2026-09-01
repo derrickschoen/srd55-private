@@ -1,5 +1,30 @@
 # Binding scope decisions
 
+## D431 — OWNER: human-readable optimization only; DM context is coaching for humans (2026-09-01)
+
+Verbatim: "For the p# rounds, treat the ai dm like it was human. Keep it
+human readable and remove information strategically to see what
+information removals improve ai dm performance. Remember we are
+targeting coaching for human dms in the end so stick to human readable
+optimization." Consequences, binding:
+1. Every renderer variant that earns a live slot must be something a
+   human DM could read at the table. Machine-oriented encodings
+   (short-ref tables, sparse slot forms, hoisted id schemes) are
+   PERMANENTLY excluded, not merely shelved — they fail the
+   human-readability test regardless of any future byte argument.
+2. The experimental lever is STRATEGIC INFORMATION REMOVAL: which
+   removals improve AI-DM performance, read as a proxy for what a human
+   DM doesn't need. The AI DM is the measurable stand-in for the human
+   DM the coaching ultimately targets.
+3. In-flight P3 arms comply (each is a readable brief: best-choice rows
+   with exceptions, opportunity-cost only when competitive, movement
+   notes only when material, threat counts). P4's fewer-alternatives
+   arms comply (fewer options, each fully readable). No in-flight
+   change needed.
+4. The D427 end-goal artifacts (adaptive seam selector / fast reading
+   prompt) inherit the constraint: profiles the selector picks between
+   must all be human-readable.
+
 ## D430 — OWNER: relevance reduction, not byte compaction (2026-09-01)
 
 Verbatim: "For improving the dm coaching for brutal rooms, we need to
