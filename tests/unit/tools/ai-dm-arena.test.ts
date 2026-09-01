@@ -239,6 +239,40 @@ describe('AI-DM arena', () => {
       .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
   });
 
+  it('threads inline renderer-profile JSON through dry-run rows while keeping arena metadata', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-renderer-profile-'));
+    const profiles = [
+      { ...DEFAULT_RENDERER_PROFILE, nullFields: 'omit' as const },
+      { ...DEFAULT_RENDERER_PROFILE, attribution: 'stamped' as const },
+    ] as const;
+
+    for (const [index, profile] of profiles.entries()) {
+      const config = parseArenaArgs([
+        '--rooms', '1', '--reps', '1', '--seed', '3943001', '--dry-run',
+        '--out', join(directory, `profile-${String(index)}.jsonl`),
+        '--renderer-profile', JSON.stringify(profile),
+        ...LEGACY_BLOCK_ARGS,
+      ]);
+      const [row] = await runArena(config);
+      if (row === undefined) throw new Error('Renderer-profile dry run produced no row.');
+
+      expect(config.rendererProfile).toEqual(profile);
+      expect(row.rendererAttribution).toEqual({
+        policyVersion: RENDERER_POLICY_VERSION,
+        profile,
+      });
+      expect(circumstanceFeatureVectorSchema.safeParse(row.circumstanceFeatures).success).toBe(true);
+      const modelVisibleContext = objectValue(JSON.parse(row.rawTurnContext), 'raw turn context');
+      if (profile.attribution === 'off') {
+        expect(modelVisibleContext).not.toHaveProperty('renderer_attribution');
+      } else {
+        expect(modelVisibleContext['renderer_attribution']).toEqual({
+          policy_version: RENDERER_POLICY_VERSION,
+        });
+      }
+    }
+  });
+
   it('suppresses every intel context surface while attributing off rows and preserving full bytes', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-intel-mode-'));
     const common = [

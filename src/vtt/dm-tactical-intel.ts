@@ -13,6 +13,7 @@ import type { EngineQueryPort } from './engine-query-port';
 import type { EngineActorOption, EngineOptionId } from './turn-proposal';
 import { ENGINE_FAILURE_MODES_POLICY } from './engine-failure-modes';
 import { legalMultiattackCombinations } from './turn-option-registry';
+import type { RendererNullFields } from './renderer-profile';
 
 export const DM_TURN_INTEL_POLICY = 'dm-turn-intel-v1' as const;
 export const DM_INTEL_QUERY_POLICY = 'dm-intel-query-v1' as const;
@@ -387,7 +388,10 @@ export function renderDmIntelRow(row: DmTargetIntelRow): Readonly<Record<string,
 }
 
 /** Actor envelope already binds actor and renderer policy; omit those repeated bytes in always-on context. */
-export function renderDmContextIntelRow(row: DmTargetIntelRow): Readonly<Record<string, unknown>> {
+export function renderDmContextIntelRow(
+  row: DmTargetIntelRow,
+  nullFields: RendererNullFields = 'omit',
+): Readonly<Record<string, unknown>> {
   const compact: Record<string, unknown> = { ...renderDmIntelRow(row) };
   delete compact['policy'];
   delete compact['actor_id'];
@@ -397,13 +401,15 @@ export function renderDmContextIntelRow(row: DmTargetIntelRow): Readonly<Record<
   if (!row.deathFailureOnHit && row.automaticCriticalMaximumDistanceFeet === null) {
     delete compact['consequence_codes'];
   }
-  for (const key of ['action_id', 'distance_feet', 'p_hit', 'ev', 'movement_need_feet'] as const) {
-    if (compact[key] === null) delete compact[key];
+  if (nullFields === 'omit') {
+    for (const key of ['action_id', 'distance_feet', 'p_hit', 'ev', 'movement_need_feet'] as const) {
+      if (compact[key] === null) delete compact[key];
+    }
+    if (compact['visibility'] === 'UNKNOWN') delete compact['visibility'];
+    if (compact['cover'] === 'UNKNOWN') delete compact['cover'];
+    if (compact['range'] === 'UNRESOLVED') delete compact['range'];
+    if (compact['roll_mode'] === 'UNRESOLVED') delete compact['roll_mode'];
   }
-  if (compact['visibility'] === 'UNKNOWN') delete compact['visibility'];
-  if (compact['cover'] === 'UNKNOWN') delete compact['cover'];
-  if (compact['range'] === 'UNRESOLVED') delete compact['range'];
-  if (compact['roll_mode'] === 'UNRESOLVED') delete compact['roll_mode'];
   return compact;
 }
 

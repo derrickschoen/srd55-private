@@ -5,6 +5,7 @@ import {
   DM_TURN_INTEL_POLICY,
   isInformativeDmIntelRow,
   renderDmContextIntelRow,
+  topDmActorIntelRows,
 } from '../../../src/vtt/dm-tactical-intel';
 import { TACTICAL_EVALUATOR_POLICY } from '../../../src/combat/tactical-evaluator';
 import { freshMonsterPlanningState, createEngineMcpRuntime, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
@@ -103,9 +104,12 @@ function actorContext() {
 describe('renderer profile', () => {
   it('schema-validates every complete planned profile and rejects open or incomplete profiles', () => {
     expect(rendererProfileSchema.parse(DEFAULT_RENDERER_PROFILE)).toEqual(DEFAULT_RENDERER_PROFILE);
+    expect(DEFAULT_RENDERER_PROFILE).toMatchObject({ nullFields: 'explicit', attribution: 'off' });
     expect(Object.values(PLANNED_COMBINED_RENDERER_PROFILES).every((profile) =>
       rendererProfileSchema.safeParse(profile).success)).toBe(true);
     expect(rendererProfileSchema.safeParse({ ...DEFAULT_RENDERER_PROFILE, delta: 'maybe' }).success).toBe(false);
+    expect(rendererProfileSchema.safeParse({ ...DEFAULT_RENDERER_PROFILE, nullFields: 'maybe' }).success).toBe(false);
+    expect(rendererProfileSchema.safeParse({ ...DEFAULT_RENDERER_PROFILE, attribution: 'maybe' }).success).toBe(false);
     const { rows: _rows, ...incomplete } = DEFAULT_RENDERER_PROFILE;
     expect(rendererProfileSchema.safeParse(incomplete).success).toBe(false);
   });
@@ -134,6 +138,33 @@ describe('renderer profile', () => {
     });
     expect(renderDmContextIntelRow(absent)).not.toHaveProperty('distance_feet');
     expect(renderDmContextIntelRow(absent)).not.toHaveProperty('roll_mode');
+  });
+
+  it('restores the hand-written old-era row bytes without restoring wholly empty rows', () => {
+    const retained: DmTargetIntelRow = {
+      ...unresolvedRow(),
+      actionId: null,
+      visible: true,
+    };
+    const oldEraRow = '{"target_id":"combatant:renderer-target","action_id":null,"attacks":0,"kind":"approach","visibility":"VISIBLE","cover":"UNKNOWN","range":"UNRESOLVED","distance_feet":null,"roll_mode":"UNRESOLVED","p_hit":null,"ev":null,"movement_need_feet":null}';
+
+    expect(JSON.stringify(renderDmContextIntelRow(retained, 'explicit'))).toBe(oldEraRow);
+    expect(topDmActorIntelRows([unresolvedRow()], actorId).map((row) =>
+      renderDmContextIntelRow(row, 'omit'))).toEqual([]);
+    expect(topDmActorIntelRows([unresolvedRow()], actorId).map((row) =>
+      renderDmContextIntelRow(row, 'explicit'))).toEqual([]);
+  });
+
+  it('independently controls model-visible renderer attribution', () => {
+    const input = { actors: [actorContext()] };
+    const off = renderTurnContextProfile(input, DEFAULT_RENDERER_PROFILE).context;
+    const stamped = renderTurnContextProfile(input, {
+      ...DEFAULT_RENDERER_PROFILE,
+      attribution: 'stamped',
+    }).context;
+
+    expect(stamped['renderer_attribution']).toEqual({ policy_version: RENDERER_POLICY_VERSION });
+    expect(off).not.toHaveProperty('renderer_attribution');
   });
 
   it('reconstructs sparse slots and status byte-for-byte to the incumbent object', () => {
@@ -386,6 +417,6 @@ describe('renderer profile', () => {
       options_per_actor_mean: 2,
       options_per_actor_max: 3,
     });
-    expect(RENDERER_POLICY_VERSION).toBe('turn-context-renderer-v1');
+    expect(RENDERER_POLICY_VERSION).toBe('turn-context-renderer-v2');
   });
 });
