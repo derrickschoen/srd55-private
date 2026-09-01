@@ -1,5 +1,26 @@
 # Binding scope decisions
 
+## D438 — OWNER: grappling is control; it must be priced in the AI coaching (2026-09-01)
+
+Verbatim: "We need grappling in the ai coaching options. It is a type
+of control. Especially because you can drag characters around."
+This OVERRIDES the D437 supervisor scope note that left grapple outside
+control-valuation V1 (unresolved valuation). Binding consequences:
+1. The control-valuation design gains a GRAPPLE control family
+   alongside hard turn-denial. Pricing must stay grounded in real
+   action costs, not invented fractions: expected victim actions spent
+   on escape attempts (exact d20 check arithmetic vs escape DC, per
+   round while held, horizon-discounted), the victim's attack-EV loss
+   from disadvantage (computable delta, not a policy constant), speed-0
+   positional denial, and a DRAG term — forced repositioning of the
+   victim is first-class value, per the owner's emphasis.
+2. Design amendment goes through the same dual-blind reviewer (sol)
+   before implementation — one amendment round, not a re-litigation of
+   the settled hard-control consensus.
+3. Lane order becomes: D436 evaluator framework lane first, then the
+   D437 grapple lane implements mechanics AND its pricing profile on
+   top of that framework.
+
 ## D437 — OWNER: add grappling for PC and NPC if not already present (2026-09-01)
 
 Verbatim: "We need to add grappling for pc and npc if we don't already
