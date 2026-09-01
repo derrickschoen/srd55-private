@@ -1,5 +1,19 @@
 # Binding scope decisions
 
+## D429 — OWNER: three post-P1 rulings (2026-09-01)
+
+1. **Standing post-merge behavioral gate: SHAPE-STAT MINI-A/B** — after
+   every host-path (engine/renderer/conversation) merge: 10 rooms x 1
+   rep live, shape stats (offense, zero-offense, end_turn, blocks)
+   compared against the era reference; no judge panel. Catches the
+   regression class that gates/tests/smokes were blind to.
+2. **D427 dataset home: PRIVATE DIR stays** —
+   ~/dnd-research-private/slim-dataset/, outside all git trees; the
+   public repo carries only aggregated results.
+3. **Interim intel default: HOLD UNTIL P5** — full-intel default
+   unchanged everywhere despite the era-clean brutal inversion; the
+   slimming program may produce a profile that beats off.
+
 ## P1 re-anchor UNSEALED (fixed era 7a9b1a29) — SUPERVISOR (2026-09-01)
 
 Both arms fresh, 10 brutal rooms x 3 reps, luna-low; blinded 3-judge
