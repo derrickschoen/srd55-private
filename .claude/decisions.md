@@ -1,5 +1,30 @@
 # Binding scope decisions
 
+## Regression isolated to exhaustion-path frontier resolution — SUPERVISOR (2026-09-01)
+
+Amends the finding below with the completed isolation chain (all my own
+runs, same 10 brutal rooms, luna-low, same day): (1) 3-arm study on new
+era — restored-default presentation (byte-identical to old era) 1.17
+offense/12 zero-offense/4 end_turn; nulls-omitted 1.64/10/2; stamp-on
+1.55/8/4 — presentation EXONERATED, all arms equally collapsed. (2) OLD
+era 4deae1fc run today: 2.39 offense, 0/28 zero-offense, 0 end_turn —
+model drift EXONERATED, the defect is ours. (3) Conversation-level
+discriminator: autoSubmitBlocks ('auto_submit_blocked_unresolved_
+frontier', tools/ai-dm-conversation.ts resolveDeterministically) fires
+12x new era vs 0x old; blocks correlate with zero-offense rounds (6/12
+vs 2/18); monsterSegments 38 vs 20. The machinery predates P0
+(35a42605); what changed is how often the frontier reads unresolved.
+Prime suspect: P0's perf fix lazified/removed eager turn-context renders
+whose SIDE EFFECT resolved frontier candidates before the deterministic
+path read them — a hidden temporal coupling that worked by accident in
+the old era. Dry-run does not reproduce (simulated adapter never
+exhausts). Root-cause lane lane-wt/frontier-regress dispatched with a
+fail-pre-fix/pass-post-fix reproduction requirement; fix must decouple
+frontier resolution from rendering, not restore the eager render.
+Defaults meanwhile: lane-wt/slim-diag merged (ba1e92cd) reverted
+presentation defaults to the attested-good era — necessary hygiene but
+NOT the cause. P1 re-anchor remains blocked until this lands.
+
 ## FINDING against merged P0: full-intel behavioral regression — SUPERVISOR (2026-09-01)
 
 The P1 re-anchor unsealed at full 4.38 vs off 7.46 pooled (W3/L25/T2,
