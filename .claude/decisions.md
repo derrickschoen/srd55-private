@@ -1,5 +1,23 @@
 # Binding scope decisions
 
+## D430 — OWNER: relevance reduction, not byte compaction (2026-09-01)
+
+Verbatim: "For improving the dm coaching for brutal rooms, we need to
+reduce the irrelevant information. Byte compaction will not help much."
+Consequences, binding on the slimming program:
+1. Representation-compression seams (S-ids/S-slots/S-status/S-label,
+   the compact-wire family) are SHELVED as live levers — consistent
+   with P2's measured failure. No further live slots for them.
+2. The program's thrust is CONTENT RELEVANCE: which surfaces/rows/
+   options are material to THIS actor's turn in THIS room. P3's four
+   category-brief arms and P4's fewer-alternatives arms already are
+   relevance cuts and proceed unchanged.
+3. TIER 2 relevance gating (rare:triggered, knowledge:relevance_gated,
+   frontier:candidates_summary, failures:headline_codes, adverts:stubs,
+   misc:merged) is promoted from conditional to a CONFIRMED fifth arm
+   of the P3 screen — top-level surface gating is the purest
+   "drop the irrelevant" test available.
+
 ## P2 wire compaction UNSEALED: FAILS promotion — SUPERVISOR (2026-09-01)
 
 Compact-wire (sparse slots + short-ref ids + sparse status + derivable
