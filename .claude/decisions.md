@@ -65,6 +65,35 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D456 — OWNER: live games run luna medium, started speculatively during the player's turn; answer on end-turn; 180 s wall (2026-09-02)
+
+Asked (brainstorm Q6): live effort and deadline policy. Options offered:
+low live + medium speculative (supervisor recommendation), low with engine
+fallback, medium 240 s wait, table setting.
+
+Owner (verbatim): **"medium during player turns. keep medium thinking and
+have it answer if the player ends his turn before medium is done. also, set
+timeout at 180s"**
+
+Supervisor reading, recorded so it can be corrected:
+- Live effort is medium. There is no low tier at the table.
+- The medium session starts speculatively when the player's turn begins
+  (the D407 window), reasoning against the projected state.
+- If the player ends their turn before medium has answered, the in-flight
+  session is not discarded and not restarted at low: it is asked to answer
+  now against the actual end-of-turn state (resumeCorrection if the state
+  moved, otherwise deliver). The table waits for that answer.
+- Hard wall: 180 s. Open implementation detail (supervisor verifies, does
+  not re-ask): whether the wall runs from speculation start or from
+  end-turn, and how an in-flight `codex exec` is told to conclude — exec
+  cannot be nudged mid-turn, so "answer now" most likely means: let the
+  speculative turn finish, then one resumed correction turn under the
+  remaining budget. What happens at 180 s with no answer is NOT ruled here
+  and is asked separately if the engine-fallback default is unacceptable.
+- Arena measurement budgets are unchanged: 240 s medium / 120 s low per
+  D448, because the D443 sweep is mid-flight and the budget is part of the
+  preregistration. A later era may re-anchor arena budgets to 180 s.
+
 ## D455 — OWNER: k7 nudge and renderer fix are measured sequentially (2026-09-02)
 
 Asked (brainstorm Q5): sequential (supervisor recommendation), 2x2
