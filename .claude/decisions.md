@@ -65,6 +65,24 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D461 — OWNER: engine advice renders as a ranked recommendation (2026-09-02)
+
+Asked (brainstorm Q11): ranked recommendation (supervisor recommendation),
+facts and warnings only, draft play to accept/edit, auto-select on
+dominance.
+
+Owner: **"Ranked recommendation."**
+
+Consequences: the D460 advice layer renders, per actor, the computed facts
+plus an explicit preference order over offered option ids with a one-line
+reason each ("Dash to close on the archer is preferred; Dodge is the
+fallback"). The DM keeps the choice; no option is auto-selected and no
+draft play is submitted on the model's behalf. The A/B's mechanism metric
+is advice-follow rate alongside the panel score. Ranking must be computed
+from typed intel rows (expected damage, reachability, threat), never from
+prose heuristics, and every rendered preference must be reproducible from
+the row.
+
 ## D460 — OWNER: next big rock is algorithmic advice distilled from low-vs-medium (2026-09-02)
 
 Asked (brainstorm Q10): algorithmic advice from the distillation
