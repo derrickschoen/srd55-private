@@ -1,5 +1,17 @@
 # Binding scope decisions
 
+## D448 — OWNER: extend the medium-effort timeout and rerun the failures (2026-09-02)
+
+Verbatim: "It says some of the medium effort Luna timed out. What was the
+timeout? Please extend the timeout and re run the failed ones." Answer
+given: 120 s per round (arena default). Ruling ratifies the supervisor
+deviation recorded below: all D443 medium arms run at --timeout-ms
+240000, low arms stay at 120000; the arena reruns whole arms, so
+s-full-medium reran in full at 240 s (landed 14:42, 30/30 authorized,
+0 timeouts, wall median 24.5 s / p90 45.7 s / max 63.3 s). The 120 s
+medium run is retained as d443-s-full-medium.b120.jsonl, not judged in
+the main sweep. Reporting rule as preregistered in analysis-notes.md.
+
 MEDIUM ARMS GET A 240 S BUDGET (supervisor deviation, 2026-09-02, owner
 may overrule): the s-full-medium rerun on a quiet box timed out 4/30
 (first run 5/30; low arms 0–2). Cases did not overlap between runs, so
