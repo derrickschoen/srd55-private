@@ -65,6 +65,17 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D464 — OWNER: full three-judge panel on every packet (2026-09-02)
+
+Asked (brainstorm Q14): full panel everywhere (supervisor recommendation),
+two judges with tie-break, single judge on confirmations.
+
+Owner: **"Full panel everywhere."**
+
+Consequences: D447, D449, the post-shift control, the multi-round lane and
+the advice A/B are all scored by sol high, opus and fresh-context fable.
+No packet is scored by fewer than three seats.
+
 ## D463 — OWNER: wall-miss behaviour is configurable; default is the engine's recommendation; every timeout is logged (2026-09-02)
 
 Asked (brainstorm Q13, follow-up to D456): engine's ranked recommendation
