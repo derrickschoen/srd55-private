@@ -1,5 +1,22 @@
 # Binding scope decisions
 
+WEATHER STOP ON ARM 7 (supervisor note, 2026-09-02): d443-s-full-medium
+(first medium arm, 12:02–12:48) finished with 5 CLI timeouts (>3), so the
+resumer stopped the chain. Classification, verified from the rows: the
+five refused rounds carry "Agent CLI timed out after 120000 ms" with zero
+tokens in and out, i.e. the operator CLI produced nothing — not the model
+running long. Medium's authorized rounds have median wall 20.4 s, p90
+44.2 s, max 59.1 s against the 120 s budget (low arms: median 16–17 s,
+p90 31–37 s), so effort is not near the cap. Nothing of mine was running
+concurrently on the box during the arm. Ruled weather; the arm is VOID
+(file renamed d443-s-full-medium.VOID-weather1.jsonl, kept for the
+record), budget NOT re-pinned, and the whole arm reruns first when the
+resumer relaunches — automatically once the one codex analysis agent now
+running (sealed raw-row low-vs-medium comparison requested by the owner,
+dispatched 12:48 on the voided arm; it will be redone on the rerun)
+exits, so the rerun gets a quiet machine. Refusals per arm to date:
+0,0,0,1,2,1 at low, then 5 at medium.
+
 D447 PREREGISTERED; ARM 15 QUEUED (supervisor note, 2026-09-02): per the
 sealed recommendations (rec 1 and rec 2, both already visible to the owner),
 appended cav-rows-move-gating-medium as D443 arm 15 to d443-profiles.tsv —
