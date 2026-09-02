@@ -1,5 +1,24 @@
 # Binding scope decisions
 
+SUPERVISOR BLINDING BREACH, PARTIAL (2026-09-02, recorded at full length):
+while harvesting the sealed recommendations agent I tailed its stdout log to
+read the permitted count lines. Codex had echoed a diff of the report's
+caveats section into that stdout, so the tail put result fragments into my
+context. What I now know that I should not: (a) the ship recommendation is a
+triple reduction (identity unknown) with unanimous judge direction and no
+reduction-side refusals; (b) this grid conflicts with P3 in that not every
+single reduction lost; (c) pair/triple interaction terms were uniformly
+negative; (d) judge disagreement >=4 points on 166/780 reduction rows. I did
+NOT learn any arm identities, per-arm deltas, or rankings. Exposure risk to
+the remaining D443 sweep judging: D443 arms are structured-renderer singles
+plus cav-full at two efforts — the leak names no arm and maps to the caveman
+family, so my pre-registered archetype scoring tables remain the mechanical
+basis; residual bias risk is acknowledged and the owner may swap my judge
+seat for the D443 sweep if preferred. Root cause: my harvest procedure tailed
+a sealed agent's raw stdout; codex prints file patches there. Fix, effective
+immediately: sealed-agent status is read only via grep for the explicit
+STATUS/count lines; never tail or cat a sealed agent's log.
+
 ERA-SHIFT MERGE LANDED (supervisor note, 2026-09-02): lane-wt/ctrl-value merged
 to main as b0709cea (lane commit fee67cc7). Sequence per D444.1/D446, all
 verified by the supervisor directly: lane full vitest 9420/9420 after codex
