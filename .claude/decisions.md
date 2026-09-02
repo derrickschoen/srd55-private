@@ -123,6 +123,23 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D472 — OWNER: a post-shift control more than 0.3 below the current-era leader triggers bisection (2026-09-02)
+
+Asked (round 2 Q7): threshold triggers bisection (supervisor
+recommendation), accept regardless, escalate with no preset rule.
+
+Owner: **"Threshold triggers bisection."**
+
+Consequences (preregistered now, before the control runs): the post-shift
+control is compared with the D443-era leader on the same seeds and reps
+(the leader's identity is known after the D451 unsealing). If the control's
+mean panel total is more than 0.3 below the leader, promotion freezes and
+per-change diagnostic arms run: (a) no-effect hiding only, (b) rider
+flags + multiattack fix + creature replacements only, (c) KB scaffolding
++ tactics only, (d) digest rollover only where it can act in an opening
+round, each against the pre-shift leader profile. Otherwise the control
+is the new zero and every later comparison anchors on it.
+
 ## D471 — OWNER: advice A/B first, multi-round lane beside it in one sealed program (2026-09-02)
 
 Asked (round 2 Q6): advice first with multi-round beside it in one program
