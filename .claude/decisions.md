@@ -1,5 +1,19 @@
 # Binding scope decisions
 
+K-ARM BUILDER MERGED; H2H4 JUDGED (supervisor note, 2026-09-02): lane
+merged to main as 2e10d5c6; main gate run by the supervisor: tsc -b 0, sg
+scan 0, full vitest 534 files / 9422 tests passed in 245s (9420 prior + 2 new
+packet tests), build clean, :4173 200. h2h4 panel finished by 09:25:47 (about
+3 min for 120 entries on all three seats); format validation for each of
+sol/opus/fable: n=120, blind sequence intact, no duplicates, no missing, no
+component/total mismatch, no out-of-range, no nulls, refused rows zeroed.
+Copied to dnd-slim-runs; key sealed. Correction to the reboot notes: the
+arena writes its --out file once at the end of the run (writeFile at
+tools/ai-dm-arena.ts:652), so "0 rows mid-arm" is normal, the earlier
+"~2 min in / ~16 min in" reboot costs were the full elapsed arm time, and
+progress is only visible as operator rollouts under ~/.codex-aidm/sessions
+(13 in the first 15 min of arm 3 => ~35 min per arm).
+
 SECOND REBOOT + K-ARM PACKET LANDED (supervisor note, 2026-09-02): host
 rebooted again 09:12:11, ~16 min into the restarted D443 arm 3, killing the
 resumer, tick cron and :4173 a second time. Recovered 09:17 (arm 3 restarted
