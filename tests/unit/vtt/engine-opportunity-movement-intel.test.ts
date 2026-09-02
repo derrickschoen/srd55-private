@@ -5,8 +5,12 @@ import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import {
   actorOpportunityReport,
+  compareOpportunityV1,
+  compareOpportunityV2,
+  legacyDefaultOption,
   submissionDominance,
   type ActorOpportunityReport,
+  type ResolvedOpportunityOption,
 } from '../../../src/vtt/intel/opportunity-cost';
 import { renderMovementIntelRow, type MovementIntelRow } from '../../../src/vtt/intel/movement-options';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
@@ -277,6 +281,23 @@ describe('engine movement and opportunity-cost intel', () => {
       .toBe('fully_resolved');
     expect(actorOpportunityReport(state, PRIEST, canonicalEngineQueryPort, 1).frontierResolution)
       .toBe('contains_unresolved');
+  });
+
+  it('preserves every legacy pair comparison and legacy-filtered default under V2', () => {
+    const state = frozenState();
+    const monsters = state.combatants.filter((combatant) => combatant.profile.kind === 'monster');
+    for (const monster of monsters) {
+      const report = actorOpportunityReport(state, monster.profile.id, canonicalEngineQueryPort, 1);
+      const legacy = report.options.filter((option): option is ResolvedOpportunityOption =>
+        option.status === 'resolved' && option.family === 'legacy');
+      if (legacy.length === 0) throw new Error(`${monster.profile.id} has no resolved legacy option.`);
+      for (const left of legacy) {
+        for (const right of legacy) {
+          expect(compareOpportunityV2(left, right)).toEqual(compareOpportunityV1(left, right));
+        }
+      }
+      expect(report.defaultOption.optionId).toBe(legacyDefaultOption(legacy).optionId);
+    }
   });
 
   it('blocks M5 refusal when the selected option has an unresolved declared metric', () => {

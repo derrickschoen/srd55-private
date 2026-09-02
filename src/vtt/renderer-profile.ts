@@ -718,6 +718,14 @@ function optionFacts(option: MutableRecord): readonly string[] {
   const expectation = record(option['expectation']);
   if (expectation !== null) {
     facts.push(expectation['resolvable'] === true ? 'outcome resolved' : 'outcome unresolved');
+    if (expectation['kind'] === 'hard_control') {
+      facts.push(`expected ${String(expectation['expected_initially_affected'])} caught initially`);
+      facts.push(`${String(expectation['expected_control_burden'])} expected enemy actions over ${String(expectation['horizon_rounds'])} rounds`);
+      facts.push(`${String(expectation['expected_disabled_turns'])} lost turns`);
+      facts.push(`${String(expectation['expected_wake_actions'])} wake actions`);
+      facts.push(`${String(expectation['resource_penalty'])} limited-use penalty`);
+      facts.push(`${String(expectation['net_action_equivalents'])} net action-equivalents`);
+    }
     if (typeof expectation['outcome_probability'] === 'number') {
       facts.push(`outcome probability ${String(expectation['outcome_probability'])}`);
     }
@@ -726,7 +734,9 @@ function optionFacts(option: MutableRecord): readonly string[] {
     }
     if (typeof expectation['expected_value'] === 'number') {
       facts.push(`EV ${String(expectation['expected_value'])} ${String(expectation['metric'])}`);
-    } else facts.push(`EV unresolved for ${String(expectation['metric'])}`);
+    } else if (expectation['metric'] !== 'none' && expectation['kind'] !== 'hard_control') {
+      facts.push(`EV unavailable for ${String(expectation['metric'])}`);
+    }
   }
   for (const refusalValue of array(option['refusals'])) {
     const refusal = record(refusalValue);

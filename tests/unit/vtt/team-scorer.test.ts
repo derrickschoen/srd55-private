@@ -3,8 +3,11 @@ import { combatantId } from '../../../src/combat/values';
 import { exactRational } from '../../../src/vtt/intel/contracts';
 import {
   classifyWastedTurn,
+  compareTeamPlanV1,
+  compareTeamPlanV2,
   renderTeamPlanFrontier,
   scoreTeamPlanEvaluations,
+  teamCommonVector,
   teamPlanVector,
   type ResolvedTeamPlanEvaluation,
   type TeamPlanCandidate,
@@ -31,6 +34,13 @@ function resolved(
   return {
     status: 'resolved',
     candidate: candidate(candidateId),
+    family: 'legacy',
+    commonVector: teamCommonVector({
+      netActionEquivalents: exactRational(metrics.objectiveProgress, 1),
+      dyingPcRemoval: exactRational(...metrics.dyingPcRemoval),
+      wastedTurn: exactRational(metrics.wastedTurn, 1),
+    }),
+    outcomes: [],
     vector: teamPlanVector({
       lethality: exactRational(...metrics.lethality),
       objectiveProgress: exactRational(metrics.objectiveProgress, 1),
@@ -43,6 +53,28 @@ function resolved(
 }
 
 describe('team plan Pareto scorer', () => {
+  it('keeps V2 byte-identical to V1 for every legacy pair', () => {
+    const legacy = [
+      resolved('alpha', {
+        lethality: [3, 4], objectiveProgress: 2, resourceConservation: 1,
+        dyingPcRemoval: [0, 1], wastedTurn: 0,
+      }),
+      resolved('beta', {
+        lethality: [1, 2], objectiveProgress: 1, resourceConservation: 2,
+        dyingPcRemoval: [0, 1], wastedTurn: 0,
+      }),
+      resolved('tradeoff', {
+        lethality: [1, 1], objectiveProgress: 0, resourceConservation: 0,
+        dyingPcRemoval: [1, 1], wastedTurn: 1,
+      }),
+    ];
+    for (const left of legacy) {
+      for (const right of legacy) {
+        expect(compareTeamPlanV2(left, right)).toEqual(compareTeamPlanV1(left, right));
+      }
+    }
+  });
+
   it('removes a plan that is hand-computed worse on three axes and no better on the rest', () => {
     const winning = resolved('winning', {
       lethality: [3, 4], objectiveProgress: 2, resourceConservation: 1,
@@ -150,7 +182,7 @@ describe('team plan Pareto scorer', () => {
       status: 'unresolved',
       candidate: candidate('unresolved-spell-plan'),
       unresolvedMetrics: ['lethality'],
-      reasons: ['declared_outcome_unresolved'],
+      reasons: ['option_outcome_unresolved'],
     };
 
     const report = scoreTeamPlanEvaluations([resolvedAlternative, unresolved]);

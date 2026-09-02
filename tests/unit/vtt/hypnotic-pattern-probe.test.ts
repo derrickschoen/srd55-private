@@ -5,6 +5,7 @@ import { affectedCells } from '../../../src/combat/templates';
 import { combatantId } from '../../../src/combat/values';
 import { loadContentPack } from '../../../src/content/content-pack';
 import { engineConcentrationActive } from '../../../src/vtt/engine-query-port';
+import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import { EngineRoundSession, type AuthorizedEngineTurnProposal } from '../../../src/vtt/engine-round-session';
 import {
   availableEngineActorOptions,
@@ -13,6 +14,13 @@ import {
 } from '../../../src/vtt/intent-resolver';
 import { createEngineMcpRuntime, freshMonsterPlanningState, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
 import type { EngineActorOption, EngineTurnProposal } from '../../../src/vtt/turn-proposal';
+import { actorOpportunityReport, submissionDominance } from '../../../src/vtt/intel/opportunity-cost';
+import { scoreTeamPlans } from '../../../src/vtt/intel/team-scorer';
+import {
+  DEFAULT_RENDERER_PROFILE,
+  renderProseTurnContext,
+  renderTurnContextProfile,
+} from '../../../src/vtt/renderer-profile';
 import { readFileSync } from '../../helpers/test-filesystem';
 
 const FIXTURE = 'tests/fixtures/arena-scenarios/hypnotic-pattern-cc.json';
@@ -168,11 +176,119 @@ describe('D432 Hypnotic Pattern control probe', () => {
       'spellcasting/hypnotic-pattern (1/1) [30-ft cube -> combatant:d432-cleric, combatant:d432-fighter, combatant:d432-rogue, combatant:d432-wizard]');
     const damage = options.find((option) => option['label'] ===
       'Restless Touch + Restless Touch -> combatant:d432-wizard');
+    if (control === undefined) throw new Error('Hypnotic Pattern option is absent.');
     expect(control).toMatchObject({
       kind: 'cast_spell',
       action_slots: [expect.objectContaining({ kind: 'cast_spell', spell_id: 'hypnotic-pattern' })],
+      expectation: {
+        kind: 'hard_control',
+        resolvable: true,
+        metric: 'control',
+        expected_initially_affected: 3.2,
+        expected_control_burden: 6.214656,
+        expected_disabled_turns: 4.816896,
+        expected_wake_actions: 1.39776,
+        resource_penalty: 0.5,
+        net_action_equivalents: 5.714656,
+        policy: 'option-outcome-v1',
+        target_fail_probabilities: expect.arrayContaining([
+          expect.objectContaining({ probability: 0.8, side: 'hostile' }),
+        ]),
+        initial_count_distribution: [
+          { numerator: 1, denominator: 625 },
+          { numerator: 16, denominator: 625 },
+          { numerator: 96, denominator: 625 },
+          { numerator: 256, denominator: 625 },
+          { numerator: 256, denominator: 625 },
+        ],
+        assumption_codes: expect.any(Array),
+        expected_initially_affected_exact: { numerator: 16, denominator: 5 },
+        expected_control_burden_exact: { numerator: 97104, denominator: 15625 },
+        expected_disabled_turns_exact: { numerator: 75264, denominator: 15625 },
+        expected_wake_actions_exact: { numerator: 4368, denominator: 3125 },
+        resource_penalty_exact: { numerator: 1, denominator: 2 },
+        net_action_equivalents_exact: { numerator: 178583, denominator: 31250 },
+        horizon_rounds: 3,
+        concentration_survival_exact: { numerator: 4, denominator: 5 },
+        concentration_exposure: 'exposed',
+      },
     });
     expect(damage).toMatchObject({ kind: 'attack', action_id: 'multiattack' });
+    expect(damage).toMatchObject({
+      usable_now: true,
+      usable_after_movement: true,
+      minimum_movement_feet: 0,
+      expectation: expect.objectContaining({
+        kind: 'damage',
+        resolvable: true,
+        metric: 'damage',
+        expected_value: 21.2,
+        expected_value_exact: { numerator: 106, denominator: 5 },
+        kill_probability_exact: { numerator: 14329861, denominator: 54419558400 },
+        net_action_equivalents_exact: { numerator: 2310764334427, denominator: 6530347008000 },
+      }),
+    });
+
+    const opportunity = actorOpportunityReport(state, CASTER, canonicalEngineQueryPort, state.revision);
+    const controlOption = hypnoticOption(availableEngineActorOptions(state, CASTER));
+    const damageEngineOption = damageOption(availableEngineActorOptions(state, CASTER));
+    expect(opportunity.defaultOption.optionId).toBe(controlOption.optionId);
+    expect(opportunity.frontierResolution).toBe('fully_resolved');
+    expect(opportunity.options.flatMap((entry) => entry.status === 'unresolved' ? entry.reasons : []))
+      .not.toContain('cast_spell_outcome_unresolved');
+    expect(submissionDominance(opportunity, damageEngineOption.optionId)).toMatchObject({
+      status: 'dominated',
+      alternative: { option: { optionId: controlOption.optionId } },
+    });
+    expect(submissionDominance(opportunity, controlOption.optionId).status).toBe('not_dominated');
+
+    const team = scoreTeamPlans(state, [
+      { candidateId: 'control', label: 'Control', proposals: [proposal(state.revision, controlOption)] },
+      { candidateId: 'damage', label: 'Damage', proposals: [proposal(state.revision, damageEngineOption)] },
+    ], canonicalEngineQueryPort);
+    expect(team.frontierResolution).toBe('fully_resolved');
+    expect(team.frontier.map((entry) => entry.candidate.candidateId)).toEqual(['control']);
+    expect(team.removed).toEqual([
+      expect.objectContaining({
+        candidate: expect.objectContaining({ candidate: expect.objectContaining({ candidateId: 'damage' }) }),
+        dominatedBy: expect.objectContaining({ candidate: expect.objectContaining({ candidateId: 'control' }) }),
+      }),
+    ]);
+
+    const filtered = renderTurnContextProfile(context, {
+      ...DEFAULT_RENDERER_PROFILE,
+      format: 'structured',
+    });
+    for (const style of ['regular_prose', 'caveman_prose'] as const) {
+      const rendered = renderProseTurnContext(filtered.context, style, filtered.optionRefs, 10 * 1024 * 1024);
+      const document = String(rendered.context['document']);
+      expect(document).toContain(String(control['option_id']));
+      expect(document).toContain('3.2 caught initially');
+      expect(document).toContain('6.214656 expected enemy actions');
+      expect(document).toContain('4.816896 lost turns');
+      expect(document).toContain('1.39776 wake actions');
+      expect(document).toContain('0.5 limited-use penalty');
+      expect(document).toContain('5.714656 net action-equivalents');
+      expect(document).toContain('21.2 damage');
+    }
+  });
+
+  it('keeps a friendly caught by geometry in the mechanical target selectors', async () => {
+    const state = freshMonsterPlanningState(await loadArenaFixture(FIXTURE));
+    const crowded = {
+      ...state,
+      bounds: { columns: 6, rows: 6 },
+      blockedCells: [],
+      tokens: state.tokens.map((token, index) => ({
+        ...token,
+        position: { column: index, row: index },
+      })),
+    };
+    const option = hypnoticOption(availableEngineActorOptions(crowded, CASTER));
+    const cast = option.actionSlots.find((slot) => slot.use.kind === 'cast_spell')?.use;
+    if (cast?.kind !== 'cast_spell') throw new Error('Crowded control option has no spell use.');
+    expect(cast.targets).toContainEqual({ kind: 'combatant', combatantId: CASTER });
+    expect(option.label).toContain(`allies ${CASTER}`);
   });
 
   it('resolves the advertised cube into Charmed plus Incapacitated effects and concentration', async () => {
@@ -203,6 +319,8 @@ describe('D432 Hypnotic Pattern control probe', () => {
       .toEqual(PC_IDS);
     expect(after.combatants.find((candidate) => candidate.profile.id === CASTER)?.limitedResources)
       .toContainEqual(expect.objectContaining({ id: 'monster-spell:spellcasting:hypnotic-pattern', remaining: 0 }));
+    expect(after.combatants.find((candidate) => candidate.profile.id === CASTER)?.spellSlots)
+      .toContainEqual({ level: 3, maximum: 1, remaining: 1 });
   });
 
   it('mints the same placement and option ids from repeated fixture loads', async () => {

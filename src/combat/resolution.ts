@@ -4,10 +4,15 @@ import {
   type ArmorClass,
   type DamageType,
   type DieSides,
-  type DifficultyClass,
 } from './values';
+import type { RollMode, SavingThrowRequest } from './saving-throw-outcomes';
 
-export type RollMode = 'normal' | 'advantage' | 'disadvantage';
+export {
+  savingThrowOutcomeWeights,
+  type RollMode,
+  type SavingThrowOutcomeWeights,
+  type SavingThrowRequest,
+} from './saving-throw-outcomes';
 
 export interface DiceExpression {
   readonly count: number;
@@ -67,12 +72,6 @@ export type AttackRollResult =
   | { readonly outcome: 'miss'; readonly roll: D20Roll; readonly total: number }
   | { readonly outcome: 'hit'; readonly roll: D20Roll; readonly total: number }
   | { readonly outcome: 'critical'; readonly roll: D20Roll; readonly total: number };
-
-export interface SavingThrowRequest {
-  readonly bonus: number;
-  readonly dc: DifficultyClass;
-  readonly rollMode: RollMode;
-}
 
 export interface SavingThrowResult {
   readonly outcome: 'failure' | 'success';
