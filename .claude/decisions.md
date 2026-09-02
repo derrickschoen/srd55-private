@@ -1,5 +1,22 @@
 # Binding scope decisions
 
+D466 SHIFT PLAN: CODEX DRAFT REVIEWED, ROUND 1 RETURNED (supervisor note,
+2026-09-02 19:1x): codex sol produced a 360-line plan (dnd-slim-runs/
+d466-shift-plan.md; four parts A-D, nine increments, tests with named
+mutations, 18 assumptions). Supervisor verified 14 assumptions locally in
+the lane (contracts.ts sha 0f0e1d8f…, registry attack-only child filter at
+turn-option-registry.ts:181, six 6203 fixtures, zero 6204 fixtures,
+replacement creatures present with zero audit findings, traits typed,
+k7 1086 bytes, KB seam at ai-dm-conversation.ts:652/1226, no sunlight
+provenance in LightLevel). Six amendments sent back: cut sunlight
+provenance (typed not-applicable instead); rollover threshold must come
+from per-call context input, not the per-round token sum (median 286k/438k
+is a sum), with a failing placeholder test until measured; preflight must
+run on post-override 6204 rooms and prove untouched seeds byte-identical;
+confirm CR equality of replacements; prove D2 escalation path unreachable
+in arms with no escalation flags; drop the duplicate printout. Resumed
+codex session for the amended plan (d466-plan-codex-2.log).
+
 ARM 12 VERIFIED (supervisor note, 2026-09-02 18:52): d443-s-gating-medium
 29/30 authorized (one non-authorized row, same count as the low twin), 0
 timeouts at 240 s, 10 digests x3, refusals 14 (low 12), no escalations.
