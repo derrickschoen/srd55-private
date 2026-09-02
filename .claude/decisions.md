@@ -1,5 +1,21 @@
 # Binding scope decisions
 
+ARM 11 VERIFIED; KB PLAN + STRATEGY DISTILLATION REVIEWED (supervisor
+note, 2026-09-02 18:15): d443-s-threats-medium 30/30 authorized, 0
+timeouts at 240 s, 10 digests x3, refusals 11 (low twin: 28/30, 2 timeouts,
+13). Idle Disengage 24 -> 6, Dash 50 -> 75, attack slots 39 -> 46, wall
+median 16.4 -> 24.0 s. Arm 12 gating-medium started 18:00:01. Codex KB plan
+and strategy analysis reviewed in dnd-slim-runs/
+supervisor-review-kb-plan-and-strategy.md: five required changes on the KB
+plan (tactical lines out of the root per D458, no host-bound lane paths,
+capture subject-file reads per row, A/B becomes a D452-style regression
+check, encounter-scoped role sentence); strategy rules 1-10 accepted as the
+D460 candidate set after two numbers were reproduced independently (wall
+medians 17.2/24.5 s; zero-movement Disengage 88 low / 49 medium vs codex
+85). Codex's analysis predates arm 11 and must be refreshed with threats
+and the D465 sol-low rows before the D460 build. Post-D443 chain (D459
+smoke -> D449 k7 -> D465 sol-low) detached and waiting on the resumer.
+
 FINDING: TWO CODEX ANALYSIS JOBS DISPATCHED READ-ONLY WHILE TOLD TO WRITE
 FILES (supervisor, 2026-09-02, my error): the KB-plan job (session
 01a06402…) and the effort-strategy distillation (01a06403…) each finished
