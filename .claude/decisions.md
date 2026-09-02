@@ -65,6 +65,23 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D451 — OWNER: unseal after D443 only (2026-09-02)
+
+Asked (brainstorm Q1): when do the sealed keys open, given D442 said one
+unsealing at program end and D447/D449 were preregistered afterwards as
+sealed. Options offered: after D443+D447+D449 (supervisor recommendation),
+after D443 only, owner-only unsealing after D443.
+
+Owner: **"After D443 only."**
+
+Consequences: the D443 sweep (15 arms + h2h4 K-arm packet) is unsealed as
+soon as its judging is complete and validated; D445 ranking table and the
+effort verdict follow immediately. D447 and D449 form a new sealed program
+with their own single unsealing at their end. The supervisor will know D443
+arm identities while building the D447/D449 packets; those packets keep the
+shuffle-prime blinding (373, 379) and the judge seats stay blind, but the
+caveat is recorded here so it is read into the D447/D449 report.
+
 ## D450 — OWNER: every subsequent turn resumes the same session (2026-09-02)
 
 Verbatim: "not dependent. I want each subsequent turn to resume session"
