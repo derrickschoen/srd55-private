@@ -1,5 +1,5 @@
 import type { EngineStateCapsule } from '../engine-state-capsule';
-import type { CombatantId, EngineActorOption, EngineTurnProposal } from '../turn-proposal';
+import type { CombatantId, EngineOfferableOption, EngineTurnProposal } from '../turn-proposal';
 
 export const PLAY_NAMES = ['remove_obstacle', 'focus_fire', 'basic_advance'] as const;
 export type PlayName = (typeof PLAY_NAMES)[number];
@@ -131,7 +131,7 @@ function requestedActors(capsule: EngineStateCapsule): readonly ProjectedActor[]
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
-function explicitTargetIds(option: EngineActorOption): readonly CombatantId[] {
+function explicitTargetIds(option: EngineOfferableOption): readonly CombatantId[] {
   return option.actionSlots.flatMap((slot) => {
     const use = slot.use;
     switch (use.kind) {
@@ -150,21 +150,21 @@ function explicitTargetIds(option: EngineActorOption): readonly CombatantId[] {
   });
 }
 
-function isDefense(option: EngineActorOption): boolean {
+function isDefense(option: EngineOfferableOption): boolean {
   return option.actionSlots.some((slot) => slot.slot === 'main' &&
     (slot.use.kind === 'dodge' || slot.use.kind === 'end_turn'));
 }
 
-function isAdvance(option: EngineActorOption): boolean {
+function isAdvance(option: EngineOfferableOption): boolean {
   return option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dash');
 }
 
-function isOffense(option: EngineActorOption): boolean {
+function isOffense(option: EngineOfferableOption): boolean {
   return option.actionSlots.some((slot) => slot.slot === 'main' &&
     (slot.use.kind === 'attack' || slot.use.kind === 'multiattack' || slot.use.kind === 'saving_throw'));
 }
 
-function isControl(option: EngineActorOption): boolean {
+function isControl(option: EngineOfferableOption): boolean {
   return option.actionSlots.some((slot) => {
     const use = slot.use;
     const ids = use.kind === 'multiattack'
@@ -186,7 +186,7 @@ function chooseOption(
   actor: ProjectedActor,
   targets: readonly ProjectedActor[],
   controlOnly: boolean,
-): EngineActorOption | null {
+): EngineOfferableOption | null {
   const targetRank = new Map(targets.map((target, index) => [target.id, index] as const));
   const candidates = actor.options.filter((option) => controlOnly ? isControl(option) : isOffense(option));
   candidates.sort((left, right) => {
@@ -203,9 +203,9 @@ function chooseOption(
 
 function alternateOffense(
   actor: ProjectedActor,
-  primary: EngineActorOption,
+  primary: EngineOfferableOption,
   targets: readonly ProjectedActor[],
-): EngineActorOption | null {
+): EngineOfferableOption | null {
   const primaryTargets = new Set(explicitTargetIds(primary));
   const targetRank = new Map(targets.map((target, index) => [target.id, index] as const));
   return actor.options

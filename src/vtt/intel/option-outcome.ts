@@ -26,7 +26,7 @@ import {
   type EngineQueryPort,
 } from '../engine-query-port';
 import type {
-  EngineActorOption,
+  EngineOfferableOption,
   EngineBonusActionUse,
   EngineMainActionUse,
   ResolvedTurnMechanics,
@@ -565,7 +565,7 @@ function sourceSpellcastingAction(
 
 function declaredSpellOutcome(
   state: EncounterState,
-  option: EngineActorOption,
+  option: EngineOfferableOption,
   use: Extract<EngineMainActionUse | EngineBonusActionUse, { readonly kind: 'cast_spell' }>,
 ): DeclaredOptionOutcome {
   const definition = spellDefinition(use.spellId);
@@ -585,7 +585,7 @@ function declaredSpellOutcome(
 
 function declaredUseOutcome(
   state: EncounterState,
-  option: EngineActorOption,
+  option: EngineOfferableOption,
   use: EngineMainActionUse | EngineBonusActionUse,
 ): DeclaredOptionOutcome {
   switch (use.kind) {
@@ -604,7 +604,7 @@ function declaredUseOutcome(
 
 export function classifyDeclaredOptionOutcome(
   state: EncounterState,
-  option: EngineActorOption,
+  option: EngineOfferableOption,
 ): DeclaredOptionOutcome {
   const declarations = option.actionSlots.map((slot) => declaredUseOutcome(state, option, slot.use));
   const unsupported = declarations.find(
@@ -905,7 +905,7 @@ function movedState(
 
 function attackOutcome(
   state: EncounterState,
-  option: EngineActorOption,
+  option: EngineOfferableOption,
   mechanics: ResolvedTurnMechanics,
 ): OptionOutcomeEvaluation {
   const attackUses = mechanics.actionSlots.filter((use) => use.kind === 'attack');
@@ -1077,7 +1077,7 @@ function concentrationFacts(
 
 function canonicalLimitedResourceSpends(
   state: EncounterState,
-  option: EngineActorOption,
+  option: EngineOfferableOption,
 ): number {
   const pools = new Set<string>();
   for (const slot of option.actionSlots) {
@@ -1214,7 +1214,7 @@ export function evaluateHardControlProfile(
 
 export function evaluateOptionOutcome(
   state: EncounterState,
-  option: EngineActorOption,
+  option: EngineOfferableOption,
   mechanics: ResolvedTurnMechanics,
   _queries: EngineQueryPort,
 ): OptionOutcomeEvaluation {

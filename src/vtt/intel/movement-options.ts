@@ -5,7 +5,7 @@ import type { CombatantId } from '../../combat/values';
 import type { DmIntelRollMode, DmTargetIntelRow } from '../dm-tactical-intel';
 import type { EngineStateCapsule } from '../engine-state-capsule';
 import type { EngineQueryPort } from '../engine-query-port';
-import type { EngineActorOption, EngineOptionId } from '../turn-proposal';
+import type { EngineOfferableOption, EngineOptionId } from '../turn-proposal';
 import { intelPolicyVersion, type IntelProviderResult } from './contracts';
 
 export const MOVEMENT_OPTIONS_INTEL_POLICY = intelPolicyVersion('movement-options-v1');
@@ -51,7 +51,7 @@ export type MovementOptionsIntelResult = IntelProviderResult<
   'movement_input_unavailable'
 >;
 
-function actionIdForMovement(option: EngineActorOption | undefined, targetId: CombatantId): string | null {
+function actionIdForMovement(option: EngineOfferableOption | undefined, targetId: CombatantId): string | null {
   const main = option?.actionSlots.find((slot) => slot.slot === 'main')?.use;
   if (main === undefined) return null;
   if (main.kind === 'attack') {

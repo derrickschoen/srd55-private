@@ -24,7 +24,7 @@ import {
 import {
   engineActionId,
   engineOptionId,
-  type EngineActorOption,
+  type EngineOfferableOption,
   type EngineTurnProposal,
 } from '../../../src/vtt/turn-proposal';
 import { placedToken, playerProfile } from '../combat/fixtures';
@@ -58,7 +58,7 @@ function encounter(
   }));
 }
 
-function proposalFor(state: EncounterState, option: EngineActorOption): EngineTurnProposal {
+function proposalFor(state: EncounterState, option: EngineOfferableOption): EngineTurnProposal {
   return {
     actorId: option.actorId,
     expectedRevision: option.revision,
@@ -68,7 +68,7 @@ function proposalFor(state: EncounterState, option: EngineActorOption): EngineTu
   };
 }
 
-function authorize(state: EncounterState, option: EngineActorOption): AuthorizedEngineTurnProposal {
+function authorize(state: EncounterState, option: EngineOfferableOption): AuthorizedEngineTurnProposal {
   const proposal = proposalFor(state, option);
   const resolution = pureTurnProposalResolver.resolve(state, proposal);
   if (!resolution.valid) {
@@ -84,7 +84,7 @@ function authorize(state: EncounterState, option: EngineActorOption): Authorized
   };
 }
 
-function mainMultiattack(option: EngineActorOption, actionId: string, count: number): boolean {
+function mainMultiattack(option: EngineOfferableOption, actionId: string, count: number): boolean {
   return option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'multiattack' &&
     slot.use.components.length === count && slot.use.components.every((component) => component.actionId === actionId));
 }
@@ -253,7 +253,7 @@ describe('complete action economy and composite turn proposals', () => {
   it('rejects a multiattack when even one declared component is illegal', () => {
     const scout = monsterProfile(SCOUT, 'partial-scout');
     const state = encounter([{ profile: scout, column: 0, row: 2 }], 8);
-    const illegal: EngineActorOption = {
+    const illegal: EngineOfferableOption = {
       optionId: engineOptionId('option:partial-illegal'),
       actorId: scout.id,
       revision: state.revision,
@@ -277,6 +277,7 @@ describe('complete action economy and composite turn proposals', () => {
         },
       }],
       resourceCostLabels: [],
+      omittedRiders: [],
     };
     expect(resolveEngineActorOption(state, illegal)).toEqual({
       valid: false,

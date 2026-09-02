@@ -18,11 +18,11 @@ import {
   type EngineQueryPort,
   type EngineTargetSelector,
 } from './engine-query-port';
-import { engineActorOptions } from './turn-option-registry';
+import { projectEngineActorOptions } from './turn-option-registry';
 import {
   engineActionId,
   type EngineActionSlotUse,
-  type EngineActorOption,
+  type EngineOfferableOption,
   type EngineBonusActionUse,
   type EngineMainActionUse,
   type EngineMovementObjective,
@@ -37,7 +37,7 @@ import {
 export type {
   EngineActionId,
   EngineActionSlotUse,
-  EngineActorOption,
+  EngineOfferableOption,
   EngineBonusActionUse,
   EngineEngagement,
   EngineMainActionUse,
@@ -412,7 +412,7 @@ function resolvedUses(
 
 export function resolveEngineActorOption(
   state: EncounterState,
-  option: EngineActorOption,
+  option: EngineOfferableOption,
   queries: EngineQueryPort = canonicalEngineQueryPort,
 ): OptionResolution {
   const actor = queries.combatant(state, option.actorId);
@@ -452,16 +452,17 @@ export function availableEngineActorOptions(
   actorId: CombatantId,
   queries: EngineQueryPort = canonicalEngineQueryPort,
   revision = state.revision,
-): readonly EngineActorOption[] {
-  return engineActorOptions(state, actorId, revision).filter((option) => resolveEngineActorOption(state, option, queries).valid);
+): readonly EngineOfferableOption[] {
+  return projectEngineActorOptions(state, actorId, revision, (partition) => partition.offerable)
+    .filter((option) => resolveEngineActorOption(state, option, queries).valid);
 }
 
 function accepted(
   selectedBranch: 'primary' | 'fallback',
-  option: EngineActorOption,
+  option: EngineOfferableOption,
   mechanics: ResolvedTurnMechanics,
-  primaryOption: EngineActorOption,
-  fallbackOption: EngineActorOption | null,
+  primaryOption: EngineOfferableOption,
+  fallbackOption: EngineOfferableOption | null,
   refusals: Extract<EngineProposalResolution, { readonly valid: true }>['refusals'] = [],
 ): EngineProposalResolution {
   const resolutionDigest = sha256(canonicalJson(mechanics));

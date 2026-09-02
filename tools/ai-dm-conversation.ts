@@ -46,7 +46,7 @@ import {
 import { canonicalEngineQueryPort } from '../src/vtt/engine-query-port';
 import {
   availableEngineActorOptions, pureTurnProposalResolver,
-  type EngineActorOption, type EngineTurnProposal, type ResolvedTurnMechanics,
+  type EngineOfferableOption, type EngineTurnProposal, type ResolvedTurnMechanics,
 } from '../src/vtt/intent-resolver';
 import { projectFutureMonsterTurns } from '../src/vtt/monster-planning-state';
 import { SNIPPET_REGISTRY, type PlayName } from '../src/vtt/snippet-registry-runtime';
@@ -766,9 +766,9 @@ function livingMonsterIds(state: EncounterState): readonly CombatantId[] {
 
 interface SegmentMonsterPlanEntry {
   readonly proposal: EngineTurnProposal;
-  readonly option: EngineActorOption;
-  readonly primaryOption: EngineActorOption;
-  readonly fallbackOption: EngineActorOption | null;
+  readonly option: EngineOfferableOption;
+  readonly primaryOption: EngineOfferableOption;
+  readonly fallbackOption: EngineOfferableOption | null;
   readonly mechanics: ResolvedTurnMechanics;
   readonly selectedBranch: 'primary' | 'fallback';
 }
@@ -907,7 +907,7 @@ function sameCombatantSet(left: readonly CombatantId[], right: readonly Combatan
   return a.length === b.length && a.every((actorId, index) => actorId === b[index]);
 }
 
-function optionStructure(option: EngineActorOption): string {
+function optionStructure(option: EngineOfferableOption): string {
   const { optionId: _optionId, revision: _revision, ...structure } = option;
   return canonicalJson(structure);
 }
@@ -2051,9 +2051,9 @@ export function proposalResolutionDivergence(
 function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalEnvelope): {
   readonly entries: readonly {
     readonly proposal: EngineTurnProposal;
-    readonly option: EngineActorOption;
-    readonly primaryOption: EngineActorOption;
-    readonly fallbackOption: EngineActorOption | null;
+    readonly option: EngineOfferableOption;
+    readonly primaryOption: EngineOfferableOption;
+    readonly fallbackOption: EngineOfferableOption | null;
     readonly mechanics: ResolvedTurnMechanics;
     readonly acceptedProposal: Readonly<Record<string, unknown>>;
     readonly selectedBranch: 'primary' | 'fallback';
@@ -2098,9 +2098,9 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
   return {
     entries: resolved.some((entry) => entry === null) ? null : resolved as readonly {
       readonly proposal: EngineTurnProposal;
-      readonly option: EngineActorOption;
-      readonly primaryOption: EngineActorOption;
-      readonly fallbackOption: EngineActorOption | null;
+      readonly option: EngineOfferableOption;
+      readonly primaryOption: EngineOfferableOption;
+      readonly fallbackOption: EngineOfferableOption | null;
       readonly mechanics: ResolvedTurnMechanics;
       readonly acceptedProposal: Readonly<Record<string, unknown>>;
       readonly selectedBranch: 'primary' | 'fallback';

@@ -960,7 +960,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     });
 
     expect(beforeRender).toEqual([
-      'contains_unresolved',
+      'fully_resolved',
       'fully_resolved',
       'fully_resolved',
       'contains_unresolved',

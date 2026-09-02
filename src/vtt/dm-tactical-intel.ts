@@ -10,7 +10,7 @@ import {
 import type { CombatantId } from '../combat/values';
 import type { EngineStateCapsule } from './engine-state-capsule';
 import type { EngineQueryPort } from './engine-query-port';
-import type { EngineActorOption, EngineOptionId } from './turn-proposal';
+import type { EngineOfferableOption, EngineOptionId } from './turn-proposal';
 import { ENGINE_FAILURE_MODES_POLICY } from './engine-failure-modes';
 import { legalMultiattackCombinations } from './turn-option-registry';
 import type { RendererNullFields } from './renderer-profile';
@@ -86,7 +86,7 @@ function attackCandidates(actions: readonly MonsterAction[]): readonly AttackCan
   });
 }
 
-function optionTargets(option: EngineActorOption): readonly CombatantId[] {
+function optionTargets(option: EngineOfferableOption): readonly CombatantId[] {
   return option.actionSlots.flatMap((slot): readonly CombatantId[] => {
     const use = slot.use;
     switch (use.kind) {
@@ -106,7 +106,7 @@ function optionTargets(option: EngineActorOption): readonly CombatantId[] {
   });
 }
 
-function optionActionId(option: EngineActorOption): string | null {
+function optionActionId(option: EngineOfferableOption): string | null {
   const main = option.actionSlots.find((slot) => slot.slot === 'main')?.use;
   if (main === undefined) return null;
   switch (main.kind) {
@@ -127,7 +127,7 @@ function selectedOption(
   targetId: CombatantId,
   actionId: string,
   attackActionIds: readonly string[],
-): EngineActorOption | null {
+): EngineOfferableOption | null {
   return actor.options.find((option) =>
     optionActionId(option) === actionId && optionTargets(option).includes(targetId) &&
     option.actionSlots.some((slot) => slot.slot === 'main' && (

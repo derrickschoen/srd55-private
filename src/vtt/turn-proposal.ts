@@ -1,17 +1,27 @@
-import type { Brand } from '../domain/ids';
 import type { GridCell } from '../combat/grid';
 import type { AreaTemplate } from '../combat/templates';
 import type { CombatantId, WorldObjectId } from '../combat/values';
 import type { EngineTargetSelector } from './engine-query-port';
+import type { EngineOfferableOption, EngineOptionId } from './option-modeling';
+
+export {
+  engineHumanOptionId,
+  engineOptionId,
+  type EngineHumanOnlyOption,
+  type EngineHumanOptionId,
+  type EngineOfferableOption,
+  type EngineOptionCandidate,
+  type EngineOptionId,
+  type NoModeledEffect,
+} from './option-modeling';
 
 export type { CombatantId } from '../combat/values';
 
 /** Stable passthrough ids remain distinct even when supplied by homebrew content. */
-export type EngineOptionId = Brand<string, 'EngineOptionId'>;
+import type { Brand } from '../domain/ids';
 export type EngineActionId = Brand<string, 'EngineActionId'>;
 export type EngineSpellId = Brand<string, 'EngineSpellId'>;
 
-export const engineOptionId = (value: string): EngineOptionId => value as EngineOptionId;
 export const engineActionId = (value: string): EngineActionId => value as EngineActionId;
 export const engineSpellId = (value: string): EngineSpellId => value as EngineSpellId;
 
@@ -84,16 +94,6 @@ export type EngineActionSlotUse =
   | { readonly slot: 'main'; readonly use: EngineMainActionUse }
   | { readonly slot: 'bonus'; readonly use: EngineBonusActionUse };
 
-export interface EngineActorOption {
-  readonly optionId: EngineOptionId;
-  readonly actorId: CombatantId;
-  readonly revision: number;
-  readonly label: string;
-  readonly movement: EngineMovementObjective;
-  readonly actionSlots: readonly EngineActionSlotUse[];
-  readonly resourceCostLabels: readonly string[];
-}
-
 export interface EngineTurnProposal {
   readonly actorId: CombatantId;
   readonly expectedRevision: number;
@@ -151,9 +151,9 @@ export type EngineProposalResolution =
         readonly summary: string;
       }[];
       readonly mechanics: ResolvedTurnMechanics;
-      readonly option: EngineActorOption;
-      readonly primaryOption: EngineActorOption;
-      readonly fallbackOption: EngineActorOption | null;
+      readonly option: EngineOfferableOption;
+      readonly primaryOption: EngineOfferableOption;
+      readonly fallbackOption: EngineOfferableOption | null;
     }
   | {
       readonly valid: false;

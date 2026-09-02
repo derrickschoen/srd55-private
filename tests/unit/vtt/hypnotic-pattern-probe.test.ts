@@ -13,7 +13,7 @@ import {
   resolveEngineActorOption,
 } from '../../../src/vtt/intent-resolver';
 import { createEngineMcpRuntime, freshMonsterPlanningState, loadArenaFixture } from '../../../src/vtt/mcp/entrypoint';
-import type { EngineActorOption, EngineTurnProposal } from '../../../src/vtt/turn-proposal';
+import type { EngineOfferableOption, EngineTurnProposal } from '../../../src/vtt/turn-proposal';
 import { actorOpportunityReport, submissionDominance } from '../../../src/vtt/intel/opportunity-cost';
 import { scoreTeamPlans } from '../../../src/vtt/intel/team-scorer';
 import {
@@ -39,11 +39,11 @@ function record(value: unknown, label: string): Readonly<Record<string, unknown>
   return value as Readonly<Record<string, unknown>>;
 }
 
-function mainUse(option: EngineActorOption) {
+function mainUse(option: EngineOfferableOption) {
   return option.actionSlots.find((slot) => slot.slot === 'main')?.use;
 }
 
-function hypnoticOption(options: readonly EngineActorOption[]): EngineActorOption {
+function hypnoticOption(options: readonly EngineOfferableOption[]): EngineOfferableOption {
   const option = options.find((candidate) => {
     const use = mainUse(candidate);
     return use?.kind === 'cast_spell' && use.spellId === 'hypnotic-pattern';
@@ -52,7 +52,7 @@ function hypnoticOption(options: readonly EngineActorOption[]): EngineActorOptio
   return option;
 }
 
-function damageOption(options: readonly EngineActorOption[]): EngineActorOption {
+function damageOption(options: readonly EngineOfferableOption[]): EngineOfferableOption {
   const option = options.find((candidate) => {
     const use = mainUse(candidate);
     return use?.kind === 'multiattack' && use.components.every((component) =>
@@ -63,7 +63,7 @@ function damageOption(options: readonly EngineActorOption[]): EngineActorOption 
   return option;
 }
 
-function proposal(stateRevision: number, option: EngineActorOption): EngineTurnProposal {
+function proposal(stateRevision: number, option: EngineOfferableOption): EngineTurnProposal {
   return {
     actorId: CASTER,
     expectedRevision: stateRevision,

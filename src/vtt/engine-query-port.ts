@@ -53,7 +53,7 @@ import type {
   ActorKnowledgeProjection,
   PerceivedTargetKnowledge,
 } from './intel/actor-knowledge';
-import type { EngineActorOption, EngineOptionId } from './turn-proposal';
+import type { EngineOfferableOption, EngineOptionId } from './turn-proposal';
 
 export interface TacticalAllocationChoice {
   readonly actorId: CombatantId;
@@ -634,28 +634,33 @@ export function enginePlanningSemanticZones(
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
-export function monsterActions(state: EncounterState, actorId: CombatantId): readonly MonsterAction[] {
+export function declaredMonsterActions(state: EncounterState, actorId: CombatantId): readonly MonsterAction[] {
   const subject = combatant(state, actorId);
   if (subject === null) return [];
-  if (subject.wildShape !== undefined) return subject.wildShape.physical.actions.filter((action) => action.execution?.kind !== 'absent');
-  if (subject.form !== undefined) return subject.form.availableActions.filter((action) => action.execution?.kind !== 'absent');
+  if (subject.wildShape !== undefined) return subject.wildShape.physical.actions;
+  if (subject.form !== undefined) return subject.form.availableActions;
   if (subject.profile.kind !== 'monster') return [];
   const statblockId = subject.profile.statblockId;
   for (const pack of state.contentPacks ?? []) {
     const imported = pack.monsters.find((monster) => monster.statblock.id === statblockId);
-    if (imported !== undefined) return imported.actions.filter((action) => action.execution?.kind !== 'absent');
+    if (imported !== undefined) return imported.actions;
   }
   const lookup = lookupBundledMonster(String(statblockId));
   if (lookup.status !== 'resolved' || lookup.entry.kind !== 'static') return [];
   const actions = lookup.entry.statblock.sourceDetails.actions;
-  return actions.kind === 'present' ? actions.value.filter((action) => action.execution?.kind !== 'absent') : [];
+  return actions.kind === 'present' ? actions.value : [];
+}
+
+export function monsterActions(state: EncounterState, actorId: CombatantId): readonly MonsterAction[] {
+  return declaredMonsterActions(state, actorId).filter((action) =>
+    action.execution?.kind !== 'absent' || action.kind === 'attack' || action.kind === 'multiattack');
 }
 
 function executableBonusActions(actions: readonly MonsterBonusAction[]): readonly MonsterBonusAction[] {
   return actions.filter((action) => !('execution' in action) || action.execution.kind !== 'absent');
 }
 
-export function monsterBonusActions(
+export function declaredMonsterBonusActions(
   state: EncounterState,
   actorId: CombatantId,
 ): readonly MonsterBonusAction[] {
@@ -666,13 +671,20 @@ export function monsterBonusActions(
     const imported = pack.monsters.find((monster) => monster.statblock.id === statblockId);
     if (imported !== undefined) {
       const bonusActions = imported.statblock.sourceDetails.bonusActions;
-      return bonusActions.kind === 'present' ? executableBonusActions(bonusActions.value) : [];
+      return bonusActions.kind === 'present' ? bonusActions.value : [];
     }
   }
   const lookup = lookupBundledMonster(String(statblockId));
   if (lookup.status !== 'resolved' || lookup.entry.kind !== 'static') return [];
   const bonusActions = lookup.entry.statblock.sourceDetails.bonusActions;
-  return bonusActions.kind === 'present' ? executableBonusActions(bonusActions.value) : [];
+  return bonusActions.kind === 'present' ? bonusActions.value : [];
+}
+
+export function monsterBonusActions(
+  state: EncounterState,
+  actorId: CombatantId,
+): readonly MonsterBonusAction[] {
+  return executableBonusActions(declaredMonsterBonusActions(state, actorId));
 }
 
 function interveningCells(from: GridCell, to: GridCell): readonly GridCell[] {
@@ -1615,7 +1627,7 @@ export function projectedMovementOptions(
   });
 }
 
-function optionBlessTargets(option: EngineActorOption): readonly CombatantId[] {
+function optionBlessTargets(option: EngineOfferableOption): readonly CombatantId[] {
   return option.actionSlots.flatMap((slot) =>
     slot.slot === 'bonus' && slot.use.kind === 'cast_spell' && slot.use.spellId === 'bless'
       ? slot.use.targets.flatMap((targetSelector) => targetSelector.kind === 'combatant'
@@ -1625,7 +1637,7 @@ function optionBlessTargets(option: EngineActorOption): readonly CombatantId[] {
 }
 
 function optionAttackActionIds(
-  option: EngineActorOption,
+  option: EngineOfferableOption,
   targetId: CombatantId,
 ): readonly string[] {
   return option.actionSlots.flatMap((slot) => {

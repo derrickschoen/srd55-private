@@ -32,6 +32,7 @@ function resolution(actorId: CombatantId, fallback = false): ProposedTurnResolut
     },
     actionSlots: [{ slot: 'main' as const, use: { kind: 'dodge' as const } }],
     resourceCostLabels: [],
+    omittedRiders: [],
   };
   return {
     proposal: {

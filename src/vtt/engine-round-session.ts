@@ -20,7 +20,7 @@ import { canonicalEngineQueryPort, monsterActions, monsterBonusActions } from '.
 import {
   availableEngineActorOptions,
   resolveEngineActorOption,
-  type EngineActorOption,
+  type EngineOfferableOption,
   type EngineTurnProposal,
   type ResolvedActionSlotUse,
   type ResolvedTurnMechanics,
@@ -97,9 +97,9 @@ export interface EngineProposalDeviation {
 
 export interface AuthorizedEngineTurnProposal {
   readonly proposal: EngineTurnProposal;
-  readonly option: EngineActorOption;
-  readonly primaryOption: EngineActorOption;
-  readonly fallbackOption: EngineActorOption | null;
+  readonly option: EngineOfferableOption;
+  readonly primaryOption: EngineOfferableOption;
+  readonly fallbackOption: EngineOfferableOption | null;
   readonly mechanics: ResolvedTurnMechanics;
   readonly selectedBranch: 'primary' | 'fallback';
 }

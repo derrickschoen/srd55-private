@@ -9,7 +9,7 @@ import {
   type ReadonlyStateCapsuleSource,
 } from './engine-state-capsule';
 import type {
-  EngineActorOption,
+  EngineOfferableOption,
   EngineTurnProposal,
   ResolvedTurnMechanics,
 } from './intent-resolver';
@@ -29,9 +29,9 @@ export interface EngineProposalBinding {
 
 export interface ProposedTurnResolution {
   readonly proposal: EngineTurnProposal;
-  readonly option: EngineActorOption;
-  readonly primaryOption: EngineActorOption;
-  readonly fallbackOption: EngineActorOption | null;
+  readonly option: EngineOfferableOption;
+  readonly primaryOption: EngineOfferableOption;
+  readonly fallbackOption: EngineOfferableOption | null;
   readonly mechanics: ResolvedTurnMechanics;
   readonly selectedBranch: 'primary' | 'fallback';
   readonly resolutionDigest: string;

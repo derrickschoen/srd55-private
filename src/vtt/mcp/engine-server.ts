@@ -29,7 +29,7 @@ import {
 } from '../engine-state-capsule';
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
 import { resolveEngineActorOption, type EngineMovementPreference, type EngineTurnProposal, type PureTurnProposalResolver } from '../intent-resolver';
-import { engineOptionId, type EngineActorOption } from '../turn-proposal';
+import { engineOptionId, type EngineOfferableOption } from '../turn-proposal';
 import {
   DM_INTEL_QUERY_POLICY,
   DM_TURN_INTEL_POLICY,
@@ -532,7 +532,7 @@ function advertisedExpectation(
     policy: OPTION_OUTCOME_POLICY,
   };
 }
-function externalOptionSlot(slot: EngineActorOption['actionSlots'][number]): Readonly<Record<string, unknown>> {
+function externalOptionSlot(slot: EngineOfferableOption['actionSlots'][number]): Readonly<Record<string, unknown>> {
   const use = slot.use;
   const targetIds = use.kind === 'attack' || use.kind === 'saving_throw'
     ? use.target.kind === 'combatant' ? [use.target.combatantId] : []
@@ -557,7 +557,7 @@ function externalOptionSlot(slot: EngineActorOption['actionSlots'][number]): Rea
 function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsule: EngineStateCapsule, actorId: CombatantId, includeExpectations: boolean, _includeUnavailable: boolean): readonly Readonly<Record<string, unknown>>[] {
   const projected = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
   if (projected === undefined) return [];
-  const informationRank = (option: EngineActorOption): number => {
+  const informationRank = (option: EngineOfferableOption): number => {
     const main = option.actionSlots.find((slot) => slot.slot === 'main')?.use;
     if (main === undefined) return 6;
     switch (main.kind) {
@@ -1129,7 +1129,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   function dominanceRefusal(
     capsule: EngineStateCapsule,
     proposal: EngineTurnProposal,
-    selectedOptionId: EngineActorOption['optionId'],
+    selectedOptionId: EngineOfferableOption['optionId'],
   ): { readonly code: string; readonly summary: string } | null {
     const dominance = submissionDominance(
       opportunityReport(capsule, proposal.actorId),

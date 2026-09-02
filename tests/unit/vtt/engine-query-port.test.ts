@@ -7,6 +7,7 @@ import { availableEngineActorOptions, pureTurnProposalResolver } from '../../../
 import { engineOptionId } from '../../../src/vtt/turn-proposal';
 import { generateRoom } from '../../../src/vtt/room-generator';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
+import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 
 const SEED = 3_943_001;
 const ACTOR_ID = combatantId('combatant:generated-3943001-monster-2');
@@ -40,7 +41,7 @@ function placedState(
 }
 
 describe('canonical engine query port', () => {
-  it('withholds typed-but-unavailable statblock actions from executable engine queries', () => {
+  it('offers a modeled base attack despite an unresolved rider and partitions idle Disengage', () => {
     const generated = placedState(SEED, new Map<CombatantId, GridCell>([
       [ACTOR_ID, { column: 0, row: 0 }],
       [TARGET_ID, { column: 5, row: 0 }],
@@ -52,12 +53,22 @@ describe('canonical engine query port', () => {
         : combatant),
     };
 
-    expect(canonicalEngineQueryPort.actions(state, ACTOR_ID)).toEqual([]);
+    expect(canonicalEngineQueryPort.actions(state, ACTOR_ID).map((action) => action.id))
+      .toEqual(['dissolving-pseudopod']);
     const options = availableEngineActorOptions(state, ACTOR_ID);
-    expect(options.map(({ label }) => label)).toEqual(['Dash', 'Disengage', 'Dodge', 'End Turn']);
-    expect(options.flatMap(({ actionSlots }) => actionSlots.map(({ use }) => use.kind))).toEqual([
-      'dash', 'disengage', 'dodge', 'end_turn',
+    expect(options.map(({ label }) => label)).toEqual([
+      'Dash',
+      'Dissolving Pseudopod -> combatant:fighter',
+      'Dodge',
+      'End Turn',
     ]);
+    expect(options.flatMap(({ actionSlots }) => actionSlots.map(({ use }) => use.kind))).toEqual([
+      'dash', 'attack', 'dodge', 'end_turn',
+    ]);
+    expect(engineActorOptions(state, ACTOR_ID).humanOnly).toContainEqual(expect.objectContaining({
+      label: 'Disengage',
+      noModeledEffect: { kind: 'stationary_disengage', action: 'disengage' },
+    }));
   });
 
   it('returns independently hand-computed path legality and movement costs', () => {
@@ -122,7 +133,11 @@ describe('canonical engine query port', () => {
       maximumFeet: 60,
     })).toEqual({ legal: false, code: 'destination_unreachable' });
     expect(availableEngineActorOptions(state, ACTOR_ID).map(({ label }) => label))
-      .toEqual(['Disengage', 'Dodge', 'End Turn']);
+      .toEqual(['Dodge', 'End Turn']);
+    expect(engineActorOptions(state, ACTOR_ID).humanOnly).toContainEqual(expect.objectContaining({
+      label: 'Disengage',
+      noModeledEffect: { kind: 'stationary_disengage', action: 'disengage' },
+    }));
   });
 
   it('returns independently hand-computed melee reach and thrown normal range', () => {

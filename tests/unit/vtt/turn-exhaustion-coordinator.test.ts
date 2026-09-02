@@ -94,7 +94,7 @@ function proposal(
     optionId: engineOptionId(`option:${phase}:primary`), actorId: f.actor, revision: f.state.revision,
     label: 'Dodge',
     movement: { preference: { willingness: 'none' as const, maximumFeet: 0, opportunityRisk: 'avoid' as const }, engagement: { stance: 'hold_position' as const } },
-    actionSlots: [{ slot: 'main' as const, use: { kind: 'dodge' as const } }], resourceCostLabels: [],
+    actionSlots: [{ slot: 'main' as const, use: { kind: 'dodge' as const } }], resourceCostLabels: [], omittedRiders: [],
   };
   const fallbackOption = selectedBranch === 'fallback'
     ? { ...primaryOption, optionId: engineOptionId(`option:${phase}:fallback`), label: 'End Turn', actionSlots: [{ slot: 'main' as const, use: { kind: 'end_turn' as const } }] }
