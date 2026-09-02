@@ -65,6 +65,22 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D466 — OWNER: D453/D454/D457/D458 land as one era shift with one fresh control (2026-09-02)
+
+Asked (brainstorm Q15): one shift with one control (supervisor
+recommendation), two stages, stage everything.
+
+Owner: **"One shift, one control."**
+
+Consequences: the no-effect hiding, base-attack-with-rider-flag plus the
+room pass, the KB scaffolding and the digest rollover are built in the
+lane in parallel, merged and gated together after the D465 sol-low batch
+and D447 have landed on the current era, smoked as one, and followed by a
+single fresh control arm (structured full, luna low, seeds 6203001–10,
+reps 3, k7 in baseline). Every later comparison, starting with the D460
+advice A/B and the D459 judged multi-round lane, anchors on that control.
+Rider modeling from the D454 audit is part of the same shift.
+
 ## D465 — OWNER: re-run the current batch of arms on gpt-5.6-sol at low effort (2026-09-02)
 
 Owner (mid-turn, verbatim): **"run the current batch of arms on 5.6-sol
