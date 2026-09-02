@@ -123,6 +123,18 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D470 — OWNER: sol judges sol-operator packets; the confound is noted (2026-09-02)
+
+Asked (round 2 Q5): keep sol and report its seat separately (supervisor
+recommendation), accept and note the confound, swap in a fourth seat.
+
+Owner: **"Accept, note the confound."**
+
+Consequences: D465 packets are scored by the unchanged three-seat panel.
+Each report carries one caveat line that the sol seat scored an arm
+operated by its own model family. Per-seat totals are already part of
+every report, so no extra analysis is added.
+
 ## D469 — OWNER: k7 lives in an auto-loaded tactics subject (2026-09-02)
 
 Asked (round 2 Q4): auto-loaded tactics subject (supervisor
