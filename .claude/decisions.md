@@ -123,6 +123,21 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D478 — OWNER: all arena until after D460 (2026-09-02)
+
+Asked (round 2 Q12): owner-played post-shift smoke (supervisor
+recommendation), all arena until after D460, dated playable target.
+
+Owner: **"All arena until after D460."**
+
+Consequences: no live-loop VTT work (180 s wall, timeout log, escalation
+plumbing, table settings from D456/D463/D474/D475) is scheduled before
+the advice program's unsealing. Those rulings are recorded as the spec for
+that work; the box runs arena programs only. Deferred from round 2 and
+not asked: mid-combat digest rollover policy, holdout status after the
+room pass (5117 has no replaced creature; only engine changes), a
+no-advice reference arm in later programs.
+
 ## D477 — OWNER: monsters maximise confirmed kills, with sequential coordination (2026-09-02)
 
 Asked (round 2 Q11b): encounter-win probability with sequential
