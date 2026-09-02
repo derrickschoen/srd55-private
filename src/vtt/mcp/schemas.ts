@@ -12,6 +12,7 @@ import {
   OPPORTUNITY_COST_POLICY,
 } from '../intel/opportunity-cost';
 import { TEAM_SCORER_POLICY } from '../intel/team-scorer';
+import { OPTION_OUTCOME_POLICY } from '../intel/option-outcome';
 import { ALERTING_POLICY } from '../../combat/alerting';
 import { SEARCH_MEMORY_POLICY } from '../../combat/search-memory';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
@@ -110,13 +111,45 @@ const risk = z.object({
   kind: z.enum(['opportunity_window', 'hazard', 'resource_exposure', 'visibility_loss']),
   source_id: identifier.nullable(), severity: z.enum(['low', 'medium', 'high']),
 }).strict();
-const expectation = z.object({
-  resolvable: z.boolean(), outcome_probability: z.number().min(0).max(1).nullable(),
-  critical_probability: z.number().min(0).max(1).nullable(),
-  expected_value: z.number().finite().nullable(), metric: z.enum(['damage', 'healing', 'control', 'none']),
-  assumption_codes: z.array(shortCode).max(20),
-  policy: z.literal(TACTICAL_EVALUATOR_POLICY),
+const exactRationalValue = z.object({
+  numerator: z.number().int().safe(), denominator: z.number().int().safe().positive(),
 }).strict();
+const expectation = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('damage'), resolvable: z.literal(true),
+    outcome_probability: z.number().min(0).max(1).nullable(),
+    critical_probability: z.number().min(0).max(1).nullable(),
+    expected_value: z.number().finite(), expected_value_exact: exactRationalValue,
+    kill_probability_exact: exactRationalValue, net_action_equivalents_exact: exactRationalValue,
+    metric: z.literal('damage'), assumption_codes: z.array(shortCode).max(20),
+    policy: z.literal(OPTION_OUTCOME_POLICY),
+  }).strict(),
+  z.object({
+    kind: z.literal('hard_control'), resolvable: z.literal(true), metric: z.literal('control'),
+    target_fail_probabilities: z.array(z.object({
+      target_id: identifier, side: z.enum(['hostile', 'friendly']), exact: exactRationalValue,
+      probability: z.number().min(0).max(1),
+    }).strict()).max(50),
+    initial_count_distribution: z.array(exactRationalValue).max(51),
+    expected_initially_affected: z.number().nonnegative(), expected_initially_affected_exact: exactRationalValue,
+    expected_disabled_turns: z.number().nonnegative(), expected_disabled_turns_exact: exactRationalValue,
+    expected_wake_actions: z.number().nonnegative(), expected_wake_actions_exact: exactRationalValue,
+    expected_control_burden: z.number().finite(), expected_control_burden_exact: exactRationalValue,
+    resource_penalty: z.number().nonnegative(), resource_penalty_exact: exactRationalValue,
+    net_action_equivalents: z.number().finite(), net_action_equivalents_exact: exactRationalValue,
+    horizon_rounds: z.number().int().min(1).max(3), concentration_survival_exact: exactRationalValue,
+    concentration_exposure: z.enum(['no_living_damage_threat', 'exposed']),
+    assumption_codes: z.array(shortCode).max(20), policy: z.literal(OPTION_OUTCOME_POLICY),
+  }).strict(),
+  z.object({
+    kind: z.literal('unresolved'), resolvable: z.literal(false), metric: z.literal('none'),
+    reason: shortCode, assumption_codes: z.array(shortCode).max(20), policy: z.literal(OPTION_OUTCOME_POLICY),
+  }).strict(),
+  z.object({
+    kind: z.enum(['movement', 'known_no_effect']), resolvable: z.literal(true), metric: z.literal('none'),
+    assumption_codes: z.array(shortCode).max(20), policy: z.literal(OPTION_OUTCOME_POLICY),
+  }).strict(),
+]);
 const tacticalOption = z.object({
   option_id: identifier, actor_id: identifier, revision: z.number().int().min(0), label: summaryText,
   action_slots: z.array(z.object({
@@ -202,7 +235,7 @@ const opportunityCost = z.object({
   correction_policy: z.literal(DOMINANCE_CORRECTION_POLICY),
   dodge_option_id: identifier,
   engine_default_option_id: identifier,
-  status: z.enum(['dominated', 'not_dominated', 'blocked_unresolved', 'blocked_incomparable']),
+  status: z.enum(['dominated', 'not_dominated', 'not_dominated_tradeoff', 'blocked_unresolved']),
   better_option_id: identifier.optional(),
   delta: z.string().min(1).max(1_000).optional(),
   reason_codes: z.array(shortCode).max(50).optional(),

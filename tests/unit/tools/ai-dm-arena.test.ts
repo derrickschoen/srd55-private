@@ -257,9 +257,11 @@ describe('AI-DM arena', () => {
 
     expect(first.probeVerdict).toEqual({
       scenario: 'hypnotic-pattern-cc',
-      chose_control: false,
-      selected_instead: { kind: 'action', id: 'restless-touch' },
+      chose_control: true,
+      selected_instead: null,
     });
+    expect(first.sessionId).toBeNull();
+    expect(first.escalationSessionId).toBeNull();
     expect(extractArenaProbeVerdict(first.basis, first.authorizedPlan)).toEqual(first.probeVerdict);
     if (first.authorizedPlan === null) throw new Error('Scenario arena omitted its authorized plan.');
     const controlPlan = first.authorizedPlan.map((entry) => entry.actorId !== 'combatant:d432-incubus'

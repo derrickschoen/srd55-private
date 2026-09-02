@@ -12,6 +12,11 @@ import {
   type DominanceComparison,
   type DominanceVector,
 } from './contracts';
+import {
+  evaluateOptionOutcome,
+  type OptionOutcomeEvaluation,
+  type OptionOutcomeFamily,
+} from './option-outcome';
 
 export const OPPORTUNITY_COST_POLICY = intelPolicyVersion('opportunity-cost-v1');
 export const DOMINANCE_CORRECTION_POLICY = intelPolicyVersion('dominance-correction-v1');
@@ -25,6 +30,8 @@ export type OpportunityMetric =
   | 'resource_costs';
 
 export type OpportunityVector = DominanceVector<OpportunityMetric>;
+export type ActionEquivalentMetric = 'net_action_equivalents';
+export type ActionEquivalentVector = DominanceVector<ActionEquivalentMetric>;
 
 export type OpportunityOptionKind = 'offense' | 'approach' | 'dodge' | 'other';
 
@@ -33,6 +40,9 @@ export interface ResolvedOpportunityOption {
   readonly option: EngineActorOption;
   readonly kind: OpportunityOptionKind;
   readonly vector: OpportunityVector;
+  readonly family: OptionOutcomeFamily;
+  readonly commonVector: ActionEquivalentVector;
+  readonly outcome: Extract<OptionOutcomeEvaluation, { readonly status: 'resolved' }>;
   readonly summary: string;
 }
 
@@ -62,11 +72,11 @@ export type SubmissionDominance =
       readonly correctionPolicy: typeof DOMINANCE_CORRECTION_POLICY;
       readonly selected: ResolvedOpportunityOption;
       readonly alternative: ResolvedOpportunityOption;
-      readonly comparison: DominanceComparison<OpportunityMetric>;
+      readonly comparison: DominanceComparison<OpportunityMetric> | DominanceComparison<ActionEquivalentMetric>;
       readonly delta: string;
     }
   | {
-      readonly status: 'not_dominated' | 'blocked_unresolved' | 'blocked_incomparable';
+      readonly status: 'not_dominated' | 'not_dominated_tradeoff' | 'blocked_unresolved';
       readonly policy: typeof OPPORTUNITY_COST_POLICY;
       readonly correctionPolicy: typeof DOMINANCE_CORRECTION_POLICY;
       readonly reasons: readonly string[];
@@ -152,14 +162,13 @@ function evaluateOption(
   const attacks = targetedAttacks(option);
   const approachFeet = resolution.mechanics.movementCostFeet;
   const kind = optionKind(option, approachFeet);
-  const unresolvedOutcomeUse = option.actionSlots.map((slot) => slot.use).find((use) =>
-    use.kind === 'saving_throw' || use.kind === 'cast_spell' || use.kind === 'use_world_object');
-  if (unresolvedOutcomeUse !== undefined) {
+  const outcome = evaluateOptionOutcome(state, option, resolution.mechanics, queries);
+  if (outcome.status === 'unresolved') {
     return {
       status: 'unresolved', option, kind,
       unresolvedMetrics: ['expected_damage_milli'],
-      reasons: [`${unresolvedOutcomeUse.kind}_outcome_unresolved`],
-      summary: `${option.label}: declared outcome metrics unresolved`,
+      reasons: [outcome.reason],
+      summary: `${option.label}: ${outcome.reason}`,
     };
   }
   const movedState = stateWithActorAt(state, option.actorId, resolution.mechanics.finalPosition);
@@ -183,6 +192,14 @@ function evaluateOption(
     total + (evaluation?.damage.status === 'resolved' ? evaluation.damage.expectedDamage : 0), 0);
   return {
     status: 'resolved', option, kind,
+    family: outcome.family,
+    commonVector: {
+      net_action_equivalents: {
+        exact: outcome.ledger.netActionEquivalents,
+        objective: 'maximize',
+      },
+    },
+    outcome,
     vector: vector({
       expectedDamage,
       attackCount: attacks.length,
@@ -192,6 +209,22 @@ function evaluateOption(
     }),
     summary: `${option.label}: attacks ${String(attacks.length)}, EV ${String(Math.round(expectedDamage))}, approach ${String(approachFeet)} ft`,
   };
+}
+
+export function compareOpportunityV1(
+  left: ResolvedOpportunityOption,
+  right: ResolvedOpportunityOption,
+): DominanceComparison<OpportunityMetric> {
+  return compareDominanceVectors(left.vector, right.vector);
+}
+
+export function compareOpportunityV2(
+  left: ResolvedOpportunityOption,
+  right: ResolvedOpportunityOption,
+): DominanceComparison<OpportunityMetric> | DominanceComparison<ActionEquivalentMetric> {
+  return left.family === 'legacy' && right.family === 'legacy'
+    ? compareOpportunityV1(left, right)
+    : compareDominanceVectors(left.commonVector, right.commonVector);
 }
 
 function rankingTuple(evaluation: OpportunityOptionEvaluation): readonly number[] {
@@ -218,6 +251,25 @@ function compareTuple(left: readonly number[], right: readonly number[]): number
   return 0;
 }
 
+export function legacyDefaultOption(
+  evaluations: readonly ResolvedOpportunityOption[],
+): EngineActorOption {
+  const offensiveOrApproach = evaluations.filter((option) =>
+    option.kind === 'offense' || option.kind === 'approach');
+  const candidates = offensiveOrApproach.length > 0
+    ? offensiveOrApproach
+    : evaluations.filter((option) => option.kind === 'dodge');
+  const eligible = candidates.length > 0 ? candidates : evaluations;
+  const frontier = eligible.filter((candidate) => !eligible.some((alternative) =>
+    alternative.option.optionId !== candidate.option.optionId &&
+    compareOpportunityV1(alternative, candidate).relation === 'left_dominates'));
+  const selected = [...frontier].sort((left, right) =>
+    compareTuple(rankingTuple(left), rankingTuple(right)) ||
+    left.option.optionId.localeCompare(right.option.optionId))[0];
+  if (selected === undefined) throw new Error('No resolved legacy option exists.');
+  return selected.option;
+}
+
 export function actorOpportunityReport(
   state: EncounterState,
   actorId: CombatantId,
@@ -236,10 +288,14 @@ export function actorOpportunityReport(
     ? offensiveOrApproach
     : options.filter((option) => option.kind === 'dodge');
   const eligible = candidates.length > 0 ? candidates : options;
-  const frontier = eligible.filter((candidate) => candidate.status === 'unresolved' ||
-    !eligible.some((alternative) => alternative.status === 'resolved' &&
-      alternative.option.optionId !== candidate.option.optionId &&
-      compareDominanceVectors(alternative.vector, candidate.vector).relation === 'left_dominates'));
+  const withinFamily = eligible.filter((candidate) => candidate.status === 'unresolved' ||
+    !eligible.some((alternative) => alternative.status === 'resolved' && candidate.status === 'resolved' &&
+      alternative.family === candidate.family && alternative.option.optionId !== candidate.option.optionId &&
+      compareOpportunityV2(alternative, candidate).relation === 'left_dominates'));
+  const frontier = withinFamily.filter((candidate) => candidate.status === 'unresolved' ||
+    !withinFamily.some((alternative) => alternative.status === 'resolved' && candidate.status === 'resolved' &&
+      alternative.family !== candidate.family && alternative.option.optionId !== candidate.option.optionId &&
+      compareDominanceVectors(alternative.commonVector, candidate.commonVector).relation === 'left_dominates'));
   const defaultEvaluation = [...frontier]
     .sort((left, right) => compareTuple(rankingTuple(left), rankingTuple(right)) ||
       left.option.optionId.localeCompare(right.option.optionId))[0];
@@ -258,7 +314,7 @@ export function actorOpportunityReport(
 function deltaText(
   selected: ResolvedOpportunityOption,
   alternative: ResolvedOpportunityOption,
-  comparison: DominanceComparison<OpportunityMetric>,
+  comparison: DominanceComparison<OpportunityMetric> | DominanceComparison<ActionEquivalentMetric>,
 ): string {
   const better = Object.entries(comparison.perMetric)
     .filter(([, verdict]) => verdict === 'left_better')
@@ -281,7 +337,7 @@ export function submissionDominance(
   let sawIncomparable = false;
   for (const alternative of report.options) {
     if (alternative.status === 'unresolved' || alternative.option.optionId === selectedOptionId) continue;
-    const comparison = compareDominanceVectors(alternative.vector, selected.vector);
+    const comparison = compareOpportunityV2(alternative, selected);
     if (comparison.relation === 'left_dominates') {
       return {
         status: 'dominated', policy: OPPORTUNITY_COST_POLICY,
@@ -293,7 +349,7 @@ export function submissionDominance(
     sawIncomparable ||= comparison.relation === 'incomparable';
   }
   return {
-    status: sawIncomparable ? 'blocked_incomparable' : 'not_dominated',
+    status: sawIncomparable ? 'not_dominated_tradeoff' : 'not_dominated',
     policy: OPPORTUNITY_COST_POLICY,
     correctionPolicy: DOMINANCE_CORRECTION_POLICY,
     reasons: sawIncomparable ? ['declared_metrics_incomparable'] : [],

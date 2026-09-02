@@ -28,7 +28,7 @@ import {
   type RuleReference,
 } from '../engine-state-capsule';
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
-import type { EngineMovementPreference, EngineTurnProposal, PureTurnProposalResolver } from '../intent-resolver';
+import { resolveEngineActorOption, type EngineMovementPreference, type EngineTurnProposal, type PureTurnProposalResolver } from '../intent-resolver';
 import { engineOptionId, type EngineActorOption } from '../turn-proposal';
 import {
   DM_INTEL_QUERY_POLICY,
@@ -64,6 +64,11 @@ import {
   scoreTeamPlans,
   type TeamPlanFrontierReport,
 } from '../intel/team-scorer';
+import {
+  evaluateOptionOutcome,
+  OPTION_OUTCOME_POLICY,
+  type OptionOutcomeEvaluation,
+} from '../intel/option-outcome';
 import type { ReactionGuidanceDeclaration, ReactionTriggerGuidance } from '../reaction-guidance';
 import { diffTurnContextValues } from '../dm-bridge/projection-transport';
 import {
@@ -397,16 +402,27 @@ function tacticalSummary(capsule: EngineStateCapsule) {
 function recentChanges(capsule: EngineStateCapsule): readonly Readonly<Record<string, unknown>>[] {
   return [...capsule.historyDelta].sort((left, right) => left.revision - right.revision).map((entry) => ({ revision: entry.revision, kind: entry.kind, summary: `${entry.kind} at encounter round ${String(entry.encounterRound)}`, branch_status: entry.branchStatus }));
 }
-function expectationFor(state: EncounterState, queries: EngineQueryPort, actorId: CombatantId, actionId: string, targetId: CombatantId | null): Readonly<Record<string, unknown>> | null {
-  const action = queries.actions(state, actorId).find((candidate): candidate is MonsterAttackAction => candidate.kind === 'attack' && candidate.id === actionId);
-  const target = targetId === null ? null : queries.combatant(state, targetId);
-  if (action === undefined || target === null) return null;
-  const evaluation = queries.tacticalAttack(state, actorId, target.profile.id, action.id);
-  if (evaluation === null) return null;
+function expectationFor(
+  state: EncounterState,
+  queries: EngineQueryPort,
+  actorId: CombatantId,
+  attacks: readonly { readonly actionId: string; readonly targetId: CombatantId }[],
+): Readonly<Record<string, unknown>> | null {
+  if (attacks.length === 0) return null;
+  const evaluations = attacks.map(({ actionId, targetId }) => {
+    const action = queries.actions(state, actorId).find(
+      (candidate): candidate is MonsterAttackAction => candidate.kind === 'attack' && candidate.id === actionId,
+    );
+    const target = queries.combatant(state, targetId);
+    return action === undefined || target === null
+      ? null
+      : queries.tacticalAttack(state, actorId, target.profile.id, action.id);
+  });
+  if (evaluations.some((evaluation) => evaluation === null)) return null;
+  const present = evaluations.filter((evaluation) => evaluation !== null);
   if (
-    evaluation.probabilities.status === 'unresolved' ||
-    evaluation.damage.status === 'unresolved' ||
-    evaluation.unresolved.length > 0
+    present.some((evaluation) => evaluation.probabilities.status === 'unresolved' ||
+      evaluation.damage.status === 'unresolved' || evaluation.unresolved.length > 0)
   ) {
     return {
       resolvable: false,
@@ -414,18 +430,106 @@ function expectationFor(state: EncounterState, queries: EngineQueryPort, actorId
       critical_probability: null,
       expected_value: null,
       metric: 'damage',
-      assumption_codes: evaluation.unresolved,
+      assumption_codes: [...new Set(present.flatMap((evaluation) => evaluation.unresolved))],
+      policy: present[0]?.policy ?? TACTICAL_EVALUATOR_POLICY,
+    };
+  }
+  const resolved = present.map((evaluation) => {
+    if (evaluation.probabilities.status !== 'resolved' || evaluation.damage.status !== 'resolved') {
+      throw new Error('Resolved expectation narrowed to an unresolved attack evaluation.');
+    }
+    return {
+      probabilities: evaluation.probabilities,
+      damage: evaluation.damage,
+      rollMode: evaluation.rollMode,
       policy: evaluation.policy,
+    };
+  });
+  const allMissProbability = resolved.reduce((probability, evaluation) =>
+    probability * evaluation.probabilities.miss, 1);
+  const noCriticalProbability = resolved.reduce((probability, evaluation) =>
+    probability * (1 - evaluation.probabilities.critical), 1);
+  return {
+    resolvable: true,
+    outcome_probability: 1 - allMissProbability,
+    critical_probability: 1 - noCriticalProbability,
+    expected_value: resolved.reduce((total, evaluation) => total + evaluation.damage.expectedDamage, 0),
+    metric: 'damage',
+    assumption_codes: [...new Set(resolved.flatMap((evaluation) => evaluation.rollMode.reasons))],
+    policy: resolved[0]?.policy ?? TACTICAL_EVALUATOR_POLICY,
+  };
+}
+
+function rationalNumber(value: { readonly numerator: number; readonly denominator: number }): number {
+  return value.numerator / value.denominator;
+}
+
+function advertisedExpectation(
+  outcome: OptionOutcomeEvaluation,
+  damageExpectation: Readonly<Record<string, unknown>> | null,
+): Readonly<Record<string, unknown>> {
+  if (outcome.status === 'unresolved') {
+    return {
+      kind: 'unresolved', resolvable: false, metric: 'none', reason: outcome.reason,
+      assumption_codes: [outcome.reason], policy: outcome.policy,
+    };
+  }
+  if (outcome.evidence.kind === 'damage') {
+    return {
+      kind: 'damage',
+      resolvable: true,
+      outcome_probability: damageExpectation?.['outcome_probability'] ?? null,
+      critical_probability: damageExpectation?.['critical_probability'] ?? null,
+      expected_value: rationalNumber(outcome.evidence.expectedDamage),
+      expected_value_exact: outcome.evidence.expectedDamage,
+      kill_probability_exact: outcome.evidence.killProbability,
+      net_action_equivalents_exact: outcome.ledger.netActionEquivalents,
+      metric: 'damage',
+      assumption_codes: damageExpectation?.['assumption_codes'] ?? [],
+      policy: outcome.policy,
+    };
+  }
+  if (outcome.evidence.kind === 'hard_control') {
+    const evidence = outcome.evidence;
+    return {
+      kind: 'hard_control',
+      resolvable: true,
+      metric: 'control',
+      target_fail_probabilities: evidence.targetOutcomes.map((target) => ({
+        target_id: target.targetId,
+        side: target.side,
+        exact: target.failProbability,
+        probability: rationalNumber(target.failProbability),
+      })),
+      initial_count_distribution: evidence.hostileInitialCountDistribution,
+      expected_initially_affected: rationalNumber(evidence.expectedInitiallyAffected),
+      expected_initially_affected_exact: evidence.expectedInitiallyAffected,
+      expected_disabled_turns: rationalNumber(evidence.expectedDisabledTurns),
+      expected_disabled_turns_exact: evidence.expectedDisabledTurns,
+      expected_wake_actions: rationalNumber(evidence.expectedWakeActions),
+      expected_wake_actions_exact: evidence.expectedWakeActions,
+      expected_control_burden: rationalNumber(evidence.expectedControlBurden),
+      expected_control_burden_exact: evidence.expectedControlBurden,
+      resource_penalty: rationalNumber(outcome.ledger.resourcePenalty),
+      resource_penalty_exact: outcome.ledger.resourcePenalty,
+      net_action_equivalents: rationalNumber(outcome.ledger.netActionEquivalents),
+      net_action_equivalents_exact: outcome.ledger.netActionEquivalents,
+      horizon_rounds: evidence.horizon.numerator,
+      concentration_survival_exact: evidence.concentrationSurvival,
+      concentration_exposure: evidence.concentrationExposure,
+      assumption_codes: [
+        `wake_reachability:${evidence.wakeReachability}`,
+        `concentration:${evidence.concentrationExposure}`,
+      ],
+      policy: outcome.policy,
     };
   }
   return {
+    kind: outcome.evidence.kind,
     resolvable: true,
-    outcome_probability: evaluation.probabilities.hit,
-    critical_probability: evaluation.probabilities.critical,
-    expected_value: evaluation.damage.expectedDamage,
-    metric: 'damage',
-    assumption_codes: evaluation.rollMode.reasons,
-    policy: evaluation.policy,
+    metric: 'none',
+    assumption_codes: [],
+    policy: OPTION_OUTCOME_POLICY,
   };
 }
 function externalOptionSlot(slot: EngineActorOption['actionSlots'][number]): Readonly<Record<string, unknown>> {
@@ -489,16 +593,33 @@ function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsul
           ? firstUse.targets[0] ?? null
           : null;
     const targetId = firstTarget === null ? null : queries.resolveTarget(state, actorId, firstTarget);
-    const movementFeet = option.movement.preference.willingness === 'none' ? 0 : null;
+    const resolution = resolveEngineActorOption(state, option, queries);
+    const movementFeet = resolution.valid ? resolution.mechanics.movementCostFeet : null;
+    const attacks = firstUse.kind === 'attack'
+      ? targetId === null ? [] : [{ actionId: String(firstUse.actionId), targetId }]
+      : firstUse.kind === 'multiattack'
+        ? firstUse.components.flatMap((component) => {
+            const componentTarget = queries.resolveTarget(state, actorId, component.target);
+            return componentTarget === null
+              ? []
+              : [{ actionId: String(component.actionId), targetId: componentTarget }];
+          })
+        : [];
     return {
       option_id: option.optionId, actor_id: option.actorId, revision: option.revision, label: option.label,
       action_slots: option.actionSlots.map(externalOptionSlot),
       action_id: firstActionId, kind, target_selectors: [], resource_cost_labels: option.resourceCostLabels,
-      usable_now: movementFeet === 0, usable_after_movement: true, minimum_movement_feet: movementFeet,
+      usable_now: resolution.valid && movementFeet === 0,
+      usable_after_movement: resolution.valid,
+      minimum_movement_feet: movementFeet,
       visibility: targetId === null ? 'unknown' : queries.visibility(state, actorId, targetId)?.visible === true ? 'yes' : 'no',
       cover: targetId === null ? 'unknown' : queries.cover(state, actorId, targetId)?.tier ?? 'unknown', risks: [],
-      expectation: includeExpectations && targetId !== null ? expectationFor(state, queries, actorId,
-        firstUse.kind === 'multiattack' ? firstUse.components[0]?.actionId ?? firstActionId : firstActionId, targetId) : null,
+      expectation: includeExpectations && resolution.valid
+        ? advertisedExpectation(
+            evaluateOptionOutcome(state, option, resolution.mechanics, queries),
+            expectationFor(state, queries, actorId, attacks),
+          )
+        : null,
       refusals: [],
     };
     });
@@ -2050,7 +2171,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const choice = decodeChoice(candidate['choice']);
         const targetId = 'target' in choice && choice.target !== null ? queries.resolveTarget(state, actorId, choice.target) : null;
         const actionId = choice.kind === 'attack' || choice.kind === 'use_action' ? choice.actionId : choice.kind === 'cast_spell' ? choice.spellId : choice.kind;
-        const expectation = expectationFor(state, queries, actorId, actionId, targetId);
+        const expectation = targetId === null
+          ? null
+          : expectationFor(state, queries, actorId, [{ actionId, targetId }]);
         return expectation === null || expectation['resolvable'] !== true
           ? { candidate_id: stringField(candidate, 'candidate_id'), policy: TACTICAL_EVALUATOR_POLICY, resolvable: false, metrics: { outcome_probability: null, expected_damage: null, expected_healing: null, resource_cost: null, distribution: null }, assumptions: expectation?.['assumption_codes'] ?? [], refusals: [{ code: 'EXPECTATION_UNAVAILABLE', summary: 'The canonical mechanic does not expose an analytic expectation.' }] }
           : { candidate_id: stringField(candidate, 'candidate_id'), policy: expectation['policy'], resolvable: true, metrics: { outcome_probability: expectation['outcome_probability'], expected_damage: expectation['expected_value'], expected_healing: null, resource_cost: 0, distribution: includeDistribution ? [{ outcome: 0, probability: 1 - Number(expectation['outcome_probability']) }, { outcome: Number(expectation['expected_value']) / Number(expectation['outcome_probability']), probability: expectation['outcome_probability'] }] : null }, assumptions: expectation['assumption_codes'], refusals: [] };

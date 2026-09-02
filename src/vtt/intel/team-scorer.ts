@@ -16,6 +16,13 @@ import {
   type DominanceVector,
   type ExactRational,
 } from './contracts';
+import {
+  combinedDamageActionEquivalents,
+  evaluateOptionOutcome,
+  type DamageOutcomeEvidence,
+  type OptionOutcomeEvaluation,
+  type OptionOutcomeFamily,
+} from './option-outcome';
 
 export const TEAM_SCORER_POLICY = intelPolicyVersion('team-scorer-v1');
 
@@ -27,6 +34,8 @@ export type TeamPlanMetric =
   | 'wasted_turn';
 
 export type TeamPlanVector = DominanceVector<TeamPlanMetric>;
+export type TeamCommonMetric = 'net_action_equivalents' | 'dying_pc_removal' | 'wasted_turn';
+export type TeamCommonVector = DominanceVector<TeamCommonMetric>;
 
 export interface TeamPlanCandidate {
   readonly candidateId: string;
@@ -49,7 +58,7 @@ export type TeamPlanUnresolvedReason =
   | 'option_illegal'
   | 'actor_absent'
   | 'mixed_team_sides'
-  | 'declared_outcome_unresolved'
+  | 'option_outcome_unresolved'
   | 'semantic_attack_target_unresolved'
   | 'attack_allocation_unresolved';
 
@@ -57,6 +66,9 @@ export interface ResolvedTeamPlanEvaluation {
   readonly status: 'resolved';
   readonly candidate: TeamPlanCandidate;
   readonly vector: TeamPlanVector;
+  readonly family: OptionOutcomeFamily;
+  readonly commonVector: TeamCommonVector;
+  readonly outcomes: readonly Extract<OptionOutcomeEvaluation, { readonly status: 'resolved' }>[];
   readonly markers: readonly TeamPlanDominanceMarker[];
 }
 
@@ -72,7 +84,7 @@ export type TeamPlanEvaluation = ResolvedTeamPlanEvaluation | UnresolvedTeamPlan
 export interface RemovedTeamPlan {
   readonly candidate: ResolvedTeamPlanEvaluation;
   readonly dominatedBy: ResolvedTeamPlanEvaluation;
-  readonly comparison: DominanceComparison<TeamPlanMetric>;
+  readonly comparison: DominanceComparison<TeamPlanMetric> | DominanceComparison<TeamCommonMetric>;
   readonly markers: readonly TeamPlanDominanceMarker[];
 }
 
@@ -100,6 +112,34 @@ export function teamPlanVector(input: {
   };
 }
 
+export function teamCommonVector(input: {
+  readonly netActionEquivalents: ExactRational;
+  readonly dyingPcRemoval: ExactRational;
+  readonly wastedTurn: ExactRational;
+}): TeamCommonVector {
+  return {
+    net_action_equivalents: { exact: input.netActionEquivalents, objective: 'maximize' },
+    dying_pc_removal: { exact: input.dyingPcRemoval, objective: 'maximize' },
+    wasted_turn: { exact: input.wastedTurn, objective: 'minimize' },
+  };
+}
+
+export function compareTeamPlanV1(
+  left: ResolvedTeamPlanEvaluation,
+  right: ResolvedTeamPlanEvaluation,
+): DominanceComparison<TeamPlanMetric> {
+  return compareDominanceVectors(left.vector, right.vector);
+}
+
+export function compareTeamPlanV2(
+  left: ResolvedTeamPlanEvaluation,
+  right: ResolvedTeamPlanEvaluation,
+): DominanceComparison<TeamPlanMetric> | DominanceComparison<TeamCommonMetric> {
+  return left.family === 'legacy' && right.family === 'legacy'
+    ? compareTeamPlanV1(left, right)
+    : compareDominanceVectors(left.commonVector, right.commonVector);
+}
+
 /**
  * Pure Pareto reduction. Unresolved candidates are deliberately incomparable
  * and therefore always remain available to the model.
@@ -107,26 +147,42 @@ export function teamPlanVector(input: {
 export function scoreTeamPlanEvaluations(
   evaluations: readonly TeamPlanEvaluation[],
 ): TeamPlanFrontierReport {
-  const removed = evaluations.flatMap((candidate): readonly RemovedTeamPlan[] => {
+  const withinFamilyRemoved = evaluations.flatMap((candidate): readonly RemovedTeamPlan[] => {
     if (candidate.status === 'unresolved') return [];
     const dominator = evaluations
       .filter((alternative): alternative is ResolvedTeamPlanEvaluation =>
         alternative.status === 'resolved' &&
+        alternative.family === candidate.family &&
         alternative.candidate.candidateId !== candidate.candidate.candidateId)
       .sort((left, right) => left.candidate.candidateId.localeCompare(right.candidate.candidateId))
       .find((alternative) =>
-        compareDominanceVectors(alternative.vector, candidate.vector).relation === 'left_dominates');
+        compareTeamPlanV2(alternative, candidate).relation === 'left_dominates');
     if (dominator === undefined) return [];
     return [{
       candidate,
       dominatedBy: dominator,
-      comparison: compareDominanceVectors(dominator.vector, candidate.vector),
+      comparison: compareTeamPlanV2(dominator, candidate),
       markers: candidate.markers,
     }];
   });
+  const withinFamilyRemovedIds = new Set(withinFamilyRemoved.map((entry) => entry.candidate.candidate.candidateId));
+  const familyFrontier = evaluations.filter((candidate) =>
+    !withinFamilyRemovedIds.has(candidate.candidate.candidateId));
+  const crossFamilyRemoved = familyFrontier.flatMap((candidate): readonly RemovedTeamPlan[] => {
+    if (candidate.status === 'unresolved') return [];
+    const dominator = familyFrontier.find((alternative): alternative is ResolvedTeamPlanEvaluation =>
+      alternative.status === 'resolved' && alternative.family !== candidate.family &&
+      compareDominanceVectors(alternative.commonVector, candidate.commonVector).relation === 'left_dominates');
+    return dominator === undefined ? [] : [{
+      candidate,
+      dominatedBy: dominator,
+      comparison: compareDominanceVectors(dominator.commonVector, candidate.commonVector),
+      markers: candidate.markers,
+    }];
+  });
+  const removed = [...withinFamilyRemoved, ...crossFamilyRemoved];
   const removedIds = new Set(removed.map((entry) => entry.candidate.candidate.candidateId));
-  const frontier = evaluations.filter((candidate) =>
-    !removedIds.has(candidate.candidate.candidateId));
+  const frontier = evaluations.filter((candidate) => !removedIds.has(candidate.candidate.candidateId));
   return {
     policy: TEAM_SCORER_POLICY,
     evaluations,
@@ -231,14 +287,6 @@ function wastedTurnMarker(
   return classifyWastedTurn(choice.option, choice.mechanics.movementCostFeet, hasAlternative);
 }
 
-function unresolvedOutcome(option: EngineActorOption): boolean {
-  return option.actionSlots.some((slot) => {
-    const use = slot.use;
-    if (use.kind === 'saving_throw' || use.kind === 'use_world_object') return true;
-    return use.kind === 'cast_spell' && String(use.spellId) !== 'bless';
-  });
-}
-
 function hasSemanticAttackTarget(option: EngineActorOption): boolean {
   return option.actionSlots.some((slot) => {
     const use = slot.use;
@@ -307,7 +355,17 @@ function evaluateTeamPlan(
   const firstActor = choices[0]?.option.actorId;
   const targets = firstActor === undefined ? [] : state.combatants.filter((target) =>
     target.life !== 'dead' && !queries.sameSide(state, firstActor, target.profile.id));
-  const declaredOutcomeUnresolved = choices.some((choice) => unresolvedOutcome(choice.option));
+  const outcomes = choices.map((choice) =>
+    evaluateOptionOutcome(state, choice.option, choice.mechanics, queries));
+  const resolvedDamageTargets = new Set(outcomes.flatMap((outcome) =>
+    outcome.status === 'resolved' && outcome.evidence.kind === 'damage'
+      ? [outcome.evidence.targetId]
+      : []));
+  const controlDamageInteraction = outcomes.some((outcome) =>
+    outcome.status === 'resolved' && outcome.evidence.kind === 'hard_control' &&
+    outcome.evidence.profile.targets.some((targetId) => resolvedDamageTargets.has(targetId)));
+  const optionOutcomeUnresolved = controlDamageInteraction ||
+    outcomes.some((outcome) => outcome.status === 'unresolved');
   const semanticTargetUnresolved = choices.some((choice) => hasSemanticAttackTarget(choice.option));
   const initiativeRank = new Map(state.initiative.map((entry, index) => [entry.combatant, index] as const));
   const allocationChoices: TacticalAllocationChoice[] = choices
@@ -323,7 +381,7 @@ function evaluateTeamPlan(
   ).allocations[0]);
   const allocationUnresolved = allocations.some((allocation) =>
     allocation === undefined || allocation.status === 'unresolved' || allocation.killProbability === null);
-  if (declaredOutcomeUnresolved || semanticTargetUnresolved || allocationUnresolved) {
+  if (optionOutcomeUnresolved || semanticTargetUnresolved || allocationUnresolved) {
     return {
       status: 'unresolved', candidate,
       unresolvedMetrics: [
@@ -334,7 +392,7 @@ function evaluateTeamPlan(
           : []),
       ],
       reasons: [
-        ...(declaredOutcomeUnresolved ? ['declared_outcome_unresolved' as const] : []),
+        ...(optionOutcomeUnresolved ? ['option_outcome_unresolved' as const] : []),
         ...(semanticTargetUnresolved ? ['semantic_attack_target_unresolved' as const] : []),
         ...(allocationUnresolved ? ['attack_allocation_unresolved' as const] : []),
       ],
@@ -351,16 +409,47 @@ function evaluateTeamPlan(
     target.profile.kind === 'player_character' && target.life === 'dying'
       ? sum + millionths(allocations[index]?.killProbability ?? 0)
       : sum, 0);
+  const resolvedOutcomes = outcomes.filter(
+    (outcome): outcome is Extract<OptionOutcomeEvaluation, { readonly status: 'resolved' }> =>
+      outcome.status === 'resolved',
+  );
+  const damageEvidence = resolvedOutcomes.flatMap((outcome): readonly DamageOutcomeEvidence[] =>
+    outcome.evidence.kind === 'damage' ? [outcome.evidence] : []);
+  const nonDamageNet = resolvedOutcomes.filter((outcome) => outcome.evidence.kind !== 'damage')
+    .reduce((sum, outcome) => {
+    const exact = outcome.ledger.netActionEquivalents;
+    return exactRational(
+      sum.numerator * exact.denominator + exact.numerator * sum.denominator,
+      sum.denominator * exact.denominator,
+    );
+  }, exactRational(0, 1));
+  const combinedDamage = combinedDamageActionEquivalents(state, damageEvidence);
+  const netActionEquivalents = exactRational(
+    nonDamageNet.numerator * combinedDamage.denominator +
+      combinedDamage.numerator * nonDamageNet.denominator,
+    nonDamageNet.denominator * combinedDamage.denominator,
+  );
+  const dyingExact = exactRational(dyingPcRemoval, 1_000_000);
+  const wastedExact = exactRational(markers.length, 1);
   return {
     status: 'resolved',
     candidate,
+    family: resolvedOutcomes.some((outcome) => outcome.family === 'hard_turn_denial')
+      ? 'hard_turn_denial'
+      : 'legacy',
+    commonVector: teamCommonVector({
+      netActionEquivalents,
+      dyingPcRemoval: dyingExact,
+      wastedTurn: wastedExact,
+    }),
+    outcomes: resolvedOutcomes,
     vector: teamPlanVector({
       lethality: exactRational(lethality, 1_000_000),
       objectiveProgress: exactRational(choices.filter(hasConcreteEffect).length, 1),
       resourceConservation: exactRational(choices.reduce((sum, choice) =>
         sum + choice.option.resourceCostLabels.length, 0), 1),
-      dyingPcRemoval: exactRational(dyingPcRemoval, 1_000_000),
-      wastedTurn: exactRational(markers.length, 1),
+      dyingPcRemoval: dyingExact,
+      wastedTurn: wastedExact,
     }),
     markers,
   };
@@ -383,9 +472,9 @@ function renderVector(vector: TeamPlanVector): Readonly<Record<TeamPlanMetric, u
 }
 
 function betterMetrics(
-  comparison: DominanceComparison<TeamPlanMetric>,
-): readonly TeamPlanMetric[] {
-  return (Object.entries(comparison.perMetric) as [TeamPlanMetric, string][])
+  comparison: DominanceComparison<TeamPlanMetric> | DominanceComparison<TeamCommonMetric>,
+): readonly (TeamPlanMetric | TeamCommonMetric)[] {
+  return (Object.entries(comparison.perMetric) as [TeamPlanMetric | TeamCommonMetric, string][])
     .filter(([, verdict]) => verdict === 'left_better')
     .map(([metric]) => metric);
 }

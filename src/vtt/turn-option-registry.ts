@@ -17,6 +17,11 @@ import { feet, type CombatantId } from '../combat/values';
 import { worldObjectActionWasUsed } from '../combat/world-object-actions';
 import { gridDistance } from '../combat/grid';
 import { sha256 } from '../crypto/sha256';
+import {
+  evaluateHardControlProfile,
+  hardControlProfileForDefinition,
+  isHardControlDefinition,
+} from './intel/option-outcome';
 import { monsterActions, monsterBonusActions } from './engine-query-port';
 import {
   engineActionId,
@@ -63,10 +68,24 @@ interface SpellUseSelection {
   readonly labelSuffix: string;
 }
 
-function hypnoticPatternSelection(
+function compareExact(
+  left: import('./intel/contracts').ExactRational,
+  right: import('./intel/contracts').ExactRational,
+): number {
+  const leftProduct = BigInt(left.numerator) * BigInt(right.denominator);
+  const rightProduct = BigInt(right.numerator) * BigInt(left.denominator);
+  return leftProduct < rightProduct ? -1 : leftProduct > rightProduct ? 1 : 0;
+}
+
+function hardControlSelection(
   state: EncounterState,
   actorId: CombatantId,
+  definition: NonNullable<ReturnType<typeof spellDefinition>>,
+  saveDc: number | null,
 ): SpellUseSelection | null {
+  if (definition.targeting.kind !== 'area' || definition.targeting.shape !== 'cube' ||
+    !isHardControlDefinition(definition)) return null;
+  const targeting = definition.targeting;
   const actorPosition = state.tokens.find((token) => token.combatantId === actorId)?.position;
   if (actorPosition === undefined) return null;
   const enemies = new Set(livingEnemies(state, actorId));
@@ -81,7 +100,8 @@ function hypnoticPatternSelection(
       ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
     ],
   };
-  const halfSizeFeet = 15;
+  const sizeFeet = targeting.baseSizeFeet;
+  const halfSizeFeet = sizeFeet / 2;
   const minimumCenterColumn = halfSizeFeet / 5;
   const maximumCenterColumn = state.bounds.columns - minimumCenterColumn;
   const minimumCenterRow = halfSizeFeet / 5;
@@ -99,7 +119,7 @@ function hypnoticPatternSelection(
         origin: feetPoint(column * 5 - halfSizeFeet, row * 5),
         center: feetPoint(column * 5, row * 5),
         axis: { x: 1, y: 0 },
-        size: feet(30),
+        size: feet(sizeFeet),
         includeOrigin: false,
       },
     };
@@ -110,7 +130,7 @@ function hypnoticPatternSelection(
     const actorMaximumY = actorMinimumY + 5;
     const horizontal = Math.max(actorMinimumX - origin.x, 0, origin.x - actorMaximumX);
     const vertical = Math.max(actorMinimumY - origin.y, 0, origin.y - actorMaximumY);
-    if (Math.max(horizontal, vertical) > 120) return [];
+    if (Math.max(horizontal, vertical) > targeting.rangeFeet) return [];
     const affectedCells = new Set(cubeAffectedCellsAmong(
       templateGrid,
       area.template,
@@ -125,19 +145,30 @@ function hypnoticPatternSelection(
     const affectedAllies = affected.filter((token) => allies.has(token.combatantId))
       .map((token) => token.combatantId)
       .sort((left, right) => left.localeCompare(right));
-    return [{ area, affectedEnemies, affectedAllies, column, row }];
+    const affectedIds = [...affectedEnemies, ...affectedAllies]
+      .sort((left, right) => left.localeCompare(right));
+    return [{ area, affectedEnemies, affectedAllies, affectedIds, column, row }];
   }));
-  const chosen = candidates.sort((left, right) =>
-    right.affectedEnemies.length - left.affectedEnemies.length ||
-    left.affectedAllies.length - right.affectedAllies.length ||
+  const deduplicated = candidates.filter((candidate, index, all) =>
+    all.findIndex((other) => other.affectedIds.join('|') === candidate.affectedIds.join('|')) === index);
+  const valued = deduplicated.flatMap((candidate) => {
+    const profile = hardControlProfileForDefinition(definition, candidate.affectedIds, saveDc);
+    if (profile === null) return [];
+    const evaluation = evaluateHardControlProfile(state, actorId, profile);
+    return evaluation.status === 'resolved'
+      ? [{ ...candidate, profile, net: evaluation.ledger.netActionEquivalents }]
+      : [];
+  });
+  const chosen = valued.sort((left, right) =>
+    -compareExact(left.net, right.net) ||
     left.affectedEnemies.join('|').localeCompare(right.affectedEnemies.join('|')) ||
     left.affectedAllies.join('|').localeCompare(right.affectedAllies.join('|')) ||
     left.row - right.row || left.column - right.column)[0];
   if (chosen === undefined) return null;
   return {
-    targets: chosen.affectedEnemies.map(target),
+    targets: chosen.affectedIds.map(target),
     area: chosen.area,
-    labelSuffix: ` [30-ft cube -> ${chosen.affectedEnemies.join(', ')}${
+    labelSuffix: ` [${String(sizeFeet)}-ft cube -> ${chosen.affectedEnemies.join(', ')}${
       chosen.affectedAllies.length === 0 ? '' : `; allies ${chosen.affectedAllies.join(', ')}`}]`,
   };
 }
@@ -273,13 +304,16 @@ function spellSelection(
   state: EncounterState,
   actorId: CombatantId,
   spellId: string,
+  saveDc: number | null,
 ): SpellUseSelection | null {
   const definition = spellDefinition(spellId);
   if (definition === null) return null;
+  if (isHardControlDefinition(definition)) {
+    return hardControlSelection(state, actorId, definition, saveDc);
+  }
   const allies = livingAllies(state, actorId);
   const enemies = livingEnemies(state, actorId);
   switch (spellId) {
-    case 'hypnotic-pattern': return hypnoticPatternSelection(state, actorId);
     case 'bless': return { targets: allies.slice(0, 3).map(target), area: null, labelSuffix: '' };
     case 'healing-word':
     case 'cure-wounds':
@@ -318,7 +352,12 @@ function spellcastingUses(
       ? null
       : subject?.limitedResources?.find((pool) => pool.id === poolId)?.remaining ?? 0;
     if (remaining !== null && remaining < 1) return [];
-    const selection = spellSelection(state, actorId, spell.id);
+    const selection = spellSelection(
+      state,
+      actorId,
+      spell.id,
+      action.saveDc.kind === 'present' ? action.saveDc.value : null,
+    );
     if (selection === null || selection.targets.length === 0) return [];
     return [{
       label: `${action.id}/${spell.id}${maximum === null ? '' : ` (${String(remaining)}/${String(maximum)})`}${selection.labelSuffix}`,
