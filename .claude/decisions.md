@@ -65,6 +65,24 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D452 — OWNER: k7 close-fast nudge ships regardless; the D449 A/B is a regression check (2026-09-02)
+
+Asked (brainstorm Q2): what promotes k7 into the baseline KB. Options:
+non-inferior plus mechanism win (supervisor recommendation), panel win
+required, ship regardless with the A/B as regression check, mechanism win
+alone.
+
+Owner: **"Ship regardless, A/B is a regression check."**
+
+Consequences: k7 (`tests/fixtures/ai-dm-kb/k7-close.txt`, lane bc96653b)
+folds into the baseline KB now and into the structured KB's tactics subject.
+D449 still runs as preregistered, but its branch is: k7 stays unless it
+loses by more than 0.2 on the panel score against d443-s-full-low, in which
+case the result goes to the owner rather than auto-reverting. Mechanism
+counts (idle Disengages, Dash-to-close) are reported, not gated. The
+preregistration in analysis-notes.md is amended to say so before any key
+opens.
+
 ## D451 — OWNER: unseal after D443 only (2026-09-02)
 
 Asked (brainstorm Q1): when do the sealed keys open, given D442 said one
