@@ -1,5 +1,13 @@
 # Binding scope decisions
 
+ARM 13 VERIFIED (supervisor note, 2026-09-02 19:37): d443-cav-full-medium
+30/30 authorized, 0 timeouts at 240 s, 10 digests x3, refusals 9, no
+escalations, wall median 16.0 s / p90 36.7 s (faster than any structured
+medium arm), token median 560k. Idle Disengage 3, Dash 84, attack slots
+46. Arm 14 cav-full-low started 19:28:25 (120 s). A1 in flight in the
+lane: 27 files modified, contracts.ts untouched (sha 0f0e1d8f…), no
+claude invocation in the log.
+
 D466 PLAN CONSENSUS; A1 DISPATCHED (supervisor note, 2026-09-02 19:27):
 codex accepted all six round-1 amendments (d466-shift-plan-v2.md, 364
 lines): sunlight provenance cut (Sunlight Sensitivity typed
