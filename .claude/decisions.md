@@ -59,6 +59,10 @@ Harvest log (rolling): opp-move seed 269, opp-threats seed 271 — both
 ten pairs done. Per-arm steps now in dnd-slim-runs/harvest-d44x.sh
 (copy, verify, packet, detached sol+opus, compact render) and
 validate-judges.py; sealed report agent exited, report unread.
+Then opp-gating 277 (0 timeouts), move-threats 281 (2 timeouts),
+move-gating 283 (0 timeouts): all 30 rows, profile==tsv, three judges
+x 60 valid. Nine of ten pairs done; chain on threats-gating, then the
+ten triples.
 
 ## D445 — OWNER: post-merge ranking-invariance check on P3 arms (2026-09-01)
 
