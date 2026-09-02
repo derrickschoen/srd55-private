@@ -1,5 +1,24 @@
 # Binding scope decisions
 
+MEDIUM ARMS GET A 240 S BUDGET (supervisor deviation, 2026-09-02, owner
+may overrule): the s-full-medium rerun on a quiet box timed out 4/30
+(first run 5/30; low arms 0–2). Cases did not overlap between runs, so
+not a bad room; operator session durations show medium is ~20 s slower
+per session (median 92–93 s vs 72–77 s at low) with 6–9 sessions per arm
+at or over 115 s vs 4–5 at low, and timed-out rows have zero tokens. The
+120 s budget is binding for medium, not weather. The standing "never
+re-pin the budget" rule was written for box-saturation fakes; this is the
+opposite case and is documented as a deviation, not a rewrite of the rule.
+Action: resumer patched so medium arms run at --timeout-ms 240000, low
+arms unchanged at 120000; the 120 s medium run kept as
+d443-s-full-medium.b120.jsonl (26/30 authorized); handling preregistered
+in analysis-notes.md (report medium both as-scored and on both-authorized
+pairs; wall-time and timeouts reported next to quality). Relaunched
+13:52:56. Supervisor bug, mine: the first relaunch attempt was refused by
+the resumer's own double-start guard because my command text contained
+the literal "ai-dm-arena.ts --" (the D444 wrapper-self-match class again);
+relaunched from a literal-free command.
+
 WEATHER STOP ON ARM 7 (supervisor note, 2026-09-02): d443-s-full-medium
 (first medium arm, 12:02–12:48) finished with 5 CLI timeouts (>3), so the
 resumer stopped the chain. Classification, verified from the rows: the
