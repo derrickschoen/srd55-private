@@ -65,6 +65,33 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D454 — OWNER: offer the base attack and flag the omitted rider; audit and model every missing rider; fix or replace every monster until every room works (2026-09-02)
+
+Asked (brainstorm Q4): doppelganger with every attack withheld because its
+riders are unmodeled. Options: offer base attack with typed omitted-rider
+flag (supervisor recommendation), implement rider first, exclude from rooms.
+
+Owner: **"Offer base attack, flag omitted rider. Also, start a lane to audit
+these missing rider attacks from the rooms we are using and model them.
+Also go through the rooms after this batch of arms and either fix or
+replace every monster until every room works like it should."**
+
+Three consequences:
+1. Engine: an attack whose base resolution is supported is offered even when
+   a rider (advantage condition, coupled feature, extra effect) is not; the
+   omission is a typed field on the option, rendered in the row and the
+   human UI, never silently dropped. Era-shift item, lands with D453.
+2. Audit lane (starts now, read-only): enumerate every creature in the rooms
+   in use (measurement seeds 6203001–10, D447 seeds 6204001–10, R1–10 holdout
+   5117001–10), every action/feature the engine marks unavailable or
+   unsupported, the reason, and the SRD text; classify each as
+   base-offerable-with-flag / needs new mechanic / replace creature. Then
+   model the missing riders.
+3. After the current batch of arms completes: room pass — every monster in
+   every room in use either fixed or replaced until every room plays as the
+   SRD says. Replacing a creature in a room changes that room's digest and
+   is itself an era shift for that seed set; sequence with D453/D454 item 1.
+
 ## D453 — OWNER: provably no-effect options are hidden from the AI offer set, shown labelled to humans (2026-09-02)
 
 Asked (brainstorm Q3): keep-label-rank-last (supervisor recommendation),
