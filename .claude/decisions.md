@@ -65,6 +65,24 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D453 — OWNER: provably no-effect options are hidden from the AI offer set, shown labelled to humans (2026-09-02)
+
+Asked (brainstorm Q3): keep-label-rank-last (supervisor recommendation),
+hide from the AI but show to humans, hide everywhere.
+
+Owner: **"Hide from the AI, show to humans."**
+
+Consequences for the pre-P4 renderer fix: the engine gains a per-option
+"no modeled effect in this position" predicate (Disengage with no adjacent
+hostile; Dodge with no incoming attack modeled is NOT no-effect and stays;
+unsupported utility spells such as self-targeted Detect Thoughts). Options
+that satisfy it are removed from the offer set the AI DM receives and from
+its exact-option-id contract; the human-facing UI keeps them, labelled with
+the reason, sorted last. The predicate must be typed, not a string check,
+and every hidden option is logged in the row so idle-Disengage counts remain
+computable for comparison with pre-shift arms. This is an era shift; it
+lands only after D447/D449 controls are complete on the current era.
+
 ## D452 — OWNER: k7 close-fast nudge ships regardless; the D449 A/B is a regression check (2026-09-02)
 
 Asked (brainstorm Q2): what promotes k7 into the baseline KB. Options:
