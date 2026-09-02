@@ -1,5 +1,16 @@
 # Binding scope decisions
 
+D447 PREREGISTERED; ARM 15 QUEUED (supervisor note, 2026-09-02): per the
+sealed recommendations (rec 1 and rec 2, both already visible to the owner),
+appended cav-rows-move-gating-medium as D443 arm 15 to d443-profiles.tsv —
+the running resumer will pick it up (its TSV read offset was 1237 of 6396
+bytes when appended). Preregistered the fresh-seed confirmation D447 in
+dnd-slim-runs/analysis-notes.md before any key is opened: control (P3
+caveman full, luna low) vs rows+move+gating (luna low), seeds 6204001–10,
+5 reps, 2-arm packet prime 373, same three seats, primary = paired mean
+panel-total delta with the ±0.2 band, confirmation threshold and refusal
+condition fixed in the note. Runs after the D443 chain finishes.
+
 K-ARM BUILDER MERGED; H2H4 JUDGED (supervisor note, 2026-09-02): lane
 merged to main as 2e10d5c6; main gate run by the supervisor: tsc -b 0, sg
 scan 0, full vitest 534 files / 9422 tests passed in 245s (9420 prior + 2 new
