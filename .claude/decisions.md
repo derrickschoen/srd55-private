@@ -65,6 +65,23 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D459 — OWNER: unjudged 3-round smoke after arm 15; blinded multi-round lane after the era shift (2026-09-02)
+
+Asked (brainstorm Q9): smoke now + blinded lane after era shift (supervisor
+recommendation), blinded 3-round arm before P4/P5, switch program to
+N-round runs, defer until after P4/P5.
+
+Owner: **"Unjudged 3-round smoke now, blinded lane after era shift."**
+
+Consequences: immediately after D443 arm 15 lands, one `--rounds 3` run on
+the leading structured profile (luna low, 120 s, seeds 6203001–10, reps 1)
+with k7 loaded; it is a verification run, not a measurement: checks resume
+succeeds every round, the KB stays in context, contextRevision advances,
+no escalation storms, wall/token growth per round. Findings go in
+decisions.md; no packet, no judge. A judged 3-round arm on the leading
+profile is preregistered as part of the first program on the post-shift
+era (D453/D454/D458).
+
 ## D458 — OWNER: structured-KB scaffolding ships as baseline; tactical lines stay under A/B (2026-09-02)
 
 Asked (brainstorm Q8): ship as baseline with ~3 KB root (supervisor
