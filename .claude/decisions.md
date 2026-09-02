@@ -65,6 +65,22 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D463 — OWNER: wall-miss behaviour is configurable; default is the engine's recommendation; every timeout is logged (2026-09-02)
+
+Asked (brainstorm Q13, follow-up to D456): engine's ranked recommendation
+(supervisor recommendation), one retry at low, ask the human, keep waiting.
+
+Owner (verbatim): **"configurable. default to engines recommendation. log
+somewhere when the ai times out and defaults to the engine."**
+
+Consequences: a typed table setting `onAiTimeout` with values
+engine_recommendation (default) | retry_low | ask_human | wait; the live
+turn at 180 s with no answer resolves with the D461 top-ranked option per
+actor, tagged plannerLabel sim_controller and a timeout reason. Every
+timeout writes a durable log entry (per-game timeout log surfaced in the
+VTT, plus the row field) with turn, actor set, elapsed, effort, and the
+fallback taken. Not silent, ever.
+
 ## D462 — OWNER: monsters play optimally, full stop (2026-09-02)
 
 Asked (brainstorm Q12): optimal now with difficulty knobs later
