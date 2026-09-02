@@ -65,6 +65,20 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D462 — OWNER: monsters play optimally, full stop (2026-09-02)
+
+Asked (brainstorm Q12): optimal now with difficulty knobs later
+(supervisor recommendation), competent human DM, optimal full stop.
+
+Owner: **"Optimal, full stop."**
+
+Consequences: the advice layer, the tactical KB lines and the judge rubric
+target the best SRD-legal play with no restraint or appropriateness term.
+Difficulty is the encounter builder's concern, not the DM's; no monster-side
+aggression knob is planned. Rubric comparability with prior scores is
+preserved. Focus fire, targeting the downed or the fragile, and closing on
+ranged attackers are correct behaviours to reward.
+
 ## D461 — OWNER: engine advice renders as a ranked recommendation (2026-09-02)
 
 Asked (brainstorm Q11): ranked recommendation (supervisor recommendation),
