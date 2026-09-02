@@ -1,5 +1,21 @@
 # Binding scope decisions
 
+SECOND REBOOT + K-ARM PACKET LANDED (supervisor note, 2026-09-02): host
+rebooted again 09:12:11, ~16 min into the restarted D443 arm 3, killing the
+resumer, tick cron and :4173 a second time. Recovered 09:17 (arm 3 restarted
+09:17:05, cron re-armed, :4173 200). The codex N-arm packet-builder increment
+had finished before the reboot; supervisor-run gates on the lane: tsc -b 0,
+sg scan 0, vitest tests/unit/tools 394/394 (matches codex's claim). Committed
+lane-wt/ctrl-value 4cc560cd (buildMultiArmRerunPacket; 2-arm path proven
+byte-identical by a deep-equal regression test). Not yet merged to main —
+main gate waits for a quiet machine. Built from the lane the 4-arm
+shared-control packet h2h4 (prime 367): p3-caveman control + rows-move-gating
++ move + threats = 120 entries, leak scan clean, 118 authorized / 2 refused
+(both control-side, as in every packet). Panel dispatched 09:22: sol high,
+opus, and — new for this era — the fable seat as a fresh-context
+`claude --model claude-fable-5 -p`, since the supervisor is now partially
+unblinded. Key sealed with the rest.
+
 REBOOT RECOVERY (supervisor note, 2026-09-02): host rebooted 08:49:35 with
 D443 arm 3 (s-opp-low) ~2 min in and the N-arm packet-builder codex increment
 mid-edit. Recovery, verified: resume-after-reboot.sh (idempotent, durable dir)
