@@ -1,5 +1,20 @@
 # Binding scope decisions
 
+BRAINSTORM ROUND 2 MERGED; FIVE SUPERVISOR-LEVEL DEFAULTS RECORDED
+(supervisor note, 2026-09-02 18:15; dnd-slim-runs/brainstorm2-merged.md):
+codex sol 13 + opus 15 questions merged to 12 owner questions. Defaults
+the supervisor takes without asking, reversible by the owner: (1) hide-vs-
+flag boundary = offer when the primary effect executes, flag secondary
+omissions, hide only when nothing resolves; (2) interim D463 fallback
+before the D461 ranking exists = highest-EV range-legal offered option,
+else Dash toward nearest enemy, else Dodge, tagged sim_controller +
+timeout; (3) subject-file reads capped at 2 per turn at the tool port,
+logged per row; (4) any new seed set passes a roster preflight (every
+creature has an offerable attack, every unmodeled feature flagged) before
+an arm may use it; (5) D460 distillation is re-run on post-shift rows with
+luna medium as teacher, sol-low as corroboration, luna low as student,
+preregistered before labels are read.
+
 RIDER AUDIT HARVESTED (supervisor note, 2026-09-02 18:2x; D454 item 2):
 codex sol high, read-only, enumerated all 30 rooms in use from the seed
 fixtures and the brutal generator (6204xxx have no fixtures; reconstructed
