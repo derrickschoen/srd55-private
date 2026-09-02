@@ -1,5 +1,32 @@
 # Binding scope decisions
 
+RIDER AUDIT HARVESTED (supervisor note, 2026-09-02 18:2x; D454 item 2):
+codex sol high, read-only, enumerated all 30 rooms in use from the seed
+fixtures and the brutal generator (6204xxx have no fixtures; reconstructed
+deterministically) and produced 68 findings, rider-audit.md/json in
+dnd-slim-runs. Three creatures have NO offerable attack-roll action:
+doppelganger (5 rooms: 6203002/3/7, 6204004/6), lion (6203005, 6204005),
+wight (6204006). Cause for lion/wight verified by me in
+src/vtt/turn-option-registry.ts legalMultiattackCombinations: any
+non-attack child (Roar, Life Drain are saving-throw actions) empties the
+combination list, and an existing multiattack suppresses standalone
+attacks. Conditional-rider attacks (goblin advantage d4, boar/elephant/
+warhorse-skeleton charge, homebrew crest/raking) are BASE_OFFERABLE_WITH_
+FLAG and already resolve with conditional_damage_rider_unresolved.
+Unprojected traits: Pack Tactics (six creature types, 13 rooms), Running
+Leap, Abduct, Bloodied Frenzy/Fury, Sunlight Sensitivity, Aura of
+Authority, homebrew Spider Climb/Web Walker/aquatic breathing. Unsupported
+spell payloads: priest Light/Thaumaturgy/Spirit Guardians/Dispel Magic,
+acolyte Sanctuary, unicorn suite (7 spells + Unicorn's Blessing
+spell_choice). Codex recommends REPLACE_CREATURE for none. Supervisor
+modeling order for the D466 shift, severity first: (1) mixed-kind
+multiattack (attack children + saving-throw child) so lion and wight get
+attacks; (2) doppelganger Slam offered with typed omitted-rider flag,
+Multiattack without Visage coupling, Read Thoughts rendered no-effect per
+D453; (3) rider flag on every conditional-rider attack; (4) Pack Tactics
+projection; then priest/acolyte utility spells and the unicorn suite. The
+room pass (D454 item 3) after arm 15 uses this list.
+
 ARM 11 VERIFIED; KB PLAN + STRATEGY DISTILLATION REVIEWED (supervisor
 note, 2026-09-02 18:15): d443-s-threats-medium 30/30 authorized, 0
 timeouts at 240 s, 10 digests x3, refusals 11 (low twin: 28/30, 2 timeouts,
