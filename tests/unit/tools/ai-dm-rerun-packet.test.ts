@@ -6,6 +6,7 @@ import {
   R1_10_PROTOCOL,
   R1_10_SEEDS,
   assertBlindedPacket,
+  buildMultiArmRerunPacket,
   buildRerunPacket,
   parseRerunPacketArgs,
   validateRerunRows,
@@ -148,6 +149,58 @@ describe('AI-DM R1-10 rerun packet', () => {
     )).toThrow('permanent holdout');
   });
 
+  it('builds one blinded packet for four arms and enforces their shared case grid', () => {
+    const protocol = { seeds: [5_117_001, 5_117_002], reps: 2 } as const;
+    const arms = ['control', 'cut-a', 'cut-b', 'cut-c'] as const;
+    const rows = protocol.seeds.flatMap((seed, room) => [1, 2].flatMap((round) =>
+      arms.map((arm) => ({
+        seed,
+        room: room + 1,
+        round,
+        arm,
+        model: `${arm}-model`,
+        cli: `${arm}-cli`,
+        startingRoomDigest: `frozen-room-${String(seed)}`,
+        combatModel: 'initiative_segments_v1',
+        initiativeOrder: ['monster', 'fighter'],
+        outcome: 'authorized',
+        plannedBy: { model: `${arm}-model`, effort: 'medium' },
+        plannerLabel: `${arm}-planner`,
+        roundNarrative: `${arm} narrative`,
+        authorizedPlan: null,
+        engineIntel: {
+          policy: 'dm-intel-capture-v1',
+          policyVersions: { initiative: 'initiative-intel-v1' },
+          actors: [arm],
+        },
+      } satisfies JsonRecord))
+    ));
+
+    const result = buildMultiArmRerunPacket(rows, 23, protocol);
+    expect(result.packet.entries).toHaveLength(rows.length);
+    expect(result.answerKey.entries).toHaveLength(rows.length);
+    expect(new Set(result.answerKey.entries.map(({ arm }) => arm))).toEqual(new Set(arms));
+    expect(result.answerKey.entries.map(({ blindId }) => blindId))
+      .toEqual(result.packet.entries.map(({ blindId }) => blindId));
+    const packetText = JSON.stringify(result.packet);
+    for (const arm of arms) expect(packetText).not.toContain(arm);
+
+    const mismatchedGrid = rows.filter((row) =>
+      !(row['arm'] === 'cut-c' && row['seed'] === 5_117_002 && row['round'] === 2));
+    expect(() => buildMultiArmRerunPacket(mismatchedGrid, 23, protocol))
+      .toThrow('requires one row from each arm for seed 5117002 rep 2');
+
+    expect(() => buildMultiArmRerunPacket(
+      rows.filter((row) => row['arm'] === 'control'), 23, protocol,
+    )).toThrow('requires at least two paired arms');
+  });
+
+  it('keeps the two-arm packet byte-identical through the multi-arm API', () => {
+    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl');
+    expect(buildMultiArmRerunPacket(rows, 1, tinyProtocol))
+      .toEqual(buildRerunPacket(rows, 1, tinyProtocol));
+  });
+
   it('normalizes both era plan shapes to the same neutral form and fails loud on an unknown shape', () => {
     const base = {
       seed: 5_117_001, room: 1, round: 1, startingRoomDigest: 'd1',
@@ -267,6 +320,22 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(JSON.stringify(result.packet)).not.toContain('commit-old');
     expect(new Set(result.answerKey.entries.map((entry) => entry.arm)))
       .toEqual(new Set(['era:commit-old', 'era:commit-new']));
+
+    const fourEraRows = crossEraRows().flatMap((row) => {
+      const era = row['repoCommit'];
+      if (typeof era !== 'string') throw new TypeError('test row must have repoCommit');
+      return [row, {
+        ...row,
+        repoCommit: `${era}-variant`,
+        startingRoomDigest: `${String(row['startingRoomDigest'])}-variant`,
+      }];
+    });
+    const fourEraResult = buildMultiArmRerunPacket(fourEraRows, 7, R1_10_PROTOCOL, true);
+    expect(fourEraResult.packet.entries).toHaveLength(120);
+    expect(new Set(fourEraResult.answerKey.entries.map((entry) => entry.arm))).toEqual(new Set([
+      'era:commit-old', 'era:commit-old-variant', 'era:commit-new', 'era:commit-new-variant',
+    ]));
+    expect(JSON.stringify(fourEraResult.packet)).not.toContain('commit-');
 
     const missingCommit = crossEraRows((row, era) => {
       if (era === 'commit-old' && row['seed'] === 5_117_001 && row['round'] === 1) {
