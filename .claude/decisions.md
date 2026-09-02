@@ -1,5 +1,19 @@
 # Binding scope decisions
 
+## D446 — OWNER: drop the 5 quads (2026-09-02)
+
+Verbatim: "Drop the 5 quads." Supersedes D444.2 ("quads: run
+regardless"). The 2^5 grid closes at the triples: control + 5 singles
++ 10 pairs + 10 triples + the cav-all union (already run in D440) —
+27 arms, with only the four 4-way interaction cells absent. Executed
+immediately: the D444 quads waiter killed (its background task shows
+exit 144 = my kill, expected), both d444-profiles.tsv copies emptied
+(originals kept as .dropped for reversal), so neither the old waiter
+nor the detached resumer can launch a quad. Sequencing tightens: the
+era-shift merge now follows directly after the 3 remaining triples.
+D442's sensitivity analysis proceeds on the 27-arm grid; 4-way
+interactions are simply not estimable, which the analysis will state.
+
 ## Supervisor continuity note — detached runners for the CLI reinstall (2026-09-01)
 
 Owner is exiting Claude Code to reinstall. Survival arrangements, all
