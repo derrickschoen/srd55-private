@@ -123,6 +123,23 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D473 — OWNER: arena budgets stay 120 s low / 240 s medium through D460; the live 180 s wall is absolute (2026-09-02)
+
+Asked (round 2 Q8): re-anchor at the shift with absolute 180 s (supervisor
+recommendation), re-anchor with 180 s per attempt, keep 120/240 through
+D460 with absolute live wall, re-anchor with the wall binding the default
+only.
+
+Owner: **"Keep 120/240 through D460; 180 s absolute live."**
+
+Consequences: the post-shift control, the advice A/B and the multi-round
+lane all run at 120 s (low) / 240 s (medium) so they stay comparable
+across the shift. The arena re-anchors to 180 s no earlier than the
+program after D460, as its own preregistered change. At the table, 180 s
+is an absolute per-turn cap: retry_low runs inside the remaining time,
+wait cannot exceed the wall, and the D463 default fallback fires at the
+wall whatever the setting.
+
 ## D472 — OWNER: a post-shift control more than 0.3 below the current-era leader triggers bisection (2026-09-02)
 
 Asked (round 2 Q7): threshold triggers bisection (supervisor
