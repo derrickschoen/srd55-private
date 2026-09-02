@@ -1,5 +1,13 @@
 # Binding scope decisions
 
+ARM 12 VERIFIED (supervisor note, 2026-09-02 18:52): d443-s-gating-medium
+29/30 authorized (one non-authorized row, same count as the low twin), 0
+timeouts at 240 s, 10 digests x3, refusals 14 (low 12), no escalations.
+Idle Disengage 21 -> 12, Dash 51 -> 62, attack slots 31 -> 36, wall median
+18.0 -> 22.9 s, token median 540k -> 943k. Arm 13 cav-full-medium started
+18:49:05. D466 shift plan dispatched to codex sol (read-only, stdout) at
+18:44; pending.
+
 BRAINSTORM ROUND 2 MERGED; FIVE SUPERVISOR-LEVEL DEFAULTS RECORDED
 (supervisor note, 2026-09-02 18:15; dnd-slim-runs/brainstorm2-merged.md):
 codex sol 13 + opus 15 questions merged to 12 owner questions. Defaults
