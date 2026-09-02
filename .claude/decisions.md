@@ -65,6 +65,24 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D457 — OWNER: a session spans one play sitting, with digest rollover; escalation inherits KB + digest + state (2026-09-02)
+
+Asked (brainstorm Q7): session span and escalation inheritance. Options:
+one play session with digest rollover (supervisor recommendation), one
+combat, whole campaign, no escalation during combat.
+
+Owner: **"One play session, digest rollover."**
+
+Consequences: the luna session persists across encounters within a
+sitting (D450 resume applies between combats as well as between turns).
+When context passes a measured threshold the engine rolls over to a fresh
+session seeded with an engine-built digest (typed, deterministic, tested;
+not model-written). An escalated stronger-model turn starts fresh with the
+session-start KB, the current digest and the current engine state, replacing
+today's isolated-state-only escalation. Threshold value, digest schema and
+the definition of "sitting" boundary (explicit end-session action in the
+VTT) are supervisor/codex implementation details.
+
 ## D456 — OWNER: live games run luna medium, started speculatively during the player's turn; answer on end-turn; 180 s wall (2026-09-02)
 
 Asked (brainstorm Q6): live effort and deadline policy. Options offered:
