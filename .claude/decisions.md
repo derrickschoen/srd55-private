@@ -123,6 +123,27 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D475 — OWNER: advice ships on a low win plus medium non-inferiority; low may become the default later (2026-09-02)
+
+Asked (round 2 Q10): low win + medium non-inferiority (supervisor
+recommendation), low win sufficient, medium win required, ship behind a
+setting.
+
+Owner (verbatim): **"Low win plus medium non-inferiority. Note that I
+would like the option to switch default to luna low someday if we can get
+the advice dialed in. Odds are that the advice is actually bad if it makes
+medium noticably worse than low."**
+
+Consequences, preregistered for the D471 program: advice ships as default
+when (a) +advice beats the control at luna low by more than 0.2 panel
+points, (b) +advice at luna medium is not more than 0.2 below the medium
+control, and (c) diagnostic: if medium+advice scores noticeably below
+low+advice (more than 0.2), the advice is treated as suspect regardless
+of (a)/(b) and comes back to the owner with the per-rule follow rates
+before shipping. Standing goal recorded: once advice is dialed in, the
+live default may move to luna low; the live effort is therefore a typed
+table setting from the start (medium default), not a constant.
+
 ## D474 — OWNER: the table escalates to luna high on validation failure or refusal (2026-09-02)
 
 Asked (round 2 Q9): no escalation (supervisor recommendation), sol high on
