@@ -123,6 +123,26 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D474 — OWNER: the table escalates to luna high on validation failure or refusal (2026-09-02)
+
+Asked (round 2 Q9): no escalation (supervisor recommendation), sol high on
+validation failure/refusal, on engine-detected difficulty, promote the
+stronger session.
+
+Owner (verbatim): **"Escalate to luna high on validation failure or
+refusal"** — same model family, higher effort; not sol.
+
+Supervisor reading, recorded so it can be corrected: trigger = luna
+medium's proposal fails validation twice in a turn, or it refuses. The
+escalated turn is a fresh luna high session seeded per D457 (root +
+tactics KB, current digest, current engine state), running inside the
+remaining 180 s (D473); if it cannot finish, the D463 fallback fires. The
+next turn returns to the medium session with the escalated result folded
+into its next turn context; the high session is not promoted. Arena
+counterpart: `--escalation-model gpt-5.6-luna --escalation-effort high`,
+enabled only from the post-shift control on so the D443/D447/D449/D465
+arms stay as preregistered.
+
 ## D473 — OWNER: arena budgets stay 120 s low / 240 s medium through D460; the live 180 s wall is absolute (2026-09-02)
 
 Asked (round 2 Q8): re-anchor at the shift with absolute 180 s (supervisor
