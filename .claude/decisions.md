@@ -65,6 +65,23 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D460 — OWNER: next big rock is algorithmic advice distilled from low-vs-medium (2026-09-02)
+
+Asked (brainstorm Q10): algorithmic advice from the distillation
+(supervisor recommendation), P4/P5 prose-format study, grapple lane, KB
+flywheel.
+
+Owner: **"Algorithmic advice from the low-vs-medium distillation."**
+
+Consequences: after the D447/D449 program and the era shift with its fresh
+control, the next program turns codex's effort-strategy rules
+(dnd-slim-runs/effort-strategy-rules.json, supervisor review pending) into
+engine-computed, typed, rendered advice in the intel/plays layer, and A/Bs
+it against the post-shift control at luna low (the point being to lift
+low toward medium behaviour) with a medium replication. P4/P5, grapple and
+the flywheel queue behind it. Directiveness of the advice is ruled
+separately (next question).
+
 ## D459 — OWNER: unjudged 3-round smoke after arm 15; blinded multi-round lane after the era shift (2026-09-02)
 
 Asked (brainstorm Q9): smoke now + blinded lane after era shift (supervisor
