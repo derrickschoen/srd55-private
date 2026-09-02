@@ -70,6 +70,9 @@ Triples: rows-opp-move 307, rows-opp-threats 311, rows-opp-gating 313
 (1 service_null, nulled by all three judges) — all 30 rows,
 profile==tsv, 0 timeouts, three judges x 60 valid. Three of ten
 triples done; chain on rows-move-threats.
+rows-move-threats 317, rows-move-gating 331: 30 rows, profile==tsv,
+0 timeouts, three judges x 60 valid. Five of ten triples done; chain
+on rows-threats-gating.
 
 ## D445 — OWNER: post-merge ranking-invariance check on P3 arms (2026-09-01)
 
