@@ -123,6 +123,24 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D476 — OWNER: monsters know observed facts plus defined inference (2026-09-02)
+
+Asked (round 2 Q11a): observed facts plus defined inference (supervisor
+recommendation), omniscient engine state, observed facts only.
+
+Owner: **"Observed facts plus defined inference."**
+
+Consequences: the intel rows and the D461 ranking are computed from a
+typed per-side knowledge ledger: what the side's creatures can currently
+see, what they have seen this encounter, and engine-computed inferences
+with explicit rules (cast a spell => caster; visibly bloodied => bloodied
+band; took damage of a type without flinching => not vulnerable, etc.).
+Hidden HP totals, spell slots, invisible/hidden positions and unseen
+inventory are not in the rows. This is engine work in the D460 program,
+not the D466 shift; until it lands, rows carry a typed
+`knowledgeModel: 'engine_state'` marker so the change is visible in the
+record.
+
 ## D475 — OWNER: advice ships on a low win plus medium non-inferiority; low may become the default later (2026-09-02)
 
 Asked (round 2 Q10): low win + medium non-inferiority (supervisor
