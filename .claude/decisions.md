@@ -1,5 +1,27 @@
 # Binding scope decisions
 
+FINDING: DISENGAGE OFFERED AND TAKEN WITH NO ADJACENT HOSTILE (supervisor,
+2026-09-02, raw rows only, no judge output read): owner noticed luna-low
+disengages becoming dashes at medium. Checked every disengage plan in the
+four landed full/rows arms against the engine intel distances for that
+actor: s-full-low 29 disengages, nearest hostile 35–100 ft in all 28
+resolvable cases, 29/29 moved 0 ft; s-full-medium 9 (all >=40 ft, 7 moved
+0 ft); s-rows-low 23 (20/20 resolvable far, 22 moved 0 ft); s-rows-medium
+16 (15/15 far, 14 moved 0 ft). Zero disengages with a hostile within 5 ft
+in 77 cases. So yes: monsters disengage when nothing threatens them,
+usually as a whole wasted turn — a 'do nothing' pick when they cannot
+reach anyone (room 3 monsters have 15 ft speed vs 35–40 ft gaps). Medium
+converts most of these into dash (closing). Mechanism: the option catalog
+offers "Disengage" unconditionally (usable_now true, risks [], expectation
+metric none) and the rendered turn context never says "no hostile within
+reach" — the model is not told the action has no effect. Proposed fix, NOT
+applied mid-D443 (would shift eras under running arms): renderer/intel
+increment that either gates Disengage on an adjacent-hostile predicate or
+annotates it "no hostile adjacent: no effect", plus the same for Dodge
+vs no incoming attacks; queue for the era re-anchor before P4. This is
+also a candidate rubric note for judges: disengage-with-no-threat is an
+action-economy zero regardless of prose.
+
 ## D448 — OWNER: extend the medium-effort timeout and rerun the failures (2026-09-02)
 
 Verbatim: "It says some of the medium effort Luna timed out. What was the
