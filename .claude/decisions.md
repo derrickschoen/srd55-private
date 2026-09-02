@@ -69,7 +69,9 @@ action-economy zero regardless of prose.
 
 Owner (mid-turn, verbatim): **"run the current batch of arms on 5.6-sol
 with low effort to get even more data to harvest when comparing luna low vs
-luna medium (now add vs sol low)"**
+luna medium (now add vs sol low)"** and, appended: **"this is intended
+to help distill better advice"** — i.e. the sol-low rows feed the D460
+distillation as a third strategy source.
 
 Consequences: the 15 D443 profiles are re-run with `--model gpt-5.6-sol
 --effort low`, same basis/rooms/seeds/reps (brutal, 10 rooms, seeds
