@@ -123,6 +123,25 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D477 — OWNER: monsters maximise confirmed kills, with sequential coordination (2026-09-02)
+
+Asked (round 2 Q11b): encounter-win probability with sequential
+coordination (supervisor recommendation), typed room objective with joint
+plan, expected immediate harm independent, confirmed kills sequential.
+
+Owner: **"Confirmed kills, sequential coordination."**
+
+Consequences: the D461 ranking's objective is the probability of dropping
+a character this round (team-scorer kill probability, computed under the
+D476 knowledge ledger, so "confirmed" means confirmed from what the
+monsters can observe and infer). Ties break on expected damage, then on
+attack ETA for closing moves. Rankings are recomputed per actor in
+initiative order after the previous actor's plan is fixed, so focus fire
+concentrates until a kill is likely and overkill is avoided
+deterministically. Downed and fragile targets are legitimately dominant
+targets (consistent with D462). Advice text renders the kill probability
+it ranks on.
+
 ## D476 — OWNER: monsters know observed facts plus defined inference (2026-09-02)
 
 Asked (round 2 Q11a): observed facts plus defined inference (supervisor
