@@ -123,6 +123,21 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D469 — OWNER: k7 lives in an auto-loaded tactics subject (2026-09-02)
+
+Asked (round 2 Q4): auto-loaded tactics subject (supervisor
+recommendation), inline in root, indexed on demand.
+
+Owner: **"Auto-loaded tactics subject."**
+
+Consequences: tests/fixtures/ai-dm-kb/tactics.md holds k7's lines (and
+future tactical lines once each has passed its A/B). The session-start
+delivery is root + tactics.md, in that order, both as developer
+instructions on the cold session; the byte-cap test covers the root
+alone (3072/4096) and the pair together (supervisor default 4608 hard).
+The tactics file is the only KB file that ships tactics; subject files
+in the index stay rules/procedure.
+
 ## D468 — OWNER: replace creatures that cannot be modeled quickly (2026-09-02)
 
 Asked (round 2 Q2): shift waits for the 3 no-attack creatures only
