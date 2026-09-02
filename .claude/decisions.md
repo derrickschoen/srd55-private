@@ -1,5 +1,17 @@
 # Binding scope decisions
 
+FINDING: TWO CODEX ANALYSIS JOBS DISPATCHED READ-ONLY WHILE TOLD TO WRITE
+FILES (supervisor, 2026-09-02, my error): the KB-plan job (session
+01a06402…) and the effort-strategy distillation (01a06403…) each finished
+their reasoning (90k / 124k tokens) and stopped loudly: "BLOCKED — read-only
+sandbox rejected creation of kb-plan.md" and "dnd-slim-runs is not writable;
+no output files created". Codex behaved correctly; the briefs asked for files
+under `--sandbox read-only`. Recovery: both sessions resumed read-only and
+told to emit the composed deliverables as the final message
+(kb-plan-codex-2.log, effort-strategy-codex-2.log); supervisor writes the
+files. No repo state touched. Rule: an analysis job that must produce a file
+gets `--sandbox workspace-write -C <output dir>` or prints the deliverable.
+
 FINDING: SELF-TARGETED DETECT THOUGHTS = A DOPPELGANGER WITH NO USABLE
 ATTACK (supervisor, 2026-09-02, raw rows + repo source only): owner spotted
 a self-targeted Detect Thoughts. 25 such casts across the nine landed D443
