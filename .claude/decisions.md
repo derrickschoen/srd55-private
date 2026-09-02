@@ -1,5 +1,17 @@
 # Binding scope decisions
 
+OWNER UNBLINDED SUPERVISOR FURTHER (2026-09-02): owner pasted the
+recommendations file's test-next and caveats sections into the conversation.
+Supervisor now knows: recommended triple = rows+move+gating; singles move and
+threats nearly match its gain; four singles won vs control (P3 reversal);
+interactions uniformly negative. Consequence: supervisor's in-context fable
+scoring is no longer a credible blind judge for the D443 sweep. Fix adopted:
+for the D443 sweep the fable seat will be filled by detached fresh-context
+`claude --model claude-fable-5 -p` invocations per packet (same mechanism as
+the opus judge) — same model identity, none of this session's contamination.
+Supervisor validates format only (counts, sums, refused handling), as with
+sol/opus.
+
 SUPERVISOR BLINDING BREACH, PARTIAL (2026-09-02, recorded at full length):
 while harvesting the sealed recommendations agent I tailed its stdout log to
 read the permitted count lines. Codex had echoed a diff of the report's
