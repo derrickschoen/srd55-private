@@ -123,6 +123,19 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D471 — OWNER: advice A/B first, multi-round lane beside it in one sealed program (2026-09-02)
+
+Asked (round 2 Q6): advice first with multi-round beside it in one program
+(supervisor recommendation), advice first then multi-round, multi-round
+first.
+
+Owner: **"Advice A/B first, multi-round beside it in one sealed program."**
+
+Consequences: the first post-shift program = {post-shift control, +advice
+(luna low), +advice (luna medium replication), 3-round multi-round lane on
+the control profile without advice}. Preregistered together, arms
+sequential on the box with the advice arms first, one unsealing.
+
 ## D470 — OWNER: sol judges sol-operator packets; the confound is noted (2026-09-02)
 
 Asked (round 2 Q5): keep sol and report its seat separately (supervisor
