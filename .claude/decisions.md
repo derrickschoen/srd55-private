@@ -1,5 +1,28 @@
 # Binding scope decisions
 
+A1 VERIFIED AND COMMITTED IN THE LANE; F: MUTATION LEFT IN AN UNTRACKED
+FILE FOR ~40 s (supervisor, 2026-09-02 19:58): codex delivered A1 (29
+files, +379/-146). My independent gates: tsc 0, sg 0, vitest 535 files /
+9426 tests passed (19:56:42); codex reported the same numbers. My Dodge
+mutation: 2 of 4 option-modeling tests fail, 4/4 after restore. Lane
+commit follows. Finding against my own work: I restored the mutated
+src/vtt/option-modeling.ts with `git checkout --`, which is a silent no-op
+on an UNTRACKED file; the second test run I read as "restored" was
+actually still mutated (same 2 failed). Caught because the grep for the
+mutated line returned 1 and status showed `??`. Restored from the backup
+copy I had taken first; test 4/4; committed. Rule: mutation checks on new
+files restore from an explicit backup, and the restore is proven by a
+grep for the mutated text returning 0 BEFORE the confirming test run.
+Review findings for codex (A1.1, before A2): (F1) Disengage classification
+treats any non-withdraw stance as "stationary" — a Disengage that moves
+toward another enemy while adjacent to one also prevents a modeled
+opportunity attack and must stay offerable; (F2) an existing expectation
+in ai-dm-conversation.test.ts changed contains_unresolved -> fully_resolved
+for one actor without stated cause; codex must show which option moved to
+humanOnly and pin it, not just update the literal; (F3) base attacks with
+unresolved riders are now offered with omittedRiders: [] (typed never);
+B1 must populate the flag before merge — acceptable inside the lane only.
+
 ARM 13 VERIFIED (supervisor note, 2026-09-02 19:37): d443-cav-full-medium
 30/30 authorized, 0 timeouts at 240 s, 10 digests x3, refusals 9, no
 escalations, wall median 16.0 s / p90 36.7 s (faster than any structured
