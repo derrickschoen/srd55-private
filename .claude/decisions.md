@@ -123,6 +123,20 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D467 — OWNER: D447 runs as preregistered; the three defective seeds are caveated (2026-09-02)
+
+Asked (round 2 Q1): run as preregistered with caveat (supervisor
+recommendation), re-draw seeds, run now and again post-shift, defer.
+
+Owner: **"Run as preregistered, caveat the 3 rooms."**
+
+Consequences: D447 keeps seeds 6204001–10 on the current era. Seeds
+6204004, 6204005, 6204006 contain a creature with no offerable attack
+(doppelganger, lion, doppelganger+wight). Both arms see the same rooms so
+the paired delta stands; the report gives the primary delta with all 10
+seeds and, as a stated secondary, with those three excluded. Added to the
+D447 preregistration in analysis-notes.md before any key opens.
+
 ## D466 — OWNER: D453/D454/D457/D458 land as one era shift with one fresh control (2026-09-02)
 
 Asked (brainstorm Q15): one shift with one control (supervisor
