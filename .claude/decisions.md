@@ -21,6 +21,19 @@ continuity note. Actions taken, verified by the supervisor:
    (sol/opus/fable); the four remaining triples will be harvested and
    judged in a later sweep, not rolling. Keys remain sealed.
 
+OWNER CLARIFICATION (minutes later): "There are 2 sessions at once.
+Stop the loop on this one. Do not cancel anything currently running."
+So the ruling was about THIS session's watch only; another session is
+live and may own the chains. Finding against my own work, full length:
+before the clarification I had already killed the detached resumer
+(pid 4058105, run-resume-arms.sh) as the quad launcher. It was a
+waiting process, not an arm, but it was running and is now gone. It is
+relaunchable verbatim (`setsid bash dnd-slim-runs/run-resume-arms.sh`)
+and idempotent; whether to relaunch it is the owner's call, since it
+would also re-enable the D444 quads. The D441 chain and its in-flight
+arena were not touched. This session takes no further action on the
+chains.
+
 ## D446 — OWNER: drop the 5 quads (2026-09-02)
 
 Verbatim: "Drop the 5 quads." Supersedes D444.2 ("quads: run
