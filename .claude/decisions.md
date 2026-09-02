@@ -66,6 +66,10 @@ ten triples.
 threats-gating 293 (0 timeouts) done, three judges x 60 valid. ALL
 TEN D441 PAIRS JUDGED. Chain now on the ten triples (rows-opp-move
 first); shuffle seeds continue the prime sequence from 307.
+Triples: rows-opp-move 307, rows-opp-threats 311, rows-opp-gating 313
+(1 service_null, nulled by all three judges) — all 30 rows,
+profile==tsv, 0 timeouts, three judges x 60 valid. Three of ten
+triples done; chain on rows-move-threats.
 
 ## D445 — OWNER: post-merge ranking-invariance check on P3 arms (2026-09-01)
 
