@@ -65,6 +65,24 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D465 — OWNER: re-run the current batch of arms on gpt-5.6-sol at low effort (2026-09-02)
+
+Owner (mid-turn, verbatim): **"run the current batch of arms on 5.6-sol
+with low effort to get even more data to harvest when comparing luna low vs
+luna medium (now add vs sol low)"**
+
+Consequences: the 15 D443 profiles are re-run with `--model gpt-5.6-sol
+--effort low`, same basis/rooms/seeds/reps (brutal, 10 rooms, seeds
+6203001–10, 3 reps), outputs `d465-<profile>-sol-low.jsonl`. Budget: 240 s
+(sol's per-turn cost is unmeasured at this renderer; the medium budget is
+the conservative choice and is recorded before launch; timeouts are
+reported as-scored plus both-authorized pairs per D448's rule). Sequence
+after D443 arm 15: D459 3-round smoke → D449 k7 arm → D465 sol-low batch →
+D447. Arms sequential, quiet machine. Keys stay sealed with the D447/D449
+program (D451). Sol arena operator sessions use CODEX_HOME=~/.codex-aidm
+like luna; the judge seat still uses the default home, so judge and
+operator sessions never share a home.
+
 ## D464 — OWNER: full three-judge panel on every packet (2026-09-02)
 
 Asked (brainstorm Q14): full panel everywhere (supervisor recommendation),
