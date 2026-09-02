@@ -53,6 +53,23 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D450 — OWNER: every subsequent turn resumes the same session (2026-09-02)
+
+Verbatim: "not dependent. I want each subsequent turn to resume session"
+(replying to the supervisor's remark that the KB design depended on
+whether the operator keeps context across rounds). Ruling: session
+continuity is a requirement, not a variable. Current code already does
+this in a real game — tools/ai-dm-conversation.ts resumes the base codex
+session for every round after the first (lifecycle.resumeRound) and for
+in-session corrections (resumeCorrection); only tiered escalation spawns
+an isolated fresh session by design. The KB (developer_instructions) is
+therefore delivered once at session start and persists through resumes.
+Caveat recorded: the D443 arena replays each room's opening round three
+times as independent fresh sessions (reps of round 1), so it does not
+exercise round-to-round resume; measuring multi-round behaviour needs
+--rounds N runs. No code change required by this ruling; the KB plan
+must not assume per-round re-delivery.
+
 ## D449 — OWNER: nudge melee monsters to close fast; Disengage-in-place is dominated (2026-09-02)
 
 Verbatim: "It looks like on medium effort, the model figures out that it
