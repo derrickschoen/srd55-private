@@ -1,5 +1,14 @@
 # Binding scope decisions
 
+REBOOT RECOVERY (supervisor note, 2026-09-02): host rebooted 08:49:35 with
+D443 arm 3 (s-opp-low) ~2 min in and the N-arm packet-builder codex increment
+mid-edit. Recovery, verified: resume-after-reboot.sh (idempotent, durable dir)
+skipped arms 1-2 (30 rows each) and restarted arm 3 at 08:56:09; tick cron
+re-armed (15 min); codex increment re-dispatched over its surviving partial
+edits (125 insertions in ai-dm-rerun-packet.ts + test, told to verify not
+assume); :4173 preview restarted (tools/serve.mjs builds before listening).
+No sealed artifact, packet, key or judgment was affected — all durable.
+
 OWNER UNBLINDED SUPERVISOR FURTHER (2026-09-02): owner pasted the
 recommendations file's test-next and caveats sections into the conversation.
 Supervisor now knows: recommended triple = rows+move+gating; singles move and
