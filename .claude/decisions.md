@@ -54,6 +54,11 @@ all 60 sequential entries. Four of ten D441 pairs judged; chain is on
 opp-move. Keys still sealed.
 Owner (asked): harvesting runs ROLLING with this session left open;
 each arm is judged as it lands through the D444 quads. No batching.
+Harvest log (rolling): opp-move seed 269, opp-threats seed 271 — both
+30 rows, profile==tsv, 1 timeout each, three judges x 60 valid. Six of
+ten pairs done. Per-arm steps now in dnd-slim-runs/harvest-d44x.sh
+(copy, verify, packet, detached sol+opus, compact render) and
+validate-judges.py; sealed report agent exited, report unread.
 
 ## D445 — OWNER: post-merge ranking-invariance check on P3 arms (2026-09-01)
 
