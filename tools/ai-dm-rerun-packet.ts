@@ -153,6 +153,23 @@ interface ValidatedArenaRow {
   readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
 }
 
+type ArmCardinality = 'exactly_two' | 'two_or_more';
+
+function assertArmCardinality(armCount: number, cardinality: ArmCardinality): void {
+  switch (cardinality) {
+    case 'exactly_two':
+      if (armCount !== 2) {
+        throw new TypeError(`R1-10 requires exactly two paired arms; found ${String(armCount)}.`);
+      }
+      return;
+    case 'two_or_more':
+      if (armCount < 2) {
+        throw new TypeError(`R1-10 requires at least two paired arms; found ${String(armCount)}.`);
+      }
+      return;
+  }
+}
+
 export interface BlindRubric {
   readonly targetPriority: null;
   readonly actionEconomy: null;
@@ -309,15 +326,15 @@ function validateRow(
   };
 }
 
-/** Validates the frozen R1-10 experiment shape before anything can be judged. */
-export function validateRerunRows(
+function validateRows(
   rows: readonly JsonRecord[],
-  protocol: RerunProtocol = R1_10_PROTOCOL,
-  crossEra = false,
+  protocol: RerunProtocol,
+  crossEra: boolean,
+  armCardinality: ArmCardinality,
 ): readonly ValidatedArenaRow[] {
   const validated = rows.map((row, index) => validateRow(row, `row ${String(index + 1)}`, protocol, crossEra));
   const arms = [...new Set(validated.map((row) => row.arm))].sort((left, right) => left.localeCompare(right));
-  if (arms.length !== 2) throw new TypeError(`R1-10 requires exactly two paired arms; found ${String(arms.length)}.`);
+  assertArmCardinality(arms.length, armCardinality);
   const byCase = new Map<string, ValidatedArenaRow[]>();
   for (const row of validated) {
     const caseKey = `${String(row.seed)}:${String(row.rep)}`;
@@ -366,6 +383,15 @@ export function validateRerunRows(
     throw new TypeError('R1-10 rows contain duplicate or unregistered seed/rep/arm entries.');
   }
   return validated;
+}
+
+/** Validates the frozen two-arm R1-10 experiment shape before anything can be judged. */
+export function validateRerunRows(
+  rows: readonly JsonRecord[],
+  protocol: RerunProtocol = R1_10_PROTOCOL,
+  crossEra = false,
+): readonly ValidatedArenaRow[] {
+  return validateRows(rows, protocol, crossEra, 'exactly_two');
 }
 
 function engineAttribution(row: ValidatedArenaRow): JudgePacketEntry['attribution'] {
@@ -479,14 +505,15 @@ export function assertBlindedPacket(value: unknown, path = 'packet'): void {
   }
 }
 
-export function buildRerunPacket(
+function buildPacket(
   rows: readonly JsonRecord[],
   shuffleSeed: number,
-  protocol: RerunProtocol = R1_10_PROTOCOL,
-  crossEra = false,
+  protocol: RerunProtocol,
+  crossEra: boolean,
+  armCardinality: ArmCardinality,
 ): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
   if (!Number.isSafeInteger(shuffleSeed)) throw new TypeError('shuffleSeed must be a safe integer.');
-  const validated = [...validateRerunRows(rows, protocol, crossEra)]
+  const validated = [...validateRows(rows, protocol, crossEra, armCardinality)]
     .sort((left, right) => left.seed - right.seed || left.rep - right.rep || left.arm.localeCompare(right.arm));
   const blinded = shuffled(validated, shuffleSeed).map((row, index) => ({
     blindId: `blind-${String(index + 1).padStart(3, '0')}`,
@@ -514,6 +541,26 @@ export function buildRerunPacket(
   };
   assertBlindedPacket(packet);
   return { packet, answerKey };
+}
+
+/** Builds the original two-arm packet. */
+export function buildRerunPacket(
+  rows: readonly JsonRecord[],
+  shuffleSeed: number,
+  protocol: RerunProtocol = R1_10_PROTOCOL,
+  crossEra = false,
+): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
+  return buildPacket(rows, shuffleSeed, protocol, crossEra, 'exactly_two');
+}
+
+/** Builds one blinded packet from two or more arms sharing a case protocol. */
+export function buildMultiArmRerunPacket(
+  rows: readonly JsonRecord[],
+  shuffleSeed: number,
+  protocol: RerunProtocol = R1_10_PROTOCOL,
+  crossEra = false,
+): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
+  return buildPacket(rows, shuffleSeed, protocol, crossEra, 'two_or_more');
 }
 
 export async function createRerunPacket(config: RerunPacketConfig): Promise<{ readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey }> {
