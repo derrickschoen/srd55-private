@@ -53,6 +53,29 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D449 — OWNER: nudge melee monsters to close fast; Disengage-in-place is dominated (2026-09-02)
+
+Verbatim: "It looks like on medium effort, the model figures out that it
+is better to get closer. Disengage only is strictly worse than dodge only
+and doesn't explain why you would disengage and not move. Probably should
+nudge the ai to get the melee monsters close asap to beat the party with
+ranged attacks." Ruling as read: a tactical nudge is wanted. Facts
+underneath (verified in repo): D443 arms run with no KB (kbHash null); the
+arena passes the selected KB verbatim as the session instructions
+(tools/rl/arena-session-instructions.ts), and the plan_round prompt carries
+protocol rules only, no tactics; the renderer classifies Disengage as
+known_no_effect without conditioning on adjacency (option-outcome.ts:597)
+and as opportunity kind 'other' (opportunity-cost.ts:113). Execution:
+codex drafts tests/fixtures/ai-dm-kb/k7-close.txt (tactics-only, 8–12
+lines, SRD-correct: melee closes at full budget/Dash when out of reach,
+never end a turn with unused movement while an enemy is out of reach,
+Disengage only when adjacent and leaving, Dodge beats Disengage when
+idle, ranged enemies are why closing matters, never invent abilities);
+supervisor reviews; D449 A/B preregistered in analysis-notes.md — control
+d443-s-full-low reused vs same profile + k7, one new 30-round arm after the
+D443 chain, prime 379, three seats, sealed. Renderer-side conditioning of
+Disengage/Dodge stays queued for the pre-P4 era re-anchor.
+
 ## D448 — OWNER: extend the medium-effort timeout and rerun the failures (2026-09-02)
 
 Verbatim: "It says some of the medium effort Luna timed out. What was the
