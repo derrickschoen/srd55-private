@@ -1,5 +1,21 @@
 # Binding scope decisions
 
+D466 PLAN CONSENSUS; A1 DISPATCHED (supervisor note, 2026-09-02 19:27):
+codex accepted all six round-1 amendments (d466-shift-plan-v2.md, 364
+lines): sunlight provenance cut (Sunlight Sensitivity typed
+encounter_not_applicable/no_sunlight_state); rollover threshold from the
+latest per-call turn.completed.usage.input_tokens (adapter decode verified
+by me at src/vtt/agent-adapters/codex.ts:149-170) with a deliberately red
+"rollover threshold is measured" test until measured; preflight on
+post-override 6204 rooms + untouched-seed digests pinned; CR equality
+confirmed from astral-tower.ts challengeById (doppelganger 3/ghost 4/
+will-o-wisp 2 vs giant-scorpion 3/archelon 4/gargoyle 2); null-escalation
+unreachability test; single printout. Plan approved. Lane fast-forwarded
+to main (716ba5dd). Pre-dispatch baseline in the lane, run by me: tsc 0,
+sg 0, vitest 534 files / 9422 tests passed (19:26:10). Increment A1
+(types + registry partition + compile-time proof) dispatched to codex sol
+high, workspace-write, 19:27 (d466-A1-codex.log). Arm 13 still running.
+
 D466 SHIFT PLAN: CODEX DRAFT REVIEWED, ROUND 1 RETURNED (supervisor note,
 2026-09-02 19:1x): codex sol produced a 360-line plan (dnd-slim-runs/
 d466-shift-plan.md; four parts A-D, nine increments, tests with named
