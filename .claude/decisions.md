@@ -65,6 +65,19 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D455 — OWNER: k7 nudge and renderer fix are measured sequentially (2026-09-02)
+
+Asked (brainstorm Q5): sequential (supervisor recommendation), 2x2
+factorial, independent.
+
+Owner: **"Sequential."**
+
+Consequences: D449 (+k7 vs d443-s-full-low) runs on the current era as
+preregistered and amended by D452. The D453/D454 renderer and rider changes
+land afterwards as one era shift with a fresh control on the new era; the
+renderer fix's effect is read against that control, with k7 already in the
+baseline on both sides. No factorial arms are scheduled.
+
 ## D454 — OWNER: offer the base attack and flag the omitted rider; audit and model every missing rider; fix or replace every monster until every room works (2026-09-02)
 
 Asked (brainstorm Q4): doppelganger with every attack withheld because its
