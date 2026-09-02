@@ -123,6 +123,36 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D468 — OWNER: replace creatures that cannot be modeled quickly (2026-09-02)
+
+Asked (round 2 Q2): shift waits for the 3 no-attack creatures only
+(supervisor recommendation), every combat-relevant feature, all 68,
+replace what cannot be modeled quickly.
+
+Owner: **"Replace what cannot be modeled quickly."**
+
+Supervisor reading of "quickly" = fits inside the D466 shift window (this
+week) without new state models. Applied to the audit:
+- Modeled in the shift (quick, typed): mixed-kind multiattack so lion and
+  wight get their attacks; omitted-rider flag on every conditional-rider
+  attack; Pack Tactics projection; Sunlight Sensitivity, Bloodied
+  Frenzy/Fury (advantage/disadvantage toggles on existing state).
+- Kept, with unsupported abilities hidden from the AI per D453: unicorn
+  (attacks modeled; 7 spells + Blessing hidden), priest and acolyte
+  (attacks/Bless/Healing Word modeled; Light, Thaumaturgy, Spirit
+  Guardians, Dispel Magic, Sanctuary hidden), bugbear/Ashmaw (Abduct
+  ignored, Command/Hold Person kept with eligibility filters), goblin
+  boss (Redirect Attack hidden), homebrew arachnids/aquatics (traits
+  unprojected, attacks work).
+- Replaced in their rooms by a fully modeled creature of the same CR band
+  and role: doppelganger (6203002/3/7, 6204004/6), ghost (6203006/9/10),
+  will-o'-wisp (6204009). Replacement is a typed edit to the seed fixture
+  (6203/5117) or a generator override table (6204), reviewed by codex and
+  the supervisor, digest change recorded per seed. All inside the single
+  D466 shift; no second control.
+- Round-2 Q3 (degraded doppelganger multiattack) is moot and not asked.
+Owner may narrow or widen the replacement list.
+
 ## D467 — OWNER: D447 runs as preregistered; the three defective seeds are caveated (2026-09-02)
 
 Asked (round 2 Q1): run as preregistered with caveat (supervisor
