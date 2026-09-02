@@ -1,5 +1,36 @@
 # Binding scope decisions
 
+FINDING: SELF-TARGETED DETECT THOUGHTS = A DOPPELGANGER WITH NO USABLE
+ATTACK (supervisor, 2026-09-02, raw rows + repo source only): owner spotted
+a self-targeted Detect Thoughts. 25 such casts across the nine landed D443
+arms, always by the same three creatures (rooms 2, 3, 7, one monster each),
+always the "read-thoughts/detect-thoughts" option, always 0 ft movement.
+The creature is the Astral Tower doppelganger
+(src/combat/statblocks/astral-tower.ts:180ff): its Multiattack is
+actionUnavailable ("withheld until Unsettling Visage coupling is
+supported") and its Slam is actionUnavailable ("withheld until its
+first-round advantage is included"), so the engine offers it NO attack at
+all — its rendered option list in room 7 is read-thoughts, Dash,
+Disengage, Dodge, End Turn (plus healing-word combos). Detect Thoughts is
+range Self per the SRD (docs/srd/source/spell-descriptions.txt:2119), so
+the self target is rules-correct; the engine models the effect as an
+unsupported utility (option-outcome.ts:313 detect_thoughts: 'unsupported';
+expectation reason spell_operation_unsupported), i.e. a no-op. No room
+has invisible or hidden creatures (0 mentions in the contexts), so there is
+no legitimate Sense-Thoughts use either. Net: the DM is choosing the only
+"magic" option a creature with no attacks is offered. This is an engine
+content gap (typed-unavailable withholding of the whole attack because a
+rider is unsupported), not a model reasoning failure, and it hits every
+arm identically (shared control rooms), so it is symmetric noise in the
+sealed comparison, not a bias. Proposed fixes, queued for the era
+re-anchor before P4, not applied mid-D443: (a) degrade gracefully — offer
+Slam without its first-round-advantage rider (an attack missing a rider
+beats no attack) and Multiattack without the Visage coupling; (b) the
+brutal room generator should reject creatures whose statblock has zero
+usable attacks; (c) render "no modeled effect" on unsupported-utility
+spells so the DM is not lured by them. Owner's rule of thumb recorded:
+Detect Thoughts only makes sense to look for something invisible nearby.
+
 FINDING: DISENGAGE OFFERED AND TAKEN WITH NO ADJACENT HOSTILE (supervisor,
 2026-09-02, raw rows only, no judge output read): owner noticed luna-low
 disengages becoming dashes at medium. Checked every disengage plan in the
