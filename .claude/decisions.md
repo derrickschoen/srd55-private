@@ -65,6 +65,30 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D458 — OWNER: structured-KB scaffolding ships as baseline; tactical lines stay under A/B (2026-09-02)
+
+Asked (brainstorm Q8): ship as baseline with ~3 KB root (supervisor
+recommendation), must win an arm, scaffolding ships with tactics under A/B,
+ship with no size cap.
+
+Owner: **"Scaffolding ships, tactics stay under A/B."**
+
+Consequences: the role statement, glossary, subject-file index, and the
+procedural rundown lines (call get_turn_context, cover every required
+actor, offered ids only, primary+fallback, validate when unsure, reaction
+guidance persistence, engine-owns-resolution) become the shipped
+session-start KB, replacing k5/k6 as default. The tactical rundown lines in
+codex's draft (prefer an offered attack; Disengage only when leaving reach;
+Dash to close when nothing is offered; Dodge when nothing useful; k7 text)
+are NOT in the shipped root. They live in a separate tactics fixture
+(k7-close.txt and successors) and enter the baseline only through the D452
+route: ship regardless was ruled for k7 specifically, so k7 is in; any new
+tactical line beyond k7 is measured first. Subject files under
+tests/fixtures/ai-dm-kb/ are on-demand reads and count as scaffolding. Root
+size cap not ruled; supervisor default is codex's 3,072-byte target with a
+4,096-byte hard stop, enforced by a test. The scaffolding change is an era
+shift for the KB slot and lands with D453/D454.
+
 ## D457 — OWNER: a session spans one play sitting, with digest rollover; escalation inherits KB + digest + state (2026-09-02)
 
 Asked (brainstorm Q7): session span and escalation inheritance. Options:
