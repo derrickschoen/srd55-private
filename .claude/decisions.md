@@ -1,5 +1,18 @@
 # Binding scope decisions
 
+ERA-SHIFT MERGE LANDED (supervisor note, 2026-09-02): lane-wt/ctrl-value merged
+to main as b0709cea (lane commit fee67cc7). Sequence per D444.1/D446, all
+verified by the supervisor directly: lane full vitest 9420/9420 after codex
+fixed a real boundary violation the gate caught (option-outcome.ts value-import
+dragged encounter.ts+random.ts into the read-only capsule graph; fix = pure
+extraction into combat-rules.ts + saving-throw-outcomes.ts, boundary tests
+unmodified); live smoke 3 rooms green pre-merge; main gate green (tsc, sg scan
+clean on corrected invocation, vitest 9420/9420, build+digest clean, :4173
+200); mini-A/B 4 rooms structurally sound (context +227..+1074 bytes, no
+timeouts); G-sweep dry-run 10 brutal fixtures: unresolved-actor entries 113=113
+with identical reason mixes, legacy comparator unchanged; incapacitation-class
+not exercised in these fixtures (unit-covered). D443 relaunch follows.
+
 ## D446 — OWNER: stop the rolling harvest loop; drop the five D444 quads (2026-09-02)
 
 Verbatim: "Stop the loop. Drop the 5 quads." Supersedes D444.2 (quads
