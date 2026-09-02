@@ -1,5 +1,26 @@
 # Binding scope decisions
 
+## D446 — OWNER: stop the rolling harvest loop; drop the five D444 quads (2026-09-02)
+
+Verbatim: "Stop the loop. Drop the 5 quads." Supersedes D444.2 (quads
+run regardless) and the rolling-harvest arrangement recorded in the
+continuity note. Actions taken, verified by the supervisor:
+1. The session's arm/judge watch was stopped.
+2. The detached resumer (the only process that would launch the D444
+   family) was killed; the D441 chain script contains no quad step and
+   ends at "D441 ALL DONE". Consequence: if the D441 chain dies before
+   its last triple, nothing re-runs it — a manual relaunch would be
+   needed.
+3. Left running: the D441 chain, mid-arm on opp-move-threats, with
+   three triples behind it (opp-move-gating, opp-threats-gating,
+   move-threats-gating). Supervisor reading: "drop the quads" leaves
+   the triples in scope; they complete the 2^5 grid minus the quads
+   (control, 5 singles, 10 pairs, 10 triples, union = 27 arms, exactly
+   D442.2's stated grid).
+4. Judging state at the ruling: 16 of 20 D441 arms fully judged
+   (sol/opus/fable); the four remaining triples will be harvested and
+   judged in a later sweep, not rolling. Keys remain sealed.
+
 ## D446 — OWNER: drop the 5 quads (2026-09-02)
 
 Verbatim: "Drop the 5 quads." Supersedes D444.2 ("quads: run
