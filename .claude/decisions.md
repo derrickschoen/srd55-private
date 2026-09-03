@@ -1,5 +1,11 @@
 # Binding scope decisions
 
+D447 CONTROL VERIFIED (supervisor, 2026-09-03 00:08): d447-control
+(caveman full, luna low, generated rooms 6204001-10, 5 reps, 120 s) 50
+rows, all authorized, 0 timeouts, 10 digests x5, caveman_prose profile
+confirmed from rendererAttribution. Candidate arm started 00:04:58. B4
+in flight (21 files touched).
+
 B3 VERIFIED AND COMMITTED; B4 DISPATCHED (supervisor, 2026-09-02 23:50):
 B3 (9 files +211/-9, new src/vtt/d466-room-overrides.ts and
 room-roster-preflight.test.ts; six 6203 fixtures edited). My checks:
