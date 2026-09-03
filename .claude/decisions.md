@@ -1,5 +1,22 @@
 # Binding scope decisions
 
+F: MANGLED JUDGE HEADER AND A SELF-MATCHING pkill (supervisor, 2026-09-02
+21:08, two mistakes of my own): (1) judge-d443.sh substituted the entry
+count with `${HDR//N/$n}`, which replaced every capital N in the header
+("ONLY" -> "O60LY", "JSON" -> "JSO60", "NOT" -> "60OT"). Caught by the
+post-launch header grep. The first packet's three seats were killed
+before producing output; their logs deleted; the launch log kept as
+judge-d443.VOID-mangled-header.log; placeholder changed to @@COUNT@@ and
+the substituted header verified ("60 blinded", "ONLY outcome", "JSON
+array of 60", "NOT a DM" all present). (2) The cleanup command used
+`pkill -f "judge-d443[.]sh"`, whose regex matched the literal text of my
+own command line (which contained judge-d443.sh) and killed my shell mid-
+command (D444 self-match class again, this time through pkill). Rule
+added to the pgrep memory: kill by PID from a ps listing, never pkill -f
+with a pattern that appears in the same command. No arena or smoke
+process was affected (smoke, post chain and D447 waiter verified alive).
+Panel relaunched 21:08 with the corrected header.
+
 D443 JUDGING PREREGISTERED, PACKETS BUILT, PANEL DISPATCHED (supervisor
 note, 2026-09-02 21:03): design in analysis-notes.md before any packet was
 built: seven effort-pair packets (low vs medium per profile, 60 entries,
