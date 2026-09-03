@@ -1,5 +1,19 @@
 # Binding scope decisions
 
+H3 AND H1-INDICES VERIFIED AND COMMITTED ON THEIR BRANCHES; SOL GATING
+VERIFIED (supervisor, 2026-09-03 14:20). H3 (claude/h3-skills): my gate
+545 files / 9541 tests green (codex's own full run had four load
+timeouts and a 3x3 MCP smoke over its 120 s budget in isolation; my run
+on a quieter box passed it — timing margin noted); mutation (skills
+enabled for the control arm) fails then passes; committed. H1-indices
+(claude/h1-indices): my gate 545 / 9543 green; mutation (index n->n+1)
+fails then passes; committed. G2 (lane) and H1-ids (claude/h1-ids)
+delivered (codex reports 544/9535 and 545/9545, mutations as briefed);
+my gates queued sequentially. Sol s-gating rerun: 30/30 authorized, 22
+model-planned, refusals 10, 0 CLI-exit, wall 25.2 s; idle Disengage 2
+(luna twin 21), Dash 82 (51), attack slots 37 (31). D465 valid arms now
+six; cav-full running since 14:00.
+
 H4 INTENT MATCHER: OFFLINE RESULT INCONCLUSIVE, BRANCH KEPT (supervisor,
 2026-09-03 13:40; commit on claude/h4-intent). Codex terra built the
 deterministic lexical matcher, the corpus extractor and the evaluator;
