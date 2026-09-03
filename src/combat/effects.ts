@@ -622,6 +622,18 @@ export type EffectPayload =
       readonly options: readonly ('suppress_charmed_frightened' | 'indifferent')[];
     }
   | {
+      /** Hidden mechanical immunity/suppression; the underlying conditions remain stored. */
+      readonly kind: 'condition_suppression';
+      readonly conditions: readonly ['Charmed', 'Frightened'];
+      readonly grantsImmunity: true;
+    }
+  | {
+      readonly kind: 'indifferent_toward_monster_side';
+      readonly faction: 'monster_side';
+      readonly endsOnHostileAct: true;
+      readonly endsOnTargetOrObservedAllyDamage: true;
+    }
+  | {
       readonly kind: 'darkvision';
       readonly rangeFeet: number;
     }
@@ -1351,6 +1363,7 @@ export interface EffectApplication {
     readonly ability: Ability;
     readonly skill: Skill;
     readonly dc: number;
+    readonly cost?: 'action';
   };
   /** This effect ends, target-for-target, with the named parent lifecycle. */
   readonly parentEffectId?: EncounterEffectId;
@@ -1378,6 +1391,7 @@ export interface EncounterEffect {
     readonly ability: Ability;
     readonly skill: Skill;
     readonly dc: number;
+    readonly cost?: 'action';
   };
   readonly parentEffectId?: EncounterEffectId;
   readonly damageBreak?: DamageBreakTiming | null;

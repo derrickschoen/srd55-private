@@ -92,6 +92,8 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'augury':
     case 'attacks_against_target_roll_mode':
     case 'calm_emotions':
+    case 'condition_suppression':
+    case 'indifferent_toward_monster_side':
     case 'darkvision':
     case 'detect_thoughts':
     case 'granted_breath':
@@ -226,9 +228,13 @@ export function combatantConditions(
   const conditions: AppliedCondition[] = [];
   const seenConditions = new Set<string>();
   let exhaustionLevels = 0;
+  const suppressed = new Set<string>(state.effects
+    .filter((effect) => effect.targets.includes(id) && effect.payload.kind === 'condition_suppression')
+    .flatMap((effect) => effect.payload.kind === 'condition_suppression' ? effect.payload.conditions : []));
   for (const effect of state.effects) {
     if (!effect.targets.includes(id)) continue;
     for (const condition of appliedConditions(effect)) {
+      if (suppressed.has(condition.name)) continue;
       if (condition.name === 'Exhaustion') {
         exhaustionLevels += condition.level;
         continue;

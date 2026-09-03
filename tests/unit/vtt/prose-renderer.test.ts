@@ -180,12 +180,29 @@ describe('turn-context prose formats', () => {
       if (selectedOption === undefined) throw new Error('Engine default option is not advertised.');
       expect(document).toContain(optionId);
       expect(extracted.has(optionId)).toBe(true);
+      const choice = selectedOption['activation_choice'] === undefined
+        ? null
+        : object(selectedOption['activation_choice'], 'activation choice');
+      const choiceKind = choice === null ? null : String(choice['kind']);
+      const choiceValues = choice === null ? [] : values(choice['values']);
+      const activationChoice = choice === null
+        ? undefined
+        : choiceKind === 'calm_emotions_per_target'
+          ? {
+              kind: choiceKind,
+              selections: values(choice['target_ids']).map((targetId) => ({
+                target_id: targetId,
+                mode: choiceValues[0],
+              })),
+            }
+          : { kind: choiceKind, value: choiceValues[0] };
       return {
         actor_id: actor['actor_id'],
         expected_revision: selectedOption['revision'],
         primary_option_id: optionId,
         fallback_option_id: null,
         override_justification: null,
+        ...(activationChoice === undefined ? {} : { activation_choice: activationChoice }),
       };
     });
     const request = object(prose['request'], 'prose request');
@@ -196,7 +213,7 @@ describe('turn-context prose formats', () => {
       idempotency_key: `prose-round-trip-${format}`,
       proposals,
     }), 'round submission');
-    expect(result['status']).toBe('proposed');
+    expect(result['status'], JSON.stringify(result)).toBe('proposed');
   });
 
   it.each(PROSE_FORMATS)('%s has a mechanical counterpart for every full-profile informative fact', async (format) => {

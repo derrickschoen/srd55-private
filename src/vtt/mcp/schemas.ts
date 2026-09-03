@@ -79,12 +79,40 @@ const overrideJustification = z.discriminatedUnion('reason', [
     note: z.string().min(1).max(500),
   }).strict(),
 ]).describe('Required when a selected option is strictly dominated on every resolved declared metric; unknown engine gaps must be identified in note.');
+const activationChoice = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('command_word'), value: z.enum(['approach', 'flee', 'grovel', 'halt', 'drop']) }).strict(),
+  z.object({ kind: z.literal('unicorns_blessing_spell'), value: z.enum(['cure-wounds', 'lesser-restoration']) }).strict(),
+  z.object({ kind: z.literal('dispel_evil_and_good_mode'), value: z.enum(['break_enchantment', 'dismissal']) }).strict(),
+  z.object({
+    kind: z.literal('calm_emotions_per_target'),
+    selections: z.array(z.object({
+      target_id: identifier,
+      mode: z.enum(['suppress_charmed_frightened', 'indifferent_toward_monster_side']),
+    }).strict()).min(1).max(50),
+  }).strict(),
+]);
+const activationChoiceSlot = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('command_word'), values: z.tuple([
+    z.literal('approach'), z.literal('flee'), z.literal('grovel'), z.literal('halt'), z.literal('drop'),
+  ]) }).strict(),
+  z.object({ kind: z.literal('unicorns_blessing_spell'), values: z.tuple([
+    z.literal('cure-wounds'), z.literal('lesser-restoration'),
+  ]) }).strict(),
+  z.object({ kind: z.literal('dispel_evil_and_good_mode'), values: z.tuple([
+    z.literal('break_enchantment'), z.literal('dismissal'),
+  ]) }).strict(),
+  z.object({
+    kind: z.literal('calm_emotions_per_target'), target_ids: z.array(identifier).min(1).max(50),
+    values: z.tuple([z.literal('suppress_charmed_frightened'), z.literal('indifferent_toward_monster_side')]),
+  }).strict(),
+]);
 const turnProposal = z.object({
   actor_id: identifier,
   expected_revision: z.number().int().min(0),
   primary_option_id: offerableOptionIdentifier,
   fallback_option_id: offerableOptionIdentifier.nullable(),
   override_justification: overrideJustification.nullable(),
+  activation_choice: activationChoice.nullable().optional(),
 }).strict().describe('Revision-bound selection of engine-generated composite option ids.');
 const reactionGuidanceInstruction = z.enum([
   'take', 'decline', 'only_when_target_visible', 'only_when_legal_without_moving',
@@ -190,6 +218,11 @@ const expectation = z.discriminatedUnion('kind', [
     kind: z.enum(['movement', 'known_no_effect']), resolvable: z.literal(true), metric: z.literal('none'),
     assumption_codes: z.array(shortCode).max(20), policy: z.literal(OPTION_OUTCOME_POLICY),
   }).strict(),
+  z.object({
+    kind: z.literal('modeled_effect'), resolvable: z.literal(true), metric: z.literal('none'),
+    spell_ids: z.array(identifier).min(1).max(20),
+    assumption_codes: z.array(shortCode).max(20), policy: z.literal(OPTION_OUTCOME_POLICY),
+  }).strict(),
 ]);
 const tacticalOption = z.object({
   option_id: identifier, actor_id: identifier, revision: z.number().int().min(0), label: summaryText,
@@ -206,6 +239,7 @@ const tacticalOption = z.object({
   action_id: identifier, kind: z.enum(['attack', 'cast_spell', 'use_action', 'dodge', 'disengage', 'dash', 'end_turn']),
   target_selectors: z.array(targetSelector).max(50), resource_cost_labels: z.array(identifier).max(20),
   omitted_riders: z.array(omittedRider).max(100),
+  activation_choice: activationChoiceSlot.optional(),
   usable_now: z.boolean(), usable_after_movement: z.boolean(), minimum_movement_feet: z.number().int().min(0).nullable(),
   visibility: z.enum(['yes', 'no', 'conditional', 'unknown']), cover: z.enum(['none', 'half', 'three_quarters', 'total', 'unknown']),
   risks: z.array(risk).max(50), expectation: expectation.nullable(), refusals: z.array(refusal).max(20),

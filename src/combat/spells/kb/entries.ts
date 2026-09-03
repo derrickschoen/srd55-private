@@ -15,7 +15,8 @@ export type SpellEngineLimitationCode =
   | 'persistent_area_terrain_unavailable'
   | 'forced_reaction_movement_unavailable'
   | 'encounter_expiry_unavailable'
-  | 'exploration_nourishment_unavailable';
+  | 'exploration_nourishment_unavailable'
+  | 'plane_state_unavailable';
 
 export interface SpellEngineLimitation {
   readonly code: SpellEngineLimitationCode;
@@ -394,6 +395,19 @@ export const SPELL_KB_ENTRIES = [
       components: 'docs/srd/source/spell-descriptions.txt:3874',
       targeting: 'docs/srd/source/spell-descriptions.txt:3873',
       operation: 'docs/srd/source/spell-descriptions.txt:3875-3881',
+    },
+  },
+  {
+    ...entry('R-SPELL-189', 'dispel-evil-and-good', '2241', 'Protect the caster and choose Break Enchantment or Dismissal when activating the spell.'),
+    limitations: [
+      { code: 'plane_state_unavailable', note: 'Dismissal plane transfer awaits typed planar-location state.' },
+    ],
+    fieldCitations: {
+      identity: 'docs/srd/source/spell-descriptions.txt:2241',
+      castingTime: 'docs/srd/source/spell-descriptions.txt:2243',
+      components: 'docs/srd/source/spell-descriptions.txt:2245',
+      targeting: 'docs/srd/source/spell-descriptions.txt:2244-2251',
+      operation: 'docs/srd/source/spell-descriptions.txt:2252-2279',
     },
   },
 ] as const satisfies readonly SpellKbEntry[];

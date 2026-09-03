@@ -64,6 +64,7 @@ export type PersistentAreaEffectPayload =
       readonly kind: 'effect';
       readonly payload: PersistentAreaAppliedPayload;
       readonly lifetime: PersistentAreaEffectLifetime;
+      readonly escapeCheck?: { readonly ability: Ability; readonly skill: import('../domain/enums').Skill; readonly dc: number; readonly cost: 'action' };
     };
 
 export type PersistentAreaEffectSpec =

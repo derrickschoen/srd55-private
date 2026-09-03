@@ -270,6 +270,11 @@ function numberField(value: Readonly<Record<string, unknown>>, key: string): num
   if (typeof field !== 'number') throw new TypeError(`${key} must be a number.`);
   return field;
 }
+function arrayField(value: Readonly<Record<string, unknown>>, key: string): readonly unknown[] {
+  const field = value[key];
+  if (!Array.isArray(field)) throw new RangeError(`${key} must be an array.`);
+  return field;
+}
 function stateReference(value: unknown): EngineStateReference {
   const input = record(value, 'state_ref');
   return { runId: encounterSessionId(stringField(input, 'run_id')), stateHandle: stringField(input, 'state_handle'), expectedRevision: numberField(input, 'expected_revision') };
@@ -354,6 +359,30 @@ function decodeOverrideJustification(
 function decodeProposal(value: unknown): EngineTurnProposal {
   const input = record(value, 'proposal');
   const justification = input['override_justification'];
+  const choiceValue = input['activation_choice'];
+  const activationChoice = choiceValue === undefined
+    ? undefined
+    : choiceValue === null
+      ? null
+    : (() => {
+        const choice = record(choiceValue, 'activation choice');
+        const kind = stringField(choice, 'kind');
+        switch (kind) {
+          case 'command_word':
+          case 'unicorns_blessing_spell':
+          case 'dispel_evil_and_good_mode':
+            return { kind, value: stringField(choice, 'value') } as NonNullable<EngineTurnProposal['activationChoice']>;
+          case 'calm_emotions_per_target':
+            return {
+              kind,
+              selections: arrayField(choice, 'selections').map((entry) => {
+                const selection = record(entry, 'Calm Emotions selection');
+                return { targetId: combatantId(stringField(selection, 'target_id')), mode: stringField(selection, 'mode') };
+              }),
+            } as NonNullable<EngineTurnProposal['activationChoice']>;
+          default: throw new RangeError(`Unknown activation choice kind ${kind}.`);
+        }
+      })();
   return {
     actorId: combatantId(stringField(input, 'actor_id')),
     expectedRevision: numberField(input, 'expected_revision'),
@@ -364,6 +393,7 @@ function decodeProposal(value: unknown): EngineTurnProposal {
     overrideJustification: justification === null
       ? null
       : decodeOverrideJustification(justification),
+    ...(activationChoice === undefined ? {} : { activationChoice }),
   };
 }
 function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string, unknown>> {
@@ -376,6 +406,13 @@ function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string,
       reason: proposal.overrideJustification.reason,
       ...(proposal.overrideJustification.note === undefined ? {} : { note: proposal.overrideJustification.note }),
     },
+    ...(proposal.activationChoice === undefined ? {} : {
+      activation_choice: proposal.activationChoice === null
+        ? null
+        : proposal.activationChoice.kind === 'calm_emotions_per_target'
+          ? { kind: proposal.activationChoice.kind, selections: proposal.activationChoice.selections.map((entry) => ({ target_id: entry.targetId, mode: entry.mode })) }
+          : { kind: proposal.activationChoice.kind, value: proposal.activationChoice.value },
+    }),
   };
 }
 function hitPointBand(hitPoints: number, maximum: number): 'uninjured' | 'injured' | 'critical' | 'unknown' {
@@ -524,6 +561,12 @@ function advertisedExpectation(
       policy: outcome.policy,
     };
   }
+  if (outcome.evidence.kind === 'modeled_effect') {
+    return {
+      kind: 'modeled_effect', resolvable: true, metric: 'none',
+      spell_ids: outcome.evidence.spellIds, assumption_codes: [], policy: outcome.policy,
+    };
+  }
   return {
     kind: outcome.evidence.kind,
     resolvable: true,
@@ -623,11 +666,17 @@ function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsul
               : [{ actionId: String(component.actionId), targetId: componentTarget }];
           })
         : [];
+    const externalActivationChoice = option.activationChoice === undefined || option.activationChoice === null
+      ? undefined
+      : option.activationChoice.kind === 'calm_emotions_per_target'
+        ? { kind: option.activationChoice.kind, target_ids: option.activationChoice.targetIds, values: option.activationChoice.values }
+        : { kind: option.activationChoice.kind, values: option.activationChoice.values };
     return {
       option_id: option.optionId, actor_id: option.actorId, revision: option.revision, label: option.label,
       action_slots: option.actionSlots.map((slot) => externalOptionSlot(slot, option.omittedRiders)),
       action_id: firstActionId, kind, target_selectors: [], resource_cost_labels: option.resourceCostLabels,
       omitted_riders: option.omittedRiders,
+      ...(externalActivationChoice === undefined ? {} : { activation_choice: externalActivationChoice }),
       usable_now: resolution.valid && movementFeet === 0,
       usable_after_movement: resolution.valid,
       minimum_movement_feet: movementFeet,

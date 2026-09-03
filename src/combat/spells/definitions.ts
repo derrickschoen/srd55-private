@@ -402,6 +402,29 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
     operation: { kind: 'utility', effect: { kind: 'detection_sense', detects: 'creature_types_and_hallow', radiusFeet: 30 }, concentration: true, durationRounds: 100 },
   },
   {
+    id: 'dispel-evil-and-good', name: 'Dispel Evil and Good', level: 5,
+    source: 'docs/srd/source/spell-descriptions.txt:2241',
+    castingTime: 'action', components: VS,
+    targeting: { kind: 'self' },
+    operation: {
+      kind: 'caster_choice',
+      modes: [
+        {
+          mode: 'break_enchantment',
+          operation: { kind: 'effect', effect: effect({
+            kind: 'creature_type_protection', creatureTypes: ['Celestial', 'Elemental', 'Fey', 'Fiend', 'Undead'],
+          }, { target: 'self', concentration: true, durationRounds: 10 }) },
+        },
+        {
+          mode: 'dismissal',
+          operation: { kind: 'effect', effect: effect({
+            kind: 'creature_type_protection', creatureTypes: ['Celestial', 'Elemental', 'Fey', 'Fiend', 'Undead'],
+          }, { target: 'self', concentration: true, durationRounds: 10 }) },
+        },
+      ],
+    },
+  },
+  {
     id: 'detect-magic', name: 'Detect Magic', level: 1,
     source: 'docs/srd/source/spell-descriptions.txt:2085',
     castingTime: 'action', ritual: true, components: VS,
@@ -1409,6 +1432,7 @@ export const IMPLEMENTED_SPELL_DEFINITIONS: readonly SpellDefinition[] = [
             kind: 'effect',
             payload: { kind: 'condition', condition: 'Restrained' },
             lifetime: { kind: 'area_duration' },
+            escapeCheck: { ability: 'strength', skill: 'athletics', cost: 'action' },
           },
         },
       }],

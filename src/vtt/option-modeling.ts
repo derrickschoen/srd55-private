@@ -7,6 +7,7 @@ import type { Brand } from '../domain/ids';
 import { spellDefinition } from '../combat/spells/definitions';
 import type {
   EngineActionId,
+  EngineActivationChoiceSlot,
   EngineActionSlotUse,
   EngineMovementObjective,
   EngineSpellId,
@@ -106,6 +107,8 @@ export interface EngineOfferableOption {
   readonly actionSlots: readonly EngineActionSlotUse[];
   readonly resourceCostLabels: readonly string[];
   readonly omittedRiders: readonly EngineOmittedRider[];
+  /** A single activation-time decision; values never expand into separate options. */
+  readonly activationChoice?: EngineActivationChoiceSlot | null;
 }
 
 export interface EngineHumanOnlyOption {

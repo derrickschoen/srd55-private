@@ -42,9 +42,9 @@ function hasNamedSpellHeader(
 
 describe('spell knowledge-base completeness', () => {
   it('has exactly one source-cited KB entry for every implemented manifest spell', () => {
-    expect(SPELL_KB_ENTRIES).toHaveLength(188);
-    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.ruleId)).size).toBe(188);
-    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.spellId)).size).toBe(188);
+    expect(SPELL_KB_ENTRIES).toHaveLength(189);
+    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.ruleId)).size).toBe(189);
+    expect(new Set(SPELL_KB_ENTRIES.map((entry) => entry.spellId)).size).toBe(189);
     expect(SPELL_KB_ENTRIES.map((entry) => entry.spellId).sort()).toEqual(
       IMPLEMENTED_SPELL_DEFINITIONS.map((definition) => definition.id).sort(),
     );

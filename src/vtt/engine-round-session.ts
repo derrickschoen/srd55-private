@@ -227,8 +227,9 @@ function monsterSpellCommand(
   const caster = state.combatants.find((candidate) => candidate.profile.id === state.activeCombatant);
   if (caster?.profile.kind !== 'monster') throw new Error('Resolved statblock spell caster is absent.');
   const sources = use.slot === 'main' ? monsterActions(state, caster.profile.id) : monsterBonusActions(state, caster.profile.id);
-  const source = sources.find((candidate): candidate is MonsterSpellcastingAction =>
-    candidate.kind === 'spellcasting' && candidate.id === use.actionId);
+  const source = sources.find((candidate): candidate is MonsterSpellcastingAction |
+    Extract<import('../combat/statblock').MonsterBonusAction, { readonly kind: 'spell_choice' }> =>
+    (candidate.kind === 'spellcasting' || candidate.kind === 'spell_choice') && candidate.id === use.actionId);
   const reference = source?.spells.find((spell) => spell.id === use.spellId);
   const definition = spellDefinition(use.spellId);
   if (source === undefined || reference === undefined || definition === null) {
@@ -237,8 +238,10 @@ function monsterSpellCommand(
   const abilityScore = caster.profile.rules.abilityScores?.[source.ability] ?? 10;
   const modifier = Math.floor((abilityScore - 10) / 2);
   const proficiency = caster.profile.rules.proficiencyBonus ?? 2;
-  const saveDc = source.saveDc.kind === 'present' ? source.saveDc.value : 8 + proficiency + modifier;
-  const attackBonus = source.spellAttackBonus.kind === 'present' ? source.spellAttackBonus.value : proficiency + modifier;
+  const saveDc = source.kind === 'spellcasting' && source.saveDc.kind === 'present'
+    ? source.saveDc.value : 8 + proficiency + modifier;
+  const attackBonus = source.kind === 'spellcasting' && source.spellAttackBonus.kind === 'present'
+    ? source.spellAttackBonus.value : proficiency + modifier;
   const resourcePoolId = monsterSpellResourcePoolId(source.id, reference);
   const placedArea = use.area ?? null;
   const usesPlacedArea = definition.targeting.kind === 'area' || definition.targeting.kind === 'area_selected';
@@ -248,7 +251,13 @@ function monsterSpellCommand(
     castAsRitual: false, casterLevel: 1, attackBonus, saveDc, spellcastingModifier: modifier,
     targets: usesPlacedArea ? [] : use.targetIds,
     area: usesPlacedArea ? placedArea : null,
-    weaponAttack: null, selectedOption: null,
+    weaponAttack: null,
+    selectedOption: use.activationChoice?.kind === 'command_word' ||
+      use.activationChoice?.kind === 'dispel_evil_and_good_mode'
+      ? use.activationChoice.value : null,
+    ...(use.activationChoice?.kind === 'calm_emotions_per_target'
+      ? { calmEmotionsModes: use.activationChoice.selections.map((entry) => ({ target: entry.targetId, mode: entry.mode })) }
+      : {}),
     ...(resourcePoolId === null ? {} : { resourcePoolId }),
     monsterActionId: source.id,
   };

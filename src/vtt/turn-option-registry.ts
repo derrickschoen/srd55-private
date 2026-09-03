@@ -14,7 +14,7 @@ import {
   monsterSpellResourcePoolId,
 } from '../combat/statblock';
 import { spellDefinition } from '../combat/spells/definitions';
-import { cubeAffectedCellsAmong, feetPoint, type AreaTemplate } from '../combat/templates';
+import { affectedCellsAmong, cubeAffectedCellsAmong, feetPoint, type AreaTemplate } from '../combat/templates';
 import { feet, type CombatantId } from '../combat/values';
 import { worldObjectActionWasUsed } from '../combat/world-object-actions';
 import { gridDistance } from '../combat/grid';
@@ -51,6 +51,7 @@ import {
   engineOptionId,
   engineSpellId,
   type EngineActionSlotUse,
+  type EngineActivationChoiceSlot,
   type EngineBonusActionUse,
   type EngineMainActionUse,
   type EngineMovementObjective,
@@ -239,6 +240,72 @@ interface MainUseOption {
   readonly movement: EngineMovementObjective;
   readonly resourceCostLabels: readonly string[];
   readonly omittedRiders: readonly EngineOmittedRider[];
+  readonly activationChoice?: EngineActivationChoiceSlot | null;
+}
+
+function placedAreaSelection(
+  state: EncounterState,
+  actorId: CombatantId,
+  definition: NonNullable<ReturnType<typeof spellDefinition>>,
+): SpellUseSelection | null {
+  if (definition.targeting.kind !== 'area' ||
+    (definition.targeting.shape !== 'sphere' && definition.targeting.shape !== 'cube')) return null;
+  const actorPosition = state.tokens.find((entry) => entry.combatantId === actorId)?.position;
+  if (actorPosition === undefined) return null;
+  const enemyIds = new Set(livingEnemies(state, actorId));
+  const eligibleEnemyIds = new Set(state.combatants
+    .filter((entry) => enemyIds.has(entry.profile.id))
+    .filter((entry) => definition.id !== 'calm-emotions' || entry.profile.rules.creatureType === 'Humanoid')
+    .map((entry) => entry.profile.id));
+  const occupied = state.tokens.filter((entry) => state.combatants.some((subject) =>
+    subject.profile.id === entry.combatantId && subject.life !== 'dead'));
+  const grid = {
+    bounds: state.bounds,
+    blockedCells: [
+      ...state.blockedCells,
+      ...state.worldObjects.flatMap((object) => object.blocking.lineOfSight ? object.footprint : []),
+    ],
+  };
+  const size = definition.targeting.baseSizeFeet;
+  const targeting = definition.targeting;
+  const candidates = Array.from({ length: state.bounds.columns + 1 }, (_column, column) => column)
+    .flatMap((column) => Array.from({ length: state.bounds.rows + 1 }, (_row, row) => row)
+      .flatMap((row) => {
+        const center = feetPoint(column * 5, row * 5);
+        if (gridDistance(actorPosition, { column, row }) > targeting.rangeFeet) return [];
+        if (targeting.shape === 'cube' &&
+          (center.x < size / 2 || center.y < size / 2 ||
+            center.x > state.bounds.columns * 5 - size / 2 ||
+            center.y > state.bounds.rows * 5 - size / 2)) return [];
+        const area: AreaTemplate = targeting.shape === 'sphere'
+          ? { shape: 'sphere', template: { origin: center, radius: feet(size) } }
+          : {
+              shape: 'cube',
+              template: {
+                origin: feetPoint(center.x - size / 2, center.y), center,
+                axis: { x: 1, y: 0 }, size: feet(size), includeOrigin: false,
+              },
+            };
+        const cells = new Set(affectedCellsAmong(grid, area, occupied.map((entry) => entry.position))
+          .map((cell) => `${String(cell.column)},${String(cell.row)}`));
+        const affected = occupied.filter((entry) => cells.has(`${String(entry.position.column)},${String(entry.position.row)}`));
+        const enemies = affected.filter((entry) => eligibleEnemyIds.has(entry.combatantId))
+          .map((entry) => entry.combatantId).sort();
+        if (enemies.length === 0) return [];
+        const eligible = affected.filter((entry) => definition.id !== 'calm-emotions' ||
+          state.combatants.find((subject) => subject.profile.id === entry.combatantId)?.profile.rules.creatureType === 'Humanoid')
+          .map((entry) => entry.combatantId).sort();
+        const allies = affected.filter((entry) => combatantsAreAllies(state, actorId, entry.combatantId)).length;
+        return [{ area, enemies, eligible, allies, row, column }];
+      }));
+  const chosen = candidates.sort((left, right) =>
+    right.enemies.length - left.enemies.length || left.allies - right.allies ||
+    left.row - right.row || left.column - right.column)[0];
+  if (chosen === undefined) return null;
+  return {
+    targets: chosen.eligible.map(target), area: chosen.area,
+    labelSuffix: ` [${String(size)}-ft ${definition.targeting.shape} -> ${chosen.enemies.join(', ')}]`,
+  };
 }
 
 function mainUses(state: EncounterState, actorId: CombatantId): readonly MainUseOption[] {
@@ -347,6 +414,9 @@ function spellSelection(
   if (isHardControlDefinition(definition)) {
     return hardControlSelection(state, actorId, definition, saveDc);
   }
+  if (spellId === 'calm-emotions' || spellId === 'entangle') {
+    return placedAreaSelection(state, actorId, definition);
+  }
   const allies = livingAllies(state, actorId);
   const enemies = livingEnemies(state, actorId);
   switch (spellId) {
@@ -357,7 +427,7 @@ function spellSelection(
     case 'sanctuary': return { targets: allies.slice(0, 1).map(target), area: null, labelSuffix: '' };
   }
   switch (definition.targeting.kind) {
-    case 'self': return { targets: [target(actorId)], area: null, labelSuffix: '' };
+    case 'self': return { targets: [], area: null, labelSuffix: '' };
     case 'single':
     case 'multiple':
     case 'selected': return { targets: enemies.slice(0, 1).map(target), area: null, labelSuffix: '' };
@@ -379,6 +449,7 @@ function spellcastingUses(
   readonly movement: EngineMovementObjective;
   readonly resourceCostLabels: readonly string[];
   readonly omittedRiders: readonly EngineOmittedRider[];
+  readonly activationChoice: EngineActivationChoiceSlot | null;
 }[] {
   const subject = state.combatants.find((candidate) => candidate.profile.id === actorId);
   return action.spells.flatMap((spell) => {
@@ -396,7 +467,8 @@ function spellcastingUses(
       spell.id,
       action.saveDc.kind === 'present' ? action.saveDc.value : null,
     );
-    if (selection === null || selection.targets.length === 0) return [];
+    if (selection === null || (selection.targets.length === 0 &&
+      spellDefinition(spell.id)?.targeting.kind !== 'self')) return [];
     return [{
       label: `${action.id}/${spell.id}${maximum === null ? '' : ` (${String(remaining)}/${String(maximum)})`}${selection.labelSuffix}`,
       use: {
@@ -409,6 +481,17 @@ function spellcastingUses(
       movement: HOLD,
       resourceCostLabels: poolId === null ? [] : [`${String(poolId)}:${String(remaining)}/${String(maximum)}`],
       omittedRiders: [],
+      activationChoice: spell.id === 'command'
+        ? { kind: 'command_word', values: ['approach', 'flee', 'grovel', 'halt', 'drop'] }
+        : spell.id === 'dispel-evil-and-good'
+          ? { kind: 'dispel_evil_and_good_mode', values: ['break_enchantment', 'dismissal'] }
+          : spell.id === 'calm-emotions'
+            ? {
+                kind: 'calm_emotions_per_target',
+                targetIds: selection.targets.map((entry) => entry.combatantId),
+                values: ['suppress_charmed_frightened', 'indifferent_toward_monster_side'],
+              }
+            : null,
     }];
   });
 }
@@ -417,6 +500,7 @@ interface BonusUseOption {
   readonly label: string;
   readonly use: EngineBonusActionUse;
   readonly resourceCostLabels: readonly string[];
+  readonly activationChoice?: EngineActivationChoiceSlot | null;
 }
 
 function bonusUses(state: EncounterState, actorId: CombatantId): readonly BonusUseOption[] {
@@ -426,7 +510,7 @@ function bonusUses(state: EncounterState, actorId: CombatantId): readonly BonusU
   }
   return monsterBonusActions(state, actorId).flatMap((action: MonsterBonusAction): readonly BonusUseOption[] => {
     switch (action.kind) {
-      case 'spellcasting': return spellcastingUses(state, actorId, action).map(({ label, use, resourceCostLabels }) => ({ label, use, resourceCostLabels }));
+      case 'spellcasting': return spellcastingUses(state, actorId, action).map(({ label, use, resourceCostLabels, activationChoice }) => ({ label, use, resourceCostLabels, activationChoice }));
       case 'saving_throw': return livingEnemies(state, actorId).map((enemy) => ({
         label: `${action.name} -> ${enemy}`,
         use: { kind: 'saving_throw' as const, actionId: engineActionId(action.id), target: target(enemy) },
@@ -442,9 +526,25 @@ function bonusUses(state: EncounterState, actorId: CombatantId): readonly BonusU
         use: { kind: choice === 'Dash' ? 'dash' as const : choice === 'Disengage' ? 'disengage' as const : 'hide' as const },
         resourceCostLabels: [],
       }));
+      case 'spell_choice': {
+        const remaining = subject.limitedResources?.find((pool) =>
+          pool.id === monsterSpellResourcePoolId(action.id, action.spells[0] as (typeof action.spells)[number]))?.remaining ?? action.uses;
+        if (remaining < 1 || action.spells.length !== 2 ||
+          !action.spells.every((spell) => spell.manifestStatus === 'implemented')) return [];
+        const ally = livingAllies(state, actorId)[0];
+        if (ally === undefined) return [];
+        return [{
+          label: `${action.name} (${String(remaining)}/${String(action.uses)})`,
+          use: {
+            kind: 'cast_spell', sourceActionId: engineActionId(action.id),
+            spellId: engineSpellId('cure-wounds'), targets: [target(ally)], area: null,
+          },
+          resourceCostLabels: [`${String(monsterSpellResourcePoolId(action.id, action.spells[0] as (typeof action.spells)[number]))}:${String(remaining)}/${String(action.uses)}`],
+          activationChoice: { kind: 'unicorns_blessing_spell', values: ['cure-wounds', 'lesser-restoration'] },
+        }];
+      }
       case 'teleport':
       case 'healing':
-      case 'spell_choice':
       case 'shape_shift_retained_statistics':
       case 'swoop':
       case 'consume_life':
@@ -461,8 +561,12 @@ function option(
   actionSlots: readonly EngineActionSlotUse[],
   resourceCostLabels: readonly string[],
   omittedRiders: readonly EngineOmittedRider[],
+  activationChoice: EngineActivationChoiceSlot | null,
 ): EngineOfferableOption {
-  const body = { actorId, revision, label, movement, actionSlots, resourceCostLabels, omittedRiders };
+  const body = {
+    actorId, revision, label, movement, actionSlots, resourceCostLabels, omittedRiders,
+    ...(activationChoice === null ? {} : { activationChoice }),
+  };
   return {
     optionId: engineOptionId(`option:${String(revision)}:${sha256(canonicalJson(body)).slice(0, 48)}`),
     ...body,
@@ -658,9 +762,10 @@ export function engineActorOptions(
     return [
       option(
         revision, actorId, mainUse.label, mainUse.movement, [mainSlot],
-        mainUse.resourceCostLabels, mainUse.omittedRiders,
+        mainUse.resourceCostLabels, mainUse.omittedRiders, mainUse.activationChoice ?? null,
       ),
-      ...bonus.map((bonusUse) => option(
+      ...bonus.filter((bonusUse) => (mainUse.activationChoice ?? null) === null ||
+        (bonusUse.activationChoice ?? null) === null).map((bonusUse) => option(
         revision,
         actorId,
         `${mainUse.label} + ${bonusUse.label}`,
@@ -668,6 +773,7 @@ export function engineActorOptions(
         [mainSlot, { slot: 'bonus', use: bonusUse.use }],
         [...mainUse.resourceCostLabels, ...bonusUse.resourceCostLabels],
         mainUse.omittedRiders,
+        mainUse.activationChoice ?? bonusUse.activationChoice ?? null,
       )),
     ];
   });

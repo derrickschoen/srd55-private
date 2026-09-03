@@ -21,7 +21,9 @@ import {
 import { engineActorOptions } from './turn-option-registry';
 import {
   engineActionId,
+  engineSpellId,
   type EngineActionSlotUse,
+  type EngineActivationChoice,
   type EngineOfferableOption,
   type EngineBonusActionUse,
   type EngineMainActionUse,
@@ -318,16 +320,22 @@ function movementResolution(
   return best;
 }
 
+type MonsterSpellSource = MonsterSpellcastingAction |
+  Extract<import('../combat/statblock').MonsterBonusAction, { readonly kind: 'spell_choice' }>;
+
 function sourceSpellcastingAction(
   state: EncounterState,
   actorId: CombatantId,
   slot: 'main' | 'bonus',
   use: Extract<EngineMainActionUse | EngineBonusActionUse, { readonly kind: 'cast_spell' }>,
-): MonsterSpellcastingAction | null {
+): MonsterSpellSource | null {
   const source = slot === 'main' ? monsterActions(state, actorId) : monsterBonusActions(state, actorId);
   const action = source.find(
-    (candidate): candidate is MonsterSpellcastingAction => candidate.kind === 'spellcasting' &&
-      candidate.id === use.sourceActionId && candidate.actionEconomy === (slot === 'main' ? 'action' : 'bonus_action'),
+    (candidate): candidate is MonsterSpellSource =>
+      (candidate.kind === 'spell_choice'
+        ? candidate.id === use.sourceActionId && slot === 'bonus'
+        : candidate.kind === 'spellcasting' && candidate.id === use.sourceActionId &&
+          candidate.actionEconomy === (slot === 'main' ? 'action' : 'bonus_action')),
   );
   return action?.spells.some((spell) => spell.id === use.spellId && spell.manifestStatus === 'implemented') === true
     ? action
@@ -499,6 +507,51 @@ export function resolveEngineActorOption(
   };
 }
 
+function choiceFitsOption(
+  option: EngineOfferableOption,
+  choice: EngineActivationChoice | null | undefined,
+): boolean {
+  const slot = option.activationChoice;
+  if (slot === undefined || slot === null) return choice === null || choice === undefined;
+  if (choice === null || choice === undefined || choice.kind !== slot.kind) return false;
+  switch (slot.kind) {
+    case 'command_word':
+      return choice.kind === 'command_word' && slot.values.some((value) => value === choice.value);
+    case 'unicorns_blessing_spell':
+      return choice.kind === 'unicorns_blessing_spell' && slot.values.some((value) => value === choice.value);
+    case 'dispel_evil_and_good_mode':
+      return choice.kind === 'dispel_evil_and_good_mode' && slot.values.some((value) => value === choice.value);
+    case 'calm_emotions_per_target': {
+      if (choice.kind !== 'calm_emotions_per_target') return false;
+      const expected = [...slot.targetIds].sort();
+      const actual = choice.selections.map((entry) => entry.targetId).sort();
+      return expected.length === actual.length && expected.every((value, index) => value === actual[index]) &&
+        new Set(actual).size === actual.length &&
+        choice.selections.every((entry) => slot.values.some((value) => value === entry.mode));
+    }
+  }
+}
+
+function mechanicsWithChoice(
+  mechanics: ResolvedTurnMechanics,
+  choice: EngineActivationChoice | null | undefined,
+): ResolvedTurnMechanics {
+  if (choice === null || choice === undefined) return mechanics;
+  let attached = false;
+  return {
+    ...mechanics,
+    actionSlots: mechanics.actionSlots.map((slot) => {
+      if (attached || slot.kind !== 'cast_spell') return slot;
+      attached = true;
+      return {
+        ...slot,
+        spellId: choice.kind === 'unicorns_blessing_spell' ? engineSpellId(choice.value) : slot.spellId,
+        activationChoice: choice,
+      };
+    }),
+  };
+}
+
 export function availableEngineActorOptions(
   state: EncounterState,
   actorId: CombatantId,
@@ -544,7 +597,10 @@ export function createPureTurnProposalResolver(
           const fallback = proposal.fallbackOptionId === null
             ? null
             : options.find((option) => option.optionId === proposal.fallbackOptionId) ?? null;
-          return accepted('primary', primary, resolution.mechanics, primary, fallback);
+          if (!choiceFitsOption(primary, proposal.activationChoice)) {
+            return { valid: false, selectedBranch: 'none', refusals: [{ branch: 'primary', code: 'ACTIVATION_CHOICE_INVALID', summary: `${proposal.actorId}: activation choice does not match the offered option` }] };
+          }
+          return accepted('primary', primary, mechanicsWithChoice(resolution.mechanics, proposal.activationChoice), primary, fallback);
         }
       }
       const primaryRefusal = {
@@ -563,7 +619,9 @@ export function createPureTurnProposalResolver(
       }
       const resolution = resolveEngineActorOption(state, fallback, queries);
       return resolution.valid
-        ? accepted('fallback', fallback, resolution.mechanics, primary ?? fallback, fallback, [primaryRefusal])
+        ? choiceFitsOption(fallback, proposal.activationChoice)
+          ? accepted('fallback', fallback, mechanicsWithChoice(resolution.mechanics, proposal.activationChoice), primary ?? fallback, fallback, [primaryRefusal])
+          : { valid: false, selectedBranch: 'none', refusals: [primaryRefusal, { branch: 'fallback', code: 'ACTIVATION_CHOICE_INVALID', summary: `${proposal.actorId}: activation choice does not match the fallback option` }] }
         : { valid: false, selectedBranch: 'none', refusals: [primaryRefusal, { branch: 'fallback', code: resolution.code, summary: resolution.summary }] };
     },
   });

@@ -2998,6 +2998,7 @@ function applyDamage(
     kind: 'damaged_by_creature', source, target, amount,
   });
   breakEffectsOnDamage(context, source, target, amount);
+  if (hitPointDamage > 0) breakCalmIndifferenceOnHostileAct(context, source, target);
   if (life !== 'living') endConcentration(context, target, 'concentration_broken');
 }
 
@@ -3028,6 +3029,22 @@ function breakEffectsOnDamage(
       .map((effect) => effect.id),
   );
   endEffects(context, ids, 'damage_taken');
+}
+
+function breakCalmIndifferenceOnHostileAct(
+  context: ReductionContext,
+  hostileActor: CombatantId,
+  attackedTarget: CombatantId,
+): void {
+  const ids = new Set(context.state.effects
+    .filter((effect) => effect.payload.kind === 'indifferent_toward_monster_side')
+    .filter((effect) => combatantsAreAllies(context.state, hostileActor, effect.source))
+    .filter((effect) => effect.targets.some((indifferentTarget) =>
+      indifferentTarget === attackedTarget ||
+      (combatantsAreAllies(context.state, indifferentTarget, attackedTarget) &&
+        canCombatantSee(context.state, indifferentTarget, attackedTarget))))
+    .map((effect) => effect.id));
+  endEffects(context, ids, 'trigger_consumed');
 }
 
 function resolveDeathSave(context: ReductionContext, id: CombatantId): void {
@@ -4034,6 +4051,14 @@ function applyPersistentAreaEffect(
     stackingIdentity: effectStackingIdentity(`area:${String(area.id)}:${hook}:${String(hookIndex)}:${String(target)}`),
     stacking: 'replace_same_source',
     repeatedSave,
+    ...(spec.payload.escapeCheck === undefined ? {} : {
+      escapeCheck: {
+        ability: spec.payload.escapeCheck.ability,
+        skill: spec.payload.escapeCheck.skill,
+        dc: spec.payload.escapeCheck.dc,
+        ...(spec.payload.escapeCheck.cost === undefined ? {} : { cost: spec.payload.escapeCheck.cost }),
+      },
+    }),
     payload: spec.payload.payload,
     areaSource: area.id,
     ...(lifetime.kind === 'while_inside' ? { areaMembershipBound: true as const } : {}),
@@ -5256,6 +5281,8 @@ function cloneEffectApplication(
       case 'augury':
       case 'attacks_against_target_roll_mode':
       case 'calm_emotions':
+      case 'condition_suppression':
+      case 'indifferent_toward_monster_side':
       case 'darkvision':
       case 'detect_thoughts':
       case 'granted_breath':
@@ -6630,6 +6657,7 @@ function processAttack(
   ) {
     throw new EncounterRuleError('validation', 'The target has Total Cover or is outside line of sight.');
   }
+  breakCalmIndifferenceOnHostileAct(context, command.actor, command.target);
   const madeModes = rollDefenseModes(
     context.state, 'attack_rolls_made', command.actor, command.target, 'other',
     command.rollModifierEffectIds,
@@ -7064,16 +7092,17 @@ function spendSpellCastingCost(
     const declared = statblock === null ? null : [
       ...(statblock.sourceDetails.actions.kind === 'present' ? statblock.sourceDetails.actions.value : []),
       ...(statblock.sourceDetails.bonusActions.kind === 'present' ? statblock.sourceDetails.bonusActions.value : []),
-    ].find((action) => action.kind === 'spellcasting' && action.id === command.monsterActionId &&
-      action.spells.some((spell) => spell.id === definition.id));
-    if (declared?.kind !== 'spellcasting') {
+    ].find((action) => (action.kind === 'spellcasting' || action.kind === 'spell_choice') &&
+      action.id === command.monsterActionId && action.spells.some((spell) => spell.id === definition.id));
+    if (declared?.kind !== 'spellcasting' && declared?.kind !== 'spell_choice') {
       throw new EncounterRuleError('validation', `${definition.name} is not declared by ${command.monsterActionId}.`);
     }
     assertActiveActor(context, actor);
     spendCost(
       context,
       actor,
-      declared.actionEconomy === 'action' ? 'action' : 'bonus_action',
+      declared.kind === 'spell_choice' ? 'bonus_action' :
+        declared.actionEconomy === 'action' ? 'action' : 'bonus_action',
       `Cast ${definition.name} via ${declared.id}`,
     );
     return;
@@ -7685,6 +7714,8 @@ function resolvedSpellEffectPayload(
     case 'augury':
     case 'attacks_against_target_roll_mode':
     case 'calm_emotions':
+    case 'condition_suppression':
+    case 'indifferent_toward_monster_side':
     case 'darkvision':
     case 'detect_thoughts':
     case 'granted_breath':
@@ -8620,6 +8651,9 @@ function resolvedPersistentAreaSpellEffect(
         kind: 'effect' as const,
         payload: structuredClone(spec.payload.payload),
         lifetime: structuredClone(spec.payload.lifetime),
+        ...(spec.payload.escapeCheck === undefined ? {} : {
+          escapeCheck: { ...spec.payload.escapeCheck, dc: command.saveDc },
+        }),
       };
   return spec.kind === 'automatic'
     ? { kind: 'automatic', payload }
@@ -10365,10 +10399,38 @@ function executeSpellOperation(
       const eligible = operation.excludeCaster
         ? targets.filter((target) => target !== command.actor)
         : targets;
+      const creatureEligible = operation.effect.payload.kind === 'calm_emotions'
+        ? eligible.filter((target) => effectiveCombatRules(context.state, target).creatureType === 'Humanoid')
+        : eligible;
       const failed = operation.willingTargetSkipsSave === true && command.selectedOption === 'willing'
-        ? eligible
-        : eligible.filter((target) =>
+        ? creatureEligible
+        : creatureEligible.filter((target) =>
           resolveTargetSave(context, command.actor, target, operation.ability, command.saveDc, operation.rollMode, null).outcome === 'failure');
+      if (operation.effect.payload.kind === 'calm_emotions') {
+        const selections = command.calmEmotionsModes ?? [];
+        if (selections.length !== creatureEligible.length || new Set(selections.map((entry) => entry.target)).size !== selections.length ||
+          creatureEligible.some((target) => !selections.some((entry) => entry.target === target))) {
+          throw new EncounterRuleError('validation', `${definition.name} requires one mode for every Humanoid in the sphere.`);
+        }
+        const parentId = applyEffect(context, command.actor, effectApplication(
+          definition, command, operation.effect, [command.actor, ...creatureEligible],
+        ));
+        for (const target of failed) {
+          const selection = selections.find((entry) => entry.target === target);
+          if (selection === undefined) throw new EncounterRuleError('validation', `${definition.name} target mode is absent.`);
+          applyEffect(context, command.actor, {
+            targets: [target], duration: { kind: 'permanent' }, concentration: false,
+            stackingIdentity: effectStackingIdentity(`spell:${definition.id}:${String(target)}:${selection.mode}`),
+            stacking: 'replace_same_source', repeatedSave: null, parentEffectId: parentId,
+            damageBreak: selection.mode === 'indifferent_toward_monster_side'
+              ? { sources: 'effect_source_or_allies', minimumDamage: 1 } : null,
+            payload: selection.mode === 'suppress_charmed_frightened'
+              ? { kind: 'condition_suppression', conditions: ['Charmed', 'Frightened'], grantsImmunity: true }
+              : { kind: 'indifferent_toward_monster_side', faction: 'monster_side', endsOnHostileAct: true, endsOnTargetOrObservedAllyDamage: true },
+          });
+        }
+        return 'applied';
+      }
       applySpellEffect(context, definition, command, operation.effect, failed);
       return 'applied';
     }
@@ -11602,7 +11664,8 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
         if (
           command.ability !== candidate.escapeCheck.ability ||
           command.skill !== candidate.escapeCheck.skill ||
-          command.dc !== candidate.escapeCheck.dc
+          command.dc !== candidate.escapeCheck.dc ||
+          (candidate.escapeCheck.cost !== undefined && command.cost !== candidate.escapeCheck.cost)
         ) {
           throw new EncounterRuleError('validation', 'An escape check must use the condition effect\'s declared ability, skill, and DC.');
         }

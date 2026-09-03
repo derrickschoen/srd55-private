@@ -8,6 +8,7 @@ import {
   monsterSpellResourcePoolId,
   type CombatSense,
   type MonsterLegendaryAction,
+  type MonsterBonusAction,
   type MonsterSpellcastingAction,
   type MonsterStatblock,
 } from './statblock';

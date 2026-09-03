@@ -26,6 +26,34 @@ export type EngineSpellId = Brand<string, 'EngineSpellId'>;
 export const engineActionId = (value: string): EngineActionId => value as EngineActionId;
 export const engineSpellId = (value: string): EngineSpellId => value as EngineSpellId;
 
+export const COMMAND_WORDS = ['approach', 'flee', 'grovel', 'halt', 'drop'] as const;
+export type CommandWord = (typeof COMMAND_WORDS)[number];
+export const UNICORNS_BLESSING_SPELLS = ['cure-wounds', 'lesser-restoration'] as const;
+export type UnicornsBlessingSpell = (typeof UNICORNS_BLESSING_SPELLS)[number];
+export const DISPEL_EVIL_AND_GOOD_MODES = ['break_enchantment', 'dismissal'] as const;
+export type DispelEvilAndGoodMode = (typeof DISPEL_EVIL_AND_GOOD_MODES)[number];
+export const CALM_EMOTIONS_MODES = ['suppress_charmed_frightened', 'indifferent_toward_monster_side'] as const;
+export type CalmEmotionsMode = (typeof CALM_EMOTIONS_MODES)[number];
+
+export type EngineActivationChoiceSlot =
+  | { readonly kind: 'command_word'; readonly values: typeof COMMAND_WORDS }
+  | { readonly kind: 'unicorns_blessing_spell'; readonly values: typeof UNICORNS_BLESSING_SPELLS }
+  | { readonly kind: 'dispel_evil_and_good_mode'; readonly values: typeof DISPEL_EVIL_AND_GOOD_MODES }
+  | {
+      readonly kind: 'calm_emotions_per_target';
+      readonly targetIds: readonly CombatantId[];
+      readonly values: typeof CALM_EMOTIONS_MODES;
+    };
+
+export type EngineActivationChoice =
+  | { readonly kind: 'command_word'; readonly value: CommandWord }
+  | { readonly kind: 'unicorns_blessing_spell'; readonly value: UnicornsBlessingSpell }
+  | { readonly kind: 'dispel_evil_and_good_mode'; readonly value: DispelEvilAndGoodMode }
+  | {
+      readonly kind: 'calm_emotions_per_target';
+      readonly selections: readonly { readonly targetId: CombatantId; readonly mode: CalmEmotionsMode }[];
+    };
+
 export interface EngineMovementPreference {
   readonly willingness: 'none' | 'only_if_required' | 'for_clear_advantage' | 'freely';
   readonly maximumFeet?: number;
@@ -109,6 +137,7 @@ export interface EngineTurnProposal {
   readonly expectedRevision: number;
   readonly primaryOptionId: EngineOptionId;
   readonly fallbackOptionId: EngineOptionId | null;
+  readonly activationChoice?: EngineActivationChoice | null;
   readonly overrideJustification: null | (
     {
       readonly reason: 'morale' | 'objective' | 'roleplay' | 'resource_conservation';
@@ -137,6 +166,7 @@ export interface ResolvedActionSlotUse {
   readonly targetIds: readonly CombatantId[];
   readonly objectId: WorldObjectId | null;
   readonly omittedRiders: readonly EngineOmittedRider[];
+  readonly activationChoice?: EngineActivationChoice;
   readonly multiattackComponent?: true;
   /** Present only for a placed-area spell. */
   readonly area?: AreaTemplate;

@@ -56,6 +56,24 @@ export interface MonsterTraitSupportRow {
   readonly disposition: FeatureSupportDisposition;
 }
 
+export const B4_MODELED_SPELL_PAYLOADS = [
+  'calm-emotions', 'command', 'dispel-evil-and-good', 'entangle', 'unicorns-blessing',
+] as const;
+export type B4ModeledSpellPayload = (typeof B4_MODELED_SPELL_PAYLOADS)[number];
+
+/** Binding B4 disposition audit: each listed payload has executable mechanics and typed choices where required. */
+export function b4SpellPayloadDisposition(
+  id: B4ModeledSpellPayload,
+): Extract<FeatureSupportDisposition, { readonly kind: 'modeled' }> {
+  switch (id) {
+    case 'calm-emotions':
+    case 'command':
+    case 'dispel-evil-and-good':
+    case 'entangle':
+    case 'unicorns-blessing': return { kind: 'modeled' };
+  }
+}
+
 /** Exhaustive disposition for each declared monster trait. */
 export function monsterTraitSupportDisposition(
   trait: MonsterTrait,

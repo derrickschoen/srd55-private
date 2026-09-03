@@ -282,7 +282,7 @@ function materialMovement(row: MutableRecord): boolean {
 
 function optionSemantic(option: MutableRecord): string {
   return JSON.stringify([
-    option['kind'], option['action_id'], option['resource_cost_labels'],
+    option['kind'], option['action_id'], option['resource_cost_labels'], option['activation_choice'],
     option['minimum_movement_feet'], option['usable_now'], option['usable_after_movement'],
   ]);
 }
@@ -330,7 +330,9 @@ function shortlist(
     selected.push(option);
   }
   if (options.length >= 2 && selected.length < 2) {
-    throw new Error('Renderer K-set safety failure: actor lost every visible non-default option.');
+    throw new Error(`Renderer K-set safety failure: actor ${String(options[0]?.['actor_id'])} lost every visible non-default option (${options
+      .map((option) => `${String(option['option_id'])}:${String(option['label'])}`)
+      .join(', ')}; dominated ${String(knownDominatedId)}).`);
   }
   if (defaultIndex >= 0 && selected[0]?.['option_id'] !== defaultId) {
     throw new Error('Renderer K-set safety failure: engine default is not first.');
@@ -446,6 +448,7 @@ export function renderTurnContextProfile(
         action_id: option['action_id'], kind: option['kind'], usable_now: option['usable_now'],
         usable_after_movement: option['usable_after_movement'],
         omitted_riders: option['omitted_riders'],
+        ...(option['activation_choice'] === undefined ? {} : { activation_choice: option['activation_choice'] }),
       }));
       options = actor['options'] as MutableRecord[];
     }
@@ -739,6 +742,13 @@ function optionFacts(option: MutableRecord): readonly string[] {
   }
   if (array(option['resource_cost_labels']).length > 0) {
     facts.push(`Costs ${listed(option['resource_cost_labels'])}`);
+  }
+  const activationChoice = record(option['activation_choice']);
+  if (activationChoice !== null) {
+    const values = listed(activationChoice['values']);
+    const targets = array(activationChoice['target_ids']);
+    facts.push(`Choose ${words(String(activationChoice['kind']))} at activation from ${values}${
+      targets.length === 0 ? '' : ` for each target ${targets.join(', ')}`}`);
   }
   for (const riderValue of array(option['omitted_riders'])) {
     const rider = record(riderValue);

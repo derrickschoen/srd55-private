@@ -11,6 +11,7 @@ import {
 } from '../../combat/saving-throw-outcomes';
 import {
   monsterSpellResourcePoolId,
+  type MonsterBonusAction,
   type MonsterSpellcastingAction,
 } from '../../combat/statblock';
 import { spellDefinition } from '../../combat/spells/definitions';
@@ -50,10 +51,11 @@ export const FULL_HP_BAR_PRESSURE_CREDIT = exactRational(1, 1);
 export const LIMITED_RESOURCE_CHARGE_PENALTY = exactRational(1, 2);
 export const FULL_SPEED_APPROACH_CREDIT = exactRational(1, 4);
 
-export type OptionOutcomeFamily = 'legacy' | 'hard_turn_denial';
+export type OptionOutcomeFamily = 'legacy' | 'hard_turn_denial' | 'modeled_effect';
 export const OPTION_OUTCOME_FAMILIES = [
   'legacy',
   'hard_turn_denial',
+  'modeled_effect',
 ] as const satisfies readonly OptionOutcomeFamily[];
 
 export type ActionEquivalents = Brand<ExactRational, 'ActionEquivalents'>;
@@ -412,6 +414,8 @@ export const EFFECT_PAYLOAD_OUTCOME_DISPOSITION = {
   water_breathing: 'unsupported',
   water_walk: 'unsupported',
   web_area: 'unsupported',
+  condition_suppression: 'unsupported',
+  indifferent_toward_monster_side: 'unsupported',
 } as const satisfies Record<EffectPayload['kind'], PayloadDisposition>;
 
 export type WakeEligibility =
@@ -493,6 +497,7 @@ export interface HardControlProfile {
 export type DeclaredOptionOutcome =
   | { readonly kind: 'attack_sequence' }
   | { readonly kind: 'hard_control'; readonly profile: HardControlProfile }
+  | { readonly kind: 'modeled_effect'; readonly spellIds: readonly string[] }
   | { readonly kind: 'movement' }
   | { readonly kind: 'known_no_effect' }
   | { readonly kind: 'unsupported'; readonly reason: UnsupportedOutcomeReason };
@@ -552,16 +557,20 @@ function sourceSpellcastingAction(
   state: EncounterState,
   actorId: CombatantId,
   use: Extract<EngineMainActionUse | EngineBonusActionUse, { readonly kind: 'cast_spell' }>,
-): MonsterSpellcastingAction | null {
+): MonsterSpellcastingAction | Extract<MonsterBonusAction, { readonly kind: 'spell_choice' }> | null {
   const source = monsterActions(state, actorId).find(
     (action): action is MonsterSpellcastingAction =>
       action.kind === 'spellcasting' && action.id === use.sourceActionId,
   );
   return source ?? monsterBonusActions(state, actorId).find(
-    (action): action is MonsterSpellcastingAction =>
-      action.kind === 'spellcasting' && action.id === use.sourceActionId,
+    (action): action is MonsterSpellcastingAction | Extract<MonsterBonusAction, { readonly kind: 'spell_choice' }> =>
+      (action.kind === 'spellcasting' || action.kind === 'spell_choice') && action.id === use.sourceActionId,
   ) ?? null;
 }
+
+const B4_MODELED_EFFECT_SPELLS = new Set([
+  'calm-emotions', 'command', 'cure-wounds', 'dispel-evil-and-good', 'entangle', 'lesser-restoration',
+]);
 
 function declaredSpellOutcome(
   state: EncounterState,
@@ -573,10 +582,14 @@ function declaredSpellOutcome(
   if (definition === null || source === null) {
     return { kind: 'unsupported', reason: 'spell_operation_unsupported' };
   }
+  if (B4_MODELED_EFFECT_SPELLS.has(String(use.spellId))) {
+    return { kind: 'modeled_effect', spellIds: [use.spellId] };
+  }
   const targetIds = use.targets.flatMap((selector) => selector.kind === 'combatant'
     ? [selector.combatantId]
     : []);
-  const saveDc = source.saveDc.kind === 'present' ? source.saveDc.value : null;
+  const saveDc = source.kind === 'spellcasting' && source.saveDc.kind === 'present'
+    ? source.saveDc.value : null;
   const profile = hardControlProfileFromDefinition(definition, targetIds, saveDc);
   return typeof profile === 'string'
     ? { kind: 'unsupported', reason: profile }
@@ -631,6 +644,11 @@ export function classifyDeclaredOptionOutcome(
 
   if (declarations.some((declaration) => declaration.kind === 'attack_sequence')) {
     return { kind: 'attack_sequence' };
+  }
+  const modeledSpellIds = declarations.flatMap((declaration) =>
+    declaration.kind === 'modeled_effect' ? declaration.spellIds : []);
+  if (modeledSpellIds.length > 0) {
+    return { kind: 'modeled_effect', spellIds: modeledSpellIds };
   }
   if (declarations.some((declaration) => declaration.kind === 'movement')) {
     return { kind: 'movement' };
@@ -726,6 +744,7 @@ export interface HardControlOutcomeEvidence {
 export type OptionOutcomeEvidence =
   | DamageOutcomeEvidence
   | HardControlOutcomeEvidence
+  | { readonly kind: 'modeled_effect'; readonly spellIds: readonly string[] }
   | { readonly kind: 'movement'; readonly feet: number }
   | { readonly kind: 'known_no_effect' };
 
@@ -1243,6 +1262,13 @@ export function evaluateOptionOutcome(
         ledger: emptyLedger({ positionalProgress: credit }),
       };
     }
+    case 'modeled_effect': return {
+      status: 'resolved',
+      policy: OPTION_OUTCOME_POLICY,
+      family: 'modeled_effect',
+      evidence: { kind: 'modeled_effect', spellIds: declaration.spellIds },
+      ledger: emptyLedger(),
+    };
     case 'known_no_effect': return {
       status: 'resolved',
       policy: OPTION_OUTCOME_POLICY,
