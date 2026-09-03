@@ -3,6 +3,7 @@ import { createEncounter } from '../../../src/combat/encounter';
 import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { declaredMonsterTraits } from '../../../src/combat/monster-traits';
 import { WIGHT } from '../../../src/combat/statblocks/undead-crypt';
+import { BUNDLED_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
 import {
   exactDmIntelMatrix,
   renderDmIntelRow,
@@ -10,8 +11,10 @@ import {
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import {
   monsterTraitSupportRows,
+  monsterTraitSupportDisposition,
   type FeatureSupportDisposition,
 } from '../../../src/vtt/monster-feature-support';
+import { D466_CREATURE_REPLACEMENTS } from '../../../src/vtt/d466-room-overrides';
 import {
   createEngineMcpRuntime,
   freshMonsterPlanningState,
@@ -28,6 +31,25 @@ const DISPOSITIONS = [
 ] as const satisfies readonly FeatureSupportDisposition['kind'][];
 
 describe('monster feature support dispositions', () => {
+  it('D466 replacements have no unaudited omission or human-only trait dispositions', () => {
+    for (const replacement of D466_CREATURE_REPLACEMENTS) {
+      const row = BUNDLED_MONSTER_ROSTER.find(
+        (candidate) => candidate.id === replacement.replacement,
+      );
+      if (row === undefined) throw new Error(`Missing replacement ${replacement.replacement}.`);
+      const traits = row.statblock.sourceDetails.traits;
+      const dispositions = traits.kind === 'present'
+        ? traits.value.map(monsterTraitSupportDisposition)
+        : [];
+      expect(
+        dispositions.filter((disposition) =>
+          disposition.kind === 'offered_with_omission' ||
+          disposition.kind === 'human_only_unmodeled'),
+        `${replacement.replacement} gained a disposition absent from the rider audit`,
+      ).toEqual([]);
+    }
+  });
+
   it('sunlight_sensitivity_preflight_and_intel_flag: reports no sunlight state without projecting light mechanics', () => {
     const wight = monsterCombatantProfile(WIGHT, {
       combatantId: 'combatant:sunlight-wight', tokenId: 'token:sunlight-wight',

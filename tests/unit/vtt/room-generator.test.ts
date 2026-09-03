@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../../src/commands/canonical-json';
+import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { reduceEncounter } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
 import { BUNDLED_MONSTER_ROSTER, STARTER_MONSTER_ROSTER } from '../../../src/combat/statblocks/roster';
 import { spellDefinition } from '../../../src/combat/spells/definitions';
+import { sha256 } from '../../../src/crypto/sha256';
+import {
+  D466_GENERATED_ROOM_OVERRIDES,
+  d466CreatureReplacement,
+  d466ReplacementStatblock,
+} from '../../../src/vtt/d466-room-overrides';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../../../src/vtt/intent-resolver';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import {
@@ -46,10 +53,51 @@ const HARD_BASIS_SEEDS = [
 ] as const;
 
 const BRUTAL_BASIS_SEEDS = [6_203_001, 6_203_002, 6_203_003] as const;
+const BRUTAL_BASIS_GENERATED_DIGESTS = {
+  6_203_001: '3f737f1ddf714b0381abdc0e822b3a07cda4c55287a4bc0b1a97cd4d7d71d63b',
+  6_203_002: 'cdb567192800c4dbea964fbabf03d88013d7d6402da8b391cf2f60e19e69a0c9',
+  6_203_003: '6c470c04fd6373f7fa999d5f0c66539c54eb71e6094e2b83a2ca972ab91720f8',
+} as const;
+const BRUTAL_BASIS_FIXTURE_DIGESTS = {
+  6_203_001: '3f737f1ddf714b0381abdc0e822b3a07cda4c55287a4bc0b1a97cd4d7d71d63b',
+  6_203_002: '8a7738bd2606792bae65da8f39f709ffad5b0bb5487f8e5749cecac4f29f9860',
+  6_203_003: 'd54761b2864fcdc1a777f645ade96279da751b3247bca1e042fb997326dc060f',
+} as const;
 const BRUTAL_PRODUCTIVITY_SEEDS = [
   6_203_001, 6_203_002, 6_203_003, 6_203_004, 6_203_005,
   6_203_006, 6_203_007, 6_203_008, 6_203_009, 6_203_010,
 ] as const;
+
+const D466_6204_PRE_OVERRIDE_ROSTER_DIGESTS = {
+  6_204_001: 'df493054bdfcbc09c63a9930b9299f41d0c9558be828f2b76bee03ac95d9073c',
+  6_204_002: '0b83417d94a2741bf28865ac9b4b09de44e3d82eee718109e09f2fd4cb4c5b14',
+  6_204_003: '105b5a7ff69ff572606a494fc336b29badb16f5c08438ec83fe0f1b7cf264e6f',
+  6_204_004: 'e3b822d18589cfabdd6acc579daec22325540661869850ba55c583970725fd75',
+  6_204_005: '3af3cf9a27216bc25dad9586696d47f587bec1e7ed8879569c6052e892693e72',
+  6_204_006: 'be0fcd2d2cbf0415fc6b07189132ba665e30973b86a3847e43b427c11a238b4f',
+  6_204_007: '56665e115694a30c5ff7da200e10394ae55093e5b85e03252bc2f36717cc5ba4',
+  6_204_008: 'ae387c2541e566bdf565334837d2729eb9c1a65303fe0f412eed3288fd86d306',
+  6_204_009: '04fbc7fd4cd029c63d0d936539ab53aca3d50c80206764aede55fbc0ba72a88e',
+  6_204_010: '2768168a0da1fa28d35e86febb92a6035f892fbe5a1f703c89c13fe6ace3339b',
+} as const;
+
+const D466_6204_NON_ROSTER_DIGESTS = {
+  6_204_001: 'a510aaa8e785c641bcf3455df6f7ce8fbf71b0f2ec978e3b5e6f2ac62f289a3f',
+  6_204_002: 'c26ea2b4bca6ed4f7afbf044a9853b410287e80dc9a4a4fc6f322083ea6eb501',
+  6_204_003: '16bb7c43f6a2a1751928de993d50e5bd27e69b64c9ac8a4db9efbb72d94e2f66',
+  6_204_004: '9fb5c7812054c026eb9f8d070691fbf8af5925d5e6ce8123a33a3085af961990',
+  6_204_005: '0ad33edb24bda5de199144bf9c6d6f1412e61d2915486a1364817cd47438259d',
+  6_204_006: 'd0138274a6f2b4cdf7996578b6408803ad723d808fb4b6d5487cc4b767dee880',
+  6_204_007: 'bcd1545c7a397c86a37c7a672aab72c99689a94a9df812e5a39db830cbb7c326',
+  6_204_008: '1bf591adce1bceac8ea3a8e44f9fcfed5b252266ceccfcc96991cb20670bc8b1',
+  6_204_009: 'a323c1eb80becabbae04661c815887440ddc89e02aa56a757cb776d5348d8255',
+  6_204_010: '2439eb3aa80907618d35f188429eb9ca07c56e3b0c35b1218e7732917e6b7ee9',
+} as const;
+
+const D466_6204_CR_SPEND = {
+  6_204_001: 60, 6_204_002: 50, 6_204_003: 64, 6_204_004: 54, 6_204_005: 58,
+  6_204_006: 74, 6_204_007: 66, 6_204_008: 52, 6_204_009: 58, 6_204_010: 46,
+} as const;
 
 const inputs = declareTestInputs({
   fixtures: [
@@ -95,6 +143,21 @@ function expectValidEnvironmentRegions(room: GeneratedRoom): void {
     expect(region.id.trim()).not.toBe('');
     expect(region.cells.length).toBeGreaterThan(0);
   }
+}
+
+function d466NonRosterProjection(room: GeneratedRoom): unknown {
+  return {
+    spec: { ...room.spec, monsterRoster: [] },
+    encounter: {
+      ...room.encounter,
+      state: {
+        ...room.encounter.state,
+        combatants: room.encounter.state.combatants.filter(
+          (combatant) => combatant.profile.kind !== 'monster',
+        ),
+      },
+    },
+  };
 }
 
 describe('seeded room generator', () => {
@@ -234,9 +297,73 @@ describe('seeded room generator', () => {
   it.each(BRUTAL_BASIS_SEEDS)('pins frozen brutal arena basis seed %s byte-for-byte', (seed) => {
     const path = `tests/fixtures/arena-basis-brutal/seed-${String(seed)}.json` as
       `tests/fixtures/arena-basis-brutal/seed-${typeof seed}.json`;
-    expect(`${canonicalJson(generateRoom(seed, { difficulty: 'brutal' }))}\n`).toBe(
-      inputs.fixtures.readText(path),
+    const generatedBytes = `${canonicalJson(generateRoom(seed, { difficulty: 'brutal' }))}\n`;
+    const fixtureBytes = inputs.fixtures.readText(path);
+    expect(sha256(generatedBytes), `seed ${String(seed)} pre-replacement generation changed`).toBe(
+      BRUTAL_BASIS_GENERATED_DIGESTS[seed],
     );
+    expect(sha256(fixtureBytes), `seed ${String(seed)} typed fixture changed`).toBe(
+      BRUTAL_BASIS_FIXTURE_DIGESTS[seed],
+    );
+    if (seed === 6_203_001) expect(generatedBytes).toBe(fixtureBytes);
+  });
+
+  it('applies only the three 6204 post-sampling replacements without changing RNG-derived room data', () => {
+    expect(D466_GENERATED_ROOM_OVERRIDES.map((override) => override.seed)).toEqual([
+      6_204_004, 6_204_006, 6_204_009,
+    ]);
+    for (let seed = 6_204_001; seed <= 6_204_010; seed += 1) {
+      const typedSeed = seed as keyof typeof D466_6204_PRE_OVERRIDE_ROSTER_DIGESTS;
+      const room = generateRoom(seed, { difficulty: 'brutal' });
+      expect(
+        sha256(canonicalJson(d466NonRosterProjection(room))),
+        `seed ${String(seed)} changed terrain, party, ids, placement, or RNG-derived state`,
+      ).toBe(D466_6204_NON_ROSTER_DIGESTS[typedSeed]);
+      expect(room.spec.challengeBudgetEighths, `seed ${String(seed)} changed CR budget`).toBe(
+        D466_6204_CR_SPEND[typedSeed],
+      );
+      expect(room.spec.challengeSpentEighths, `seed ${String(seed)} changed CR spend`).toBe(
+        D466_6204_CR_SPEND[typedSeed],
+      );
+
+      const override = D466_GENERATED_ROOM_OVERRIDES.find((candidate) => candidate.seed === seed);
+      if (override === undefined) {
+        expect(
+          sha256(canonicalJson(room.spec.monsterRoster)),
+          `seed ${String(seed)} roster changed; making the override also fire for 6204005 must fail`,
+        ).toBe(D466_6204_PRE_OVERRIDE_ROSTER_DIGESTS[typedSeed]);
+        continue;
+      }
+
+      const replacement = d466CreatureReplacement(override.original);
+      const replacementEntries = room.spec.monsterRoster.filter(
+        (entry) => entry.statblockId === replacement.replacement,
+      );
+      expect(replacementEntries.length, `seed ${String(seed)} did not receive its replacement`).toBeGreaterThan(0);
+      expect(room.spec.monsterRoster.some((entry) => entry.statblockId === replacement.original)).toBe(false);
+      for (const entry of replacementEntries) {
+        expect(entry).toMatchObject({
+          challengeRating: replacement.challengeRating,
+          challengeEighths: replacement.crEighths,
+        });
+        const combatant = room.encounter.state.combatants.find(
+          (candidate) => candidate.profile.id === entry.combatantId,
+        );
+        expect(combatant?.profile).toEqual(monsterCombatantProfile(
+          d466ReplacementStatblock(replacement),
+          { combatantId: entry.combatantId, tokenId: entry.tokenId },
+        ));
+      }
+      const restoredRoster = room.spec.monsterRoster.map((entry) =>
+        entry.statblockId !== replacement.replacement ? entry : {
+          ...entry,
+          statblockId: replacement.original,
+        });
+      expect(
+        sha256(canonicalJson(restoredRoster)),
+        `seed ${String(seed)} changed sampled roster data beyond the typed id replacement`,
+      ).toBe(D466_6204_PRE_OVERRIDE_ROSTER_DIGESTS[typedSeed]);
+    }
   });
 
   it.each(BRUTAL_PRODUCTIVITY_SEEDS)(
