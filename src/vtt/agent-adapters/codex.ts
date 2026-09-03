@@ -114,12 +114,12 @@ export class CodexAgentSessionAdapter extends ProcessAgentSessionAdapter {
   readonly kind = 'codex' as const;
   protected readonly defaultBinary = 'codex';
   readonly #contextReader: CodexRolloutContextReader;
+  readonly #codexHome: string;
 
   constructor(options: AgentAdapterOptions = {}) {
     super(options);
-    this.#contextReader = new CodexRolloutContextReader(
-      options.codexHome ?? process.env['CODEX_HOME'] ?? resolve(homedir(), '.codex'),
-    );
+    this.#codexHome = options.codexHome ?? process.env['CODEX_HOME'] ?? resolve(homedir(), '.codex');
+    this.#contextReader = new CodexRolloutContextReader(this.#codexHome);
   }
 
   start(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
@@ -143,8 +143,9 @@ export class CodexAgentSessionAdapter extends ProcessAgentSessionAdapter {
       engineArgs: this.engineArgs(invocation.launcherToken),
       instructions: invocation.instructions ?? null,
       arenaSession: invocation.sessionProfile === 'arena',
+      instructionSource: invocation.instructionSource,
       sessionId,
-    }));
+    }), { CODEX_HOME: this.#codexHome });
   }
 
   private async invoke(
@@ -203,6 +204,7 @@ export interface CodexArgvInput {
   readonly engineArgs: readonly string[];
   readonly instructions?: string | null;
   readonly arenaSession?: boolean;
+  readonly instructionSource?: AgentInvocation['instructionSource'];
   readonly sessionId: string | null;
 }
 
@@ -217,7 +219,7 @@ export function codexArgv(input: CodexArgvInput): readonly string[] {
     ...(input.arenaSession === true ? [
       '-c', 'project_doc_max_bytes=0',
       '-c', 'features.plugins=false',
-      '-c', 'skills.include_instructions=false',
+      '-c', `skills.include_instructions=${input.instructionSource === 'skill' ? 'true' : 'false'}`,
     ] : []),
     ...(input.engineCommand === null ? [] : [
       '-c', `mcp_servers.engine.command=${JSON.stringify(input.engineCommand)}`,

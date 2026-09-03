@@ -193,13 +193,14 @@ export abstract class ProcessAgentSessionAdapter implements AgentSessionAdapter 
     return this.options.processRunner ?? realAgentProcessRunner;
   }
 
-  protected spec(argv: readonly string[]): AgentProcessSpec {
+  protected spec(argv: readonly string[], env?: Readonly<Record<string, string>>): AgentProcessSpec {
     return {
       binary: this.options.binary ?? this.defaultBinary,
       argv,
       cwd: this.options.cwd ?? process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
+      ...(env === undefined ? {} : { env }),
       ...(this.options.onStdoutLine === undefined ? {} : { onStdoutLine: this.options.onStdoutLine }),
     };
   }

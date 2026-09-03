@@ -61,10 +61,12 @@ import {
   KB_SUBJECTS,
 } from '../../../src/vtt/knowledge-base-contract';
 import { declareTestInputs } from '../../helpers/test-inputs';
+import { sha256 } from '../../../src/crypto/sha256';
 
 const kbInputs = declareTestInputs({ fixtures: [
   'tests/fixtures/ai-dm-kb/ai-dm-core.md',
   'tests/fixtures/ai-dm-kb/tactics.md',
+  'tests/fixtures/ai-dm-skills/engine-submission/SKILL.md',
 ] });
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
 
@@ -556,6 +558,8 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(journal.ended()).toBe(true);
     const lifecycle = new AgentSessionLifecycle(journal, adapter, 1, policy);
     await expect(lifecycle.resumeRound({
+      instructionSource: 'none',
+      skill: null,
       runId,
       prompt: 'must not dispatch after explicit end',
       model: config.model,
@@ -1382,6 +1386,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(adapter.startInvocations).toHaveLength(1);
     expect(adapter.startInvocations[0]?.instructions).toBe(startupInstructions);
     expect(adapter.startInvocations[0]?.prompt).not.toContain(startupInstructions);
+    if (config.instructionSource !== 'kb') throw new Error('Explicit KB config lost its instruction source.');
     expect(adapter.resumeInvocations.length).toBeGreaterThan(0);
     expect(adapter.resumeInvocations.every((entry) => entry.instructions === null)).toBe(true);
     expect(adapter.resumeInvocations.every((entry) => !entry.prompt.includes(startupInstructions))).toBe(true);
@@ -1403,8 +1408,67 @@ describe('AI-DM engine MCP conversation runner', () => {
         manifest.turnContextDeltaBase === undefined;
     })).toBe(true);
     expect(result.rows.every((row) => row.kbHash === DEFAULT_KB_HASH)).toBe(true);
+    expect([...adapter.startInvocations, ...adapter.resumeInvocations].every((entry) =>
+      entry.instructionSource === 'kb' && entry.skill === null && entry.kbPath === config.kbPath,
+    )).toBe(true);
+    expect(result.rows.every((row) =>
+      row.instructionSource === 'kb' && row.skillName === null && row.skillHash === null,
+    )).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line)))
       .toHaveLength(3);
+  });
+
+  it('threads a selected skill through every invocation and hashes the exact fixture bytes', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-skill-'));
+    const adapter = new RecordingConversationAdapter();
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--instruction-source', 'skill', '--skill', 'engine-submission',
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+
+    const result = await runConversation(config, { adapter });
+    const invocations = [...adapter.startInvocations, ...adapter.resumeInvocations];
+    expect(invocations.length).toBeGreaterThan(0);
+    expect(invocations.every((entry) =>
+      entry.instructionSource === 'skill' && entry.skill === 'engine-submission' && entry.kbPath === null,
+    )).toBe(true);
+    expect(result.rows).toEqual([expect.objectContaining({
+      outcome: 'service_null',
+      instructionSource: 'skill',
+      skillName: 'engine-submission',
+      skillHash: sha256(kbInputs.fixtures.readText(
+        'tests/fixtures/ai-dm-skills/engine-submission/SKILL.md',
+      )),
+    })]);
+  });
+
+  it.each([
+    ['none', []],
+    ['kb', ['--instruction-source', 'kb', '--kb', DEFAULT_AI_DM_KB_ROOT]],
+    ['skill', ['--instruction-source', 'skill', '--skill', 'dm-round']],
+  ] as const)('runs a model-free %s instruction-source smoke through a SIMULATED adapter', async (
+    source,
+    sourceArgs,
+  ) => {
+    const directory = mkdtempSync(join(tmpdir(), `dnd-conversation-${source}-smoke-`));
+    const adapter = new SerializedRoundTripAdapter('attack');
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      ...sourceArgs,
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+
+    const result = await runConversation(config, { adapter });
+    expect(result.rows).toEqual([expect.objectContaining({
+      outcome: 'authorized',
+      instructionSource: source,
+      skillName: source === 'skill' ? 'dm-round' : null,
+      skillHash: source === 'skill' ? expect.stringMatching(/^[0-9a-f]{64}$/u) : null,
+    })]);
+    expect([...adapter.startInvocations, ...adapter.resumeInvocations].every((entry) =>
+      entry.instructionSource === source,
+    )).toBe(true);
   });
 
   it('starts the persistent SIMULATED session with the first round plan in one model dispatch', { timeout: 30_000 }, async () => {
@@ -1497,8 +1561,9 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--local-base-url', 'http://127.0.0.1:11434/v1', '--local-model', 'llama-SIMULATED',
       '--local-think', 'sometimes',
     ])).toThrow('--local-think must be on or off');
-    expect(parseConversationArgs(['--rooms', '1', '--out', outPath]).kbPath)
-      .toBe(join(process.cwd(), DEFAULT_AI_DM_KB_ROOT));
+    expect(parseConversationArgs(['--rooms', '1', '--out', outPath])).toEqual(expect.objectContaining({
+      instructionSource: 'none', skill: null,
+    }));
     expect(() => parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--kb', 'tests/fixtures/arena-basis/seed-3943001.json',
     ])).toThrow('--kb must name a root under tests/fixtures/ai-dm-kb');

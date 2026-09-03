@@ -36,6 +36,8 @@ import {
 
 function invocation(runId: ReturnType<typeof encounterSessionId>, prompt: string): AgentInvocation {
   return {
+    instructionSource: 'none',
+    skill: null,
     runId,
     prompt,
     model: 'SIMULATED-model',

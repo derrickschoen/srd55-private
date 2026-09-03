@@ -146,6 +146,8 @@ function runtime(
     turnContext: { request: { phase: 'correction', correction_number: 1 } },
     lifecycle: new AgentSessionLifecycle(f.journal, adapter, 4),
     invocation: {
+      instructionSource: 'none',
+      skill: null,
       runId: f.sessionId,
       prompt: 'must be replaced',
       model: 'SIMULATED-model',

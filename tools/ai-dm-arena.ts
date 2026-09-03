@@ -15,7 +15,12 @@ import {
 } from './ai-dm-conversation';
 import type { IntelMode } from '../src/vtt/mcp/engine-server';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
-import type { AgentSessionAdapter } from '../src/vtt/agent-session';
+import {
+  AGENT_SKILL_NAMES,
+  type AgentInstructionSource,
+  type AgentSessionAdapter,
+  type AgentSkillName,
+} from '../src/vtt/agent-session';
 import type { DmIntelCapture } from '../src/vtt/dm-tactical-intel';
 import type { HiddenOptionRecord } from '../src/vtt/turn-option-registry';
 import type { LocalOpenAiConfig, LocalThinkMode } from '../src/vtt/agent-adapters/local-openai';
@@ -52,7 +57,7 @@ export interface ArenaProbeVerdict {
   };
 }
 
-export interface ArenaArm {
+interface ArenaArmBase {
   readonly label: string;
   readonly model: string;
   readonly effort: ConversationEffort;
@@ -61,7 +66,9 @@ export interface ArenaArm {
   readonly combatModel: CombatModel;
 }
 
-export interface ArenaConfig {
+export type ArenaArm = ArenaArmBase & AgentInstructionSource;
+
+interface ArenaConfigBase {
   readonly intelMode: IntelMode;
   readonly rendererProfile: RendererProfile;
   readonly combatModel: CombatModel;
@@ -80,7 +87,6 @@ export interface ArenaConfig {
   readonly cwd: string;
   readonly cliBin: string;
   readonly timeoutMs: number;
-  readonly kbPath: string;
   readonly reactionAskDefault: UnattendedReactionAskDefault;
   readonly basis: ArenaBasis;
   readonly interleave: boolean;
@@ -89,6 +95,8 @@ export interface ArenaConfig {
   readonly generateMissingRooms: boolean;
   readonly localOpenAi: LocalOpenAiConfig | null;
 }
+
+export type ArenaConfig = ArenaConfigBase & AgentInstructionSource;
 
 export interface ArenaRow {
   readonly knowledgeModel: 'engine_state';
@@ -109,6 +117,9 @@ export interface ArenaRow {
   readonly model: string;
   readonly thinkMode: LocalThinkMode | null;
   readonly kbHash: string | null;
+  readonly instructionSource: AgentInstructionSource['instructionSource'];
+  readonly skillName: AgentSkillName | null;
+  readonly skillHash: string | null;
   readonly kbReads: readonly import('../src/vtt/mcp/knowledge-base').KbReadRecord[];
   readonly repoCommit: string;
   readonly rawTurnContext: string;
@@ -186,6 +197,36 @@ function validateKbPath(cwd: string, candidate: string): void {
   }
 }
 
+function parsedInstructionSource(
+  values: ReadonlyMap<string, string>,
+  cwd: string,
+  cli: ConversationCli,
+): AgentInstructionSource {
+  const source = values.get('--instruction-source') ?? (values.has('--kb') ? 'kb' : 'none');
+  const skill = values.get('--skill');
+  if (source !== 'none' && source !== 'kb' && source !== 'skill') {
+    throw new TypeError('--instruction-source must be none, kb, or skill.');
+  }
+  if (source !== 'skill' && skill !== undefined) {
+    throw new TypeError('--skill requires --instruction-source skill.');
+  }
+  if (source === 'skill') {
+    if (cli !== 'codex') throw new TypeError('--instruction-source skill requires --cli codex.');
+    if (values.has('--kb')) throw new TypeError('--kb cannot be combined with --instruction-source skill.');
+    if (!AGENT_SKILL_NAMES.includes(skill as AgentSkillName)) {
+      throw new TypeError('--skill must be engine-submission or dm-round.');
+    }
+    return { instructionSource: 'skill', skill: skill as AgentSkillName, kbPath: null };
+  }
+  if (source === 'kb') {
+    const kbPath = resolve(cwd, values.get('--kb') ?? DEFAULT_AI_DM_KB_ROOT);
+    validateKbPath(cwd, kbPath);
+    return { instructionSource: 'kb', skill: null, kbPath };
+  }
+  if (values.has('--kb')) throw new TypeError('--kb requires --instruction-source kb.');
+  return { instructionSource: 'none', skill: null };
+}
+
 export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): ArenaConfig {
   const argumentsValue = argv[0] === '--' ? argv.slice(1) : argv;
   const values = new Map<string, string>();
@@ -205,6 +246,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--rooms', '--reps', '--seed', '--cli', '--model', '--effort', '--out',
       '--escalation-model', '--escalation-effort',
       '--cli-bin', '--timeout-ms', '--kb',
+      '--instruction-source', '--skill',
       '--reaction-ask-default',
       '--combat-model', '--initiative-profile', '--arm-combat-model',
       '--party-policy',
@@ -263,8 +305,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
         ...(values.has('--local-api-key') ? { apiKey: values.get('--local-api-key') ?? '' } : {}),
       }
     : null;
-  const kbPath = resolve(cwd, values.get('--kb') ?? DEFAULT_AI_DM_KB_ROOT);
-  validateKbPath(cwd, kbPath);
+  const instructionSource = parsedInstructionSource(values, cwd, selectedCli);
   const reactionAskDefault = values.get('--reaction-ask-default') ?? 'decline';
   if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
     throw new TypeError('--reaction-ask-default must be decline or take.');
@@ -318,6 +359,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       throw new TypeError('--arm escalation effort must be low, medium, high, or xhigh.');
     }
     return {
+      ...instructionSource,
       label,
       model: armModel,
       effort: armEffort as ConversationEffort,
@@ -364,7 +406,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     cwd: resolve(cwd),
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : selectedCli === 'claude-code' ? 'claude' : ''),
     timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
-    kbPath,
+    ...instructionSource,
     reactionAskDefault,
     basis: basis as ArenaBasis,
     interleave,
@@ -481,6 +523,9 @@ export function arenaRows(
     model: row.model,
     thinkMode: row.thinkMode,
     kbHash: row.kbHash,
+    instructionSource: row.instructionSource,
+    skillName: row.skillName,
+    skillHash: row.skillHash,
     kbReads: mapConversationKbReads(row),
     repoCommit: row.repoCommit,
     rawTurnContext: row.rawTurnContext,
@@ -543,9 +588,12 @@ function conversationConfig(
     readonly escalationEffort: ConversationEffort | null;
     readonly outPath: string;
     readonly combatModel?: CombatModel;
+    readonly instruction?: AgentInstructionSource;
   },
 ): import('./ai-dm-conversation').ConversationConfig {
+  const instructionSource: AgentInstructionSource = overrides.instruction ?? config;
   return {
+    ...instructionSource,
     intelMode: config.intelMode,
     rendererProfile: config.rendererProfile,
     combatModel: overrides.combatModel ?? config.combatModel,
@@ -564,7 +612,6 @@ function conversationConfig(
     cwd: config.cwd,
     cliBin: config.cliBin,
     timeoutMs: config.timeoutMs,
-    kbPath: config.kbPath,
     reactionAskDefault: config.reactionAskDefault,
     captureRlData: config.captureRlData,
     localOpenAi: config.localOpenAi === null ? null : {
@@ -642,6 +689,7 @@ export async function runArena(
             escalationEffort: arm.escalationEffort ?? config.escalationEffort,
             outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-${arm.label}.jsonl`),
             combatModel: arm.combatModel,
+            instruction: arm,
           }), {
             ...conversationOptions,
             rendererEvidenceCache,

@@ -48,6 +48,8 @@ const cwd = '/workspace/dnd-wt-vtt';
 const engineCommand = '/workspace/node';
 const engineArgs = ['/workspace/engine-mcp.mjs'];
 const invocation: AgentInvocation = {
+  instructionSource: 'none',
+  skill: null,
   runId: encounterSessionId('encounter:SIMULATED-adapter'),
   prompt: 'SIMULATED prompt over stdin',
   instructions: 'SIMULATED session-level KB instructions',
@@ -146,6 +148,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(runner.calls.map((call) => call.stdin)).toEqual([invocation.prompt, invocation.prompt]);
     expect(runner.calls[0]?.spec).toMatchObject({
       binary: 'SIMULATED-cli', cwd, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
+      env: { CODEX_HOME: resolve('tests/fixtures/codex-home-SIMULATED') },
     });
     const expectedPrefix = [
       'exec', '-C', cwd, '--sandbox', 'read-only', '--json', '-m', invocation.model,
@@ -245,6 +248,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     } as const;
     const ordinary = codexArgv(base);
     const arena = codexArgv({ ...base, arenaSession: true });
+    const skillArena = codexArgv({ ...base, arenaSession: true, instructionSource: 'skill' });
     const arenaResume = codexArgv({ ...base, arenaSession: true, sessionId: 'codex-arena-thread' });
 
     expect(ordinary).not.toContain('project_doc_max_bytes=0');
@@ -253,6 +257,19 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(arena).toContain('project_doc_max_bytes=0');
     expect(arena).toContain('features.plugins=false');
     expect(arena).toContain('skills.include_instructions=false');
+    expect(skillArena).toContain('features.plugins=false');
+    expect(skillArena).toContain('skills.include_instructions=true');
+    expect(skillArena).not.toContain('skills.include_instructions=false');
+    expect(arena).toEqual([
+      'exec', '-C', cwd, '--sandbox', 'read-only', '--json', '-m', invocation.model,
+      '-c', `model_reasoning_effort=${JSON.stringify(invocation.reasoningEffort)}`,
+      '-c', 'project_doc_max_bytes=0',
+      '-c', 'features.plugins=false',
+      '-c', 'skills.include_instructions=false',
+      '-c', `mcp_servers.engine.command=${JSON.stringify(engineCommand)}`,
+      '-c', `mcp_servers.engine.args=${JSON.stringify(engineArgs)}`,
+      '-',
+    ]);
     expect(arenaResume).toEqual(expect.arrayContaining([
       'project_doc_max_bytes=0',
       'features.plugins=false',

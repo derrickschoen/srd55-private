@@ -100,6 +100,9 @@ const arenaRowSchema = z.object({
     'refused', 'service_null', 'local_error',
   ]),
   plannedBy: plannerSchema,
+  instructionSource: z.enum(['none', 'kb', 'skill']),
+  skillName: z.enum(['engine-submission', 'dm-round']).nullable(),
+  skillHash: z.string().regex(/^[0-9a-f]{64}$/u).nullable(),
   roundNarrative: z.string().nullable(),
   authorizedPlan: z.array(authorizedPlanEntrySchema).nullable(),
   // Optional/nullable: pre-intel-era arms have no engineIntel, and the current
@@ -148,6 +151,9 @@ interface ValidatedArenaRow {
   readonly startingRoomDigest: string;
   readonly outcome: string;
   readonly plannedBy: z.infer<typeof plannerSchema>;
+  readonly instructionSource: 'none' | 'kb' | 'skill';
+  readonly skillName: 'engine-submission' | 'dm-round' | null;
+  readonly skillHash: string | null;
   readonly plannerLabel: string | null | undefined;
   readonly roundNarrative: string | null;
   readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
@@ -205,12 +211,16 @@ export interface RerunAnswerKey {
   readonly entries: readonly {
     readonly blindId: string;
     readonly arm: string;
+    readonly instructionSource: 'none' | 'kb' | 'skill';
+    readonly skillName: 'engine-submission' | 'dm-round' | null;
+    readonly skillHash: string | null;
   }[];
 }
 
 const MODEL_IDENTITY_FIELDS = new Set([
   'arm', 'model', 'cli', 'thinkMode', 'sessionId', 'escalationSessionId',
   'escalationModel', 'kbHash', 'repoCommit', 'rawTurnContext', 'rlData', 'plannedBy',
+  'instructionSource', 'skillName', 'skillHash',
   // Era-identifying: only post-intel arms produce engineIntel, so its presence
   // (not just its contents) unblinds the arm.
   'engineIntel',
@@ -305,6 +315,13 @@ function validateRow(
     throw new TypeError(`${sourceLabel}${property} is invalid: ${issue?.message ?? 'unknown schema failure'}.`);
   }
   const row = parsed.data;
+  if (row.instructionSource === 'skill') {
+    if (row.skillName === null || row.skillHash === null) {
+      throw new TypeError(`${sourceLabel} skill instruction source requires skillName and skillHash.`);
+    }
+  } else if (row.skillName !== null || row.skillHash !== null) {
+    throw new TypeError(`${sourceLabel} non-skill instruction source requires null skillName and skillHash.`);
+  }
   if (crossEra && row.repoCommit === undefined) {
     throw new TypeError(`${sourceLabel}.repoCommit is required in cross-era mode (it is the arm partition key).`);
   }
@@ -320,6 +337,9 @@ function validateRow(
     startingRoomDigest: row.startingRoomDigest,
     outcome: row.outcome,
     plannedBy: row.plannedBy,
+    instructionSource: row.instructionSource,
+    skillName: row.skillName,
+    skillHash: row.skillHash,
     plannerLabel: row.plannerLabel,
     roundNarrative: row.roundNarrative,
     authorizedPlan: row.authorizedPlan,
@@ -537,7 +557,13 @@ function buildPacket(
   };
   const answerKey: RerunAnswerKey = {
     version: RERUN_PACKET_VERSION,
-    entries: blinded.map(({ blindId, row }) => ({ blindId, arm: row.arm })),
+    entries: blinded.map(({ blindId, row }) => ({
+      blindId,
+      arm: row.arm,
+      instructionSource: row.instructionSource,
+      skillName: row.skillName,
+      skillHash: row.skillHash,
+    })),
   };
   assertBlindedPacket(packet);
   return { packet, answerKey };

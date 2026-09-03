@@ -42,7 +42,10 @@ import {
   mkdtempSync,
   readFileSync,
 } from '../../helpers/test-filesystem';
-import type { RepoRelativeKbPath } from '../../../src/vtt/knowledge-base-contract';
+import {
+  DEFAULT_AI_DM_KB_ROOT,
+  type RepoRelativeKbPath,
+} from '../../../src/vtt/knowledge-base-contract';
 import type { KbReadRecord } from '../../../src/vtt/mcp/knowledge-base';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
@@ -323,6 +326,9 @@ describe('AI-DM arena', () => {
     ] as const;
 
     expect(parseArenaArgs(common).partyPolicy).toBe('symmetric_evaluator_v1');
+    expect(parseArenaArgs(common)).toEqual(expect.objectContaining({
+      instructionSource: 'none', skill: null,
+    }));
     expect(parseArenaArgs(common).intelMode).toBe('full');
     expect(parseArenaArgs([...common, '--intel-mode', 'off']).intelMode).toBe('off');
     expect(() => parseArenaArgs([...common, '--intel-mode', 'partial']))
@@ -626,10 +632,12 @@ describe('AI-DM arena', () => {
 
     expect(config.arms).toEqual([
       {
+        instructionSource: 'none', skill: null,
         label: 'plain', model: 'model-plain', effort: 'low',
         escalationModel: null, escalationEffort: null, combatModel: 'monster_block_v1',
       },
       {
+        instructionSource: 'none', skill: null,
         label: 'tiered', model: 'model-tiered', effort: 'high',
         escalationModel: 'arm-escalation', escalationEffort: 'xhigh',
         combatModel: 'monster_block_v1',
@@ -638,6 +646,34 @@ describe('AI-DM arena', () => {
     expect(config).toMatchObject({
       escalationModel: 'global-escalation', escalationEffort: 'medium',
     });
+  });
+
+  it('parses typed instruction sources and copies them onto every arena arm', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-instruction-source-'));
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'),
+    ] as const;
+    const kb = parseArenaArgs([...common, '--instruction-source', 'kb', '--kb', DEFAULT_AI_DM_KB_ROOT]);
+    expect(kb).toEqual(expect.objectContaining({
+      instructionSource: 'kb', skill: null, kbPath: join(process.cwd(), DEFAULT_AI_DM_KB_ROOT),
+    }));
+    const skill = parseArenaArgs([
+      ...common, '--instruction-source', 'skill', '--skill', 'engine-submission', '--interleave',
+      '--arm', 'first:model-a:low', '--arm', 'second:model-b:low',
+    ]);
+    expect(skill).toEqual(expect.objectContaining({
+      instructionSource: 'skill', skill: 'engine-submission', kbPath: null,
+    }));
+    expect(skill.arms.every((arm) =>
+      arm.instructionSource === 'skill' && arm.skill === 'engine-submission' && arm.kbPath === null,
+    )).toBe(true);
+    expect(() => parseArenaArgs([...common, '--instruction-source', 'skill']))
+      .toThrow('--skill must be engine-submission or dm-round.');
+    expect(() => parseArenaArgs([...common, '--skill', 'dm-round']))
+      .toThrow('--skill requires --instruction-source skill.');
+    expect(() => parseArenaArgs([...common, '--instruction-source', 'skill', '--skill', 'dm-round', '--kb', DEFAULT_AI_DM_KB_ROOT]))
+      .toThrow('--kb cannot be combined with --instruction-source skill.');
   });
 
   it('parses an opt-in initiative profile and independent arm combat models', () => {
@@ -697,6 +733,9 @@ describe('AI-DM arena', () => {
 
     expect(rows).toHaveLength(4);
     expect(rows.every((row) => row.basis === 'standard' && row.arm === 'single')).toBe(true);
+    expect(rows.every((row) =>
+      row.instructionSource === 'none' && row.skillName === null && row.skillHash === null,
+    )).toBe(true);
     expect(rows.every((row) =>
       row.outcome === 'authorized' && row.refusals.length === 0 &&
       row.projectionRevision > row.contextRevision)).toBe(true);

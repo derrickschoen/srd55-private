@@ -39,6 +39,9 @@ function registeredRows(): JsonRecord[] {
       room: room + 1,
       round,
       arm,
+      instructionSource: 'none',
+      skillName: null,
+      skillHash: null,
       model: `${arm}-model`,
       cli: 'codex',
       startingRoomDigest: `frozen-room-${String(seed)}`,
@@ -98,8 +101,14 @@ describe('AI-DM R1-10 rerun packet', () => {
     const expectedAnswerKey = {
       version: 'ai-dm-rerun-packet-v1',
       entries: [
-        { blindId: 'blind-001', arm: 'baseline' },
-        { blindId: 'blind-002', arm: 'intel' },
+        {
+          blindId: 'blind-001', arm: 'baseline', instructionSource: 'none',
+          skillName: null, skillHash: null,
+        },
+        {
+          blindId: 'blind-002', arm: 'intel', instructionSource: 'skill',
+          skillName: 'engine-submission', skillHash: 'a'.repeat(64),
+        },
       ],
     } as const;
 
@@ -158,6 +167,9 @@ describe('AI-DM R1-10 rerun packet', () => {
         room: room + 1,
         round,
         arm,
+        instructionSource: 'none',
+        skillName: null,
+        skillHash: null,
         model: `${arm}-model`,
         cli: `${arm}-cli`,
         startingRoomDigest: `frozen-room-${String(seed)}`,
@@ -206,6 +218,7 @@ describe('AI-DM R1-10 rerun packet', () => {
       seed: 5_117_001, room: 1, round: 1, startingRoomDigest: 'd1',
       combatModel: 'initiative_segments_v1', initiativeOrder: [], outcome: 'authorized',
       plannedBy: { model: 'm', effort: 'low' }, roundNarrative: null,
+      instructionSource: 'none', skillName: null, skillHash: null,
     };
     const paired = (plan: unknown, extra: Record<string, unknown> = {}): Record<string, unknown>[] =>
       ['a', 'b'].map((arm) => ({ ...base, arm, authorizedPlan: plan, ...extra }));
@@ -287,6 +300,9 @@ describe('AI-DM R1-10 rerun packet', () => {
             round,
             // Cross-era reality: the arena labels both eras identically.
             arm: 'single',
+            instructionSource: 'none',
+            skillName: null,
+            skillHash: null,
             repoCommit: era,
             model: 'shared-model',
             cli: 'codex',
@@ -362,6 +378,25 @@ describe('AI-DM R1-10 rerun packet', () => {
       .toThrow('leaks a model-identifying field');
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', roundNarrative: 'uses dodge' }] }))
       .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', instructionSource: 'skill' }] }))
+      .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', skillName: 'dm-round' }] }))
+      .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', skillHash: 'a'.repeat(64) }] }))
+      .toThrow('leaks a model-identifying field');
+  });
+
+  it('requires instruction provenance and the selected skill hash in every source row', () => {
+    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl');
+    const first = rows[0];
+    const second = rows[1];
+    if (first === undefined || second === undefined) throw new Error('paired fixture is incomplete');
+    const { instructionSource: _source, ...withoutSource } = first;
+    const { skillHash: _hash, ...withoutSkillHash } = second;
+    expect(() => buildRerunPacket([withoutSource, second], 1, tinyProtocol))
+      .toThrow('.instructionSource is invalid');
+    expect(() => buildRerunPacket([first, withoutSkillHash], 1, tinyProtocol))
+      .toThrow('.skillHash is invalid');
   });
 
   it('requires explicit, separate CLI paths and a deterministic shuffle seed', () => {

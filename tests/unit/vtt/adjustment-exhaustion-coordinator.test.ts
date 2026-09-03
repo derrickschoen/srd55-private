@@ -145,6 +145,8 @@ function correction(
       },
     },
     invocation: {
+      instructionSource: 'none',
+      skill: null,
       runId: capsule.runId,
       prompt: 'must be replaced',
       model: 'SIMULATED-model',
