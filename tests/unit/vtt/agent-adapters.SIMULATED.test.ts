@@ -54,6 +54,7 @@ const invocation: AgentInvocation = {
   model: 'model-SIMULATED',
   reasoningEffort: 'high',
   callPhase: 'initial',
+  output: { kind: 'tool_driven' },
   launcherToken: 'launcher-token-SIMULATED',
   timeoutMs: 12_345,
 };
@@ -166,6 +167,36 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       runner.calls[1]?.spec.argv.findIndex((value) => value.startsWith('mcp_servers.engine.args=')) ?? -1,
     );
     expect(UNVERIFIED_CONTRACT_CODEX).toContain('UNVERIFIED_CONTRACT');
+  });
+
+  it('SIMULATED Codex constrains indexed final output before resume and omits the engine MCP server', async () => {
+    const runner = new SIMULATEDChildProcessRunner([output(fixture('codex-start')), output(fixture('codex-start'))]);
+    const adapter = new CodexAgentSessionAdapter(options(runner));
+    const finalInvocation: AgentInvocation = {
+      ...invocation,
+      output: {
+        kind: 'structured_final',
+        schemaPath: '/SIMULATED/final-indices-schema.json',
+        decisionEncoding: 'indices',
+        engineTools: 'disabled',
+      },
+    };
+
+    await adapter.start(finalInvocation, new AbortController().signal);
+    await adapter.resume(binding('codex', 'codex-thread-123'), finalInvocation, new AbortController().signal);
+
+    const startArgv = runner.calls[0]?.spec.argv;
+    const resumeArgv = runner.calls[1]?.spec.argv;
+    expect(startArgv).toEqual(expect.arrayContaining([
+      '--output-schema', '/SIMULATED/final-indices-schema.json',
+    ]));
+    expect(resumeArgv).toEqual(expect.arrayContaining([
+      '--output-schema', '/SIMULATED/final-indices-schema.json',
+      'resume', 'codex-thread-123',
+    ]));
+    expect(resumeArgv?.indexOf('--output-schema')).toBeLessThan(resumeArgv?.indexOf('resume') ?? -1);
+    expect(startArgv?.some((value) => value.startsWith('mcp_servers.engine.'))).toBe(false);
+    expect(resumeArgv?.some((value) => value.startsWith('mcp_servers.engine.'))).toBe(false);
   });
 
   it('SIMULATED Codex lists the rollout directory at most once per session binding (mutation: rescan per call)', async () => {

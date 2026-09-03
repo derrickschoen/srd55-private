@@ -6,6 +6,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { createInterface, type Interface } from 'node:readline';
 import { canonicalJson } from '../src/commands/canonical-json';
+import { decisionReasonProblem } from '../src/vtt/decision-reason';
 import type { PersistedCoordinatorState } from '../src/combat/coordinator';
 import type { EncounterState } from '../src/combat/encounter';
 import { mulberry32 } from '../src/combat/random';
@@ -18,7 +19,7 @@ import {
   agentCallUsage, turnInputTotal,
   type AgentCallPhase, type AgentCallUsage,
   type AgentAdapterKind, type AgentCliKind, type AgentFailureClassification, type AgentInvocation, type AgentSessionAdapter,
-  type AgentSessionBinding, type AgentToolSession, type AgentTurnResult, type AgentUsage,
+  type AgentInvocationOutput, type AgentSessionBinding, type AgentToolSession, type AgentTurnResult, type AgentUsage,
   type ContextRolloverPolicy, type FreshSessionContext,
 } from '../src/vtt/agent-session';
 import { AgentSessionLifecycle } from '../src/vtt/agent-session-lifecycle';
@@ -89,6 +90,20 @@ import {
   MATERIALITY_CONTEXT_POLICY,
   OPPORTUNITY_COST_POLICY,
 } from '../src/vtt/intel/opportunity-cost';
+import {
+  bindDecision,
+  createDecisionCatalog,
+  finalIndicesDecisionSchema,
+  minimalRoundSubmission,
+  normalizeIndexDecision,
+  renderDecisionCatalog,
+  type DecisionCatalog,
+  type DecisionPhase,
+  type DecisionNormalizationRejectionCode,
+  type DecisionTransport,
+  type BoundRoundDecision,
+  type StructuredFinalDecisionReasonGate,
+} from '../src/vtt/agent-round-decision';
 import { MOVEMENT_OPTIONS_INTEL_POLICY } from '../src/vtt/intel/movement-options';
 import { TEAM_SCORER_POLICY } from '../src/vtt/intel/team-scorer';
 import { ACTOR_KNOWLEDGE_POLICY } from '../src/vtt/intel/actor-knowledge';
@@ -148,6 +163,8 @@ import {
 
 export const CONVERSATION_CLIS = ['codex', 'claude-code', 'local-openai'] as const;
 export type ConversationCli = (typeof CONVERSATION_CLIS)[number];
+export const CONVERSATION_TRANSPORTS = ['mcp_minimal', 'final_indices'] as const;
+export type ConversationTransport = (typeof CONVERSATION_TRANSPORTS)[number];
 export const CONVERSATION_EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const;
 export type ConversationEffort = (typeof CONVERSATION_EFFORTS)[number];
 export const COMBAT_MODELS = ['monster_block_v1', 'initiative_segments_v1'] as const;
@@ -175,6 +192,7 @@ export interface ConversationConfig {
   readonly rooms: number;
   readonly rounds: number;
   readonly cli: ConversationCli;
+  readonly decisionTransport: ConversationTransport;
   readonly model: string;
   readonly effort: ConversationEffort;
   readonly escalationModel: string | null;
@@ -476,6 +494,18 @@ export interface ConversationRow {
   readonly agentDispatched: boolean;
   readonly flapRetries: 0 | 1 | 2;
   readonly serviceNull: boolean;
+  /** Transport and validation facts belong to the answer key, never a blinded packet. */
+  readonly decisionTransport: ConversationTransport;
+  readonly firstDecisionAccepted: boolean;
+  readonly decisionAttempts: number;
+  readonly decisionRejectionCodes: readonly StructuredFinalRejectionCode[];
+  readonly normalizationCodes: readonly DecisionNormalizationRejectionCode[];
+  /** Answer-key metric input for engine-recommendation anchoring. */
+  readonly chosenOptionIndices: readonly {
+    readonly actorId: CombatantId;
+    readonly primaryOptionIndex: number;
+    readonly fallbackOptionIndex: number | null;
+  }[];
   readonly contextTruncated: boolean;
   readonly plannedBy: ConversationPlannerAttribution | null;
   readonly planner: ConversationPlanner;
@@ -638,6 +668,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
       '--fixtures', '--rooms', '--rounds', '--reps', '--cli', '--model', '--effort',
       '--escalation-model', '--escalation-effort',
       '--out', '--cli-bin', '--timeout-ms', '--kb', '--reaction-ask-default',
+      '--transport',
       '--combat-model', '--initiative-profile',
       '--intel-mode',
       '--renderer-profile',
@@ -667,6 +698,13 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     throw new TypeError('--cli must be codex, claude-code, or local-openai.');
   }
   const selectedCli = cli as ConversationCli;
+  const transport = values.get('--transport') ?? 'mcp_minimal';
+  if (!CONVERSATION_TRANSPORTS.includes(transport as ConversationTransport)) {
+    throw new TypeError('--transport must be mcp_minimal or final_indices.');
+  }
+  if (transport === 'final_indices' && selectedCli !== 'codex') {
+    throw new TypeError('--transport final_indices currently requires --cli codex.');
+  }
   const hasLocalOption = values.has('--local-base-url') || values.has('--local-model') ||
     values.has('--local-api-key') || values.has('--local-think');
   if (selectedCli !== 'local-openai' && hasLocalOption) {
@@ -720,6 +758,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     rooms: positiveInteger(values.get('--rooms') ?? '12', '--rooms'),
     rounds: positiveInteger(values.get('--rounds') ?? values.get('--reps') ?? '1', '--rounds'),
     cli: selectedCli,
+    decisionTransport: transport as ConversationTransport,
     model: localOpenAi?.model ?? values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
     effort: effort as ConversationEffort,
     escalationModel,
@@ -1838,13 +1877,24 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const key = manifest.requestId.replace(/^request:/u, '');
+    if (!roomTransition && manifest.phase === 'initial' && this.#timeoutInitial.has(key)) {
+      return cancelledSimulated(sessionId);
+    }
+    if (invocation.output.kind === 'structured_final') {
+      const finalText = !roomTransition && manifest.phase === 'initial' && this.#exhaustInitial.has(key)
+        ? ''
+        : !roomTransition && manifest.phase === 'correction' && this.#failCorrection.has(key)
+          ? ''
+          : simulatedIndexedFinalDecision(
+              invocation.prompt,
+              structuredFinalDecisionPhase(manifest.phase),
+            );
+      return completedSimulated(sessionId, finalText);
+    }
     const remainingFlaps = this.#remainingPrimaryFlaps.get(key) ?? 0;
     if (!roomTransition && manifest.phase === 'initial' && remainingFlaps > 0) {
       this.#remainingPrimaryFlaps.set(key, remainingFlaps - 1);
       return completedSimulated(sessionId);
-    }
-    if (!roomTransition && manifest.phase === 'initial' && this.#timeoutInitial.has(key)) {
-      return cancelledSimulated(sessionId);
     }
     const submit = !roomTransition && !(manifest.phase === 'initial'
       ? this.#exhaustInitial.has(key) : this.#failCorrection.has(key));
@@ -1906,11 +1956,60 @@ class ModelCallBookkeepingAdapter implements AgentSessionAdapter {
   }
 }
 
-function completedSimulated(value: string): AgentTurnResult {
+function simulatedIndexedFinalDecision(prompt: string, phase: DecisionPhase): string {
+  const marker = '[DECISION_CATALOG]\n';
+  const index = prompt.lastIndexOf(marker);
+  if (index < 0) throw new Error('SIMULATED final-index dispatch received no decision catalog.');
+  const catalog = requiredRecord(JSON.parse(prompt.slice(index + marker.length)) as unknown, 'decision catalog');
+  const digest = catalog['catalogDigest'];
+  const actors = catalog['actors'];
+  if (typeof digest !== 'string' || !Array.isArray(actors)) {
+    throw new Error('SIMULATED final-index dispatch received a malformed decision catalog.');
+  }
+  const proposals: Record<string, unknown> = {};
+  for (const actorValue of actors) {
+      const actor = requiredRecord(actorValue, 'decision catalog actor');
+      const options = actor['options'];
+      const actorId = actor['actorId'];
+      if (typeof actorId !== 'string') {
+        throw new Error('SIMULATED final-index dispatch received an actor without an id.');
+      }
+      if (!Array.isArray(options) || options.length < (phase === 'initial' ? 2 : 1)) {
+        throw new Error('SIMULATED final-index dispatch requires the catalogued fallback option.');
+      }
+      proposals[actorId] = {
+        primaryOptionIndex: 0,
+        fallbackOptionIndex: phase === 'correction' ? null : 1,
+        override: null,
+        reason: 'The engine recommendation preserves the current tactical objective.',
+      };
+  }
+  return JSON.stringify({
+    catalogDigest: digest,
+    reaction_guidance: { inherit: true },
+    proposals,
+  });
+}
+
+export function structuredFinalDecisionPhase(
+  phase: EngineMcpLauncherManifest['phase'],
+): DecisionPhase {
+  switch (phase) {
+    case 'initial':
+    case 'correction':
+      return phase;
+    case 'speculative':
+      throw new TypeError('Structured-final decisions are unavailable for speculative dispatch.');
+  }
+  phase satisfies never;
+  throw new Error('Unknown structured-final decision phase.');
+}
+
+function completedSimulated(value: string, finalText = 'SIMULATED — proposal delivered through engine MCP spool'): AgentTurnResult {
   return {
     resumeSessionId: agentSessionId(value),
     sessionId: null,
-    finalText: 'SIMULATED — proposal delivered through engine MCP spool',
+    finalText,
     usage: null,
     exit: 'completed',
   };
@@ -2218,6 +2317,187 @@ function inProcessDmToolSession(input: {
   };
 }
 
+function decisionCatalogForSnapshot(
+  state: EncounterState,
+  snapshot: EngineRoundSnapshot,
+): DecisionCatalog {
+  const request = snapshot.capsule.request;
+  if (request === null || request.phase === 'speculative') {
+    throw new Error('Structured final decisions require an ordinary pending request.');
+  }
+  const planningState = projectFutureMonsterTurns(state, request.actors);
+  return createDecisionCatalog({
+    requestId: request.requestId,
+    phase: request.phase,
+    expectedRevision: snapshot.capsule.revision,
+    stateDigest: snapshot.capsule.digest,
+    actors: request.actors.map((actorId) => {
+      const registry = availableEngineActorOptions(
+        planningState, actorId, canonicalEngineQueryPort, snapshot.capsule.revision,
+      );
+      const report = actorOpportunityReport(
+        planningState, actorId, canonicalEngineQueryPort, snapshot.capsule.revision,
+      );
+      const defaultOption = report.defaultOption;
+      const frontierIds = new Set(registry.filter((option) => {
+        const verdict = submissionDominance(report, option.optionId).status;
+        return verdict === 'not_dominated' || verdict === 'not_dominated_tradeoff';
+      }).map((option) => option.optionId));
+      const ordered = [
+        defaultOption,
+        ...registry.filter((option) => option.optionId !== defaultOption.optionId && frontierIds.has(option.optionId)),
+        ...registry.filter((option) => option.optionId !== defaultOption.optionId && !frontierIds.has(option.optionId)),
+      ];
+      return {
+        actorId,
+        options: ordered.map((option) => ({ optionId: option.optionId, label: option.label })),
+      };
+    }),
+  });
+}
+
+function structuredFinalPrompt(context: CapturedTurnContext, catalog: DecisionCatalog): string {
+  return [
+    'Return only the schema-constrained indexed decision. Do not call engine tools.',
+    '[TURN_CONTEXT]',
+    context.raw,
+    '[DECISION_CATALOG]',
+    JSON.stringify(renderDecisionCatalog(catalog)),
+  ].join('\n');
+}
+
+async function structuredFinalOutput(
+  transport: DecisionTransport,
+  directory: string,
+  name: string,
+  catalog: DecisionCatalog,
+): Promise<AgentInvocationOutput> {
+  switch (transport) {
+    case 'mcp_minimal': return { kind: 'tool_driven' };
+    case 'final_indices': {
+      const schemaPath = join(directory, `${name}-final-indices-schema.json`);
+      const schema = finalIndicesDecisionSchema(catalog);
+      await writeFile(schemaPath, canonicalJson(schema), 'utf8');
+      return {
+        kind: 'structured_final', schemaPath, decisionEncoding: 'indices', engineTools: 'disabled',
+      };
+    }
+    case 'final_ids':
+      throw new TypeError('Decision transport final_ids is intentionally unimplemented.');
+  }
+  transport satisfies never;
+  throw new Error('Unknown decision transport.');
+}
+
+type StructuredFinalRejectionCode =
+  | 'decision_missing'
+  | 'decision_invalid'
+  | 'decision_timeout'
+  | 'engine_rejected'
+  | 'REASON_REQUIRED';
+
+type StructuredFinalQueueResult =
+  | {
+      readonly kind: 'accepted';
+      readonly proposal: RoundTurnProposalEnvelope | PlanAdjustmentProposalEnvelope;
+      readonly decision: BoundRoundDecision;
+    }
+  | {
+      readonly kind: 'rejected';
+      readonly code: StructuredFinalRejectionCode;
+      readonly normalizationCode: DecisionNormalizationRejectionCode | null;
+      readonly engineResult: unknown | null;
+    };
+
+const STRUCTURED_FINAL_DECISION_REASON_GATE: StructuredFinalDecisionReasonGate = {
+  validate: (_actorId, reason) => decisionReasonProblem(reason) === null
+    ? { kind: 'accepted' }
+    : { kind: 'rejected', code: 'REASON_REQUIRED' },
+};
+
+function queueStructuredFinalDecision(input: {
+  readonly finalText: string;
+  readonly exit: AgentTurnResult['exit'];
+  readonly catalog: DecisionCatalog;
+  readonly state: EncounterState;
+  readonly snapshot: EngineRoundSnapshot;
+  readonly intelMode: IntelMode;
+  readonly rendererProfile: RendererProfile;
+  readonly turnContextDeltaBase?: TurnContextDeltaBase;
+  readonly inheritedReactionGuidance: ReactionGuidanceDeclaration | null;
+  /** G2.1 plugs its semantic decision-reason detector into this ingress seam. */
+  readonly reasonGate?: StructuredFinalDecisionReasonGate;
+}): StructuredFinalQueueResult {
+  if (input.exit !== 'completed') {
+    return { kind: 'rejected', code: 'decision_timeout', normalizationCode: null, engineResult: null };
+  }
+  if (input.finalText.trim().length === 0) {
+    return { kind: 'rejected', code: 'decision_missing', normalizationCode: null, engineResult: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input.finalText) as unknown;
+  } catch {
+    return { kind: 'rejected', code: 'decision_invalid', normalizationCode: 'invalid_shape', engineResult: null };
+  }
+  const normalized = normalizeIndexDecision(
+    parsed,
+    input.catalog,
+    input.inheritedReactionGuidance,
+    input.reasonGate,
+  );
+  if (normalized.kind === 'rejected') {
+    return {
+      kind: 'rejected',
+      code: normalized.code === 'REASON_REQUIRED' ? 'REASON_REQUIRED' : 'decision_invalid',
+      normalizationCode: normalized.code,
+      engineResult: null,
+    };
+  }
+  const bound = bindDecision(input.catalog, normalized.decision, input.inheritedReactionGuidance);
+  let queued: RoundTurnProposalEnvelope | PlanAdjustmentProposalEnvelope | null = null;
+  const toolSession = inProcessDmToolSession({
+    state: input.state,
+    snapshot: input.snapshot,
+    intelMode: input.intelMode,
+    rendererProfile: input.rendererProfile,
+    ...(input.turnContextDeltaBase === undefined ? {} : {
+      turnContextDeltaBase: input.turnContextDeltaBase,
+    }),
+    onProposal: (proposal) => { queued = proposal; },
+    onToolResult: () => undefined,
+  });
+  const request = input.snapshot.capsule.request;
+  if (request === null || request.phase === 'speculative') {
+    throw new Error('Structured final queue lost its ordinary pending request.');
+  }
+  let engineResult: unknown;
+  try {
+    if (request.kind === 'plan_adjustment') {
+      engineResult = toolSession.execute('engine.submit_plan_adjustment', {
+        state_ref: {
+          run_id: input.snapshot.capsule.runId,
+          state_handle: engineStateHandle(input.snapshot.capsule),
+          expected_revision: input.snapshot.capsule.revision,
+        },
+        request_id: request.requestId,
+        phase: request.phase,
+        idempotency_key: `final-indices:${input.catalog.digest}`,
+        baseline_plan_hash: request.baselinePlanHash,
+        updates: bound.proposals.map(externalProposal),
+      });
+    } else {
+      engineResult = toolSession.execute('engine.submit_round_proposals', minimalRoundSubmission(bound));
+    }
+  } catch {
+    return { kind: 'rejected', code: 'engine_rejected', normalizationCode: null, engineResult: null };
+  }
+  if (queued === null) {
+    return { kind: 'rejected', code: 'engine_rejected', normalizationCode: null, engineResult };
+  }
+  return { kind: 'accepted', proposal: queued, decision: bound };
+}
+
 function inProcessSpeculativeToolSession(input: {
   readonly state: EncounterState;
   readonly snapshot: EngineRoundSnapshot;
@@ -2366,11 +2646,12 @@ function invocation(
   recoveryLauncherToken?: string,
   toolSession?: AgentToolSession,
   freshSessionContext?: FreshSessionContext,
+  output: AgentInvocationOutput = { kind: 'tool_driven' },
 ): AgentInvocation {
   return {
     runId, prompt, instructions, model: planner.model, reasoningEffort: planner.effort,
     sessionProfile: 'arena',
-    callPhase,
+    callPhase, output,
     launcherToken, timeoutMs: config.timeoutMs,
     ...(recoveryLauncherToken === undefined ? {} : { recoveryLauncherToken }),
     ...(toolSession === undefined ? {} : { toolSession }),
@@ -2619,6 +2900,13 @@ async function runConversationWithConfiguredIntel(
         return plannedInitialTurnContext;
       };
       let rowTurnContext = unrequestedTurnContext();
+      const initialDecisionCatalog = config.decisionTransport === 'final_indices'
+        ? decisionCatalogForSnapshot(engineSession.currentState(), initialSnapshot)
+        : null;
+      if (initialDecisionCatalog !== null) rowTurnContext = getPlannedInitialTurnContext();
+      const initialInvocationOutput = initialDecisionCatalog === null
+        ? { kind: 'tool_driven' } as const
+        : await structuredFinalOutput(config.decisionTransport, artifacts, `${key}-initial`, initialDecisionCatalog);
       const initialLauncher = await writeLauncher({
         rendererProfile: config.rendererProfile,
         directory: artifacts, name: `${key}-initial`, snapshot: initialSnapshot, room,
@@ -2678,11 +2966,16 @@ async function runConversationWithConfiguredIntel(
       let agentDispatched = false;
       let flapRetries: 0 | 1 | 2 = 0;
       let serviceNull = false;
+      let firstDecisionAccepted = false;
+      let decisionAttempts = 0;
+      const decisionRejectionCodes: StructuredFinalRejectionCode[] = [];
+      const normalizationCodes: DecisionNormalizationRejectionCode[] = [];
       const failedAttempts: ConversationChainAttemptEvidence[] = [];
       let autoResolvedTrigger: string | null = null;
       let correctionFinalText: string | null = null;
       let authorizationStateBinding: ConversationRow['stateBinding']['authorization'] = null;
       let authorizedPlan: ConversationRow['authorizedPlan'] = null;
+      let acceptedStructuredDecision: BoundRoundDecision | null = null;
       let acceptedSubmission: readonly EngineTurnProposal[] | null = null;
       let acceptedIntelCapture: DmIntelCapture | null = null;
       let authorizedMonsterProposalHash: string | null = null;
@@ -2973,6 +3266,17 @@ async function runConversationWithConfiguredIntel(
           config.rendererProfile,
         );
         let adjustmentTurnContext = plannedAdjustmentContext;
+        const adjustmentDecisionCatalog = config.decisionTransport === 'final_indices'
+          ? decisionCatalogForSnapshot(engineSession.currentState(), adjustmentSnapshot)
+          : null;
+        const adjustmentInvocationOutput = adjustmentDecisionCatalog === null
+          ? { kind: 'tool_driven' } as const
+          : await structuredFinalOutput(
+              config.decisionTransport,
+              artifacts,
+              `${adjustmentKey}-initial`,
+              adjustmentDecisionCatalog,
+            );
         const adjustmentLauncher = await writeLauncher({
           rendererProfile: config.rendererProfile,
           directory: artifacts,
@@ -3019,6 +3323,7 @@ async function runConversationWithConfiguredIntel(
         let adjustmentCorrectionSessionId: string | null = null;
         let adjustmentFlapRetries: 0 | 1 | 2 = 0;
         let adjustmentServiceNull = false;
+        let adjustmentFinalRejected = false;
         let adjustmentUsage: AgentUsage | null = null;
         const modelCallsBeforeAdjustment = adapter.modelCalls;
         const toolCallsBeforeAdjustment = adjustmentToolCalls();
@@ -3032,13 +3337,16 @@ async function runConversationWithConfiguredIntel(
             config,
             runId,
             'adjustment',
-            `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${renderEnginePrompt('plan_round', adjustmentSnapshot.capsule, RULES_SOURCE)}`,
+            adjustmentDecisionCatalog === null
+              ? `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${renderEnginePrompt('plan_round', adjustmentSnapshot.capsule, RULES_SOURCE)}`
+              : structuredFinalPrompt(adjustmentTurnContext, adjustmentDecisionCatalog),
             adjustmentLauncher.manifestPath,
             null,
             basePlanner,
             adjustmentLauncher.recoveryManifestPath,
             adjustmentToolSession,
             freshSessionContext,
+            adjustmentInvocationOutput,
           );
           adjustmentCalls += 1;
           const turn = await lifecycle.resumeRound(
@@ -3047,14 +3355,44 @@ async function runConversationWithConfiguredIntel(
           );
           adjustmentSessionId = turn.sessionId;
           captureCallUsage(turn, 'adjustment');
+          decisionAttempts += 1;
           adjustmentUsage = addAgentUsage(adjustmentUsage, turn.usage);
           adjustmentTurnContext = takeTurnContext(adjustmentLauncher.turnContextSpoolPath) ??
             adjustmentTurnContext;
-          adjustmentProposal = localAdjustmentProposal ??
-            takePlanAdjustmentProposal(adjustmentLauncher.spoolPath);
-          const flapped = turn.exit === 'completed' && adjustmentProposal === null &&
+          if (adjustmentDecisionCatalog === null) {
+            adjustmentProposal = localAdjustmentProposal ??
+              takePlanAdjustmentProposal(adjustmentLauncher.spoolPath);
+          } else {
+            const structured = queueStructuredFinalDecision({
+              finalText: turn.finalText,
+              exit: turn.exit,
+              catalog: adjustmentDecisionCatalog,
+              state: engineSession.currentState(),
+              snapshot: adjustmentSnapshot,
+              intelMode: config.intelMode,
+              rendererProfile: config.rendererProfile,
+              ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
+              inheritedReactionGuidance: journal.reactionGuidance(),
+              reasonGate: STRUCTURED_FINAL_DECISION_REASON_GATE,
+            });
+            if (structured.kind === 'accepted') {
+              if (!isPlanAdjustmentProposal(structured.proposal)) {
+                throw new Error('Adjustment final-index decision queued a non-adjustment proposal.');
+              }
+              adjustmentProposal = structured.proposal;
+            } else {
+              adjustmentFinalRejected = true;
+              decisionRejectionCodes.push(structured.code);
+              if (structured.normalizationCode !== null) normalizationCodes.push(structured.normalizationCode);
+              if (structured.engineResult !== null) {
+                observedRejections.push(...rejectionEvidence(structured.engineResult));
+              }
+            }
+          }
+          const flapped = adjustmentDecisionCatalog === null && turn.exit === 'completed' && adjustmentProposal === null &&
             adjustmentToolCalls() === callsBefore && adjustmentRejections().length === rejectionsBefore;
           if (!flapped) break;
+          if (adjustmentDecisionCatalog !== null) break;
           if (attempt === 2) {
             adjustmentServiceNull = true;
             break;
@@ -3104,8 +3442,12 @@ async function runConversationWithConfiguredIntel(
         }
 
         const currentAdjustmentRejections = adjustmentRejections().slice(rejectionsBeforeAdjustment);
-        const refusedActorIds = [...new Set(currentAdjustmentRejections.flatMap((entry) =>
-          entry.actorId === null || !input.openActorIds.includes(entry.actorId) ? [] : [entry.actorId]))]
+        const rejectedAdjustmentActors = currentAdjustmentRejections.flatMap((entry) =>
+          entry.actorId === null || !input.openActorIds.includes(entry.actorId) ? [] : [entry.actorId]);
+        const refusedActorIds = [...new Set([
+          ...rejectedAdjustmentActors,
+          ...(adjustmentFinalRejected ? input.openActorIds : []),
+        ])]
           .sort((left, right) => left.localeCompare(right));
         let correctionRuntime: Parameters<AdjustmentExhaustionCoordinator['coordinate']>[0]['correction'] = null;
         let adjustmentCorrectionProposal: PlanAdjustmentProposalEnvelope | null = null;
@@ -3125,6 +3467,17 @@ async function runConversationWithConfiguredIntel(
             config.rendererProfile,
           );
           adjustmentCorrectionContext = correctionContext;
+          const adjustmentCorrectionDecisionCatalog = config.decisionTransport === 'final_indices'
+            ? decisionCatalogForSnapshot(engineSession.currentState(), correctionSnapshot)
+            : null;
+          const correctionInvocationOutput = adjustmentCorrectionDecisionCatalog === null
+            ? { kind: 'tool_driven' } as const
+            : await structuredFinalOutput(
+                config.decisionTransport,
+                artifacts,
+                `${adjustmentKey}-correction`,
+                adjustmentCorrectionDecisionCatalog,
+              );
           const correctionLauncher = await writeLauncher({
             rendererProfile: config.rendererProfile,
             directory: artifacts,
@@ -3171,9 +3524,39 @@ async function runConversationWithConfiguredIntel(
                 const turn = await lifecycle.resumeCorrection(correctionInvocation, signal);
                 adjustmentCorrectionSessionId = turn.sessionId;
                 captureCallUsage(turn, 'correction');
+                decisionAttempts += 1;
                 adjustmentUsage = addAgentUsage(adjustmentUsage, turn.usage);
                 adjustmentCorrectionContext =
                   takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? adjustmentCorrectionContext;
+                if (adjustmentCorrectionDecisionCatalog !== null) {
+                  const structured = queueStructuredFinalDecision({
+                    finalText: turn.finalText,
+                    exit: turn.exit,
+                    catalog: adjustmentCorrectionDecisionCatalog,
+                    state: engineSession.currentState(),
+                    snapshot: correctionSnapshot,
+                    intelMode: config.intelMode,
+                    rendererProfile: config.rendererProfile,
+                    ...(lastSeenTurnContext === undefined ? {} : {
+                      turnContextDeltaBase: lastSeenTurnContext,
+                    }),
+                    inheritedReactionGuidance: journal.reactionGuidance(),
+                    reasonGate: STRUCTURED_FINAL_DECISION_REASON_GATE,
+                  });
+                  if (structured.kind === 'accepted') {
+                    if (!isPlanAdjustmentProposal(structured.proposal)) {
+                      throw new Error('Adjustment correction final-index decision queued a non-adjustment proposal.');
+                    }
+                    localCorrection = structured.proposal;
+                    adjustmentCorrectionProposal = structured.proposal;
+                  } else {
+                    decisionRejectionCodes.push(structured.code);
+                    if (structured.normalizationCode !== null) normalizationCodes.push(structured.normalizationCode);
+                    if (structured.engineResult !== null) {
+                      observedRejections.push(...rejectionEvidence(structured.engineResult));
+                    }
+                  }
+                }
                 return turn;
               },
             },
@@ -3181,13 +3564,16 @@ async function runConversationWithConfiguredIntel(
               config,
               runId,
               'correction',
-              'replaced by adjustment correction renderer',
+              adjustmentCorrectionDecisionCatalog === null
+                ? 'replaced by adjustment correction renderer'
+                : structuredFinalPrompt(correctionContext, adjustmentCorrectionDecisionCatalog),
               correctionLauncher.manifestPath,
               null,
               basePlanner,
               correctionLauncher.recoveryManifestPath,
               correctionToolSession,
               freshSessionContext,
+              correctionInvocationOutput,
             ),
             signal: new AbortController().signal,
             activateCapsule: () => undefined,
@@ -3319,7 +3705,9 @@ async function runConversationWithConfiguredIntel(
           simulated?.contextCallsByRequest.get(requestId) ?? observedTurnContextCalls;
         const rejectionsObserved = (): readonly ConversationChainAttemptEvidence[] =>
           simulated?.rejectionsByRequest.get(requestId) ?? observedRejections;
-        const primaryPrompt = renderEnginePrompt('plan_round', capsule, RULES_SOURCE);
+        const primaryPrompt = initialDecisionCatalog === null
+          ? renderEnginePrompt('plan_round', capsule, RULES_SOURCE)
+          : structuredFinalPrompt(rowTurnContext, initialDecisionCatalog);
         try {
           for (let attempt = 0; attempt < 3; attempt += 1) {
             const callsBefore = toolCallsObserved();
@@ -3330,13 +3718,16 @@ async function runConversationWithConfiguredIntel(
             const primaryInvocation = invocation(
               config, runId,
               'initial',
-              `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${primaryPrompt}`,
+              initialDecisionCatalog === null
+                ? `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${primaryPrompt}`
+                : primaryPrompt,
               initialLauncher.manifestPath,
               journal.agentSession() === null ? knowledgeBase.startupInstructions : null,
               basePlanner,
               initialLauncher.recoveryManifestPath,
               initialToolSession,
               freshSessionContext,
+              initialInvocationOutput,
             );
             initialDispatchPlanner = plannerAttribution(primaryInvocation);
             options.onPrimaryDispatchStart?.();
@@ -3349,18 +3740,54 @@ async function runConversationWithConfiguredIntel(
             } catch (error) {
               if (!agentDispatchWasCancelled(error)) throw error;
               primaryDispatchTimedOut = true;
+              if (initialDecisionCatalog !== null) {
+                decisionAttempts += 1;
+                decisionRejectionCodes.push('decision_timeout');
+              }
               break;
             }
             rolloutSessionId = turn.sessionId;
             captureCallUsage(turn, 'initial');
-            rowTurnContext = takeTurnContext(initialLauncher.turnContextSpoolPath) ?? rowTurnContext;
-            proposed = localInitialProposal ?? takeRoundProposal(initialLauncher.spoolPath);
-            const flapped = turn.exit === 'completed' && proposed === null &&
+            decisionAttempts += 1;
+            if (initialDecisionCatalog === null) {
+              rowTurnContext = takeTurnContext(initialLauncher.turnContextSpoolPath) ?? rowTurnContext;
+              proposed = localInitialProposal ?? takeRoundProposal(initialLauncher.spoolPath);
+              if (decisionAttempts === 1) firstDecisionAccepted = proposed !== null;
+            } else {
+              const structured = queueStructuredFinalDecision({
+                finalText: turn.finalText,
+                exit: turn.exit,
+                catalog: initialDecisionCatalog,
+                state: engineSession.currentState(),
+                snapshot: initialSnapshot,
+                intelMode: config.intelMode,
+                rendererProfile: config.rendererProfile,
+                ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
+                inheritedReactionGuidance: journal.reactionGuidance(),
+                reasonGate: STRUCTURED_FINAL_DECISION_REASON_GATE,
+              });
+              if (structured.kind === 'accepted') {
+                if (!isRoundProposal(structured.proposal)) {
+                  throw new Error('Initial final-index decision queued a non-round proposal.');
+                }
+                proposed = structured.proposal;
+                acceptedStructuredDecision = structured.decision;
+                if (decisionAttempts === 1) firstDecisionAccepted = true;
+              } else {
+                decisionRejectionCodes.push(structured.code);
+                if (structured.normalizationCode !== null) normalizationCodes.push(structured.normalizationCode);
+                if (structured.engineResult !== null) {
+                  observedRejections.push(...rejectionEvidence(structured.engineResult));
+                }
+              }
+            }
+            const flapped = initialDecisionCatalog === null && turn.exit === 'completed' && proposed === null &&
               toolCallsObserved() === callsBefore && rejectionsObserved().length === rejectionsBefore;
             if (contextCallsObserved() > contextCallsBefore || proposed !== null) {
               lastSeenTurnContext = getCurrentTurnContext();
             }
             if (!flapped) break;
+            if (initialDecisionCatalog !== null) break;
             if (attempt === 2) {
               serviceNull = true;
               outcome = 'service_null';
@@ -3409,6 +3836,20 @@ async function runConversationWithConfiguredIntel(
             );
             return plannedCorrectionTurnContext;
           };
+        const correctionDecisionCatalog = config.decisionTransport === 'final_indices'
+          ? decisionCatalogForSnapshot(engineSession.currentState(), correctionSnapshot)
+          : null;
+        if (correctionDecisionCatalog !== null) {
+          recordedCorrectionTurnContext = getPlannedCorrectionTurnContext();
+        }
+        const correctionInvocationOutput = correctionDecisionCatalog === null
+          ? { kind: 'tool_driven' } as const
+          : await structuredFinalOutput(
+              config.decisionTransport,
+              artifacts,
+              `${key}-correction`,
+              correctionDecisionCatalog,
+            );
         const correctionLauncher = await writeLauncher({
           rendererProfile: config.rendererProfile,
           directory: artifacts, name: `${key}-correction`, snapshot: correctionSnapshot,
@@ -3549,9 +3990,12 @@ async function runConversationWithConfiguredIntel(
             acceptedSubmission = proposal.resolutions.map((entry) => structuredClone(entry.proposal));
             acceptedIntelCapture = proposal.intelCapture === undefined
               ? null : structuredClone(proposal.intelCapture);
+            const structuredReasonByActor = new Map(
+              acceptedStructuredDecision?.selections.map((selection) => [selection.actorId, selection.reason]) ?? [],
+            );
             authorizedPlan = mechanics.map((entry): ConversationAuthorizedActorPlan => ({
               actorId: entry.mechanics.actorId,
-              reason: entry.proposal.reason,
+              reason: structuredReasonByActor.get(entry.mechanics.actorId) ?? entry.proposal.reason,
               acceptedProposal: structuredClone(entry.acceptedProposal),
               selectedBranch: entry.selectedBranch,
               resolutionSummary: {
@@ -3693,8 +4137,38 @@ async function runConversationWithConfiguredIntel(
                 if (escalationPlanner === null) rolloutSessionId = correctionTurn.sessionId;
                 else escalationSessionId = correctionTurn.sessionId;
                 captureCallUsage(correctionTurn, 'correction');
+                decisionAttempts += 1;
                 recordedCorrectionTurnContext =
                   takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? recordedCorrectionTurnContext;
+                if (correctionDecisionCatalog !== null) {
+                  const structured = queueStructuredFinalDecision({
+                    finalText: correctionTurn.finalText,
+                    exit: correctionTurn.exit,
+                    catalog: correctionDecisionCatalog,
+                    state: engineSession.currentState(),
+                    snapshot: correctionSnapshot,
+                    intelMode: config.intelMode,
+                    rendererProfile: config.rendererProfile,
+                    ...(correctionTurnContextBase === undefined ? {} : {
+                      turnContextDeltaBase: correctionTurnContextBase,
+                    }),
+                    inheritedReactionGuidance: journal.reactionGuidance(),
+                    reasonGate: STRUCTURED_FINAL_DECISION_REASON_GATE,
+                  });
+                  if (structured.kind === 'accepted') {
+                    if (!isRoundProposal(structured.proposal)) {
+                      throw new Error('Correction final-index decision queued a non-round proposal.');
+                    }
+                    localCorrectionProposal = structured.proposal;
+                    acceptedStructuredDecision = structured.decision;
+                  } else {
+                    decisionRejectionCodes.push(structured.code);
+                    if (structured.normalizationCode !== null) normalizationCodes.push(structured.normalizationCode);
+                    if (structured.engineResult !== null) {
+                      observedRejections.push(...rejectionEvidence(structured.engineResult));
+                    }
+                  }
+                }
                 const contextCallsAfterCorrection = simulated?.contextCallsByRequest.get(requestId) ??
                   observedTurnContextCalls;
                 if (escalationPlanner === null &&
@@ -3714,13 +4188,16 @@ async function runConversationWithConfiguredIntel(
               config,
               runId,
               'correction',
-              'replaced by correction renderer',
+              correctionDecisionCatalog === null
+                ? 'replaced by correction renderer'
+                : structuredFinalPrompt(getPlannedCorrectionTurnContext(), correctionDecisionCatalog),
               correctionLauncher.manifestPath,
               null,
               escalationPlanner ?? basePlanner,
               correctionLauncher.recoveryManifestPath,
               correctionToolSession,
               freshSessionContext,
+              correctionInvocationOutput,
             ),
             signal: new AbortController().signal,
             activateCapsule: () => undefined,
@@ -3865,7 +4342,9 @@ async function runConversationWithConfiguredIntel(
             ? 'The initial primary/fallback chain and single correction were exhausted; the engine auto-submitted its non-dominated default.'
             : 'The initial primary/fallback chain and single correction were exhausted; unresolved frontier competition blocked engine auto-submit, so the deterministic controller resolved the affected actor turns.';
         }
-        if (coordinated.kind !== 'auto_resolved') correctionFinalText = null;
+        if (coordinated.kind !== 'auto_resolved' && config.decisionTransport !== 'final_indices') {
+          correctionFinalText = null;
+        }
         }
         if (config.combatModel === 'initiative_segments_v1' && !serviceNull &&
           (outcome === 'authorized' || outcome === 'auto_resolved')) {
@@ -4361,6 +4840,16 @@ async function runConversationWithConfiguredIntel(
         toolCalls: simulated?.callsByRequest.get(requestId) ?? observedToolCalls,
         callsPerRound: adapter.modelCalls - modelCallsBeforeRound,
         agentDispatched, flapRetries, serviceNull,
+        decisionTransport: config.decisionTransport,
+        firstDecisionAccepted,
+        decisionAttempts,
+        decisionRejectionCodes,
+        normalizationCodes,
+        chosenOptionIndices: acceptedStructuredDecision?.selections.map((selection) => ({
+          actorId: selection.actorId,
+          primaryOptionIndex: selection.primaryOptionIndex,
+          fallbackOptionIndex: selection.fallbackOptionIndex,
+        })) ?? [],
         contextTruncated: simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated,
         plannedBy,
         planner,

@@ -108,6 +108,7 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         model: 'SIMULATED-local-model',
         reasoningEffort: 'low',
         callPhase: 'initial',
+        output: { kind: 'tool_driven' },
         launcherToken: 'SIMULATED-adjustment-launcher',
         timeoutMs: null,
         toolSession: {

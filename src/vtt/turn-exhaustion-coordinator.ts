@@ -279,13 +279,15 @@ export class TurnExhaustionCoordinator {
         actorFailures: failures,
       });
       input.correction.activateCapsule();
-      const prompt = renderEnginePrompt(
-        'correct_proposal',
-        input.correction.capsule,
-        input.correction.rules,
-        undefined,
-        input.correction.turnContext,
-      );
+      const prompt = input.correction.invocation.output.kind === 'structured_final'
+        ? input.correction.invocation.prompt
+        : renderEnginePrompt(
+            'correct_proposal',
+            input.correction.capsule,
+            input.correction.rules,
+            undefined,
+            input.correction.turnContext,
+          );
       await input.correction.lifecycle.resumeCorrection(
         { ...input.correction.invocation, prompt },
         input.correction.signal,

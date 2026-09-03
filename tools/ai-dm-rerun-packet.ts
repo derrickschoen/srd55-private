@@ -123,6 +123,16 @@ const arenaRowSchema = z.object({
   planner: primaryPlannerSchema.optional(),
   overrideKinds: z.array(overrideKindSchema).optional(),
   overrideRejections: z.array(overrideRejectionSchema).optional(),
+  decisionTransport: z.enum(['mcp_minimal', 'final_indices']),
+  firstDecisionAccepted: z.boolean(),
+  decisionAttempts: safeIntegerSchema.min(0),
+  decisionRejectionCodes: z.array(z.string()),
+  normalizationCodes: z.array(z.string()),
+  chosenOptionIndices: z.array(z.object({
+    actorId: z.unknown(),
+    primaryOptionIndex: safeIntegerSchema.min(0),
+    fallbackOptionIndex: safeIntegerSchema.min(0).nullable(),
+  })),
   // Required in cross-era mode, where it is the arm partition key.
   repoCommit: z.string().min(1).optional(),
 }).passthrough();
@@ -166,6 +176,16 @@ interface ValidatedArenaRow {
   readonly planner: z.infer<typeof primaryPlannerSchema>;
   readonly overrideKinds: readonly z.infer<typeof overrideKindSchema>[];
   readonly overrideRejections: readonly z.infer<typeof overrideRejectionSchema>[];
+  readonly decisionTransport: 'mcp_minimal' | 'final_indices';
+  readonly firstDecisionAccepted: boolean;
+  readonly decisionAttempts: number;
+  readonly decisionRejectionCodes: readonly string[];
+  readonly normalizationCodes: readonly string[];
+  readonly chosenOptionIndices: readonly {
+    readonly actorId: unknown;
+    readonly primaryOptionIndex: number;
+    readonly fallbackOptionIndex: number | null;
+  }[];
   readonly roundNarrative: string | null;
   readonly rationale: string | null;
   readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
@@ -228,6 +248,16 @@ export interface RerunAnswerKey {
     readonly overrideRejections: readonly z.infer<typeof overrideRejectionSchema>[];
     readonly decisionReasons: readonly { readonly actorId: unknown; readonly reason: string }[];
     readonly rationale: string | null;
+    readonly decisionTransport: 'mcp_minimal' | 'final_indices';
+    readonly firstDecisionAccepted: boolean;
+    readonly decisionAttempts: number;
+    readonly decisionRejectionCodes: readonly string[];
+    readonly normalizationCodes: readonly string[];
+    readonly chosenOptionIndices: readonly {
+      readonly actorId: unknown;
+      readonly primaryOptionIndex: number;
+      readonly fallbackOptionIndex: number | null;
+    }[];
   }[];
 }
 
@@ -241,6 +271,9 @@ const MODEL_IDENTITY_FIELDS = new Set([
   // the executed-plan normalization failed and the entry identifies its era.
   'acceptedIntent', 'acceptedProposal', 'resolutionSummary', 'actionSlots',
   'selectedBranch', 'optionId', 'plannerLabel', 'planner', 'overrideKinds', 'overrideRejections',
+  'decisionTransport', 'firstDecisionAccepted', 'decisionAttempts',
+  'decisionRejectionCodes', 'normalizationCodes',
+  'chosenOptionIndices',
   // The round narrative is a deterministic era-specific renderer template
   // ("expands X + X -> Y into N ordered use(s)" vs "moves N feet and uses x"),
   // verified trivially arm-separable on real R1-10 rows. It adds nothing
@@ -353,6 +386,12 @@ function validateRow(
     planner,
     overrideKinds: row.overrideKinds ?? [],
     overrideRejections: row.overrideRejections ?? [],
+    decisionTransport: row.decisionTransport,
+    firstDecisionAccepted: row.firstDecisionAccepted,
+    decisionAttempts: row.decisionAttempts,
+    decisionRejectionCodes: row.decisionRejectionCodes,
+    normalizationCodes: row.normalizationCodes,
+    chosenOptionIndices: row.chosenOptionIndices,
     roundNarrative: row.roundNarrative,
     rationale: row.rationale ?? null,
     authorizedPlan: row.authorizedPlan,
@@ -587,6 +626,12 @@ function buildPacket(
       decisionReasons: (row.authorizedPlan ?? []).flatMap((entry) => entry.reason === undefined
         ? [] : [{ actorId: entry.actorId, reason: entry.reason }]),
       rationale: row.rationale,
+      decisionTransport: row.decisionTransport,
+      firstDecisionAccepted: row.firstDecisionAccepted,
+      decisionAttempts: row.decisionAttempts,
+      decisionRejectionCodes: row.decisionRejectionCodes,
+      normalizationCodes: row.normalizationCodes,
+      chosenOptionIndices: row.chosenOptionIndices,
     })),
   };
   assertBlindedPacket(packet);

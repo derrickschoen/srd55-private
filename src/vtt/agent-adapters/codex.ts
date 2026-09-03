@@ -135,12 +135,14 @@ export class CodexAgentSessionAdapter extends ProcessAgentSessionAdapter {
   }
 
   invocationSpec(invocation: AgentInvocation, sessionId: string | null): AgentProcessSpec {
+    const structuredFinal = invocation.output.kind === 'structured_final';
     return this.spec(codexArgv({
       cwd: this.options.cwd ?? process.cwd(),
       model: invocation.model,
       reasoningEffort: invocation.reasoningEffort,
-      engineCommand: this.engineCommand(),
-      engineArgs: this.engineArgs(invocation.launcherToken),
+      engineCommand: structuredFinal ? null : this.engineCommand(),
+      engineArgs: structuredFinal ? [] : this.engineArgs(invocation.launcherToken),
+      outputSchemaPath: structuredFinal ? invocation.output.schemaPath : null,
       instructions: invocation.instructions ?? null,
       arenaSession: invocation.sessionProfile === 'arena',
       sessionId,
@@ -201,6 +203,7 @@ export interface CodexArgvInput {
   readonly reasoningEffort: string;
   readonly engineCommand: string | null;
   readonly engineArgs: readonly string[];
+  readonly outputSchemaPath?: string | null;
   readonly instructions?: string | null;
   readonly arenaSession?: boolean;
   readonly sessionId: string | null;
@@ -213,6 +216,8 @@ export function codexArgv(input: CodexArgvInput): readonly string[] {
     '--sandbox', 'read-only',
     '--json',
     '-m', input.model,
+    ...(input.outputSchemaPath === null || input.outputSchemaPath === undefined
+      ? [] : ['--output-schema', input.outputSchemaPath]),
     '-c', `model_reasoning_effort=${JSON.stringify(input.reasoningEffort)}`,
     ...(input.arenaSession === true ? [
       '-c', 'project_doc_max_bytes=0',

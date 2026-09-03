@@ -906,6 +906,24 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     });
   });
 
+  it('G2.1 rejects an empty reason on the tool-driven wire without consuming the submission', async () => {
+    const fixture = await fixtureRuntime();
+    const facts = fixtureFacts(fixture.state, fixture.runtime);
+    const rejected = structured(toolCall(fixture.runtime.handler, 'engine.submit_round_proposals', {
+      proposals: [{ ...facts.proposal, reason: '', override_justification: null }],
+    }));
+
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      actor_refusals: [{ codes: ['REASON_REQUIRED'] }],
+    });
+    expect(fixture.runtime.proposals).toEqual([]);
+    expect(structured(toolCall(fixture.runtime.handler, 'engine.submit_round_proposals', {
+      proposals: [facts.proposal],
+    }))['status']).toBe('proposed');
+    expect(fixture.runtime.proposals).toHaveLength(1);
+  });
+
   it('D466 G1 rejects a stale minimal launcher binding with a typed code', async () => {
     const { state, runtime } = await fixtureRuntime();
     const facts = fixtureFacts(state, runtime);

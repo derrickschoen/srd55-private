@@ -78,6 +78,16 @@ export interface AgentToolSession {
   execute(name: string, argumentsValue: unknown): unknown;
 }
 
+/** Declares whether this turn is tool-driven or schema-constrained final text. */
+export type AgentInvocationOutput =
+  | { readonly kind: 'tool_driven' }
+  | {
+      readonly kind: 'structured_final';
+      readonly schemaPath: string;
+      readonly decisionEncoding: 'indices';
+      readonly engineTools: 'disabled';
+    };
+
 export interface AgentSessionBinding {
   readonly cli: AgentAdapterKind;
   readonly sessionId: AgentSessionId;
@@ -107,6 +117,7 @@ export interface AgentInvocation {
   readonly reasoningEffort: string;
   readonly sessionProfile?: 'arena' | 'test';
   readonly callPhase: AgentCallPhase;
+  readonly output: AgentInvocationOutput;
   readonly launcherToken: string;
   /** Full-context launcher used only if resume recovery creates a fresh agent session. */
   readonly recoveryLauncherToken?: string;
@@ -131,7 +142,8 @@ export interface AgentTurnResult {
   readonly sessionId: string | null;
   readonly finalText: string;
   readonly usage: AgentUsage | null;
-  readonly exit: 'completed' | 'cancelled';
+  /** Non-completed exits are censored transport outcomes, never absent decisions. */
+  readonly exit: 'completed' | 'cancelled' | 'timed_out';
   readonly contractEvidence?: readonly string[];
 }
 

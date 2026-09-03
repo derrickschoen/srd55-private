@@ -152,6 +152,7 @@ function correction(
       reasoningEffort: 'SIMULATED-effort',
       sessionProfile: 'test',
       callPhase: 'correction',
+      output: { kind: 'tool_driven' },
       launcherToken: 'SIMULATED-launcher-token',
       timeoutMs: null,
     },
@@ -190,6 +191,35 @@ describe('plan adjustment correction and exhaustion coordinator', () => {
     expect(dispatches[0]).toContain('Correct only the refused plan-adjustment actors once');
     expect(dispatches[0]).toContain('fallback_option_id must be null');
     expect(transitions.transitions().filter((entry) => entry.kind === 'adjustment_correction_requested')).toHaveLength(1);
+  });
+
+  it('preserves a structured-final correction prompt instead of rendering an engine-tool correction (mutation: overwrite indexed correction prompt)', async () => {
+    const f = await fixture();
+    const dispatches: string[] = [];
+    const queued = [proposal({
+      capsule: f.correctionRuntime.feed.current(),
+      phase: 'correction',
+      actorId: f.second,
+      id: 'proposal:structured-correction',
+    })];
+    const base = correction(f.correctionRuntime.feed.current(), queued, dispatches, { value: 0 });
+    const runtime: AdjustmentCorrectionRuntime = {
+      ...base,
+      invocation: {
+        ...base.invocation,
+        prompt: '[TURN_CONTEXT]\npre-rendered\n[DECISION_CATALOG]\nindexed',
+        output: {
+          kind: 'structured_final',
+          schemaPath: '/tmp/SIMULATED-adjustment-final-schema.json',
+          decisionEncoding: 'indices',
+          engineTools: 'disabled',
+        },
+      },
+    };
+
+    await new AdjustmentExhaustionCoordinator(journal()).coordinate({ initial: f.initial, correction: runtime });
+
+    expect(dispatches).toEqual(['[TURN_CONTEXT]\npre-rendered\n[DECISION_CATALOG]\nindexed']);
   });
 
   it('keeps refused actors on their baseline while preserving staged updates after correction failure', async () => {

@@ -97,6 +97,7 @@ function invocation(kind: AgentCliKind, prompt: string): AgentInvocation {
     model: process.env[environmentKey] ?? DEFAULT_MODELS[kind],
     reasoningEffort: 'low',
     callPhase: 'initial',
+    output: { kind: 'tool_driven' },
     launcherToken: `agent-conformance-${kind}-launcher-token`,
     timeoutMs: conformanceTimeoutMs(kind),
   };
