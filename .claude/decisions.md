@@ -1,5 +1,18 @@
 # Binding scope decisions
 
+D447 BOTH ARMS LANDED AND VERIFIED; PACKET BUILT; PANEL DISPATCHED
+(supervisor, 2026-09-03 01:22): candidate (caveman rows+move+gating, luna
+low) 50 rows, 49 authorized / 1 timeout (refused), same 10 digests x5 as
+the control, profile confirmed from rendererAttribution (caveman_prose,
+rows best_exception). Mechanism counts control vs candidate: idle
+Disengage 0 vs 1, Dash 132 vs 132, attack slots 66 vs 59, wall median
+17.7 vs 17.5 s. Packet d447-packet-confirm (buildRerunPacket, prime 373,
+protocol seeds 6204001-10 x 5 reps, 100 entries, leak scan none) judged by
+the three seats via judge-one.sh; key sealed with D449 (and D465 if it
+resumes). The box is now idle: D465 is on hold for the owner's sol
+decision and the post-shift control waits for the D466 merge. C1 in
+flight (16 files).
+
 F: B4 COMMITTED WITH A MUTATION CLAIM THAT HAD NOT YET HAPPENED
 (supervisor, 2026-09-03 01:03): my Calm Emotions mutation script looked
 for a `radius*` field; the definition uses `baseSizeFeet`, so the assert
