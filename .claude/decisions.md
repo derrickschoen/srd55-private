@@ -1,5 +1,65 @@
 # Binding scope decisions
 
+D443 UNSEALED (supervisor, 2026-09-02 21:30, per D451; all 27 judge
+outputs validated structurally first; totals recomputed from components;
+refused = 0; service_null dropped pairwise). Results in
+dnd-slim-runs/d443-results.txt.
+EFFORT (medium minus low, paired by seed x rep, mean panel total, n=30
+unless noted; SE of the paired delta): s-full +0.89 (0.45); s-rows +0.42
+(0.49); s-opp +0.77 (0.30); s-move +1.16 (0.49); s-threats +1.89 (0.54);
+s-gating +1.80 (0.68, n=29); cav-full +0.44 (0.15). Medium wins every
+pair beyond the 0.2 band; all three seats agree in sign on every pair.
+The gain is largest where the low arm was weakest (threats, gating) and
+smallest for caveman prose, whose low arm was already the best low arm.
+NEW-ERA LOW RANKING (7 arms, one 210-entry packet): cav-full 8.18;
+s-rows 6.81; s-full 6.52; s-opp 6.34; s-move 5.89; s-threats 5.84;
+s-gating 5.44. Caveman prose leads by 1.4 over the best structured arm;
+among structured arms only s-rows beats s-full and only by 0.3; every
+other reduction costs 0.2-1.1.
+NEW-ERA MEDIUM RANKING (8 arms, one 240-entry packet): cav-full 8.72;
+cav-rows-move-gating 8.60; s-threats 7.50; s-full 7.24; s-move 7.16;
+s-opp 7.04; s-rows 7.03; s-gating 7.01. Caveman still leads by 1.2; the
+reduction bundle on caveman is a tie with caveman full (-0.12); at
+medium the structured reductions collapse to within 0.5 of each other
+and s-threats moves from sixth to first among structured arms.
+OLD-ERA COLUMN (D441 per-arm packets vs the p3-caveman control, three
+seats, arm minus control): rows-move-gating +0.98, cav-threats +0.93,
+cav-move +0.92, move-gating +0.87, move-threats-gating +0.83,
+threats-gating +0.71, cav-rows +0.68, rows-move +0.64, ... cav-gating
++0.37, cav-opp -0.21, cav-all -0.55, opp-gating -0.75 (full list in the
+report). Reading across eras: caveman prose is the format winner in all
+three columns; "rows" (best_exception) is the one content reduction that
+never hurts; "opp" and "gating" hurt at low in both eras and are neutral
+at medium; the old-era winner rows-move-gating replicates as the
+caveman bundle at medium (tie with caveman full).
+D445 verdict: the ranking is stable enough to choose the P4/D460
+incumbent without a runoff: caveman full (control) with the rows
+reduction as the one safe content cut. D472's post-shift comparator is
+cav-full-low (8.18).
+CONFOUND NOTED per D470 rule for later sol packets: not applicable here
+(luna operator on every arm).
+
+D459 SMOKE FINDINGS (unjudged 3-round run, seeds 3943001-10 = the
+conversation tool's default fixtures, luna low, k7 loaded, 30/30 rows
+authorized): (1) the conversation tool already runs ONE operator session
+across all rooms of a run with [ROOM_TRANSITION] resumes — D457's sitting
+semantics exist today; sessionId identical across all 30 rows, context
+revision monotonic 2 -> 306. (2) Context growth is real: per-round input
+tokens reached 2.9M (room 5 round 2) and 2.7M (room 9); contextTruncated
+was set on 5 rows — the D457 rollover is needed, not optional. (3) Four
+rooms fell to engine planning in later rounds (rooms 2 and 9
+engine_default, rooms 5 and 8 sim_controller with
+auto_submit_blocked_unresolved_frontier). (4) Party-side harness
+refusals in multi-round play: "Dead initiative actor combatant:wizard
+remained active" (room 4, every round; contextRevision frozen at 102),
+same for fighter in room 7; "Scripted party plan has no program for
+combatant:cleric/wizard" (rooms 5, 10); "Scripted party turns require a
+living player character" (room 8); "Monster on-hit size eligibility
+requires a known size for combatant:cleric" (room 6). These are
+multi-round harness/engine defects that the opening-round arms never
+exercise; they must be fixed before the judged 3-round lane (D471) and
+are added to the D466 shift as increment E (multi-round harness).
+
 F: MANGLED JUDGE HEADER AND A SELF-MATCHING pkill (supervisor, 2026-09-02
 21:08, two mistakes of my own): (1) judge-d443.sh substituted the entry
 count with `${HDR//N/$n}`, which replaced every capital N in the header
