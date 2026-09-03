@@ -656,6 +656,27 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D484 — OWNER: a rejected first submission followed by a retry must be rare, not standard (2026-09-03)
+
+Owner (verbatim): **"I would like it to be that failure then retry for
+submission should be rare, not standard."** and **"look for other
+nonsensical things that are happening that I don't know about"**.
+
+Consequences: F (submission envelope in the tool description, rejected
+calls do not count, schema resource, `args: unknown` investigation) is
+the first step, not the whole answer. A codex brainstorm+audit was
+dispatched read-only over the raw rollouts and rows: measure the
+first-submission failure rate and its causes, rank fixes that make a
+correct first call the norm (real schema exposure, a pre-filled
+envelope/draft tool, server-side fill of state_ref/request_id/
+idempotency_key, validate-then-submit, envelope example in the turn
+text, typed rejections carrying the corrected envelope), and audit for
+other absurdities (repeated tool discovery per round, speculative-branch
+mismatch rejections, correction loops, auto-submit blocks, KB re-reads
+every round, absurd executed plans). Supervisor measures the headline
+rate independently. Findings become the design input for a further
+increment before the post-shift control is rerun.
+
 ## D483 — OWNER: rerun a few random luna arms with sol's operating instructions (2026-09-03)
 
 Owner (verbatim, mid-turn): **"Test a few random Luna arms with the extra
