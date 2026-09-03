@@ -1,5 +1,28 @@
 # Binding scope decisions
 
+H4 INTENT MATCHER: OFFLINE RESULT INCONCLUSIVE, BRANCH KEPT (supervisor,
+2026-09-03 13:40; commit on claude/h4-intent). Codex terra built the
+deterministic lexical matcher, the corpus extractor and the evaluator;
+tsc 0, sg 0, H4 tests 5/5; full suite showed the two known 5 s-budget
+timeouts (pass in isolation). The corpus tells the real story: 3,732
+items but only 152 with usable pre-submit prose — the models do not
+narrate intent before submitting, and arena rows keep only correction
+summaries. On those 152: top-1 39.5%, abstention 53.9%; on the 139
+first-rejected proses 41.7%; the target-swap negative gate had zero
+eligible cases. My review: opus's design is untestable on existing data
+and a lexical matcher over this prose is not competitive; the right
+corpus is the D489 reasons (mandatory, per actor) once post-shift arms
+exist — every reason is intent text paired with the chosen option. H4
+stays an experimental branch, not part of the shift; re-evaluate after
+the post-shift control. H1-indices and H3 delivered (both stopped
+loudly at the full-suite gate: the indices lane's command window and,
+in H3, four load timeouts plus the 3x3 MCP smoke exceeding its fixed
+120 s in isolation — the last is a real slowdown to check); supervisor
+gates queued sequentially. BG3 lane: six candidate videos recorded
+privately (three explicitly Tactician); the box has no yt-dlp/ffmpeg/
+tesseract, so frame extraction and OCR of the combat log need tools
+installed — owner asked.
+
 OVERRIDE RETROSPECTIVE (codex sol high, read-only, unsealed D443 scores;
 report dnd-slim-runs/override-retro-report.log; supervisor-checked
 headline counts match my own extraction; 2026-09-03 13:20). 907 luna-low
