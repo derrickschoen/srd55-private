@@ -1,5 +1,19 @@
 # Binding scope decisions
 
+D2 VERIFIED AND COMMITTED; E DISPATCHED (supervisor, 2026-09-03 04:15):
+D2 (21 files +914/-104, new agent-session-digest.ts, migration 0063 to
+session schema 10, measurement fixture and test). Gates: tsc 0, sg 0,
+vitest 543 files / 9504 tests, the D1 red test now green with the
+measured literal 160000 pinned at agent-session-lifecycle.ts:224. My
+mutation (removed the decisions sort comparator in the digest, guarded):
+determinism test fails, 2/2 after restore proven by cmp. Two new
+conversation tests carry explicit 60 s timeouts (new tests, not raised
+existing ones; noted for load margin). Committed. Codex's measurement
+script still prints nothing against the real sessions tree in my hands
+(count 0 earlier, empty output now); its unit fixture passes — probing
+the CLI shape; not blocking the shift. E (multi-round harness fixes
+from the D459 smoke) dispatched — the last increment before integration.
+
 ROLLOVER THRESHOLD MEASURED (supervisor, 2026-09-03 03:12; D457/R2):
 from 1,083 codex operator rollouts (2026-09-02/03: D443 luna low and
 medium arms, D449 k7 arm, the 3-round smoke, D447), 13,392 per-call
