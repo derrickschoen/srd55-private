@@ -9530,3 +9530,10 @@ the waiting chain script. Rule: before launching any chain, list the
 chain scripts themselves (`ps -eo pid,lstart,args | grep <script>`),
 and record queued chains in the tick state so a compaction cannot hide
 them.
+
+## D496 — OWNER: prepare the BG3 Script Extender capture kit; owner runs the fights (2026-09-03)
+
+Asked: the video pipeline yields action lines but not rolls, saves or damage; the complete source is a Script Extender
+combat-log dump from a live game. Owner: "Yes, prepare the capture kit." Supervisor prepares, in the private repo,
+the Script Extender + Combat Log Log setup, a fight checklist (Tactician, mephits, flat ground) and an ingest script;
+the owner runs the fights and drops the logs into the private repo. Nothing from the captures enters a public tree.
