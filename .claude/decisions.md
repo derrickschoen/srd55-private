@@ -1,5 +1,29 @@
 # Binding scope decisions
 
+D465 SOL-LOW BATCH STOPPED AFTER ARM 1: SOL LOW FAILS THE SUBMISSION
+PROTOCOL (supervisor, 2026-09-02 22:58): d465-s-full-sol-low landed 30
+rows, 0 timeouts, but 24/30 rounds were engine-planned (plannerLabel
+sim_controller; 40 auto_submit_blocked_unresolved_frontier actors) and
+only 5 model-planned. Cause, read from the sol operator rollouts (raw
+transcripts, not sealed): sol reads the turn context and the proposal
+schema resource, then makes ONE engine.submit_round_proposals call with
+the wrong shape (missing `phase` and `idempotency_key`, `run_id` at top
+level), gets rejected, and writes "I did not retry because you required
+exactly one submission call"; its single permitted correction then adds
+an invalid `correction_number` field and is rejected again. Luna under
+the identical instructions and the same codex 0.148 exec-scripted tool
+mode submits correctly. So the sol arm measured the engine's fallback,
+not sol's tactics — useless for D465's purpose (distillation input).
+Actions: post-D443 chain, the running arm 2 (rows) and its sol operators
+killed by PID; d465-s-full-sol-low.jsonl renamed .VOID-protocol; arm 2
+partial deleted. Box repurposed immediately: two sol protocol probes (2
+rooms x 1 rep, low then medium) followed by D447 control and candidate
+(luna low, unchanged design) in run-probe-then-d447.sh. Owner question
+queued: sol at medium if the probe shows it submits correctly; or give
+sol the protocol subject file from the KB plan (changes the arm's KB
+relative to luna arms and is recorded as such); or drop sol from D465.
+The D451 unsealing is unaffected; D449 key stays sealed with D447.
+
 B1 HARVESTED; D449 PANEL VALID (supervisor note, 2026-09-02 22:30):
 codex delivered B1 (24 files +433/-111, three new files: monster-feature-
 support.ts, mixed-kind-multiattack.test.ts, monster-omitted-riders.test.ts)
