@@ -9537,3 +9537,9 @@ Asked: the video pipeline yields action lines but not rolls, saves or damage; th
 combat-log dump from a live game. Owner: "Yes, prepare the capture kit." Supervisor prepares, in the private repo,
 the Script Extender + Combat Log Log setup, a fight checklist (Tactician, mephits, flat ground) and an ingest script;
 the owner runs the fights and drops the logs into the private repo. Nothing from the captures enters a public tree.
+
+## D497 — OWNER: capture list = mud mephits ×5 only, first (2026-09-03)
+
+Five runs of the Decrepit Sanctuary mud-mephit fight on Tactician from the same save and party position. Repeats are
+needed because Larian's AI scores with randomised weights; one recording cannot separate policy from dice. Melee and
+caster encounters come later.
