@@ -1,4 +1,5 @@
 import type { Ability } from '../domain/enums';
+import { combatantFaction } from './allies';
 import type { CombatRulesProfile } from './combatant';
 import {
   conditionMechanicalState,
@@ -8,8 +9,9 @@ import {
 import type { EncounterState, EncounterCombatantState } from './encounter';
 import { EncounterRuleError } from './encounter-rule-error';
 import type { EncounterEffect } from './effects';
+import { declaredMonsterTraits } from './monster-traits';
 import type { RollMode } from './saving-throw-outcomes';
-import { combineRollModes } from './tactical-evaluator';
+import { combineRollModes, projectMonsterRollModeSources } from './tactical-evaluator';
 import type { CombatantId } from './values';
 import { wildShapeRulesLens } from './wild-shape';
 
@@ -282,6 +284,25 @@ export function saveRollMode(
   cause: 'spell_or_magical_effect' | 'other',
 ): RollMode {
   const modes: RollMode[] = [base];
+  const subject = combatant(state, target);
+  const activeHitPoints = subject.wildShape?.physical.hitPoints ??
+    subject.form?.hitPoints ?? subject.hitPoints;
+  const activeBaseMaximum = subject.wildShape?.physical.hitPointMaximum ??
+    subject.form?.hitPointMaximum ?? subject.profile.rules.hitPointMaximum;
+  const activeHitPointMaximum = state.effects.reduce((maximum, effect) =>
+    effect.targets.includes(target) && effect.payload.kind === 'hit_point_maximum_modifier'
+      ? maximum + effect.payload.amount
+      : maximum, activeBaseMaximum);
+  modes.push(...projectMonsterRollModeSources({
+    kind: 'saving_throw',
+    traits: declaredMonsterTraits(state, target),
+    actor: {
+      id: target,
+      faction: combatantFaction(state, target),
+      hitPoints: activeHitPoints,
+      hitPointMaximum: activeHitPointMaximum,
+    },
+  }).map((source) => source.mode));
   if (cause === 'spell_or_magical_effect' && effectiveCombatRules(state, target).magicResistance === true) {
     modes.push('advantage');
   }

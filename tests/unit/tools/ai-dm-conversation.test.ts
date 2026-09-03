@@ -992,7 +992,13 @@ describe('AI-DM engine MCP conversation runner', () => {
   it('hidden_options_logged_once: records every hidden option once with engine-state knowledge and stationary Disengage reasons', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-hidden-options-'));
     const outPath = join(directory, 'rows.jsonl');
-    const state = generateRoom(3_943_001).encounter.state;
+    const hiddenActor = monsterProfile('hidden-options-actor', { initiativeBonus: 20 });
+    const hiddenTarget = playerProfile('hidden-options-target', { initiativeBonus: -20 });
+    const state = createEncounter({
+      bounds: { columns: 3, rows: 1 },
+      combatants: [hiddenActor, hiddenTarget],
+      tokens: [placedToken(hiddenActor, 0), placedToken(hiddenTarget, 2)],
+    });
     const result = await runConversation(parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', outPath,
       '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',

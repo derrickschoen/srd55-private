@@ -3,7 +3,11 @@ import type {
   MonsterMultiattackAction,
   MonsterMultiattackComponent,
   MonsterSavingThrowAction,
+  MonsterTrait,
 } from '../combat/statblock';
+import type { EncounterState } from '../combat/encounter';
+import { declaredMonsterTraits } from '../combat/monster-traits';
+import type { CombatantId } from '../combat/values';
 import type { EngineOmittedRider } from './option-modeling';
 import { engineActionId, type EngineActionId } from './turn-proposal';
 
@@ -15,6 +19,125 @@ const multiattackOmissionCache = new WeakMap<
   MonsterMultiattackAction,
   Map<string, readonly EngineOmittedRider[]>
 >();
+
+export type FeatureSupportDisposition =
+  | { readonly kind: 'modeled' }
+  | {
+      readonly kind: 'offered_with_omission';
+      readonly reason: 'secondary_effect_omitted';
+    }
+  | {
+      readonly kind: 'human_only_unmodeled';
+      readonly reason:
+        | 'zero_hit_point_trait_unmodeled'
+        | 'grapple_movement_unmodeled'
+        | 'ally_aura_unmodeled'
+        | 'incorporeal_movement_unmodeled'
+        | 'jump_movement_unmodeled'
+        | 'trait_save_aura_unmodeled'
+        | 'vertical_movement_unmodeled'
+        | 'web_movement_unmodeled'
+        | 'companion_life_bond_unmodeled'
+        | 'special_space_movement_unmodeled'
+        | 'object_damage_trait_unmodeled'
+        | 'automatic_grapple_trait_unmodeled'
+        | 'equipment_corrosion_trait_unmodeled'
+        | 'ethereal_plane_unmodeled'
+        | 'equipment_restriction_unmodeled'
+        | 'emitted_light_unmodeled';
+    }
+  | {
+      readonly kind: 'encounter_not_applicable';
+      readonly reason: 'no_sunlight_state' | 'no_underwater_state';
+    };
+
+export interface MonsterTraitSupportRow {
+  readonly feature: { readonly kind: 'trait'; readonly trait: MonsterTrait['kind'] };
+  readonly disposition: FeatureSupportDisposition;
+}
+
+/** Exhaustive disposition for each declared monster trait. */
+export function monsterTraitSupportDisposition(
+  trait: MonsterTrait,
+): FeatureSupportDisposition {
+  switch (trait.kind) {
+    case 'pack_tactics':
+    case 'bloodied_frenzy':
+    case 'bloodied_fury':
+    case 'web_sense':
+    case 'keen_sight':
+    case 'flyby':
+    case 'magic_resistance': return { kind: 'modeled' };
+    case 'undead_fortitude': return {
+      kind: 'human_only_unmodeled', reason: 'zero_hit_point_trait_unmodeled',
+    };
+    case 'abduct': return {
+      kind: 'human_only_unmodeled', reason: 'grapple_movement_unmodeled',
+    };
+    case 'aura_of_authority': return {
+      kind: 'human_only_unmodeled', reason: 'ally_aura_unmodeled',
+    };
+    case 'incorporeal_movement': return {
+      kind: 'human_only_unmodeled', reason: 'incorporeal_movement_unmodeled',
+    };
+    case 'running_leap': return {
+      kind: 'human_only_unmodeled', reason: 'jump_movement_unmodeled',
+    };
+    case 'stench': return {
+      kind: 'human_only_unmodeled', reason: 'trait_save_aura_unmodeled',
+    };
+    case 'sunlight_sensitivity': return {
+      kind: 'encounter_not_applicable', reason: 'no_sunlight_state',
+    };
+    case 'amphibious':
+    case 'hold_breath':
+    case 'water_breathing': return {
+      kind: 'encounter_not_applicable', reason: 'no_underwater_state',
+    };
+    case 'spider_climb': return {
+      kind: 'human_only_unmodeled', reason: 'vertical_movement_unmodeled',
+    };
+    case 'web_walker': return {
+      kind: 'human_only_unmodeled', reason: 'web_movement_unmodeled',
+    };
+    case 'life_bond': return {
+      kind: 'human_only_unmodeled', reason: 'companion_life_bond_unmodeled',
+    };
+    case 'air_form':
+    case 'earth_glide':
+    case 'amorphous': return {
+      kind: 'human_only_unmodeled', reason: 'special_space_movement_unmodeled',
+    };
+    case 'siege_monster': return {
+      kind: 'human_only_unmodeled', reason: 'object_damage_trait_unmodeled',
+    };
+    case 'adhesive': return {
+      kind: 'human_only_unmodeled', reason: 'automatic_grapple_trait_unmodeled',
+    };
+    case 'corrosive_form': return {
+      kind: 'human_only_unmodeled', reason: 'equipment_corrosion_trait_unmodeled',
+    };
+    case 'ethereal_sight': return {
+      kind: 'human_only_unmodeled', reason: 'ethereal_plane_unmodeled',
+    };
+    case 'ephemeral': return {
+      kind: 'human_only_unmodeled', reason: 'equipment_restriction_unmodeled',
+    };
+    case 'illumination': return {
+      kind: 'human_only_unmodeled', reason: 'emitted_light_unmodeled',
+    };
+  }
+}
+
+export function monsterTraitSupportRows(
+  state: EncounterState,
+  actorId: CombatantId,
+): readonly MonsterTraitSupportRow[] {
+  return declaredMonsterTraits(state, actorId).map((trait) => ({
+    feature: { kind: 'trait', trait: trait.kind },
+    disposition: monsterTraitSupportDisposition(trait),
+  }));
+}
 
 function source(
   sourceActionId: EngineActionId,

@@ -731,6 +731,7 @@ function reactionAttackInput(
     attackerCanSeeTarget: command.attackerCanSeeTarget,
     targetCanSeeAttacker: command.targetCanSeeAttacker,
     rollModeSources: [],
+    featureRollModeInput: null,
     target: {
       hitPoints: target.hitPoints,
       usesDeathSaves: target.profile.rules.usesDeathSaves,

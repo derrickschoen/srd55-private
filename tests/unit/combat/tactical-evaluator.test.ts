@@ -4,12 +4,25 @@ import {
   combineAttackRollMode,
   evaluateTacticalAttack,
   foldTacticalAttackSequence,
+  projectMonsterRollModeSources,
   tacticalRangeVerdict,
+  type MonsterRollModeFeatureInput,
   type TacticalAttackInput,
 } from '../../../src/combat/tactical-evaluator';
 import { combatantId, feet } from '../../../src/combat/values';
-import { monsterAttackRollModeSources } from '../../../src/combat/monster-commands';
-import type { MonsterAttackAction } from '../../../src/combat/statblock';
+import { monsterAttackCommand, monsterAttackRollModeSources } from '../../../src/combat/monster-commands';
+import type { MonsterAttackAction, MonsterTrait } from '../../../src/combat/statblock';
+import { MONSTER_SIDE } from '../../../src/combat/allies';
+import {
+  createEncounter,
+  evaluateMonsterTacticalAttack,
+  reduceEncounter,
+} from '../../../src/combat/encounter';
+import { monsterCombatantProfile } from '../../../src/combat/combatant';
+import { WOLF } from '../../../src/combat/statblocks/monsters';
+import { BERSERKER } from '../../../src/combat/statblocks/mercenary-company';
+import { saveRollMode } from '../../../src/combat/combat-rules';
+import { placedToken, playerProfile } from './fixtures';
 
 function baseInput(overrides: Partial<TacticalAttackInput> = {}): TacticalAttackInput {
   return {
@@ -27,12 +40,153 @@ function baseInput(overrides: Partial<TacticalAttackInput> = {}): TacticalAttack
     attackerCanSeeTarget: true,
     targetCanSeeAttacker: true,
     rollModeSources: [],
+    featureRollModeInput: null,
     target: { hitPoints: 10, usesDeathSaves: true },
     ...overrides,
   };
 }
 
+const PACK_TACTICS: Extract<MonsterTrait, { readonly kind: 'pack_tactics' }> = {
+  kind: 'pack_tactics', allyDistanceFeet: 5,
+  blockedByCondition: 'Incapacitated', appliesTo: 'attack_rolls',
+};
+
+function featureInput(overrides: Partial<MonsterRollModeFeatureInput> = {}): MonsterRollModeFeatureInput {
+  return {
+    kind: 'attack_roll',
+    traits: [PACK_TACTICS],
+    actor: {
+      id: combatantId('combatant:pack-actor'), faction: MONSTER_SIDE,
+      hitPoints: 10, hitPointMaximum: 10,
+    },
+    targetPosition: { column: 1, row: 0 },
+    combatants: [{
+      id: combatantId('combatant:pack-ally'), faction: MONSTER_SIDE,
+      position: { column: 2, row: 0 }, life: 'living', incapacitated: false,
+    }],
+    ...overrides,
+  };
+}
+
 describe('canonical tactical evaluator', () => {
+  it('pack_tactics_five_not_ten: qualifies a living monster-side ally at 5 feet, not 10 feet', () => {
+    expect(projectMonsterRollModeSources(featureInput())).toEqual([
+      { mode: 'advantage', reason: 'pack_tactics_advantage' },
+    ]);
+    expect(projectMonsterRollModeSources(featureInput({
+      combatants: [{
+        id: combatantId('combatant:pack-ally'), faction: MONSTER_SIDE,
+        position: { column: 3, row: 0 }, life: 'living', incapacitated: false,
+      }],
+    }))).toEqual([]);
+  });
+
+  it('pack_tactics_incapacitated_and_faction: rejects Incapacitated and player-side allies', () => {
+    expect(projectMonsterRollModeSources(featureInput({
+      combatants: [{
+        id: combatantId('combatant:pack-ally'), faction: MONSTER_SIDE,
+        position: { column: 2, row: 0 }, life: 'living', incapacitated: true,
+      }],
+    }))).toEqual([]);
+    expect(projectMonsterRollModeSources(featureInput({
+      combatants: [{
+        id: combatantId('combatant:player-ally'), faction: 'player_character_side',
+        position: { column: 2, row: 0 }, life: 'living', incapacitated: false,
+      }],
+    }))).toEqual([]);
+  });
+
+  it('bloodied_inclusive_half: triggers both attack traits at half but not one HP above', () => {
+    const traits: readonly MonsterTrait[] = [
+      { kind: 'bloodied_frenzy', grantsAdvantageOn: ['attack_rolls', 'saving_throws'] },
+      { kind: 'bloodied_fury', grantsAdvantageOn: ['attack_rolls'] },
+    ];
+    expect(projectMonsterRollModeSources(featureInput({
+      traits, actor: {
+        id: combatantId('combatant:bloodied'), faction: MONSTER_SIDE,
+        hitPoints: 5, hitPointMaximum: 10,
+      },
+    })).map((source) => source.reason)).toEqual([
+      'bloodied_frenzy_advantage', 'bloodied_fury_advantage',
+    ]);
+    expect(projectMonsterRollModeSources(featureInput({
+      traits, actor: {
+        id: combatantId('combatant:bloodied'), faction: MONSTER_SIDE,
+        hitPoints: 6, hitPointMaximum: 10,
+      },
+    }))).toEqual([]);
+    expect(projectMonsterRollModeSources({
+      kind: 'saving_throw', traits,
+      actor: {
+        id: combatantId('combatant:bloodied'), faction: MONSTER_SIDE,
+        hitPoints: 5, hitPointMaximum: 10,
+      },
+    })).toEqual([{ mode: 'advantage', reason: 'bloodied_frenzy_advantage' }]);
+
+    const tough = monsterCombatantProfile(BERSERKER, {
+      combatantId: 'combatant:bloodied-berserker', tokenId: 'token:bloodied-berserker',
+    });
+    const opponent = playerProfile('bloodied-opponent');
+    const initial = createEncounter({
+      bounds: { columns: 2, rows: 1 }, combatants: [tough, opponent],
+      tokens: [placedToken(tough, 0), placedToken(opponent, 1)],
+    });
+    const atHalf = {
+      ...initial,
+      combatants: initial.combatants.map((candidate) => candidate.profile.id === tough.id
+        ? { ...candidate, hitPoints: Math.floor(tough.rules.hitPointMaximum / 2) }
+        : candidate),
+    };
+    const aboveHalf = {
+      ...atHalf,
+      combatants: atHalf.combatants.map((candidate) => candidate.profile.id === tough.id
+        ? { ...candidate, hitPoints: Math.floor(tough.rules.hitPointMaximum / 2) + 1 }
+        : candidate),
+    };
+    expect(saveRollMode(atHalf, tough.id, 'dexterity', 'normal', 'other')).toBe('advantage');
+    expect(saveRollMode(aboveHalf, tough.id, 'dexterity', 'normal', 'other')).toBe('normal');
+  });
+
+  it('pack_tactics_evaluator_reducer_agreement: scores and rolls the same applicable fixture with advantage', () => {
+    const actorBase = monsterCombatantProfile(WOLF, {
+      combatantId: 'combatant:pack-wolf', tokenId: 'token:pack-wolf',
+    });
+    const actor = { ...actorBase, rules: { ...actorBase.rules, initiativeBonus: 20 } };
+    const allyBase = monsterCombatantProfile(WOLF, {
+      combatantId: 'combatant:pack-ally', tokenId: 'token:pack-ally',
+    });
+    const ally = { ...allyBase, rules: { ...allyBase.rules, initiativeBonus: -10 } };
+    const targetBase = playerProfile('pack-target', { initiativeBonus: -20 });
+    const target = { ...targetBase, rules: { ...targetBase.rules, sizeCategory: 'Medium' as const } };
+    const initial = createEncounter({
+      config: { initiativeMode: 'per_combatant' },
+      bounds: { columns: 4, rows: 1 },
+      combatants: [actor, ally, target],
+      tokens: [placedToken(actor, 0), placedToken(target, 1), placedToken(ally, 2)],
+    });
+    const started = reduceEncounter(initial, { type: 'roll_initiative' }, () => 0.5).state;
+    const actions = WOLF.sourceDetails.actions;
+    if (actions.kind !== 'present') throw new Error('Wolf actions are absent.');
+    const bite = actions.value.find(
+      (action): action is MonsterAttackAction => action.kind === 'attack' && action.id === 'bite',
+    );
+    if (bite === undefined) throw new Error('Wolf Bite is absent.');
+
+    const evaluation = evaluateMonsterTacticalAttack(started, bite, actor.id, target.id);
+    const reduced = reduceEncounter(
+      started,
+      monsterAttackCommand(bite, actor.id, target.id),
+      () => 0.5,
+    );
+    const attack = reduced.events.find((event) => event.type === 'attack_resolved');
+    if (attack?.type !== 'attack_resolved') throw new Error('Wolf Bite emitted no attack roll.');
+
+    expect(evaluation.rollMode.mode).toBe('advantage');
+    expect(evaluation.rollMode.reasons).toContain('pack_tactics_advantage');
+    expect(attack.attack.roll.mode).toBe(evaluation.rollMode.mode);
+    expect(attack.attack.roll.faces).toHaveLength(2);
+  });
+
   it('pins melee, normal, long, and out boundaries from Chebyshev distance', () => {
     const attacker = { column: 0, row: 0 };
     expect(tacticalRangeVerdict(attacker, { column: 1, row: 1 }, {

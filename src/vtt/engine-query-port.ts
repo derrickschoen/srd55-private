@@ -1,4 +1,4 @@
-import { combatantsAreAllies } from '../combat/allies';
+import { combatantFaction, combatantsAreAllies } from '../combat/allies';
 import { conditionSpeedPenaltyFeet, exhaustionPenalty, isIncapacitated } from '../combat/conditions';
 import { creatureSizes } from '../domain/enums';
 import type {
@@ -17,12 +17,15 @@ import {
 import { persistentAreaContains } from '../combat/persistent-areas';
 import type { EffectPayload, EncounterEffect } from '../combat/effects';
 import { monsterAttackRange, monsterAttackRollModeSources } from '../combat/monster-commands';
+import { declaredMonsterTraits } from '../combat/monster-traits';
 import {
   TACTICAL_EVALUATOR_POLICY,
   evaluateTacticalAttack,
   foldTacticalAttackSequence,
   tacticalRangeVerdict,
   type AttackRollModeSource,
+  type MonsterRollModeCombatantFacts,
+  type MonsterRollModeFeatureInput,
   type TacticalAttackInput,
   type TacticalAttackRange,
   type TacticalAttackRollModifier,
@@ -1321,6 +1324,32 @@ export function engineTacticalAttackInput(
       : []),
     ...(cover === 'total' ? ['target_has_total_cover' as const] : []),
   ];
+  const featureCombatants = state.combatants.flatMap(
+    (candidate): readonly MonsterRollModeCombatantFacts[] => {
+      const position = state.tokens.find(
+        (entry) => entry.combatantId === candidate.profile.id,
+      )?.position;
+      return position === undefined ? [] : [{
+        id: candidate.profile.id,
+        faction: combatantFaction(state, candidate.profile.id),
+        position,
+        life: candidate.life,
+        incapacitated: isIncapacitated(enginePlanningConditions(state, candidate.profile.id)),
+      }];
+    },
+  );
+  const featureRollModeInput: MonsterRollModeFeatureInput = {
+    kind: 'attack_roll',
+    traits: declaredMonsterTraits(state, actorId),
+    actor: {
+      id: actorId,
+      faction: combatantFaction(state, actorId),
+      hitPoints: enginePlanningHitPoints(state, actorId),
+      hitPointMaximum: enginePlanningHitPointMaximum(state, actorId),
+    },
+    targetPosition,
+    combatants: featureCombatants,
+  };
   return {
     attackerId: actorId,
     targetId,
@@ -1348,6 +1377,7 @@ export function engineTacticalAttackInput(
         enginePlanningHitPointMaximum(state, targetId),
       ),
     ],
+    featureRollModeInput,
     attackRollModifiers,
     target: {
       hitPoints: enginePlanningHitPoints(state, targetId),
@@ -1575,6 +1605,7 @@ export function projectedMovementOptions(
         attackerCanSeeTarget: true,
         targetCanSeeAttacker: true,
         rollModeSources: request.attack.rollModeSources,
+        featureRollModeInput: null,
         ...(request.attack.attackRollModifiers === undefined
           ? {}
           : { attackRollModifiers: request.attack.attackRollModifiers }),

@@ -167,6 +167,7 @@ function tacticalAssessment(
       attackerCanSeeTarget: true,
       targetCanSeeAttacker: true,
       rollModeSources: rollModeSources(command),
+      featureRollModeInput: null,
       target: {
         // The actor-knowledge bands intentionally cannot be converted to HP.
         hitPoints: { kind: 'unknown' },

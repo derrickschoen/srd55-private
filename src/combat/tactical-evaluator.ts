@@ -1,7 +1,9 @@
 import { conditionMechanicalState, type AppliedCondition } from './conditions';
+import { MONSTER_SIDE, type CombatantFaction } from './allies';
 import { gridDistance, type GridCell } from './grid';
 import type { RollMode } from './resolution';
 import { attackRangeVerdict } from './range';
+import type { MonsterTrait } from './statblock';
 import { feet, type CombatantId, type Feet } from './values';
 import {
   attackRollModifier,
@@ -49,6 +51,9 @@ export type AttackRollModeReason =
   | 'roll_defense_disadvantage'
   | 'target_grappled_by_attacker_advantage'
   | 'target_not_full_hit_points_advantage'
+  | 'pack_tactics_advantage'
+  | 'bloodied_frenzy_advantage'
+  | 'bloodied_fury_advantage'
   | 'dodge_disadvantage'
   | 'blinded_attacker_disadvantage'
   | 'blinded_target_advantage'
@@ -70,6 +75,96 @@ export type AttackRollModeReason =
 export interface AttackRollModeSource {
   readonly mode: Exclude<RollMode, 'normal'>;
   readonly reason: AttackRollModeReason;
+}
+
+export interface MonsterRollModeCombatantFacts {
+  readonly id: CombatantId;
+  readonly faction: CombatantFaction;
+  readonly position: GridCell;
+  readonly life: 'living' | 'dying' | 'stable' | 'dead';
+  readonly incapacitated: boolean;
+}
+
+export interface MonsterRollModeActorFacts {
+  readonly id: CombatantId;
+  readonly faction: CombatantFaction;
+  readonly hitPoints: number;
+  readonly hitPointMaximum: number;
+}
+
+interface MonsterRollModeFeatureBase {
+  readonly traits: readonly MonsterTrait[];
+  readonly actor: MonsterRollModeActorFacts;
+}
+
+export type MonsterRollModeFeatureInput =
+  | (MonsterRollModeFeatureBase & {
+      readonly kind: 'attack_roll';
+      readonly targetPosition: GridCell;
+      readonly combatants: readonly MonsterRollModeCombatantFacts[];
+    })
+  | (MonsterRollModeFeatureBase & {
+      readonly kind: 'saving_throw';
+    });
+
+/** Closed trait projection shared by tactical evaluation and reducer execution. */
+export function projectMonsterRollModeSources(
+  input: MonsterRollModeFeatureInput,
+): readonly AttackRollModeSource[] {
+  const sources: AttackRollModeSource[] = [];
+  const bloodied = input.actor.hitPoints <= Math.floor(input.actor.hitPointMaximum / 2);
+  for (const trait of input.traits) {
+    switch (trait.kind) {
+      case 'pack_tactics': {
+        if (
+          input.kind === 'attack_roll' &&
+          input.actor.faction === MONSTER_SIDE &&
+          input.combatants.some((candidate) =>
+            candidate.id !== input.actor.id &&
+            candidate.faction === MONSTER_SIDE &&
+            candidate.life === 'living' &&
+            !candidate.incapacitated &&
+            gridDistance(candidate.position, input.targetPosition) <= trait.allyDistanceFeet)
+        ) sources.push({ mode: 'advantage', reason: 'pack_tactics_advantage' });
+        break;
+      }
+      case 'bloodied_frenzy':
+        if (bloodied) sources.push({ mode: 'advantage', reason: 'bloodied_frenzy_advantage' });
+        break;
+      case 'bloodied_fury':
+        if (input.kind === 'attack_roll' && bloodied) {
+          sources.push({ mode: 'advantage', reason: 'bloodied_fury_advantage' });
+        }
+        break;
+      case 'undead_fortitude':
+      case 'abduct':
+      case 'aura_of_authority':
+      case 'incorporeal_movement':
+      case 'running_leap':
+      case 'stench':
+      case 'sunlight_sensitivity':
+      case 'amphibious':
+      case 'hold_breath':
+      case 'water_breathing':
+      case 'spider_climb':
+      case 'web_walker':
+      case 'web_sense':
+      case 'keen_sight':
+      case 'flyby':
+      case 'magic_resistance':
+      case 'life_bond':
+      case 'air_form':
+      case 'earth_glide':
+      case 'siege_monster':
+      case 'adhesive':
+      case 'amorphous':
+      case 'corrosive_form':
+      case 'ethereal_sight':
+      case 'ephemeral':
+      case 'illumination': break;
+    }
+  }
+  return sources;
 }
 
 export interface TacticalDamageTerm {
@@ -118,6 +213,7 @@ export interface TacticalAttackInput {
   readonly attackerCanSeeTarget: boolean;
   readonly targetCanSeeAttacker: boolean;
   readonly rollModeSources: readonly AttackRollModeSource[];
+  readonly featureRollModeInput: MonsterRollModeFeatureInput | null;
   readonly attackRollModifiers?: readonly TacticalAttackRollModifier[];
   readonly target: {
     readonly hitPoints: number | TacticalUnknownTargetFact;
@@ -537,6 +633,9 @@ export function evaluateTacticalAttack(
   const rollMode = combineAttackRollMode([
     ...rangeSources,
     ...input.rollModeSources,
+    ...(input.featureRollModeInput === null
+      ? []
+      : projectMonsterRollModeSources(input.featureRollModeInput)),
     ...conditionSources,
   ]);
   const criticalDistances = impliedTargetConditions(input.targetConditions)

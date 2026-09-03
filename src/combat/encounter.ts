@@ -1,6 +1,6 @@
 import { creatureSizes, skills, type Ability, type Skill } from '../domain/enums';
 import { canonicalJson } from '../commands/canonical-json';
-import { combatantSide, combatantsAreAllies } from './allies';
+import { combatantFaction, combatantSide, combatantsAreAllies } from './allies';
 import {
   ALERTING_POLICY,
   DEFAULT_YELLING_DISTANCE,
@@ -62,6 +62,7 @@ import {
   monsterAttackCommand,
   monsterAttackRollModeSources,
 } from './monster-commands';
+import { declaredMonsterTraits } from './monster-traits';
 import {
   adjacentCells,
   gridDistance,
@@ -144,8 +145,11 @@ import {
   conditionAttackRollModeSources,
   deathSaveFailuresFromZeroHitPointDamage,
   evaluateTacticalAttack,
+  projectMonsterRollModeSources,
   tacticalRangeVerdict,
   type AttackRollModeSource,
+  type MonsterRollModeCombatantFacts,
+  type MonsterRollModeFeatureInput,
   type TacticalAttackRollModifier,
   type TacticalAttackEvaluation,
   type TacticalUnresolvedReason,
@@ -2041,6 +2045,7 @@ function attackRollModeSources(
   >,
   includeConditionSources = true,
   includeRangeSource = true,
+  includeFeatureSources = true,
 ): readonly AttackRollModeSource[] {
   const sources: AttackRollModeSource[] = command.rollMode === 'normal'
     ? []
@@ -2123,6 +2128,13 @@ function attackRollModeSources(
       targetCanSeeAttacker,
     }));
   }
+  if (includeFeatureSources) {
+    sources.push(...projectMonsterRollModeSources(monsterAttackRollModeFeatureInput(
+      state,
+      command.actor,
+      command.target,
+    )));
+  }
 
   const targetState = combatant(state, command.target);
   if (
@@ -2134,6 +2146,54 @@ function attackRollModeSources(
     sources.push({ mode: 'disadvantage', reason: 'dodge_disadvantage' });
   }
   return sources;
+}
+
+function activeHitPoints(subject: EncounterCombatantState): number {
+  return subject.wildShape?.physical.hitPoints ?? subject.form?.hitPoints ?? subject.hitPoints;
+}
+
+function activeHitPointMaximum(state: EncounterState, subject: EncounterCombatantState): number {
+  const base = subject.wildShape?.physical.hitPointMaximum ??
+    subject.form?.hitPointMaximum ?? subject.profile.rules.hitPointMaximum;
+  return state.effects.reduce((maximum, effect) =>
+    effect.targets.includes(subject.profile.id) && effect.payload.kind === 'hit_point_maximum_modifier'
+      ? maximum + effect.payload.amount
+      : maximum, base);
+}
+
+function rollModeCombatantFacts(
+  state: EncounterState,
+): readonly MonsterRollModeCombatantFacts[] {
+  return state.combatants.flatMap((subject): readonly MonsterRollModeCombatantFacts[] => {
+    const position = state.tokens.find((entry) => entry.combatantId === subject.profile.id)?.position;
+    return position === undefined ? [] : [{
+      id: subject.profile.id,
+      faction: combatantFaction(state, subject.profile.id),
+      position,
+      life: subject.life,
+      incapacitated: isIncapacitated(combatantConditions(state, subject.profile.id)),
+    }];
+  });
+}
+
+function monsterAttackRollModeFeatureInput(
+  state: EncounterState,
+  actor: CombatantId,
+  target: CombatantId,
+): MonsterRollModeFeatureInput {
+  const subject = combatant(state, actor);
+  return {
+    kind: 'attack_roll',
+    traits: declaredMonsterTraits(state, actor),
+    actor: {
+      id: actor,
+      faction: combatantFaction(state, actor),
+      hitPoints: activeHitPoints(subject),
+      hitPointMaximum: activeHitPointMaximum(state, subject),
+    },
+    targetPosition: token(state, target).position,
+    combatants: rollModeCombatantFacts(state),
+  };
 }
 
 function attackRollMode(
@@ -2238,7 +2298,7 @@ export function evaluateMonsterTacticalAttack(
     attackerCanSeeTarget,
     targetCanSeeAttacker,
     rollModeSources: [
-      ...attackRollModeSources(state, command, false, false),
+      ...attackRollModeSources(state, command, false, false, false),
       ...rollDefenseSources,
       ...monsterAttackRollModeSources(
         action,
@@ -2248,6 +2308,7 @@ export function evaluateMonsterTacticalAttack(
         effectiveHitPointMaximum(state, target),
       ),
     ],
+    featureRollModeInput: monsterAttackRollModeFeatureInput(state, actor, target),
     attackRollModifiers,
     target: {
       hitPoints: targetHitPoints,

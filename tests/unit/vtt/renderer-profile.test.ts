@@ -54,6 +54,7 @@ function unresolvedRow(): DmTargetIntelRow {
     minimumMovementFeet: null,
     unresolvedReasons: ['damage_unresolved'],
     omittedRiders: [],
+    featureSupportFlags: [],
   };
 }
 

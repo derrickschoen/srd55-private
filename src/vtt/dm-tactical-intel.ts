@@ -12,6 +12,10 @@ import type { EngineStateCapsule } from './engine-state-capsule';
 import type { EngineQueryPort } from './engine-query-port';
 import type { EngineOfferableOption, EngineOptionId } from './turn-proposal';
 import type { EngineOmittedRider } from './option-modeling';
+import {
+  monsterTraitSupportRows,
+  type MonsterTraitSupportRow,
+} from './monster-feature-support';
 import { ENGINE_FAILURE_MODES_POLICY } from './engine-failure-modes';
 import { legalMultiattackCombinations } from './turn-option-registry';
 import type { RendererNullFields } from './renderer-profile';
@@ -48,6 +52,7 @@ export interface DmTargetIntelRow {
   readonly minimumMovementFeet: number | null;
   readonly unresolvedReasons: readonly TacticalUnresolvedReason[];
   readonly omittedRiders: readonly EngineOmittedRider[];
+  readonly featureSupportFlags: readonly MonsterTraitSupportRow[];
 }
 
 export interface DmActorIntelCapture {
@@ -244,6 +249,8 @@ function candidateRow(
     minimumMovementFeet,
     unresolvedReasons: unique(attacks.flatMap((evaluation) => evaluation.unresolved)),
     omittedRiders: option?.omittedRiders ?? [],
+    featureSupportFlags: monsterTraitSupportRows(state, actor.id)
+      .filter((row) => row.disposition.kind !== 'modeled'),
   };
 }
 
@@ -303,6 +310,8 @@ function unresolvedTargetRow(
     minimumMovementFeet: reach?.legal === true ? 0 : approach,
     unresolvedReasons: ['damage_unresolved'],
     omittedRiders: [],
+    featureSupportFlags: monsterTraitSupportRows(state, actor.id)
+      .filter((row) => row.disposition.kind !== 'modeled'),
   };
 }
 
@@ -403,6 +412,7 @@ export function renderDmIntelRow(row: DmTargetIntelRow): Readonly<Record<string,
     consequence_codes: consequenceCodes,
     movement_need_feet: row.minimumMovementFeet,
     omitted_riders: row.omittedRiders,
+    feature_support_flags: row.featureSupportFlags,
   };
 }
 
@@ -418,6 +428,7 @@ export function renderDmContextIntelRow(
   if (row.attackCount === 1) delete compact['attacks'];
   if (row.rollModeReasons.length === 0) delete compact['reason_codes'];
   if (row.omittedRiders.length === 0) delete compact['omitted_riders'];
+  if (row.featureSupportFlags.length === 0) delete compact['feature_support_flags'];
   if (!row.deathFailureOnHit && row.automaticCriticalMaximumDistanceFeet === null) {
     delete compact['consequence_codes'];
   }

@@ -225,6 +225,43 @@ const tacticalSummary = z.object({
   room: z.number().int().min(1).nullable(), round: z.number().int().min(0), active_side: z.enum(['players', 'monsters', 'none']),
   living_allies: z.number().int().min(0), living_enemies: z.number().int().min(0), terrain_tags: z.array(shortCode).max(100),
 }).strict();
+const monsterTraitKind = z.enum([
+  'pack_tactics', 'undead_fortitude', 'abduct', 'aura_of_authority',
+  'bloodied_frenzy', 'bloodied_fury', 'incorporeal_movement', 'running_leap',
+  'stench', 'sunlight_sensitivity', 'amphibious', 'hold_breath',
+  'water_breathing', 'spider_climb', 'web_walker', 'web_sense', 'keen_sight',
+  'flyby', 'magic_resistance', 'life_bond', 'air_form', 'earth_glide',
+  'siege_monster', 'adhesive', 'amorphous', 'corrosive_form',
+  'ethereal_sight', 'ephemeral', 'illumination',
+]);
+const featureSupportDisposition = z.union([
+  z.object({ kind: z.literal('modeled') }).strict(),
+  z.object({
+    kind: z.literal('offered_with_omission'),
+    reason: z.literal('secondary_effect_omitted'),
+  }).strict(),
+  z.object({
+    kind: z.literal('human_only_unmodeled'),
+    reason: z.enum([
+      'zero_hit_point_trait_unmodeled', 'grapple_movement_unmodeled',
+      'ally_aura_unmodeled', 'incorporeal_movement_unmodeled',
+      'jump_movement_unmodeled', 'trait_save_aura_unmodeled',
+      'vertical_movement_unmodeled', 'web_movement_unmodeled',
+      'companion_life_bond_unmodeled', 'special_space_movement_unmodeled',
+      'object_damage_trait_unmodeled', 'automatic_grapple_trait_unmodeled',
+      'equipment_corrosion_trait_unmodeled', 'ethereal_plane_unmodeled',
+      'equipment_restriction_unmodeled', 'emitted_light_unmodeled',
+    ]),
+  }).strict(),
+  z.object({
+    kind: z.literal('encounter_not_applicable'),
+    reason: z.enum(['no_sunlight_state', 'no_underwater_state']),
+  }).strict(),
+]);
+const monsterTraitSupportRow = z.object({
+  feature: z.object({ kind: z.literal('trait'), trait: monsterTraitKind }).strict(),
+  disposition: featureSupportDisposition,
+}).strict();
 const compactIntelRow = z.object({
   policy: z.literal(DM_TURN_INTEL_POLICY),
   actor_id: identifier,
@@ -244,14 +281,16 @@ const compactIntelRow = z.object({
   consequence_codes: z.array(shortCode).max(20),
   movement_need_feet: z.number().int().min(0).nullable(),
   omitted_riders: z.array(omittedRider).max(100),
+  feature_support_flags: z.array(monsterTraitSupportRow).max(100),
 }).strict();
 const contextIntelRow = compactIntelRow
-  .omit({ policy: true, actor_id: true, option_id: true, attacks: true, reason_codes: true, consequence_codes: true, omitted_riders: true })
+  .omit({ policy: true, actor_id: true, option_id: true, attacks: true, reason_codes: true, consequence_codes: true, omitted_riders: true, feature_support_flags: true })
   .extend({
     attacks: z.number().int().min(0).max(20).optional(),
     reason_codes: z.array(shortCode).max(50).optional(),
     consequence_codes: z.array(shortCode).max(20).optional(),
     omitted_riders: z.array(omittedRider).max(100).optional(),
+    feature_support_flags: z.array(monsterTraitSupportRow).max(100).optional(),
   });
 const movementSnapshot = z.object({
   range: z.enum(['MELEE', 'NORMAL', 'LONG', 'OUT', 'UNRESOLVED']),
