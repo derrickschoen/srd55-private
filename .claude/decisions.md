@@ -920,6 +920,22 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D493 — OWNER: BG3 lane targets Tactician; BG3-style mechanics behind the mode flag; mud mephits first (2026-09-03)
+
+Owner: **"Tactician"**, **"Add BG3-style mechanics behind the mode
+flag"**, **"Mephits first"**.
+
+Consequences: recordings must be Tactician-difficulty fights on flat
+ground; the public engine gains, behind a `tactical_mode_v2` flag with
+SRD-clean names, the mechanics that drive the imitated behaviour (shove
+as a bonus action, jump as movement, bonus-action dash for designated
+creatures, simple surfaces) — each a typed feature with its own tests,
+off by default, never affecting arena arms or the SRD mode; the first
+private sub-lane is mud mephits (summon/kiting/death-burst behaviour),
+then spellcasters, then melee. The mephit work exposes engine gaps early
+(area effects on death, summoner behaviour, flight/kiting), which is the
+owner's intent.
+
 ## D492 — OWNER: BG3 ground truth from published playthrough videos; neutral policy in the public repo, BG3 material private (2026-09-03)
 
 Asked: recordings source (owner-provided / documented-first / published
