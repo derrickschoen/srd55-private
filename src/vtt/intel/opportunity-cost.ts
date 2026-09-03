@@ -4,7 +4,7 @@ import type { CombatantId } from '../../combat/values';
 import type { PlanMaterialityReasonCode } from '../plan-materiality';
 import type { EngineQueryPort } from '../engine-query-port';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../intent-resolver';
-import type { EngineOfferableOption, EngineOptionId } from '../turn-proposal';
+import type { EngineOfferableOption, EngineOptionId, EngineOptionMetric } from '../turn-proposal';
 import {
   compareDominanceVectors,
   exactRational,
@@ -22,12 +22,7 @@ export const OPPORTUNITY_COST_POLICY = intelPolicyVersion('opportunity-cost-v1')
 export const DOMINANCE_CORRECTION_POLICY = intelPolicyVersion('dominance-correction-v1');
 export const MATERIALITY_CONTEXT_POLICY = intelPolicyVersion('materiality-context-v1');
 
-export type OpportunityMetric =
-  | 'expected_damage_milli'
-  | 'attack_count'
-  | 'approach_feet'
-  | 'action_slot_uses'
-  | 'resource_costs';
+export type OpportunityMetric = EngineOptionMetric;
 
 export type OpportunityVector = DominanceVector<OpportunityMetric>;
 export type ActionEquivalentMetric = 'net_action_equivalents';

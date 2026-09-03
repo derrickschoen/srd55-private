@@ -29,7 +29,12 @@ import {
 } from '../engine-state-capsule';
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
 import { resolveEngineActorOption, type EngineMovementPreference, type EngineTurnProposal, type PureTurnProposalResolver } from '../intent-resolver';
-import { engineOptionId, type EngineOfferableOption } from '../turn-proposal';
+import {
+  engineOptionId,
+  enginePlayToken,
+  type EngineOfferableOption,
+  type EngineOptionMetric,
+} from '../turn-proposal';
 import {
   DM_INTEL_QUERY_POLICY,
   DM_TURN_INTEL_POLICY,
@@ -422,12 +427,23 @@ function decodeOverrideJustification(
   const note = input['note'] === undefined ? undefined : stringField(input, 'note');
   switch (reason) {
     case 'morale':
-    case 'objective':
     case 'roleplay':
     case 'resource_conservation':
       return note === undefined ? { reason } : { reason, note };
+    case 'objective': {
+      const playToken = typeof input['play_token'] === 'string'
+        ? enginePlayToken(input['play_token'])
+        : null;
+      return note === undefined ? { reason, playToken } : { reason, playToken, note };
+    }
     case 'unknown_engine_gap':
-      return { reason, note: stringField(input, 'note') };
+      return {
+        reason,
+        metric: typeof input['metric'] === 'string'
+          ? input['metric'] as EngineOptionMetric
+          : null,
+        ...(note === undefined ? {} : { note }),
+      };
     default:
       throw new RangeError(`Unknown override justification reason ${reason}.`);
   }
@@ -473,14 +489,21 @@ function decodeProposal(value: unknown): EngineTurnProposal {
   };
 }
 function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string, unknown>> {
+  const override = proposal.overrideJustification;
   return {
     actor_id: proposal.actorId,
     expected_revision: proposal.expectedRevision,
     primary_option_id: proposal.primaryOptionId,
     fallback_option_id: proposal.fallbackOptionId,
-    override_justification: proposal.overrideJustification === null ? null : {
-      reason: proposal.overrideJustification.reason,
-      ...(proposal.overrideJustification.note === undefined ? {} : { note: proposal.overrideJustification.note }),
+    override_justification: override === null ? null : {
+      reason: override.reason,
+      ...(override.reason === 'objective' && override.playToken !== null
+        ? { play_token: override.playToken }
+        : {}),
+      ...(override.reason === 'unknown_engine_gap' && override.metric !== null
+        ? { metric: override.metric }
+        : {}),
+      ...(override.note === undefined ? {} : { note: override.note }),
     },
     ...(proposal.activationChoice === undefined ? {} : {
       activation_choice: proposal.activationChoice === null
@@ -1352,6 +1375,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   function proposalWithPlayObjective(
     capsule: EngineStateCapsule,
     proposal: EngineTurnProposal,
+    playToken: string,
   ): EngineTurnProposal {
     if (proposal.overrideJustification !== null) return proposal;
     const dominance = submissionDominance(
@@ -1363,6 +1387,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           ...proposal,
           overrideJustification: {
             reason: 'objective',
+            playToken: enginePlayToken(playToken),
             note: 'The engine-authored tactical play intentionally coordinates this option.',
           },
         }
@@ -1381,13 +1406,21 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     if (proposal.overrideJustification === null) {
       return { code: 'DOMINATED_OPTION_REQUIRES_OVERRIDE', summary: dominance.delta };
     }
-    if (proposal.overrideJustification.reason === 'resource_conservation') {
+    const override = proposal.overrideJustification;
+    const issuedPlayTokens = SNIPPET_REGISTRY.applicable(capsule).map((play) => play.snippetHash);
+    if (override.reason === 'objective' && override.playToken !== null &&
+      issuedPlayTokens.includes(override.playToken)) return null;
+    if (override.reason === 'unknown_engine_gap' && override.metric !== null) return null;
+    if (override.reason === 'resource_conservation') {
       return {
-        code: 'DOMINANCE_OVERRIDE_CONTRADICTS_METRICS',
+        code: 'override_unjustified',
         summary: `${dominance.delta} Resource conservation cannot justify this override because the dominating option has no greater declared resource cost.`,
       };
     }
-    return null;
+    return {
+      code: 'override_unjustified',
+      summary: `${dominance.delta} The override must name a current-context play token or a typed unknown engine metric.`,
+    };
   }
   function fullTurnContext(
     capsule: EngineStateCapsule,
@@ -1448,6 +1481,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           name: play.name,
           description: play.description,
           snippet_hash: play.snippetHash,
+          play_token: play.snippetHash,
         })),
         applicable_skills: applicableSkills.map((skill) => ({
           name: skill.name,
@@ -1475,7 +1509,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           const plan = {
             play_name: topPlay.name,
             snippet_hash: topPlay.snippetHash,
-            proposals: draft.proposals.map(externalProposal),
+            play_token: topPlay.snippetHash,
+            proposals: draft.proposals.map((proposal) =>
+              externalProposal(proposalWithPlayObjective(capsule, proposal, topPlay.snippetHash))),
             advisory: SUGGESTED_PLAN_ADVISORY,
           };
           const bytes = new TextEncoder().encode(JSON.stringify(plan)).byteLength;
@@ -1651,6 +1687,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         name: play.name,
         description: play.description,
         snippet_hash: play.snippetHash,
+        play_token: play.snippetHash,
       })),
       applicable_skills: applicableSkills.map((skill) => ({
         name: skill.name,
@@ -1679,8 +1716,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const plan = {
           play_name: topPlay.name,
           snippet_hash: topPlay.snippetHash,
+          play_token: topPlay.snippetHash,
           proposals: draft.proposals.map((proposal) =>
-            externalProposal(proposalWithPlayObjective(capsule, proposal))),
+            externalProposal(proposalWithPlayObjective(capsule, proposal, topPlay.snippetHash))),
           advisory: SUGGESTED_PLAN_ADVISORY,
         };
         const bytes = new TextEncoder().encode(JSON.stringify(plan)).byteLength;
@@ -2247,8 +2285,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         state_ref: externalStateRef(capsule),
         play_name: playName,
         snippet_hash: draft.definition.snippetHash,
+        play_token: draft.definition.snippetHash,
         proposals: draft.proposals.map((proposal) =>
-          externalProposal(proposalWithPlayObjective(capsule, proposal))),
+          externalProposal(proposalWithPlayObjective(capsule, proposal, draft.definition.snippetHash))),
       };
     }
     if (name === 'engine.load_skill') {
@@ -2264,10 +2303,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         skill_hash: loaded.skillHash,
         description: loaded.description,
         procedure: loaded.procedure,
-        plays: loaded.plays.map((play) => ({
-          name: play.name,
-          description: play.description,
-          snippet_hash: play.snippetHash,
+          plays: loaded.plays.map((play) => ({
+            name: play.name,
+            description: play.description,
+            snippet_hash: play.snippetHash,
+            play_token: play.snippetHash,
         })),
       };
     }

@@ -2,7 +2,12 @@ import { z } from 'zod';
 import type { CombatantId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import { verifyEngineStateCapsule, type EngineStateCapsule } from './engine-state-capsule';
-import type { EngineOptionId, EngineTurnProposal } from './turn-proposal';
+import {
+  ENGINE_OPTION_METRICS,
+  enginePlayToken,
+  type EngineOptionId,
+  type EngineTurnProposal,
+} from './turn-proposal';
 import { createSnippetRegistry, PLAY_NAMES, SKILL_NAMES, type SnippetSchema } from './snippets/registry';
 
 const combatantIdSchema = z.custom<CombatantId>((value) =>
@@ -11,15 +16,26 @@ const optionIdSchema = z.custom<EngineOptionId>((value) =>
   typeof value === 'string' && value.startsWith('option:') && value.length <= 200);
 const overrideJustificationValueSchema = z.discriminatedUnion('reason', [
   z.object({
-    reason: z.enum(['morale', 'objective', 'roleplay', 'resource_conservation']),
+    reason: z.enum(['morale', 'roleplay', 'resource_conservation']),
+    note: z.string().min(1).max(500).optional(),
+  }).strict(),
+  z.object({
+    reason: z.literal('objective'),
+    playToken: z.string().min(1).max(200).nullable(),
     note: z.string().min(1).max(500).optional(),
   }).strict(),
   z.object({
     reason: z.literal('unknown_engine_gap'),
-    note: z.string().min(1).max(500),
+    metric: z.enum(ENGINE_OPTION_METRICS).nullable(),
+    note: z.string().min(1).max(500).optional(),
   }).strict(),
 ]).transform((value): NonNullable<EngineTurnProposal['overrideJustification']> => {
-  if (value.reason === 'unknown_engine_gap') return value;
+  if (value.reason === 'objective') return value.note === undefined
+    ? { reason: value.reason, playToken: value.playToken === null ? null : enginePlayToken(value.playToken) }
+    : { reason: value.reason, playToken: value.playToken === null ? null : enginePlayToken(value.playToken), note: value.note };
+  if (value.reason === 'unknown_engine_gap') return value.note === undefined
+    ? { reason: value.reason, metric: value.metric }
+    : { reason: value.reason, metric: value.metric, note: value.note };
   return value.note === undefined
     ? { reason: value.reason }
     : { reason: value.reason, note: value.note };

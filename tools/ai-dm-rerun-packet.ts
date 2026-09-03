@@ -72,6 +72,14 @@ const plannerSchema = z.union([
   z.object({ model: z.string(), effort: z.string() }).passthrough(),
   z.null(),
 ]);
+const primaryPlannerSchema = z.enum(['model', 'engine_default', 'sim_controller']);
+const overrideKindSchema = z.enum([
+  'morale', 'objective', 'roleplay', 'resource_conservation', 'unknown_engine_gap',
+]);
+const overrideRejectionSchema = z.object({
+  actorId: z.string().nullable(),
+  code: z.literal('override_unjustified'),
+}).strict();
 
 export interface NeutralAction {
   readonly kind: string;
@@ -97,7 +105,7 @@ const arenaRowSchema = z.object({
   initiativeOrder: z.array(z.unknown()),
   outcome: z.enum([
     'authorized', 'auto_resolved', 'awaiting_dm_adjudication',
-    'refused', 'service_null', 'local_error',
+    'refused', 'service_null', 'local_error', 'execution_failed', 'partial_execution',
   ]),
   plannedBy: plannerSchema,
   roundNarrative: z.string().nullable(),
@@ -109,6 +117,9 @@ const arenaRowSchema = z.object({
   // Post-intel rows label the planner ('model' | 'engine_default'); pre-intel
   // rows have no such field. Attribution uses it when present.
   plannerLabel: z.string().nullable().optional(),
+  planner: primaryPlannerSchema.optional(),
+  overrideKinds: z.array(overrideKindSchema).optional(),
+  overrideRejections: z.array(overrideRejectionSchema).optional(),
   // Required in cross-era mode, where it is the arm partition key.
   repoCommit: z.string().min(1).optional(),
 }).passthrough();
@@ -149,6 +160,9 @@ interface ValidatedArenaRow {
   readonly outcome: string;
   readonly plannedBy: z.infer<typeof plannerSchema>;
   readonly plannerLabel: string | null | undefined;
+  readonly planner: z.infer<typeof primaryPlannerSchema>;
+  readonly overrideKinds: readonly z.infer<typeof overrideKindSchema>[];
+  readonly overrideRejections: readonly z.infer<typeof overrideRejectionSchema>[];
   readonly roundNarrative: string | null;
   readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
 }
@@ -171,11 +185,11 @@ function assertArmCardinality(armCount: number, cardinality: ArmCardinality): vo
 }
 
 export interface BlindRubric {
-  readonly targetPriority: null;
-  readonly actionEconomy: null;
-  readonly positioning: null;
-  readonly coherence: null;
-  readonly total: null;
+  readonly targetPriority: number | null;
+  readonly actionEconomy: number | null;
+  readonly positioning: number | null;
+  readonly coherence: number | null;
+  readonly total: number | null;
 }
 
 export interface JudgePacketEntry {
@@ -205,6 +219,9 @@ export interface RerunAnswerKey {
   readonly entries: readonly {
     readonly blindId: string;
     readonly arm: string;
+    readonly planner: z.infer<typeof primaryPlannerSchema>;
+    readonly overrideKinds: readonly z.infer<typeof overrideKindSchema>[];
+    readonly overrideRejections: readonly z.infer<typeof overrideRejectionSchema>[];
   }[];
 }
 
@@ -217,7 +234,7 @@ const MODEL_IDENTITY_FIELDS = new Set([
   // Era-specific plan-shape keys: any of these surviving into the packet means
   // the executed-plan normalization failed and the entry identifies its era.
   'acceptedIntent', 'acceptedProposal', 'resolutionSummary', 'actionSlots',
-  'selectedBranch', 'optionId', 'plannerLabel',
+  'selectedBranch', 'optionId', 'plannerLabel', 'planner', 'overrideKinds', 'overrideRejections',
   // The round narrative is a deterministic era-specific renderer template
   // ("expands X + X -> Y into N ordered use(s)" vs "moves N feet and uses x"),
   // verified trivially arm-separable on real R1-10 rows. It adds nothing
@@ -315,12 +332,20 @@ function validateRow(
   if (expectedRoom === 0) throw new TypeError(`${sourceLabel}.seed=${String(seed)} is not an R1-10 holdout seed.`);
   if (room !== expectedRoom) throw new TypeError(`${sourceLabel}.room must be ${String(expectedRoom)} for seed ${String(seed)}.`);
   if (rep < 1 || rep > protocol.reps) throw new TypeError(`${sourceLabel}.round must be in 1..${String(protocol.reps)}.`);
+  const planner = row.planner ?? (row.plannerLabel === 'sim_controller'
+    ? 'sim_controller'
+    : row.plannerLabel === 'engine_default' || row.outcome === 'auto_resolved' || row.plannedBy === 'sim_controller'
+      ? 'engine_default'
+      : 'model');
   return {
     seed, arm, room, rep,
     startingRoomDigest: row.startingRoomDigest,
     outcome: row.outcome,
     plannedBy: row.plannedBy,
     plannerLabel: row.plannerLabel,
+    planner,
+    overrideKinds: row.overrideKinds ?? [],
+    overrideRejections: row.overrideRejections ?? [],
     roundNarrative: row.roundNarrative,
     authorizedPlan: row.authorizedPlan,
   };
@@ -395,11 +420,7 @@ export function validateRerunRows(
 }
 
 function engineAttribution(row: ValidatedArenaRow): JudgePacketEntry['attribution'] {
-  if (
-    row.outcome === 'auto_resolved' ||
-    row.plannedBy === 'sim_controller' ||
-    row.plannerLabel === 'engine_default'
-  ) return 'engine_default';
+  if (row.planner !== 'model') return 'engine_default';
   if (row.outcome === 'authorized' && row.plannedBy !== null && typeof row.plannedBy === 'object') {
     return 'model_authorized';
   }
@@ -469,8 +490,17 @@ function executedPlan(
   return value.map(neutralPlanEntry);
 }
 
-function rubric(): BlindRubric {
-  return { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null };
+function packetOutcome(outcome: string): 'authorized' | 'refused' | 'service_null' | 'execution_failed' {
+  if (outcome === 'authorized') return 'authorized';
+  if (outcome === 'service_null') return 'service_null';
+  if (outcome === 'execution_failed' || outcome === 'partial_execution') return 'execution_failed';
+  return 'refused';
+}
+
+function rubric(outcome: ReturnType<typeof packetOutcome>): BlindRubric {
+  return outcome === 'refused' || outcome === 'execution_failed'
+    ? { targetPriority: 0, actionEconomy: 0, positioning: 0, coherence: 0, total: 0 }
+    : { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null };
 }
 
 function shuffled<T>(values: readonly T[], seed: number): readonly T[] {
@@ -526,18 +556,27 @@ function buildPacket(
       targetPriority: { maximum: 3 }, actionEconomy: { maximum: 3 },
       positioning: { maximum: 2 }, coherence: { maximum: 2 }, total: { maximum: 10 },
     },
-    entries: blinded.map(({ blindId, row }) => ({
-      blindId,
-      caseId: `case-${String(row.room).padStart(2, '0')}-${String(row.rep)}`,
-      outcome: row.outcome,
-      attribution: engineAttribution(row),
-      executedPlan: executedPlan(row.authorizedPlan),
-      rubric: rubric(),
-    })),
+    entries: blinded.map(({ blindId, row }) => {
+      const outcome = packetOutcome(row.outcome);
+      return {
+        blindId,
+        caseId: `case-${String(row.room).padStart(2, '0')}-${String(row.rep)}`,
+        outcome,
+        attribution: engineAttribution(row),
+        executedPlan: outcome === 'authorized' ? executedPlan(row.authorizedPlan) : null,
+        rubric: rubric(outcome),
+      };
+    }),
   };
   const answerKey: RerunAnswerKey = {
     version: RERUN_PACKET_VERSION,
-    entries: blinded.map(({ blindId, row }) => ({ blindId, arm: row.arm })),
+    entries: blinded.map(({ blindId, row }) => ({
+      blindId,
+      arm: row.arm,
+      planner: row.planner,
+      overrideKinds: row.overrideKinds,
+      overrideRejections: row.overrideRejections,
+    })),
   };
   assertBlindedPacket(packet);
   return { packet, answerKey };

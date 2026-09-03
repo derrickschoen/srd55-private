@@ -122,7 +122,8 @@ export interface ArenaRow {
   /** Codex rollout ID; locate its full log with a rollout-*-<id>.jsonl glob. */
   readonly sessionId: string | null;
   readonly escalationSessionId: string | null;
-  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null' | 'local_error';
+  readonly outcome: import('./ai-dm-conversation').ConversationRow['outcome'];
+  readonly executionErrorClass: import('./ai-dm-conversation').ConversationRow['executionErrorClass'];
   readonly proposalId: string | null;
   readonly wall: number;
   readonly tokens: ConversationTokenCounts;
@@ -140,7 +141,9 @@ export interface ArenaRow {
   readonly serviceNull: boolean;
   readonly contextTruncated: boolean;
   readonly plannedBy: import('./ai-dm-conversation').ConversationPlannerAttribution | null;
-  readonly plannerLabel: import('./ai-dm-conversation').ConversationRow['plannerLabel'];
+  readonly planner: import('./ai-dm-conversation').ConversationPlanner;
+  readonly overrideKinds: import('./ai-dm-conversation').ConversationRow['overrideKinds'];
+  readonly overrideRejections: import('./ai-dm-conversation').ConversationRow['overrideRejections'];
   readonly autoSubmitBlocks: import('./ai-dm-conversation').ConversationRow['autoSubmitBlocks'];
   readonly escalated: boolean;
   readonly escalationModel: string | null;
@@ -511,7 +514,10 @@ export function arenaRows(
     serviceNull: row.serviceNull,
     contextTruncated: row.contextTruncated,
     plannedBy: row.plannedBy,
-    plannerLabel: row.plannerLabel,
+    planner: row.planner,
+    executionErrorClass: row.executionErrorClass,
+    overrideKinds: row.overrideKinds,
+    overrideRejections: row.overrideRejections,
     autoSubmitBlocks: row.autoSubmitBlocks,
     escalated: row.escalated,
     escalationModel: row.escalationModel,

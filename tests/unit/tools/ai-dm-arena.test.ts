@@ -1260,7 +1260,7 @@ describe('AI-DM arena', () => {
 
     expect(row).toEqual(expect.objectContaining({
       outcome: 'authorized', agentDispatched: true,
-      plannedBy: null, plannerLabel: 'engine_default', escalated: true, escalationModel: 'gpt-escalation',
+      plannedBy: null, planner: 'engine_default', escalated: true, escalationModel: 'gpt-escalation',
       authorizedPlan: expect.any(Array),
       roundNarrative: expect.any(String),
       chainEvidence: {

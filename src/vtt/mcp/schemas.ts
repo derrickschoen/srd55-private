@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ENGINE_OPTION_METRICS } from '../turn-proposal';
 import { TACTICAL_EVALUATOR_POLICY } from '../../combat/tactical-evaluator';
 import { PLAY_NAMES, SKILL_NAMES } from '../snippet-registry-runtime';
 import { DM_INTEL_QUERY_POLICY, DM_TURN_INTEL_POLICY } from '../dm-tactical-intel';
@@ -72,14 +73,20 @@ const engagement = z.object({
 
 const overrideJustification = z.discriminatedUnion('reason', [
   z.object({
-    reason: z.enum(['morale', 'objective', 'roleplay', 'resource_conservation']),
+    reason: z.enum(['morale', 'roleplay', 'resource_conservation']),
+    note: z.string().min(1).max(500).optional(),
+  }).strict(),
+  z.object({
+    reason: z.literal('objective'),
+    play_token: z.string().min(1).max(200).optional(),
     note: z.string().min(1).max(500).optional(),
   }).strict(),
   z.object({
     reason: z.literal('unknown_engine_gap'),
-    note: z.string().min(1).max(500),
+    metric: z.enum(ENGINE_OPTION_METRICS).optional(),
+    note: z.string().min(1).max(500).optional(),
   }).strict(),
-]).describe('Required when a selected option is strictly dominated on every resolved declared metric; unknown engine gaps must be identified in note.');
+]).describe('Required for a dominated selection. objective requires a current-context play_token; unknown_engine_gap requires a typed metric.');
 const activationChoice = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('command_word'), value: z.enum(['approach', 'flee', 'grovel', 'halt', 'drop']) }).strict(),
   z.object({ kind: z.literal('unicorns_blessing_spell'), value: z.enum(['cure-wounds', 'lesser-restoration']) }).strict(),
@@ -574,6 +581,7 @@ const advertisedPlay = z.object({
   name: z.enum(PLAY_NAMES),
   description: z.string().min(1).max(200),
   snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+  play_token: z.string().regex(/^[0-9a-f]{64}$/u),
 }).strict();
 const advertisedSkill = z.object({
   name: z.enum(SKILL_NAMES),
@@ -705,6 +713,7 @@ const teamPlanFrontier = z.union([
 const suggestedPlan = z.object({
   play_name: z.enum(PLAY_NAMES),
   snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+  play_token: z.string().regex(/^[0-9a-f]{64}$/u),
   proposals: z.array(turnProposal).min(1).max(50),
   advisory: z.string().min(1).max(300),
 }).strict();
@@ -791,6 +800,7 @@ const proposeFromPlayOutput = z.object({
   state_ref: stateRef,
   play_name: z.enum(PLAY_NAMES),
   snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+  play_token: z.string().regex(/^[0-9a-f]{64}$/u),
   proposals: z.array(turnProposal).min(1).max(50),
 }).strict();
 const loadSkillOutput = z.object({

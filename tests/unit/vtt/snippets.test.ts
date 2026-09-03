@@ -189,6 +189,7 @@ describe('composite play registry', () => {
     expect(draft).toEqual({
       state_ref: context['state_ref'],
       play_name: 'focus_fire',
+      play_token: expected.definition.snippetHash,
       snippet_hash: expected.definition.snippetHash,
       proposals: expected.proposals.map(externalProposal),
     });

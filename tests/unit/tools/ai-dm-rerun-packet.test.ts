@@ -88,18 +88,24 @@ describe('AI-DM R1-10 rerun packet', () => {
           rubric: { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null },
         },
         {
-          blindId: 'blind-002', caseId: 'case-01-1', outcome: 'auto_resolved',
+          blindId: 'blind-002', caseId: 'case-01-1', outcome: 'refused',
           attribution: 'engine_default',
           executedPlan: null,
-          rubric: { targetPriority: null, actionEconomy: null, positioning: null, coherence: null, total: null },
+          rubric: { targetPriority: 0, actionEconomy: 0, positioning: 0, coherence: 0, total: 0 },
         },
       ],
     } as const;
     const expectedAnswerKey = {
       version: 'ai-dm-rerun-packet-v1',
       entries: [
-        { blindId: 'blind-001', arm: 'baseline' },
-        { blindId: 'blind-002', arm: 'intel' },
+        {
+          blindId: 'blind-001', arm: 'baseline', planner: 'model',
+          overrideKinds: [], overrideRejections: [],
+        },
+        {
+          blindId: 'blind-002', arm: 'intel', planner: 'engine_default',
+          overrideKinds: [], overrideRejections: [],
+        },
       ],
     } as const;
 
@@ -130,6 +136,38 @@ describe('AI-DM R1-10 rerun packet', () => {
         }
       : row);
     expect(buildRerunPacket(planMutated, 1, tinyProtocol).packet).not.toEqual(expectedPacket);
+  });
+
+  it('scores execution_failed as zero and keeps planner and override evidence only in the answer key', () => {
+    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl')
+      .map((row, index) => ({
+        ...row,
+        outcome: 'execution_failed',
+        planner: index === 0 ? 'model' : 'sim_controller',
+        overrideKinds: index === 0 ? ['objective'] : [],
+        overrideRejections: index === 0
+          ? [{ actorId: 'monster:ogre', code: 'override_unjustified' }]
+          : [],
+      }));
+    const result = buildRerunPacket(rows, 1, tinyProtocol);
+
+    expect(result.packet.entries.every((entry) =>
+      entry.outcome === 'execution_failed' && entry.executedPlan === null &&
+      entry.rubric.total === 0)).toBe(true);
+    expect(result.answerKey.entries).toEqual([
+      {
+        blindId: 'blind-001', arm: 'baseline', planner: 'model',
+        overrideKinds: ['objective'],
+        overrideRejections: [{ actorId: 'monster:ogre', code: 'override_unjustified' }],
+      },
+      {
+        blindId: 'blind-002', arm: 'intel', planner: 'sim_controller',
+        overrideKinds: [], overrideRejections: [],
+      },
+    ]);
+    const packetText = JSON.stringify(result.packet);
+    expect(packetText).not.toContain('planner');
+    expect(packetText).not.toContain('override');
   });
 
   it('validates the preregistered seed set, three paired reps, frozen artifacts, holdout status, and initiative evidence', () => {

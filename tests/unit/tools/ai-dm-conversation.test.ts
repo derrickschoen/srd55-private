@@ -228,7 +228,11 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
         primary_option_id: selected.optionId,
         fallback_option_id: manifest.phase === 'correction' ? null : fallback?.optionId ?? null,
         override_justification: requestedKind === 'dodge' || requestedKind === 'end_turn'
-          ? { reason: 'objective', note: 'Serialized fixture intentionally selects a dominated option.' }
+          ? {
+              reason: 'unknown_engine_gap',
+              metric: 'expected_damage_milli',
+              note: 'Serialized fixture intentionally selects a dominated option.',
+            }
           : null,
       };
     });
@@ -919,7 +923,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.toolCalls).toBe(2);
     expect(result.rows[0]?.agentDispatched).toBe(true);
     expect(result.rows[0]).toEqual(expect.objectContaining({
-      plannedBy: null, plannerLabel: 'engine_default', autoSubmitBlocks: [],
+      plannedBy: null, planner: 'engine_default', autoSubmitBlocks: [],
       escalated: false, escalationModel: null,
     }));
     expect(result.rows[0]?.chainEvidence).toEqual({
@@ -1034,7 +1038,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(row).toEqual(expect.objectContaining({
       outcome: 'authorized',
       plannedBy: null,
-      plannerLabel: 'sim_controller',
+      planner: 'sim_controller',
       proposalId: expect.stringContaining('sim-controller:'),
       autoSubmitBlocks: expect.arrayContaining([
         {
@@ -1306,7 +1310,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows).toEqual([
       expect.objectContaining({
-        outcome: 'authorized', plannerLabel: 'engine_default', flapRetries: 0, serviceNull: false,
+        outcome: 'authorized', planner: 'engine_default', flapRetries: 0, serviceNull: false,
         toolCalls: 3,
         chainEvidence: expect.objectContaining({
           failedAttempts: expect.arrayContaining([
@@ -1671,7 +1675,7 @@ describe('AI-DM engine MCP conversation runner', () => {
   it.each([
     ['keep', 'baseline_kept'],
     ['change', 'adjusted'],
-  ] as const)('records a material adjustment that chooses %s', { timeout: 30_000 }, async (response, outcome) => {
+  ] as const)('dispatches when a superior option appears and records adjustment choice %s', { timeout: 30_000 }, async (response, outcome) => {
     const directory = mkdtempSync(join(tmpdir(), `dnd-conversation-segments-${response}-`));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
@@ -1684,8 +1688,13 @@ describe('AI-DM engine MCP conversation runner', () => {
       adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': response },
     });
     const row = result.rows[0];
+    const adjustment = row?.adjustments[0];
+    if (adjustment === undefined || adjustment.skipped !== null) {
+      throw new Error('Expected a dispatched adjustment fixture.');
+    }
 
-    expect(row?.adjustments?.[0]).toEqual(expect.objectContaining({
+    expect(adjustment).toEqual(expect.objectContaining({
+      preflight: 'superior_option_appeared',
       outcome,
       granularity: 'turn_delta',
       flapRetries: 0,
@@ -1705,11 +1714,11 @@ describe('AI-DM engine MCP conversation runner', () => {
       correctionChain: null,
       rlData: expect.any(Array),
     }));
-    expect(row?.adjustments?.[0]?.stateBinding).toEqual({
+    expect(adjustment.stateBinding).toEqual({
       request: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
       result: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
     });
-    expect(row?.adjustments?.[0]?.rawContext).toContain('"granularity":"turn_delta"');
+    expect(adjustment.rawContext).toContain('"granularity":"turn_delta"');
     expect(row?.rlData).toEqual(expect.objectContaining({
       format: 'arena-rl-capture-v2',
       task: 'round_plan',
@@ -1730,19 +1739,19 @@ describe('AI-DM engine MCP conversation runner', () => {
       }),
     }));
     expect(row?.engineIntel).toEqual(row?.rlData?.engineIntel);
-    expect(row?.adjustments[0]?.rlData[0]).toEqual(expect.objectContaining({
+    expect(adjustment.rlData[0]).toEqual(expect.objectContaining({
       format: 'arena-rl-capture-v2',
       task: 'plan_adjustment',
       submissionTool: 'engine.submit_plan_adjustment',
       parentPlanId: expect.any(String),
     }));
-    expect(row?.adjustments?.[0]?.reasons).toContain('OPEN_MONSTER_SET_CHANGED');
+    expect(adjustment.reasons).toContain('OPEN_MONSTER_SET_CHANGED');
     expect(row?.adjustments).toHaveLength(1);
     expect(row?.roundTotals.adjustmentCalls).toBe(1);
     expect(row?.monsterSegments?.flatMap((segment) => segment.actors)).toHaveLength(2);
   });
 
-  it('fires the adjustment machinery for a material symmetric-evaluator PC turn', { timeout: 30_000 }, async () => {
+  it('skips the D443-style adjustment when material bookkeeping changed but the retained plan stayed legal and non-dominated (mutation: always dispatch)', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-symmetric-material-'));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
@@ -1808,11 +1817,101 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(adjustment?.trigger).toBe('combatant:cleric');
     expect(adjustment?.triggerPcTurnOrdinal).toBe(1);
     expect(adjustment?.reasons).toEqual(['LIFE_STATE_CHANGED', 'OPEN_MONSTER_SET_CHANGED']);
-    expect(adjustment?.outcome).toBe('baseline_kept');
-    expect(row?.roundTotals.adjustmentCalls).toBe(1);
+    expect(adjustment?.skipped).toBe('no_material_change');
+    expect(row?.roundTotals.adjustmentCalls).toBe(0);
     expect(row?.speculations).toContainEqual(expect.objectContaining({
       status: 'adopted', proposed: true, adopted: true, discarded: false,
     }));
+  });
+
+  it('dispatches an adjustment when the retained primary becomes illegal', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-illegal-primary-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+    const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      mutateBeforeAdjustmentPreflight: (state) => ({
+        ...state,
+        revision: state.revision + 1,
+        combatants: state.combatants.map((combatant) =>
+          combatant.profile.kind === 'player_character'
+            ? { ...combatant, hitPoints: 0, life: 'dead' as const }
+            : combatant),
+      }),
+      adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'keep' },
+    });
+    const adjustment = result.rows[0]?.adjustments[0];
+    if (adjustment === undefined || adjustment.skipped !== null) {
+      throw new Error('Expected an illegal retained primary to dispatch adjustment planning.');
+    }
+    expect(adjustment.preflight).toBe('retained_plan_illegal');
+    expect(result.rows[0]?.roundTotals.adjustmentCalls).toBe(1);
+  });
+
+  it('rejects a speculative context actor mismatch before model dispatch', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-speculation-context-mismatch-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+    let speculationDispatches = 0;
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom()],
+      mutateSpeculativeContext: (context) => ({ ...context, actors: [] }),
+      onSpeculationDispatchStart: () => { speculationDispatches += 1; },
+    });
+    const row = result.rows[0];
+    expect(speculationDispatches).toBe(0);
+    expect(row?.speculations.length).toBeGreaterThan(0);
+    expect(row?.speculations.every((entry) =>
+      entry.status === 'discarded' && entry.discardReason === 'context_actor_set_mismatch')).toBe(true);
+    expect(row?.refusals.some((message) => message.includes('SPECULATIVE_BRANCH_CONTRACT_MISMATCH'))).toBe(false);
+    expect(row?.outcome).toBe('authorized');
+  });
+
+  it('never authorizes a row when execution throws before its first completed turn (mutation: authorized before the loop)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-execution-failed-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom()],
+      mutateSpeculativeContext: () => {
+        throw new Error('SIMULATED execution fixture failure.');
+      },
+    });
+    const row = result.rows[0];
+    expect(row).toMatchObject({
+      outcome: 'execution_failed',
+      executionErrorClass: 'other',
+      planner: 'model',
+      pcTurns: [],
+      monsterSegments: [],
+    });
+    expect(row?.refusals).toEqual(['SIMULATED execution fixture failure.']);
+    expect(result.rows.some((entry) => entry.outcome === 'authorized' && entry.refusals.length > 0)).toBe(false);
+  });
+
+  it('records partial_execution when execution throws after a completed PC turn', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-partial-execution-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom()],
+      mutateBeforeSpeculationBoundary: () => {
+        throw new Error('SIMULATED unresolved boundary decision.');
+      },
+    });
+    const row = result.rows[0];
+    expect(row?.outcome).toBe('partial_execution');
+    expect(row?.executionErrorClass).toBe('unresolved_boundary_decision');
+    expect(row?.pcTurns.length).toBeGreaterThan(0);
+    expect(row?.refusals).toEqual(['SIMULATED unresolved boundary decision.']);
   });
 
   it('discards speculation when the actual board invalidates the planned option structure', { timeout: 30_000 }, async () => {
@@ -1869,7 +1968,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       .toBeLessThan(1_000);
   });
 
-  it('gives two material PC turns independent adjustment flap budgets', { timeout: 30_000 }, async () => {
+  it('does not spend a second adjustment flap budget when preflight finds no material plan change', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-independent-flaps-'));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
@@ -1901,7 +2000,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows[0]?.adjustments?.slice(0, 2)).toEqual([
       expect.objectContaining({ flapRetries: 1, outcome: 'baseline_kept' }),
-      expect.objectContaining({ flapRetries: 1, outcome: 'baseline_kept' }),
+      expect.objectContaining({ skipped: 'no_material_change' }),
     ]);
   });
 

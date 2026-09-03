@@ -239,6 +239,21 @@ function stateRef(runtime: EngineMcpRuntime): Readonly<Record<string, unknown>> 
     scope: 'round',
   }))['state_ref'] as Readonly<Record<string, unknown>>;
 }
+function currentPlayToken(runtime: EngineMcpRuntime): string {
+  const capsule = runtime.feed.current();
+  const context = structured(toolCall(runtime.handler, 'engine.get_turn_context', {
+    run_id: capsule.runId,
+    expected_revision: capsule.revision,
+    scope: 'round',
+  }));
+  const plays = context['applicable_plays'];
+  const play = Array.isArray(plays) ? plays[0] : undefined;
+  if (typeof play !== 'object' || play === null || Array.isArray(play) ||
+    !('play_token' in play) || typeof play.play_token !== 'string') {
+    throw new Error('Fixture current turn context has no engine play token.');
+  }
+  return play.play_token;
+}
 function fixtureFacts(state: EncounterState, runtime: EngineMcpRuntime) {
   const capsule = runtime.feed.current();
   const actor = capsule.request?.actors[0];
@@ -255,7 +270,11 @@ function fixtureFacts(state: EncounterState, runtime: EngineMcpRuntime) {
     expected_revision: capsule.revision,
     primary_option_id: option.optionId,
     fallback_option_id: fallback.optionId,
-    override_justification: { reason: 'objective' as const, note: 'Fixture intentionally exercises the defensive override path.' },
+    override_justification: {
+      reason: 'unknown_engine_gap' as const,
+      metric: 'expected_damage_milli' as const,
+      note: 'Fixture intentionally exercises the defensive override path.',
+    },
   } as const;
   return { actor, target, action, request: capsule.request, proposal, ref: stateRef(runtime) };
 }
@@ -283,7 +302,11 @@ function dodgeUpdate(runtime: EngineMcpRuntime, actorId: string, fallbackOptionI
   return {
     actor_id: actorId, expected_revision: capsule.revision, primary_option_id: option.optionId,
     fallback_option_id: fallbackOptionId,
-    override_justification: { reason: 'objective' as const, note: 'Fixture intentionally exercises the defensive override path.' },
+    override_justification: {
+      reason: 'unknown_engine_gap' as const,
+      metric: 'expected_damage_milli' as const,
+      note: 'Fixture intentionally exercises the defensive override path.',
+    },
   };
 }
 function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, runtime: EngineMcpRuntime): Readonly<Record<string, unknown>> {
@@ -918,7 +941,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(accepted['status']).toBe('proposed');
   });
 
-  it('rejects passive dominance overrides that contradict or omit their mechanical rationale', async () => {
+  it('rejects dominance overrides that lack the engine-bound justification required by D485', async () => {
     const resourceFixture = await fixtureRuntime({ requestedActorCount: 1 });
     const resourceFacts = fixtureFacts(resourceFixture.state, resourceFixture.runtime);
     const endTurn = resourceFixture.runtime.feed.current().projection.combatants
@@ -940,23 +963,64 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     ));
     expect(resourceResult).toMatchObject({
       status: 'rejected',
-      actor_refusals: [{ codes: ['DOMINANCE_OVERRIDE_CONTRADICTS_METRICS'] }],
+      actor_refusals: [{ codes: ['override_unjustified'] }],
     });
     expect(resourceFixture.runtime.proposals).toEqual([]);
 
     const gapFixture = await fixtureRuntime({ requestedActorCount: 1 });
     const gapFacts = fixtureFacts(gapFixture.state, gapFixture.runtime);
-    const gapResult = toolCall(gapFixture.runtime.handler, 'engine.submit_round_proposals', {
+    const gapResult = structured(toolCall(gapFixture.runtime.handler, 'engine.submit_round_proposals', {
       ...happyArguments('engine.submit_round_proposals', gapFixture.state, gapFixture.runtime),
       idempotency_key: 'round-vacuous-engine-gap-override-0001',
       proposals: [{
         ...gapFacts.proposal,
         override_justification: { reason: 'unknown_engine_gap' },
       }],
+    }));
+    expect(gapResult).toMatchObject({
+      status: 'rejected',
+      actor_refusals: [{ codes: ['override_unjustified'] }],
     });
-    expect(gapResult['isError']).toBe(true);
-    expect(JSON.stringify(gapResult)).toContain('note');
     expect(gapFixture.runtime.proposals).toEqual([]);
+  });
+
+  it('rejects a bare objective override without consuming the submission and accepts a current engine play token', async () => {
+    const fixture = await fixtureRuntime({ requestedActorCount: 1 });
+    const facts = fixtureFacts(fixture.state, fixture.runtime);
+    const endTurn = fixture.runtime.feed.current().projection.combatants
+      .find((combatant) => combatant.id === facts.actor)?.options
+      .find((option) => option.actionSlots.some((slot) => slot.use.kind === 'end_turn'));
+    if (endTurn === undefined) throw new Error('Fixture End Turn option is absent.');
+    const baseArguments = happyArguments('engine.submit_round_proposals', fixture.state, fixture.runtime);
+    const rejected = structured(toolCall(fixture.runtime.handler, 'engine.submit_round_proposals', {
+      ...baseArguments,
+      idempotency_key: 'round-bare-objective-override-0001',
+      proposals: [{
+        ...facts.proposal,
+        primary_option_id: endTurn.optionId,
+        override_justification: { reason: 'objective' },
+      }],
+    }));
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      actor_refusals: [{ codes: ['override_unjustified'] }],
+    });
+    expect(fixture.runtime.proposals).toEqual([]);
+
+    const accepted = structured(toolCall(fixture.runtime.handler, 'engine.submit_round_proposals', {
+      ...baseArguments,
+      idempotency_key: 'round-bound-objective-override-0001',
+      proposals: [{
+        ...facts.proposal,
+        primary_option_id: endTurn.optionId,
+        override_justification: {
+          reason: 'objective',
+          play_token: currentPlayToken(fixture.runtime),
+        },
+      }],
+    }));
+    expect(accepted['status']).toBe('proposed');
+    expect(fixture.runtime.proposals).toHaveLength(1);
   });
 
   it('renders versioned materiality detail for a newly dying target in adjustment context', async () => {

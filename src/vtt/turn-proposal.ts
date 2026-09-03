@@ -22,9 +22,20 @@ export type { CombatantId } from '../combat/values';
 import type { Brand } from '../domain/ids';
 export type EngineActionId = Brand<string, 'EngineActionId'>;
 export type EngineSpellId = Brand<string, 'EngineSpellId'>;
+export type EnginePlayToken = Brand<string, 'EnginePlayToken'>;
+
+export const ENGINE_OPTION_METRICS = [
+  'expected_damage_milli',
+  'attack_count',
+  'approach_feet',
+  'action_slot_uses',
+  'resource_costs',
+] as const;
+export type EngineOptionMetric = (typeof ENGINE_OPTION_METRICS)[number];
 
 export const engineActionId = (value: string): EngineActionId => value as EngineActionId;
 export const engineSpellId = (value: string): EngineSpellId => value as EngineSpellId;
+export const enginePlayToken = (value: string): EnginePlayToken => value as EnginePlayToken;
 
 export const COMMAND_WORDS = ['approach', 'flee', 'grovel', 'halt', 'drop'] as const;
 export type CommandWord = (typeof COMMAND_WORDS)[number];
@@ -140,11 +151,18 @@ export interface EngineTurnProposal {
   readonly activationChoice?: EngineActivationChoice | null;
   readonly overrideJustification: null | (
     {
-      readonly reason: 'morale' | 'objective' | 'roleplay' | 'resource_conservation';
+      readonly reason: 'morale' | 'roleplay' | 'resource_conservation';
+      readonly note?: string;
+    } | {
+      readonly reason: 'objective';
+      /** Null is retained through decoding so policy can return override_unjustified. */
+      readonly playToken: EnginePlayToken | null;
       readonly note?: string;
     } | {
       readonly reason: 'unknown_engine_gap';
-      readonly note: string;
+      /** Null is retained through decoding so policy can return override_unjustified. */
+      readonly metric: EngineOptionMetric | null;
+      readonly note?: string;
     }
   );
 }

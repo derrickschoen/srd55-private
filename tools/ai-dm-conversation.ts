@@ -50,6 +50,7 @@ import {
   availableEngineActorOptions, pureTurnProposalResolver,
   type EngineOfferableOption, type EngineTurnProposal, type ResolvedTurnMechanics,
 } from '../src/vtt/intent-resolver';
+import { enginePlayToken, type EnginePlayToken } from '../src/vtt/turn-proposal';
 import {
   hiddenOptionRecords,
   type HiddenOptionRecord,
@@ -83,6 +84,7 @@ import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-hos
 import { captureDmIntel, type DmIntelCapture } from '../src/vtt/dm-tactical-intel';
 import {
   actorOpportunityReport,
+  submissionDominance,
   DOMINANCE_CORRECTION_POLICY,
   MATERIALITY_CONTEXT_POLICY,
   OPPORTUNITY_COST_POLICY,
@@ -245,6 +247,7 @@ export interface ConversationChainAttemptEvidence {
   readonly actorId: CombatantId | null;
   readonly declaredProposal: Readonly<Record<string, unknown>> | null;
   readonly rejectionReasons: readonly string[];
+  readonly rejectionCodes?: readonly string[];
 }
 
 export interface ConversationChainEvidence {
@@ -281,12 +284,19 @@ export interface ConversationPcTurn {
   readonly materialityReasons: readonly PlanMaterialityReasonCode[];
 }
 
-export interface ConversationAdjustment {
+interface ConversationAdjustmentTrigger {
   readonly trigger: CombatantId;
   readonly triggerPcTurnOrdinal: number;
   readonly triggerInitiativeIndex: number;
   readonly reasons: readonly PlanMaterialityReasonCode[];
   readonly openActors: readonly CombatantId[];
+}
+
+export type ConversationAdjustment = ConversationAdjustmentTrigger & (
+  | { readonly skipped: 'no_material_change' }
+  | {
+  readonly skipped: null;
+  readonly preflight: 'retained_plan_illegal' | 'superior_option_appeared';
   readonly requestId: string;
   readonly proposalId: string | null;
   readonly baselinePlanHash: string;
@@ -314,7 +324,7 @@ export interface ConversationAdjustment {
     readonly granularity: 'full' | 'turn_delta';
   } | null;
   readonly rlData: readonly ConversationRlDataV2[];
-}
+});
 
 export interface ConversationMonsterSegment {
   readonly actors: readonly CombatantId[];
@@ -335,7 +345,8 @@ export type ConversationSpeculationDiscardReason =
   | 'no_scenario_match'
   | 'ambiguous_scenario_match'
   | 'option_mapping_failed'
-  | 'proposal_validation_failed';
+  | 'proposal_validation_failed'
+  | 'context_actor_set_mismatch';
 
 export type ConversationSpeculation =
   | {
@@ -446,7 +457,8 @@ export interface ConversationRow {
   readonly snippetSetHash: string;
   readonly suggestedPlay: ConversationSuggestedPlay | null;
   readonly suggestionAdopted: ConversationSuggestionAdoption | null;
-  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null' | 'local_error';
+  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null' | 'local_error' | 'execution_failed' | 'partial_execution';
+  readonly executionErrorClass: ConversationExecutionErrorClass | null;
   readonly proposalId: string | null;
   readonly timeToFirstAction: number;
   readonly wallPerCreature: number;
@@ -465,7 +477,9 @@ export interface ConversationRow {
   readonly serviceNull: boolean;
   readonly contextTruncated: boolean;
   readonly plannedBy: ConversationPlannerAttribution | null;
-  readonly plannerLabel: 'model' | ExhaustionPlannerLabel | null;
+  readonly planner: ConversationPlanner;
+  readonly overrideKinds: readonly ConversationOverrideKind[];
+  readonly overrideRejections: readonly ConversationOverrideRejection[];
   readonly fallbackReason: ConversationFallbackReason | null;
   readonly autoSubmitBlocks: readonly ConversationAutoSubmitBlock[];
   readonly partyDefaultTurn: boolean;
@@ -506,6 +520,19 @@ export interface ConversationPlannerAttribution {
   readonly effort: ConversationEffort;
 }
 
+export type ConversationPlanner = 'model' | 'engine_default' | 'sim_controller';
+export type ConversationExecutionErrorClass =
+  | 'missing_pc_program'
+  | 'invalid_self_target'
+  | 'unresolved_boundary_decision'
+  | 'cli_timeout'
+  | 'other';
+export type ConversationOverrideKind = NonNullable<EngineTurnProposal['overrideJustification']>['reason'];
+export interface ConversationOverrideRejection {
+  readonly actorId: CombatantId | null;
+  readonly code: 'override_unjustified';
+}
+
 export interface ConversationRunResult {
   readonly rows: readonly ConversationRow[];
   readonly binding: AgentSessionBinding | null;
@@ -532,6 +559,12 @@ export interface ConversationRunOptions {
   readonly speculationDispatchDelayMs?: number;
   /** SIMULATED-only immutable state replacement immediately before speculative boundary validation. */
   readonly mutateBeforeSpeculationBoundary?: (state: EncounterState) => EncounterState;
+  /** Test-only immutable state replacement immediately before adjustment legality preflight. */
+  readonly mutateBeforeAdjustmentPreflight?: (state: EncounterState) => EncounterState;
+  /** Test-only context mutation proving speculative actor binding is checked before dispatch. */
+  readonly mutateSpeculativeContext?: (
+    context: Readonly<Record<string, unknown>>,
+  ) => Readonly<Record<string, unknown>>;
   /** Test-only explicit override; takes precedence over the configured arena policy. */
   readonly partyPolicyOverride?: ScriptedPartyDecisionPolicy;
   /** Test-only browser-reload proof point; one-based completed round count. */
@@ -750,7 +783,8 @@ function rejectionEvidence(value: unknown): readonly ConversationChainAttemptEvi
       const attempt = asRecord(attemptValue);
       const reasons = attempt?.['rejection_reasons'];
       const attemptKind = attempt?.['attempt'];
-      const declaredOptionId = attempt?.['declared_option_id'];
+    const declaredOptionId = attempt?.['declared_option_id'];
+      const codes = candidate['codes'];
       const declaredProposal = typeof declaredOptionId === 'string'
         ? { option_id: declaredOptionId }
         : null;
@@ -761,6 +795,9 @@ function rejectionEvidence(value: unknown): readonly ConversationChainAttemptEvi
         actorId,
         declaredProposal: declaredProposal === null ? null : structuredClone(declaredProposal),
         rejectionReasons: reasons as readonly string[],
+        ...(Array.isArray(codes) && codes.every((code) => typeof code === 'string')
+          ? { rejectionCodes: codes as readonly string[] }
+          : {}),
       }];
     });
   });
@@ -957,6 +994,30 @@ function sameCombatantSet(left: readonly CombatantId[], right: readonly Combatan
   return a.length === b.length && a.every((actorId, index) => actorId === b[index]);
 }
 
+function renderedContextActorIds(context: Readonly<Record<string, unknown>>): readonly CombatantId[] {
+  const actors = context['actors'];
+  if (!Array.isArray(actors)) return [];
+  return actors.flatMap((value): readonly CombatantId[] => {
+    const actor = asRecord(value);
+    return typeof actor?.['actor_id'] === 'string' ? [combatantId(actor['actor_id'])] : [];
+  });
+}
+
+function executionErrorClass(error: unknown): ConversationExecutionErrorClass {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/no (?:round |scripted )?program|program is missing|missing.*program/iu.test(message)) {
+    return 'missing_pc_program';
+  }
+  if (/Self spell does not select targets|invalid.*self.?target/iu.test(message)) {
+    return 'invalid_self_target';
+  }
+  if (/pending decision for this boundary is unresolved|unresolved.*boundary decision/iu.test(message)) {
+    return 'unresolved_boundary_decision';
+  }
+  if (/timed out|timeout/iu.test(message)) return 'cli_timeout';
+  return 'other';
+}
+
 function optionStructure(option: EngineOfferableOption): string {
   const { optionId: _optionId, revision: _revision, ...structure } = option;
   return canonicalJson(structure);
@@ -999,6 +1060,34 @@ function rebaseStoredPlanEntries(input: {
     });
   }
   return rebound;
+}
+
+function adjustmentPreflight(input: {
+  readonly state: EncounterState;
+  readonly actualRevision: number;
+  readonly entries: readonly SegmentMonsterPlanEntry[];
+}): { readonly dispatch: true; readonly reason: 'retained_plan_illegal' | 'superior_option_appeared' } | {
+  readonly dispatch: false;
+  readonly rebound: readonly SegmentMonsterPlanEntry[];
+} {
+  const rebound = rebaseStoredPlanEntries(input);
+  if (rebound === null) return { dispatch: true, reason: 'retained_plan_illegal' };
+  const planningState = projectFutureMonsterTurns(
+    input.state,
+    rebound.map((entry) => entry.proposal.actorId),
+  );
+  const superiorAppeared = rebound.some((entry) => submissionDominance(
+    actorOpportunityReport(
+      planningState,
+      entry.proposal.actorId,
+      canonicalEngineQueryPort,
+      input.actualRevision,
+    ),
+    entry.option.optionId,
+  ).status === 'dominated');
+  return superiorAppeared
+    ? { dispatch: true, reason: 'superior_option_appeared' }
+    : { dispatch: false, rebound };
 }
 
 function adoptSpeculativeBranch(input: {
@@ -1087,12 +1176,22 @@ function adoptSpeculativeBranch(input: {
 }
 
 function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string, unknown>> {
+  const override = proposal.overrideJustification;
   return {
     actor_id: proposal.actorId,
     expected_revision: proposal.expectedRevision,
     primary_option_id: proposal.primaryOptionId,
     fallback_option_id: proposal.fallbackOptionId,
-    override_justification: proposal.overrideJustification,
+    override_justification: override === null ? null : {
+      reason: override.reason,
+      ...(override.reason === 'objective' && override.playToken !== null
+        ? { play_token: override.playToken }
+        : {}),
+      ...(override.reason === 'unknown_engine_gap' && override.metric !== null
+        ? { metric: override.metric }
+        : {}),
+      ...(override.note === undefined ? {} : { note: override.note }),
+    },
   };
 }
 
@@ -1160,6 +1259,7 @@ function scriptedProposals(
 function intentionallyIgnoredProposals(
   state: EncounterState,
   phase: 'initial' | 'correction',
+  playToken: EnginePlayToken,
   revision = state.revision,
 ): readonly EngineTurnProposal[] {
   const actors = livingMonsterIds(state);
@@ -1186,6 +1286,7 @@ function intentionallyIgnoredProposals(
       fallbackOptionId: phase === 'correction' ? null : fallback?.optionId ?? null,
       overrideJustification: {
         reason: 'objective',
+        playToken,
         note: 'SIMULATED response intentionally ignores the suggested play.',
       },
     };
@@ -1394,7 +1495,7 @@ function plannedTurnContext(
       baselineProposalDigests: request.baselineProposalDigests,
       adjustmentBudget: request.adjustmentBudget,
       },
-    } : { requestedActorCount: request.actors.length }),
+    } : { requestedActorIds: request.actors }),
     toolProfile: 'dm',
     rendererProfile,
     onTurnContextRendered: (value) => { rendering = value; },
@@ -1576,6 +1677,11 @@ async function driveScriptedMcp(
     }
     const suggestion = asRecord(context['suggested_plan']);
     const suggestedProposals = suggestion?.['proposals'];
+    const advertisedPlays = context['applicable_plays'];
+    const firstAdvertisedPlay = Array.isArray(advertisedPlays)
+      ? asRecord(advertisedPlays[0])
+      : null;
+    const contextualPlayToken = suggestion?.['play_token'] ?? firstAdvertisedPlay?.['play_token'];
     let frontierProposals: readonly unknown[] | undefined;
     if ((suggestionResponse === 'as_is' || suggestionResponse === 'edited') &&
       !Array.isArray(suggestedProposals)) {
@@ -1603,13 +1709,26 @@ async function driveScriptedMcp(
     const proposals = useEnginePlan
       ? structuredClone(enginePlanProposals) as readonly Readonly<Record<string, unknown>>[]
       : suggestionResponse === 'ignored'
-        ? intentionallyIgnoredProposals(state, manifest.phase, manifest.revision).map(externalProposal)
+        ? intentionallyIgnoredProposals(
+            state,
+            manifest.phase,
+            typeof contextualPlayToken === 'string'
+              ? enginePlayToken(contextualPlayToken)
+              : enginePlayToken('SIMULATED-unissued-play-token'),
+            manifest.revision,
+          ).map(externalProposal)
         : scriptedProposals(state, manifest.phase, manifest.revision).map(externalProposal);
     const responseProposals = suggestionResponse !== 'edited' || !useEnginePlan
       ? proposals
       : proposals.map((proposal, index) => index !== 0 ? proposal : {
           ...proposal,
-          override_justification: { reason: 'objective', note: 'SIMULATED edit' },
+          override_justification: {
+            reason: 'objective',
+            play_token: typeof suggestion?.['play_token'] === 'string'
+              ? suggestion['play_token']
+              : 'SIMULATED-unissued-play-token',
+            note: 'SIMULATED edit',
+          },
         });
     const submittedProposals = invalid ? responseProposals.map((proposal) => ({
       ...proposal,
@@ -2547,6 +2666,8 @@ async function runConversationWithConfiguredIntel(
       };
       let proposalId: string | null = null;
       let outcome: ConversationRow['outcome'] = 'refused';
+      let executionError: ConversationExecutionErrorClass | null = null;
+      let initiativeExecutionPending = false;
       const refusals: string[] = [];
       let agentDispatched = false;
       let flapRetries: 0 | 1 | 2 = 0;
@@ -2563,7 +2684,7 @@ async function runConversationWithConfiguredIntel(
       let initialDispatchPlanner: ConversationPlannerAttribution | null = null;
       let correctionDispatchPlanner: ConversationPlannerAttribution | null = null;
       let plannedBy: ConversationRow['plannedBy'] = null;
-      let plannerLabel: ConversationRow['plannerLabel'] = null;
+      let planner: ConversationPlanner = 'model';
       let fallbackReason: ConversationFallbackReason | null = null;
       let partyDefaultTurn = false;
       let terminalOutcome: ConversationTerminalOutcome | null = null;
@@ -2643,13 +2764,36 @@ async function runConversationWithConfiguredIntel(
           historyKind: 'speculative_context_projected',
           requestedActorIds: window.monsters,
         });
-        const ordinaryContext = plannedTurnContext(
+        const renderedOrdinaryContext = plannedTurnContext(
           sourceState,
           ordinaryContextSnapshot,
           undefined,
           config.intelMode,
           config.rendererProfile,
         ).value;
+        const ordinaryContext = options.mutateSpeculativeContext?.(renderedOrdinaryContext) ??
+          renderedOrdinaryContext;
+        const planner = escalationPlanner ?? basePlanner;
+        if (!sameCombatantSet(renderedContextActorIds(ordinaryContext), window.monsters)) {
+          speculation = {
+            status: 'discarded', proposed: true, adopted: false, discarded: true,
+            discardReason: 'context_actor_set_mismatch',
+            targetMonsterRound: round,
+            targetActorIds: window.monsters,
+            branchCount: menu.scenarios.length,
+            budgetMs,
+            planningWallMs: 0,
+            boundaryWaitMs: 0,
+            plannedBy: planner,
+            source: {
+              revision: sourceSnapshot.capsule.revision,
+              digest: sourceSnapshot.capsule.digest,
+            },
+            decision: null,
+          };
+          speculations.push(speculation);
+          return;
+        }
         const speculativeContext = {
           ...ordinaryContext,
           state_ref: {
@@ -2675,7 +2819,6 @@ async function runConversationWithConfiguredIntel(
               onPlan: (plan) => { localPlan = plan; },
             })
           : undefined;
-        const planner = escalationPlanner ?? basePlanner;
         const controller = new AbortController();
         const dispatchStarted = performance.now();
         const timeout = setTimeout(() => controller.abort(), budgetMs);
@@ -2757,6 +2900,43 @@ async function runConversationWithConfiguredIntel(
         readonly openActorIds: readonly CombatantId[];
       }): Promise<void> => {
         if (segmentPlanId === null) throw new Error('Material PC turn has no authorized monster plan to adjust.');
+        if (options.mutateBeforeAdjustmentPreflight !== undefined) {
+          engineSession.replaceEncounterState(
+            options.mutateBeforeAdjustmentPreflight(engineSession.currentState()),
+          );
+          capsuleRevision = Math.max(capsuleRevision, engineSession.currentState().revision);
+        }
+        const baselineEntries = input.openActorIds.map((actorId) => {
+          const entry = segmentMonsterPlan.get(actorId);
+          if (entry === undefined) throw new Error(`Open monster ${actorId} has no baseline proposal.`);
+          return entry;
+        });
+        const preflight = adjustmentPreflight({
+          state: engineSession.currentState(),
+          actualRevision: capsuleRevision,
+          entries: baselineEntries,
+        });
+        if (!preflight.dispatch) {
+          for (const entry of preflight.rebound) {
+            segmentMonsterPlan.set(entry.proposal.actorId, entry);
+          }
+          segmentPlanId = `retained:${monsterPlanHash(segmentMonsterPlan)}`;
+          if (inFlightSpeculation.current !== null) {
+            inFlightSpeculation.current = {
+              ...inFlightSpeculation.current,
+              baselinePlanHash: monsterPlanHash(segmentMonsterPlan),
+            };
+          }
+          adjustments.push({
+            trigger: input.triggerActor,
+            triggerPcTurnOrdinal: input.pcTurnOrdinal,
+            triggerInitiativeIndex: initiativeIndexByActor.get(input.triggerActor) ?? -1,
+            reasons: input.reasons,
+            openActors: input.openActorIds,
+            skipped: 'no_material_change',
+          });
+          return;
+        }
         const adjustmentKey = `${key}-pc-turn-${String(input.pcTurnOrdinal)}`;
         const adjustmentRequestId = `request:${adjustmentKey}`;
         const baselinePlanHash = monsterPlanHash(segmentMonsterPlan);
@@ -2886,6 +3066,8 @@ async function runConversationWithConfiguredIntel(
             triggerInitiativeIndex: initiativeIndexByActor.get(input.triggerActor) ?? -1,
             reasons: input.reasons,
             openActors: input.openActorIds,
+            skipped: null,
+            preflight: preflight.reason,
             requestId: adjustmentRequestId,
             proposalId: null,
             baselinePlanHash,
@@ -3085,6 +3267,8 @@ async function runConversationWithConfiguredIntel(
           triggerInitiativeIndex: initiativeIndexByActor.get(input.triggerActor) ?? -1,
           reasons: input.reasons,
           openActors: input.openActorIds,
+          skipped: null,
+          preflight: preflight.reason,
           requestId: adjustmentRequestId,
           proposalId: adjustmentProposal?.proposalId ?? completedCorrectionProposal?.proposalId ?? null,
           baselinePlanHash,
@@ -3601,7 +3785,7 @@ async function runConversationWithConfiguredIntel(
             },
           }));
           roundNarrative = entries.map((entry) => entry.summary).join('; ');
-          plannerLabel = exhaustionPlannerLabel;
+          planner = exhaustionPlannerLabel;
           if (config.combatModel === 'initiative_segments_v1') {
             segmentPlanId = exhaustionProposalId;
           }
@@ -3674,6 +3858,8 @@ async function runConversationWithConfiguredIntel(
         }
         if (config.combatModel === 'initiative_segments_v1' && !serviceNull &&
           (outcome === 'authorized' || outcome === 'auto_resolved')) {
+          initiativeExecutionPending = true;
+          outcome = 'execution_failed';
           if (partyIsDefeated(engineSession.currentState())) {
             terminalOutcome = { kind: 'encounter_over', result: 'party_defeated' };
           } else {
@@ -3758,6 +3944,7 @@ async function runConversationWithConfiguredIntel(
                 material: materiality.material,
                 materialityReasons: materiality.reasonCodes,
               });
+              outcome = 'partial_execution';
               if (materiality.material && afterOpenActorIds.length > 0) {
                 await dispatchPlanAdjustment({
                   triggerActor: activeActorId,
@@ -3985,6 +4172,7 @@ async function runConversationWithConfiguredIntel(
               appliedPlanHash,
               deviationResolutions: applied.deviationResolutions,
             });
+            outcome = 'partial_execution';
           }
           if (inFlightSpeculation.current !== null) {
             const pending = inFlightSpeculation.current;
@@ -4010,6 +4198,8 @@ async function runConversationWithConfiguredIntel(
             inFlightSpeculation.current = null;
           }
           }
+          outcome = 'authorized';
+          initiativeExecutionPending = false;
         }
       } catch (error) {
         if (inFlightSpeculation.current !== null) {
@@ -4035,7 +4225,9 @@ async function runConversationWithConfiguredIntel(
           speculations.push(speculation);
           inFlightSpeculation.current = null;
         }
-        if (config.cli === 'local-openai' && selectedAdapter.classifyFailure(error) !== 'unknown') {
+        if (initiativeExecutionPending) {
+          executionError = executionErrorClass(error);
+        } else if (config.cli === 'local-openai' && selectedAdapter.classifyFailure(error) !== 'unknown') {
           outcome = 'local_error';
           serviceNull = false;
           flapRetries = 0;
@@ -4071,7 +4263,7 @@ async function runConversationWithConfiguredIntel(
       const contextBytes = [
         rowTurnContext.raw,
         ...(recordedCorrectionTurnContext === null ? [] : [recordedCorrectionTurnContext.raw]),
-        ...adjustments.flatMap((entry) => [
+        ...adjustments.flatMap((entry) => entry.skipped === 'no_material_change' ? [] : [
           entry.rawContext,
           ...(entry.correctionChain === null ? [] : [entry.correctionChain.rawContext]),
         ]),
@@ -4104,6 +4296,16 @@ async function runConversationWithConfiguredIntel(
       const kbReads = rowKbSubjectSources === undefined
         ? []
         : decodeKbReadRecords(readFileSync(kbReadSpoolPath, 'utf8'));
+      const overrideKinds = [...new Set((acceptedSubmission ?? []).flatMap((proposal) =>
+        proposal.overrideJustification === null ? [] : [proposal.overrideJustification.reason]))]
+        .sort((left, right) => left.localeCompare(right));
+      const overrideRejections = failedAttempts.flatMap((attempt): readonly ConversationOverrideRejection[] =>
+        attempt.rejectionCodes?.includes('override_unjustified') === true
+          ? [{ actorId: attempt.actorId, code: 'override_unjustified' }]
+          : []);
+      if (outcome === 'authorized' && refusals.length > 0) {
+        throw new Error('Authorized arena row cannot carry execution refusals.');
+      }
       const row: ConversationRow = {
         knowledgeModel: 'engine_state',
         hiddenOptions,
@@ -4121,7 +4323,10 @@ async function runConversationWithConfiguredIntel(
         contextRevision, projectionRevision: capsuleRevision,
         sessionId: rolloutSessionId,
         escalationSessionId,
-        sessionIdHash: binding === null ? null : sha256(binding.sessionId), outcome, proposalId,
+        sessionIdHash: binding === null ? null : sha256(binding.sessionId),
+        outcome,
+        executionErrorClass: executionError,
+        proposalId,
         kbHash: knowledgeBase.combinedStartupHash,
         kbReads,
         repoCommit,
@@ -4147,7 +4352,9 @@ async function runConversationWithConfiguredIntel(
         agentDispatched, flapRetries, serviceNull,
         contextTruncated: simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated,
         plannedBy,
-        plannerLabel: plannerLabel ?? (plannedBy === null ? null : 'model'),
+        planner,
+        overrideKinds,
+        overrideRejections,
         fallbackReason,
         autoSubmitBlocks: [...autoSubmitBlocks.values()]
           .sort((left, right) => left.actorId.localeCompare(right.actorId)),
