@@ -1,5 +1,22 @@
 # Binding scope decisions
 
+D449 K7 ARM LANDED AND VERIFIED; PACKET BUILT; PANEL DISPATCHED
+(supervisor note, 2026-09-02 22:08): d449-s-full-low-k7 30 rows, 27
+authorized / 3 refused (all three are 120 s timeouts; the weather rule is
+>3, so the arm stands and the timeouts are scored as refused per the
+preregistration), 10 digests x3 identical to the control, kbHash
+1639ea14 (k7-close.txt), no escalations. Mechanism counts vs the control
+d443-s-full-low: idle Disengage 29 -> 0, Dash 47 -> 84, Dodge 3 -> 1,
+attack slots 45 -> 34, wall median 17.2 -> 22.0 s, token median 542k ->
+652k. The nudge removed idle Disengage entirely; the attack-slot drop
+and the timeouts are the cost side and go to the owner with the panel
+result per D452. repoCommit differs (caff2d19 vs 62010319/9ea974fa)
+because main gained decisions.md, packet-tool and fixture commits; no
+engine or arena code path changed between them. Packet d449-packet-k7
+(buildRerunPacket, prime 379, 60 entries, leak scan none) judged by the
+three seats via judge-one.sh; key sealed with the D447/D465 program.
+D465 sol-low batch started 22:03:16 (arm 1 of 15, 240 s).
+
 D443 UNSEALED (supervisor, 2026-09-02 21:30, per D451; all 27 judge
 outputs validated structurally first; totals recomputed from components;
 refused = 0; service_null dropped pairwise). Results in
