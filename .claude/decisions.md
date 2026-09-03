@@ -1,5 +1,25 @@
 # Binding scope decisions
 
+E VERIFIED AND COMMITTED; INTEGRATION GATE GREEN; POST-SHIFT CONTROL
+LAUNCHED FROM THE LANE (supervisor, 2026-09-03 05:40): E (8 files
++476/-31, new reference-party-size.test.ts). Gates on the fully
+integrated lane (A1..E, HEAD 818ef569): tsc 0, sg 0, vitest 544 files /
+9515 tests on rerun (first run one 5 s-budget arena test, 4.5 s in
+isolation). My dead-actor mutation (never advance past a dead active
+actor, guarded): the E1 test fails, 16/16 after restore proven by cmp; an
+earlier attempt on an unrelated `life !== 'living'` check survived and
+was discarded as a wrong target, not counted. Codex's model-free 10x3
+smoke on seeds 6203001-10: 30 rows, 0 refusals, no fallback reasons.
+Preregistration amended in analysis-notes.md BEFORE launch: the control
+uses the era leader's own profile (caveman full) so era is the only
+difference vs cav-full-low 8.18; KB = ai-dm-core.md bundle with tactics
+auto-appended; luna low, 120 s, seeds 6203001-10 x3, no escalation
+flags; run from the integration worktree per D481 so main stays on the
+old era until the single merge. Output d466-control-cav-full-low.jsonl.
+Main merge is deferred until the owner's sol decision (D465 wants
+old-era rows if it resumes) — the lane worktree makes that free.
+Measurement script main-guard defect queued for the merge pass.
+
 D2 VERIFIED AND COMMITTED; E DISPATCHED (supervisor, 2026-09-03 04:15):
 D2 (21 files +914/-104, new agent-session-digest.ts, migration 0063 to
 session schema 10, measurement fixture and test). Gates: tsc 0, sg 0,
