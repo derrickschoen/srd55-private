@@ -641,6 +641,19 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D483 — OWNER: rerun a few random luna arms with sol's operating instructions (2026-09-03)
+
+Owner (verbatim, mid-turn): **"Test a few random Luna arms with the extra
+operating instructions that sol got. See what changes"**
+
+Consequences: three low profiles drawn with a recorded seed
+(random.seed(483)) — see analysis-notes.md — rerun at luna low on the old
+era with the identical protocol KB file sol received; compared to their
+D443 no-KB twins on mechanism counts now and by blinded 2-arm packets
+later (sealed with the D447/D449/D465 program). This also measures the
+size of the D482 confound directly. Runs alongside the sol batch, two
+operator sessions at a time, weather rule watched on both.
+
 ## D482 — OWNER: give sol the protocol subject and rerun D465 at low (2026-09-03)
 
 Asked: drop sol (supervisor recommendation), rerun at medium, give sol the
