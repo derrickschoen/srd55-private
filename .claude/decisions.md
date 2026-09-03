@@ -1,5 +1,20 @@
 # Binding scope decisions
 
+ROLLOVER THRESHOLD MEASURED (supervisor, 2026-09-03 03:12; D457/R2):
+from 1,083 codex operator rollouts (2026-09-02/03: D443 luna low and
+medium arms, D449 k7 arm, the 3-round smoke, D447), 13,392 per-call
+samples of event_msg token_count.info.last_token_usage.input_tokens:
+median 29,102; p90 46,093; p99 86,762; max 238,731; luna
+model_context_window 258,400. Threshold literal chosen: 160,000 (62% of
+the window; ~98k headroom exceeds the largest single-round growth seen).
+Codex's D1 measurement script printed count 0 against the real
+directory because rollouts store usage in token_count events, not in
+turn.completed items (those are on the --json stdout stream only); the
+fix is part of D2. D1 harvested: 26 files +548/-41, new drizzle
+migration 0062 (session schema 8 -> 9) and the measurement script; codex
+reports the single expected red test `rollover threshold is measured`;
+supervisor gates running.
+
 C2 VERIFIED AND COMMITTED; D1 DISPATCHED (supervisor, 2026-09-03 02:32):
 C2 (9 files +294/-10, new src/vtt/mcp/knowledge-base.ts). The per-row
 budget is a spool file per room/round referenced by the initial,
