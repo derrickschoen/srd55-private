@@ -1,5 +1,11 @@
 # Binding scope decisions
 
+SOL S-MOVE RERUN VERIFIED (supervisor, 2026-09-03 12:22): d465-s-move-
+sol-low 30/30 authorized, 25 model-planned, refusals 9, 0 CLI-exit rows,
+0 timeouts, wall median 27.5 s; idle Disengage 3 (luna twin 8), Dash 88
+(55), attack slots 37 (35). D465 valid arms: s-full, s-rows, s-opp,
+s-move; s-threats running since 12:17.
+
 G1 VERIFIED AND COMMITTED; G2 DISPATCHED (supervisor, 2026-09-03 12:15):
 G1 (9 files +589/-104): plain advertised schemas with the conditional
 rules moved to runtime, launcher-bound minimal submissions (the model
