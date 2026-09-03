@@ -920,6 +920,28 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D490 — OWNER: overrides need a typed kind plus the D489 reason; judge-visibility only in the preregistered arm; run the three-arm experiment (2026-09-03)
+
+Asked (on the retrospective evidence): reason required + typed kind +
+judge-visible with the experiment (supervisor recommendation), keep D485
+strict as baseline with free-text challengers, or adopt visibility
+outright without the experiment.
+
+Owner: **"Reason required, typed kind, judge-visible; run the
+experiment."**
+
+Consequences: D485's engine-vocabulary requirement is relaxed: an
+override carries a typed kind (objective | morale | roleplay |
+resource_conservation | unknown_engine_gap | engine_play(token) |
+missing_metric(id)) plus the mandatory D489 reason; empty or boilerplate
+reasons are still rejected (REASON_REQUIRED / OVERRIDE_UNJUSTIFIED when
+the reason merely restates "offered/legal/selected"). Reasons reach the
+judges only in the preregistered judge-visible arm of the three-arm
+experiment (strict / free-text judge-visible / free-text unscored, per
+the retrospective's design) on the new era; the default packet keeps
+reasons in the answer key. G2 implements D485-strict as built; G2.1
+relaxes it to this rule and adds the reason requirement.
+
 ## D489 — OWNER: every AI decision carries a debuggable reason (2026-09-03)
 
 Owner (verbatim): **"We are in the early data collection and
