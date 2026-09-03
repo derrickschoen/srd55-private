@@ -67,7 +67,7 @@ describe('canonical engine query port', () => {
     ]);
     expect(engineActorOptions(state, ACTOR_ID).humanOnly).toContainEqual(expect.objectContaining({
       label: 'Disengage',
-      noModeledEffect: { kind: 'stationary_disengage', action: 'disengage' },
+      noModeledEffect: { kind: 'disengage_without_movement', action: 'disengage' },
     }));
   });
 
@@ -136,7 +136,7 @@ describe('canonical engine query port', () => {
       .toEqual(['Dodge', 'End Turn']);
     expect(engineActorOptions(state, ACTOR_ID).humanOnly).toContainEqual(expect.objectContaining({
       label: 'Disengage',
-      noModeledEffect: { kind: 'stationary_disengage', action: 'disengage' },
+      noModeledEffect: { kind: 'disengage_without_movement', action: 'disengage' },
     }));
   });
 

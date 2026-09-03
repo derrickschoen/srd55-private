@@ -23,7 +23,7 @@ export type EngineDeclaredActionKind = MonsterAction['kind'] | MonsterBonusActio
 
 export type NoModeledEffect =
   | {
-      readonly kind: 'stationary_disengage';
+      readonly kind: 'disengage_without_movement';
       readonly action: 'disengage';
     }
   | {
@@ -111,8 +111,7 @@ export type EngineOptionModelingCandidate =
     };
 
 function intendsMovement(candidate: Extract<EngineOptionModelingCandidate, { readonly kind: 'executable' }>): boolean {
-  return candidate.movement.engagement.stance === 'withdraw' &&
-    candidate.movement.preference.willingness !== 'none' &&
+  return candidate.movement.preference.willingness !== 'none' &&
     candidate.movement.preference.maximumFeet !== 0;
 }
 
@@ -193,7 +192,7 @@ export function classifyOptionModeling(
         }
         case 'disengage':
           if (!intendsMovement(candidate)) {
-            return { kind: 'no_modeled_effect', reason: { kind: 'stationary_disengage', action: 'disengage' } };
+            return { kind: 'no_modeled_effect', reason: { kind: 'disengage_without_movement', action: 'disengage' } };
           }
           return hasAdjacentHostileWithModeledOpportunityAttack(state, candidate.actorId)
             ? { kind: 'primary_effect_modeled' }

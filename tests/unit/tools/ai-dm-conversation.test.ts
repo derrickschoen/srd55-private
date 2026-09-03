@@ -42,6 +42,7 @@ import {
 import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { actorOpportunityReport } from '../../../src/vtt/intel/opportunity-cost';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 import {
@@ -949,6 +950,26 @@ describe('AI-DM engine MCP conversation runner', () => {
     const resolutions = () => actorIds.map((actorId) =>
       actorOpportunityReport(state, actorId, canonicalEngineQueryPort, state.revision).frontierResolution);
     const beforeRender = resolutions();
+    const firstActorId = actorIds[0];
+    if (firstActorId === undefined) throw new Error('Brutal fixture has no first monster actor.');
+    const firstActorOptions = engineActorOptions(state, firstActorId);
+    expect(firstActorOptions.humanOnly).toContainEqual(expect.objectContaining({
+      label: 'spellcasting/detect-evil-and-good',
+      declaredOption: {
+        kind: 'spell',
+        sourceActionId: 'spellcasting',
+        spellId: 'detect-evil-and-good',
+        slot: 'main',
+      },
+      noModeledEffect: {
+        kind: 'unsupported_spell_payload',
+        sourceActionId: 'spellcasting',
+        spellId: 'detect-evil-and-good',
+        limitation: 'utility_operation_unmodeled',
+      },
+    }));
+    expect(firstActorOptions.offerable.some((option) => option.label === 'spellcasting/detect-evil-and-good'))
+      .toBe(false);
     const runtime = createEngineMcpRuntime(state, { toolProfile: 'dm', requestedActorIds: actorIds });
     const capsule = runtime.feed.current();
     runtime.toolSurface.execute('engine.get_turn_context', {

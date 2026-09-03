@@ -50,15 +50,36 @@ describe('engine option modeling partition', () => {
     expect(partition.offerable.map((option) => option.label)).not.toContain('Disengage');
     expect(partition.humanOnly).toContainEqual(expect.objectContaining({
       label: 'Disengage',
-      noModeledEffect: { kind: 'stationary_disengage', action: 'disengage' },
+      noModeledEffect: { kind: 'disengage_without_movement', action: 'disengage' },
     }));
   });
 
-  it('retains a moving Disengage when an adjacent hostile can make a modeled opportunity attack', () => {
+  it('offers close-to-melee Disengage at exact reach, catching stance gates and strict reach comparison', () => {
     const { state, actorId } = adjacentState();
     const disposition = classifyOptionModeling(state, {
       kind: 'executable',
       actorId,
+      movement: {
+        preference: { willingness: 'freely', maximumFeet: 30, opportunityRisk: 'avoid' },
+        engagement: { stance: 'close_to_melee', anchor: { kind: 'nearest_visible_enemy' } },
+      },
+      actionSlots: [{ slot: 'main', use: { kind: 'disengage' } }],
+    });
+
+    expect(disposition).toEqual({ kind: 'primary_effect_modeled' });
+  });
+
+  it('classifies moving withdraw Disengage without an adjacent hostile, catching a removed threat check', () => {
+    const fixture = adjacentState();
+    const state: EncounterState = {
+      ...fixture.state,
+      tokens: fixture.state.tokens.map((token) => token.combatantId === fixture.actorId
+        ? token
+        : { ...token, position: { column: fixture.state.bounds.columns - 1, row: fixture.state.bounds.rows - 1 } }),
+    };
+    const disposition = classifyOptionModeling(state, {
+      kind: 'executable',
+      actorId: fixture.actorId,
       movement: {
         preference: { willingness: 'freely', maximumFeet: 30, opportunityRisk: 'avoid' },
         engagement: { stance: 'withdraw', anchor: { kind: 'nearest_visible_enemy' } },
@@ -66,7 +87,28 @@ describe('engine option modeling partition', () => {
       actionSlots: [{ slot: 'main', use: { kind: 'disengage' } }],
     });
 
-    expect(disposition).toEqual({ kind: 'primary_effect_modeled' });
+    expect(disposition).toEqual({
+      kind: 'no_modeled_effect',
+      reason: { kind: 'disengage_without_adjacent_hostile', action: 'disengage' },
+    });
+  });
+
+  it('classifies willingness-none Disengage without movement, catching ignored willingness', () => {
+    const { state, actorId } = adjacentState();
+    const disposition = classifyOptionModeling(state, {
+      kind: 'executable',
+      actorId,
+      movement: {
+        preference: { willingness: 'none', maximumFeet: 30, opportunityRisk: 'avoid' },
+        engagement: { stance: 'maintain_range', anchor: { kind: 'nearest_visible_enemy' } },
+      },
+      actionSlots: [{ slot: 'main', use: { kind: 'disengage' } }],
+    });
+
+    expect(disposition).toEqual({
+      kind: 'no_modeled_effect',
+      reason: { kind: 'disengage_without_movement', action: 'disengage' },
+    });
   });
 
   it('keeps unsupported utility spells as typed human-only candidates', () => {
