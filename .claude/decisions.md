@@ -1,5 +1,21 @@
 # Binding scope decisions
 
+B2 VERIFIED AND COMMITTED; B3 DISPATCHED (supervisor, 2026-09-02 23:16):
+B2 (16 files +563/-10, new src/combat/monster-traits.ts and
+monster-feature-support.test.ts). My gates: tsc 0, sg 0, vitest 538 files
+/ 9454 tests. My mutation (Pack Tactics `<=` -> `<` in the shared
+projection in src/combat/tactical-evaluator.ts): pack_tactics_five_not_ten
+and pack_tactics_evaluator_reducer_agreement fail, 36/36 files pass after
+restore proven by grep. Two of my first mutation attempts targeted the
+wrong file (the predicate is in tactical-evaluator.ts, not
+monster-traits.ts or combat-rules.ts) and applied nothing; those runs were
+unmutated and are not counted. The flaky A2 test now runs 3.37 s in
+isolation (was 4.28 s): still marginal against the 5 s default under
+load; to be watched, never raised. Lane commit follows. B3 (typed
+replacements, 6203 fixture edits, 6204 override table on the
+--generate-missing-rooms path, 30-room preflight) dispatched. D447
+control running since 23:07 on generated rooms.
+
 SOL PROBES; D447 FIRST LAUNCH FAILED ON MISSING FIXTURES, RELAUNCHED
 (supervisor, 2026-09-02 23:10): probes (2 rooms x 1 rep, s-full profile,
 240 s): sol LOW 0/2 model-planned (both engine fallback after schema
