@@ -1,5 +1,20 @@
 # Binding scope decisions
 
+D2.1+D2.2 COMMITTED; F DISPATCHED; CONTROL RERUN DEFERRED (supervisor,
+2026-09-03 08:40): lane 4888a90b. D2.2 made the rollout lookup one
+directory listing per session with a cached path and a bounded tail
+read; the three-reps arena test dropped 4.52 s -> 98 ms and
+hidden_options_logged_once 3.61 s -> 53 ms. My cache-disable mutation
+fails the rescan test, 27/27 after restore proven by cmp. Full suite:
+run 1 green 544/9519; run 2 one 5 s-budget failure in a 3.6 s test under
+load 4 (two arena arms running) — discarded per the quiet-machine rule
+and handed to F as a sweep of every test above 2.5 s. F (submission
+envelope in the tool description, "rejected-for-arguments does not count
+as your submission", envelope in the schema resource, tools/list
+inputSchema test, the `args: unknown` investigation) dispatched. The
+post-shift control rerun waits until D483 finishes so no more than two
+arena arms run at once (D465 batch + D483 now).
+
 SOL PROTOCOL INVESTIGATION (codex sol high, read-only, on raw rollouts;
 supervisor, 2026-09-03 08:25): findings with evidence in
 dnd-slim-runs/sol-investigation-report.log. (1) Luna ALSO gets its first
