@@ -381,6 +381,7 @@ export interface ArenaRunOptions extends Omit<
 > {
   readonly adapterByArm?: Readonly<Record<string, AgentSessionAdapter>>;
   readonly heartbeat?: (line: string) => void;
+  readonly fixtureStates?: readonly import('../src/combat/encounter').EncounterState[];
 }
 
 function stdoutHeartbeat(line: string): void {
@@ -577,14 +578,18 @@ export async function runArena(
   config: ArenaConfig,
   options: ArenaRunOptions = {},
 ): Promise<readonly ArenaRow[]> {
-  const states = await frozenRoomStates(config);
   const seeds = Array.from({ length: config.rooms }, (_unused, index) => config.seed + index);
   const {
     adapterByArm,
     heartbeat = stdoutHeartbeat,
     rendererEvidenceCache = new Map<string, TurnContextRenderEvidence>(),
+    fixtureStates,
     ...conversationOptions
   } = options;
+  const states = fixtureStates ?? await frozenRoomStates(config);
+  if (states.length !== config.rooms) {
+    throw new RangeError(`Arena requires exactly ${String(config.rooms)} fixture states; received ${String(states.length)}.`);
+  }
   let rows: readonly ArenaRow[];
   if (!config.interleave) {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-arena-independent-'));

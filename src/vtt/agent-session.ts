@@ -2,9 +2,11 @@ import type { EncounterSessionId, AgentSessionId } from '../combat/values';
 import type { AgentSessionDigest } from './agent-session-digest';
 
 declare const contextTokenCountBrand: unique symbol;
+declare const turnInputTotalBrand: unique symbol;
 declare const measuredContextRolloverThresholdBrand: unique symbol;
 
 export type ContextTokenCount = number & { readonly [contextTokenCountBrand]: true };
+export type TurnInputTotal = number & { readonly [turnInputTotalBrand]: true };
 export type MeasuredContextRolloverThreshold = number & {
   readonly [measuredContextRolloverThresholdBrand]: true;
 };
@@ -17,7 +19,9 @@ export type AgentCallPhase =
   | 'speculation_recalculation';
 
 export interface AgentCallUsage {
-  readonly input: ContextTokenCount;
+  readonly turnInputTotal: TurnInputTotal;
+  readonly contextInputTokens: ContextTokenCount;
+  readonly modelContextWindow: ContextTokenCount | null;
   readonly cachedInput: number;
   readonly output: number;
   readonly reasoning: number;
@@ -112,7 +116,9 @@ export interface AgentInvocation {
 }
 
 export interface AgentUsage {
-  readonly inputTokens: ContextTokenCount;
+  readonly turnInputTotal: TurnInputTotal;
+  readonly contextInputTokens: ContextTokenCount;
+  readonly modelContextWindow: ContextTokenCount | null;
   readonly cachedInputTokens: number;
   readonly outputTokens: number;
   readonly reasoningTokens: number;
@@ -169,6 +175,13 @@ export function contextTokenCount(value: number): ContextTokenCount {
   return value as ContextTokenCount;
 }
 
+export function turnInputTotal(value: number): TurnInputTotal {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError('Turn input total must be a non-negative safe integer.');
+  }
+  return value as TurnInputTotal;
+}
+
 export function measuredContextRolloverThreshold(value: number): MeasuredContextRolloverThreshold {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new RangeError('Context rollover threshold must be a positive safe integer.');
@@ -185,7 +198,9 @@ export function agentCallUsage(
     throw new RangeError('Agent call usage ordinal must be a positive safe integer.');
   }
   return {
-    input: usage.inputTokens,
+    turnInputTotal: usage.turnInputTotal,
+    contextInputTokens: usage.contextInputTokens,
+    modelContextWindow: usage.modelContextWindow,
     cachedInput: usage.cachedInputTokens,
     output: usage.outputTokens,
     reasoning: usage.reasoningTokens,
@@ -220,7 +235,7 @@ export function isAgentSessionBinding(value: unknown): value is AgentSessionBind
     (binding.currentContextTokens === null || isContextTokenCount(binding.currentContextTokens)) &&
     (binding.callUsage.length === 0
       ? binding.currentContextTokens === null
-      : binding.currentContextTokens === binding.callUsage.at(-1)?.input) &&
+      : binding.currentContextTokens === binding.callUsage.at(-1)?.contextInputTokens) &&
     (binding.status === 'active' || binding.status === 'superseded_after_resume_failure' ||
       binding.status === 'superseded_after_context_rollover');
 }
@@ -240,12 +255,18 @@ function isSha256(value: unknown): value is string {
 export function isAgentCallUsage(value: unknown): value is AgentCallUsage {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const usage = value as Readonly<Record<string, unknown>>;
-  return Object.keys(usage).length === 6 &&
-    isContextTokenCount(usage.input) &&
+  return Object.keys(usage).length === 8 &&
+    isTurnInputTotal(usage.turnInputTotal) &&
+    isContextTokenCount(usage.contextInputTokens) &&
+    (usage.modelContextWindow === null || isContextTokenCount(usage.modelContextWindow)) &&
     typeof usage.cachedInput === 'number' && Number.isSafeInteger(usage.cachedInput) && usage.cachedInput >= 0 &&
     typeof usage.output === 'number' && Number.isSafeInteger(usage.output) && usage.output >= 0 &&
     typeof usage.reasoning === 'number' && Number.isSafeInteger(usage.reasoning) && usage.reasoning >= 0 &&
     (usage.callPhase === 'initial' || usage.callPhase === 'adjustment' || usage.callPhase === 'correction' ||
       usage.callPhase === 'speculation' || usage.callPhase === 'speculation_recalculation') &&
     typeof usage.ordinal === 'number' && Number.isSafeInteger(usage.ordinal) && usage.ordinal >= 1;
+}
+
+function isTurnInputTotal(value: unknown): value is TurnInputTotal {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }

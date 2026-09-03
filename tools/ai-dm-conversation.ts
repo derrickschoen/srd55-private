@@ -15,7 +15,7 @@ import {
 } from '../src/combat/values';
 import { sha256 } from '../src/crypto/sha256';
 import {
-  agentCallUsage, contextTokenCount,
+  agentCallUsage, turnInputTotal,
   type AgentCallPhase, type AgentCallUsage,
   type AgentAdapterKind, type AgentCliKind, type AgentFailureClassification, type AgentInvocation, type AgentSessionAdapter,
   type AgentSessionBinding, type AgentToolSession, type AgentTurnResult, type AgentUsage,
@@ -778,7 +778,7 @@ function rejectionEvidence(value: unknown): readonly ConversationChainAttemptEvi
 
 function tokenCounts(usage: AgentUsage | null): ConversationTokenCounts {
   return usage === null ? { input: 0, cachedInput: 0, output: 0, reasoning: 0 } : {
-    input: usage.inputTokens,
+    input: usage.turnInputTotal,
     cachedInput: usage.cachedInputTokens,
     output: usage.outputTokens,
     reasoning: usage.reasoningTokens,
@@ -793,7 +793,9 @@ function addAgentUsage(total: AgentUsage | null, usage: AgentUsage | null): Agen
   if (usage === null) return total;
   if (total === null) return usage;
   return {
-    inputTokens: contextTokenCount(total.inputTokens + usage.inputTokens),
+    turnInputTotal: turnInputTotal(total.turnInputTotal + usage.turnInputTotal),
+    contextInputTokens: usage.contextInputTokens,
+    modelContextWindow: usage.modelContextWindow,
     cachedInputTokens: total.cachedInputTokens + usage.cachedInputTokens,
     outputTokens: total.outputTokens + usage.outputTokens,
     reasoningTokens: total.reasoningTokens + usage.reasoningTokens,

@@ -96,7 +96,7 @@ describe('phase-2 mutation ledger manifest', () => {
     for (const mutation of [
       'unsorted map traversal',
       'omitted resource',
-      'resume after crossing threshold',
+      'compare turnInputTotal',
       'treat rollover as resume failure',
       'implicit escalation default',
       'total_token_usage',

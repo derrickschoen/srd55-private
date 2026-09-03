@@ -29,13 +29,6 @@ export interface ContextUsageSample {
 export function completedContextUsage(value: unknown): readonly ContextUsageSample[] {
   const candidate = record(value);
   if (candidate === null) return [];
-  if (candidate['type'] === 'turn.completed') {
-    const usage = record(candidate['usage']);
-    const inputTokens = usage?.['input_tokens'];
-    return typeof inputTokens === 'number' && Number.isSafeInteger(inputTokens) && inputTokens >= 0
-      ? [{ inputTokens, modelContextWindow: null }]
-      : [];
-  }
   if (candidate['type'] === 'event_msg') {
     const payload = record(candidate['payload']);
     const info = payload?.['type'] === 'token_count' ? record(payload['info']) : null;
@@ -58,10 +51,12 @@ function percentile(sorted: readonly number[], fraction: number): number {
   return sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)]!;
 }
 
-export async function main(): Promise<void> {
-  const sessionsDirectory = process.argv[2];
-  if (sessionsDirectory === undefined || process.argv.length !== 3) {
-    throw new TypeError('Usage: npx tsx tools/measure-context-rollover.ts <sessions-directory>');
+export async function main(
+  sessionsDirectory: string | undefined,
+  write: (value: string) => void = (value) => { process.stdout.write(value); },
+): Promise<void> {
+  if (sessionsDirectory === undefined) {
+    throw new TypeError('Usage: npx vite-node tools/measure-context-rollover.ts <sessions-directory>');
   }
   const resolvedDirectory = resolve(sessionsDirectory);
   if (!(await stat(resolvedDirectory)).isDirectory()) {
@@ -86,7 +81,7 @@ export async function main(): Promise<void> {
     }
   }
   if (counts.length === 0) {
-    process.stdout.write('count: 0\nmedian: n/a\np90: n/a\np99: n/a\nmax: n/a\nmodel_context_window: n/a\n');
+    write('count: 0\nmedian: n/a\np90: n/a\np99: n/a\nmax: n/a\nmodel_context_window: n/a\n');
     return;
   }
   counts.sort((left, right) => left - right);
@@ -94,7 +89,7 @@ export async function main(): Promise<void> {
   const median = counts.length % 2 === 0
     ? (counts[middle - 1]! + counts[middle]!) / 2
     : counts[middle]!;
-  process.stdout.write([
+  write([
     `count: ${String(counts.length)}`,
     `median: ${String(median)}`,
     `p90: ${String(percentile(counts, 0.9))}`,
@@ -105,7 +100,17 @@ export async function main(): Promise<void> {
   ].join('\n'));
 }
 
+const scriptIndex = process.argv.findIndex((argument) =>
+  argument.endsWith('/measure-context-rollover.ts') || argument.endsWith('\\measure-context-rollover.ts'));
 const invokedPath = process.argv[1];
-if (invokedPath !== undefined && (
-  invokedPath.endsWith('/measure-context-rollover.ts') || invokedPath.endsWith('\\measure-context-rollover.ts')
-)) await main();
+const invokedByViteNode = invokedPath !== undefined && (
+  invokedPath.endsWith('/vite-node') || invokedPath.endsWith('\\vite-node') ||
+  invokedPath.endsWith('/vite-node.mjs') || invokedPath.endsWith('\\vite-node.mjs')
+);
+if (process.env['VITEST'] !== 'true' && (scriptIndex >= 0 || invokedByViteNode)) {
+  const argumentsValue = scriptIndex >= 0 ? process.argv.slice(scriptIndex + 1) : process.argv.slice(2);
+  if (argumentsValue.length !== 1) {
+    throw new TypeError('Usage: npx vite-node tools/measure-context-rollover.ts <sessions-directory>');
+  }
+  await main(argumentsValue[0]);
+}

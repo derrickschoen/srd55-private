@@ -3,9 +3,12 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { encounterSessionId } from '../../../src/combat/values';
+import { createEncounter } from '../../../src/combat/encounter';
 import {
   agentSessionIdFromCli,
+  contextTokenCount,
   measuredContextRolloverThreshold,
+  turnInputTotal,
   type AgentInvocation,
   type AgentSessionAdapter,
   type AgentSessionBinding,
@@ -41,6 +44,7 @@ import {
 } from '../../helpers/test-filesystem';
 import type { RepoRelativeKbPath } from '../../../src/vtt/knowledge-base-contract';
 import type { KbReadRecord } from '../../../src/vtt/mcp/knowledge-base';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 
 const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
 
@@ -83,16 +87,83 @@ class FakeCodexUsageAdapter implements AgentSessionAdapter {
       `${JSON.stringify({ type: 'turn.completed', usage })}\n`,
       sessionId,
     );
+    const turnUsage = decoded.turnUsage;
+    if (turnUsage === null) throw new Error('SIMULATED Codex turn usage did not decode.');
     return {
       resumeSessionId: agentSessionIdFromCli(decoded.sessionId),
       sessionId: decoded.sessionId,
       finalText: decoded.finalText,
-      usage: decoded.usage,
+      usage: {
+        ...turnUsage,
+        contextInputTokens: contextTokenCount(turnUsage.turnInputTotal),
+        modelContextWindow: contextTokenCount(258_400),
+      },
       exit: 'completed',
     };
   }
 
   classifyFailure(): 'unknown' { return 'unknown'; }
+}
+
+interface ArenaRolloverUsageFixture {
+  readonly belowThreshold: readonly ArenaRolloverUsage[];
+  readonly atThreshold: readonly ArenaRolloverUsage[];
+}
+
+interface ArenaRolloverUsage {
+  readonly turnInputTotal: number;
+  readonly contextInputTokens: number;
+}
+
+class ArenaRolloverFixtureAdapter implements AgentSessionAdapter {
+  readonly kind = 'codex' as const;
+  modelCalls = 0;
+  #starts = 0;
+  readonly #usages: ArenaRolloverUsage[];
+
+  constructor(usages: readonly ArenaRolloverUsage[]) {
+    this.#usages = [...usages];
+  }
+
+  async probe() { return { present: true, version: 'SIMULATED' }; }
+
+  async start(): Promise<AgentTurnResult> {
+    this.#starts += 1;
+    return this.#completed(agentSessionIdFromCli(`codex-rollover-fixture-${String(this.#starts)}`));
+  }
+
+  async resume(binding: AgentSessionBinding): Promise<AgentTurnResult> {
+    return this.#completed(binding.sessionId);
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+
+  #completed(sessionId: AgentTurnResult['resumeSessionId']): AgentTurnResult {
+    const usage = this.#usages.shift();
+    if (usage === undefined) throw new Error('Arena rollover usage fixture was exhausted.');
+    this.modelCalls += 1;
+    return {
+      resumeSessionId: sessionId,
+      sessionId,
+      finalText: '',
+      usage: {
+        turnInputTotal: turnInputTotal(usage.turnInputTotal),
+        contextInputTokens: contextTokenCount(usage.contextInputTokens),
+        modelContextWindow: contextTokenCount(258_400),
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+      },
+      exit: 'completed',
+    };
+  }
+}
+
+function arenaRolloverUsageFixture(): ArenaRolloverUsageFixture {
+  return JSON.parse(readFileSync(
+    'tests/fixtures/context-rollover/arena-turn-vs-context.SIMULATED.json',
+    'utf8',
+  )) as ArenaRolloverUsageFixture;
 }
 
 class OrderingNullAdapter implements AgentSessionAdapter {
@@ -693,6 +764,16 @@ describe('AI-DM arena', () => {
   describe('brutal room-4 full-intel regression', () => {
     it('reloads the fixture and full context for each of three SIMULATED reps', async () => {
       const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-room-4-full-intel-'));
+      const monster = monsterProfile('full-intel-rep-monster', { initiativeBonus: -20 });
+      const character = playerProfile('full-intel-rep-character', { initiativeBonus: 20 });
+      const fixtureState = {
+        ...createEncounter({
+          bounds: { columns: 3, rows: 1 },
+          combatants: [monster, character],
+          tokens: [placedToken(monster, 0), placedToken(character, 2)],
+          config: { initiativeMode: 'per_combatant' },
+        }),
+      };
       const rows = await runArena(parseArenaArgs([
         '--rooms', '1',
         '--reps', '3',
@@ -703,7 +784,7 @@ describe('AI-DM arena', () => {
         '--local-base-url', 'http://SIMULATED.invalid',
         '--local-model', 'SIMULATED-model',
         '--out', join(directory, 'arena.jsonl'),
-      ]), { adapter: new InProcessArenaAdapter() });
+      ]), { adapter: new InProcessArenaAdapter(), fixtureStates: [fixtureState] });
 
       expect(rows).toHaveLength(3);
       expect(rows.map((row) => ({
@@ -715,15 +796,15 @@ describe('AI-DM arena', () => {
         failedAttempts: row.chainEvidence.failedAttempts,
       }))).toEqual([
         {
-          round: 1, outcome: 'authorized', granularity: 'full', contextRevision: 6,
+          round: 1, outcome: 'authorized', granularity: 'full', contextRevision: 2,
           startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
         },
         {
-          round: 2, outcome: 'authorized', granularity: 'full', contextRevision: 6,
+          round: 2, outcome: 'authorized', granularity: 'full', contextRevision: 2,
           startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
         },
         {
-          round: 3, outcome: 'authorized', granularity: 'full', contextRevision: 6,
+          round: 3, outcome: 'authorized', granularity: 'full', contextRevision: 2,
           startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
         },
       ]);
@@ -1014,9 +1095,9 @@ describe('AI-DM arena', () => {
         chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
         tokens: { input: 611, cachedInput: 115, output: 77, reasoning: 31 },
         callUsage: [
-          { input: 101, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
-          { input: 203, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'initial', ordinal: 2 },
-          { input: 307, cachedInput: 43, output: 31, reasoning: 13, callPhase: 'initial', ordinal: 3 },
+          { turnInputTotal: 101, contextInputTokens: 101, modelContextWindow: 258400, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
+          { turnInputTotal: 203, contextInputTokens: 203, modelContextWindow: 258400, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'initial', ordinal: 2 },
+          { turnInputTotal: 307, contextInputTokens: 307, modelContextWindow: 258400, cachedInput: 43, output: 31, reasoning: 13, callPhase: 'initial', ordinal: 3 },
         ],
       }),
     ]);
@@ -1026,9 +1107,9 @@ describe('AI-DM arena', () => {
         sessionId: 'codex-arena-usage', escalationSessionId: null,
         tokens: { input: 611, cachedInput: 115, output: 77, reasoning: 31 },
         callUsage: [
-          { input: 101, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
-          { input: 203, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'initial', ordinal: 2 },
-          { input: 307, cachedInput: 43, output: 31, reasoning: 13, callPhase: 'initial', ordinal: 3 },
+          { turnInputTotal: 101, contextInputTokens: 101, modelContextWindow: 258400, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
+          { turnInputTotal: 203, contextInputTokens: 203, modelContextWindow: 258400, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'initial', ordinal: 2 },
+          { turnInputTotal: 307, contextInputTokens: 307, modelContextWindow: 258400, cachedInput: 43, output: 31, reasoning: 13, callPhase: 'initial', ordinal: 3 },
         ],
       }),
     );
@@ -1109,6 +1190,47 @@ describe('AI-DM arena', () => {
       outcome: disabledRow?.outcome,
       callsPerRound: disabledRow?.callsPerRound,
       contextRolloverOccurred: false,
+    }));
+  });
+
+  it('keeps every one-round row at generation zero when only turn totals cross the threshold (mutation: compare against turnInputTotal instead of contextInputTokens)', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-turn-total-rollover-'));
+    const adapter = new ArenaRolloverFixtureAdapter(arenaRolloverUsageFixture().belowThreshold);
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '2', '--seed', '3943001',
+      '--out', join(directory, 'below-threshold.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+
+    const rows = await runArena(config, { adapter, heartbeat: () => undefined });
+
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.agentSessionGeneration === 0)).toBe(true);
+    expect(rows.every((row) => row.contextRolloverOccurred === false)).toBe(true);
+    expect(rows.flatMap((row) => row.callUsage).every((usage) =>
+      usage.turnInputTotal >= 160_000 && usage.contextInputTokens < 160_000)).toBe(true);
+  });
+
+  it('rolls a one-round row when per-call context reaches the threshold (mutation: ignore contextInputTokens threshold)', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-context-rollover-'));
+    const adapter = new ArenaRolloverFixtureAdapter(arenaRolloverUsageFixture().atThreshold);
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'at-threshold.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+
+    const [row] = await runArena(config, { adapter, heartbeat: () => undefined });
+
+    expect(row).toEqual(expect.objectContaining({
+      agentSessionGeneration: 1,
+      contextRolloverTriggerCount: 1,
+      contextRolloverOccurred: true,
+    }));
+    expect(row?.callUsage[0]).toEqual(expect.objectContaining({
+      turnInputTotal: 190_320,
+      contextInputTokens: 160_000,
+      modelContextWindow: 258_400,
     }));
   });
 

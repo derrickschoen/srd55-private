@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
-import { agentSessionIdFromCli, contextTokenCount } from '../agent-session';
+import { agentSessionIdFromCli, contextTokenCount, turnInputTotal } from '../agent-session';
 import type { AgentInvocation, AgentSessionBinding, AgentTurnResult, AgentUsage } from '../agent-session';
 import {
   AgentAdapterError,
@@ -227,7 +227,9 @@ function decodeUsage(value: Readonly<Record<string, unknown>>): AgentUsage | nul
   const outputTokens = integer(value['output']);
   if (inputTokens === null || outputTokens === null || integer(value['totalTokens']) === null) return null;
   return {
-    inputTokens: contextTokenCount(inputTokens),
+    turnInputTotal: turnInputTotal(inputTokens),
+    contextInputTokens: contextTokenCount(inputTokens),
+    modelContextWindow: null,
     cachedInputTokens: integer(value['cacheRead']) ?? 0,
     outputTokens,
     reasoningTokens: 0,

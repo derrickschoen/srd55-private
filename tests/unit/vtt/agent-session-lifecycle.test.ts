@@ -10,6 +10,7 @@ import { sha256 } from '../../../src/crypto/sha256';
 import {
   measuredContextRolloverThreshold,
   contextTokenCount,
+  turnInputTotal,
   type AgentSessionAdapter,
   type AgentSessionBinding,
   type AgentInvocation,
@@ -106,9 +107,13 @@ describe('SIMULATED agent session lifecycle', () => {
     expect(adapter.startInvocations).toEqual([]);
   });
 
-  it('resumes at threshold-1 and rolls at threshold with a distinct successor (mutation: resume after crossing threshold)', async () => {
+  it('compares rollover against per-call context, never the turn total (mutation: compare turnInputTotal)', async () => {
     const threshold = measuredContextRolloverThreshold(1_000);
-    const usages = [999, 1_000, 73];
+    const usages = [
+      { turnTotal: 190_320, contextInput: 999 },
+      { turnTotal: 556_770, contextInput: 1_000 },
+      { turnTotal: 73, contextInput: 73 },
+    ];
     const startIds = ['agent-session:threshold-base', 'agent-session:threshold-successor'];
     const adapter: AgentSessionAdapter & {
       readonly starts: AgentInvocation[];
@@ -121,20 +126,30 @@ describe('SIMULATED agent session lifecycle', () => {
       start: async function(startInvocation) {
         this.starts.push(startInvocation);
         const sessionId = startIds.shift();
-        const input = usages.shift();
-        if (sessionId === undefined || input === undefined) throw new Error('SIMULATED start exhausted.');
+        const usage = usages.shift();
+        if (sessionId === undefined || usage === undefined) throw new Error('SIMULATED start exhausted.');
         return {
           resumeSessionId: agentSessionId(sessionId), sessionId: null, finalText: '', exit: 'completed',
-          usage: { inputTokens: contextTokenCount(input), cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 },
+          usage: {
+            turnInputTotal: turnInputTotal(usage.turnTotal),
+            contextInputTokens: contextTokenCount(usage.contextInput),
+            modelContextWindow: contextTokenCount(258_400),
+            cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0,
+          },
         };
       },
       resume: async function(binding) {
         this.resumes.push(binding);
-        const input = usages.shift();
-        if (input === undefined) throw new Error('SIMULATED resume exhausted.');
+        const usage = usages.shift();
+        if (usage === undefined) throw new Error('SIMULATED resume exhausted.');
         return {
           resumeSessionId: binding.sessionId, sessionId: null, finalText: '', exit: 'completed',
-          usage: { inputTokens: contextTokenCount(input), cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 },
+          usage: {
+            turnInputTotal: turnInputTotal(usage.turnTotal),
+            contextInputTokens: contextTokenCount(usage.contextInput),
+            modelContextWindow: contextTokenCount(258_400),
+            cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0,
+          },
         };
       },
       classifyFailure: () => 'unknown',
@@ -168,7 +183,10 @@ describe('SIMULATED agent session lifecycle', () => {
   });
 
   it('records each completed lifecycle call before aggregate consumers can sum it', async () => {
-    const inputs = [contextTokenCount(101), contextTokenCount(203)];
+    const inputs = [
+      { turnTotal: 190_320, contextInput: 101 },
+      { turnTotal: 556_770, contextInput: 203 },
+    ];
     const adapter: AgentSessionAdapter = {
       kind: 'codex',
       probe: async () => ({ present: true, version: 'SIMULATED' }),
@@ -176,14 +194,32 @@ describe('SIMULATED agent session lifecycle', () => {
         resumeSessionId: agentSessionId('agent-session:usage'),
         sessionId: null,
         finalText: '',
-        usage: { inputTokens: inputs.shift()!, cachedInputTokens: 31, outputTokens: 17, reasoningTokens: 7 },
+        usage: (() => {
+          const usage = inputs.shift();
+          if (usage === undefined) throw new Error('SIMULATED usage exhausted.');
+          return {
+            turnInputTotal: turnInputTotal(usage.turnTotal),
+            contextInputTokens: contextTokenCount(usage.contextInput),
+            modelContextWindow: contextTokenCount(258_400),
+            cachedInputTokens: 31, outputTokens: 17, reasoningTokens: 7,
+          };
+        })(),
         exit: 'completed',
       }),
       resume: async (binding) => ({
         resumeSessionId: binding.sessionId,
         sessionId: null,
         finalText: '',
-        usage: { inputTokens: inputs.shift()!, cachedInputTokens: 41, outputTokens: 29, reasoningTokens: 11 },
+        usage: (() => {
+          const usage = inputs.shift();
+          if (usage === undefined) throw new Error('SIMULATED usage exhausted.');
+          return {
+            turnInputTotal: turnInputTotal(usage.turnTotal),
+            contextInputTokens: contextTokenCount(usage.contextInput),
+            modelContextWindow: contextTokenCount(258_400),
+            cachedInputTokens: 41, outputTokens: 29, reasoningTokens: 11,
+          };
+        })(),
         exit: 'completed',
       }),
       classifyFailure: () => 'unknown',
@@ -195,8 +231,8 @@ describe('SIMULATED agent session lifecycle', () => {
     await lifecycle.resumeCorrection({ ...invocation(sessionId, 'second'), callPhase: 'correction' }, signal);
 
     expect(journal.agentSession()?.callUsage).toEqual([
-      { input: 101, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
-      { input: 203, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'correction', ordinal: 2 },
+      { turnInputTotal: 190320, contextInputTokens: 101, modelContextWindow: 258400, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
+      { turnInputTotal: 556770, contextInputTokens: 203, modelContextWindow: 258400, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'correction', ordinal: 2 },
     ]);
     expect(journal.agentSession()?.currentContextTokens).toBe(203);
   });

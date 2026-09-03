@@ -1,6 +1,7 @@
 import {
   agentSessionIdFromCli,
   contextTokenCount,
+  turnInputTotal,
   type AgentFailureClassification,
   type AgentInvocation,
   type AgentSessionBinding,
@@ -76,19 +77,26 @@ function usageFromResponse(value: unknown): AgentUsage | null {
   const promptDetails = record(usage['prompt_tokens_details']);
   const completionDetails = record(usage['completion_tokens_details']);
   const decoded = {
-    inputTokens: contextTokenCount(nonNegativeInteger(usage['prompt_tokens'])),
+    turnInputTotal: turnInputTotal(nonNegativeInteger(usage['prompt_tokens'])),
+    contextInputTokens: contextTokenCount(nonNegativeInteger(usage['prompt_tokens'])),
+    modelContextWindow: null,
     cachedInputTokens: nonNegativeInteger(promptDetails?.['cached_tokens']),
     outputTokens: nonNegativeInteger(usage['completion_tokens']),
     reasoningTokens: nonNegativeInteger(completionDetails?.['reasoning_tokens']),
   };
-  return Object.values(decoded).some((count) => count > 0) ? decoded : null;
+  return decoded.turnInputTotal > 0 || decoded.cachedInputTokens > 0 ||
+    decoded.outputTokens > 0 || decoded.reasoningTokens > 0
+    ? decoded
+    : null;
 }
 
 function addUsage(total: AgentUsage | null, addition: AgentUsage | null): AgentUsage | null {
   if (addition === null) return total;
   if (total === null) return addition;
   return {
-    inputTokens: contextTokenCount(total.inputTokens + addition.inputTokens),
+    turnInputTotal: turnInputTotal(total.turnInputTotal + addition.turnInputTotal),
+    contextInputTokens: addition.contextInputTokens,
+    modelContextWindow: addition.modelContextWindow,
     cachedInputTokens: total.cachedInputTokens + addition.cachedInputTokens,
     outputTokens: total.outputTokens + addition.outputTokens,
     reasoningTokens: total.reasoningTokens + addition.reasoningTokens,

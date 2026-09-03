@@ -29,6 +29,7 @@ import {
   agentCallUsage,
   contextTokenCount,
   measuredContextRolloverThreshold,
+  turnInputTotal,
 } from '../../../src/vtt/agent-session';
 import {
   DeferredMirrorSink,
@@ -258,13 +259,17 @@ describe('event-sourced encounter persistence', () => {
       adapterVersion: 1,
     });
     journal.recordAgentCallUsage(agentCallUsage({
-      inputTokens: contextTokenCount(101),
+      turnInputTotal: turnInputTotal(190_320),
+      contextInputTokens: contextTokenCount(101),
+      modelContextWindow: contextTokenCount(258_400),
       cachedInputTokens: 31,
       outputTokens: 17,
       reasoningTokens: 7,
     }, 'initial', 1));
     journal.recordAgentCallUsage(agentCallUsage({
-      inputTokens: contextTokenCount(203),
+      turnInputTotal: turnInputTotal(556_770),
+      contextInputTokens: contextTokenCount(203),
+      modelContextWindow: contextTokenCount(258_400),
       cachedInputTokens: 41,
       outputTokens: 29,
       reasoningTokens: 11,
@@ -280,8 +285,8 @@ describe('event-sourced encounter persistence', () => {
     ).agentSession;
 
     expect(binding?.callUsage).toEqual([
-      { input: 101, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
-      { input: 203, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'correction', ordinal: 2 },
+      { turnInputTotal: 190320, contextInputTokens: 101, modelContextWindow: 258400, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
+      { turnInputTotal: 556770, contextInputTokens: 203, modelContextWindow: 258400, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'correction', ordinal: 2 },
     ]);
     expect(binding?.currentContextTokens).toBe(203);
     expect(binding?.currentContextTokens).not.toBe(304);
@@ -295,7 +300,10 @@ describe('event-sourced encounter persistence', () => {
       measuredRolloverThreshold: measuredContextRolloverThreshold(160_000),
     });
     journal.recordAgentCallUsage(agentCallUsage({
-      inputTokens: contextTokenCount(160_000), cachedInputTokens: 0,
+      turnInputTotal: turnInputTotal(560_000),
+      contextInputTokens: contextTokenCount(160_000),
+      modelContextWindow: contextTokenCount(258_400),
+      cachedInputTokens: 0,
       outputTokens: 1, reasoningTokens: 0,
     }, 'initial', 1));
     const before = store.revisions(encounterSessionId('session:persistence-test')).at(-1)!;

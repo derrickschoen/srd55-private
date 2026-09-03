@@ -1283,7 +1283,7 @@ export function replaySessionRevisions(
           {
             ...parent.agentSession,
             callUsage: [...parent.agentSession.callUsage, transition.usage],
-            currentContextTokens: transition.usage.input,
+            currentContextTokens: transition.usage.contextInputTokens,
           },
           'agent call usage binding',
         );
@@ -1737,7 +1737,7 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
     const binding: AgentSessionBinding = {
       ...latest.agentSession,
       callUsage: [...latest.agentSession.callUsage, structuredClone(usage)],
-      currentContextTokens: usage.input,
+      currentContextTokens: usage.contextInputTokens,
     };
     this.#append({
       parentRevision: latest.revision,

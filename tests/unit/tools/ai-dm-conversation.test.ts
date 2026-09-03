@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   agentSessionIdFromCli,
   contextTokenCount,
+  turnInputTotal,
   measuredContextRolloverThreshold,
   type AgentInvocation,
   type AgentSessionAdapter,
@@ -269,7 +270,9 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       sessionId,
       finalText: 'SERIALIZED-TEST',
       usage: this.usageInputs.length === 0 ? null : {
-        inputTokens: contextTokenCount(this.usageInputs.shift()!),
+        turnInputTotal: turnInputTotal(this.usageInputs[0]!),
+        contextInputTokens: contextTokenCount(this.usageInputs.shift()!),
+        modelContextWindow: null,
         cachedInputTokens: 0,
         outputTokens: 0,
         reasoningTokens: 0,
@@ -1182,7 +1185,11 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--rooms', '1', '--rounds', '1', '--out', outPath,
       '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
       ...LEGACY_BLOCK_ARGS,
-    ]), { roomStates: [state] });
+    ]), {
+      adapter: new SerializedRoundTripAdapter('use_action_dodge'),
+      roomStates: [state],
+      partyPolicyOverride: 'heuristic_v0',
+    });
     const row = result.rows[0];
     if (row === undefined) throw new Error('Hidden-option conversation produced no row.');
     const identities = row.hiddenOptions.map((option) => option.humanOptionId);
