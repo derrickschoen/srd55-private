@@ -1,5 +1,18 @@
 # Binding scope decisions
 
+C2 VERIFIED AND COMMITTED; D1 DISPATCHED (supervisor, 2026-09-03 02:32):
+C2 (9 files +294/-10, new src/vtt/mcp/knowledge-base.ts). The per-row
+budget is a spool file per room/round referenced by the initial,
+correction and adjustment launcher manifests (codex's stated location;
+its cross-phase test exercises it). Root grew to 2831 bytes with the one
+tool/budget sentence (cap 3072). Gates: tsc 0, sg 0, vitest 541 files /
+9485 tests. My mutation: first attempt (allowed 2->3 regex) hit the
+loud guard and applied nothing — correct behaviour of the new rule; the
+real check is `records.length >= KB_READ_LIMIT`; mutated to `>`, tests
+fail, pass after restore proven by grep. Committed. D1 (per-call usage
+capture, unmeasured rollover policy with a deliberately RED threshold
+test, measurement script) dispatched.
+
 C1 VERIFIED AND COMMITTED; C2 DISPATCHED; D447 PANEL VALID (supervisor,
 2026-09-03 01:45): C1 = 10 new fixture files + src/vtt/knowledge-base-
 contract.ts + tests/unit/tools/ai-dm-knowledge-base.test.ts (5 files
