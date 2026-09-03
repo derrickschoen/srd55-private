@@ -28,6 +28,7 @@ import {
   type EngineTurnProposal,
 } from '../../../src/vtt/turn-proposal';
 import { placedToken, playerProfile } from '../combat/fixtures';
+import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 
 function monsterProfile(
   statblock: typeof SCOUT | typeof SPY | typeof PRIEST,
@@ -90,6 +91,31 @@ function mainMultiattack(option: EngineOfferableOption, actionId: string, count:
 }
 
 describe('complete action economy and composite turn proposals', () => {
+  it('keeps hidden ids out of primary and fallback lookup and rejects a forged offerable brand', () => {
+    const scout = monsterProfile(SCOUT, 'hidden-id-scout');
+    const state = encounter([{ profile: scout, column: 0, row: 2 }], 20);
+    const partition = engineActorOptions(state, scout.id);
+    const hidden = partition.humanOnly.find((option) => option.label === 'Disengage');
+    if (hidden === undefined) throw new Error('Composite hidden-id fixture omitted Disengage.');
+    const forged = engineOptionId(hidden.optionId);
+    expect(availableEngineActorOptions(state, scout.id).map((option) => option.optionId))
+      .not.toContain(forged);
+    expect(pureTurnProposalResolver.resolve(state, {
+      actorId: scout.id,
+      expectedRevision: state.revision,
+      primaryOptionId: forged,
+      fallbackOptionId: forged,
+      overrideJustification: null,
+    })).toEqual({
+      valid: false,
+      selectedBranch: 'none',
+      refusals: [
+        expect.objectContaining({ branch: 'primary', code: 'OPTION_NOT_OFFERED' }),
+        expect.objectContaining({ branch: 'fallback', code: 'OPTION_NOT_OFFERED' }),
+      ],
+    });
+  });
+
   it('projects fresh options for every requested generated-room monster turn', async () => {
     const state = await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117005.json');
     const scoutId = 'combatant:generated-5117005-monster-3';

@@ -10,6 +10,11 @@ import {
   installInteractiveDocument,
   interactiveElement,
 } from '../../fixtures/interactive-dom';
+import { renderHumanEngineOptionCatalog } from '../../../src/vtt/encounter-app';
+import { projectHumanEngineOptions } from '../../../src/vtt/encounter-board-projection';
+import { generateRoom } from '../../../src/vtt/room-generator';
+import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
+import { statblockId } from '../../../src/combat/values';
 
 describe('stable VTT control rendering', () => {
   let restoreDocument: () => void;
@@ -19,6 +24,32 @@ describe('stable VTT control rendering', () => {
   });
 
   afterEach(() => restoreDocument());
+
+  it('human_only_sorted_last_dom: renders offerable entries before every labeled no-effect entry', () => {
+    const generated = generateRoom(3_943_001).encounter.state;
+    const monster = generated.combatants.find((combatant) => combatant.profile.kind === 'monster');
+    if (monster === undefined) throw new Error('Generated DOM fixture has no monster.');
+    const state = freshMonsterPlanningState({
+      ...generated,
+      combatants: generated.combatants.map((combatant) => combatant.profile.id === monster.profile.id
+        ? { ...combatant, profile: { ...combatant.profile, statblockId: statblockId('statblock:doppelganger') } }
+        : combatant),
+    });
+    const catalog = renderHumanEngineOptionCatalog(
+      projectHumanEngineOptions(state, [monster.profile.id]),
+    );
+    const entries = interactiveElement(catalog).querySelectorAll('li');
+    const availability = entries.map((entry) => entry.dataset['optionAvailability']);
+    const firstHumanOnly = availability.indexOf('human_only');
+
+    expect(firstHumanOnly).toBeGreaterThan(0);
+    expect(availability.slice(0, firstHumanOnly).every((value) => value === 'offerable')).toBe(true);
+    expect(availability.slice(firstHumanOnly).every((value) => value === 'human_only')).toBe(true);
+    expect(entries.map((entry) => entry.textContent)).toEqual(expect.arrayContaining([
+      expect.stringContaining('not modeled: detect thoughts has no in-combat effect'),
+      expect.stringContaining('no effect here: no movement to disengage with'),
+    ]));
+  });
 
   it('keeps a pending tray option connected and clickable across live publishes', () => {
     const live = document.createElement('main');

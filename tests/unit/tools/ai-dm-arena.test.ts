@@ -304,6 +304,25 @@ describe('AI-DM arena', () => {
     expect(labels).toContain('Restless Touch + Restless Touch -> combatant:d432-wizard');
   });
 
+  it('propagates hidden options exactly once with the engine-state knowledge marker', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-hidden-options-'));
+    const [row] = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--dry-run',
+      '--out', join(directory, 'arena.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
+    ]));
+    if (row === undefined) throw new Error('Hidden-option arena produced no row.');
+
+    expect(row.knowledgeModel).toBe('engine_state');
+    expect(row.hiddenOptions.length).toBeGreaterThan(0);
+    expect(new Set(row.hiddenOptions.map((option) => option.humanOptionId)).size)
+      .toBe(row.hiddenOptions.length);
+    expect(row.hiddenOptions).toContainEqual(expect.objectContaining({
+      declaredOption: { kind: 'standard_action', action: 'disengage' },
+      reason: { kind: 'disengage_without_movement', action: 'disengage' },
+    }));
+  });
+
   it('threads inline renderer-profile JSON through dry-run rows while keeping arena metadata', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-renderer-profile-'));
     const profiles = [

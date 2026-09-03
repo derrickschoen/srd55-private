@@ -48,6 +48,10 @@ import {
   availableEngineActorOptions, pureTurnProposalResolver,
   type EngineOfferableOption, type EngineTurnProposal, type ResolvedTurnMechanics,
 } from '../src/vtt/intent-resolver';
+import {
+  hiddenOptionRecords,
+  type HiddenOptionRecord,
+} from '../src/vtt/turn-option-registry';
 import { projectFutureMonsterTurns } from '../src/vtt/monster-planning-state';
 import { SNIPPET_REGISTRY, type PlayName } from '../src/vtt/snippet-registry-runtime';
 import {
@@ -383,6 +387,8 @@ export type ConversationSuggestionAdoption = 'as_is' | 'edited' | 'ignored';
 type SimulatedSuggestionResponse = ConversationSuggestionAdoption | 'legacy';
 
 export interface ConversationRow {
+  readonly knowledgeModel: 'engine_state';
+  readonly hiddenOptions: readonly HiddenOptionRecord[];
   readonly intelMode: IntelMode;
   readonly rendererAttribution: {
     readonly policyVersion: typeof RENDERER_POLICY_VERSION;
@@ -2302,6 +2308,15 @@ async function runConversationWithConfiguredIntel(
       const rendererState = structuredClone(engineSession.currentState());
       const rendererDeltaBase = lastSeenTurnContext;
       const capsule = initialSnapshot.capsule;
+      const optionProjectionState = projectFutureMonsterTurns(
+        rendererState,
+        capsule.request?.actors ?? [],
+      );
+      const hiddenOptions = hiddenOptionRecords(
+        optionProjectionState,
+        capsule.request?.actors ?? [],
+        capsule.revision,
+      );
       const suggestedPlan = suggestedPlanBookkeeping(capsule);
       const segmentPartyPlan = config.combatModel === 'initiative_segments_v1'
         ? createScriptedPartyPlan(engineSession.currentState(), {
@@ -3858,6 +3873,8 @@ async function runConversationWithConfiguredIntel(
       if (rendererEvidence === undefined) throw new Error('Turn-context renderer emitted no attribution evidence.');
       options.rendererEvidenceCache?.set(rendererEvidenceCacheKey, rendererEvidence);
       const row: ConversationRow = {
+        knowledgeModel: 'engine_state',
+        hiddenOptions,
         intelMode: config.intelMode,
         rendererAttribution: {
           policyVersion: RENDERER_POLICY_VERSION,

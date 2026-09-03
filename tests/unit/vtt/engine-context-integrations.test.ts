@@ -16,6 +16,9 @@ import { applyRoomInitiativeProfile } from '../../../src/vtt/room-generator';
 import { projectEncounterTimeline } from '../../../src/vtt/session-timeline';
 import { engineOptionId } from '../../../src/vtt/turn-proposal';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
+import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
+import { projectHumanEngineOptions } from '../../../src/vtt/encounter-board-projection';
 
 const fixedD20 = (face: number) => () => (face - 0.5) / 20;
 
@@ -184,6 +187,41 @@ function denseDeltaBase(value: unknown): unknown {
 }
 
 describe('M-core and D420 turn-context rendering', () => {
+  it('keeps hidden candidates out of get_turn_context while retaining their labeled human projection last', async () => {
+    const state = freshMonsterPlanningState(
+      await loadArenaFixture('tests/fixtures/arena-basis-brutal/seed-6203001.json'),
+    );
+    const actor = state.combatants.find((combatant) => combatant.profile.kind === 'monster');
+    if (actor === undefined) throw new Error('Brutal context fixture has no monster.');
+    const partition = engineActorOptions(state, actor.profile.id);
+    const hidden = partition.humanOnly.find((option) =>
+      option.noModeledEffect.kind === 'unsupported_spell_payload' &&
+      option.noModeledEffect.limitation === 'utility_operation_unmodeled');
+    if (hidden === undefined) throw new Error('Brutal context fixture has no hidden spell.');
+    const runtime = createEngineMcpRuntime(state, {
+      toolProfile: 'dm', requestedActorIds: [actor.profile.id],
+    });
+    const capsule = runtime.feed.current();
+    const context = runtime.toolSurface.execute('engine.get_turn_context', {
+      run_id: capsule.runId,
+      expected_revision: capsule.revision,
+      scope: 'round',
+      granularity: 'full',
+      intel_mode: 'full',
+    });
+    const human = projectHumanEngineOptions(state, [actor.profile.id])[0];
+    if (human === undefined) throw new Error('Human projection omitted the brutal actor.');
+    const firstHumanOnly = human.options.findIndex((option) => option.availability === 'human_only');
+
+    expect(JSON.stringify(context)).not.toContain(hidden.optionId);
+    expect(JSON.stringify(context)).not.toContain(hidden.label);
+    expect(human.options.map((option) => option.option.optionId)).toContain(hidden.optionId);
+    expect(firstHumanOnly).toBeGreaterThan(0);
+    expect(human.options.slice(firstHumanOnly).every((option) => option.availability === 'human_only')).toBe(true);
+    expect(human.options.find((option) => option.option.optionId === hidden.optionId)?.label)
+      .toContain('not modeled: detect evil and good has no in-combat effect');
+  });
+
   it.each(Array.from({ length: 10 }, (_unused, index) => 6_203_001 + index))(
     'keeps brutal-basis seed %i full-intel round context within the hard byte cap',
     async (seed) => {

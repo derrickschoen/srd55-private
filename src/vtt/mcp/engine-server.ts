@@ -554,7 +554,7 @@ function externalOptionSlot(slot: EngineOfferableOption['actionSlots'][number]):
     world_object_id: use.kind === 'use_world_object' ? use.objectId : null,
   };
 }
-function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsule: EngineStateCapsule, actorId: CombatantId, includeExpectations: boolean, _includeUnavailable: boolean): readonly Readonly<Record<string, unknown>>[] {
+function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsule: EngineStateCapsule, actorId: CombatantId, includeExpectations: boolean): readonly Readonly<Record<string, unknown>>[] {
   const projected = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
   if (projected === undefined) return [];
   const informationRank = (option: EngineOfferableOption): number => {
@@ -1171,7 +1171,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const actors = [...required].sort().map((actorId) => {
         const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
         if (actor === undefined) throw new RangeError(`ACTOR_ABSENT:${actorId}`);
-        const all = tacticalOptions(state, queries, capsule, actorId, false, true);
+        const all = tacticalOptions(state, queries, capsule, actorId, false);
         return {
           actor_id: actorId,
           status: actorStatus(actor),
@@ -1327,7 +1327,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     const actors = [...required].sort().map((actorId) => {
       const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
       if (actor === undefined) throw new RangeError(`ACTOR_ABSENT:${actorId}`);
-      const all = tacticalOptions(state, queries, capsule, actorId, includeExpectations, true);
+      const all = tacticalOptions(state, queries, capsule, actorId, includeExpectations);
       const intelRows = topDmActorIntelRows(exactIntel, actorId);
       const unresolvedFindings = exactIntel.filter((row) =>
         row.actorId === actorId && !isInformativeDmIntelRow(row)).map((row) => ({
@@ -2090,7 +2090,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         name: actor.name,
         side: actor.side,
         status: actorStatus(actor),
-        options: granularity === 'combatant_detail' ? tacticalOptions(state, queries, capsule, actor.id, true, true) : [],
+        options: granularity === 'combatant_detail' ? tacticalOptions(state, queries, capsule, actor.id, true) : [],
         threats: granularity === 'turn_minimal' || granularity === 'combatant_detail' ? threats(state, queries, actor.id) : [],
       }));
       const history = recentChanges(capsule).filter((entry) => typeof input['since_revision'] !== 'number' || Number(entry['revision']) > input['since_revision']);
@@ -2102,8 +2102,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const actorId = combatantId(stringField(input, 'actor_id'));
       const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
       if (actor === undefined) throw new RangeError('ACTOR_ABSENT');
-      const all = tacticalOptions(state, queries, capsule, actorId, input['include_unavailable'] === true, input['include_unavailable'] === true);
-      const paged = applicationPage(capsule, canonicalJson({ actorId, unavailable: input['include_unavailable'] === true }), all, input['page']);
+      const all = tacticalOptions(state, queries, capsule, actorId, true);
+      const paged = applicationPage(capsule, canonicalJson({ actorId }), all, input['page']);
       return { state_ref: externalStateRef(capsule), actor_id: actorId, status: actorStatus(actor), options: paged.values, truncated: paged.truncated, next_cursor: paged.next };
     }
     if (name === 'engine.query_path') {

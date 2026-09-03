@@ -18,7 +18,7 @@ import {
   type EngineQueryPort,
   type EngineTargetSelector,
 } from './engine-query-port';
-import { projectEngineActorOptions } from './turn-option-registry';
+import { engineActorOptions } from './turn-option-registry';
 import {
   engineActionId,
   type EngineActionSlotUse,
@@ -453,7 +453,7 @@ export function availableEngineActorOptions(
   queries: EngineQueryPort = canonicalEngineQueryPort,
   revision = state.revision,
 ): readonly EngineOfferableOption[] {
-  return projectEngineActorOptions(state, actorId, revision, (partition) => partition.offerable)
+  return engineActorOptions(state, actorId, revision).offerable
     .filter((option) => resolveEngineActorOption(state, option, queries).valid);
 }
 

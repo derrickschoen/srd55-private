@@ -326,6 +326,9 @@ describe('read-only engine state capsule', () => {
     ]);
     expect(JSON.stringify(capsule.projection)).not.toContain('pendingCommand');
     expect(JSON.stringify(capsule.projection)).not.toContain('rngState');
+    expect(JSON.stringify(capsule.projection)).not.toContain('human-option:');
+    expect(capsule.projection.combatants.flatMap((combatant) => combatant.options)
+      .every((option) => option.optionId.startsWith('option:'))).toBe(true);
   });
 
   it('submits a closed proposal without changing the projection digest', () => {

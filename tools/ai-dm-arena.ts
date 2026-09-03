@@ -17,6 +17,7 @@ import type { IntelMode } from '../src/vtt/mcp/engine-server';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
 import type { AgentSessionAdapter } from '../src/vtt/agent-session';
 import type { DmIntelCapture } from '../src/vtt/dm-tactical-intel';
+import type { HiddenOptionRecord } from '../src/vtt/turn-option-registry';
 import type { LocalOpenAiConfig, LocalThinkMode } from '../src/vtt/agent-adapters/local-openai';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 import {
@@ -89,6 +90,8 @@ export interface ArenaConfig {
 }
 
 export interface ArenaRow {
+  readonly knowledgeModel: 'engine_state';
+  readonly hiddenOptions: readonly HiddenOptionRecord[];
   readonly intelMode: IntelMode;
   readonly rendererAttribution: import('./ai-dm-conversation').ConversationRow['rendererAttribution'];
   readonly circumstanceFeatures: CircumstanceFeatureVector;
@@ -445,6 +448,8 @@ function arenaRows(
   seeds: readonly number[],
 ): readonly ArenaRow[] {
   return rows.map((row): ArenaRow => ({
+    knowledgeModel: row.knowledgeModel,
+    hiddenOptions: structuredClone(row.hiddenOptions),
     intelMode: row.intelMode,
     rendererAttribution: {
       policyVersion: row.rendererAttribution.policyVersion,

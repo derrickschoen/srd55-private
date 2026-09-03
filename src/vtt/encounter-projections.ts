@@ -39,6 +39,10 @@ import {
   type PartySessionState,
   type PlayerPartySessionView,
 } from './party-session-state';
+import {
+  projectHumanEngineOptions,
+  type HumanEngineActorOptions,
+} from './encounter-board-projection';
 
 export interface ProjectedControllerRequest {
   readonly kind: 'turn' | 'reaction';
@@ -75,6 +79,8 @@ export interface DmBoardProjection {
   readonly pendingRequest: ControllerRequest | null;
   /** Exact legal commands exposed to the DM only when the pending actor uses a human controller. */
   readonly humanCommandActions: readonly EncounterCommand[];
+  /** Complete engine option catalog for human inspection, including typed no-effect declarations. */
+  readonly humanEngineOptions: readonly HumanEngineActorOptions[];
   /** DM-only previews keyed by the exact legal move command. */
   readonly movementPreviews: readonly DmMovementPathPreview[];
   /** Optional batch-planning action domains, populated when one request plans for several actors. */
@@ -303,6 +309,7 @@ export function projectDmBoard(input: {
     coordinator: input.coordinator,
     pendingRequest: input.coordinator.pendingRequest,
     humanCommandActions,
+    humanEngineOptions: projectHumanEngineOptions(input.view.state),
     movementPreviews: humanCommandActions.flatMap((action): readonly DmMovementPathPreview[] =>
       action.type === 'move'
         ? [{ commandKey: canonicalJson(action), ...previewMovementPathDangers(input.view.state, action) }]

@@ -32,6 +32,7 @@ import {
   classifyOptionModeling,
   engineHumanOptionId,
   type EngineDeclaredOptionIdentity,
+  type EngineHumanOptionId,
   type EngineHumanOnlyOption,
   type EngineOfferableOption,
   type EngineOptionCandidate,
@@ -612,6 +613,13 @@ export interface EngineActorOptionPartition {
   readonly candidates: readonly EngineOptionCandidate[];
 }
 
+export interface HiddenOptionRecord {
+  readonly actorId: CombatantId;
+  readonly humanOptionId: EngineHumanOptionId;
+  readonly declaredOption: EngineDeclaredOptionIdentity;
+  readonly reason: EngineHumanOnlyOption['noModeledEffect'];
+}
+
 export function engineActorOptions(
   state: EncounterState,
   actorId: CombatantId,
@@ -664,11 +672,17 @@ export function engineActorOptions(
   return { offerable, humanOnly, candidates: [...offerable, ...humanOnly] };
 }
 
-export function projectEngineActorOptions<Result>(
+export function hiddenOptionRecords(
   state: EncounterState,
-  actorId: CombatantId,
+  actorIds: readonly CombatantId[],
   revision: number,
-  project: (partition: EngineActorOptionPartition) => Result,
-): Result {
-  return project(engineActorOptions(state, actorId, revision));
+): readonly HiddenOptionRecord[] {
+  return [...new Set(actorIds)].sort((left, right) => left.localeCompare(right)).flatMap((actorId) =>
+    engineActorOptions(state, actorId, revision).humanOnly.map((option) => ({
+      actorId,
+      humanOptionId: option.optionId,
+      declaredOption: option.declaredOption,
+      reason: option.noModeledEffect,
+    })),
+  );
 }

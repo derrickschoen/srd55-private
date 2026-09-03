@@ -3,6 +3,7 @@ import type { EncounterState } from '../combat/encounter';
 import { gridDistance } from '../combat/grid';
 import { BUNDLED_MONSTER_ROSTER } from '../combat/statblocks/roster';
 import type { EngineStateCapsule } from './engine-state-capsule';
+import type { NoModeledEffect } from './option-modeling';
 
 export const RENDERER_POLICY_VERSION = 'turn-context-renderer-v3' as const;
 
@@ -126,6 +127,30 @@ export interface RendererRemovalCounts {
 }
 
 type MutableRecord = Record<string, unknown>;
+
+function plainWords(value: string): string {
+  return value.replaceAll('-', ' ').replaceAll('_', ' ');
+}
+
+export function renderNoModeledEffectReason(reason: NoModeledEffect): string {
+  switch (reason.kind) {
+    case 'disengage_without_movement':
+      return 'no effect here: no movement to disengage with';
+    case 'disengage_without_adjacent_hostile':
+      return 'no effect here: no adjacent enemy to disengage from';
+    case 'unsupported_action_payload':
+      return `not modeled: ${reason.sourceNote.replace(/[.]$/u, '').toLocaleLowerCase()}`;
+    case 'unsupported_spell_payload': {
+      const spell = plainWords(reason.spellId);
+      switch (reason.limitation) {
+        case 'not_in_manifest': return `not modeled: ${spell} is not implemented`;
+        case 'definition_unavailable': return `not modeled: ${spell} has no engine definition`;
+        case 'targeting_unresolved': return `not modeled: ${spell} targeting cannot be resolved`;
+        case 'utility_operation_unmodeled': return `not modeled: ${spell} has no in-combat effect`;
+      }
+    }
+  }
+}
 
 function record(value: unknown): MutableRecord | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

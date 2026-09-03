@@ -27,6 +27,7 @@ import {
 import { feet } from '../../../src/combat/values';
 import { buildHostScenarioMenu } from '../../../src/vtt/speculative-planning';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
+import { engineSchemaInternals } from '../../../src/vtt/mcp/schemas';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
 const TOOL_NAMES = [
@@ -51,6 +52,16 @@ const TOOL_NAMES = [
 ] as const;
 const REVISION_BOUND_TOOL_NAMES = TOOL_NAMES.filter((name) =>
   name !== 'engine.propose_from_play' && name !== 'engine.load_skill');
+
+it('rejects human-only option ids at the proposal schema boundary', () => {
+  expect(engineSchemaInternals.turnProposal.safeParse({
+    actor_id: 'combatant:monster',
+    expected_revision: 1,
+    primary_option_id: 'human-option:1:hidden',
+    fallback_option_id: null,
+    override_justification: null,
+  }).success).toBe(false);
+});
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError('Expected an object.');
@@ -357,7 +368,7 @@ function happyArguments(name: typeof TOOL_NAMES[number], state: EncounterState, 
     case 'engine.propose_from_play': return { play_name: 'basic_advance' };
     case 'engine.load_skill': return { skill_name: 'core_tactics' };
     case 'engine.get_state_summary': return { state_ref: facts.ref, granularity: 'room_tactical', page: { maximum_items: 1 } };
-    case 'engine.get_combatant_options': return { state_ref: facts.ref, actor_id: facts.actor, include_unavailable: true, page: { maximum_items: 2 } };
+    case 'engine.get_combatant_options': return { state_ref: facts.ref, actor_id: facts.actor, page: { maximum_items: 2 } };
     case 'engine.query_path': return { state_ref: facts.ref, actor_id: facts.actor, objective: { kind: 'approach', target: { kind: 'combatant', combatant_id: facts.target } }, movement: { willingness: 'freely', maximum_feet: 30, opportunity_risk: 'accept_if_needed' }, engagement: { stance: 'close_to_melee' } };
     case 'engine.query_reach':
     case 'engine.query_cover':
@@ -1082,12 +1093,14 @@ describe('engine MCP dual-handshake full surface conformance', () => {
   it('paginates application collections and rejects a cursor after filters change', async () => {
     const { state, runtime } = await fixtureRuntime();
     const facts = fixtureFacts(state, runtime);
-    const first = structured(toolCall(runtime.handler, 'engine.get_combatant_options', { state_ref: facts.ref, actor_id: facts.actor, include_unavailable: true, page: { maximum_items: 1 } }));
+    const first = structured(toolCall(runtime.handler, 'engine.get_combatant_options', { state_ref: facts.ref, actor_id: facts.actor, page: { maximum_items: 1 } }));
     expect(first['truncated']).toBe(true);
     expect(first['next_cursor']).toEqual(expect.any(String));
-    const second = structured(toolCall(runtime.handler, 'engine.get_combatant_options', { state_ref: facts.ref, actor_id: facts.actor, include_unavailable: true, page: { maximum_items: 1, cursor: first['next_cursor'] } }));
+    const second = structured(toolCall(runtime.handler, 'engine.get_combatant_options', { state_ref: facts.ref, actor_id: facts.actor, page: { maximum_items: 1, cursor: first['next_cursor'] } }));
     expect(second['options']).not.toEqual(first['options']);
-    const invalid = toolCall(runtime.handler, 'engine.get_combatant_options', { state_ref: facts.ref, actor_id: facts.actor, include_unavailable: false, page: { maximum_items: 1, cursor: first['next_cursor'] } });
+    const otherActor = runtime.feed.current().projection.combatants.find((actor) => actor.id !== facts.actor);
+    if (otherActor === undefined) throw new Error('Pagination fixture has no second actor.');
+    const invalid = toolCall(runtime.handler, 'engine.get_combatant_options', { state_ref: facts.ref, actor_id: otherActor.id, page: { maximum_items: 1, cursor: first['next_cursor'] } });
     expect(JSON.stringify(invalid)).toContain('INVALID_CURSOR');
   });
 

@@ -19,6 +19,7 @@ import {
   damageType,
   dieSides,
   feet,
+  statblockId,
   worldObjectId,
   type CombatantId,
   type EncounterEffectId,
@@ -29,6 +30,9 @@ import { encounterBoardRenderModel, projectEncounterBoard } from '../../../src/v
 import { projectDmBoard } from '../../../src/vtt/encounter-projections';
 import { REFERENCE_ENCOUNTER_ART } from '../../../src/vtt/reference-encounter-art';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+import { generateRoom } from '../../../src/vtt/room-generator';
+import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
+import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 
 interface SpellRecord {
   readonly id: string;
@@ -204,6 +208,37 @@ const IDLE = {
 };
 
 describe('D344.3 DM encounter board projection', () => {
+  it('human_only_sorted_last: retains every engine candidate and renders its typed no-effect reason after offerable options', () => {
+    const generated = generateRoom(3_943_001).encounter.state;
+    const monster = generated.combatants.find((combatant) => combatant.profile.kind === 'monster');
+    if (monster === undefined) throw new Error('Generated board fixture has no monster.');
+    const state = freshMonsterPlanningState({
+      ...generated,
+      combatants: generated.combatants.map((combatant) => combatant.profile.id === monster.profile.id
+        ? { ...combatant, profile: { ...combatant.profile, statblockId: statblockId('statblock:doppelganger') } }
+        : combatant),
+    });
+    const expected = engineActorOptions(state, monster.profile.id);
+    const projection = projectDmBoard({
+      view: projectDmView(state), coordinator: IDLE, controllers: [], history: [],
+    });
+    const actor = projection.humanEngineOptions.find((candidate) => candidate.actorId === monster.profile.id);
+    if (actor === undefined) throw new Error('Human engine option projection omitted the monster.');
+
+    expect(actor.options).toHaveLength(expected.candidates.length);
+    expect(actor.options.map((option) => option.option.optionId)).toEqual(
+      expected.candidates.map((option) => option.optionId),
+    );
+    const firstHumanOnly = actor.options.findIndex((option) => option.availability === 'human_only');
+    expect(firstHumanOnly).toBeGreaterThan(0);
+    expect(actor.options.slice(0, firstHumanOnly).every((option) => option.availability === 'offerable')).toBe(true);
+    expect(actor.options.slice(firstHumanOnly).every((option) => option.availability === 'human_only')).toBe(true);
+    expect(actor.options.find((option) => option.option.label.startsWith('read-thoughts/detect-thoughts'))?.label)
+      .toContain('not modeled: detect thoughts has no in-combat effect');
+    expect(actor.options.find((option) => option.option.label === 'Disengage')?.label)
+      .toContain('no effect here: no movement to disengage with');
+  });
+
   it('dying_marker_distinct_from_corpse: a death-save combatant at 0 HP renders as a dying token', () => {
     const downed = playerProfile('fighter', { hitPoints: 10, initiativeBonus: 20 });
     let state = started([downed], [{ column: 1, row: 1 }], { columns: 10, rows: 7 });

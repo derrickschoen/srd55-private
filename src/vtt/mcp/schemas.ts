@@ -24,6 +24,10 @@ export const ENGINE_REACTION_SPEND_HOLD_POLICY = 'reaction-spend-hold-v1' as con
 export const ENGINE_RECOVERY_CAPABILITY_POLICY = 'recovery-capability-v1' as const;
 
 const identifier = z.string().min(1).max(200).describe('Engine-owned stable identifier.');
+const offerableOptionIdentifier = identifier.refine(
+  (value) => !value.startsWith('human-option:'),
+  'Human-only option ids cannot be submitted as engine proposals.',
+);
 const shortCode = z.string().min(1).max(100).describe('Stable machine-readable code.');
 const summaryText = z.string().min(1).max(500).describe('Bounded human-readable summary.');
 const stateRef = z.object({
@@ -78,8 +82,8 @@ const overrideJustification = z.discriminatedUnion('reason', [
 const turnProposal = z.object({
   actor_id: identifier,
   expected_revision: z.number().int().min(0),
-  primary_option_id: identifier,
-  fallback_option_id: identifier.nullable(),
+  primary_option_id: offerableOptionIdentifier,
+  fallback_option_id: offerableOptionIdentifier.nullable(),
   override_justification: overrideJustification.nullable(),
 }).strict().describe('Revision-bound selection of engine-generated composite option ids.');
 const reactionGuidanceInstruction = z.enum([
@@ -932,7 +936,7 @@ export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.propose_from_play', 'Expand one advertised play into an editable, unqueued composite proposal set.', z.object({ play_name: z.enum(PLAY_NAMES) }).strict(), proposeFromPlayOutput),
   spec('engine.load_skill', 'Load one advertised tactical skill procedure and its referenced plays.', z.object({ skill_name: z.enum(SKILL_NAMES) }).strict(), loadSkillOutput),
   spec('engine.get_state_summary', 'Read one bounded state projection or journal delta using an opaque application cursor.', z.object({ ...refInput, granularity: z.enum(['turn_minimal', 'room_tactical', 'combatant_detail', 'journal_delta']), combatant_ids: z.array(identifier).max(50).optional(), since_revision: z.number().int().min(1).optional(), page: page.optional() }).strict(), stateSummaryOutput),
-  spec('engine.get_combatant_options', 'List canonical legal and unavailable action options for one combatant.', z.object({ ...refInput, actor_id: identifier, include_unavailable: z.boolean().optional(), page: page.optional() }).strict(), optionsOutput),
+  spec('engine.get_combatant_options', 'List canonical offerable action options for one combatant.', z.object({ ...refInput, actor_id: identifier, page: page.optional() }).strict(), optionsOutput),
   spec('engine.query_path', 'Resolve a semantic movement objective without accepting or returning coordinates.', z.object({ ...refInput, actor_id: identifier, objective: z.union([z.object({ kind: z.literal('enable_action'), action_id: identifier, target: targetSelector }).strict(), z.object({ kind: z.enum(['approach', 'maintain_range_from', 'withdraw_from']), target: targetSelector }).strict()]), movement: movementPreference, engagement: engagement.optional() }).strict(), pathOutput),
   spec('engine.query_reach', 'Batch engine-owned current and post-movement reach checks.', z.object({ ...refInput, queries: z.array(pairQuery).min(1).max(50) }).strict(), pairOutput(reachFacts)),
   spec('engine.query_cover', 'Batch engine-owned cover comparisons.', z.object({ ...refInput, queries: z.array(pairQuery).min(1).max(50) }).strict(), pairOutput(coverFacts)),

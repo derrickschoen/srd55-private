@@ -989,6 +989,32 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(resolutions()).toEqual(beforeRender);
   });
 
+  it('hidden_options_logged_once: records every hidden option once with engine-state knowledge and stationary Disengage reasons', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-hidden-options-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const state = generateRoom(3_943_001).encounter.state;
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath,
+      '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
+    ]), { roomStates: [state] });
+    const row = result.rows[0];
+    if (row === undefined) throw new Error('Hidden-option conversation produced no row.');
+    const identities = row.hiddenOptions.map((option) => option.humanOptionId);
+
+    expect(row.knowledgeModel).toBe('engine_state');
+    expect(new Set(identities).size).toBe(identities.length);
+    expect(row.hiddenOptions.filter((option) =>
+      option.declaredOption.kind === 'standard_action' &&
+      option.reason.kind === 'disengage_without_movement').length).toBeGreaterThan(0);
+    expect(row.hiddenOptions.every((option) => option.actorId.length > 0 &&
+      option.humanOptionId.startsWith('human-option:'))).toBe(true);
+    expect(JSON.parse(readFileSync(outPath, 'utf8').trim())).toMatchObject({
+      knowledgeModel: 'engine_state',
+      hiddenOptions: row.hiddenOptions,
+    });
+  });
+
   it('runs a model-free stdio MCP dry-run smoke', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-smoke-'));
     const outPath = join(directory, 'rows.jsonl');

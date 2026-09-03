@@ -86,6 +86,15 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D466-A2-MUTATION-LEDGER pins human-only ordering and single hidden-row logging to named killing tests', () => {
+    const boardTests = readFileSync('tests/unit/vtt/encounter-board-projection.test.ts', 'utf8');
+    const domTests = readFileSync('tests/unit/vtt/stable-dom-render.test.ts', 'utf8');
+    const rowTests = readFileSync('tests/unit/tools/ai-dm-conversation.test.ts', 'utf8');
+    expect(boardTests).toContain('human_only_sorted_last:');
+    expect(domTests).toContain('human_only_sorted_last_dom:');
+    expect(rowTests).toContain('hidden_options_logged_once:');
+  });
+
   it('D373.7-LONG-REST-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {
     const longRestLedger = readFileSync(LONG_REST_LEDGER_PATH, 'utf8');
     const partyTests = readFileSync('tests/unit/vtt/party-session-state.test.ts', 'utf8');

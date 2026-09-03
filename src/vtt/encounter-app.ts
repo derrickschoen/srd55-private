@@ -61,6 +61,7 @@ import {
   type RefusalHandlingMode,
 } from './refusal-handling';
 import { reconcileStableRenderedChildren, stableRenderKey } from './stable-dom-render';
+import type { HumanEngineActorOptions } from './encounter-board-projection';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -73,6 +74,37 @@ function element<K extends keyof HTMLElementTagNameMap>(
   if (options.className !== undefined) node.className = options.className;
   if (options.text !== undefined) node.textContent = options.text;
   return node;
+}
+
+export function renderHumanEngineOptionCatalog(
+  actors: readonly HumanEngineActorOptions[],
+): HTMLElement {
+  const catalog = element('section', { className: 'dm-engine-options' });
+  catalog.dataset.renderKey = stableRenderKey('dm', 'engine-options');
+  catalog.append(element('h2', { text: 'Engine options' }));
+  if (actors.length === 0) {
+    catalog.append(element('p', { text: 'No monster options.' }));
+    return catalog;
+  }
+  for (const actor of actors) {
+    const group = element('article');
+    group.dataset.renderKey = stableRenderKey('dm', 'engine-options', actor.actorId);
+    group.dataset.actorId = actor.actorId;
+    group.append(element('h3', { text: actor.actorName }));
+    const list = element('ol');
+    for (const entry of actor.options) {
+      const item = element('li', { text: entry.label });
+      item.dataset.renderKey = stableRenderKey(
+        'dm', 'engine-options', actor.actorId, String(entry.option.optionId),
+      );
+      item.dataset.optionAvailability = entry.availability;
+      item.dataset.optionId = entry.option.optionId;
+      list.append(item);
+    }
+    group.append(list);
+    catalog.append(group);
+  }
+  return catalog;
 }
 
 export function renderDmEncounterOutcome(
@@ -1933,6 +1965,7 @@ class DmEncounterView {
       }
     }
     this.#shell.append(pending);
+    this.#shell.append(renderHumanEngineOptionCatalog(projection.humanEngineOptions));
 
     const objectControls = element('section', { className: 'dm-world-object-controls' });
     objectControls.dataset.renderKey = stableRenderKey('dm', 'world-object-controls');
