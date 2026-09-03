@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { appendFile, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
@@ -131,6 +131,14 @@ import {
   loadAiDmKnowledgeBase,
   type LoadedAiDmKnowledgeBase,
 } from '../src/vtt/knowledge-base-contract';
+import {
+  decodeKbReadRecords,
+  kbSubjectSources,
+  KbReadBudget,
+  type KbReadCallPhase,
+  type KbReadRecord,
+  type KbSubjectSources,
+} from '../src/vtt/mcp/knowledge-base';
 
 export const CONVERSATION_CLIS = ['codex', 'claude-code', 'local-openai'] as const;
 export type ConversationCli = (typeof CONVERSATION_CLIS)[number];
@@ -414,6 +422,7 @@ export interface ConversationRow {
   readonly escalationSessionId: string | null;
   readonly sessionIdHash: string | null;
   readonly kbHash: string | null;
+  readonly kbReads: readonly KbReadRecord[];
   readonly repoCommit: string;
   readonly rawTurnContext: string;
   readonly turnContextGranularity: 'full' | 'turn_delta';
@@ -1377,6 +1386,12 @@ async function driveScriptedMcp(
   let calls = 0;
   try {
     await mcpRequest(client, 'server/discover', {});
+    const listedTools = asRecord(await mcpRequest(client, 'tools/list', {}))?.['tools'];
+    if (manifest.kbReadSpoolPath !== undefined &&
+      (!Array.isArray(listedTools) || !listedTools.some((tool) =>
+        asRecord(tool)?.['name'] === 'engine.read_kb_subject'))) {
+      throw new Error('Launcher-owned KB subject tool is not advertised.');
+    }
     if (manifest.phase === 'speculative') {
       await abortableDelay(speculativeDelayMs, signal ?? new AbortController().signal);
       const speculative = manifest.speculativeRequest;
@@ -1782,6 +1797,10 @@ async function writeLauncher(input: {
   readonly room: number;
   readonly historyKind: string;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
+  readonly kbRead?: {
+    readonly spoolPath: string;
+    readonly subjectSources: KbSubjectSources;
+  };
 }): Promise<{
   readonly manifestPath: string;
   readonly recoveryManifestPath: string;
@@ -1802,6 +1821,10 @@ async function writeLauncher(input: {
   const manifest: EngineMcpLauncherManifest = {
     format: 'engine-mcp-launcher-v1', fixturePath, proposalSpoolPath: spoolPath,
     turnContextSpoolPath,
+    ...(input.kbRead === undefined ? {} : {
+      kbReadSpoolPath: input.kbRead.spoolPath,
+      kbSubjectSources: input.kbRead.subjectSources,
+    }),
     runId: capsule.runId, branchId: capsule.branchId,
     revision: capsule.revision, requestId: request.requestId,
     phase: request.phase, correctionNumber: request.correctionNumber,
@@ -1910,6 +1933,8 @@ function inProcessDmToolSession(input: {
   readonly onProposal: (proposal: RoundTurnProposalEnvelope | PlanAdjustmentProposalEnvelope) => void;
   readonly onToolResult: (name: string, result: unknown) => void;
   readonly onTurnContextRendered?: (evidence: NonNullable<CapturedTurnContext['rendering']>) => void;
+  readonly kbReadBudget?: KbReadBudget;
+  readonly kbReadCallPhase?: KbReadCallPhase;
 }): AgentToolSession {
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
@@ -1950,6 +1975,8 @@ function inProcessDmToolSession(input: {
     ...(input.turnContextDeltaBase === undefined ? {} : {
       turnContextDeltaBase: input.turnContextDeltaBase,
     }),
+    ...(input.kbReadBudget === undefined ? {} : { kbReadBudget: input.kbReadBudget }),
+    ...(input.kbReadCallPhase === undefined ? {} : { kbReadCallPhase: input.kbReadCallPhase }),
     onProposal: (proposal) => {
       if (isRoundProposal(proposal) || isPlanAdjustmentProposal(proposal)) {
         input.onProposal(structuredClone(proposal));
@@ -2291,6 +2318,20 @@ async function runConversationWithConfiguredIntel(
       observedRejections = [];
       const requestId = `request:room-${String(room)}-round-${String(round)}`;
       const key = `room-${String(room)}-round-${String(round)}`;
+      const kbReadSpoolPath = join(artifacts, `${key}-kb-reads.jsonl`);
+      const rowKbSubjectSources = knowledgeBase.kind === 'bundle'
+        ? kbSubjectSources(knowledgeBase)
+        : undefined;
+      if (rowKbSubjectSources !== undefined) await writeFile(kbReadSpoolPath, '', 'utf8');
+      const rowKbReadBudget = rowKbSubjectSources === undefined
+        ? undefined
+        : new KbReadBudget(rowKbSubjectSources, [], (record) => {
+            appendFileSync(kbReadSpoolPath, `${JSON.stringify(record)}\n`, 'utf8');
+          });
+      const launcherKbRead = rowKbSubjectSources === undefined ? undefined : {
+        spoolPath: kbReadSpoolPath,
+        subjectSources: rowKbSubjectSources,
+      };
       const initialRequest: EngineOrdinaryRoundCapsuleRequest = {
         runId, branchId, revision: capsuleRevision, requestId,
         phase: 'initial', room, historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
@@ -2347,6 +2388,7 @@ async function runConversationWithConfiguredIntel(
         rendererProfile: config.rendererProfile,
         directory: artifacts, name: `${key}-initial`, snapshot: initialSnapshot, room,
         historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
+        ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
         ...(lastSeenTurnContext === undefined ? {} : {
           turnContextDeltaBase: lastSeenTurnContext,
         }),
@@ -2358,6 +2400,10 @@ async function runConversationWithConfiguredIntel(
             snapshot: initialSnapshot,
             intelMode: config.intelMode,
             rendererProfile: config.rendererProfile,
+            ...(rowKbReadBudget === undefined ? {} : {
+              kbReadBudget: rowKbReadBudget,
+              kbReadCallPhase: 'initial',
+            }),
             ...(lastSeenTurnContext === undefined ? {} : {
               turnContextDeltaBase: lastSeenTurnContext,
             }),
@@ -2624,6 +2670,7 @@ async function runConversationWithConfiguredIntel(
           snapshot: adjustmentSnapshot,
           room,
           historyKind: 'plan_adjustment_requested',
+          ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
           ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
         });
         let localAdjustmentProposal: PlanAdjustmentProposalEnvelope | null = null;
@@ -2633,6 +2680,10 @@ async function runConversationWithConfiguredIntel(
               snapshot: adjustmentSnapshot,
               intelMode: config.intelMode,
               rendererProfile: config.rendererProfile,
+              ...(rowKbReadBudget === undefined ? {} : {
+                kbReadBudget: rowKbReadBudget,
+                kbReadCallPhase: 'adjustment',
+              }),
               ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
               onProposal: (proposal) => {
                 if (isPlanAdjustmentProposal(proposal)) localAdjustmentProposal = proposal;
@@ -2767,6 +2818,7 @@ async function runConversationWithConfiguredIntel(
             snapshot: correctionSnapshot,
             room,
             historyKind: 'plan_adjustment_correction_requested',
+            ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
             ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
           });
           let localCorrection: PlanAdjustmentProposalEnvelope | null = null;
@@ -2776,6 +2828,10 @@ async function runConversationWithConfiguredIntel(
                 snapshot: correctionSnapshot,
                 intelMode: config.intelMode,
                 rendererProfile: config.rendererProfile,
+                ...(rowKbReadBudget === undefined ? {} : {
+                  kbReadBudget: rowKbReadBudget,
+                  kbReadCallPhase: 'adjustment',
+                }),
                 ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
                 onProposal: (proposal) => {
                   if (isPlanAdjustmentProposal(proposal)) {
@@ -3030,6 +3086,7 @@ async function runConversationWithConfiguredIntel(
           rendererProfile: config.rendererProfile,
           directory: artifacts, name: `${key}-correction`, snapshot: correctionSnapshot,
           room, historyKind: 'proposal_correction_requested',
+          ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
           ...(correctionTurnContextBase === undefined ? {} : {
             turnContextDeltaBase: correctionTurnContextBase,
           }),
@@ -3042,6 +3099,10 @@ async function runConversationWithConfiguredIntel(
               snapshot: correctionSnapshot,
               intelMode: config.intelMode,
               rendererProfile: config.rendererProfile,
+              ...(rowKbReadBudget === undefined ? {} : {
+                kbReadBudget: rowKbReadBudget,
+                kbReadCallPhase: 'correction',
+              }),
               ...(correctionTurnContextBase === undefined ? {} : {
                 turnContextDeltaBase: correctionTurnContextBase,
               }),
@@ -3865,6 +3926,9 @@ async function runConversationWithConfiguredIntel(
         ).rendering;
       if (rendererEvidence === undefined) throw new Error('Turn-context renderer emitted no attribution evidence.');
       options.rendererEvidenceCache?.set(rendererEvidenceCacheKey, rendererEvidence);
+      const kbReads = rowKbSubjectSources === undefined
+        ? []
+        : decodeKbReadRecords(readFileSync(kbReadSpoolPath, 'utf8'));
       const row: ConversationRow = {
         knowledgeModel: 'engine_state',
         hiddenOptions,
@@ -3884,6 +3948,7 @@ async function runConversationWithConfiguredIntel(
         escalationSessionId,
         sessionIdHash: binding === null ? null : sha256(binding.sessionId), outcome, proposalId,
         kbHash: knowledgeBase.combinedStartupHash,
+        kbReads,
         repoCommit,
         rawTurnContext: rowTurnContext.raw,
         turnContextGranularity: rowTurnContext.granularity,

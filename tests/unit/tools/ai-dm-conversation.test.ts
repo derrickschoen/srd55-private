@@ -59,7 +59,7 @@ const kbInputs = declareTestInputs({ fixtures: [
   'tests/fixtures/ai-dm-kb/ai-dm-core.md',
   'tests/fixtures/ai-dm-kb/tactics.md',
 ] });
-const DEFAULT_KB_HASH = '45ea6c7b6ccfcd04aad13e51ff3d7e9884247782cb9feba1e9297344ce7d39f0';
+const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
 
 async function runConversationWithPartyPolicy(
   decisionPolicy: ScriptedPartyDecisionPolicy,
@@ -1032,7 +1032,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     });
   });
 
-  it('runs a model-free stdio MCP dry-run smoke', { timeout: 30_000 }, async () => {
+  it('runs a model-free stdio MCP dry-run smoke (mutation: count tool calls as KB reads)', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-smoke-'));
     const outPath = join(directory, 'rows.jsonl');
     const config = parseConversationArgs([
@@ -1045,7 +1045,8 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows).toEqual([
       expect.objectContaining({
-        outcome: 'authorized', toolCalls: 2, callsPerRound: 1, refusals: [], kbHash: DEFAULT_KB_HASH,
+        outcome: 'authorized', toolCalls: 2, kbReads: [], callsPerRound: 1,
+        refusals: [], kbHash: DEFAULT_KB_HASH,
       }),
     ]);
     expect(result.rows[0]?.tokens).toEqual({ input: 0, cachedInput: 0, output: 0, reasoning: 0 });

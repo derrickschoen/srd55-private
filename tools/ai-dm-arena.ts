@@ -109,6 +109,7 @@ export interface ArenaRow {
   readonly model: string;
   readonly thinkMode: LocalThinkMode | null;
   readonly kbHash: string | null;
+  readonly kbReads: readonly import('../src/vtt/mcp/knowledge-base').KbReadRecord[];
   readonly repoCommit: string;
   readonly rawTurnContext: string;
   readonly turnContextGranularity: 'full' | 'turn_delta';
@@ -439,7 +440,13 @@ export function extractArenaProbeVerdict(
   };
 }
 
-function arenaRows(
+export function mapConversationKbReads(
+  row: Pick<import('./ai-dm-conversation').ConversationRow, 'kbReads'>,
+): readonly import('../src/vtt/mcp/knowledge-base').KbReadRecord[] {
+  return structuredClone(row.kbReads);
+}
+
+export function arenaRows(
   config: ArenaConfig,
   rows: readonly import('./ai-dm-conversation').ConversationRow[],
   arm: string,
@@ -467,6 +474,7 @@ function arenaRows(
     model: row.model,
     thinkMode: row.thinkMode,
     kbHash: row.kbHash,
+    kbReads: mapConversationKbReads(row),
     repoCommit: row.repoCommit,
     rawTurnContext: row.rawTurnContext,
     turnContextGranularity: row.turnContextGranularity,

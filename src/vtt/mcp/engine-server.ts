@@ -108,6 +108,7 @@ import {
   ENGINE_TOOL_SPECS,
   schemaViolations,
 } from './schemas';
+import type { KbReadBudget, KbReadCallPhase } from './knowledge-base';
 
 export const ENGINE_DM_TOOL_NAMES = Object.freeze([
   'engine.get_turn_context',
@@ -245,6 +246,8 @@ interface EngineMcpDependencies {
     readonly features: CircumstanceFeatureVector;
     readonly removals: RendererRemovalCounts;
   }) => void;
+  readonly kbReadBudget?: KbReadBudget;
+  readonly kbReadCallPhase?: KbReadCallPhase;
 }
 
 export interface EngineToolSurface {
@@ -1717,6 +1720,17 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   };
   function execute(name: string, value: unknown): unknown {
     const input = record(value, `${name} arguments`);
+    if (name === 'engine.read_kb_subject') {
+      const budget = dependencies.kbReadBudget;
+      const callPhase = dependencies.kbReadCallPhase;
+      if (budget === undefined || callPhase === undefined) {
+        throw new RangeError('KB_SUBJECT_READER_UNAVAILABLE');
+      }
+      return budget.read(
+        stringField(input, 'subject') as import('../knowledge-base-contract').KbSubject,
+        callPhase,
+      );
+    }
     if (name === 'engine.get_turn_context') {
       const capsule = exactCurrent(feed, stringField(input, 'run_id'), numberField(input, 'expected_revision'));
       if (capsule.request === null) throw new RangeError('NO_PENDING_REQUEST');
@@ -2538,7 +2552,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         : ENGINE_DM_TOOL_NAMES)
     : null;
   const bindings: readonly McpToolBinding[] = ENGINE_TOOL_SPECS
-    .filter((spec) => advertisedNames === null || advertisedNames.has(spec.descriptor.name))
+    .filter((spec) => spec.descriptor.name === 'engine.read_kb_subject'
+      ? dependencies.kbReadBudget !== undefined && profileRequest?.phase !== 'speculative'
+      : advertisedNames === null || advertisedNames.has(spec.descriptor.name))
     .map((spec) => ({ descriptor: spec.descriptor, validateArguments: (value) => schemaViolations(spec.input, value), validateOutput: (value) => schemaViolations(spec.output, value), execute: (value) => execute(spec.descriptor.name, value) }));
   const bindingsByName = new Map(bindings.map((binding) => [binding.descriptor.name, binding]));
   const toolSurface: EngineToolSurface = Object.freeze({

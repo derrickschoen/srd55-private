@@ -17,6 +17,7 @@ import { ALERTING_POLICY } from '../../combat/alerting';
 import { SEARCH_MEMORY_POLICY } from '../../combat/search-memory';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
 import { rendererAttributionSchema } from '../renderer-profile';
+import { KB_SUBJECTS } from '../knowledge-base-contract';
 
 export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v1' as const;
 export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v1' as const;
@@ -1035,6 +1036,15 @@ function spec(name: string, description: string, input: z.ZodType<unknown>, outp
 }
 
 export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
+  spec('engine.read_kb_subject', 'Read one indexed knowledge-base subject; at most two successful reads are allowed per round.', z.object({
+    subject: z.enum(KB_SUBJECTS),
+  }).strict(), z.union([
+    z.object({
+      kind: z.literal('kb_subject'), subject: z.enum(KB_SUBJECTS), text: z.string(),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/u), byteCount: z.number().int().nonnegative(),
+    }).strict(),
+    z.object({ kind: z.literal('kb_read_budget_exhausted'), allowed: z.literal(2) }).strict(),
+  ])),
   spec('engine.get_turn_context', 'Return full bounded tactical context, or a revision-addressed delta for a resumed session.', z.object({ run_id: identifier, expected_revision: z.number().int().min(1), scope: z.enum(['active_turn', 'round']), granularity: z.enum(['full', 'turn_delta']).optional(), since_revision: z.number().int().min(1).optional(), actor_ids: z.array(identifier).min(1).max(50).optional(), include_expectations: z.boolean().optional(), maximum_options_per_actor: z.number().int().min(1).max(20).optional(), intel_mode: z.enum(['full', 'off']).optional() }).strict().superRefine((value, context) => {
     if (value.granularity === 'turn_delta' && value.since_revision === undefined) {
       context.addIssue({ code: 'custom', path: ['since_revision'], message: 'since_revision is required for turn_delta.' });

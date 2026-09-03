@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { EncounterState } from '../../combat/encounter';
@@ -44,6 +44,14 @@ import {
   type TurnContextDeltaBase,
 } from './engine-server';
 import { jsonRpcParseError, type JsonRpcResponse, type McpHandler } from './handler';
+import {
+  decodeKbReadRecords,
+  isKbSubjectSources,
+  KbReadBudget,
+  type KbReadCallPhase,
+  type KbReadRecord,
+  type KbSubjectSources,
+} from './knowledge-base';
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
@@ -142,6 +150,8 @@ export interface EngineMcpLauncherManifest {
   readonly fixturePath: string;
   readonly proposalSpoolPath: string;
   readonly turnContextSpoolPath?: string;
+  readonly kbReadSpoolPath?: string;
+  readonly kbSubjectSources?: KbSubjectSources;
   readonly runId: EncounterSessionId;
   readonly branchId: EncounterBranchId;
   readonly revision: number;
@@ -202,6 +212,8 @@ export function createEngineMcpRuntime(
     }) => void;
     readonly initiativeProjection?: EngineInitiativeProjection;
     readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
+    readonly kbReadBudget?: KbReadBudget;
+    readonly kbReadCallPhase?: KbReadCallPhase;
   } = {},
 ): EngineMcpRuntime {
   const candidates = state.combatants
@@ -326,6 +338,8 @@ export function createEngineMcpRuntime(
       onTurnContextRendered: options.onTurnContextRendered,
     }),
     ...(options.onTurnContext === undefined ? {} : { onTurnContext: options.onTurnContext }),
+    ...(options.kbReadBudget === undefined ? {} : { kbReadBudget: options.kbReadBudget }),
+    ...(options.kbReadCallPhase === undefined ? {} : { kbReadCallPhase: options.kbReadCallPhase }),
   });
   return {
     handler: application,
@@ -385,6 +399,9 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
     typeof input['proposalSpoolPath'] === 'string' && input['proposalSpoolPath'].length > 0 &&
     (input['turnContextSpoolPath'] === undefined ||
       typeof input['turnContextSpoolPath'] === 'string' && input['turnContextSpoolPath'].length > 0) &&
+    ((input['kbReadSpoolPath'] === undefined && input['kbSubjectSources'] === undefined) ||
+      typeof input['kbReadSpoolPath'] === 'string' && input['kbReadSpoolPath'].length > 0 &&
+      isKbSubjectSources(input['kbSubjectSources'])) &&
     typeof input['runId'] === 'string' && input['runId'].length > 0 &&
     typeof input['branchId'] === 'string' && input['branchId'].length > 0 &&
     Number.isSafeInteger(input['revision']) && typeof input['revision'] === 'number' && input['revision'] >= 1 &&
@@ -449,6 +466,24 @@ async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherM
   return decodeEngineMcpLauncherManifest(decoded);
 }
 
+function kbReadRecords(path: string): readonly KbReadRecord[] {
+  let source: string;
+  try { source = readFileSync(path, 'utf8'); } catch { return []; }
+  return decodeKbReadRecords(source);
+}
+
+export function createLauncherKbReadBudget(input: {
+  readonly kbReadSpoolPath?: string;
+  readonly kbSubjectSources?: KbSubjectSources;
+}): KbReadBudget | undefined {
+  if (input.kbReadSpoolPath === undefined || input.kbSubjectSources === undefined) return undefined;
+  return new KbReadBudget(
+    input.kbSubjectSources,
+    kbReadRecords(input.kbReadSpoolPath),
+    (record) => appendFileSync(input.kbReadSpoolPath ?? '', `${JSON.stringify(record)}\n`, 'utf8'),
+  );
+}
+
 export async function runEngineMcpEntrypoint(argv: readonly string[] = process.argv): Promise<void> {
   const profileArguments = argv.slice(2).filter((argument) => argument.startsWith('--agent-profile='));
   if (profileArguments.length > 1) throw new TypeError('Engine MCP accepts at most one agent profile flag.');
@@ -462,6 +497,7 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
   const selectedProfile = profileValue as EngineMcpToolProfile | undefined;
   const manifest = await launcherManifest(launcherPath);
   if (manifest !== null) {
+    const kbReadBudget = createLauncherKbReadBudget(manifest);
     await runEngineMcpServer(manifest.fixturePath, {
       runId: manifest.runId,
       branchId: manifest.branchId,
@@ -492,6 +528,12 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       ...((selectedProfile ?? manifest.toolProfile) === undefined
         ? {}
         : { toolProfile: selectedProfile ?? manifest.toolProfile }),
+      ...(kbReadBudget === undefined ? {} : {
+        kbReadBudget,
+        kbReadCallPhase: manifest.requestKind === 'plan_adjustment'
+          ? 'adjustment' as const
+          : manifest.phase === 'correction' ? 'correction' as const : 'initial' as const,
+      }),
       onProposal: (proposal) => {
         appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(proposal)}\n`, 'utf8');
       },

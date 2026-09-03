@@ -30,6 +30,7 @@ import {
 import {
   basisFixturesPath,
   extractArenaProbeVerdict,
+  mapConversationKbReads,
   parseArenaArgs,
   runArena,
 } from '../../../tools/ai-dm-arena';
@@ -37,8 +38,10 @@ import {
   mkdtempSync,
   readFileSync,
 } from '../../helpers/test-filesystem';
+import type { RepoRelativeKbPath } from '../../../src/vtt/knowledge-base-contract';
+import type { KbReadRecord } from '../../../src/vtt/mcp/knowledge-base';
 
-const DEFAULT_KB_HASH = '45ea6c7b6ccfcd04aad13e51ff3d7e9884247782cb9feba1e9297344ce7d39f0';
+const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
 
 function objectValue(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -209,6 +212,24 @@ const LEGACY_BLOCK_ARGS = [
 ] as const;
 
 describe('AI-DM arena', () => {
+  it('maps rows with zero, one, and two KB reads without losing hashes or order (mutation: omit arena kbReads)', () => {
+    const records: readonly KbReadRecord[] = [
+      {
+        subject: 'actions',
+        repoRelativePath: 'tests/fixtures/ai-dm-kb/actions.md' as RepoRelativeKbPath,
+        sha256: '1'.repeat(64), byteCount: 101, ordinal: 1, callPhase: 'initial',
+      },
+      {
+        subject: 'spells',
+        repoRelativePath: 'tests/fixtures/ai-dm-kb/spells.md' as RepoRelativeKbPath,
+        sha256: '2'.repeat(64), byteCount: 202, ordinal: 2, callPhase: 'correction',
+      },
+    ];
+
+    expect([0, 1, 2].map((count) => mapConversationKbReads({ kbReads: records.slice(0, count) })))
+      .toEqual([[], [records[0]], records]);
+  });
+
   it.each([
     ['standard', 'tests/fixtures/arena-basis'],
     ['hard', 'tests/fixtures/arena-basis-hard'],
