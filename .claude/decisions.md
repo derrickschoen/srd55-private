@@ -1,5 +1,21 @@
 # Binding scope decisions
 
+F: B4 COMMITTED WITH A MUTATION CLAIM THAT HAD NOT YET HAPPENED
+(supervisor, 2026-09-03 01:03): my Calm Emotions mutation script looked
+for a `radius*` field; the definition uses `baseSizeFeet`, so the assert
+fired, nothing was mutated, and the two "test runs" in that command were
+both unmutated 9/9 passes. I read the sequence as a successful mutation
+check and wrote it into the B4 lane commit message and the previous
+supervisor note. Caught on reading the command output. Redone on the
+real field (baseSizeFeet 20 -> 25): three B4 tests fail
+(sphere_radius_15_or_25, humanoid_filter_dropped,
+indifference_not_ending_on_hostility), 9/9 after `git checkout` restore
+proven by grep. Lane commit message amended (message only; C1 was
+running in the working tree and is unaffected). Rule: a mutation script
+must print the mutated line and the command must fail loudly (set -e or
+an explicit exit) when the assert fires, so an unapplied mutation cannot
+be followed by a test run that looks like evidence.
+
 B4 VERIFIED AND COMMITTED; C1 DISPATCHED (supervisor, 2026-09-03 01:00):
 B4 (27 files +606/-49, new tests/unit/vtt/d466-b4-spell-payloads.test.ts).
 Codex reports tsc 0 / sg 0 / 540 files 9472 tests and both mutations
