@@ -1,5 +1,23 @@
 # Binding scope decisions
 
+B3 VERIFIED AND COMMITTED; B4 DISPATCHED (supervisor, 2026-09-02 23:50):
+B3 (9 files +211/-9, new src/vtt/d466-room-overrides.ts and
+room-roster-preflight.test.ts; six 6203 fixtures edited). My checks:
+every edited fixture has zero doppelganger/ghost mentions and two
+replacement mentions (state + spec halves); replacement HP equals the
+replacement maximum (giant scorpion 52/52); the override is applied
+inside generateRoom (room-generator.ts:627) so both the arena
+--generate-missing-rooms path and the conversation tool get it; the
+preflight test loads all 30 rooms and asserts an offerable attack-roll
+option per creature and a disposition per feature. Gates: tsc 0, sg 0,
+vitest 539 files / 9460 tests on the rerun (first run: one 5 s-budget
+timeout in the arena round-robin test, 3.2 s in isolation — same
+load-margin class as the A2 test). My mutation (override table extended
+to 6204005 in both the union type and the table) fails the room-generator
+test, passes after restore proven by grep. Committed in the lane. B4
+(choice-on-activation, Calm Emotions, Entangle per D479/D480) dispatched.
+D447 control still running (43 min).
+
 B2 VERIFIED AND COMMITTED; B3 DISPATCHED (supervisor, 2026-09-02 23:16):
 B2 (16 files +563/-10, new src/combat/monster-traits.ts and
 monster-feature-support.test.ts). My gates: tsc 0, sg 0, vitest 538 files
