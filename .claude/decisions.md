@@ -1,5 +1,23 @@
 # Binding scope decisions
 
+MEASURED: THE FIRST SUBMISSION IS REJECTED IN 85% OF LUNA SESSIONS
+(supervisor, 2026-09-03 08:50, raw rollouts, invocation-level detector
+`engine_submit_round_proposals(` in the exec JS, paired with the exec
+output): 212 luna-low rollouts from the D443 arms (09/02 17:00-21:59);
+183 contain a submit; the FIRST submit was rejected in 155 of them
+(84.7%), 152 for envelope shape (missing phase/idempotency_key,
+state_ref/run_id placement, unrecognized keys), 3 other (stale_state,
+a JS syntax error in the model's exec script). Sessions make a median
+of 4 submit invocations (p90 5) and a median of 6 exec calls (tool
+discovery, context fetch, schema reads) before the first submit. My
+earlier detector (substring match) reported 184 first-ok — wrong,
+because the model's discovery scripts mention the tool name; discarded.
+Confirms D484's premise: failure-then-retry is the norm for luna too;
+sol merely refused to retry. The codex brainstorm/audit is in flight;
+F's description fix alone will not reach "rare" — the fixes must
+remove the need to know the envelope at all (server-side fill / draft
+tool) or expose the real schema.
+
 D2.1+D2.2 COMMITTED; F DISPATCHED; CONTROL RERUN DEFERRED (supervisor,
 2026-09-03 08:40): lane 4888a90b. D2.2 made the rollout lookup one
 directory listing per session with a cached path and a bounded tail
