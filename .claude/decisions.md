@@ -1,5 +1,24 @@
 # Binding scope decisions
 
+D2.1 VERIFIED BUT NOT YET COMMITTED: A TEST-COST REGRESSION BLOCKS THE
+GATE (supervisor, 2026-09-03 07:50): D2.1 (17 files +441/-86, five
+simulated rollout fixtures) reads the session's rollout file for the last
+token_count.last_token_usage after each completed turn — the --json
+stream has no per-call usage (codex pasted a captured stream:
+turn.completed carries only the turn total). Typed as turnInputTotal vs
+contextInputTokens; the policy compares contextInputTokens only. My
+mutation (both currentContextTokens writes -> turnInputTotal, guarded):
+tsc REFUSES it (branded ContextTokenCount vs TurnInputTotal) and six
+tests fail, 16/16 after restore proven by cmp — the type system doing
+what AGENTS.md asks. But the arena test "reloads the fixture and full
+context for each of three SIMULATED reps" now fails the full suite at
+5.4-5.8 s (5 s default) on three consecutive runs at load 2-3 (4.46 s in
+isolation); it passed in full runs before D2.1. Not a flake to wave
+through: D2.1 made the per-call path more expensive. D2.2 dispatched:
+bounded rollout lookup (cached path per session, tail read), cheaper
+test, two green full runs, no timeout changes. D2.1 stays in the working
+tree and is committed together with D2.2. Sol batch arm 1 running.
+
 D465 RELAUNCHED WITH THE PROTOCOL SUBJECT; PROBE PASSES (supervisor,
 2026-09-03 07:27): 2-room sol-low probe with sol-protocol-kb.txt
 (kbHash 3111bc8f): 2/2 rounds model-planned, 0 auto-submit blocks, 0
