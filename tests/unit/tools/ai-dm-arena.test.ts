@@ -403,11 +403,21 @@ describe('AI-DM arena', () => {
 
   it('propagates hidden options exactly once with the engine-state knowledge marker', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-hidden-options-'));
+    const monster = monsterProfile('hidden-option-monster', { initiativeBonus: -20 });
+    const character = playerProfile('hidden-option-character', { initiativeBonus: 20 });
+    const fixtureState = createEncounter({
+      bounds: { columns: 3, rows: 1 },
+      combatants: [monster, character],
+      tokens: [placedToken(monster, 0), placedToken(character, 2)],
+      config: { initiativeMode: 'per_combatant' },
+    });
     const [row] = await runArena(parseArenaArgs([
       '--rooms', '1', '--reps', '1', '--seed', '3943001', '--dry-run',
+      '--cli', 'local-openai', '--local-base-url', 'http://SIMULATED.invalid',
+      '--local-model', 'SIMULATED-model',
       '--out', join(directory, 'arena.jsonl'),
       ...LEGACY_BLOCK_ARGS,
-    ]));
+    ]), { adapter: new InProcessArenaAdapter(), fixtureStates: [fixtureState] });
     if (row === undefined) throw new Error('Hidden-option arena produced no row.');
 
     expect(row.knowledgeModel).toBe('engine_state');

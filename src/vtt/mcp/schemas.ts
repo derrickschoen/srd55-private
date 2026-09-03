@@ -1016,17 +1016,21 @@ const proposalAnnotations = Object.freeze({ readOnlyHint: false, destructiveHint
 function spec(name: string, description: string, input: z.ZodType<unknown>, output: z.ZodType<unknown>, proposal = false): EngineToolSpec {
   const inputSchema = jsonSchema(input);
   const correctionRule = name === 'engine.submit_round_proposals'
-    ? [{ if: { properties: { phase: { const: 'correction' } } }, then: { properties: { proposals: { items: { properties: { fallback_option_id: { type: 'null' } } } } } } }]
+    ? { if: { properties: { phase: { const: 'correction' } } }, then: { properties: { proposals: { items: { properties: { fallback_option_id: { type: 'null' } } } } } } }
     : name === 'engine.submit_plan_adjustment'
-      ? [{ if: { properties: { phase: { const: 'correction' } } }, then: { properties: { updates: { items: { properties: { fallback_option_id: { type: 'null' } } } } } } }]
+      ? { if: { properties: { phase: { const: 'correction' } } }, then: { properties: { updates: { items: { properties: { fallback_option_id: { type: 'null' } } } } } } }
       : name === 'engine.validate_proposal' || name === 'engine.submit_proposal'
-      ? [{ if: { properties: { phase: { const: 'correction' } } }, then: { properties: { proposal: { properties: { fallback_option_id: { type: 'null' } } } } } }]
+      ? { if: { properties: { phase: { const: 'correction' } } }, then: { properties: { proposal: { properties: { fallback_option_id: { type: 'null' } } } } } }
       : null;
   return {
     descriptor: {
       name,
       description,
-      inputSchema: correctionRule === null ? inputSchema : { ...inputSchema, allOf: correctionRule },
+      inputSchema: correctionRule === null
+        ? inputSchema
+        : name === 'engine.submit_round_proposals'
+          ? { ...inputSchema, ...correctionRule }
+          : { ...inputSchema, allOf: [correctionRule] },
       ...(ADVERTISE_MCP_OUTPUT_SCHEMAS ? { outputSchema: jsonSchema(output) } : {}),
       annotations: proposal ? proposalAnnotations : queryAnnotations,
     },
@@ -1034,6 +1038,8 @@ function spec(name: string, description: string, input: z.ZodType<unknown>, outp
     output,
   };
 }
+
+export const ENGINE_TURN_PROPOSAL_INPUT_SCHEMA = jsonSchema(turnProposal);
 
 export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.read_kb_subject', 'Read one indexed knowledge-base subject; at most two successful reads are allowed per round.', z.object({
@@ -1071,13 +1077,20 @@ export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.query_visibility', 'Batch engine-owned perception and visibility comparisons.', z.object({ ...refInput, queries: z.array(pairQuery).min(1).max(50) }).strict(), pairOutput(visibilityFacts)),
   spec('engine.query_dice_expectation', 'Compare bounded analytic outcomes without consuming RNG.', z.object({ ...refInput, candidates: z.array(z.object({ candidate_id: z.string().min(1).max(100), actor_id: identifier, choice: actionChoice, movement: movementPreference.optional(), engagement: engagement.optional() }).strict()).min(1).max(20), include_distribution: z.boolean().optional() }).strict(), diceOutput),
   spec('engine.validate_proposal', 'Purely validate and preview one revision-bound composite option proposal.', phaseProposalInput, validateOutput),
-  spec('engine.submit_round_proposals', 'Validate and queue one all-or-nothing shared-initiative round proposal.', submitRoundInput, roundOutput, true),
+  spec('engine.submit_round_proposals', 'Queue one all-or-nothing shared-initiative round proposal. Input envelope: { state_ref: { run_id, state_handle, expected_revision }, request_id, phase, idempotency_key, proposals }. A call rejected for invalid arguments is not queued and does not count as your submission; fix the arguments and call again.', submitRoundInput, roundOutput, true),
   spec('engine.submit_plan_adjustment', 'Validate and queue a bounded patch over the remaining open monster plan.', submitPlanAdjustmentInput, adjustmentOutput, true),
   spec('engine.submit_speculative_round_plan', 'Structurally validate and queue one host-guarded contingent monster-round plan.', submitSpeculativeRoundPlanInput, speculativeRoundPlanOutput, true),
   spec('engine.submit_proposal', 'Validate and queue one separately controlled seat proposal.', submitProposalInput, singleOutput, true),
   spec('engine.emit_narration', 'Queue one bounded presentation-only narration chunk.', z.object({ ...refInput, request_id: identifier, idempotency_key: z.string().min(16).max(200), voice: z.enum(['cinematic_visible_rolls', 'terse_tactical', 'rules_explicit', 'terse_rule_citing_validation']), text: z.string().min(1).max(12_000), audience: z.enum(['shared', 'dm_only']), rule_references: z.array(z.object({ rule_id: identifier, source_locator: z.string().min(1).max(300) }).strict()).max(20).optional() }).strict(), narrationOutput, true),
   spec('engine.request_dm_adjudication', 'Queue a bounded DM question with no raw mechanical consequence.', z.object({ ...refInput, request_id: identifier, actor_id: identifier, subject: z.string().min(1).max(300), reason: z.string().min(1).max(2_000), blocking: z.boolean(), suggested_outcomes: z.array(z.string().min(1).max(500)).max(5).optional(), idempotency_key: z.string().min(16).max(200) }).strict(), adjudicationOutput, true),
 ]);
+
+export const ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA = ENGINE_TOOL_SPECS.find(
+  (specification) => specification.descriptor.name === 'engine.submit_round_proposals',
+)?.descriptor.inputSchema;
+if (ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA === undefined) {
+  throw new Error('engine.submit_round_proposals must publish an input schema.');
+}
 
 function jsonPointer(path: readonly PropertyKey[]): string {
   return path.length === 0 ? '$' : path.reduce<string>((pointer, segment) => `${pointer}/${String(segment).replaceAll('~', '~0').replaceAll('/', '~1')}`, '');

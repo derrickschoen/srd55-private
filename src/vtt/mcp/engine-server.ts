@@ -105,7 +105,9 @@ import {
   ENGINE_LEGENDARY_WINDOWS_POLICY,
   ENGINE_REACTION_SPEND_HOLD_POLICY,
   ENGINE_RECOVERY_CAPABILITY_POLICY,
+  ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
   ENGINE_TOOL_SPECS,
+  ENGINE_TURN_PROPOSAL_INPUT_SCHEMA,
   schemaViolations,
 } from './schemas';
 import type { KbReadBudget, KbReadCallPhase } from './knowledge-base';
@@ -749,7 +751,7 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal' | 'sp
       ? 'Review the current remaining monster plan, then use engine.submit_plan_adjustment once. Submit zero to the stated adjustment budget of open-actor replacement proposals; omitted actors keep their baseline proposals and an empty updates list explicitly keeps the plan. Do not change reaction guidance. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
       : 'Correct only the refused plan-adjustment actors once with engine.submit_plan_adjustment. Valid staged updates remain accepted. No fallback remains after this correction; every correction fallback_option_id must be null. Omitted refused actors keep their baseline proposals.'
     : kind === 'plan_round'
-      ? 'Use engine.get_turn_context, then engine.submit_round_proposals once for the complete required actor set. Select only offered revision-bound option ids. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
+      ? 'Use engine.get_turn_context, then engine.submit_round_proposals once for the complete required actor set. Input envelope: { state_ref: { run_id, state_handle, expected_revision }, request_id, phase, idempotency_key, proposals }. A call rejected for invalid arguments is not queued and does not count as your submission; fix the arguments and call again. Select only offered revision-bound option ids. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
       : 'Correct the complete refused proposal request once. No fallback remains after this correction; correction fallback_option_id must be null. If you refresh context, use the get_turn_context request in current_context exactly.';
   return [fixed, `Turn resource: ${uriBase}/turn/current`, `Proposal schema: ${uriBase}/schema/turn-proposal-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: capsule.request, voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
 }
@@ -2668,7 +2670,13 @@ function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRules
         if (entry === null) throw new RangeError('Rule source is not allowlisted.');
         return content(uri, { rule_id: entry.ruleId, source_locator: entry.sourceLocator, text: entry.text, attribution: entry.attribution });
       }
-      if (uri === `${base}/schema/turn-proposal-v1`) return content(uri, { version: 1, constraints: ['Select only engine-offered option ids from the exact revision.', 'Never send coordinates, cells, destinations, paths, attack modifiers, DCs, dice, damage, or commands.'], examples: [{ actor_id: 'monster-id', expected_revision: 42, primary_option_id: 'option:42:...', fallback_option_id: null, override_justification: null }] });
+      if (uri === `${base}/schema/turn-proposal-v1`) return content(uri, {
+        version: 1,
+        envelope: ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
+        proposal: ENGINE_TURN_PROPOSAL_INPUT_SCHEMA,
+        constraints: ['Select only engine-offered option ids from the exact revision.', 'Never send coordinates, cells, destinations, paths, attack modifiers, DCs, dice, damage, or commands.'],
+        examples: [{ actor_id: 'monster-id', expected_revision: 42, primary_option_id: 'option:42:...', fallback_option_id: null, override_justification: null }],
+      });
       throw new RangeError('Unknown or expired resource URI.');
     },
   };

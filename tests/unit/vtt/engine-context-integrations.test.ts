@@ -130,6 +130,7 @@ async function brutalTurnContext(
   seed: number,
   revision: number,
   base?: TurnContextDeltaBase,
+  requestedActorCount?: number,
 ): Promise<Readonly<Record<string, unknown>>> {
   const state = await loadArenaFixture(
     `tests/fixtures/arena-basis-brutal/seed-${String(seed)}.json`,
@@ -160,7 +161,7 @@ async function brutalTurnContext(
     correctionNumber: request.correctionNumber,
     room: 1,
     historyKind: 'room_ready',
-    requestedActorCount: request.actors.length,
+    requestedActorCount: requestedActorCount ?? request.actors.length,
     initiativeProjection: prepared.snapshot.capsule.projection.initiative,
     ...(base === undefined ? {} : { turnContextDeltaBase: base }),
   });
@@ -173,17 +174,6 @@ async function brutalTurnContext(
     intel_mode: 'full',
     ...(base === undefined ? {} : { since_revision: base.revision }),
   }), `brutal ${String(seed)} turn context`);
-}
-
-function denseDeltaBase(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(denseDeltaBase);
-  if (typeof value === 'object' && value !== null) {
-    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, denseDeltaBase(nested)]));
-  }
-  if (typeof value === 'string') return `${value}:prior`;
-  if (typeof value === 'number') return value + 1;
-  if (typeof value === 'boolean') return !value;
-  return value;
 }
 
 describe('M-core and D420 turn-context rendering', () => {
@@ -232,19 +222,22 @@ describe('M-core and D420 turn-context rendering', () => {
   );
 
   it('falls back to the capped full context when the brutal seed 6203003 delta is larger', async () => {
-    const baseContext = await brutalTurnContext(6_203_002, 2);
-    const baseStateRef = record(baseContext['state_ref'], 'brutal delta base state ref');
-    const baseRevision = baseStateRef['expected_revision'];
-    if (typeof baseRevision !== 'number') throw new TypeError('Brutal delta base revision is absent.');
-    const pressuredBase = record(denseDeltaBase(baseContext), 'pressured brutal delta base');
+    const baseRevision = 2;
     const context = await brutalTurnContext(6_203_003, baseRevision + 1, {
       revision: baseRevision,
       context: {
-        ...pressuredBase,
         granularity: 'full',
-        state_ref: baseContext['state_ref'],
+        context_trimmed: false,
+        state_ref: {
+          run_id: 'encounter:brutal-context',
+          state_handle: `engine-state:${'0'.repeat(64)}`,
+          expected_revision: baseRevision,
+        },
+        actors: Array.from({ length: 2 }, () => ({
+          options: Array.from({ length: 1_000 }, () => ({})),
+        })),
       },
-    });
+    }, 2);
     const bytes = new TextEncoder().encode(JSON.stringify(context)).byteLength;
     expect(context['granularity']).toBe('full');
     expect(context['context_trimmed']).toBe(true);

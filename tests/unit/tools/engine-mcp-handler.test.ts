@@ -27,7 +27,11 @@ import {
 import { feet } from '../../../src/combat/values';
 import { buildHostScenarioMenu } from '../../../src/vtt/speculative-planning';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
-import { engineSchemaInternals } from '../../../src/vtt/mcp/schemas';
+import {
+  ENGINE_TOOL_SPECS,
+  ENGINE_TURN_PROPOSAL_INPUT_SCHEMA,
+  engineSchemaInternals,
+} from '../../../src/vtt/mcp/schemas';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
 const TOOL_NAMES = [
@@ -501,6 +505,39 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     } while (cursor !== undefined);
     expect(names).toEqual(TOOL_NAMES);
     expect(request(runtime.handler, 99, 'tools/list', { cursor: 'forged' })).toMatchObject({ error: { code: -32602 } });
+  });
+
+  it('D466 F names the submit envelope and invalid-call retry rule (mutation: drop either description sentence)', async () => {
+    const { runtime } = await fixtureRuntime({ requestedActorCount: 1, toolProfile: 'dm' });
+    const listing = record(request(runtime.handler, 98, 'tools/list').result);
+    const tools = listing['tools'];
+    if (!Array.isArray(tools)) throw new TypeError('DM tools/list omitted tools.');
+    const submission = tools.map(record).find((tool) => tool['name'] === 'engine.submit_round_proposals');
+    if (submission === undefined) throw new TypeError('DM tools/list omitted engine.submit_round_proposals.');
+    expect(submission['description']).toContain('Input envelope: { state_ref: { run_id, state_handle, expected_revision }, request_id, phase, idempotency_key, proposals }.');
+    expect(submission['description']).toContain('A call rejected for invalid arguments is not queued and does not count as your submission; fix the arguments and call again.');
+  });
+
+  it('D466 F publishes the complete submit schema through tools/list (mutation: replace inputSchema with an unknown or partial object)', async () => {
+    const { runtime } = await fixtureRuntime({ requestedActorCount: 1, toolProfile: 'dm' });
+    const listing = record(request(runtime.handler, 97, 'tools/list').result);
+    const tools = listing['tools'];
+    if (!Array.isArray(tools)) throw new TypeError('DM tools/list omitted tools.');
+    const submission = tools.map(record).find((tool) => tool['name'] === 'engine.submit_round_proposals');
+    const specification = ENGINE_TOOL_SPECS.find((candidate) => candidate.descriptor.name === 'engine.submit_round_proposals');
+    if (submission === undefined || specification === undefined) throw new TypeError('Submit-round tool is missing.');
+    expect(submission['inputSchema']).toEqual(specification.descriptor.inputSchema);
+    expect(record(submission['inputSchema'])['required']).toEqual([
+      'state_ref', 'request_id', 'phase', 'idempotency_key', 'proposals',
+    ]);
+    // Codex 0.148 receives this schema, but its code-mode TypeScript renderer chooses a
+    // root allOf before the root object and reduces an if/then-only member to `unknown`.
+    // Root-level if/then preserves the same validation rule while keeping the envelope visible.
+    expect(record(submission['inputSchema'])['allOf']).toBeUndefined();
+    expect(record(submission['inputSchema'])).toMatchObject({
+      if: { properties: { phase: { const: 'correction' } } },
+      then: { properties: { proposals: { items: { properties: { fallback_option_id: { type: 'null' } } } } } },
+    });
   });
 
   it('advertises only locally resolved and reachable definitions in every tool input schema', async () => {
@@ -1154,6 +1191,22 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(Array.isArray(templates) ? templates.map((value) => record(value)['name']) : []).toEqual(['Journal chunk', 'Rule entry']);
   });
 
+  it('D466 F serves the exact submit envelope schema from the proposal resource (mutation: drift one envelope field)', async () => {
+    const { runtime } = await fixtureRuntime({ requestedActorCount: 1, toolProfile: 'dm' });
+    const resources = record(request(runtime.handler, 398, 'resources/list').result)['resources'];
+    if (!Array.isArray(resources)) throw new TypeError('resources/list omitted resources.');
+    const proposalResource = resources.map(record).find((resource) => resource['name'] === 'Turn proposal v1');
+    if (proposalResource === undefined) throw new TypeError('resources/list omitted Turn proposal v1.');
+    const read = record(request(runtime.handler, 397, 'resources/read', { uri: proposalResource['uri'] }).result);
+    const contents = read['contents'];
+    if (!Array.isArray(contents)) throw new TypeError('Proposal resource omitted contents.');
+    const body = record(JSON.parse(String(record(contents[0])['text'])) as unknown);
+    const specification = ENGINE_TOOL_SPECS.find((candidate) => candidate.descriptor.name === 'engine.submit_round_proposals');
+    if (specification === undefined) throw new TypeError('Submit-round tool is missing.');
+    expect(body['envelope']).toEqual(specification.descriptor.inputSchema);
+    expect(body['proposal']).toEqual(ENGINE_TURN_PROPOSAL_INPUT_SCHEMA);
+  });
+
   it('renders both prompts from the same bounded renderer and validates prompt arguments', async () => {
     const { runtime } = await fixtureRuntime();
     const plan = record(request(runtime.handler, 400, 'prompts/get', {
@@ -1163,6 +1216,8 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(JSON.stringify(plan)).toContain('engine.submit_round_proposals');
     expect(JSON.stringify(plan)).toContain('reaction_guidance');
     expect(JSON.stringify(plan)).toContain('persists until replaced');
+    expect(JSON.stringify(plan)).toContain('Input envelope: { state_ref: { run_id, state_handle, expected_revision }, request_id, phase, idempotency_key, proposals }.');
+    expect(JSON.stringify(plan)).toContain('A call rejected for invalid arguments is not queued and does not count as your submission; fix the arguments and call again.');
     const capsule = runtime.feed.current();
     expect(JSON.stringify(plan)).not.toContain('proof_token');
     expect(JSON.stringify(plan)).not.toContain(engineStateSummaryProofToken(capsule.digest, 'turn_minimal'));
