@@ -38,6 +38,7 @@ import {
   type CircumstanceFeatureVector,
   type RendererProfile,
 } from '../src/vtt/renderer-profile';
+import { DEFAULT_AI_DM_KB_ROOT } from '../src/vtt/knowledge-base-contract';
 
 export const ARENA_BASES = ['standard', 'hard', 'brutal', 'scenario'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
@@ -79,7 +80,7 @@ export interface ArenaConfig {
   readonly cwd: string;
   readonly cliBin: string;
   readonly timeoutMs: number;
-  readonly kbPath: string | null;
+  readonly kbPath: string;
   readonly reactionAskDefault: UnattendedReactionAskDefault;
   readonly basis: ArenaBasis;
   readonly interleave: boolean;
@@ -173,8 +174,8 @@ function validateKbPath(cwd: string, candidate: string): void {
   if (pathIsInside(resolve(cwd, 'content/cc-by-sa'), candidate)) {
     throw new TypeError('--kb cannot use content/cc-by-sa as a knowledge-base source.');
   }
-  if (pathIsInside(cwd, candidate) && !pathIsInside(resolve(cwd, 'tests/fixtures'), candidate)) {
-    throw new TypeError('--kb must be outside the repository working tree or within tests/fixtures.');
+  if (!pathIsInside(resolve(cwd, 'tests/fixtures/ai-dm-kb'), candidate)) {
+    throw new TypeError('--kb must name a root under tests/fixtures/ai-dm-kb.');
   }
 }
 
@@ -255,11 +256,8 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
         ...(values.has('--local-api-key') ? { apiKey: values.get('--local-api-key') ?? '' } : {}),
       }
     : null;
-  const kbPath = values.has('--kb') ? resolve(values.get('--kb') ?? '') : null;
-  if (kbPath !== null) validateKbPath(cwd, kbPath);
-  if (captureRlData && kbPath !== null && !pathIsInside(resolve(cwd, 'tests/fixtures'), kbPath)) {
-    throw new TypeError('--capture-rl-data requires a project fixture KB or no KB.');
-  }
+  const kbPath = resolve(cwd, values.get('--kb') ?? DEFAULT_AI_DM_KB_ROOT);
+  validateKbPath(cwd, kbPath);
   const reactionAskDefault = values.get('--reaction-ask-default') ?? 'decline';
   if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
     throw new TypeError('--reaction-ask-default must be decline or take.');

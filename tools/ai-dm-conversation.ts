@@ -1,7 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { appendFile, mkdtemp, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -127,6 +126,11 @@ import {
   type RendererProfile,
   type RendererRemovalCounts,
 } from '../src/vtt/renderer-profile';
+import {
+  DEFAULT_AI_DM_KB_ROOT,
+  loadAiDmKnowledgeBase,
+  type LoadedAiDmKnowledgeBase,
+} from '../src/vtt/knowledge-base-contract';
 
 export const CONVERSATION_CLIS = ['codex', 'claude-code', 'local-openai'] as const;
 export type ConversationCli = (typeof CONVERSATION_CLIS)[number];
@@ -166,7 +170,7 @@ export interface ConversationConfig {
   readonly cwd: string;
   readonly cliBin: string;
   readonly timeoutMs: number;
-  readonly kbPath: string | null;
+  readonly kbPath: string;
   readonly reactionAskDefault: UnattendedReactionAskDefault;
   readonly captureRlData: boolean;
   readonly localOpenAi: LocalOpenAiConfig | null;
@@ -537,8 +541,8 @@ function validateKbPath(cwd: string, candidate: string): void {
   if (pathIsInside(resolve(cwd, 'content/cc-by-sa'), candidate)) {
     throw new TypeError('--kb cannot use content/cc-by-sa as a knowledge-base source.');
   }
-  if (pathIsInside(cwd, candidate) && !pathIsInside(resolve(cwd, 'tests/fixtures'), candidate)) {
-    throw new TypeError('--kb must be outside the repository working tree or within tests/fixtures.');
+  if (!pathIsInside(resolve(cwd, 'tests/fixtures/ai-dm-kb'), candidate)) {
+    throw new TypeError('--kb must name a root under tests/fixtures/ai-dm-kb.');
   }
 }
 
@@ -605,11 +609,8 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
         ...(values.has('--local-api-key') ? { apiKey: values.get('--local-api-key') ?? '' } : {}),
       }
     : null;
-  const kbPath = values.has('--kb') ? resolve(values.get('--kb') ?? '') : null;
-  if (kbPath !== null) validateKbPath(cwd, kbPath);
-  if (captureRlData && kbPath !== null && !pathIsInside(resolve(cwd, 'tests/fixtures'), kbPath)) {
-    throw new TypeError('--capture-rl-data requires a project fixture KB or no KB.');
-  }
+  const kbPath = resolve(cwd, values.get('--kb') ?? DEFAULT_AI_DM_KB_ROOT);
+  validateKbPath(cwd, kbPath);
   const reactionAskDefault = values.get('--reaction-ask-default') ?? 'decline';
   if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
     throw new TypeError('--reaction-ask-default must be decline or take.');
@@ -655,18 +656,8 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   };
 }
 
-async function loadKnowledgeBase(config: ConversationConfig): Promise<{
-  readonly text: string;
-  readonly hash: string;
-} | null> {
-  if (config.kbPath === null) return null;
-  const sourcePath = await realpath(config.kbPath);
-  validateKbPath(config.cwd, sourcePath);
-  const bytes = await readFile(sourcePath);
-  return {
-    text: bytes.toString('utf8'),
-    hash: createHash('sha256').update(bytes).digest('hex'),
-  };
+async function loadKnowledgeBase(config: ConversationConfig): Promise<LoadedAiDmKnowledgeBase> {
+  return loadAiDmKnowledgeBase(config.cwd, config.kbPath);
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
@@ -2252,8 +2243,10 @@ async function runConversationWithConfiguredIntel(
     config.escalationModel === null || config.escalationEffort === null
       ? null
       : { model: config.escalationModel, effort: config.escalationEffort };
-  const escalationInstructions =
+  const escalationRepairInstructions =
     'This is a fresh one-shot escalation session for the supplied repair brief. Submit one complete OFFENSIVE corrected round: every actor with a legal attack must attack; Dash-to-close counts as offense for out-of-reach melee; Dodge is allowed only when that actor has no resolvable action. Use only the correction launcher; no fallback remains.';
+  const escalationInstructions =
+    `${knowledgeBase.startupInstructions}\n\n${escalationRepairInstructions}`;
   const prepareRound = (request: EngineOrdinaryRoundCapsuleRequest): EngineRoundSnapshot => {
     const prepared = engineSession.prepareRound(request, journal.reactionGuidance());
     recordAutoResolvedReactions(journal, prepared);
@@ -2529,7 +2522,7 @@ async function runConversationWithConfiguredIntel(
                 'speculate_round', sourceSnapshot.capsule, RULES_SOURCE, undefined, speculativeContext,
               ),
               launcher.manifestPath,
-              knowledgeBase?.text ?? null,
+              knowledgeBase.startupInstructions,
               planner,
               launcher.recoveryManifestPath,
               toolSession,
@@ -2846,7 +2839,7 @@ async function runConversationWithConfiguredIntel(
         const completedCorrectionProposal = recordedAdjustmentCorrectionProposal();
         if (config.captureRlData && adjustmentProposal?.submittedArguments !== undefined) {
           adjustmentRlData.push(rlCapture(
-            knowledgeBase?.text ?? null,
+            knowledgeBase.startupInstructions,
             adjustmentTurnContext,
             adjustmentProposal,
             config.intelMode,
@@ -2865,7 +2858,7 @@ async function runConversationWithConfiguredIntel(
           completedCorrectionProposal?.submittedArguments !== undefined &&
           adjustmentCorrectionContext !== null) {
           adjustmentRlData.push(rlCapture(
-            knowledgeBase?.text ?? null,
+            knowledgeBase.startupInstructions,
             adjustmentCorrectionContext,
             completedCorrectionProposal,
             config.intelMode,
@@ -2964,7 +2957,7 @@ async function runConversationWithConfiguredIntel(
               config, runId,
               `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${primaryPrompt}`,
               initialLauncher.manifestPath,
-              journal.agentSession() === null ? knowledgeBase?.text ?? null : null,
+              journal.agentSession() === null ? knowledgeBase.startupInstructions : null,
               basePlanner,
               initialLauncher.recoveryManifestPath,
               initialToolSession,
@@ -3097,7 +3090,7 @@ async function runConversationWithConfiguredIntel(
               : null;
             const proposalRlData = proposalTurnContext === null
               ? undefined
-              : rlCapture(knowledgeBase?.text ?? null, proposalTurnContext, proposal, config.intelMode, {
+              : rlCapture(knowledgeBase.startupInstructions, proposalTurnContext, proposal, config.intelMode, {
                   repoCommit,
                   model: config.model,
                   effort: config.effort,
@@ -3430,7 +3423,7 @@ async function runConversationWithConfiguredIntel(
               ...(exhaustionIntelCapture === null ? {} : { intelCapture: exhaustionIntelCapture }),
             };
             capturedRlData = rlCapture(
-              knowledgeBase?.text ?? null,
+              knowledgeBase.startupInstructions,
               recordedCorrectionTurnContext ?? getPlannedCorrectionTurnContext(),
               syntheticProposal,
               config.intelMode,
@@ -3890,7 +3883,7 @@ async function runConversationWithConfiguredIntel(
         sessionId: rolloutSessionId,
         escalationSessionId,
         sessionIdHash: binding === null ? null : sha256(binding.sessionId), outcome, proposalId,
-        kbHash: knowledgeBase?.hash ?? null,
+        kbHash: knowledgeBase.combinedStartupHash,
         repoCommit,
         rawTurnContext: rowTurnContext.raw,
         turnContextGranularity: rowTurnContext.granularity,

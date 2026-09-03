@@ -1,6 +1,5 @@
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   agentSessionIdFromCli,
@@ -49,6 +48,18 @@ import {
   createScriptedPartyPlan,
   type ScriptedPartyDecisionPolicy,
 } from '../../../src/vtt/scripted-party-round';
+import {
+  AI_DM_KB_FIXTURE_DIRECTORY,
+  DEFAULT_AI_DM_KB_ROOT,
+  KB_SUBJECTS,
+} from '../../../src/vtt/knowledge-base-contract';
+import { declareTestInputs } from '../../helpers/test-inputs';
+
+const kbInputs = declareTestInputs({ fixtures: [
+  'tests/fixtures/ai-dm-kb/ai-dm-core.md',
+  'tests/fixtures/ai-dm-kb/tactics.md',
+] });
+const DEFAULT_KB_HASH = '45ea6c7b6ccfcd04aad13e51ff3d7e9884247782cb9feba1e9297344ce7d39f0';
 
 async function runConversationWithPartyPolicy(
   decisionPolicy: ScriptedPartyDecisionPolicy,
@@ -1034,7 +1045,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows).toEqual([
       expect.objectContaining({
-        outcome: 'authorized', toolCalls: 2, callsPerRound: 1, refusals: [], kbHash: null,
+        outcome: 'authorized', toolCalls: 2, callsPerRound: 1, refusals: [], kbHash: DEFAULT_KB_HASH,
       }),
     ]);
     expect(result.rows[0]?.tokens).toEqual({ input: 0, cachedInput: 0, output: 0, reasoning: 0 });
@@ -1151,32 +1162,35 @@ describe('AI-DM engine MCP conversation runner', () => {
     })).toBe(true);
   });
 
-  it('injects a KB only on cold start and attributes every output row to its bytes', async () => {
+  it('injects the root and tactics pair byte-for-byte only on cold start and attributes its hash', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-kb-'));
     const outPath = join(directory, 'rows.jsonl');
-    const kbPath = join(directory, 'kb.txt');
-    const kbText = 'SIMULATED KB: café tactics\n';
-    writeFileSync(kbPath, kbText, 'utf8');
+    const root = kbInputs.fixtures.readText('tests/fixtures/ai-dm-kb/ai-dm-core.md');
+    const tactics = kbInputs.fixtures.readText('tests/fixtures/ai-dm-kb/tactics.md');
+    const resolvedRoot = KB_SUBJECTS.reduce<string>((text, subject) => text.replaceAll(
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/${subject}.md`,
+      resolve(process.cwd(), AI_DM_KB_FIXTURE_DIRECTORY, `${subject}.md`),
+    ), root);
+    const startupInstructions = `${resolvedRoot}\n\n${tactics}`;
     const adapter = new RecordingConversationAdapter();
     const config = parseConversationArgs([
-      '--rooms', '3', '--rounds', '1', '--out', outPath, '--kb', kbPath,
+      '--rooms', '3', '--rounds', '1', '--out', outPath, '--kb', DEFAULT_AI_DM_KB_ROOT,
       ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, { adapter });
-    const expectedHash = createHash('sha256').update(Buffer.from(kbText, 'utf8')).digest('hex');
 
     expect(adapter.startInvocations).toHaveLength(1);
-    expect(adapter.startInvocations[0]?.instructions).toBe(kbText);
-    expect(adapter.startInvocations[0]?.prompt).not.toContain(kbText);
+    expect(adapter.startInvocations[0]?.instructions).toBe(startupInstructions);
+    expect(adapter.startInvocations[0]?.prompt).not.toContain(startupInstructions);
     expect(adapter.resumeInvocations.length).toBeGreaterThan(0);
     expect(adapter.resumeInvocations.every((entry) => entry.instructions === null)).toBe(true);
-    expect(adapter.resumeInvocations.every((entry) => !entry.prompt.includes(kbText))).toBe(true);
+    expect(adapter.resumeInvocations.every((entry) => !entry.prompt.includes(startupInstructions))).toBe(true);
     const injectedText = [
       ...adapter.startInvocations.map((entry) => entry.instructions ?? ''),
       ...adapter.resumeInvocations.map((entry) => entry.instructions ?? ''),
     ].join('\n');
-    expect(injectedText.split(kbText).length - 1).toBe(1);
+    expect(injectedText.split(startupInstructions).length - 1).toBe(1);
 
     expect(adapter.resumeInvocations.some((entry) =>
       entry.prompt.startsWith('[ROOM_TRANSITION]'))).toBe(false);
@@ -1189,7 +1203,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       return entry.prompt.includes('granularity "full"') &&
         manifest.turnContextDeltaBase === undefined;
     })).toBe(true);
-    expect(result.rows.every((row) => row.kbHash === expectedHash)).toBe(true);
+    expect(result.rows.every((row) => row.kbHash === DEFAULT_KB_HASH)).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line)))
       .toHaveLength(3);
   });
@@ -1284,9 +1298,11 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--local-base-url', 'http://127.0.0.1:11434/v1', '--local-model', 'llama-SIMULATED',
       '--local-think', 'sometimes',
     ])).toThrow('--local-think must be on or off');
-    expect(parseConversationArgs([
+    expect(parseConversationArgs(['--rooms', '1', '--out', outPath]).kbPath)
+      .toBe(join(process.cwd(), DEFAULT_AI_DM_KB_ROOT));
+    expect(() => parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--kb', 'tests/fixtures/arena-basis/seed-3943001.json',
-    ]).kbPath).toBe(join(process.cwd(), 'tests/fixtures/arena-basis/seed-3943001.json'));
+    ])).toThrow('--kb must name a root under tests/fixtures/ai-dm-kb');
     expect(parseConversationArgs([
       '--rooms', '1', '--out', outPath,
       '--escalation-model', 'gpt-escalation', '--escalation-effort', 'xhigh',

@@ -1,6 +1,5 @@
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { encounterSessionId } from '../../../src/combat/values';
@@ -37,8 +36,9 @@ import {
 import {
   mkdtempSync,
   readFileSync,
-  writeFileSync,
 } from '../../helpers/test-filesystem';
+
+const DEFAULT_KB_HASH = '45ea6c7b6ccfcd04aad13e51ff3d7e9884247782cb9feba1e9297344ce7d39f0';
 
 function objectValue(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -576,16 +576,12 @@ describe('AI-DM arena', () => {
   it('renders and validates a multi-round dry run without spawning a model', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-dry-'));
     const outPath = join(directory, 'arena.jsonl');
-    const kbPath = join(directory, 'kb.txt');
-    const kbText = 'SIMULATED arena knowledge base\n';
-    writeFileSync(kbPath, kbText, 'utf8');
     const config = parseArenaArgs([
       '--rooms', '2',
       '--reps', '2',
       '--seed', '3943001',
       '--effort', 'low',
       '--out', outPath,
-      '--kb', kbPath,
       '--cli-bin', 'definitely-not-a-real-codex-binary',
       '--dry-run',
       ...LEGACY_BLOCK_ARGS,
@@ -627,8 +623,7 @@ describe('AI-DM arena', () => {
     expect(rows[1]?.contextRevision).toBe(rows[0]?.contextRevision);
     expect(rows[1]?.projectionRevision).toBe(rows[0]?.projectionRevision);
     expect(rows[1]?.startingRoomDigest).toBe(rows[0]?.startingRoomDigest);
-    const kbHash = createHash('sha256').update(Buffer.from(kbText, 'utf8')).digest('hex');
-    expect(rows.every((row) => row.kbHash === kbHash)).toBe(true);
+    expect(rows.every((row) => row.kbHash === DEFAULT_KB_HASH)).toBe(true);
     expect(rows.every((row) => /^[0-9a-f]{40}$/u.test(row.repoCommit))).toBe(true);
     expect(rows.every((row) => row.turnContextGranularity === 'full')).toBe(true);
     const firstTurnContext = JSON.parse(rows[0]?.rawTurnContext ?? '') as unknown;
@@ -661,7 +656,7 @@ describe('AI-DM arena', () => {
     });
     expect(rows[0]?.suggestionAdopted).toBe('edited');
     expect(readFileSync(outPath, 'utf8').trim().split('\n').every((line) =>
-      (JSON.parse(line) as { readonly kbHash?: unknown }).kbHash === kbHash)).toBe(true);
+      (JSON.parse(line) as { readonly kbHash?: unknown }).kbHash === DEFAULT_KB_HASH)).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n').every((line) => {
       const row = JSON.parse(line) as { readonly snippetHash?: unknown; readonly snippetSetHash?: unknown };
       return row.snippetHash === SNIPPET_REGISTRY.snippetHash &&
@@ -983,7 +978,7 @@ describe('AI-DM arena', () => {
         outcome: 'service_null',
         sessionId: 'codex-arena-usage',
         escalationSessionId: null,
-        kbHash: null,
+        kbHash: DEFAULT_KB_HASH,
         agentDispatched: true,
         flapRetries: 2,
         serviceNull: true,
