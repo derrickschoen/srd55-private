@@ -203,6 +203,43 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D479 — OWNER: choice-on-activation for Unicorn's Blessing and similar; model Calm Emotions and Entangle (2026-09-02)
+
+Owner (verbatim, on the unicorn/priest unsupported-spell table): **"For
+unicorn, make it like bg3 so that blessing activation causes a pop where
+you decide between 'cure wounds' and 'lesser restoration' (this should be
+similar to how you choose damage type when you cast 'chaos orb'). Apply
+this to other similar situations. Calm emotions sphere and entangle ape
+should be able to be modeled."**
+
+Supervisor reading and consequences:
+1. Choice-on-activation pattern. The engine already carries this shape
+   for Chromatic Orb (damageTypeChoice, src/combat/spells/definitions.ts
+   :363 and :239) and Blindness/Deafness (condition_choice, :630).
+   Unicorn's Blessing (statblock.ts:490 `spell_choice`, monsters.ts:254)
+   becomes an offered bonus-action option whose activation carries a
+   typed choice slot `spell_choice: 'cure-wounds' | 'lesser-restoration'`
+   drawn from the shared 3/day pool; the human UI prompts at activation
+   (the same interaction as the Chromatic Orb damage-type prompt); the AI
+   DM supplies the choice in the proposal (an option per choice is NOT
+   generated — one option, one typed choice field, validated against the
+   closed set). Applied to every "decide at activation" site: Command
+   (word), Dispel Evil and Good (mode), any other `*_choice` operation or
+   `spell_choice` action the disposition audit surfaces. The reference to
+   BG3 is a UX pattern only; no BG3 text or data enters the repo
+   (licensing wall unchanged).
+2. Calm Emotions (20-ft sphere, Humanoids, suppress Charmed/Frightened or
+   indifference, ends on hostile act) and Entangle (20-ft square of
+   difficult terrain, Restrained on failed Str save, Athletics escape) are
+   modeled, not hidden. Both need area placement for monster casters plus
+   an area-terrain effect (Entangle) and a sphere condition-suppression
+   effect (Calm Emotions), from the SRD text only.
+3. Placement: added to the D466 shift as increment B4 (spell payloads:
+   choice-on-activation pattern, Calm Emotions, Entangle) so the era
+   shifts once (D466). Supervisor flags the cost: B4 is the largest single
+   engine increment in the shift and may add a day; the owner can move it
+   to the post-shift tier if the timeline matters more than one era.
+
 ## D478 — OWNER: all arena until after D460 (2026-09-02)
 
 Asked (round 2 Q12): owner-played post-shift smoke (supervisor
