@@ -1,5 +1,18 @@
 # Binding scope decisions
 
+CORRECTION: ARENA ARMS RUN ROOMS SEQUENTIALLY, ON BOTH ERAS (supervisor,
+2026-09-03 06:00): watching the post-shift control I saw one operator
+session at a time (14 rollouts in 15 min) and suspected the shift had
+serialised the rooms. Read both checkouts: the non-interleaved arena
+path awaits runConversation inside nested room/rep loops in main
+(tools/ai-dm-arena.ts:569-571) and in the lane (:592-594) alike; only
+--interleave dispatches concurrently. So the control's cadence is the
+old cadence (~45 min per 30-round arm). The earlier D443 note's
+"rooms run fully parallel, ~21 codex processes per arm" described the
+conversation tool's fixture loading (Promise.all over readdir), not
+operator dispatch; that sentence was wrong and this note supersedes it.
+No behaviour change in the shift.
+
 E VERIFIED AND COMMITTED; INTEGRATION GATE GREEN; POST-SHIFT CONTROL
 LAUNCHED FROM THE LANE (supervisor, 2026-09-03 05:40): E (8 files
 +476/-31, new reference-party-size.test.ts). Gates on the fully
