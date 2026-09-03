@@ -1,5 +1,19 @@
 # Binding scope decisions
 
+G1 VERIFIED AND COMMITTED; G2 DISPATCHED (supervisor, 2026-09-03 12:15):
+G1 (9 files +589/-104): plain advertised schemas with the conditional
+rules moved to runtime, launcher-bound minimal submissions (the model
+sends proposals + optional reaction guidance; the launcher fills
+state_ref/request_id/phase and a deterministic idempotency key), typed
+rejections (stale, ambiguous, CORRECTION_FALLBACK_MUST_BE_NULL,
+INITIAL_FALLBACK_REQUIRED, PRIMARY_FALLBACK_IDENTICAL), generated
+minimal example, snake_case model-facing context; explicit envelopes
+still accepted. My gates: tsc 0, sg 0, vitest 544 files / 9529 tests.
+My mutation (identical-fallback check disabled, guarded): handler test
+fails, 100/100 after restore proven by cmp. Committed. G2 (honest
+outcomes, planner dimension, speculative actor ids, adjustment
+preflight, D485 override policy) dispatched.
+
 DECISION-EXTRACTION AND SKILLS PLAN (codex sol high, read-only, with the
 supervisor's prior art; report in dnd-slim-runs/decision-extraction-plan-
 report.log; 2026-09-03 11:40). Recommendation: the model's job becomes
