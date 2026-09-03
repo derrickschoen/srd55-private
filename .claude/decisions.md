@@ -815,6 +815,34 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D486 — OWNER: the D466 era shift includes H1 and H3 (2026-09-03)
+
+Asked: shift ends at G2 with H1/H3 as the next program (supervisor
+recommendation), or include H1 and H3 in the shift.
+
+Owner: **"Include H1 and H3 in the shift."**
+
+Consequences: the post-shift control runs after G1, G2, H1 and H3 have
+landed and the integration gate is green again; the control keeps the
+mcp_minimal transport and instructionSource none so it is comparable to
+cav-full-low 8.18 on era alone; the skills/transport experiment arms then
+run against that control on the same era. About one more day before the
+control.
+
+## D485 — OWNER: a dominance override must name an engine play or a concrete missing metric (2026-09-03)
+
+Asked: require a named engine play or missing metric (supervisor
+recommendation), keep accepting freely, accept but flag and score.
+
+Owner: **"Name an engine play or a concrete missing metric."**
+
+Consequences (added to G2): an 'objective' override must carry an
+engine-issued play token from the current context; an 'unknown_engine_gap'
+override must name a typed metric identifier the engine does not expose
+for that option; anything else is a typed rejection
+(override_unjustified) that does not consume the submission. Rows record
+override kinds and rejections; the packet key records them.
+
 ## D484 — OWNER: a rejected first submission followed by a retry must be rare, not standard (2026-09-03)
 
 Owner (verbatim): **"I would like it to be that failure then retry for
