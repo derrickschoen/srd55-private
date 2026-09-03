@@ -1,5 +1,22 @@
 # Binding scope decisions
 
+SOL PROBES; D447 FIRST LAUNCH FAILED ON MISSING FIXTURES, RELAUNCHED
+(supervisor, 2026-09-02 23:10): probes (2 rooms x 1 rep, s-full profile,
+240 s): sol LOW 0/2 model-planned (both engine fallback after schema
+rejection); sol MEDIUM 1/2 model-planned. Sol medium follows the protocol
+half the time in this tiny sample; not enough to run a 15-arm batch on.
+Owner question stands (sol medium / give sol the protocol subject / drop
+sol). D447 first launch (22:59) died in 5 s on both arms: the arena
+requires a fixture file per seed unless --generate-missing-rooms is
+passed, and seeds 6204001-10 have no fixtures (as the audit found). My
+launcher omitted the flag — supervisor error, caught at the next tick;
+log kept as run-probe-then-d447.VOID-nofixtures.log, empty outputs
+removed. Relaunched as run-d447-direct.sh with --generate-missing-rooms:
+rooms are generated deterministically from the seed (the same
+reconstruction the D454 audit used), no fixture files are added to main,
+so B3's generator override table for 6204004/6/9 remains the right shape.
+Preregistration otherwise unchanged (control first, 5 reps, 120 s).
+
 D465 SOL-LOW BATCH STOPPED AFTER ARM 1: SOL LOW FAILS THE SUBMISSION
 PROTOCOL (supervisor, 2026-09-02 22:58): d465-s-full-sol-low landed 30
 rows, 0 timeouts, but 24/30 rounds were engine-planned (plannerLabel
