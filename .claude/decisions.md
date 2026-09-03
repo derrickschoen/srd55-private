@@ -1,5 +1,37 @@
 # Binding scope decisions
 
+DECISION-EXTRACTION AND SKILLS PLAN (codex sol high, read-only, with the
+supervisor's prior art; report in dnd-slim-runs/decision-extraction-plan-
+report.log; 2026-09-03 11:40). Recommendation: the model's job becomes
+"read a pre-rendered ranked catalog, emit ONE schema-constrained final
+decision by INDEX" (A3); the harness maps indices through an immutable
+revision-bound catalog, fills every binding field, normalises, validates
+with named codes, and submits; no MCP round trip in that mode (codex
+--output-schema on the final message; the constrained turn makes no
+tool calls, avoiding the constraint tax). Path: land G1/G2 (A2 minimal
+tool) as the control and migration step; add one typed decision ingress
+(src/vtt/agent-round-decision.ts: RawIdDecision/RawIndexDecision never
+assignable to EngineTurnProposal, branded indices constructible only
+after bounds checks, DecisionCatalog, BoundRoundDecision built only by
+bindDecision, discriminated normalisation result); implement A1 (ids)
+then A3 as a small delta; A3 requires the D461/D477 typed ranking so
+index 0 is the engine recommendation (options are alphabetical today,
+turn-option-registry.ts:802); rows gain decisionTransport,
+firstDecisionAccepted, decisionAttempts, rejection/normalisation codes,
+instructionSource none|kb|skill, skillName, skillHash, planner; answer
+keys (not packets) carry planner/transport/skill. Skills experiment:
+skills under /home/vagrant/.codex-aidm/skills (engine-submission,
+dm-round), a typed arm union {none|kb|skill}, adapter emits
+skills.include_instructions=true only for skill arms, per-arm isolated
+CODEX_HOME view (the adapter's codexHome option is not yet passed to the
+child env — process.ts:41/93 — fix and test), judge home untouched; four
+arms x luna low 120 s and sol low 240 s on seeds 6203001-10 x3; primary
+outcome first decision accepted; promotion needs better first
+acceptance, no lower model-planned share, panel within 0.2. Supervisor
+sequencing: G1 (running) -> G2 -> H1 (ingress + normaliser + A1) -> H3
+(skills infrastructure + two SKILL.md) -> skills experiment on the new
+era; A3 (H2) joins the D460 program because it needs the ranking.
+
 S-MOVE SOL ARM ALSO OUTAGE-CONTAMINATED (supervisor, 2026-09-03 11:25):
 d465-s-move-sol-low.jsonl (landed 10:45:23) has 7 rows refused with
 "Agent CLI exited 1 … failed to refresh available models" — the outage
