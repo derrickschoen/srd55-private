@@ -152,6 +152,7 @@ function runtime(
       reasoningEffort: 'SIMULATED-effort',
       sessionProfile: 'test',
       callPhase: 'correction',
+      output: { kind: 'tool_driven' },
       launcherToken: 'SIMULATED-launcher-token',
       timeoutMs: null,
     },

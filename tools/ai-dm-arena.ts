@@ -4,12 +4,14 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
   CONVERSATION_CLIS,
   CONVERSATION_EFFORTS,
+  CONVERSATION_TRANSPORTS,
   COMBAT_MODELS,
   runConversation,
   type ConversationCli,
   type ConversationEffort,
   type ConversationRunOptions,
   type ConversationTokenCounts,
+  type ConversationTransport,
   type CombatModel,
   type TurnContextRenderEvidence,
 } from './ai-dm-conversation';
@@ -71,6 +73,7 @@ export interface ArenaConfig {
   readonly reps: number;
   readonly seed: number;
   readonly cli: ConversationCli;
+  readonly decisionTransport: ConversationTransport;
   readonly model: string;
   readonly effort: ConversationEffort;
   readonly escalationModel: string | null;
@@ -122,7 +125,7 @@ export interface ArenaRow {
   /** Codex rollout ID; locate its full log with a rollout-*-<id>.jsonl glob. */
   readonly sessionId: string | null;
   readonly escalationSessionId: string | null;
-  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null' | 'local_error';
+  readonly outcome: import('./ai-dm-conversation').ConversationRow['outcome'];
   readonly proposalId: string | null;
   readonly wall: number;
   readonly tokens: ConversationTokenCounts;
@@ -138,6 +141,11 @@ export interface ArenaRow {
   readonly agentDispatched: boolean;
   readonly flapRetries: 0 | 1 | 2;
   readonly serviceNull: boolean;
+  readonly decisionTransport: ConversationTransport;
+  readonly firstDecisionAccepted: boolean;
+  readonly decisionAttempts: number;
+  readonly decisionRejectionCodes: import('./ai-dm-conversation').ConversationRow['decisionRejectionCodes'];
+  readonly normalizationCodes: import('./ai-dm-conversation').ConversationRow['normalizationCodes'];
   readonly contextTruncated: boolean;
   readonly plannedBy: import('./ai-dm-conversation').ConversationPlannerAttribution | null;
   readonly plannerLabel: import('./ai-dm-conversation').ConversationRow['plannerLabel'];
@@ -206,6 +214,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--escalation-model', '--escalation-effort',
       '--cli-bin', '--timeout-ms', '--kb',
       '--reaction-ask-default',
+      '--transport',
       '--combat-model', '--initiative-profile', '--arm-combat-model',
       '--party-policy',
       '--intel-mode',
@@ -241,6 +250,13 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     throw new TypeError('--escalation-effort must be low, medium, high, or xhigh.');
   }
   const selectedCli = cli as ConversationCli;
+  const transport = values.get('--transport') ?? 'mcp_minimal';
+  if (!CONVERSATION_TRANSPORTS.includes(transport as ConversationTransport)) {
+    throw new TypeError('--transport must be mcp_minimal or final_indices.');
+  }
+  if (transport === 'final_indices' && selectedCli !== 'codex') {
+    throw new TypeError('--transport final_indices currently requires --cli codex.');
+  }
   const hasLocalOption = values.has('--local-base-url') || values.has('--local-model') ||
     values.has('--local-api-key') || values.has('--local-think');
   if (selectedCli !== 'local-openai' && hasLocalOption) {
@@ -355,6 +371,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
     seed,
     cli: selectedCli,
+    decisionTransport: transport as ConversationTransport,
     model: localOpenAi?.model ?? values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
     effort: effort as ConversationEffort,
     escalationModel,
@@ -509,6 +526,11 @@ export function arenaRows(
     agentDispatched: row.agentDispatched,
     flapRetries: row.flapRetries,
     serviceNull: row.serviceNull,
+    decisionTransport: row.decisionTransport,
+    firstDecisionAccepted: row.firstDecisionAccepted,
+    decisionAttempts: row.decisionAttempts,
+    decisionRejectionCodes: row.decisionRejectionCodes,
+    normalizationCodes: row.normalizationCodes,
     contextTruncated: row.contextTruncated,
     plannedBy: row.plannedBy,
     plannerLabel: row.plannerLabel,
@@ -555,6 +577,7 @@ function conversationConfig(
     rooms: overrides.rooms,
     rounds: overrides.rounds,
     cli: config.cli,
+    decisionTransport: config.decisionTransport,
     model: overrides.model,
     effort: overrides.effort,
     escalationModel: overrides.escalationModel,

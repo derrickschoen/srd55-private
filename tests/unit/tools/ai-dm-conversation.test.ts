@@ -562,6 +562,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       reasoningEffort: config.effort,
       sessionProfile: 'test',
       callPhase: 'initial',
+      output: { kind: 'tool_driven' },
       launcherToken: 'SIMULATED-unused',
       timeoutMs: 1,
     }, new AbortController().signal)).rejects.toThrow('Explicitly ended sitting');
@@ -1439,6 +1440,112 @@ describe('AI-DM engine MCP conversation runner', () => {
     }));
   });
 
+  it('queues a schema-final indexed decision through the same engine round path (mutation: parse valid final output but do not queue it)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-'));
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]));
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index transport produced no row.');
+
+    expect(row).toMatchObject({
+      outcome: 'authorized',
+      decisionTransport: 'final_indices',
+      firstDecisionAccepted: true,
+      decisionAttempts: 1,
+      decisionRejectionCodes: [],
+      normalizationCodes: [],
+      serviceNull: false,
+    });
+    expect(row.toolCalls).toBe(0);
+    expect(row.rawTurnContext).not.toContain('context_not_requested');
+    expect(row.authorizedPlan).not.toBeNull();
+  });
+
+  it('records a missing final decision explicitly and repairs it with the same indexed correction shape (mutation: classify final absence as service_null)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-correction-'));
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]), { exhaustInitial: ['room-1-round-1'] });
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index correction produced no row.');
+
+    expect(row.refusals).toEqual([]);
+    expect(row).toMatchObject({
+      outcome: 'authorized',
+      firstDecisionAccepted: false,
+      decisionAttempts: 2,
+      decisionRejectionCodes: ['decision_missing'],
+      normalizationCodes: [],
+      serviceNull: false,
+    });
+    expect(row.chainEvidence.correctionFinalText).toContain('catalogDigest');
+  });
+
+  it('uses the same indexed final contract for a G2-preflighted adjustment (mutation: send an adjustment through MCP)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-adjustment-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run', '--transport', 'final_indices',
+    ]);
+    const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+    });
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index adjustment run produced no row.');
+
+    expect(row).toMatchObject({
+      outcome: 'authorized',
+      decisionTransport: 'final_indices',
+      serviceNull: false,
+      decisionRejectionCodes: [],
+      normalizationCodes: [],
+    });
+    expect(row.adjustments).toHaveLength(1);
+    expect(row.adjustments[0]).toMatchObject({
+      outcome: 'adjusted',
+      requestId: 'request:room-1-round-1-pc-turn-1',
+      toolCalls: 0,
+      modelCalls: 1,
+    });
+    expect(row.decisionAttempts).toBe(2);
+  });
+
+  it('repairs an indexed adjustment through the same correction ingress (mutation: use a tool-driven adjustment correction)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-adjustment-correction-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run', '--transport', 'final_indices',
+    ]);
+    const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+      exhaustInitial: ['room-1-round-1-pc-turn-1'],
+    });
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index adjustment correction run produced no row.');
+
+    expect(row).toMatchObject({
+      outcome: 'authorized',
+      decisionTransport: 'final_indices',
+      decisionAttempts: 3,
+      decisionRejectionCodes: ['decision_missing'],
+      normalizationCodes: [],
+      serviceNull: false,
+    });
+    expect(row.adjustments[0]).toMatchObject({
+      outcome: 'adjusted',
+      correctionChain: expect.objectContaining({ result: 'accepted' }),
+      toolCalls: 0,
+      modelCalls: 2,
+    });
+  });
+
   it('directs K6 to consume an inline suggestion without fetching the same play again', () => {
     const k6 = readFileSync('tests/fixtures/ai-dm-kb/k6.txt', 'utf8');
 
@@ -1454,6 +1561,16 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(defaults.combatModel).toBe('initiative_segments_v1');
     expect(defaults.initiativeProfile).toBe('derived_v1');
     expect(defaults.intelMode).toBe('full');
+    expect(defaults.decisionTransport).toBe('mcp_minimal');
+    expect(parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--transport', 'final_indices',
+    ]).decisionTransport).toBe('final_indices');
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--transport', 'final_ids',
+    ])).toThrow('--transport must be mcp_minimal or final_indices');
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--cli', 'claude-code', '--transport', 'final_indices',
+    ])).toThrow('final_indices currently requires --cli codex');
     expect(parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--intel-mode', 'off',
     ]).intelMode).toBe('off');

@@ -46,6 +46,11 @@ function registeredRows(): JsonRecord[] {
       initiativeOrder: ['monster', 'fighter'],
       outcome: 'authorized',
       plannedBy: { model: `${arm}-model`, effort: 'medium' },
+      decisionTransport: 'mcp_minimal',
+      firstDecisionAccepted: true,
+      decisionAttempts: 1,
+      decisionRejectionCodes: [],
+      normalizationCodes: [],
       roundNarrative: null,
       authorizedPlan: null,
       // Era asymmetry is the real R1-10 shape: only the post-intel arm
@@ -98,8 +103,8 @@ describe('AI-DM R1-10 rerun packet', () => {
     const expectedAnswerKey = {
       version: 'ai-dm-rerun-packet-v1',
       entries: [
-        { blindId: 'blind-001', arm: 'baseline' },
-        { blindId: 'blind-002', arm: 'intel' },
+        { blindId: 'blind-001', arm: 'baseline', decisionTransport: 'mcp_minimal', firstDecisionAccepted: true, decisionAttempts: 1, decisionRejectionCodes: [], normalizationCodes: [] },
+        { blindId: 'blind-002', arm: 'intel', decisionTransport: 'mcp_minimal', firstDecisionAccepted: false, decisionAttempts: 0, decisionRejectionCodes: [], normalizationCodes: [] },
       ],
     } as const;
 
@@ -165,6 +170,11 @@ describe('AI-DM R1-10 rerun packet', () => {
         initiativeOrder: ['monster', 'fighter'],
         outcome: 'authorized',
         plannedBy: { model: `${arm}-model`, effort: 'medium' },
+        decisionTransport: 'mcp_minimal',
+        firstDecisionAccepted: true,
+        decisionAttempts: 1,
+        decisionRejectionCodes: [],
+        normalizationCodes: [],
         plannerLabel: `${arm}-planner`,
         roundNarrative: `${arm} narrative`,
         authorizedPlan: null,
@@ -206,6 +216,8 @@ describe('AI-DM R1-10 rerun packet', () => {
       seed: 5_117_001, room: 1, round: 1, startingRoomDigest: 'd1',
       combatModel: 'initiative_segments_v1', initiativeOrder: [], outcome: 'authorized',
       plannedBy: { model: 'm', effort: 'low' }, roundNarrative: null,
+      decisionTransport: 'mcp_minimal', firstDecisionAccepted: true, decisionAttempts: 1,
+      decisionRejectionCodes: [], normalizationCodes: [],
     };
     const paired = (plan: unknown, extra: Record<string, unknown> = {}): Record<string, unknown>[] =>
       ['a', 'b'].map((arm) => ({ ...base, arm, authorizedPlan: plan, ...extra }));
@@ -297,6 +309,11 @@ describe('AI-DM R1-10 rerun packet', () => {
             initiativeOrder: ['monster', 'fighter'],
             outcome: 'authorized',
             plannedBy: { model: 'shared-model', effort: 'low' },
+            decisionTransport: 'mcp_minimal',
+            firstDecisionAccepted: true,
+            decisionAttempts: 1,
+            decisionRejectionCodes: [],
+            normalizationCodes: [],
             roundNarrative: null,
             authorizedPlan: null,
             ...(era === 'commit-new' ? {
@@ -361,6 +378,10 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', engineIntel: { actors: [] } }] }))
       .toThrow('leaks a model-identifying field');
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', roundNarrative: 'uses dodge' }] }))
+      .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', decisionTransport: 'final_indices' }] }))
+      .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', normalizationCodes: ['stale_catalog'] }] }))
       .toThrow('leaks a model-identifying field');
   });
 

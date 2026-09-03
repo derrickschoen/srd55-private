@@ -109,6 +109,11 @@ const arenaRowSchema = z.object({
   // Post-intel rows label the planner ('model' | 'engine_default'); pre-intel
   // rows have no such field. Attribution uses it when present.
   plannerLabel: z.string().nullable().optional(),
+  decisionTransport: z.enum(['mcp_minimal', 'final_indices']),
+  firstDecisionAccepted: z.boolean(),
+  decisionAttempts: safeIntegerSchema.min(0),
+  decisionRejectionCodes: z.array(z.string()),
+  normalizationCodes: z.array(z.string()),
   // Required in cross-era mode, where it is the arm partition key.
   repoCommit: z.string().min(1).optional(),
 }).passthrough();
@@ -149,6 +154,11 @@ interface ValidatedArenaRow {
   readonly outcome: string;
   readonly plannedBy: z.infer<typeof plannerSchema>;
   readonly plannerLabel: string | null | undefined;
+  readonly decisionTransport: 'mcp_minimal' | 'final_indices';
+  readonly firstDecisionAccepted: boolean;
+  readonly decisionAttempts: number;
+  readonly decisionRejectionCodes: readonly string[];
+  readonly normalizationCodes: readonly string[];
   readonly roundNarrative: string | null;
   readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
 }
@@ -205,6 +215,11 @@ export interface RerunAnswerKey {
   readonly entries: readonly {
     readonly blindId: string;
     readonly arm: string;
+    readonly decisionTransport: 'mcp_minimal' | 'final_indices';
+    readonly firstDecisionAccepted: boolean;
+    readonly decisionAttempts: number;
+    readonly decisionRejectionCodes: readonly string[];
+    readonly normalizationCodes: readonly string[];
   }[];
 }
 
@@ -218,6 +233,8 @@ const MODEL_IDENTITY_FIELDS = new Set([
   // the executed-plan normalization failed and the entry identifies its era.
   'acceptedIntent', 'acceptedProposal', 'resolutionSummary', 'actionSlots',
   'selectedBranch', 'optionId', 'plannerLabel',
+  'decisionTransport', 'firstDecisionAccepted', 'decisionAttempts',
+  'decisionRejectionCodes', 'normalizationCodes',
   // The round narrative is a deterministic era-specific renderer template
   // ("expands X + X -> Y into N ordered use(s)" vs "moves N feet and uses x"),
   // verified trivially arm-separable on real R1-10 rows. It adds nothing
@@ -321,6 +338,11 @@ function validateRow(
     outcome: row.outcome,
     plannedBy: row.plannedBy,
     plannerLabel: row.plannerLabel,
+    decisionTransport: row.decisionTransport,
+    firstDecisionAccepted: row.firstDecisionAccepted,
+    decisionAttempts: row.decisionAttempts,
+    decisionRejectionCodes: row.decisionRejectionCodes,
+    normalizationCodes: row.normalizationCodes,
     roundNarrative: row.roundNarrative,
     authorizedPlan: row.authorizedPlan,
   };
@@ -537,7 +559,15 @@ function buildPacket(
   };
   const answerKey: RerunAnswerKey = {
     version: RERUN_PACKET_VERSION,
-    entries: blinded.map(({ blindId, row }) => ({ blindId, arm: row.arm })),
+    entries: blinded.map(({ blindId, row }) => ({
+      blindId,
+      arm: row.arm,
+      decisionTransport: row.decisionTransport,
+      firstDecisionAccepted: row.firstDecisionAccepted,
+      decisionAttempts: row.decisionAttempts,
+      decisionRejectionCodes: row.decisionRejectionCodes,
+      normalizationCodes: row.normalizationCodes,
+    })),
   };
   assertBlindedPacket(packet);
   return { packet, answerKey };

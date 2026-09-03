@@ -210,15 +210,18 @@ export class AdjustmentExhaustionCoordinator {
         refusedActorIds: refusedActors,
       });
       input.correction.activateCapsule();
+      const prompt = input.correction.invocation.output.kind === 'structured_final'
+        ? input.correction.invocation.prompt
+        : renderEnginePrompt(
+            'correct_proposal',
+            input.correction.capsule,
+            input.correction.rules,
+            undefined,
+            input.correction.turnContext,
+          );
       await input.correction.lifecycle.resumeCorrection({
         ...input.correction.invocation,
-        prompt: renderEnginePrompt(
-          'correct_proposal',
-          input.correction.capsule,
-          input.correction.rules,
-          undefined,
-          input.correction.turnContext,
-        ),
+        prompt,
       }, input.correction.signal);
     }
 

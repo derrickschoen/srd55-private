@@ -42,6 +42,7 @@ function invocation(runId: ReturnType<typeof encounterSessionId>, prompt: string
     reasoningEffort: 'SIMULATED-effort',
     sessionProfile: 'test',
     callPhase: 'initial',
+    output: { kind: 'tool_driven' },
     launcherToken: 'SIMULATED-launcher-token',
     recoveryLauncherToken: 'SIMULATED-full-launcher-token',
     freshSessionContext: {

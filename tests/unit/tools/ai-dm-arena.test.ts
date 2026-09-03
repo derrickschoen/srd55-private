@@ -324,6 +324,11 @@ describe('AI-DM arena', () => {
 
     expect(parseArenaArgs(common).partyPolicy).toBe('symmetric_evaluator_v1');
     expect(parseArenaArgs(common).intelMode).toBe('full');
+    expect(parseArenaArgs(common).decisionTransport).toBe('mcp_minimal');
+    expect(parseArenaArgs([...common, '--transport', 'final_indices']).decisionTransport)
+      .toBe('final_indices');
+    expect(() => parseArenaArgs([...common, '--transport', 'final_ids']))
+      .toThrow('--transport must be mcp_minimal or final_indices');
     expect(parseArenaArgs([...common, '--intel-mode', 'off']).intelMode).toBe('off');
     expect(() => parseArenaArgs([...common, '--intel-mode', 'partial']))
       .toThrow('--intel-mode must be full or off.');
