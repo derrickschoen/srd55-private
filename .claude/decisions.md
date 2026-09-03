@@ -9543,3 +9543,19 @@ the owner runs the fights and drops the logs into the private repo. Nothing from
 Five runs of the Decrepit Sanctuary mud-mephit fight on Tactician from the same save and party position. Repeats are
 needed because Larian's AI scores with randomised weights; one recording cannot separate policy from dice. Melee and
 caster encounters come later.
+
+JUDGE QUEUE 2 DONE; REPLAY PLAN LANDED; F: MISSING NO-CLAUDE PREAMBLE
+(supervisor, 2026-09-03 19:45). The six remaining D465/D483 packets
+(primes 557/563/569/571 and 491/499, fixed in analysis-notes before
+building) were judged by the three seats; validator: every seat 60/60,
+seq true, no nulls, no refused-nonzero, three badsum entries (totals
+are recomputed). Keys sealed. BG3 lane (private): unified fight log
+(83 events, 68 both / 12 disagree), and codex sol wrote eval/replay-
+plan.md — six increments, each with a named mutation, engine seams
+cited by file:line (actorOpportunityReport, engineActorOptions,
+canonicalEngineQueryPort spot-checked by me). Finding against my own
+work: the replay-plan brief carried no "do not invoke claude" line, and
+codex ran `claude -p` twice for its own plan review (default model).
+The dispatch-preamble rule (memory) exists for exactly this; every
+private-repo brief now starts with the same COMMON RULES line as the
+public ones.
