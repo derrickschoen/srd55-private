@@ -1,5 +1,19 @@
 # Binding scope decisions
 
+G2 VERIFIED AND COMMITTED; MUTATION EVIDENCE CORRECTED (supervisor,
+2026-09-03 14:30; lane 2039cf0f). Forced gates: tsc -b --force 0, sg 0,
+vitest 544 files / 9535 tests. F against my own work: my first G2
+mutation edited the OUTCOME TYPE UNION (removed 'execution_failed'), so
+tsc refused it while vitest — which does not type-check — still passed;
+I committed with "mutation fails then passes", which was not true of the
+tests. Redone on the assignment site (tools/ai-dm-conversation.ts:3862,
+`outcome = 'execution_failed'` -> 'authorized'): "never authorizes a row
+when execution throws before its first completed turn" fails, restore
+proven by cmp; commit message amended to point here. Rule: a mutation
+must change runtime behaviour, not a type; if tsc rejects the mutant,
+the mutation is void and must be redone. G2.1 (D489 reasons, D490
+override relaxation, decision trace helper) dispatched in the lane.
+
 F: MY GATE TRUSTED INCREMENTAL tsc; H1-INDICES DOES NOT COMPILE
 (supervisor, 2026-09-03 14:30). After committing H1-indices as "tsc 0",
 a mutation run showed `tsc -b` failing at tools/ai-dm-conversation.ts:
