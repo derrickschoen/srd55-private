@@ -1,5 +1,12 @@
 # Binding scope decisions
 
+D465 RELAUNCHED WITH THE PROTOCOL SUBJECT; PROBE PASSES (supervisor,
+2026-09-03 07:27): 2-room sol-low probe with sol-protocol-kb.txt
+(kbHash 3111bc8f): 2/2 rounds model-planned, 0 auto-submit blocks, 0
+refusals (previous probe without it: 0/2). Batch arm 1 (s-full) started
+07:25:22 from main (old era), 240 s. D2.1 exited; supervisor gates
+running.
+
 POST-SHIFT CONTROL VOID: ROLLOVER FIRED ON THE WRONG QUANTITY (supervisor,
 2026-09-03 06:40; finding against the D1/D2 increments and my review of
 them): d466-control-cav-full-low landed 30/30 authorized, 0 refusals (old
