@@ -1,5 +1,33 @@
 # Binding scope decisions
 
+OVERRIDE RETROSPECTIVE (codex sol high, read-only, unsealed D443 scores;
+report dnd-slim-runs/override-retro-report.log; supervisor-checked
+headline counts match my own extraction; 2026-09-03 13:20). 907 luna-low
+actor plans, 727 overrides in 174/210 rounds; 168 override rounds
+overrode EVERY actor (form-filling). Classification: 74 engine-
+expressible, 11 DM-only (formation, defensive positioning, ally support,
+delay commitment, information gathering), 642 empty/rubber-stamp; no
+retreat/surrender/sparing/next-room reason exists in the corpus. Value:
+model-authorized rounds without overrides scored 7.22 (n=12) vs 6.52
+with (n=174); rounds with a PROVEN dominated override 5.80 (n=20) vs
+6.61 other override rounds; 42 accepted overrides proven dominated
+across arms (30 rubber stamps, 7 engine-expressible, 5 DM-only); all 55
+executed End Turns carried overrides, 41 provably dominated; in the 9
+numeric cases the chosen target had hit 0.16 / EV 1.05 vs 0.25 / 1.63.
+Descriptive, not causal. Verdict: the reviewer is right about the
+diagnosis (rubber stamps), not yet about the value of DM-only reasons
+(11 instances, judges never saw them). Experiment preregistered by
+codex: three arms {D485-strict, named-free-text-judge-visible, free-
+text-unscored}, 30 rounds each, paired by seed, panel total primary,
+override/justification-class/dominated-End-Turn rates secondary, service
+faults censored; decision rule: named free text must beat strict by
+>=0.2 with a seed-clustered interval excluding zero and DM-only reasons
+judged action-consistent; plus an offline rescoring of plan-only vs
+plan+reason packets. Supervisor note: D489 (a reason on every decision)
+already makes free-text reasons mandatory; the remaining choice is
+whether an override additionally needs an engine vocabulary and whether
+reasons are judge-visible.
+
 F: WORKTREE node_modules SYMLINKS WERE READ-ONLY UNDER THE SANDBOX
 (supervisor, 2026-09-03 13:10): I gave the four new worktrees a symlink
 to the lane's node_modules; codex's workspace-write sandbox treats the
