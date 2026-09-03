@@ -1,5 +1,21 @@
 # Binding scope decisions
 
+D443 JUDGING PREREGISTERED, PACKETS BUILT, PANEL DISPATCHED (supervisor
+note, 2026-09-02 21:03): design in analysis-notes.md before any packet was
+built: seven effort-pair packets (low vs medium per profile, 60 entries,
+primes 433/439/443/449/457/461/463), one 7-arm new-era LOW ranking packet
+(210 entries, prime 467), one 8-arm new-era MEDIUM ranking packet (240
+entries, prime 479). All nine built with buildMultiArmRerunPacket; leak
+scan 'none' on every packet (scan now also rejects 'medium', 'low',
+'luna', 'effort', 'structured', 'best_exception'); outcome mixes match
+the arm files (rank-low 206 authorized / 4 refused; rank-medium 239 / 1
+service_null). Judge script judge-d443.sh: three seats per packet in
+parallel (sol high via codex exec read-only default home; opus; fresh-
+context fable), packets sequential; prompts via stdin because the ranking
+prompts (185 KB / 212 KB) exceed the 128 KB argv limit. Keys sealed
+(d443-key-*.json) until all 27 outputs validate (D451). Smoke (D459) is
+running concurrently; judges are network-bound.
+
 D443 SWEEP COMPLETE; ARM 15 VERIFIED (supervisor note, 2026-09-02 20:52):
 d443-cav-rows-move-gating-medium 30/30 authorized, 0 timeouts, 10 digests
 x3, refusals 9, model-planned 30/30, wall median 20.7 s / p90 43.5 s,
