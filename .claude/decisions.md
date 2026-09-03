@@ -1,5 +1,18 @@
 # Binding scope decisions
 
+H3 AND H4 STOPPED LOUDLY ON MY BRIEFS; REDISPATCHED (supervisor,
+2026-09-03 12:55): H3 could not create /home/vagrant/.codex-aidm/skills
+(read-only under workspace-write) and H4 could not write the corpus to
+dnd-slim-runs — both correct stops, both my brief errors (writes outside
+the worktree). Amended: H3 writes skills only as fixtures under
+tests/fixtures/ai-dm-skills and the per-arm isolated CODEX_HOME view is
+built from them at run time; H4 writes the corpus under the worktree's
+ignored .tmp-intent/. Redispatched (sol high / terra xhigh). Judge queue
+finished 12:42: five packets (d465 s-full/s-rows/s-opp/s-move vs luna
+twins, d483 s-threats vs no-KB twin), three seats each, all structurally
+valid (one opus component-sum mismatch on s-threats, recomputed per
+protocol); keys sealed with the D447/D449 program.
+
 OPUS REVIEW OF THE DECISION-EXTRACTION PLAN; H4 DISPATCHED (supervisor,
 2026-09-03 12:40; review in dnd-slim-runs/opus-plan-review.md, luna skill
 drafts in luna-skill-{engine-submission,dm-round}.md). Adopted as H1.1
