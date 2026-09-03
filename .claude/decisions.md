@@ -1,5 +1,45 @@
 # Binding scope decisions
 
+PROTOCOL BRAINSTORM AND NONSENSE AUDIT (codex sol high, read-only, on
+McpToolCall events, not exec strings; supervisor cross-checked the
+headline; report in dnd-slim-runs/protocol-brainstorm-report.log; 2026-
+09-03 09:10). Measured: correct FIRST submission in only 15% of luna
+sessions (28/183), 12% sol no-KB, 10% sol+protocol; first rejection is
+envelope shape in 123/155 luna cases, option-id/dominance in 30, revision
+2; luna makes 3-4 submit calls per session (one session 44); eventual
+success luna 90%, sol no-KB 21%, sol+protocol 74% — the KB fixes
+recovery, not first-call correctness. Ranked fixes: (1) publish a schema
+codex can render — the server adds allOf/if/then conditionals
+(schemas.ts:893-906) and the codex exec wrapper renders that as `args:
+unknown` while plain tools render typed; advertise the plain object
+schema, keep conditionals in runtime validation; (2) generated complete
+envelope in the turn text and "one ACCEPTED submission; repair
+argument-validation failures"; (3) server-side fill of state_ref/
+request_id/phase/idempotency_key so the model supplies only proposals,
+bound to the launcher token; (4) engine.proposal_template returning a
+prefilled envelope; (5) validate-then-submit as one atomic normalised
+call; (6) typed rejection with corrected skeleton (recovery only).
+Other nonsense, ranked: (a) 100 of 270 rows labelled authorized carry
+execution refusals (52 missing PC programs, 22 invalid Self-spell
+targets, 26 unresolved boundary decisions, 4 timeouts) — authorized is
+set before the initiative loop runs (ai-dm-conversation.ts:3437-3447);
+(b) speculative planning: 36/42 speculative submissions hit
+SPECULATIVE_BRANCH_CONTRACT_MISMATCH because context rendering passes an
+actor COUNT while speculation snapshots exact actor IDs (:1319-1333 vs
+:2463-2485); (c) tool discovery every round in 100% of sessions, with
+irrelevant web/plugin declarations returned; (d) adjustment dispatch is
+a 96% no-op (52/54 baseline_kept) costing 13.4M input tokens; (e) engine
+fallback (77 auto-submit blocks, 49 sim-controller rows) reported as if
+model output; (f) 40% of accepted proposals have identical primary and
+fallback (schema permits it), 80% carry dominance overrides (375
+'objective', 352 'unknown_engine_gap') that the engine accepts wholesale,
+40 of 55 End Turn plans had a better engine option; (g) turn data is
+camelCase (requestId, correctionNumber) while the wire wants snake_case
+and forbids correction_number; (h) kbReads on the d465/d483 rows is null
+because the old-era arena injects the KB as instructions (the 26/30 count
+was the new-era control). Increment G is designed from this list; the
+post-shift control waits for G so the era shifts once.
+
 MEASURED: THE FIRST SUBMISSION IS REJECTED IN 85% OF LUNA SESSIONS
 (supervisor, 2026-09-03 08:50, raw rollouts, invocation-level detector
 `engine_submit_round_proposals(` in the exec JS, paired with the exec
