@@ -943,6 +943,31 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D494 — OWNER: for the BG3 lane, use written accounts and prior reverse-engineering, not video tools (2026-09-03)
+
+Asked: install yt-dlp/ffmpeg/tesseract for video transcription.
+
+Owner: **"Look for written accounts of bg3 behaviour and prior attempts
+to reverse engineer and debug how bg3 works."**
+
+Found and stored privately (dnd-research-private/bg3-npc-ai/notes/
+larian-combat-ai.md): Larian's own Combat AI documentation (docs.
+larian.game) describing the "Jane" pipeline — eligibility, per-target
+effect simulation, weighted action score, position score, movement
+score, argmax, fallback-to-favourable-ground — and the full base
+archetype modifier table with defaults (kill bonus 2.5, already-engaged
+target 3.0, summon target 0.35, pile-on penalties 0.5/0.25, friendly
+fire 1.5, knockdown 1.75, charmed 2.5, movement cost 0.9, flanking
+0.05, jump only when saving >= 2 AP, difficulty overrides under
+Archetypes/TACTICIAN/); BG3 modding sources (mod.io archetype-weights
+guide, Nexus Smarter AI / UTAC, docs.baldursgate3.game archetype page —
+most are 403/404 to a fetcher; UTAC's changelog gave BG3 parameter
+names such as MODIFIER_HIT_CHANCE_STUPIDITY). This is exactly the prior
+art needed: BG3's enemy AI is a weighted simulate-and-score argmax over
+(skill, target, position), which maps onto our intel rows and the
+D461/D477 ranking; the private policy spec will be rewritten in those
+terms. Video candidates stay listed for later verification.
+
 ## D493 — OWNER: BG3 lane targets Tactician; BG3-style mechanics behind the mode flag; mud mephits first (2026-09-03)
 
 Owner: **"Tactician"**, **"Add BG3-style mechanics behind the mode
