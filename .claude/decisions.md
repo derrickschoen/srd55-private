@@ -9512,3 +9512,21 @@ now keeps full frames and OCRs the log feed band. Luna-medium vs sol-
 high frame transcription (D495 follow-up) recorded privately: equal at
 line reading, Luna finds more monster turns, sol reads HP/damage
 numbers; time must be derived from frame ids, never from the model.
+
+F: I LAUNCHED A DUPLICATE D483 CHAIN; BOTH RERUNS VOIDED (supervisor,
+2026-09-03 16:40). A run-d483-rerun.sh + remainder chain had been queued
+at 11:18 (pre-compaction) to start when the D465 batch ended. Not seeing
+it in my process check, I launched a second chain at 15:44. Both woke
+on the same condition and ran s-gating concurrently (15:44–16:13 and
+15:44–16:34); the first chain's cav-full (16:13–16:34) overlapped my
+s-gating. The second s-gating hit 9 timeouts and tripped the weather
+stop, overwriting the first chain's 30-row file. Under the "alone"
+preregistration all of it is void: s-gating file moved to
+.VOID-duplicate-chain-16-34, cav-full never written, both chains and
+the arena/operators killed by PID, D483-BLOCKED cleared, ONE chain
+relaunched at 16:37 (s-gating → cav-full → remainder). Cost: ~55 min of
+arena time. Cause: my process check looked for arena processes, not for
+the waiting chain script. Rule: before launching any chain, list the
+chain scripts themselves (`ps -eo pid,lstart,args | grep <script>`),
+and record queued chains in the tick state so a compaction cannot hide
+them.
