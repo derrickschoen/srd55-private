@@ -920,6 +920,28 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D491 — OWNER: a BG3 NPC-AI matching lane, in a private repo, no agent assist (2026-09-03)
+
+Owner (verbatim): **"Can we have a lane to try to match the bg3 npc ai
+behaviour in a private repo. I want recordings of bg3 fights (prefer
+without high/low ground) I want our vtt in bg3 mode to be able to at
+least match bg3 in breath of behaviour and performance with easy melee
+type monster and ones that are more complicated like spellcasters and
+mud mephits. I want out vtt to at least be able to match bg3 without an
+ai agent assist."**
+
+Set up: private git repo /home/vagrant/dnd-research-private/bg3-npc-ai
+(outside every public tree; never pushed) with recordings/, notes/,
+specs/, fixtures/, eval/. Licensing wall unchanged: BG3 and bg3.wiki
+material lives only there; the public repo receives a neutrally named
+deterministic policy ("tactical policy v2" / "bg3 mode" as a mode flag
+without BG3 content) built on the engine's existing intel (team scorer,
+opportunity-cost frontier, D461/D477 ranking objective: confirmed kills,
+sequential coordination), plus SRD creature data. Ground truth must be
+recordings the owner provides; until then any behaviour catalogue is
+marked UNVERIFIED. Pending owner answers: recording source/format and
+confirmation of the private/public split.
+
 ## D490 — OWNER: overrides need a typed kind plus the D489 reason; judge-visibility only in the preregistered arm; run the three-arm experiment (2026-09-03)
 
 Asked (on the retrospective evidence): reason required + typed kind +
