@@ -1,5 +1,19 @@
 # Binding scope decisions
 
+F: WORKTREE node_modules SYMLINKS WERE READ-ONLY UNDER THE SANDBOX
+(supervisor, 2026-09-03 13:10): I gave the four new worktrees a symlink
+to the lane's node_modules; codex's workspace-write sandbox treats the
+symlink target as outside the workspace, so vite-node could not write
+its config bundle to node_modules/.vite-temp and H4 stopped loudly at its
+corpus gate (after tsc 0 and its unit tests passed). Replaced the
+symlink in all four worktrees with a hard-linked copy (cp -al; new files
+land locally) and resumed H4's session. H1-ids/H1-indices/H3 were still
+mid-implementation and had not hit the wall. SOL S-THREATS RERUN
+VERIFIED: 30/30 authorized, 26 model-planned, refusals 12, 0 CLI-exit,
+0 timeouts, wall median 21.8 s; idle Disengage 3 (luna twin 24), Dash 88
+(50), attack slots 36 (39). D465 valid: s-full, s-rows, s-opp, s-move,
+s-threats; s-gating started 13:05.
+
 H3 AND H4 STOPPED LOUDLY ON MY BRIEFS; REDISPATCHED (supervisor,
 2026-09-03 12:55): H3 could not create /home/vagrant/.codex-aidm/skills
 (read-only under workspace-write) and H4 could not write the corpus to
