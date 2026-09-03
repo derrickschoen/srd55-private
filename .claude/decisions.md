@@ -1,5 +1,30 @@
 # Binding scope decisions
 
+POST-SHIFT CONTROL VOID: ROLLOVER FIRED ON THE WRONG QUANTITY (supervisor,
+2026-09-03 06:40; finding against the D1/D2 increments and my review of
+them): d466-control-cav-full-low landed 30/30 authorized, 0 refusals (old
+era 9), engine-planned 1 (old 6), idle Disengage 1 (old 4), Dash 92,
+attack slots 39, wall median 25.2 s (old 16.1), kbReads: protocol.md on
+26/30 rows, hiddenOptions 294 (219 Disengage-without-movement, 72
+unsupported spell payloads), omitted riders rendered on 132 plans, all
+10 room digests changed (6 by creature replacement, the rest by the
+typed PC size on the party pack). BUT contextRolloverOccurred on 11/30
+rows (generation 1 on 9, 2 on 2) in one-round arms, which the plan
+forbids. Cause verified from rows: callUsage[].input is 190k-557k per
+phase = the codex exec turn's cumulative input over 10-36 internal calls
+(turn.completed.usage.input_tokens is a TURN TOTAL), not the last call's
+context (rollouts' last_token_usage, median 29k). I approved D2 on
+codex's statement that turn.completed gave per-call usage; my R2
+amendment asked for "the latest individual adapter call" and I did not
+check the stream semantics against a rollout. Rows and log renamed
+.VOID-rollover-quantity; not judged. D2.1 dispatched: distinct typed
+turnInputTotal vs contextInputTokens (per-call from the stream if it has
+it, else from the session's rollout token_count.last_token_usage), the
+policy compares only contextInputTokens, arena regression fixture with
+turn totals above and per-call context below the threshold, measurement
+script main-guard fix. The control is rerun after D2.1 lands. The
+threshold literal 160000 stands (measured on the right quantity).
+
 CORRECTION: ARENA ARMS RUN ROOMS SEQUENTIALLY, ON BOTH ERAS (supervisor,
 2026-09-03 06:00): watching the post-shift control I saw one operator
 session at a time (14 rollouts in 15 min) and suspected the shift had
