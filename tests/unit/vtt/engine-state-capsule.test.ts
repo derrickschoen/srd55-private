@@ -265,7 +265,8 @@ describe('read-only engine state capsule', () => {
       if (option === undefined) throw new Error(`Fixture omitted Dodge for ${actorId}.`);
       const proposal = {
         actorId, expectedRevision: fixture.state.revision, primaryOptionId: option.optionId,
-        fallbackOptionId: null, overrideJustification: null,
+        fallbackOptionId: null,
+        reason: 'Exercise the state capsule fixture.', overrideJustification: null,
       };
       const resolution = pureTurnProposalResolver.resolve(fixture.state, proposal);
       if (!resolution.valid) throw new Error(resolution.refusals.map((entry) => entry.summary).join('\n'));
@@ -340,12 +341,14 @@ describe('read-only engine state capsule', () => {
     if (option === undefined) throw new Error('Fixture omitted Dodge.');
     const proposal = {
       actorId: fixture.actor, expectedRevision: fixture.state.revision, primaryOptionId: option.optionId,
-      fallbackOptionId: null, overrideJustification: null,
+      fallbackOptionId: null,
+      reason: 'Exercise the restored capsule fixture.', overrideJustification: null,
     };
     const resolution = pureTurnProposalResolver.resolve(fixture.state, proposal);
     if (!resolution.valid) throw new Error(resolution.refusals.map((entry) => entry.summary).join('\n'));
     const envelope: EngineProposalEnvelope = {
       kind: 'round_turn_proposal',
+      rationale: null,
       reactionGuidance: null,
       proposalId: 'proposal:mcp-migration',
       runId: fixture.capsule.runId,

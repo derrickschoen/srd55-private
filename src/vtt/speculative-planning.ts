@@ -302,7 +302,9 @@ export const hostBaselineProposalPlanner: HostBaselineProposalPlanner = Object.f
       const fallback = options.find((option) => option.actionSlots.some((slot) =>
         slot.slot === 'main' && slot.use.kind === 'dodge')) ?? null;
       return [{ actorId, expectedRevision: state.revision, primaryOptionId: primary.optionId,
-        fallbackOptionId: fallback?.optionId ?? null, overrideJustification: null }];
+        fallbackOptionId: fallback?.optionId ?? null,
+        reason: 'Use the strongest currently available offensive option.',
+        overrideJustification: null }];
     });
   },
 });

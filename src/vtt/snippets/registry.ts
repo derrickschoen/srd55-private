@@ -238,6 +238,7 @@ function proposals(capsule: EngineStateCapsule, controlActorOnly: boolean): read
       expectedRevision: primary.revision,
       primaryOptionId: primary.optionId,
       fallbackOptionId: fallback?.optionId ?? null,
+      reason: 'Coordinate pressure against the highest-priority visible target.',
       overrideJustification: null,
     }];
   });

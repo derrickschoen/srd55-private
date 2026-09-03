@@ -65,6 +65,7 @@ function proposalFor(state: EncounterState, option: EngineOfferableOption): Engi
     expectedRevision: option.revision,
     primaryOptionId: option.optionId,
     fallbackOptionId: null,
+    reason: 'Exercise the composite proposal fixture.',
     overrideJustification: null,
   };
 }
@@ -105,6 +106,7 @@ describe('complete action economy and composite turn proposals', () => {
       expectedRevision: state.revision,
       primaryOptionId: forged,
       fallbackOptionId: forged,
+      reason: 'Exercise the composite fallback fixture.',
       overrideJustification: null,
     })).toEqual({
       valid: false,

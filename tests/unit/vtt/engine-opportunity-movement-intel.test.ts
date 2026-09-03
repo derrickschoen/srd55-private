@@ -328,16 +328,17 @@ describe('engine movement and opportunity-cost intel', () => {
       expected_revision: 1,
       primary_option_id: 'option',
       fallback_option_id: null,
+      reason: 'Hold the gate so the injured ally can retreat.',
     };
     expect(schemaViolations(engineSchemaInternals.turnProposal, {
       ...base,
-      override_justification: { reason: 'objective', note: 'Hold the gate.' },
+      override_justification: { kind: 'objective' },
     })).toEqual([]);
     expect(schemaViolations(engineSchemaInternals.turnProposal, {
       ...base,
-      override_justification: { note: 'Hold the gate.' },
+      override_justification: {},
     })).toEqual(expect.arrayContaining([
-      expect.objectContaining({ path: '/override_justification/reason' }),
+      expect.objectContaining({ path: '/override_justification/kind' }),
     ]));
   });
 });

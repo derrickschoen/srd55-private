@@ -49,6 +49,8 @@ export interface RoundTurnProposalEnvelope extends EngineProposalBinding {
   readonly kind: 'round_turn_proposal';
   readonly proposalId: string;
   readonly resolutions: readonly ProposedTurnResolution[];
+  /** Optional round-level rationale retained verbatim for decision tracing. */
+  readonly rationale: string | null;
   readonly reactionGuidance: ReactionGuidanceDeclaration | null;
   /** Validated wire arguments retained for opt-in model-training provenance. */
   readonly submittedArguments?: Readonly<Record<string, unknown>>;

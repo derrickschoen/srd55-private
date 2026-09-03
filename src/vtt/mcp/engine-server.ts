@@ -29,6 +29,7 @@ import {
 } from '../engine-state-capsule';
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
 import { resolveEngineActorOption, type EngineMovementPreference, type EngineTurnProposal, type PureTurnProposalResolver } from '../intent-resolver';
+import { decisionReasonProblem } from '../decision-reason';
 import {
   engineOptionId,
   enginePlayToken,
@@ -423,29 +424,20 @@ function decodeOverrideJustification(
   value: unknown,
 ): NonNullable<EngineTurnProposal['overrideJustification']> {
   const input = record(value, 'override justification');
-  const reason = stringField(input, 'reason');
-  const note = input['note'] === undefined ? undefined : stringField(input, 'note');
-  switch (reason) {
+  const kind = stringField(input, 'kind');
+  switch (kind) {
+    case 'objective':
     case 'morale':
     case 'roleplay':
     case 'resource_conservation':
-      return note === undefined ? { reason } : { reason, note };
-    case 'objective': {
-      const playToken = typeof input['play_token'] === 'string'
-        ? enginePlayToken(input['play_token'])
-        : null;
-      return note === undefined ? { reason, playToken } : { reason, playToken, note };
-    }
     case 'unknown_engine_gap':
-      return {
-        reason,
-        metric: typeof input['metric'] === 'string'
-          ? input['metric'] as EngineOptionMetric
-          : null,
-        ...(note === undefined ? {} : { note }),
-      };
+      return { kind };
+    case 'engine_play':
+      return { kind, token: typeof input['token'] === 'string' ? enginePlayToken(input['token']) : null };
+    case 'missing_metric':
+      return { kind, id: typeof input['id'] === 'string' ? input['id'] as EngineOptionMetric : null };
     default:
-      throw new RangeError(`Unknown override justification reason ${reason}.`);
+      throw new RangeError(`Unknown override justification kind ${kind}.`);
   }
 }
 function decodeProposal(value: unknown): EngineTurnProposal {
@@ -482,6 +474,7 @@ function decodeProposal(value: unknown): EngineTurnProposal {
     fallbackOptionId: input['fallback_option_id'] === null
       ? null
       : engineOptionId(stringField(input, 'fallback_option_id')),
+    reason: stringField(input, 'reason'),
     overrideJustification: justification === null
       ? null
       : decodeOverrideJustification(justification),
@@ -495,15 +488,15 @@ function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string,
     expected_revision: proposal.expectedRevision,
     primary_option_id: proposal.primaryOptionId,
     fallback_option_id: proposal.fallbackOptionId,
+    reason: proposal.reason,
     override_justification: override === null ? null : {
-      reason: override.reason,
-      ...(override.reason === 'objective' && override.playToken !== null
-        ? { play_token: override.playToken }
+      kind: override.kind,
+      ...(override.kind === 'engine_play' && override.token !== null
+        ? { token: override.token }
         : {}),
-      ...(override.reason === 'unknown_engine_gap' && override.metric !== null
-        ? { metric: override.metric }
+      ...(override.kind === 'missing_metric' && override.id !== null
+        ? { id: override.id }
         : {}),
-      ...(override.note === undefined ? {} : { note: override.note }),
     },
     ...(proposal.activationChoice === undefined ? {} : {
       activation_choice: proposal.activationChoice === null
@@ -847,8 +840,8 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal' | 'sp
       ? 'Review the current remaining monster plan, then use engine.submit_plan_adjustment once. Submit zero to the stated adjustment budget of open-actor replacement proposals; omitted actors keep their baseline proposals and an empty updates list explicitly keeps the plan. Do not change reaction guidance. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
       : 'Correct only the refused plan-adjustment actors once with engine.submit_plan_adjustment. Valid staged updates remain accepted. No fallback remains after this correction; every correction fallback_option_id must be null. Omitted refused actors keep their baseline proposals.'
     : kind === 'plan_round'
-      ? `Use engine.get_turn_context, then submit only the minimal engine.submit_round_proposals arguments for the complete required actor set. Generated minimal example: ${minimalExample}. The launcher fills state_ref, request_id, phase, and idempotency_key from this turn binding. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again. Select only offered revision-bound option ids and provide an independent fallback. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.`
-      : `Correct the complete refused proposal request with the minimal engine.submit_round_proposals arguments. Generated minimal example: ${minimalExample}. The launcher fills state_ref, request_id, phase, and idempotency_key from this turn binding. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again. No fallback remains after this correction; correction fallback_option_id must be null. If you refresh context, use the get_turn_context request in current_context exactly.`;
+      ? `Use engine.get_turn_context, then submit only the minimal engine.submit_round_proposals arguments for the complete required actor set, with one short sentence per actor saying why this option. Generated minimal example: ${minimalExample}. The launcher fills state_ref, request_id, phase, and idempotency_key from this turn binding. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again. Select only offered revision-bound option ids and provide an independent fallback. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.`
+      : `Correct the complete refused proposal request with the minimal engine.submit_round_proposals arguments, with one short sentence per actor saying why this option. Generated minimal example: ${minimalExample}. The launcher fills state_ref, request_id, phase, and idempotency_key from this turn binding. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again. No fallback remains after this correction; correction fallback_option_id must be null. If you refresh context, use the get_turn_context request in current_context exactly.`;
   return [fixed, `Turn resource: ${uriBase}/turn/current`, `Proposal schema: ${uriBase}/schema/turn-proposal-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: promptRequest(capsule), voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
 }
 
@@ -1311,7 +1304,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     };
   }
   function prepareRoundSubmission(value: Readonly<Record<string, unknown>>): PreparedRoundSubmission {
-    if (!engineSchemaInternals.minimalSubmitRoundInput.safeParse(value).success) {
+    if (!engineSchemaInternals.minimalSubmitRoundTransportInput.safeParse(value).success) {
       return { kind: 'explicit_envelope', submittedArguments: value, envelope: value };
     }
     const current = feed.current();
@@ -1366,6 +1359,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         phase: launcherRoundBinding.phase,
         idempotency_key: idempotencyKey,
         proposals: value['proposals'],
+        ...(value['rationale'] === undefined ? {} : { rationale: value['rationale'] }),
         ...(value['reaction_guidance'] === undefined ? {} : {
           reaction_guidance: value['reaction_guidance'],
         }),
@@ -1386,9 +1380,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       ? {
           ...proposal,
           overrideJustification: {
-            reason: 'objective',
-            playToken: enginePlayToken(playToken),
-            note: 'The engine-authored tactical play intentionally coordinates this option.',
+            kind: 'engine_play',
+            token: enginePlayToken(playToken),
           },
         }
       : proposal;
@@ -1402,25 +1395,28 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       opportunityReport(capsule, proposal.actorId),
       selectedOptionId,
     );
-    if (dominance.status !== 'dominated') return null;
-    if (proposal.overrideJustification === null) {
-      return { code: 'DOMINATED_OPTION_REQUIRES_OVERRIDE', summary: dominance.delta };
-    }
     const override = proposal.overrideJustification;
-    const issuedPlayTokens = SNIPPET_REGISTRY.applicable(capsule).map((play) => play.snippetHash);
-    if (override.reason === 'objective' && override.playToken !== null &&
-      issuedPlayTokens.includes(override.playToken)) return null;
-    if (override.reason === 'unknown_engine_gap' && override.metric !== null) return null;
-    if (override.reason === 'resource_conservation') {
+    if (override !== null && decisionReasonProblem(proposal.reason) !== null) {
       return {
-        code: 'override_unjustified',
-        summary: `${dominance.delta} Resource conservation cannot justify this override because the dominating option has no greater declared resource cost.`,
+        code: 'OVERRIDE_UNJUSTIFIED',
+        summary: 'An override reason must explain the decision instead of restating that an option was offered, legal, selected, or revision-bound.',
       };
     }
-    return {
-      code: 'override_unjustified',
-      summary: `${dominance.delta} The override must name a current-context play token or a typed unknown engine metric.`,
+    if (dominance.status !== 'dominated') return null;
+    if (override === null) {
+      return { code: 'DOMINATED_OPTION_REQUIRES_OVERRIDE', summary: dominance.delta };
+    }
+    const issuedPlayTokens = SNIPPET_REGISTRY.applicable(capsule).map((play) => play.snippetHash);
+    if (override.kind === 'engine_play' &&
+      (override.token === null || !issuedPlayTokens.includes(override.token))) return {
+        code: 'OVERRIDE_UNJUSTIFIED',
+        summary: `${dominance.delta} The engine_play override must name a current-context token.`,
+      };
+    if (override.kind === 'missing_metric' && override.id === null) return {
+      code: 'OVERRIDE_UNJUSTIFIED',
+      summary: `${dominance.delta} The missing_metric override must name a typed metric id.`,
     };
+    return null;
   }
   function fullTurnContext(
     capsule: EngineStateCapsule,
@@ -2500,6 +2496,32 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (request.kind === 'plan_adjustment') throw new RangeError('REQUEST_KIND_MISMATCH');
       const proposalValues = input['proposals'];
       if (!Array.isArray(proposalValues)) throw new TypeError('proposals must be an array.');
+      const missingReasons = proposalValues.flatMap((value) => {
+        const proposal = record(value, 'proposal');
+        return typeof proposal['reason'] === 'string' && proposal['reason'].trim().length > 0
+          ? []
+          : [{
+              actor_id: typeof proposal['actor_id'] === 'string' ? proposal['actor_id'] : request.actors[0],
+              codes: [typeof proposal['reason'] === 'string' && proposal['override_justification'] !== null
+                ? 'OVERRIDE_UNJUSTIFIED' : 'REASON_REQUIRED'],
+              summary: typeof proposal['reason'] === 'string' && proposal['override_justification'] !== null
+                ? 'An override reason cannot be empty.'
+                : 'Each proposal requires one short sentence explaining why this option was chosen.',
+              attempt_rejections: [{
+                attempt: 'primary' as const,
+                declared_option_id: typeof proposal['primary_option_id'] === 'string'
+                  ? proposal['primary_option_id'] : null,
+                rejection_reasons: [typeof proposal['reason'] === 'string' && proposal['override_justification'] !== null
+                  ? 'An override reason cannot be empty.' : 'A proposal reason is required.'],
+              }],
+            }];
+      });
+      if (missingReasons.length > 0) {
+        return {
+          status: 'rejected', state_ref: externalStateRef(capsule),
+          actor_refusals: missingReasons, correction_guidance: correctionGuidance(capsule),
+        };
+      }
       const decoded = proposalValues.map(decodeRenderedProposal);
       const actual = decoded.map((proposal) => proposal.actorId);
       const expected = [...request.actors].sort();
@@ -2575,7 +2597,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       return idempotent(key, input, () => {
         const valid = evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal === null && resolution?.valid === true ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
-        submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance, submittedArguments: structuredClone(roundSubmission?.submittedArguments ?? suppliedInput), ...(activeIntelMode === 'off' ? {} : { intelCapture: captureDmIntel(state, capsule, queries) }) });
+        submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, rationale: typeof input['rationale'] === 'string' ? input['rationale'] : null, reactionGuidance, submittedArguments: structuredClone(roundSubmission?.submittedArguments ?? suppliedInput), ...(activeIntelMode === 'off' ? {} : { intelCapture: captureDmIntel(state, capsule, queries) }) });
         return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.proposal.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
       });
     }
@@ -2798,10 +2820,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       : advertisedNames === null || advertisedNames.has(spec.descriptor.name))
     .map((spec) => ({
       descriptor: spec.descriptor,
-      validateArguments: (value) => spec.descriptor.name === 'engine.submit_round_proposals' &&
-        engineSchemaInternals.minimalSubmitRoundInput.safeParse(value).success
-        ? []
-        : schemaViolations(spec.input, value),
+      validateArguments: (value) => spec.descriptor.name !== 'engine.submit_round_proposals'
+        ? schemaViolations(spec.input, value)
+        : engineSchemaInternals.minimalSubmitRoundTransportInput.safeParse(value).success ||
+          engineSchemaInternals.submitRoundTransportInput.safeParse(value).success
+          ? []
+          : schemaViolations(spec.input, value),
       validateOutput: (value) => schemaViolations(spec.output, value),
       execute: (value) => execute(spec.descriptor.name, value),
     }));

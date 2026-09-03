@@ -48,6 +48,7 @@ function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string,
     expected_revision: proposal.expectedRevision,
     primary_option_id: proposal.primaryOptionId,
     fallback_option_id: proposal.fallbackOptionId,
+    reason: proposal.reason,
     override_justification: proposal.overrideJustification,
   };
 }

@@ -65,6 +65,7 @@ it('rejects human-only option ids at the proposal schema boundary', () => {
     expected_revision: 1,
     primary_option_id: 'human-option:1:hidden',
     fallback_option_id: null,
+    reason: 'Choose this hidden option to exercise rejection.',
     override_justification: null,
   }).success).toBe(false);
 });
@@ -270,10 +271,10 @@ function fixtureFacts(state: EncounterState, runtime: EngineMcpRuntime) {
     expected_revision: capsule.revision,
     primary_option_id: option.optionId,
     fallback_option_id: fallback.optionId,
+    reason: 'Dodge to preserve this actor for the next exchange.',
     override_justification: {
-      reason: 'unknown_engine_gap' as const,
-      metric: 'expected_damage_milli' as const,
-      note: 'Fixture intentionally exercises the defensive override path.',
+      kind: 'missing_metric' as const,
+      id: 'expected_damage_milli' as const,
     },
   } as const;
   return { actor, target, action, request: capsule.request, proposal, ref: stateRef(runtime) };
@@ -302,10 +303,10 @@ function dodgeUpdate(runtime: EngineMcpRuntime, actorId: string, fallbackOptionI
   return {
     actor_id: actorId, expected_revision: capsule.revision, primary_option_id: option.optionId,
     fallback_option_id: fallbackOptionId,
+    reason: 'Dodge to preserve this actor for the next exchange.',
     override_justification: {
-      reason: 'unknown_engine_gap' as const,
-      metric: 'expected_damage_milli' as const,
-      note: 'Fixture intentionally exercises the defensive override path.',
+      kind: 'missing_metric' as const,
+      id: 'expected_damage_milli' as const,
     },
   };
 }
@@ -578,9 +579,10 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     if (!Array.isArray(tools)) throw new TypeError('DM tools/list omitted tools.');
     const submission = tools.map(record).find((tool) => tool['name'] === 'engine.submit_round_proposals');
     if (submission === undefined) throw new TypeError('DM tools/list omitted engine.submit_round_proposals.');
-    expect(submission['description']).toContain('Minimal input: { proposals, reaction_guidance? }');
+    expect(submission['description']).toContain('one short sentence per actor saying why this option');
+    expect(submission['description']).toContain('Minimal input: { proposals, rationale?, reaction_guidance? }');
     expect(submission['description']).toContain('launcher fills state_ref, request_id, phase, and a deterministic idempotency_key');
-    expect(submission['description']).toContain('full explicit envelope { state_ref, request_id, phase, idempotency_key, proposals, reaction_guidance? }');
+    expect(submission['description']).toContain('full explicit envelope { state_ref, request_id, phase, idempotency_key, proposals, rationale?, reaction_guidance? }');
     expect(submission['description']).toContain('One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again.');
   });
 
@@ -626,12 +628,18 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(engineSchemaInternals.minimalSubmitRoundInput.safeParse(correction).success).toBe(true);
     expect(initial).toHaveProperty('proposals.0.primary_option_id');
     expect(initial).toHaveProperty('proposals.0.fallback_option_id');
+    expect(initial).toHaveProperty('proposals.0.reason');
+    expect(record((initial['proposals'] as readonly unknown[])[0])['reason']).toBe(
+      'Close with the most vulnerable visible enemy before it can recover.',
+    );
     expect(record((initial['proposals'] as readonly unknown[])[0])['fallback_option_id'])
       .not.toBe(record((initial['proposals'] as readonly unknown[])[0])['primary_option_id']);
     expect(record((correction['proposals'] as readonly unknown[])[0])['fallback_option_id']).toBeNull();
     expect(ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA).toMatchObject({
       type: 'object', required: ['proposals'],
     });
+    const schemas = JSON.stringify(ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA);
+    expect(schemas).toMatch(/"required":\[[^\]]*"reason"/u);
   });
 
   it('advertises only locally resolved and reachable definitions in every tool input schema', async () => {
@@ -848,6 +856,56 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     });
   });
 
+  it('G2.1 rejects missing proposal reasons without consuming minimal or explicit submissions (mutation: reason optional)', async () => {
+    expect(JSON.stringify(ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA))
+      .toMatch(/"required":\[[^\]]*"reason"/u);
+    const minimalFixture = await fixtureRuntime();
+    const minimalFacts = fixtureFacts(minimalFixture.state, minimalFixture.runtime);
+    const { reason: _minimalReason, ...minimalWithoutReason } = minimalFacts.proposal;
+    const minimalRejected = structured(toolCall(
+      minimalFixture.runtime.handler,
+      'engine.submit_round_proposals',
+      { proposals: [minimalWithoutReason] },
+    ));
+    expect(minimalRejected).toMatchObject({
+      status: 'rejected', actor_refusals: [{ codes: ['REASON_REQUIRED'] }],
+    });
+    expect(minimalFixture.runtime.proposals).toEqual([]);
+    expect(structured(toolCall(minimalFixture.runtime.handler, 'engine.submit_round_proposals', {
+      proposals: [minimalFacts.proposal],
+    }))['status']).toBe('proposed');
+
+    const explicitFixture = await fixtureRuntime();
+    const explicitFacts = fixtureFacts(explicitFixture.state, explicitFixture.runtime);
+    const explicit = happyArguments(
+      'engine.submit_round_proposals', explicitFixture.state, explicitFixture.runtime,
+    );
+    const explicitProposals = explicit['proposals'];
+    if (!Array.isArray(explicitProposals)) throw new TypeError('Explicit fixture proposals are absent.');
+    const explicitProposal = record(explicitProposals[0]);
+    const { reason: _explicitReason, ...explicitWithoutReason } = explicitProposal;
+    const explicitWithRationale = {
+      ...explicit,
+      rationale: 'The round focuses on preserving the front line while ranged actors reposition.',
+    };
+    const explicitRejected = structured(toolCall(
+      explicitFixture.runtime.handler,
+      'engine.submit_round_proposals',
+      { ...explicitWithRationale, proposals: [explicitWithoutReason] },
+    ));
+    expect(explicitRejected).toMatchObject({
+      status: 'rejected', actor_refusals: [{ codes: ['REASON_REQUIRED'] }],
+    });
+    expect(explicitFixture.runtime.proposals).toEqual([]);
+    expect(structured(toolCall(
+      explicitFixture.runtime.handler, 'engine.submit_round_proposals', explicitWithRationale,
+    ))['status']).toBe('proposed');
+    expect(explicitFixture.runtime.proposals[0]).toMatchObject({
+      rationale: explicitWithRationale.rationale,
+      resolutions: [{ proposal: { reason: explicitFacts.proposal.reason } }],
+    });
+  });
+
   it('D466 G1 rejects a stale minimal launcher binding with a typed code', async () => {
     const { state, runtime } = await fixtureRuntime();
     const facts = fixtureFacts(state, runtime);
@@ -941,7 +999,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(accepted['status']).toBe('proposed');
   });
 
-  it('rejects dominance overrides that lack the engine-bound justification required by D485', async () => {
+  it('D490 accepts a typed DM-only override kind with a substantive reason', async () => {
     const resourceFixture = await fixtureRuntime({ requestedActorCount: 1 });
     const resourceFacts = fixtureFacts(resourceFixture.state, resourceFixture.runtime);
     const endTurn = resourceFixture.runtime.feed.current().projection.combatants
@@ -957,16 +1015,16 @@ describe('engine MCP dual-handshake full surface conformance', () => {
         proposals: [{
           ...resourceFacts.proposal,
           primary_option_id: endTurn.optionId,
-          override_justification: { reason: 'resource_conservation' },
+          reason: 'Conserve the last attack resource for the more dangerous next room.',
+          override_justification: { kind: 'resource_conservation' },
         }],
       },
     ));
-    expect(resourceResult).toMatchObject({
-      status: 'rejected',
-      actor_refusals: [{ codes: ['override_unjustified'] }],
-    });
-    expect(resourceFixture.runtime.proposals).toEqual([]);
+    expect(resourceResult['status']).toBe('proposed');
+    expect(resourceFixture.runtime.proposals).toHaveLength(1);
+  });
 
+  it('D490 rejects a rubber-stamp override as OVERRIDE_UNJUSTIFIED without consuming the submission', async () => {
     const gapFixture = await fixtureRuntime({ requestedActorCount: 1 });
     const gapFacts = fixtureFacts(gapFixture.state, gapFixture.runtime);
     const gapResult = structured(toolCall(gapFixture.runtime.handler, 'engine.submit_round_proposals', {
@@ -974,17 +1032,25 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       idempotency_key: 'round-vacuous-engine-gap-override-0001',
       proposals: [{
         ...gapFacts.proposal,
-        override_justification: { reason: 'unknown_engine_gap' },
+        reason: 'Use the offered revision-bound option.',
+        override_justification: { kind: 'unknown_engine_gap' },
       }],
     }));
     expect(gapResult).toMatchObject({
       status: 'rejected',
-      actor_refusals: [{ codes: ['override_unjustified'] }],
+      actor_refusals: [{ codes: ['OVERRIDE_UNJUSTIFIED'] }],
+    });
+    expect(gapFixture.runtime.proposals).toEqual([]);
+    const emptyResult = structured(toolCall(gapFixture.runtime.handler, 'engine.submit_round_proposals', {
+      proposals: [{ ...gapFacts.proposal, reason: '   ', override_justification: { kind: 'morale' } }],
+    }));
+    expect(emptyResult).toMatchObject({
+      status: 'rejected', actor_refusals: [{ codes: ['OVERRIDE_UNJUSTIFIED'] }],
     });
     expect(gapFixture.runtime.proposals).toEqual([]);
   });
 
-  it('rejects a bare objective override without consuming the submission and accepts a current engine play token', async () => {
+  it('D490 keeps engine_play as a typed kind, rejecting a missing token and accepting a current token', async () => {
     const fixture = await fixtureRuntime({ requestedActorCount: 1 });
     const facts = fixtureFacts(fixture.state, fixture.runtime);
     const endTurn = fixture.runtime.feed.current().projection.combatants
@@ -998,12 +1064,13 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       proposals: [{
         ...facts.proposal,
         primary_option_id: endTurn.optionId,
-        override_justification: { reason: 'objective' },
+        reason: 'Coordinate this delay with the advertised engine play.',
+        override_justification: { kind: 'engine_play' },
       }],
     }));
     expect(rejected).toMatchObject({
       status: 'rejected',
-      actor_refusals: [{ codes: ['override_unjustified'] }],
+      actor_refusals: [{ codes: ['OVERRIDE_UNJUSTIFIED'] }],
     });
     expect(fixture.runtime.proposals).toEqual([]);
 
@@ -1014,8 +1081,8 @@ describe('engine MCP dual-handshake full surface conformance', () => {
         ...facts.proposal,
         primary_option_id: endTurn.optionId,
         override_justification: {
-          reason: 'objective',
-          play_token: currentPlayToken(fixture.runtime),
+          kind: 'engine_play',
+          token: currentPlayToken(fixture.runtime),
         },
       }],
     }));
@@ -1187,6 +1254,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
         expected_revision: capsule.revision,
         primary_option_id: fallbackOptionId,
         fallback_option_id: null,
+        reason: 'Exercise rejection for an actor whose plan is closed.',
         override_justification: null,
       }],
     }));
@@ -1254,6 +1322,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
         expected_revision: capsule.revision,
         primary_option_id: fallbackOptionId,
         fallback_option_id: null,
+        reason: 'Exercise rejection for an actor who is dead.',
         override_justification: null,
       }],
     }));

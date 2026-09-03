@@ -148,21 +148,20 @@ export interface EngineTurnProposal {
   readonly expectedRevision: number;
   readonly primaryOptionId: EngineOptionId;
   readonly fallbackOptionId: EngineOptionId | null;
+  /** Verbatim, bounded explanation supplied by the decision author. */
+  readonly reason: string;
   readonly activationChoice?: EngineActivationChoice | null;
   readonly overrideJustification: null | (
     {
-      readonly reason: 'morale' | 'roleplay' | 'resource_conservation';
-      readonly note?: string;
+      readonly kind: 'objective' | 'morale' | 'roleplay' | 'resource_conservation' | 'unknown_engine_gap';
     } | {
-      readonly reason: 'objective';
-      /** Null is retained through decoding so policy can return override_unjustified. */
-      readonly playToken: EnginePlayToken | null;
-      readonly note?: string;
+      readonly kind: 'engine_play';
+      /** Null is retained through decoding so policy can return OVERRIDE_UNJUSTIFIED. */
+      readonly token: EnginePlayToken | null;
     } | {
-      readonly reason: 'unknown_engine_gap';
-      /** Null is retained through decoding so policy can return override_unjustified. */
-      readonly metric: EngineOptionMetric | null;
-      readonly note?: string;
+      readonly kind: 'missing_metric';
+      /** Null is retained through decoding so policy can return OVERRIDE_UNJUSTIFIED. */
+      readonly id: EngineOptionMetric | null;
     }
   );
 }

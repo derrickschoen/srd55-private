@@ -258,6 +258,7 @@ export interface ConversationChainEvidence {
 
 export interface ConversationAuthorizedActorPlan {
   readonly actorId: CombatantId;
+  readonly reason: string;
   readonly acceptedProposal: Readonly<Record<string, unknown>>;
   readonly selectedBranch: 'primary' | 'fallback';
   readonly resolutionSummary: {
@@ -491,6 +492,7 @@ export interface ConversationRow {
     readonly authorization: { readonly revision: number; readonly digest: string } | null;
   };
   readonly authorizedPlan: readonly ConversationAuthorizedActorPlan[] | null;
+  readonly rationale: string | null;
   readonly roundNarrative: string | null;
   readonly chainEvidence: ConversationChainEvidence;
   readonly initiativeOrder: readonly CombatantId[];
@@ -527,10 +529,10 @@ export type ConversationExecutionErrorClass =
   | 'unresolved_boundary_decision'
   | 'cli_timeout'
   | 'other';
-export type ConversationOverrideKind = NonNullable<EngineTurnProposal['overrideJustification']>['reason'];
+export type ConversationOverrideKind = NonNullable<EngineTurnProposal['overrideJustification']>['kind'];
 export interface ConversationOverrideRejection {
   readonly actorId: CombatantId | null;
-  readonly code: 'override_unjustified';
+  readonly code: 'OVERRIDE_UNJUSTIFIED';
 }
 
 export interface ConversationRunResult {
@@ -897,7 +899,9 @@ function engineDefaultPlanEntry(
   const option = report.defaultOption;
   const proposal: EngineTurnProposal = {
     actorId, expectedRevision: revision, primaryOptionId: option.optionId,
-    fallbackOptionId: null, overrideJustification: null,
+    fallbackOptionId: null,
+    reason: 'The engine selected its highest-ranked available option.',
+    overrideJustification: null,
   };
   const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
   if (!resolution.valid) throw new Error(`Could not stage engine default for ${actorId}.`);
@@ -931,7 +935,9 @@ function simControllerPlanEntry(
   if (option === undefined) throw new Error(`Could not stage deterministic-controller Dodge for ${actorId}.`);
   const proposal: EngineTurnProposal = {
     actorId, expectedRevision: revision, primaryOptionId: option.optionId,
-    fallbackOptionId: null, overrideJustification: null,
+    fallbackOptionId: null,
+    reason: 'The deterministic controller chose Dodge after model planning was exhausted.',
+    overrideJustification: null,
   };
   const resolution = pureTurnProposalResolver.resolve(planningState, proposal);
   if (!resolution.valid) throw new Error(`Could not resolve deterministic-controller Dodge for ${actorId}.`);
@@ -1182,15 +1188,15 @@ function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string,
     expected_revision: proposal.expectedRevision,
     primary_option_id: proposal.primaryOptionId,
     fallback_option_id: proposal.fallbackOptionId,
+    reason: proposal.reason,
     override_justification: override === null ? null : {
-      reason: override.reason,
-      ...(override.reason === 'objective' && override.playToken !== null
-        ? { play_token: override.playToken }
+      kind: override.kind,
+      ...(override.kind === 'engine_play' && override.token !== null
+        ? { token: override.token }
         : {}),
-      ...(override.reason === 'unknown_engine_gap' && override.metric !== null
-        ? { metric: override.metric }
+      ...(override.kind === 'missing_metric' && override.id !== null
+        ? { id: override.id }
         : {}),
-      ...(override.note === undefined ? {} : { note: override.note }),
     },
   };
 }
@@ -1251,6 +1257,7 @@ function scriptedProposals(
     return {
       actorId, expectedRevision: revision, primaryOptionId: primary.optionId,
       fallbackOptionId: phase === 'correction' ? null : fallback?.optionId ?? null,
+      reason: 'Use the engine-ranked option to maximize immediate tactical value.',
       overrideJustification: null,
     };
   });
@@ -1284,10 +1291,10 @@ function intentionallyIgnoredProposals(
       expectedRevision: revision,
       primaryOptionId: option.optionId,
       fallbackOptionId: phase === 'correction' ? null : fallback?.optionId ?? null,
+      reason: 'End the turn to intentionally ignore the suggested coordinated play.',
       overrideJustification: {
-        reason: 'objective',
-        playToken,
-        note: 'SIMULATED response intentionally ignores the suggested play.',
+        kind: 'engine_play',
+        token: playToken,
       },
     };
   });
@@ -1723,11 +1730,10 @@ async function driveScriptedMcp(
       : proposals.map((proposal, index) => index !== 0 ? proposal : {
           ...proposal,
           override_justification: {
-            reason: 'objective',
-            play_token: typeof suggestion?.['play_token'] === 'string'
+            kind: 'engine_play',
+            token: typeof suggestion?.['play_token'] === 'string'
               ? suggestion['play_token']
               : 'SIMULATED-unissued-play-token',
-            note: 'SIMULATED edit',
           },
         });
     const submittedProposals = invalid ? responseProposals.map((proposal) => ({
@@ -2680,6 +2686,7 @@ async function runConversationWithConfiguredIntel(
       let acceptedSubmission: readonly EngineTurnProposal[] | null = null;
       let acceptedIntelCapture: DmIntelCapture | null = null;
       let authorizedMonsterProposalHash: string | null = null;
+      let roundRationale: string | null = null;
       let roundNarrative: ConversationRow['roundNarrative'] = null;
       let initialDispatchPlanner: ConversationPlannerAttribution | null = null;
       let correctionDispatchPlanner: ConversationPlannerAttribution | null = null;
@@ -3544,6 +3551,7 @@ async function runConversationWithConfiguredIntel(
               ? null : structuredClone(proposal.intelCapture);
             authorizedPlan = mechanics.map((entry): ConversationAuthorizedActorPlan => ({
               actorId: entry.mechanics.actorId,
+              reason: entry.proposal.reason,
               acceptedProposal: structuredClone(entry.acceptedProposal),
               selectedBranch: entry.selectedBranch,
               resolutionSummary: {
@@ -3553,6 +3561,7 @@ async function runConversationWithConfiguredIntel(
               },
             }));
             capturedRlData = proposalRlData;
+            roundRationale = proposal.rationale;
             roundNarrative = mechanics.map((entry) => entry.summary).join('; ');
             const acceptingPlanner = proposal.phase === 'initial'
               ? initialDispatchPlanner
@@ -3776,6 +3785,7 @@ async function runConversationWithConfiguredIntel(
           };
           authorizedPlan = entries.map((entry) => ({
             actorId: entry.proposal.actorId,
+            reason: entry.proposal.reason,
             acceptedProposal: externalProposal(entry.proposal),
             selectedBranch: entry.selectedBranch,
             resolutionSummary: {
@@ -3825,6 +3835,7 @@ async function runConversationWithConfiguredIntel(
                 resolutionDigest: entry.resolutionDigest,
                 summary: entry.summary,
               })),
+              rationale: null,
               reactionGuidance: journal.reactionGuidance(),
               submittedArguments,
               ...(exhaustionIntelCapture === null ? {} : { intelCapture: exhaustionIntelCapture }),
@@ -4297,11 +4308,11 @@ async function runConversationWithConfiguredIntel(
         ? []
         : decodeKbReadRecords(readFileSync(kbReadSpoolPath, 'utf8'));
       const overrideKinds = [...new Set((acceptedSubmission ?? []).flatMap((proposal) =>
-        proposal.overrideJustification === null ? [] : [proposal.overrideJustification.reason]))]
+        proposal.overrideJustification === null ? [] : [proposal.overrideJustification.kind]))]
         .sort((left, right) => left.localeCompare(right));
       const overrideRejections = failedAttempts.flatMap((attempt): readonly ConversationOverrideRejection[] =>
-        attempt.rejectionCodes?.includes('override_unjustified') === true
-          ? [{ actorId: attempt.actorId, code: 'override_unjustified' }]
+        attempt.rejectionCodes?.includes('OVERRIDE_UNJUSTIFIED') === true
+          ? [{ actorId: attempt.actorId, code: 'OVERRIDE_UNJUSTIFIED' }]
           : []);
       if (outcome === 'authorized' && refusals.length > 0) {
         throw new Error('Authorized arena row cannot carry execution refusals.');
@@ -4366,6 +4377,7 @@ async function runConversationWithConfiguredIntel(
           authorization: authorizationStateBinding,
         },
         authorizedPlan,
+        rationale: roundRationale,
         roundNarrative,
         chainEvidence: { failedAttempts, autoResolvedTrigger, correctionFinalText },
         initiativeOrder,

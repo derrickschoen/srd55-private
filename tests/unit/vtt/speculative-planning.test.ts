@@ -531,7 +531,8 @@ describe('speculative host fact system', () => {
     if (offered === undefined) throw new Error('Speculative fixture omitted its actor option inventory.');
     const turnProposal = {
       actorId: fixture.target.id, expectedRevision: capsule.revision,
-      primaryOptionId: offered.optionId, fallbackOptionId: null, overrideJustification: null,
+      primaryOptionId: offered.optionId, fallbackOptionId: null,
+      reason: 'Exercise the speculative planning fixture.', overrideJustification: null,
     };
     const envelope = submitSpeculativeRoundPlan(source, {
       append: (entry) => { accepted.push(entry); },
@@ -578,6 +579,7 @@ describe('speculative host fact system', () => {
           expected_revision: 1,
           primary_option_id: 'option:monster:dodge',
           fallback_option_id: null,
+          reason: 'Exercise the speculative branch proposal.',
           override_justification: null,
         }],
       }],

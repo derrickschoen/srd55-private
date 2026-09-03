@@ -147,7 +147,8 @@ describe('D466 B4 spell payloads', () => {
     expect(OUTSIDE_COMMAND_WORD_IS_ACCEPTED).toBe(false);
     expect(engineSchemaInternals.turnProposal.safeParse({
       actor_id: 'combatant:marshal', expected_revision: 1,
-      primary_option_id: 'option:command', fallback_option_id: null, override_justification: null,
+      primary_option_id: 'option:command', fallback_option_id: null,
+      reason: 'Exercise the invalid command-word choice.', override_justification: null,
       activation_choice: { kind: 'command_word', value: 'dance' },
     }).success).toBe(false);
   });

@@ -203,6 +203,7 @@ describe('plays v1', () => {
       expectedRevision: capsule.revision,
       primaryOptionId: engineOptionId('option:not-projected'),
       fallbackOptionId: null,
+      reason: 'Exercise the advertised play fixture.',
       overrideJustification: null,
     };
     const registry = createSnippetRegistry({

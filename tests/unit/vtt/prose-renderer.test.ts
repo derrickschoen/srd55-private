@@ -206,6 +206,7 @@ describe('turn-context prose formats', () => {
         expected_revision: selectedOption['revision'],
         primary_option_id: optionId,
         fallback_option_id: fallbackOption['option_id'],
+        reason: 'Exercise the prose-rendered option selection.',
         override_justification: null,
         ...(activationChoice === undefined ? {} : { activation_choice: activationChoice }),
       };

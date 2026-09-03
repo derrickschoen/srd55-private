@@ -38,6 +38,7 @@ function resolution(actorId: CombatantId, fallback = false): ProposedTurnResolut
     proposal: {
       actorId, expectedRevision: 1, primaryOptionId: option.optionId,
       fallbackOptionId: fallback ? engineOptionId(`option:${actorId}:fallback`) : null,
+      reason: 'Exercise the adjustment exhaustion fixture.',
       overrideJustification: null,
     },
     option,

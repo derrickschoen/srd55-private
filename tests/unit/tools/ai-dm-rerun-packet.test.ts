@@ -16,6 +16,10 @@ import { declareTestInputs } from '../../helpers/test-inputs';
 const fixtureRowSchema = z.record(z.string(), z.unknown());
 type JsonRecord = z.infer<typeof fixtureRowSchema>;
 
+function record(value: unknown): JsonRecord {
+  return fixtureRowSchema.parse(value);
+}
+
 const inputs = declareTestInputs({
   fixtures: [
     'tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl',
@@ -63,7 +67,15 @@ function registeredRows(): JsonRecord[] {
 
 describe('AI-DM R1-10 rerun packet', () => {
   it('builds the exact blinded packet and separate answer key from hand-built arena rows', () => {
-    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl');
+    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl')
+      .map((row, index) => index !== 0 ? row : {
+        ...row,
+        rationale: 'The ogre pins the front line while its allies reposition.',
+        authorizedPlan: [{
+          ...record((row['authorizedPlan'] as readonly unknown[])[0]),
+          reason: 'Attack the fighter to keep the front line occupied.',
+        }],
+      });
     const result = buildRerunPacket(rows, 1, tinyProtocol);
 
     const expectedPacket = {
@@ -101,10 +113,14 @@ describe('AI-DM R1-10 rerun packet', () => {
         {
           blindId: 'blind-001', arm: 'baseline', planner: 'model',
           overrideKinds: [], overrideRejections: [],
+          decisionReasons: [{
+            actorId: 'monster:ogre', reason: 'Attack the fighter to keep the front line occupied.',
+          }],
+          rationale: 'The ogre pins the front line while its allies reposition.',
         },
         {
           blindId: 'blind-002', arm: 'intel', planner: 'engine_default',
-          overrideKinds: [], overrideRejections: [],
+          overrideKinds: [], overrideRejections: [], decisionReasons: [], rationale: null,
         },
       ],
     } as const;
@@ -146,7 +162,7 @@ describe('AI-DM R1-10 rerun packet', () => {
         planner: index === 0 ? 'model' : 'sim_controller',
         overrideKinds: index === 0 ? ['objective'] : [],
         overrideRejections: index === 0
-          ? [{ actorId: 'monster:ogre', code: 'override_unjustified' }]
+          ? [{ actorId: 'monster:ogre', code: 'OVERRIDE_UNJUSTIFIED' }]
           : [],
       }));
     const result = buildRerunPacket(rows, 1, tinyProtocol);
@@ -158,11 +174,12 @@ describe('AI-DM R1-10 rerun packet', () => {
       {
         blindId: 'blind-001', arm: 'baseline', planner: 'model',
         overrideKinds: ['objective'],
-        overrideRejections: [{ actorId: 'monster:ogre', code: 'override_unjustified' }],
+        overrideRejections: [{ actorId: 'monster:ogre', code: 'OVERRIDE_UNJUSTIFIED' }],
+        decisionReasons: [], rationale: null,
       },
       {
         blindId: 'blind-002', arm: 'intel', planner: 'sim_controller',
-        overrideKinds: [], overrideRejections: [],
+        overrideKinds: [], overrideRejections: [], decisionReasons: [], rationale: null,
       },
     ]);
     const packetText = JSON.stringify(result.packet);
@@ -393,12 +410,21 @@ describe('AI-DM R1-10 rerun packet', () => {
       .toThrow('distinct room states across reps');
   });
 
-  it('rejects an identity field if one reaches the blinded packet', () => {
+  it('rejects identity and decision text from blinded packets (mutation: reason leaks into packet)', () => {
+    expect(() => buildRerunPacket(
+      rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl'),
+      1,
+      tinyProtocol,
+    )).not.toThrow();
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', model: 'leaked-model' }] }))
       .toThrow('leaks a model-identifying field');
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', engineIntel: { actors: [] } }] }))
       .toThrow('leaks a model-identifying field');
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', roundNarrative: 'uses dodge' }] }))
+      .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', reason: 'because' }] }))
+      .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', rationale: 'because' }] }))
       .toThrow('leaks a model-identifying field');
   });
 

@@ -43,10 +43,10 @@ function dodge(context: Readonly<Record<string, unknown>>, actorId: string): Rea
   return {
     actor_id: actorId, expected_revision: stateRef['expected_revision'], primary_option_id: option['option_id'],
     fallback_option_id: fallback['option_id'],
+    reason: 'Dodge to preserve this actor for the next exchange.',
     override_justification: {
-      reason: 'unknown_engine_gap',
-      metric: 'expected_damage_milli',
-      note: 'The mutation-boundary fixture intentionally exercises a defensive plan.',
+      kind: 'missing_metric',
+      id: 'expected_damage_milli',
     },
   };
 }

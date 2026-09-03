@@ -50,6 +50,7 @@ function authorize(state: EncounterState, option: EngineOfferableOption): Author
     expectedRevision: option.revision,
     primaryOptionId: option.optionId,
     fallbackOptionId: null,
+    reason: 'Exercise the mixed-kind multiattack fixture.',
     overrideJustification: null,
   };
   const resolution = pureTurnProposalResolver.resolve(state, proposal);

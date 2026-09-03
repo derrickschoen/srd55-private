@@ -71,22 +71,23 @@ const engagement = z.object({
   anchor: targetSelector.nullable().optional(),
 }).strict().describe('Semantic engagement objective resolved by the engine.');
 
-const overrideJustification = z.discriminatedUnion('reason', [
+const decisionReason = z.string().min(1).max(240).refine((value) => value.trim().length > 0, 'Reason cannot be blank.')
+  .describe('One short sentence explaining why this option was chosen.');
+const roundRationale = z.string().min(1).max(600).refine((value) => value.trim().length > 0, 'Rationale cannot be blank.')
+  .describe('Optional round-level rationale retained outside blinded judging packets.');
+const overrideJustification = z.discriminatedUnion('kind', [
   z.object({
-    reason: z.enum(['morale', 'roleplay', 'resource_conservation']),
-    note: z.string().min(1).max(500).optional(),
+    kind: z.enum(['objective', 'morale', 'roleplay', 'resource_conservation', 'unknown_engine_gap']),
   }).strict(),
   z.object({
-    reason: z.literal('objective'),
-    play_token: z.string().min(1).max(200).optional(),
-    note: z.string().min(1).max(500).optional(),
+    kind: z.literal('engine_play'),
+    token: z.string().min(1).max(200).optional(),
   }).strict(),
   z.object({
-    reason: z.literal('unknown_engine_gap'),
-    metric: z.enum(ENGINE_OPTION_METRICS).optional(),
-    note: z.string().min(1).max(500).optional(),
+    kind: z.literal('missing_metric'),
+    id: z.enum(ENGINE_OPTION_METRICS).optional(),
   }).strict(),
-]).describe('Required for a dominated selection. objective requires a current-context play_token; unknown_engine_gap requires a typed metric.');
+]).describe('Required for a dominated selection. engine_play requires a current token; missing_metric requires a typed metric id.');
 const activationChoice = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('command_word'), value: z.enum(['approach', 'flee', 'grovel', 'halt', 'drop']) }).strict(),
   z.object({ kind: z.literal('unicorns_blessing_spell'), value: z.enum(['cure-wounds', 'lesser-restoration']) }).strict(),
@@ -119,6 +120,7 @@ const turnProposal = z.object({
   expected_revision: z.number().int().min(0).meta({ examples: [42] }),
   primary_option_id: offerableOptionIdentifier.meta({ examples: ['option:42:primary'] }),
   fallback_option_id: offerableOptionIdentifier.nullable().meta({ examples: ['option:42:fallback'] }),
+  reason: decisionReason.meta({ examples: ['Close with the most vulnerable visible enemy before it can recover.'] }),
   override_justification: overrideJustification.nullable().meta({ examples: [null] }),
   activation_choice: activationChoice.nullable().optional(),
 }).strict().describe('Revision-bound selection of engine-generated composite option ids.');
@@ -907,8 +909,15 @@ const adjudicationOutput = z.object({ status: z.literal('requested'), adjudicati
 const refInput = { state_ref: stateRef };
 const phaseProposalInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), proposal: turnProposal }).strict();
 const submitProposalInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), proposal: turnProposal, reaction_guidance: reactionGuidance.optional() }).strict();
-const minimalSubmitRoundInput = z.object({ proposals: z.array(turnProposal).min(1).max(50), reaction_guidance: reactionGuidance.optional() }).strict();
-const submitRoundInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), proposals: z.array(turnProposal).min(1).max(50), reaction_guidance: reactionGuidance.optional() }).strict();
+const minimalSubmitRoundInput = z.object({ proposals: z.array(turnProposal).min(1).max(50), rationale: roundRationale.optional(), reaction_guidance: reactionGuidance.optional() }).strict();
+const submitRoundInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), proposals: z.array(turnProposal).min(1).max(50), rationale: roundRationale.optional(), reaction_guidance: reactionGuidance.optional() }).strict();
+const submissionTransportProposal = turnProposal.extend({ reason: z.string().max(240).optional() });
+const minimalSubmitRoundTransportInput = minimalSubmitRoundInput.extend({
+  proposals: z.array(submissionTransportProposal).min(1).max(50),
+});
+const submitRoundTransportInput = submitRoundInput.extend({
+  proposals: z.array(submissionTransportProposal).min(1).max(50),
+});
 const submitPlanAdjustmentInput = z.object({
   ...refInput,
   request_id: identifier,
@@ -1126,7 +1135,7 @@ export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.query_visibility', 'Batch engine-owned perception and visibility comparisons.', z.object({ ...refInput, queries: z.array(pairQuery).min(1).max(50) }).strict(), pairOutput(visibilityFacts)),
   spec('engine.query_dice_expectation', 'Compare bounded analytic outcomes without consuming RNG.', z.object({ ...refInput, candidates: z.array(z.object({ candidate_id: z.string().min(1).max(100), actor_id: identifier, choice: actionChoice, movement: movementPreference.optional(), engagement: engagement.optional() }).strict()).min(1).max(20), include_distribution: z.boolean().optional() }).strict(), diceOutput),
   spec('engine.validate_proposal', 'Purely validate and preview one revision-bound composite option proposal.', phaseProposalInput, validateOutput),
-  spec('engine.submit_round_proposals', 'Queue one all-or-nothing shared-initiative round proposal. Minimal input: { proposals, reaction_guidance? }; the launcher fills state_ref, request_id, phase, and a deterministic idempotency_key from this turn binding. The full explicit envelope { state_ref, request_id, phase, idempotency_key, proposals, reaction_guidance? } is also accepted. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again.', submitRoundInput, roundOutput, true),
+  spec('engine.submit_round_proposals', 'Queue the round; include one short sentence per actor saying why this option. Minimal input: { proposals, rationale?, reaction_guidance? }; the launcher fills state_ref, request_id, phase, and a deterministic idempotency_key from this turn binding. The full explicit envelope { state_ref, request_id, phase, idempotency_key, proposals, rationale?, reaction_guidance? } is also accepted. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again.', submitRoundInput, roundOutput, true),
   spec('engine.submit_plan_adjustment', 'Validate and queue a bounded patch over the remaining open monster plan.', submitPlanAdjustmentInput, adjustmentOutput, true),
   spec('engine.submit_speculative_round_plan', 'Structurally validate and queue one host-guarded contingent monster-round plan.', submitSpeculativeRoundPlanInput, speculativeRoundPlanOutput, true),
   spec('engine.submit_proposal', 'Validate and queue one separately controlled seat proposal.', submitProposalInput, singleOutput, true),
@@ -1181,5 +1190,7 @@ export const engineSchemaInternals = {
   engagement,
   turnProposal,
   minimalSubmitRoundInput,
+  minimalSubmitRoundTransportInput,
+  submitRoundTransportInput,
   submitSpeculativeRoundPlanInput,
 };

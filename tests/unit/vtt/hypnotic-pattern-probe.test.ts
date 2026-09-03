@@ -69,6 +69,7 @@ function proposal(stateRevision: number, option: EngineOfferableOption): EngineT
     expectedRevision: stateRevision,
     primaryOptionId: option.optionId,
     fallbackOptionId: null,
+    reason: 'Exercise the Hypnotic Pattern probe fixture.',
     overrideJustification: null,
   };
 }

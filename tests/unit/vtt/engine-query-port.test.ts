@@ -211,6 +211,7 @@ describe('canonical engine query port', () => {
     const resolved = pureTurnProposalResolver.resolve(state, {
       actorId: ACTOR_ID, expectedRevision: state.revision,
       primaryOptionId: engineOptionId('option:missing-grab'), fallbackOptionId: fallback.optionId,
+      reason: 'Exercise the engine query proposal fixture.',
       overrideJustification: null,
     });
 
@@ -233,7 +234,8 @@ describe('canonical engine query port', () => {
     if (grab === undefined) throw new Error('Fixture omitted the Grab option.');
     const resolved = pureTurnProposalResolver.resolve(state, {
       actorId: ACTOR_ID, expectedRevision: state.revision,
-      primaryOptionId: grab.optionId, fallbackOptionId: null, overrideJustification: null,
+      primaryOptionId: grab.optionId, fallbackOptionId: null,
+      reason: 'Exercise the engine query grab fixture.', overrideJustification: null,
     });
 
     expect(resolved).toMatchObject({
@@ -258,6 +260,7 @@ describe('canonical engine query port', () => {
     expect(pureTurnProposalResolver.resolve(state, {
       actorId: ACTOR_ID, expectedRevision: state.revision,
       primaryOptionId: engineOptionId('option:dead-target-grab'), fallbackOptionId: null,
+      reason: 'Exercise the engine query resolution fixture.',
       overrideJustification: null,
     })).toEqual({
       valid: false,

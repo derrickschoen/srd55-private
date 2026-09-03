@@ -106,17 +106,18 @@ function proposal(
     expected_revision: revision,
     primary_option_id: primary['option_id'],
     fallback_option_id: typeof fallback?.['option_id'] === 'string' ? fallback['option_id'] : null,
+    reason: primary['kind'] === 'dodge'
+      ? 'Dodge to preserve this actor for the next exchange.'
+      : 'Attack the most vulnerable available target before it can recover.',
     override_justification: primary['kind'] === 'dodge'
       ? playToken === null
         ? {
-            reason: 'unknown_engine_gap',
-            metric: 'expected_damage_milli',
-            note: 'The dry client intentionally exercises a defensive plan.',
+            kind: 'missing_metric',
+            id: 'expected_damage_milli',
           }
         : {
-            reason: 'objective',
-            play_token: playToken,
-            note: 'The dry client intentionally exercises a defensive plan.',
+            kind: 'engine_play',
+            token: playToken,
           }
       : null,
   };

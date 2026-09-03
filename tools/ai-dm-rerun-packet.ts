@@ -63,6 +63,7 @@ const baselineResolutionSummarySchema = z.object({
 
 const authorizedPlanEntrySchema = z.object({
   actorId: z.unknown(),
+  reason: z.string().max(240).optional(),
   acceptedIntent: z.object({ choice: baselineChoiceSchema }).passthrough().optional(),
   resolutionSummary: z.union([currentResolutionSummarySchema, baselineResolutionSummarySchema]).optional(),
 }).passthrough();
@@ -74,11 +75,12 @@ const plannerSchema = z.union([
 ]);
 const primaryPlannerSchema = z.enum(['model', 'engine_default', 'sim_controller']);
 const overrideKindSchema = z.enum([
-  'morale', 'objective', 'roleplay', 'resource_conservation', 'unknown_engine_gap',
+  'objective', 'morale', 'roleplay', 'resource_conservation', 'unknown_engine_gap',
+  'engine_play', 'missing_metric',
 ]);
 const overrideRejectionSchema = z.object({
   actorId: z.string().nullable(),
-  code: z.literal('override_unjustified'),
+  code: z.literal('OVERRIDE_UNJUSTIFIED'),
 }).strict();
 
 export interface NeutralAction {
@@ -109,6 +111,7 @@ const arenaRowSchema = z.object({
   ]),
   plannedBy: plannerSchema,
   roundNarrative: z.string().nullable(),
+  rationale: z.string().max(600).nullable().optional(),
   authorizedPlan: z.array(authorizedPlanEntrySchema).nullable(),
   // Optional/nullable: pre-intel-era arms have no engineIntel, and the current
   // producer writes null on failed rows. It must never reach the blinded
@@ -164,6 +167,7 @@ interface ValidatedArenaRow {
   readonly overrideKinds: readonly z.infer<typeof overrideKindSchema>[];
   readonly overrideRejections: readonly z.infer<typeof overrideRejectionSchema>[];
   readonly roundNarrative: string | null;
+  readonly rationale: string | null;
   readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
 }
 
@@ -222,6 +226,8 @@ export interface RerunAnswerKey {
     readonly planner: z.infer<typeof primaryPlannerSchema>;
     readonly overrideKinds: readonly z.infer<typeof overrideKindSchema>[];
     readonly overrideRejections: readonly z.infer<typeof overrideRejectionSchema>[];
+    readonly decisionReasons: readonly { readonly actorId: unknown; readonly reason: string }[];
+    readonly rationale: string | null;
   }[];
 }
 
@@ -231,7 +237,7 @@ const MODEL_IDENTITY_FIELDS = new Set([
   // Era-identifying: only post-intel arms produce engineIntel, so its presence
   // (not just its contents) unblinds the arm.
   'engineIntel',
-  // Era-specific plan-shape keys: any of these surviving into the packet means
+  // Era-specific plan-shape keys: one of these surviving into the packet means
   // the executed-plan normalization failed and the entry identifies its era.
   'acceptedIntent', 'acceptedProposal', 'resolutionSummary', 'actionSlots',
   'selectedBranch', 'optionId', 'plannerLabel', 'planner', 'overrideKinds', 'overrideRejections',
@@ -240,6 +246,7 @@ const MODEL_IDENTITY_FIELDS = new Set([
   // verified trivially arm-separable on real R1-10 rows. It adds nothing
   // beyond the neutral plan + movementFeet, so it is banned from the packet.
   'roundNarrative',
+  'reason', 'rationale',
 ]);
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -347,6 +354,7 @@ function validateRow(
     overrideKinds: row.overrideKinds ?? [],
     overrideRejections: row.overrideRejections ?? [],
     roundNarrative: row.roundNarrative,
+    rationale: row.rationale ?? null,
     authorizedPlan: row.authorizedPlan,
   };
 }
@@ -576,6 +584,9 @@ function buildPacket(
       planner: row.planner,
       overrideKinds: row.overrideKinds,
       overrideRejections: row.overrideRejections,
+      decisionReasons: (row.authorizedPlan ?? []).flatMap((entry) => entry.reason === undefined
+        ? [] : [{ actorId: entry.actorId, reason: entry.reason }]),
+      rationale: row.rationale,
     })),
   };
   assertBlindedPacket(packet);

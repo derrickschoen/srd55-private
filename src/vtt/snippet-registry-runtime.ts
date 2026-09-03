@@ -14,31 +14,23 @@ const combatantIdSchema = z.custom<CombatantId>((value) =>
   typeof value === 'string' && value.trim() === value && value.length > 0 && value.length <= 200);
 const optionIdSchema = z.custom<EngineOptionId>((value) =>
   typeof value === 'string' && value.startsWith('option:') && value.length <= 200);
-const overrideJustificationValueSchema = z.discriminatedUnion('reason', [
+const overrideJustificationValueSchema = z.discriminatedUnion('kind', [
   z.object({
-    reason: z.enum(['morale', 'roleplay', 'resource_conservation']),
-    note: z.string().min(1).max(500).optional(),
+    kind: z.enum(['objective', 'morale', 'roleplay', 'resource_conservation', 'unknown_engine_gap']),
   }).strict(),
   z.object({
-    reason: z.literal('objective'),
-    playToken: z.string().min(1).max(200).nullable(),
-    note: z.string().min(1).max(500).optional(),
+    kind: z.literal('engine_play'),
+    token: z.string().min(1).max(200).nullable(),
   }).strict(),
   z.object({
-    reason: z.literal('unknown_engine_gap'),
-    metric: z.enum(ENGINE_OPTION_METRICS).nullable(),
-    note: z.string().min(1).max(500).optional(),
+    kind: z.literal('missing_metric'),
+    id: z.enum(ENGINE_OPTION_METRICS).nullable(),
   }).strict(),
 ]).transform((value): NonNullable<EngineTurnProposal['overrideJustification']> => {
-  if (value.reason === 'objective') return value.note === undefined
-    ? { reason: value.reason, playToken: value.playToken === null ? null : enginePlayToken(value.playToken) }
-    : { reason: value.reason, playToken: value.playToken === null ? null : enginePlayToken(value.playToken), note: value.note };
-  if (value.reason === 'unknown_engine_gap') return value.note === undefined
-    ? { reason: value.reason, metric: value.metric }
-    : { reason: value.reason, metric: value.metric, note: value.note };
-  return value.note === undefined
-    ? { reason: value.reason }
-    : { reason: value.reason, note: value.note };
+  if (value.kind === 'engine_play') {
+    return { kind: value.kind, token: value.token === null ? null : enginePlayToken(value.token) };
+  }
+  return value;
 });
 const overrideJustificationSchema = z.union([
   z.null(),
@@ -50,6 +42,7 @@ const proposalSchema: z.ZodType<EngineTurnProposal> = z.object({
   expectedRevision: z.number().int().min(0),
   primaryOptionId: optionIdSchema,
   fallbackOptionId: optionIdSchema.nullable(),
+  reason: z.string().min(1).max(240).refine((value) => value.trim().length > 0),
   overrideJustification: overrideJustificationSchema,
 }).strict();
 

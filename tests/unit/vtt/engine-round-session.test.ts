@@ -73,7 +73,8 @@ function attackProposal(
   if (primary === undefined) throw new Error(`Test fixture omitted ${actionId} for ${actorId}.`);
   return {
     actorId, expectedRevision: state.revision, primaryOptionId: primary.optionId,
-    fallbackOptionId: fallback?.optionId ?? null, overrideJustification: null,
+    fallbackOptionId: fallback?.optionId ?? null,
+    reason: 'Exercise the round session proposal fixture.', overrideJustification: null,
   };
 }
 
@@ -123,7 +124,8 @@ function dodgeProposal(state: EncounterState, actorId: CombatantId): EngineTurnP
   if (dodge === undefined) throw new Error(`Test fixture omitted Dodge for ${actorId}.`);
   return {
     actorId, expectedRevision: state.revision, primaryOptionId: dodge.optionId,
-    fallbackOptionId: null, overrideJustification: null,
+    fallbackOptionId: null,
+    reason: 'Exercise the invalid round session fixture.', overrideJustification: null,
   };
 }
 
@@ -184,6 +186,7 @@ describe('authoritative engine round session', () => {
       expectedRevision: state.revision,
       primaryOptionId: mixedOption.optionId,
       fallbackOptionId: null,
+      reason: 'Exercise the round session resolution fixture.',
       overrideJustification: null,
     });
     expect(mixed.mechanics.actionSlots.map((use) => use.kind)).toEqual(['attack', 'saving_throw']);

@@ -227,11 +227,11 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
         expected_revision: manifest.revision,
         primary_option_id: selected.optionId,
         fallback_option_id: manifest.phase === 'correction' ? null : fallback?.optionId ?? null,
+        reason: `Choose ${selected.label} to exercise the serialized decision path.`,
         override_justification: requestedKind === 'dodge' || requestedKind === 'end_turn'
           ? {
-              reason: 'unknown_engine_gap',
-              metric: 'expected_damage_milli',
-              note: 'Serialized fixture intentionally selects a dominated option.',
+              kind: 'missing_metric',
+              id: 'expected_damage_milli',
             }
           : null,
       };
@@ -383,6 +383,10 @@ describe('AI-DM engine MCP conversation runner', () => {
       plannedBy: { model: 'gpt-5.6-sol', effort: 'medium' },
       escalated: false,
       escalationModel: null,
+      rationale: null,
+      authorizedPlan: expect.arrayContaining([expect.objectContaining({
+        reason: expect.stringContaining('exercise the serialized decision path'),
+      })]),
     }));
     expect(result.rows[0]?.stateBinding.authorization).toEqual(result.rows[0]?.stateBinding.capsule);
   });
@@ -734,7 +738,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     if (option === undefined) throw new Error('Room 3943006 Dodge option is absent.');
     const proposal = {
       actorId: actor.profile.id, expectedRevision: state.revision, primaryOptionId: option.optionId,
-      fallbackOptionId: null, overrideJustification: null,
+      fallbackOptionId: null, reason: 'Exercise the fixture proposal path.', overrideJustification: null,
     };
     const proposalTime = pureTurnProposalResolver.resolve(state, proposal);
     if (!proposalTime.valid) throw new Error('Room 3943006 Dodge proposal did not resolve.');

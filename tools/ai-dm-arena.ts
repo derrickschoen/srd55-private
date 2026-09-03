@@ -148,6 +148,7 @@ export interface ArenaRow {
   readonly escalated: boolean;
   readonly escalationModel: string | null;
   readonly authorizedPlan: readonly import('./ai-dm-conversation').ConversationAuthorizedActorPlan[] | null;
+  readonly rationale: string | null;
   readonly roundNarrative: string | null;
   readonly chainEvidence: import('./ai-dm-conversation').ConversationChainEvidence;
   readonly initiativeOrder: import('./ai-dm-conversation').ConversationRow['initiativeOrder'];
@@ -522,6 +523,7 @@ export function arenaRows(
     escalated: row.escalated,
     escalationModel: row.escalationModel,
     authorizedPlan: row.authorizedPlan,
+    rationale: row.rationale,
     roundNarrative: row.roundNarrative,
     chainEvidence: row.chainEvidence,
     initiativeOrder: row.initiativeOrder,
