@@ -19,6 +19,7 @@ import {
   type AgentCallPhase, type AgentCallUsage,
   type AgentAdapterKind, type AgentCliKind, type AgentFailureClassification, type AgentInvocation, type AgentSessionAdapter,
   type AgentSessionBinding, type AgentToolSession, type AgentTurnResult, type AgentUsage,
+  type ContextRolloverPolicy, type FreshSessionContext,
 } from '../src/vtt/agent-session';
 import { AgentSessionLifecycle } from '../src/vtt/agent-session-lifecycle';
 import { AGENT_ADAPTER_VERSION, resolveAgentAdapter } from '../src/vtt/agent-adapters';
@@ -438,6 +439,11 @@ export interface ConversationRow {
   readonly wallPerCreature: number;
   readonly tokens: ConversationTokenCounts;
   readonly callUsage: readonly AgentCallUsage[];
+  readonly agentSessionGeneration: number;
+  readonly contextRolloverTriggerCount: number;
+  readonly contextRolloverThreshold: number | null;
+  readonly contextRolloverOccurred: boolean;
+  readonly agentSessionDigestHash: string | null;
   readonly refusals: readonly string[];
   readonly toolCalls: number;
   readonly callsPerRound: number;
@@ -530,6 +536,10 @@ export interface ConversationRunOptions {
   readonly suggestionResponseByRequest?: Readonly<Record<string, ConversationSuggestionAdoption>>;
   /** SIMULATED-only adjustment response keyed by `room-N-round-N-pc-turn-N`. */
   readonly adjustmentResponseByRequest?: Readonly<Record<string, 'keep' | 'change' | 'invalid'>>;
+  /** Test-only policy seam used to force or disable deterministic rollover. */
+  readonly contextRolloverPolicy?: ContextRolloverPolicy;
+  /** Explicit sitting boundary; omitted means the sitting remains resumable. */
+  readonly endSession?: boolean;
 }
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
@@ -2150,6 +2160,7 @@ function invocation(
   planner: ConversationPlannerAttribution = { model: config.model, effort: config.effort },
   recoveryLauncherToken?: string,
   toolSession?: AgentToolSession,
+  freshSessionContext?: FreshSessionContext,
 ): AgentInvocation {
   return {
     runId, prompt, instructions, model: planner.model, reasoningEffort: planner.effort,
@@ -2158,6 +2169,7 @@ function invocation(
     launcherToken, timeoutMs: config.timeoutMs,
     ...(recoveryLauncherToken === undefined ? {} : { recoveryLauncherToken }),
     ...(toolSession === undefined ? {} : { toolSession }),
+    ...(freshSessionContext === undefined ? {} : { freshSessionContext }),
   };
 }
 
@@ -2199,6 +2211,10 @@ async function runConversationWithConfiguredIntel(
 ): Promise<ConversationRunResult> {
   const partyPolicy = options.partyPolicyOverride ?? config.partyPolicy;
   const knowledgeBase = await loadKnowledgeBase(config);
+  const freshSessionContext: FreshSessionContext = {
+    knowledgeBaseBundleHash: knowledgeBase.combinedStartupHash,
+    startupInstructions: knowledgeBase.startupInstructions,
+  };
   const repoCommit = await readRepoCommit(config.cwd);
   await writeFile(config.outPath, '', 'utf8');
   const artifacts = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-conversation-'));
@@ -2277,8 +2293,6 @@ async function runConversationWithConfiguredIntel(
       : { model: config.escalationModel, effort: config.escalationEffort };
   const escalationRepairInstructions =
     'This is a fresh one-shot escalation session for the supplied repair brief. Submit one complete OFFENSIVE corrected round: every actor with a legal attack must attack; Dash-to-close counts as offense for out-of-reach melee; Dodge is allowed only when that actor has no resolvable action. Use only the correction launcher; no fallback remains.';
-  const escalationInstructions =
-    `${knowledgeBase.startupInstructions}\n\n${escalationRepairInstructions}`;
   const prepareRound = (request: EngineOrdinaryRoundCapsuleRequest): EngineRoundSnapshot => {
     const prepared = engineSession.prepareRound(request, journal.reactionGuidance());
     recordAutoResolvedReactions(journal, prepared);
@@ -2300,7 +2314,12 @@ async function runConversationWithConfiguredIntel(
     runId, branchId, revision: capsuleRevision, requestId: 'request:room-1-round-1',
     phase: 'initial', room: 1, historyKind: 'session_started',
   });
-  let lifecycle = new AgentSessionLifecycle(journal, adapter, AGENT_ADAPTER_VERSION);
+  let lifecycle = new AgentSessionLifecycle(
+    journal,
+    adapter,
+    AGENT_ADAPTER_VERSION,
+    options.contextRolloverPolicy,
+  );
 
   for (let room = 1; room <= config.rooms; room += 1) {
     if (room > 1) {
@@ -2315,6 +2334,7 @@ async function runConversationWithConfiguredIntel(
     }
 
     for (let round = 1; round <= config.rounds; round += 1) {
+      const generationBeforeRound = journal.agentSession()?.generation ?? 0;
       const started = performance.now();
       const modelCallsBeforeRound = adapter.modelCalls;
       observedToolCalls = 0;
@@ -2584,6 +2604,7 @@ async function runConversationWithConfiguredIntel(
               planner,
               launcher.recoveryManifestPath,
               toolSession,
+              freshSessionContext,
             ), controller.signal);
             const planningWallMs = performance.now() - dispatchStarted;
             return {
@@ -2740,6 +2761,7 @@ async function runConversationWithConfiguredIntel(
             basePlanner,
             adjustmentLauncher.recoveryManifestPath,
             adjustmentToolSession,
+            freshSessionContext,
           );
           adjustmentCalls += 1;
           const turn = await lifecycle.resumeRound(
@@ -2886,6 +2908,7 @@ async function runConversationWithConfiguredIntel(
               basePlanner,
               correctionLauncher.recoveryManifestPath,
               correctionToolSession,
+              freshSessionContext,
             ),
             signal: new AbortController().signal,
             activateCapsule: () => undefined,
@@ -3032,6 +3055,7 @@ async function runConversationWithConfiguredIntel(
               basePlanner,
               initialLauncher.recoveryManifestPath,
               initialToolSession,
+              freshSessionContext,
             );
             initialDispatchPlanner = plannerAttribution(primaryInvocation);
             options.onPrimaryDispatchStart?.();
@@ -3348,9 +3372,9 @@ async function runConversationWithConfiguredIntel(
                 recordedCorrectionTurnContext = getPlannedCorrectionTurnContext();
                 const correctionTurn = escalationPlanner === null
                   ? await lifecycle.resumeCorrection(correctionInvocation, signal)
-                  : await adapter.start({
+                  : await lifecycle.startEscalation({
                       ...correctionInvocation,
-                      instructions: escalationInstructions,
+                      instructions: escalationRepairInstructions,
                     }, signal);
                 if (correctionTurn.exit !== 'completed') {
                   throw new Error('Agent correction dispatch was cancelled.');
@@ -3389,6 +3413,7 @@ async function runConversationWithConfiguredIntel(
               escalationPlanner ?? basePlanner,
               correctionLauncher.recoveryManifestPath,
               correctionToolSession,
+              freshSessionContext,
             ),
             signal: new AbortController().signal,
             activateCapsule: () => undefined,
@@ -3720,7 +3745,10 @@ async function runConversationWithConfiguredIntel(
                       cli: adapter.kind,
                       sessionId: completed.turn.resumeSessionId,
                       adapterVersion: AGENT_ADAPTER_VERSION,
-                      recoveryGeneration: 0,
+                      generation: 0,
+                      rolloverTriggerCount: 0,
+                      measuredRolloverThreshold: null,
+                      lastDigestHash: null,
                       predecessorSessionHash: null,
                       startedAtRevision: pending.sourceSnapshot.capsule.revision,
                       lastDispatchedRevision: pending.sourceSnapshot.capsule.revision,
@@ -3741,6 +3769,7 @@ async function runConversationWithConfiguredIntel(
                           pending.planner,
                           recalculationLauncher.recoveryManifestPath,
                           recalculationToolSession,
+                          freshSessionContext,
                         ),
                         new AbortController().signal,
                       );
@@ -3979,6 +4008,12 @@ async function runConversationWithConfiguredIntel(
         wallPerCreature: wall / Math.max(1, livingMonsterIds(engineSession.currentState()).length),
         tokens: totalsTokens,
         callUsage: structuredClone(roundCallUsage),
+        agentSessionGeneration: binding?.generation ?? 0,
+        contextRolloverTriggerCount: binding?.rolloverTriggerCount ?? 0,
+        contextRolloverThreshold: binding?.measuredRolloverThreshold ?? null,
+        contextRolloverOccurred: (binding?.generation ?? 0) > generationBeforeRound &&
+          (binding?.rolloverTriggerCount ?? 0) > 0,
+        agentSessionDigestHash: binding === null ? null : journal.agentSessionDigest().hash,
         refusals,
         toolCalls: simulated?.callsByRequest.get(requestId) ?? observedToolCalls,
         callsPerRound: adapter.modelCalls - modelCallsBeforeRound,
@@ -4027,11 +4062,17 @@ async function runConversationWithConfiguredIntel(
         store = new MemoryBrowserSessionStore();
         importSavedSession(store, saved);
         journal = EncounterSessionJournal.resume(runId, store, new MemoryMirrorSink()).journal;
-        lifecycle = new AgentSessionLifecycle(journal, adapter, AGENT_ADAPTER_VERSION);
+        lifecycle = new AgentSessionLifecycle(
+          journal,
+          adapter,
+          AGENT_ADAPTER_VERSION,
+          options.contextRolloverPolicy,
+        );
         restoredMidRun = true;
       }
     }
   }
+  if (options.endSession === true) journal.endSession();
   const binding = journal.agentSession();
   return { rows, binding, journalExport: journal.export(), restoredMidRun };
 }

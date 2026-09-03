@@ -8,9 +8,10 @@ import {
 } from '../../../src/combat/values';
 import { sha256 } from '../../../src/crypto/sha256';
 import {
-  contextRolloverThreshold,
+  measuredContextRolloverThreshold,
   contextTokenCount,
   type AgentSessionAdapter,
+  type AgentSessionBinding,
   type AgentInvocation,
 } from '../../../src/vtt/agent-session';
 import {
@@ -41,11 +42,16 @@ function invocation(runId: ReturnType<typeof encounterSessionId>, prompt: string
     sessionProfile: 'test',
     callPhase: 'initial',
     launcherToken: 'SIMULATED-launcher-token',
+    recoveryLauncherToken: 'SIMULATED-full-launcher-token',
+    freshSessionContext: {
+      knowledgeBaseBundleHash: sha256('SIMULATED root+tactics'),
+      startupInstructions: 'SIMULATED root\n\nSIMULATED tactics',
+    },
     timeoutMs: 5_000,
   };
 }
 
-function setup(adapter: AgentSessionAdapter) {
+function setup(adapter: AgentSessionAdapter, policy = CONTEXT_ROLLOVER_POLICY) {
   const sessionId = encounterSessionId('session:simulated-agent-lifecycle');
   const store = new MemoryBrowserSessionStore();
   const journal = EncounterSessionJournal.create({
@@ -68,17 +74,21 @@ function setup(adapter: AgentSessionAdapter) {
     sessionId,
     store,
     journal,
-    lifecycle: new AgentSessionLifecycle(journal, adapter, 4),
+    lifecycle: new AgentSessionLifecycle(journal, adapter, 4, policy),
   };
 }
 
 describe('SIMULATED agent session lifecycle', () => {
   it('rollover threshold is measured', () => {
-    expect(CONTEXT_ROLLOVER_POLICY.kind).toBe('measured');
+    expect(CONTEXT_ROLLOVER_POLICY).toEqual({
+      kind: 'measured',
+      threshold: 160000,
+      evidence: 'supervisor 2026-09-03: 13392 per-call samples / 1083 rollouts; median 29102 p90 46093 p99 86762 max 238731; window 258400',
+    });
   });
 
   it('uses >= at the measured rollover boundary (mutation: > instead of >=)', () => {
-    const threshold = contextRolloverThreshold(100_000);
+    const threshold = measuredContextRolloverThreshold(100_000);
     const policy = { kind: 'measured', threshold, evidence: 'SIMULATED measurement' } as const;
 
     expect(shouldRollOver(contextTokenCount(99_999), policy)).toBe(false);
@@ -87,12 +97,74 @@ describe('SIMULATED agent session lifecycle', () => {
 
   it('rejects an unmeasured rollover policy for startup outside tests and arena', async () => {
     const adapter = new SIMULATEDAgentSessionAdapter({ startIds: ['must-not-start'] });
-    const { lifecycle, sessionId } = setup(adapter);
+    const { journal, sessionId } = setup(adapter);
+    const lifecycle = new AgentSessionLifecycle(journal, adapter, 4, { kind: 'unmeasured' });
     const { sessionProfile: _testProfile, ...realInvocation } = invocation(sessionId, 'real startup');
 
     await expect(lifecycle.coldStart(realInvocation, new AbortController().signal))
       .rejects.toBeInstanceOf(UnmeasuredContextRolloverPolicyError);
     expect(adapter.startInvocations).toEqual([]);
+  });
+
+  it('resumes at threshold-1 and rolls at threshold with a distinct successor (mutation: resume after crossing threshold)', async () => {
+    const threshold = measuredContextRolloverThreshold(1_000);
+    const usages = [999, 1_000, 73];
+    const startIds = ['agent-session:threshold-base', 'agent-session:threshold-successor'];
+    const adapter: AgentSessionAdapter & {
+      readonly starts: AgentInvocation[];
+      readonly resumes: AgentSessionBinding[];
+    } = {
+      kind: 'codex',
+      starts: [],
+      resumes: [],
+      probe: async () => ({ present: true, version: 'SIMULATED' }),
+      start: async function(startInvocation) {
+        this.starts.push(startInvocation);
+        const sessionId = startIds.shift();
+        const input = usages.shift();
+        if (sessionId === undefined || input === undefined) throw new Error('SIMULATED start exhausted.');
+        return {
+          resumeSessionId: agentSessionId(sessionId), sessionId: null, finalText: '', exit: 'completed',
+          usage: { inputTokens: contextTokenCount(input), cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 },
+        };
+      },
+      resume: async function(binding) {
+        this.resumes.push(binding);
+        const input = usages.shift();
+        if (input === undefined) throw new Error('SIMULATED resume exhausted.');
+        return {
+          resumeSessionId: binding.sessionId, sessionId: null, finalText: '', exit: 'completed',
+          usage: { inputTokens: contextTokenCount(input), cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 },
+        };
+      },
+      classifyFailure: () => 'unknown',
+    };
+    const policy = { kind: 'measured', threshold, evidence: 'SIMULATED boundary' } as const;
+    const { lifecycle, journal, sessionId } = setup(adapter, policy);
+    const signal = new AbortController().signal;
+
+    await lifecycle.coldStartRound(invocation(sessionId, 'first'), signal);
+    await lifecycle.resumeRound(invocation(sessionId, 'threshold call'), signal);
+    expect(adapter.resumes).toHaveLength(1);
+    expect(journal.agentSession()?.sessionId).toBe(agentSessionId('agent-session:threshold-base'));
+
+    const rolled = await lifecycle.resumeRound(invocation(sessionId, 'post-threshold call'), signal);
+    expect(rolled.resumeSessionId).toBe(agentSessionId('agent-session:threshold-successor'));
+    expect(adapter.resumes).toHaveLength(1);
+    expect(adapter.starts[1]?.bootstrap).toMatchObject({
+      kind: 'context_rollover',
+      knowledgeBaseBundleHash: sha256('SIMULATED root+tactics'),
+      stateDelivery: 'full_engine_context',
+    });
+    expect(adapter.starts[1]?.instructions).toContain('[SESSION_DIGEST]');
+    expect(adapter.starts[1]?.instructions).toContain('[FULL_ENGINE_CONTEXT]');
+    expect(adapter.starts[1]?.launcherToken).toBe('SIMULATED-full-launcher-token');
+    expect(journal.agentSession()).toMatchObject({
+      sessionId: agentSessionId('agent-session:threshold-successor'),
+      generation: 1,
+      rolloverTriggerCount: 1,
+      measuredRolloverThreshold: 1_000,
+    });
   });
 
   it('records each completed lifecycle call before aggregate consumers can sum it', async () => {
@@ -160,7 +232,7 @@ describe('SIMULATED agent session lifecycle', () => {
       cli: 'codex',
       sessionId: agentSessionId('agent-session:stable'),
       adapterVersion: 4,
-      recoveryGeneration: 0,
+      generation: 0,
       predecessorSessionHash: null,
       startedAtRevision: 2,
       lastDispatchedRevision: 4,
@@ -196,8 +268,11 @@ describe('SIMULATED agent session lifecycle', () => {
       expect(result.resumeSessionId).toBe(agentSessionId('agent-session:successor'));
       expect(result.sessionId).toBeNull();
       expect(adapter.startInvocations).toHaveLength(2);
-      expect(adapter.startInvocations[1]?.prompt).toContain('"format":"recovery_bootstrap"');
-      expect(adapter.startInvocations[1]?.prompt).toContain(predecessorHash);
+      expect(adapter.startInvocations[1]?.bootstrap).toMatchObject({
+        kind: 'resume_recovery', predecessorSessionHash: predecessorHash,
+        stateDelivery: 'full_engine_context',
+      });
+      expect(adapter.startInvocations[1]?.instructions).toContain('[SESSION_DIGEST]');
       expect(adapter.startInvocations[1]?.prompt).not.toContain('agent-session:failed');
       expect(adapter.startInvocations[1]?.prompt).toContain('[RECOVERY_DISPATCH]\npending-round');
       expect(adapter.startInvocations[1]?.launcherToken).toBe('SIMULATED-full-launcher-token');
@@ -219,14 +294,14 @@ describe('SIMULATED agent session lifecycle', () => {
         },
         binding: {
           sessionId: agentSessionId('agent-session:successor'),
-          recoveryGeneration: 1,
+          generation: 1,
           predecessorSessionHash: predecessorHash,
           status: 'active',
         },
       });
       expect(journal.agentSession()).toMatchObject({
         sessionId: agentSessionId('agent-session:successor'),
-        recoveryGeneration: 1,
+        generation: 1,
         predecessorSessionHash: predecessorHash,
         status: 'active',
       });
@@ -251,7 +326,7 @@ describe('SIMULATED agent session lifecycle', () => {
     )).toBe(false);
     expect(journal.agentSession()).toMatchObject({
       sessionId: agentSessionId('agent-session:still-active'),
-      recoveryGeneration: 0,
+      generation: 0,
       predecessorSessionHash: null,
       status: 'active',
     });

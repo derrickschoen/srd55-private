@@ -127,6 +127,11 @@ export interface ArenaRow {
   readonly wall: number;
   readonly tokens: ConversationTokenCounts;
   readonly callUsage: readonly import('../src/vtt/agent-session').AgentCallUsage[];
+  readonly agentSessionGeneration: number;
+  readonly contextRolloverTriggerCount: number;
+  readonly contextRolloverThreshold: number | null;
+  readonly contextRolloverOccurred: boolean;
+  readonly agentSessionDigestHash: string | null;
   readonly refusals: readonly string[];
   readonly toolCalls: number;
   readonly callsPerRound: number;
@@ -492,6 +497,11 @@ export function arenaRows(
     wall: row.wallPerCreature,
     tokens: row.tokens,
     callUsage: structuredClone(row.callUsage),
+    agentSessionGeneration: row.agentSessionGeneration,
+    contextRolloverTriggerCount: row.contextRolloverTriggerCount,
+    contextRolloverThreshold: row.contextRolloverThreshold,
+    contextRolloverOccurred: row.contextRolloverOccurred,
+    agentSessionDigestHash: row.agentSessionDigestHash,
     refusals: row.refusals,
     toolCalls: row.toolCalls,
     callsPerRound: row.callsPerRound,

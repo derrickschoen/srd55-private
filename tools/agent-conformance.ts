@@ -103,7 +103,7 @@ function invocation(kind: AgentCliKind, prompt: string): AgentInvocation {
 }
 
 function binding(kind: AgentCliKind, sessionId: string): AgentSessionBinding {
-  return { cli: kind, sessionId: agentSessionIdFromCli(sessionId), adapterVersion: AGENT_ADAPTER_VERSION, recoveryGeneration: 0, predecessorSessionHash: null, startedAtRevision: 1, lastDispatchedRevision: 1, callUsage: [], currentContextTokens: null, status: 'active' };
+  return { cli: kind, sessionId: agentSessionIdFromCli(sessionId), adapterVersion: AGENT_ADAPTER_VERSION, generation: 0, rolloverTriggerCount: 0, measuredRolloverThreshold: null, lastDigestHash: null, predecessorSessionHash: null, startedAtRevision: 1, lastDispatchedRevision: 1, callUsage: [], currentContextTokens: null, status: 'active' };
 }
 
 function conformanceTimeoutMs(kind: AgentCliKind): number {

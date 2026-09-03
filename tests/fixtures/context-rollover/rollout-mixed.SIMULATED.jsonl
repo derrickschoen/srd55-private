@@ -1,0 +1,2 @@
+{"type":"turn.completed","usage":{"input_tokens":101,"cached_input_tokens":31,"output_tokens":17,"reasoning_output_tokens":7}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":999999},"last_token_usage":{"input_tokens":203},"model_context_window":258400}}}

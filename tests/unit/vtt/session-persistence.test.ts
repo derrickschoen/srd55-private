@@ -25,7 +25,11 @@ import {
   encounterSessionId,
   type CombatantId,
 } from '../../../src/combat/values';
-import { agentCallUsage, contextTokenCount } from '../../../src/vtt/agent-session';
+import {
+  agentCallUsage,
+  contextTokenCount,
+  measuredContextRolloverThreshold,
+} from '../../../src/vtt/agent-session';
 import {
   DeferredMirrorSink,
   EncounterSessionJournal,
@@ -194,7 +198,10 @@ describe('event-sourced encounter persistence', () => {
       cli: 'codex',
       sessionId: 'codex:increment-6-local',
       adapterVersion: 1,
-      recoveryGeneration: 0,
+      generation: 0,
+      rolloverTriggerCount: 0,
+      measuredRolloverThreshold: null,
+      lastDigestHash: null,
       predecessorSessionHash: null,
       startedAtRevision: 1,
       lastDispatchedRevision: 0,
@@ -278,6 +285,44 @@ describe('event-sourced encounter persistence', () => {
     ]);
     expect(binding?.currentContextTokens).toBe(203);
     expect(binding?.currentContextTokens).not.toBe(304);
+  });
+
+  it('round-trips rollover generation and transition without losing engine state (mutation: treat rollover as resume failure)', () => {
+    const store = new MemoryBrowserSessionStore();
+    const { journal } = createJournal(store, new MemoryMirrorSink(), new ControllerRegistry([]));
+    journal.startAgentSession({
+      cli: 'codex', sessionId: agentSessionId('codex:rollover-base'), adapterVersion: 1,
+      measuredRolloverThreshold: measuredContextRolloverThreshold(160_000),
+    });
+    journal.recordAgentCallUsage(agentCallUsage({
+      inputTokens: contextTokenCount(160_000), cachedInputTokens: 0,
+      outputTokens: 1, reasoningTokens: 0,
+    }, 'initial', 1));
+    const before = store.revisions(encounterSessionId('session:persistence-test')).at(-1)!;
+    const digest = journal.agentSessionDigest();
+    journal.rollOverAgentSession({
+      sessionId: agentSessionId('codex:rollover-successor'),
+      predecessorSessionHash: '1'.repeat(64),
+      latestInputTokens: contextTokenCount(160_000),
+      threshold: measuredContextRolloverThreshold(160_000),
+      digestHash: digest.hash,
+    });
+
+    const reloaded = new MemoryBrowserSessionStore();
+    const sessionId = encounterSessionId('session:persistence-test');
+    importSavedSession(reloaded, journal.export());
+    const resumed = EncounterSessionJournal.resume(sessionId, reloaded, new MemoryMirrorSink());
+
+    expect(resumed.agentSession).toMatchObject({
+      sessionId: agentSessionId('codex:rollover-successor'), generation: 1,
+      rolloverTriggerCount: 1, measuredRolloverThreshold: 160_000,
+      lastDigestHash: digest.hash,
+    });
+    expect(resumed.encounterState).toEqual(before.encounterState);
+    expect(resumed.partyState).toEqual(before.partyState);
+    expect(resumed.coordinatorState).toEqual(before.coordinatorState);
+    expect(resumed.controllers).toEqual(before.controllers);
+    expect(reloaded.revisions(sessionId).at(-1)?.transition.kind).toBe('agent_session_rolled_over');
   });
 
   it('fingerprint_not_checked: one flipped bundle byte refuses the whole session file', () => {
@@ -875,7 +920,8 @@ describe('event-sourced encounter persistence', () => {
     expect(after.agentSession).toMatchObject({
       cli: 'codex',
       sessionId: agentSessionId('codex:legacy-v1-migration-fixture'),
-      recoveryGeneration: 0,
+      generation: 0,
+      rolloverTriggerCount: 0,
       predecessorSessionHash: null,
       status: 'active',
     });
@@ -912,11 +958,11 @@ describe('event-sourced encounter persistence', () => {
          ORDER BY revision`,
       );
       expect(rows).toEqual([
-        { revision: 1, schema_version: 9 },
-        { revision: 2, schema_version: 9 },
-        { revision: 3, schema_version: 9 },
-        { revision: 4, schema_version: 9 },
-        { revision: 5, schema_version: 9 },
+        { revision: 1, schema_version: 10 },
+        { revision: 2, schema_version: 10 },
+        { revision: 3, schema_version: 10 },
+        { revision: 4, schema_version: 10 },
+        { revision: 5, schema_version: 10 },
       ]);
       expect(
         EncounterSessionJournal.resume(

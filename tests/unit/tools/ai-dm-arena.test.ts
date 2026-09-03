@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { encounterSessionId } from '../../../src/combat/values';
 import {
   agentSessionIdFromCli,
+  measuredContextRolloverThreshold,
   type AgentInvocation,
   type AgentSessionAdapter,
   type AgentSessionBinding,
@@ -131,11 +132,13 @@ class OrderingNullAdapter implements AgentSessionAdapter {
 
 class InProcessArenaAdapter implements AgentSessionAdapter {
   readonly kind = 'local-openai' as const;
+  readonly invocations: Array<{ readonly dispatch: 'start' | 'resume'; readonly invocation: AgentInvocation }> = [];
   #starts = 0;
 
   async probe() { return { present: true, version: 'SIMULATED-in-process' }; }
 
   async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
+    this.invocations.push({ dispatch: 'start', invocation });
     this.#starts += 1;
     return this.#dispatch(
       agentSessionIdFromCli(`local-openai:SIMULATED-arena-${String(this.#starts)}`),
@@ -147,6 +150,7 @@ class InProcessArenaAdapter implements AgentSessionAdapter {
     binding: AgentSessionBinding,
     invocation: AgentInvocation,
   ): Promise<AgentTurnResult> {
+    this.invocations.push({ dispatch: 'resume', invocation });
     return this.#dispatch(binding.sessionId, invocation);
   }
 
@@ -1050,17 +1054,47 @@ describe('AI-DM arena', () => {
     }));
   });
 
-  it('keeps the model-free one-round arena behavior unchanged except required call usage fields', async () => {
+  it('keeps model-free one-round invocation sequences identical with rollover disabled or too high to act', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-d1-regression-'));
-    const config = parseArenaArgs([
+    const baseArgs = [
       '--rooms', '1', '--reps', '1', '--seed', '3943001',
-      '--out', join(directory, 'arena.jsonl'), '--dry-run',
+      '--dry-run', '--cli', 'local-openai', '--local-base-url', 'http://SIMULATED',
+      '--local-model', 'SIMULATED-model',
       ...LEGACY_BLOCK_ARGS,
+    ] as const;
+    const disabledAdapter = new InProcessArenaAdapter();
+    const highAdapter = new InProcessArenaAdapter();
+    const disabledConfig = parseArenaArgs([
+      ...baseArgs, '--out', join(directory, 'disabled.jsonl'),
+    ]);
+    const highConfig = parseArenaArgs([
+      ...baseArgs, '--out', join(directory, 'high.jsonl'),
     ]);
 
-    const [row] = await runArena(config);
+    const [disabledRow] = await runArena(disabledConfig, {
+      adapter: disabledAdapter,
+      contextRolloverPolicy: { kind: 'unmeasured' },
+    });
+    const [highRow] = await runArena(highConfig, {
+      adapter: highAdapter,
+      contextRolloverPolicy: {
+        kind: 'measured',
+        threshold: measuredContextRolloverThreshold(Number.MAX_SAFE_INTEGER),
+        evidence: 'SIMULATED inactive threshold',
+      },
+    });
 
-    expect(row).toEqual(expect.objectContaining({
+    const sequence = (adapter: InProcessArenaAdapter) => adapter.invocations.map((entry) => ({
+      dispatch: entry.dispatch,
+      callPhase: entry.invocation.callPhase,
+      prompt: entry.invocation.prompt,
+      model: entry.invocation.model,
+      reasoningEffort: entry.invocation.reasoningEffort,
+      bootstrap: entry.invocation.bootstrap?.kind ?? null,
+    }));
+    expect(sequence(highAdapter)).toEqual(sequence(disabledAdapter));
+
+    expect(disabledRow).toEqual(expect.objectContaining({
       knowledgeModel: 'engine_state',
       room: 1,
       round: 1,
@@ -1069,6 +1103,12 @@ describe('AI-DM arena', () => {
       callsPerRound: 1,
       tokens: { input: 0, cachedInput: 0, output: 0, reasoning: 0 },
       callUsage: [],
+      contextRolloverOccurred: false,
+    }));
+    expect(highRow).toEqual(expect.objectContaining({
+      outcome: disabledRow?.outcome,
+      callsPerRound: disabledRow?.callsPerRound,
+      contextRolloverOccurred: false,
     }));
   });
 

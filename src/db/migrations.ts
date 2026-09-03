@@ -63,6 +63,7 @@ import safeQueryIndexes from '../../drizzle/0059_safe_query_indexes.sql?raw';
 import profileProvenIndexes from '../../drizzle/0060_profile_proven_indexes.sql?raw';
 import vttAgentSessionBinding from '../../drizzle/0061_vtt_agent_session_binding.sql?raw';
 import vttContextTokenUsage from '../../drizzle/0062_vtt_context_token_usage.sql?raw';
+import vttContextRollover from '../../drizzle/0063_vtt_context_rollover.sql?raw';
 import { sha256 } from '../crypto/sha256';
 
 export interface DatabaseMigration {
@@ -658,6 +659,12 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = Object.freeze([
     sql: vttContextTokenUsage,
     checksum: 'dbb74cca0525108da0d60c2e902f4237216445076d7ff5592f9b8f776933bf9c',
     resultSchemaChecksum: '6990e8086a0731ff4204ea90310c1c1a35e0006198885bea95c6455bc41d5a27',
+  }),
+  Object.freeze({
+    id: '0063_vtt_context_rollover',
+    sql: vttContextRollover,
+    checksum: 'c4aab1df7d15b3e8c499b46f8166ebb5bdf319d5bb0e97634ddfcf45f68b7110',
+    resultSchemaChecksum: '4f18fd0935b384029516b7f60063856a23f3f39ec29968dbff0d922bd9b41c3a',
   }),
 ]);
 

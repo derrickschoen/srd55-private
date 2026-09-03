@@ -1,10 +1,13 @@
 import type { EncounterSessionId, AgentSessionId } from '../combat/values';
+import type { AgentSessionDigest } from './agent-session-digest';
 
 declare const contextTokenCountBrand: unique symbol;
-declare const contextRolloverThresholdBrand: unique symbol;
+declare const measuredContextRolloverThresholdBrand: unique symbol;
 
 export type ContextTokenCount = number & { readonly [contextTokenCountBrand]: true };
-export type ContextRolloverThreshold = number & { readonly [contextRolloverThresholdBrand]: true };
+export type MeasuredContextRolloverThreshold = number & {
+  readonly [measuredContextRolloverThresholdBrand]: true;
+};
 
 export type AgentCallPhase =
   | 'initial'
@@ -26,9 +29,36 @@ export type ContextRolloverPolicy =
   | { readonly kind: 'unmeasured' }
   | {
       readonly kind: 'measured';
-      readonly threshold: ContextRolloverThreshold;
+      readonly threshold: MeasuredContextRolloverThreshold;
       readonly evidence: string;
     };
+
+export type FreshSessionBootstrap =
+  | { readonly kind: 'cold_start' }
+  | {
+      readonly kind: 'context_rollover';
+      readonly knowledgeBaseBundleHash: string;
+      readonly digest: AgentSessionDigest;
+      readonly stateDelivery: 'full_engine_context';
+    }
+  | {
+      readonly kind: 'resume_recovery';
+      readonly knowledgeBaseBundleHash: string;
+      readonly digest: AgentSessionDigest;
+      readonly stateDelivery: 'full_engine_context';
+      readonly predecessorSessionHash: string;
+    }
+  | {
+      readonly kind: 'escalation';
+      readonly knowledgeBaseBundleHash: string;
+      readonly digest: AgentSessionDigest;
+      readonly stateDelivery: 'full_engine_context';
+    };
+
+export interface FreshSessionContext {
+  readonly knowledgeBaseBundleHash: string;
+  readonly startupInstructions: string;
+}
 
 export type AgentCliKind = 'codex' | 'opencode' | 'pi' | 'claude-code';
 export type AgentAdapterKind = AgentCliKind | 'local-openai';
@@ -48,13 +78,16 @@ export interface AgentSessionBinding {
   readonly cli: AgentAdapterKind;
   readonly sessionId: AgentSessionId;
   readonly adapterVersion: number;
-  readonly recoveryGeneration: number;
+  readonly generation: number;
+  readonly rolloverTriggerCount: number;
+  readonly measuredRolloverThreshold: MeasuredContextRolloverThreshold | null;
+  readonly lastDigestHash: string | null;
   readonly predecessorSessionHash: string | null;
   readonly startedAtRevision: number;
   readonly lastDispatchedRevision: number;
   readonly callUsage: readonly AgentCallUsage[];
   readonly currentContextTokens: ContextTokenCount | null;
-  readonly status: 'active' | 'superseded_after_resume_failure';
+  readonly status: 'active' | 'superseded_after_resume_failure' | 'superseded_after_context_rollover';
 }
 
 export interface AgentInvocation {
@@ -62,6 +95,10 @@ export interface AgentInvocation {
   readonly prompt: string;
   /** Session-level instructions supplied only when creating a new agent session. */
   readonly instructions?: string | null;
+  /** Typed provenance for every genuinely fresh session. */
+  readonly bootstrap?: FreshSessionBootstrap;
+  /** Root+tactics bytes and relocation-stable bundle hash needed by fresh successors. */
+  readonly freshSessionContext?: FreshSessionContext;
   readonly model: string;
   readonly reasoningEffort: string;
   readonly sessionProfile?: 'arena' | 'test';
@@ -132,11 +169,11 @@ export function contextTokenCount(value: number): ContextTokenCount {
   return value as ContextTokenCount;
 }
 
-export function contextRolloverThreshold(value: number): ContextRolloverThreshold {
+export function measuredContextRolloverThreshold(value: number): MeasuredContextRolloverThreshold {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new RangeError('Context rollover threshold must be a positive safe integer.');
   }
-  return value as ContextRolloverThreshold;
+  return value as MeasuredContextRolloverThreshold;
 }
 
 export function agentCallUsage(
@@ -168,11 +205,14 @@ export function isAgentAdapterKind(value: unknown): value is AgentAdapterKind {
 export function isAgentSessionBinding(value: unknown): value is AgentSessionBinding {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const binding = value as Readonly<Record<string, unknown>>;
-  return Object.keys(binding).length === 10 &&
+  return Object.keys(binding).length === 13 &&
     isAgentAdapterKind(binding.cli) &&
     typeof binding.sessionId === 'string' && binding.sessionId.length > 0 && binding.sessionId.trim() === binding.sessionId && binding.sessionId.length <= 200 &&
     Number.isSafeInteger(binding.adapterVersion) && typeof binding.adapterVersion === 'number' && binding.adapterVersion >= 1 &&
-    Number.isSafeInteger(binding.recoveryGeneration) && typeof binding.recoveryGeneration === 'number' && binding.recoveryGeneration >= 0 &&
+    Number.isSafeInteger(binding.generation) && typeof binding.generation === 'number' && binding.generation >= 0 &&
+    Number.isSafeInteger(binding.rolloverTriggerCount) && typeof binding.rolloverTriggerCount === 'number' && binding.rolloverTriggerCount >= 0 &&
+    (binding.measuredRolloverThreshold === null || isMeasuredContextRolloverThreshold(binding.measuredRolloverThreshold)) &&
+    (binding.lastDigestHash === null || isSha256(binding.lastDigestHash)) &&
     (binding.predecessorSessionHash === null || typeof binding.predecessorSessionHash === 'string') &&
     Number.isSafeInteger(binding.startedAtRevision) && typeof binding.startedAtRevision === 'number' && binding.startedAtRevision >= 1 &&
     Number.isSafeInteger(binding.lastDispatchedRevision) && typeof binding.lastDispatchedRevision === 'number' && binding.lastDispatchedRevision >= 0 &&
@@ -181,11 +221,20 @@ export function isAgentSessionBinding(value: unknown): value is AgentSessionBind
     (binding.callUsage.length === 0
       ? binding.currentContextTokens === null
       : binding.currentContextTokens === binding.callUsage.at(-1)?.input) &&
-    (binding.status === 'active' || binding.status === 'superseded_after_resume_failure');
+    (binding.status === 'active' || binding.status === 'superseded_after_resume_failure' ||
+      binding.status === 'superseded_after_context_rollover');
 }
 
 function isContextTokenCount(value: unknown): value is ContextTokenCount {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isMeasuredContextRolloverThreshold(value: unknown): value is MeasuredContextRolloverThreshold {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value);
 }
 
 export function isAgentCallUsage(value: unknown): value is AgentCallUsage {

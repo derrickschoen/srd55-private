@@ -3,11 +3,14 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import {
   agentSessionIdFromCli,
+  contextTokenCount,
+  measuredContextRolloverThreshold,
   type AgentInvocation,
   type AgentSessionAdapter,
   type AgentSessionBinding,
   type AgentTurnResult,
 } from '../../../src/vtt/agent-session';
+import { AgentSessionLifecycle } from '../../../src/vtt/agent-session-lifecycle';
 import {
   parseConversationArgs,
   proposalResolutionDivergence,
@@ -31,7 +34,10 @@ import { mcpRequestMeta, type McpHandler } from '../../../src/vtt/mcp/handler';
 import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
 import {
   importSavedSession,
+  exportSavedSession,
+  EncounterSessionJournal,
   MemoryBrowserSessionStore,
+  MemoryMirrorSink,
 } from '../../../src/vtt/session-persistence';
 import { codexArgv } from '../../../src/vtt/agent-adapters/codex';
 import {
@@ -131,7 +137,10 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
   readonly resumeInvocations: AgentInvocation[] = [];
   #startCount = 0;
 
-  constructor(private readonly choice: 'use_action_dodge' | 'targeted_web' | 'attack' | 'invalid_then_dodge' | 'option_shaped_end_turn') {}
+  constructor(
+    private readonly choice: 'use_action_dodge' | 'targeted_web' | 'attack' | 'invalid_then_dodge' | 'option_shaped_end_turn',
+    private readonly usageInputs: number[] = [],
+  ) {}
 
   async probe() { return { present: true, version: 'SERIALIZED-TEST' }; }
 
@@ -259,7 +268,12 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       resumeSessionId: sessionId,
       sessionId,
       finalText: 'SERIALIZED-TEST',
-      usage: null,
+      usage: this.usageInputs.length === 0 ? null : {
+        inputTokens: contextTokenCount(this.usageInputs.shift()!),
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+      },
       exit: 'completed',
     };
   }
@@ -452,9 +466,104 @@ describe('AI-DM engine MCP conversation runner', () => {
       .toContain('Dash-to-close counts as offense for out-of-reach melee');
     expect(tieredAdapter.startInvocations[1]?.instructions)
       .toContain('Dodge is allowed only when that actor has no resolvable action');
+    const escalation = tieredAdapter.startInvocations[1];
+    if (escalation?.instructions === undefined || escalation.instructions === null) {
+      throw new Error('Configured escalation omitted its typed startup instructions.');
+    }
+    expect(escalation.bootstrap).toMatchObject({
+      kind: 'escalation', knowledgeBaseBundleHash: DEFAULT_KB_HASH,
+      stateDelivery: 'full_engine_context',
+    });
+    const startupOrder = [
+      escalation.instructions.indexOf('## Role'),
+      escalation.instructions.indexOf('When a melee creature cannot reach an enemy'),
+      escalation.instructions.indexOf('[SESSION_DIGEST]'),
+      escalation.instructions.indexOf('[FULL_ENGINE_CONTEXT]'),
+      escalation.instructions.indexOf('OFFENSIVE corrected round'),
+    ];
+    expect(startupOrder.every((position) => position >= 0)).toBe(true);
+    expect(startupOrder).toEqual([...startupOrder].sort((left, right) => left - right));
     expect(tieredAdapter.resumeInvocations).toHaveLength(0);
     expect(untieredAdapter.startInvocations).toHaveLength(1);
     expect(untieredAdapter.resumeInvocations).toHaveLength(1);
+  });
+
+  it('constructs no escalation adapter or bootstrap for the exact post-shift no-flag control shape (mutation: implicit escalation default)', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-no-escalation-'));
+    const adapter = new SerializedRoundTripAdapter('invalid_then_dodge');
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--model', 'gpt-5.6-luna', '--effort', 'low',
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+    expect({ escalationModel: config.escalationModel, escalationEffort: config.escalationEffort })
+      .toEqual({ escalationModel: null, escalationEffort: null });
+
+    const result = await runConversation(config, {
+      adapter,
+      roomStates: [generateRoom(3_943_006).encounter.state],
+    });
+
+    expect(adapter.startInvocations).toHaveLength(1);
+    expect(adapter.startInvocations[0]?.bootstrap).toEqual({ kind: 'cold_start' });
+    expect(adapter.resumeInvocations).toHaveLength(1);
+    expect(adapter.resumeInvocations[0]?.bootstrap).toBeUndefined();
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      escalated: false,
+      escalationModel: null,
+      escalationSessionId: null,
+    }));
+  });
+
+  it('keeps one sitting across rooms, rolls only at threshold, and explicit end prevents resume', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-sitting-rollover-'));
+    const adapter = new SerializedRoundTripAdapter('use_action_dodge', [1_000, 73]);
+    const config = parseConversationArgs([
+      '--rooms', '2', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+    const policy = {
+      kind: 'measured',
+      threshold: measuredContextRolloverThreshold(1_000),
+      evidence: 'SIMULATED conversation boundary',
+    } as const;
+    const result = await runConversation(config, {
+      adapter,
+      contextRolloverPolicy: policy,
+      endSession: true,
+    });
+
+    expect(adapter.startInvocations).toHaveLength(2);
+    expect(adapter.resumeInvocations).toHaveLength(0);
+    expect(adapter.startInvocations[1]?.bootstrap).toMatchObject({ kind: 'context_rollover' });
+    expect(result.rows.map((row) => ({
+      room: row.room,
+      generation: row.agentSessionGeneration,
+      rolled: row.contextRolloverOccurred,
+    }))).toEqual([
+      { room: 1, generation: 0, rolled: false },
+      { room: 2, generation: 1, rolled: true },
+    ]);
+    expect(result.binding?.sessionId).not.toBe(agentSessionIdFromCli(
+      'codex:serialized:encounter:ai-dm-conversation:session-1',
+    ));
+
+    const store = new MemoryBrowserSessionStore();
+    const runId = importSavedSession(store, result.journalExport);
+    const journal = EncounterSessionJournal.resume(runId, store, new MemoryMirrorSink()).journal;
+    expect(journal.ended()).toBe(true);
+    const lifecycle = new AgentSessionLifecycle(journal, adapter, 1, policy);
+    await expect(lifecycle.resumeRound({
+      runId,
+      prompt: 'must not dispatch after explicit end',
+      model: config.model,
+      reasoningEffort: config.effort,
+      sessionProfile: 'test',
+      callPhase: 'initial',
+      launcherToken: 'SIMULATED-unused',
+      timeoutMs: 1,
+    }, new AbortController().signal)).rejects.toThrow('Explicitly ended sitting');
+    expect(adapter.startInvocations).toHaveLength(2);
   });
 
   it.each([
@@ -1047,9 +1156,16 @@ describe('AI-DM engine MCP conversation runner', () => {
       expect.objectContaining({
         outcome: 'authorized', toolCalls: 2, kbReads: [], callsPerRound: 1,
         refusals: [], kbHash: DEFAULT_KB_HASH,
+        contextRolloverOccurred: false,
+        contextRolloverTriggerCount: 0,
+        escalated: false,
+        escalationSessionId: null,
       }),
     ]);
     expect(result.rows[0]?.tokens).toEqual({ input: 0, cachedInput: 0, output: 0, reasoning: 0 });
+    const store = new MemoryBrowserSessionStore();
+    const sessionId = importSavedSession(store, result.journalExport);
+    expect(exportSavedSession(store, sessionId)).toBe(result.journalExport);
   });
 
   it('retries one SIMULATED service flap and uses the first healthy primary turn', { timeout: 30_000 }, async () => {

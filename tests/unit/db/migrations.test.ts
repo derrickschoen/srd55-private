@@ -375,6 +375,14 @@ const SCHEMA_BEFORE_VTT_CONTEXT_TOKEN_USAGE = DATABASE_MIGRATIONS
   .join('\n');
 const VTT_CONTEXT_TOKEN_USAGE_MIGRATION =
   DATABASE_MIGRATIONS[VTT_CONTEXT_TOKEN_USAGE_INDEX]!;
+const VTT_CONTEXT_ROLLOVER_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0063_vtt_context_rollover',
+);
+const SCHEMA_BEFORE_VTT_CONTEXT_ROLLOVER = DATABASE_MIGRATIONS
+  .slice(0, VTT_CONTEXT_ROLLOVER_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const VTT_CONTEXT_ROLLOVER_MIGRATION = DATABASE_MIGRATIONS[VTT_CONTEXT_ROLLOVER_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -4356,6 +4364,50 @@ describe('database migration chain', () => {
       `);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         VTT_CONTEXT_TOKEN_USAGE_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(schemaSignature(SCHEMA_BEFORE_VTT_CONTEXT_ROLLOVER));
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0063 preserves schema-nine journal bytes and admits schema-ten rollover transitions', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_VTT_CONTEXT_ROLLOVER);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES (
+          'session:rollover-survivor', 1, 9,
+          '{"agentSession":{"callUsage":[],"currentContextTokens":160000},"journal":"unchanged"}',
+          '${'34'.repeat(32)}'
+        )
+      `);
+
+      db.exec(VTT_CONTEXT_ROLLOVER_MIGRATION.sql);
+
+      expect(db.selectObjects(
+        `SELECT session_id, revision, schema_version, payload_json, payload_checksum
+         FROM vtt_session_revisions`,
+      )).toEqual([{
+        session_id: 'session:rollover-survivor',
+        revision: 1,
+        schema_version: 9,
+        payload_json: '{"agentSession":{"callUsage":[],"currentContextTokens":160000},"journal":"unchanged"}',
+        payload_checksum: '34'.repeat(32),
+      }]);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES (
+          'session:rollover-v10', 1, 10,
+          '{"transition":{"kind":"agent_session_rolled_over"}}',
+          '${'56'.repeat(32)}'
+        )
+      `);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        VTT_CONTEXT_ROLLOVER_MIGRATION.resultSchemaChecksum,
       );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {
