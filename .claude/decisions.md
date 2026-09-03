@@ -920,6 +920,24 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D492 — OWNER: BG3 ground truth from published playthrough videos; neutral policy in the public repo, BG3 material private (2026-09-03)
+
+Asked: recordings source (owner-provided / documented-first / published
+videos) and code placement.
+
+Owner: **"Use published playthrough videos"** and **"Neutral policy in
+the public repo, BG3 material private."**
+
+Consequences: the supervisor locates public gameplay videos of flat-
+ground BG3 fights featuring easy melee enemies, spellcasters and mud
+mephits, and records links, timestamps and per-turn decisions as
+private fixtures under dnd-research-private/bg3-npc-ai (transcription is
+manual and slow; videos with a visible combat log are preferred; any
+turn the transcriber cannot read is marked unknown, never guessed). The
+public repo receives only the neutrally named deterministic policy
+("tactical policy v2", mode flag) and SRD data; agreement scoring
+against BG3 stays private.
+
 ## D491 — OWNER: a BG3 NPC-AI matching lane, in a private repo, no agent assist (2026-09-03)
 
 Owner (verbatim): **"Can we have a lane to try to match the bg3 npc ai
