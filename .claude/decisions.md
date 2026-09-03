@@ -1,5 +1,19 @@
 # Binding scope decisions
 
+C1 VERIFIED AND COMMITTED; C2 DISPATCHED; D447 PANEL VALID (supervisor,
+2026-09-03 01:45): C1 = 10 new fixture files + src/vtt/knowledge-base-
+contract.ts + tests/unit/tools/ai-dm-knowledge-base.test.ts (5 files
+changed +69/-67). My checks: root 2706 bytes (cap 3072), root+tactics
+3794 (cap 4608), tactics.md identical to k7-close.txt by cmp, index paths
+repo-relative, no /home/vagrant or banned-source words in any fixture,
+actions.md/spells.md contain rule definitions only (my sentinel grep hit
+the word Dodge in a rules sentence, not a tactic). Gates: tsc 0, sg 0,
+vitest 541 files / 9479 tests. My mutation (a k7 Dash line inserted into
+the root, guarded to fail loudly if unapplied): sentinel test fails,
+7/7 after restore proven by grep. Committed in the lane. C2 (two-read
+engine.read_kb_subject tool + kbReads telemetry) dispatched. D447 panel:
+three seats, 100/100 each, all structural checks clean; key sealed.
+
 D447 BOTH ARMS LANDED AND VERIFIED; PACKET BUILT; PANEL DISPATCHED
 (supervisor, 2026-09-03 01:22): candidate (caveman rows+move+gating, luna
 low) 50 rows, 49 authorized / 1 timeout (refused), same 10 digests x5 as
