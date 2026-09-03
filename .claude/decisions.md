@@ -1,5 +1,25 @@
 # Binding scope decisions
 
+B1 HARVESTED; D449 PANEL VALID (supervisor note, 2026-09-02 22:30):
+codex delivered B1 (24 files +433/-111, three new files: monster-feature-
+support.ts, mixed-kind-multiattack.test.ts, monster-omitted-riders.test.ts)
+reporting tsc 0 / sg 0 / 537 files 9448 tests. My gates: tsc 0, sg 0,
+vitest 9447/9448 with one failure — "hidden_options_logged_once" (the A2
+row-telemetry test) at 5108 ms; in isolation it passes in 4.28 s, i.e.
+it sits inside the 5 s default with no margin and fails whenever the box
+is loaded. Not a B1 defect; assigned to B2 as a side task: make the test
+cheaper, never raise the timeout. Full-suite rerun in progress for a
+clean gate before the B1 commit. My mutation (child lookup reverted to
+attacks only): 3/3 mixed-multiattack tests fail, 3/3 pass after restore
+proven by grep. Review: legalMultiattackCombinations now accepts attack
+and saving-throw children; 'one_attack_may_be_replaced' takes the LAST
+actionId as the replacement by position (typed enough for lion/wight;
+flagged for a named replacement field later); the previous
+"raises_as_zombie throws loudly" test was rewritten to assert Life Drain
+executes damage and max-HP reduction while the zombie lifecycle is an
+omitted rider — that is D454's rule, not a weakened test. D449 k7 panel:
+three seats, 60/60 each, all structural checks clean; key sealed.
+
 D449 K7 ARM LANDED AND VERIFIED; PACKET BUILT; PANEL DISPATCHED
 (supervisor note, 2026-09-02 22:08): d449-s-full-low-k7 30 rows, 27
 authorized / 3 refused (all three are 120 s timeouts; the weather rule is
