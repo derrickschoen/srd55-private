@@ -9559,3 +9559,9 @@ codex ran `claude -p` twice for its own plan review (default model).
 The dispatch-preamble rule (memory) exists for exactly this; every
 private-repo brief now starts with the same COMMON RULES line as the
 public ones.
+
+## D498 — OWNER: keep the D447/D449/D465/D483 keys sealed until the post-shift control has run (2026-09-03)
+
+Asked whether to unseal now that every arm is judged. Owner: keep sealed, so old-era and new-era results are
+unsealed together after the post-shift control (caveman full profile, KB bundle, mcp_minimal, no skill) runs on the
+merged lane (G2.1 + H1-indices + H1.1 + H3).
