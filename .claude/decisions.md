@@ -1,5 +1,16 @@
 # Binding scope decisions
 
+S-MOVE SOL ARM ALSO OUTAGE-CONTAMINATED (supervisor, 2026-09-03 11:25):
+d465-s-move-sol-low.jsonl (landed 10:45:23) has 7 rows refused with
+"Agent CLI exited 1 … failed to refresh available models" — the outage
+began inside that arm, not after it. Voided (.VOID-codex-outage-tail);
+the earlier note's "s-move 23/30 authorized, party-script refusals" was
+partly wrong: 7 of its refusals were the outage. D465 valid arms are
+now s-full, s-rows, s-opp only. A remainder waiter reruns the chain
+(idempotent) after the current chain and the D483 rerun finish, so
+s-move is redone alone. Outage rule from memory applied: CLI-exit
+refusals are an outage signal regardless of the timeout count.
+
 CODEX BACK; EVERYTHING RELAUNCHED (supervisor, 2026-09-03 11:20): probe
 returned OK at 11:17. D465 chain relaunched (skips the four valid arms,
 reruns the probe, then the three voided arms and cav-rows-move-gating);
