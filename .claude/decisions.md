@@ -1,5 +1,18 @@
 # Binding scope decisions
 
+CODEX BACK; EVERYTHING RELAUNCHED (supervisor, 2026-09-03 11:20): probe
+returned OK at 11:17. D465 chain relaunched (skips the four valid arms,
+reruns the probe, then the three voided arms and cav-rows-move-gating);
+D483 rerun waiter re-armed behind it; G1 redispatched in the lane; the
+owner's directive (prior art for decision extraction, algorithmic load-
+shedding, codex skills experiments) dispatched to codex sol as a plan
+with the supervisor's prior-art notes: codex exec --output-schema strict
+final-message structuring, constrained-decoding "constraint tax" on
+tool calls (arXiv 2606.25605), schema-first tool APIs (arXiv
+2603.13404), agents reproduce tool order 0.87 but arguments 0.69 (arXiv
+2605.28840), enumerated-index selection reliability, codex SKILL.md
+injection under $CODEX_HOME/skills (currently disabled by the adapter).
+
 CODEX SERVICE OUTAGE; ALL CODEX WORK STOPPED LOUDLY (supervisor, 2026-09-03
 11:20). From about 10:45 the codex CLI fails every call: operator sessions
 died with "failed to refresh available models: unexpected status 4xx" and
