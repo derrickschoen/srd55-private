@@ -582,6 +582,24 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D482 — OWNER: give sol the protocol subject and rerun D465 at low (2026-09-03)
+
+Asked: drop sol (supervisor recommendation), rerun at medium, give sol the
+protocol subject and rerun low, defer sol to the new era.
+
+Owner: **"Give sol the protocol subject and rerun low."**
+
+Consequences: the D465 batch relaunched from main (old era) with
+`--kb dnd-slim-runs/sol-protocol-kb.txt`, a verbatim copy of the lane's
+protocol.md (901 bytes) placed outside the repo so the old-era arena's KB
+path rule accepts it; sol low, 240 s, same seeds/reps/profiles; a 2-room
+probe runs first and the supervisor kills the batch if sol still does not
+self-plan. The confound (sol has protocol text, luna arms had none) is
+recorded in analysis-notes.md and must appear in the D465 report. The
+main merge of D466 waits for the batch (~12 h); the post-shift control
+reruns from the lane after D2.1 lands and after the batch, so arms stay
+sequential.
+
 ## D481 — OWNER: all engine changes merge at once; increments land in a worktree while arms run on unchanged code (2026-09-02)
 
 Owner (verbatim, mid-turn): **"Make it so all of the engine changes merge
