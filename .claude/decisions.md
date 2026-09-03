@@ -9484,3 +9484,31 @@ explainer (parse-once + digest tripwire + who-operates framing).
     own release deliverable with its own audit (beyond the 127-entry sweep).
 11. **Persistence: EXPORT/IMPORT REQUIRED AT v1** — file save + re-import
     joins the v1 bar; localStorage reload-safety alone is insufficient.
+
+G2.1, H1-IDS AND H1-INDICES.1 VERIFIED AND COMMITTED; H1 WINNER = INDICES;
+D465 SOL-LOW BATCH DONE (supervisor, 2026-09-03 15:50). G2.1 (lane
+69e3dbfd): forced tsc 0, sg 0, 546/9543 on a quiet box; my mutation
+(empty reason accepted) fails the 55-text audit test, restore by cmp,
+108/108 after; coverage note: the engine-mcp-handler tests did not
+catch it, so the empty-string wire path is unit-covered only. H1-ids
+(claude/h1-ids 17d615a1): 545/9545, mutation caught by 2 tests. H1-
+indices.1 (claude/h1-indices 5fb56e9a): compile fix; 9541/9544 with
+three load-class failures (load 8.8), all three files pass isolated;
+codex stopped rather than raise a timeout — correct. H1 winner: the
+indices variant (the A3 design the extraction plan and the opus review
+adopted; ids stays as the comparator branch, not deleted). H1.1
+amendments dispatched to the indices worktree on the same terra
+session, item 7 as a schema-side union with G2.1. D465 sol-low: all
+arms finished, cav-full 30/30 authorized (27 model, 3 sim_controller,
+9 rows with one refusal), cav-rows-move-gating 30/30 (25 model); D483
+reruns + remainder pass chained and running alone. Merge order stands:
+G2.1 → H1-indices(+H1.1) → H3, then the post-shift control rerun.
+
+F: MY FIRST VIDEO FINDING WAS WRONG (supervisor, 2026-09-03). I reported
+the first BG3 recording as a portrait stream clip with no combat log.
+The extract script cropped every frame to the right third before saving
+and I inspected my own crop. Corrected in the private repo; the script
+now keeps full frames and OCRs the log feed band. Luna-medium vs sol-
+high frame transcription (D495 follow-up) recorded privately: equal at
+line reading, Luna finds more monster turns, sol reads HP/damage
+numbers; time must be derived from frame ids, never from the model.
