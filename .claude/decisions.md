@@ -986,6 +986,22 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D495 — OWNER: for video downloading, find or build a docker image that does it all (2026-09-03)
+
+Owner (verbatim): **"For the video downloading. Find or build a docker
+image to do it all"** (supersedes the tool-install question under
+D494; written accounts remain the primary source).
+
+Done: docker is usable on the box; built `bg3-video-tools:latest`
+(python:3.12-slim + ffmpeg 7.1 + tesseract 5.5 + yt-dlp 2026.08.19,
+Dockerfile and extract.sh in the private repo eval/video-tools/). The
+script downloads a video (<=1080p), samples frames at 0.5 fps, crops the
+right-hand third (BG3's combat-log panel), OCRs each frame and writes an
+index.tsv (frame, seconds, text) for manual correction. First run
+started on the explicitly Tactician mud-mephit video (4DI3Pl0i8pk) into
+the private recordings directory. Nothing from the videos or OCR leaves
+the private repo.
+
 ## D494 — OWNER: for the BG3 lane, use written accounts and prior reverse-engineering, not video tools (2026-09-03)
 
 Asked: install yt-dlp/ffmpeg/tesseract for video transcription.
