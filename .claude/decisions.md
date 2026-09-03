@@ -1,5 +1,35 @@
 # Binding scope decisions
 
+OPUS REVIEW OF THE DECISION-EXTRACTION PLAN; H4 DISPATCHED (supervisor,
+2026-09-03 12:40; review in dnd-slim-runs/opus-plan-review.md, luna skill
+drafts in luna-skill-{engine-submission,dm-round}.md). Adopted as H1.1
+amendments (file brief-d466-H1.1-amendments.md, applied after each H1
+variant lands): brand constructors must not be total casts (the repo's
+engineOptionId at option-modeling.ts:19 is `value as EngineOptionId`);
+per-actor phantom option index; the adapter's cancelled exit maps to a
+censored decision_timeout, not decision_missing; the output schema is an
+object keyed by required actor so coverage is schema-enforced; explicit
+reaction-guidance inherit; chosen index recorded per actor so index-0
+anchoring is measurable. Adopted for the experiment design: transport is
+a blocking factor (four instruction arms at one transport plus a
+{none, best skill} x {A2, A3} cell = 6 cells, not 8); timeouts censored
+from the primary; a skills inventory test from the child's own
+environment (spawn merges process.env, process.ts:96); instruction arms
+evaluated as a PAIRED REPLAY over a frozen context corpus (offline, ~900
+items) with live arena kept for the transport comparison; a shuffled-
+index arm to detect anchoring. Opus's third alternative — intent-first:
+free-text intent per actor resolved by a deterministic matcher that
+abstains — dispatched as H4 in worktree dnd-wt-h4-intent (codex terra
+xhigh): matcher + corpus extraction from rollouts/rows + offline eval
+(top-1 vs the model's own accepted option, abstention, the adversarial
+"first rejected prose" arm, target-label perturbation gate). Two opus
+points conflict with owner rulings and go to the owner: overrides as a
+closed engine vocabulary (D485) vs named free-text judge-visible
+objectives; hiding human-only options from the AI (D453) removes the
+DM-ish part of the option set. Also corrected in the record: the "21
+parallel codex processes" claim opus quoted from decisions.md:1014 was
+already superseded (rooms run sequentially; see the 06:00 correction).
+
 SOL S-MOVE RERUN VERIFIED (supervisor, 2026-09-03 12:22): d465-s-move-
 sol-low 30/30 authorized, 25 model-planned, refusals 9, 0 CLI-exit rows,
 0 timeouts, wall median 27.5 s; idle Disengage 3 (luna twin 8), Dash 88
