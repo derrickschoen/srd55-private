@@ -33,13 +33,16 @@ function dodge(context: Readonly<Record<string, unknown>>, actorId: string): Rea
   const options = actor?.['options'];
   if (!Array.isArray(options)) throw new TypeError(`Turn context options are missing for ${actorId}.`);
   const option = options.map((value) => record(value, 'actor option')).find((value) => value['kind'] === 'dodge');
+  const fallback = options.map((value) => record(value, 'actor option'))
+    .find((value) => value['option_id'] !== option?.['option_id']);
   const stateRef = record(context['state_ref'], 'state ref');
-  if (typeof option?.['option_id'] !== 'string' || typeof stateRef['expected_revision'] !== 'number') {
-    throw new TypeError(`Dodge option is missing for ${actorId}.`);
+  if (typeof option?.['option_id'] !== 'string' || typeof fallback?.['option_id'] !== 'string' ||
+    typeof stateRef['expected_revision'] !== 'number') {
+    throw new TypeError(`Independent Dodge options are missing for ${actorId}.`);
   }
   return {
     actor_id: actorId, expected_revision: stateRef['expected_revision'], primary_option_id: option['option_id'],
-    fallback_option_id: null,
+    fallback_option_id: fallback['option_id'],
     override_justification: {
       reason: 'objective',
       note: 'The mutation-boundary fixture intentionally exercises a defensive plan.',

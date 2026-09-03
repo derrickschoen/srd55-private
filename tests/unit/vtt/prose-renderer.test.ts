@@ -178,8 +178,13 @@ describe('turn-context prose formats', () => {
       const selectedOption = values(actor['options']).map((value) => object(value, 'advertised option'))
         .find((option) => option['option_id'] === optionId);
       if (selectedOption === undefined) throw new Error('Engine default option is not advertised.');
+      const fallbackOption = values(actor['options']).map((value) => object(value, 'advertised option'))
+        .find((option) => option['option_id'] !== optionId);
+      if (fallbackOption === undefined) throw new Error('Independent fallback option is not advertised.');
       expect(document).toContain(optionId);
       expect(extracted.has(optionId)).toBe(true);
+      expect(document).toContain(String(fallbackOption['option_id']));
+      expect(extracted.has(String(fallbackOption['option_id']))).toBe(true);
       const choice = selectedOption['activation_choice'] === undefined
         ? null
         : object(selectedOption['activation_choice'], 'activation choice');
@@ -200,7 +205,7 @@ describe('turn-context prose formats', () => {
         actor_id: actor['actor_id'],
         expected_revision: selectedOption['revision'],
         primary_option_id: optionId,
-        fallback_option_id: null,
+        fallback_option_id: fallbackOption['option_id'],
         override_justification: null,
         ...(activationChoice === undefined ? {} : { activation_choice: activationChoice }),
       };

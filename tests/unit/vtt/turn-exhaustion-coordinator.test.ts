@@ -220,7 +220,8 @@ describe('host turn exhaustion coordinator', () => {
 
     expect(activated.value).toBe(1);
     expect(adapter.resumeInvocations).toHaveLength(1);
-    expect(adapter.resumeInvocations[0]?.invocation.prompt).toContain('Correct the complete refused proposal request once.');
+    expect(adapter.resumeInvocations[0]?.invocation.prompt).toContain('Correct the complete refused proposal request with the minimal engine.submit_round_proposals arguments.');
+    expect(adapter.resumeInvocations[0]?.invocation.prompt).toContain('One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again.');
     expect(adapter.resumeInvocations[0]?.invocation.prompt).toContain('fallback_option_id must be null');
     expect(f.journal.history().map((entry) => entry.transition.kind)).toEqual(expect.arrayContaining([
       'proposal_correction_requested',

@@ -28,9 +28,11 @@ import { feet } from '../../../src/combat/values';
 import { buildHostScenarioMenu } from '../../../src/vtt/speculative-planning';
 import { DEFAULT_RENDERER_PROFILE } from '../../../src/vtt/renderer-profile';
 import {
+  ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
   ENGINE_TOOL_SPECS,
   ENGINE_TURN_PROPOSAL_INPUT_SCHEMA,
   engineSchemaInternals,
+  generatedMinimalRoundSubmissionExample,
 } from '../../../src/vtt/mcp/schemas';
 
 const CLIENT_INFO = Object.freeze({ name: 'vitest', version: '1.0.0' });
@@ -145,6 +147,43 @@ function unresolvedSchemaReferences(root: unknown, value: unknown = root, path =
   ];
 }
 
+function localPointerValue(root: unknown, reference: string): unknown {
+  if (reference === '#') return root;
+  if (!reference.startsWith('#/')) return undefined;
+  let current = root;
+  for (const encoded of reference.slice(2).split('/')) {
+    const segment = decodeURIComponent(encoded).replaceAll('~1', '/').replaceAll('~0', '~');
+    if (typeof current !== 'object' || current === null || Array.isArray(current)) return undefined;
+    current = (current as Readonly<Record<string, unknown>>)[segment];
+  }
+  return current;
+}
+
+function codexFallbackType(root: unknown, value: unknown): string {
+  const schema = typeof value === 'object' && value !== null && !Array.isArray(value) ? record(value) : null;
+  if (schema === null || ['allOf', 'if', 'then'].some((keyword) => schema[keyword] !== undefined)) return 'unknown';
+  if (typeof schema['$ref'] === 'string') return codexFallbackType(root, localPointerValue(root, schema['$ref']));
+  const variants = Array.isArray(schema['anyOf'])
+    ? schema['anyOf']
+    : Array.isArray(schema['oneOf']) ? schema['oneOf'] : null;
+  if (variants !== null) return variants.map((variant) => codexFallbackType(root, variant)).join(' | ');
+  if (schema['const'] !== undefined) return JSON.stringify(schema['const']);
+  if (Array.isArray(schema['enum'])) return schema['enum'].map((entry) => JSON.stringify(entry)).join(' | ');
+  const declaredType = schema['type'];
+  if (Array.isArray(declaredType)) return declaredType.map(String).join(' | ');
+  if (declaredType === 'array') return `Array<${codexFallbackType(root, schema['items'])}>`;
+  if (declaredType === 'object') {
+    const properties = record(schema['properties'] ?? {});
+    const required = new Set(Array.isArray(schema['required']) ? schema['required'].map(String) : []);
+    return `{ ${Object.entries(properties).map(([key, property]) =>
+      `${key}${required.has(key) ? '' : '?'}: ${codexFallbackType(root, property)}`).join('; ')} }`;
+  }
+  return declaredType === 'string' || declaredType === 'number' || declaredType === 'integer' ||
+    declaredType === 'boolean' || declaredType === 'null'
+    ? String(declaredType).replace('integer', 'number')
+    : 'unknown';
+}
+
 function referencedDefinitionKeys(value: unknown): ReadonlySet<string> {
   const root = record(value);
   const definitions = root['$defs'] === undefined ? {} : record(root['$defs']);
@@ -208,12 +247,14 @@ function fixtureFacts(state: EncounterState, runtime: EngineMcpRuntime) {
   if (actor === undefined || target === undefined || action === undefined || capsule.request === null) throw new Error('Fixture facts are absent.');
   const option = capsule.projection.combatants.find((candidate) => candidate.id === actor)?.options
     .find((candidate) => candidate.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'dodge'));
-  if (option === undefined) throw new Error('Fixture Dodge option is absent.');
+  const fallback = capsule.projection.combatants.find((candidate) => candidate.id === actor)?.options
+    .find((candidate) => candidate.optionId !== option?.optionId);
+  if (option === undefined || fallback === undefined) throw new Error('Fixture independent options are absent.');
   const proposal = {
     actor_id: actor,
     expected_revision: capsule.revision,
     primary_option_id: option.optionId,
-    fallback_option_id: null,
+    fallback_option_id: fallback.optionId,
     override_justification: { reason: 'objective' as const, note: 'Fixture intentionally exercises the defensive override path.' },
   } as const;
   return { actor, target, action, request: capsule.request, proposal, ref: stateRef(runtime) };
@@ -507,18 +548,20 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(request(runtime.handler, 99, 'tools/list', { cursor: 'forged' })).toMatchObject({ error: { code: -32602 } });
   });
 
-  it('D466 F names the submit envelope and invalid-call retry rule (mutation: drop either description sentence)', async () => {
+  it('D466 G1 presents the minimal submission first and preserves the explicit envelope path', async () => {
     const { runtime } = await fixtureRuntime({ requestedActorCount: 1, toolProfile: 'dm' });
     const listing = record(request(runtime.handler, 98, 'tools/list').result);
     const tools = listing['tools'];
     if (!Array.isArray(tools)) throw new TypeError('DM tools/list omitted tools.');
     const submission = tools.map(record).find((tool) => tool['name'] === 'engine.submit_round_proposals');
     if (submission === undefined) throw new TypeError('DM tools/list omitted engine.submit_round_proposals.');
-    expect(submission['description']).toContain('Input envelope: { state_ref: { run_id, state_handle, expected_revision }, request_id, phase, idempotency_key, proposals }.');
-    expect(submission['description']).toContain('A call rejected for invalid arguments is not queued and does not count as your submission; fix the arguments and call again.');
+    expect(submission['description']).toContain('Minimal input: { proposals, reaction_guidance? }');
+    expect(submission['description']).toContain('launcher fills state_ref, request_id, phase, and a deterministic idempotency_key');
+    expect(submission['description']).toContain('full explicit envelope { state_ref, request_id, phase, idempotency_key, proposals, reaction_guidance? }');
+    expect(submission['description']).toContain('One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again.');
   });
 
-  it('D466 F publishes the complete submit schema through tools/list (mutation: replace inputSchema with an unknown or partial object)', async () => {
+  it('D466 G1 advertises plain object schemas and a complete explicit submit envelope (mutation: reintroduce a top-level conditional)', async () => {
     const { runtime } = await fixtureRuntime({ requestedActorCount: 1, toolProfile: 'dm' });
     const listing = record(request(runtime.handler, 97, 'tools/list').result);
     const tools = listing['tools'];
@@ -530,13 +573,41 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(record(submission['inputSchema'])['required']).toEqual([
       'state_ref', 'request_id', 'phase', 'idempotency_key', 'proposals',
     ]);
-    // Codex 0.148 receives this schema, but its code-mode TypeScript renderer chooses a
-    // root allOf before the root object and reduces an if/then-only member to `unknown`.
-    // Root-level if/then preserves the same validation rule while keeping the envelope visible.
-    expect(record(submission['inputSchema'])['allOf']).toBeUndefined();
-    expect(record(submission['inputSchema'])).toMatchObject({
-      if: { properties: { phase: { const: 'correction' } } },
-      then: { properties: { proposals: { items: { properties: { fallback_option_id: { type: 'null' } } } } } },
+    for (const specification of ENGINE_TOOL_SPECS) {
+      const schema = record(specification.descriptor.inputSchema);
+      expect(schema['type'], specification.descriptor.name).toBe('object');
+      expect(schema['allOf'], specification.descriptor.name).toBeUndefined();
+      expect(schema['if'], specification.descriptor.name).toBeUndefined();
+      expect(schema['then'], specification.descriptor.name).toBeUndefined();
+      expect(schema['oneOf'], specification.descriptor.name).toBeUndefined();
+    }
+  });
+
+  it('D466 G1 renders the explicit schema without unknown when the Codex package renderer is unavailable', () => {
+    const rendered = codexFallbackType(
+      ENGINE_TOOL_SPECS.find((candidate) => candidate.descriptor.name === 'engine.submit_round_proposals')?.descriptor.inputSchema,
+      ENGINE_TOOL_SPECS.find((candidate) => candidate.descriptor.name === 'engine.submit_round_proposals')?.descriptor.inputSchema,
+    );
+    expect(rendered).toContain('state_ref:');
+    expect(rendered).toContain('request_id: string');
+    expect(rendered).toContain('phase:');
+    expect(rendered).toContain('idempotency_key: string');
+    expect(rendered).toContain('proposals: Array<');
+    expect(rendered).not.toMatch(/(?:^|[<|: ])unknown(?:$|[>|; ])/u);
+  });
+
+  it('D466 G1 generates complete phase-valid minimal examples from the minimal schema', () => {
+    const initial = generatedMinimalRoundSubmissionExample('initial');
+    const correction = generatedMinimalRoundSubmissionExample('correction');
+    expect(engineSchemaInternals.minimalSubmitRoundInput.safeParse(initial).success).toBe(true);
+    expect(engineSchemaInternals.minimalSubmitRoundInput.safeParse(correction).success).toBe(true);
+    expect(initial).toHaveProperty('proposals.0.primary_option_id');
+    expect(initial).toHaveProperty('proposals.0.fallback_option_id');
+    expect(record((initial['proposals'] as readonly unknown[])[0])['fallback_option_id'])
+      .not.toBe(record((initial['proposals'] as readonly unknown[])[0])['primary_option_id']);
+    expect(record((correction['proposals'] as readonly unknown[])[0])['fallback_option_id']).toBeNull();
+    expect(ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA).toMatchObject({
+      type: 'object', required: ['proposals'],
     });
   });
 
@@ -733,6 +804,94 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       ...valid, idempotency_key: 'round-idempotency-0002', proposals: [{ ...facts.proposal, actor_id: 'extra-actor' }],
     }));
     expect(rejected['status']).toBe('rejected');
+    expect(runtime.proposals).toHaveLength(1);
+  });
+
+  it('D466 G1 fills a minimal submission from its launch binding and replays it exactly once', async () => {
+    const { state, runtime } = await fixtureRuntime();
+    const facts = fixtureFacts(state, runtime);
+    const minimal = { proposals: [facts.proposal] };
+    const first = structured(toolCall(runtime.handler, 'engine.submit_round_proposals', minimal));
+    const replay = structured(toolCall(runtime.handler, 'engine.submit_round_proposals', minimal));
+
+    expect(first).toEqual(replay);
+    expect(first['status']).toBe('proposed');
+    expect(runtime.proposals).toHaveLength(1);
+    expect(runtime.proposals[0]).toMatchObject({
+      requestId: facts.request.requestId,
+      phase: facts.request.phase,
+      submittedArguments: minimal,
+      idempotencyKey: expect.stringMatching(/^round-submit:[0-9a-f]{48}$/u),
+    });
+  });
+
+  it('D466 G1 rejects a stale minimal launcher binding with a typed code', async () => {
+    const { state, runtime } = await fixtureRuntime();
+    const facts = fixtureFacts(state, runtime);
+    const capsule = runtime.feed.current();
+    runtime.feed.replace(createEngineStateCapsule({
+      runId: capsule.runId, branchId: capsule.branchId, revision: capsule.revision + 1,
+      generatedAt: '2026-08-27T12:01:00.000Z', request: capsule.request,
+      projection: capsule.projection, historyDelta: capsule.historyDelta, rulesIndex: capsule.rulesIndex,
+    }));
+
+    const rejected = structured(toolCall(runtime.handler, 'engine.submit_round_proposals', {
+      proposals: [facts.proposal],
+    }));
+    expect(rejected).toMatchObject({
+      status: 'rejected', actor_refusals: [{ codes: ['STALE_SUBMISSION_BINDING'] }],
+    });
+    expect(runtime.proposals).toEqual([]);
+  });
+
+  it('D466 G1 rejects concurrent pending requests as ambiguous instead of filling from the newest request', async () => {
+    const { state, runtime } = await fixtureRuntime();
+    const facts = fixtureFacts(state, runtime);
+    const capsule = runtime.feed.current();
+    if (capsule.request === null || capsule.request.phase === 'speculative') throw new Error('Round request is absent.');
+    runtime.feed.replace(createEngineStateCapsule({
+      runId: capsule.runId, branchId: capsule.branchId, revision: capsule.revision + 1,
+      generatedAt: '2026-08-27T12:01:00.000Z',
+      request: { ...capsule.request, requestId: 'request:concurrent-round' },
+      projection: capsule.projection, historyDelta: capsule.historyDelta, rulesIndex: capsule.rulesIndex,
+    }));
+
+    const rejected = structured(toolCall(runtime.handler, 'engine.submit_round_proposals', {
+      proposals: [facts.proposal],
+    }));
+    expect(rejected).toMatchObject({
+      status: 'rejected', actor_refusals: [{ codes: ['AMBIGUOUS_SUBMISSION_BINDING'] }],
+    });
+    expect(runtime.proposals).toEqual([]);
+  });
+
+  it('D466 G1 requires an independent initial fallback and names identical ids', async () => {
+    const { state, runtime } = await fixtureRuntime();
+    const facts = fixtureFacts(state, runtime);
+    const identical = structured(toolCall(runtime.handler, 'engine.submit_round_proposals', {
+      proposals: [{ ...facts.proposal, fallback_option_id: facts.proposal.primary_option_id }],
+    }));
+    expect(identical).toMatchObject({
+      status: 'rejected', actor_refusals: [{ codes: ['PRIMARY_FALLBACK_IDENTICAL'] }],
+    });
+    const missing = structured(toolCall(runtime.handler, 'engine.submit_round_proposals', {
+      proposals: [{ ...facts.proposal, fallback_option_id: null }],
+    }));
+    expect(missing).toMatchObject({
+      status: 'rejected', actor_refusals: [{ codes: ['INITIAL_FALLBACK_REQUIRED'] }],
+    });
+    expect(runtime.proposals).toEqual([]);
+  });
+
+  it('D466 G1 permits a null fallback for a bound correction submission', async () => {
+    const { state, runtime } = await fixtureRuntime({
+      requestedActorCount: 1, phase: 'correction', correctionNumber: 1,
+    });
+    const facts = fixtureFacts(state, runtime);
+    const accepted = structured(toolCall(runtime.handler, 'engine.submit_round_proposals', {
+      proposals: [{ ...facts.proposal, fallback_option_id: null }],
+    }));
+    expect(accepted['status']).toBe('proposed');
     expect(runtime.proposals).toHaveLength(1);
   });
 
@@ -1056,16 +1215,18 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       idempotency_key: 'adjustment-correction-0001',
       updates: [dodgeUpdate(correctionRuntime, second)],
     }))).toMatchObject({ status: 'proposed', actor_resolutions: [{ actor_id: second }] });
-    const fallbackCorrection = toolCall(correctionRuntime.handler, 'engine.submit_plan_adjustment', {
+    const fallbackCorrection = structured(toolCall(correctionRuntime.handler, 'engine.submit_plan_adjustment', {
       state_ref: correctionContext['state_ref'],
       request_id: correctionRuntime.feed.current().request?.requestId,
       phase: 'correction',
       baseline_plan_hash: 'a'.repeat(64),
       idempotency_key: 'adjustment-correction-fallback-0001',
       updates: [dodgeUpdate(correctionRuntime, second, fallbackOptionId)],
+    }));
+    expect(fallbackCorrection).toMatchObject({
+      status: 'rejected',
+      actor_refusals: [{ codes: ['CORRECTION_FALLBACK_MUST_BE_NULL'] }],
     });
-    expect(fallbackCorrection['isError']).toBe(true);
-    expect(JSON.stringify(fallbackCorrection)).toContain('fallback');
   });
 
   it('queues speculative prediction envelopes separately and byte-locks idempotency', async () => {
@@ -1203,6 +1364,8 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     const body = record(JSON.parse(String(record(contents[0])['text'])) as unknown);
     const specification = ENGINE_TOOL_SPECS.find((candidate) => candidate.descriptor.name === 'engine.submit_round_proposals');
     if (specification === undefined) throw new TypeError('Submit-round tool is missing.');
+    expect(body['minimal_submission']).toEqual(ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA);
+    expect(body['minimal_example']).toEqual(generatedMinimalRoundSubmissionExample('initial'));
     expect(body['envelope']).toEqual(specification.descriptor.inputSchema);
     expect(body['proposal']).toEqual(ENGINE_TURN_PROPOSAL_INPUT_SCHEMA);
   });
@@ -1216,8 +1379,11 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(JSON.stringify(plan)).toContain('engine.submit_round_proposals');
     expect(JSON.stringify(plan)).toContain('reaction_guidance');
     expect(JSON.stringify(plan)).toContain('persists until replaced');
-    expect(JSON.stringify(plan)).toContain('Input envelope: { state_ref: { run_id, state_handle, expected_revision }, request_id, phase, idempotency_key, proposals }.');
-    expect(JSON.stringify(plan)).toContain('A call rejected for invalid arguments is not queued and does not count as your submission; fix the arguments and call again.');
+    expect(JSON.stringify(plan)).toContain('Generated minimal example:');
+    expect(JSON.stringify(plan)).toContain('One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again.');
+    expect(JSON.stringify(plan)).toContain('request_id');
+    expect(JSON.stringify(plan)).not.toContain('requestId');
+    expect(JSON.stringify(plan)).not.toContain('correctionNumber');
     const capsule = runtime.feed.current();
     expect(JSON.stringify(plan)).not.toContain('proof_token');
     expect(JSON.stringify(plan)).not.toContain(engineStateSummaryProofToken(capsule.digest, 'turn_minimal'));
@@ -1259,7 +1425,7 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(secondBody['truncated']).toBe(true);
   });
 
-  it.each(['engine.validate_proposal', 'engine.submit_proposal', 'engine.submit_round_proposals'] as const)('%s rejects a second fallback during correction', async (name) => {
+  it.each(['engine.validate_proposal', 'engine.submit_proposal', 'engine.submit_round_proposals'] as const)('%s rejects a second fallback during correction with a typed code', async (name) => {
     const { state, runtime } = await fixtureRuntime();
     const capsule = runtime.feed.current();
     runtime.feed.replace(createEngineStateCapsule({
@@ -1274,9 +1440,13 @@ describe('engine MCP dual-handshake full surface conformance', () => {
       : name === 'engine.submit_proposal'
         ? { state_ref: freshFacts.ref, request_id: freshFacts.request.requestId, phase: 'correction', idempotency_key: 'correction-proposal-0001', proposal }
         : { state_ref: freshFacts.ref, request_id: freshFacts.request.requestId, phase: 'correction', proposal };
-    const result = toolCall(runtime.handler, name, args);
-    expect(result['isError']).toBe(true);
-    expect(JSON.stringify(result)).toContain('fallback');
+    const result = structured(toolCall(runtime.handler, name, args));
+    const refusals = name === 'engine.submit_round_proposals' ? result['actor_refusals'] : result['refusals'];
+    expect(refusals).toEqual(expect.arrayContaining([
+      expect.objectContaining(name === 'engine.submit_round_proposals'
+        ? { codes: ['CORRECTION_FALLBACK_MUST_BE_NULL'] }
+        : { code: 'CORRECTION_FALLBACK_MUST_BE_NULL' }),
+    ]));
   });
 
   it('hard-denies content/cc-by-sa rule text from resources, prompts, and narration references', async () => {

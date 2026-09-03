@@ -1130,27 +1130,36 @@ export function classifySuggestionAdoption(
 
 function scriptedProposals(
   state: EncounterState,
-  _phase: 'initial' | 'correction',
+  phase: 'initial' | 'correction',
   revision = state.revision,
 ): readonly EngineTurnProposal[] {
   const actors = livingMonsterIds(state);
   const planningState = projectFutureMonsterTurns(state, actors);
   return actors.map((actorId): EngineTurnProposal => {
-    const primary = actorOpportunityReport(
+    const report = actorOpportunityReport(
       planningState,
       actorId,
       canonicalEngineQueryPort,
       revision,
-    ).defaultOption;
+    );
+    const primary = report.defaultOption;
+    const fallback = availableEngineActorOptions(
+      planningState, actorId, canonicalEngineQueryPort, revision,
+    ).find((option) => option.optionId !== primary.optionId);
+    if (phase === 'initial' && fallback === undefined) {
+      throw new Error(`Could not stage an independent fallback for ${actorId}.`);
+    }
     return {
       actorId, expectedRevision: revision, primaryOptionId: primary.optionId,
-      fallbackOptionId: null, overrideJustification: null,
+      fallbackOptionId: phase === 'correction' ? null : fallback?.optionId ?? null,
+      overrideJustification: null,
     };
   });
 }
 
 function intentionallyIgnoredProposals(
   state: EncounterState,
+  phase: 'initial' | 'correction',
   revision = state.revision,
 ): readonly EngineTurnProposal[] {
   const actors = livingMonsterIds(state);
@@ -1164,11 +1173,17 @@ function intentionallyIgnoredProposals(
     ).find((candidate) => candidate.actionSlots.some((slot) =>
       slot.slot === 'main' && slot.use.kind === 'end_turn'));
     if (option === undefined) throw new Error(`Could not stage intentionally ignored response for ${actorId}.`);
+    const fallback = availableEngineActorOptions(
+      planningState, actorId, canonicalEngineQueryPort, revision,
+    ).find((candidate) => candidate.optionId !== option.optionId);
+    if (phase === 'initial' && fallback === undefined) {
+      throw new Error(`Could not stage an independent ignored-response fallback for ${actorId}.`);
+    }
     return {
       actorId,
       expectedRevision: revision,
       primaryOptionId: option.optionId,
-      fallbackOptionId: null,
+      fallbackOptionId: phase === 'correction' ? null : fallback?.optionId ?? null,
       overrideJustification: {
         reason: 'objective',
         note: 'SIMULATED response intentionally ignores the suggested play.',
@@ -1515,12 +1530,29 @@ async function driveScriptedMcp(
         ? []
         : actorId === undefined
           ? []
-          : [externalProposal({
-              ...engineDefaultPlanEntry(state, actorId, manifest.revision).proposal,
-              ...(invalidAdjustment ? {
-                primaryOptionId: 'SIMULATED-unavailable-adjustment' as EngineTurnProposal['primaryOptionId'],
-              } : {}),
-            })];
+          : (() => {
+              const proposal = engineDefaultPlanEntry(state, actorId, manifest.revision).proposal;
+              const fallback = availableEngineActorOptions(
+                projectFutureMonsterTurns(state, [actorId]),
+                actorId,
+                canonicalEngineQueryPort,
+                manifest.revision,
+              ).find((option) => option.optionId !== proposal.primaryOptionId);
+              if (manifest.phase === 'initial' && fallback === undefined) {
+                throw new Error(`SIMULATED adjustment has no independent fallback for ${actorId}.`);
+              }
+              return [externalProposal({
+                ...proposal,
+                fallbackOptionId: manifest.phase === 'correction'
+                  ? null
+                  : invalidAdjustment
+                    ? 'SIMULATED-unavailable-adjustment-fallback' as EngineTurnProposal['fallbackOptionId']
+                    : fallback?.optionId ?? null,
+                ...(invalidAdjustment ? {
+                  primaryOptionId: 'SIMULATED-unavailable-adjustment' as EngineTurnProposal['primaryOptionId'],
+                } : {}),
+              })];
+            })();
       const submitResult = asRecord(await mcpRequest(client, 'tools/call', {
         name: 'engine.submit_plan_adjustment',
         arguments: {
@@ -1571,7 +1603,7 @@ async function driveScriptedMcp(
     const proposals = useEnginePlan
       ? structuredClone(enginePlanProposals) as readonly Readonly<Record<string, unknown>>[]
       : suggestionResponse === 'ignored'
-        ? intentionallyIgnoredProposals(state, manifest.revision).map(externalProposal)
+        ? intentionallyIgnoredProposals(state, manifest.phase, manifest.revision).map(externalProposal)
         : scriptedProposals(state, manifest.phase, manifest.revision).map(externalProposal);
     const responseProposals = suggestionResponse !== 'edited' || !useEnginePlan
       ? proposals
@@ -1587,10 +1619,6 @@ async function driveScriptedMcp(
     const submitResult = asRecord(await mcpRequest(client, 'tools/call', {
       name: 'engine.submit_round_proposals',
       arguments: {
-        state_ref: stateRef,
-        request_id: manifest.requestId,
-        phase: manifest.phase,
-        idempotency_key: `SIMULATED-${manifest.requestId}-${manifest.phase}`.slice(0, 200),
         proposals: submittedProposals,
         ...(reactionGuidance === null ? {} : { reaction_guidance: externalReactionGuidance(reactionGuidance) }),
       },

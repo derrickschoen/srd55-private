@@ -200,7 +200,6 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
           );
     if (context === null) throw new Error('Serialized turn delta could not be reconstructed.');
     this.turnContexts.push(context);
-    const stateRef = objectValue(context['state_ref'], 'serialized state ref');
     const actors = runtime.feed.current().request?.actors;
     if (actors === undefined) throw new Error('Serialized round request has no actors.');
     let specialSubmitted = false;
@@ -218,12 +217,16 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       const selected = special ?? options.find((option) => option.actionSlots.some((slot) =>
         slot.slot === 'main' && slot.use.kind === requestedKind));
       if (selected === undefined) throw new Error(`Serialized round has no ${requestedKind} option for ${actorId}.`);
+      const fallback = options.find((option) => option.optionId !== selected.optionId);
+      if (manifest.phase === 'initial' && fallback === undefined) {
+        throw new Error(`Serialized round has no independent fallback option for ${actorId}.`);
+      }
       this.submittedOptions.push({ option_id: selected.optionId, label: selected.label });
       return {
         actor_id: actorId,
         expected_revision: manifest.revision,
         primary_option_id: selected.optionId,
-        fallback_option_id: null,
+        fallback_option_id: manifest.phase === 'correction' ? null : fallback?.optionId ?? null,
         override_justification: requestedKind === 'dodge' || requestedKind === 'end_turn'
           ? { reason: 'objective', note: 'Serialized fixture intentionally selects a dominated option.' }
           : null,
@@ -233,10 +236,6 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       throw new Error(`Serialized round has no requested actor with a resolvable ${this.choice}.`);
     }
     const submitted = serializedToolCall(runtime.handler, 'engine.submit_round_proposals', {
-      state_ref: stateRef,
-      request_id: manifest.requestId,
-      phase: manifest.phase,
-      idempotency_key: `serialized-${this.choice}-${manifest.phase}`,
       proposals,
     });
     if (submitted['status'] !== 'proposed' || runtime.proposals.length !== 1) {

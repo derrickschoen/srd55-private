@@ -92,7 +92,9 @@ function proposal(actorContext: Readonly<Record<string, unknown>>, revision: num
   const primary = (preferAttack ? candidates.find((option) =>
     option['kind'] === 'attack' || option['kind'] === 'use_action') : undefined) ??
     candidates.find((option) => option['kind'] === 'dodge');
-  const fallback = candidates.find((option) => option['kind'] === 'dodge');
+  const fallback = candidates.find((option) => option['kind'] === 'dodge' &&
+    option['option_id'] !== primary?.['option_id']) ??
+    candidates.find((option) => option['option_id'] !== primary?.['option_id']);
   if (typeof primary?.['option_id'] !== 'string') throw new Error(`Actor ${actorId} has no usable option.`);
   return {
     actor_id: actorId,

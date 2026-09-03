@@ -108,11 +108,11 @@ const activationChoiceSlot = z.discriminatedUnion('kind', [
   }).strict(),
 ]);
 const turnProposal = z.object({
-  actor_id: identifier,
-  expected_revision: z.number().int().min(0),
-  primary_option_id: offerableOptionIdentifier,
-  fallback_option_id: offerableOptionIdentifier.nullable(),
-  override_justification: overrideJustification.nullable(),
+  actor_id: identifier.meta({ examples: ['monster-id'] }),
+  expected_revision: z.number().int().min(0).meta({ examples: [42] }),
+  primary_option_id: offerableOptionIdentifier.meta({ examples: ['option:42:primary'] }),
+  fallback_option_id: offerableOptionIdentifier.nullable().meta({ examples: ['option:42:fallback'] }),
+  override_justification: overrideJustification.nullable().meta({ examples: [null] }),
   activation_choice: activationChoice.nullable().optional(),
 }).strict().describe('Revision-bound selection of engine-generated composite option ids.');
 const reactionGuidanceInstruction = z.enum([
@@ -895,17 +895,10 @@ const narrationOutput = z.object({ status: z.literal('queued'), narration_id: id
 const adjudicationOutput = z.object({ status: z.literal('requested'), adjudication_request_id: identifier, state_ref: stateRef }).strict();
 
 const refInput = { state_ref: stateRef };
-const phaseProposalInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), proposal: turnProposal }).strict().superRefine((value, context) => {
-  if (value.phase === 'correction' && value.proposal.fallback_option_id !== null) context.addIssue({ code: 'custom', path: ['proposal', 'fallback_option_id'], message: 'Correction proposal fallback must be null.' });
-});
-const submitProposalInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), proposal: turnProposal, reaction_guidance: reactionGuidance.optional() }).strict().superRefine((value, context) => {
-  if (value.phase === 'correction' && value.proposal.fallback_option_id !== null) context.addIssue({ code: 'custom', path: ['proposal', 'fallback_option_id'], message: 'Correction proposal fallback must be null.' });
-});
-const submitRoundInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), proposals: z.array(turnProposal).min(1).max(50), reaction_guidance: reactionGuidance.optional() }).strict().superRefine((value, context) => {
-  if (value.phase === 'correction') value.proposals.forEach((proposal, index) => {
-    if (proposal.fallback_option_id !== null) context.addIssue({ code: 'custom', path: ['proposals', index, 'fallback_option_id'], message: 'Correction proposal fallback must be null.' });
-  });
-});
+const phaseProposalInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), proposal: turnProposal }).strict();
+const submitProposalInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), proposal: turnProposal, reaction_guidance: reactionGuidance.optional() }).strict();
+const minimalSubmitRoundInput = z.object({ proposals: z.array(turnProposal).min(1).max(50), reaction_guidance: reactionGuidance.optional() }).strict();
+const submitRoundInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), proposals: z.array(turnProposal).min(1).max(50), reaction_guidance: reactionGuidance.optional() }).strict();
 const submitPlanAdjustmentInput = z.object({
   ...refInput,
   request_id: identifier,
@@ -913,11 +906,7 @@ const submitPlanAdjustmentInput = z.object({
   idempotency_key: z.string().min(16).max(200),
   baseline_plan_hash: z.string().regex(/^[0-9a-f]{64}$/u),
   updates: z.array(turnProposal).max(2),
-}).strict().superRefine((value, context) => {
-  if (value.phase === 'correction') value.updates.forEach((proposal, index) => {
-    if (proposal.fallback_option_id !== null) context.addIssue({ code: 'custom', path: ['updates', index, 'fallback_option_id'], message: 'Adjustment correction fallback must be null.' });
-  });
-});
+}).strict();
 const adjustmentOutput = z.union([
   z.object({
     status: z.literal('proposed'),
@@ -1011,26 +1000,76 @@ function jsonSchema(schema: z.ZodType<unknown>): Readonly<Record<string, unknown
     ...(Object.keys(definitions).length === 0 ? {} : { $defs: definitions }),
   });
 }
+
+function schemaRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function referencedSchema(root: Readonly<Record<string, unknown>>, reference: string): Readonly<Record<string, unknown>> {
+  if (!reference.startsWith('#/')) throw new TypeError(`Only local schema references can generate examples: ${reference}`);
+  let value: unknown = root;
+  for (const encoded of reference.slice(2).split('/')) {
+    const segment = decodeURIComponent(encoded).replaceAll('~1', '/').replaceAll('~0', '~');
+    value = schemaRecord(value, `schema reference ${reference}`)[segment];
+  }
+  return schemaRecord(value, `schema reference ${reference}`);
+}
+
+function generatedSchemaExample(
+  schemaValue: unknown,
+  root: Readonly<Record<string, unknown>>,
+): unknown {
+  const schema = schemaRecord(schemaValue, 'schema');
+  const examples = schema['examples'];
+  if (Array.isArray(examples) && examples.length > 0) return structuredClone(examples[0]);
+  if (schema['const'] !== undefined) return structuredClone(schema['const']);
+  const choices = schema['enum'];
+  if (Array.isArray(choices) && choices.length > 0) return structuredClone(choices[0]);
+  const reference = schema['$ref'];
+  if (typeof reference === 'string') return generatedSchemaExample(referencedSchema(root, reference), root);
+  const variants = Array.isArray(schema['anyOf'])
+    ? schema['anyOf']
+    : Array.isArray(schema['oneOf']) ? schema['oneOf'] : null;
+  if (variants !== null && variants.length > 0) return generatedSchemaExample(variants[0], root);
+  const declaredType = schema['type'];
+  const type = Array.isArray(declaredType)
+    ? declaredType.find((candidate) => candidate !== 'null')
+    : declaredType;
+  switch (type) {
+    case 'object': {
+      const properties = schemaRecord(schema['properties'] ?? {}, 'schema properties');
+      const required = Array.isArray(schema['required']) ? schema['required'] : [];
+      return Object.fromEntries(required.map((key) => {
+        if (typeof key !== 'string' || properties[key] === undefined) {
+          throw new TypeError('Required schema property is missing its definition.');
+        }
+        return [key, generatedSchemaExample(properties[key], root)];
+      }));
+    }
+    case 'array': {
+      const length = typeof schema['minItems'] === 'number' ? Math.max(1, schema['minItems']) : 1;
+      return Array.from({ length }, () => generatedSchemaExample(schema['items'], root));
+    }
+    case 'string': return 'example';
+    case 'integer':
+    case 'number': return typeof schema['minimum'] === 'number' ? schema['minimum'] : 0;
+    case 'boolean': return true;
+    case 'null': return null;
+    default: throw new TypeError(`Schema example generator does not support type ${String(type)}.`);
+  }
+}
 const queryAnnotations = Object.freeze({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 const proposalAnnotations = Object.freeze({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 function spec(name: string, description: string, input: z.ZodType<unknown>, output: z.ZodType<unknown>, proposal = false): EngineToolSpec {
   const inputSchema = jsonSchema(input);
-  const correctionRule = name === 'engine.submit_round_proposals'
-    ? { if: { properties: { phase: { const: 'correction' } } }, then: { properties: { proposals: { items: { properties: { fallback_option_id: { type: 'null' } } } } } } }
-    : name === 'engine.submit_plan_adjustment'
-      ? { if: { properties: { phase: { const: 'correction' } } }, then: { properties: { updates: { items: { properties: { fallback_option_id: { type: 'null' } } } } } } }
-      : name === 'engine.validate_proposal' || name === 'engine.submit_proposal'
-      ? { if: { properties: { phase: { const: 'correction' } } }, then: { properties: { proposal: { properties: { fallback_option_id: { type: 'null' } } } } } }
-      : null;
   return {
     descriptor: {
       name,
       description,
-      inputSchema: correctionRule === null
-        ? inputSchema
-        : name === 'engine.submit_round_proposals'
-          ? { ...inputSchema, ...correctionRule }
-          : { ...inputSchema, allOf: [correctionRule] },
+      inputSchema,
       ...(ADVERTISE_MCP_OUTPUT_SCHEMAS ? { outputSchema: jsonSchema(output) } : {}),
       annotations: proposal ? proposalAnnotations : queryAnnotations,
     },
@@ -1077,7 +1116,7 @@ export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.query_visibility', 'Batch engine-owned perception and visibility comparisons.', z.object({ ...refInput, queries: z.array(pairQuery).min(1).max(50) }).strict(), pairOutput(visibilityFacts)),
   spec('engine.query_dice_expectation', 'Compare bounded analytic outcomes without consuming RNG.', z.object({ ...refInput, candidates: z.array(z.object({ candidate_id: z.string().min(1).max(100), actor_id: identifier, choice: actionChoice, movement: movementPreference.optional(), engagement: engagement.optional() }).strict()).min(1).max(20), include_distribution: z.boolean().optional() }).strict(), diceOutput),
   spec('engine.validate_proposal', 'Purely validate and preview one revision-bound composite option proposal.', phaseProposalInput, validateOutput),
-  spec('engine.submit_round_proposals', 'Queue one all-or-nothing shared-initiative round proposal. Input envelope: { state_ref: { run_id, state_handle, expected_revision }, request_id, phase, idempotency_key, proposals }. A call rejected for invalid arguments is not queued and does not count as your submission; fix the arguments and call again.', submitRoundInput, roundOutput, true),
+  spec('engine.submit_round_proposals', 'Queue one all-or-nothing shared-initiative round proposal. Minimal input: { proposals, reaction_guidance? }; the launcher fills state_ref, request_id, phase, and a deterministic idempotency_key from this turn binding. The full explicit envelope { state_ref, request_id, phase, idempotency_key, proposals, reaction_guidance? } is also accepted. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again.', submitRoundInput, roundOutput, true),
   spec('engine.submit_plan_adjustment', 'Validate and queue a bounded patch over the remaining open monster plan.', submitPlanAdjustmentInput, adjustmentOutput, true),
   spec('engine.submit_speculative_round_plan', 'Structurally validate and queue one host-guarded contingent monster-round plan.', submitSpeculativeRoundPlanInput, speculativeRoundPlanOutput, true),
   spec('engine.submit_proposal', 'Validate and queue one separately controlled seat proposal.', submitProposalInput, singleOutput, true),
@@ -1090,6 +1129,30 @@ export const ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA = ENGINE_TOOL_SPECS.find
 )?.descriptor.inputSchema;
 if (ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA === undefined) {
   throw new Error('engine.submit_round_proposals must publish an input schema.');
+}
+
+export const ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA = jsonSchema(minimalSubmitRoundInput);
+
+export function generatedMinimalRoundSubmissionExample(
+  phase: 'initial' | 'correction',
+): Readonly<Record<string, unknown>> {
+  const generated = schemaRecord(
+    generatedSchemaExample(
+      ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
+      ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
+    ),
+    'generated minimal submission example',
+  );
+  if (phase === 'initial') return generated;
+  const proposals = generated['proposals'];
+  if (!Array.isArray(proposals)) throw new TypeError('Generated minimal submission example omitted proposals.');
+  return {
+    ...generated,
+    proposals: proposals.map((proposal) => ({
+      ...schemaRecord(proposal, 'generated proposal example'),
+      fallback_option_id: null,
+    })),
+  };
 }
 
 function jsonPointer(path: readonly PropertyKey[]): string {
@@ -1107,5 +1170,6 @@ export const engineSchemaInternals = {
   movementPreference,
   engagement,
   turnProposal,
+  minimalSubmitRoundInput,
   submitSpeculativeRoundPlanInput,
 };

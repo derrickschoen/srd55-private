@@ -103,11 +103,14 @@ import {
 import {
   ENGINE_ACTOR_KNOWLEDGE_POLICY,
   ENGINE_LEGENDARY_WINDOWS_POLICY,
+  ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
   ENGINE_REACTION_SPEND_HOLD_POLICY,
   ENGINE_RECOVERY_CAPABILITY_POLICY,
   ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
   ENGINE_TOOL_SPECS,
   ENGINE_TURN_PROPOSAL_INPUT_SCHEMA,
+  engineSchemaInternals,
+  generatedMinimalRoundSubmissionExample,
   schemaViolations,
 } from './schemas';
 import type { KbReadBudget, KbReadCallPhase } from './knowledge-base';
@@ -287,6 +290,74 @@ function stateReference(value: unknown): EngineStateReference {
 function externalStateRef(capsule: EngineStateCapsule): Readonly<Record<string, unknown>> {
   return { run_id: capsule.runId, state_handle: engineStateHandle(capsule), expected_revision: capsule.revision };
 }
+function promptRequest(capsule: EngineStateCapsule): Readonly<Record<string, unknown>> | null {
+  const request = capsule.request;
+  if (request === null) return null;
+  return {
+    request_id: request.requestId,
+    phase: request.phase,
+    correction_number: request.correctionNumber,
+    required_actor_ids: request.actors,
+    ...(request.phase === 'speculative' ? {
+      target_room: request.targetRoom,
+      target_monster_round: request.targetMonsterRound,
+      refresh_generation: request.refreshGeneration,
+    } : request.kind === 'plan_adjustment' ? {
+      baseline_plan_hash: request.baselinePlanHash,
+      adjustment_budget: request.adjustmentBudget,
+    } : {}),
+  };
+}
+interface ProposalContractRefusal {
+  readonly code: 'CORRECTION_FALLBACK_MUST_BE_NULL' | 'INITIAL_FALLBACK_REQUIRED' | 'PRIMARY_FALLBACK_IDENTICAL';
+  readonly summary: string;
+  readonly attempt: 'primary' | 'fallback';
+}
+function proposalContractRefusal(
+  phase: 'initial' | 'correction',
+  proposal: EngineTurnProposal,
+): ProposalContractRefusal | null {
+  if (phase === 'correction' && proposal.fallbackOptionId !== null) {
+    return {
+      code: 'CORRECTION_FALLBACK_MUST_BE_NULL',
+      summary: 'Correction proposal fallback_option_id must be null.',
+      attempt: 'fallback',
+    };
+  }
+  if (phase === 'initial' && proposal.fallbackOptionId === null) {
+    return {
+      code: 'INITIAL_FALLBACK_REQUIRED',
+      summary: 'Initial proposal fallback_option_id must identify an independent offered option.',
+      attempt: 'fallback',
+    };
+  }
+  if (proposal.fallbackOptionId !== null && proposal.fallbackOptionId === proposal.primaryOptionId) {
+    return {
+      code: 'PRIMARY_FALLBACK_IDENTICAL',
+      summary: 'Primary and fallback option ids must identify independent choices.',
+      attempt: 'fallback',
+    };
+  }
+  return null;
+}
+
+interface LauncherRoundSubmissionBinding {
+  readonly stateRef: Readonly<Record<string, unknown>>;
+  readonly requestId: string;
+  readonly phase: 'initial' | 'correction';
+}
+type PreparedRoundSubmission =
+  | {
+      readonly kind: 'minimal_submission';
+      readonly submittedArguments: Readonly<Record<string, unknown>>;
+      readonly envelope: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly kind: 'explicit_envelope';
+      readonly submittedArguments: Readonly<Record<string, unknown>>;
+      readonly envelope: Readonly<Record<string, unknown>>;
+    }
+  | { readonly kind: 'rejected'; readonly result: Readonly<Record<string, unknown>> };
 function decodeTarget(value: unknown): EngineTargetSelector {
   const input = record(value, 'target');
   const kind = stringField(input, 'kind');
@@ -744,6 +815,8 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal' | 'sp
   });
   const uriBase = `engine://run/${encodeURIComponent(capsule.runId)}`;
   const adjustment = capsule.request?.phase !== 'speculative' && capsule.request?.kind === 'plan_adjustment';
+  const roundPhase = capsule.request?.phase === 'correction' ? 'correction' : 'initial';
+  const minimalExample = canonicalJson(generatedMinimalRoundSubmissionExample(roundPhase));
   const fixed = kind === 'speculate_round'
     ? 'Plan every advertised speculative scenario, then use engine.submit_speculative_round_plan once. Each branch must cover the complete required monster actor set using only revision-bound option ids offered in current_context. The host alone evaluates conditions and validates the selected branch; never infer or execute outcomes, coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
     : adjustment
@@ -751,9 +824,9 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal' | 'sp
       ? 'Review the current remaining monster plan, then use engine.submit_plan_adjustment once. Submit zero to the stated adjustment budget of open-actor replacement proposals; omitted actors keep their baseline proposals and an empty updates list explicitly keeps the plan. Do not change reaction guidance. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
       : 'Correct only the refused plan-adjustment actors once with engine.submit_plan_adjustment. Valid staged updates remain accepted. No fallback remains after this correction; every correction fallback_option_id must be null. Omitted refused actors keep their baseline proposals.'
     : kind === 'plan_round'
-      ? 'Use engine.get_turn_context, then engine.submit_round_proposals once for the complete required actor set. Input envelope: { state_ref: { run_id, state_handle, expected_revision }, request_id, phase, idempotency_key, proposals }. A call rejected for invalid arguments is not queued and does not count as your submission; fix the arguments and call again. Select only offered revision-bound option ids. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
-      : 'Correct the complete refused proposal request once. No fallback remains after this correction; correction fallback_option_id must be null. If you refresh context, use the get_turn_context request in current_context exactly.';
-  return [fixed, `Turn resource: ${uriBase}/turn/current`, `Proposal schema: ${uriBase}/schema/turn-proposal-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: capsule.request, voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
+      ? `Use engine.get_turn_context, then submit only the minimal engine.submit_round_proposals arguments for the complete required actor set. Generated minimal example: ${minimalExample}. The launcher fills state_ref, request_id, phase, and idempotency_key from this turn binding. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again. Select only offered revision-bound option ids and provide an independent fallback. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.`
+      : `Correct the complete refused proposal request with the minimal engine.submit_round_proposals arguments. Generated minimal example: ${minimalExample}. The launcher fills state_ref, request_id, phase, and idempotency_key from this turn binding. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again. No fallback remains after this correction; correction fallback_option_id must be null. If you refresh context, use the get_turn_context request in current_context exactly.`;
+  return [fixed, `Turn resource: ${uriBase}/turn/current`, `Proposal schema: ${uriBase}/schema/turn-proposal-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: promptRequest(capsule), voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
 }
 
 function reactionAttackInput(
@@ -1087,6 +1160,16 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   }
   const { state, stateSource: feed, proposals, speculativePlans, narration, adjudications, rules } = dependencies;
   const { queries, turnProposals } = dependencies;
+  const launchCapsule = feed.current();
+  const launchRequest = launchCapsule.request;
+  const launcherRoundBinding: LauncherRoundSubmissionBinding | null =
+    launchRequest !== null && launchRequest.phase !== 'speculative' && launchRequest.kind !== 'plan_adjustment'
+      ? {
+          stateRef: externalStateRef(launchCapsule),
+          requestId: launchRequest.requestId,
+          phase: launchRequest.phase,
+        }
+      : null;
   const rendererProfile = rendererProfileSchema.parse(
     dependencies.rendererProfile ?? DEFAULT_RENDERER_PROFILE,
   );
@@ -1180,6 +1263,91 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     const result = create();
     idempotency.set(key, { bytes, result: structuredClone(result) });
     return result;
+  }
+  function roundBindingRejection(
+    capsule: EngineStateCapsule,
+    code: 'AMBIGUOUS_SUBMISSION_BINDING' | 'STALE_SUBMISSION_BINDING' | 'ROUND_SUBMISSION_BINDING_UNAVAILABLE',
+    summary: string,
+  ): Readonly<Record<string, unknown>> {
+    const actorId = capsule.request?.actors[0];
+    if (actorId === undefined) throw new RangeError(code);
+    return {
+      status: 'rejected',
+      state_ref: externalStateRef(capsule),
+      actor_refusals: [{
+        actor_id: actorId,
+        codes: [code],
+        summary,
+        attempt_rejections: [{
+          attempt: 'primary',
+          declared_option_id: null,
+          rejection_reasons: [summary],
+        }],
+      }],
+      correction_guidance: correctionGuidance(capsule),
+    };
+  }
+  function prepareRoundSubmission(value: Readonly<Record<string, unknown>>): PreparedRoundSubmission {
+    if (!engineSchemaInternals.minimalSubmitRoundInput.safeParse(value).success) {
+      return { kind: 'explicit_envelope', submittedArguments: value, envelope: value };
+    }
+    const current = feed.current();
+    if (launcherRoundBinding === null) {
+      return {
+        kind: 'rejected',
+        result: roundBindingRejection(
+          current,
+          'ROUND_SUBMISSION_BINDING_UNAVAILABLE',
+          'This launcher was not issued for an ordinary round proposal request.',
+        ),
+      };
+    }
+    const currentRequest = current.request;
+    if (currentRequest !== null && currentRequest.phase !== 'speculative' &&
+      currentRequest.kind !== 'plan_adjustment' && currentRequest.requestId !== launcherRoundBinding.requestId) {
+      return {
+        kind: 'rejected',
+        result: roundBindingRejection(
+          current,
+          'AMBIGUOUS_SUBMISSION_BINDING',
+          'More than one pending round request is visible to this launcher binding; no request was selected.',
+        ),
+      };
+    }
+    const currentStateRef = externalStateRef(current);
+    if (currentRequest === null || currentRequest.phase === 'speculative' ||
+      currentRequest.kind === 'plan_adjustment' ||
+      currentRequest.requestId !== launcherRoundBinding.requestId ||
+      currentRequest.phase !== launcherRoundBinding.phase ||
+      canonicalJson(currentStateRef) !== canonicalJson(launcherRoundBinding.stateRef)) {
+      return {
+        kind: 'rejected',
+        result: roundBindingRejection(
+          current,
+          'STALE_SUBMISSION_BINDING',
+          'The launcher turn binding is stale; refresh the current turn before submitting.',
+        ),
+      };
+    }
+    const idempotencyKey = `round-submit:${sha256(canonicalJson({
+      state_ref: launcherRoundBinding.stateRef,
+      request_id: launcherRoundBinding.requestId,
+      phase: launcherRoundBinding.phase,
+    })).slice(0, 48)}`;
+    return {
+      kind: 'minimal_submission',
+      submittedArguments: value,
+      envelope: {
+        state_ref: launcherRoundBinding.stateRef,
+        request_id: launcherRoundBinding.requestId,
+        phase: launcherRoundBinding.phase,
+        idempotency_key: idempotencyKey,
+        proposals: value['proposals'],
+        ...(value['reaction_guidance'] === undefined ? {} : {
+          reaction_guidance: value['reaction_guidance'],
+        }),
+      },
+    };
   }
   function proposalWithPlayObjective(
     capsule: EngineStateCapsule,
@@ -1721,7 +1889,12 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     });
   };
   function execute(name: string, value: unknown): unknown {
-    const input = record(value, `${name} arguments`);
+    const suppliedInput = record(value, `${name} arguments`);
+    const roundSubmission = name === 'engine.submit_round_proposals'
+      ? prepareRoundSubmission(suppliedInput)
+      : null;
+    if (roundSubmission?.kind === 'rejected') return roundSubmission.result;
+    const input = roundSubmission === null ? suppliedInput : roundSubmission.envelope;
     if (name === 'engine.read_kb_subject') {
       const budget = dependencies.kbReadBudget;
       const callPhase = dependencies.kbReadCallPhase;
@@ -2269,6 +2442,10 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const proposal = decodeRenderedProposal(input['proposal']);
       if (!request.actors.includes(proposal.actorId)) throw new RangeError('ACTOR_NOT_PENDING');
       if (proposal.expectedRevision !== capsule.revision) throw new RangeError('PROPOSAL_REVISION_MISMATCH');
+      const contractRefusal = proposalContractRefusal(request.phase, proposal);
+      if (contractRefusal !== null) {
+        return { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: [{ code: contractRefusal.code, summary: contractRefusal.summary }], correction_guidance: correctionGuidance(capsule) };
+      }
       const resolution = turnProposals.resolve(state, proposal);
       if (!resolution.valid) {
         return { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
@@ -2291,9 +2468,16 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const canonical = actorSetValid
         ? request.actors.map((actorId) => decoded.find((proposal) => proposal.actorId === actorId)).filter((proposal): proposal is EngineTurnProposal => proposal !== undefined)
         : decoded;
-      const resolved = canonical.map((proposal) => ({ proposal, resolution: turnProposals.resolve(state, proposal) }));
-      const dominanceRefusals = resolved.flatMap(({ proposal, resolution }) => {
-        if (!resolution.valid) return [];
+      const evaluated = canonical.map((proposal) => {
+        const contractRefusal = proposalContractRefusal(request.phase, proposal);
+        return {
+          proposal,
+          contractRefusal,
+          resolution: contractRefusal === null ? turnProposals.resolve(state, proposal) : null,
+        };
+      });
+      const dominanceRefusals = evaluated.flatMap(({ proposal, contractRefusal, resolution }) => {
+        if (contractRefusal !== null || resolution === null || !resolution.valid) return [];
         const refusal = dominanceRefusal(capsule, proposal, resolution.option.optionId);
         return refusal === null ? [] : [{
           actor_id: proposal.actorId,
@@ -2316,7 +2500,18 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             rejection_reasons: ['Round submission must contain one proposal for each required actor exactly once.'],
           }],
         }]),
-        ...resolved.flatMap(({ proposal, resolution }) => resolution.valid ? [] : [{
+        ...evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal === null ? [] : [{
+          actor_id: proposal.actorId,
+          codes: [contractRefusal.code],
+          summary: contractRefusal.summary,
+          attempt_rejections: [{
+            attempt: contractRefusal.attempt,
+            declared_option_id: contractRefusal.attempt === 'primary'
+              ? proposal.primaryOptionId : proposal.fallbackOptionId,
+            rejection_reasons: [contractRefusal.summary],
+          }],
+        }]),
+        ...evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal !== null || resolution === null || resolution.valid ? [] : [{
           actor_id: proposal.actorId,
           codes: resolution.refusals.map((entry) => entry.code),
           summary: resolution.refusals.map((entry) => entry.summary).join('; '),
@@ -2338,9 +2533,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const reactionGuidance = input['reaction_guidance'] === undefined
         ? null : decodeReactionGuidance(input['reaction_guidance']);
       return idempotent(key, input, () => {
-        const valid = resolved.flatMap(({ proposal, resolution }) => resolution.valid ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
+        const valid = evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal === null && resolution?.valid === true ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
-        submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance, submittedArguments: structuredClone(input), ...(activeIntelMode === 'off' ? {} : { intelCapture: captureDmIntel(state, capsule, queries) }) });
+        submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance, submittedArguments: structuredClone(roundSubmission?.submittedArguments ?? suppliedInput), ...(activeIntelMode === 'off' ? {} : { intelCapture: captureDmIntel(state, capsule, queries) }) });
         return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.proposal.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
       });
     }
@@ -2358,20 +2553,21 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const overBudget = decoded.length > request.adjustmentBudget;
       const evaluated = decoded.map((proposal) => {
         const actor = state.combatants.find((candidate) => candidate.profile.id === proposal.actorId);
+        const contractRefusal = proposalContractRefusal(request.phase, proposal);
         const staticRefusal = overBudget
-          ? { code: 'ADJUSTMENT_BUDGET_EXCEEDED', summary: `Adjustment contains more than ${String(request.adjustmentBudget)} replacement proposals.` }
+          ? { code: 'ADJUSTMENT_BUDGET_EXCEEDED', summary: `Adjustment contains more than ${String(request.adjustmentBudget)} replacement proposals.`, attempt: 'primary' as const }
           : (counts.get(proposal.actorId) ?? 0) > 1
-            ? { code: 'DUPLICATE_ACTOR_UPDATE', summary: 'An adjustment may replace an open actor at most once.' }
+            ? { code: 'DUPLICATE_ACTOR_UPDATE', summary: 'An adjustment may replace an open actor at most once.', attempt: 'primary' as const }
             : actor?.life === 'dead'
-              ? { code: 'ACTOR_DEAD', summary: 'A dead actor cannot receive a plan adjustment.' }
+              ? { code: 'ACTOR_DEAD', summary: 'A dead actor cannot receive a plan adjustment.', attempt: 'primary' as const }
               : !request.actors.includes(proposal.actorId)
-                ? { code: 'ACTOR_NOT_OPEN', summary: 'Only actors whose turns remain open may receive an adjustment.' }
-                : null;
+                ? { code: 'ACTOR_NOT_OPEN', summary: 'Only actors whose turns remain open may receive an adjustment.', attempt: 'primary' as const }
+                : contractRefusal;
         if (staticRefusal !== null) return { proposal, resolution: null, staticRefusal };
         const resolution = turnProposals.resolve(state, proposal);
         if (resolution.valid) {
           const refusal = dominanceRefusal(capsule, proposal, resolution.option.optionId);
-          if (refusal !== null) return { proposal, resolution: null, staticRefusal: refusal };
+          if (refusal !== null) return { proposal, resolution: null, staticRefusal: { ...refusal, attempt: 'primary' as const } };
         }
         return { proposal, resolution, staticRefusal: null };
       });
@@ -2391,8 +2587,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           codes: [entry.staticRefusal.code],
           summary: entry.staticRefusal.summary,
           attempt_rejections: [{
-            attempt: 'primary' as const,
-            declared_option_id: entry.proposal.primaryOptionId,
+            attempt: entry.staticRefusal.attempt,
+            declared_option_id: entry.staticRefusal.attempt === 'primary'
+              ? entry.proposal.primaryOptionId : entry.proposal.fallbackOptionId,
             rejection_reasons: [entry.staticRefusal.summary],
           }],
         }];
@@ -2502,6 +2699,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (request.kind === 'plan_adjustment') throw new RangeError('REQUEST_KIND_MISMATCH');
       const proposal = decodeRenderedProposal(input['proposal']);
       if (request.actors.length !== 1 || request.actors[0] !== proposal.actorId) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: 'ACTOR_REQUIRES_WHOLE_ROUND', summary: 'This actor belongs to the pending shared-initiative whole-round request.' }], correction_guidance: correctionGuidance(capsule) };
+      const contractRefusal = proposalContractRefusal(request.phase, proposal);
+      if (contractRefusal !== null) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: contractRefusal.code, summary: contractRefusal.summary }], correction_guidance: correctionGuidance(capsule) };
       const resolution = turnProposals.resolve(state, proposal);
       if (!resolution.valid) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
       const dominance = dominanceRefusal(capsule, proposal, resolution.option.optionId);
@@ -2557,7 +2756,15 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     .filter((spec) => spec.descriptor.name === 'engine.read_kb_subject'
       ? dependencies.kbReadBudget !== undefined && profileRequest?.phase !== 'speculative'
       : advertisedNames === null || advertisedNames.has(spec.descriptor.name))
-    .map((spec) => ({ descriptor: spec.descriptor, validateArguments: (value) => schemaViolations(spec.input, value), validateOutput: (value) => schemaViolations(spec.output, value), execute: (value) => execute(spec.descriptor.name, value) }));
+    .map((spec) => ({
+      descriptor: spec.descriptor,
+      validateArguments: (value) => spec.descriptor.name === 'engine.submit_round_proposals' &&
+        engineSchemaInternals.minimalSubmitRoundInput.safeParse(value).success
+        ? []
+        : schemaViolations(spec.input, value),
+      validateOutput: (value) => schemaViolations(spec.output, value),
+      execute: (value) => execute(spec.descriptor.name, value),
+    }));
   const bindingsByName = new Map(bindings.map((binding) => [binding.descriptor.name, binding]));
   const toolSurface: EngineToolSurface = Object.freeze({
     tools: Object.freeze(bindings.map((binding) => binding.descriptor)),
@@ -2672,10 +2879,16 @@ function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRules
       }
       if (uri === `${base}/schema/turn-proposal-v1`) return content(uri, {
         version: 1,
+        minimal_submission: ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
+        minimal_example: generatedMinimalRoundSubmissionExample(
+          capsule.request?.phase === 'correction' ? 'correction' : 'initial',
+        ),
         envelope: ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
         proposal: ENGINE_TURN_PROPOSAL_INPUT_SCHEMA,
         constraints: ['Select only engine-offered option ids from the exact revision.', 'Never send coordinates, cells, destinations, paths, attack modifiers, DCs, dice, damage, or commands.'],
-        examples: [{ actor_id: 'monster-id', expected_revision: 42, primary_option_id: 'option:42:...', fallback_option_id: null, override_justification: null }],
+        examples: generatedMinimalRoundSubmissionExample(
+          capsule.request?.phase === 'correction' ? 'correction' : 'initial',
+        )['proposals'],
       });
       throw new RangeError('Unknown or expired resource URI.');
     },
