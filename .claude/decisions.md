@@ -892,6 +892,36 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D489 — OWNER: every AI decision carries a debuggable reason (2026-09-03)
+
+Owner (verbatim): **"We are in the early data collection and
+experimentation phase with the ai dm. We should be making sure that the
+ai gives a reason that we can debug later for every decision so that we
+can compare good and bad outcomes and trace the reasoning."**
+
+Consequences:
+1. The decision contract (G1 minimal submit, H1 structured final in both
+   variants, H4 intent) gains a REQUIRED short `reason` per actor
+   proposal (free text, bounded, e.g. <= 240 chars) and an optional
+   round-level `rationale`; an override justification is a typed
+   sub-case of the reason, never a substitute for it. A proposal without
+   a reason is a typed rejection (REASON_REQUIRED) that does not consume
+   the submission.
+2. Reasons are recorded verbatim per row (authorizedPlan[].reason) and
+   in the packet ANSWER KEY; they are NOT shown to judges by default
+   (they could carry arm-identifying text) — a separate reason-visible
+   packet variant is allowed only as a preregistered arm.
+3. Traceability: each row links reason -> chosen option -> engine's
+   expected outcome (from the intel rows) -> executed result -> the
+   round's judged score, so good and bad outcomes can be compared by
+   reason text and reason class later. The G2 planner/outcome fields
+   make the link complete.
+4. Applied now as: H1.1 amendment item 7 (both H1 variants), G2.1 (the
+   minimal MCP submit gets `reason`), H4 (the intent text IS the reason
+   and is stored with the match evidence), skills (the SKILL.md contract
+   asks for a reason per actor). The old-era arms have no reasons; only
+   post-shift data carries them.
+
 ## D488 — OWNER: keep D453; capture unmodeled intent as typed gaps through the H4 matcher (2026-09-03)
 
 Asked (opus DM-perspective objection to D453): keep D453 and capture
