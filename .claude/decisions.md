@@ -865,6 +865,23 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D488 — OWNER: keep D453; capture unmodeled intent as typed gaps through the H4 matcher (2026-09-03)
+
+Asked (opus DM-perspective objection to D453): keep D453 and capture
+intent gaps via H4 (supervisor recommendation), or show hidden options
+to the AI with a no-effect label.
+
+Owner: **"Keep D453; capture intent gaps via H4."**
+
+On the override question (opus vs D485) the owner asked for **"context
+details and examples to help decide. Run an experiment as well to check
+if opus is right or not"** — D485 stays in force meanwhile; a codex
+retrospective (override kinds/texts/examples, panel-score comparison
+from the unsealed D443 keys, classification engine-expressible vs
+DM-only vs rubber-stamp) is dispatched and a preregisterable forward
+experiment {D485-strict, named-free-text-judge-visible, free-text-
+unscored} is being designed; the owner decides on the evidence.
+
 ## D487 — OWNER: parallelize everything; worktrees per strategy; different models collaborate; permute the Gs and Hs (2026-09-03)
 
 Owner (verbatim): **"Parallelize everything you can. Look for seams to
