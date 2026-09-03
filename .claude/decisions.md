@@ -1,5 +1,20 @@
 # Binding scope decisions
 
+B4 VERIFIED AND COMMITTED; C1 DISPATCHED (supervisor, 2026-09-03 01:00):
+B4 (27 files +606/-49, new tests/unit/vtt/d466-b4-spell-payloads.test.ts).
+Codex reports tsc 0 / sg 0 / 540 files 9472 tests and both mutations
+(radius 20->25, Athletics->Acrobatics). My gates: tsc 0, sg 0, 540 files
+/ 9472 tests. My mutation (Calm Emotions radius 20->25 in definitions.ts)
+fails the B4 test file, passes after restore proven by grep. Review:
+Entangle already existed as a persistent area; B4 added the typed
+Athletics escape check and choice slots; Dispel Evil and Good entered
+the manifest (188->189, the count assertions updated to match a real
+addition, not regenerated); Calm Emotions carries per-target modes with
+monster-side indifference (D480); no non-SRD source words in the diff.
+Committed in the lane. C1 (KB fixture package + relocation-safe loader;
+tactical lines out of the root and subjects; tactics.md = k7) dispatched.
+D447 candidate still running (55 min).
+
 D447 CONTROL VERIFIED (supervisor, 2026-09-03 00:08): d447-control
 (caveman full, luna low, generated rooms 6204001-10, 5 reps, 120 s) 50
 rows, all authorized, 0 timeouts, 10 digests x5, caveman_prose profile
