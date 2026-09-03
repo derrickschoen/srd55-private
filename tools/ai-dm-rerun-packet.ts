@@ -63,6 +63,7 @@ const baselineResolutionSummarySchema = z.object({
 
 const authorizedPlanEntrySchema = z.object({
   actorId: z.unknown(),
+  reason: z.string().max(240).nullable().optional(),
   acceptedIntent: z.object({ choice: baselineChoiceSchema }).passthrough().optional(),
   resolutionSummary: z.union([currentResolutionSummarySchema, baselineResolutionSummarySchema]).optional(),
 }).passthrough();
@@ -114,6 +115,11 @@ const arenaRowSchema = z.object({
   decisionAttempts: safeIntegerSchema.min(0),
   decisionRejectionCodes: z.array(z.string()),
   normalizationCodes: z.array(z.string()),
+  chosenOptionIndices: z.array(z.object({
+    actorId: z.unknown(),
+    primaryOptionIndex: safeIntegerSchema.min(0),
+    fallbackOptionIndex: safeIntegerSchema.min(0).nullable(),
+  })),
   // Required in cross-era mode, where it is the arm partition key.
   repoCommit: z.string().min(1).optional(),
 }).passthrough();
@@ -159,6 +165,11 @@ interface ValidatedArenaRow {
   readonly decisionAttempts: number;
   readonly decisionRejectionCodes: readonly string[];
   readonly normalizationCodes: readonly string[];
+  readonly chosenOptionIndices: readonly {
+    readonly actorId: unknown;
+    readonly primaryOptionIndex: number;
+    readonly fallbackOptionIndex: number | null;
+  }[];
   readonly roundNarrative: string | null;
   readonly authorizedPlan: readonly z.infer<typeof authorizedPlanEntrySchema>[] | null;
 }
@@ -220,6 +231,12 @@ export interface RerunAnswerKey {
     readonly decisionAttempts: number;
     readonly decisionRejectionCodes: readonly string[];
     readonly normalizationCodes: readonly string[];
+    readonly chosenOptionIndices: readonly {
+      readonly actorId: unknown;
+      readonly primaryOptionIndex: number;
+      readonly fallbackOptionIndex: number | null;
+    }[];
+    readonly decisionReasons: readonly { readonly actorId: unknown; readonly reason: string | null }[] | null;
   }[];
 }
 
@@ -235,6 +252,7 @@ const MODEL_IDENTITY_FIELDS = new Set([
   'selectedBranch', 'optionId', 'plannerLabel',
   'decisionTransport', 'firstDecisionAccepted', 'decisionAttempts',
   'decisionRejectionCodes', 'normalizationCodes',
+  'chosenOptionIndices', 'reason',
   // The round narrative is a deterministic era-specific renderer template
   // ("expands X + X -> Y into N ordered use(s)" vs "moves N feet and uses x"),
   // verified trivially arm-separable on real R1-10 rows. It adds nothing
@@ -343,6 +361,7 @@ function validateRow(
     decisionAttempts: row.decisionAttempts,
     decisionRejectionCodes: row.decisionRejectionCodes,
     normalizationCodes: row.normalizationCodes,
+    chosenOptionIndices: row.chosenOptionIndices,
     roundNarrative: row.roundNarrative,
     authorizedPlan: row.authorizedPlan,
   };
@@ -567,6 +586,11 @@ function buildPacket(
       decisionAttempts: row.decisionAttempts,
       decisionRejectionCodes: row.decisionRejectionCodes,
       normalizationCodes: row.normalizationCodes,
+      chosenOptionIndices: row.chosenOptionIndices,
+      decisionReasons: row.authorizedPlan?.map((entry) => ({
+        actorId: entry.actorId,
+        reason: entry.reason ?? null,
+      })) ?? null,
     })),
   };
   assertBlindedPacket(packet);

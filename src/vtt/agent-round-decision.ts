@@ -12,8 +12,26 @@ const boundRoundDecisionBrand = Symbol('BoundRoundDecision');
 /** The decision transports considered by the A1/A3 ingress. */
 export type DecisionTransport = 'mcp_minimal' | 'final_ids' | 'final_indices';
 
-export type DecisionActorIndex = number & { readonly [decisionActorIndexBrand]: true };
-export type DecisionOptionIndex = number & { readonly [decisionOptionIndexBrand]: true };
+/**
+ * The literal parameter is intentionally retained: an option index for actor
+ * zero is not assignable to an option index for actor one.
+ */
+export type DecisionActorIndex<N extends number = number> = number & {
+  readonly [decisionActorIndexBrand]: N;
+};
+
+export type OptionIndex<A extends DecisionActorIndex = DecisionActorIndex> = number & {
+  readonly [decisionOptionIndexBrand]: A;
+};
+
+/** Compatibility name for consumers which do not retain a particular actor. */
+export type DecisionOptionIndex = OptionIndex<DecisionActorIndex>;
+
+export interface OutOfRange {
+  readonly kind: 'out_of_range';
+  readonly value: number;
+  readonly upperExclusive: number;
+}
 
 export type DecisionPhase = 'initial' | 'correction';
 
@@ -30,12 +48,14 @@ export interface RawIdDecision {
 /** Model-shaped data. It deliberately lacks every field of EngineTurnProposal. */
 export interface RawIndexDecision {
   readonly catalogDigest: string;
-  readonly proposals: readonly {
-    readonly actorIndex: DecisionActorIndex;
-    readonly primaryOptionIndex: DecisionOptionIndex;
-    readonly fallbackOptionIndex: DecisionOptionIndex | null;
+  readonly reaction_guidance: { readonly inherit: true };
+  readonly rationale?: string;
+  readonly proposals: Readonly<Record<string, {
+    readonly primaryOptionIndex: number;
+    readonly fallbackOptionIndex: number | null;
     readonly override: DecisionOverride | null;
-  }[];
+    readonly reason: string;
+  }>>;
 }
 
 export interface DecisionOverride {
@@ -78,7 +98,8 @@ export type DecisionNormalizationRejectionCode =
   | 'unknown_option'
   | 'stale_catalog'
   | 'identical_fallback'
-  | 'non_null_correction_fallback';
+  | 'non_null_correction_fallback'
+  | 'REASON_REQUIRED';
 
 export type DecisionNormalizationResult =
   | {
@@ -92,11 +113,29 @@ export type DecisionNormalizationResult =
       readonly codes: readonly [DecisionNormalizationRejectionCode];
     };
 
+interface NormalizedIndexProposal<A extends DecisionActorIndex = DecisionActorIndex> {
+  readonly actorIndex: A;
+  readonly primaryOptionIndex: OptionIndex<A>;
+  readonly fallbackOptionIndex: OptionIndex<A> | null;
+  readonly override: DecisionOverride | null;
+  readonly reason: string;
+}
+
 interface NormalizedRoundDecision {
   readonly [normalizedRoundDecisionBrand]: true;
   readonly catalogDigest: string;
-  readonly proposals: RawIndexDecision['proposals'];
-  readonly reactionGuidance: ReactionGuidanceDeclaration | null;
+  readonly proposals: readonly NormalizedIndexProposal[];
+  readonly rationale: string | null;
+}
+
+/**
+ * Integration seam for the G2.1 decision-reason detector. It deliberately
+ * names the only structured-final hook without reimplementing that detector.
+ */
+export interface StructuredFinalDecisionReasonGate {
+  validate(actorId: CombatantId, reason: string):
+    | { readonly kind: 'accepted' }
+    | { readonly kind: 'rejected'; readonly code: 'REASON_REQUIRED' };
 }
 
 /**
@@ -108,6 +147,13 @@ export interface BoundRoundDecision {
   readonly catalog: DecisionCatalog;
   readonly proposals: readonly EngineTurnProposal[];
   readonly inheritedReactionGuidance: ReactionGuidanceDeclaration | null;
+  readonly rationale: string | null;
+  readonly selections: readonly {
+    readonly actorId: CombatantId;
+    readonly primaryOptionIndex: number;
+    readonly fallbackOptionIndex: number | null;
+    readonly reason: string;
+  }[];
 }
 
 export interface RenderedDecisionCatalog {
@@ -232,8 +278,12 @@ function rawDialect(input: Readonly<Record<string, unknown>>): RawDialect | null
   const hasCamel = 'catalogDigest' in input;
   const hasSnake = 'catalog_digest' in input;
   if (hasCamel === hasSnake) return null;
-  if (hasCamel && optionalClosedRecord(input, ['catalogDigest', 'proposals'], [])) return 'camel';
-  if (hasSnake && optionalClosedRecord(input, ['catalog_digest', 'proposals'], [])) return 'snake';
+  if (hasCamel && optionalClosedRecord(input, ['catalogDigest', 'proposals', 'reaction_guidance'], ['rationale'])) {
+    return 'camel';
+  }
+  if (hasSnake && optionalClosedRecord(input, ['catalog_digest', 'proposals', 'reaction_guidance'], ['rationale'])) {
+    return 'snake';
+  }
   return null;
 }
 
@@ -241,12 +291,33 @@ function numberIndex(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
-function indexWithinActor(value: number, length: number): DecisionOptionIndex | null {
-  return value < length ? value as DecisionOptionIndex : null;
+function outOfRange(value: number, upperExclusive: number): OutOfRange {
+  return frozen({ kind: 'out_of_range', value, upperExclusive });
 }
 
-function indexWithinCatalog(value: number, length: number): DecisionActorIndex | null {
-  return value < length ? value as DecisionActorIndex : null;
+export function decisionActorIndex<const N extends number>(
+  value: N,
+  catalog: Pick<DecisionCatalog, 'actors'>,
+): DecisionActorIndex<N> | OutOfRange {
+  if (!Number.isSafeInteger(value) || value < 0 || value >= catalog.actors.length) {
+    return outOfRange(value, catalog.actors.length);
+  }
+  return value as unknown as DecisionActorIndex<N>;
+}
+
+export function decisionOptionIndex<A extends DecisionActorIndex, const N extends number>(
+  actor: A,
+  value: N,
+  optionCount: number,
+): OptionIndex<A> | OutOfRange {
+  if (!Number.isSafeInteger(value) || value < 0 || value >= optionCount) {
+    return outOfRange(value, optionCount);
+  }
+  return value as unknown as OptionIndex<A>;
+}
+
+function isOutOfRange(value: DecisionActorIndex | DecisionOptionIndex | OutOfRange): value is OutOfRange {
+  return typeof value === 'object' && value !== null && value.kind === 'out_of_range';
 }
 
 /**
@@ -257,6 +328,7 @@ export function normalizeIndexDecision(
   value: unknown,
   catalog: DecisionCatalog,
   inheritedReactionGuidance: ReactionGuidanceDeclaration | null,
+  reasonGate?: StructuredFinalDecisionReasonGate,
 ): DecisionNormalizationResult {
   const input = record(value);
   if (input === null) return failure('invalid_shape');
@@ -268,41 +340,51 @@ export function normalizeIndexDecision(
   const catalogDigest = dialect === 'camel' ? input['catalogDigest'] : input['catalog_digest'];
   if (catalogDigest !== catalog.digest) return failure('stale_catalog');
   const rawProposals = input['proposals'];
-  if (!Array.isArray(rawProposals)) return failure('invalid_shape');
-  const proposals: Array<RawIndexDecision['proposals'][number]> = [];
-  const selectedActors = new Set<number>();
-  for (const rawProposal of rawProposals) {
-    const proposal = record(rawProposal);
+  if (record(rawProposals) === null) return failure('invalid_shape');
+  const proposalRecord = record(rawProposals);
+  if (proposalRecord === null) return failure('invalid_shape');
+  const reactionGuidance = input['reaction_guidance'];
+  const reactionGuidanceRecord = record(reactionGuidance);
+  if (reactionGuidanceRecord === null || !closedRecord(reactionGuidanceRecord, ['inherit']) ||
+    reactionGuidanceRecord['inherit'] !== true) return failure('invalid_shape');
+  const rationale = input['rationale'];
+  if (rationale !== undefined && (typeof rationale !== 'string' || rationale.length > 240)) {
+    return failure('invalid_shape');
+  }
+  const expectedActorIds = catalog.actors.map((actor) => actor.actorId);
+  if (!expectedActorIds.every((actorId) => actorId in proposalRecord)) return failure('missing_actor');
+  if (!Object.keys(proposalRecord).every((actorId) => expectedActorIds.includes(actorId as CombatantId))) {
+    return failure('unknown_option');
+  }
+  const proposals: NormalizedIndexProposal[] = [];
+  for (const [actorNumber, actor] of catalog.actors.entries()) {
+    const rawProposal = proposalRecord[actor.actorId];
+    const proposal = rawProposal === undefined ? null : record(rawProposal);
     if (proposal === null) return failure('invalid_shape');
-    const actorIndexKey = dialect === 'camel' ? 'actorIndex' : 'actor_index';
     const primaryKey = dialect === 'camel' ? 'primaryOptionIndex' : 'primary_option_index';
     const fallbackKey = dialect === 'camel' ? 'fallbackOptionIndex' : 'fallback_option_index';
-    const expectedKeys = [actorIndexKey, primaryKey, fallbackKey, 'override'];
+    const expectedKeys = [primaryKey, fallbackKey, 'override', 'reason'];
     if (!closedRecord(proposal, expectedKeys)) {
       const conflictingDialect = dialect === 'camel'
-        ? 'actor_index' in proposal || 'primary_option_index' in proposal || 'fallback_option_index' in proposal
-        : 'actorIndex' in proposal || 'primaryOptionIndex' in proposal || 'fallbackOptionIndex' in proposal;
+        ? 'primary_option_index' in proposal || 'fallback_option_index' in proposal
+        : 'primaryOptionIndex' in proposal || 'fallbackOptionIndex' in proposal;
       return failure(conflictingDialect ? 'dialect_mismatch' : 'invalid_shape');
     }
-    const actorNumber = numberIndex(proposal[actorIndexKey]);
-    if (actorNumber === null) return failure('invalid_shape');
-    if (selectedActors.has(actorNumber)) return failure('duplicate_actor');
-    const actorIndex = indexWithinCatalog(actorNumber, catalog.actors.length);
-    if (actorIndex === null) return failure('unknown_option');
-    const actor = catalog.actors[actorIndex];
-    if (actor === undefined) return failure('unknown_option');
+    const actorIndex = decisionActorIndex(actorNumber, catalog);
+    if (isOutOfRange(actorIndex)) return failure('unknown_option');
     const primaryNumber = numberIndex(proposal[primaryKey]);
     if (primaryNumber === null) return failure('invalid_shape');
-    const primaryOptionIndex = indexWithinActor(primaryNumber, actor.options.length);
-    if (primaryOptionIndex === null) return failure('unknown_option');
+    const primaryOptionIndex = decisionOptionIndex(actorIndex, primaryNumber, actor.options.length);
+    if (isOutOfRange(primaryOptionIndex)) return failure('unknown_option');
     const fallbackValue = proposal[fallbackKey];
-    const fallbackOptionIndex = fallbackValue === null
-      ? null
-      : (() => {
-          const fallbackNumber = numberIndex(fallbackValue);
-          return fallbackNumber === null ? null : indexWithinActor(fallbackNumber, actor.options.length);
-        })();
-    if (fallbackValue !== null && fallbackOptionIndex === null) return failure('unknown_option');
+    let fallbackOptionIndex: OptionIndex<typeof actorIndex> | null = null;
+    if (fallbackValue !== null) {
+      const fallbackNumber = numberIndex(fallbackValue);
+      if (fallbackNumber === null) return failure('unknown_option');
+      const checkedFallback = decisionOptionIndex(actorIndex, fallbackNumber, actor.options.length);
+      if (isOutOfRange(checkedFallback)) return failure('unknown_option');
+      fallbackOptionIndex = checkedFallback;
+    }
     if (catalog.phase === 'correction' && fallbackOptionIndex !== null) {
       return failure('non_null_correction_fallback');
     }
@@ -312,17 +394,19 @@ export function normalizeIndexDecision(
     }
     const override = parseOverride(proposal['override']);
     if (override === undefined) return failure('invalid_shape');
-    selectedActors.add(actorNumber);
-    proposals.push({ actorIndex, primaryOptionIndex, fallbackOptionIndex, override });
+    const reason = proposal['reason'];
+    if (typeof reason !== 'string' || reason.trim().length === 0) return failure('REASON_REQUIRED');
+    if (reason.length > 240) return failure('invalid_shape');
+    if (reasonGate?.validate(actor.actorId, reason).kind === 'rejected') return failure('REASON_REQUIRED');
+    proposals.push({ actorIndex, primaryOptionIndex, fallbackOptionIndex, override, reason });
   }
-  if (selectedActors.size !== catalog.actors.length) return failure('missing_actor');
   return {
     kind: 'accepted',
     decision: {
       [normalizedRoundDecisionBrand]: true,
       catalogDigest: catalog.digest,
       proposals,
-      reactionGuidance: inheritedReactionGuidance,
+      rationale: rationale ?? null,
     },
     codes: [],
   };
@@ -332,6 +416,7 @@ export function normalizeIndexDecision(
 export function bindDecision(
   catalog: DecisionCatalog,
   normalized: NormalizedRoundDecision,
+  inheritedReactionGuidance: ReactionGuidanceDeclaration | null,
 ): BoundRoundDecision {
   if (normalized.catalogDigest !== catalog.digest) {
     throw new RangeError('Cannot bind a decision to a different catalog digest.');
@@ -370,7 +455,18 @@ export function bindDecision(
     [boundRoundDecisionBrand]: true,
     catalog,
     proposals,
-    inheritedReactionGuidance: normalized.reactionGuidance,
+    inheritedReactionGuidance,
+    rationale: normalized.rationale,
+    selections: normalized.proposals.map((raw) => {
+      const actor = catalog.actors[raw.actorIndex];
+      if (actor === undefined) throw new RangeError('Normalized actor index escaped its catalog.');
+      return {
+        actorId: actor.actorId,
+        primaryOptionIndex: raw.primaryOptionIndex,
+        fallbackOptionIndex: raw.fallbackOptionIndex,
+        reason: raw.reason,
+      };
+    }),
   });
 }
 
@@ -416,29 +512,40 @@ export function finalIndicesDecisionSchema(catalog: DecisionCatalog): JsonSchema
   const fallback = catalog.phase === 'correction'
     ? { type: 'null' }
     : { type: 'integer', minimum: 0 };
+  const proposalProperties: Record<string, JsonSchema> = {};
+  for (const actor of catalog.actors) {
+    proposalProperties[actor.actorId] = {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        primaryOptionIndex: { type: 'integer', minimum: 0 },
+        fallbackOptionIndex: fallback,
+        override: overrideSchema(),
+        reason: { type: 'string', minLength: 1, maxLength: 240 },
+      },
+      required: ['primaryOptionIndex', 'fallbackOptionIndex', 'override', 'reason'],
+    };
+  }
   return {
     type: 'object',
     additionalProperties: false,
     properties: {
       catalogDigest: { type: 'string', const: catalog.digest },
       proposals: {
-        type: 'array',
-        minItems: catalog.actors.length,
-        maxItems: catalog.actors.length,
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            actorIndex: { type: 'integer', minimum: 0 },
-            primaryOptionIndex: { type: 'integer', minimum: 0 },
-            fallbackOptionIndex: fallback,
-            override: overrideSchema(),
-          },
-          required: ['actorIndex', 'primaryOptionIndex', 'fallbackOptionIndex', 'override'],
-        },
+        type: 'object',
+        additionalProperties: false,
+        properties: proposalProperties,
+        required: catalog.actors.map((actor) => actor.actorId),
       },
+      reaction_guidance: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { inherit: { type: 'boolean', const: true } },
+        required: ['inherit'],
+      },
+      rationale: { type: 'string', maxLength: 240 },
     },
-    required: ['catalogDigest', 'proposals'],
+    required: ['catalogDigest', 'proposals', 'reaction_guidance'],
   };
 }
 

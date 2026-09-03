@@ -98,6 +98,8 @@ import {
   type DecisionPhase,
   type DecisionNormalizationRejectionCode,
   type DecisionTransport,
+  type BoundRoundDecision,
+  type StructuredFinalDecisionReasonGate,
 } from '../src/vtt/agent-round-decision';
 import { MOVEMENT_OPTIONS_INTEL_POLICY } from '../src/vtt/intel/movement-options';
 import { TEAM_SCORER_POLICY } from '../src/vtt/intel/team-scorer';
@@ -270,6 +272,8 @@ export interface ConversationChainEvidence {
 
 export interface ConversationAuthorizedActorPlan {
   readonly actorId: CombatantId;
+  /** Structured-final explanation; null for tool-driven plans. */
+  readonly reason: string | null;
   readonly acceptedProposal: Readonly<Record<string, unknown>>;
   readonly selectedBranch: 'primary' | 'fallback';
   readonly resolutionSummary: {
@@ -484,6 +488,12 @@ export interface ConversationRow {
   readonly decisionAttempts: number;
   readonly decisionRejectionCodes: readonly StructuredFinalRejectionCode[];
   readonly normalizationCodes: readonly DecisionNormalizationRejectionCode[];
+  /** Answer-key metric input for engine-recommendation anchoring. */
+  readonly chosenOptionIndices: readonly {
+    readonly actorId: CombatantId;
+    readonly primaryOptionIndex: number;
+    readonly fallbackOptionIndex: number | null;
+  }[];
   readonly contextTruncated: boolean;
   readonly plannedBy: ConversationPlannerAttribution | null;
   readonly plannerLabel: 'model' | ExhaustionPlannerLabel | null;
@@ -1743,6 +1753,9 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   ): Promise<AgentTurnResult> {
     const manifest = JSON.parse(await readFile(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
     const key = manifest.requestId.replace(/^request:/u, '');
+    if (!roomTransition && manifest.phase === 'initial' && this.#timeoutInitial.has(key)) {
+      return cancelledSimulated(sessionId);
+    }
     if (invocation.output.kind === 'structured_final') {
       const finalText = !roomTransition && manifest.phase === 'initial' && this.#exhaustInitial.has(key)
         ? ''
@@ -1758,9 +1771,6 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     if (!roomTransition && manifest.phase === 'initial' && remainingFlaps > 0) {
       this.#remainingPrimaryFlaps.set(key, remainingFlaps - 1);
       return completedSimulated(sessionId);
-    }
-    if (!roomTransition && manifest.phase === 'initial' && this.#timeoutInitial.has(key)) {
-      return cancelledSimulated(sessionId);
     }
     const submit = !roomTransition && !(manifest.phase === 'initial'
       ? this.#exhaustInitial.has(key) : this.#failCorrection.has(key));
@@ -1832,21 +1842,28 @@ function simulatedIndexedFinalDecision(prompt: string, phase: DecisionPhase): st
   if (typeof digest !== 'string' || !Array.isArray(actors)) {
     throw new Error('SIMULATED final-index dispatch received a malformed decision catalog.');
   }
-  return JSON.stringify({
-    catalogDigest: digest,
-    proposals: actors.map((actorValue, actorIndex) => {
+  const proposals: Record<string, unknown> = {};
+  for (const actorValue of actors) {
       const actor = requiredRecord(actorValue, 'decision catalog actor');
       const options = actor['options'];
+      const actorId = actor['actorId'];
+      if (typeof actorId !== 'string') {
+        throw new Error('SIMULATED final-index dispatch received an actor without an id.');
+      }
       if (!Array.isArray(options) || options.length < (phase === 'initial' ? 2 : 1)) {
         throw new Error('SIMULATED final-index dispatch requires the catalogued fallback option.');
       }
-      return {
-        actorIndex,
+      proposals[actorId] = {
         primaryOptionIndex: 0,
         fallbackOptionIndex: phase === 'correction' ? null : 1,
         override: null,
+        reason: 'The engine recommendation preserves the current tactical objective.',
       };
-    }),
+  }
+  return JSON.stringify({
+    catalogDigest: digest,
+    reaction_guidance: { inherit: true },
+    proposals,
   });
 }
 
@@ -2248,12 +2265,18 @@ async function structuredFinalOutput(
   throw new Error('Unknown decision transport.');
 }
 
-type StructuredFinalRejectionCode = 'decision_missing' | 'decision_invalid' | 'engine_rejected';
+type StructuredFinalRejectionCode =
+  | 'decision_missing'
+  | 'decision_invalid'
+  | 'decision_timeout'
+  | 'engine_rejected'
+  | 'REASON_REQUIRED';
 
 type StructuredFinalQueueResult =
   | {
       readonly kind: 'accepted';
       readonly proposal: RoundTurnProposalEnvelope | PlanAdjustmentProposalEnvelope;
+      readonly decision: BoundRoundDecision;
     }
   | {
       readonly kind: 'rejected';
@@ -2264,6 +2287,7 @@ type StructuredFinalQueueResult =
 
 function queueStructuredFinalDecision(input: {
   readonly finalText: string;
+  readonly exit: AgentTurnResult['exit'];
   readonly catalog: DecisionCatalog;
   readonly state: EncounterState;
   readonly snapshot: EngineRoundSnapshot;
@@ -2271,7 +2295,12 @@ function queueStructuredFinalDecision(input: {
   readonly rendererProfile: RendererProfile;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly inheritedReactionGuidance: ReactionGuidanceDeclaration | null;
+  /** G2.1 plugs its semantic decision-reason detector into this ingress seam. */
+  readonly reasonGate?: StructuredFinalDecisionReasonGate;
 }): StructuredFinalQueueResult {
+  if (input.exit !== 'completed') {
+    return { kind: 'rejected', code: 'decision_timeout', normalizationCode: null, engineResult: null };
+  }
   if (input.finalText.trim().length === 0) {
     return { kind: 'rejected', code: 'decision_missing', normalizationCode: null, engineResult: null };
   }
@@ -2281,11 +2310,21 @@ function queueStructuredFinalDecision(input: {
   } catch {
     return { kind: 'rejected', code: 'decision_invalid', normalizationCode: 'invalid_shape', engineResult: null };
   }
-  const normalized = normalizeIndexDecision(parsed, input.catalog, input.inheritedReactionGuidance);
+  const normalized = normalizeIndexDecision(
+    parsed,
+    input.catalog,
+    input.inheritedReactionGuidance,
+    input.reasonGate,
+  );
   if (normalized.kind === 'rejected') {
-    return { kind: 'rejected', code: 'decision_invalid', normalizationCode: normalized.code, engineResult: null };
+    return {
+      kind: 'rejected',
+      code: normalized.code === 'REASON_REQUIRED' ? 'REASON_REQUIRED' : 'decision_invalid',
+      normalizationCode: normalized.code,
+      engineResult: null,
+    };
   }
-  const bound = bindDecision(input.catalog, normalized.decision);
+  const bound = bindDecision(input.catalog, normalized.decision, input.inheritedReactionGuidance);
   let queued: RoundTurnProposalEnvelope | PlanAdjustmentProposalEnvelope | null = null;
   const toolSession = inProcessDmToolSession({
     state: input.state,
@@ -2326,7 +2365,7 @@ function queueStructuredFinalDecision(input: {
   if (queued === null) {
     return { kind: 'rejected', code: 'engine_rejected', normalizationCode: null, engineResult };
   }
-  return { kind: 'accepted', proposal: queued };
+  return { kind: 'accepted', proposal: queued, decision: bound };
 }
 
 function inProcessSpeculativeToolSession(input: {
@@ -2804,6 +2843,7 @@ async function runConversationWithConfiguredIntel(
       let correctionFinalText: string | null = null;
       let authorizationStateBinding: ConversationRow['stateBinding']['authorization'] = null;
       let authorizedPlan: ConversationRow['authorizedPlan'] = null;
+      let acceptedStructuredDecision: BoundRoundDecision | null = null;
       let acceptedSubmission: readonly EngineTurnProposal[] | null = null;
       let acceptedIntelCapture: DmIntelCapture | null = null;
       let authorizedMonsterProposalHash: string | null = null;
@@ -3133,6 +3173,7 @@ async function runConversationWithConfiguredIntel(
           } else {
             const structured = queueStructuredFinalDecision({
               finalText: turn.finalText,
+              exit: turn.exit,
               catalog: adjustmentDecisionCatalog,
               state: engineSession.currentState(),
               snapshot: adjustmentSnapshot,
@@ -3295,6 +3336,7 @@ async function runConversationWithConfiguredIntel(
                 if (adjustmentCorrectionDecisionCatalog !== null) {
                   const structured = queueStructuredFinalDecision({
                     finalText: turn.finalText,
+                    exit: turn.exit,
                     catalog: adjustmentCorrectionDecisionCatalog,
                     state: engineSession.currentState(),
                     snapshot: correctionSnapshot,
@@ -3500,6 +3542,10 @@ async function runConversationWithConfiguredIntel(
             } catch (error) {
               if (!agentDispatchWasCancelled(error)) throw error;
               primaryDispatchTimedOut = true;
+              if (initialDecisionCatalog !== null) {
+                decisionAttempts += 1;
+                decisionRejectionCodes.push('decision_timeout');
+              }
               break;
             }
             rolloutSessionId = turn.sessionId;
@@ -3512,6 +3558,7 @@ async function runConversationWithConfiguredIntel(
             } else {
               const structured = queueStructuredFinalDecision({
                 finalText: turn.finalText,
+                exit: turn.exit,
                 catalog: initialDecisionCatalog,
                 state: engineSession.currentState(),
                 snapshot: initialSnapshot,
@@ -3525,6 +3572,7 @@ async function runConversationWithConfiguredIntel(
                   throw new Error('Initial final-index decision queued a non-round proposal.');
                 }
                 proposed = structured.proposal;
+                acceptedStructuredDecision = structured.decision;
                 if (decisionAttempts === 1) firstDecisionAccepted = true;
               } else {
                 decisionRejectionCodes.push(structured.code);
@@ -3743,8 +3791,12 @@ async function runConversationWithConfiguredIntel(
             acceptedSubmission = proposal.resolutions.map((entry) => structuredClone(entry.proposal));
             acceptedIntelCapture = proposal.intelCapture === undefined
               ? null : structuredClone(proposal.intelCapture);
+            const structuredReasonByActor = new Map(
+              acceptedStructuredDecision?.selections.map((selection) => [selection.actorId, selection.reason]) ?? [],
+            );
             authorizedPlan = mechanics.map((entry): ConversationAuthorizedActorPlan => ({
               actorId: entry.mechanics.actorId,
+              reason: structuredReasonByActor.get(entry.mechanics.actorId) ?? null,
               acceptedProposal: structuredClone(entry.acceptedProposal),
               selectedBranch: entry.selectedBranch,
               resolutionSummary: {
@@ -3891,6 +3943,7 @@ async function runConversationWithConfiguredIntel(
                 if (correctionDecisionCatalog !== null) {
                   const structured = queueStructuredFinalDecision({
                     finalText: correctionTurn.finalText,
+                    exit: correctionTurn.exit,
                     catalog: correctionDecisionCatalog,
                     state: engineSession.currentState(),
                     snapshot: correctionSnapshot,
@@ -3906,6 +3959,7 @@ async function runConversationWithConfiguredIntel(
                       throw new Error('Correction final-index decision queued a non-round proposal.');
                     }
                     localCorrectionProposal = structured.proposal;
+                    acceptedStructuredDecision = structured.decision;
                   } else {
                     decisionRejectionCodes.push(structured.code);
                     if (structured.normalizationCode !== null) normalizationCodes.push(structured.normalizationCode);
@@ -4007,6 +4061,7 @@ async function runConversationWithConfiguredIntel(
           };
           authorizedPlan = entries.map((entry) => ({
             actorId: entry.proposal.actorId,
+            reason: null,
             acceptedProposal: externalProposal(entry.proposal),
             selectedBranch: entry.selectedBranch,
             resolutionSummary: {
@@ -4567,6 +4622,11 @@ async function runConversationWithConfiguredIntel(
         decisionAttempts,
         decisionRejectionCodes,
         normalizationCodes,
+        chosenOptionIndices: acceptedStructuredDecision?.selections.map((selection) => ({
+          actorId: selection.actorId,
+          primaryOptionIndex: selection.primaryOptionIndex,
+          fallbackOptionIndex: selection.fallbackOptionIndex,
+        })) ?? [],
         contextTruncated: simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated,
         plannedBy,
         plannerLabel: plannerLabel ?? (plannedBy === null ? null : 'model'),

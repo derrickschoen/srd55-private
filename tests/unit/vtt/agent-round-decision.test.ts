@@ -4,10 +4,14 @@ import {
   assertClosedObjectSchema,
   bindDecision,
   createDecisionCatalog,
+  decisionActorIndex,
+  decisionOptionIndex,
   finalIndicesDecisionSchema,
   minimalRoundSubmission,
   normalizeIndexDecision,
   renderDecisionCatalog,
+  type DecisionActorIndex,
+  type OptionIndex,
   type RawIdDecision,
 } from '../../../src/vtt/agent-round-decision';
 import { engineOptionId, type EngineTurnProposal } from '../../../src/vtt/turn-proposal';
@@ -40,10 +44,17 @@ function catalog(phase: 'initial' | 'correction' = 'initial') {
 function validRaw(value: ReturnType<typeof catalog>) {
   return {
     catalogDigest: value.digest,
-    proposals: [
-      { actorIndex: 0, primaryOptionIndex: 0, fallbackOptionIndex: 1, override: null },
-      { actorIndex: 1, primaryOptionIndex: 0, fallbackOptionIndex: 1, override: null },
-    ],
+    reaction_guidance: { inherit: true } as const,
+    proposals: {
+      'combatant:alpha': {
+        primaryOptionIndex: 0, fallbackOptionIndex: 1, override: null,
+        reason: 'The recommendation retains pressure without wasting resources.',
+      },
+      'combatant:beta': {
+        primaryOptionIndex: 0, fallbackOptionIndex: 1, override: null,
+        reason: 'The recommendation keeps the second actor on the same tactical line.',
+      },
+    },
   };
 }
 
@@ -53,7 +64,7 @@ describe('A3 indexed round decisions', () => {
     const normalized = normalizeIndexDecision(validRaw(value), value, null);
     if (normalized.kind !== 'accepted') throw new Error(`Expected accepted decision, got ${normalized.code}.`);
 
-    expect(minimalRoundSubmission(bindDecision(value, normalized.decision))).toEqual({
+    expect(minimalRoundSubmission(bindDecision(value, normalized.decision, null))).toEqual({
       proposals: [
         {
           actor_id: 'combatant:alpha', expected_revision: 7,
@@ -73,14 +84,21 @@ describe('A3 indexed round decisions', () => {
     const value = catalog();
     const normalized = normalizeIndexDecision({
       catalog_digest: value.digest,
-      proposals: [
-        { actor_index: 0, primary_option_index: 0, fallback_option_index: 1, override: null },
-        { actor_index: 1, primary_option_index: 0, fallback_option_index: 1, override: null },
-      ],
+      reaction_guidance: { inherit: true },
+      proposals: {
+        'combatant:alpha': {
+          primary_option_index: 0, fallback_option_index: 1, override: null,
+          reason: 'The first actor uses the engine recommendation.',
+        },
+        'combatant:beta': {
+          primary_option_index: 0, fallback_option_index: 1, override: null,
+          reason: 'The second actor uses the engine recommendation.',
+        },
+      },
     }, value, null);
     if (normalized.kind !== 'accepted') throw new Error(`Expected accepted decision, got ${normalized.code}.`);
 
-    expect(bindDecision(value, normalized.decision).proposals.map((proposal) => proposal.primaryOptionId))
+    expect(bindDecision(value, normalized.decision, null).proposals.map((proposal) => proposal.primaryOptionId))
       .toEqual(['option:alpha:recommendation', 'option:beta:recommendation']);
   });
 
@@ -89,30 +107,41 @@ describe('A3 indexed round decisions', () => {
     expect(normalizeIndexDecision({
       catalogDigest: value.digest,
       catalog_digest: value.digest,
-      proposals: [],
+      reaction_guidance: { inherit: true },
+      proposals: {},
     }, value, null)).toMatchObject({ kind: 'rejected', code: 'dialect_mismatch' });
     expect(normalizeIndexDecision({
       catalogDigest: value.digest,
-      proposals: [
-        { actor_index: 0, primary_option_index: 0, fallback_option_index: 1, override: null },
-      ],
+      reaction_guidance: { inherit: true },
+      proposals: {
+        'combatant:alpha': {
+          primary_option_index: 0, fallback_option_index: 1, override: null,
+          reason: 'Mixed dialect.',
+        },
+        'combatant:beta': {
+          primary_option_index: 0, fallback_option_index: 1, override: null,
+          reason: 'Second actor completes coverage.',
+        },
+      },
     }, value, null)).toMatchObject({ kind: 'rejected', code: 'dialect_mismatch' });
   });
 
   it('rejects named actor, option, and fallback errors', () => {
     const value = catalog();
     const raw = validRaw(value);
-    expect(normalizeIndexDecision({ ...raw, proposals: [raw.proposals[0]!, raw.proposals[0]! ] }, value, null))
-      .toMatchObject({ kind: 'rejected', code: 'duplicate_actor' });
-    expect(normalizeIndexDecision({ ...raw, proposals: [raw.proposals[0]!] }, value, null))
+    expect(normalizeIndexDecision({ ...raw, proposals: { 'combatant:alpha': raw.proposals['combatant:alpha'] } }, value, null))
       .toMatchObject({ kind: 'rejected', code: 'missing_actor' });
     expect(normalizeIndexDecision({
-      ...raw,
-      proposals: [{ ...raw.proposals[0]!, primaryOptionIndex: 2 }, raw.proposals[1]!],
+      ...raw, proposals: {
+        ...raw.proposals,
+        'combatant:alpha': { ...raw.proposals['combatant:alpha'], primaryOptionIndex: 2 },
+      },
     }, value, null)).toMatchObject({ kind: 'rejected', code: 'unknown_option' });
     expect(normalizeIndexDecision({
-      ...raw,
-      proposals: [{ ...raw.proposals[0]!, fallbackOptionIndex: 0 }, raw.proposals[1]!],
+      ...raw, proposals: {
+        ...raw.proposals,
+        'combatant:alpha': { ...raw.proposals['combatant:alpha'], fallbackOptionIndex: 0 },
+      },
     }, value, null)).toMatchObject({ kind: 'rejected', code: 'identical_fallback' });
   });
 
@@ -134,15 +163,15 @@ describe('A3 indexed round decisions', () => {
     const value = catalog('correction');
     expect(normalizeIndexDecision({
       catalogDigest: value.digest,
-      proposals: [
-        { actorIndex: 0, primaryOptionIndex: 0, fallbackOptionIndex: 1, override: null },
-        { actorIndex: 1, primaryOptionIndex: 0, fallbackOptionIndex: 1, override: null },
-      ],
+      reaction_guidance: { inherit: true },
+      proposals: validRaw(value).proposals,
     }, value, null)).toMatchObject({ kind: 'rejected', code: 'non_null_correction_fallback' });
     expect(finalIndicesDecisionSchema(value)).toMatchObject({
       properties: {
         proposals: {
-          items: { properties: { fallbackOptionIndex: { type: 'null' } } },
+          properties: {
+            'combatant:alpha': { properties: { fallbackOptionIndex: { type: 'null' } } },
+          },
         },
       },
     });
@@ -169,6 +198,72 @@ describe('A3 indexed round decisions', () => {
     expect(() => assertClosedObjectSchema(finalIndicesDecisionSchema(value))).not.toThrow();
     expect(() => assertClosedObjectSchema({ type: 'object', properties: { nested: { type: 'object' } } }))
       .toThrow('additionalProperties');
+  });
+
+  it('checks brand constructors rather than exporting total number casts (mutation: return a brand for an out-of-range number)', () => {
+    const value = catalog();
+    const checked = decisionActorIndex(0 as const, value);
+    const rejected = decisionActorIndex(2 as const, value);
+    expect(typeof checked).toBe('number');
+    expect(rejected).toEqual({ kind: 'out_of_range', value: 2, upperExclusive: 2 });
+    expectTypeOf<number>().not.toMatchTypeOf<DecisionActorIndex>();
+  });
+
+  it('keeps option indices phantom-bound to their checked actor (mutation: use actor alpha option index for actor beta)', () => {
+    const value = catalog();
+    const alpha = decisionActorIndex(0 as const, value);
+    const beta = decisionActorIndex(1 as const, value);
+    if (typeof alpha !== 'number' || typeof beta !== 'number') throw new Error('Catalog actor index unexpectedly rejected.');
+    const alphaOption = decisionOptionIndex(alpha, 0 as const, 2);
+    const betaOption = decisionOptionIndex(beta, 0 as const, 2);
+    if (typeof alphaOption !== 'number' || typeof betaOption !== 'number') {
+      throw new Error('Catalog option index unexpectedly rejected.');
+    }
+    expectTypeOf<OptionIndex<typeof alpha>>().not.toMatchTypeOf<OptionIndex<typeof beta>>();
+    expect(alphaOption).toBe(0);
+    expect(betaOption).toBe(0);
+  });
+
+  it('generates actor-keyed required coverage rather than an array (mutation: make one actor optional in schema)', () => {
+    expect(finalIndicesDecisionSchema(catalog())).toMatchObject({
+      properties: {
+        proposals: {
+          type: 'object', additionalProperties: false,
+          required: ['combatant:alpha', 'combatant:beta'],
+        },
+      },
+    });
+  });
+
+  it('requires explicit reaction guidance inheritance (mutation: fill inherited guidance as a default)', () => {
+    const value = catalog();
+    const raw = validRaw(value);
+    expect(normalizeIndexDecision({ ...raw, reaction_guidance: { inherit: false } }, value, null))
+      .toMatchObject({ kind: 'rejected', code: 'invalid_shape' });
+  });
+
+  it('requires each bounded decision reason before binding (mutation: make reason optional)', () => {
+    const value = catalog();
+    const raw = validRaw(value);
+    expect(normalizeIndexDecision({
+      ...raw,
+      proposals: {
+        ...raw.proposals,
+        'combatant:alpha': { ...raw.proposals['combatant:alpha'], reason: '' },
+      },
+    }, value, null)).toMatchObject({ kind: 'rejected', code: 'REASON_REQUIRED' });
+    expect(finalIndicesDecisionSchema(value)).toMatchObject({
+      properties: {
+        proposals: {
+          properties: {
+            'combatant:alpha': {
+              properties: { reason: { maxLength: 240 } },
+              required: expect.arrayContaining(['reason']),
+            },
+          },
+        },
+      },
+    });
   });
 
   it('keeps raw id-shaped ingress unassignable to engine proposals (compile-only mutation: pass raw data to submit)', () => {

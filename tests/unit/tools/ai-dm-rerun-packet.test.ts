@@ -51,6 +51,7 @@ function registeredRows(): JsonRecord[] {
       decisionAttempts: 1,
       decisionRejectionCodes: [],
       normalizationCodes: [],
+      chosenOptionIndices: [],
       roundNarrative: null,
       authorizedPlan: null,
       // Era asymmetry is the real R1-10 shape: only the post-intel arm
@@ -103,8 +104,8 @@ describe('AI-DM R1-10 rerun packet', () => {
     const expectedAnswerKey = {
       version: 'ai-dm-rerun-packet-v1',
       entries: [
-        { blindId: 'blind-001', arm: 'baseline', decisionTransport: 'mcp_minimal', firstDecisionAccepted: true, decisionAttempts: 1, decisionRejectionCodes: [], normalizationCodes: [] },
-        { blindId: 'blind-002', arm: 'intel', decisionTransport: 'mcp_minimal', firstDecisionAccepted: false, decisionAttempts: 0, decisionRejectionCodes: [], normalizationCodes: [] },
+        { blindId: 'blind-001', arm: 'baseline', decisionTransport: 'mcp_minimal', firstDecisionAccepted: true, decisionAttempts: 1, decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [], decisionReasons: [{ actorId: 'monster:ogre', reason: null }] },
+        { blindId: 'blind-002', arm: 'intel', decisionTransport: 'mcp_minimal', firstDecisionAccepted: false, decisionAttempts: 0, decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [], decisionReasons: null },
       ],
     } as const;
 
@@ -175,6 +176,7 @@ describe('AI-DM R1-10 rerun packet', () => {
         decisionAttempts: 1,
         decisionRejectionCodes: [],
         normalizationCodes: [],
+        chosenOptionIndices: [],
         plannerLabel: `${arm}-planner`,
         roundNarrative: `${arm} narrative`,
         authorizedPlan: null,
@@ -217,7 +219,7 @@ describe('AI-DM R1-10 rerun packet', () => {
       combatModel: 'initiative_segments_v1', initiativeOrder: [], outcome: 'authorized',
       plannedBy: { model: 'm', effort: 'low' }, roundNarrative: null,
       decisionTransport: 'mcp_minimal', firstDecisionAccepted: true, decisionAttempts: 1,
-      decisionRejectionCodes: [], normalizationCodes: [],
+      decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [],
     };
     const paired = (plan: unknown, extra: Record<string, unknown> = {}): Record<string, unknown>[] =>
       ['a', 'b'].map((arm) => ({ ...base, arm, authorizedPlan: plan, ...extra }));
@@ -314,6 +316,7 @@ describe('AI-DM R1-10 rerun packet', () => {
             decisionAttempts: 1,
             decisionRejectionCodes: [],
             normalizationCodes: [],
+            chosenOptionIndices: [],
             roundNarrative: null,
             authorizedPlan: null,
             ...(era === 'commit-new' ? {
@@ -382,6 +385,32 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', decisionTransport: 'final_indices' }] }))
       .toThrow('leaks a model-identifying field');
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', normalizationCodes: ['stale_catalog'] }] }))
+      .toThrow('leaks a model-identifying field');
+  });
+
+  it('keeps structured-final reasons and chosen indices in the answer key only (mutation: make reason optional)', () => {
+    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl').map((row, index) => index === 0
+      ? {
+          ...row,
+          decisionTransport: 'final_indices',
+          chosenOptionIndices: [{ actorId: 'monster:ogre', primaryOptionIndex: 0, fallbackOptionIndex: 1 }],
+          authorizedPlan: [{
+            actorId: 'monster:ogre', reason: 'The engine recommendation preserves the tactical advantage.',
+            selectedBranch: 'primary',
+            resolutionSummary: {
+              optionId: 'club-fighter', movementFeet: 0,
+              actionSlots: [{ slot: 'main', kind: 'attack', targetIds: ['pc:fighter'] }],
+            },
+          }],
+        }
+      : row);
+    const result = buildRerunPacket(rows, 1, tinyProtocol);
+    expect(result.answerKey.entries[0]).toMatchObject({
+      chosenOptionIndices: [{ actorId: 'monster:ogre', primaryOptionIndex: 0, fallbackOptionIndex: 1 }],
+      decisionReasons: [{ actorId: 'monster:ogre', reason: 'The engine recommendation preserves the tactical advantage.' }],
+    });
+    expect(JSON.stringify(result.packet)).not.toContain('tactical advantage');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', reason: 'leaked' }] }))
       .toThrow('leaks a model-identifying field');
   });
 

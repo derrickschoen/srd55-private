@@ -142,7 +142,8 @@ export interface AgentTurnResult {
   readonly sessionId: string | null;
   readonly finalText: string;
   readonly usage: AgentUsage | null;
-  readonly exit: 'completed' | 'cancelled';
+  /** Non-completed exits are censored transport outcomes, never absent decisions. */
+  readonly exit: 'completed' | 'cancelled' | 'timed_out';
   readonly contractEvidence?: readonly string[];
 }
 

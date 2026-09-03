@@ -1463,6 +1463,37 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(row.toolCalls).toBe(0);
     expect(row.rawTurnContext).not.toContain('context_not_requested');
     expect(row.authorizedPlan).not.toBeNull();
+    expect(row.chosenOptionIndices.length).toBeGreaterThan(0);
+    expect(row.chosenOptionIndices.every((selection) => selection.primaryOptionIndex === 0)).toBe(true);
+    expect(row.authorizedPlan?.every((entry) => entry.reason ===
+      'The engine recommendation preserves the current tactical objective.')).toBe(true);
+  });
+
+  it('censors a cancelled structured-final turn as decision_timeout (mutation: classify cancelled final output as decision_missing)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-timeout-'));
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]), { timeoutInitial: ['room-1-round-1'] });
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index timeout produced no row.');
+    expect(row.decisionRejectionCodes).toContain('decision_timeout');
+    expect(row.decisionRejectionCodes).not.toContain('decision_missing');
+  });
+
+  it('records the actor chosen index for recommendation-anchor measurement (mutation: omit chosen index from final row)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-indices-'));
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]));
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index row is absent.');
+    expect(row.chosenOptionIndices).toEqual(row.authorizedPlan?.map((entry) => ({
+      actorId: entry.actorId, primaryOptionIndex: 0, fallbackOptionIndex: 1,
+    })));
   });
 
   it('rejects speculative structured-final dispatch at the typed phase boundary (mutation: pass speculative through as a decision phase)', () => {
