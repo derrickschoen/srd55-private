@@ -126,6 +126,7 @@ export interface ArenaRow {
   readonly proposalId: string | null;
   readonly wall: number;
   readonly tokens: ConversationTokenCounts;
+  readonly callUsage: readonly import('../src/vtt/agent-session').AgentCallUsage[];
   readonly refusals: readonly string[];
   readonly toolCalls: number;
   readonly callsPerRound: number;
@@ -490,6 +491,7 @@ export function arenaRows(
     proposalId: row.proposalId,
     wall: row.wallPerCreature,
     tokens: row.tokens,
+    callUsage: structuredClone(row.callUsage),
     refusals: row.refusals,
     toolCalls: row.toolCalls,
     callsPerRound: row.callsPerRound,

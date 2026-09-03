@@ -366,6 +366,15 @@ const SCHEMA_BEFORE_VTT_AGENT_SESSION_BINDING = DATABASE_MIGRATIONS
   .join('\n');
 const VTT_AGENT_SESSION_BINDING_MIGRATION =
   DATABASE_MIGRATIONS[VTT_AGENT_SESSION_BINDING_INDEX]!;
+const VTT_CONTEXT_TOKEN_USAGE_INDEX = DATABASE_MIGRATIONS.findIndex(
+  (entry) => entry.id === '0062_vtt_context_token_usage',
+);
+const SCHEMA_BEFORE_VTT_CONTEXT_TOKEN_USAGE = DATABASE_MIGRATIONS
+  .slice(0, VTT_CONTEXT_TOKEN_USAGE_INDEX)
+  .map((entry) => entry.sql)
+  .join('\n');
+const VTT_CONTEXT_TOKEN_USAGE_MIGRATION =
+  DATABASE_MIGRATIONS[VTT_CONTEXT_TOKEN_USAGE_INDEX]!;
 
 /**
  * One character, three source instances (one of them deleted so the
@@ -4303,6 +4312,50 @@ describe('database migration chain', () => {
       `);
       expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
         VTT_AGENT_SESSION_BINDING_MIGRATION.resultSchemaChecksum,
+      );
+      expect(databaseSchemaSignature(db)).toBe(schemaSignature(SCHEMA_BEFORE_VTT_CONTEXT_TOKEN_USAGE));
+    } finally {
+      db.close();
+    }
+  });
+
+  it('0062 preserves schema-eight journal bytes and admits schema-nine context usage', () => {
+    const db = new sqlite3.oo1.DB(':memory:', 'c');
+    try {
+      db.exec(SCHEMA_BEFORE_VTT_CONTEXT_TOKEN_USAGE);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES (
+          'session:context-usage-survivor', 1, 8,
+          '{"agentSession":{"cli":"codex"},"journal":"unchanged"}',
+          '${'ef'.repeat(32)}'
+        )
+      `);
+
+      db.exec(VTT_CONTEXT_TOKEN_USAGE_MIGRATION.sql);
+
+      expect(db.selectObjects(
+        `SELECT session_id, revision, schema_version, payload_json, payload_checksum
+         FROM vtt_session_revisions`,
+      )).toEqual([{
+        session_id: 'session:context-usage-survivor',
+        revision: 1,
+        schema_version: 8,
+        payload_json: '{"agentSession":{"cli":"codex"},"journal":"unchanged"}',
+        payload_checksum: 'ef'.repeat(32),
+      }]);
+      db.exec(`
+        INSERT INTO vtt_session_revisions (
+          session_id, revision, schema_version, payload_json, payload_checksum
+        ) VALUES (
+          'session:context-usage-v9', 1, 9,
+          '{"agentSession":{"callUsage":[],"currentContextTokens":null}}',
+          '${'12'.repeat(32)}'
+        )
+      `);
+      expect(databaseSchemaChecksum(databaseSchemaSignature(db))).toBe(
+        VTT_CONTEXT_TOKEN_USAGE_MIGRATION.resultSchemaChecksum,
       );
       expect(databaseSchemaSignature(db)).toBe(schemaSignature(schema));
     } finally {

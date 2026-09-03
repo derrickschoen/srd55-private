@@ -749,6 +749,7 @@ export function replayBundle(
         break;
       case 'agent_session_started':
       case 'agent_session_dispatched':
+      case 'agent_call_usage_recorded':
       case 'agent_session_recovered':
         if (parent === null || parent === undefined) {
           throw new ReplayDivergenceError('bundle', index, 'parentRevision', 'existing agent-session parent', revision.parentRevision);

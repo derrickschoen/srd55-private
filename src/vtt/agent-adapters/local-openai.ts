@@ -1,5 +1,6 @@
 import {
   agentSessionIdFromCli,
+  contextTokenCount,
   type AgentFailureClassification,
   type AgentInvocation,
   type AgentSessionBinding,
@@ -75,7 +76,7 @@ function usageFromResponse(value: unknown): AgentUsage | null {
   const promptDetails = record(usage['prompt_tokens_details']);
   const completionDetails = record(usage['completion_tokens_details']);
   const decoded = {
-    inputTokens: nonNegativeInteger(usage['prompt_tokens']),
+    inputTokens: contextTokenCount(nonNegativeInteger(usage['prompt_tokens'])),
     cachedInputTokens: nonNegativeInteger(promptDetails?.['cached_tokens']),
     outputTokens: nonNegativeInteger(usage['completion_tokens']),
     reasoningTokens: nonNegativeInteger(completionDetails?.['reasoning_tokens']),
@@ -87,7 +88,7 @@ function addUsage(total: AgentUsage | null, addition: AgentUsage | null): AgentU
   if (addition === null) return total;
   if (total === null) return addition;
   return {
-    inputTokens: total.inputTokens + addition.inputTokens,
+    inputTokens: contextTokenCount(total.inputTokens + addition.inputTokens),
     cachedInputTokens: total.cachedInputTokens + addition.cachedInputTokens,
     outputTokens: total.outputTokens + addition.outputTokens,
     reasoningTokens: total.reasoningTokens + addition.reasoningTokens,

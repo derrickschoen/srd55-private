@@ -96,13 +96,14 @@ function invocation(kind: AgentCliKind, prompt: string): AgentInvocation {
     prompt,
     model: process.env[environmentKey] ?? DEFAULT_MODELS[kind],
     reasoningEffort: 'low',
+    callPhase: 'initial',
     launcherToken: `agent-conformance-${kind}-launcher-token`,
     timeoutMs: conformanceTimeoutMs(kind),
   };
 }
 
 function binding(kind: AgentCliKind, sessionId: string): AgentSessionBinding {
-  return { cli: kind, sessionId: agentSessionIdFromCli(sessionId), adapterVersion: AGENT_ADAPTER_VERSION, recoveryGeneration: 0, predecessorSessionHash: null, startedAtRevision: 1, lastDispatchedRevision: 1, status: 'active' };
+  return { cli: kind, sessionId: agentSessionIdFromCli(sessionId), adapterVersion: AGENT_ADAPTER_VERSION, recoveryGeneration: 0, predecessorSessionHash: null, startedAtRevision: 1, lastDispatchedRevision: 1, callUsage: [], currentContextTokens: null, status: 'active' };
 }
 
 function conformanceTimeoutMs(kind: AgentCliKind): number {

@@ -7,8 +7,18 @@ import {
   encounterSessionId,
 } from '../../../src/combat/values';
 import { sha256 } from '../../../src/crypto/sha256';
-import type { AgentInvocation } from '../../../src/vtt/agent-session';
-import { AgentSessionLifecycle } from '../../../src/vtt/agent-session-lifecycle';
+import {
+  contextRolloverThreshold,
+  contextTokenCount,
+  type AgentSessionAdapter,
+  type AgentInvocation,
+} from '../../../src/vtt/agent-session';
+import {
+  AgentSessionLifecycle,
+  CONTEXT_ROLLOVER_POLICY,
+  shouldRollOver,
+  UnmeasuredContextRolloverPolicyError,
+} from '../../../src/vtt/agent-session-lifecycle';
 import { referenceEncounterSetup } from '../../../src/vtt/reference-encounter';
 import {
   EncounterSessionJournal,
@@ -28,12 +38,14 @@ function invocation(runId: ReturnType<typeof encounterSessionId>, prompt: string
     prompt,
     model: 'SIMULATED-model',
     reasoningEffort: 'SIMULATED-effort',
+    sessionProfile: 'test',
+    callPhase: 'initial',
     launcherToken: 'SIMULATED-launcher-token',
     timeoutMs: 5_000,
   };
 }
 
-function setup(adapter: SIMULATEDAgentSessionAdapter) {
+function setup(adapter: AgentSessionAdapter) {
   const sessionId = encounterSessionId('session:simulated-agent-lifecycle');
   const store = new MemoryBrowserSessionStore();
   const journal = EncounterSessionJournal.create({
@@ -61,6 +73,62 @@ function setup(adapter: SIMULATEDAgentSessionAdapter) {
 }
 
 describe('SIMULATED agent session lifecycle', () => {
+  it('rollover threshold is measured', () => {
+    expect(CONTEXT_ROLLOVER_POLICY.kind).toBe('measured');
+  });
+
+  it('uses >= at the measured rollover boundary (mutation: > instead of >=)', () => {
+    const threshold = contextRolloverThreshold(100_000);
+    const policy = { kind: 'measured', threshold, evidence: 'SIMULATED measurement' } as const;
+
+    expect(shouldRollOver(contextTokenCount(99_999), policy)).toBe(false);
+    expect(shouldRollOver(contextTokenCount(100_000), policy)).toBe(true);
+  });
+
+  it('rejects an unmeasured rollover policy for startup outside tests and arena', async () => {
+    const adapter = new SIMULATEDAgentSessionAdapter({ startIds: ['must-not-start'] });
+    const { lifecycle, sessionId } = setup(adapter);
+    const { sessionProfile: _testProfile, ...realInvocation } = invocation(sessionId, 'real startup');
+
+    await expect(lifecycle.coldStart(realInvocation, new AbortController().signal))
+      .rejects.toBeInstanceOf(UnmeasuredContextRolloverPolicyError);
+    expect(adapter.startInvocations).toEqual([]);
+  });
+
+  it('records each completed lifecycle call before aggregate consumers can sum it', async () => {
+    const inputs = [contextTokenCount(101), contextTokenCount(203)];
+    const adapter: AgentSessionAdapter = {
+      kind: 'codex',
+      probe: async () => ({ present: true, version: 'SIMULATED' }),
+      start: async () => ({
+        resumeSessionId: agentSessionId('agent-session:usage'),
+        sessionId: null,
+        finalText: '',
+        usage: { inputTokens: inputs.shift()!, cachedInputTokens: 31, outputTokens: 17, reasoningTokens: 7 },
+        exit: 'completed',
+      }),
+      resume: async (binding) => ({
+        resumeSessionId: binding.sessionId,
+        sessionId: null,
+        finalText: '',
+        usage: { inputTokens: inputs.shift()!, cachedInputTokens: 41, outputTokens: 29, reasoningTokens: 11 },
+        exit: 'completed',
+      }),
+      classifyFailure: () => 'unknown',
+    };
+    const { lifecycle, journal, sessionId } = setup(adapter);
+    const signal = new AbortController().signal;
+
+    await lifecycle.coldStartRound(invocation(sessionId, 'first'), signal);
+    await lifecycle.resumeCorrection({ ...invocation(sessionId, 'second'), callPhase: 'correction' }, signal);
+
+    expect(journal.agentSession()?.callUsage).toEqual([
+      { input: 101, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
+      { input: 203, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'correction', ordinal: 2 },
+    ]);
+    expect(journal.agentSession()?.currentContextTokens).toBe(203);
+  });
+
   it('cold-starts once, then resumes one persisted run-scoped session for round, room transition, and correction', async () => {
     const adapter = new SIMULATEDAgentSessionAdapter({ startIds: ['agent-session:stable'] });
     const { lifecycle, journal, sessionId, store } = setup(adapter);

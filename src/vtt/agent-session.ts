@@ -1,5 +1,35 @@
 import type { EncounterSessionId, AgentSessionId } from '../combat/values';
 
+declare const contextTokenCountBrand: unique symbol;
+declare const contextRolloverThresholdBrand: unique symbol;
+
+export type ContextTokenCount = number & { readonly [contextTokenCountBrand]: true };
+export type ContextRolloverThreshold = number & { readonly [contextRolloverThresholdBrand]: true };
+
+export type AgentCallPhase =
+  | 'initial'
+  | 'adjustment'
+  | 'correction'
+  | 'speculation'
+  | 'speculation_recalculation';
+
+export interface AgentCallUsage {
+  readonly input: ContextTokenCount;
+  readonly cachedInput: number;
+  readonly output: number;
+  readonly reasoning: number;
+  readonly callPhase: AgentCallPhase;
+  readonly ordinal: number;
+}
+
+export type ContextRolloverPolicy =
+  | { readonly kind: 'unmeasured' }
+  | {
+      readonly kind: 'measured';
+      readonly threshold: ContextRolloverThreshold;
+      readonly evidence: string;
+    };
+
 export type AgentCliKind = 'codex' | 'opencode' | 'pi' | 'claude-code';
 export type AgentAdapterKind = AgentCliKind | 'local-openai';
 
@@ -22,6 +52,8 @@ export interface AgentSessionBinding {
   readonly predecessorSessionHash: string | null;
   readonly startedAtRevision: number;
   readonly lastDispatchedRevision: number;
+  readonly callUsage: readonly AgentCallUsage[];
+  readonly currentContextTokens: ContextTokenCount | null;
   readonly status: 'active' | 'superseded_after_resume_failure';
 }
 
@@ -32,7 +64,8 @@ export interface AgentInvocation {
   readonly instructions?: string | null;
   readonly model: string;
   readonly reasoningEffort: string;
-  readonly sessionProfile?: 'arena';
+  readonly sessionProfile?: 'arena' | 'test';
+  readonly callPhase: AgentCallPhase;
   readonly launcherToken: string;
   /** Full-context launcher used only if resume recovery creates a fresh agent session. */
   readonly recoveryLauncherToken?: string;
@@ -42,7 +75,7 @@ export interface AgentInvocation {
 }
 
 export interface AgentUsage {
-  readonly inputTokens: number;
+  readonly inputTokens: ContextTokenCount;
   readonly cachedInputTokens: number;
   readonly outputTokens: number;
   readonly reasoningTokens: number;
@@ -92,6 +125,38 @@ export function agentSessionIdFromCli(value: string): AgentSessionId {
   return value as AgentSessionId;
 }
 
+export function contextTokenCount(value: number): ContextTokenCount {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError('Context token count must be a non-negative safe integer.');
+  }
+  return value as ContextTokenCount;
+}
+
+export function contextRolloverThreshold(value: number): ContextRolloverThreshold {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError('Context rollover threshold must be a positive safe integer.');
+  }
+  return value as ContextRolloverThreshold;
+}
+
+export function agentCallUsage(
+  usage: AgentUsage,
+  callPhase: AgentCallPhase,
+  ordinal: number,
+): AgentCallUsage {
+  if (!Number.isSafeInteger(ordinal) || ordinal < 1) {
+    throw new RangeError('Agent call usage ordinal must be a positive safe integer.');
+  }
+  return {
+    input: usage.inputTokens,
+    cachedInput: usage.cachedInputTokens,
+    output: usage.outputTokens,
+    reasoning: usage.reasoningTokens,
+    callPhase,
+    ordinal,
+  };
+}
+
 export function isAgentCliKind(value: unknown): value is AgentCliKind {
   return value === 'codex' || value === 'opencode' || value === 'pi' || value === 'claude-code';
 }
@@ -103,7 +168,7 @@ export function isAgentAdapterKind(value: unknown): value is AgentAdapterKind {
 export function isAgentSessionBinding(value: unknown): value is AgentSessionBinding {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const binding = value as Readonly<Record<string, unknown>>;
-  return Object.keys(binding).length === 8 &&
+  return Object.keys(binding).length === 10 &&
     isAgentAdapterKind(binding.cli) &&
     typeof binding.sessionId === 'string' && binding.sessionId.length > 0 && binding.sessionId.trim() === binding.sessionId && binding.sessionId.length <= 200 &&
     Number.isSafeInteger(binding.adapterVersion) && typeof binding.adapterVersion === 'number' && binding.adapterVersion >= 1 &&
@@ -111,5 +176,27 @@ export function isAgentSessionBinding(value: unknown): value is AgentSessionBind
     (binding.predecessorSessionHash === null || typeof binding.predecessorSessionHash === 'string') &&
     Number.isSafeInteger(binding.startedAtRevision) && typeof binding.startedAtRevision === 'number' && binding.startedAtRevision >= 1 &&
     Number.isSafeInteger(binding.lastDispatchedRevision) && typeof binding.lastDispatchedRevision === 'number' && binding.lastDispatchedRevision >= 0 &&
+    Array.isArray(binding.callUsage) && binding.callUsage.every(isAgentCallUsage) &&
+    (binding.currentContextTokens === null || isContextTokenCount(binding.currentContextTokens)) &&
+    (binding.callUsage.length === 0
+      ? binding.currentContextTokens === null
+      : binding.currentContextTokens === binding.callUsage.at(-1)?.input) &&
     (binding.status === 'active' || binding.status === 'superseded_after_resume_failure');
+}
+
+function isContextTokenCount(value: unknown): value is ContextTokenCount {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+export function isAgentCallUsage(value: unknown): value is AgentCallUsage {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const usage = value as Readonly<Record<string, unknown>>;
+  return Object.keys(usage).length === 6 &&
+    isContextTokenCount(usage.input) &&
+    typeof usage.cachedInput === 'number' && Number.isSafeInteger(usage.cachedInput) && usage.cachedInput >= 0 &&
+    typeof usage.output === 'number' && Number.isSafeInteger(usage.output) && usage.output >= 0 &&
+    typeof usage.reasoning === 'number' && Number.isSafeInteger(usage.reasoning) && usage.reasoning >= 0 &&
+    (usage.callPhase === 'initial' || usage.callPhase === 'adjustment' || usage.callPhase === 'correction' ||
+      usage.callPhase === 'speculation' || usage.callPhase === 'speculation_recalculation') &&
+    typeof usage.ordinal === 'number' && Number.isSafeInteger(usage.ordinal) && usage.ordinal >= 1;
 }

@@ -15,6 +15,8 @@ import {
 } from '../src/combat/values';
 import { sha256 } from '../src/crypto/sha256';
 import {
+  agentCallUsage, contextTokenCount,
+  type AgentCallPhase, type AgentCallUsage,
   type AgentAdapterKind, type AgentCliKind, type AgentFailureClassification, type AgentInvocation, type AgentSessionAdapter,
   type AgentSessionBinding, type AgentToolSession, type AgentTurnResult, type AgentUsage,
 } from '../src/vtt/agent-session';
@@ -435,6 +437,7 @@ export interface ConversationRow {
   readonly timeToFirstAction: number;
   readonly wallPerCreature: number;
   readonly tokens: ConversationTokenCounts;
+  readonly callUsage: readonly AgentCallUsage[];
   readonly refusals: readonly string[];
   readonly toolCalls: number;
   readonly callsPerRound: number;
@@ -757,7 +760,7 @@ function addAgentUsage(total: AgentUsage | null, usage: AgentUsage | null): Agen
   if (usage === null) return total;
   if (total === null) return usage;
   return {
-    inputTokens: total.inputTokens + usage.inputTokens,
+    inputTokens: contextTokenCount(total.inputTokens + usage.inputTokens),
     cachedInputTokens: total.cachedInputTokens + usage.cachedInputTokens,
     outputTokens: total.outputTokens + usage.outputTokens,
     reasoningTokens: total.reasoningTokens + usage.reasoningTokens,
@@ -2140,6 +2143,7 @@ function authorizedMechanics(state: EncounterState, proposal: RoundTurnProposalE
 function invocation(
   config: ConversationConfig,
   runId: EncounterSessionId,
+  callPhase: AgentCallPhase,
   prompt: string,
   launcherToken: string,
   instructions: string | null = null,
@@ -2150,6 +2154,7 @@ function invocation(
   return {
     runId, prompt, instructions, model: planner.model, reasoningEffort: planner.effort,
     sessionProfile: 'arena',
+    callPhase,
     launcherToken, timeoutMs: config.timeoutMs,
     ...(recoveryLauncherToken === undefined ? {} : { recoveryLauncherToken }),
     ...(toolSession === undefined ? {} : { toolSession }),
@@ -2429,6 +2434,12 @@ async function runConversationWithConfiguredIntel(
           })
         : undefined;
       let roundUsage: AgentUsage | null = null;
+      const roundCallUsage: AgentCallUsage[] = [];
+      const captureCallUsage = (turn: AgentTurnResult, callPhase: AgentCallPhase): void => {
+        if (turn.usage === null) return;
+        roundCallUsage.push(agentCallUsage(turn.usage, callPhase, roundCallUsage.length + 1));
+        roundUsage = addAgentUsage(roundUsage, turn.usage);
+      };
       let proposalId: string | null = null;
       let outcome: ConversationRow['outcome'] = 'refused';
       const refusals: string[] = [];
@@ -2564,6 +2575,7 @@ async function runConversationWithConfiguredIntel(
             const turn = await adapter.start(invocation(
               config,
               runId,
+              'speculation',
               renderEnginePrompt(
                 'speculate_round', sourceSnapshot.capsule, RULES_SOURCE, undefined, speculativeContext,
               ),
@@ -2721,6 +2733,7 @@ async function runConversationWithConfiguredIntel(
           const adjustmentInvocation = invocation(
             config,
             runId,
+            'adjustment',
             `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${renderEnginePrompt('plan_round', adjustmentSnapshot.capsule, RULES_SOURCE)}`,
             adjustmentLauncher.manifestPath,
             null,
@@ -2734,7 +2747,7 @@ async function runConversationWithConfiguredIntel(
             new AbortController().signal,
           );
           adjustmentSessionId = turn.sessionId;
-          roundUsage = addAgentUsage(roundUsage, turn.usage);
+          captureCallUsage(turn, 'adjustment');
           adjustmentUsage = addAgentUsage(adjustmentUsage, turn.usage);
           adjustmentTurnContext = takeTurnContext(adjustmentLauncher.turnContextSpoolPath) ??
             adjustmentTurnContext;
@@ -2856,7 +2869,7 @@ async function runConversationWithConfiguredIntel(
                 correctionCalls += 1;
                 const turn = await lifecycle.resumeCorrection(correctionInvocation, signal);
                 adjustmentCorrectionSessionId = turn.sessionId;
-                roundUsage = addAgentUsage(roundUsage, turn.usage);
+                captureCallUsage(turn, 'correction');
                 adjustmentUsage = addAgentUsage(adjustmentUsage, turn.usage);
                 adjustmentCorrectionContext =
                   takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? adjustmentCorrectionContext;
@@ -2866,6 +2879,7 @@ async function runConversationWithConfiguredIntel(
             invocation: invocation(
               config,
               runId,
+              'correction',
               'replaced by adjustment correction renderer',
               correctionLauncher.manifestPath,
               null,
@@ -3011,6 +3025,7 @@ async function runConversationWithConfiguredIntel(
               '[SERVICE_RETRY] The previous turn completed with no engine tool activity and no proposal. Retry the same round now.\n\n';
             const primaryInvocation = invocation(
               config, runId,
+              'initial',
               `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${primaryPrompt}`,
               initialLauncher.manifestPath,
               journal.agentSession() === null ? knowledgeBase.startupInstructions : null,
@@ -3025,7 +3040,7 @@ async function runConversationWithConfiguredIntel(
               ? await lifecycle.coldStartRound(primaryInvocation, new AbortController().signal)
               : await lifecycle.resumeRound(primaryInvocation, new AbortController().signal);
             rolloutSessionId = turn.sessionId;
-            roundUsage = addAgentUsage(roundUsage, turn.usage);
+            captureCallUsage(turn, 'initial');
             rowTurnContext = takeTurnContext(initialLauncher.turnContextSpoolPath) ?? rowTurnContext;
             proposed = localInitialProposal ?? takeRoundProposal(initialLauncher.spoolPath);
             const flapped = turn.exit === 'completed' && proposed === null &&
@@ -3346,7 +3361,7 @@ async function runConversationWithConfiguredIntel(
                 }
                 if (escalationPlanner === null) rolloutSessionId = correctionTurn.sessionId;
                 else escalationSessionId = correctionTurn.sessionId;
-                roundUsage = addAgentUsage(roundUsage, correctionTurn.usage);
+                captureCallUsage(correctionTurn, 'correction');
                 recordedCorrectionTurnContext =
                   takeTurnContext(correctionLauncher.turnContextSpoolPath) ?? recordedCorrectionTurnContext;
                 const contextCallsAfterCorrection = simulated?.contextCallsByRequest.get(requestId) ??
@@ -3367,6 +3382,7 @@ async function runConversationWithConfiguredIntel(
             invocation: invocation(
               config,
               runId,
+              'correction',
               'replaced by correction renderer',
               correctionLauncher.manifestPath,
               null,
@@ -3618,7 +3634,7 @@ async function runConversationWithConfiguredIntel(
               const pending = inFlightSpeculation.current;
               const boundaryStarted = performance.now();
               const completed = await pending.completion;
-              roundUsage = addAgentUsage(roundUsage, completed.turn?.usage ?? null);
+              if (completed.turn !== null) captureCallUsage(completed.turn, 'speculation');
               const decisionSnapshot = engineSession.snapshot({
                 runId, branchId, revision: capsuleRevision,
                 requestId: `${requestId}:speculation-decision`,
@@ -3708,6 +3724,8 @@ async function runConversationWithConfiguredIntel(
                       predecessorSessionHash: null,
                       startedAtRevision: pending.sourceSnapshot.capsule.revision,
                       lastDispatchedRevision: pending.sourceSnapshot.capsule.revision,
+                      callUsage: [],
+                      currentContextTokens: null,
                       status: 'active',
                     };
                     try {
@@ -3716,6 +3734,7 @@ async function runConversationWithConfiguredIntel(
                         invocation(
                           config,
                           runId,
+                          'speculation_recalculation',
                           `${turnContextPrompt(pending.sourceTurnContext, config.intelMode)}\n\n${renderEnginePrompt('plan_round', recalculationSnapshot.capsule, RULES_SOURCE)}`,
                           recalculationLauncher.manifestPath,
                           null,
@@ -3725,7 +3744,7 @@ async function runConversationWithConfiguredIntel(
                         ),
                         new AbortController().signal,
                       );
-                      roundUsage = addAgentUsage(roundUsage, recalculationTurn.usage);
+                      captureCallUsage(recalculationTurn, 'speculation_recalculation');
                       const proposal = localRecalculationProposal ??
                         takeRoundProposal(recalculationLauncher.spoolPath);
                       if (proposal !== null) {
@@ -3958,7 +3977,9 @@ async function runConversationWithConfiguredIntel(
         suggestionAdopted: classifySuggestionAdoption(suggestedPlan?.proposals ?? null, acceptedSubmission),
         timeToFirstAction: wall,
         wallPerCreature: wall / Math.max(1, livingMonsterIds(engineSession.currentState()).length),
-        tokens: totalsTokens, refusals,
+        tokens: totalsTokens,
+        callUsage: structuredClone(roundCallUsage),
+        refusals,
         toolCalls: simulated?.callsByRequest.get(requestId) ?? observedToolCalls,
         callsPerRound: adapter.modelCalls - modelCallsBeforeRound,
         agentDispatched, flapRetries, serviceNull,

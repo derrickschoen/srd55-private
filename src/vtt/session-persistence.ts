@@ -63,6 +63,8 @@ import { reduceSessionEncounter } from './session-encounter-reducer';
 import type { JsonValue } from '../domain/models';
 import {
   isAgentSessionBinding,
+  isAgentCallUsage,
+  type AgentCallUsage,
   type AgentFailureClassification,
   type AgentSessionBinding,
 } from './agent-session';
@@ -108,7 +110,7 @@ export type EngineHostTransition =
       readonly controllerKind: 'agent' | 'algorithm';
     };
 
-export const VTT_SESSION_SCHEMA_VERSION = 8 as const;
+export const VTT_SESSION_SCHEMA_VERSION = 9 as const;
 export const VTT_SESSION_MINIMUM_SCHEMA_VERSION = 1 as const;
 
 export type SessionTransition =
@@ -120,6 +122,10 @@ export type SessionTransition =
   | {
       readonly kind: 'agent_session_dispatched';
       readonly dispatchedRevision: number;
+    }
+  | {
+      readonly kind: 'agent_call_usage_recorded';
+      readonly usage: AgentCallUsage;
     }
   | {
       readonly kind: 'agent_session_recovered';
@@ -187,6 +193,7 @@ export const SESSION_TRANSITION_KINDS = [
   'session_started',
   'agent_session_started',
   'agent_session_dispatched',
+  'agent_call_usage_recorded',
   'agent_session_recovered',
   'session_ended',
   'proposal_fallback_resolved',
@@ -622,6 +629,11 @@ function decodeTransition(value: unknown): SessionTransition {
         typeof value.dispatchedRevision === 'number' &&
         value.dispatchedRevision >= 1
       ) return { kind: 'agent_session_dispatched', dispatchedRevision: value.dispatchedRevision };
+      break;
+    case 'agent_call_usage_recorded':
+      if (hasExactlyKeys(value, ['kind', 'usage']) && isAgentCallUsage(value.usage)) {
+        return { kind: 'agent_call_usage_recorded', usage: value.usage };
+      }
       break;
     case 'agent_session_recovered':
       if (
@@ -1232,6 +1244,28 @@ export function replaySessionRevisions(
         requireCanonicalEqual(revision.partyState, parent.partyState, 'agent-dispatch party state');
         requireCanonicalEqual(revision.rngState, parent.rngState, 'agent-dispatch RNG state');
         break;
+      case 'agent_call_usage_recorded':
+        if (parent === null || parent === undefined || parent.agentSession === null ||
+          parent.agentSession.status !== 'active') {
+          throw new Error('agent_call_usage_recorded requires an active binding.');
+        }
+        if (transition.usage.ordinal !== parent.agentSession.callUsage.length + 1) {
+          throw new Error('Recorded agent call usage ordinal is not contiguous.');
+        }
+        requireCanonicalEqual(
+          revision.agentSession,
+          {
+            ...parent.agentSession,
+            callUsage: [...parent.agentSession.callUsage, transition.usage],
+            currentContextTokens: transition.usage.input,
+          },
+          'agent call usage binding',
+        );
+        requireCanonicalEqual(revision.encounterState, parent.encounterState, 'agent-usage encounter state');
+        requireCanonicalEqual(revision.coordinatorState, parent.coordinatorState, 'agent-usage coordinator state');
+        requireCanonicalEqual(revision.partyState, parent.partyState, 'agent-usage party state');
+        requireCanonicalEqual(revision.rngState, parent.rngState, 'agent-usage RNG state');
+        break;
       case 'agent_session_recovered':
         if (parent === null || parent === undefined || parent.agentSession === null) {
           throw new Error('agent_session_recovered requires a failed active binding.');
@@ -1470,6 +1504,7 @@ export function replaySessionRevisions(
       parent !== null && parent !== undefined &&
       transition.kind !== 'agent_session_started' &&
       transition.kind !== 'agent_session_dispatched' &&
+      transition.kind !== 'agent_call_usage_recorded' &&
       transition.kind !== 'agent_session_recovered'
     ) {
       requireCanonicalEqual(revision.agentSession, parent.agentSession, 'unchanged agent binding');
@@ -1589,6 +1624,8 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       predecessorSessionHash: null,
       startedAtRevision: latest.revision + 1,
       lastDispatchedRevision: 0,
+      callUsage: [],
+      currentContextTokens: null,
       status: 'active',
     };
     this.#append({
@@ -1617,6 +1654,32 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       parentRevision: latest.revision,
       branchId: latest.branchId,
       transition: { kind: 'agent_session_dispatched', dispatchedRevision: latest.revision },
+      encounterState: latest.encounterState,
+      partyState: latest.partyState,
+      coordinatorState: latest.coordinatorState,
+      controllers: latest.controllers,
+      agentSession: binding,
+    });
+    return binding;
+  }
+
+  recordAgentCallUsage(usage: AgentCallUsage): AgentSessionBinding {
+    const latest = this.#latest();
+    if (latest.agentSession === null || latest.agentSession.status !== 'active') {
+      throw new Error('Encounter run has no active agent session for call usage.');
+    }
+    if (usage.ordinal !== latest.agentSession.callUsage.length + 1) {
+      throw new Error('Agent call usage ordinal is not contiguous.');
+    }
+    const binding: AgentSessionBinding = {
+      ...latest.agentSession,
+      callUsage: [...latest.agentSession.callUsage, structuredClone(usage)],
+      currentContextTokens: usage.input,
+    };
+    this.#append({
+      parentRevision: latest.revision,
+      branchId: latest.branchId,
+      transition: { kind: 'agent_call_usage_recorded', usage: structuredClone(usage) },
       encounterState: latest.encounterState,
       partyState: latest.partyState,
       coordinatorState: latest.coordinatorState,
@@ -1685,6 +1748,8 @@ export class EncounterSessionJournal implements CoordinatorPersistence {
       predecessorSessionHash: input.predecessorSessionHash,
       startedAtRevision: latest.revision + 1,
       lastDispatchedRevision: 0,
+      callUsage: [],
+      currentContextTokens: null,
       status: 'active',
     };
     this.#append({
@@ -2381,6 +2446,7 @@ const V4_TO_V5_SOURCE = 'vtt-session-v4-to-v5:add-typed-combatant-death-moment-a
 const V5_TO_V6_SOURCE = 'vtt-session-v5-to-v6:replace-hide-death-save-rolls-with-hidden-roll-categories';
 const V6_TO_V7_SOURCE = 'vtt-session-v6-to-v7:add-typed-encounter-phase-and-rehash-revisions';
 const V7_TO_V8_SOURCE = 'vtt-session-v7-to-v8:replace-codex-session-id-with-agent-session-binding-and-rehash-revisions';
+const V8_TO_V9_SOURCE = 'vtt-session-v8-to-v9:add-agent-call-usage-and-current-context-token-count';
 
 export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
   Object.freeze([
@@ -2671,6 +2737,56 @@ export const VTT_SESSION_MIGRATIONS: readonly VttSessionMigration[] =
         return { ...body, fingerprint: sha256(canonicalJson(body)) };
       },
     }),
+    Object.freeze({
+      id: 'vtt_session_v8_to_v9',
+      from: 8,
+      to: 9,
+      source: V8_TO_V9_SOURCE,
+      checksum: 'cf56e83a7fad46c19ab76b437cbb943ba48ce9122022207031ffa7d22f8f826a',
+      migrate: (bundle: Readonly<Record<string, unknown>>) => {
+        if (!Array.isArray(bundle.revisions)) {
+          throw new TypeError('VTT session v8 revisions are malformed.');
+        }
+        const migrateBinding = (value: unknown): unknown => {
+          if (value === null) return null;
+          if (!isRecord(value)) throw new TypeError('VTT session v8 agent binding is malformed.');
+          return { ...value, callUsage: [], currentContextTokens: null };
+        };
+        const revisions = bundle.revisions.map((revision) => {
+          if (!isRecord(revision) || typeof revision.checksum !== 'string' || !isRecord(revision.transition)) {
+            throw new TypeError('VTT session v8 revision is malformed.');
+          }
+          const { checksum: _oldChecksum, ...oldBody } = revision;
+          if (sha256(canonicalJson(oldBody)) !== revision.checksum) {
+            throw new Error('VTT session v8 revision checksum mismatch.');
+          }
+          const transition = revision.transition.kind === 'agent_session_started'
+            ? { ...revision.transition, binding: migrateBinding(revision.transition.binding) }
+            : revision.transition.kind === 'agent_session_recovered'
+              ? {
+                  ...revision.transition,
+                  failedBinding: migrateBinding(revision.transition.failedBinding),
+                  binding: migrateBinding(revision.transition.binding),
+                }
+              : revision.transition;
+          const body = {
+            ...oldBody,
+            schemaVersion: 9 as const,
+            transition,
+            agentSession: migrateBinding(revision.agentSession),
+          };
+          return { ...body, checksum: sha256(canonicalJson(body)) };
+        });
+        const { fingerprint: _oldFingerprint, ...oldBundle } = bundle;
+        const body = {
+          ...oldBundle,
+          format: 'vtt-session-revisions' as const,
+          schemaVersion: 9 as const,
+          revisions,
+        };
+        return { ...body, fingerprint: sha256(canonicalJson(body)) };
+      },
+    }),
   ]);
 
 export function validateVttSessionMigrationRegistry(): void {
@@ -2698,13 +2814,14 @@ function migrateSavedBundle(value: unknown): SavedSessionBundleV2 {
   if (isRecord(value) && value.format === JOURNAL_DAG_FORMAT) {
     if (value.schemaVersion === VTT_SESSION_SCHEMA_VERSION) return decodeJournalDagBundle(value);
     if (
-      value.schemaVersion !== 7 ||
+      (value.schemaVersion !== 7 && value.schemaVersion !== 8) ||
       typeof value.sessionId !== 'string' ||
       typeof value.fingerprint !== 'string'
     ) throw new TypeError('Saved VTT session journal DAG header is malformed.');
+    const legacySchemaVersion = value.schemaVersion;
     const legacyBody = {
       format: JOURNAL_DAG_FORMAT,
-      schemaVersion: 7,
+      schemaVersion: legacySchemaVersion,
       sessionId: value.sessionId,
       nodes: value.nodes,
       revisions: value.revisions,
@@ -2714,7 +2831,7 @@ function migrateSavedBundle(value: unknown): SavedSessionBundleV2 {
     }
     const expandedLegacyBody = {
       format: 'vtt-session-revisions',
-      schemaVersion: 7,
+      schemaVersion: legacySchemaVersion,
       sessionId: value.sessionId,
       revisions: decodeJournalDagValues(value.nodes, value.revisions),
     };

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentSessionIdFromCli } from '../agent-session';
+import { agentSessionIdFromCli, contextTokenCount } from '../agent-session';
 import type { AgentInvocation, AgentSessionBinding, AgentTurnResult, AgentUsage } from '../agent-session';
 import {
   AgentAdapterError,
@@ -202,7 +202,7 @@ function decodeUsage(value: Readonly<Record<string, unknown>>): AgentUsage | nul
   if (totalTokens === null || inputTokens === null || outputTokens === null || reasoningTokens === null ||
     cacheReadTokens === null || cacheWriteTokens === null) return null;
   return {
-    inputTokens,
+    inputTokens: contextTokenCount(inputTokens),
     cachedInputTokens: cacheReadTokens,
     outputTokens,
     reasoningTokens,

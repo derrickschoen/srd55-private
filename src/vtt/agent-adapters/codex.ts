@@ -1,4 +1,4 @@
-import { agentSessionIdFromCli } from '../agent-session';
+import { agentSessionIdFromCli, contextTokenCount } from '../agent-session';
 import type { AgentInvocation, AgentSessionBinding, AgentTurnResult, AgentUsage } from '../agent-session';
 import {
   AgentAdapterError,
@@ -167,7 +167,7 @@ function decodeUsage(value: Readonly<Record<string, unknown>>): AgentUsage | nul
   const reasoningTokens = integer(value['reasoning_output_tokens']);
   return inputTokens === null || cachedInputTokens === null || outputTokens === null || reasoningTokens === null
     ? null
-    : { inputTokens, cachedInputTokens, outputTokens, reasoningTokens };
+    : { inputTokens: contextTokenCount(inputTokens), cachedInputTokens, outputTokens, reasoningTokens };
 }
 
 function integer(value: unknown): number | null {

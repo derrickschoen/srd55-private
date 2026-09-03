@@ -51,6 +51,7 @@ const invocation: AgentInvocation = {
   instructions: 'SIMULATED session-level KB instructions',
   model: 'model-SIMULATED',
   reasoningEffort: 'high',
+  callPhase: 'initial',
   launcherToken: 'launcher-token-SIMULATED',
   timeoutMs: 12_345,
 };
@@ -94,6 +95,8 @@ function binding(kind: AgentCliKind, id: string): AgentSessionBinding {
     predecessorSessionHash: null,
     startedAtRevision: 1,
     lastDispatchedRevision: 1,
+    callUsage: [],
+    currentContextTokens: null,
     status: 'active',
   };
 }
@@ -162,6 +165,32 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       usage: { inputTokens: 89, cachedInputTokens: 34, outputTokens: 13, reasoningTokens: 5 },
       exit: 'completed',
     });
+  });
+
+  it('SIMULATED Codex exposes each completed call usage independently (mutation: summing)', async () => {
+    const usages = [
+      { input_tokens: 101, cached_input_tokens: 31, output_tokens: 17, reasoning_output_tokens: 7 },
+      { input_tokens: 203, cached_input_tokens: 41, output_tokens: 29, reasoning_output_tokens: 11 },
+      { input_tokens: 307, cached_input_tokens: 43, output_tokens: 31, reasoning_output_tokens: 13 },
+    ] as const;
+    const runner = new SIMULATEDChildProcessRunner(usages.map((usage, index) => output([
+      JSON.stringify({ type: 'thread.started', thread_id: `codex-independent-${String(index + 1)}` }),
+      JSON.stringify({ type: 'turn.completed', usage }),
+    ].join('\n'))));
+    const adapter = new CodexAgentSessionAdapter(options(runner));
+
+    const results = [];
+    for (const _usage of usages) {
+      results.push(await adapter.start(invocation, new AbortController().signal));
+    }
+
+    expect(results.map((result) => result.usage)).toEqual([
+      { inputTokens: 101, cachedInputTokens: 31, outputTokens: 17, reasoningTokens: 7 },
+      { inputTokens: 203, cachedInputTokens: 41, outputTokens: 29, reasoningTokens: 11 },
+      { inputTokens: 307, cachedInputTokens: 43, outputTokens: 31, reasoningTokens: 13 },
+    ]);
+    expect(results.at(-1)?.usage?.inputTokens).toBe(307);
+    expect(results.at(-1)?.usage?.inputTokens).not.toBe(611);
   });
 
   it('SIMULATED Codex disables project docs, the plugin surface, and skill instructions only for arena sessions', () => {

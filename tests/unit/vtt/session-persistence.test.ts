@@ -25,6 +25,7 @@ import {
   encounterSessionId,
   type CombatantId,
 } from '../../../src/combat/values';
+import { agentCallUsage, contextTokenCount } from '../../../src/vtt/agent-session';
 import {
   DeferredMirrorSink,
   EncounterSessionJournal,
@@ -197,6 +198,8 @@ describe('event-sourced encounter persistence', () => {
       predecessorSessionHash: null,
       startedAtRevision: 1,
       lastDispatchedRevision: 0,
+      callUsage: [],
+      currentContextTokens: null,
       status: 'active',
     });
     const migratedRevision = migrated[0]!;
@@ -237,6 +240,44 @@ describe('event-sourced encounter persistence', () => {
     expect(() => replaySessionRevisions([forged])).toThrowError(
       new UnknownSessionTransitionKindError('transition_from_the_future'),
     );
+  });
+
+  it('round-trips ordered per-call usage and the latest context size (mutation: persist aggregate round input)', () => {
+    const store = new MemoryBrowserSessionStore();
+    const { journal } = createJournal(store, new MemoryMirrorSink(), new ControllerRegistry([]));
+    journal.startAgentSession({
+      cli: 'codex',
+      sessionId: agentSessionId('codex:usage-round-trip'),
+      adapterVersion: 1,
+    });
+    journal.recordAgentCallUsage(agentCallUsage({
+      inputTokens: contextTokenCount(101),
+      cachedInputTokens: 31,
+      outputTokens: 17,
+      reasoningTokens: 7,
+    }, 'initial', 1));
+    journal.recordAgentCallUsage(agentCallUsage({
+      inputTokens: contextTokenCount(203),
+      cachedInputTokens: 41,
+      outputTokens: 29,
+      reasoningTokens: 11,
+    }, 'correction', 2));
+
+    const reloaded = new MemoryBrowserSessionStore();
+    const sessionId = encounterSessionId('session:persistence-test');
+    importSavedSession(reloaded, exportSavedSession(store, sessionId));
+    const binding = EncounterSessionJournal.resume(
+      sessionId,
+      reloaded,
+      new MemoryMirrorSink(),
+    ).agentSession;
+
+    expect(binding?.callUsage).toEqual([
+      { input: 101, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
+      { input: 203, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'correction', ordinal: 2 },
+    ]);
+    expect(binding?.currentContextTokens).toBe(203);
+    expect(binding?.currentContextTokens).not.toBe(304);
   });
 
   it('fingerprint_not_checked: one flipped bundle byte refuses the whole session file', () => {
@@ -871,11 +912,11 @@ describe('event-sourced encounter persistence', () => {
          ORDER BY revision`,
       );
       expect(rows).toEqual([
-        { revision: 1, schema_version: 8 },
-        { revision: 2, schema_version: 8 },
-        { revision: 3, schema_version: 8 },
-        { revision: 4, schema_version: 8 },
-        { revision: 5, schema_version: 8 },
+        { revision: 1, schema_version: 9 },
+        { revision: 2, schema_version: 9 },
+        { revision: 3, schema_version: 9 },
+        { revision: 4, schema_version: 9 },
+        { revision: 5, schema_version: 9 },
       ]);
       expect(
         EncounterSessionJournal.resume(

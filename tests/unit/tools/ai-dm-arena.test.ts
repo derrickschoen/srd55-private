@@ -979,7 +979,7 @@ describe('AI-DM arena', () => {
     ])).toThrow('--kb cannot use content/cc-by-sa');
   });
 
-  it('sums live-shape Codex usage across service-null retries into the arena row', async () => {
+  it('retains ordered per-call usage while summing only aggregate tokens (mutation: summing call usage)', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-usage-'));
     const outPath = join(directory, 'arena.jsonl');
     const adapter = new FakeCodexUsageAdapter();
@@ -990,6 +990,7 @@ describe('AI-DM arena', () => {
 
     const rows = await runArena(config, { adapter });
 
+    expect(rows[0]?.refusals).toEqual([]);
     expect(adapter.modelCalls).toBe(3);
     expect(adapter.prompts[0]).not.toContain('[SERVICE_RETRY]');
     expect(adapter.prompts.slice(1).every((prompt) =>
@@ -1008,6 +1009,11 @@ describe('AI-DM arena', () => {
         roundNarrative: null,
         chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
         tokens: { input: 611, cachedInput: 115, output: 77, reasoning: 31 },
+        callUsage: [
+          { input: 101, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
+          { input: 203, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'initial', ordinal: 2 },
+          { input: 307, cachedInput: 43, output: 31, reasoning: 13, callPhase: 'initial', ordinal: 3 },
+        ],
       }),
     ]);
     expect(JSON.parse(readFileSync(outPath, 'utf8').trim())).toEqual(
@@ -1015,6 +1021,11 @@ describe('AI-DM arena', () => {
         flapRetries: 2, serviceNull: true, callsPerRound: 3,
         sessionId: 'codex-arena-usage', escalationSessionId: null,
         tokens: { input: 611, cachedInput: 115, output: 77, reasoning: 31 },
+        callUsage: [
+          { input: 101, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
+          { input: 203, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'initial', ordinal: 2 },
+          { input: 307, cachedInput: 43, output: 31, reasoning: 13, callPhase: 'initial', ordinal: 3 },
+        ],
       }),
     );
   });
@@ -1036,6 +1047,28 @@ describe('AI-DM arena', () => {
       authorizedPlan: null, roundNarrative: null,
       chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
       refusals: ['SIMULATED host failure before agent dispatch.'],
+    }));
+  });
+
+  it('keeps the model-free one-round arena behavior unchanged except required call usage fields', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-d1-regression-'));
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'), '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+
+    const [row] = await runArena(config);
+
+    expect(row).toEqual(expect.objectContaining({
+      knowledgeModel: 'engine_state',
+      room: 1,
+      round: 1,
+      outcome: 'authorized',
+      agentDispatched: true,
+      callsPerRound: 1,
+      tokens: { input: 0, cachedInput: 0, output: 0, reasoning: 0 },
+      callUsage: [],
     }));
   });
 

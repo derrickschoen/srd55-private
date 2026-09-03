@@ -150,6 +150,8 @@ function runtime(
       prompt: 'must be replaced',
       model: 'SIMULATED-model',
       reasoningEffort: 'SIMULATED-effort',
+      sessionProfile: 'test',
+      callPhase: 'correction',
       launcherToken: 'SIMULATED-launcher-token',
       timeoutMs: null,
     },

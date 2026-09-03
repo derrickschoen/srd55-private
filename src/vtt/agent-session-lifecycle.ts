@@ -1,10 +1,13 @@
 import { sha256 } from '../crypto/sha256';
 import type {
+  ContextRolloverPolicy,
+  ContextTokenCount,
   AgentInvocation,
   AgentSessionAdapter,
   AgentSessionBinding,
   AgentTurnResult,
 } from './agent-session';
+import { agentCallUsage } from './agent-session';
 import type { EncounterSessionJournal } from './session-persistence';
 
 export class AgentSessionLifecycle {
@@ -12,6 +15,7 @@ export class AgentSessionLifecycle {
     private readonly journal: EncounterSessionJournal,
     private readonly adapter: AgentSessionAdapter,
     private readonly adapterVersion: number,
+    private readonly rolloverPolicy: ContextRolloverPolicy = CONTEXT_ROLLOVER_POLICY,
   ) {
     if (!Number.isSafeInteger(adapterVersion) || adapterVersion < 1) {
       throw new RangeError('Agent adapter version must be a positive integer.');
@@ -20,11 +24,13 @@ export class AgentSessionLifecycle {
 
   async coldStart(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentSessionBinding> {
     const result = await this.#coldStart(invocation, signal);
-    return this.journal.startAgentSession({
+    const binding = this.journal.startAgentSession({
       cli: this.adapter.kind,
       sessionId: result.resumeSessionId,
       adapterVersion: this.adapterVersion,
     });
+    this.#recordUsage(result, invocation);
+    return this.journal.agentSession() ?? binding;
   }
 
   async coldStartRound(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
@@ -35,6 +41,7 @@ export class AgentSessionLifecycle {
       adapterVersion: this.adapterVersion,
     });
     this.journal.recordAgentSessionDispatch();
+    this.#recordUsage(result, invocation);
     return result;
   }
 
@@ -44,6 +51,10 @@ export class AgentSessionLifecycle {
     }
     if (this.journal.agentSession() !== null) {
       throw new Error('Encounter run already has an agent session.');
+    }
+    if (invocation.sessionProfile !== 'arena' && invocation.sessionProfile !== 'test' &&
+      this.rolloverPolicy.kind === 'unmeasured') {
+      throw new UnmeasuredContextRolloverPolicyError();
     }
     const result = await this.adapter.start(invocation, signal);
     requireCompleted(result, 'Agent cold start');
@@ -75,11 +86,13 @@ export class AgentSessionLifecycle {
     }
     const dispatched = this.journal.recordAgentSessionDispatch();
     try {
-      return requireResumedSameSession(
+      const result = requireResumedSameSession(
         await this.adapter.resume(dispatched, invocation, signal),
         dispatched,
         'Agent resume',
       );
+      this.#recordUsage(result, invocation);
+      return result;
     } catch (error) {
       const classification = this.adapter.classifyFailure(error);
       if (classification !== 'resume_not_found' && classification !== 'resume_corrupt') throw error;
@@ -102,13 +115,38 @@ export class AgentSessionLifecycle {
         failure: classification,
       });
       this.journal.recordAgentSessionDispatch();
-      return requireResumedSameSession(
+      const result = requireResumedSameSession(
         bootstrap,
         successor,
         'Recovered agent dispatch',
       );
+      this.#recordUsage(result, invocation);
+      return result;
     }
   }
+
+  #recordUsage(result: AgentTurnResult, invocation: AgentInvocation): void {
+    if (result.usage === null) return;
+    const ordinal = (this.journal.agentSession()?.callUsage.length ?? 0) + 1;
+    this.journal.recordAgentCallUsage(agentCallUsage(result.usage, invocation.callPhase, ordinal));
+  }
+}
+
+export const CONTEXT_ROLLOVER_POLICY: ContextRolloverPolicy = { kind: 'unmeasured' };
+
+export class UnmeasuredContextRolloverPolicyError extends Error {
+  override readonly name = 'UnmeasuredContextRolloverPolicyError' as const;
+
+  constructor() {
+    super('A real agent session requires a measured context rollover policy.');
+  }
+}
+
+export function shouldRollOver(
+  latestInput: ContextTokenCount,
+  policy: ContextRolloverPolicy,
+): boolean {
+  return policy.kind === 'measured' && latestInput >= policy.threshold;
 }
 
 function requireCompleted(result: AgentTurnResult, operation: string): AgentTurnResult {
