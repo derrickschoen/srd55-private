@@ -1,5 +1,15 @@
 # Binding scope decisions
 
+D443 SWEEP COMPLETE; ARM 15 VERIFIED (supervisor note, 2026-09-02 20:52):
+d443-cav-rows-move-gating-medium 30/30 authorized, 0 timeouts, 10 digests
+x3, refusals 9, model-planned 30/30, wall median 20.7 s / p90 43.5 s,
+token median 597k, idle Disengage 2, Dash 91, attack slots 46. Resumer
+printed "D443 ALL DONE" at 20:50:53; all 15 arm files have exactly 30
+rows (verified by wc). Post-D443 chain now owns the box: D459 smoke ->
+D449 k7 -> D465 sol-low batch; D447 waiter behind it. Next supervisor
+work: build the D443 judging packets (per D451 the sweep unseals as soon
+as its judging validates).
+
 ARM 14 VERIFIED (supervisor note, 2026-09-02 20:07): d443-cav-full-low
 30/30 authorized, 0 timeouts at 120 s, 10 digests x3, refusals 9, no
 escalations, engine-planned rounds 6 (sim_controller; highest of the
