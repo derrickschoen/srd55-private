@@ -1,5 +1,28 @@
 # Binding scope decisions
 
+CODEX SERVICE OUTAGE; ALL CODEX WORK STOPPED LOUDLY (supervisor, 2026-09-03
+11:20). From about 10:45 the codex CLI fails every call: operator sessions
+died with "failed to refresh available models: unexpected status 4xx" and
+a direct probe returns "404 Not Found ... chatgpt.com/backend-api/codex/
+responses" after 5 reconnects; `codex login status` is still "Logged in
+using ChatGPT", so this is the backend, not credentials. Damage: D465 sol
+arms 5-7 (s-threats, s-gating, cav-full) produced 30 rows each of CLI-
+error refusals in ~4 s per round — renamed .VOID-codex-outage; the last
+arm (cav-rows-move-gating) killed and its partial removed; the D465 chain
+and the D483 rerun waiter killed by PID. D465 valid so far: s-full,
+s-rows, s-opp, s-move (s-move 23/30 authorized — party-script refusals,
+the E1/E2 class, old era). D483: s-threats valid (30/30, 30 model-
+planned); s-gating hit 4 timeouts while overlapping the sol batch at
+10:10 (WEATHER STOP, D483-BLOCKED) — voided by the rerun script; cav-full
+not run. G1 dispatched at 11:14 into the outage and exited without
+output. Supervisor gap: the cron ticks between 09:28 and 11:12 were not
+acted on because my previous turn ended inside a gate wait; the owner's
+"Status?" messages went unanswered for ~1 h 45 — recorded as a finding
+against my own work. Nothing resumes until a codex probe returns OK; the
+lane is committed through F (aa09742a); the owner's new directive (prior
+art for extracting decisions from agent output, algorithmic load-shedding,
+skills for codex models) starts with supervisor-side research now.
+
 ARMS LANDED: SOL ROWS (D465 #2) AND LUNA THREATS+PROTOCOL (D483 #1);
 F HARVESTED (supervisor, 2026-09-03 09:25). d465-s-rows-sol-low: 30/30
 authorized, only 18 model-planned (12 engine; arm 1 had 25), refusals
