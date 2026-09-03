@@ -1,5 +1,38 @@
 # Binding scope decisions
 
+SOL PROTOCOL INVESTIGATION (codex sol high, read-only, on raw rollouts;
+supervisor, 2026-09-03 08:25): findings with evidence in
+dnd-slim-runs/sol-investigation-report.log. (1) Luna ALSO gets its first
+submission wrong (legacy-shaped payload, rejected as invalid arguments)
+and then retries twice, reasoning that a rejected, unqueued call is not
+the one submission; its third call succeeds. Sol submits once, is
+rejected for missing phase/idempotency_key and a top-level run_id, and
+stops: "I did not retry because you required exactly one submission
+call". (2) Without a KB the session instructions are empty; the "once"
+comes from the generated turn text (engine-server.ts:681 "use
+engine.submit_round_proposals once") and the tool description
+(schemas.ts:942 "queue one round proposal"); neither says whether a call
+rejected by argument validation counts. Both readings fit the wording.
+(3) The engine defines the full input schema (schemas.ts:781/893) but the
+model-visible tool declaration in the rollouts shows `args: unknown`, and
+the "proposal schema" resource (engine-server.ts:2586) documents only the
+per-actor proposal, not the submission envelope — so a careful model
+cannot get the shape right from what it can see. (4) protocol.md names
+the envelope fields and the correction path; with it sol includes
+phase/idempotency_key, still misplaces state_ref once, then corrects
+and reaches status "proposed". Consequence: this is a harness gap, not
+only a model trait. Queued as D466 increment F (new era only): (a) the
+tool description carries the envelope in one sentence and states that a
+call rejected by argument validation does not consume the single
+submission; (b) the proposal-schema resource covers the envelope; (c)
+find why the model-visible declaration is `args: unknown` (MCP schema
+not surfaced through the exec tool wrapper?) and fix or document. The
+D465 confound stands as recorded.
+SOL ARM 1 VERIFIED (with protocol KB): 30/30 authorized, 25 model-planned
+(5 engine), refusals 9, 0 timeouts, wall median 21.1 s, idle Disengage 3
+(luna low 29, luna medium 7), Dash 87 (47 / 75), attack slots 39 (45 /
+43). Arm 2 (s-rows) started 08:14:24.
+
 D2.1 VERIFIED BUT NOT YET COMMITTED: A TEST-COST REGRESSION BLOCKS THE
 GATE (supervisor, 2026-09-03 07:50): D2.1 (17 files +441/-86, five
 simulated rollout fixtures) reads the session's rollout file for the last
