@@ -203,6 +203,40 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D481 — OWNER: all engine changes merge at once; increments land in a worktree while arms run on unchanged code (2026-09-02)
+
+Owner (verbatim, mid-turn): **"Make it so all of the engine changes merge
+at once. Use a worktree to merge each into when finished so that the arms
+can still run on unchanged code while the engine improvements are
+written."**
+
+Consequences: this is the D466 arrangement, now explicit. The lane
+worktree /home/vagrant/PhpstormProjects/dnd-lane-rollout (branch
+lane-wt/ctrl-value) is the integration worktree: every finished, gated
+increment (A1 6c807fce, A1.1 …, A2, B1–B4, C1–C2, D1–D2) is committed
+there. The main repo working tree, which the arena chains run from,
+receives no code change until the single D466 merge after the D465
+sol-low batch and D447 have landed on the current era. decisions.md
+notes continue to land on main because they are not code and do not
+affect arena behaviour.
+
+## D480 — OWNER: Calm Emotions is crowd control; all monsters are allies for now (2026-09-02)
+
+Owner (verbatim, mid-turn): **"Calm emotions is real crowd control. For
+now assume all monsters are allies."**
+
+Consequences for B4: a monster caster's Calm Emotions is modeled as
+control, not comfort: the caster picks the sphere to cover enemy
+Humanoids, and the per-target mode is the indifference mode toward
+creatures of the caster's choice (the monster side), which ends if the
+target is attacked or harmed by a spell or sees an ally being attacked;
+the suppression mode is available but not the default the advice layer
+ranks. Side model: every monster is an ally of every other monster
+(one monster team) for Calm Emotions' choice set, Pack Tactics' ally
+check, focus-fire coordination and the D476 knowledge ledger, until a
+faction model exists. Typed as a single `monster_side` faction constant,
+not scattered booleans.
+
 ## D479 — OWNER: choice-on-activation for Unicorn's Blessing and similar; model Calm Emotions and Entangle (2026-09-02)
 
 Owner (verbatim, on the unicorn/priest unsupported-spell table): **"For
