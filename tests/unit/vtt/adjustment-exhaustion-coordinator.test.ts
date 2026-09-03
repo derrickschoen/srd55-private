@@ -45,7 +45,8 @@ function resolution(actorId: CombatantId, fallback = false): ProposedTurnResolut
     fallbackOption: fallback ? { ...option, optionId: engineOptionId(`option:${actorId}:fallback`) } : null,
     mechanics: {
       actorId, optionId: option.optionId, movementCostFeet: 0, path: [], finalPosition: { column: 0, row: 0 },
-      actionSlots: [{ slot: 'main', kind: 'dodge', actionId: engineActionId('dodge'), spellId: null, targetIds: [], objectId: null }],
+      actionSlots: [{ slot: 'main', kind: 'dodge', actionId: engineActionId('dodge'), spellId: null, targetIds: [], objectId: null, omittedRiders: [] }],
+      omittedRiders: [],
     },
     selectedBranch: 'primary',
     resolutionDigest: 'c'.repeat(64),

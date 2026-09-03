@@ -11483,7 +11483,9 @@ function processCommand(context: ReductionContext, command: EncounterCommand): v
           command.dc !== declared.savingThrow.dc ||
           command.onSuccess !== (declared.success.kind === 'half_damage' ? 'half' : 'none') ||
           canonicalJson(command.damage) !== canonicalJson(declaredMonsterDamage(declared.failure.damage)) ||
-          canonicalJson(command.monsterFailureEffects) !== canonicalJson(declared.failure.effects)
+          canonicalJson(command.monsterFailureEffects) !== canonicalJson(
+            executableMonsterOnHitEffects(declared.failure.effects),
+          )
         ) {
           throw new EncounterRuleError('validation', `Combatant ${command.actor}'s monster save declaration was altered.`);
         }

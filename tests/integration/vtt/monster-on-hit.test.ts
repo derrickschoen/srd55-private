@@ -280,7 +280,7 @@ describe('monster statblock effects execute through the encounter reducer', () =
     }
   });
 
-  it('declared_effect_skipped: a real raises_as_zombie declaration refuses loudly until its lifecycle lands', () => {
+  it('declared_effect_skipped: executes Life Drain base effects while omitting its delayed zombie lifecycle', () => {
     const row = STARTER_MONSTER_ROSTER.find((candidate) => candidate.id === 'statblock:wight');
     if (row === undefined) throw new Error('Missing Wight row.');
     const subject = started(row.statblock, knownTarget('zombie-raise-target'));
@@ -288,10 +288,26 @@ describe('monster statblock effects execute through the encounter reducer', () =
     expect(lifeDrain.failure.effects.map((effect) => effect.kind)).toEqual([
       'hit_point_maximum_reduction', 'raises_as_zombie',
     ]);
-    expect(() => reduceEncounter(
+    const command = monsterSavingThrowCommand(lifeDrain, subject.actor.id, subject.target.id);
+    expect(command.monsterFailureEffects).toEqual([
+      { kind: 'hit_point_maximum_reduction', amount: 'damage_taken' },
+    ]);
+    const before = hitPoints(subject.state, subject.target);
+    const result = reduceEncounter(
       subject.state,
-      monsterSavingThrowCommand(lifeDrain, subject.actor.id, subject.target.id),
+      command,
       () => 0,
-    )).toThrow('raises_as_zombie monster effect has no landed delayed out-of-combat lifecycle');
+    );
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'save_resolved',
+      source: subject.actor.id,
+      target: subject.target.id,
+      save: expect.objectContaining({ outcome: 'failure' }),
+    }));
+    expect(hitPoints(result.state, subject.target)).toBe(before - 3);
+    expect(result.state.effects).toContainEqual(expect.objectContaining({
+      targets: [subject.target.id],
+      payload: { kind: 'hit_point_maximum_modifier', amount: -3 },
+    }));
   });
 });

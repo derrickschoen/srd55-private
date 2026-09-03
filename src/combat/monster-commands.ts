@@ -70,8 +70,9 @@ export function monsterAttackRollModeSources(
 
 /**
  * Charge riders require reducer-owned proof of the preceding straight-line
- * movement. Until that turn state lands, the declared base attack remains
- * executable but the conditional rider is outside the legal command domain.
+ * movement, while zombie creation requires a delayed out-of-combat lifecycle.
+ * Until those state models land, the declared base effect remains executable
+ * but each secondary rider is outside the legal command domain.
  * The SRD Boar states this as movement immediately before the hit:
  * docs/srd/full/srd-5.2.1.txt:22805-22809.
  */
@@ -79,7 +80,8 @@ export function executableMonsterOnHitEffects(
   effects: readonly MonsterOnHitEffect[],
 ): readonly MonsterOnHitEffect[] {
   return effects.filter((effect) =>
-    effect.kind !== 'condition' || effect.trigger.kind !== 'charge');
+    effect.kind !== 'raises_as_zombie' &&
+    (effect.kind !== 'condition' || effect.trigger.kind !== 'charge'));
 }
 
 export function monsterAttackCommand(
@@ -136,6 +138,6 @@ export function monsterSavingThrowCommand(
     onSuccess: action.success.kind === 'half_damage' ? 'half' : 'none',
     cost,
     monsterActionId: action.id,
-    monsterFailureEffects: action.failure.effects,
+    monsterFailureEffects: executableMonsterOnHitEffects(action.failure.effects),
   };
 }

@@ -5,7 +5,7 @@ import type {
   EngineOfferableOption,
   EngineOptionCandidate,
 } from './option-modeling';
-import { renderNoModeledEffectReason } from './renderer-profile';
+import { renderNoModeledEffectReason, renderOmittedRider } from './renderer-profile';
 import { engineActorOptions } from './turn-option-registry';
 import { projectFutureMonsterTurns } from './monster-planning-state';
 
@@ -35,7 +35,14 @@ function presentOption(candidate: EngineOptionCandidate): HumanEngineOptionPrese
       label: `${candidate.label} — ${renderNoModeledEffectReason(candidate.noModeledEffect)}`,
     };
   }
-  return { availability: 'offerable', option: candidate, label: candidate.label };
+  const omissions = candidate.omittedRiders.map(renderOmittedRider);
+  return {
+    availability: 'offerable',
+    option: candidate,
+    label: omissions.length === 0
+      ? candidate.label
+      : `${candidate.label} — omitted rider${omissions.length === 1 ? '' : 's'}: ${omissions.join('; ')}`,
+  };
 }
 
 /** Human projection retains every declared candidate while keeping executable options first. */

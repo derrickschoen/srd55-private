@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { combatantsAreAllies } from '../combat/allies';
 import type { EncounterState } from '../combat/encounter';
 import { gridDistance } from '../combat/grid';
 import { BUNDLED_MONSTER_ROSTER } from '../combat/statblocks/roster';
 import type { EngineStateCapsule } from './engine-state-capsule';
-import type { NoModeledEffect } from './option-modeling';
+import type { EngineOmittedRider, NoModeledEffect } from './option-modeling';
 
 export const RENDERER_POLICY_VERSION = 'turn-context-renderer-v3' as const;
 
@@ -152,6 +153,22 @@ export function renderNoModeledEffectReason(reason: NoModeledEffect): string {
   }
 }
 
+export function renderOmittedRider(rider: EngineOmittedRider): string {
+  const component = plainWords(rider.componentActionId);
+  switch (rider.kind) {
+    case 'conditional_damage_trigger':
+      return `${component}: conditional ${plainWords(rider.trigger)} damage is not executed`;
+    case 'conditional_on_hit_effect':
+      return `${component}: conditional ${plainWords(rider.trigger)} on-hit ${rider.effect} is not executed`;
+    case 'attack_advantage_window':
+      return `${component}: ${plainWords(rider.window)} attack Advantage is not executed`;
+    case 'delayed_zombie_creation':
+      return `${component}: delayed Zombie creation after ${String(rider.delayHours)} hours is not executed`;
+    case 'other_explicitly_classified_secondary_effect':
+      return `${component}: ${plainWords(rider.classification)} is not executed`;
+  }
+}
+
 function record(value: unknown): MutableRecord | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as MutableRecord
@@ -195,7 +212,7 @@ export function extractCircumstanceFeatures(input: {
   const living = input.state.combatants.filter((actor) => actor.life !== 'dead');
   const positions = new Map(input.state.tokens.map((token) => [token.combatantId, token.position]));
   const engagementDistances = living.flatMap((left, leftIndex) => living.slice(leftIndex + 1)
-    .filter((right) => right.profile.kind !== left.profile.kind)
+    .filter((right) => !combatantsAreAllies(input.state, left.profile.id, right.profile.id))
     .flatMap((right) => {
       const leftPosition = positions.get(left.profile.id);
       const rightPosition = positions.get(right.profile.id);
@@ -323,7 +340,7 @@ function shortlist(
 
 function sparseSlot(slot: MutableRecord): MutableRecord {
   const result: MutableRecord = { slot: slot['slot'], kind: slot['kind'], action_id: slot['action_id'] };
-  for (const key of ['component_action_ids', 'spell_id', 'target_ids', 'world_object_id'] as const) {
+  for (const key of ['component_action_ids', 'components', 'omitted_riders', 'spell_id', 'target_ids', 'world_object_id'] as const) {
     const value = slot[key];
     if (value !== null && (!Array.isArray(value) || value.length > 0)) result[key] = value;
   }
@@ -340,6 +357,8 @@ export function decodeSparseActionSlot(slotValue: unknown): Readonly<Record<stri
     spell_id: typeof slot['spell_id'] === 'string' ? slot['spell_id'] : null,
     target_ids: array(slot['target_ids']),
     world_object_id: typeof slot['world_object_id'] === 'string' ? slot['world_object_id'] : null,
+    ...(Array.isArray(slot['components']) ? { components: slot['components'] } : {}),
+    ...(Array.isArray(slot['omitted_riders']) ? { omitted_riders: slot['omitted_riders'] } : {}),
   };
 }
 
@@ -426,6 +445,7 @@ export function renderTurnContextProfile(
         option_id: option['option_id'], actor_id: option['actor_id'], revision: option['revision'],
         action_id: option['action_id'], kind: option['kind'], usable_now: option['usable_now'],
         usable_after_movement: option['usable_after_movement'],
+        omitted_riders: option['omitted_riders'],
       }));
       options = actor['options'] as MutableRecord[];
     }
@@ -719,6 +739,12 @@ function optionFacts(option: MutableRecord): readonly string[] {
   }
   if (array(option['resource_cost_labels']).length > 0) {
     facts.push(`Costs ${listed(option['resource_cost_labels'])}`);
+  }
+  for (const riderValue of array(option['omitted_riders'])) {
+    const rider = record(riderValue);
+    if (rider === null) continue;
+    const component = words(String(rider['componentActionId']));
+    facts.push(`Omitted rider beside ${component}: ${words(String(rider['kind']))}`);
   }
   if (option['usable_now'] === true && option['usable_after_movement'] === true) facts.push('Works now and after movement');
   else if (option['usable_after_movement'] === true) facts.push('Needs movement first');

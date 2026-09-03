@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
 import { armorClass, combatantId, encounterBranchId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
+import { LION } from '../../../src/combat/statblocks/wild-beasts';
 import {
   EngineRoundSession,
   type AuthorizedEngineTurnProposal,
@@ -133,6 +135,45 @@ function completeDodge(session: EngineRoundSession, actorId: CombatantId) {
 }
 
 describe('authoritative engine round session', () => {
+  it('executes a mixed multiattack attack child and saving-throw child once each', () => {
+    const positioned = fixedPositions(new Map([
+      [BRUTE_ID, { column: 1, row: 1 }],
+      [FOCUS_ID, { column: 2, row: 1 }],
+    ]));
+    const lionProfile = monsterCombatantProfile(LION, {
+      combatantId: BRUTE_ID,
+      tokenId: 'token:generated-3943001-monster-2',
+    });
+    const state: EncounterState = {
+      ...positioned,
+      combatants: positioned.combatants.map((candidate) => candidate.profile.id === BRUTE_ID
+        ? { ...candidate, hitPoints: LION.hitPointMaximum, profile: lionProfile }
+        : candidate),
+    };
+    const lion = authorized(state, attackProposal(state, BRUTE_ID, 'rend', FOCUS_ID));
+    expect(lion.mechanics.actionSlots.map((use) => use.kind)).toEqual(['attack', 'attack']);
+    const mixedOption = availableEngineActorOptions(state, BRUTE_ID).find((option) =>
+      option.label.startsWith('Rend + Roar'));
+    if (mixedOption === undefined) throw new Error('Lion mixed option is absent.');
+    const mixed = authorized(state, {
+      actorId: BRUTE_ID,
+      expectedRevision: state.revision,
+      primaryOptionId: mixedOption.optionId,
+      fallbackOptionId: null,
+      overrideJustification: null,
+    });
+    expect(mixed.mechanics.actionSlots.map((use) => use.kind)).toEqual(['attack', 'saving_throw']);
+
+    const session = new EngineRoundSession(state, mulberry32(46_600_002), {
+      kind: 'unattended', askDefault: 'decline',
+    });
+    session.applyResolvedMechanics([mixed], null);
+    const events = session.currentState().eventLog.filter((event) =>
+      (event.type === 'attack_resolved' && event.actor === BRUTE_ID) ||
+      (event.type === 'save_resolved' && event.source === BRUTE_ID));
+    expect(events.map((event) => event.type)).toEqual(['attack_resolved', 'save_resolved']);
+  });
+
   it('applies canonical long-range disadvantage during attack resolution', () => {
     const state = fixedPositions(new Map([
       [ARCHER_ID, { column: 0, row: 0 }],

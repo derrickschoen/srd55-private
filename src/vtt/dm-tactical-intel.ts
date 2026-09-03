@@ -11,6 +11,7 @@ import type { CombatantId } from '../combat/values';
 import type { EngineStateCapsule } from './engine-state-capsule';
 import type { EngineQueryPort } from './engine-query-port';
 import type { EngineOfferableOption, EngineOptionId } from './turn-proposal';
+import type { EngineOmittedRider } from './option-modeling';
 import { ENGINE_FAILURE_MODES_POLICY } from './engine-failure-modes';
 import { legalMultiattackCombinations } from './turn-option-registry';
 import type { RendererNullFields } from './renderer-profile';
@@ -46,6 +47,7 @@ export interface DmTargetIntelRow {
   readonly automaticCriticalMaximumDistanceFeet: number | null;
   readonly minimumMovementFeet: number | null;
   readonly unresolvedReasons: readonly TacticalUnresolvedReason[];
+  readonly omittedRiders: readonly EngineOmittedRider[];
 }
 
 export interface DmActorIntelCapture {
@@ -70,15 +72,21 @@ export interface DmIntelCapture {
 interface AttackCandidate {
   readonly actionId: string;
   readonly attackActionIds: readonly string[];
+  readonly componentIdentities: readonly { readonly kind: 'attack' | 'saving_throw'; readonly actionId: string }[];
 }
 
 function attackCandidates(actions: readonly MonsterAction[]): readonly AttackCandidate[] {
   return actions.flatMap((action): readonly AttackCandidate[] => {
     switch (action.kind) {
-      case 'attack': return [{ actionId: action.id, attackActionIds: [action.id] }];
+      case 'attack': return [{
+        actionId: action.id,
+        attackActionIds: [action.id],
+        componentIdentities: [{ kind: 'attack', actionId: action.id }],
+      }];
       case 'multiattack': return legalMultiattackCombinations(action, actions).map((combination) => ({
         actionId: action.id,
-        attackActionIds: combination.map((attack) => attack.id),
+        attackActionIds: combination.flatMap((component) => component.kind === 'attack' ? [component.id] : []),
+        componentIdentities: combination.map((component) => ({ kind: component.kind, actionId: component.id })),
       }));
       case 'saving_throw':
       case 'spellcasting': return [];
@@ -127,6 +135,7 @@ function selectedOption(
   targetId: CombatantId,
   actionId: string,
   attackActionIds: readonly string[],
+  componentIdentities: readonly { readonly kind: 'attack' | 'saving_throw'; readonly actionId: string }[],
 ): EngineOfferableOption | null {
   return actor.options.find((option) =>
     optionActionId(option) === actionId && optionTargets(option).includes(targetId) &&
@@ -134,7 +143,10 @@ function selectedOption(
       slot.use.kind === 'attack'
         ? attackActionIds.length === 1 && slot.use.actionId === attackActionIds[0]
         : slot.use.kind === 'multiattack' &&
-          slot.use.components.map((component) => component.actionId).join('|') === attackActionIds.join('|')
+          slot.use.components.length === componentIdentities.length &&
+          slot.use.components.every((component, index) =>
+            component.kind === componentIdentities[index]?.kind &&
+            component.actionId === componentIdentities[index]?.actionId)
     ))) ?? null;
 }
 
@@ -199,7 +211,9 @@ function candidateRow(
     : null;
   const firstRange = attacks[0]?.range;
   const minimumMovementFeet = movementNeed(actor, targetId, candidate.actionId, rangeLegal);
-  const option = selectedOption(actor, targetId, candidate.actionId, candidate.attackActionIds);
+  const option = selectedOption(
+    actor, targetId, candidate.actionId, candidate.attackActionIds, candidate.componentIdentities,
+  );
   return {
     policy: DM_TURN_INTEL_POLICY,
     evaluatorPolicy: TACTICAL_EVALUATOR_POLICY,
@@ -229,6 +243,7 @@ function candidateRow(
     }, null),
     minimumMovementFeet,
     unresolvedReasons: unique(attacks.flatMap((evaluation) => evaluation.unresolved)),
+    omittedRiders: option?.omittedRiders ?? [],
   };
 }
 
@@ -265,7 +280,9 @@ function unresolvedTargetRow(
     evaluatorPolicy: TACTICAL_EVALUATOR_POLICY,
     actorId: actor.id,
     targetId,
-    optionId: actionId === null ? null : selectedOption(actor, targetId, actionId, [actionId])?.optionId ?? null,
+    optionId: actionId === null ? null : selectedOption(
+      actor, targetId, actionId, [actionId], [{ kind: 'attack', actionId }],
+    )?.optionId ?? null,
     actionId,
     attackCount: 0,
     kind: reach?.legal === true ? 'offense' : 'approach',
@@ -285,6 +302,7 @@ function unresolvedTargetRow(
     automaticCriticalMaximumDistanceFeet: null,
     minimumMovementFeet: reach?.legal === true ? 0 : approach,
     unresolvedReasons: ['damage_unresolved'],
+    omittedRiders: [],
   };
 }
 
@@ -384,6 +402,7 @@ export function renderDmIntelRow(row: DmTargetIntelRow): Readonly<Record<string,
     ev: row.expectedDamage === null ? null : Math.round(row.expectedDamage),
     consequence_codes: consequenceCodes,
     movement_need_feet: row.minimumMovementFeet,
+    omitted_riders: row.omittedRiders,
   };
 }
 
@@ -398,6 +417,7 @@ export function renderDmContextIntelRow(
   delete compact['option_id'];
   if (row.attackCount === 1) delete compact['attacks'];
   if (row.rollModeReasons.length === 0) delete compact['reason_codes'];
+  if (row.omittedRiders.length === 0) delete compact['omitted_riders'];
   if (!row.deathFailureOnHit && row.automaticCriticalMaximumDistanceFeet === null) {
     delete compact['consequence_codes'];
   }

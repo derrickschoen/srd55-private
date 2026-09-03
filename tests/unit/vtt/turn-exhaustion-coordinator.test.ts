@@ -124,7 +124,8 @@ function proposal(
       mechanics: {
         actorId: f.actor, optionId: selectedOption.optionId, movementCostFeet: 0, path: [],
         finalPosition: { column: 0, row: 0 },
-        actionSlots: [{ slot: 'main', kind: selectedBranch === 'fallback' ? 'end_turn' : 'dodge', actionId: engineActionId(selectedBranch === 'fallback' ? 'end_turn' : 'dodge'), spellId: null, targetIds: [], objectId: null }],
+        actionSlots: [{ slot: 'main', kind: selectedBranch === 'fallback' ? 'end_turn' : 'dodge', actionId: engineActionId(selectedBranch === 'fallback' ? 'end_turn' : 'dodge'), spellId: null, targetIds: [], objectId: null, omittedRiders: [] }],
+        omittedRiders: [],
       },
       selectedBranch,
       resolutionDigest: 'a'.repeat(64),

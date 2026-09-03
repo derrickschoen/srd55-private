@@ -532,7 +532,10 @@ function advertisedExpectation(
     policy: OPTION_OUTCOME_POLICY,
   };
 }
-function externalOptionSlot(slot: EngineOfferableOption['actionSlots'][number]): Readonly<Record<string, unknown>> {
+function externalOptionSlot(
+  slot: EngineOfferableOption['actionSlots'][number],
+  omittedRiders: EngineOfferableOption['omittedRiders'],
+): Readonly<Record<string, unknown>> {
   const use = slot.use;
   const targetIds = use.kind === 'attack' || use.kind === 'saving_throw'
     ? use.target.kind === 'combatant' ? [use.target.combatantId] : []
@@ -549,9 +552,23 @@ function externalOptionSlot(slot: EngineOfferableOption['actionSlots'][number]):
     component_action_ids: use.kind === 'multiattack'
       ? use.components.map((component) => component.actionId)
       : [],
+    components: use.kind === 'multiattack'
+      ? use.components.map((component) => ({
+          kind: component.kind,
+          action_id: component.actionId,
+          target_ids: component.target.kind === 'combatant' ? [component.target.combatantId] : [],
+          omitted_riders: component.omittedRiders,
+        }))
+      : [],
     spell_id: use.kind === 'cast_spell' ? use.spellId : null,
     target_ids: targetIds,
     world_object_id: use.kind === 'use_world_object' ? use.objectId : null,
+    omitted_riders: use.kind === 'multiattack'
+      ? omittedRiders
+      : omittedRiders.length === 0
+        ? omittedRiders
+        : omittedRiders.filter((rider) =>
+            'actionId' in use && rider.sourceActionId === use.actionId),
   };
 }
 function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsule: EngineStateCapsule, actorId: CombatantId, includeExpectations: boolean): readonly Readonly<Record<string, unknown>>[] {
@@ -599,6 +616,7 @@ function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsul
       ? targetId === null ? [] : [{ actionId: String(firstUse.actionId), targetId }]
       : firstUse.kind === 'multiattack'
         ? firstUse.components.flatMap((component) => {
+            if (component.kind !== 'attack') return [];
             const componentTarget = queries.resolveTarget(state, actorId, component.target);
             return componentTarget === null
               ? []
@@ -607,8 +625,9 @@ function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsul
         : [];
     return {
       option_id: option.optionId, actor_id: option.actorId, revision: option.revision, label: option.label,
-      action_slots: option.actionSlots.map(externalOptionSlot),
+      action_slots: option.actionSlots.map((slot) => externalOptionSlot(slot, option.omittedRiders)),
       action_id: firstActionId, kind, target_selectors: [], resource_cost_labels: option.resourceCostLabels,
+      omitted_riders: option.omittedRiders,
       usable_now: resolution.valid && movementFeet === 0,
       usable_after_movement: resolution.valid,
       minimum_movement_feet: movementFeet,
@@ -652,7 +671,7 @@ function correctionGuidance(
   };
 }
 function resolutionPreview(resolution: Extract<ReturnType<PureTurnProposalResolver['resolve']>, { readonly valid: true }>): Readonly<Record<string, unknown>> {
-  return { actor_id: resolution.mechanics.actorId, option_id: resolution.mechanics.optionId, action_slot_count: resolution.mechanics.actionSlots.length, movement_feet: resolution.mechanics.movementCostFeet, resolution_digest: resolution.resolutionDigest, summary: resolution.summary };
+  return { actor_id: resolution.mechanics.actorId, option_id: resolution.mechanics.optionId, action_slot_count: resolution.mechanics.actionSlots.length, movement_feet: resolution.mechanics.movementCostFeet, omitted_riders: resolution.mechanics.omittedRiders, resolution_digest: resolution.resolutionDigest, summary: resolution.summary };
 }
 function disallowedLocator(locator: string): boolean {
   const normalized = locator.replaceAll('\\', '/').toLowerCase();
@@ -731,7 +750,7 @@ function actorKnowledgeReports(
     .map((actor) => ({
       actor_id: actor.profile.id,
       targets: state.combatants
-        .filter((target) => target.profile.kind !== actor.profile.kind && target.life !== 'dead')
+        .filter((target) => !queries.sameSide(state, actor.profile.id, target.profile.id) && target.life !== 'dead')
         .map((target) => {
           const visibility = queries.visibility(state, actor.profile.id, target.profile.id);
           return visibility?.visible === true

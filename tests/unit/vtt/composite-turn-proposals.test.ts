@@ -297,8 +297,8 @@ describe('complete action economy and composite turn proposals', () => {
           kind: 'multiattack',
           actionId: engineActionId('multiattack'),
           components: [
-            { kind: 'attack', actionId: engineActionId('longbow'), target: { kind: 'combatant', combatantId: playerProfile('target').id } },
-            { kind: 'attack', actionId: engineActionId('homebrew-missing'), target: { kind: 'combatant', combatantId: playerProfile('target').id } },
+            { kind: 'attack', actionId: engineActionId('longbow'), target: { kind: 'combatant', combatantId: playerProfile('target').id }, omittedRiders: [] },
+            { kind: 'attack', actionId: engineActionId('homebrew-missing'), target: { kind: 'combatant', combatantId: playerProfile('target').id }, omittedRiders: [] },
           ],
         },
       }],

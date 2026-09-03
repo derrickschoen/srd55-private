@@ -118,6 +118,43 @@ const risk = z.object({
 const exactRationalValue = z.object({
   numerator: z.number().int().safe(), denominator: z.number().int().safe().positive(),
 }).strict();
+const omittedRiderSource = {
+  sourceActionId: identifier,
+  componentActionId: identifier,
+};
+const omittedRider = z.discriminatedUnion('kind', [
+  z.object({
+    ...omittedRiderSource,
+    kind: z.literal('conditional_damage_trigger'),
+    trigger: z.enum(['attack_roll_advantage', 'replaces_base_when_target_bloodied', 'charge']),
+  }).strict(),
+  z.object({
+    ...omittedRiderSource,
+    kind: z.literal('conditional_on_hit_effect'),
+    effect: z.literal('condition'),
+    trigger: z.literal('charge'),
+  }).strict(),
+  z.object({
+    ...omittedRiderSource,
+    kind: z.literal('attack_advantage_window'),
+    window: z.literal('first_round_of_each_combat'),
+  }).strict(),
+  z.object({
+    ...omittedRiderSource,
+    kind: z.literal('delayed_zombie_creation'),
+    targetKind: z.literal('Humanoid'),
+    delayHours: z.literal(24),
+  }).strict(),
+  z.object({
+    ...omittedRiderSource,
+    kind: z.literal('other_explicitly_classified_secondary_effect'),
+    classification: z.enum([
+      'coupled_action_use', 'equipment_corrosion', 'conditional_damage_replacement',
+      'grapple_escape_disadvantage', 'attachment',
+    ]),
+    relatedActionId: identifier.optional(),
+  }).strict(),
+]);
 const expectation = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('damage'), resolvable: z.literal(true),
@@ -160,9 +197,15 @@ const tacticalOption = z.object({
     slot: z.enum(['main', 'bonus']), kind: shortCode, action_id: identifier,
     component_action_ids: z.array(identifier).max(20), spell_id: identifier.nullable(),
     target_ids: z.array(identifier).max(50), world_object_id: identifier.nullable(),
+    components: z.array(z.object({
+      kind: z.enum(['attack', 'saving_throw']), action_id: identifier,
+      target_ids: z.array(identifier).max(50), omitted_riders: z.array(omittedRider).max(50),
+    }).strict()).max(20),
+    omitted_riders: z.array(omittedRider).max(100),
   }).strict()).min(1).max(20),
   action_id: identifier, kind: z.enum(['attack', 'cast_spell', 'use_action', 'dodge', 'disengage', 'dash', 'end_turn']),
   target_selectors: z.array(targetSelector).max(50), resource_cost_labels: z.array(identifier).max(20),
+  omitted_riders: z.array(omittedRider).max(100),
   usable_now: z.boolean(), usable_after_movement: z.boolean(), minimum_movement_feet: z.number().int().min(0).nullable(),
   visibility: z.enum(['yes', 'no', 'conditional', 'unknown']), cover: z.enum(['none', 'half', 'three_quarters', 'total', 'unknown']),
   risks: z.array(risk).max(50), expectation: expectation.nullable(), refusals: z.array(refusal).max(20),
@@ -200,13 +243,15 @@ const compactIntelRow = z.object({
   ev: z.number().int().nullable(),
   consequence_codes: z.array(shortCode).max(20),
   movement_need_feet: z.number().int().min(0).nullable(),
+  omitted_riders: z.array(omittedRider).max(100),
 }).strict();
 const contextIntelRow = compactIntelRow
-  .omit({ policy: true, actor_id: true, option_id: true, attacks: true, reason_codes: true, consequence_codes: true })
+  .omit({ policy: true, actor_id: true, option_id: true, attacks: true, reason_codes: true, consequence_codes: true, omitted_riders: true })
   .extend({
     attacks: z.number().int().min(0).max(20).optional(),
     reason_codes: z.array(shortCode).max(50).optional(),
     consequence_codes: z.array(shortCode).max(20).optional(),
+    omitted_riders: z.array(omittedRider).max(100).optional(),
   });
 const movementSnapshot = z.object({
   range: z.enum(['MELEE', 'NORMAL', 'LONG', 'OUT', 'UNRESOLVED']),
@@ -747,7 +792,7 @@ const tacticalIntelOutput = z.object({
   next_cursor: z.string().max(500).nullable(),
 }).strict();
 
-const resolutionPreview = z.object({ actor_id: identifier, option_id: identifier, action_slot_count: z.number().int().min(1).max(20), movement_feet: z.number().int().min(0), resolution_digest: z.string().min(64).max(128), summary: summaryText }).strict();
+const resolutionPreview = z.object({ actor_id: identifier, option_id: identifier, action_slot_count: z.number().int().min(1).max(20), movement_feet: z.number().int().min(0), omitted_riders: z.array(omittedRider).max(100), resolution_digest: z.string().min(64).max(128), summary: summaryText }).strict();
 const correctionGuidance = z.union([
   z.object({ remaining_corrections: z.union([z.literal(0), z.literal(1)]), required_actor_ids: z.array(identifier).min(1).max(50), replace_whole_round: z.literal(true) }).strict(),
   z.object({ remaining_corrections: z.union([z.literal(0), z.literal(1)]), required_actor_ids: z.array(identifier).min(1).max(50), replace_whole_round: z.literal(false) }).strict(),

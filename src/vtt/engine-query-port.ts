@@ -31,7 +31,7 @@ import {
   type TacticalRangeBand,
   type TacticalUnresolvedReason,
 } from '../combat/tactical-evaluator';
-import type { MonsterAction, MonsterAttackAction, MonsterBonusAction, MonsterSpellReference } from '../combat/statblock';
+import type { MonsterAction, MonsterAttackAction, MonsterBonusAction, MonsterSavingThrowAction, MonsterSpellReference } from '../combat/statblock';
 import { monsterSpellMaximumUses, monsterSpellResourcePoolId } from '../combat/statblock';
 import { lookupBundledMonster } from '../combat/statblocks/companions';
 import {
@@ -913,9 +913,12 @@ export function engineActionRangeFeet(
     case 'multiattack': {
       const ranges = selected.actionIds.flatMap((id) => {
         const component = actions.find(
-          (candidate): candidate is MonsterAttackAction => candidate.kind === 'attack' && candidate.id === id,
+          (candidate): candidate is MonsterAttackAction | MonsterSavingThrowAction =>
+            (candidate.kind === 'attack' || candidate.kind === 'saving_throw') && candidate.id === id,
         );
-        return component === undefined ? [] : [engineAttackRangeFeet(component)];
+        return component === undefined
+          ? []
+          : [component.kind === 'attack' ? engineAttackRangeFeet(component) : component.target.rangeFeet];
       });
       return ranges.length === selected.actionIds.length && ranges.length > 0
         ? Math.min(...ranges)
@@ -1649,7 +1652,8 @@ function optionAttackActionIds(
     }
     if (slot.use.kind === 'multiattack') {
       return slot.use.components.flatMap((component) =>
-        component.target.kind === 'combatant' && component.target.combatantId === targetId
+        component.kind === 'attack' && component.target.kind === 'combatant' &&
+          component.target.combatantId === targetId
           ? [String(component.actionId)]
           : []);
     }

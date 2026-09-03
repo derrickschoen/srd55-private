@@ -326,7 +326,7 @@ function applyOneResolvedProposal(
           action,
           mechanics.actorId,
           targetId,
-          use.slot === 'bonus' ? 'bonus_action' : 'action',
+          use.multiattackComponent === true ? 'none' : use.slot === 'bonus' ? 'bonus_action' : 'action',
         ));
         break;
     }

@@ -1,9 +1,11 @@
 import { canonicalJson } from '../commands/canonical-json';
+import { combatantsAreAllies } from '../combat/allies';
 import type { EncounterState } from '../combat/encounter';
 import type {
   MonsterAction,
   MonsterAttackAction,
   MonsterBonusAction,
+  MonsterMultiattackComponent,
   MonsterMultiattackAction,
   MonsterSpellcastingAction,
 } from '../combat/statblock';
@@ -37,7 +39,13 @@ import {
   type EngineOfferableOption,
   type EngineOptionCandidate,
   type EngineOptionModelingCandidate,
+  type EngineOmittedRider,
 } from './option-modeling';
+import {
+  omittedRidersForMultiattack,
+  omittedRidersForMultiattackComponent,
+  omittedRidersForStandaloneAction,
+} from './monster-feature-support';
 import {
   engineActionId,
   engineOptionId,
@@ -46,7 +54,7 @@ import {
   type EngineBonusActionUse,
   type EngineMainActionUse,
   type EngineMovementObjective,
-  type EngineTargetedAttackUse,
+  type EngineMultiattackComponentUse,
 } from './turn-proposal';
 
 export const ACTION_ECONOMY_POLICY_VERSION = 'action-economy-v1' as const;
@@ -61,17 +69,17 @@ function target(combatantId: CombatantId) {
 }
 
 function livingEnemies(state: EncounterState, actorId: CombatantId): readonly CombatantId[] {
-  const actor = state.combatants.find((candidate) => candidate.profile.id === actorId);
   return state.combatants
-    .filter((candidate) => candidate.life !== 'dead' && candidate.profile.kind !== actor?.profile.kind)
+    .filter((candidate) => candidate.life !== 'dead' &&
+      !combatantsAreAllies(state, actorId, candidate.profile.id))
     .map((candidate) => candidate.profile.id)
     .sort((left, right) => left.localeCompare(right));
 }
 
 function livingAllies(state: EncounterState, actorId: CombatantId): readonly CombatantId[] {
-  const actor = state.combatants.find((candidate) => candidate.profile.id === actorId);
   return state.combatants
-    .filter((candidate) => candidate.life === 'living' && candidate.profile.kind === actor?.profile.kind)
+    .filter((candidate) => candidate.life === 'living' &&
+      combatantsAreAllies(state, actorId, candidate.profile.id))
     .map((candidate) => candidate.profile.id)
     .sort((left, right) => left.localeCompare(right));
 }
@@ -195,40 +203,45 @@ function combinations<T>(values: readonly T[], count: number): readonly (readonl
 export function legalMultiattackCombinations(
   multiattack: MonsterMultiattackAction,
   actions: readonly MonsterAction[],
-): readonly (readonly MonsterAttackAction[])[] {
-  const attacks = multiattack.actionIds.flatMap((id) => {
+): readonly (readonly MonsterMultiattackComponent[])[] {
+  const components = multiattack.actionIds.flatMap((id) => {
     const action = actions.find(
-      (candidate): candidate is MonsterAttackAction => candidate.kind === 'attack' && candidate.id === id,
+      (candidate): candidate is MonsterMultiattackComponent =>
+        (candidate.kind === 'attack' || candidate.kind === 'saving_throw') && candidate.id === id,
     );
     return action === undefined ? [] : [action];
   });
-  if (attacks.length !== multiattack.actionIds.length || attacks.length === 0) return [];
+  if (components.length !== multiattack.actionIds.length || components.length === 0) return [];
   switch (multiattack.combination) {
-    case 'any': return combinations(attacks, multiattack.count);
-    case 'fixed': return attacks.length === multiattack.count ? [attacks] : [];
+    case 'any': return combinations(components, multiattack.count);
+    case 'fixed': return components.length === multiattack.count ? [components] : [];
     case 'one_attack_may_be_replaced': {
-      const replacement = attacks.at(-1);
-      const ordinary = attacks.slice(0, -1);
-      if (replacement === undefined || ordinary.length === 0) return [];
+      const replacement = components.at(-1);
+      const ordinary = components.slice(0, -1).filter(
+        (component): component is MonsterAttackAction => component.kind === 'attack',
+      );
+      if (replacement === undefined || replacement.kind !== 'saving_throw' ||
+        ordinary.length !== components.length - 1 || ordinary.length === 0) return [];
       const base = combinations(ordinary, multiattack.count);
       return [
         ...base,
-        ...base.flatMap((entry) => entry.map((_, index) =>
-          entry.map((action, actionIndex) => actionIndex === index ? replacement : action),
-        )),
+        ...base.map((entry) => [...entry.slice(0, -1), replacement]),
       ].filter((entry, index, all) =>
-        all.findIndex((candidate) => canonicalJson(candidate.map((action) => action.id)) ===
-          canonicalJson(entry.map((action) => action.id))) === index);
+        all.findIndex((candidate) => canonicalJson(candidate.map((action) => [action.kind, action.id])) ===
+          canonicalJson(entry.map((action) => [action.kind, action.id]))) === index);
     }
   }
 }
 
-function mainUses(state: EncounterState, actorId: CombatantId): readonly {
+interface MainUseOption {
   readonly label: string;
   readonly use: EngineMainActionUse;
   readonly movement: EngineMovementObjective;
   readonly resourceCostLabels: readonly string[];
-}[] {
+  readonly omittedRiders: readonly EngineOmittedRider[];
+}
+
+function mainUses(state: EncounterState, actorId: CombatantId): readonly MainUseOption[] {
   const subject = state.combatants.find((candidate) => candidate.profile.id === actorId);
   if (subject?.profile.kind !== 'monster' || subject.life !== 'living' || subject.turn.action.kind !== 'available') {
     return [];
@@ -240,7 +253,7 @@ function mainUses(state: EncounterState, actorId: CombatantId): readonly {
   );
   const attacks = multiattacks.length === 0
     ? actions.filter((action): action is MonsterAttackAction => action.kind === 'attack').flatMap((action) =>
-        enemies.map((enemy): { readonly label: string; readonly use: EngineMainActionUse; readonly movement: EngineMovementObjective; readonly resourceCostLabels: readonly string[] } => ({
+        enemies.map((enemy): MainUseOption => ({
           label: `${action.name} -> ${enemy}`,
           use: { kind: 'attack', actionId: engineActionId(action.id), target: target(enemy) },
           movement: {
@@ -248,11 +261,16 @@ function mainUses(state: EncounterState, actorId: CombatantId): readonly {
             engagement: { stance: action.delivery.kind === 'melee' ? 'close_to_melee' : 'maintain_range', anchor: target(enemy) },
           },
           resourceCostLabels: [],
+          omittedRiders: omittedRidersForStandaloneAction(action),
         })))
     : multiattacks.flatMap((multiattack) => legalMultiattackCombinations(multiattack, actions).flatMap((combination) =>
-        enemies.map((enemy): { readonly label: string; readonly use: EngineMainActionUse; readonly movement: EngineMovementObjective; readonly resourceCostLabels: readonly string[] } => {
-          const components: readonly EngineTargetedAttackUse[] = combination.map((action) => ({
-            kind: 'attack', actionId: engineActionId(action.id), target: target(enemy),
+        enemies.map((enemy): MainUseOption => {
+          const sourceActionId = engineActionId(multiattack.id);
+          const components: readonly EngineMultiattackComponentUse[] = combination.map((action) => ({
+            kind: action.kind,
+            actionId: engineActionId(action.id),
+            target: target(enemy),
+            omittedRiders: omittedRidersForMultiattackComponent(sourceActionId, action),
           }));
           return {
             label: `${combination.map((action) => action.name).join(' + ')} -> ${enemy}`,
@@ -260,14 +278,16 @@ function mainUses(state: EncounterState, actorId: CombatantId): readonly {
             movement: {
               preference: { willingness: 'only_if_required', maximumFeet: subject.profile.rules.speed, opportunityRisk: 'avoid' },
               engagement: {
-                stance: combination.every((action) => action.delivery.kind === 'melee') ? 'close_to_melee' : 'maintain_range',
+                stance: combination.every((action) =>
+                  action.kind === 'saving_throw' || action.delivery.kind === 'melee') ? 'close_to_melee' : 'maintain_range',
                 anchor: target(enemy),
               },
             },
             resourceCostLabels: [],
+            omittedRiders: omittedRidersForMultiattack(multiattack, combination),
           };
         })));
-  const savingThrows = actions.flatMap((action) => action.kind !== 'saving_throw' ? [] : enemies.map((enemy) => ({
+  const savingThrows = actions.flatMap((action) => action.kind !== 'saving_throw' ? [] : enemies.map((enemy): MainUseOption => ({
     label: `${action.name} -> ${enemy}`,
     use: { kind: 'saving_throw' as const, actionId: engineActionId(action.id), target: target(enemy) },
     movement: {
@@ -275,6 +295,7 @@ function mainUses(state: EncounterState, actorId: CombatantId): readonly {
       engagement: { stance: 'close_to_melee' as const, anchor: target(enemy) },
     },
     resourceCostLabels: [],
+    omittedRiders: omittedRidersForStandaloneAction(action),
   })));
   const spellUses = actions.flatMap((action) => action.kind === 'spellcasting'
     ? spellcastingUses(state, actorId, action)
@@ -291,16 +312,16 @@ function mainUses(state: EncounterState, actorId: CombatantId): readonly {
         label: `${action.id} @ ${object.name}`,
         use: { kind: 'use_world_object' as const, objectId: object.id, actionId: engineActionId(action.id) },
         movement: HOLD,
-        resourceCostLabels: action.uses === 'once' ? [`world-object:${String(object.id)}:once`] : [],
-      }];
+        resourceCostLabels: action.uses === 'once' ? [`world-object:${String(object.id)}:once`] : [], omittedRiders: [],
+      } satisfies MainUseOption];
     }));
   return [
     ...attacks,
     ...savingThrows,
     ...spellUses,
     ...worldObjects,
-    { label: 'Dodge', use: { kind: 'dodge' }, movement: HOLD, resourceCostLabels: [] },
-    { label: 'Disengage', use: { kind: 'disengage' }, movement: HOLD, resourceCostLabels: [] },
+    { label: 'Dodge', use: { kind: 'dodge' }, movement: HOLD, resourceCostLabels: [], omittedRiders: [] },
+    { label: 'Disengage', use: { kind: 'disengage' }, movement: HOLD, resourceCostLabels: [], omittedRiders: [] },
     {
       label: 'Dash',
       use: { kind: 'dash' },
@@ -309,8 +330,9 @@ function mainUses(state: EncounterState, actorId: CombatantId): readonly {
         engagement: { stance: 'close_to_melee', anchor: { kind: 'nearest_visible_enemy' } },
       },
       resourceCostLabels: [],
+      omittedRiders: [],
     },
-    { label: 'End Turn', use: { kind: 'end_turn' }, movement: HOLD, resourceCostLabels: [] },
+    { label: 'End Turn', use: { kind: 'end_turn' }, movement: HOLD, resourceCostLabels: [], omittedRiders: [] },
   ];
 }
 
@@ -356,6 +378,7 @@ function spellcastingUses(
   readonly use: Extract<EngineMainActionUse | EngineBonusActionUse, { readonly kind: 'cast_spell' }>;
   readonly movement: EngineMovementObjective;
   readonly resourceCostLabels: readonly string[];
+  readonly omittedRiders: readonly EngineOmittedRider[];
 }[] {
   const subject = state.combatants.find((candidate) => candidate.profile.id === actorId);
   return action.spells.flatMap((spell) => {
@@ -385,6 +408,7 @@ function spellcastingUses(
       },
       movement: HOLD,
       resourceCostLabels: poolId === null ? [] : [`${String(poolId)}:${String(remaining)}/${String(maximum)}`],
+      omittedRiders: [],
     }];
   });
 }
@@ -436,12 +460,12 @@ function option(
   movement: EngineMovementObjective,
   actionSlots: readonly EngineActionSlotUse[],
   resourceCostLabels: readonly string[],
+  omittedRiders: readonly EngineOmittedRider[],
 ): EngineOfferableOption {
-  const body = { actorId, revision, label, movement, actionSlots, resourceCostLabels };
+  const body = { actorId, revision, label, movement, actionSlots, resourceCostLabels, omittedRiders };
   return {
     optionId: engineOptionId(`option:${String(revision)}:${sha256(canonicalJson(body)).slice(0, 48)}`),
     ...body,
-    omittedRiders: [],
   };
 }
 
@@ -632,7 +656,10 @@ export function engineActorOptions(
   const values = main.flatMap((mainUse) => {
     const mainSlot: EngineActionSlotUse = { slot: 'main', use: mainUse.use };
     return [
-      option(revision, actorId, mainUse.label, mainUse.movement, [mainSlot], mainUse.resourceCostLabels),
+      option(
+        revision, actorId, mainUse.label, mainUse.movement, [mainSlot],
+        mainUse.resourceCostLabels, mainUse.omittedRiders,
+      ),
       ...bonus.map((bonusUse) => option(
         revision,
         actorId,
@@ -640,6 +667,7 @@ export function engineActorOptions(
         movementWithBonusUse(mainUse.movement, bonusUse.use, subject.profile.rules.speed),
         [mainSlot, { slot: 'bonus', use: bonusUse.use }],
         [...mainUse.resourceCostLabels, ...bonusUse.resourceCostLabels],
+        mainUse.omittedRiders,
       )),
     ];
   });

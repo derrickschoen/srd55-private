@@ -2,7 +2,7 @@ import type { GridCell } from '../combat/grid';
 import type { AreaTemplate } from '../combat/templates';
 import type { CombatantId, WorldObjectId } from '../combat/values';
 import type { EngineTargetSelector } from './engine-query-port';
-import type { EngineOfferableOption, EngineOptionId } from './option-modeling';
+import type { EngineOfferableOption, EngineOmittedRider, EngineOptionId } from './option-modeling';
 
 export {
   engineHumanOptionId,
@@ -10,6 +10,7 @@ export {
   type EngineHumanOnlyOption,
   type EngineHumanOptionId,
   type EngineOfferableOption,
+  type EngineOmittedRider,
   type EngineOptionCandidate,
   type EngineOptionId,
   type NoModeledEffect,
@@ -47,12 +48,21 @@ export interface EngineTargetedAttackUse {
   readonly target: EngineTargetSelector;
 }
 
+export type EngineMultiattackComponentUse = (
+  | EngineTargetedAttackUse
+  | {
+      readonly kind: 'saving_throw';
+      readonly actionId: EngineActionId;
+      readonly target: EngineTargetSelector;
+    }
+) & { readonly omittedRiders: readonly EngineOmittedRider[] };
+
 export type EngineMainActionUse =
   | EngineTargetedAttackUse
   | {
       readonly kind: 'multiattack';
       readonly actionId: EngineActionId;
-      readonly components: readonly EngineTargetedAttackUse[];
+      readonly components: readonly EngineMultiattackComponentUse[];
     }
   | {
       readonly kind: 'saving_throw';
@@ -126,6 +136,8 @@ export interface ResolvedActionSlotUse {
   readonly spellId: EngineSpellId | null;
   readonly targetIds: readonly CombatantId[];
   readonly objectId: WorldObjectId | null;
+  readonly omittedRiders: readonly EngineOmittedRider[];
+  readonly multiattackComponent?: true;
   /** Present only for a placed-area spell. */
   readonly area?: AreaTemplate;
 }
@@ -137,6 +149,7 @@ export interface ResolvedTurnMechanics {
   readonly path: readonly GridCell[];
   readonly finalPosition: GridCell;
   readonly actionSlots: readonly ResolvedActionSlotUse[];
+  readonly omittedRiders: readonly EngineOmittedRider[];
 }
 
 export type EngineProposalResolution =

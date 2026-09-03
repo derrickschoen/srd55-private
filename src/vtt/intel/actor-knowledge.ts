@@ -5,6 +5,7 @@ import {
   type EncounterCombatantState,
   type EncounterState,
 } from '../../combat/encounter';
+import { combatantsAreAllies } from '../../combat/allies';
 import type { ConditionName } from '../../combat/conditions';
 import type { GridCell } from '../../combat/grid';
 import type { CombatantId } from '../../combat/values';
@@ -200,13 +201,13 @@ export function projectActorKnowledge(
   state: EncounterState,
   actorId: CombatantId,
 ): ActorKnowledgeProjection {
-  const actor = state.combatants.find((combatant) => combatant.profile.id === actorId);
-  if (actor === undefined) {
+  if (!state.combatants.some((combatant) => combatant.profile.id === actorId)) {
     throw new RangeError(`Actor knowledge requires a combatant in this encounter: ${String(actorId)}.`);
   }
   const tokens = new Map(state.tokens.map((token) => [token.combatantId, token] as const));
   const targets = state.combatants
-    .filter((candidate) => candidate.life !== 'dead' && candidate.profile.kind !== actor.profile.kind)
+    .filter((candidate) => candidate.life !== 'dead' &&
+      !combatantsAreAllies(state, actorId, candidate.profile.id))
     .map((candidate): ActorTargetKnowledge => {
       const targetId = candidate.profile.id;
       const target = tokens.get(targetId);

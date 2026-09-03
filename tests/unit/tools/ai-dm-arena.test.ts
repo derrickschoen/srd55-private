@@ -277,6 +277,7 @@ describe('AI-DM arena', () => {
               spellId: engineSpellId('hypnotic-pattern'),
               targetIds: [],
               objectId: null,
+              omittedRiders: [],
             }],
           },
         });

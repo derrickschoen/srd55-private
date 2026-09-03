@@ -18,7 +18,40 @@ export type EngineHumanOptionId = Brand<string, 'EngineHumanOptionId'>;
 export const engineOptionId = (value: string): EngineOptionId => value as EngineOptionId;
 export const engineHumanOptionId = (value: string): EngineHumanOptionId => value as EngineHumanOptionId;
 
-export type EngineOmittedRider = never;
+interface EngineOmittedRiderSource {
+  readonly sourceActionId: EngineActionId;
+  readonly componentActionId: EngineActionId;
+}
+
+export type EngineOmittedRider =
+  | (EngineOmittedRiderSource & {
+      readonly kind: 'conditional_damage_trigger';
+      readonly trigger: 'attack_roll_advantage' | 'replaces_base_when_target_bloodied' | 'charge';
+    })
+  | (EngineOmittedRiderSource & {
+      readonly kind: 'conditional_on_hit_effect';
+      readonly effect: 'condition';
+      readonly trigger: 'charge';
+    })
+  | (EngineOmittedRiderSource & {
+      readonly kind: 'attack_advantage_window';
+      readonly window: 'first_round_of_each_combat';
+    })
+  | (EngineOmittedRiderSource & {
+      readonly kind: 'delayed_zombie_creation';
+      readonly targetKind: 'Humanoid';
+      readonly delayHours: 24;
+    })
+  | (EngineOmittedRiderSource & {
+      readonly kind: 'other_explicitly_classified_secondary_effect';
+      readonly classification:
+        | 'coupled_action_use'
+        | 'equipment_corrosion'
+        | 'conditional_damage_replacement'
+        | 'grapple_escape_disadvantage'
+        | 'attachment';
+      readonly relatedActionId?: EngineActionId;
+    });
 export type EngineDeclaredActionKind = MonsterAction['kind'] | MonsterBonusAction['kind'];
 
 export type NoModeledEffect =
