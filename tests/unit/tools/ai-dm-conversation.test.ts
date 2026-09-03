@@ -16,6 +16,7 @@ import {
   parseConversationArgs,
   proposalResolutionDivergence,
   runConversation,
+  structuredFinalDecisionPhase,
 } from '../../../tools/ai-dm-conversation';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
@@ -1462,6 +1463,13 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(row.toolCalls).toBe(0);
     expect(row.rawTurnContext).not.toContain('context_not_requested');
     expect(row.authorizedPlan).not.toBeNull();
+  });
+
+  it('rejects speculative structured-final dispatch at the typed phase boundary (mutation: pass speculative through as a decision phase)', () => {
+    expect(structuredFinalDecisionPhase('initial')).toBe('initial');
+    expect(structuredFinalDecisionPhase('correction')).toBe('correction');
+    expect(() => structuredFinalDecisionPhase('speculative'))
+      .toThrow('Structured-final decisions are unavailable for speculative dispatch.');
   });
 
   it('records a missing final decision explicitly and repairs it with the same indexed correction shape (mutation: classify final absence as service_null)', { timeout: 30_000 }, async () => {

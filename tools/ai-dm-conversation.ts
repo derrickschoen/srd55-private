@@ -1748,7 +1748,10 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
         ? ''
         : !roomTransition && manifest.phase === 'correction' && this.#failCorrection.has(key)
           ? ''
-          : simulatedIndexedFinalDecision(invocation.prompt, manifest.phase);
+          : simulatedIndexedFinalDecision(
+              invocation.prompt,
+              structuredFinalDecisionPhase(manifest.phase),
+            );
       return completedSimulated(sessionId, finalText);
     }
     const remainingFlaps = this.#remainingPrimaryFlaps.get(key) ?? 0;
@@ -1845,6 +1848,20 @@ function simulatedIndexedFinalDecision(prompt: string, phase: DecisionPhase): st
       };
     }),
   });
+}
+
+export function structuredFinalDecisionPhase(
+  phase: EngineMcpLauncherManifest['phase'],
+): DecisionPhase {
+  switch (phase) {
+    case 'initial':
+    case 'correction':
+      return phase;
+    case 'speculative':
+      throw new TypeError('Structured-final decisions are unavailable for speculative dispatch.');
+  }
+  phase satisfies never;
+  throw new Error('Unknown structured-final decision phase.');
 }
 
 function completedSimulated(value: string, finalText = 'SIMULATED — proposal delivered through engine MCP spool'): AgentTurnResult {
