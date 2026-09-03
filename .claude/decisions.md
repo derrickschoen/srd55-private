@@ -835,6 +835,38 @@ vs no incoming attacks; queue for the era re-anchor before P4. This is
 also a candidate rubric note for judges: disengage-with-no-threat is an
 action-economy zero regardless of prose.
 
+## D487 — OWNER: parallelize everything; worktrees per strategy; different models collaborate; permute the Gs and Hs (2026-09-03)
+
+Owner (verbatim): **"Parallelize everything you can. Look for seams to
+split tasks up. Set up worktrees to try different strategies from
+different perspectives using collaboration of different models.
+Experiment with different permutations of the Gs and the Hs"**
+
+Program set up 12:33:
+- Worktrees from lane HEAD 79dca133 (post-G1): dnd-wt-h1-ids
+  (claude/h1-ids, codex sol high: H1 with the id-based constrained final
+  decision), dnd-wt-h1-indices (claude/h1-indices, codex terra xhigh: the
+  competing A3 index-based variant with an interim ranking = engine
+  frontier/default first), dnd-wt-h3-skills (claude/h3-skills, codex sol
+  high: skills infrastructure + two SKILL.md). G2 continues in the lane
+  (dnd-lane-rollout). node_modules shared by symlink.
+- Perspectives: opus (claude -p, read-only) critiques the decision-
+  extraction plan as type designer / experimentalist / DM and proposes
+  one alternative; luna medium drafts alternative SKILL.md texts for a
+  fourth skill arm; codex sol/terra implement; the supervisor gates and
+  arbitrates. Claude subagents are still not used; opus/luna are
+  explicit owner-authorized collaborators here.
+- Judging parallelized: five 2-arm packets (d465 s-full/s-rows/s-opp/
+  s-move vs luna-low twins, primes 503/509/521/523; d483 s-threats vs
+  its no-KB twin, prime 487) built leak-clean and queued through the
+  three-seat panel while the arena keeps running.
+- Merge plan: each worktree is gated by the supervisor separately (tsc,
+  sg, full vitest, mutation checks), then merged into the lane in the
+  order G2 -> H1 winner -> H3; the losing H1 variant is kept as a branch
+  for the transport A/B, not merged. Conflicts in tools/ai-dm-
+  conversation.ts are expected and resolved by the supervisor with a
+  codex review of the merge.
+
 ## D486 — OWNER: the D466 era shift includes H1 and H3 (2026-09-03)
 
 Asked: shift ends at G2 with H1/H3 as the next program (supervisor
