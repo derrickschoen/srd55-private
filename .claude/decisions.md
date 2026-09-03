@@ -1,5 +1,13 @@
 # Binding scope decisions
 
+ARM 14 VERIFIED (supervisor note, 2026-09-02 20:07): d443-cav-full-low
+30/30 authorized, 0 timeouts at 120 s, 10 digests x3, refusals 9, no
+escalations, engine-planned rounds 6 (sim_controller; highest of the
+sweep so far), wall median 16.1 s / p90 28.7 s, token median 495k. Idle
+Disengage 4, Dash 85, attack slots 41. Caveman low and medium look alike
+on mechanism counts (medium: 3/84/46). Arm 15 cav-rows-move-gating-medium,
+the last D443 arm, started 20:04:12. A1.1 still in flight in the lane.
+
 A1 VERIFIED AND COMMITTED IN THE LANE; F: MUTATION LEFT IN AN UNTRACKED
 FILE FOR ~40 s (supervisor, 2026-09-02 19:58): codex delivered A1 (29
 files, +379/-146). My independent gates: tsc 0, sg 0, vitest 535 files /
