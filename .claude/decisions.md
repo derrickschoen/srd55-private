@@ -1,5 +1,20 @@
 # Binding scope decisions
 
+F: MY GATE TRUSTED INCREMENTAL tsc; H1-INDICES DOES NOT COMPILE
+(supervisor, 2026-09-03 14:30). After committing H1-indices as "tsc 0",
+a mutation run showed `tsc -b` failing at tools/ai-dm-conversation.ts:
+1751 (speculative phase not assignable to DecisionPhase); with the
+mutation restored byte-for-byte the error persists, and `tsc -b --force`
+confirms it. The gate's `npx tsc -b` at 13:41 passed because an
+incremental build cache marked the project up to date — the same trap
+codex fell into. Actions: gate-wt.sh now runs `tsc -b --force`; forced
+checks re-run on H3, the lane (G2), H1-ids and H4 (results in this
+note's follow-up); the H1-indices commit message amended to say NOT
+GREEN; fix dispatched to the same terra session (typed handling of the
+speculative phase, no cast). Rule: every gate and every mutation check
+uses `tsc -b --force`; a "tsc 0" claim from an incremental build is not
+evidence.
+
 H3 AND H1-INDICES VERIFIED AND COMMITTED ON THEIR BRANCHES; SOL GATING
 VERIFIED (supervisor, 2026-09-03 14:20). H3 (claude/h3-skills): my gate
 545 files / 9541 tests green (codex's own full run had four load
