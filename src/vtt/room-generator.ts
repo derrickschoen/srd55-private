@@ -137,6 +137,12 @@ const GENERATED_PARTY_ABILITY_SCORES = {
   },
 } as const satisfies Readonly<Record<string, NonNullable<CombatantProfile['rules']['abilityScores']>>>;
 
+const GENERATED_PARTY_SIZE_CATEGORIES = {
+  'combatant:fighter': 'Medium',
+  'combatant:cleric': 'Medium',
+  'combatant:wizard': 'Medium',
+} as const satisfies Readonly<Record<string, NonNullable<CombatantProfile['rules']['sizeCategory']>>>;
+
 function derivedAbilityScores(
   profile: CombatantProfile,
 ): NonNullable<CombatantProfile['rules']['abilityScores']> {
@@ -159,6 +165,9 @@ export function applyRoomInitiativeProfile(
     config: { ...state.config, initiativeMode: 'per_combatant' },
     combatants: state.combatants.map((combatant) => {
       const abilityScores = derivedAbilityScores(combatant.profile);
+      const configuredPartySize = GENERATED_PARTY_SIZE_CATEGORIES[
+        String(combatant.profile.id) as keyof typeof GENERATED_PARTY_SIZE_CATEGORIES
+      ];
       return {
         ...structuredClone(combatant),
         profile: {
@@ -167,6 +176,7 @@ export function applyRoomInitiativeProfile(
             ...structuredClone(combatant.profile.rules),
             abilityScores: structuredClone(abilityScores),
             initiativeBonus: Math.floor((abilityScores.dexterity - 10) / 2),
+            ...(configuredPartySize === undefined ? {} : { sizeCategory: configuredPartySize }),
           },
         },
       };

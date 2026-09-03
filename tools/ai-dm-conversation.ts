@@ -102,6 +102,7 @@ import {
   materializeScriptedPartyTurn,
   type ScriptedPartyAdherence,
   type ScriptedPartyAdherenceReasonCode,
+  type ScriptedPartyDefaultTurn,
   type ScriptedPartyDecisionPolicy,
   type ScriptedPartyPlan,
 } from '../src/vtt/scripted-party-round';
@@ -265,6 +266,7 @@ export interface ConversationAuthorizedActorPlan {
 
 export interface ConversationPcTurn {
   readonly actor: CombatantId;
+  readonly partyDefaultTurn: ScriptedPartyDefaultTurn | null;
   readonly initiativeIndex: number;
   readonly beforeRevision: number;
   readonly afterRevision: number;
@@ -401,6 +403,17 @@ export interface ConversationSuggestedPlay {
 export type ConversationSuggestionAdoption = 'as_is' | 'edited' | 'ignored';
 type SimulatedSuggestionResponse = ConversationSuggestionAdoption | 'legacy';
 
+export type ConversationFallbackReason =
+  | 'no_proposal'
+  | 'validation_exhausted'
+  | 'auto_submit_blocked'
+  | 'timeout';
+
+export type ConversationTerminalOutcome = {
+  readonly kind: 'encounter_over';
+  readonly result: 'party_defeated';
+};
+
 export interface ConversationRow {
   readonly knowledgeModel: 'engine_state';
   readonly hiddenOptions: readonly HiddenOptionRecord[];
@@ -453,7 +466,10 @@ export interface ConversationRow {
   readonly contextTruncated: boolean;
   readonly plannedBy: ConversationPlannerAttribution | null;
   readonly plannerLabel: 'model' | ExhaustionPlannerLabel | null;
+  readonly fallbackReason: ConversationFallbackReason | null;
   readonly autoSubmitBlocks: readonly ConversationAutoSubmitBlock[];
+  readonly partyDefaultTurn: boolean;
+  readonly terminalOutcome: ConversationTerminalOutcome | null;
   readonly escalated: boolean;
   readonly escalationModel: string | null;
   readonly stateBinding: {
@@ -525,6 +541,8 @@ export interface ConversationRunOptions {
   /** SIMULATED-only exhaustion cases, encoded as `room-N-round-N`. */
   readonly exhaustInitial?: readonly string[];
   readonly invalidInitial?: readonly string[];
+  /** SIMULATED-only cancelled initial dispatches, encoded as `room-N-round-N`. */
+  readonly timeoutInitial?: readonly string[];
   readonly failCorrection?: readonly string[];
   /** SIMULATED-only count of consecutive service-null primary turns by request key. */
   readonly flapPrimaryByRequest?: Readonly<Record<string, number>>;
@@ -538,6 +556,11 @@ export interface ConversationRunOptions {
   readonly adjustmentResponseByRequest?: Readonly<Record<string, 'keep' | 'change' | 'invalid'>>;
   /** Test-only policy seam used to force or disable deterministic rollover. */
   readonly contextRolloverPolicy?: ContextRolloverPolicy;
+  /** Test-only replacement for reproducing stale or incomplete scripted plans. */
+  readonly mutateScriptedPartyPlan?: (
+    plan: ScriptedPartyPlan,
+    context: { readonly room: number; readonly round: number },
+  ) => ScriptedPartyPlan;
   /** Explicit sitting boundary; omitted means the sitting remains resumable. */
   readonly endSession?: boolean;
 }
@@ -781,6 +804,12 @@ function livingMonsterIds(state: EncounterState): readonly CombatantId[] {
   return state.combatants.flatMap((subject) =>
     subject.profile.kind === 'monster' && subject.life !== 'dead' ? [subject.profile.id] : [],
   ).sort((left, right) => left.localeCompare(right));
+}
+
+function partyIsDefeated(state: EncounterState): boolean {
+  const players = state.combatants.filter((subject) =>
+    subject.profile.kind === 'player_character');
+  return players.length > 0 && players.every((subject) => subject.life !== 'living');
 }
 
 interface SegmentMonsterPlanEntry {
@@ -1587,6 +1616,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
   readonly contextCallsByRequest = new Map<string, number>();
   readonly #exhaustInitial: ReadonlySet<string>;
   readonly #invalidInitial: ReadonlySet<string>;
+  readonly #timeoutInitial: ReadonlySet<string>;
   readonly #failCorrection: ReadonlySet<string>;
   readonly #remainingPrimaryFlaps: Map<string, number>;
   readonly #reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>;
@@ -1601,6 +1631,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     private readonly intelMode: IntelMode,
     exhaust: readonly string[],
     invalid: readonly string[],
+    timeout: readonly string[],
     fail: readonly string[],
     primaryFlaps: Readonly<Record<string, number>>,
     reactionGuidanceByRequest: Readonly<Record<string, ReactionGuidanceDeclaration>>,
@@ -1611,6 +1642,7 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     this.kind = kind;
     this.#exhaustInitial = new Set(exhaust);
     this.#invalidInitial = new Set(invalid);
+    this.#timeoutInitial = new Set(timeout);
     this.#failCorrection = new Set(fail);
     this.#remainingPrimaryFlaps = new Map(Object.entries(primaryFlaps));
     this.#reactionGuidanceByRequest = reactionGuidanceByRequest;
@@ -1655,6 +1687,9 @@ class SimulatedConversationAdapter implements AgentSessionAdapter {
     if (!roomTransition && manifest.phase === 'initial' && remainingFlaps > 0) {
       this.#remainingPrimaryFlaps.set(key, remainingFlaps - 1);
       return completedSimulated(sessionId);
+    }
+    if (!roomTransition && manifest.phase === 'initial' && this.#timeoutInitial.has(key)) {
+      return cancelledSimulated(sessionId);
     }
     const submit = !roomTransition && !(manifest.phase === 'initial'
       ? this.#exhaustInitial.has(key) : this.#failCorrection.has(key));
@@ -1724,6 +1759,21 @@ function completedSimulated(value: string): AgentTurnResult {
     usage: null,
     exit: 'completed',
   };
+}
+
+function cancelledSimulated(value: string): AgentTurnResult {
+  return {
+    resumeSessionId: agentSessionId(value),
+    sessionId: null,
+    finalText: '',
+    usage: null,
+    exit: 'cancelled',
+  };
+}
+
+function agentDispatchWasCancelled(error: unknown): boolean {
+  return error instanceof Error && /Agent (?:cold start|resume|recovery cold start|escalation cold start) was cancelled\.$/u
+    .test(error.message);
 }
 
 async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
@@ -2240,6 +2290,7 @@ async function runConversationWithConfiguredIntel(
   let observedRejections: ConversationChainAttemptEvidence[] = [];
   const simulated = config.dryRun ? new SimulatedConversationAdapter(
     config.cli, config.cwd, config.intelMode, options.exhaustInitial ?? [], options.invalidInitial ?? [],
+    options.timeoutInitial ?? [],
     options.failCorrection ?? [],
     options.flapPrimaryByRequest ?? {},
     options.reactionGuidanceByRequest ?? {},
@@ -2377,11 +2428,15 @@ async function runConversationWithConfiguredIntel(
         capsule.revision,
       );
       const suggestedPlan = suggestedPlanBookkeeping(capsule);
-      const segmentPartyPlan = config.combatModel === 'initiative_segments_v1'
+      const createdSegmentPartyPlan = config.combatModel === 'initiative_segments_v1'
         ? createScriptedPartyPlan(engineSession.currentState(), {
             decisionPolicy: partyPolicy,
           })
         : null;
+      const segmentPartyPlan = createdSegmentPartyPlan === null
+        ? null
+        : options.mutateScriptedPartyPlan?.(createdSegmentPartyPlan, { room, round }) ??
+          createdSegmentPartyPlan;
       const initiativeOrder = engineSession.currentState().initiative.map((entry) => entry.combatant);
       const initiativeIndexByActor = new Map(
         initiativeOrder.map((actorId, index) => [actorId, index] as const),
@@ -2479,6 +2534,11 @@ async function runConversationWithConfiguredIntel(
       let correctionDispatchPlanner: ConversationPlannerAttribution | null = null;
       let plannedBy: ConversationRow['plannedBy'] = null;
       let plannerLabel: ConversationRow['plannerLabel'] = null;
+      let fallbackReason: ConversationFallbackReason | null = null;
+      let partyDefaultTurn = false;
+      let terminalOutcome: ConversationTerminalOutcome | null = null;
+      let primaryDispatchTimedOut = false;
+      let correctionDispatchTimedOut = false;
       let escalated = false;
       let firedEscalationModel: string | null = null;
       let rolloutSessionId: string | null = null;
@@ -3060,9 +3120,16 @@ async function runConversationWithConfiguredIntel(
             initialDispatchPlanner = plannerAttribution(primaryInvocation);
             options.onPrimaryDispatchStart?.();
             initialCalls += 1;
-            const turn = journal.agentSession() === null
-              ? await lifecycle.coldStartRound(primaryInvocation, new AbortController().signal)
-              : await lifecycle.resumeRound(primaryInvocation, new AbortController().signal);
+            let turn: AgentTurnResult;
+            try {
+              turn = journal.agentSession() === null
+                ? await lifecycle.coldStartRound(primaryInvocation, new AbortController().signal)
+                : await lifecycle.resumeRound(primaryInvocation, new AbortController().signal);
+            } catch (error) {
+              if (!agentDispatchWasCancelled(error)) throw error;
+              primaryDispatchTimedOut = true;
+              break;
+            }
             rolloutSessionId = turn.sessionId;
             captureCallUsage(turn, 'initial');
             rowTurnContext = takeTurnContext(initialLauncher.turnContextSpoolPath) ?? rowTurnContext;
@@ -3370,12 +3437,29 @@ async function runConversationWithConfiguredIntel(
                   observedTurnContextCalls;
                 correctionCalls += 1;
                 recordedCorrectionTurnContext = getPlannedCorrectionTurnContext();
-                const correctionTurn = escalationPlanner === null
-                  ? await lifecycle.resumeCorrection(correctionInvocation, signal)
-                  : await lifecycle.startEscalation({
-                      ...correctionInvocation,
-                      instructions: escalationRepairInstructions,
-                    }, signal);
+                let correctionTurn: AgentTurnResult;
+                try {
+                  correctionTurn = escalationPlanner === null
+                    ? await lifecycle.resumeCorrection(correctionInvocation, signal)
+                    : await lifecycle.startEscalation({
+                        ...correctionInvocation,
+                        instructions: escalationRepairInstructions,
+                      }, signal);
+                } catch (error) {
+                  if (!agentDispatchWasCancelled(error)) throw error;
+                  correctionDispatchTimedOut = true;
+                  const activeBinding = journal.agentSession();
+                  if (activeBinding === null) {
+                    throw new Error('Timed-out correction has no retained agent session.');
+                  }
+                  correctionTurn = {
+                    resumeSessionId: activeBinding.sessionId,
+                    sessionId: null,
+                    finalText: '',
+                    usage: null,
+                    exit: 'completed',
+                  };
+                }
                 if (correctionTurn.exit !== 'completed') {
                   throw new Error('Agent correction dispatch was cancelled.');
                 }
@@ -3458,6 +3542,13 @@ async function runConversationWithConfiguredIntel(
           const exhaustionPlannerLabel: ExhaustionPlannerLabel = blockFacts.length === 0
             ? 'engine_default'
             : 'sim_controller';
+          fallbackReason = blockFacts.length > 0
+            ? 'auto_submit_blocked'
+            : primaryDispatchTimedOut || correctionDispatchTimedOut
+              ? 'timeout'
+              : engineRejections.length > 0 || proposed !== null
+                ? 'validation_exhausted'
+                : 'no_proposal';
           const exhaustionProposalId = `${exhaustionPlannerLabel === 'engine_default'
             ? 'engine-default'
             : 'sim-controller'}:${requestId}`;
@@ -3553,6 +3644,9 @@ async function runConversationWithConfiguredIntel(
         }
         if (config.combatModel === 'initiative_segments_v1' && !serviceNull &&
           (outcome === 'authorized' || outcome === 'auto_resolved')) {
+          if (partyIsDefeated(engineSession.currentState())) {
+            terminalOutcome = { kind: 'encounter_over', result: 'party_defeated' };
+          } else {
           if (segmentPartyPlan === null || segmentPlanId === null) {
             throw new Error('Authorized initiative-segment round is missing a stored team plan.');
           }
@@ -3586,6 +3680,7 @@ async function runConversationWithConfiguredIntel(
                 plan: segmentPartyPlan,
                 actorId: activeActorId,
               });
+              if (materialized.partyDefaultTurn !== null) partyDefaultTurn = true;
               const applied = engineSession.completeScriptedPcTurn(
                 materialized,
                 journal.reactionGuidance(),
@@ -3619,6 +3714,7 @@ async function runConversationWithConfiguredIntel(
               });
               pcTurns.push({
                 actor: activeActorId,
+                partyDefaultTurn: materialized.partyDefaultTurn,
                 initiativeIndex: initiativeIndexByActor.get(activeActorId) ?? -1,
                 beforeRevision: beforeState.revision,
                 afterRevision: afterState.revision,
@@ -3883,6 +3979,7 @@ async function runConversationWithConfiguredIntel(
             speculations.push(speculation);
             inFlightSpeculation.current = null;
           }
+          }
         }
       } catch (error) {
         if (inFlightSpeculation.current !== null) {
@@ -4021,8 +4118,11 @@ async function runConversationWithConfiguredIntel(
         contextTruncated: simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated,
         plannedBy,
         plannerLabel: plannerLabel ?? (plannedBy === null ? null : 'model'),
+        fallbackReason,
         autoSubmitBlocks: [...autoSubmitBlocks.values()]
           .sort((left, right) => left.actorId.localeCompare(right.actorId)),
+        partyDefaultTurn,
+        terminalOutcome,
         escalated, escalationModel: firedEscalationModel,
         stateBinding: {
           capsule: { revision: capsule.revision, digest: capsule.digest },
@@ -4070,6 +4170,7 @@ async function runConversationWithConfiguredIntel(
         );
         restoredMidRun = true;
       }
+      if (terminalOutcome !== null) break;
     }
   }
   if (options.endSession === true) journal.endSession();

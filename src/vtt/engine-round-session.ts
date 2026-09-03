@@ -91,7 +91,12 @@ export interface EngineProposalDeviation {
   readonly appliedBranch: EngineAppliedProposalBranch;
   readonly authorizedOptionId: string;
   readonly appliedOptionId: string;
-  readonly reasonCodes: readonly ('branch_changed' | 'option_changed' | 'degraded_to_dodge')[];
+  readonly reasonCodes: readonly (
+    | 'branch_changed'
+    | 'option_changed'
+    | 'degraded_to_dodge'
+    | 'remaining_attack_target_dead'
+  )[];
   readonly refusalCodes: readonly string[];
 }
 
@@ -160,6 +165,7 @@ function resolveBoundaryDecisions(
   rng: SerializableRng,
   policy: ReactionOfferHostPolicy,
   guidance: ReactionGuidanceDeclaration | null,
+  resolveInitiativeSegmentDecisions: boolean,
 ): { readonly state: EncounterState } & EngineBoundaryResolutions {
   if (policy.kind === 'dm_attended') {
     return { state: initialState, fallbackResolutions: [], guidedResolutions: [] };
@@ -195,6 +201,32 @@ function resolveBoundaryDecisions(
       else fallbackResolutions.push(selected.resolution);
       continue;
     }
+    const legendaryResistance = resolveInitiativeSegmentDecisions &&
+      state.config.initiativeMode === 'per_combatant'
+      ? state.pendingDecisions.find((decision) => decision.kind === 'legendary_resistance')
+      : undefined;
+    if (legendaryResistance !== undefined) {
+      state = reduceOne(state, {
+        type: 'resolve_pending_decision', decisionId: legendaryResistance.id, optionId: 'suffer',
+      }, rng);
+      continue;
+    }
+    const legendaryWindow = resolveInitiativeSegmentDecisions &&
+      state.config.initiativeMode === 'per_combatant'
+      ? state.pendingDecisions.find((decision) => decision.kind === 'legendary_action_window')
+      : undefined;
+    if (legendaryWindow !== undefined) {
+      state = reduceOne(state, {
+        type: 'resolve_pending_decision', decisionId: legendaryWindow.id, optionId: 'pass',
+      }, rng);
+      if (state.phase.kind === 'active' &&
+        state.activeCombatant === legendaryWindow.boundary.activeCombatant) {
+        state = reduceOne(state, {
+          type: 'end_turn', actor: legendaryWindow.boundary.activeCombatant,
+        }, rng);
+      }
+      continue;
+    }
     const deathSave = state.pendingDecisions.find((decision) => decision.kind === 'death_save');
     if (deathSave === undefined) return { state, fallbackResolutions, guidedResolutions };
     state = reduceOne(state, {
@@ -216,6 +248,20 @@ function advanceToActor(
     state = reduce(state, { type: 'end_turn', actor: active });
   }
   if (state.activeCombatant !== actorId) throw new Error(`Could not advance initiative to ${actorId}.`);
+  return state;
+}
+
+function advancePastUnavailableActiveCombatant(
+  initialState: EncounterState,
+  reduce: (state: EncounterState, command: EncounterCommand) => EncounterState,
+): EncounterState {
+  let state = initialState;
+  while (state.phase.kind === 'active' && state.activeCombatant !== null) {
+    const active = state.combatants.find((entry) => entry.profile.id === state.activeCombatant);
+    if (active === undefined) throw new Error(`Active initiative actor ${state.activeCombatant} is absent.`);
+    if (active.life === 'living') return state;
+    state = reduce(state, { type: 'end_turn', actor: active.profile.id });
+  }
   return state;
 }
 
@@ -267,8 +313,9 @@ function applyOneResolvedProposal(
   initialState: EncounterState,
   mechanics: ResolvedTurnMechanics,
   reduce: (state: EncounterState, command: EncounterCommand) => EncounterState,
-): EncounterState {
+): { readonly state: EncounterState; readonly remainingAttackTargetDead: boolean } {
   let state = initialState;
+  let remainingAttackTargetDead = false;
   const dashesBeforeMovement = mechanics.path.length === 0
     ? []
     : mechanics.actionSlots.filter((use) => use.kind === 'dash');
@@ -285,7 +332,7 @@ function applyOneResolvedProposal(
     });
   }
   if (state.combatants.find((entry) => entry.profile.id === mechanics.actorId)?.life !== 'living') {
-    return state;
+    return { state, remainingAttackTargetDead };
   }
   for (const use of mechanics.actionSlots) {
     if (state.combatants.find((entry) => entry.profile.id === mechanics.actorId)?.life !== 'living') break;
@@ -293,6 +340,10 @@ function applyOneResolvedProposal(
     case 'attack': {
       const targetId = use.targetIds[0];
       if (targetId === undefined) throw new Error('Resolved attack omitted its target.');
+      if (state.combatants.find((entry) => entry.profile.id === targetId)?.life === 'dead') {
+        remainingAttackTargetDead = true;
+        break;
+      }
       const action = canonicalEngineQueryPort.actions(state, mechanics.actorId)
         .find((candidate): candidate is MonsterAttackAction =>
           candidate.kind === 'attack' && candidate.id === use.actionId);
@@ -318,7 +369,10 @@ function applyOneResolvedProposal(
       break;
     }
     case 'hide': state = reduce(state, { type: 'hide', actor: mechanics.actorId, cost: 'bonus_action' }); break;
-    case 'end_turn': return reduce(state, { type: 'end_turn', actor: mechanics.actorId });
+    case 'end_turn': return {
+      state: reduce(state, { type: 'end_turn', actor: mechanics.actorId }),
+      remainingAttackTargetDead,
+    };
     case 'saving_throw': {
         const targetId = use.targetIds[0];
         if (targetId === undefined) throw new Error(`Resolved save action ${use.actionId} omitted its target.`);
@@ -347,7 +401,10 @@ function applyOneResolvedProposal(
     }
     }
   }
-  return reduce(state, { type: 'end_turn', actor: mechanics.actorId });
+  return {
+    state: reduce(state, { type: 'end_turn', actor: mechanics.actorId }),
+    remainingAttackTargetDead,
+  };
 }
 
 export class EngineRoundSession {
@@ -394,14 +451,14 @@ export class EngineRoundSession {
     const guidedResolutions: GuidedReactionResolution[] = [];
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
       const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance);
+      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance, false);
       fallbackResolutions.push(...resolved.fallbackResolutions);
       guidedResolutions.push(...resolved.guidedResolutions);
       return resolved.state;
     };
     const firstMonster = livingMonsterIds(this.#state)[0];
     if (firstMonster === undefined) throw new Error('Encounter has no living monster to prepare.');
-    const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance);
+    const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance, false);
     fallbackResolutions.push(...initialBoundary.fallbackResolutions);
     guidedResolutions.push(...initialBoundary.guidedResolutions);
     const prepared = advanceToActor(initialBoundary.state, firstMonster, reduce);
@@ -425,17 +482,18 @@ export class EngineRoundSession {
     const guidedResolutions: GuidedReactionResolution[] = [];
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
       const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance);
+      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance, true);
       fallbackResolutions.push(...resolved.fallbackResolutions);
       guidedResolutions.push(...resolved.guidedResolutions);
       return resolved.state;
     };
-    const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance);
+    const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance, true);
     fallbackResolutions.push(...initialBoundary.fallbackResolutions);
     guidedResolutions.push(...initialBoundary.guidedResolutions);
-    const begun = initialBoundary.state.initiative.length === 0
+    const begunBeforeDeadActorAdvance = initialBoundary.state.initiative.length === 0
       ? reduce(initialBoundary.state, { type: 'roll_initiative' })
       : initialBoundary.state;
+    const begun = advancePastUnavailableActiveCombatant(begunBeforeDeadActorAdvance, reduce);
     if (begun.activeCombatant === null) throw new Error('Initiative has no active combatant.');
     const revisionDelta = begun.revision - beforeRevision;
     this.#state = begun;
@@ -459,12 +517,12 @@ export class EngineRoundSession {
     const guidedResolutions: GuidedReactionResolution[] = [];
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
       const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance);
+      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance, true);
       fallbackResolutions.push(...resolved.fallbackResolutions);
       guidedResolutions.push(...resolved.guidedResolutions);
       return resolved.state;
     };
-    const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance);
+    const initialBoundary = resolveBoundaryDecisions(this.#state, trialRng, this.policy, guidance, true);
     fallbackResolutions.push(...initialBoundary.fallbackResolutions);
     guidedResolutions.push(...initialBoundary.guidedResolutions);
     let state = initialBoundary.state;
@@ -480,6 +538,7 @@ export class EngineRoundSession {
     if (state.activeCombatant === turn.actorId) {
       state = reduce(state, { type: 'end_turn', actor: turn.actorId });
     }
+    state = advancePastUnavailableActiveCombatant(state, reduce);
     this.#state = canonicalEncounterState(state).state;
     this.#rng = trialRng;
     return {
@@ -531,7 +590,7 @@ export class EngineRoundSession {
     const deviationResolutions: EngineProposalDeviation[] = [];
     const reduce = (state: EncounterState, command: EncounterCommand): EncounterState => {
       const reduced = reduceOne(state, command, trialRng);
-      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance);
+      const resolved = resolveBoundaryDecisions(reduced, trialRng, this.policy, guidance, true);
       fallbackResolutions.push(...resolved.fallbackResolutions);
       guidedResolutions.push(...resolved.guidedResolutions);
       return resolved.state;
@@ -546,7 +605,7 @@ export class EngineRoundSession {
         : resolveEngineActorOption(state, entry.fallbackOption);
       let mechanics: ResolvedTurnMechanics;
       let appliedBranch: EngineAppliedProposalBranch;
-      let refusalCodes: readonly string[];
+      let refusalCodes: string[];
       if (primary.valid) {
         mechanics = primary.mechanics;
         appliedBranch = 'primary';
@@ -573,6 +632,12 @@ export class EngineRoundSession {
         if (appliedBranch !== entry.selectedBranch) reasonCodes.push('branch_changed');
         if (mechanics.optionId !== entry.mechanics.optionId) reasonCodes.push('option_changed');
       }
+      const appliedProposal = applyOneResolvedProposal(state, mechanics, reduce);
+      state = appliedProposal.state;
+      if (appliedProposal.remainingAttackTargetDead) {
+        reasonCodes.push('remaining_attack_target_dead');
+        refusalCodes.push('TARGET_DIED_DURING_OPTION');
+      }
       if (reasonCodes.length > 0) {
         deviationResolutions.push({
           actorId: entry.proposal.actorId,
@@ -584,8 +649,8 @@ export class EngineRoundSession {
           refusalCodes,
         });
       }
-      state = applyOneResolvedProposal(state, mechanics, reduce);
     }
+    state = advancePastUnavailableActiveCombatant(state, reduce);
     this.#state = canonicalEncounterState(state).state;
     this.#rng = trialRng;
     return {

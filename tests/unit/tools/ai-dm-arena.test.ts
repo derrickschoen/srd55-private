@@ -715,15 +715,15 @@ describe('AI-DM arena', () => {
         failedAttempts: row.chainEvidence.failedAttempts,
       }))).toEqual([
         {
-          round: 1, outcome: 'authorized', granularity: 'full', contextRevision: 3,
+          round: 1, outcome: 'authorized', granularity: 'full', contextRevision: 6,
           startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
         },
         {
-          round: 2, outcome: 'authorized', granularity: 'full', contextRevision: 3,
+          round: 2, outcome: 'authorized', granularity: 'full', contextRevision: 6,
           startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
         },
         {
-          round: 3, outcome: 'authorized', granularity: 'full', contextRevision: 3,
+          round: 3, outcome: 'authorized', granularity: 'full', contextRevision: 6,
           startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
         },
       ]);

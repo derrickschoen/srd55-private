@@ -1061,6 +1061,65 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(row?.projectionRevision).toBeGreaterThan(row?.contextRevision ?? 0);
   });
 
+  it.each([
+    {
+      name: 'no proposal',
+      expected: 'no_proposal',
+      options: {
+        exhaustInitial: ['room-1-round-1'],
+        failCorrection: ['room-1-round-1'],
+      },
+      hard: false,
+    },
+    {
+      name: 'validation exhaustion',
+      expected: 'validation_exhausted',
+      options: {
+        invalidInitial: ['room-1-round-1'],
+        failCorrection: ['room-1-round-1'],
+      },
+      hard: false,
+    },
+    {
+      name: 'blocked auto-submit',
+      expected: 'auto_submit_blocked',
+      options: {
+        exhaustInitial: ['room-1-round-1'],
+        failCorrection: ['room-1-round-1'],
+      },
+      hard: true,
+    },
+    {
+      name: 'timeout',
+      expected: 'timeout',
+      options: {
+        timeoutInitial: ['room-1-round-2'],
+        failCorrection: ['room-1-round-2'],
+      },
+      hard: false,
+    },
+  ] as const)('records typed fallbackReason for $name from the stub adapter', { timeout: 60_000 }, async ({
+    expected,
+    options,
+    hard,
+  }) => {
+    const directory = mkdtempSync(join(tmpdir(), `dnd-conversation-fallback-${expected}-`));
+    const rounds = expected === 'timeout' ? 2 : 1;
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', String(rounds), '--out', join(directory, 'rows.jsonl'),
+      '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+    const state = hard
+      ? await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117009.json')
+      : await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+
+    const result = await runConversation(config, { roomStates: [state], ...options });
+
+    expect(result.rows.at(-1)?.fallbackReason).toBe(expected);
+    expect(result.rows.at(-1)?.refusals).toEqual([]);
+  });
+
   it('does not depend on turn-context rendering to resolve a brutal exhaustion frontier', async () => {
     const state = freshMonsterPlanningState(
       await loadArenaFixture('tests/fixtures/arena-basis-brutal/seed-6203001.json'),
@@ -1166,6 +1225,23 @@ describe('AI-DM engine MCP conversation runner', () => {
     const store = new MemoryBrowserSessionStore();
     const sessionId = importSavedSession(store, result.journalExport);
     expect(exportSavedSession(store, sessionId)).toBe(result.journalExport);
+  });
+
+  it('runs a three-room three-round model-free brutal smoke with the stub adapter', { timeout: 120_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-3round-smoke-'));
+    const config = parseConversationArgs([
+      '--fixtures', 'tests/fixtures/arena-basis-brutal',
+      '--rooms', '3', '--rounds', '3', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--initiative-profile', 'derived_v1',
+      '--dry-run',
+    ]);
+
+    const result = await runConversation(config);
+
+    expect(new Set(result.rows.map((row) => row.room))).toEqual(new Set([1, 2, 3]));
+    expect(result.rows).toHaveLength(9);
+    expect(result.rows.flatMap((row) => row.refusals)).toEqual([]);
+    expect(result.rows.every((row) => row.knowledgeModel === 'engine_state')).toBe(true);
   });
 
   it('retries one SIMULATED service flap and uses the first healthy primary turn', { timeout: 30_000 }, async () => {
@@ -1525,6 +1601,65 @@ describe('AI-DM engine MCP conversation runner', () => {
       source: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
       decision: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
     }));
+  });
+
+  it('ends a three-round room as party_defeated when all PCs are dead entering the party segment', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-party-defeated-'));
+    const base = await alternatingInitiativeRoom();
+    const defeated: EncounterState = {
+      ...base,
+      combatants: base.combatants.map((combatant) =>
+        combatant.profile.kind === 'player_character'
+          ? { ...combatant, hitPoints: 0, life: 'dead' as const, deathSaves: null }
+          : combatant),
+    };
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '3', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, { roomStates: [defeated] });
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.terminalOutcome).toEqual({
+      kind: 'encounter_over', result: 'party_defeated',
+    });
+    expect(result.rows[0]?.refusals).toEqual([]);
+  });
+
+  it('runs three rounds with a one-round party program by recording typed default turns', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-party-default-'));
+    const base = await alternatingInitiativeRoom({ monsterHitPoints: 10_000 });
+    const durable: EncounterState = {
+      ...base,
+      combatants: base.combatants.map((combatant) => combatant.profile.kind === 'player_character'
+        ? {
+            ...combatant,
+            hitPoints: 10_000,
+            profile: {
+              ...combatant.profile,
+              rules: { ...combatant.profile.rules, hitPointMaximum: 10_000 },
+            },
+          }
+        : combatant),
+    };
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '3', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [durable],
+      mutateScriptedPartyPlan: (plan, context) => context.round === 1
+        ? plan
+        : { ...plan, programs: [] },
+    });
+
+    expect(result.rows).toHaveLength(3);
+    expect(result.rows.map((row) => row.partyDefaultTurn)).toEqual([false, true, true]);
+    expect(result.rows.flatMap((row) => row.refusals)).toEqual([]);
+    expect(result.rows.slice(1).flatMap((row) => row.pcTurns)
+      .every((turn) => turn.partyDefaultTurn !== null)).toBe(true);
   });
 
   it.each([

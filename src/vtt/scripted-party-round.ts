@@ -65,10 +65,15 @@ export type ScriptedPartyAdherence = 'followed' | 'altered' | 'plan_invalidated'
 export type ScriptedPartyAdherenceReasonCode =
   | 'PLANNED_PRIMARY_FOLLOWED'
   | 'POLICY_SELECTED_DIFFERENT_LEGAL_PROGRAM'
-  | 'PLANNED_PRIMARY_NO_LONGER_LEGAL';
+  | 'PLANNED_PRIMARY_NO_LONGER_LEGAL'
+  | 'SCRIPTED_PROGRAM_MISSING_DEFAULT_DODGE'
+  | 'SCRIPTED_PROGRAM_MISSING_DEFAULT_HOLD_POSITION';
+
+export type ScriptedPartyDefaultTurn = 'dodge' | 'hold_position';
 
 export interface ScriptedPartyTurnMaterialization {
   readonly actorId: CombatantId;
+  readonly partyDefaultTurn: ScriptedPartyDefaultTurn | null;
   readonly adherence: ScriptedPartyAdherence;
   readonly reasonCodes: readonly ScriptedPartyAdherenceReasonCode[];
   readonly plannedProgramHash: string;
@@ -448,14 +453,38 @@ export function createScriptedPartyPlan(
 export function materializeScriptedPartyTurn(
   input: ScriptedPartyTurnInput,
 ): ScriptedPartyTurnMaterialization {
-  const planned = input.plan.programs.find((candidate) => candidate.actorId === input.actorId);
-  if (planned === undefined) throw new TypeError(`Scripted party plan has no program for ${input.actorId}.`);
   const actor = input.state.combatants.find((candidate) => candidate.profile.id === input.actorId);
   if (actor?.profile.kind !== 'player_character' || actor.life !== 'living') {
     throw new TypeError('Scripted party turns require a living player character.');
   }
   const legalProvider = input.turnLegalActions ?? regretTurnLegalActions;
   const legal = legalProvider(input.state, input.actorId).actions;
+  const planned = input.plan.programs.find((candidate) => candidate.actorId === input.actorId);
+  if (planned === undefined) {
+    const command = legal.find((candidate) => candidate.type === 'dodge') ??
+      legal.find((candidate) => candidate.type === 'end_turn');
+    if (command === undefined || (command.type !== 'dodge' && command.type !== 'end_turn')) {
+      throw new Error(`Scripted party default turn has no Dodge or hold-position command for ${input.actorId}.`);
+    }
+    const partyDefaultTurn: ScriptedPartyDefaultTurn = command.type === 'dodge'
+      ? 'dodge'
+      : 'hold_position';
+    const program = symmetricProgram(command);
+    const programHash = scriptedPartyProgramHash(program);
+    return {
+      actorId: input.actorId,
+      partyDefaultTurn,
+      adherence: 'plan_invalidated',
+      reasonCodes: [partyDefaultTurn === 'dodge'
+        ? 'SCRIPTED_PROGRAM_MISSING_DEFAULT_DODGE'
+        : 'SCRIPTED_PROGRAM_MISSING_DEFAULT_HOLD_POSITION'],
+      plannedProgramHash: programHash,
+      executedProgramHash: programHash,
+      executedProgram: program,
+      actionSlotUses: [{ slot: 'main', commandCount: 1 }],
+      reducerCommands: [command],
+    };
+  }
   const decisionPolicy = input.decisionPolicy ?? input.plan.decisionPolicy;
   if (decisionPolicy !== input.plan.decisionPolicy) {
     throw new Error('Scripted party turn policy must match the planned decision policy.');
@@ -489,6 +518,7 @@ export function materializeScriptedPartyTurn(
       : [...mainCommands, bonusSpell];
     return {
       actorId: input.actorId,
+      partyDefaultTurn: null,
       adherence,
       reasonCodes: adherence === 'followed'
         ? ['PLANNED_PRIMARY_FOLLOWED']
@@ -543,6 +573,7 @@ export function materializeScriptedPartyTurn(
     : [...mainCommands, bonusSpell];
   return {
     actorId: input.actorId,
+    partyDefaultTurn: null,
     adherence,
     reasonCodes,
     plannedProgramHash,
