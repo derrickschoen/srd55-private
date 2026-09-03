@@ -1,5 +1,27 @@
 # Binding scope decisions
 
+ARMS LANDED: SOL ROWS (D465 #2) AND LUNA THREATS+PROTOCOL (D483 #1);
+F HARVESTED (supervisor, 2026-09-03 09:25). d465-s-rows-sol-low: 30/30
+authorized, only 18 model-planned (12 engine; arm 1 had 25), refusals
+10, idle Disengage 1, Dash 83, attack slots 29, wall median 24.9 s.
+d483-s-threats-luna-low-protocol: 30/30 authorized, 30/30 model-planned
+(no-KB twin 26 + 2 timeouts), refusals 13 (same), idle Disengage 33 (twin
+24), Dash 45 (50), attack slots 45 (39), wall 19.1 s (16.4). First read:
+the protocol text does not change luna's tactics (idle Disengage is if
+anything higher) and removes the two timeouts; the confound is about
+completion, not play. Sol's model-planned share is unstable across
+profiles (25 then 18 of 30). F: 5 files +108/-29; codex reports the
+`args: unknown` cause as the root-level allOf/if/then in the advertised
+schema, restructured so codex 0.148's schema-to-TypeScript renderer can
+render the envelope (cited the renderer sources), tool description now
+carries the envelope and "a rejected call is not queued and does not
+count", the resource exposes the envelope and per-actor schemas from one
+zod source, tools/list tested against the published schema; the
+slow-test sweep found 78 legitimately heavy tests (survival seeds, 3x3
+MCP smoke, migration chains) and codex stopped rather than shrink their
+subjects — accepted; the two flaky ones were cheapened (delta fallback
+3.5 s -> 0.95 s). Supervisor gates running.
+
 PROTOCOL BRAINSTORM AND NONSENSE AUDIT (codex sol high, read-only, on
 McpToolCall events, not exec strings; supervisor cross-checked the
 headline; report in dnd-slim-runs/protocol-brainstorm-report.log; 2026-
