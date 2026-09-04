@@ -10138,3 +10138,11 @@ constants in the iso contract (atlas native resolution doubles: TILE 128×64, WA
 camera's integer zoom starts at 1 so a 20-cell room still fits a 1080p viewport). The supervisor writes the art
 bible (brief-iso-art-C.md) and judges each round's screenshot; at most three rounds. Still inspiration only: no
 assets, palettes or names lifted from any game.
+
+D516 — OWNER (2026-09-04 17:55): "Use your design abilities as fable to do a higher resolution pass improvement on
+the current ui as well. It looks like a bad nes game instead of a great snes inspired modern retro game." Supervisor:
+second Fable art unit, claude/classic-art off claude/board-shot (inc2), owning the starter art generator
+(src/assets/**), the board/DM-view stylesheet, and a new label/legend module; the screenshot cell size rises from
+40 to 64 CSS px (20-cell room = 1280 px, the capture viewport) with the PNG budget unchanged. Folds in the
+legibility items (full names, HP band, coordinates, legend) so only one lane draws labels. Same art bible as D515,
+top-down grammar. Path-overlay merges on top; both lanes append to styles.css.
