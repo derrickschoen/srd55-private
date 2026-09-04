@@ -9594,3 +9594,8 @@ deep-water / grease surfaces, flight ignoring ground, summon actions, death burs
 engine's behaviour match the video/replay results best, documented as our own design in neutral wording. BG3's own
 numbers stay in the private repo as calibration targets and are never the provenance of a public constant.
 Resolves plan unknowns 2–9 in principle; the concrete declarations are supervisor decisions recorded per increment.
+
+## D501 — OWNER: tactical_v2 is symmetric — the same options for PCs and monsters (2026-09-03)
+
+One rules engine; under tactical_v2 the new options (bonus-action shove and dash, jump, surfaces, flight, summons,
+death burst) are offered to both sides. The neutral scored policy is the only monster-specific part. Single flag.
