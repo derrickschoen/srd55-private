@@ -9858,3 +9858,22 @@ LANE LANDED ON MAIN; TACTICAL_V2 INCREMENT 5 LANDED ON ITS BRANCH; GRAPH-SLICE P
   (3) including tactics.md in the graph corpus repeats startup text, which the plan itself flags as
   confounding salience with retrieval. Plan section 7 lists seven rulings it needs; nothing is
   dispatched for it until the owner rules.
+
+OVERRIDES JUDGED ON THEIR OWN MERITS (supervisor, 2026-09-04 10:50; owner request). The 14 accepted
+overrides across the D490 arms (S strict 3, V typed_reason 3, U typed_reason 8; 0 rejected attempts in any
+arm) were put to the three-seat panel blind to arm and round score, with two 0–5 scores each: did the
+override make sense; was the written reason sound (files d490ov-*, unsealed in d490ov-unsealed.json).
+Results: decision 3.67 / 5, reason 2.26 / 5 overall. The five Entangle-over-damage overrides (every arm)
+scored 5.0 on decision from all three seats — the engine's "dominated" ruling was wrong there, the same
+ranking weakness the transport arm exposed. Reason quality is mediocre: correct but generic ("hinder the
+whole group"), and twice mechanically wrong ("retaining disengagement as fallback" when no Disengage was
+taken). By arm: strict 3.22 / 1.78, V 4.55 / 2.89, U 3.50 / 2.21 (n too small for a policy claim).
+FINDING AGAINST OUR OWN HARNESS: two overrides (S room 3 rep 2 monster-2; U room 9 rep 2 monster-2)
+executed as Dodge with 0 ft while the recorded reason says "Dash toward the nearest enemy". Both were
+selectedBranch=fallback: the AI proposed Dash (needs movement first) with Dodge as fallback, Dash was not
+executable at the actor's turn (deviation branch_changed), the fallback ran, and the packet/row present
+the PRIMARY's reason beside the FALLBACK's executed action. Judges scored those reasons 0, correctly for
+what they were shown, but the row is misattributing the reason. Rule for packet builders: when
+selectedBranch is fallback, carry the fallback's own reason (or mark "fallback executed; primary reason
+not applicable") — never the primary's text. Also settled: Dash + Disengage in one turn is legal for
+those monsters (Nimble Escape bonus-action Disengage); the earlier judge complaints were wrong.
