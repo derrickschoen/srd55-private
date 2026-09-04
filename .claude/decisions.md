@@ -10093,3 +10093,27 @@ Applied now: tactical inc5.6 and graph-slice inc2 browser gates stopped (already
 iso-r2a's full-suite run and the conditions lane's queued full-suite run stopped so board-shot inc2 takes the lock
 first. Conditions gets a supervisor gate with the DM-view specs; iso r2a/r2b get iso-view.spec. Finding against
 myself: I put the full suite in every lane brief without measuring it first.
+
+D514 — OWNER (2026-09-04 15:45), footprints plan rulings gated before Increments 2–4 (plan round 3, sha 9a714cdf):
+1. Migration: one-way session 11 / replay 6 decoders; known sizes carry over, old paths become normal mode, unknown
+   size or unknowable size-effect becomes an explicit pending state the DM resolves; never guess Medium.
+2. Growth that no longer fits (Wild Shape reversion beside a wall, Enlarge beside a creature): AUTO-RELOCATE to the
+   nearest legal anchor, deterministically (overrides the plan's pending-placement recommendation for this case: the
+   plan's pending-placement machinery is NOT built; tie-break: smallest Chebyshev distance, then row-major). If no
+   legal anchor exists within the board, the transition is rejected with a typed refusal.
+3. Per-step terrain and hazards for multi-cell creatures: owner said "research community rulings". Result (EN World
+   thread on large monsters and difficult terrain, the d20 SRD "most difficult terrain" rule inherited by 5e tables,
+   rpgbot): count ONLY newly entered cells; the step costs as the most difficult terrain among the cells being
+   entered; cells the creature already occupied do not re-charge. Entry hazards fire for newly entered cells only;
+   ongoing/occupancy effects evaluate the whole footprint. This REPLACES the plan's "retained difficult cell still
+   counts" recommendation.
+4. Creature-provided cover: owner said "research community rulings". Result (Jeremy Crawford, 2018: "A creature
+   provides half cover, regardless of that creature's size"; DMG 251 lets a DM rule a group gives three-quarters;
+   Foundry cover modules trace best attacker corner to the target's corners and treat tokens as blockers): an
+   intervening creature grants Half Cover flat, no half-of-target oracle. Intervening = its footprint blocks any
+   line from the best attacker cell corner to the target's corners using the existing rasterizer; multiple
+   intervening creatures still give Half Cover (three-quarters is a DM option, default off). This REPLACES the plan's
+   ceil(targetCells/2) oracle.
+Supervisor defaults (not asked, UI/topology): 5 opening topology = plan rec; 6 audience-specific hidden geometry =
+plan rec (DM board shows every placed footprint incl. hidden-from-players, player projection per D513 rule 7);
+7 shared-cell stack interaction = plan rec.
