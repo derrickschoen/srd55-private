@@ -9979,3 +9979,34 @@ low; first decision 26/30 vs 27/30) and are not judged. Packet d510/control (Lun
 prime 619, 60 entries, leaks none) built and sent to the three seats; key sealed until the owner rules.
 Finding against my own shell hygiene: a pkill whose pattern words were in the same command line killed the
 supervisor's shell (exit 144) — the kill-loop-alone rule exists for exactly this, fourth instance.
+
+D510 — OWNER RULINGS (2026-09-04 12:20, four questions answered):
+1. Conditions: widen the DM projection so `DmVisibleCombatant` carries per-combatant conditions; the iso side
+   panel and the round-start screenshot both show them. Codex implements on main; supervisor gates.
+2. DM view: fix on main as its own commit (the KB_SUBJECTS split, below) after codex review, AND add the
+   Playwright browser suite to the routine landing gate (tsc / sg / vitest / playwright).
+3. tactical_v2: gate + commit inc5.5, rebase claude/tactical-v2 onto main, re-gate once, then increment 6.
+4. Board-shot increment 2 arms — owner: "Can't we use the runs we already did without screenshots?" Yes:
+   d490 U and V (Luna low, typed_reason, two replicates) and d510-control-medium (Luna medium) all ran on
+   engine commit 8a459180, which is byte-identical to main's engine code today (only .claude/ commits since),
+   same seed 6203001, rooms, KB, timeout and policy; round-1 prose is already identical across arms (U vs
+   control 25/30 rows byte-identical, the rest diverged fights). They are the image-off arms. New arena runs:
+   Luna low image-on ×2 replicates, Luna medium image-on ×1, Sol low image-off ×1 and image-on ×1 (5 × 30
+   rows). Before any packet is built the image-off prose of every new row must hash-match the old rows'
+   rawTurnContext per (room, round); a mismatch voids the pairing. Old rows are RE-JUDGED inside the new
+   two-arm packets (judges now receive the image too); old panel scores are not reused. Keys sealed per pair.
+
+FINDING AGAINST MAIN — THE /vtt ROUTE HAS BEEN DEAD SINCE D466 C2 (supervisor, 2026-09-04 12:30, VERIFIED).
+Two lanes independently hit it: iso unit B (Fable) and board-shot inc1 (codex) each split `KB_SUBJECTS` into
+a new src/vtt/knowledge-base-subjects.ts because src/vtt/mcp/schemas.ts imports it from
+knowledge-base-contract.ts, which imports node:crypto; Vite externalizes it to a browser shim that throws at
+module evaluation, so `import('./vtt/encounter-app')` in main.ts never resolves. I ran
+tests/browser/vtt-save-manager.spec.ts on main (PLAYWRIGHT_PORT=4283, one worker): 0/2, both stuck at the
+startup phase "Starting local database…" with no "DM controls" heading after 60 s. The import landed in
+214c2349 (D466 C2, 2026-09-03 02:26), so main's browser app has been unmountable for ~34 hours, through two
+landings that passed my tsc/sg/vitest gate. Root cause of the miss: the landing gate never ran Playwright.
+Fix per D510(2): land the split on main as its own commit once the iso review (codex 01a06d40-ce24) returns,
+then every landing gate runs the browser suite (gate-wt2.sh). Finding against my own tick: my first gate
+chain passed bare worktree names to gate-wt.sh (it expects wt-<name>) and ran zero gates; my first
+Playwright attempt on main hit port 4173 because I omitted PLAYWRIGHT_PORT. Both caught within minutes, both
+mine.
