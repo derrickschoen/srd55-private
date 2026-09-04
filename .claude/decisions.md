@@ -9771,3 +9771,17 @@ src/combat/tactical-movement-constants.ts): ground 1×, difficult / mud /
 deep water 2×, grease 1×, jump budget floor(speed/3), grease DC 12 Dex
 save, Prone 1 round, 1 trigger per turn on entry; flight ignores all
 surfaces.
+
+TACTICAL_V2 INCREMENT 3 LANDED ON claude/tactical-v2 (supervisor,
+2026-09-04 08:20). Commit follows 487d2b62. Codex: universal bonus Dash
+(typed apart from feature-owned SRD Dash), bonus-action Shove, and Jump
+as a movement segment only; symmetric for PCs and monsters; absent under
+srd_2024 with exact-message guards per throw site. Verified myself:
+forced tsc 0, sg 0, full suite 551 files / 9644 tests; my mutation (size
+eligibility <= → <) killed by the boundary test, restore by cmp;
+contracts.ts sha unchanged; +534/−47 with zero forbidden patterns.
+SHOVE DECLARATIONS AWAITING OWNER RULING (src/combat/
+tactical-action-constants.ts): reach 5 ft; target at most one known
+size category larger (unknown size eligible); Strength save DC 12; 5 ft
+displacement directly away or knock prone (declared choice); occupied or
+off-grid destination omits the displacement option.
