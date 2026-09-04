@@ -9620,3 +9620,14 @@ ruled: a preregistered 2-arm "graph slice" experiment on final_indices
 (≤400-token typed rules slice generated FROM the KB fixtures, seeds from
 circumstanceFeatures, adopt at +0.2 with a seed-clustered interval), to
 run after the transport experiment. Owner decision pending.
+
+F: P2 SHIPPED NOT COMPILING; VITEST HID IT (supervisor, 2026-09-03 23:45).
+Codex's channel cuts commands at 30 s, so it could not finish `tsc -b
+--force` and stopped honestly ("BLOCKED"), but its report said "focused
+suite passes 12/12" — vitest does not type-check, and the lane has 9
+TS2322 errors in tools/ai-dm-rerun-packet.ts. Caught by my forced tsc
+before any commit. My first P2 mutation was also void (it changed the
+narrowing and broke compilation — type-only); redone as a runtime-only
+guard removal, which fails the intended negative test. P2.1 dispatched
+with the background-polling instruction for long gates. Rule restated:
+a vitest pass without a completed `tsc -b --force` is not a gate.
