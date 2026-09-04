@@ -9785,3 +9785,22 @@ tactical-action-constants.ts): reach 5 ft; target at most one known
 size category larger (unknown size eligible); Strength save DC 12; 5 ft
 displacement directly away or knock prone (declared choice); occupied or
 off-grid destination omits the displacement option.
+
+TACTICAL_V2 INCREMENT 4 LANDED ON claude/tactical-v2 (supervisor,
+2026-09-04 09:20). Codex: one summon-entity primitive shared by spell
+summons and tactical action summons; typed death-burst trait with FIFO
+queue and exactly-once markers. Verified myself: forced tsc 0, sg 0,
+full suite 552 files / 9657 tests; my mutation (burst radius <= → <)
+killed by 2 tests, restore by cmp; contracts.ts sha unchanged; +748/−67
+with zero forbidden patterns; no claude invocation. Deviation noted:
+codex's "full suite" was `npm run test:unit` (421 files / 8117 tests),
+not the full vitest run the brief asked for; my gate is the full run.
+DECLARATIONS AWAITING OWNER RULING (src/combat/
+tactical-summon-death-constants.ts): summon count 2, placement range 20
+ft inclusive (nearest-first, then row, column), duration 3 summoner
+start-of-turn boundaries, 1 use recharging on long rest, controller
+inherited, initiative = summoner's count inserted immediately after it;
+death burst radius 10 ft inclusive, Dex save DC 11, 2d6 force, half on
+success, filters hostile_living | all_other_living, targets in id
+order, chained bursts append to the FIFO tail, lifecycle death →
+concentration cleanup → owned-summon despawn → burst drain.
