@@ -9833,3 +9833,28 @@ recomputed totals, seed-clustered bootstrap CI.
   scored the identical rows identically whether or not the per-actor reason text was present (verified the
   visible entries do carry `reason` in executedPlan). The svu contrast is therefore not contaminated by reason
   visibility, and the panel rubric is blind to rationale text by construction.
+
+LANE LANDED ON MAIN; TACTICAL_V2 INCREMENT 5 LANDED ON ITS BRANCH; GRAPH-SLICE PLAN WRITTEN
+(supervisor, 2026-09-04 10:30).
+- Main: merge 77d14a20 (lane 8a459180, 163 files) gated by me on the merged tree: forced tsc 0,
+  sg 0, full suite 548 files / 9595 tests. The merge stands.
+- claude/tactical-v2 1614d213 (increment 5, scored default policy): my gate 553 / 9672; my
+  compiling mutation (penalty added instead of subtracted) killed by 2 tests; a first mutant that
+  flipped the direction literal was REJECTED BY THE COMPILER — void as coverage proof, but it is the
+  type design working. Codex's independently authored public defaults: kill weight 8, the four
+  secondaries 1 each, secondary maximum 4 < 8 asserted; summon cap 4, flying burden cap 30 ft,
+  5 ft credit per avoided ground hook. Awaiting owner ruling with the other declarations.
+- Increment 5.5 dispatched (D502): one typed, validated `TacticalV2Declarations` object on
+  EncounterConfig<'tactical_v2'>, today's numbers as the default, srd_2024 cannot carry it.
+- Graph-slice plan (D503) written by codex sol at .tmp-plans/graph-slice-plan.md (34 KB): typed
+  closed entity/edge unions, graph generated from the KB fixtures with sha-pinned provenance,
+  non-lexical seeds from circumstanceFeatures, fixed-depth walk, exact budget with deterministic
+  pruning, `--kb-graph off|slice` default off with an off-identity contract, 4 increments, a
+  preregistered 2-arm Luna-low 240 s experiment (seeds 6205001–6205010, verified unused) with a
+  +0.20 point-estimate gate before any 2×2. Supervisor critique: (1) the plan fixes BOTH arms on
+  final_indices, the transport that leaned worse in d500 and anchors on index 0 at 0.94 — I
+  recommend the production mcp_minimal transport instead, or the owner rules; (2) "400 tokens"
+  has no offline tokenizer in the tree — a byte budget (≈1,600 bytes) avoids a new dependency;
+  (3) including tactics.md in the graph corpus repeats startup text, which the plan itself flags as
+  confounding salience with retrieval. Plan section 7 lists seven rulings it needs; nothing is
+  dispatched for it until the owner rules.
