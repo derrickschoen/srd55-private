@@ -10046,3 +10046,12 @@ SUPERVISOR NOTES (2026-09-04 14:20, parallel era, D511):
   failures (acceptance-walkthrough, player-build-and-share, superseded-species-selection) ran under load 11; re-run alone.
 - d512 Sol low image-off: 30/30, 0 timeouts, 0 refusals, first accepted 30/30, wall median 10.6 s / max 19.2 s,
   0 rounds over 120 s while seven lanes ran (load 3–11). Reasoning tokens median 190. Off baseline for Sol is in hand.
+
+D512 — OWNER (2026-09-04 14:35): "We should add path options for visible on each screenshot for each option delivered
+from the engine. Highlight in red when the path goes through opportunity attack range and if it goes over difficult
+terrain and damaging terrain." Supervisor reading: every engine-offered option that includes movement gets its path
+drawn on the round-start screenshot, labelled with the same option index the AI DM sees in prose; cells where the
+engine's own danger preview (previewMovementPathDangers: opportunity_attack, difficult_terrain, burning_surface,
+persistent_area_damage) fires are drawn red with a per-kind glyph and a legend. Own lane claude/path-overlay off
+claude/board-shot (inc1), disjoint from inc2's files; merges into board-shot before the image-on arms if it lands in
+time, otherwise as a second screenshot generation (both are recorded on the row so packets can tell them apart).
