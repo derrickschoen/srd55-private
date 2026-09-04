@@ -9931,3 +9931,15 @@ Start running the old arms on Luna medium so we can have comparison numbers." Th
 control (cav-full, mcp_minimal, typed_reason default), final_indices, and strict on Luna medium, 30 rows each,
 240 s budget with wall distribution recorded so rounds that would have exceeded the old 120 s cap can be
 counted; sealed packets d510/control (low d466 vs medium, prime 619), d510/transport (631), d510/strict (641).
+
+DISPATCH STATE (supervisor, 2026-09-04 11:20). Running in parallel, each in its own worktree: tactical_v2
+inc5.5 (codex sol, dnd-wt-tactical-v2, D502 declarations); board-screenshot inc1 (codex sol
+01a06cfa-93c4, dnd-wt-board-shot, plan .tmp-plans/board-screenshot-plan.md amended by D506/D509: full DM
+view, no monster-side projection, mutation renamed board_image_stale_after_move); graph-slice inc1 (codex sol
+01a06cfa-93cd, dnd-wt-graph-slice, plan .tmp-plans/graph-slice-plan.md with D507); isometric VTT units A and
+B (two Fable 5.1 claude -p subagents, dnd-wt-iso-vtt). Queued: run-d510-medium.sh (Luna-medium reruns of
+control / final_indices / strict; waits for a box with no vitest, tsc, gate or Playwright process, so it
+starts only between lane gates — if it has not started by the next quiet window the supervisor will run
+it alone). Screenshot plan's own recommendations overridden by rulings: monster-side view (D506 says full),
+K=10 stratified one rep per seed kept; the 3×2 (Luna low, Luna medium, Sol low × image off/on, D509) replaces
+the plan's 2×2 in Increment 4.
