@@ -38,7 +38,8 @@ describe('RL arena batch generator', () => {
     expect(firstCalls.map((config) => config.seed)).toEqual([3_943_001, 3_943_002, 3_943_003]);
     expect(firstCalls.every((config) =>
       config.model === 'gpt-5.6-luna' && config.effort === 'low' && config.reps === 2 &&
-      config.captureRlData && config.kbPath?.endsWith('/tests/fixtures/ai-dm-kb/k6.txt') === true,
+      config.captureRlData && config.instructionSource === 'kb' &&
+      config.kbPath.endsWith('/tests/fixtures/ai-dm-kb/k6.txt'),
     )).toBe(true);
     expect(firstCalls.every((config) => config.generateMissingRooms)).toBe(true);
     expect(firstCalls.every((config) => config.combatModel === 'initiative_segments_v1')).toBe(true);

@@ -110,6 +110,9 @@ const arenaRowSchema = z.object({
     'refused', 'service_null', 'local_error', 'execution_failed', 'partial_execution',
   ]),
   plannedBy: plannerSchema,
+  instructionSource: z.enum(['none', 'kb', 'skill']),
+  skillName: z.enum(['engine-submission', 'dm-round']).nullable(),
+  skillHash: z.string().regex(/^[0-9a-f]{64}$/u).nullable(),
   roundNarrative: z.string().nullable(),
   rationale: z.string().max(600).nullable().optional(),
   authorizedPlan: z.array(authorizedPlanEntrySchema).nullable(),
@@ -172,6 +175,9 @@ interface ValidatedArenaRow {
   readonly startingRoomDigest: string;
   readonly outcome: string;
   readonly plannedBy: z.infer<typeof plannerSchema>;
+  readonly instructionSource: 'none' | 'kb' | 'skill';
+  readonly skillName: 'engine-submission' | 'dm-round' | null;
+  readonly skillHash: string | null;
   readonly plannerLabel: string | null | undefined;
   readonly planner: z.infer<typeof primaryPlannerSchema>;
   readonly overrideKinds: readonly z.infer<typeof overrideKindSchema>[];
@@ -258,12 +264,16 @@ export interface RerunAnswerKey {
       readonly primaryOptionIndex: number;
       readonly fallbackOptionIndex: number | null;
     }[];
+    readonly instructionSource: 'none' | 'kb' | 'skill';
+    readonly skillName: 'engine-submission' | 'dm-round' | null;
+    readonly skillHash: string | null;
   }[];
 }
 
 const MODEL_IDENTITY_FIELDS = new Set([
   'arm', 'model', 'cli', 'thinkMode', 'sessionId', 'escalationSessionId',
   'escalationModel', 'kbHash', 'repoCommit', 'rawTurnContext', 'rlData', 'plannedBy',
+  'instructionSource', 'skillName', 'skillHash',
   // Era-identifying: only post-intel arms produce engineIntel, so its presence
   // (not just its contents) unblinds the arm.
   'engineIntel',
@@ -362,6 +372,13 @@ function validateRow(
     throw new TypeError(`${sourceLabel}${property} is invalid: ${issue?.message ?? 'unknown schema failure'}.`);
   }
   const row = parsed.data;
+  if (row.instructionSource === 'skill') {
+    if (row.skillName === null || row.skillHash === null) {
+      throw new TypeError(`${sourceLabel} skill instruction source requires skillName and skillHash.`);
+    }
+  } else if (row.skillName !== null || row.skillHash !== null) {
+    throw new TypeError(`${sourceLabel} non-skill instruction source requires null skillName and skillHash.`);
+  }
   if (crossEra && row.repoCommit === undefined) {
     throw new TypeError(`${sourceLabel}.repoCommit is required in cross-era mode (it is the arm partition key).`);
   }
@@ -382,6 +399,9 @@ function validateRow(
     startingRoomDigest: row.startingRoomDigest,
     outcome: row.outcome,
     plannedBy: row.plannedBy,
+    instructionSource: row.instructionSource,
+    skillName: row.skillName,
+    skillHash: row.skillHash,
     plannerLabel: row.plannerLabel,
     planner,
     overrideKinds: row.overrideKinds ?? [],
@@ -632,6 +652,9 @@ function buildPacket(
       decisionRejectionCodes: row.decisionRejectionCodes,
       normalizationCodes: row.normalizationCodes,
       chosenOptionIndices: row.chosenOptionIndices,
+      instructionSource: row.instructionSource,
+      skillName: row.skillName,
+      skillHash: row.skillHash,
     })),
   };
   assertBlindedPacket(packet);

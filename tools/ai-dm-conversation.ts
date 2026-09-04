@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
-import { appendFile, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, copyFile, mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -17,10 +17,11 @@ import {
 import { sha256 } from '../src/crypto/sha256';
 import {
   agentCallUsage, turnInputTotal,
+  AGENT_SKILL_NAMES,
   type AgentCallPhase, type AgentCallUsage,
   type AgentAdapterKind, type AgentCliKind, type AgentFailureClassification, type AgentInvocation, type AgentSessionAdapter,
   type AgentInvocationOutput, type AgentSessionBinding, type AgentToolSession, type AgentTurnResult, type AgentUsage,
-  type ContextRolloverPolicy, type FreshSessionContext,
+  type AgentInstructionSource, type AgentSkillName, type ContextRolloverPolicy, type FreshSessionContext,
 } from '../src/vtt/agent-session';
 import { AgentSessionLifecycle } from '../src/vtt/agent-session-lifecycle';
 import { AGENT_ADAPTER_VERSION, resolveAgentAdapter } from '../src/vtt/agent-adapters';
@@ -182,7 +183,7 @@ const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
 };
 const RULES_SOURCE = { get: () => null } as const;
 
-export interface ConversationConfig {
+interface ConversationConfigBase {
   readonly intelMode: IntelMode;
   readonly rendererProfile: RendererProfile;
   readonly combatModel: CombatModel;
@@ -202,11 +203,12 @@ export interface ConversationConfig {
   readonly cwd: string;
   readonly cliBin: string;
   readonly timeoutMs: number;
-  readonly kbPath: string;
   readonly reactionAskDefault: UnattendedReactionAskDefault;
   readonly captureRlData: boolean;
   readonly localOpenAi: LocalOpenAiConfig | null;
 }
+
+export type ConversationConfig = ConversationConfigBase & AgentInstructionSource;
 
 export type ConversationRlTask = 'round_plan' | 'plan_adjustment';
 export type ConversationRlSubmissionTool =
@@ -468,6 +470,9 @@ export interface ConversationRow {
   readonly escalationSessionId: string | null;
   readonly sessionIdHash: string | null;
   readonly kbHash: string | null;
+  readonly instructionSource: AgentInstructionSource['instructionSource'];
+  readonly skillName: AgentSkillName | null;
+  readonly skillHash: string | null;
   readonly kbReads: readonly KbReadRecord[];
   readonly repoCommit: string;
   readonly rawTurnContext: string;
@@ -656,6 +661,36 @@ function validateKbPath(cwd: string, candidate: string): void {
   }
 }
 
+function parsedInstructionSource(
+  values: ReadonlyMap<string, string>,
+  cwd: string,
+  cli: ConversationCli,
+): AgentInstructionSource {
+  const source = values.get('--instruction-source') ?? (values.has('--kb') ? 'kb' : 'none');
+  const skill = values.get('--skill');
+  if (source !== 'none' && source !== 'kb' && source !== 'skill') {
+    throw new TypeError('--instruction-source must be none, kb, or skill.');
+  }
+  if (source !== 'skill' && skill !== undefined) {
+    throw new TypeError('--skill requires --instruction-source skill.');
+  }
+  if (source === 'skill') {
+    if (cli !== 'codex') throw new TypeError('--instruction-source skill requires --cli codex.');
+    if (values.has('--kb')) throw new TypeError('--kb cannot be combined with --instruction-source skill.');
+    if (!AGENT_SKILL_NAMES.includes(skill as AgentSkillName)) {
+      throw new TypeError('--skill must be engine-submission or dm-round.');
+    }
+    return { instructionSource: 'skill', skill: skill as AgentSkillName, kbPath: null };
+  }
+  if (source === 'kb') {
+    const kbPath = resolve(cwd, values.get('--kb') ?? DEFAULT_AI_DM_KB_ROOT);
+    validateKbPath(cwd, kbPath);
+    return { instructionSource: 'kb', skill: null, kbPath };
+  }
+  if (values.has('--kb')) throw new TypeError('--kb requires --instruction-source kb.');
+  return { instructionSource: 'none', skill: null };
+}
+
 export function parseConversationArgs(argv: readonly string[], cwd = process.cwd()): ConversationConfig {
   const values = new Map<string, string>();
   let dryRun = false;
@@ -668,7 +703,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
       '--fixtures', '--rooms', '--rounds', '--reps', '--cli', '--model', '--effort',
       '--escalation-model', '--escalation-effort',
       '--out', '--cli-bin', '--timeout-ms', '--kb', '--reaction-ask-default',
-      '--transport',
+      '--transport', '--instruction-source', '--skill',
       '--combat-model', '--initiative-profile',
       '--intel-mode',
       '--renderer-profile',
@@ -727,8 +762,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
         ...(values.has('--local-api-key') ? { apiKey: values.get('--local-api-key') ?? '' } : {}),
       }
     : null;
-  const kbPath = resolve(cwd, values.get('--kb') ?? DEFAULT_AI_DM_KB_ROOT);
-  validateKbPath(cwd, kbPath);
+  const instructionSource = parsedInstructionSource(values, cwd, selectedCli);
   const reactionAskDefault = values.get('--reaction-ask-default') ?? 'decline';
   if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
     throw new TypeError('--reaction-ask-default must be decline or take.');
@@ -768,7 +802,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     cwd: resolve(cwd),
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : selectedCli === 'claude-code' ? 'claude' : ''),
     timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
-    kbPath,
+    ...instructionSource,
     reactionAskDefault,
     captureRlData,
     localOpenAi,
@@ -776,7 +810,38 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
 }
 
 async function loadKnowledgeBase(config: ConversationConfig): Promise<LoadedAiDmKnowledgeBase> {
-  return loadAiDmKnowledgeBase(config.cwd, config.kbPath);
+  return loadAiDmKnowledgeBase(
+    config.cwd,
+    config.instructionSource === 'kb' ? config.kbPath : DEFAULT_AI_DM_KB_ROOT,
+  );
+}
+
+const OPERATOR_CODEX_HOME = '/home/vagrant/.codex-aidm';
+
+export interface IsolatedCodexHome {
+  readonly codexHome: string;
+  readonly skillHash: string | null;
+}
+
+export async function buildIsolatedCodexHome(
+  artifactsDirectory: string,
+  config: { readonly cwd: string } & AgentInstructionSource,
+  operatorHome = OPERATOR_CODEX_HOME,
+): Promise<IsolatedCodexHome> {
+  const suffix = config.instructionSource === 'skill' ? config.skill : config.instructionSource;
+  const codexHome = resolve(artifactsDirectory, `codex-home-${suffix}`);
+  const skillsDirectory = resolve(codexHome, 'skills');
+  await mkdir(skillsDirectory, { recursive: true });
+  await Promise.all(['auth.json', 'config.toml'].map(async (name) =>
+    symlink(resolve(operatorHome, name), resolve(codexHome, name), 'file')));
+  if (config.instructionSource !== 'skill') return { codexHome, skillHash: null };
+
+  const fixturePath = resolve(config.cwd, 'tests/fixtures/ai-dm-skills', config.skill, 'SKILL.md');
+  const skillDirectory = resolve(skillsDirectory, config.skill);
+  const skillBytes = await readFile(fixturePath);
+  await mkdir(skillDirectory, { recursive: true });
+  await copyFile(fixturePath, resolve(skillDirectory, 'SKILL.md'));
+  return { codexHome, skillHash: sha256(skillBytes.toString('utf8')) };
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
@@ -2648,7 +2713,9 @@ function invocation(
   freshSessionContext?: FreshSessionContext,
   output: AgentInvocationOutput = { kind: 'tool_driven' },
 ): AgentInvocation {
+  const instructionSource: AgentInstructionSource = config;
   return {
+    ...instructionSource,
     runId, prompt, instructions, model: planner.model, reasoningEffort: planner.effort,
     sessionProfile: 'arena',
     callPhase, output,
@@ -2704,6 +2771,9 @@ async function runConversationWithConfiguredIntel(
   const repoCommit = await readRepoCommit(config.cwd);
   await writeFile(config.outPath, '', 'utf8');
   const artifacts = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-conversation-'));
+  const instructionEnvironment = config.cli === 'codex'
+    ? await buildIsolatedCodexHome(artifacts, config)
+    : { codexHome: null, skillHash: null };
   const states = await roomStates(config, options);
   if (config.combatModel === 'initiative_segments_v1') {
     const invalidFixture = states.findIndex((state) => state.config.initiativeMode !== 'per_combatant');
@@ -2742,6 +2812,7 @@ async function runConversationWithConfiguredIntel(
       })
     : resolveAgentAdapter(config.cli as AgentCliKind, {
         binary: config.cliBin, cwd: config.cwd, engineCommand: process.execPath,
+        ...(instructionEnvironment.codexHome === null ? {} : { codexHome: instructionEnvironment.codexHome }),
         engineToolProfile: 'dm',
         engineArgs: [
           resolve(config.cwd, 'node_modules/vite-node/vite-node.mjs'),
@@ -4818,6 +4889,9 @@ async function runConversationWithConfiguredIntel(
         executionErrorClass: executionError,
         proposalId,
         kbHash: knowledgeBase.combinedStartupHash,
+        instructionSource: config.instructionSource,
+        skillName: config.skill,
+        skillHash: instructionEnvironment.skillHash,
         kbReads,
         repoCommit,
         rawTurnContext: rowTurnContext.raw,

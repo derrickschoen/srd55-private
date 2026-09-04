@@ -92,6 +92,8 @@ const statusForFailure = (classification: AgentFailureClassification): Conforman
 function invocation(kind: AgentCliKind, prompt: string): AgentInvocation {
   const environmentKey = `DND_AGENT_CONFORMANCE_MODEL_${kind.replaceAll('-', '_').toUpperCase()}`;
   return {
+    instructionSource: 'none',
+    skill: null,
     runId: encounterSessionId('encounter:engine-mcp'),
     prompt,
     model: process.env[environmentKey] ?? DEFAULT_MODELS[kind],

@@ -43,6 +43,9 @@ function registeredRows(): JsonRecord[] {
       room: room + 1,
       round,
       arm,
+      instructionSource: 'none',
+      skillName: null,
+      skillHash: null,
       model: `${arm}-model`,
       cli: 'codex',
       startingRoomDigest: `frozen-room-${String(seed)}`,
@@ -125,12 +128,15 @@ describe('AI-DM R1-10 rerun packet', () => {
           rationale: 'The ogre pins the front line while its allies reposition.',
           decisionTransport: 'mcp_minimal', firstDecisionAccepted: true, decisionAttempts: 1,
           decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [],
+          instructionSource: 'none', skillName: null, skillHash: null,
         },
         {
           blindId: 'blind-002', arm: 'intel', planner: 'engine_default',
           overrideKinds: [], overrideRejections: [], decisionReasons: [], rationale: null,
           decisionTransport: 'mcp_minimal', firstDecisionAccepted: false, decisionAttempts: 0,
           decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [],
+          skillName: 'engine-submission', skillHash: 'a'.repeat(64),
+          instructionSource: 'skill',
         },
       ],
     } as const;
@@ -188,12 +194,14 @@ describe('AI-DM R1-10 rerun packet', () => {
         decisionReasons: [], rationale: null,
         decisionTransport: 'mcp_minimal', firstDecisionAccepted: true, decisionAttempts: 1,
         decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [],
+        instructionSource: 'none', skillName: null, skillHash: null,
       },
       {
         blindId: 'blind-002', arm: 'intel', planner: 'sim_controller',
         overrideKinds: [], overrideRejections: [], decisionReasons: [], rationale: null,
         decisionTransport: 'mcp_minimal', firstDecisionAccepted: false, decisionAttempts: 0,
         decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [],
+        instructionSource: 'skill', skillName: 'engine-submission', skillHash: 'a'.repeat(64),
       },
     ]);
     const packetText = JSON.stringify(result.packet);
@@ -227,6 +235,9 @@ describe('AI-DM R1-10 rerun packet', () => {
         room: room + 1,
         round,
         arm,
+        instructionSource: 'none',
+        skillName: null,
+        skillHash: null,
         model: `${arm}-model`,
         cli: `${arm}-cli`,
         startingRoomDigest: `frozen-room-${String(seed)}`,
@@ -283,6 +294,7 @@ describe('AI-DM R1-10 rerun packet', () => {
       plannedBy: { model: 'm', effort: 'low' }, roundNarrative: null,
       decisionTransport: 'mcp_minimal', firstDecisionAccepted: true, decisionAttempts: 1,
       decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [],
+      instructionSource: 'none', skillName: null, skillHash: null,
     };
     const paired = (plan: unknown, extra: Record<string, unknown> = {}): Record<string, unknown>[] =>
       ['a', 'b'].map((arm) => ({ ...base, arm, authorizedPlan: plan, ...extra }));
@@ -364,6 +376,9 @@ describe('AI-DM R1-10 rerun packet', () => {
             round,
             // Cross-era reality: the arena labels both eras identically.
             arm: 'single',
+            instructionSource: 'none',
+            skillName: null,
+            skillHash: null,
             repoCommit: era,
             model: 'shared-model',
             cli: 'codex',
@@ -458,6 +473,12 @@ describe('AI-DM R1-10 rerun packet', () => {
       .toThrow('leaks a model-identifying field');
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', normalizationCodes: ['stale_catalog'] }] }))
       .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', instructionSource: 'skill' }] }))
+      .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', skillName: 'dm-round' }] }))
+      .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', skillHash: 'a'.repeat(64) }] }))
+      .toThrow('leaks a model-identifying field');
   });
 
   it('keeps structured-final reasons and chosen indices in the answer key only (mutation: make reason optional)', () => {
@@ -484,6 +505,19 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(JSON.stringify(result.packet)).not.toContain('tactical advantage');
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', reason: 'leaked' }] }))
       .toThrow('leaks a model-identifying field');
+  });
+
+  it('requires instruction provenance and the selected skill hash in every source row', () => {
+    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl');
+    const first = rows[0];
+    const second = rows[1];
+    if (first === undefined || second === undefined) throw new Error('paired fixture is incomplete');
+    const { instructionSource: _source, ...withoutSource } = first;
+    const { skillHash: _hash, ...withoutSkillHash } = second;
+    expect(() => buildRerunPacket([withoutSource, second], 1, tinyProtocol))
+      .toThrow('.instructionSource is invalid');
+    expect(() => buildRerunPacket([first, withoutSkillHash], 1, tinyProtocol))
+      .toThrow('.skillHash is invalid');
   });
 
   it('requires explicit, separate CLI paths and a deterministic shuffle seed', () => {

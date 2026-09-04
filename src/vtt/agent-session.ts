@@ -64,6 +64,14 @@ export interface FreshSessionContext {
   readonly startupInstructions: string;
 }
 
+export const AGENT_SKILL_NAMES = ['engine-submission', 'dm-round'] as const;
+export type AgentSkillName = (typeof AGENT_SKILL_NAMES)[number];
+
+export type AgentInstructionSource =
+  | { readonly instructionSource: 'none'; readonly skill: null }
+  | { readonly instructionSource: 'kb'; readonly skill: null; readonly kbPath: string }
+  | { readonly instructionSource: 'skill'; readonly skill: AgentSkillName; readonly kbPath: null };
+
 export type AgentCliKind = 'codex' | 'opencode' | 'pi' | 'claude-code';
 export type AgentAdapterKind = AgentCliKind | 'local-openai';
 
@@ -104,7 +112,7 @@ export interface AgentSessionBinding {
   readonly status: 'active' | 'superseded_after_resume_failure' | 'superseded_after_context_rollover';
 }
 
-export interface AgentInvocation {
+export type AgentInvocation = AgentInstructionSource & {
   readonly runId: EncounterSessionId;
   readonly prompt: string;
   /** Session-level instructions supplied only when creating a new agent session. */
@@ -124,7 +132,7 @@ export interface AgentInvocation {
   readonly timeoutMs: number | null;
   /** Direct in-process engine surface used by adapters that do not speak MCP. */
   readonly toolSession?: AgentToolSession;
-}
+};
 
 export interface AgentUsage {
   readonly turnInputTotal: TurnInputTotal;

@@ -103,6 +103,8 @@ describe('SIMULATED local OpenAI conversation adapter', () => {
         thinkMode: 'off',
       });
       const result = await adapter.start({
+        instructionSource: 'none',
+        skill: null,
         runId: encounterSessionId('encounter:SIMULATED-adjustment'),
         prompt: 'SIMULATED adjustment prompt',
         model: 'SIMULATED-local-model',
