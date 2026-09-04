@@ -10084,3 +10084,12 @@ Footprint defaults (plan §Open rulings, recommendation text verbatim):
   10. Public MCP exposure: add required footprint/size/mode to the public combatant summary and bump its governing response policy/schema if one exists.
   11. Serialized-change register: approve only listed fields/versions; one-way migrate persisted user sessions/replays containing old paths to explicit normal mode; hand-author changed fixtures from the contract, never from runtime output.
   12. Diagonal movement: preserve destination-only eight-way semantics for all sizes unless a separate corner rule is requested.
+
+SUPERVISOR POLICY (2026-09-04 14:58) — browser-suite gates. The full Playwright suite takes ~54 min on this box at one
+worker and the D511 lock serializes it; three lane gates queued behind each other put the screenshot lane (owner
+priority) two hours out. Rule: the FULL browser suite runs at main landings and for lanes that change src/vtt UI or
+tools/ai-dm-board-snapshot; non-UI lanes (tactical_v2, graph-slice) get tsc/sg/vitest plus only the specs they touch.
+Applied now: tactical inc5.6 and graph-slice inc2 browser gates stopped (already committed on vitest-green gates);
+iso-r2a's full-suite run and the conditions lane's queued full-suite run stopped so board-shot inc2 takes the lock
+first. Conditions gets a supervisor gate with the DM-view specs; iso r2a/r2b get iso-view.spec. Finding against
+myself: I put the full suite in every lane brief without measuring it first.
