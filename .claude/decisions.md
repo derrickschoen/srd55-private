@@ -10158,3 +10158,10 @@ Iso art round 1 (unit C) screenshot reviewed: sprites, walls and floors now read
 critique for round 2: floor and wall tops merge in the same blue-grey, the wall-top dither reads as noise at 2×,
 the room is cropped by the 960-px canvas clamp (camera is the supervisor's), labels are the sibling's fillText and
 overlap until renderLabel/stackLabelOffsets are wired in the r2 integration unit.
+
+D517 — OWNER (2026-09-04 18:55): "Compare the iso to Diablo 2. Make the close walls translucent. Do a mood lighting
+pass." Supervisor: conventions only (no assets/palettes/names): dark ambient with warm pools of light, a light
+radius that falls off into cool darkness, desaturated shadow, walls nearest the camera fade to translucent when they
+would occlude a token or the hovered cell. Runs as ONE Fable unit (D) on the merged iso branch (r2a + r2b + art C
+merged into claude/iso-vtt first), owning renderer/scene/view and pixel-art together; the camera default becomes
+fit-to-room at integer zoom with the 960-px clamp removed (supervisor's camera ruling).
