@@ -106,6 +106,7 @@ import {
   type McpResourceContent,
   type McpResourceProvider,
   type McpToolBinding,
+  type McpToolResultContent,
 } from './handler';
 import {
   ENGINE_ACTOR_KNOWLEDGE_POLICY,
@@ -264,6 +265,7 @@ interface EngineMcpDependencies {
   readonly kbReadBudget?: KbReadBudget;
   readonly kbReadCallPhase?: KbReadCallPhase;
   readonly overridePolicy?: OverridePolicy;
+  readonly toolResultContent?: McpToolResultContent;
 }
 
 export interface EngineToolSurface {
@@ -2908,7 +2910,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     return resource;
   });
   const prompts = createPromptProvider(feed, rules, currentTurnContext);
-  const handler = createMcpHandler({ tools: bindings, resources, prompts, ...(dependencies.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: dependencies.maximumToolResultBytes }), ...(dependencies.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: dependencies.maximumResourceBytes }), ...(dependencies.listPageSize === undefined ? {} : { listPageSize: dependencies.listPageSize }) });
+  const handler = createMcpHandler({ tools: bindings, resources, prompts, ...(dependencies.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: dependencies.maximumToolResultBytes }), ...(dependencies.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: dependencies.maximumResourceBytes }), ...(dependencies.listPageSize === undefined ? {} : { listPageSize: dependencies.listPageSize }), ...(dependencies.toolResultContent === undefined ? {} : { toolResultContent: dependencies.toolResultContent }) });
   return Object.freeze({
     handle: handler.handle,
     drainNotifications: handler.drainNotifications,

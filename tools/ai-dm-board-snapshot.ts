@@ -4,13 +4,14 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
 import { arch, platform, release, tmpdir } from 'node:os';
-import { basename, join, relative, resolve, sep } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type BrowserContext, type Page } from '@playwright/test';
 import { preview, type PreviewServer } from 'vite';
@@ -33,7 +34,7 @@ import {
 
 const repositoryRoot = resolve(fileURLToPath(new URL('../', import.meta.url)));
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-const MAX_PNG_BYTES = 1_000_000;
+export const MAX_BOARD_PNG_BYTES = 1_000_000;
 const VIEWPORT = Object.freeze({ width: 1_280, height: 1_280 });
 const TILE_SIZE_CSS_PX = 40;
 const SNAPSHOT_CANARY = 'board-snapshot-element-crop-canary';
@@ -249,6 +250,66 @@ function pngDimensions(png: Buffer): { readonly width: number; readonly height: 
   return { width, height };
 }
 
+function validateArtifactShape(artifact: BoardImageArtifact): void {
+  if (artifact.version !== 'arena-board-image-v1' || artifact.audience !== 'dm' ||
+    artifact.mimeType !== 'image/png') {
+    throw new TypeError('Board image artifact has an unsupported contract discriminator.');
+  }
+  if (!/^board-images\/[a-f0-9]{64}\.png$/u.test(artifact.relativePath) ||
+    artifact.relativePath !== `board-images/${artifact.sha256}.png`) {
+    throw new TypeError('Board image path must be content-addressed under board-images/.');
+  }
+  if (!SHA256_PATTERN.test(artifact.sha256)) {
+    throw new TypeError('Board image SHA-256 must be lowercase hexadecimal.');
+  }
+  if (!Number.isSafeInteger(artifact.bytes) || artifact.bytes < 24 ||
+    artifact.bytes > MAX_BOARD_PNG_BYTES) {
+    throw new RangeError('Board image byte count violates the PNG size contract.');
+  }
+  for (const [label, value] of Object.entries({ width: artifact.width, height: artifact.height })) {
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new RangeError(`Board image ${label} must be a positive safe integer.`);
+    }
+  }
+  if (!Number.isSafeInteger(artifact.capturedAtUnixMs) || artifact.capturedAtUnixMs < 1 ||
+    !Number.isFinite(artifact.captureMs) || artifact.captureMs < 0) {
+    throw new RangeError('Board image capture timing is invalid.');
+  }
+}
+
+export async function readValidatedBoardImage(input: {
+  readonly artifact: BoardImageArtifact;
+  readonly artifactRoot: string;
+  readonly state: EncounterState;
+  readonly source: BoardImageSource;
+  readonly primaryDispatchStartedAtUnixMs: number;
+}): Promise<Buffer> {
+  validateArtifactShape(input.artifact);
+  assertBoardImageFresh(input.artifact, input.state, input.source);
+  if (!Number.isSafeInteger(input.primaryDispatchStartedAtUnixMs) ||
+    input.primaryDispatchStartedAtUnixMs < input.artifact.capturedAtUnixMs) {
+    throw new Error('Board image capture must complete before primary model dispatch.');
+  }
+  const root = resolve(input.artifactRoot);
+  const path = resolve(root, input.artifact.relativePath);
+  const inside = relative(root, path);
+  if (inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
+    throw new Error('Board image escaped its artifact root.');
+  }
+  const [realRoot, realPath] = await Promise.all([realpath(root), realpath(path)]);
+  const realInside = relative(realRoot, realPath);
+  if (realInside === '..' || realInside.startsWith(`..${sep}`) || isAbsolute(realInside)) {
+    throw new Error('Board image resolved outside its artifact root.');
+  }
+  const png = await readFile(realPath);
+  const dimensions = pngDimensions(png);
+  if (png.byteLength !== input.artifact.bytes || sha256Bytes(png) !== input.artifact.sha256 ||
+    dimensions.width !== input.artifact.width || dimensions.height !== input.artifact.height) {
+    throw new Error('Board image bytes do not match their persisted artifact metadata.');
+  }
+  return png;
+}
+
 async function writeContentAddressedPng(
   directory: string,
   digest: string,
@@ -379,6 +440,10 @@ export class BoardSnapshotService implements AsyncDisposable {
     return this.#coldStartMs;
   }
 
+  get outputDirectory(): string {
+    return this.#outputDirectory;
+  }
+
   get manifestPath(): string | null {
     return this.#manifestPath;
   }
@@ -449,8 +514,8 @@ export class BoardSnapshotService implements AsyncDisposable {
       scale: 'device',
     });
     const captureMs = performance.now() - captureStartedAt;
-    if (png.byteLength > MAX_PNG_BYTES) {
-      throw new Error(`Board screenshot is ${String(png.byteLength)} bytes; limit is ${String(MAX_PNG_BYTES)}.`);
+    if (png.byteLength > MAX_BOARD_PNG_BYTES) {
+      throw new Error(`Board screenshot is ${String(png.byteLength)} bytes; limit is ${String(MAX_BOARD_PNG_BYTES)}.`);
     }
     const dimensions = pngDimensions(png);
     const digest = sha256Bytes(png);
@@ -585,7 +650,7 @@ export class BoardSnapshotService implements AsyncDisposable {
       viewport: VIEWPORT,
       deviceScaleFactor: 1,
       tileSizeCssPx: TILE_SIZE_CSS_PX,
-      maximumPngBytes: MAX_PNG_BYTES,
+      maximumPngBytes: MAX_BOARD_PNG_BYTES,
       capturePolicy: 'encounter-board-element-settled-v1',
       coldStartMs: this.#coldStartMs,
       artifacts: [...this.#artifacts],
