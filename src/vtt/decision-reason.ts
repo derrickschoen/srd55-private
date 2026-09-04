@@ -3,7 +3,7 @@ const CONTRACT_ONLY_WORDS = new Set([
   'cannot', 'choice', 'complete', 'context', 'corrected', 'correction', 'defensive',
   'compatible', 'coverage', 'details', 'did', 'dominating', 'effect', 'engine', 'encounter',
   'every', 'executable', 'expose', 'fallback',
-  'for', 'full', 'further', 'gap', 'higher', 'identical', 'if', 'intended', 'is', 'legal',
+  'for', 'full', 'further', 'gap', 'higher', 'highest', 'identical', 'if', 'intended', 'is', 'its', 'legal',
   'initial', 'no', 'not', 'objective', 'of', 'offered', 'option', 'options', 'or', 'override',
   'play', 'plan', 'preserve', 'preserving',
   'primary', 'proceed', 'ranked', 'requested', 'requires', 'resolve', 'resolves', 'revision',

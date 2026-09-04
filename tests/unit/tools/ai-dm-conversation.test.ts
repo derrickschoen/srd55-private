@@ -18,6 +18,7 @@ import {
   runConversation,
   structuredFinalDecisionPhase,
 } from '../../../tools/ai-dm-conversation';
+import { buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { armorClass, encounterSessionId, type CombatantId } from '../../../src/combat/values';
@@ -1555,8 +1556,9 @@ describe('AI-DM engine MCP conversation runner', () => {
 
   it('starts the persistent SIMULATED session with the first round plan in one model dispatch', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-cold-plan-'));
+    const outPath = join(directory, 'rows.jsonl');
     const result = await runConversation(parseConversationArgs([
-      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      '--rooms', '1', '--rounds', '1', '--out', outPath, '--dry-run',
       ...LEGACY_BLOCK_ARGS,
     ]));
 
@@ -1583,6 +1585,8 @@ describe('AI-DM engine MCP conversation runner', () => {
       serviceNullAdjustments: 0,
       tokens: result.rows[0]?.tokens,
     }));
+    expect(result.rows[0]).not.toHaveProperty('chosenOptionIndices');
+    expect(JSON.parse(readFileSync(outPath, 'utf8'))).not.toHaveProperty('chosenOptionIndices');
   });
 
   it('queues a schema-final indexed decision through the same engine round path (mutation: parse valid final output but do not queue it)', { timeout: 30_000 }, async () => {
@@ -1607,6 +1611,9 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(row.toolCalls).toBe(0);
     expect(row.rawTurnContext).not.toContain('context_not_requested');
     expect(row.authorizedPlan).not.toBeNull();
+    if (row.chosenOptionIndices === undefined) {
+      throw new Error('Final-index row omitted chosen option indices.');
+    }
     expect(row.chosenOptionIndices.length).toBeGreaterThan(0);
     expect(row.chosenOptionIndices.every((selection) => selection.primaryOptionIndex === 0)).toBe(true);
     expect(row.authorizedPlan?.every((entry) => entry.reason ===
@@ -1636,6 +1643,9 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(row.authorizedPlan).not.toBeNull();
     expect(row.authorizedPlan?.every((entry) =>
       entry.reason === 'Hold the doorway so the injured scout can disengage safely.')).toBe(true);
+    if (row.chosenOptionIndices === undefined) {
+      throw new Error('Corrected final-index row omitted chosen option indices.');
+    }
     expect(row.chosenOptionIndices.every((selection) => selection.fallbackOptionIndex === null)).toBe(true);
     expect(JSON.stringify(row.authorizedPlan)).not.toContain('Use the offered legal option for this actor.');
   });
@@ -1655,8 +1665,9 @@ describe('AI-DM engine MCP conversation runner', () => {
 
   it('records the actor chosen index for recommendation-anchor measurement (mutation: omit chosen index from final row)', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-indices-'));
+    const outPath = join(directory, 'rows.jsonl');
     const result = await runConversation(parseConversationArgs([
-      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      '--rooms', '1', '--rounds', '1', '--out', outPath, '--dry-run',
       '--transport', 'final_indices',
       ...LEGACY_BLOCK_ARGS,
     ]));
@@ -1665,6 +1676,61 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(row.chosenOptionIndices).toEqual(row.authorizedPlan?.map((entry) => ({
       actorId: entry.actorId, primaryOptionIndex: 0, fallbackOptionIndex: 1,
     })));
+    expect(JSON.parse(readFileSync(outPath, 'utf8'))).toEqual(expect.objectContaining({
+      chosenOptionIndices: row.authorizedPlan?.map((entry) => ({
+        actorId: entry.actorId, primaryOptionIndex: 0, fallbackOptionIndex: 1,
+      })),
+    }));
+  });
+
+  it('passes a persisted final-index row through packet validation', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-packet-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath, '--dry-run',
+      '--transport', 'final_indices', '--combat-model', 'initiative_segments_v1',
+    ]);
+    await runConversationWithPartyPolicy('heuristic_v0', config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+    });
+    const persisted = objectValue(JSON.parse(readFileSync(outPath, 'utf8')) as unknown, 'persisted arena row');
+    const packet = buildRerunPacket([
+      { ...persisted, seed: 3_943_001, arm: 'indexed-a' },
+      { ...persisted, seed: 3_943_001, arm: 'indexed-b' },
+    ], 1, { seeds: [3_943_001], reps: 1 });
+
+    expect(packet.answerKey.entries).toHaveLength(2);
+    expect(packet.answerKey.entries.every((entry) =>
+      entry.rowEra === 'post_shift' &&
+      entry.decisionTransport === 'final_indices' &&
+      entry.chosenOptionIndices.length > 0)).toBe(true);
+  });
+
+  it('records no chosen indices when no final-index decision is accepted', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-exhausted-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath, '--dry-run',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]), {
+      exhaustInitial: ['room-1-round-1'],
+      failCorrection: ['room-1-round-1'],
+    });
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Exhausted final-index run produced no row.');
+
+    expect(row).toMatchObject({
+      outcome: 'authorized',
+      decisionTransport: 'final_indices',
+      firstDecisionAccepted: false,
+      chosenOptionIndices: [],
+      planner: 'engine_default',
+    });
+    expect(JSON.parse(readFileSync(outPath, 'utf8'))).toEqual(expect.objectContaining({
+      decisionTransport: 'final_indices',
+      chosenOptionIndices: [],
+    }));
   });
 
   it('rejects speculative structured-final dispatch at the typed phase boundary (mutation: pass speculative through as a decision phase)', () => {

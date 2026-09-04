@@ -24,6 +24,7 @@ const RETRO_AUDIT_RUBBER_STAMPS = [
   'Selected offered revision-bound option.',
   'The offered primary option is selected; the offered fallback is retained.',
   'The offered primary option is the intended selection.',
+  'The engine selected its highest-ranked available option.',
   'Use available complete turn.',
   'Use offered fallback if primary cannot resolve.',
   'Use offered fallback if primary is not executable.',
@@ -60,8 +61,8 @@ const RETRO_AUDIT_RUBBER_STAMPS = [
 ] as const;
 
 describe('decision reasons', () => {
-  it('rejects all 55 independently audited rubber-stamp texts', () => {
-    expect(RETRO_AUDIT_RUBBER_STAMPS).toHaveLength(55);
+  it('rejects all 56 independently audited rubber-stamp texts', () => {
+    expect(RETRO_AUDIT_RUBBER_STAMPS).toHaveLength(56);
     const missed = RETRO_AUDIT_RUBBER_STAMPS.filter((reason) => decisionReasonProblem(reason) === null);
     expect(missed, JSON.stringify(missed)).toEqual([]);
   });
@@ -71,6 +72,7 @@ describe('decision reasons', () => {
     'Spare the surrendering foe because the captain needs information.',
     'Conserve the last spell slot for the more dangerous next room.',
     'Hold this doorway so the injured scout can disengage safely.',
+    'Cleric is at 3 HP and adjacent; kill chance 0.62.',
   ])('keeps a concrete decision motive: %s', (reason) => {
     expect(decisionReasonProblem(reason)).toBeNull();
   });

@@ -506,7 +506,7 @@ export interface ConversationRow {
   readonly decisionRejectionCodes: readonly StructuredFinalRejectionCode[];
   readonly normalizationCodes: readonly DecisionNormalizationRejectionCode[];
   /** Answer-key metric input for engine-recommendation anchoring. */
-  readonly chosenOptionIndices: readonly {
+  readonly chosenOptionIndices?: readonly {
     readonly actorId: CombatantId;
     readonly primaryOptionIndex: number;
     readonly fallbackOptionIndex: number | null;
@@ -3047,7 +3047,8 @@ async function runConversationWithConfiguredIntel(
       let correctionFinalText: string | null = null;
       let authorizationStateBinding: ConversationRow['stateBinding']['authorization'] = null;
       let authorizedPlan: ConversationRow['authorizedPlan'] = null;
-      let acceptedStructuredDecision: BoundRoundDecision | null = null;
+      let pendingStructuredDecision: BoundRoundDecision | null = null;
+      let authorizedChosenOptionIndices: NonNullable<ConversationRow['chosenOptionIndices']> = [];
       let acceptedSubmission: readonly EngineTurnProposal[] | null = null;
       let acceptedIntelCapture: DmIntelCapture | null = null;
       let authorizedMonsterProposalHash: string | null = null;
@@ -3843,7 +3844,7 @@ async function runConversationWithConfiguredIntel(
                   throw new Error('Initial final-index decision queued a non-round proposal.');
                 }
                 proposed = structured.proposal;
-                acceptedStructuredDecision = structured.decision;
+                pendingStructuredDecision = structured.decision;
                 if (decisionAttempts === 1) firstDecisionAccepted = true;
               } else {
                 decisionRejectionCodes.push(structured.code);
@@ -4063,7 +4064,7 @@ async function runConversationWithConfiguredIntel(
             acceptedIntelCapture = proposal.intelCapture === undefined
               ? null : structuredClone(proposal.intelCapture);
             const structuredReasonByActor = new Map(
-              acceptedStructuredDecision?.selections.map((selection) => [selection.actorId, selection.reason]) ?? [],
+              pendingStructuredDecision?.selections.map((selection) => [selection.actorId, selection.reason]) ?? [],
             );
             authorizedPlan = mechanics.map((entry): ConversationAuthorizedActorPlan => ({
               actorId: entry.mechanics.actorId,
@@ -4079,6 +4080,11 @@ async function runConversationWithConfiguredIntel(
             capturedRlData = proposalRlData;
             roundRationale = proposal.rationale;
             roundNarrative = mechanics.map((entry) => entry.summary).join('; ');
+            authorizedChosenOptionIndices = pendingStructuredDecision?.selections.map((selection) => ({
+              actorId: selection.actorId,
+              primaryOptionIndex: selection.primaryOptionIndex,
+              fallbackOptionIndex: selection.fallbackOptionIndex,
+            })) ?? [];
             const acceptingPlanner = proposal.phase === 'initial'
               ? initialDispatchPlanner
               : correctionDispatchPlanner;
@@ -4232,7 +4238,7 @@ async function runConversationWithConfiguredIntel(
                       throw new Error('Correction final-index decision queued a non-round proposal.');
                     }
                     localCorrectionProposal = structured.proposal;
-                    acceptedStructuredDecision = structured.decision;
+                    pendingStructuredDecision = structured.decision;
                   } else {
                     decisionRejectionCodes.push(structured.code);
                     if (structured.normalizationCode !== null) normalizationCodes.push(structured.normalizationCode);
@@ -4920,11 +4926,9 @@ async function runConversationWithConfiguredIntel(
         decisionAttempts,
         decisionRejectionCodes,
         normalizationCodes,
-        chosenOptionIndices: acceptedStructuredDecision?.selections.map((selection) => ({
-          actorId: selection.actorId,
-          primaryOptionIndex: selection.primaryOptionIndex,
-          fallbackOptionIndex: selection.fallbackOptionIndex,
-        })) ?? [],
+        ...(config.decisionTransport === 'final_indices' ? {
+          chosenOptionIndices: authorizedChosenOptionIndices,
+        } : {}),
         contextTruncated: simulated?.contextTruncatedByRequest.get(requestId) ?? observedContextTruncated,
         plannedBy,
         planner,
