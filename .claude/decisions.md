@@ -10010,3 +10010,16 @@ then every landing gate runs the browser suite (gate-wt2.sh). Finding against my
 chain passed bare worktree names to gate-wt.sh (it expects wt-<name>) and ran zero gates; my first
 Playwright attempt on main hit port 4173 because I omitted PLAYWRIGHT_PORT. Both caught within minutes, both
 mine.
+
+D511 — OWNER (2026-09-04 13:30): "Parallelize everything you can. Look for seams in tasks to split up tasks. Experiment
+using a worktree per experiment." Three rulings on the questions that followed:
+1. Creature space: engine footprints per SRD 5.2.1 (Large 2×2, Huge 3×3, Gargantuan 4×4; docs/srd/full line 854) in
+   their own lane (claude/footprints): occupancy, movement, reach, templates, DM projection. The iso view draws 1×1
+   until it lands.
+2. The arena-alone rule is LIFTED: arms run alongside implementation lanes. Only full vitest suites, the Playwright
+   suite and production builds serialize through `flock /home/vagrant/dnd-slim-runs/gate.lock`. Every arena round
+   records the 1-minute load average; rounds over 120 s are flagged; an arm with more than 3 timeouts is void.
+3. Codex CLI stays at 0.148.0 (no gpt-6-astra upgrade yet).
+Supervisor mechanics: one worktree per lane/experiment; heavy commands in every brief carry the lock line;
+gate-wt2.sh takes the same lock; Fable subagent lanes split at file seams (iso r2a = projection/renderer/contract
+types, r2b = view/input/scene) and merge on claude/iso-vtt.
