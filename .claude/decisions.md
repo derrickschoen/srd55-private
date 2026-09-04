@@ -9631,3 +9631,56 @@ narrowing and broke compilation — type-only); redone as a runtime-only
 guard removal, which fails the intended negative test. P2.1 dispatched
 with the background-polling instruction for long gates. Rule restated:
 a vitest pass without a completed `tsc -b --force` is not a gate.
+
+UNSEALED (supervisor, 2026-09-03 23:55, per D498 after the post-shift
+control): every seat 60/60 on every packet; totals recomputed from
+rubric items, refused = 0, service-null dropped pairwise, seed-clustered
+bootstrap intervals (unseal-report.py, verified against d443-results.txt
+before any sealed key was opened). Report: dnd-slim-runs/unseal-2026-09-03.md.
+
+  packet                        contrast                       n   delta   95% CI
+  D447 confirm (fresh seeds)    compression bundle − cav-full  50  −0.45  [−0.82, −0.07]
+  D449 k7 nudge                 +k7 KB − s-full-low            30  +0.47  [−0.72, +1.68]
+  D465 sol-low − luna-low       s-full                         30  +1.50  [−0.04, +2.86]
+                                s-rows                         30  −0.42  [−2.39, +1.12]
+                                s-opp                          30  +1.72  [−0.03, +3.24]
+                                s-move                         30  +1.86  [+0.68, +3.07]
+                                s-threats                      30  +1.79  [+0.62, +2.84]
+                                s-gating                       30  +2.10  [−0.58, +4.47]
+                                cav-full                       30  +0.42  [−0.22, +1.03]
+                                cav-rows-move-gating (vs luna MEDIUM) 29 −0.10 [−0.91, +0.69]
+  D483 luna-low+protocol − luna-low  s-threats                 30  +1.09  [−0.12, +2.18]
+                                s-gating (120 s, 6 refusals)   30  +0.89  [−0.72, +2.60]
+                                cav-full (5 refusals)          30  −0.92  [−1.90, +0.07]
+  D499 s-gating 240 s+protocol − luna-low                      30  +2.34  [+1.28, +3.42]
+  D466 post-shift control − pre-shift cav-full-low (in-packet) 30  +0.97  [+0.31, +1.66]
+
+Verdicts.
+1. D447: caveman full CONFIRMED as incumbent on ten never-seen rooms with
+   five reps; the compression bundle (rows=best_exception, movement=
+   material_only, gating) loses by 0.45 with an interval excluding zero.
+2. D449: the k7 "melee closes, never idle" nudge is positive but
+   inconclusive (+0.47, interval spans zero); 3 refusals in the nudged arm.
+3. D465: sol low beats luna low on every structured profile except s-rows,
+   by 1.5–2.1 points on the compressed ones, and by only +0.42 on caveman
+   full (interval spans zero). Against luna MEDIUM (cav-rows-move-gating)
+   sol low is level. Pattern identical to the D443 low→medium effect:
+   the profile that already gives full context needs the least model.
+   Confound recorded in the D465 amendment: sol carried the protocol text.
+4. D483/D499 resolve that confound for one profile: luna low with the same
+   protocol text at 120 s gained +0.89 on s-gating with 6 timeouts; at
+   240 s (D499) it gained +2.34 [+1.28, +3.42] — matching sol low's
+   +2.10 on the same profile. On s-gating the "sol advantage" is the
+   protocol instructions plus time, not the model. On cav-full the
+   protocol text HURT luna low (−0.92, 5 timeouts): more instructions on
+   an already-full prompt cost time it did not have.
+5. D466: the post-shift engine (G1, G2, G2.1, H1-indices, H1.1, H3, D2.x)
+   scores +0.97 above the same profile on the old era, interval excluding
+   zero. Rule D472 (freeze if >0.3 below the leader) is not triggered; the
+   post-shift control (8.06 in-packet) is the new zero. The pre-shift arm
+   scored 7.09 in this packet vs 8.18 in its own D443 packet: judges score
+   within a packet, so cross-packet absolute numbers are not comparable;
+   only paired deltas are.
+Open for the owner: whether 240 s becomes the standard luna-low budget
+(the D443 grid ran at 120 s), and whether the k7 nudge is retested with
+more reps or folded into the KB by default.
