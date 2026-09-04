@@ -10061,3 +10061,26 @@ the move crosses difficult terrain; a sharp arrow from the threatening enemy to 
 opportunity attack triggers; a destination marker with the distance; the part of the path beyond remaining movement
 shown differently. Owner's red rule wins for hazard colouring. Lane redispatched with the amended brief (first
 session killed at 10 min, 0 edits kept).
+
+
+D513 — OWNER (2026-09-04 14:45), three rulings:
+1. Image-on arms START as soon as inc2 lands (plain screenshots); the path-overlay arms are a second screenshot
+   generation, marked on every row (boardImage.generation), never mixed in a packet.
+2. Footprints plan (round 2, sha e88c0d92…) open rulings: SUPERVISOR DEFAULTS = codex's recommendations, recorded here;
+   the owner overrides any later. Default 9 changes the meaning of FROZEN for src/vtt/intel/contracts.ts and is flagged
+   to the owner explicitly.
+3. D504 UI feedback: a separate optional MCP tool `engine.submit_ui_feedback`, at most once per round after the
+   accepted decision, only in image arms, never scored; judges get the same question in their packet.
+Footprint defaults (plan §Open rulings, recommendation text verbatim):
+  1. Anchor convention: north-west.
+  2. Tiny capacity: capacity four, same GridCell geometry, stacked visual until subcell coordinates are separately designed.
+  3. Authored opening contract: approve; do not infer apertures from obstacles.
+  4. Forced shared endpoints: permit forced sharing; at end turn apply Prone when the actor is non-Tiny and is not larger than every overlapping creature; keep the shared placement until moved.
+  5. Failed growth/reversion/re-entry: reject discretionary Enlarge/form entry atomically; for mandatory Wild Shape/form expiration and banishment return, create a typed pending-placement state that cannot act until the DM selects a terrain-valid placement. Creature overlap may then follow ruling 4; walls/bounds never do.
+  6. Cover aggregation: least tier across permitted pairs; Total only when every pair is total; stable source ids from the chosen pair.
+  7. Fog boundary: disclose the complete footprint of a detected creature; hidden creatures disclose none.
+  8. Capsule schema: schema 2 with no compatibility layer in pre-alpha.
+  9. Frozen intel meaning: bytes remain frozen; explicitly authorize only the enumerated policy-literal changes plus a required closed movement-mode field if the movement result needs it, and prohibit every other key/discriminant change.
+  10. Public MCP exposure: add required footprint/size/mode to the public combatant summary and bump its governing response policy/schema if one exists.
+  11. Serialized-change register: approve only listed fields/versions; one-way migrate persisted user sessions/replays containing old paths to explicit normal mode; hand-author changed fixtures from the contract, never from runtime output.
+  12. Diagonal movement: preserve destination-only eight-way semantics for all sizes unless a separate corner rule is requested.
