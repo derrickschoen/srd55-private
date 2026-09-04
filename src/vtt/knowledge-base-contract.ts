@@ -1,18 +1,9 @@
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { KB_SUBJECTS, type KbSubject } from './knowledge-base-subjects';
 
-export const KB_SUBJECTS = [
-  'actions',
-  'movement',
-  'targeting',
-  'spells',
-  'conditions',
-  'reactions',
-  'protocol',
-] as const;
-
-export type KbSubject = (typeof KB_SUBJECTS)[number];
+export { KB_SUBJECTS, type KbSubject } from './knowledge-base-subjects';
 
 declare const repoRelativeKbPathBrand: unique symbol;
 export type RepoRelativeKbPath = string & {
