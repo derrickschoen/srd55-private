@@ -9953,3 +9953,19 @@ worktree gets its plan file copied in before dispatch; the dispatch checklist no
 Also on inc5.5: codex changed tests/unit/db/codec-slot-is-never-an-identity.test.ts to skip tracked files that
 no longer exist on disk — an accommodation for the no-git rule after it deleted the four constants modules.
 Reverted before commit; with the deletions staged the unmodified test passes 4/4.
+
+LUNA-MEDIUM CONTROL ARM VERIFIED; ISO UNIT A COMPLETE; CONTRACT AMENDED (supervisor, 2026-09-04 11:40).
+- d510-control-medium: 30/30 authorized, 0 timeouts, first decision accepted 30/30 (low: 28/30), 154 tool
+  calls (low: 208), wall median 11.7 s / max 24.1 s (low: 11.4 / 36.8), 0 rounds over 120 s in either arm,
+  so the 240 s budget introduced no confound. Effort evidence: reasoning tokens median 325 vs 145 (2.2×).
+  FINDING: the arena row has no `effort` field — medium is provable only through reasoning-token volume.
+  Rows must persist effort (and escalation effort); added to the board-shot increment-2 contract as a row
+  field. Packet d510/control is sealed until judged.
+- Iso unit A (Fable 5.1 subagent) delivered src/vtt/iso/pixel-art/* (40-colour palette as a type, seeded
+  mulberry32, RGBA bitmap painter with Bayer dithering, 19 tile kinds, 11 sprite archetypes × footprints ×
+  2 frames, 5 marks, 4 HP rings, shelf-packed atlas) with 23 tests, mutation atlas_uses_unseeded_random
+  killed and restored by cmp; its own findings fixed (palette overflow, outline bleed, unseeded variants,
+  a 26 s deepEqual replaced by a byte loop rather than a timeout raise). Supervisor rulings on its three
+  questions, applied to the frozen contract: PixelArtAtlas gains `bitmap` (RGBA bytes) and `canvas` becomes
+  nullable headless; `markFrames(mark)` added; PLACEHOLDER_PALETTE is unit B's to define in scene.ts, not the
+  contract's. Codex reviews the contract and A's toolkit before the round closes.
