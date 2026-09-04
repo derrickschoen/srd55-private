@@ -9804,3 +9804,32 @@ death burst radius 10 ft inclusive, Dex save DC 11, 2d6 force, half on
 success, filters hostile_living | all_other_living, targets in id
 order, chained bursts append to the FIFO tail, lifecycle death →
 concentration cleanup → owned-summon despawn → burst drain.
+
+## D502 — OWNER: non-SRD options default OFF, but configurable (2026-09-04)
+
+Asked how to treat the ~30 tactical_v2 numeric declarations from increments 2–4, the owner ruled: "Have non srd
+options default to off, but configurable." Reading: every non-SRD mechanic stays off by default (srd_2024 remains
+the default ruleset and carries none of them), and each declared number becomes a typed, validated configuration
+value with the increment's number as its default, rather than a bare constant. Follow-up increment: lift the three
+constants modules into a typed `TacticalV2Declarations` config carried by `EncounterConfig<'tactical_v2'>` with
+constructors that reject invalid values; srd_2024 config cannot carry it.
+
+## D503 — OWNER: unseal d500 and d490; land the lane; next arm = graph-slice (2026-09-04)
+
+Owner rulings in one round: unseal both sealed panels now (D498 lifted for d500/d490); land the lane
+(HEAD 8a459180) on main; the next AI-DM experiment after the tactical_v2 series is the knowledge-graph slice
+(≤400-token typed slice from KB fixtures seeded by circumstanceFeatures, pushed per round), which needs a
+builder increment first.
+
+UNSEALED 4 SEP (supervisor, 2026-09-04 09:45; unseal-2026-09-04.md). Panel = mean of sol/opus/fable
+recomputed totals, seed-clustered bootstrap CI.
+- d500 transport: arm-a mcp_minimal control 7.64, arm-b final_indices 7.38; delta −0.27 [−0.98, +0.23], n 30.
+  Inconclusive, leaning negative; final_indices costs one call per round instead of ~7 and anchors on index 0
+  at 0.94. Not a free win.
+- d490 override policy: arm-s strict 8.11, arm-v typed_reason 8.29, arm-u typed_reason (second seat) 8.71;
+  u−s +0.60 [−0.47, +2.07], v−s +0.18 [−0.89, +1.33]. The two typed_reason seats differ by 0.42 among
+  themselves, so the policy effect is inside seat noise. Inconclusive; typed_reason is not worse.
+- d490 isolation: reason_visible − reason_hidden = +0.00 [+0.00, +0.00] on 30 pairs × 3 seats — every judge
+  scored the identical rows identically whether or not the per-actor reason text was present (verified the
+  visible entries do carry `reason` in executedPlan). The svu contrast is therefore not contaminated by reason
+  visibility, and the panel rubric is blind to rationale text by construction.
