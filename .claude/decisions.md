@@ -9728,3 +9728,18 @@ an arena-level dry-run test that validates a persisted final_indices
 row through the packet builder. Rule: a row field is only "shipped"
 when the ARENA's persisted row passes the packet builder in a test; the
 runner's own row is not the artifact the experiments consume.
+
+TRANSPORT EXPERIMENT RUN 4 COMPLETE; PACKET AND PANEL BUILT; KEY SEALED
+(supervisor, 2026-09-04 04:25). Lane 0b384262 (H1.4). Row-level
+(secondary, preregistered): 30/30 authorized, 0 timeouts, first decision
+accepted 27/30, 26 rounds in one call (control mcp_minimal: 27 rounds in
+one call but ~15% first-call correctness in the D443-era audit);
+rejections 10 engine_rejected + 1 decision_invalid; indexZeroSelectionRate
+= 0.94 (117 of 124 actor choices took the engine's top-ranked option;
+the other picks: index 17 ×3, 2 ×2, 3, 10). That anchoring rate is the
+number the extraction plan warned about: on this transport luna low
+mostly confirms the engine's own ranking. Whether that scores well is
+in the sealed panel (2-arm packet, 60 entries, leaks none, prime 599;
+every seat 60/60 valid). Voided predecessors: run 1 (schema rejected),
+runs 2–3 (row field dropped) — their first-decision rates (26/30,
+27/30) agree with run 4.
