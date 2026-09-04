@@ -10193,3 +10193,11 @@ failures headline_codes / adverts stubs / rare triggered / misc merged); profile
 (d514, worktree dnd-wt-arena-img at ff1a6ca9, same seeds): luna-low-reduced-on, luna-low-reduced-off (control
 isolating the picture), luna-medium-reduced-on, sol-low-reduced-on, 30 rows each. Packets: reduced-on vs the d513
 full-text image-on arm of the same model/effort (primes 653, 659, 661), plus reduced-off vs d490 U (673). Keys sealed.
+
+D519 — OWNER (2026-09-04 19:36): "we should test Luna low and medium to make sure it can understand what is in the
+screenshot or if we need to tweak the ui until it understands all of the info in the screenshot." Supervisor: a
+screenshot-comprehension probe (claude/screenshot-probe off claude/board-shot): render boards from known states with
+BoardSnapshotService, send ONLY the PNG plus a fixed structured question set, score the answers against the DM
+projection (exact match per fact class), report per-class accuracy for Luna low and Luna medium (Sol low as a
+reference seat). Runs on the g1 art now and again on each art generation; UI tuning targets the weakest fact class
+until every class is ≥ 0.9 at Luna low. Probe rows are never mixed into arena rows or packets.
