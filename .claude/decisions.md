@@ -9572,3 +9572,17 @@ The 120 s runs (4/9/6 timeouts, incl. the alone run) stay on disk as a record bu
 run at luna low, 240 s (the budget sol had), alone, same seeds/reps/KB; packet against the D443 luna-low twin with a
 fresh prime (577); the timing confound (luna twin ran at 120 s) is noted next to the result. The 120 s alone-run
 packet (prime 491) is kept sealed and reported as a secondary.
+
+PARALLEL SEAMS OPENED (supervisor, 2026-09-03 21:40, per owner "parallelize
+everything"). Running at once: D499 s-gating-240 arena (alone) → its
+packet/panel; lane gate queued behind the arena → D2.3 commit → the
+post-shift control chain (run-d466-control.sh, armed behind the LANE-READY
+sentinel; prime 587 fixed in analysis-notes; packet built with the lane's
+packet code); unseal-report.py being written by terra against the
+unsealed D443 family only (sealed keys named as forbidden; --unseal flag
+required at run time; --dry-run lists keys); tactical_v2 worktree
+(claude/tactical-v2 off the lane) with a planning brief on sol (typed
+closed ruleset union, SRD-neutral wording, default off); private policy-
+spec rewrite in Larian-score terms on sol; replay increments 5–6 on sol.
+Critical path to unblind unchanged (arena → gate → control → panels →
+unseal); everything else now runs beside it.
