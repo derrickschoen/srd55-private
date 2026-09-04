@@ -10201,3 +10201,8 @@ BoardSnapshotService, send ONLY the PNG plus a fixed structured question set, sc
 projection (exact match per fact class), report per-class accuracy for Luna low and Luna medium (Sol low as a
 reference seat). Runs on the g1 art now and again on each art generation; UI tuning targets the weakest fact class
 until every class is ≥ 0.9 at Luna low. Probe rows are never mixed into arena rows or packets.
+
+LANDED ON MAIN (supervisor, 2026-09-04 19:40): claude/browser-fix merged. With this and the node:crypto split, the
+browser suite on main is 182/182 (my run, 50 min, port 4710) for the first time since D466 C2. D513 judging complete:
+four packets (luna-low-on-1/2, luna-medium-on, sol-low-on), three seats each, 60/60 valid, keys SEALED pending the
+owner's word. D514 reduced-text arms running (started 19:36). Classic-art full vitest 9651 green; specs running.
