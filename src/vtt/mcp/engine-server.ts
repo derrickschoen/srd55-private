@@ -29,7 +29,14 @@ import {
 } from '../engine-state-capsule';
 import type { EngineQueryPort, EngineTargetSelector } from '../engine-query-port';
 import { resolveEngineActorOption, type EngineMovementPreference, type EngineTurnProposal, type PureTurnProposalResolver } from '../intent-resolver';
-import { engineOptionId, type EngineActorOption } from '../turn-proposal';
+import { decisionReasonProblem } from '../decision-reason';
+import {
+  engineOptionId,
+  enginePlayToken,
+  type EngineOfferableOption,
+  type EngineOptionMetric,
+  type EngineOverrideJustification,
+} from '../turn-proposal';
 import {
   DM_INTEL_QUERY_POLICY,
   DM_TURN_INTEL_POLICY,
@@ -103,11 +110,17 @@ import {
 import {
   ENGINE_ACTOR_KNOWLEDGE_POLICY,
   ENGINE_LEGENDARY_WINDOWS_POLICY,
+  ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
   ENGINE_REACTION_SPEND_HOLD_POLICY,
   ENGINE_RECOVERY_CAPABILITY_POLICY,
+  ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
   ENGINE_TOOL_SPECS,
+  ENGINE_TURN_PROPOSAL_INPUT_SCHEMA,
+  engineSchemaInternals,
+  generatedMinimalRoundSubmissionExample,
   schemaViolations,
 } from './schemas';
+import type { KbReadBudget, KbReadCallPhase } from './knowledge-base';
 
 export const ENGINE_DM_TOOL_NAMES = Object.freeze([
   'engine.get_turn_context',
@@ -133,6 +146,9 @@ export const ENGINE_SPECULATIVE_DM_TOOL_NAMES = Object.freeze([
 export type EngineMcpToolProfile = 'full' | 'dm';
 export const INTEL_MODES = ['full', 'off'] as const;
 export type IntelMode = (typeof INTEL_MODES)[number];
+export const OVERRIDE_POLICIES = ['strict', 'typed_reason'] as const;
+export type OverridePolicy = (typeof OVERRIDE_POLICIES)[number];
+export const DEFAULT_OVERRIDE_POLICY: OverridePolicy = 'typed_reason';
 
 export interface EngineCapsuleFeed extends ReadonlyStateCapsuleSource {
   current(): EngineStateCapsule;
@@ -245,6 +261,9 @@ interface EngineMcpDependencies {
     readonly features: CircumstanceFeatureVector;
     readonly removals: RendererRemovalCounts;
   }) => void;
+  readonly kbReadBudget?: KbReadBudget;
+  readonly kbReadCallPhase?: KbReadCallPhase;
+  readonly overridePolicy?: OverridePolicy;
 }
 
 export interface EngineToolSurface {
@@ -254,6 +273,44 @@ export interface EngineToolSurface {
 
 export interface EngineMcpApplication extends McpHandler {
   readonly toolSurface: EngineToolSurface;
+}
+
+interface OverridePolicyRule {
+  refusal(override: EngineOverrideJustification): { readonly code: 'OVERRIDE_UNJUSTIFIED'; readonly summary: string } | null;
+}
+
+const TYPED_REASON_OVERRIDE_RULE: OverridePolicyRule = {
+  refusal: () => null,
+};
+
+const STRICT_OVERRIDE_RULE: OverridePolicyRule = {
+  refusal(override) {
+    switch (override.kind) {
+      case 'engine_play':
+      case 'missing_metric':
+        return null;
+      case 'objective':
+      case 'morale':
+      case 'roleplay':
+      case 'resource_conservation':
+      case 'unknown_engine_gap':
+        return {
+          code: 'OVERRIDE_UNJUSTIFIED',
+          summary: 'The strict override policy accepts only engine_play or missing_metric justifications.',
+        };
+    }
+    override satisfies never;
+    throw new TypeError('Unknown override justification kind.');
+  },
+};
+
+function overridePolicyRule(policy: OverridePolicy): OverridePolicyRule {
+  switch (policy) {
+    case 'strict': return STRICT_OVERRIDE_RULE;
+    case 'typed_reason': return TYPED_REASON_OVERRIDE_RULE;
+  }
+  policy satisfies never;
+  throw new TypeError(`Unknown override policy ${String(policy)}.`);
 }
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
@@ -270,6 +327,11 @@ function numberField(value: Readonly<Record<string, unknown>>, key: string): num
   if (typeof field !== 'number') throw new TypeError(`${key} must be a number.`);
   return field;
 }
+function arrayField(value: Readonly<Record<string, unknown>>, key: string): readonly unknown[] {
+  const field = value[key];
+  if (!Array.isArray(field)) throw new RangeError(`${key} must be an array.`);
+  return field;
+}
 function stateReference(value: unknown): EngineStateReference {
   const input = record(value, 'state_ref');
   return { runId: encounterSessionId(stringField(input, 'run_id')), stateHandle: stringField(input, 'state_handle'), expectedRevision: numberField(input, 'expected_revision') };
@@ -277,6 +339,74 @@ function stateReference(value: unknown): EngineStateReference {
 function externalStateRef(capsule: EngineStateCapsule): Readonly<Record<string, unknown>> {
   return { run_id: capsule.runId, state_handle: engineStateHandle(capsule), expected_revision: capsule.revision };
 }
+function promptRequest(capsule: EngineStateCapsule): Readonly<Record<string, unknown>> | null {
+  const request = capsule.request;
+  if (request === null) return null;
+  return {
+    request_id: request.requestId,
+    phase: request.phase,
+    correction_number: request.correctionNumber,
+    required_actor_ids: request.actors,
+    ...(request.phase === 'speculative' ? {
+      target_room: request.targetRoom,
+      target_monster_round: request.targetMonsterRound,
+      refresh_generation: request.refreshGeneration,
+    } : request.kind === 'plan_adjustment' ? {
+      baseline_plan_hash: request.baselinePlanHash,
+      adjustment_budget: request.adjustmentBudget,
+    } : {}),
+  };
+}
+interface ProposalContractRefusal {
+  readonly code: 'CORRECTION_FALLBACK_MUST_BE_NULL' | 'INITIAL_FALLBACK_REQUIRED' | 'PRIMARY_FALLBACK_IDENTICAL';
+  readonly summary: string;
+  readonly attempt: 'primary' | 'fallback';
+}
+function proposalContractRefusal(
+  phase: 'initial' | 'correction',
+  proposal: EngineTurnProposal,
+): ProposalContractRefusal | null {
+  if (phase === 'correction' && proposal.fallbackOptionId !== null) {
+    return {
+      code: 'CORRECTION_FALLBACK_MUST_BE_NULL',
+      summary: 'Correction proposal fallback_option_id must be null.',
+      attempt: 'fallback',
+    };
+  }
+  if (phase === 'initial' && proposal.fallbackOptionId === null) {
+    return {
+      code: 'INITIAL_FALLBACK_REQUIRED',
+      summary: 'Initial proposal fallback_option_id must identify an independent offered option.',
+      attempt: 'fallback',
+    };
+  }
+  if (proposal.fallbackOptionId !== null && proposal.fallbackOptionId === proposal.primaryOptionId) {
+    return {
+      code: 'PRIMARY_FALLBACK_IDENTICAL',
+      summary: 'Primary and fallback option ids must identify independent choices.',
+      attempt: 'fallback',
+    };
+  }
+  return null;
+}
+
+interface LauncherRoundSubmissionBinding {
+  readonly stateRef: Readonly<Record<string, unknown>>;
+  readonly requestId: string;
+  readonly phase: 'initial' | 'correction';
+}
+type PreparedRoundSubmission =
+  | {
+      readonly kind: 'minimal_submission';
+      readonly submittedArguments: Readonly<Record<string, unknown>>;
+      readonly envelope: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly kind: 'explicit_envelope';
+      readonly submittedArguments: Readonly<Record<string, unknown>>;
+      readonly envelope: Readonly<Record<string, unknown>>;
+    }
+  | { readonly kind: 'rejected'; readonly result: Readonly<Record<string, unknown>> };
 function decodeTarget(value: unknown): EngineTargetSelector {
   const input = record(value, 'target');
   const kind = stringField(input, 'kind');
@@ -337,23 +467,49 @@ function decodeOverrideJustification(
   value: unknown,
 ): NonNullable<EngineTurnProposal['overrideJustification']> {
   const input = record(value, 'override justification');
-  const reason = stringField(input, 'reason');
-  const note = input['note'] === undefined ? undefined : stringField(input, 'note');
-  switch (reason) {
-    case 'morale':
+  const kind = stringField(input, 'kind');
+  switch (kind) {
     case 'objective':
+    case 'morale':
     case 'roleplay':
     case 'resource_conservation':
-      return note === undefined ? { reason } : { reason, note };
     case 'unknown_engine_gap':
-      return { reason, note: stringField(input, 'note') };
+      return { kind };
+    case 'engine_play':
+      return { kind, token: typeof input['token'] === 'string' ? enginePlayToken(input['token']) : null };
+    case 'missing_metric':
+      return { kind, id: typeof input['id'] === 'string' ? input['id'] as EngineOptionMetric : null };
     default:
-      throw new RangeError(`Unknown override justification reason ${reason}.`);
+      throw new RangeError(`Unknown override justification kind ${kind}.`);
   }
 }
 function decodeProposal(value: unknown): EngineTurnProposal {
   const input = record(value, 'proposal');
   const justification = input['override_justification'];
+  const choiceValue = input['activation_choice'];
+  const activationChoice = choiceValue === undefined
+    ? undefined
+    : choiceValue === null
+      ? null
+    : (() => {
+        const choice = record(choiceValue, 'activation choice');
+        const kind = stringField(choice, 'kind');
+        switch (kind) {
+          case 'command_word':
+          case 'unicorns_blessing_spell':
+          case 'dispel_evil_and_good_mode':
+            return { kind, value: stringField(choice, 'value') } as NonNullable<EngineTurnProposal['activationChoice']>;
+          case 'calm_emotions_per_target':
+            return {
+              kind,
+              selections: arrayField(choice, 'selections').map((entry) => {
+                const selection = record(entry, 'Calm Emotions selection');
+                return { targetId: combatantId(stringField(selection, 'target_id')), mode: stringField(selection, 'mode') };
+              }),
+            } as NonNullable<EngineTurnProposal['activationChoice']>;
+          default: throw new RangeError(`Unknown activation choice kind ${kind}.`);
+        }
+      })();
   return {
     actorId: combatantId(stringField(input, 'actor_id')),
     expectedRevision: numberField(input, 'expected_revision'),
@@ -361,21 +517,37 @@ function decodeProposal(value: unknown): EngineTurnProposal {
     fallbackOptionId: input['fallback_option_id'] === null
       ? null
       : engineOptionId(stringField(input, 'fallback_option_id')),
+    reason: stringField(input, 'reason'),
     overrideJustification: justification === null
       ? null
       : decodeOverrideJustification(justification),
+    ...(activationChoice === undefined ? {} : { activationChoice }),
   };
 }
 function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string, unknown>> {
+  const override = proposal.overrideJustification;
   return {
     actor_id: proposal.actorId,
     expected_revision: proposal.expectedRevision,
     primary_option_id: proposal.primaryOptionId,
     fallback_option_id: proposal.fallbackOptionId,
-    override_justification: proposal.overrideJustification === null ? null : {
-      reason: proposal.overrideJustification.reason,
-      ...(proposal.overrideJustification.note === undefined ? {} : { note: proposal.overrideJustification.note }),
+    reason: proposal.reason,
+    override_justification: override === null ? null : {
+      kind: override.kind,
+      ...(override.kind === 'engine_play' && override.token !== null
+        ? { token: override.token }
+        : {}),
+      ...(override.kind === 'missing_metric' && override.id !== null
+        ? { id: override.id }
+        : {}),
     },
+    ...(proposal.activationChoice === undefined ? {} : {
+      activation_choice: proposal.activationChoice === null
+        ? null
+        : proposal.activationChoice.kind === 'calm_emotions_per_target'
+          ? { kind: proposal.activationChoice.kind, selections: proposal.activationChoice.selections.map((entry) => ({ target_id: entry.targetId, mode: entry.mode })) }
+          : { kind: proposal.activationChoice.kind, value: proposal.activationChoice.value },
+    }),
   };
 }
 function hitPointBand(hitPoints: number, maximum: number): 'uninjured' | 'injured' | 'critical' | 'unknown' {
@@ -524,6 +696,12 @@ function advertisedExpectation(
       policy: outcome.policy,
     };
   }
+  if (outcome.evidence.kind === 'modeled_effect') {
+    return {
+      kind: 'modeled_effect', resolvable: true, metric: 'none',
+      spell_ids: outcome.evidence.spellIds, assumption_codes: [], policy: outcome.policy,
+    };
+  }
   return {
     kind: outcome.evidence.kind,
     resolvable: true,
@@ -532,7 +710,10 @@ function advertisedExpectation(
     policy: OPTION_OUTCOME_POLICY,
   };
 }
-function externalOptionSlot(slot: EngineActorOption['actionSlots'][number]): Readonly<Record<string, unknown>> {
+function externalOptionSlot(
+  slot: EngineOfferableOption['actionSlots'][number],
+  omittedRiders: EngineOfferableOption['omittedRiders'],
+): Readonly<Record<string, unknown>> {
   const use = slot.use;
   const targetIds = use.kind === 'attack' || use.kind === 'saving_throw'
     ? use.target.kind === 'combatant' ? [use.target.combatantId] : []
@@ -549,15 +730,29 @@ function externalOptionSlot(slot: EngineActorOption['actionSlots'][number]): Rea
     component_action_ids: use.kind === 'multiattack'
       ? use.components.map((component) => component.actionId)
       : [],
+    components: use.kind === 'multiattack'
+      ? use.components.map((component) => ({
+          kind: component.kind,
+          action_id: component.actionId,
+          target_ids: component.target.kind === 'combatant' ? [component.target.combatantId] : [],
+          omitted_riders: component.omittedRiders,
+        }))
+      : [],
     spell_id: use.kind === 'cast_spell' ? use.spellId : null,
     target_ids: targetIds,
     world_object_id: use.kind === 'use_world_object' ? use.objectId : null,
+    omitted_riders: use.kind === 'multiattack'
+      ? omittedRiders
+      : omittedRiders.length === 0
+        ? omittedRiders
+        : omittedRiders.filter((rider) =>
+            'actionId' in use && rider.sourceActionId === use.actionId),
   };
 }
-function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsule: EngineStateCapsule, actorId: CombatantId, includeExpectations: boolean, _includeUnavailable: boolean): readonly Readonly<Record<string, unknown>>[] {
+function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsule: EngineStateCapsule, actorId: CombatantId, includeExpectations: boolean): readonly Readonly<Record<string, unknown>>[] {
   const projected = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
   if (projected === undefined) return [];
-  const informationRank = (option: EngineActorOption): number => {
+  const informationRank = (option: EngineOfferableOption): number => {
     const main = option.actionSlots.find((slot) => slot.slot === 'main')?.use;
     if (main === undefined) return 6;
     switch (main.kind) {
@@ -599,16 +794,24 @@ function tacticalOptions(state: EncounterState, queries: EngineQueryPort, capsul
       ? targetId === null ? [] : [{ actionId: String(firstUse.actionId), targetId }]
       : firstUse.kind === 'multiattack'
         ? firstUse.components.flatMap((component) => {
+            if (component.kind !== 'attack') return [];
             const componentTarget = queries.resolveTarget(state, actorId, component.target);
             return componentTarget === null
               ? []
               : [{ actionId: String(component.actionId), targetId: componentTarget }];
           })
         : [];
+    const externalActivationChoice = option.activationChoice === undefined || option.activationChoice === null
+      ? undefined
+      : option.activationChoice.kind === 'calm_emotions_per_target'
+        ? { kind: option.activationChoice.kind, target_ids: option.activationChoice.targetIds, values: option.activationChoice.values }
+        : { kind: option.activationChoice.kind, values: option.activationChoice.values };
     return {
       option_id: option.optionId, actor_id: option.actorId, revision: option.revision, label: option.label,
-      action_slots: option.actionSlots.map(externalOptionSlot),
+      action_slots: option.actionSlots.map((slot) => externalOptionSlot(slot, option.omittedRiders)),
       action_id: firstActionId, kind, target_selectors: [], resource_cost_labels: option.resourceCostLabels,
+      omitted_riders: option.omittedRiders,
+      ...(externalActivationChoice === undefined ? {} : { activation_choice: externalActivationChoice }),
       usable_now: resolution.valid && movementFeet === 0,
       usable_after_movement: resolution.valid,
       minimum_movement_feet: movementFeet,
@@ -652,7 +855,7 @@ function correctionGuidance(
   };
 }
 function resolutionPreview(resolution: Extract<ReturnType<PureTurnProposalResolver['resolve']>, { readonly valid: true }>): Readonly<Record<string, unknown>> {
-  return { actor_id: resolution.mechanics.actorId, option_id: resolution.mechanics.optionId, action_slot_count: resolution.mechanics.actionSlots.length, movement_feet: resolution.mechanics.movementCostFeet, resolution_digest: resolution.resolutionDigest, summary: resolution.summary };
+  return { actor_id: resolution.mechanics.actorId, option_id: resolution.mechanics.optionId, action_slot_count: resolution.mechanics.actionSlots.length, movement_feet: resolution.mechanics.movementCostFeet, omitted_riders: resolution.mechanics.omittedRiders, resolution_digest: resolution.resolutionDigest, summary: resolution.summary };
 }
 function disallowedLocator(locator: string): boolean {
   const normalized = locator.replaceAll('\\', '/').toLowerCase();
@@ -671,6 +874,8 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal' | 'sp
   });
   const uriBase = `engine://run/${encodeURIComponent(capsule.runId)}`;
   const adjustment = capsule.request?.phase !== 'speculative' && capsule.request?.kind === 'plan_adjustment';
+  const roundPhase = capsule.request?.phase === 'correction' ? 'correction' : 'initial';
+  const minimalExample = canonicalJson(generatedMinimalRoundSubmissionExample(roundPhase));
   const fixed = kind === 'speculate_round'
     ? 'Plan every advertised speculative scenario, then use engine.submit_speculative_round_plan once. Each branch must cover the complete required monster actor set using only revision-bound option ids offered in current_context. The host alone evaluates conditions and validates the selected branch; never infer or execute outcomes, coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
     : adjustment
@@ -678,9 +883,9 @@ export function renderEnginePrompt(kind: 'plan_round' | 'correct_proposal' | 'sp
       ? 'Review the current remaining monster plan, then use engine.submit_plan_adjustment once. Submit zero to the stated adjustment budget of open-actor replacement proposals; omitted actors keep their baseline proposals and an empty updates list explicitly keeps the plan. Do not change reaction guidance. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
       : 'Correct only the refused plan-adjustment actors once with engine.submit_plan_adjustment. Valid staged updates remain accepted. No fallback remains after this correction; every correction fallback_option_id must be null. Omitted refused actors keep their baseline proposals.'
     : kind === 'plan_round'
-      ? 'Use engine.get_turn_context, then engine.submit_round_proposals once for the complete required actor set. Select only offered revision-bound option ids. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.'
-      : 'Correct the complete refused proposal request once. No fallback remains after this correction; correction fallback_option_id must be null. If you refresh context, use the get_turn_context request in current_context exactly.';
-  return [fixed, `Turn resource: ${uriBase}/turn/current`, `Proposal schema: ${uriBase}/schema/turn-proposal-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: capsule.request, voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
+      ? `Use engine.get_turn_context, then submit only the minimal engine.submit_round_proposals arguments for the complete required actor set, with one short sentence per actor saying why this option. Generated minimal example: ${minimalExample}. The launcher fills state_ref, request_id, phase, and idempotency_key from this turn binding. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again. Select only offered revision-bound option ids and provide an independent fallback. You may declare reaction_guidance for foreseeable Reactions; it persists until replaced. Never emit coordinates, paths, dice, modifiers, DCs, damage, or reducer commands.`
+      : `Correct the complete refused proposal request with the minimal engine.submit_round_proposals arguments, with one short sentence per actor saying why this option. Generated minimal example: ${minimalExample}. The launcher fills state_ref, request_id, phase, and idempotency_key from this turn binding. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again. No fallback remains after this correction; correction fallback_option_id must be null. If you refresh context, use the get_turn_context request in current_context exactly.`;
+  return [fixed, `Turn resource: ${uriBase}/turn/current`, `Proposal schema: ${uriBase}/schema/turn-proposal-v1`, `<engine-data-json>${canonicalJson({ run_id: capsule.runId, revision: capsule.revision, request: promptRequest(capsule), voice: voice ?? null, recent_changes: recentChanges(capsule), current_context: turnContext ?? null, rules: entries })}</engine-data-json>`].join('\n');
 }
 
 function reactionAttackInput(
@@ -712,6 +917,7 @@ function reactionAttackInput(
     attackerCanSeeTarget: command.attackerCanSeeTarget,
     targetCanSeeAttacker: command.targetCanSeeAttacker,
     rollModeSources: [],
+    featureRollModeInput: null,
     target: {
       hitPoints: target.hitPoints,
       usesDeathSaves: target.profile.rules.usesDeathSaves,
@@ -731,7 +937,7 @@ function actorKnowledgeReports(
     .map((actor) => ({
       actor_id: actor.profile.id,
       targets: state.combatants
-        .filter((target) => target.profile.kind !== actor.profile.kind && target.life !== 'dead')
+        .filter((target) => !queries.sameSide(state, actor.profile.id, target.profile.id) && target.life !== 'dead')
         .map((target) => {
           const visibility = queries.visibility(state, actor.profile.id, target.profile.id);
           return visibility?.visible === true
@@ -1005,6 +1211,9 @@ function renderFailureModesWithCoverage(): Readonly<Record<string, unknown>> {
 }
 
 export function createEngineMcpApplication(dependencies: EngineMcpDependencies): EngineMcpApplication {
+  const selectedOverridePolicy = overridePolicyRule(
+    dependencies.overridePolicy ?? DEFAULT_OVERRIDE_POLICY,
+  );
   if (dependencies.maximumToolResultBytes !== undefined && dependencies.maximumToolResultBytes > 64 * 1024) {
     throw new RangeError('maximumToolResultBytes cannot exceed the 64 KiB hard limit.');
   }
@@ -1013,6 +1222,16 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   }
   const { state, stateSource: feed, proposals, speculativePlans, narration, adjudications, rules } = dependencies;
   const { queries, turnProposals } = dependencies;
+  const launchCapsule = feed.current();
+  const launchRequest = launchCapsule.request;
+  const launcherRoundBinding: LauncherRoundSubmissionBinding | null =
+    launchRequest !== null && launchRequest.phase !== 'speculative' && launchRequest.kind !== 'plan_adjustment'
+      ? {
+          stateRef: externalStateRef(launchCapsule),
+          requestId: launchRequest.requestId,
+          phase: launchRequest.phase,
+        }
+      : null;
   const rendererProfile = rendererProfileSchema.parse(
     dependencies.rendererProfile ?? DEFAULT_RENDERER_PROFILE,
   );
@@ -1107,9 +1326,96 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     idempotency.set(key, { bytes, result: structuredClone(result) });
     return result;
   }
+  function roundBindingRejection(
+    capsule: EngineStateCapsule,
+    code: 'AMBIGUOUS_SUBMISSION_BINDING' | 'STALE_SUBMISSION_BINDING' | 'ROUND_SUBMISSION_BINDING_UNAVAILABLE',
+    summary: string,
+  ): Readonly<Record<string, unknown>> {
+    const actorId = capsule.request?.actors[0];
+    if (actorId === undefined) throw new RangeError(code);
+    return {
+      status: 'rejected',
+      state_ref: externalStateRef(capsule),
+      actor_refusals: [{
+        actor_id: actorId,
+        codes: [code],
+        summary,
+        attempt_rejections: [{
+          attempt: 'primary',
+          declared_option_id: null,
+          rejection_reasons: [summary],
+        }],
+      }],
+      correction_guidance: correctionGuidance(capsule),
+    };
+  }
+  function prepareRoundSubmission(value: Readonly<Record<string, unknown>>): PreparedRoundSubmission {
+    if (!engineSchemaInternals.minimalSubmitRoundTransportInput.safeParse(value).success) {
+      return { kind: 'explicit_envelope', submittedArguments: value, envelope: value };
+    }
+    const current = feed.current();
+    if (launcherRoundBinding === null) {
+      return {
+        kind: 'rejected',
+        result: roundBindingRejection(
+          current,
+          'ROUND_SUBMISSION_BINDING_UNAVAILABLE',
+          'This launcher was not issued for an ordinary round proposal request.',
+        ),
+      };
+    }
+    const currentRequest = current.request;
+    if (currentRequest !== null && currentRequest.phase !== 'speculative' &&
+      currentRequest.kind !== 'plan_adjustment' && currentRequest.requestId !== launcherRoundBinding.requestId) {
+      return {
+        kind: 'rejected',
+        result: roundBindingRejection(
+          current,
+          'AMBIGUOUS_SUBMISSION_BINDING',
+          'More than one pending round request is visible to this launcher binding; no request was selected.',
+        ),
+      };
+    }
+    const currentStateRef = externalStateRef(current);
+    if (currentRequest === null || currentRequest.phase === 'speculative' ||
+      currentRequest.kind === 'plan_adjustment' ||
+      currentRequest.requestId !== launcherRoundBinding.requestId ||
+      currentRequest.phase !== launcherRoundBinding.phase ||
+      canonicalJson(currentStateRef) !== canonicalJson(launcherRoundBinding.stateRef)) {
+      return {
+        kind: 'rejected',
+        result: roundBindingRejection(
+          current,
+          'STALE_SUBMISSION_BINDING',
+          'The launcher turn binding is stale; refresh the current turn before submitting.',
+        ),
+      };
+    }
+    const idempotencyKey = `round-submit:${sha256(canonicalJson({
+      state_ref: launcherRoundBinding.stateRef,
+      request_id: launcherRoundBinding.requestId,
+      phase: launcherRoundBinding.phase,
+    })).slice(0, 48)}`;
+    return {
+      kind: 'minimal_submission',
+      submittedArguments: value,
+      envelope: {
+        state_ref: launcherRoundBinding.stateRef,
+        request_id: launcherRoundBinding.requestId,
+        phase: launcherRoundBinding.phase,
+        idempotency_key: idempotencyKey,
+        proposals: value['proposals'],
+        ...(value['rationale'] === undefined ? {} : { rationale: value['rationale'] }),
+        ...(value['reaction_guidance'] === undefined ? {} : {
+          reaction_guidance: value['reaction_guidance'],
+        }),
+      },
+    };
+  }
   function proposalWithPlayObjective(
     capsule: EngineStateCapsule,
     proposal: EngineTurnProposal,
+    playToken: string,
   ): EngineTurnProposal {
     if (proposal.overrideJustification !== null) return proposal;
     const dominance = submissionDominance(
@@ -1120,8 +1426,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       ? {
           ...proposal,
           overrideJustification: {
-            reason: 'objective',
-            note: 'The engine-authored tactical play intentionally coordinates this option.',
+            kind: 'engine_play',
+            token: enginePlayToken(playToken),
           },
         }
       : proposal;
@@ -1129,22 +1435,37 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
   function dominanceRefusal(
     capsule: EngineStateCapsule,
     proposal: EngineTurnProposal,
-    selectedOptionId: EngineActorOption['optionId'],
+    selectedOptionId: EngineOfferableOption['optionId'],
   ): { readonly code: string; readonly summary: string } | null {
     const dominance = submissionDominance(
       opportunityReport(capsule, proposal.actorId),
       selectedOptionId,
     );
-    if (dominance.status !== 'dominated') return null;
-    if (proposal.overrideJustification === null) {
-      return { code: 'DOMINATED_OPTION_REQUIRES_OVERRIDE', summary: dominance.delta };
-    }
-    if (proposal.overrideJustification.reason === 'resource_conservation') {
+    const override = proposal.overrideJustification;
+    if (override !== null && decisionReasonProblem(proposal.reason) !== null) {
       return {
-        code: 'DOMINANCE_OVERRIDE_CONTRADICTS_METRICS',
-        summary: `${dominance.delta} Resource conservation cannot justify this override because the dominating option has no greater declared resource cost.`,
+        code: 'OVERRIDE_UNJUSTIFIED',
+        summary: 'An override reason must explain the decision instead of restating that an option was offered, legal, selected, or revision-bound.',
       };
     }
+    if (override !== null) {
+      const policyRefusal = selectedOverridePolicy.refusal(override);
+      if (policyRefusal !== null) return policyRefusal;
+    }
+    if (dominance.status !== 'dominated') return null;
+    if (override === null) {
+      return { code: 'DOMINATED_OPTION_REQUIRES_OVERRIDE', summary: dominance.delta };
+    }
+    const issuedPlayTokens = SNIPPET_REGISTRY.applicable(capsule).map((play) => play.snippetHash);
+    if (override.kind === 'engine_play' &&
+      (override.token === null || !issuedPlayTokens.includes(override.token))) return {
+        code: 'OVERRIDE_UNJUSTIFIED',
+        summary: `${dominance.delta} The engine_play override must name a current-context token.`,
+      };
+    if (override.kind === 'missing_metric' && override.id === null) return {
+      code: 'OVERRIDE_UNJUSTIFIED',
+      summary: `${dominance.delta} The missing_metric override must name a typed metric id.`,
+    };
     return null;
   }
   function fullTurnContext(
@@ -1171,7 +1492,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const actors = [...required].sort().map((actorId) => {
         const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
         if (actor === undefined) throw new RangeError(`ACTOR_ABSENT:${actorId}`);
-        const all = tacticalOptions(state, queries, capsule, actorId, false, true);
+        const all = tacticalOptions(state, queries, capsule, actorId, false);
         return {
           actor_id: actorId,
           status: actorStatus(actor),
@@ -1206,6 +1527,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           name: play.name,
           description: play.description,
           snippet_hash: play.snippetHash,
+          play_token: play.snippetHash,
         })),
         applicable_skills: applicableSkills.map((skill) => ({
           name: skill.name,
@@ -1233,7 +1555,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           const plan = {
             play_name: topPlay.name,
             snippet_hash: topPlay.snippetHash,
-            proposals: draft.proposals.map(externalProposal),
+            play_token: topPlay.snippetHash,
+            proposals: draft.proposals.map((proposal) =>
+              externalProposal(proposalWithPlayObjective(capsule, proposal, topPlay.snippetHash))),
             advisory: SUGGESTED_PLAN_ADVISORY,
           };
           const bytes = new TextEncoder().encode(JSON.stringify(plan)).byteLength;
@@ -1327,7 +1651,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     const actors = [...required].sort().map((actorId) => {
       const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
       if (actor === undefined) throw new RangeError(`ACTOR_ABSENT:${actorId}`);
-      const all = tacticalOptions(state, queries, capsule, actorId, includeExpectations, true);
+      const all = tacticalOptions(state, queries, capsule, actorId, includeExpectations);
       const intelRows = topDmActorIntelRows(exactIntel, actorId);
       const unresolvedFindings = exactIntel.filter((row) =>
         row.actorId === actorId && !isInformativeDmIntelRow(row)).map((row) => ({
@@ -1409,6 +1733,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         name: play.name,
         description: play.description,
         snippet_hash: play.snippetHash,
+        play_token: play.snippetHash,
       })),
       applicable_skills: applicableSkills.map((skill) => ({
         name: skill.name,
@@ -1437,8 +1762,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         const plan = {
           play_name: topPlay.name,
           snippet_hash: topPlay.snippetHash,
+          play_token: topPlay.snippetHash,
           proposals: draft.proposals.map((proposal) =>
-            externalProposal(proposalWithPlayObjective(capsule, proposal))),
+            externalProposal(proposalWithPlayObjective(capsule, proposal, topPlay.snippetHash))),
           advisory: SUGGESTED_PLAN_ADVISORY,
         };
         const bytes = new TextEncoder().encode(JSON.stringify(plan)).byteLength;
@@ -1647,7 +1973,23 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
     });
   };
   function execute(name: string, value: unknown): unknown {
-    const input = record(value, `${name} arguments`);
+    const suppliedInput = record(value, `${name} arguments`);
+    const roundSubmission = name === 'engine.submit_round_proposals'
+      ? prepareRoundSubmission(suppliedInput)
+      : null;
+    if (roundSubmission?.kind === 'rejected') return roundSubmission.result;
+    const input = roundSubmission === null ? suppliedInput : roundSubmission.envelope;
+    if (name === 'engine.read_kb_subject') {
+      const budget = dependencies.kbReadBudget;
+      const callPhase = dependencies.kbReadCallPhase;
+      if (budget === undefined || callPhase === undefined) {
+        throw new RangeError('KB_SUBJECT_READER_UNAVAILABLE');
+      }
+      return budget.read(
+        stringField(input, 'subject') as import('../knowledge-base-contract').KbSubject,
+        callPhase,
+      );
+    }
     if (name === 'engine.get_turn_context') {
       const capsule = exactCurrent(feed, stringField(input, 'run_id'), numberField(input, 'expected_revision'));
       if (capsule.request === null) throw new RangeError('NO_PENDING_REQUEST');
@@ -1989,8 +2331,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         state_ref: externalStateRef(capsule),
         play_name: playName,
         snippet_hash: draft.definition.snippetHash,
+        play_token: draft.definition.snippetHash,
         proposals: draft.proposals.map((proposal) =>
-          externalProposal(proposalWithPlayObjective(capsule, proposal))),
+          externalProposal(proposalWithPlayObjective(capsule, proposal, draft.definition.snippetHash))),
       };
     }
     if (name === 'engine.load_skill') {
@@ -2006,10 +2349,11 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         skill_hash: loaded.skillHash,
         description: loaded.description,
         procedure: loaded.procedure,
-        plays: loaded.plays.map((play) => ({
-          name: play.name,
-          description: play.description,
-          snippet_hash: play.snippetHash,
+          plays: loaded.plays.map((play) => ({
+            name: play.name,
+            description: play.description,
+            snippet_hash: play.snippetHash,
+            play_token: play.snippetHash,
         })),
       };
     }
@@ -2090,7 +2434,7 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         name: actor.name,
         side: actor.side,
         status: actorStatus(actor),
-        options: granularity === 'combatant_detail' ? tacticalOptions(state, queries, capsule, actor.id, true, true) : [],
+        options: granularity === 'combatant_detail' ? tacticalOptions(state, queries, capsule, actor.id, true) : [],
         threats: granularity === 'turn_minimal' || granularity === 'combatant_detail' ? threats(state, queries, actor.id) : [],
       }));
       const history = recentChanges(capsule).filter((entry) => typeof input['since_revision'] !== 'number' || Number(entry['revision']) > input['since_revision']);
@@ -2102,8 +2446,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const actorId = combatantId(stringField(input, 'actor_id'));
       const actor = capsule.projection.combatants.find((candidate) => candidate.id === actorId);
       if (actor === undefined) throw new RangeError('ACTOR_ABSENT');
-      const all = tacticalOptions(state, queries, capsule, actorId, input['include_unavailable'] === true, input['include_unavailable'] === true);
-      const paged = applicationPage(capsule, canonicalJson({ actorId, unavailable: input['include_unavailable'] === true }), all, input['page']);
+      const all = tacticalOptions(state, queries, capsule, actorId, true);
+      const paged = applicationPage(capsule, canonicalJson({ actorId }), all, input['page']);
       return { state_ref: externalStateRef(capsule), actor_id: actorId, status: actorStatus(actor), options: paged.values, truncated: paged.truncated, next_cursor: paged.next };
     }
     if (name === 'engine.query_path') {
@@ -2184,6 +2528,10 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const proposal = decodeRenderedProposal(input['proposal']);
       if (!request.actors.includes(proposal.actorId)) throw new RangeError('ACTOR_NOT_PENDING');
       if (proposal.expectedRevision !== capsule.revision) throw new RangeError('PROPOSAL_REVISION_MISMATCH');
+      const contractRefusal = proposalContractRefusal(request.phase, proposal);
+      if (contractRefusal !== null) {
+        return { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: [{ code: contractRefusal.code, summary: contractRefusal.summary }], correction_guidance: correctionGuidance(capsule) };
+      }
       const resolution = turnProposals.resolve(state, proposal);
       if (!resolution.valid) {
         return { state_ref: externalStateRef(capsule), valid: false, selected_branch: 'none', resolution: null, refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
@@ -2198,6 +2546,32 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (request.kind === 'plan_adjustment') throw new RangeError('REQUEST_KIND_MISMATCH');
       const proposalValues = input['proposals'];
       if (!Array.isArray(proposalValues)) throw new TypeError('proposals must be an array.');
+      const missingReasons = proposalValues.flatMap((value) => {
+        const proposal = record(value, 'proposal');
+        return typeof proposal['reason'] === 'string' && proposal['reason'].trim().length > 0
+          ? []
+          : [{
+              actor_id: typeof proposal['actor_id'] === 'string' ? proposal['actor_id'] : request.actors[0],
+              codes: [typeof proposal['reason'] === 'string' && proposal['override_justification'] !== null
+                ? 'OVERRIDE_UNJUSTIFIED' : 'REASON_REQUIRED'],
+              summary: typeof proposal['reason'] === 'string' && proposal['override_justification'] !== null
+                ? 'An override reason cannot be empty.'
+                : 'Each proposal requires one short sentence explaining why this option was chosen.',
+              attempt_rejections: [{
+                attempt: 'primary' as const,
+                declared_option_id: typeof proposal['primary_option_id'] === 'string'
+                  ? proposal['primary_option_id'] : null,
+                rejection_reasons: [typeof proposal['reason'] === 'string' && proposal['override_justification'] !== null
+                  ? 'An override reason cannot be empty.' : 'A proposal reason is required.'],
+              }],
+            }];
+      });
+      if (missingReasons.length > 0) {
+        return {
+          status: 'rejected', state_ref: externalStateRef(capsule),
+          actor_refusals: missingReasons, correction_guidance: correctionGuidance(capsule),
+        };
+      }
       const decoded = proposalValues.map(decodeRenderedProposal);
       const actual = decoded.map((proposal) => proposal.actorId);
       const expected = [...request.actors].sort();
@@ -2206,9 +2580,16 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const canonical = actorSetValid
         ? request.actors.map((actorId) => decoded.find((proposal) => proposal.actorId === actorId)).filter((proposal): proposal is EngineTurnProposal => proposal !== undefined)
         : decoded;
-      const resolved = canonical.map((proposal) => ({ proposal, resolution: turnProposals.resolve(state, proposal) }));
-      const dominanceRefusals = resolved.flatMap(({ proposal, resolution }) => {
-        if (!resolution.valid) return [];
+      const evaluated = canonical.map((proposal) => {
+        const contractRefusal = proposalContractRefusal(request.phase, proposal);
+        return {
+          proposal,
+          contractRefusal,
+          resolution: contractRefusal === null ? turnProposals.resolve(state, proposal) : null,
+        };
+      });
+      const dominanceRefusals = evaluated.flatMap(({ proposal, contractRefusal, resolution }) => {
+        if (contractRefusal !== null || resolution === null || !resolution.valid) return [];
         const refusal = dominanceRefusal(capsule, proposal, resolution.option.optionId);
         return refusal === null ? [] : [{
           actor_id: proposal.actorId,
@@ -2231,7 +2612,18 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
             rejection_reasons: ['Round submission must contain one proposal for each required actor exactly once.'],
           }],
         }]),
-        ...resolved.flatMap(({ proposal, resolution }) => resolution.valid ? [] : [{
+        ...evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal === null ? [] : [{
+          actor_id: proposal.actorId,
+          codes: [contractRefusal.code],
+          summary: contractRefusal.summary,
+          attempt_rejections: [{
+            attempt: contractRefusal.attempt,
+            declared_option_id: contractRefusal.attempt === 'primary'
+              ? proposal.primaryOptionId : proposal.fallbackOptionId,
+            rejection_reasons: [contractRefusal.summary],
+          }],
+        }]),
+        ...evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal !== null || resolution === null || resolution.valid ? [] : [{
           actor_id: proposal.actorId,
           codes: resolution.refusals.map((entry) => entry.code),
           summary: resolution.refusals.map((entry) => entry.summary).join('; '),
@@ -2253,9 +2645,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const reactionGuidance = input['reaction_guidance'] === undefined
         ? null : decodeReactionGuidance(input['reaction_guidance']);
       return idempotent(key, input, () => {
-        const valid = resolved.flatMap(({ proposal, resolution }) => resolution.valid ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
+        const valid = evaluated.flatMap(({ proposal, contractRefusal, resolution }) => contractRefusal === null && resolution?.valid === true ? [{ proposal, option: resolution.option, primaryOption: resolution.primaryOption, fallbackOption: resolution.fallbackOption, mechanics: resolution.mechanics, selectedBranch: resolution.selectedBranch, resolutionDigest: resolution.resolutionDigest, summary: resolution.summary }] : []);
         const proposalId = `round:${sha256(canonicalJson({ digest: capsule.digest, key, valid, reactionGuidance })).slice(0, 48)}`;
-        submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, reactionGuidance, submittedArguments: structuredClone(input), ...(activeIntelMode === 'off' ? {} : { intelCapture: captureDmIntel(state, capsule, queries) }) });
+        submitEngineProposal(feed, proposals, { kind: 'round_turn_proposal', proposalId, runId: capsule.runId, branchId: capsule.branchId, requestId: request.requestId, expectedRevision: capsule.revision, stateDigest: capsule.digest, stateHandle: engineStateHandle(capsule), phase: request.phase, idempotencyKey: key, resolutions: valid, rationale: typeof input['rationale'] === 'string' ? input['rationale'] : null, reactionGuidance, submittedArguments: structuredClone(roundSubmission?.submittedArguments ?? suppliedInput), ...(activeIntelMode === 'off' ? {} : { intelCapture: captureDmIntel(state, capsule, queries) }) });
         return { status: 'proposed', round_proposal_id: proposalId, state_ref: externalStateRef(capsule), actor_resolutions: valid.map((entry) => ({ actor_id: entry.proposal.actorId, selected_branch: entry.selectedBranch, resolution_digest: entry.resolutionDigest, summary: entry.summary })) };
       });
     }
@@ -2273,20 +2665,21 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       const overBudget = decoded.length > request.adjustmentBudget;
       const evaluated = decoded.map((proposal) => {
         const actor = state.combatants.find((candidate) => candidate.profile.id === proposal.actorId);
+        const contractRefusal = proposalContractRefusal(request.phase, proposal);
         const staticRefusal = overBudget
-          ? { code: 'ADJUSTMENT_BUDGET_EXCEEDED', summary: `Adjustment contains more than ${String(request.adjustmentBudget)} replacement proposals.` }
+          ? { code: 'ADJUSTMENT_BUDGET_EXCEEDED', summary: `Adjustment contains more than ${String(request.adjustmentBudget)} replacement proposals.`, attempt: 'primary' as const }
           : (counts.get(proposal.actorId) ?? 0) > 1
-            ? { code: 'DUPLICATE_ACTOR_UPDATE', summary: 'An adjustment may replace an open actor at most once.' }
+            ? { code: 'DUPLICATE_ACTOR_UPDATE', summary: 'An adjustment may replace an open actor at most once.', attempt: 'primary' as const }
             : actor?.life === 'dead'
-              ? { code: 'ACTOR_DEAD', summary: 'A dead actor cannot receive a plan adjustment.' }
+              ? { code: 'ACTOR_DEAD', summary: 'A dead actor cannot receive a plan adjustment.', attempt: 'primary' as const }
               : !request.actors.includes(proposal.actorId)
-                ? { code: 'ACTOR_NOT_OPEN', summary: 'Only actors whose turns remain open may receive an adjustment.' }
-                : null;
+                ? { code: 'ACTOR_NOT_OPEN', summary: 'Only actors whose turns remain open may receive an adjustment.', attempt: 'primary' as const }
+                : contractRefusal;
         if (staticRefusal !== null) return { proposal, resolution: null, staticRefusal };
         const resolution = turnProposals.resolve(state, proposal);
         if (resolution.valid) {
           const refusal = dominanceRefusal(capsule, proposal, resolution.option.optionId);
-          if (refusal !== null) return { proposal, resolution: null, staticRefusal: refusal };
+          if (refusal !== null) return { proposal, resolution: null, staticRefusal: { ...refusal, attempt: 'primary' as const } };
         }
         return { proposal, resolution, staticRefusal: null };
       });
@@ -2306,8 +2699,9 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
           codes: [entry.staticRefusal.code],
           summary: entry.staticRefusal.summary,
           attempt_rejections: [{
-            attempt: 'primary' as const,
-            declared_option_id: entry.proposal.primaryOptionId,
+            attempt: entry.staticRefusal.attempt,
+            declared_option_id: entry.staticRefusal.attempt === 'primary'
+              ? entry.proposal.primaryOptionId : entry.proposal.fallbackOptionId,
             rejection_reasons: [entry.staticRefusal.summary],
           }],
         }];
@@ -2417,6 +2811,8 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
       if (request.kind === 'plan_adjustment') throw new RangeError('REQUEST_KIND_MISMATCH');
       const proposal = decodeRenderedProposal(input['proposal']);
       if (request.actors.length !== 1 || request.actors[0] !== proposal.actorId) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: 'ACTOR_REQUIRES_WHOLE_ROUND', summary: 'This actor belongs to the pending shared-initiative whole-round request.' }], correction_guidance: correctionGuidance(capsule) };
+      const contractRefusal = proposalContractRefusal(request.phase, proposal);
+      if (contractRefusal !== null) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: [{ code: contractRefusal.code, summary: contractRefusal.summary }], correction_guidance: correctionGuidance(capsule) };
       const resolution = turnProposals.resolve(state, proposal);
       if (!resolution.valid) return { status: 'rejected', state_ref: externalStateRef(capsule), refusals: resolution.refusals.map((entry) => ({ code: entry.code, summary: entry.summary })), correction_guidance: correctionGuidance(capsule) };
       const dominance = dominanceRefusal(capsule, proposal, resolution.option.optionId);
@@ -2469,8 +2865,20 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         : ENGINE_DM_TOOL_NAMES)
     : null;
   const bindings: readonly McpToolBinding[] = ENGINE_TOOL_SPECS
-    .filter((spec) => advertisedNames === null || advertisedNames.has(spec.descriptor.name))
-    .map((spec) => ({ descriptor: spec.descriptor, validateArguments: (value) => schemaViolations(spec.input, value), validateOutput: (value) => schemaViolations(spec.output, value), execute: (value) => execute(spec.descriptor.name, value) }));
+    .filter((spec) => spec.descriptor.name === 'engine.read_kb_subject'
+      ? dependencies.kbReadBudget !== undefined && profileRequest?.phase !== 'speculative'
+      : advertisedNames === null || advertisedNames.has(spec.descriptor.name))
+    .map((spec) => ({
+      descriptor: spec.descriptor,
+      validateArguments: (value) => spec.descriptor.name !== 'engine.submit_round_proposals'
+        ? schemaViolations(spec.input, value)
+        : engineSchemaInternals.minimalSubmitRoundTransportInput.safeParse(value).success ||
+          engineSchemaInternals.submitRoundTransportInput.safeParse(value).success
+          ? []
+          : schemaViolations(spec.input, value),
+      validateOutput: (value) => schemaViolations(spec.output, value),
+      execute: (value) => execute(spec.descriptor.name, value),
+    }));
   const bindingsByName = new Map(bindings.map((binding) => [binding.descriptor.name, binding]));
   const toolSurface: EngineToolSurface = Object.freeze({
     tools: Object.freeze(bindings.map((binding) => binding.descriptor)),
@@ -2583,7 +2991,19 @@ function createResourceProvider(feed: EngineCapsuleFeed, rules: AllowlistedRules
         if (entry === null) throw new RangeError('Rule source is not allowlisted.');
         return content(uri, { rule_id: entry.ruleId, source_locator: entry.sourceLocator, text: entry.text, attribution: entry.attribution });
       }
-      if (uri === `${base}/schema/turn-proposal-v1`) return content(uri, { version: 1, constraints: ['Select only engine-offered option ids from the exact revision.', 'Never send coordinates, cells, destinations, paths, attack modifiers, DCs, dice, damage, or commands.'], examples: [{ actor_id: 'monster-id', expected_revision: 42, primary_option_id: 'option:42:...', fallback_option_id: null, override_justification: null }] });
+      if (uri === `${base}/schema/turn-proposal-v1`) return content(uri, {
+        version: 1,
+        minimal_submission: ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
+        minimal_example: generatedMinimalRoundSubmissionExample(
+          capsule.request?.phase === 'correction' ? 'correction' : 'initial',
+        ),
+        envelope: ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
+        proposal: ENGINE_TURN_PROPOSAL_INPUT_SCHEMA,
+        constraints: ['Select only engine-offered option ids from the exact revision.', 'Never send coordinates, cells, destinations, paths, attack modifiers, DCs, dice, damage, or commands.'],
+        examples: generatedMinimalRoundSubmissionExample(
+          capsule.request?.phase === 'correction' ? 'correction' : 'initial',
+        )['proposals'],
+      });
       throw new RangeError('Unknown or expired resource URI.');
     },
   };

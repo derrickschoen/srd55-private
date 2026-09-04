@@ -1,11 +1,14 @@
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { encounterSessionId } from '../../../src/combat/values';
+import { createEncounter } from '../../../src/combat/encounter';
 import {
   agentSessionIdFromCli,
+  contextTokenCount,
+  measuredContextRolloverThreshold,
+  turnInputTotal,
   type AgentInvocation,
   type AgentSessionAdapter,
   type AgentSessionBinding,
@@ -31,14 +34,23 @@ import {
 import {
   basisFixturesPath,
   extractArenaProbeVerdict,
+  mapConversationKbReads,
   parseArenaArgs,
   runArena,
 } from '../../../tools/ai-dm-arena';
+import { validateRerunRows } from '../../../tools/ai-dm-rerun-packet';
 import {
   mkdtempSync,
   readFileSync,
-  writeFileSync,
 } from '../../helpers/test-filesystem';
+import {
+  DEFAULT_AI_DM_KB_ROOT,
+  type RepoRelativeKbPath,
+} from '../../../src/vtt/knowledge-base-contract';
+import type { KbReadRecord } from '../../../src/vtt/mcp/knowledge-base';
+import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
+
+const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
 
 function objectValue(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -79,16 +91,83 @@ class FakeCodexUsageAdapter implements AgentSessionAdapter {
       `${JSON.stringify({ type: 'turn.completed', usage })}\n`,
       sessionId,
     );
+    const turnUsage = decoded.turnUsage;
+    if (turnUsage === null) throw new Error('SIMULATED Codex turn usage did not decode.');
     return {
       resumeSessionId: agentSessionIdFromCli(decoded.sessionId),
       sessionId: decoded.sessionId,
       finalText: decoded.finalText,
-      usage: decoded.usage,
+      usage: {
+        ...turnUsage,
+        contextInputTokens: contextTokenCount(turnUsage.turnInputTotal),
+        modelContextWindow: contextTokenCount(258_400),
+      },
       exit: 'completed',
     };
   }
 
   classifyFailure(): 'unknown' { return 'unknown'; }
+}
+
+interface ArenaRolloverUsageFixture {
+  readonly belowThreshold: readonly ArenaRolloverUsage[];
+  readonly atThreshold: readonly ArenaRolloverUsage[];
+}
+
+interface ArenaRolloverUsage {
+  readonly turnInputTotal: number;
+  readonly contextInputTokens: number;
+}
+
+class ArenaRolloverFixtureAdapter implements AgentSessionAdapter {
+  readonly kind = 'codex' as const;
+  modelCalls = 0;
+  #starts = 0;
+  readonly #usages: ArenaRolloverUsage[];
+
+  constructor(usages: readonly ArenaRolloverUsage[]) {
+    this.#usages = [...usages];
+  }
+
+  async probe() { return { present: true, version: 'SIMULATED' }; }
+
+  async start(): Promise<AgentTurnResult> {
+    this.#starts += 1;
+    return this.#completed(agentSessionIdFromCli(`codex-rollover-fixture-${String(this.#starts)}`));
+  }
+
+  async resume(binding: AgentSessionBinding): Promise<AgentTurnResult> {
+    return this.#completed(binding.sessionId);
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+
+  #completed(sessionId: AgentTurnResult['resumeSessionId']): AgentTurnResult {
+    const usage = this.#usages.shift();
+    if (usage === undefined) throw new Error('Arena rollover usage fixture was exhausted.');
+    this.modelCalls += 1;
+    return {
+      resumeSessionId: sessionId,
+      sessionId,
+      finalText: '',
+      usage: {
+        turnInputTotal: turnInputTotal(usage.turnInputTotal),
+        contextInputTokens: contextTokenCount(usage.contextInputTokens),
+        modelContextWindow: contextTokenCount(258_400),
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+      },
+      exit: 'completed',
+    };
+  }
+}
+
+function arenaRolloverUsageFixture(): ArenaRolloverUsageFixture {
+  return JSON.parse(readFileSync(
+    'tests/fixtures/context-rollover/arena-turn-vs-context.SIMULATED.json',
+    'utf8',
+  )) as ArenaRolloverUsageFixture;
 }
 
 class OrderingNullAdapter implements AgentSessionAdapter {
@@ -128,11 +207,13 @@ class OrderingNullAdapter implements AgentSessionAdapter {
 
 class InProcessArenaAdapter implements AgentSessionAdapter {
   readonly kind = 'local-openai' as const;
+  readonly invocations: Array<{ readonly dispatch: 'start' | 'resume'; readonly invocation: AgentInvocation }> = [];
   #starts = 0;
 
   async probe() { return { present: true, version: 'SIMULATED-in-process' }; }
 
   async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
+    this.invocations.push({ dispatch: 'start', invocation });
     this.#starts += 1;
     return this.#dispatch(
       agentSessionIdFromCli(`local-openai:SIMULATED-arena-${String(this.#starts)}`),
@@ -144,6 +225,7 @@ class InProcessArenaAdapter implements AgentSessionAdapter {
     binding: AgentSessionBinding,
     invocation: AgentInvocation,
   ): Promise<AgentTurnResult> {
+    this.invocations.push({ dispatch: 'resume', invocation });
     return this.#dispatch(binding.sessionId, invocation);
   }
 
@@ -209,6 +291,24 @@ const LEGACY_BLOCK_ARGS = [
 ] as const;
 
 describe('AI-DM arena', () => {
+  it('maps rows with zero, one, and two KB reads without losing hashes or order (mutation: omit arena kbReads)', () => {
+    const records: readonly KbReadRecord[] = [
+      {
+        subject: 'actions',
+        repoRelativePath: 'tests/fixtures/ai-dm-kb/actions.md' as RepoRelativeKbPath,
+        sha256: '1'.repeat(64), byteCount: 101, ordinal: 1, callPhase: 'initial',
+      },
+      {
+        subject: 'spells',
+        repoRelativePath: 'tests/fixtures/ai-dm-kb/spells.md' as RepoRelativeKbPath,
+        sha256: '2'.repeat(64), byteCount: 202, ordinal: 2, callPhase: 'correction',
+      },
+    ];
+
+    expect([0, 1, 2].map((count) => mapConversationKbReads({ kbReads: records.slice(0, count) })))
+      .toEqual([[], [records[0]], records]);
+  });
+
   it.each([
     ['standard', 'tests/fixtures/arena-basis'],
     ['hard', 'tests/fixtures/arena-basis-hard'],
@@ -227,7 +327,19 @@ describe('AI-DM arena', () => {
     ] as const;
 
     expect(parseArenaArgs(common).partyPolicy).toBe('symmetric_evaluator_v1');
+    expect(parseArenaArgs(common)).toEqual(expect.objectContaining({
+      instructionSource: 'none', skill: null,
+    }));
     expect(parseArenaArgs(common).intelMode).toBe('full');
+    expect(parseArenaArgs(common).overridePolicy).toBe('typed_reason');
+    expect(parseArenaArgs([...common, '--override-policy', 'strict']).overridePolicy).toBe('strict');
+    expect(() => parseArenaArgs([...common, '--override-policy', 'free_text']))
+      .toThrow('--override-policy must be strict or typed_reason');
+    expect(parseArenaArgs(common).decisionTransport).toBe('mcp_minimal');
+    expect(parseArenaArgs([...common, '--transport', 'final_indices']).decisionTransport)
+      .toBe('final_indices');
+    expect(() => parseArenaArgs([...common, '--transport', 'final_ids']))
+      .toThrow('--transport must be mcp_minimal or final_indices');
     expect(parseArenaArgs([...common, '--intel-mode', 'off']).intelMode).toBe('off');
     expect(() => parseArenaArgs([...common, '--intel-mode', 'partial']))
       .toThrow('--intel-mode must be full or off.');
@@ -240,6 +352,40 @@ describe('AI-DM arena', () => {
       .toThrow('--basis must be standard, hard, brutal, or scenario.');
     expect(() => parseArenaArgs([...common, '--party-policy', 'unknown-policy']))
       .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
+  });
+
+  it('persists final indices through the arena and validates them beside an mcp-minimal row', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-final-indices-'));
+    const finalPath = join(directory, 'final-indices.jsonl');
+    const minimalPath = join(directory, 'mcp-minimal.jsonl');
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--dry-run',
+    ] as const;
+    const [finalRow] = await runArena(parseArenaArgs([
+      ...common, '--out', finalPath, '--transport', 'final_indices',
+    ]));
+    const [minimalRow] = await runArena(parseArenaArgs([
+      ...common, '--out', minimalPath, '--transport', 'mcp_minimal',
+    ]));
+    if (finalRow === undefined || minimalRow === undefined) {
+      throw new Error('Mixed-transport arena dry run omitted a row.');
+    }
+
+    expect(finalRow.decisionTransport).toBe('final_indices');
+    expect(finalRow.overridePolicy).toBe('typed_reason');
+    expect(finalRow.chosenOptionIndices).toBeDefined();
+    expect(finalRow.chosenOptionIndices?.length).toBeGreaterThan(0);
+    expect(minimalRow.decisionTransport).toBe('mcp_minimal');
+    expect(minimalRow).not.toHaveProperty('chosenOptionIndices');
+
+    const persistedFinal = objectValue(JSON.parse(readFileSync(finalPath, 'utf8')) as unknown, 'final-index arena row');
+    const persistedMinimal = objectValue(JSON.parse(readFileSync(minimalPath, 'utf8')) as unknown, 'mcp-minimal arena row');
+    expect(persistedFinal['chosenOptionIndices']).toEqual(finalRow.chosenOptionIndices);
+    expect(persistedMinimal).not.toHaveProperty('chosenOptionIndices');
+    expect(validateRerunRows([
+      { ...persistedFinal, arm: 'final-indices' },
+      { ...persistedMinimal, arm: 'mcp-minimal' },
+    ], { seeds: [3_943_001], reps: 1 })).toHaveLength(2);
   });
 
   it('runs the frozen control probe through the arena and emits a deterministic mechanical verdict', { timeout: 30_000 }, async () => {
@@ -277,6 +423,7 @@ describe('AI-DM arena', () => {
               spellId: engineSpellId('hypnotic-pattern'),
               targetIds: [],
               objectId: null,
+              omittedRiders: [],
             }],
           },
         });
@@ -302,6 +449,35 @@ describe('AI-DM arena', () => {
       'spellcasting/hypnotic-pattern (1/1) [30-ft cube -> combatant:d432-cleric, combatant:d432-fighter, combatant:d432-rogue, combatant:d432-wizard]',
     );
     expect(labels).toContain('Restless Touch + Restless Touch -> combatant:d432-wizard');
+  });
+
+  it('propagates hidden options exactly once with the engine-state knowledge marker', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-hidden-options-'));
+    const monster = monsterProfile('hidden-option-monster', { initiativeBonus: -20 });
+    const character = playerProfile('hidden-option-character', { initiativeBonus: 20 });
+    const fixtureState = createEncounter({
+      bounds: { columns: 3, rows: 1 },
+      combatants: [monster, character],
+      tokens: [placedToken(monster, 0), placedToken(character, 2)],
+      config: { initiativeMode: 'per_combatant' },
+    });
+    const [row] = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--dry-run',
+      '--cli', 'local-openai', '--local-base-url', 'http://SIMULATED.invalid',
+      '--local-model', 'SIMULATED-model',
+      '--out', join(directory, 'arena.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
+    ]), { adapter: new InProcessArenaAdapter(), fixtureStates: [fixtureState] });
+    if (row === undefined) throw new Error('Hidden-option arena produced no row.');
+
+    expect(row.knowledgeModel).toBe('engine_state');
+    expect(row.hiddenOptions.length).toBeGreaterThan(0);
+    expect(new Set(row.hiddenOptions.map((option) => option.humanOptionId)).size)
+      .toBe(row.hiddenOptions.length);
+    expect(row.hiddenOptions).toContainEqual(expect.objectContaining({
+      declaredOption: { kind: 'standard_action', action: 'disengage' },
+      reason: { kind: 'disengage_without_movement', action: 'disengage' },
+    }));
   });
 
   it('threads inline renderer-profile JSON through dry-run rows while keeping arena metadata', { timeout: 30_000 }, async () => {
@@ -500,18 +676,50 @@ describe('AI-DM arena', () => {
 
     expect(config.arms).toEqual([
       {
+        instructionSource: 'none', skill: null,
         label: 'plain', model: 'model-plain', effort: 'low',
         escalationModel: null, escalationEffort: null, combatModel: 'monster_block_v1',
+        overridePolicy: 'typed_reason',
       },
       {
+        instructionSource: 'none', skill: null,
         label: 'tiered', model: 'model-tiered', effort: 'high',
         escalationModel: 'arm-escalation', escalationEffort: 'xhigh',
         combatModel: 'monster_block_v1',
+        overridePolicy: 'typed_reason',
       },
     ]);
     expect(config).toMatchObject({
       escalationModel: 'global-escalation', escalationEffort: 'medium',
     });
+  });
+
+  it('parses typed instruction sources and copies them onto every arena arm', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-instruction-source-'));
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'arena.jsonl'),
+    ] as const;
+    const kb = parseArenaArgs([...common, '--instruction-source', 'kb', '--kb', DEFAULT_AI_DM_KB_ROOT]);
+    expect(kb).toEqual(expect.objectContaining({
+      instructionSource: 'kb', skill: null, kbPath: join(process.cwd(), DEFAULT_AI_DM_KB_ROOT),
+    }));
+    const skill = parseArenaArgs([
+      ...common, '--instruction-source', 'skill', '--skill', 'engine-submission', '--interleave',
+      '--arm', 'first:model-a:low', '--arm', 'second:model-b:low',
+    ]);
+    expect(skill).toEqual(expect.objectContaining({
+      instructionSource: 'skill', skill: 'engine-submission', kbPath: null,
+    }));
+    expect(skill.arms.every((arm) =>
+      arm.instructionSource === 'skill' && arm.skill === 'engine-submission' && arm.kbPath === null,
+    )).toBe(true);
+    expect(() => parseArenaArgs([...common, '--instruction-source', 'skill']))
+      .toThrow('--skill must be engine-submission or dm-round.');
+    expect(() => parseArenaArgs([...common, '--skill', 'dm-round']))
+      .toThrow('--skill requires --instruction-source skill.');
+    expect(() => parseArenaArgs([...common, '--instruction-source', 'skill', '--skill', 'dm-round', '--kb', DEFAULT_AI_DM_KB_ROOT]))
+      .toThrow('--kb cannot be combined with --instruction-source skill.');
   });
 
   it('parses an opt-in initiative profile and independent arm combat models', () => {
@@ -537,6 +745,49 @@ describe('AI-DM arena', () => {
     ])).toThrow('--initiative-profile must be legacy or derived_v1');
   });
 
+  it('selects independent override policies for preregistered interleaved arms', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-override-policy-'));
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '6203001',
+      '--out', join(directory, 'arena.jsonl'), '--interleave',
+      '--arm', 'S:gpt-5.6-luna:low',
+      '--arm', 'V:gpt-5.6-luna:low',
+      '--arm', 'U:gpt-5.6-luna:low',
+    ] as const;
+    const config = parseArenaArgs([
+      ...common,
+      '--arm-override-policy', 'S:strict',
+      '--arm-override-policy', 'V:typed_reason',
+      '--arm-override-policy', 'U:typed_reason',
+    ]);
+
+    expect(config.arms.map(({ label, overridePolicy }) => ({ label, overridePolicy }))).toEqual([
+      { label: 'S', overridePolicy: 'strict' },
+      { label: 'V', overridePolicy: 'typed_reason' },
+      { label: 'U', overridePolicy: 'typed_reason' },
+    ]);
+    expect(() => parseArenaArgs([...common, '--arm-override-policy', 'S:free_text']))
+      .toThrow('--arm-override-policy must use label:strict|typed_reason syntax');
+    expect(() => parseArenaArgs([...common, '--arm-override-policy', 'missing:strict']))
+      .toThrow('--arm-override-policy names unknown arm missing');
+  });
+
+  it('threads each interleaved arm policy into its persisted row', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-override-row-'));
+    const rows = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--dry-run',
+      '--out', join(directory, 'arena.jsonl'), '--interleave',
+      '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
+      '--arm', 'S:gpt-5.6-luna:low', '--arm', 'V:gpt-5.6-luna:low',
+      '--arm-override-policy', 'S:strict', '--arm-override-policy', 'V:typed_reason',
+    ]));
+
+    expect(rows.map(({ arm, overridePolicy }) => ({ arm, overridePolicy }))).toEqual([
+      { arm: 'S', overridePolicy: 'strict' },
+      { arm: 'V', overridePolicy: 'typed_reason' },
+    ]);
+  });
+
   it('rejects partial per-arm escalation suffixes and invalid escalation effort', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-invalid-'));
     const common = [
@@ -556,16 +807,12 @@ describe('AI-DM arena', () => {
   it('renders and validates a multi-round dry run without spawning a model', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-dry-'));
     const outPath = join(directory, 'arena.jsonl');
-    const kbPath = join(directory, 'kb.txt');
-    const kbText = 'SIMULATED arena knowledge base\n';
-    writeFileSync(kbPath, kbText, 'utf8');
     const config = parseArenaArgs([
       '--rooms', '2',
       '--reps', '2',
       '--seed', '3943001',
       '--effort', 'low',
       '--out', outPath,
-      '--kb', kbPath,
       '--cli-bin', 'definitely-not-a-real-codex-binary',
       '--dry-run',
       ...LEGACY_BLOCK_ARGS,
@@ -575,6 +822,9 @@ describe('AI-DM arena', () => {
 
     expect(rows).toHaveLength(4);
     expect(rows.every((row) => row.basis === 'standard' && row.arm === 'single')).toBe(true);
+    expect(rows.every((row) =>
+      row.instructionSource === 'none' && row.skillName === null && row.skillHash === null,
+    )).toBe(true);
     expect(rows.every((row) =>
       row.outcome === 'authorized' && row.refusals.length === 0 &&
       row.projectionRevision > row.contextRevision)).toBe(true);
@@ -607,8 +857,7 @@ describe('AI-DM arena', () => {
     expect(rows[1]?.contextRevision).toBe(rows[0]?.contextRevision);
     expect(rows[1]?.projectionRevision).toBe(rows[0]?.projectionRevision);
     expect(rows[1]?.startingRoomDigest).toBe(rows[0]?.startingRoomDigest);
-    const kbHash = createHash('sha256').update(Buffer.from(kbText, 'utf8')).digest('hex');
-    expect(rows.every((row) => row.kbHash === kbHash)).toBe(true);
+    expect(rows.every((row) => row.kbHash === DEFAULT_KB_HASH)).toBe(true);
     expect(rows.every((row) => /^[0-9a-f]{40}$/u.test(row.repoCommit))).toBe(true);
     expect(rows.every((row) => row.turnContextGranularity === 'full')).toBe(true);
     const firstTurnContext = JSON.parse(rows[0]?.rawTurnContext ?? '') as unknown;
@@ -641,7 +890,7 @@ describe('AI-DM arena', () => {
     });
     expect(rows[0]?.suggestionAdopted).toBe('edited');
     expect(readFileSync(outPath, 'utf8').trim().split('\n').every((line) =>
-      (JSON.parse(line) as { readonly kbHash?: unknown }).kbHash === kbHash)).toBe(true);
+      (JSON.parse(line) as { readonly kbHash?: unknown }).kbHash === DEFAULT_KB_HASH)).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n').every((line) => {
       const row = JSON.parse(line) as { readonly snippetHash?: unknown; readonly snippetSetHash?: unknown };
       return row.snippetHash === SNIPPET_REGISTRY.snippetHash &&
@@ -653,6 +902,16 @@ describe('AI-DM arena', () => {
   describe('brutal room-4 full-intel regression', () => {
     it('reloads the fixture and full context for each of three SIMULATED reps', async () => {
       const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-room-4-full-intel-'));
+      const monster = monsterProfile('full-intel-rep-monster', { initiativeBonus: -20 });
+      const character = playerProfile('full-intel-rep-character', { initiativeBonus: 20 });
+      const fixtureState = {
+        ...createEncounter({
+          bounds: { columns: 3, rows: 1 },
+          combatants: [monster, character],
+          tokens: [placedToken(monster, 0), placedToken(character, 2)],
+          config: { initiativeMode: 'per_combatant' },
+        }),
+      };
       const rows = await runArena(parseArenaArgs([
         '--rooms', '1',
         '--reps', '3',
@@ -663,7 +922,7 @@ describe('AI-DM arena', () => {
         '--local-base-url', 'http://SIMULATED.invalid',
         '--local-model', 'SIMULATED-model',
         '--out', join(directory, 'arena.jsonl'),
-      ]), { adapter: new InProcessArenaAdapter() });
+      ]), { adapter: new InProcessArenaAdapter(), fixtureStates: [fixtureState] });
 
       expect(rows).toHaveLength(3);
       expect(rows.map((row) => ({
@@ -675,15 +934,15 @@ describe('AI-DM arena', () => {
         failedAttempts: row.chainEvidence.failedAttempts,
       }))).toEqual([
         {
-          round: 1, outcome: 'authorized', granularity: 'full', contextRevision: 3,
+          round: 1, outcome: 'authorized', granularity: 'full', contextRevision: 2,
           startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
         },
         {
-          round: 2, outcome: 'authorized', granularity: 'full', contextRevision: 3,
+          round: 2, outcome: 'authorized', granularity: 'full', contextRevision: 2,
           startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
         },
         {
-          round: 3, outcome: 'authorized', granularity: 'full', contextRevision: 3,
+          round: 3, outcome: 'authorized', granularity: 'full', contextRevision: 2,
           startingRoomDigest: rows[0]?.startingRoomDigest, failedAttempts: [],
         },
       ]);
@@ -943,7 +1202,7 @@ describe('AI-DM arena', () => {
     ])).toThrow('--kb cannot use content/cc-by-sa');
   });
 
-  it('sums live-shape Codex usage across service-null retries into the arena row', async () => {
+  it('retains ordered per-call usage while summing only aggregate tokens (mutation: summing call usage)', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-usage-'));
     const outPath = join(directory, 'arena.jsonl');
     const adapter = new FakeCodexUsageAdapter();
@@ -954,6 +1213,7 @@ describe('AI-DM arena', () => {
 
     const rows = await runArena(config, { adapter });
 
+    expect(rows[0]?.refusals).toEqual([]);
     expect(adapter.modelCalls).toBe(3);
     expect(adapter.prompts[0]).not.toContain('[SERVICE_RETRY]');
     expect(adapter.prompts.slice(1).every((prompt) =>
@@ -963,7 +1223,7 @@ describe('AI-DM arena', () => {
         outcome: 'service_null',
         sessionId: 'codex-arena-usage',
         escalationSessionId: null,
-        kbHash: null,
+        kbHash: DEFAULT_KB_HASH,
         agentDispatched: true,
         flapRetries: 2,
         serviceNull: true,
@@ -972,6 +1232,11 @@ describe('AI-DM arena', () => {
         roundNarrative: null,
         chainEvidence: { failedAttempts: [], autoResolvedTrigger: null, correctionFinalText: null },
         tokens: { input: 611, cachedInput: 115, output: 77, reasoning: 31 },
+        callUsage: [
+          { turnInputTotal: 101, contextInputTokens: 101, modelContextWindow: 258400, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
+          { turnInputTotal: 203, contextInputTokens: 203, modelContextWindow: 258400, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'initial', ordinal: 2 },
+          { turnInputTotal: 307, contextInputTokens: 307, modelContextWindow: 258400, cachedInput: 43, output: 31, reasoning: 13, callPhase: 'initial', ordinal: 3 },
+        ],
       }),
     ]);
     expect(JSON.parse(readFileSync(outPath, 'utf8').trim())).toEqual(
@@ -979,6 +1244,11 @@ describe('AI-DM arena', () => {
         flapRetries: 2, serviceNull: true, callsPerRound: 3,
         sessionId: 'codex-arena-usage', escalationSessionId: null,
         tokens: { input: 611, cachedInput: 115, output: 77, reasoning: 31 },
+        callUsage: [
+          { turnInputTotal: 101, contextInputTokens: 101, modelContextWindow: 258400, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
+          { turnInputTotal: 203, contextInputTokens: 203, modelContextWindow: 258400, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'initial', ordinal: 2 },
+          { turnInputTotal: 307, contextInputTokens: 307, modelContextWindow: 258400, cachedInput: 43, output: 31, reasoning: 13, callPhase: 'initial', ordinal: 3 },
+        ],
       }),
     );
   });
@@ -1003,6 +1273,105 @@ describe('AI-DM arena', () => {
     }));
   });
 
+  it('keeps model-free one-round invocation sequences identical with rollover disabled or too high to act', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-d1-regression-'));
+    const baseArgs = [
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--dry-run', '--cli', 'local-openai', '--local-base-url', 'http://SIMULATED',
+      '--local-model', 'SIMULATED-model',
+      ...LEGACY_BLOCK_ARGS,
+    ] as const;
+    const disabledAdapter = new InProcessArenaAdapter();
+    const highAdapter = new InProcessArenaAdapter();
+    const disabledConfig = parseArenaArgs([
+      ...baseArgs, '--out', join(directory, 'disabled.jsonl'),
+    ]);
+    const highConfig = parseArenaArgs([
+      ...baseArgs, '--out', join(directory, 'high.jsonl'),
+    ]);
+
+    const [disabledRow] = await runArena(disabledConfig, {
+      adapter: disabledAdapter,
+      contextRolloverPolicy: { kind: 'unmeasured' },
+    });
+    const [highRow] = await runArena(highConfig, {
+      adapter: highAdapter,
+      contextRolloverPolicy: {
+        kind: 'measured',
+        threshold: measuredContextRolloverThreshold(Number.MAX_SAFE_INTEGER),
+        evidence: 'SIMULATED inactive threshold',
+      },
+    });
+
+    const sequence = (adapter: InProcessArenaAdapter) => adapter.invocations.map((entry) => ({
+      dispatch: entry.dispatch,
+      callPhase: entry.invocation.callPhase,
+      prompt: entry.invocation.prompt,
+      model: entry.invocation.model,
+      reasoningEffort: entry.invocation.reasoningEffort,
+      bootstrap: entry.invocation.bootstrap?.kind ?? null,
+    }));
+    expect(sequence(highAdapter)).toEqual(sequence(disabledAdapter));
+
+    expect(disabledRow).toEqual(expect.objectContaining({
+      knowledgeModel: 'engine_state',
+      room: 1,
+      round: 1,
+      outcome: 'authorized',
+      agentDispatched: true,
+      callsPerRound: 1,
+      tokens: { input: 0, cachedInput: 0, output: 0, reasoning: 0 },
+      callUsage: [],
+      contextRolloverOccurred: false,
+    }));
+    expect(highRow).toEqual(expect.objectContaining({
+      outcome: disabledRow?.outcome,
+      callsPerRound: disabledRow?.callsPerRound,
+      contextRolloverOccurred: false,
+    }));
+  });
+
+  it('keeps every one-round row at generation zero when only turn totals cross the threshold (mutation: compare against turnInputTotal instead of contextInputTokens)', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-turn-total-rollover-'));
+    const adapter = new ArenaRolloverFixtureAdapter(arenaRolloverUsageFixture().belowThreshold);
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '2', '--seed', '3943001',
+      '--out', join(directory, 'below-threshold.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+
+    const rows = await runArena(config, { adapter, heartbeat: () => undefined });
+
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.agentSessionGeneration === 0)).toBe(true);
+    expect(rows.every((row) => row.contextRolloverOccurred === false)).toBe(true);
+    expect(rows.flatMap((row) => row.callUsage).every((usage) =>
+      usage.turnInputTotal >= 160_000 && usage.contextInputTokens < 160_000)).toBe(true);
+  });
+
+  it('rolls a one-round row when per-call context reaches the threshold (mutation: ignore contextInputTokens threshold)', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-context-rollover-'));
+    const adapter = new ArenaRolloverFixtureAdapter(arenaRolloverUsageFixture().atThreshold);
+    const config = parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001',
+      '--out', join(directory, 'at-threshold.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+
+    const [row] = await runArena(config, { adapter, heartbeat: () => undefined });
+
+    expect(row).toEqual(expect.objectContaining({
+      agentSessionGeneration: 1,
+      contextRolloverTriggerCount: 1,
+      contextRolloverOccurred: true,
+    }));
+    expect(row?.callUsage[0]).toEqual(expect.objectContaining({
+      turnInputTotal: 190_320,
+      contextInputTokens: 160_000,
+      modelContextWindow: 258_400,
+    }));
+  });
+
   it('records the engine actual unavailable-option rejection strings in chain evidence', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-chain-evidence-'));
     const config = parseArenaArgs([
@@ -1019,7 +1388,7 @@ describe('AI-DM arena', () => {
 
     expect(row).toEqual(expect.objectContaining({
       outcome: 'authorized', agentDispatched: true,
-      plannedBy: null, plannerLabel: 'engine_default', escalated: true, escalationModel: 'gpt-escalation',
+      plannedBy: null, planner: 'engine_default', escalated: true, escalationModel: 'gpt-escalation',
       authorizedPlan: expect.any(Array),
       roundNarrative: expect.any(String),
       chainEvidence: {

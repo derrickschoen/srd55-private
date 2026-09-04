@@ -22,7 +22,7 @@ import { createSnippetRegistry } from '../../../src/vtt/snippets/registry';
 import {
   engineActionId,
   engineOptionId,
-  type EngineActorOption,
+  type EngineOfferableOption,
   type EngineTurnProposal,
 } from '../../../src/vtt/turn-proposal';
 
@@ -36,7 +36,7 @@ function option(
   name: string,
   action: 'attack' | 'grab' | 'dodge',
   targetId: CombatantId | null,
-): EngineActorOption {
+): EngineOfferableOption {
   return {
     optionId: engineOptionId(`option:${name}`),
     actorId,
@@ -56,6 +56,7 @@ function option(
             ? { kind: 'attack', actionId: engineActionId(`${name}:attack`), target: { kind: 'combatant', combatantId: targetId ?? SCOUT } }
             : { kind: 'saving_throw', actionId: engineActionId(`${name}:grab`), target: { kind: 'combatant', combatantId: targetId ?? SCOUT } },
         }],
+    omittedRiders: [],
     resourceCostLabels: [],
   };
 }
@@ -65,7 +66,7 @@ function projectedActor(input: {
   readonly side: 'monster' | 'player_character';
   readonly hitPoints: number;
   readonly position: { readonly column: number; readonly row: number };
-  readonly options?: readonly EngineActorOption[];
+  readonly options?: readonly EngineOfferableOption[];
 }): EngineProjectionCombatant {
   return {
     id: input.id,
@@ -202,6 +203,7 @@ describe('plays v1', () => {
       expectedRevision: capsule.revision,
       primaryOptionId: engineOptionId('option:not-projected'),
       fallbackOptionId: null,
+      reason: 'Exercise the advertised play fixture.',
       overrideJustification: null,
     };
     const registry = createSnippetRegistry({

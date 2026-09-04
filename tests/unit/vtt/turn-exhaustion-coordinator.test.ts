@@ -94,7 +94,7 @@ function proposal(
     optionId: engineOptionId(`option:${phase}:primary`), actorId: f.actor, revision: f.state.revision,
     label: 'Dodge',
     movement: { preference: { willingness: 'none' as const, maximumFeet: 0, opportunityRisk: 'avoid' as const }, engagement: { stance: 'hold_position' as const } },
-    actionSlots: [{ slot: 'main' as const, use: { kind: 'dodge' as const } }], resourceCostLabels: [],
+    actionSlots: [{ slot: 'main' as const, use: { kind: 'dodge' as const } }], resourceCostLabels: [], omittedRiders: [],
   };
   const fallbackOption = selectedBranch === 'fallback'
     ? { ...primaryOption, optionId: engineOptionId(`option:${phase}:fallback`), label: 'End Turn', actionSlots: [{ slot: 'main' as const, use: { kind: 'end_turn' as const } }] }
@@ -102,10 +102,12 @@ function proposal(
   const selectedOption = fallbackOption ?? primaryOption;
   const turnProposal = {
     actorId: f.actor, expectedRevision: f.state.revision, primaryOptionId: primaryOption.optionId,
-    fallbackOptionId: fallbackOption?.optionId ?? null, overrideJustification: null,
+    fallbackOptionId: fallbackOption?.optionId ?? null,
+    reason: 'Exercise the turn exhaustion fixture.', overrideJustification: null,
   };
   return {
     kind: 'round_turn_proposal',
+    rationale: null,
     proposalId,
     runId: f.sessionId,
     branchId: f.branchId,
@@ -124,7 +126,8 @@ function proposal(
       mechanics: {
         actorId: f.actor, optionId: selectedOption.optionId, movementCostFeet: 0, path: [],
         finalPosition: { column: 0, row: 0 },
-        actionSlots: [{ slot: 'main', kind: selectedBranch === 'fallback' ? 'end_turn' : 'dodge', actionId: engineActionId(selectedBranch === 'fallback' ? 'end_turn' : 'dodge'), spellId: null, targetIds: [], objectId: null }],
+        actionSlots: [{ slot: 'main', kind: selectedBranch === 'fallback' ? 'end_turn' : 'dodge', actionId: engineActionId(selectedBranch === 'fallback' ? 'end_turn' : 'dodge'), spellId: null, targetIds: [], objectId: null, omittedRiders: [] }],
+        omittedRiders: [],
       },
       selectedBranch,
       resolutionDigest: 'a'.repeat(64),
@@ -145,10 +148,15 @@ function runtime(
     turnContext: { request: { phase: 'correction', correction_number: 1 } },
     lifecycle: new AgentSessionLifecycle(f.journal, adapter, 4),
     invocation: {
+      instructionSource: 'none',
+      skill: null,
       runId: f.sessionId,
       prompt: 'must be replaced',
       model: 'SIMULATED-model',
       reasoningEffort: 'SIMULATED-effort',
+      sessionProfile: 'test',
+      callPhase: 'correction',
+      output: { kind: 'tool_driven' },
       launcherToken: 'SIMULATED-launcher-token',
       timeoutMs: null,
     },
@@ -217,7 +225,8 @@ describe('host turn exhaustion coordinator', () => {
 
     expect(activated.value).toBe(1);
     expect(adapter.resumeInvocations).toHaveLength(1);
-    expect(adapter.resumeInvocations[0]?.invocation.prompt).toContain('Correct the complete refused proposal request once.');
+    expect(adapter.resumeInvocations[0]?.invocation.prompt).toContain('Correct the complete refused proposal request with the minimal engine.submit_round_proposals arguments, with one short sentence per actor saying why this option.');
+    expect(adapter.resumeInvocations[0]?.invocation.prompt).toContain('One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again.');
     expect(adapter.resumeInvocations[0]?.invocation.prompt).toContain('fallback_option_id must be null');
     expect(f.journal.history().map((entry) => entry.transition.kind)).toEqual(expect.arrayContaining([
       'proposal_correction_requested',

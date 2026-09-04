@@ -21,11 +21,14 @@ import {
 import { engineActorOptions } from './turn-option-registry';
 import {
   engineActionId,
+  engineSpellId,
   type EngineActionSlotUse,
-  type EngineActorOption,
+  type EngineActivationChoice,
+  type EngineOfferableOption,
   type EngineBonusActionUse,
   type EngineMainActionUse,
   type EngineMovementObjective,
+  type EngineMultiattackComponentUse,
   type EngineProposalResolution,
   type EngineTargetedAttackUse,
   type EngineTurnProposal,
@@ -33,11 +36,13 @@ import {
   type ResolvedActionSlotUse,
   type ResolvedTurnMechanics,
 } from './turn-proposal';
+import type { EngineOmittedRider } from './option-modeling';
+import { legalMultiattackCombinations } from './turn-option-registry';
 
 export type {
   EngineActionId,
   EngineActionSlotUse,
-  EngineActorOption,
+  EngineOfferableOption,
   EngineBonusActionUse,
   EngineEngagement,
   EngineMainActionUse,
@@ -83,6 +88,20 @@ function targetUse(
   return targetId === null || action === undefined ? null : { targetId, action };
 }
 
+function savingThrowTargetUse(
+  state: EncounterState,
+  actorId: CombatantId,
+  use: Extract<EngineMultiattackComponentUse, { readonly kind: 'saving_throw' }>,
+  queries: EngineQueryPort,
+): { readonly targetId: CombatantId; readonly action: MonsterSavingThrowAction } | null {
+  const targetId = resolveSelector(state, actorId, use.target, queries);
+  const action = monsterActions(state, actorId).find(
+    (candidate): candidate is MonsterSavingThrowAction =>
+      candidate.kind === 'saving_throw' && candidate.id === use.actionId,
+  );
+  return targetId === null || action === undefined ? null : { targetId, action };
+}
+
 function useTargets(
   state: EncounterState,
   actorId: CombatantId,
@@ -95,7 +114,9 @@ function useTargets(
       return resolved === null ? null : [resolved.targetId];
     }
     case 'multiattack': {
-      const targets = use.components.map((component) => targetUse(state, actorId, component, queries));
+      const targets = use.components.map((component) => component.kind === 'attack'
+        ? targetUse(state, actorId, component, queries)
+        : savingThrowTargetUse(state, actorId, component, queries));
       return targets.some((entry) => entry === null)
         ? null
         : targets.flatMap((entry) => entry === null ? [] : [entry.targetId]);
@@ -145,16 +166,31 @@ function targetConstraints(
       }
       case 'multiattack':
         for (const component of use.components) {
-          const resolved = targetUse(state, actorId, component, queries);
-          if (resolved === null) return null;
-          const rangeFeet = resolved.action.delivery.kind === 'melee'
-            ? resolved.action.delivery.reachFeet
-            : resolved.action.delivery.kind === 'ranged'
-              ? resolved.action.delivery.longRangeFeet.kind === 'present'
-                ? resolved.action.delivery.longRangeFeet.value
-                : resolved.action.delivery.rangeFeet
-              : resolved.action.delivery.longRangeFeet;
-          constraints.push({ targetId: resolved.targetId, actionId: resolved.action.id, rangeFeet });
+          switch (component.kind) {
+            case 'attack': {
+              const resolved = targetUse(state, actorId, component, queries);
+              if (resolved === null) return null;
+              const rangeFeet = resolved.action.delivery.kind === 'melee'
+                ? resolved.action.delivery.reachFeet
+                : resolved.action.delivery.kind === 'ranged'
+                  ? resolved.action.delivery.longRangeFeet.kind === 'present'
+                    ? resolved.action.delivery.longRangeFeet.value
+                    : resolved.action.delivery.rangeFeet
+                  : resolved.action.delivery.longRangeFeet;
+              constraints.push({ targetId: resolved.targetId, actionId: resolved.action.id, rangeFeet });
+              break;
+            }
+            case 'saving_throw': {
+              const resolved = savingThrowTargetUse(state, actorId, component, queries);
+              if (resolved === null) return null;
+              constraints.push({
+                targetId: resolved.targetId,
+                actionId: resolved.action.id,
+                rangeFeet: resolved.action.target.rangeFeet,
+              });
+              break;
+            }
+          }
         }
         break;
       case 'saving_throw': {
@@ -284,16 +320,22 @@ function movementResolution(
   return best;
 }
 
+type MonsterSpellSource = MonsterSpellcastingAction |
+  Extract<import('../combat/statblock').MonsterBonusAction, { readonly kind: 'spell_choice' }>;
+
 function sourceSpellcastingAction(
   state: EncounterState,
   actorId: CombatantId,
   slot: 'main' | 'bonus',
   use: Extract<EngineMainActionUse | EngineBonusActionUse, { readonly kind: 'cast_spell' }>,
-): MonsterSpellcastingAction | null {
+): MonsterSpellSource | null {
   const source = slot === 'main' ? monsterActions(state, actorId) : monsterBonusActions(state, actorId);
   const action = source.find(
-    (candidate): candidate is MonsterSpellcastingAction => candidate.kind === 'spellcasting' &&
-      candidate.id === use.sourceActionId && candidate.actionEconomy === (slot === 'main' ? 'action' : 'bonus_action'),
+    (candidate): candidate is MonsterSpellSource =>
+      (candidate.kind === 'spell_choice'
+        ? candidate.id === use.sourceActionId && slot === 'bonus'
+        : candidate.kind === 'spellcasting' && candidate.id === use.sourceActionId &&
+          candidate.actionEconomy === (slot === 'main' ? 'action' : 'bonus_action')),
   );
   return action?.spells.some((spell) => spell.id === use.spellId && spell.manifestStatus === 'implemented') === true
     ? action
@@ -316,18 +358,16 @@ function validateUse(
           candidate.kind === 'multiattack' && candidate.id === use.actionId,
       );
       if (declaration === undefined || use.components.length !== declaration.count ||
-        use.components.some((component) => !declaration.actionIds.includes(component.actionId) ||
-          targetUse(state, actorId, component, queries) === null)) return 'MULTIATTACK_COMBINATION_ILLEGAL';
-      if (declaration.combination === 'fixed' && declaration.actionIds.some(
-        (actionId, index) => use.components[index]?.actionId !== actionId,
-      )) return 'MULTIATTACK_COMBINATION_ILLEGAL';
-      if (declaration.combination === 'one_attack_may_be_replaced') {
-        const replacement = declaration.actionIds.at(-1);
-        if (replacement !== undefined && use.components.filter((component) => component.actionId === replacement).length > 1) {
-          return 'MULTIATTACK_COMBINATION_ILLEGAL';
-        }
+        use.components.some((component) => component.kind === 'attack'
+          ? targetUse(state, actorId, component, queries) === null
+          : savingThrowTargetUse(state, actorId, component, queries) === null)) {
+        return 'MULTIATTACK_COMBINATION_ILLEGAL';
       }
-      return null;
+      const legal = legalMultiattackCombinations(declaration, actions);
+      return legal.some((combination) => combination.every((component, index) =>
+        component.kind === use.components[index]?.kind && component.id === use.components[index]?.actionId))
+        ? null
+        : 'MULTIATTACK_COMBINATION_ILLEGAL';
     }
     case 'saving_throw': {
       const source = slot === 'main' ? actions : monsterBonusActions(state, actorId);
@@ -374,6 +414,7 @@ function resolvedUses(
   actorId: CombatantId,
   slots: readonly EngineActionSlotUse[],
   queries: EngineQueryPort,
+  omittedRiders: readonly EngineOmittedRider[],
 ): readonly ResolvedActionSlotUse[] | null {
   const resolved: ResolvedActionSlotUse[] = [];
   for (const slot of slots) {
@@ -385,7 +426,16 @@ function resolvedUses(
         for (const component of use.components) {
           const targetId = resolveSelector(state, actorId, component.target, queries);
           if (targetId === null) return null;
-          resolved.push({ slot: slot.slot, kind: 'attack', actionId: component.actionId, spellId: null, targetIds: [targetId], objectId: null });
+          resolved.push({
+            slot: slot.slot,
+            kind: component.kind,
+            actionId: component.actionId,
+            spellId: null,
+            targetIds: [targetId],
+            objectId: null,
+            omittedRiders: component.omittedRiders,
+            multiattackComponent: true,
+          });
         }
         break;
       case 'cast_spell': resolved.push({
@@ -395,16 +445,25 @@ function resolvedUses(
         spellId: use.spellId,
         targetIds: targets,
         objectId: null,
+        omittedRiders: omittedRiders.filter((rider) => rider.sourceActionId === use.sourceActionId),
         ...(use.area === null ? {} : { area: use.area }),
       }); break;
-      case 'use_world_object': resolved.push({ slot: slot.slot, kind: use.kind, actionId: use.actionId, spellId: null, targetIds: [], objectId: use.objectId }); break;
+      case 'use_world_object': resolved.push({ slot: slot.slot, kind: use.kind, actionId: use.actionId, spellId: null, targetIds: [], objectId: use.objectId, omittedRiders: [] }); break;
       case 'attack':
-      case 'saving_throw': resolved.push({ slot: slot.slot, kind: use.kind, actionId: use.actionId, spellId: null, targetIds: targets, objectId: null }); break;
+      case 'saving_throw': resolved.push({
+        slot: slot.slot,
+        kind: use.kind,
+        actionId: use.actionId,
+        spellId: null,
+        targetIds: targets,
+        objectId: null,
+        omittedRiders: omittedRiders.filter((rider) => rider.sourceActionId === use.actionId),
+      }); break;
       case 'dodge':
       case 'disengage':
       case 'dash':
       case 'hide':
-      case 'end_turn': resolved.push({ slot: slot.slot, kind: use.kind, actionId: engineActionId(use.kind), spellId: null, targetIds: [], objectId: null }); break;
+      case 'end_turn': resolved.push({ slot: slot.slot, kind: use.kind, actionId: engineActionId(use.kind), spellId: null, targetIds: [], objectId: null, omittedRiders: [] }); break;
     }
   }
   return resolved;
@@ -412,7 +471,7 @@ function resolvedUses(
 
 export function resolveEngineActorOption(
   state: EncounterState,
-  option: EngineActorOption,
+  option: EngineOfferableOption,
   queries: EngineQueryPort = canonicalEngineQueryPort,
 ): OptionResolution {
   const actor = queries.combatant(state, option.actorId);
@@ -432,7 +491,7 @@ export function resolveEngineActorOption(
   }
   const movement = movementResolution(state, option.actorId, option.movement, option.actionSlots, queries);
   if (movement === null) return refused('OPTION_UNREACHABLE', `${option.actorId}: ${option.label} has no legal movement expansion`);
-  const actionSlots = resolvedUses(state, option.actorId, option.actionSlots, queries);
+  const actionSlots = resolvedUses(state, option.actorId, option.actionSlots, queries, option.omittedRiders);
   if (actionSlots === null) return refused('OPTION_TARGET_UNRESOLVED', `${option.actorId}: ${option.label} target did not resolve`);
   return {
     valid: true,
@@ -443,7 +502,53 @@ export function resolveEngineActorOption(
       path: movement.path,
       finalPosition: movement.finalPosition,
       actionSlots,
+      omittedRiders: option.omittedRiders,
     },
+  };
+}
+
+function choiceFitsOption(
+  option: EngineOfferableOption,
+  choice: EngineActivationChoice | null | undefined,
+): boolean {
+  const slot = option.activationChoice;
+  if (slot === undefined || slot === null) return choice === null || choice === undefined;
+  if (choice === null || choice === undefined || choice.kind !== slot.kind) return false;
+  switch (slot.kind) {
+    case 'command_word':
+      return choice.kind === 'command_word' && slot.values.some((value) => value === choice.value);
+    case 'unicorns_blessing_spell':
+      return choice.kind === 'unicorns_blessing_spell' && slot.values.some((value) => value === choice.value);
+    case 'dispel_evil_and_good_mode':
+      return choice.kind === 'dispel_evil_and_good_mode' && slot.values.some((value) => value === choice.value);
+    case 'calm_emotions_per_target': {
+      if (choice.kind !== 'calm_emotions_per_target') return false;
+      const expected = [...slot.targetIds].sort();
+      const actual = choice.selections.map((entry) => entry.targetId).sort();
+      return expected.length === actual.length && expected.every((value, index) => value === actual[index]) &&
+        new Set(actual).size === actual.length &&
+        choice.selections.every((entry) => slot.values.some((value) => value === entry.mode));
+    }
+  }
+}
+
+function mechanicsWithChoice(
+  mechanics: ResolvedTurnMechanics,
+  choice: EngineActivationChoice | null | undefined,
+): ResolvedTurnMechanics {
+  if (choice === null || choice === undefined) return mechanics;
+  let attached = false;
+  return {
+    ...mechanics,
+    actionSlots: mechanics.actionSlots.map((slot) => {
+      if (attached || slot.kind !== 'cast_spell') return slot;
+      attached = true;
+      return {
+        ...slot,
+        spellId: choice.kind === 'unicorns_blessing_spell' ? engineSpellId(choice.value) : slot.spellId,
+        activationChoice: choice,
+      };
+    }),
   };
 }
 
@@ -452,16 +557,17 @@ export function availableEngineActorOptions(
   actorId: CombatantId,
   queries: EngineQueryPort = canonicalEngineQueryPort,
   revision = state.revision,
-): readonly EngineActorOption[] {
-  return engineActorOptions(state, actorId, revision).filter((option) => resolveEngineActorOption(state, option, queries).valid);
+): readonly EngineOfferableOption[] {
+  return engineActorOptions(state, actorId, revision).offerable
+    .filter((option) => resolveEngineActorOption(state, option, queries).valid);
 }
 
 function accepted(
   selectedBranch: 'primary' | 'fallback',
-  option: EngineActorOption,
+  option: EngineOfferableOption,
   mechanics: ResolvedTurnMechanics,
-  primaryOption: EngineActorOption,
-  fallbackOption: EngineActorOption | null,
+  primaryOption: EngineOfferableOption,
+  fallbackOption: EngineOfferableOption | null,
   refusals: Extract<EngineProposalResolution, { readonly valid: true }>['refusals'] = [],
 ): EngineProposalResolution {
   const resolutionDigest = sha256(canonicalJson(mechanics));
@@ -491,7 +597,10 @@ export function createPureTurnProposalResolver(
           const fallback = proposal.fallbackOptionId === null
             ? null
             : options.find((option) => option.optionId === proposal.fallbackOptionId) ?? null;
-          return accepted('primary', primary, resolution.mechanics, primary, fallback);
+          if (!choiceFitsOption(primary, proposal.activationChoice)) {
+            return { valid: false, selectedBranch: 'none', refusals: [{ branch: 'primary', code: 'ACTIVATION_CHOICE_INVALID', summary: `${proposal.actorId}: activation choice does not match the offered option` }] };
+          }
+          return accepted('primary', primary, mechanicsWithChoice(resolution.mechanics, proposal.activationChoice), primary, fallback);
         }
       }
       const primaryRefusal = {
@@ -510,7 +619,9 @@ export function createPureTurnProposalResolver(
       }
       const resolution = resolveEngineActorOption(state, fallback, queries);
       return resolution.valid
-        ? accepted('fallback', fallback, resolution.mechanics, primary ?? fallback, fallback, [primaryRefusal])
+        ? choiceFitsOption(fallback, proposal.activationChoice)
+          ? accepted('fallback', fallback, mechanicsWithChoice(resolution.mechanics, proposal.activationChoice), primary ?? fallback, fallback, [primaryRefusal])
+          : { valid: false, selectedBranch: 'none', refusals: [primaryRefusal, { branch: 'fallback', code: 'ACTIVATION_CHOICE_INVALID', summary: `${proposal.actorId}: activation choice does not match the fallback option` }] }
         : { valid: false, selectedBranch: 'none', refusals: [primaryRefusal, { branch: 'fallback', code: resolution.code, summary: resolution.summary }] };
     },
   });

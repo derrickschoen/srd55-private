@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ENGINE_OPTION_METRICS, SIMPLE_OVERRIDE_JUSTIFICATION_KINDS } from '../turn-proposal';
 import { TACTICAL_EVALUATOR_POLICY } from '../../combat/tactical-evaluator';
 import { PLAY_NAMES, SKILL_NAMES } from '../snippet-registry-runtime';
 import { DM_INTEL_QUERY_POLICY, DM_TURN_INTEL_POLICY } from '../dm-tactical-intel';
@@ -17,6 +18,7 @@ import { ALERTING_POLICY } from '../../combat/alerting';
 import { SEARCH_MEMORY_POLICY } from '../../combat/search-memory';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
 import { rendererAttributionSchema } from '../renderer-profile';
+import { KB_SUBJECTS } from '../knowledge-base-contract';
 
 export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v1' as const;
 export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v1' as const;
@@ -24,6 +26,10 @@ export const ENGINE_REACTION_SPEND_HOLD_POLICY = 'reaction-spend-hold-v1' as con
 export const ENGINE_RECOVERY_CAPABILITY_POLICY = 'recovery-capability-v1' as const;
 
 const identifier = z.string().min(1).max(200).describe('Engine-owned stable identifier.');
+const offerableOptionIdentifier = identifier.refine(
+  (value) => !value.startsWith('human-option:'),
+  'Human-only option ids cannot be submitted as engine proposals.',
+);
 const shortCode = z.string().min(1).max(100).describe('Stable machine-readable code.');
 const summaryText = z.string().min(1).max(500).describe('Bounded human-readable summary.');
 const stateRef = z.object({
@@ -65,22 +71,58 @@ const engagement = z.object({
   anchor: targetSelector.nullable().optional(),
 }).strict().describe('Semantic engagement objective resolved by the engine.');
 
-const overrideJustification = z.discriminatedUnion('reason', [
+const decisionReason = z.string().min(1).max(240).refine((value) => value.trim().length > 0, 'Reason cannot be blank.')
+  .describe('One short sentence explaining why this option was chosen.');
+const roundRationale = z.string().min(1).max(600).refine((value) => value.trim().length > 0, 'Rationale cannot be blank.')
+  .describe('Optional round-level rationale retained outside blinded judging packets.');
+const overrideJustification = z.discriminatedUnion('kind', [
   z.object({
-    reason: z.enum(['morale', 'objective', 'roleplay', 'resource_conservation']),
-    note: z.string().min(1).max(500).optional(),
+    kind: z.enum(SIMPLE_OVERRIDE_JUSTIFICATION_KINDS),
   }).strict(),
   z.object({
-    reason: z.literal('unknown_engine_gap'),
-    note: z.string().min(1).max(500),
+    kind: z.literal('engine_play'),
+    token: z.string().min(1).max(200).optional(),
   }).strict(),
-]).describe('Required when a selected option is strictly dominated on every resolved declared metric; unknown engine gaps must be identified in note.');
+  z.object({
+    kind: z.literal('missing_metric'),
+    id: z.enum(ENGINE_OPTION_METRICS).optional(),
+  }).strict(),
+]).describe('Required for a dominated selection. engine_play requires a current token; missing_metric requires a typed metric id.');
+const activationChoice = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('command_word'), value: z.enum(['approach', 'flee', 'grovel', 'halt', 'drop']) }).strict(),
+  z.object({ kind: z.literal('unicorns_blessing_spell'), value: z.enum(['cure-wounds', 'lesser-restoration']) }).strict(),
+  z.object({ kind: z.literal('dispel_evil_and_good_mode'), value: z.enum(['break_enchantment', 'dismissal']) }).strict(),
+  z.object({
+    kind: z.literal('calm_emotions_per_target'),
+    selections: z.array(z.object({
+      target_id: identifier,
+      mode: z.enum(['suppress_charmed_frightened', 'indifferent_toward_monster_side']),
+    }).strict()).min(1).max(50),
+  }).strict(),
+]);
+const activationChoiceSlot = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('command_word'), values: z.tuple([
+    z.literal('approach'), z.literal('flee'), z.literal('grovel'), z.literal('halt'), z.literal('drop'),
+  ]) }).strict(),
+  z.object({ kind: z.literal('unicorns_blessing_spell'), values: z.tuple([
+    z.literal('cure-wounds'), z.literal('lesser-restoration'),
+  ]) }).strict(),
+  z.object({ kind: z.literal('dispel_evil_and_good_mode'), values: z.tuple([
+    z.literal('break_enchantment'), z.literal('dismissal'),
+  ]) }).strict(),
+  z.object({
+    kind: z.literal('calm_emotions_per_target'), target_ids: z.array(identifier).min(1).max(50),
+    values: z.tuple([z.literal('suppress_charmed_frightened'), z.literal('indifferent_toward_monster_side')]),
+  }).strict(),
+]);
 const turnProposal = z.object({
-  actor_id: identifier,
-  expected_revision: z.number().int().min(0),
-  primary_option_id: identifier,
-  fallback_option_id: identifier.nullable(),
-  override_justification: overrideJustification.nullable(),
+  actor_id: identifier.meta({ examples: ['monster-id'] }),
+  expected_revision: z.number().int().min(0).meta({ examples: [42] }),
+  primary_option_id: offerableOptionIdentifier.meta({ examples: ['option:42:primary'] }),
+  fallback_option_id: offerableOptionIdentifier.nullable().meta({ examples: ['option:42:fallback'] }),
+  reason: decisionReason.meta({ examples: ['Close with the most vulnerable visible enemy before it can recover.'] }),
+  override_justification: overrideJustification.nullable().meta({ examples: [null] }),
+  activation_choice: activationChoice.nullable().optional(),
 }).strict().describe('Revision-bound selection of engine-generated composite option ids.');
 const reactionGuidanceInstruction = z.enum([
   'take', 'decline', 'only_when_target_visible', 'only_when_legal_without_moving',
@@ -114,6 +156,43 @@ const risk = z.object({
 const exactRationalValue = z.object({
   numerator: z.number().int().safe(), denominator: z.number().int().safe().positive(),
 }).strict();
+const omittedRiderSource = {
+  sourceActionId: identifier,
+  componentActionId: identifier,
+};
+const omittedRider = z.discriminatedUnion('kind', [
+  z.object({
+    ...omittedRiderSource,
+    kind: z.literal('conditional_damage_trigger'),
+    trigger: z.enum(['attack_roll_advantage', 'replaces_base_when_target_bloodied', 'charge']),
+  }).strict(),
+  z.object({
+    ...omittedRiderSource,
+    kind: z.literal('conditional_on_hit_effect'),
+    effect: z.literal('condition'),
+    trigger: z.literal('charge'),
+  }).strict(),
+  z.object({
+    ...omittedRiderSource,
+    kind: z.literal('attack_advantage_window'),
+    window: z.literal('first_round_of_each_combat'),
+  }).strict(),
+  z.object({
+    ...omittedRiderSource,
+    kind: z.literal('delayed_zombie_creation'),
+    targetKind: z.literal('Humanoid'),
+    delayHours: z.literal(24),
+  }).strict(),
+  z.object({
+    ...omittedRiderSource,
+    kind: z.literal('other_explicitly_classified_secondary_effect'),
+    classification: z.enum([
+      'coupled_action_use', 'equipment_corrosion', 'conditional_damage_replacement',
+      'grapple_escape_disadvantage', 'attachment',
+    ]),
+    relatedActionId: identifier.optional(),
+  }).strict(),
+]);
 const expectation = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('damage'), resolvable: z.literal(true),
@@ -149,6 +228,11 @@ const expectation = z.discriminatedUnion('kind', [
     kind: z.enum(['movement', 'known_no_effect']), resolvable: z.literal(true), metric: z.literal('none'),
     assumption_codes: z.array(shortCode).max(20), policy: z.literal(OPTION_OUTCOME_POLICY),
   }).strict(),
+  z.object({
+    kind: z.literal('modeled_effect'), resolvable: z.literal(true), metric: z.literal('none'),
+    spell_ids: z.array(identifier).min(1).max(20),
+    assumption_codes: z.array(shortCode).max(20), policy: z.literal(OPTION_OUTCOME_POLICY),
+  }).strict(),
 ]);
 const tacticalOption = z.object({
   option_id: identifier, actor_id: identifier, revision: z.number().int().min(0), label: summaryText,
@@ -156,9 +240,16 @@ const tacticalOption = z.object({
     slot: z.enum(['main', 'bonus']), kind: shortCode, action_id: identifier,
     component_action_ids: z.array(identifier).max(20), spell_id: identifier.nullable(),
     target_ids: z.array(identifier).max(50), world_object_id: identifier.nullable(),
+    components: z.array(z.object({
+      kind: z.enum(['attack', 'saving_throw']), action_id: identifier,
+      target_ids: z.array(identifier).max(50), omitted_riders: z.array(omittedRider).max(50),
+    }).strict()).max(20),
+    omitted_riders: z.array(omittedRider).max(100),
   }).strict()).min(1).max(20),
   action_id: identifier, kind: z.enum(['attack', 'cast_spell', 'use_action', 'dodge', 'disengage', 'dash', 'end_turn']),
   target_selectors: z.array(targetSelector).max(50), resource_cost_labels: z.array(identifier).max(20),
+  omitted_riders: z.array(omittedRider).max(100),
+  activation_choice: activationChoiceSlot.optional(),
   usable_now: z.boolean(), usable_after_movement: z.boolean(), minimum_movement_feet: z.number().int().min(0).nullable(),
   visibility: z.enum(['yes', 'no', 'conditional', 'unknown']), cover: z.enum(['none', 'half', 'three_quarters', 'total', 'unknown']),
   risks: z.array(risk).max(50), expectation: expectation.nullable(), refusals: z.array(refusal).max(20),
@@ -178,6 +269,43 @@ const tacticalSummary = z.object({
   room: z.number().int().min(1).nullable(), round: z.number().int().min(0), active_side: z.enum(['players', 'monsters', 'none']),
   living_allies: z.number().int().min(0), living_enemies: z.number().int().min(0), terrain_tags: z.array(shortCode).max(100),
 }).strict();
+const monsterTraitKind = z.enum([
+  'pack_tactics', 'undead_fortitude', 'abduct', 'aura_of_authority',
+  'bloodied_frenzy', 'bloodied_fury', 'incorporeal_movement', 'running_leap',
+  'stench', 'sunlight_sensitivity', 'amphibious', 'hold_breath',
+  'water_breathing', 'spider_climb', 'web_walker', 'web_sense', 'keen_sight',
+  'flyby', 'magic_resistance', 'life_bond', 'air_form', 'earth_glide',
+  'siege_monster', 'adhesive', 'amorphous', 'corrosive_form',
+  'ethereal_sight', 'ephemeral', 'illumination',
+]);
+const featureSupportDisposition = z.union([
+  z.object({ kind: z.literal('modeled') }).strict(),
+  z.object({
+    kind: z.literal('offered_with_omission'),
+    reason: z.literal('secondary_effect_omitted'),
+  }).strict(),
+  z.object({
+    kind: z.literal('human_only_unmodeled'),
+    reason: z.enum([
+      'zero_hit_point_trait_unmodeled', 'grapple_movement_unmodeled',
+      'ally_aura_unmodeled', 'incorporeal_movement_unmodeled',
+      'jump_movement_unmodeled', 'trait_save_aura_unmodeled',
+      'vertical_movement_unmodeled', 'web_movement_unmodeled',
+      'companion_life_bond_unmodeled', 'special_space_movement_unmodeled',
+      'object_damage_trait_unmodeled', 'automatic_grapple_trait_unmodeled',
+      'equipment_corrosion_trait_unmodeled', 'ethereal_plane_unmodeled',
+      'equipment_restriction_unmodeled', 'emitted_light_unmodeled',
+    ]),
+  }).strict(),
+  z.object({
+    kind: z.literal('encounter_not_applicable'),
+    reason: z.enum(['no_sunlight_state', 'no_underwater_state']),
+  }).strict(),
+]);
+const monsterTraitSupportRow = z.object({
+  feature: z.object({ kind: z.literal('trait'), trait: monsterTraitKind }).strict(),
+  disposition: featureSupportDisposition,
+}).strict();
 const compactIntelRow = z.object({
   policy: z.literal(DM_TURN_INTEL_POLICY),
   actor_id: identifier,
@@ -196,13 +324,17 @@ const compactIntelRow = z.object({
   ev: z.number().int().nullable(),
   consequence_codes: z.array(shortCode).max(20),
   movement_need_feet: z.number().int().min(0).nullable(),
+  omitted_riders: z.array(omittedRider).max(100),
+  feature_support_flags: z.array(monsterTraitSupportRow).max(100),
 }).strict();
 const contextIntelRow = compactIntelRow
-  .omit({ policy: true, actor_id: true, option_id: true, attacks: true, reason_codes: true, consequence_codes: true })
+  .omit({ policy: true, actor_id: true, option_id: true, attacks: true, reason_codes: true, consequence_codes: true, omitted_riders: true, feature_support_flags: true })
   .extend({
     attacks: z.number().int().min(0).max(20).optional(),
     reason_codes: z.array(shortCode).max(50).optional(),
     consequence_codes: z.array(shortCode).max(20).optional(),
+    omitted_riders: z.array(omittedRider).max(100).optional(),
+    feature_support_flags: z.array(monsterTraitSupportRow).max(100).optional(),
   });
 const movementSnapshot = z.object({
   range: z.enum(['MELEE', 'NORMAL', 'LONG', 'OUT', 'UNRESOLVED']),
@@ -451,6 +583,7 @@ const advertisedPlay = z.object({
   name: z.enum(PLAY_NAMES),
   description: z.string().min(1).max(200),
   snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+  play_token: z.string().regex(/^[0-9a-f]{64}$/u),
 }).strict();
 const advertisedSkill = z.object({
   name: z.enum(SKILL_NAMES),
@@ -582,6 +715,7 @@ const teamPlanFrontier = z.union([
 const suggestedPlan = z.object({
   play_name: z.enum(PLAY_NAMES),
   snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+  play_token: z.string().regex(/^[0-9a-f]{64}$/u),
   proposals: z.array(turnProposal).min(1).max(50),
   advisory: z.string().min(1).max(300),
 }).strict();
@@ -668,6 +802,7 @@ const proposeFromPlayOutput = z.object({
   state_ref: stateRef,
   play_name: z.enum(PLAY_NAMES),
   snippet_hash: z.string().regex(/^[0-9a-f]{64}$/u),
+  play_token: z.string().regex(/^[0-9a-f]{64}$/u),
   proposals: z.array(turnProposal).min(1).max(50),
 }).strict();
 const loadSkillOutput = z.object({
@@ -743,7 +878,7 @@ const tacticalIntelOutput = z.object({
   next_cursor: z.string().max(500).nullable(),
 }).strict();
 
-const resolutionPreview = z.object({ actor_id: identifier, option_id: identifier, action_slot_count: z.number().int().min(1).max(20), movement_feet: z.number().int().min(0), resolution_digest: z.string().min(64).max(128), summary: summaryText }).strict();
+const resolutionPreview = z.object({ actor_id: identifier, option_id: identifier, action_slot_count: z.number().int().min(1).max(20), movement_feet: z.number().int().min(0), omitted_riders: z.array(omittedRider).max(100), resolution_digest: z.string().min(64).max(128), summary: summaryText }).strict();
 const correctionGuidance = z.union([
   z.object({ remaining_corrections: z.union([z.literal(0), z.literal(1)]), required_actor_ids: z.array(identifier).min(1).max(50), replace_whole_round: z.literal(true) }).strict(),
   z.object({ remaining_corrections: z.union([z.literal(0), z.literal(1)]), required_actor_ids: z.array(identifier).min(1).max(50), replace_whole_round: z.literal(false) }).strict(),
@@ -772,16 +907,16 @@ const narrationOutput = z.object({ status: z.literal('queued'), narration_id: id
 const adjudicationOutput = z.object({ status: z.literal('requested'), adjudication_request_id: identifier, state_ref: stateRef }).strict();
 
 const refInput = { state_ref: stateRef };
-const phaseProposalInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), proposal: turnProposal }).strict().superRefine((value, context) => {
-  if (value.phase === 'correction' && value.proposal.fallback_option_id !== null) context.addIssue({ code: 'custom', path: ['proposal', 'fallback_option_id'], message: 'Correction proposal fallback must be null.' });
+const phaseProposalInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), proposal: turnProposal }).strict();
+const submitProposalInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), proposal: turnProposal, reaction_guidance: reactionGuidance.optional() }).strict();
+const minimalSubmitRoundInput = z.object({ proposals: z.array(turnProposal).min(1).max(50), rationale: roundRationale.optional(), reaction_guidance: reactionGuidance.optional() }).strict();
+const submitRoundInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), proposals: z.array(turnProposal).min(1).max(50), rationale: roundRationale.optional(), reaction_guidance: reactionGuidance.optional() }).strict();
+const submissionTransportProposal = turnProposal.extend({ reason: z.string().max(240).optional() });
+const minimalSubmitRoundTransportInput = minimalSubmitRoundInput.extend({
+  proposals: z.array(submissionTransportProposal).min(1).max(50),
 });
-const submitProposalInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), proposal: turnProposal, reaction_guidance: reactionGuidance.optional() }).strict().superRefine((value, context) => {
-  if (value.phase === 'correction' && value.proposal.fallback_option_id !== null) context.addIssue({ code: 'custom', path: ['proposal', 'fallback_option_id'], message: 'Correction proposal fallback must be null.' });
-});
-const submitRoundInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), idempotency_key: z.string().min(16).max(200), proposals: z.array(turnProposal).min(1).max(50), reaction_guidance: reactionGuidance.optional() }).strict().superRefine((value, context) => {
-  if (value.phase === 'correction') value.proposals.forEach((proposal, index) => {
-    if (proposal.fallback_option_id !== null) context.addIssue({ code: 'custom', path: ['proposals', index, 'fallback_option_id'], message: 'Correction proposal fallback must be null.' });
-  });
+const submitRoundTransportInput = submitRoundInput.extend({
+  proposals: z.array(submissionTransportProposal).min(1).max(50),
 });
 const submitPlanAdjustmentInput = z.object({
   ...refInput,
@@ -790,11 +925,7 @@ const submitPlanAdjustmentInput = z.object({
   idempotency_key: z.string().min(16).max(200),
   baseline_plan_hash: z.string().regex(/^[0-9a-f]{64}$/u),
   updates: z.array(turnProposal).max(2),
-}).strict().superRefine((value, context) => {
-  if (value.phase === 'correction') value.updates.forEach((proposal, index) => {
-    if (proposal.fallback_option_id !== null) context.addIssue({ code: 'custom', path: ['updates', index, 'fallback_option_id'], message: 'Adjustment correction fallback must be null.' });
-  });
-});
+}).strict();
 const adjustmentOutput = z.union([
   z.object({
     status: z.literal('proposed'),
@@ -888,22 +1019,76 @@ function jsonSchema(schema: z.ZodType<unknown>): Readonly<Record<string, unknown
     ...(Object.keys(definitions).length === 0 ? {} : { $defs: definitions }),
   });
 }
+
+function schemaRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function referencedSchema(root: Readonly<Record<string, unknown>>, reference: string): Readonly<Record<string, unknown>> {
+  if (!reference.startsWith('#/')) throw new TypeError(`Only local schema references can generate examples: ${reference}`);
+  let value: unknown = root;
+  for (const encoded of reference.slice(2).split('/')) {
+    const segment = decodeURIComponent(encoded).replaceAll('~1', '/').replaceAll('~0', '~');
+    value = schemaRecord(value, `schema reference ${reference}`)[segment];
+  }
+  return schemaRecord(value, `schema reference ${reference}`);
+}
+
+function generatedSchemaExample(
+  schemaValue: unknown,
+  root: Readonly<Record<string, unknown>>,
+): unknown {
+  const schema = schemaRecord(schemaValue, 'schema');
+  const examples = schema['examples'];
+  if (Array.isArray(examples) && examples.length > 0) return structuredClone(examples[0]);
+  if (schema['const'] !== undefined) return structuredClone(schema['const']);
+  const choices = schema['enum'];
+  if (Array.isArray(choices) && choices.length > 0) return structuredClone(choices[0]);
+  const reference = schema['$ref'];
+  if (typeof reference === 'string') return generatedSchemaExample(referencedSchema(root, reference), root);
+  const variants = Array.isArray(schema['anyOf'])
+    ? schema['anyOf']
+    : Array.isArray(schema['oneOf']) ? schema['oneOf'] : null;
+  if (variants !== null && variants.length > 0) return generatedSchemaExample(variants[0], root);
+  const declaredType = schema['type'];
+  const type = Array.isArray(declaredType)
+    ? declaredType.find((candidate) => candidate !== 'null')
+    : declaredType;
+  switch (type) {
+    case 'object': {
+      const properties = schemaRecord(schema['properties'] ?? {}, 'schema properties');
+      const required = Array.isArray(schema['required']) ? schema['required'] : [];
+      return Object.fromEntries(required.map((key) => {
+        if (typeof key !== 'string' || properties[key] === undefined) {
+          throw new TypeError('Required schema property is missing its definition.');
+        }
+        return [key, generatedSchemaExample(properties[key], root)];
+      }));
+    }
+    case 'array': {
+      const length = typeof schema['minItems'] === 'number' ? Math.max(1, schema['minItems']) : 1;
+      return Array.from({ length }, () => generatedSchemaExample(schema['items'], root));
+    }
+    case 'string': return 'example';
+    case 'integer':
+    case 'number': return typeof schema['minimum'] === 'number' ? schema['minimum'] : 0;
+    case 'boolean': return true;
+    case 'null': return null;
+    default: throw new TypeError(`Schema example generator does not support type ${String(type)}.`);
+  }
+}
 const queryAnnotations = Object.freeze({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 const proposalAnnotations = Object.freeze({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 function spec(name: string, description: string, input: z.ZodType<unknown>, output: z.ZodType<unknown>, proposal = false): EngineToolSpec {
   const inputSchema = jsonSchema(input);
-  const correctionRule = name === 'engine.submit_round_proposals'
-    ? [{ if: { properties: { phase: { const: 'correction' } } }, then: { properties: { proposals: { items: { properties: { fallback_option_id: { type: 'null' } } } } } } }]
-    : name === 'engine.submit_plan_adjustment'
-      ? [{ if: { properties: { phase: { const: 'correction' } } }, then: { properties: { updates: { items: { properties: { fallback_option_id: { type: 'null' } } } } } } }]
-      : name === 'engine.validate_proposal' || name === 'engine.submit_proposal'
-      ? [{ if: { properties: { phase: { const: 'correction' } } }, then: { properties: { proposal: { properties: { fallback_option_id: { type: 'null' } } } } } }]
-      : null;
   return {
     descriptor: {
       name,
       description,
-      inputSchema: correctionRule === null ? inputSchema : { ...inputSchema, allOf: correctionRule },
+      inputSchema,
       ...(ADVERTISE_MCP_OUTPUT_SCHEMAS ? { outputSchema: jsonSchema(output) } : {}),
       annotations: proposal ? proposalAnnotations : queryAnnotations,
     },
@@ -912,7 +1097,18 @@ function spec(name: string, description: string, input: z.ZodType<unknown>, outp
   };
 }
 
+export const ENGINE_TURN_PROPOSAL_INPUT_SCHEMA = jsonSchema(turnProposal);
+
 export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
+  spec('engine.read_kb_subject', 'Read one indexed knowledge-base subject; at most two successful reads are allowed per round.', z.object({
+    subject: z.enum(KB_SUBJECTS),
+  }).strict(), z.union([
+    z.object({
+      kind: z.literal('kb_subject'), subject: z.enum(KB_SUBJECTS), text: z.string(),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/u), byteCount: z.number().int().nonnegative(),
+    }).strict(),
+    z.object({ kind: z.literal('kb_read_budget_exhausted'), allowed: z.literal(2) }).strict(),
+  ])),
   spec('engine.get_turn_context', 'Return full bounded tactical context, or a revision-addressed delta for a resumed session.', z.object({ run_id: identifier, expected_revision: z.number().int().min(1), scope: z.enum(['active_turn', 'round']), granularity: z.enum(['full', 'turn_delta']).optional(), since_revision: z.number().int().min(1).optional(), actor_ids: z.array(identifier).min(1).max(50).optional(), include_expectations: z.boolean().optional(), maximum_options_per_actor: z.number().int().min(1).max(20).optional(), intel_mode: z.enum(['full', 'off']).optional() }).strict().superRefine((value, context) => {
     if (value.granularity === 'turn_delta' && value.since_revision === undefined) {
       context.addIssue({ code: 'custom', path: ['since_revision'], message: 'since_revision is required for turn_delta.' });
@@ -932,20 +1128,51 @@ export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.propose_from_play', 'Expand one advertised play into an editable, unqueued composite proposal set.', z.object({ play_name: z.enum(PLAY_NAMES) }).strict(), proposeFromPlayOutput),
   spec('engine.load_skill', 'Load one advertised tactical skill procedure and its referenced plays.', z.object({ skill_name: z.enum(SKILL_NAMES) }).strict(), loadSkillOutput),
   spec('engine.get_state_summary', 'Read one bounded state projection or journal delta using an opaque application cursor.', z.object({ ...refInput, granularity: z.enum(['turn_minimal', 'room_tactical', 'combatant_detail', 'journal_delta']), combatant_ids: z.array(identifier).max(50).optional(), since_revision: z.number().int().min(1).optional(), page: page.optional() }).strict(), stateSummaryOutput),
-  spec('engine.get_combatant_options', 'List canonical legal and unavailable action options for one combatant.', z.object({ ...refInput, actor_id: identifier, include_unavailable: z.boolean().optional(), page: page.optional() }).strict(), optionsOutput),
+  spec('engine.get_combatant_options', 'List canonical offerable action options for one combatant.', z.object({ ...refInput, actor_id: identifier, page: page.optional() }).strict(), optionsOutput),
   spec('engine.query_path', 'Resolve a semantic movement objective without accepting or returning coordinates.', z.object({ ...refInput, actor_id: identifier, objective: z.union([z.object({ kind: z.literal('enable_action'), action_id: identifier, target: targetSelector }).strict(), z.object({ kind: z.enum(['approach', 'maintain_range_from', 'withdraw_from']), target: targetSelector }).strict()]), movement: movementPreference, engagement: engagement.optional() }).strict(), pathOutput),
   spec('engine.query_reach', 'Batch engine-owned current and post-movement reach checks.', z.object({ ...refInput, queries: z.array(pairQuery).min(1).max(50) }).strict(), pairOutput(reachFacts)),
   spec('engine.query_cover', 'Batch engine-owned cover comparisons.', z.object({ ...refInput, queries: z.array(pairQuery).min(1).max(50) }).strict(), pairOutput(coverFacts)),
   spec('engine.query_visibility', 'Batch engine-owned perception and visibility comparisons.', z.object({ ...refInput, queries: z.array(pairQuery).min(1).max(50) }).strict(), pairOutput(visibilityFacts)),
   spec('engine.query_dice_expectation', 'Compare bounded analytic outcomes without consuming RNG.', z.object({ ...refInput, candidates: z.array(z.object({ candidate_id: z.string().min(1).max(100), actor_id: identifier, choice: actionChoice, movement: movementPreference.optional(), engagement: engagement.optional() }).strict()).min(1).max(20), include_distribution: z.boolean().optional() }).strict(), diceOutput),
   spec('engine.validate_proposal', 'Purely validate and preview one revision-bound composite option proposal.', phaseProposalInput, validateOutput),
-  spec('engine.submit_round_proposals', 'Validate and queue one all-or-nothing shared-initiative round proposal.', submitRoundInput, roundOutput, true),
+  spec('engine.submit_round_proposals', 'Queue the round; include one short sentence per actor saying why this option. Minimal input: { proposals, rationale?, reaction_guidance? }; the launcher fills state_ref, request_id, phase, and a deterministic idempotency_key from this turn binding. The full explicit envelope { state_ref, request_id, phase, idempotency_key, proposals, rationale?, reaction_guidance? } is also accepted. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again.', submitRoundInput, roundOutput, true),
   spec('engine.submit_plan_adjustment', 'Validate and queue a bounded patch over the remaining open monster plan.', submitPlanAdjustmentInput, adjustmentOutput, true),
   spec('engine.submit_speculative_round_plan', 'Structurally validate and queue one host-guarded contingent monster-round plan.', submitSpeculativeRoundPlanInput, speculativeRoundPlanOutput, true),
   spec('engine.submit_proposal', 'Validate and queue one separately controlled seat proposal.', submitProposalInput, singleOutput, true),
   spec('engine.emit_narration', 'Queue one bounded presentation-only narration chunk.', z.object({ ...refInput, request_id: identifier, idempotency_key: z.string().min(16).max(200), voice: z.enum(['cinematic_visible_rolls', 'terse_tactical', 'rules_explicit', 'terse_rule_citing_validation']), text: z.string().min(1).max(12_000), audience: z.enum(['shared', 'dm_only']), rule_references: z.array(z.object({ rule_id: identifier, source_locator: z.string().min(1).max(300) }).strict()).max(20).optional() }).strict(), narrationOutput, true),
   spec('engine.request_dm_adjudication', 'Queue a bounded DM question with no raw mechanical consequence.', z.object({ ...refInput, request_id: identifier, actor_id: identifier, subject: z.string().min(1).max(300), reason: z.string().min(1).max(2_000), blocking: z.boolean(), suggested_outcomes: z.array(z.string().min(1).max(500)).max(5).optional(), idempotency_key: z.string().min(16).max(200) }).strict(), adjudicationOutput, true),
 ]);
+
+export const ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA = ENGINE_TOOL_SPECS.find(
+  (specification) => specification.descriptor.name === 'engine.submit_round_proposals',
+)?.descriptor.inputSchema;
+if (ENGINE_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA === undefined) {
+  throw new Error('engine.submit_round_proposals must publish an input schema.');
+}
+
+export const ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA = jsonSchema(minimalSubmitRoundInput);
+
+export function generatedMinimalRoundSubmissionExample(
+  phase: 'initial' | 'correction',
+): Readonly<Record<string, unknown>> {
+  const generated = schemaRecord(
+    generatedSchemaExample(
+      ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
+      ENGINE_MINIMAL_SUBMIT_ROUND_PROPOSALS_INPUT_SCHEMA,
+    ),
+    'generated minimal submission example',
+  );
+  if (phase === 'initial') return generated;
+  const proposals = generated['proposals'];
+  if (!Array.isArray(proposals)) throw new TypeError('Generated minimal submission example omitted proposals.');
+  return {
+    ...generated,
+    proposals: proposals.map((proposal) => ({
+      ...schemaRecord(proposal, 'generated proposal example'),
+      fallback_option_id: null,
+    })),
+  };
+}
 
 function jsonPointer(path: readonly PropertyKey[]): string {
   return path.length === 0 ? '$' : path.reduce<string>((pointer, segment) => `${pointer}/${String(segment).replaceAll('~', '~0').replaceAll('/', '~1')}`, '');
@@ -962,5 +1189,8 @@ export const engineSchemaInternals = {
   movementPreference,
   engagement,
   turnProposal,
+  minimalSubmitRoundInput,
+  minimalSubmitRoundTransportInput,
+  submitRoundTransportInput,
   submitSpeculativeRoundPlanInput,
 };

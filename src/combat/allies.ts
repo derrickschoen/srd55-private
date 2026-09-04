@@ -3,6 +3,10 @@ import type { EncounterState } from './encounter';
 import { EncounterRuleError } from './encounter-rule-error';
 import type { CombatantId } from './values';
 
+/** Stable faction identity for rules that refer to a monster's allies. */
+export const MONSTER_SIDE = 'monster_side' as const;
+export type CombatantFaction = typeof MONSTER_SIDE | 'player_character_side';
+
 function profileKind(
   state: EncounterState,
   id: CombatantId,
@@ -37,5 +41,9 @@ export function combatantsAreAllies(
   left: CombatantId,
   right: CombatantId,
 ): boolean {
-  return combatantSide(state, left) === combatantSide(state, right);
+  return combatantFaction(state, left) === combatantFaction(state, right);
+}
+
+export function combatantFaction(state: EncounterState, id: CombatantId): CombatantFaction {
+  return combatantSide(state, id) === 'monster' ? MONSTER_SIDE : 'player_character_side';
 }

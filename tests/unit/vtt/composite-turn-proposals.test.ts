@@ -24,10 +24,11 @@ import {
 import {
   engineActionId,
   engineOptionId,
-  type EngineActorOption,
+  type EngineOfferableOption,
   type EngineTurnProposal,
 } from '../../../src/vtt/turn-proposal';
 import { placedToken, playerProfile } from '../combat/fixtures';
+import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 
 function monsterProfile(
   statblock: typeof SCOUT | typeof SPY | typeof PRIEST,
@@ -58,17 +59,18 @@ function encounter(
   }));
 }
 
-function proposalFor(state: EncounterState, option: EngineActorOption): EngineTurnProposal {
+function proposalFor(state: EncounterState, option: EngineOfferableOption): EngineTurnProposal {
   return {
     actorId: option.actorId,
     expectedRevision: option.revision,
     primaryOptionId: option.optionId,
     fallbackOptionId: null,
+    reason: 'Exercise the composite proposal fixture.',
     overrideJustification: null,
   };
 }
 
-function authorize(state: EncounterState, option: EngineActorOption): AuthorizedEngineTurnProposal {
+function authorize(state: EncounterState, option: EngineOfferableOption): AuthorizedEngineTurnProposal {
   const proposal = proposalFor(state, option);
   const resolution = pureTurnProposalResolver.resolve(state, proposal);
   if (!resolution.valid) {
@@ -84,12 +86,38 @@ function authorize(state: EncounterState, option: EngineActorOption): Authorized
   };
 }
 
-function mainMultiattack(option: EngineActorOption, actionId: string, count: number): boolean {
+function mainMultiattack(option: EngineOfferableOption, actionId: string, count: number): boolean {
   return option.actionSlots.some((slot) => slot.slot === 'main' && slot.use.kind === 'multiattack' &&
     slot.use.components.length === count && slot.use.components.every((component) => component.actionId === actionId));
 }
 
 describe('complete action economy and composite turn proposals', () => {
+  it('keeps hidden ids out of primary and fallback lookup and rejects a forged offerable brand', () => {
+    const scout = monsterProfile(SCOUT, 'hidden-id-scout');
+    const state = encounter([{ profile: scout, column: 0, row: 2 }], 20);
+    const partition = engineActorOptions(state, scout.id);
+    const hidden = partition.humanOnly.find((option) => option.label === 'Disengage');
+    if (hidden === undefined) throw new Error('Composite hidden-id fixture omitted Disengage.');
+    const forged = engineOptionId(hidden.optionId);
+    expect(availableEngineActorOptions(state, scout.id).map((option) => option.optionId))
+      .not.toContain(forged);
+    expect(pureTurnProposalResolver.resolve(state, {
+      actorId: scout.id,
+      expectedRevision: state.revision,
+      primaryOptionId: forged,
+      fallbackOptionId: forged,
+      reason: 'Exercise the composite fallback fixture.',
+      overrideJustification: null,
+    })).toEqual({
+      valid: false,
+      selectedBranch: 'none',
+      refusals: [
+        expect.objectContaining({ branch: 'primary', code: 'OPTION_NOT_OFFERED' }),
+        expect.objectContaining({ branch: 'fallback', code: 'OPTION_NOT_OFFERED' }),
+      ],
+    });
+  });
+
   it('projects fresh options for every requested generated-room monster turn', async () => {
     const state = await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117005.json');
     const scoutId = 'combatant:generated-5117005-monster-3';
@@ -253,7 +281,7 @@ describe('complete action economy and composite turn proposals', () => {
   it('rejects a multiattack when even one declared component is illegal', () => {
     const scout = monsterProfile(SCOUT, 'partial-scout');
     const state = encounter([{ profile: scout, column: 0, row: 2 }], 8);
-    const illegal: EngineActorOption = {
+    const illegal: EngineOfferableOption = {
       optionId: engineOptionId('option:partial-illegal'),
       actorId: scout.id,
       revision: state.revision,
@@ -271,12 +299,13 @@ describe('complete action economy and composite turn proposals', () => {
           kind: 'multiattack',
           actionId: engineActionId('multiattack'),
           components: [
-            { kind: 'attack', actionId: engineActionId('longbow'), target: { kind: 'combatant', combatantId: playerProfile('target').id } },
-            { kind: 'attack', actionId: engineActionId('homebrew-missing'), target: { kind: 'combatant', combatantId: playerProfile('target').id } },
+            { kind: 'attack', actionId: engineActionId('longbow'), target: { kind: 'combatant', combatantId: playerProfile('target').id }, omittedRiders: [] },
+            { kind: 'attack', actionId: engineActionId('homebrew-missing'), target: { kind: 'combatant', combatantId: playerProfile('target').id }, omittedRiders: [] },
           ],
         },
       }],
       resourceCostLabels: [],
+      omittedRiders: [],
     };
     expect(resolveEngineActorOption(state, illegal)).toEqual({
       valid: false,

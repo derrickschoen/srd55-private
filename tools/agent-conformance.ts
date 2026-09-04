@@ -92,17 +92,21 @@ const statusForFailure = (classification: AgentFailureClassification): Conforman
 function invocation(kind: AgentCliKind, prompt: string): AgentInvocation {
   const environmentKey = `DND_AGENT_CONFORMANCE_MODEL_${kind.replaceAll('-', '_').toUpperCase()}`;
   return {
+    instructionSource: 'none',
+    skill: null,
     runId: encounterSessionId('encounter:engine-mcp'),
     prompt,
     model: process.env[environmentKey] ?? DEFAULT_MODELS[kind],
     reasoningEffort: 'low',
+    callPhase: 'initial',
+    output: { kind: 'tool_driven' },
     launcherToken: `agent-conformance-${kind}-launcher-token`,
     timeoutMs: conformanceTimeoutMs(kind),
   };
 }
 
 function binding(kind: AgentCliKind, sessionId: string): AgentSessionBinding {
-  return { cli: kind, sessionId: agentSessionIdFromCli(sessionId), adapterVersion: AGENT_ADAPTER_VERSION, recoveryGeneration: 0, predecessorSessionHash: null, startedAtRevision: 1, lastDispatchedRevision: 1, status: 'active' };
+  return { cli: kind, sessionId: agentSessionIdFromCli(sessionId), adapterVersion: AGENT_ADAPTER_VERSION, generation: 0, rolloverTriggerCount: 0, measuredRolloverThreshold: null, lastDigestHash: null, predecessorSessionHash: null, startedAtRevision: 1, lastDispatchedRevision: 1, callUsage: [], currentContextTokens: null, status: 'active' };
 }
 
 function conformanceTimeoutMs(kind: AgentCliKind): number {

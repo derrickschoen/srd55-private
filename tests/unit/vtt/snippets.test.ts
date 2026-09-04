@@ -10,7 +10,7 @@ import { mcpRequestMeta } from '../../../src/vtt/mcp/handler';
 import { engineSchemaInternals, schemaViolations } from '../../../src/vtt/mcp/schemas';
 import { SUGGESTED_PLAN_MAX_BYTES } from '../../../src/vtt/mcp/engine-server';
 import { SNIPPET_REGISTRY } from '../../../src/vtt/snippet-registry-runtime';
-import type { EngineActorOption, EngineTurnProposal } from '../../../src/vtt/turn-proposal';
+import type { EngineOfferableOption, EngineTurnProposal } from '../../../src/vtt/turn-proposal';
 
 const CLIENT = Object.freeze({ name: 'snippet-test', version: '1.0.0' });
 
@@ -48,24 +48,25 @@ function externalProposal(proposal: EngineTurnProposal): Readonly<Record<string,
     expected_revision: proposal.expectedRevision,
     primary_option_id: proposal.primaryOptionId,
     fallback_option_id: proposal.fallbackOptionId,
+    reason: proposal.reason,
     override_justification: proposal.overrideJustification,
   };
 }
 
-function selectedOption(capsule: EngineStateCapsule, proposal: EngineTurnProposal): EngineActorOption {
+function selectedOption(capsule: EngineStateCapsule, proposal: EngineTurnProposal): EngineOfferableOption {
   const actor = capsule.projection.combatants.find((candidate) => candidate.id === proposal.actorId);
   const option = actor?.options.find((candidate) => candidate.optionId === proposal.primaryOptionId);
   if (option === undefined) throw new Error(`Selected option ${proposal.primaryOptionId} is not projected.`);
   return option;
 }
 
-function fallbackOption(capsule: EngineStateCapsule, proposal: EngineTurnProposal): EngineActorOption | null {
+function fallbackOption(capsule: EngineStateCapsule, proposal: EngineTurnProposal): EngineOfferableOption | null {
   if (proposal.fallbackOptionId === null) return null;
   const actor = capsule.projection.combatants.find((candidate) => candidate.id === proposal.actorId);
   return actor?.options.find((candidate) => candidate.optionId === proposal.fallbackOptionId) ?? null;
 }
 
-function actionIds(option: EngineActorOption): readonly string[] {
+function actionIds(option: EngineOfferableOption): readonly string[] {
   return option.actionSlots.flatMap<string>((slot) => {
     const use = slot.use;
     switch (use.kind) {
@@ -83,7 +84,7 @@ function actionIds(option: EngineActorOption): readonly string[] {
   });
 }
 
-function targetIds(option: EngineActorOption): readonly string[] {
+function targetIds(option: EngineOfferableOption): readonly string[] {
   return option.actionSlots.flatMap((slot) => {
     const use = slot.use;
     switch (use.kind) {
@@ -103,7 +104,7 @@ function targetIds(option: EngineActorOption): readonly string[] {
   });
 }
 
-function isOffensive(option: EngineActorOption): boolean {
+function isOffensive(option: EngineOfferableOption): boolean {
   return option.actionSlots.some((slot) =>
     slot.use.kind === 'attack' || slot.use.kind === 'multiattack' || slot.use.kind === 'saving_throw');
 }
@@ -189,6 +190,7 @@ describe('composite play registry', () => {
     expect(draft).toEqual({
       state_ref: context['state_ref'],
       play_name: 'focus_fire',
+      play_token: expected.definition.snippetHash,
       snippet_hash: expected.definition.snippetHash,
       proposals: expected.proposals.map(externalProposal),
     });

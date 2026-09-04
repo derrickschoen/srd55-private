@@ -218,7 +218,10 @@ describe('level-2 spell mechanics pins', () => {
       initiativeBonus: 20,
       spellSlots: referencePartySpellSlots('Wizard'),
     });
-    const target = monsterProfile(`target-${pin.id}`, { hitPoints: 200, initiativeBonus: 0 });
+    const targetBase = monsterProfile(`target-${pin.id}`, { hitPoints: 200, initiativeBonus: 0 });
+    const target = pin.id === 'calm-emotions'
+      ? { ...targetBase, rules: { ...targetBase.rules, creatureType: 'Humanoid' } }
+      : targetBase;
     let state = createEncounter({
       bounds: { columns: 20, rows: 10 },
       combatants: [caster, target],
@@ -247,6 +250,9 @@ describe('level-2 spell mechanics pins', () => {
       spellcastingModifier: 3, targets, area: levelTwoArea(definition), weaponAttack: null,
       selectedOption: definition.id === 'blindness-deafness' ? 'Blinded'
         : definition.id === 'lesser-restoration' ? 'Poisoned' : null,
+      ...(definition.id === 'calm-emotions'
+        ? { calmEmotionsModes: [{ target: target.id, mode: 'suppress_charmed_frightened' as const }] }
+        : {}),
     };
     const result = reduceEncounter(state, command, () => 0.5);
     expect(result.events.some((event) => event.type === 'spell_cast' && event.spellId === pin.id)).toBe(true);

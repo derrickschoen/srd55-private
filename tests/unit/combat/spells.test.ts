@@ -37,14 +37,14 @@ const EXPECTED_LEVEL_TOTALS: Readonly<Record<SpellLevel, number>> = {
   2: 47,
   3: 37,
   4: 30,
-  5: 1,
+  5: 2,
   6: 1,
   7: 0,
   8: 0,
   9: 0,
 };
-const EXPECTED_MANIFEST_TOTAL = 188;
-const EXPECTED_IMPLEMENTED = 188;
+const EXPECTED_MANIFEST_TOTAL = 189;
+const EXPECTED_IMPLEMENTED = 189;
 const EXPECTED_PENDING = 0;
 const EXPECTED_CANTRIP_AND_LEVEL_ONE_IMPLEMENTED = 72;
 
@@ -663,7 +663,7 @@ const COMPLETE_MECHANICS_PINS: readonly CompleteMechanicsPin[] = [
   {
     id: 'entangle', source: 'spell-descriptions.txt:2729-2756',
     targeting: { kind: 'area', rangeFeet: 90, shape: 'cube', baseSizeFeet: 20, sizePerSlotFeet: 0, surface: 'ground_square' },
-    operation: { kind: 'persistent_area', origin: 'selected_when_cast', shape: null, durationRounds: 10, concentration: true, targetFilter: 'all', includeOwner: false, difficultTerrain: true, movableFeet: null, hooks: [], initialEffects: [{ excludeOwner: true, effect: { kind: 'save_gated', ability: 'strength', rollMode: 'normal', onSuccess: 'none', payload: { kind: 'effect', payload: { kind: 'condition', condition: 'Restrained' }, lifetime: { kind: 'area_duration' } } } }] },
+    operation: { kind: 'persistent_area', origin: 'selected_when_cast', shape: null, durationRounds: 10, concentration: true, targetFilter: 'all', includeOwner: false, difficultTerrain: true, movableFeet: null, hooks: [], initialEffects: [{ excludeOwner: true, effect: { kind: 'save_gated', ability: 'strength', rollMode: 'normal', onSuccess: 'none', payload: { kind: 'effect', payload: { kind: 'condition', condition: 'Restrained' }, lifetime: { kind: 'area_duration' }, escapeCheck: { ability: 'strength', skill: 'athletics', cost: 'action' } } } }] },
   },
   {
     id: 'dissonant-whispers', source: 'spell-descriptions.txt:2289-2312',
@@ -1004,6 +1004,7 @@ describe('reference-party spell manifest', () => {
     expected.set('Goodberry', new Set(['Druid', 'Ranger']));
     expected.set('Pass without Trace', new Set(['Druid', 'Ranger']));
     expected.set('Hold Monster', new Set(['Bard', 'Sorcerer', 'Warlock', 'Wizard']));
+    expected.set('Dispel Evil and Good', new Set(['Cleric', 'Paladin']));
 
     expect(SPELL_MANIFEST).toHaveLength(EXPECTED_MANIFEST_TOTAL);
     expect(new Set(SPELL_MANIFEST.map((row) => row.id)).size).toBe(EXPECTED_MANIFEST_TOTAL);

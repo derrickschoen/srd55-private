@@ -1,4 +1,5 @@
 import type { Ability } from '../domain/enums';
+import { combatantFaction } from './allies';
 import type { CombatRulesProfile } from './combatant';
 import {
   conditionMechanicalState,
@@ -8,8 +9,9 @@ import {
 import type { EncounterState, EncounterCombatantState } from './encounter';
 import { EncounterRuleError } from './encounter-rule-error';
 import type { EncounterEffect } from './effects';
+import { declaredMonsterTraits } from './monster-traits';
 import type { RollMode } from './saving-throw-outcomes';
-import { combineRollModes } from './tactical-evaluator';
+import { combineRollModes, projectMonsterRollModeSources } from './tactical-evaluator';
 import type { CombatantId } from './values';
 import { wildShapeRulesLens } from './wild-shape';
 
@@ -90,6 +92,8 @@ function appliedConditions(effect: EncounterEffect): readonly AppliedCondition[]
     case 'augury':
     case 'attacks_against_target_roll_mode':
     case 'calm_emotions':
+    case 'condition_suppression':
+    case 'indifferent_toward_monster_side':
     case 'darkvision':
     case 'detect_thoughts':
     case 'granted_breath':
@@ -224,9 +228,13 @@ export function combatantConditions(
   const conditions: AppliedCondition[] = [];
   const seenConditions = new Set<string>();
   let exhaustionLevels = 0;
+  const suppressed = new Set<string>(state.effects
+    .filter((effect) => effect.targets.includes(id) && effect.payload.kind === 'condition_suppression')
+    .flatMap((effect) => effect.payload.kind === 'condition_suppression' ? effect.payload.conditions : []));
   for (const effect of state.effects) {
     if (!effect.targets.includes(id)) continue;
     for (const condition of appliedConditions(effect)) {
+      if (suppressed.has(condition.name)) continue;
       if (condition.name === 'Exhaustion') {
         exhaustionLevels += condition.level;
         continue;
@@ -282,6 +290,25 @@ export function saveRollMode(
   cause: 'spell_or_magical_effect' | 'other',
 ): RollMode {
   const modes: RollMode[] = [base];
+  const subject = combatant(state, target);
+  const activeHitPoints = subject.wildShape?.physical.hitPoints ??
+    subject.form?.hitPoints ?? subject.hitPoints;
+  const activeBaseMaximum = subject.wildShape?.physical.hitPointMaximum ??
+    subject.form?.hitPointMaximum ?? subject.profile.rules.hitPointMaximum;
+  const activeHitPointMaximum = state.effects.reduce((maximum, effect) =>
+    effect.targets.includes(target) && effect.payload.kind === 'hit_point_maximum_modifier'
+      ? maximum + effect.payload.amount
+      : maximum, activeBaseMaximum);
+  modes.push(...projectMonsterRollModeSources({
+    kind: 'saving_throw',
+    traits: declaredMonsterTraits(state, target),
+    actor: {
+      id: target,
+      faction: combatantFaction(state, target),
+      hitPoints: activeHitPoints,
+      hitPointMaximum: activeHitPointMaximum,
+    },
+  }).map((source) => source.mode));
   if (cause === 'spell_or_magical_effect' && effectiveCombatRules(state, target).magicResistance === true) {
     modes.push('advantage');
   }

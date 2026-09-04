@@ -6,7 +6,7 @@ import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
 import type { TacticalAllocationCandidate } from '../../../src/vtt/engine-query-port';
 import { freshMonsterPlanningState } from '../../../src/vtt/monster-planning-state';
 import { availableEngineActorOptions } from '../../../src/vtt/intent-resolver';
-import type { EngineActorOption } from '../../../src/vtt/turn-proposal';
+import type { EngineOfferableOption } from '../../../src/vtt/turn-proposal';
 import type { GeneratedRoom } from '../../../src/vtt/room-generator';
 import { declareTestInputs } from '../../helpers/test-inputs';
 
@@ -101,8 +101,8 @@ describe('R02-like canonical tactical query', () => {
     const state = freshMonsterPlanningState(frozenState());
     const optionFor = (
       actorId: typeof PRIEST,
-      predicate: (option: EngineActorOption) => boolean,
-    ): EngineActorOption => {
+      predicate: (option: EngineOfferableOption) => boolean,
+    ): EngineOfferableOption => {
       const option = availableEngineActorOptions(state, actorId).find(predicate);
       if (option === undefined) throw new Error(`Required option is absent for ${actorId}.`);
       return option;
@@ -117,7 +117,7 @@ describe('R02-like canonical tactical query', () => {
       optionFor(actorId, (option) => option.actionSlots.length === 1 && option.actionSlots.some((slot) =>
         slot.slot === 'main' && slot.use.kind === 'attack' && slot.use.actionId === actionId &&
         slot.use.target.kind === 'combatant' && slot.use.target.combatantId === FIGHTER));
-    const hasBless = (option: EngineActorOption) =>
+    const hasBless = (option: EngineOfferableOption) =>
       option.actionSlots.some((slot) => {
         return slot.slot === 'bonus' && slot.use.kind === 'cast_spell' && slot.use.spellId === 'bless';
       });
@@ -137,7 +137,7 @@ describe('R02-like canonical tactical query', () => {
     const initiativeOrder = [PRIEST, ...SCOUTS, ...BANDITS] as const;
     const candidate = (
       allocationId: string,
-      priestOption: EngineActorOption,
+      priestOption: EngineOfferableOption,
       blessTargetIds?: readonly typeof PRIEST[],
     ): TacticalAllocationCandidate => ({
       allocationId,

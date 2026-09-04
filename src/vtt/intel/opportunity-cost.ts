@@ -4,7 +4,7 @@ import type { CombatantId } from '../../combat/values';
 import type { PlanMaterialityReasonCode } from '../plan-materiality';
 import type { EngineQueryPort } from '../engine-query-port';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../intent-resolver';
-import type { EngineActorOption, EngineOptionId } from '../turn-proposal';
+import type { EngineOfferableOption, EngineOptionId, EngineOptionMetric } from '../turn-proposal';
 import {
   compareDominanceVectors,
   exactRational,
@@ -22,12 +22,7 @@ export const OPPORTUNITY_COST_POLICY = intelPolicyVersion('opportunity-cost-v1')
 export const DOMINANCE_CORRECTION_POLICY = intelPolicyVersion('dominance-correction-v1');
 export const MATERIALITY_CONTEXT_POLICY = intelPolicyVersion('materiality-context-v1');
 
-export type OpportunityMetric =
-  | 'expected_damage_milli'
-  | 'attack_count'
-  | 'approach_feet'
-  | 'action_slot_uses'
-  | 'resource_costs';
+export type OpportunityMetric = EngineOptionMetric;
 
 export type OpportunityVector = DominanceVector<OpportunityMetric>;
 export type ActionEquivalentMetric = 'net_action_equivalents';
@@ -37,7 +32,7 @@ export type OpportunityOptionKind = 'offense' | 'approach' | 'dodge' | 'other';
 
 export interface ResolvedOpportunityOption {
   readonly status: 'resolved';
-  readonly option: EngineActorOption;
+  readonly option: EngineOfferableOption;
   readonly kind: OpportunityOptionKind;
   readonly vector: OpportunityVector;
   readonly family: OptionOutcomeFamily;
@@ -48,7 +43,7 @@ export interface ResolvedOpportunityOption {
 
 export interface UnresolvedOpportunityOption {
   readonly status: 'unresolved';
-  readonly option: EngineActorOption;
+  readonly option: EngineOfferableOption;
   readonly kind: OpportunityOptionKind;
   readonly unresolvedMetrics: readonly OpportunityMetric[];
   readonly reasons: readonly string[];
@@ -61,7 +56,7 @@ export interface ActorOpportunityReport {
   readonly policy: typeof OPPORTUNITY_COST_POLICY;
   readonly actorId: CombatantId;
   readonly options: readonly OpportunityOptionEvaluation[];
-  readonly defaultOption: EngineActorOption;
+  readonly defaultOption: EngineOfferableOption;
   readonly frontierResolution: 'fully_resolved' | 'contains_unresolved';
 }
 
@@ -95,11 +90,11 @@ function stateWithActorAt(
   };
 }
 
-function mainUse(option: EngineActorOption) {
+function mainUse(option: EngineOfferableOption) {
   return option.actionSlots.find((slot) => slot.slot === 'main')?.use;
 }
 
-function optionKind(option: EngineActorOption, approachFeet: number): OpportunityOptionKind {
+function optionKind(option: EngineOfferableOption, approachFeet: number): OpportunityOptionKind {
   const main = mainUse(option);
   if (main === undefined) return 'other';
   switch (main.kind) {
@@ -115,7 +110,7 @@ function optionKind(option: EngineActorOption, approachFeet: number): Opportunit
   }
 }
 
-function targetedAttacks(option: EngineActorOption): readonly {
+function targetedAttacks(option: EngineOfferableOption): readonly {
   readonly actionId: string;
   readonly targetId: CombatantId;
 }[] {
@@ -154,7 +149,7 @@ function vector(input: {
 
 function evaluateOption(
   state: EncounterState,
-  option: EngineActorOption,
+  option: EngineOfferableOption,
   queries: EngineQueryPort,
 ): OpportunityOptionEvaluation | null {
   const resolution = resolveEngineActorOption(state, option, queries);
@@ -253,7 +248,7 @@ function compareTuple(left: readonly number[], right: readonly number[]): number
 
 export function legacyDefaultOption(
   evaluations: readonly ResolvedOpportunityOption[],
-): EngineActorOption {
+): EngineOfferableOption {
   const offensiveOrApproach = evaluations.filter((option) =>
     option.kind === 'offense' || option.kind === 'approach');
   const candidates = offensiveOrApproach.length > 0

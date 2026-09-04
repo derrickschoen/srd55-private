@@ -84,7 +84,12 @@ export class EngineMcpStdioClient {
   }
 }
 
-function proposal(actorContext: Readonly<Record<string, unknown>>, revision: number, preferAttack: boolean): Readonly<Record<string, unknown>> {
+function proposal(
+  actorContext: Readonly<Record<string, unknown>>,
+  revision: number,
+  preferAttack: boolean,
+  playToken: string | null,
+): Readonly<Record<string, unknown>> {
   const actorId = actorContext['actor_id'];
   const options = actorContext['options'];
   if (typeof actorId !== 'string' || !Array.isArray(options)) throw new TypeError('Actor context cannot form a proposal.');
@@ -92,17 +97,38 @@ function proposal(actorContext: Readonly<Record<string, unknown>>, revision: num
   const primary = (preferAttack ? candidates.find((option) =>
     option['kind'] === 'attack' || option['kind'] === 'use_action') : undefined) ??
     candidates.find((option) => option['kind'] === 'dodge');
-  const fallback = candidates.find((option) => option['kind'] === 'dodge');
+  const fallback = candidates.find((option) => option['kind'] === 'dodge' &&
+    option['option_id'] !== primary?.['option_id']) ??
+    candidates.find((option) => option['option_id'] !== primary?.['option_id']);
   if (typeof primary?.['option_id'] !== 'string') throw new Error(`Actor ${actorId} has no usable option.`);
   return {
     actor_id: actorId,
     expected_revision: revision,
     primary_option_id: primary['option_id'],
     fallback_option_id: typeof fallback?.['option_id'] === 'string' ? fallback['option_id'] : null,
+    reason: primary['kind'] === 'dodge'
+      ? 'Dodge to preserve this actor for the next exchange.'
+      : 'Attack the most vulnerable available target before it can recover.',
     override_justification: primary['kind'] === 'dodge'
-      ? { reason: 'objective', note: 'The dry client intentionally exercises a defensive plan.' }
+      ? playToken === null
+        ? {
+            kind: 'missing_metric',
+            id: 'expected_damage_milli',
+          }
+        : {
+            kind: 'engine_play',
+            token: playToken,
+          }
       : null,
   };
+}
+
+function currentPlayToken(context: Readonly<Record<string, unknown>>): string | null {
+  const plays = context['applicable_plays'];
+  if (!Array.isArray(plays) || plays.length === 0) return null;
+  const first = record(plays[0], 'applicable play');
+  if (typeof first['play_token'] !== 'string') throw new Error('Applicable play has no engine-issued play token.');
+  return first['play_token'];
 }
 
 function stateReference(context: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
@@ -135,6 +161,7 @@ export async function runEngineMcpDryClient(fixturePath: string): Promise<Engine
     run_id: 'encounter:engine-mcp', expected_revision: 1, scope: 'round', maximum_options_per_actor: 20,
   }));
   const initialRef = stateReference(initialContext);
+  const initialPlayToken = currentPlayToken(initialContext);
   const actors = requestedActors(initialContext);
   const firstActor = actors[0];
   if (firstActor === undefined) throw new Error('Dry fixture did not request an actor.');
@@ -163,7 +190,7 @@ export async function runEngineMcpDryClient(fixturePath: string): Promise<Engine
     request_id: 'request:engine-mcp',
     phase: 'initial',
     proposal: {
-      ...proposal(firstContext, 1, false),
+      ...proposal(firstContext, 1, false, initialPlayToken),
       primary_option_id: 'missing-option',
     },
   });
@@ -172,7 +199,7 @@ export async function runEngineMcpDryClient(fixturePath: string): Promise<Engine
     request_id: 'request:engine-mcp',
     phase: 'initial',
     idempotency_key: 'dry-round-initial-0001',
-    proposals: actorContexts.map((actorContext) => proposal(record(actorContext, 'actor context'), 1, false)),
+    proposals: actorContexts.map((actorContext) => proposal(record(actorContext, 'actor context'), 1, false, initialPlayToken)),
   });
   await initial.tool('engine.request_dm_adjudication', {
     state_ref: initialRef,
@@ -210,7 +237,7 @@ export async function runEngineMcpDryClient(fixturePath: string): Promise<Engine
     phase: 'correction',
     idempotency_key: 'dry-round-correction-0001',
     proposals: correctionContexts.map((actorContext) => ({
-      ...proposal(record(actorContext, 'correction actor context'), 2, false), fallback_option_id: null,
+      ...proposal(record(actorContext, 'correction actor context'), 2, false, currentPlayToken(correctionContext)), fallback_option_id: null,
     })),
   });
   if (await correction.close() !== 0) throw new Error(`Correction dry server failed: ${correction.stderr}`);

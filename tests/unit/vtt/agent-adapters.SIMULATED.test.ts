@@ -19,6 +19,7 @@ import {
 } from '../../../src/vtt/agent-adapters/claude-code';
 import {
   CodexAgentSessionAdapter,
+  CodexRolloutContextReader,
   codexArgv,
   UNVERIFIED_CONTRACT_CODEX,
 } from '../../../src/vtt/agent-adapters/codex';
@@ -41,16 +42,23 @@ import {
   type AgentProcessRunner,
   type AgentProcessSpec,
 } from '../../../src/vtt/agent-adapters/process';
+import { readdir } from '../../helpers/test-filesystem-promises';
 
 const cwd = '/workspace/dnd-wt-vtt';
 const engineCommand = '/workspace/node';
 const engineArgs = ['/workspace/engine-mcp.mjs'];
+const codexFixtureHome = resolve('tests/fixtures/codex-home-SIMULATED');
+const codexFixtureClock = (): Date => new Date('2026-09-04T00:00:00.000Z');
 const invocation: AgentInvocation = {
+  instructionSource: 'none',
+  skill: null,
   runId: encounterSessionId('encounter:SIMULATED-adapter'),
   prompt: 'SIMULATED prompt over stdin',
   instructions: 'SIMULATED session-level KB instructions',
   model: 'model-SIMULATED',
   reasoningEffort: 'high',
+  callPhase: 'initial',
+  output: { kind: 'tool_driven' },
   launcherToken: 'launcher-token-SIMULATED',
   timeoutMs: 12_345,
 };
@@ -90,16 +98,25 @@ function binding(kind: AgentCliKind, id: string): AgentSessionBinding {
     cli: kind,
     sessionId: agentSessionIdFromCli(id),
     adapterVersion: 1,
-    recoveryGeneration: 0,
+    generation: 0,
+    rolloverTriggerCount: 0,
+    measuredRolloverThreshold: null,
+    lastDigestHash: null,
     predecessorSessionHash: null,
     startedAtRevision: 1,
     lastDispatchedRevision: 1,
+    callUsage: [],
+    currentContextTokens: null,
     status: 'active',
   };
 }
 
 function options(runner: AgentProcessRunner) {
-  return { binary: 'SIMULATED-cli', cwd, engineCommand, engineArgs, processRunner: runner } as const;
+  return {
+    binary: 'SIMULATED-cli', cwd, engineCommand, engineArgs, processRunner: runner,
+    codexHome: codexFixtureHome,
+    rolloutClock: codexFixtureClock,
+  } as const;
 }
 
 describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
@@ -120,7 +137,14 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       resumeSessionId: 'codex-thread-123',
       sessionId: 'codex-thread-123',
       finalText: '{"proposals":[]}',
-      usage: { inputTokens: 101, cachedInputTokens: 55, outputTokens: 17, reasoningTokens: 9 },
+      usage: {
+        turnInputTotal: 101,
+        contextInputTokens: 71001,
+        modelContextWindow: 258400,
+        cachedInputTokens: 55,
+        outputTokens: 17,
+        reasoningTokens: 9,
+      },
       exit: 'completed',
     });
     expect(resumed.resumeSessionId).toBe('codex-thread-123');
@@ -128,6 +152,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(runner.calls.map((call) => call.stdin)).toEqual([invocation.prompt, invocation.prompt]);
     expect(runner.calls[0]?.spec).toMatchObject({
       binary: 'SIMULATED-cli', cwd, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
+      env: { CODEX_HOME: resolve('tests/fixtures/codex-home-SIMULATED') },
     });
     const expectedPrefix = [
       'exec', '-C', cwd, '--sandbox', 'read-only', '--json', '-m', invocation.model,
@@ -150,6 +175,87 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(UNVERIFIED_CONTRACT_CODEX).toContain('UNVERIFIED_CONTRACT');
   });
 
+  it('SIMULATED Codex constrains indexed final output before resume and omits the engine MCP server', async () => {
+    const runner = new SIMULATEDChildProcessRunner([output(fixture('codex-start')), output(fixture('codex-start'))]);
+    const adapter = new CodexAgentSessionAdapter(options(runner));
+    const finalInvocation: AgentInvocation = {
+      ...invocation,
+      output: {
+        kind: 'structured_final',
+        schemaPath: '/SIMULATED/final-indices-schema.json',
+        decisionEncoding: 'indices',
+        engineTools: 'disabled',
+      },
+    };
+
+    await adapter.start(finalInvocation, new AbortController().signal);
+    await adapter.resume(binding('codex', 'codex-thread-123'), finalInvocation, new AbortController().signal);
+
+    const startArgv = runner.calls[0]?.spec.argv;
+    const resumeArgv = runner.calls[1]?.spec.argv;
+    expect(startArgv).toEqual(expect.arrayContaining([
+      '--output-schema', '/SIMULATED/final-indices-schema.json',
+    ]));
+    expect(resumeArgv).toEqual(expect.arrayContaining([
+      '--output-schema', '/SIMULATED/final-indices-schema.json',
+      'resume', 'codex-thread-123',
+    ]));
+    expect(resumeArgv?.indexOf('--output-schema')).toBeLessThan(resumeArgv?.indexOf('resume') ?? -1);
+    expect(startArgv?.some((value) => value.startsWith('mcp_servers.engine.'))).toBe(false);
+    expect(resumeArgv?.some((value) => value.startsWith('mcp_servers.engine.'))).toBe(false);
+  });
+
+  it('SIMULATED Codex lists the rollout directory at most once per session binding (mutation: rescan per call)', async () => {
+    let directoryListings = 0;
+    const reader = new CodexRolloutContextReader(
+      codexFixtureHome,
+      async (directory) => {
+        directoryListings += 1;
+        return readdir(directory, { withFileTypes: true });
+      },
+      codexFixtureClock,
+    );
+
+    const first = await reader.read('codex-thread-123');
+    const second = await reader.read('codex-thread-123');
+
+    expect(first).toEqual({ contextInputTokens: 71001, modelContextWindow: 258400 });
+    expect(second).toEqual(first);
+    expect(directoryListings).toBe(4);
+  });
+
+  it('SIMULATED Codex finds a session rollout created yesterday when read today', async () => {
+    const reader = new CodexRolloutContextReader(codexFixtureHome, undefined, codexFixtureClock);
+
+    await expect(reader.read('codex-thread-123')).resolves.toEqual({
+      contextInputTokens: 71001,
+      modelContextWindow: 258400,
+    });
+  });
+
+  it('SIMULATED Codex scans exactly today and three prior UTC days (mutation: wrong-day-only or unbounded scan)', async () => {
+    const listedDirectories: string[] = [];
+    const reader = new CodexRolloutContextReader(
+      codexFixtureHome,
+      async (directory) => {
+        listedDirectories.push(directory);
+        return readdir(directory, { withFileTypes: true });
+      },
+      codexFixtureClock,
+    );
+
+    await expect(reader.read('codex-thread-123')).resolves.toEqual({
+      contextInputTokens: 71001,
+      modelContextWindow: 258400,
+    });
+    expect(listedDirectories).toEqual([
+      resolve(codexFixtureHome, 'sessions/2026/09/04'),
+      resolve(codexFixtureHome, 'sessions/2026/09/03'),
+      resolve(codexFixtureHome, 'sessions/2026/09/02'),
+      resolve(codexFixtureHome, 'sessions/2026/09/01'),
+    ]);
+  });
+
   it('SIMULATED Codex extracts the UUID from captured stdout session id output', async () => {
     const adapter = new CodexAgentSessionAdapter(options(new SIMULATEDChildProcessRunner([
       output(fixture('codex-session-id-stdout')),
@@ -159,9 +265,42 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       resumeSessionId: '019d1234-5678-7abc-8def-0123456789ab',
       sessionId: '019d1234-5678-7abc-8def-0123456789ab',
       finalText: 'CAPTURED_CODEX_STDOUT',
-      usage: { inputTokens: 89, cachedInputTokens: 34, outputTokens: 13, reasoningTokens: 5 },
+      usage: {
+        turnInputTotal: 89,
+        contextInputTokens: 67002,
+        modelContextWindow: 258400,
+        cachedInputTokens: 34,
+        outputTokens: 13,
+        reasoningTokens: 5,
+      },
       exit: 'completed',
     });
+  });
+
+  it('SIMULATED Codex exposes each completed call usage independently (mutation: summing)', async () => {
+    const usages = [
+      { input_tokens: 101, cached_input_tokens: 31, output_tokens: 17, reasoning_output_tokens: 7 },
+      { input_tokens: 203, cached_input_tokens: 41, output_tokens: 29, reasoning_output_tokens: 11 },
+      { input_tokens: 307, cached_input_tokens: 43, output_tokens: 31, reasoning_output_tokens: 13 },
+    ] as const;
+    const runner = new SIMULATEDChildProcessRunner(usages.map((usage, index) => output([
+      JSON.stringify({ type: 'thread.started', thread_id: `codex-independent-${String(index + 1)}` }),
+      JSON.stringify({ type: 'turn.completed', usage }),
+    ].join('\n'))));
+    const adapter = new CodexAgentSessionAdapter(options(runner));
+
+    const results = [];
+    for (const _usage of usages) {
+      results.push(await adapter.start(invocation, new AbortController().signal));
+    }
+
+    expect(results.map((result) => result.usage)).toEqual([
+      { turnInputTotal: 101, contextInputTokens: 51003, modelContextWindow: 258400, cachedInputTokens: 31, outputTokens: 17, reasoningTokens: 7 },
+      { turnInputTotal: 203, contextInputTokens: 52004, modelContextWindow: 258400, cachedInputTokens: 41, outputTokens: 29, reasoningTokens: 11 },
+      { turnInputTotal: 307, contextInputTokens: 53005, modelContextWindow: 258400, cachedInputTokens: 43, outputTokens: 31, reasoningTokens: 13 },
+    ]);
+    expect(results.at(-1)?.usage?.turnInputTotal).toBe(307);
+    expect(results.at(-1)?.usage?.turnInputTotal).not.toBe(611);
   });
 
   it('SIMULATED Codex disables project docs, the plugin surface, and skill instructions only for arena sessions', () => {
@@ -175,6 +314,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     } as const;
     const ordinary = codexArgv(base);
     const arena = codexArgv({ ...base, arenaSession: true });
+    const skillArena = codexArgv({ ...base, arenaSession: true, instructionSource: 'skill' });
     const arenaResume = codexArgv({ ...base, arenaSession: true, sessionId: 'codex-arena-thread' });
 
     expect(ordinary).not.toContain('project_doc_max_bytes=0');
@@ -183,6 +323,19 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     expect(arena).toContain('project_doc_max_bytes=0');
     expect(arena).toContain('features.plugins=false');
     expect(arena).toContain('skills.include_instructions=false');
+    expect(skillArena).toContain('features.plugins=false');
+    expect(skillArena).toContain('skills.include_instructions=true');
+    expect(skillArena).not.toContain('skills.include_instructions=false');
+    expect(arena).toEqual([
+      'exec', '-C', cwd, '--sandbox', 'read-only', '--json', '-m', invocation.model,
+      '-c', `model_reasoning_effort=${JSON.stringify(invocation.reasoningEffort)}`,
+      '-c', 'project_doc_max_bytes=0',
+      '-c', 'features.plugins=false',
+      '-c', 'skills.include_instructions=false',
+      '-c', `mcp_servers.engine.command=${JSON.stringify(engineCommand)}`,
+      '-c', `mcp_servers.engine.args=${JSON.stringify(engineArgs)}`,
+      '-',
+    ]);
     expect(arenaResume).toEqual(expect.arrayContaining([
       'project_doc_max_bytes=0',
       'features.plugins=false',
@@ -365,7 +518,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
       resumeSessionId: 'ses_fba44c8fcffewZFncFkCWbLLuB',
       sessionId: null,
       finalText: 'OC_EVIDENCE',
-      usage: { inputTokens: 2051, cachedInputTokens: 0, outputTokens: 68, reasoningTokens: 0 },
+      usage: { turnInputTotal: 2051, contextInputTokens: 2051, modelContextWindow: null, cachedInputTokens: 0, outputTokens: 68, reasoningTokens: 0 },
       exit: 'completed',
     });
     await adapter.resume(
@@ -423,7 +576,7 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
     const started = await startAdapter.start(invocation, new AbortController().signal);
     expect(started).toMatchObject({
       finalText: 'PI_EVIDENCE',
-      usage: { inputTokens: 2051, cachedInputTokens: 0, outputTokens: 34, reasoningTokens: 0 },
+      usage: { turnInputTotal: 2051, contextInputTokens: 2051, modelContextWindow: null, cachedInputTokens: 0, outputTokens: 34, reasoningTokens: 0 },
       exit: 'completed',
       contractEvidence: [PI_SESSION_ID_FROM_FILE, 'MCP_EXTENSION_CONFIGURED'],
     });

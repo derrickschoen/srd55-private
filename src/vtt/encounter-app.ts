@@ -61,6 +61,8 @@ import {
   type RefusalHandlingMode,
 } from './refusal-handling';
 import { reconcileStableRenderedChildren, stableRenderKey } from './stable-dom-render';
+import type { HumanEngineActorOptions } from './encounter-board-projection';
+import type { EngineActivationChoiceSlot } from './turn-proposal';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -73,6 +75,71 @@ function element<K extends keyof HTMLElementTagNameMap>(
   if (options.className !== undefined) node.className = options.className;
   if (options.text !== undefined) node.textContent = options.text;
   return node;
+}
+
+function activationChoiceControls(
+  optionId: string,
+  slot: EngineActivationChoiceSlot,
+): readonly HTMLElement[] {
+  const targets = slot.kind === 'calm_emotions_per_target' ? slot.targetIds : [null];
+  return targets.map((targetId, index) => {
+    const label = element('label', { className: 'engine-activation-choice' });
+    const name = slot.kind.replaceAll('_', ' ');
+    const prompt = targetId === null ? name : `${name} for ${String(targetId)}`;
+    label.append(element('span', { text: `Choose ${prompt} at activation` }));
+    const control = element('select');
+    control.dataset.optionId = optionId;
+    control.dataset.choiceKind = slot.kind;
+    if (targetId !== null) control.dataset.targetId = targetId;
+    control.setAttribute('aria-label', `Activation choice ${String(index + 1)} for ${optionId}`);
+    const undecided = element('option', {
+      text: `Not chosen: ${slot.values.join(' or ')}`,
+    });
+    undecided.value = '';
+    control.append(undecided);
+    for (const value of slot.values) {
+      const choice = element('option', { text: value.replaceAll('_', ' ') });
+      choice.value = value;
+      control.append(choice);
+    }
+    label.append(control);
+    return label;
+  });
+}
+
+export function renderHumanEngineOptionCatalog(
+  actors: readonly HumanEngineActorOptions[],
+): HTMLElement {
+  const catalog = element('section', { className: 'dm-engine-options' });
+  catalog.dataset.renderKey = stableRenderKey('dm', 'engine-options');
+  catalog.append(element('h2', { text: 'Engine options' }));
+  if (actors.length === 0) {
+    catalog.append(element('p', { text: 'No monster options.' }));
+    return catalog;
+  }
+  for (const actor of actors) {
+    const group = element('article');
+    group.dataset.renderKey = stableRenderKey('dm', 'engine-options', actor.actorId);
+    group.dataset.actorId = actor.actorId;
+    group.append(element('h3', { text: actor.actorName }));
+    const list = element('ol');
+    for (const entry of actor.options) {
+      const item = element('li', { text: entry.label });
+      item.dataset.renderKey = stableRenderKey(
+        'dm', 'engine-options', actor.actorId, String(entry.option.optionId),
+      );
+      item.dataset.optionAvailability = entry.availability;
+      item.dataset.optionId = entry.option.optionId;
+      if (entry.availability === 'offerable' && entry.option.activationChoice !== undefined &&
+        entry.option.activationChoice !== null) {
+        item.append(...activationChoiceControls(entry.option.optionId, entry.option.activationChoice));
+      }
+      list.append(item);
+    }
+    group.append(list);
+    catalog.append(group);
+  }
+  return catalog;
 }
 
 export function renderDmEncounterOutcome(
@@ -1933,6 +2000,7 @@ class DmEncounterView {
       }
     }
     this.#shell.append(pending);
+    this.#shell.append(renderHumanEngineOptionCatalog(projection.humanEngineOptions));
 
     const objectControls = element('section', { className: 'dm-world-object-controls' });
     objectControls.dataset.renderKey = stableRenderKey('dm', 'world-object-controls');

@@ -1,5 +1,31 @@
 import type { EncounterState } from '../combat/encounter';
+import { monsterSpellMaximumUses, monsterSpellResourcePoolId } from '../combat/statblock';
 import { feet, type CombatantId } from '../combat/values';
+import { declaredMonsterBonusActions } from './engine-query-port';
+
+function withChoicePools(state: EncounterState): EncounterState {
+  return {
+    ...state,
+    combatants: state.combatants.map((combatant) => {
+      if (combatant.profile.kind !== 'monster') return combatant;
+      const existing = combatant.limitedResources ?? [];
+      const additions = declaredMonsterBonusActions(state, combatant.profile.id).flatMap((action) => {
+        if (action.kind !== 'spell_choice') return [];
+        return action.spells.flatMap((spell) => {
+          const id = monsterSpellResourcePoolId(action.id, spell);
+          const maximum = monsterSpellMaximumUses(spell);
+          return id === null || maximum === null || existing.some((pool) => pool.id === id)
+            ? []
+            : [{ id, maximum, remaining: maximum, recharge: 'long_rest' as const }];
+        });
+      });
+      const uniqueAdditions = [...new Map(additions.map((pool) => [pool.id, pool] as const)).values()];
+      return uniqueAdditions.length === 0
+        ? combatant
+        : { ...combatant, limitedResources: [...existing, ...uniqueAdditions] };
+    }),
+  };
+}
 
 function resetMonsterTurns(
   state: EncounterState,
@@ -34,12 +60,12 @@ export function projectFutureMonsterTurns(
   state: EncounterState,
   actorIds: readonly CombatantId[],
 ): EncounterState {
-  return resetMonsterTurns(state, new Set(actorIds), true);
+  return withChoicePools(resetMonsterTurns(state, new Set(actorIds), true));
 }
 
 /** A direct fixture session starts with every monster at a fresh planning window. */
 export function freshMonsterPlanningState(state: EncounterState): EncounterState {
   const actors = state.combatants.flatMap((combatant) =>
     combatant.profile.kind === 'monster' ? [combatant.profile.id] : []);
-  return resetMonsterTurns(state, new Set(actors), false);
+  return withChoicePools(resetMonsterTurns(state, new Set(actors), false));
 }

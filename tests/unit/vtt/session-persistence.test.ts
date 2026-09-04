@@ -26,6 +26,12 @@ import {
   type CombatantId,
 } from '../../../src/combat/values';
 import {
+  agentCallUsage,
+  contextTokenCount,
+  measuredContextRolloverThreshold,
+  turnInputTotal,
+} from '../../../src/vtt/agent-session';
+import {
   DeferredMirrorSink,
   EncounterSessionJournal,
   MemoryBrowserSessionStore,
@@ -193,10 +199,15 @@ describe('event-sourced encounter persistence', () => {
       cli: 'codex',
       sessionId: 'codex:increment-6-local',
       adapterVersion: 1,
-      recoveryGeneration: 0,
+      generation: 0,
+      rolloverTriggerCount: 0,
+      measuredRolloverThreshold: null,
+      lastDigestHash: null,
       predecessorSessionHash: null,
       startedAtRevision: 1,
       lastDispatchedRevision: 0,
+      callUsage: [],
+      currentContextTokens: null,
       status: 'active',
     });
     const migratedRevision = migrated[0]!;
@@ -237,6 +248,89 @@ describe('event-sourced encounter persistence', () => {
     expect(() => replaySessionRevisions([forged])).toThrowError(
       new UnknownSessionTransitionKindError('transition_from_the_future'),
     );
+  });
+
+  it('round-trips ordered per-call usage and the latest context size (mutation: persist aggregate round input)', () => {
+    const store = new MemoryBrowserSessionStore();
+    const { journal } = createJournal(store, new MemoryMirrorSink(), new ControllerRegistry([]));
+    journal.startAgentSession({
+      cli: 'codex',
+      sessionId: agentSessionId('codex:usage-round-trip'),
+      adapterVersion: 1,
+    });
+    journal.recordAgentCallUsage(agentCallUsage({
+      turnInputTotal: turnInputTotal(190_320),
+      contextInputTokens: contextTokenCount(101),
+      modelContextWindow: contextTokenCount(258_400),
+      cachedInputTokens: 31,
+      outputTokens: 17,
+      reasoningTokens: 7,
+    }, 'initial', 1));
+    journal.recordAgentCallUsage(agentCallUsage({
+      turnInputTotal: turnInputTotal(556_770),
+      contextInputTokens: contextTokenCount(203),
+      modelContextWindow: contextTokenCount(258_400),
+      cachedInputTokens: 41,
+      outputTokens: 29,
+      reasoningTokens: 11,
+    }, 'correction', 2));
+
+    const reloaded = new MemoryBrowserSessionStore();
+    const sessionId = encounterSessionId('session:persistence-test');
+    importSavedSession(reloaded, exportSavedSession(store, sessionId));
+    const binding = EncounterSessionJournal.resume(
+      sessionId,
+      reloaded,
+      new MemoryMirrorSink(),
+    ).agentSession;
+
+    expect(binding?.callUsage).toEqual([
+      { turnInputTotal: 190320, contextInputTokens: 101, modelContextWindow: 258400, cachedInput: 31, output: 17, reasoning: 7, callPhase: 'initial', ordinal: 1 },
+      { turnInputTotal: 556770, contextInputTokens: 203, modelContextWindow: 258400, cachedInput: 41, output: 29, reasoning: 11, callPhase: 'correction', ordinal: 2 },
+    ]);
+    expect(binding?.currentContextTokens).toBe(203);
+    expect(binding?.currentContextTokens).not.toBe(304);
+  });
+
+  it('round-trips rollover generation and transition without losing engine state (mutation: treat rollover as resume failure)', () => {
+    const store = new MemoryBrowserSessionStore();
+    const { journal } = createJournal(store, new MemoryMirrorSink(), new ControllerRegistry([]));
+    journal.startAgentSession({
+      cli: 'codex', sessionId: agentSessionId('codex:rollover-base'), adapterVersion: 1,
+      measuredRolloverThreshold: measuredContextRolloverThreshold(160_000),
+    });
+    journal.recordAgentCallUsage(agentCallUsage({
+      turnInputTotal: turnInputTotal(560_000),
+      contextInputTokens: contextTokenCount(160_000),
+      modelContextWindow: contextTokenCount(258_400),
+      cachedInputTokens: 0,
+      outputTokens: 1, reasoningTokens: 0,
+    }, 'initial', 1));
+    const before = store.revisions(encounterSessionId('session:persistence-test')).at(-1)!;
+    const digest = journal.agentSessionDigest();
+    journal.rollOverAgentSession({
+      sessionId: agentSessionId('codex:rollover-successor'),
+      predecessorSessionHash: '1'.repeat(64),
+      latestInputTokens: contextTokenCount(160_000),
+      threshold: measuredContextRolloverThreshold(160_000),
+      digestHash: digest.hash,
+    });
+
+    const reloaded = new MemoryBrowserSessionStore();
+    const sessionId = encounterSessionId('session:persistence-test');
+    importSavedSession(reloaded, journal.export());
+    const resumed = EncounterSessionJournal.resume(sessionId, reloaded, new MemoryMirrorSink());
+
+    expect(resumed.agentSession).toMatchObject({
+      sessionId: agentSessionId('codex:rollover-successor'), generation: 1,
+      rolloverTriggerCount: 1, measuredRolloverThreshold: 160_000,
+      lastDigestHash: digest.hash,
+    });
+    expect(resumed.encounterState).toEqual(before.encounterState);
+    expect(resumed.partyState).toEqual(before.partyState);
+    expect(resumed.coordinatorState).toEqual(before.coordinatorState);
+    expect(resumed.controllers).toEqual(before.controllers);
+    expect(reloaded.revisions(sessionId).at(-1)?.transition.kind).toBe('agent_session_rolled_over');
   });
 
   it('fingerprint_not_checked: one flipped bundle byte refuses the whole session file', () => {
@@ -834,7 +928,8 @@ describe('event-sourced encounter persistence', () => {
     expect(after.agentSession).toMatchObject({
       cli: 'codex',
       sessionId: agentSessionId('codex:legacy-v1-migration-fixture'),
-      recoveryGeneration: 0,
+      generation: 0,
+      rolloverTriggerCount: 0,
       predecessorSessionHash: null,
       status: 'active',
     });
@@ -871,11 +966,11 @@ describe('event-sourced encounter persistence', () => {
          ORDER BY revision`,
       );
       expect(rows).toEqual([
-        { revision: 1, schema_version: 8 },
-        { revision: 2, schema_version: 8 },
-        { revision: 3, schema_version: 8 },
-        { revision: 4, schema_version: 8 },
-        { revision: 5, schema_version: 8 },
+        { revision: 1, schema_version: 10 },
+        { revision: 2, schema_version: 10 },
+        { revision: 3, schema_version: 10 },
+        { revision: 4, schema_version: 10 },
+        { revision: 5, schema_version: 10 },
       ]);
       expect(
         EncounterSessionJournal.resume(

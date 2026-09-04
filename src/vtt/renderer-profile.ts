@@ -1,8 +1,10 @@
 import { z } from 'zod';
+import { combatantsAreAllies } from '../combat/allies';
 import type { EncounterState } from '../combat/encounter';
 import { gridDistance } from '../combat/grid';
 import { BUNDLED_MONSTER_ROSTER } from '../combat/statblocks/roster';
 import type { EngineStateCapsule } from './engine-state-capsule';
+import type { EngineOmittedRider, NoModeledEffect } from './option-modeling';
 
 export const RENDERER_POLICY_VERSION = 'turn-context-renderer-v3' as const;
 
@@ -127,6 +129,46 @@ export interface RendererRemovalCounts {
 
 type MutableRecord = Record<string, unknown>;
 
+function plainWords(value: string): string {
+  return value.replaceAll('-', ' ').replaceAll('_', ' ');
+}
+
+export function renderNoModeledEffectReason(reason: NoModeledEffect): string {
+  switch (reason.kind) {
+    case 'disengage_without_movement':
+      return 'no effect here: no movement to disengage with';
+    case 'disengage_without_adjacent_hostile':
+      return 'no effect here: no adjacent enemy to disengage from';
+    case 'unsupported_action_payload':
+      return `not modeled: ${reason.sourceNote.replace(/[.]$/u, '').toLocaleLowerCase()}`;
+    case 'unsupported_spell_payload': {
+      const spell = plainWords(reason.spellId);
+      switch (reason.limitation) {
+        case 'not_in_manifest': return `not modeled: ${spell} is not implemented`;
+        case 'definition_unavailable': return `not modeled: ${spell} has no engine definition`;
+        case 'targeting_unresolved': return `not modeled: ${spell} targeting cannot be resolved`;
+        case 'utility_operation_unmodeled': return `not modeled: ${spell} has no in-combat effect`;
+      }
+    }
+  }
+}
+
+export function renderOmittedRider(rider: EngineOmittedRider): string {
+  const component = plainWords(rider.componentActionId);
+  switch (rider.kind) {
+    case 'conditional_damage_trigger':
+      return `${component}: conditional ${plainWords(rider.trigger)} damage is not executed`;
+    case 'conditional_on_hit_effect':
+      return `${component}: conditional ${plainWords(rider.trigger)} on-hit ${rider.effect} is not executed`;
+    case 'attack_advantage_window':
+      return `${component}: ${plainWords(rider.window)} attack Advantage is not executed`;
+    case 'delayed_zombie_creation':
+      return `${component}: delayed Zombie creation after ${String(rider.delayHours)} hours is not executed`;
+    case 'other_explicitly_classified_secondary_effect':
+      return `${component}: ${plainWords(rider.classification)} is not executed`;
+  }
+}
+
 function record(value: unknown): MutableRecord | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as MutableRecord
@@ -170,7 +212,7 @@ export function extractCircumstanceFeatures(input: {
   const living = input.state.combatants.filter((actor) => actor.life !== 'dead');
   const positions = new Map(input.state.tokens.map((token) => [token.combatantId, token.position]));
   const engagementDistances = living.flatMap((left, leftIndex) => living.slice(leftIndex + 1)
-    .filter((right) => right.profile.kind !== left.profile.kind)
+    .filter((right) => !combatantsAreAllies(input.state, left.profile.id, right.profile.id))
     .flatMap((right) => {
       const leftPosition = positions.get(left.profile.id);
       const rightPosition = positions.get(right.profile.id);
@@ -240,7 +282,7 @@ function materialMovement(row: MutableRecord): boolean {
 
 function optionSemantic(option: MutableRecord): string {
   return JSON.stringify([
-    option['kind'], option['action_id'], option['resource_cost_labels'],
+    option['kind'], option['action_id'], option['resource_cost_labels'], option['activation_choice'],
     option['minimum_movement_feet'], option['usable_now'], option['usable_after_movement'],
   ]);
 }
@@ -288,7 +330,9 @@ function shortlist(
     selected.push(option);
   }
   if (options.length >= 2 && selected.length < 2) {
-    throw new Error('Renderer K-set safety failure: actor lost every visible non-default option.');
+    throw new Error(`Renderer K-set safety failure: actor ${String(options[0]?.['actor_id'])} lost every visible non-default option (${options
+      .map((option) => `${String(option['option_id'])}:${String(option['label'])}`)
+      .join(', ')}; dominated ${String(knownDominatedId)}).`);
   }
   if (defaultIndex >= 0 && selected[0]?.['option_id'] !== defaultId) {
     throw new Error('Renderer K-set safety failure: engine default is not first.');
@@ -298,7 +342,7 @@ function shortlist(
 
 function sparseSlot(slot: MutableRecord): MutableRecord {
   const result: MutableRecord = { slot: slot['slot'], kind: slot['kind'], action_id: slot['action_id'] };
-  for (const key of ['component_action_ids', 'spell_id', 'target_ids', 'world_object_id'] as const) {
+  for (const key of ['component_action_ids', 'components', 'omitted_riders', 'spell_id', 'target_ids', 'world_object_id'] as const) {
     const value = slot[key];
     if (value !== null && (!Array.isArray(value) || value.length > 0)) result[key] = value;
   }
@@ -315,6 +359,8 @@ export function decodeSparseActionSlot(slotValue: unknown): Readonly<Record<stri
     spell_id: typeof slot['spell_id'] === 'string' ? slot['spell_id'] : null,
     target_ids: array(slot['target_ids']),
     world_object_id: typeof slot['world_object_id'] === 'string' ? slot['world_object_id'] : null,
+    ...(Array.isArray(slot['components']) ? { components: slot['components'] } : {}),
+    ...(Array.isArray(slot['omitted_riders']) ? { omitted_riders: slot['omitted_riders'] } : {}),
   };
 }
 
@@ -401,6 +447,8 @@ export function renderTurnContextProfile(
         option_id: option['option_id'], actor_id: option['actor_id'], revision: option['revision'],
         action_id: option['action_id'], kind: option['kind'], usable_now: option['usable_now'],
         usable_after_movement: option['usable_after_movement'],
+        omitted_riders: option['omitted_riders'],
+        ...(option['activation_choice'] === undefined ? {} : { activation_choice: option['activation_choice'] }),
       }));
       options = actor['options'] as MutableRecord[];
     }
@@ -694,6 +742,19 @@ function optionFacts(option: MutableRecord): readonly string[] {
   }
   if (array(option['resource_cost_labels']).length > 0) {
     facts.push(`Costs ${listed(option['resource_cost_labels'])}`);
+  }
+  const activationChoice = record(option['activation_choice']);
+  if (activationChoice !== null) {
+    const values = listed(activationChoice['values']);
+    const targets = array(activationChoice['target_ids']);
+    facts.push(`Choose ${words(String(activationChoice['kind']))} at activation from ${values}${
+      targets.length === 0 ? '' : ` for each target ${targets.join(', ')}`}`);
+  }
+  for (const riderValue of array(option['omitted_riders'])) {
+    const rider = record(riderValue);
+    if (rider === null) continue;
+    const component = words(String(rider['componentActionId']));
+    facts.push(`Omitted rider beside ${component}: ${words(String(rider['kind']))}`);
   }
   if (option['usable_now'] === true && option['usable_after_movement'] === true) facts.push('Works now and after movement');
   else if (option['usable_after_movement'] === true) facts.push('Needs movement first');

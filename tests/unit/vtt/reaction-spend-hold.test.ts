@@ -28,6 +28,7 @@ function opportunityAttack(overrides: Partial<TacticalAttackInput> = {}): Tactic
     attackerCanSeeTarget: true,
     targetCanSeeAttacker: true,
     rollModeSources: [],
+    featureRollModeInput: null,
     target: { hitPoints: 20, usesDeathSaves: true },
     ...overrides,
   };

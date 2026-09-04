@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { monsterCombatantProfile } from '../../../src/combat/combatant';
 import { reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { mulberry32 } from '../../../src/combat/random';
 import { armorClass, combatantId, encounterBranchId, encounterSessionId, type CombatantId } from '../../../src/combat/values';
+import { LION } from '../../../src/combat/statblocks/wild-beasts';
 import {
   EngineRoundSession,
   type AuthorizedEngineTurnProposal,
@@ -71,7 +73,8 @@ function attackProposal(
   if (primary === undefined) throw new Error(`Test fixture omitted ${actionId} for ${actorId}.`);
   return {
     actorId, expectedRevision: state.revision, primaryOptionId: primary.optionId,
-    fallbackOptionId: fallback?.optionId ?? null, overrideJustification: null,
+    fallbackOptionId: fallback?.optionId ?? null,
+    reason: 'Exercise the round session proposal fixture.', overrideJustification: null,
   };
 }
 
@@ -121,7 +124,8 @@ function dodgeProposal(state: EncounterState, actorId: CombatantId): EngineTurnP
   if (dodge === undefined) throw new Error(`Test fixture omitted Dodge for ${actorId}.`);
   return {
     actorId, expectedRevision: state.revision, primaryOptionId: dodge.optionId,
-    fallbackOptionId: null, overrideJustification: null,
+    fallbackOptionId: null,
+    reason: 'Exercise the invalid round session fixture.', overrideJustification: null,
   };
 }
 
@@ -133,6 +137,70 @@ function completeDodge(session: EngineRoundSession, actorId: CombatantId) {
 }
 
 describe('authoritative engine round session', () => {
+  it('advances past an active PC killed mid-round before the next segment begins', () => {
+    const started = reduceEncounter(
+      segmentedState(),
+      { type: 'roll_initiative' },
+      mulberry32(46_600_003),
+    ).state;
+    expect(started.activeCombatant).toBe(FOCUS_ID);
+    const killed: EncounterState = {
+      ...started,
+      combatants: started.combatants.map((combatant) => combatant.profile.id === FOCUS_ID
+        ? { ...combatant, hitPoints: 0, life: 'dead' as const, deathSaves: null }
+        : combatant),
+    };
+    const session = new EngineRoundSession(killed, mulberry32(46_600_004), {
+      kind: 'unattended', askDefault: 'decline',
+    });
+
+    session.beginRoundWithoutSkipping({ ...REQUEST, revision: killed.revision }, null);
+
+    expect(session.currentState().activeCombatant).toBe(KILLER_ID);
+    expect(session.currentState().combatants.find((combatant) =>
+      combatant.profile.id === KILLER_ID)?.life).toBe('living');
+  });
+
+  it('executes a mixed multiattack attack child and saving-throw child once each', () => {
+    const positioned = fixedPositions(new Map([
+      [BRUTE_ID, { column: 1, row: 1 }],
+      [FOCUS_ID, { column: 2, row: 1 }],
+    ]));
+    const lionProfile = monsterCombatantProfile(LION, {
+      combatantId: BRUTE_ID,
+      tokenId: 'token:generated-3943001-monster-2',
+    });
+    const state: EncounterState = {
+      ...positioned,
+      combatants: positioned.combatants.map((candidate) => candidate.profile.id === BRUTE_ID
+        ? { ...candidate, hitPoints: LION.hitPointMaximum, profile: lionProfile }
+        : candidate),
+    };
+    const lion = authorized(state, attackProposal(state, BRUTE_ID, 'rend', FOCUS_ID));
+    expect(lion.mechanics.actionSlots.map((use) => use.kind)).toEqual(['attack', 'attack']);
+    const mixedOption = availableEngineActorOptions(state, BRUTE_ID).find((option) =>
+      option.label.startsWith('Rend + Roar'));
+    if (mixedOption === undefined) throw new Error('Lion mixed option is absent.');
+    const mixed = authorized(state, {
+      actorId: BRUTE_ID,
+      expectedRevision: state.revision,
+      primaryOptionId: mixedOption.optionId,
+      fallbackOptionId: null,
+      reason: 'Exercise the round session resolution fixture.',
+      overrideJustification: null,
+    });
+    expect(mixed.mechanics.actionSlots.map((use) => use.kind)).toEqual(['attack', 'saving_throw']);
+
+    const session = new EngineRoundSession(state, mulberry32(46_600_002), {
+      kind: 'unattended', askDefault: 'decline',
+    });
+    session.applyResolvedMechanics([mixed], null);
+    const events = session.currentState().eventLog.filter((event) =>
+      (event.type === 'attack_resolved' && event.actor === BRUTE_ID) ||
+      (event.type === 'save_resolved' && event.source === BRUTE_ID));
+    expect(events.map((event) => event.type)).toEqual(['attack_resolved', 'save_resolved']);
+  });
+
   it('applies canonical long-range disadvantage during attack resolution', () => {
     const state = fixedPositions(new Map([
       [ARCHER_ID, { column: 0, row: 0 }],
@@ -383,6 +451,51 @@ describe('authoritative engine round session', () => {
       reasonCodes: ['branch_changed', 'option_changed'],
       refusalCodes: ['ATTACK_UNAVAILABLE'],
     }]);
+  });
+
+  it('records a typed omission when an earlier attack in one option kills its later target', () => {
+    const positioned = fixedPositions(new Map([
+      [BRUTE_ID, { column: 1, row: 1 }],
+      [FOCUS_ID, { column: 2, row: 1 }],
+    ]));
+    const lionProfile = monsterCombatantProfile(LION, {
+      combatantId: BRUTE_ID,
+      tokenId: 'token:generated-3943001-monster-2',
+    });
+    const state: EncounterState = {
+      ...positioned,
+      combatants: positioned.combatants.map((candidate) => {
+        if (candidate.profile.id === BRUTE_ID) {
+          return { ...candidate, hitPoints: LION.hitPointMaximum, profile: lionProfile };
+        }
+        if (candidate.profile.id === FOCUS_ID) {
+          return {
+            ...candidate,
+            hitPoints: 1,
+            profile: {
+              ...candidate.profile,
+              rules: { ...candidate.profile.rules, armorClass: armorClass(1), usesDeathSaves: false },
+            },
+          };
+        }
+        return candidate;
+      }),
+    };
+    const lion = authorized(state, attackProposal(state, BRUTE_ID, 'rend', FOCUS_ID));
+    const session = new EngineRoundSession(state, mulberry32(46_600_006), {
+      kind: 'unattended', askDefault: 'decline',
+    });
+
+    const applied = session.applyResolvedMechanics([lion], null);
+
+    expect(session.currentState().eventLog.filter((event) =>
+      event.type === 'attack_resolved' && event.actor === BRUTE_ID && event.target === FOCUS_ID))
+      .toHaveLength(1);
+    expect(applied.deviationResolutions).toContainEqual(expect.objectContaining({
+      actorId: BRUTE_ID,
+      reasonCodes: ['remaining_attack_target_dead'],
+      refusalCodes: ['TARGET_DIED_DURING_OPTION'],
+    }));
   });
 
   it('preserves live re-resolution deviation evidence inside a monster segment', () => {

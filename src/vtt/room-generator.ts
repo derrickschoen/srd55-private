@@ -18,6 +18,10 @@ import {
 import type { LightLevel, WorldObject } from '../combat/world-objects';
 import { referenceEncounterSetup } from './reference-encounter';
 import { encounterIr, type EncounterIr, type EncounterProvenance } from './encounter-ir';
+import {
+  d466GeneratedRoomOverride,
+  d466ReplacementStatblock,
+} from './d466-room-overrides';
 
 export const ROOM_GRID_DIMENSIONS = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24] as const;
 export type RoomGridDimension = (typeof ROOM_GRID_DIMENSIONS)[number];
@@ -133,6 +137,12 @@ const GENERATED_PARTY_ABILITY_SCORES = {
   },
 } as const satisfies Readonly<Record<string, NonNullable<CombatantProfile['rules']['abilityScores']>>>;
 
+const GENERATED_PARTY_SIZE_CATEGORIES = {
+  'combatant:fighter': 'Medium',
+  'combatant:cleric': 'Medium',
+  'combatant:wizard': 'Medium',
+} as const satisfies Readonly<Record<string, NonNullable<CombatantProfile['rules']['sizeCategory']>>>;
+
 function derivedAbilityScores(
   profile: CombatantProfile,
 ): NonNullable<CombatantProfile['rules']['abilityScores']> {
@@ -155,6 +165,9 @@ export function applyRoomInitiativeProfile(
     config: { ...state.config, initiativeMode: 'per_combatant' },
     combatants: state.combatants.map((combatant) => {
       const abilityScores = derivedAbilityScores(combatant.profile);
+      const configuredPartySize = GENERATED_PARTY_SIZE_CATEGORIES[
+        String(combatant.profile.id) as keyof typeof GENERATED_PARTY_SIZE_CATEGORIES
+      ];
       return {
         ...structuredClone(combatant),
         profile: {
@@ -163,6 +176,7 @@ export function applyRoomInitiativeProfile(
             ...structuredClone(combatant.profile.rules),
             abilityScores: structuredClone(abilityScores),
             initiativeBonus: Math.floor((abilityScores.dexterity - 10) / 2),
+            ...(configuredPartySize === undefined ? {} : { sizeCategory: configuredPartySize }),
           },
         },
       };
@@ -445,6 +459,52 @@ function sampledBrutalRoster(
   return { budget, spent: budget - remaining, entries, profiles };
 }
 
+function applyD466GeneratedRoomOverride(
+  seed: number,
+  roster: {
+    readonly budget: number;
+    readonly spent: number;
+    readonly entries: readonly RoomMonsterRosterEntry[];
+    readonly profiles: readonly CombatantProfile[];
+  },
+): typeof roster {
+  const replacement = d466GeneratedRoomOverride(seed);
+  if (replacement === null) return roster;
+  const matchingIndexes = roster.entries.flatMap((entry, index) =>
+    entry.statblockId === replacement.original ? [index] : []);
+  if (matchingIndexes.length === 0) {
+    throw new Error(
+      `D466 room override seed ${String(seed)} has no ${replacement.original} to replace.`,
+    );
+  }
+  const matchingIndexSet = new Set(matchingIndexes);
+  const replacementStatblock = d466ReplacementStatblock(replacement);
+  return {
+    budget: roster.budget,
+    spent: roster.spent,
+    entries: roster.entries.map((entry, index) => matchingIndexSet.has(index)
+      ? {
+          ...entry,
+          statblockId: replacement.replacement,
+          challengeRating: replacement.challengeRating,
+          challengeEighths: replacement.crEighths,
+        }
+      : entry),
+    profiles: roster.profiles.map((profile, index) => {
+      if (!matchingIndexSet.has(index)) return profile;
+      const entry = roster.entries[index];
+      if (profile.kind !== 'monster' || entry === undefined ||
+        profile.statblockId !== replacement.original) {
+        throw new Error(`D466 room override seed ${String(seed)} found a misaligned roster profile.`);
+      }
+      return monsterCombatantProfile(replacementStatblock, {
+        combatantId: entry.combatantId,
+        tokenId: entry.tokenId,
+      });
+    }),
+  };
+}
+
 function hardChokepoint(
   rng: Rng,
   seed: number,
@@ -568,11 +628,14 @@ export function generateRoom(seed: number, options: GenerateRoomOptions = {}): G
     (profile) => profile.kind === 'player_character',
   );
   const difficulty = options.difficulty ?? 'standard';
-  const roster = difficulty === 'brutal'
+  const sampledRoomRoster = difficulty === 'brutal'
     ? sampledBrutalRoster(rng, normalizedSeed)
     : difficulty === 'hard'
       ? sampledHardRoster(rng, normalizedSeed)
       : sampledRoster(rng, normalizedSeed);
+  const roster = difficulty === 'brutal'
+    ? applyD466GeneratedRoomOverride(normalizedSeed, sampledRoomRoster)
+    : sampledRoomRoster;
   const partyPositions = partyProfiles.map((_profile, index) => ({
     column: 1 + index % 2,
     row: 2 + index * 2,

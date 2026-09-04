@@ -1,0 +1,15 @@
+{
+  "belowThreshold": [
+    { "turnInputTotal": 190320, "contextInputTokens": 29001 },
+    { "turnInputTotal": 320450, "contextInputTokens": 31002 },
+    { "turnInputTotal": 556770, "contextInputTokens": 87003 },
+    { "turnInputTotal": 201111, "contextInputTokens": 28004 },
+    { "turnInputTotal": 330222, "contextInputTokens": 32005 },
+    { "turnInputTotal": 540333, "contextInputTokens": 86006 }
+  ],
+  "atThreshold": [
+    { "turnInputTotal": 190320, "contextInputTokens": 160000 },
+    { "turnInputTotal": 320450, "contextInputTokens": 31002 },
+    { "turnInputTotal": 556770, "contextInputTokens": 87003 }
+  ]
+}

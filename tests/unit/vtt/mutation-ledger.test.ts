@@ -86,6 +86,37 @@ function ledger(): MutationLedger {
 }
 
 describe('phase-2 mutation ledger manifest', () => {
+  it('D466-D2-MUTATION-LEDGER pins deterministic rollover controls to named killing tests', () => {
+    const digestTests = readFileSync('tests/unit/vtt/agent-session-digest.test.ts', 'utf8');
+    const lifecycleTests = readFileSync('tests/unit/vtt/agent-session-lifecycle.test.ts', 'utf8');
+    const persistenceTests = readFileSync('tests/unit/vtt/session-persistence.test.ts', 'utf8');
+    const conversationTests = readFileSync('tests/unit/tools/ai-dm-conversation.test.ts', 'utf8');
+    const arenaTests = readFileSync('tests/unit/tools/ai-dm-arena.test.ts', 'utf8');
+    const measurementTests = readFileSync('tests/unit/tools/measure-context-rollover.test.ts', 'utf8');
+    for (const mutation of [
+      'unsorted map traversal',
+      'omitted resource',
+      'compare turnInputTotal',
+      'treat rollover as resume failure',
+      'implicit escalation default',
+      'total_token_usage',
+    ]) {
+      expect([
+        digestTests, lifecycleTests, persistenceTests, conversationTests, arenaTests, measurementTests,
+      ].join('\n')).toContain(`mutation: ${mutation}`);
+    }
+    expect(arenaTests).toContain('rollover disabled or too high to act');
+  });
+
+  it('D466-A2-MUTATION-LEDGER pins human-only ordering and single hidden-row logging to named killing tests', () => {
+    const boardTests = readFileSync('tests/unit/vtt/encounter-board-projection.test.ts', 'utf8');
+    const domTests = readFileSync('tests/unit/vtt/stable-dom-render.test.ts', 'utf8');
+    const rowTests = readFileSync('tests/unit/tools/ai-dm-conversation.test.ts', 'utf8');
+    expect(boardTests).toContain('human_only_sorted_last:');
+    expect(domTests).toContain('human_only_sorted_last_dom:');
+    expect(rowTests).toContain('hidden_options_logged_once:');
+  });
+
   it('D373.7-LONG-REST-MUTATION-LEDGER pins all three restored controls to named killing tests', () => {
     const longRestLedger = readFileSync(LONG_REST_LEDGER_PATH, 'utf8');
     const partyTests = readFileSync('tests/unit/vtt/party-session-state.test.ts', 'utf8');

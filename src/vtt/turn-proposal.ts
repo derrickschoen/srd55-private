@@ -1,19 +1,95 @@
-import type { Brand } from '../domain/ids';
 import type { GridCell } from '../combat/grid';
 import type { AreaTemplate } from '../combat/templates';
 import type { CombatantId, WorldObjectId } from '../combat/values';
 import type { EngineTargetSelector } from './engine-query-port';
+import type { EngineOfferableOption, EngineOmittedRider, EngineOptionId } from './option-modeling';
+
+export {
+  engineHumanOptionId,
+  engineOptionId,
+  type EngineHumanOnlyOption,
+  type EngineHumanOptionId,
+  type EngineOfferableOption,
+  type EngineOmittedRider,
+  type EngineOptionCandidate,
+  type EngineOptionId,
+  type NoModeledEffect,
+} from './option-modeling';
 
 export type { CombatantId } from '../combat/values';
 
 /** Stable passthrough ids remain distinct even when supplied by homebrew content. */
-export type EngineOptionId = Brand<string, 'EngineOptionId'>;
+import type { Brand } from '../domain/ids';
 export type EngineActionId = Brand<string, 'EngineActionId'>;
 export type EngineSpellId = Brand<string, 'EngineSpellId'>;
+export type EnginePlayToken = Brand<string, 'EnginePlayToken'>;
 
-export const engineOptionId = (value: string): EngineOptionId => value as EngineOptionId;
+export const ENGINE_OPTION_METRICS = [
+  'expected_damage_milli',
+  'attack_count',
+  'approach_feet',
+  'action_slot_uses',
+  'resource_costs',
+] as const;
+export type EngineOptionMetric = (typeof ENGINE_OPTION_METRICS)[number];
+
+export const SIMPLE_OVERRIDE_JUSTIFICATION_KINDS = [
+  'objective',
+  'morale',
+  'roleplay',
+  'resource_conservation',
+  'unknown_engine_gap',
+] as const;
+export const ENGINE_OVERRIDE_JUSTIFICATION_KINDS = [
+  ...SIMPLE_OVERRIDE_JUSTIFICATION_KINDS,
+  'engine_play',
+  'missing_metric',
+] as const;
+export type EngineOverrideJustificationKind = (typeof ENGINE_OVERRIDE_JUSTIFICATION_KINDS)[number];
+export type EngineOverrideJustification =
+  | { readonly kind: (typeof SIMPLE_OVERRIDE_JUSTIFICATION_KINDS)[number] }
+  | {
+      readonly kind: 'engine_play';
+      /** Null is retained through decoding so policy can return OVERRIDE_UNJUSTIFIED. */
+      readonly token: EnginePlayToken | null;
+    }
+  | {
+      readonly kind: 'missing_metric';
+      /** Null is retained through decoding so policy can return OVERRIDE_UNJUSTIFIED. */
+      readonly id: EngineOptionMetric | null;
+    };
+
 export const engineActionId = (value: string): EngineActionId => value as EngineActionId;
 export const engineSpellId = (value: string): EngineSpellId => value as EngineSpellId;
+export const enginePlayToken = (value: string): EnginePlayToken => value as EnginePlayToken;
+
+export const COMMAND_WORDS = ['approach', 'flee', 'grovel', 'halt', 'drop'] as const;
+export type CommandWord = (typeof COMMAND_WORDS)[number];
+export const UNICORNS_BLESSING_SPELLS = ['cure-wounds', 'lesser-restoration'] as const;
+export type UnicornsBlessingSpell = (typeof UNICORNS_BLESSING_SPELLS)[number];
+export const DISPEL_EVIL_AND_GOOD_MODES = ['break_enchantment', 'dismissal'] as const;
+export type DispelEvilAndGoodMode = (typeof DISPEL_EVIL_AND_GOOD_MODES)[number];
+export const CALM_EMOTIONS_MODES = ['suppress_charmed_frightened', 'indifferent_toward_monster_side'] as const;
+export type CalmEmotionsMode = (typeof CALM_EMOTIONS_MODES)[number];
+
+export type EngineActivationChoiceSlot =
+  | { readonly kind: 'command_word'; readonly values: typeof COMMAND_WORDS }
+  | { readonly kind: 'unicorns_blessing_spell'; readonly values: typeof UNICORNS_BLESSING_SPELLS }
+  | { readonly kind: 'dispel_evil_and_good_mode'; readonly values: typeof DISPEL_EVIL_AND_GOOD_MODES }
+  | {
+      readonly kind: 'calm_emotions_per_target';
+      readonly targetIds: readonly CombatantId[];
+      readonly values: typeof CALM_EMOTIONS_MODES;
+    };
+
+export type EngineActivationChoice =
+  | { readonly kind: 'command_word'; readonly value: CommandWord }
+  | { readonly kind: 'unicorns_blessing_spell'; readonly value: UnicornsBlessingSpell }
+  | { readonly kind: 'dispel_evil_and_good_mode'; readonly value: DispelEvilAndGoodMode }
+  | {
+      readonly kind: 'calm_emotions_per_target';
+      readonly selections: readonly { readonly targetId: CombatantId; readonly mode: CalmEmotionsMode }[];
+    };
 
 export interface EngineMovementPreference {
   readonly willingness: 'none' | 'only_if_required' | 'for_clear_advantage' | 'freely';
@@ -37,12 +113,21 @@ export interface EngineTargetedAttackUse {
   readonly target: EngineTargetSelector;
 }
 
+export type EngineMultiattackComponentUse = (
+  | EngineTargetedAttackUse
+  | {
+      readonly kind: 'saving_throw';
+      readonly actionId: EngineActionId;
+      readonly target: EngineTargetSelector;
+    }
+) & { readonly omittedRiders: readonly EngineOmittedRider[] };
+
 export type EngineMainActionUse =
   | EngineTargetedAttackUse
   | {
       readonly kind: 'multiattack';
       readonly actionId: EngineActionId;
-      readonly components: readonly EngineTargetedAttackUse[];
+      readonly components: readonly EngineMultiattackComponentUse[];
     }
   | {
       readonly kind: 'saving_throw';
@@ -84,30 +169,15 @@ export type EngineActionSlotUse =
   | { readonly slot: 'main'; readonly use: EngineMainActionUse }
   | { readonly slot: 'bonus'; readonly use: EngineBonusActionUse };
 
-export interface EngineActorOption {
-  readonly optionId: EngineOptionId;
-  readonly actorId: CombatantId;
-  readonly revision: number;
-  readonly label: string;
-  readonly movement: EngineMovementObjective;
-  readonly actionSlots: readonly EngineActionSlotUse[];
-  readonly resourceCostLabels: readonly string[];
-}
-
 export interface EngineTurnProposal {
   readonly actorId: CombatantId;
   readonly expectedRevision: number;
   readonly primaryOptionId: EngineOptionId;
   readonly fallbackOptionId: EngineOptionId | null;
-  readonly overrideJustification: null | (
-    {
-      readonly reason: 'morale' | 'objective' | 'roleplay' | 'resource_conservation';
-      readonly note?: string;
-    } | {
-      readonly reason: 'unknown_engine_gap';
-      readonly note: string;
-    }
-  );
+  /** Verbatim, bounded explanation supplied by the decision author. */
+  readonly reason: string;
+  readonly activationChoice?: EngineActivationChoice | null;
+  readonly overrideJustification: EngineOverrideJustification | null;
 }
 
 export interface ResolvedActionSlotUse {
@@ -126,6 +196,9 @@ export interface ResolvedActionSlotUse {
   readonly spellId: EngineSpellId | null;
   readonly targetIds: readonly CombatantId[];
   readonly objectId: WorldObjectId | null;
+  readonly omittedRiders: readonly EngineOmittedRider[];
+  readonly activationChoice?: EngineActivationChoice;
+  readonly multiattackComponent?: true;
   /** Present only for a placed-area spell. */
   readonly area?: AreaTemplate;
 }
@@ -137,6 +210,7 @@ export interface ResolvedTurnMechanics {
   readonly path: readonly GridCell[];
   readonly finalPosition: GridCell;
   readonly actionSlots: readonly ResolvedActionSlotUse[];
+  readonly omittedRiders: readonly EngineOmittedRider[];
 }
 
 export type EngineProposalResolution =
@@ -151,9 +225,9 @@ export type EngineProposalResolution =
         readonly summary: string;
       }[];
       readonly mechanics: ResolvedTurnMechanics;
-      readonly option: EngineActorOption;
-      readonly primaryOption: EngineActorOption;
-      readonly fallbackOption: EngineActorOption | null;
+      readonly option: EngineOfferableOption;
+      readonly primaryOption: EngineOfferableOption;
+      readonly fallbackOption: EngineOfferableOption | null;
     }
   | {
       readonly valid: false;

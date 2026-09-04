@@ -150,7 +150,7 @@ export type SpellPersistentAreaEffectSpec =
       readonly kind: 'automatic';
       readonly payload:
         | { readonly kind: 'damage'; readonly damageType: DamageType | 'spirit_guardians_alignment'; readonly dice: ScaledDice }
-        | { readonly kind: 'effect'; readonly payload: PersistentAreaAppliedPayload; readonly lifetime: PersistentAreaEffectLifetime };
+        | { readonly kind: 'effect'; readonly payload: PersistentAreaAppliedPayload; readonly lifetime: PersistentAreaEffectLifetime; readonly escapeCheck?: { readonly ability: Ability; readonly skill: Skill; readonly cost: 'action' } };
     }
   | {
       readonly kind: 'save_gated';
@@ -159,7 +159,7 @@ export type SpellPersistentAreaEffectSpec =
       readonly onSuccess: 'none' | 'half';
       readonly payload:
         | { readonly kind: 'damage'; readonly damageType: DamageType | 'spirit_guardians_alignment'; readonly dice: ScaledDice }
-        | { readonly kind: 'effect'; readonly payload: PersistentAreaAppliedPayload; readonly lifetime: PersistentAreaEffectLifetime };
+        | { readonly kind: 'effect'; readonly payload: PersistentAreaAppliedPayload; readonly lifetime: PersistentAreaEffectLifetime; readonly escapeCheck?: { readonly ability: Ability; readonly skill: Skill; readonly cost: 'action' } };
     };
 
 export type ConditionLifecycleDuration =
@@ -1259,6 +1259,11 @@ export interface SpellCastCommand {
     readonly damageModifier: number;
   };
   readonly selectedOption: string | null;
+  /** Per-Humanoid Calm Emotions choice, supplied at activation. */
+  readonly calmEmotionsModes?: readonly {
+    readonly target: CombatantId;
+    readonly mode: 'suppress_charmed_frightened' | 'indifferent_toward_monster_side';
+  }[];
   /** Required only by a targeted-defense operation cast against a selected attacker. */
   readonly modifierSource?: CombatantId;
   /** Explicitly chooses one-shot-by-choice modifiers for this spell attack. */

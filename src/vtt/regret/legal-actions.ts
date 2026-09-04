@@ -1,4 +1,5 @@
 import type { LegalActionSummary } from '../../combat/controllers';
+import { combatantsAreAllies } from '../../combat/allies';
 import type { EncounterState } from '../../combat/encounter';
 import type { EncounterCommand } from '../../combat/events';
 import { adjacentCells, gridDistance } from '../../combat/grid';
@@ -192,9 +193,8 @@ function fixedRiderCommands(
 }
 
 function nearestEnemy(state: EncounterState, actor: CombatantId) {
-  const acting = subject(state, actor);
   return state.combatants
-    .filter((candidate) => candidate.profile.kind !== acting.profile.kind && candidate.life !== 'dead')
+    .filter((candidate) => !combatantsAreAllies(state, actor, candidate.profile.id) && candidate.life !== 'dead')
     .sort((left, right) => {
       const distance = gridDistance(position(state, actor), position(state, left.profile.id))
         - gridDistance(position(state, actor), position(state, right.profile.id));
@@ -208,9 +208,8 @@ export function regretTurnLegalActions(
   fixedRider: PlanAction | null = null,
 ): LegalActionSummary {
   const acting = subject(state, actor);
-  const enemies = state.combatants.filter(
-    (candidate) => candidate.profile.kind !== acting.profile.kind && candidate.life !== 'dead',
-  );
+  const enemies = state.combatants.filter((candidate) =>
+    !combatantsAreAllies(state, actor, candidate.profile.id) && candidate.life !== 'dead');
   const occupied = new Set(state.tokens.map((token) => `${token.position.column},${token.position.row}`));
   const actions: EncounterCommand[] = [];
   if (acting.turn.movement.remaining >= 5) {
@@ -252,9 +251,8 @@ export function regretReactionLegalActions(
   mover: CombatantId,
 ): readonly Extract<EncounterCommand, { readonly type: 'opportunity_attack' }>[] {
   const reacting = subject(state, reactor);
-  const moving = subject(state, mover);
   if (
-    reacting.profile.kind === moving.profile.kind ||
+    combatantsAreAllies(state, reactor, mover) ||
     reacting.life !== 'living' ||
     !reacting.turn.reactionAvailable
   ) {

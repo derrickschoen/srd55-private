@@ -43,6 +43,40 @@ function livingPlayerId(state: Awaited<ReturnType<typeof fixture>>): CombatantId
 }
 
 describe('scripted party round planning and adherence', () => {
+  it('uses a typed Dodge default in round three when a one-round plan omitted a then-unavailable PC', async () => {
+    const initial = await fixture();
+    const actorId = initial.combatants.find((combatant) =>
+      combatant.profile.id === 'combatant:wizard')?.profile.id;
+    if (actorId === undefined) throw new Error('Fixture has no wizard.');
+    const roundOne: typeof initial = {
+      ...initial,
+      round: 1,
+      combatants: initial.combatants.map((combatant) => combatant.profile.id === actorId
+        ? { ...combatant, hitPoints: 0, life: 'stable' as const }
+        : combatant),
+    };
+    const oneRoundPlan = createScriptedPartyPlan(roundOne);
+    expect(oneRoundPlan.programs.some((program) => program.actorId === actorId)).toBe(false);
+    const roundThree: typeof initial = {
+      ...initial,
+      round: 3,
+      combatants: initial.combatants.map((combatant) => combatant.profile.id === actorId
+        ? { ...combatant, hitPoints: 1, life: 'living' as const }
+        : combatant),
+    };
+
+    const turn = materializeScriptedPartyTurn({
+      state: roundThree,
+      plan: oneRoundPlan,
+      actorId,
+    });
+
+    expect(turn.partyDefaultTurn).toBe('hold_position');
+    expect(turn.adherence).toBe('plan_invalidated');
+    expect(turn.reasonCodes).toEqual(['SCRIPTED_PROGRAM_MISSING_DEFAULT_HOLD_POSITION']);
+    expect(turn.reducerCommands).toEqual([{ type: 'end_turn', actor: actorId }]);
+  });
+
   it('follows the first PC planned primary when no state drift occurred', async () => {
     const generated = generateRoom(6_100_081, { initiativeProfile: 'derived_v1' }).encounter.state;
     const state = reduceEncounter(

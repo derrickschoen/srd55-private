@@ -3,7 +3,7 @@ import type { CombatantId } from '../../combat/values';
 import type { EngineQueryPort, TacticalAllocationChoice } from '../engine-query-port';
 import { availableEngineActorOptions, resolveEngineActorOption } from '../intent-resolver';
 import type {
-  EngineActorOption,
+  EngineOfferableOption,
   EngineOptionId,
   EngineTurnProposal,
   ResolvedTurnMechanics,
@@ -195,7 +195,7 @@ export function scoreTeamPlanEvaluations(
 }
 
 interface ResolvedChoice {
-  readonly option: EngineActorOption;
+  readonly option: EngineOfferableOption;
   readonly mechanics: ResolvedTurnMechanics;
 }
 
@@ -221,7 +221,7 @@ function resolvedChoice(
     : 'option_illegal';
 }
 
-function optionHasConcreteEffect(option: EngineActorOption, movementCostFeet: number): boolean {
+function optionHasConcreteEffect(option: EngineOfferableOption, movementCostFeet: number): boolean {
   if (movementCostFeet > 0) return true;
   return option.actionSlots.some((slot) => {
     switch (slot.use.kind) {
@@ -244,7 +244,7 @@ function hasConcreteEffect(choice: ResolvedChoice): boolean {
 }
 
 function intrinsicWastedReason(
-  option: EngineActorOption,
+  option: EngineOfferableOption,
   movementCostFeet: number,
 ): WastedTurnMarker['reason'] | null {
   if (optionHasConcreteEffect(option, movementCostFeet)) return null;
@@ -254,7 +254,7 @@ function intrinsicWastedReason(
 }
 
 export function classifyWastedTurn(
-  option: EngineActorOption,
+  option: EngineOfferableOption,
   movementCostFeet: number,
   hasNonWastedLegalAlternative: boolean,
 ): WastedTurnMarker | null {
@@ -287,7 +287,7 @@ function wastedTurnMarker(
   return classifyWastedTurn(choice.option, choice.mechanics.movementCostFeet, hasAlternative);
 }
 
-function hasSemanticAttackTarget(option: EngineActorOption): boolean {
+function hasSemanticAttackTarget(option: EngineOfferableOption): boolean {
   return option.actionSlots.some((slot) => {
     const use = slot.use;
     if (use.kind === 'attack') return use.target.kind !== 'combatant';

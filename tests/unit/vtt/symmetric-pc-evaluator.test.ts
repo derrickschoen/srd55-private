@@ -108,14 +108,14 @@ describe('symmetric scripted-PC evaluator', () => {
       attackerId: actor.id, targetId: alpha.id, attackerPosition: { column: 0, row: 0 }, targetPosition: { column: 1, row: 0 },
       range, attackBonus: 5, targetArmorClass: 18, criticalFloor: 20,
       damageTerms: [{ dice: { count: 1, sides: 8, modifier: 3 } }], attackerConditions: [], targetConditions: [],
-      attackerCanSeeTarget: true, targetCanSeeAttacker: true, rollModeSources: [],
+      attackerCanSeeTarget: true, targetCanSeeAttacker: true, rollModeSources: [], featureRollModeInput: null,
       target: { hitPoints: 1, usesDeathSaves: false },
     });
     const fullBeta = evaluateTacticalAttack({
       attackerId: actor.id, targetId: beta.id, attackerPosition: { column: 0, row: 0 }, targetPosition: { column: 1, row: 1 },
       range, attackBonus: 5, targetArmorClass: 10, criticalFloor: 20,
       damageTerms: [{ dice: { count: 1, sides: 8, modifier: 3 } }], attackerConditions: [], targetConditions: [],
-      attackerCanSeeTarget: true, targetCanSeeAttacker: true, rollModeSources: [],
+      attackerCanSeeTarget: true, targetCanSeeAttacker: true, rollModeSources: [], featureRollModeInput: null,
       target: { hitPoints: 40, usesDeathSaves: false },
     });
     if (fullAlpha.damage.status !== 'resolved' || fullBeta.damage.status !== 'resolved') {

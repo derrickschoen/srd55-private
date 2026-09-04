@@ -4,20 +4,31 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
   CONVERSATION_CLIS,
   CONVERSATION_EFFORTS,
+  CONVERSATION_TRANSPORTS,
   COMBAT_MODELS,
   runConversation,
   type ConversationCli,
   type ConversationEffort,
+  type ConversationRowPersisted,
   type ConversationRunOptions,
-  type ConversationTokenCounts,
+  type ConversationTransport,
   type CombatModel,
   type TurnContextRenderEvidence,
 } from './ai-dm-conversation';
-import type { IntelMode } from '../src/vtt/mcp/engine-server';
+import {
+  DEFAULT_OVERRIDE_POLICY,
+  OVERRIDE_POLICIES,
+  type IntelMode,
+  type OverridePolicy,
+} from '../src/vtt/mcp/engine-server';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
-import type { AgentSessionAdapter } from '../src/vtt/agent-session';
-import type { DmIntelCapture } from '../src/vtt/dm-tactical-intel';
-import type { LocalOpenAiConfig, LocalThinkMode } from '../src/vtt/agent-adapters/local-openai';
+import {
+  AGENT_SKILL_NAMES,
+  type AgentInstructionSource,
+  type AgentSessionAdapter,
+  type AgentSkillName,
+} from '../src/vtt/agent-session';
+import type { LocalOpenAiConfig } from '../src/vtt/agent-adapters/local-openai';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 import {
   applyRoomInitiativeProfile,
@@ -34,9 +45,9 @@ import {
   DEFAULT_RENDERER_PROFILE,
   circumstanceFeatureVectorSchema,
   rendererProfileSchema,
-  type CircumstanceFeatureVector,
   type RendererProfile,
 } from '../src/vtt/renderer-profile';
+import { DEFAULT_AI_DM_KB_ROOT } from '../src/vtt/knowledge-base-contract';
 
 export const ARENA_BASES = ['standard', 'hard', 'brutal', 'scenario'] as const;
 export type ArenaBasis = (typeof ARENA_BASES)[number];
@@ -50,17 +61,21 @@ export interface ArenaProbeVerdict {
   };
 }
 
-export interface ArenaArm {
+interface ArenaArmBase {
   readonly label: string;
   readonly model: string;
   readonly effort: ConversationEffort;
   readonly escalationModel: string | null;
   readonly escalationEffort: ConversationEffort | null;
   readonly combatModel: CombatModel;
+  readonly overridePolicy: OverridePolicy;
 }
 
-export interface ArenaConfig {
+export type ArenaArm = ArenaArmBase & AgentInstructionSource;
+
+interface ArenaConfigBase {
   readonly intelMode: IntelMode;
+  readonly overridePolicy: OverridePolicy;
   readonly rendererProfile: RendererProfile;
   readonly combatModel: CombatModel;
   readonly initiativeProfile: RoomInitiativeProfile;
@@ -69,6 +84,7 @@ export interface ArenaConfig {
   readonly reps: number;
   readonly seed: number;
   readonly cli: ConversationCli;
+  readonly decisionTransport: ConversationTransport;
   readonly model: string;
   readonly effort: ConversationEffort;
   readonly escalationModel: string | null;
@@ -78,7 +94,6 @@ export interface ArenaConfig {
   readonly cwd: string;
   readonly cliBin: string;
   readonly timeoutMs: number;
-  readonly kbPath: string | null;
   readonly reactionAskDefault: UnattendedReactionAskDefault;
   readonly basis: ArenaBasis;
   readonly interleave: boolean;
@@ -88,66 +103,32 @@ export interface ArenaConfig {
   readonly localOpenAi: LocalOpenAiConfig | null;
 }
 
-export interface ArenaRow {
-  readonly intelMode: IntelMode;
-  readonly rendererAttribution: import('./ai-dm-conversation').ConversationRow['rendererAttribution'];
-  readonly circumstanceFeatures: CircumstanceFeatureVector;
-  readonly combatModel: CombatModel;
-  readonly roundProtocolVersion: import('./ai-dm-conversation').ConversationRow['roundProtocolVersion'];
-  readonly startingRoomDigest: string;
+export type ArenaConfig = ArenaConfigBase & AgentInstructionSource;
+
+interface ArenaExtras {
   readonly seed: number;
   readonly basis: ArenaBasis;
   readonly probeVerdict: ArenaProbeVerdict | null;
   readonly arm: string;
-  readonly room: number;
-  readonly round: number;
-  readonly cli: ConversationCli;
-  readonly model: string;
-  readonly thinkMode: LocalThinkMode | null;
-  readonly kbHash: string | null;
-  readonly repoCommit: string;
-  readonly rawTurnContext: string;
-  readonly turnContextGranularity: 'full' | 'turn_delta';
-  readonly snippetHash: string;
-  readonly snippetSetHash: string;
-  readonly suggestedPlay: import('./ai-dm-conversation').ConversationSuggestedPlay | null;
-  readonly suggestionAdopted: import('./ai-dm-conversation').ConversationSuggestionAdoption | null;
-  readonly contextRevision: number;
-  readonly projectionRevision: number;
-  /** Codex rollout ID; locate its full log with a rollout-*-<id>.jsonl glob. */
-  readonly sessionId: string | null;
-  readonly escalationSessionId: string | null;
-  readonly outcome: 'authorized' | 'auto_resolved' | 'awaiting_dm_adjudication' | 'refused' | 'service_null' | 'local_error';
-  readonly proposalId: string | null;
   readonly wall: number;
-  readonly tokens: ConversationTokenCounts;
-  readonly refusals: readonly string[];
-  readonly toolCalls: number;
-  readonly callsPerRound: number;
-  readonly agentDispatched: boolean;
-  readonly flapRetries: 0 | 1 | 2;
-  readonly serviceNull: boolean;
-  readonly contextTruncated: boolean;
-  readonly plannedBy: import('./ai-dm-conversation').ConversationPlannerAttribution | null;
-  readonly plannerLabel: import('./ai-dm-conversation').ConversationRow['plannerLabel'];
-  readonly autoSubmitBlocks: import('./ai-dm-conversation').ConversationRow['autoSubmitBlocks'];
-  readonly escalated: boolean;
-  readonly escalationModel: string | null;
-  readonly authorizedPlan: readonly import('./ai-dm-conversation').ConversationAuthorizedActorPlan[] | null;
-  readonly roundNarrative: string | null;
-  readonly chainEvidence: import('./ai-dm-conversation').ConversationChainEvidence;
-  readonly initiativeOrder: import('./ai-dm-conversation').ConversationRow['initiativeOrder'];
-  readonly partyPolicyHash: string | null;
-  readonly materialityPolicyHash: string | null;
-  readonly engineIntel: DmIntelCapture | null;
-  readonly adjustmentBudget: number;
-  readonly teamPlans: import('./ai-dm-conversation').ConversationTeamPlans;
-  readonly pcTurns: readonly import('./ai-dm-conversation').ConversationPcTurn[];
-  readonly adjustments: readonly import('./ai-dm-conversation').ConversationAdjustment[];
-  readonly monsterSegments: readonly import('./ai-dm-conversation').ConversationMonsterSegment[];
-  readonly roundTotals: import('./ai-dm-conversation').ConversationRow['roundTotals'];
-  readonly rlData?: import('./ai-dm-conversation').ConversationRlData;
 }
+
+function conversationPart(row: ConversationRowPersisted) {
+  return {
+    ...row,
+    hiddenOptions: structuredClone(row.hiddenOptions),
+    rendererAttribution: {
+      policyVersion: row.rendererAttribution.policyVersion,
+      profile: rendererProfileSchema.parse(row.rendererAttribution.profile),
+    },
+    circumstanceFeatures: circumstanceFeatureVectorSchema.parse(row.circumstanceFeatures),
+    kbReads: mapConversationKbReads(row),
+    callUsage: structuredClone(row.callUsage),
+  } satisfies ConversationRowPersisted;
+}
+
+export type ArenaConversationPart = ReturnType<typeof conversationPart>;
+export type ArenaRow = ArenaConversationPart & ArenaExtras;
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
   const value = argv[index + 1];
@@ -170,9 +151,39 @@ function validateKbPath(cwd: string, candidate: string): void {
   if (pathIsInside(resolve(cwd, 'content/cc-by-sa'), candidate)) {
     throw new TypeError('--kb cannot use content/cc-by-sa as a knowledge-base source.');
   }
-  if (pathIsInside(cwd, candidate) && !pathIsInside(resolve(cwd, 'tests/fixtures'), candidate)) {
-    throw new TypeError('--kb must be outside the repository working tree or within tests/fixtures.');
+  if (!pathIsInside(resolve(cwd, 'tests/fixtures/ai-dm-kb'), candidate)) {
+    throw new TypeError('--kb must name a root under tests/fixtures/ai-dm-kb.');
   }
+}
+
+function parsedInstructionSource(
+  values: ReadonlyMap<string, string>,
+  cwd: string,
+  cli: ConversationCli,
+): AgentInstructionSource {
+  const source = values.get('--instruction-source') ?? (values.has('--kb') ? 'kb' : 'none');
+  const skill = values.get('--skill');
+  if (source !== 'none' && source !== 'kb' && source !== 'skill') {
+    throw new TypeError('--instruction-source must be none, kb, or skill.');
+  }
+  if (source !== 'skill' && skill !== undefined) {
+    throw new TypeError('--skill requires --instruction-source skill.');
+  }
+  if (source === 'skill') {
+    if (cli !== 'codex') throw new TypeError('--instruction-source skill requires --cli codex.');
+    if (values.has('--kb')) throw new TypeError('--kb cannot be combined with --instruction-source skill.');
+    if (!AGENT_SKILL_NAMES.includes(skill as AgentSkillName)) {
+      throw new TypeError('--skill must be engine-submission or dm-round.');
+    }
+    return { instructionSource: 'skill', skill: skill as AgentSkillName, kbPath: null };
+  }
+  if (source === 'kb') {
+    const kbPath = resolve(cwd, values.get('--kb') ?? DEFAULT_AI_DM_KB_ROOT);
+    validateKbPath(cwd, kbPath);
+    return { instructionSource: 'kb', skill: null, kbPath };
+  }
+  if (values.has('--kb')) throw new TypeError('--kb requires --instruction-source kb.');
+  return { instructionSource: 'none', skill: null };
 }
 
 export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): ArenaConfig {
@@ -184,6 +195,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   let generateMissingRooms = false;
   const rawArms: string[] = [];
   const rawArmCombatModels: string[] = [];
+  const rawArmOverridePolicies: string[] = [];
   for (let index = 0; index < argumentsValue.length; index += 1) {
     const option = argumentsValue[index];
     if (option === '--dry-run') { dryRun = true; continue; }
@@ -194,16 +206,20 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--rooms', '--reps', '--seed', '--cli', '--model', '--effort', '--out',
       '--escalation-model', '--escalation-effort',
       '--cli-bin', '--timeout-ms', '--kb',
+      '--instruction-source', '--skill',
       '--reaction-ask-default',
-      '--combat-model', '--initiative-profile', '--arm-combat-model',
+      '--transport',
+      '--combat-model', '--initiative-profile', '--arm-combat-model', '--arm-override-policy',
       '--party-policy',
       '--intel-mode',
+      '--override-policy',
       '--renderer-profile',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
     if (option === '--arm') rawArms.push(value);
     else if (option === '--arm-combat-model') rawArmCombatModels.push(value);
+    else if (option === '--arm-override-policy') rawArmOverridePolicies.push(value);
     else values.set(option ?? '', value);
     index += 1;
   }
@@ -230,6 +246,13 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     throw new TypeError('--escalation-effort must be low, medium, high, or xhigh.');
   }
   const selectedCli = cli as ConversationCli;
+  const transport = values.get('--transport') ?? 'mcp_minimal';
+  if (!CONVERSATION_TRANSPORTS.includes(transport as ConversationTransport)) {
+    throw new TypeError('--transport must be mcp_minimal or final_indices.');
+  }
+  if (transport === 'final_indices' && selectedCli !== 'codex') {
+    throw new TypeError('--transport final_indices currently requires --cli codex.');
+  }
   const hasLocalOption = values.has('--local-base-url') || values.has('--local-model') ||
     values.has('--local-api-key') || values.has('--local-think');
   if (selectedCli !== 'local-openai' && hasLocalOption) {
@@ -252,11 +275,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
         ...(values.has('--local-api-key') ? { apiKey: values.get('--local-api-key') ?? '' } : {}),
       }
     : null;
-  const kbPath = values.has('--kb') ? resolve(values.get('--kb') ?? '') : null;
-  if (kbPath !== null) validateKbPath(cwd, kbPath);
-  if (captureRlData && kbPath !== null && !pathIsInside(resolve(cwd, 'tests/fixtures'), kbPath)) {
-    throw new TypeError('--capture-rl-data requires a project fixture KB or no KB.');
-  }
+  const instructionSource = parsedInstructionSource(values, cwd, selectedCli);
   const reactionAskDefault = values.get('--reaction-ask-default') ?? 'decline';
   if (reactionAskDefault !== 'decline' && reactionAskDefault !== 'take') {
     throw new TypeError('--reaction-ask-default must be decline or take.');
@@ -281,6 +300,10 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (intelMode !== 'full' && intelMode !== 'off') {
     throw new TypeError('--intel-mode must be full or off.');
   }
+  const overridePolicy = values.get('--override-policy') ?? DEFAULT_OVERRIDE_POLICY;
+  if (!OVERRIDE_POLICIES.includes(overridePolicy as OverridePolicy)) {
+    throw new TypeError('--override-policy must be strict or typed_reason.');
+  }
   const rendererProfile = values.has('--renderer-profile')
     ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
     : DEFAULT_RENDERER_PROFILE;
@@ -293,6 +316,18 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     }
     if (armCombatModels.has(label)) throw new TypeError(`Duplicate --arm-combat-model for ${label}.`);
     armCombatModels.set(label, model as CombatModel);
+  }
+  const armOverridePolicies = new Map<string, OverridePolicy>();
+  for (const raw of rawArmOverridePolicies) {
+    const [label, policy, extra] = raw.split(':');
+    if (label === undefined || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) ||
+      policy === undefined || extra !== undefined || !OVERRIDE_POLICIES.includes(policy as OverridePolicy)) {
+      throw new TypeError('--arm-override-policy must use label:strict|typed_reason syntax.');
+    }
+    if (armOverridePolicies.has(label)) {
+      throw new TypeError(`Duplicate --arm-override-policy for ${label}.`);
+    }
+    armOverridePolicies.set(label, policy as OverridePolicy);
   }
   const arms = rawArms.map((raw): ArenaArm => {
     const [label, armModel, armEffort, armEscalationModel, armEscalationEffort, extra] = raw.split(':');
@@ -310,6 +345,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       throw new TypeError('--arm escalation effort must be low, medium, high, or xhigh.');
     }
     return {
+      ...instructionSource,
       label,
       model: armModel,
       effort: armEffort as ConversationEffort,
@@ -318,6 +354,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
         ? null
         : armEscalationEffort as ConversationEffort,
       combatModel: armCombatModels.get(label) ?? combatModel as CombatModel,
+      overridePolicy: armOverridePolicies.get(label) ?? overridePolicy as OverridePolicy,
     };
   });
   if (new Set(arms.map((arm) => arm.label)).size !== arms.length) {
@@ -337,8 +374,16 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (!interleave && armCombatModels.size > 0) {
     throw new TypeError('--arm-combat-model is only valid with --interleave.');
   }
+  const unknownArmPolicy = [...armOverridePolicies.keys()].find((label) => !armLabels.has(label));
+  if (unknownArmPolicy !== undefined) {
+    throw new TypeError(`--arm-override-policy names unknown arm ${unknownArmPolicy}.`);
+  }
+  if (!interleave && armOverridePolicies.size > 0) {
+    throw new TypeError('--arm-override-policy is only valid with --interleave.');
+  }
   return {
     intelMode,
+    overridePolicy: overridePolicy as OverridePolicy,
     rendererProfile,
     combatModel: combatModel as CombatModel,
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
@@ -347,6 +392,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     reps: positiveInteger(values.get('--reps') ?? '', '--reps'),
     seed,
     cli: selectedCli,
+    decisionTransport: transport as ConversationTransport,
     model: localOpenAi?.model ?? values.get('--model') ?? (selectedCli === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
     effort: effort as ConversationEffort,
     escalationModel,
@@ -356,7 +402,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     cwd: resolve(cwd),
     cliBin: values.get('--cli-bin') ?? (selectedCli === 'codex' ? 'codex' : selectedCli === 'claude-code' ? 'claude' : ''),
     timeoutMs: positiveInteger(values.get('--timeout-ms') ?? '120000', '--timeout-ms'),
-    kbPath,
+    ...instructionSource,
     reactionAskDefault,
     basis: basis as ArenaBasis,
     interleave,
@@ -373,6 +419,7 @@ export interface ArenaRunOptions extends Omit<
 > {
   readonly adapterByArm?: Readonly<Record<string, AgentSessionAdapter>>;
   readonly heartbeat?: (line: string) => void;
+  readonly fixtureStates?: readonly import('../src/combat/encounter').EncounterState[];
 }
 
 function stdoutHeartbeat(line: string): void {
@@ -438,73 +485,25 @@ export function extractArenaProbeVerdict(
   };
 }
 
-function arenaRows(
+export function mapConversationKbReads(
+  row: Pick<import('./ai-dm-conversation').ConversationRow, 'kbReads'>,
+): readonly import('../src/vtt/mcp/knowledge-base').KbReadRecord[] {
+  return structuredClone(row.kbReads);
+}
+
+export function arenaRows(
   config: ArenaConfig,
-  rows: readonly import('./ai-dm-conversation').ConversationRow[],
+  rows: readonly ConversationRowPersisted[],
   arm: string,
   seeds: readonly number[],
 ): readonly ArenaRow[] {
   return rows.map((row): ArenaRow => ({
-    intelMode: row.intelMode,
-    rendererAttribution: {
-      policyVersion: row.rendererAttribution.policyVersion,
-      profile: rendererProfileSchema.parse(row.rendererAttribution.profile),
-    },
-    circumstanceFeatures: circumstanceFeatureVectorSchema.parse(row.circumstanceFeatures),
-    combatModel: row.combatModel,
-    roundProtocolVersion: row.roundProtocolVersion,
-    startingRoomDigest: row.startingRoomDigest,
+    ...conversationPart(row),
     seed: seeds[row.room - 1]!,
     basis: config.basis,
     probeVerdict: extractArenaProbeVerdict(config.basis, row.authorizedPlan),
     arm,
-    room: row.room,
-    round: row.round,
-    cli: row.cli,
-    model: row.model,
-    thinkMode: row.thinkMode,
-    kbHash: row.kbHash,
-    repoCommit: row.repoCommit,
-    rawTurnContext: row.rawTurnContext,
-    turnContextGranularity: row.turnContextGranularity,
-    snippetHash: row.snippetHash,
-    snippetSetHash: row.snippetSetHash,
-    suggestedPlay: row.suggestedPlay,
-    suggestionAdopted: row.suggestionAdopted,
-    contextRevision: row.contextRevision,
-    projectionRevision: row.projectionRevision,
-    sessionId: row.sessionId,
-    escalationSessionId: row.escalationSessionId,
-    outcome: row.outcome,
-    proposalId: row.proposalId,
     wall: row.wallPerCreature,
-    tokens: row.tokens,
-    refusals: row.refusals,
-    toolCalls: row.toolCalls,
-    callsPerRound: row.callsPerRound,
-    agentDispatched: row.agentDispatched,
-    flapRetries: row.flapRetries,
-    serviceNull: row.serviceNull,
-    contextTruncated: row.contextTruncated,
-    plannedBy: row.plannedBy,
-    plannerLabel: row.plannerLabel,
-    autoSubmitBlocks: row.autoSubmitBlocks,
-    escalated: row.escalated,
-    escalationModel: row.escalationModel,
-    authorizedPlan: row.authorizedPlan,
-    roundNarrative: row.roundNarrative,
-    chainEvidence: row.chainEvidence,
-    initiativeOrder: row.initiativeOrder,
-    partyPolicyHash: row.partyPolicyHash,
-    materialityPolicyHash: row.materialityPolicyHash,
-    engineIntel: row.engineIntel,
-    adjustmentBudget: row.adjustmentBudget,
-    teamPlans: row.teamPlans,
-    pcTurns: row.pcTurns,
-    adjustments: row.adjustments,
-    monsterSegments: row.monsterSegments,
-    roundTotals: row.roundTotals,
-    ...(row.rlData === undefined ? {} : { rlData: row.rlData }),
   }));
 }
 
@@ -519,10 +518,15 @@ function conversationConfig(
     readonly escalationEffort: ConversationEffort | null;
     readonly outPath: string;
     readonly combatModel?: CombatModel;
+    readonly overridePolicy?: OverridePolicy;
+    readonly instruction?: AgentInstructionSource;
   },
 ): import('./ai-dm-conversation').ConversationConfig {
+  const instructionSource: AgentInstructionSource = overrides.instruction ?? config;
   return {
+    ...instructionSource,
     intelMode: config.intelMode,
+    overridePolicy: overrides.overridePolicy ?? config.overridePolicy,
     rendererProfile: config.rendererProfile,
     combatModel: overrides.combatModel ?? config.combatModel,
     initiativeProfile: config.initiativeProfile,
@@ -531,6 +535,7 @@ function conversationConfig(
     rooms: overrides.rooms,
     rounds: overrides.rounds,
     cli: config.cli,
+    decisionTransport: config.decisionTransport,
     model: overrides.model,
     effort: overrides.effort,
     escalationModel: overrides.escalationModel,
@@ -540,7 +545,6 @@ function conversationConfig(
     cwd: config.cwd,
     cliBin: config.cliBin,
     timeoutMs: config.timeoutMs,
-    kbPath: config.kbPath,
     reactionAskDefault: config.reactionAskDefault,
     captureRlData: config.captureRlData,
     localOpenAi: config.localOpenAi === null ? null : {
@@ -554,14 +558,18 @@ export async function runArena(
   config: ArenaConfig,
   options: ArenaRunOptions = {},
 ): Promise<readonly ArenaRow[]> {
-  const states = await frozenRoomStates(config);
   const seeds = Array.from({ length: config.rooms }, (_unused, index) => config.seed + index);
   const {
     adapterByArm,
     heartbeat = stdoutHeartbeat,
     rendererEvidenceCache = new Map<string, TurnContextRenderEvidence>(),
+    fixtureStates,
     ...conversationOptions
   } = options;
+  const states = fixtureStates ?? await frozenRoomStates(config);
+  if (states.length !== config.rooms) {
+    throw new RangeError(`Arena requires exactly ${String(config.rooms)} fixture states; received ${String(states.length)}.`);
+  }
   let rows: readonly ArenaRow[];
   if (!config.interleave) {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dnd-ai-dm-arena-independent-'));
@@ -614,6 +622,8 @@ export async function runArena(
             escalationEffort: arm.escalationEffort ?? config.escalationEffort,
             outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-${arm.label}.jsonl`),
             combatModel: arm.combatModel,
+            overridePolicy: arm.overridePolicy,
+            instruction: arm,
           }), {
             ...conversationOptions,
             rendererEvidenceCache,

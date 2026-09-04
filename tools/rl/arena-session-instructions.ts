@@ -1,4 +1,4 @@
-/** The arena supplies the selected KB verbatim as its session-level instructions. */
-export function buildArenaSessionInstructions(knowledgeBase: string | null): string {
-  return knowledgeBase ?? '';
+/** The arena supplies the loaded cold-start KB text verbatim as session-level instructions. */
+export function buildArenaSessionInstructions(startupInstructions: string | null): string {
+  return startupInstructions ?? '';
 }

@@ -4,7 +4,7 @@ import type { GridCell } from '../combat/grid';
 import type { CombatantId, EngineZoneId } from '../combat/values';
 import { sha256 } from '../crypto/sha256';
 import { enginePlanningCombatantFacts, enginePlanningSemanticZones } from './engine-query-port';
-import { resolveEngineActorOption, type EngineActorOption } from './intent-resolver';
+import { resolveEngineActorOption, type EngineOfferableOption } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
 import type { GuardConditionIdentity } from './speculative-plan-types';
 
@@ -32,7 +32,7 @@ export type PlanRelevanceTurnEvent =
 export interface PlanRelevanceContext {
   readonly state: EncounterState;
   readonly openMonsterActorIds: readonly CombatantId[];
-  readonly remainingOptions: readonly EngineActorOption[];
+  readonly remainingOptions: readonly EngineOfferableOption[];
   readonly explicitEngagementAnchors?: readonly PlanRelevanceAnchor[];
   readonly turnEvents?: readonly PlanRelevanceTurnEvent[];
   readonly additionalRelevantCombatantIds?: readonly CombatantId[];
@@ -95,7 +95,7 @@ function canonicalConditions(conditions: readonly GuardConditionIdentity[]): rea
   return [...conditions].sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
 }
 
-function proposalRecord(state: EncounterState, option: EngineActorOption): PlanRelevanceProposalRecord {
+function proposalRecord(state: EncounterState, option: EngineOfferableOption): PlanRelevanceProposalRecord {
   const resolution = resolveEngineActorOption(state, option);
   return resolution.valid
     ? {
@@ -117,7 +117,7 @@ function proposalRecord(state: EncounterState, option: EngineActorOption): PlanR
       };
 }
 
-function configuredCombatantAnchors(options: readonly EngineActorOption[]): readonly CombatantId[] {
+function configuredCombatantAnchors(options: readonly EngineOfferableOption[]): readonly CombatantId[] {
   return options.flatMap((option) => {
     const anchor = option.movement.engagement.anchor;
     return anchor?.kind === 'combatant' ? [anchor.combatantId] : [];

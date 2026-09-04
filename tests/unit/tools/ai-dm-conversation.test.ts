@@ -1,19 +1,24 @@
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   agentSessionIdFromCli,
+  contextTokenCount,
+  turnInputTotal,
+  measuredContextRolloverThreshold,
   type AgentInvocation,
   type AgentSessionAdapter,
   type AgentSessionBinding,
   type AgentTurnResult,
 } from '../../../src/vtt/agent-session';
+import { AgentSessionLifecycle } from '../../../src/vtt/agent-session-lifecycle';
 import {
   parseConversationArgs,
   proposalResolutionDivergence,
   runConversation,
+  structuredFinalDecisionPhase,
 } from '../../../tools/ai-dm-conversation';
+import { buildRerunPacket } from '../../../tools/ai-dm-rerun-packet';
 import { mkdtempSync, readFileSync, writeFileSync } from '../../helpers/test-filesystem';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { armorClass, encounterSessionId, type CombatantId } from '../../../src/combat/values';
@@ -32,7 +37,10 @@ import { mcpRequestMeta, type McpHandler } from '../../../src/vtt/mcp/handler';
 import { reduceSessionEncounter } from '../../../src/vtt/session-encounter-reducer';
 import {
   importSavedSession,
+  exportSavedSession,
+  EncounterSessionJournal,
   MemoryBrowserSessionStore,
+  MemoryMirrorSink,
 } from '../../../src/vtt/session-persistence';
 import { codexArgv } from '../../../src/vtt/agent-adapters/codex';
 import {
@@ -42,12 +50,27 @@ import {
 import { projectActorKnowledge } from '../../../src/vtt/intel/actor-knowledge';
 import { actorOpportunityReport } from '../../../src/vtt/intel/opportunity-cost';
 import { canonicalEngineQueryPort } from '../../../src/vtt/engine-query-port';
+import { engineActorOptions } from '../../../src/vtt/turn-option-registry';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
 import { alternatingInitiativeRoom } from '../../fixtures/initiative-segments/alternating-room';
 import {
   createScriptedPartyPlan,
   type ScriptedPartyDecisionPolicy,
 } from '../../../src/vtt/scripted-party-round';
+import {
+  AI_DM_KB_FIXTURE_DIRECTORY,
+  DEFAULT_AI_DM_KB_ROOT,
+  KB_SUBJECTS,
+} from '../../../src/vtt/knowledge-base-contract';
+import { declareTestInputs } from '../../helpers/test-inputs';
+import { sha256 } from '../../../src/crypto/sha256';
+
+const kbInputs = declareTestInputs({ fixtures: [
+  'tests/fixtures/ai-dm-kb/ai-dm-core.md',
+  'tests/fixtures/ai-dm-kb/tactics.md',
+  'tests/fixtures/ai-dm-skills/engine-submission/SKILL.md',
+] });
+const DEFAULT_KB_HASH = '00776f3f2d4cd7468a1eb2a63028e9c3f846b43b14a4e5787d3e9c94e02633c0';
 
 async function runConversationWithPartyPolicy(
   decisionPolicy: ScriptedPartyDecisionPolicy,
@@ -88,6 +111,78 @@ function objectValue(value: unknown, label: string): Readonly<Record<string, unk
   return value as Readonly<Record<string, unknown>>;
 }
 
+class BoilerplateThenValidStructuredFinalAdapter implements AgentSessionAdapter {
+  readonly kind = 'codex' as const;
+  decisionAttempts = 0;
+
+  async probe() { return { present: true, version: 'STRUCTURED-REASON-TEST' }; }
+
+  async start(invocation: AgentInvocation): Promise<AgentTurnResult> {
+    return this.dispatch(
+      agentSessionIdFromCli(`codex:structured-reason:${invocation.runId}`),
+      invocation,
+    );
+  }
+
+  async resume(
+    binding: AgentSessionBinding,
+    invocation: AgentInvocation,
+  ): Promise<AgentTurnResult> {
+    return this.dispatch(binding.sessionId, invocation);
+  }
+
+  classifyFailure(): 'unknown' { return 'unknown'; }
+
+  private dispatch(
+    sessionId: AgentTurnResult['resumeSessionId'],
+    invocation: AgentInvocation,
+  ): AgentTurnResult {
+    if (invocation.output.kind !== 'structured_final') {
+      throw new TypeError('Structured reason adapter received a tool-driven invocation.');
+    }
+    this.decisionAttempts += 1;
+    const manifest = JSON.parse(readFileSync(invocation.launcherToken, 'utf8')) as EngineMcpLauncherManifest;
+    const marker = '[DECISION_CATALOG]\n';
+    const markerIndex = invocation.prompt.lastIndexOf(marker);
+    if (markerIndex < 0) throw new TypeError('Structured reason adapter received no decision catalog.');
+    const catalog = objectValue(
+      JSON.parse(invocation.prompt.slice(markerIndex + marker.length)) as unknown,
+      'structured reason decision catalog',
+    );
+    const actors = catalog['actors'];
+    if (typeof catalog['catalogDigest'] !== 'string' || !Array.isArray(actors)) {
+      throw new TypeError('Structured reason adapter received a malformed decision catalog.');
+    }
+    const reason = this.decisionAttempts === 1
+      ? 'Use the offered legal option for this actor.'
+      : 'Hold the doorway so the injured scout can disengage safely.';
+    const proposals = Object.fromEntries(actors.map((value) => {
+      const actor = objectValue(value, 'structured reason decision actor');
+      if (typeof actor['actorId'] !== 'string') {
+        throw new TypeError('Structured reason decision actor omitted its id.');
+      }
+      return [actor['actorId'], {
+        primaryOptionIndex: 0,
+        fallbackOptionIndex: manifest.phase === 'correction' ? null : 1,
+        override: null,
+        reason,
+      }];
+    }));
+    return {
+      resumeSessionId: sessionId,
+      sessionId: null,
+      finalText: JSON.stringify({
+        catalogDigest: catalog['catalogDigest'],
+        reaction_guidance: { inherit: true },
+        proposals,
+        rationale: null,
+      }),
+      usage: null,
+      exit: 'completed',
+    };
+  }
+}
+
 function serializedToolCall(
   handler: McpHandler,
   name: string,
@@ -119,7 +214,10 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
   readonly resumeInvocations: AgentInvocation[] = [];
   #startCount = 0;
 
-  constructor(private readonly choice: 'use_action_dodge' | 'targeted_web' | 'attack' | 'invalid_then_dodge' | 'option_shaped_end_turn') {}
+  constructor(
+    private readonly choice: 'use_action_dodge' | 'targeted_web' | 'attack' | 'invalid_then_dodge' | 'option_shaped_end_turn',
+    private readonly usageInputs: number[] = [],
+  ) {}
 
   async probe() { return { present: true, version: 'SERIALIZED-TEST' }; }
 
@@ -178,7 +276,6 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
           );
     if (context === null) throw new Error('Serialized turn delta could not be reconstructed.');
     this.turnContexts.push(context);
-    const stateRef = objectValue(context['state_ref'], 'serialized state ref');
     const actors = runtime.feed.current().request?.actors;
     if (actors === undefined) throw new Error('Serialized round request has no actors.');
     let specialSubmitted = false;
@@ -196,14 +293,22 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       const selected = special ?? options.find((option) => option.actionSlots.some((slot) =>
         slot.slot === 'main' && slot.use.kind === requestedKind));
       if (selected === undefined) throw new Error(`Serialized round has no ${requestedKind} option for ${actorId}.`);
+      const fallback = options.find((option) => option.optionId !== selected.optionId);
+      if (manifest.phase === 'initial' && fallback === undefined) {
+        throw new Error(`Serialized round has no independent fallback option for ${actorId}.`);
+      }
       this.submittedOptions.push({ option_id: selected.optionId, label: selected.label });
       return {
         actor_id: actorId,
         expected_revision: manifest.revision,
         primary_option_id: selected.optionId,
-        fallback_option_id: null,
+        fallback_option_id: manifest.phase === 'correction' ? null : fallback?.optionId ?? null,
+        reason: `Choose ${selected.label} to exercise the serialized decision path.`,
         override_justification: requestedKind === 'dodge' || requestedKind === 'end_turn'
-          ? { reason: 'objective', note: 'Serialized fixture intentionally selects a dominated option.' }
+          ? {
+              kind: 'missing_metric',
+              id: 'expected_damage_milli',
+            }
           : null,
       };
     });
@@ -211,10 +316,6 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       throw new Error(`Serialized round has no requested actor with a resolvable ${this.choice}.`);
     }
     const submitted = serializedToolCall(runtime.handler, 'engine.submit_round_proposals', {
-      state_ref: stateRef,
-      request_id: manifest.requestId,
-      phase: manifest.phase,
-      idempotency_key: `serialized-${this.choice}-${manifest.phase}`,
       proposals,
     });
     if (submitted['status'] !== 'proposed' || runtime.proposals.length !== 1) {
@@ -247,7 +348,14 @@ class SerializedRoundTripAdapter implements AgentSessionAdapter {
       resumeSessionId: sessionId,
       sessionId,
       finalText: 'SERIALIZED-TEST',
-      usage: null,
+      usage: this.usageInputs.length === 0 ? null : {
+        turnInputTotal: turnInputTotal(this.usageInputs[0]!),
+        contextInputTokens: contextTokenCount(this.usageInputs.shift()!),
+        modelContextWindow: null,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+      },
       exit: 'completed',
     };
   }
@@ -346,11 +454,17 @@ describe('AI-DM engine MCP conversation runner', () => {
       action_slots: [{ slot: 'main', use: { kind: 'dodge' } }],
     }));
     expect(rejectionReasons).not.toContain('The engine could not authorize this proposal mechanic.');
-    expect(result.rows[0]).toEqual(expect.objectContaining({ outcome: 'authorized', refusals: [] }));
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      outcome: 'authorized', refusals: [], overridePolicy: 'typed_reason',
+    }));
     expect(result.rows[0]).toEqual(expect.objectContaining({
       plannedBy: { model: 'gpt-5.6-sol', effort: 'medium' },
       escalated: false,
       escalationModel: null,
+      rationale: null,
+      authorizedPlan: expect.arrayContaining([expect.objectContaining({
+        reason: expect.stringContaining('exercise the serialized decision path'),
+      })]),
     }));
     expect(result.rows[0]?.stateBinding.authorization).toEqual(result.rows[0]?.stateBinding.capsule);
   });
@@ -440,9 +554,107 @@ describe('AI-DM engine MCP conversation runner', () => {
       .toContain('Dash-to-close counts as offense for out-of-reach melee');
     expect(tieredAdapter.startInvocations[1]?.instructions)
       .toContain('Dodge is allowed only when that actor has no resolvable action');
+    const escalation = tieredAdapter.startInvocations[1];
+    if (escalation?.instructions === undefined || escalation.instructions === null) {
+      throw new Error('Configured escalation omitted its typed startup instructions.');
+    }
+    expect(escalation.bootstrap).toMatchObject({
+      kind: 'escalation', knowledgeBaseBundleHash: DEFAULT_KB_HASH,
+      stateDelivery: 'full_engine_context',
+    });
+    const startupOrder = [
+      escalation.instructions.indexOf('## Role'),
+      escalation.instructions.indexOf('When a melee creature cannot reach an enemy'),
+      escalation.instructions.indexOf('[SESSION_DIGEST]'),
+      escalation.instructions.indexOf('[FULL_ENGINE_CONTEXT]'),
+      escalation.instructions.indexOf('OFFENSIVE corrected round'),
+    ];
+    expect(startupOrder.every((position) => position >= 0)).toBe(true);
+    expect(startupOrder).toEqual([...startupOrder].sort((left, right) => left - right));
     expect(tieredAdapter.resumeInvocations).toHaveLength(0);
     expect(untieredAdapter.startInvocations).toHaveLength(1);
     expect(untieredAdapter.resumeInvocations).toHaveLength(1);
+  });
+
+  it('constructs no escalation adapter or bootstrap for the exact post-shift no-flag control shape (mutation: implicit escalation default)', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-no-escalation-'));
+    const adapter = new SerializedRoundTripAdapter('invalid_then_dodge');
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--model', 'gpt-5.6-luna', '--effort', 'low',
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+    expect({ escalationModel: config.escalationModel, escalationEffort: config.escalationEffort })
+      .toEqual({ escalationModel: null, escalationEffort: null });
+
+    const result = await runConversation(config, {
+      adapter,
+      roomStates: [generateRoom(3_943_006).encounter.state],
+    });
+
+    expect(adapter.startInvocations).toHaveLength(1);
+    expect(adapter.startInvocations[0]?.bootstrap).toEqual({ kind: 'cold_start' });
+    expect(adapter.resumeInvocations).toHaveLength(1);
+    expect(adapter.resumeInvocations[0]?.bootstrap).toBeUndefined();
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      escalated: false,
+      escalationModel: null,
+      escalationSessionId: null,
+    }));
+  });
+
+  it('keeps one sitting across rooms, rolls only at threshold, and explicit end prevents resume', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-sitting-rollover-'));
+    const adapter = new SerializedRoundTripAdapter('use_action_dodge', [1_000, 73]);
+    const config = parseConversationArgs([
+      '--rooms', '2', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+    const policy = {
+      kind: 'measured',
+      threshold: measuredContextRolloverThreshold(1_000),
+      evidence: 'SIMULATED conversation boundary',
+    } as const;
+    const result = await runConversation(config, {
+      adapter,
+      contextRolloverPolicy: policy,
+      endSession: true,
+    });
+
+    expect(adapter.startInvocations).toHaveLength(2);
+    expect(adapter.resumeInvocations).toHaveLength(0);
+    expect(adapter.startInvocations[1]?.bootstrap).toMatchObject({ kind: 'context_rollover' });
+    expect(result.rows.map((row) => ({
+      room: row.room,
+      generation: row.agentSessionGeneration,
+      rolled: row.contextRolloverOccurred,
+    }))).toEqual([
+      { room: 1, generation: 0, rolled: false },
+      { room: 2, generation: 1, rolled: true },
+    ]);
+    expect(result.binding?.sessionId).not.toBe(agentSessionIdFromCli(
+      'codex:serialized:encounter:ai-dm-conversation:session-1',
+    ));
+
+    const store = new MemoryBrowserSessionStore();
+    const runId = importSavedSession(store, result.journalExport);
+    const journal = EncounterSessionJournal.resume(runId, store, new MemoryMirrorSink()).journal;
+    expect(journal.ended()).toBe(true);
+    const lifecycle = new AgentSessionLifecycle(journal, adapter, 1, policy);
+    await expect(lifecycle.resumeRound({
+      instructionSource: 'none',
+      skill: null,
+      runId,
+      prompt: 'must not dispatch after explicit end',
+      model: config.model,
+      reasoningEffort: config.effort,
+      sessionProfile: 'test',
+      callPhase: 'initial',
+      output: { kind: 'tool_driven' },
+      launcherToken: 'SIMULATED-unused',
+      timeoutMs: 1,
+    }, new AbortController().signal)).rejects.toThrow('Explicitly ended sitting');
+    expect(adapter.startInvocations).toHaveLength(2);
   });
 
   it.each([
@@ -607,7 +819,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     if (option === undefined) throw new Error('Room 3943006 Dodge option is absent.');
     const proposal = {
       actorId: actor.profile.id, expectedRevision: state.revision, primaryOptionId: option.optionId,
-      fallbackOptionId: null, overrideJustification: null,
+      fallbackOptionId: null, reason: 'Exercise the fixture proposal path.', overrideJustification: null,
     };
     const proposalTime = pureTurnProposalResolver.resolve(state, proposal);
     if (!proposalTime.valid) throw new Error('Room 3943006 Dodge proposal did not resolve.');
@@ -796,7 +1008,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(result.rows[0]?.toolCalls).toBe(2);
     expect(result.rows[0]?.agentDispatched).toBe(true);
     expect(result.rows[0]).toEqual(expect.objectContaining({
-      plannedBy: null, plannerLabel: 'engine_default', autoSubmitBlocks: [],
+      plannedBy: null, planner: 'engine_default', autoSubmitBlocks: [],
       escalated: false, escalationModel: null,
     }));
     expect(result.rows[0]?.chainEvidence).toEqual({
@@ -911,7 +1123,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(row).toEqual(expect.objectContaining({
       outcome: 'authorized',
       plannedBy: null,
-      plannerLabel: 'sim_controller',
+      planner: 'sim_controller',
       proposalId: expect.stringContaining('sim-controller:'),
       autoSubmitBlocks: expect.arrayContaining([
         {
@@ -940,6 +1152,65 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(row?.projectionRevision).toBeGreaterThan(row?.contextRevision ?? 0);
   });
 
+  it.each([
+    {
+      name: 'no proposal',
+      expected: 'no_proposal',
+      options: {
+        exhaustInitial: ['room-1-round-1'],
+        failCorrection: ['room-1-round-1'],
+      },
+      hard: false,
+    },
+    {
+      name: 'validation exhaustion',
+      expected: 'validation_exhausted',
+      options: {
+        invalidInitial: ['room-1-round-1'],
+        failCorrection: ['room-1-round-1'],
+      },
+      hard: false,
+    },
+    {
+      name: 'blocked auto-submit',
+      expected: 'auto_submit_blocked',
+      options: {
+        exhaustInitial: ['room-1-round-1'],
+        failCorrection: ['room-1-round-1'],
+      },
+      hard: true,
+    },
+    {
+      name: 'timeout',
+      expected: 'timeout',
+      options: {
+        timeoutInitial: ['room-1-round-2'],
+        failCorrection: ['room-1-round-2'],
+      },
+      hard: false,
+    },
+  ] as const)('records typed fallbackReason for $name from the stub adapter', { timeout: 60_000 }, async ({
+    expected,
+    options,
+    hard,
+  }) => {
+    const directory = mkdtempSync(join(tmpdir(), `dnd-conversation-fallback-${expected}-`));
+    const rounds = expected === 'timeout' ? 2 : 1;
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', String(rounds), '--out', join(directory, 'rows.jsonl'),
+      '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+    const state = hard
+      ? await loadArenaFixture('tests/fixtures/arena-basis-hard/seed-5117009.json')
+      : await loadArenaFixture('tests/fixtures/arena-basis/seed-3943001.json');
+
+    const result = await runConversation(config, { roomStates: [state], ...options });
+
+    expect(result.rows.at(-1)?.fallbackReason).toBe(expected);
+    expect(result.rows.at(-1)?.refusals).toEqual([]);
+  });
+
   it('does not depend on turn-context rendering to resolve a brutal exhaustion frontier', async () => {
     const state = freshMonsterPlanningState(
       await loadArenaFixture('tests/fixtures/arena-basis-brutal/seed-6203001.json'),
@@ -949,6 +1220,26 @@ describe('AI-DM engine MCP conversation runner', () => {
     const resolutions = () => actorIds.map((actorId) =>
       actorOpportunityReport(state, actorId, canonicalEngineQueryPort, state.revision).frontierResolution);
     const beforeRender = resolutions();
+    const firstActorId = actorIds[0];
+    if (firstActorId === undefined) throw new Error('Brutal fixture has no first monster actor.');
+    const firstActorOptions = engineActorOptions(state, firstActorId);
+    expect(firstActorOptions.humanOnly).toContainEqual(expect.objectContaining({
+      label: 'spellcasting/detect-evil-and-good',
+      declaredOption: {
+        kind: 'spell',
+        sourceActionId: 'spellcasting',
+        spellId: 'detect-evil-and-good',
+        slot: 'main',
+      },
+      noModeledEffect: {
+        kind: 'unsupported_spell_payload',
+        sourceActionId: 'spellcasting',
+        spellId: 'detect-evil-and-good',
+        limitation: 'utility_operation_unmodeled',
+      },
+    }));
+    expect(firstActorOptions.offerable.some((option) => option.label === 'spellcasting/detect-evil-and-good'))
+      .toBe(false);
     const runtime = createEngineMcpRuntime(state, { toolProfile: 'dm', requestedActorIds: actorIds });
     const capsule = runtime.feed.current();
     runtime.toolSurface.execute('engine.get_turn_context', {
@@ -960,7 +1251,7 @@ describe('AI-DM engine MCP conversation runner', () => {
     });
 
     expect(beforeRender).toEqual([
-      'contains_unresolved',
+      'fully_resolved',
       'fully_resolved',
       'fully_resolved',
       'contains_unresolved',
@@ -968,7 +1259,43 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(resolutions()).toEqual(beforeRender);
   });
 
-  it('runs a model-free stdio MCP dry-run smoke', { timeout: 30_000 }, async () => {
+  it('hidden_options_logged_once: records every hidden option once with engine-state knowledge and stationary Disengage reasons', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-hidden-options-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const hiddenActor = monsterProfile('hidden-options-actor', { initiativeBonus: 20 });
+    const hiddenTarget = playerProfile('hidden-options-target', { initiativeBonus: -20 });
+    const state = createEncounter({
+      bounds: { columns: 3, rows: 1 },
+      combatants: [hiddenActor, hiddenTarget],
+      tokens: [placedToken(hiddenActor, 0), placedToken(hiddenTarget, 2)],
+    });
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath,
+      '--cli-bin', 'definitely-not-a-model-binary', '--dry-run',
+      ...LEGACY_BLOCK_ARGS,
+    ]), {
+      adapter: new SerializedRoundTripAdapter('use_action_dodge'),
+      roomStates: [state],
+      partyPolicyOverride: 'heuristic_v0',
+    });
+    const row = result.rows[0];
+    if (row === undefined) throw new Error('Hidden-option conversation produced no row.');
+    const identities = row.hiddenOptions.map((option) => option.humanOptionId);
+
+    expect(row.knowledgeModel).toBe('engine_state');
+    expect(new Set(identities).size).toBe(identities.length);
+    expect(row.hiddenOptions.filter((option) =>
+      option.declaredOption.kind === 'standard_action' &&
+      option.reason.kind === 'disengage_without_movement').length).toBeGreaterThan(0);
+    expect(row.hiddenOptions.every((option) => option.actorId.length > 0 &&
+      option.humanOptionId.startsWith('human-option:'))).toBe(true);
+    expect(JSON.parse(readFileSync(outPath, 'utf8').trim())).toMatchObject({
+      knowledgeModel: 'engine_state',
+      hiddenOptions: row.hiddenOptions,
+    });
+  });
+
+  it('runs a model-free stdio MCP dry-run smoke (mutation: count tool calls as KB reads)', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-smoke-'));
     const outPath = join(directory, 'rows.jsonl');
     const config = parseConversationArgs([
@@ -981,10 +1308,35 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows).toEqual([
       expect.objectContaining({
-        outcome: 'authorized', toolCalls: 2, callsPerRound: 1, refusals: [], kbHash: null,
+        outcome: 'authorized', toolCalls: 2, kbReads: [], callsPerRound: 1,
+        refusals: [], kbHash: DEFAULT_KB_HASH,
+        contextRolloverOccurred: false,
+        contextRolloverTriggerCount: 0,
+        escalated: false,
+        escalationSessionId: null,
       }),
     ]);
     expect(result.rows[0]?.tokens).toEqual({ input: 0, cachedInput: 0, output: 0, reasoning: 0 });
+    const store = new MemoryBrowserSessionStore();
+    const sessionId = importSavedSession(store, result.journalExport);
+    expect(exportSavedSession(store, sessionId)).toBe(result.journalExport);
+  });
+
+  it('runs a three-room three-round model-free brutal smoke with the stub adapter', { timeout: 120_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-3round-smoke-'));
+    const config = parseConversationArgs([
+      '--fixtures', 'tests/fixtures/arena-basis-brutal',
+      '--rooms', '3', '--rounds', '3', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--initiative-profile', 'derived_v1',
+      '--dry-run',
+    ]);
+
+    const result = await runConversation(config);
+
+    expect(new Set(result.rows.map((row) => row.room))).toEqual(new Set([1, 2, 3]));
+    expect(result.rows).toHaveLength(9);
+    expect(result.rows.flatMap((row) => row.refusals)).toEqual([]);
+    expect(result.rows.every((row) => row.knowledgeModel === 'engine_state')).toBe(true);
   });
 
   it('retries one SIMULATED service flap and uses the first healthy primary turn', { timeout: 30_000 }, async () => {
@@ -1043,7 +1395,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows).toEqual([
       expect.objectContaining({
-        outcome: 'authorized', plannerLabel: 'engine_default', flapRetries: 0, serviceNull: false,
+        outcome: 'authorized', planner: 'engine_default', flapRetries: 0, serviceNull: false,
         toolCalls: 3,
         chainEvidence: expect.objectContaining({
           failedAttempts: expect.arrayContaining([
@@ -1098,32 +1450,36 @@ describe('AI-DM engine MCP conversation runner', () => {
     })).toBe(true);
   });
 
-  it('injects a KB only on cold start and attributes every output row to its bytes', async () => {
+  it('injects the root and tactics pair byte-for-byte only on cold start and attributes its hash', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-kb-'));
     const outPath = join(directory, 'rows.jsonl');
-    const kbPath = join(directory, 'kb.txt');
-    const kbText = 'SIMULATED KB: café tactics\n';
-    writeFileSync(kbPath, kbText, 'utf8');
+    const root = kbInputs.fixtures.readText('tests/fixtures/ai-dm-kb/ai-dm-core.md');
+    const tactics = kbInputs.fixtures.readText('tests/fixtures/ai-dm-kb/tactics.md');
+    const resolvedRoot = KB_SUBJECTS.reduce<string>((text, subject) => text.replaceAll(
+      `${AI_DM_KB_FIXTURE_DIRECTORY}/${subject}.md`,
+      resolve(process.cwd(), AI_DM_KB_FIXTURE_DIRECTORY, `${subject}.md`),
+    ), root);
+    const startupInstructions = `${resolvedRoot}\n\n${tactics}`;
     const adapter = new RecordingConversationAdapter();
     const config = parseConversationArgs([
-      '--rooms', '3', '--rounds', '1', '--out', outPath, '--kb', kbPath,
+      '--rooms', '3', '--rounds', '1', '--out', outPath, '--kb', DEFAULT_AI_DM_KB_ROOT,
       ...LEGACY_BLOCK_ARGS,
     ]);
 
     const result = await runConversation(config, { adapter });
-    const expectedHash = createHash('sha256').update(Buffer.from(kbText, 'utf8')).digest('hex');
 
     expect(adapter.startInvocations).toHaveLength(1);
-    expect(adapter.startInvocations[0]?.instructions).toBe(kbText);
-    expect(adapter.startInvocations[0]?.prompt).not.toContain(kbText);
+    expect(adapter.startInvocations[0]?.instructions).toBe(startupInstructions);
+    expect(adapter.startInvocations[0]?.prompt).not.toContain(startupInstructions);
+    if (config.instructionSource !== 'kb') throw new Error('Explicit KB config lost its instruction source.');
     expect(adapter.resumeInvocations.length).toBeGreaterThan(0);
     expect(adapter.resumeInvocations.every((entry) => entry.instructions === null)).toBe(true);
-    expect(adapter.resumeInvocations.every((entry) => !entry.prompt.includes(kbText))).toBe(true);
+    expect(adapter.resumeInvocations.every((entry) => !entry.prompt.includes(startupInstructions))).toBe(true);
     const injectedText = [
       ...adapter.startInvocations.map((entry) => entry.instructions ?? ''),
       ...adapter.resumeInvocations.map((entry) => entry.instructions ?? ''),
     ].join('\n');
-    expect(injectedText.split(kbText).length - 1).toBe(1);
+    expect(injectedText.split(startupInstructions).length - 1).toBe(1);
 
     expect(adapter.resumeInvocations.some((entry) =>
       entry.prompt.startsWith('[ROOM_TRANSITION]'))).toBe(false);
@@ -1136,15 +1492,75 @@ describe('AI-DM engine MCP conversation runner', () => {
       return entry.prompt.includes('granularity "full"') &&
         manifest.turnContextDeltaBase === undefined;
     })).toBe(true);
-    expect(result.rows.every((row) => row.kbHash === expectedHash)).toBe(true);
+    expect(result.rows.every((row) => row.kbHash === DEFAULT_KB_HASH)).toBe(true);
+    expect([...adapter.startInvocations, ...adapter.resumeInvocations].every((entry) =>
+      entry.instructionSource === 'kb' && entry.skill === null && entry.kbPath === config.kbPath,
+    )).toBe(true);
+    expect(result.rows.every((row) =>
+      row.instructionSource === 'kb' && row.skillName === null && row.skillHash === null,
+    )).toBe(true);
     expect(readFileSync(outPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line)))
       .toHaveLength(3);
   });
 
+  it('threads a selected skill through every invocation and hashes the exact fixture bytes', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-skill-'));
+    const adapter = new RecordingConversationAdapter();
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--instruction-source', 'skill', '--skill', 'engine-submission',
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+
+    const result = await runConversation(config, { adapter });
+    const invocations = [...adapter.startInvocations, ...adapter.resumeInvocations];
+    expect(invocations.length).toBeGreaterThan(0);
+    expect(invocations.every((entry) =>
+      entry.instructionSource === 'skill' && entry.skill === 'engine-submission' && entry.kbPath === null,
+    )).toBe(true);
+    expect(result.rows).toEqual([expect.objectContaining({
+      outcome: 'service_null',
+      instructionSource: 'skill',
+      skillName: 'engine-submission',
+      skillHash: sha256(kbInputs.fixtures.readText(
+        'tests/fixtures/ai-dm-skills/engine-submission/SKILL.md',
+      )),
+    })]);
+  });
+
+  it.each([
+    ['none', []],
+    ['kb', ['--instruction-source', 'kb', '--kb', DEFAULT_AI_DM_KB_ROOT]],
+    ['skill', ['--instruction-source', 'skill', '--skill', 'dm-round']],
+  ] as const)('runs a model-free %s instruction-source smoke through a SIMULATED adapter', async (
+    source,
+    sourceArgs,
+  ) => {
+    const directory = mkdtempSync(join(tmpdir(), `dnd-conversation-${source}-smoke-`));
+    const adapter = new SerializedRoundTripAdapter('attack');
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      ...sourceArgs,
+      ...LEGACY_BLOCK_ARGS,
+    ]);
+
+    const result = await runConversation(config, { adapter });
+    expect(result.rows).toEqual([expect.objectContaining({
+      outcome: 'authorized',
+      instructionSource: source,
+      skillName: source === 'skill' ? 'dm-round' : null,
+      skillHash: source === 'skill' ? expect.stringMatching(/^[0-9a-f]{64}$/u) : null,
+    })]);
+    expect([...adapter.startInvocations, ...adapter.resumeInvocations].every((entry) =>
+      entry.instructionSource === source,
+    )).toBe(true);
+  });
+
   it('starts the persistent SIMULATED session with the first round plan in one model dispatch', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-cold-plan-'));
+    const outPath = join(directory, 'rows.jsonl');
     const result = await runConversation(parseConversationArgs([
-      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      '--rooms', '1', '--rounds', '1', '--out', outPath, '--dry-run',
       ...LEGACY_BLOCK_ARGS,
     ]));
 
@@ -1171,6 +1587,241 @@ describe('AI-DM engine MCP conversation runner', () => {
       serviceNullAdjustments: 0,
       tokens: result.rows[0]?.tokens,
     }));
+    expect(result.rows[0]).not.toHaveProperty('chosenOptionIndices');
+    expect(JSON.parse(readFileSync(outPath, 'utf8'))).not.toHaveProperty('chosenOptionIndices');
+  });
+
+  it('queues a schema-final indexed decision through the same engine round path (mutation: parse valid final output but do not queue it)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-'));
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]));
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index transport produced no row.');
+
+    expect(row).toMatchObject({
+      outcome: 'authorized',
+      decisionTransport: 'final_indices',
+      firstDecisionAccepted: true,
+      decisionAttempts: 1,
+      decisionRejectionCodes: [],
+      normalizationCodes: [],
+      serviceNull: false,
+    });
+    expect(row.toolCalls).toBe(0);
+    expect(row.rawTurnContext).not.toContain('context_not_requested');
+    expect(row.authorizedPlan).not.toBeNull();
+    if (row.chosenOptionIndices === undefined) {
+      throw new Error('Final-index row omitted chosen option indices.');
+    }
+    expect(row.chosenOptionIndices.length).toBeGreaterThan(0);
+    expect(row.chosenOptionIndices.every((selection) => selection.primaryOptionIndex === 0)).toBe(true);
+    expect(row.authorizedPlan?.every((entry) => entry.reason ===
+      'The engine recommendation preserves the current tactical objective.')).toBe(true);
+  });
+
+  it('rejects audited boilerplate at structured-final ingress before accepting a substantive correction', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-reason-gate-'));
+    const adapter = new BoilerplateThenValidStructuredFinalAdapter();
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]), { adapter });
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index reason-gate run produced no row.');
+
+    expect(adapter.decisionAttempts).toBe(2);
+    expect(row).toMatchObject({
+      outcome: 'authorized',
+      firstDecisionAccepted: false,
+      decisionAttempts: 2,
+      decisionRejectionCodes: ['REASON_REQUIRED'],
+      normalizationCodes: ['REASON_REQUIRED'],
+      toolCalls: 0,
+    });
+    expect(row.authorizedPlan).not.toBeNull();
+    expect(row.authorizedPlan?.every((entry) =>
+      entry.reason === 'Hold the doorway so the injured scout can disengage safely.')).toBe(true);
+    if (row.chosenOptionIndices === undefined) {
+      throw new Error('Corrected final-index row omitted chosen option indices.');
+    }
+    expect(row.chosenOptionIndices.every((selection) => selection.fallbackOptionIndex === null)).toBe(true);
+    expect(JSON.stringify(row.authorizedPlan)).not.toContain('Use the offered legal option for this actor.');
+  });
+
+  it('censors a cancelled structured-final turn as decision_timeout (mutation: classify cancelled final output as decision_missing)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-timeout-'));
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]), { timeoutInitial: ['room-1-round-1'] });
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index timeout produced no row.');
+    expect(row.decisionRejectionCodes).toContain('decision_timeout');
+    expect(row.decisionRejectionCodes).not.toContain('decision_missing');
+  });
+
+  it('records the actor chosen index for recommendation-anchor measurement (mutation: omit chosen index from final row)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-indices-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath, '--dry-run',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]));
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index row is absent.');
+    expect(row.chosenOptionIndices).toEqual(row.authorizedPlan?.map((entry) => ({
+      actorId: entry.actorId, primaryOptionIndex: 0, fallbackOptionIndex: 1,
+    })));
+    expect(JSON.parse(readFileSync(outPath, 'utf8'))).toEqual(expect.objectContaining({
+      chosenOptionIndices: row.authorizedPlan?.map((entry) => ({
+        actorId: entry.actorId, primaryOptionIndex: 0, fallbackOptionIndex: 1,
+      })),
+    }));
+  });
+
+  it('passes a persisted final-index row through packet validation', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-packet-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath, '--dry-run',
+      '--transport', 'final_indices', '--combat-model', 'initiative_segments_v1',
+    ]);
+    await runConversationWithPartyPolicy('heuristic_v0', config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+    });
+    const persisted = objectValue(JSON.parse(readFileSync(outPath, 'utf8')) as unknown, 'persisted arena row');
+    const packet = buildRerunPacket([
+      { ...persisted, seed: 3_943_001, arm: 'indexed-a' },
+      { ...persisted, seed: 3_943_001, arm: 'indexed-b' },
+    ], 1, { seeds: [3_943_001], reps: 1 });
+
+    expect(packet.answerKey.entries).toHaveLength(2);
+    expect(packet.answerKey.entries.every((entry) =>
+      entry.rowEra === 'post_shift' &&
+      entry.decisionTransport === 'final_indices' &&
+      entry.chosenOptionIndices.length > 0)).toBe(true);
+  });
+
+  it('records no chosen indices when no final-index decision is accepted', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-exhausted-'));
+    const outPath = join(directory, 'rows.jsonl');
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', outPath, '--dry-run',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]), {
+      exhaustInitial: ['room-1-round-1'],
+      failCorrection: ['room-1-round-1'],
+    });
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Exhausted final-index run produced no row.');
+
+    expect(row).toMatchObject({
+      outcome: 'authorized',
+      decisionTransport: 'final_indices',
+      firstDecisionAccepted: false,
+      chosenOptionIndices: [],
+      planner: 'engine_default',
+    });
+    expect(JSON.parse(readFileSync(outPath, 'utf8'))).toEqual(expect.objectContaining({
+      decisionTransport: 'final_indices',
+      chosenOptionIndices: [],
+    }));
+  });
+
+  it('rejects speculative structured-final dispatch at the typed phase boundary (mutation: pass speculative through as a decision phase)', () => {
+    expect(structuredFinalDecisionPhase('initial')).toBe('initial');
+    expect(structuredFinalDecisionPhase('correction')).toBe('correction');
+    expect(() => structuredFinalDecisionPhase('speculative'))
+      .toThrow('Structured-final decisions are unavailable for speculative dispatch.');
+  });
+
+  it('records a missing final decision explicitly and repairs it with the same indexed correction shape (mutation: classify final absence as service_null)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-correction-'));
+    const result = await runConversation(parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'), '--dry-run',
+      '--transport', 'final_indices',
+      ...LEGACY_BLOCK_ARGS,
+    ]), { exhaustInitial: ['room-1-round-1'] });
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index correction produced no row.');
+
+    expect(row.refusals).toEqual([]);
+    expect(row).toMatchObject({
+      outcome: 'authorized',
+      firstDecisionAccepted: false,
+      decisionAttempts: 2,
+      decisionRejectionCodes: ['decision_missing'],
+      normalizationCodes: [],
+      serviceNull: false,
+    });
+    expect(row.chainEvidence.correctionFinalText).toContain('catalogDigest');
+  });
+
+  it('uses the same indexed final contract for a G2-preflighted adjustment (mutation: send an adjustment through MCP)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-adjustment-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run', '--transport', 'final_indices',
+    ]);
+    const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+    });
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index adjustment run produced no row.');
+
+    expect(row).toMatchObject({
+      outcome: 'authorized',
+      decisionTransport: 'final_indices',
+      serviceNull: false,
+      decisionRejectionCodes: [],
+      normalizationCodes: [],
+    });
+    expect(row.adjustments).toHaveLength(1);
+    expect(row.adjustments[0]).toMatchObject({
+      outcome: 'adjusted',
+      requestId: 'request:room-1-round-1-pc-turn-1',
+      toolCalls: 0,
+      modelCalls: 1,
+    });
+    expect(row.decisionAttempts).toBe(2);
+  });
+
+  it('repairs an indexed adjustment through the same correction ingress (mutation: use a tool-driven adjustment correction)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-final-indices-adjustment-correction-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run', '--transport', 'final_indices',
+    ]);
+    const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      suggestionResponseByRequest: { 'room-1-round-1': 'ignored' },
+      exhaustInitial: ['room-1-round-1-pc-turn-1'],
+    });
+    const [row] = result.rows;
+    if (row === undefined) throw new Error('Final-index adjustment correction run produced no row.');
+
+    expect(row).toMatchObject({
+      outcome: 'authorized',
+      decisionTransport: 'final_indices',
+      decisionAttempts: 3,
+      decisionRejectionCodes: ['decision_missing'],
+      normalizationCodes: [],
+      serviceNull: false,
+    });
+    expect(row.adjustments[0]).toMatchObject({
+      outcome: 'adjusted',
+      correctionChain: expect.objectContaining({ result: 'accepted' }),
+      toolCalls: 0,
+      modelCalls: 2,
+    });
   });
 
   it('directs K6 to consume an inline suggestion without fetching the same play again', () => {
@@ -1188,6 +1839,23 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(defaults.combatModel).toBe('initiative_segments_v1');
     expect(defaults.initiativeProfile).toBe('derived_v1');
     expect(defaults.intelMode).toBe('full');
+    expect(defaults.overridePolicy).toBe('typed_reason');
+    expect(parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--override-policy', 'strict',
+    ]).overridePolicy).toBe('strict');
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--override-policy', 'free_text',
+    ])).toThrow('--override-policy must be strict or typed_reason');
+    expect(defaults.decisionTransport).toBe('mcp_minimal');
+    expect(parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--transport', 'final_indices',
+    ]).decisionTransport).toBe('final_indices');
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--transport', 'final_ids',
+    ])).toThrow('--transport must be mcp_minimal or final_indices');
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--cli', 'claude-code', '--transport', 'final_indices',
+    ])).toThrow('final_indices currently requires --cli codex');
     expect(parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--intel-mode', 'off',
     ]).intelMode).toBe('off');
@@ -1231,9 +1899,12 @@ describe('AI-DM engine MCP conversation runner', () => {
       '--local-base-url', 'http://127.0.0.1:11434/v1', '--local-model', 'llama-SIMULATED',
       '--local-think', 'sometimes',
     ])).toThrow('--local-think must be on or off');
-    expect(parseConversationArgs([
+    expect(parseConversationArgs(['--rooms', '1', '--out', outPath])).toEqual(expect.objectContaining({
+      instructionSource: 'none', skill: null,
+    }));
+    expect(() => parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--kb', 'tests/fixtures/arena-basis/seed-3943001.json',
-    ]).kbPath).toBe(join(process.cwd(), 'tests/fixtures/arena-basis/seed-3943001.json'));
+    ])).toThrow('--kb must name a root under tests/fixtures/ai-dm-kb');
     expect(parseConversationArgs([
       '--rooms', '1', '--out', outPath,
       '--escalation-model', 'gpt-escalation', '--escalation-effort', 'xhigh',
@@ -1341,10 +2012,69 @@ describe('AI-DM engine MCP conversation runner', () => {
     }));
   });
 
+  it('ends a three-round room as party_defeated when all PCs are dead entering the party segment', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-party-defeated-'));
+    const base = await alternatingInitiativeRoom();
+    const defeated: EncounterState = {
+      ...base,
+      combatants: base.combatants.map((combatant) =>
+        combatant.profile.kind === 'player_character'
+          ? { ...combatant, hitPoints: 0, life: 'dead' as const, deathSaves: null }
+          : combatant),
+    };
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '3', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, { roomStates: [defeated] });
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.terminalOutcome).toEqual({
+      kind: 'encounter_over', result: 'party_defeated',
+    });
+    expect(result.rows[0]?.refusals).toEqual([]);
+  });
+
+  it('runs three rounds with a one-round party program by recording typed default turns', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-party-default-'));
+    const base = await alternatingInitiativeRoom({ monsterHitPoints: 10_000 });
+    const durable: EncounterState = {
+      ...base,
+      combatants: base.combatants.map((combatant) => combatant.profile.kind === 'player_character'
+        ? {
+            ...combatant,
+            hitPoints: 10_000,
+            profile: {
+              ...combatant.profile,
+              rules: { ...combatant.profile.rules, hitPointMaximum: 10_000 },
+            },
+          }
+        : combatant),
+    };
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '3', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+
+    const result = await runConversation(config, {
+      roomStates: [durable],
+      mutateScriptedPartyPlan: (plan, context) => context.round === 1
+        ? plan
+        : { ...plan, programs: [] },
+    });
+
+    expect(result.rows).toHaveLength(3);
+    expect(result.rows.map((row) => row.partyDefaultTurn)).toEqual([false, true, true]);
+    expect(result.rows.flatMap((row) => row.refusals)).toEqual([]);
+    expect(result.rows.slice(1).flatMap((row) => row.pcTurns)
+      .every((turn) => turn.partyDefaultTurn !== null)).toBe(true);
+  });
+
   it.each([
     ['keep', 'baseline_kept'],
     ['change', 'adjusted'],
-  ] as const)('records a material adjustment that chooses %s', { timeout: 30_000 }, async (response, outcome) => {
+  ] as const)('dispatches when a superior option appears and records adjustment choice %s', { timeout: 30_000 }, async (response, outcome) => {
     const directory = mkdtempSync(join(tmpdir(), `dnd-conversation-segments-${response}-`));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
@@ -1357,8 +2087,13 @@ describe('AI-DM engine MCP conversation runner', () => {
       adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': response },
     });
     const row = result.rows[0];
+    const adjustment = row?.adjustments[0];
+    if (adjustment === undefined || adjustment.skipped !== null) {
+      throw new Error('Expected a dispatched adjustment fixture.');
+    }
 
-    expect(row?.adjustments?.[0]).toEqual(expect.objectContaining({
+    expect(adjustment).toEqual(expect.objectContaining({
+      preflight: 'superior_option_appeared',
       outcome,
       granularity: 'turn_delta',
       flapRetries: 0,
@@ -1378,11 +2113,11 @@ describe('AI-DM engine MCP conversation runner', () => {
       correctionChain: null,
       rlData: expect.any(Array),
     }));
-    expect(row?.adjustments?.[0]?.stateBinding).toEqual({
+    expect(adjustment.stateBinding).toEqual({
       request: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
       result: expect.objectContaining({ revision: expect.any(Number), digest: expect.any(String) }),
     });
-    expect(row?.adjustments?.[0]?.rawContext).toContain('"granularity":"turn_delta"');
+    expect(adjustment.rawContext).toContain('"granularity":"turn_delta"');
     expect(row?.rlData).toEqual(expect.objectContaining({
       format: 'arena-rl-capture-v2',
       task: 'round_plan',
@@ -1403,19 +2138,19 @@ describe('AI-DM engine MCP conversation runner', () => {
       }),
     }));
     expect(row?.engineIntel).toEqual(row?.rlData?.engineIntel);
-    expect(row?.adjustments[0]?.rlData[0]).toEqual(expect.objectContaining({
+    expect(adjustment.rlData[0]).toEqual(expect.objectContaining({
       format: 'arena-rl-capture-v2',
       task: 'plan_adjustment',
       submissionTool: 'engine.submit_plan_adjustment',
       parentPlanId: expect.any(String),
     }));
-    expect(row?.adjustments?.[0]?.reasons).toContain('OPEN_MONSTER_SET_CHANGED');
+    expect(adjustment.reasons).toContain('OPEN_MONSTER_SET_CHANGED');
     expect(row?.adjustments).toHaveLength(1);
     expect(row?.roundTotals.adjustmentCalls).toBe(1);
     expect(row?.monsterSegments?.flatMap((segment) => segment.actors)).toHaveLength(2);
   });
 
-  it('fires the adjustment machinery for a material symmetric-evaluator PC turn', { timeout: 30_000 }, async () => {
+  it('skips the D443-style adjustment when material bookkeeping changed but the retained plan stayed legal and non-dominated (mutation: always dispatch)', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-symmetric-material-'));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
@@ -1481,11 +2216,101 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(adjustment?.trigger).toBe('combatant:cleric');
     expect(adjustment?.triggerPcTurnOrdinal).toBe(1);
     expect(adjustment?.reasons).toEqual(['LIFE_STATE_CHANGED', 'OPEN_MONSTER_SET_CHANGED']);
-    expect(adjustment?.outcome).toBe('baseline_kept');
-    expect(row?.roundTotals.adjustmentCalls).toBe(1);
+    expect(adjustment?.skipped).toBe('no_material_change');
+    expect(row?.roundTotals.adjustmentCalls).toBe(0);
     expect(row?.speculations).toContainEqual(expect.objectContaining({
       status: 'adopted', proposed: true, adopted: true, discarded: false,
     }));
+  });
+
+  it('dispatches an adjustment when the retained primary becomes illegal', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-illegal-primary-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+    const result = await runConversationWithPartyPolicy('heuristic_v0', config, {
+      roomStates: [await alternatingInitiativeRoom({ fragileMonsterCount: 1 })],
+      mutateBeforeAdjustmentPreflight: (state) => ({
+        ...state,
+        revision: state.revision + 1,
+        combatants: state.combatants.map((combatant) =>
+          combatant.profile.kind === 'player_character'
+            ? { ...combatant, hitPoints: 0, life: 'dead' as const }
+            : combatant),
+      }),
+      adjustmentResponseByRequest: { 'room-1-round-1-pc-turn-1': 'keep' },
+    });
+    const adjustment = result.rows[0]?.adjustments[0];
+    if (adjustment === undefined || adjustment.skipped !== null) {
+      throw new Error('Expected an illegal retained primary to dispatch adjustment planning.');
+    }
+    expect(adjustment.preflight).toBe('retained_plan_illegal');
+    expect(result.rows[0]?.roundTotals.adjustmentCalls).toBe(1);
+  });
+
+  it('rejects a speculative context actor mismatch before model dispatch', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-speculation-context-mismatch-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+    let speculationDispatches = 0;
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom()],
+      mutateSpeculativeContext: (context) => ({ ...context, actors: [] }),
+      onSpeculationDispatchStart: () => { speculationDispatches += 1; },
+    });
+    const row = result.rows[0];
+    expect(speculationDispatches).toBe(0);
+    expect(row?.speculations.length).toBeGreaterThan(0);
+    expect(row?.speculations.every((entry) =>
+      entry.status === 'discarded' && entry.discardReason === 'context_actor_set_mismatch')).toBe(true);
+    expect(row?.refusals.some((message) => message.includes('SPECULATIVE_BRANCH_CONTRACT_MISMATCH'))).toBe(false);
+    expect(row?.outcome).toBe('authorized');
+  });
+
+  it('never authorizes a row when execution throws before its first completed turn (mutation: authorized before the loop)', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-execution-failed-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom()],
+      mutateSpeculativeContext: () => {
+        throw new Error('SIMULATED execution fixture failure.');
+      },
+    });
+    const row = result.rows[0];
+    expect(row).toMatchObject({
+      outcome: 'execution_failed',
+      executionErrorClass: 'other',
+      planner: 'model',
+      pcTurns: [],
+      monsterSegments: [],
+    });
+    expect(row?.refusals).toEqual(['SIMULATED execution fixture failure.']);
+    expect(result.rows.some((entry) => entry.outcome === 'authorized' && entry.refusals.length > 0)).toBe(false);
+  });
+
+  it('records partial_execution when execution throws after a completed PC turn', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-partial-execution-'));
+    const config = parseConversationArgs([
+      '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
+      '--combat-model', 'initiative_segments_v1', '--dry-run',
+    ]);
+    const result = await runConversation(config, {
+      roomStates: [await alternatingInitiativeRoom()],
+      mutateBeforeSpeculationBoundary: () => {
+        throw new Error('SIMULATED unresolved boundary decision.');
+      },
+    });
+    const row = result.rows[0];
+    expect(row?.outcome).toBe('partial_execution');
+    expect(row?.executionErrorClass).toBe('unresolved_boundary_decision');
+    expect(row?.pcTurns.length).toBeGreaterThan(0);
+    expect(row?.refusals).toEqual(['SIMULATED unresolved boundary decision.']);
   });
 
   it('discards speculation when the actual board invalidates the planned option structure', { timeout: 30_000 }, async () => {
@@ -1542,7 +2367,7 @@ describe('AI-DM engine MCP conversation runner', () => {
       .toBeLessThan(1_000);
   });
 
-  it('gives two material PC turns independent adjustment flap budgets', { timeout: 30_000 }, async () => {
+  it('does not spend a second adjustment flap budget when preflight finds no material plan change', { timeout: 30_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dnd-conversation-segments-independent-flaps-'));
     const config = parseConversationArgs([
       '--rooms', '1', '--rounds', '1', '--out', join(directory, 'rows.jsonl'),
@@ -1574,7 +2399,7 @@ describe('AI-DM engine MCP conversation runner', () => {
 
     expect(result.rows[0]?.adjustments?.slice(0, 2)).toEqual([
       expect.objectContaining({ flapRetries: 1, outcome: 'baseline_kept' }),
-      expect.objectContaining({ flapRetries: 1, outcome: 'baseline_kept' }),
+      expect.objectContaining({ skipped: 'no_material_change' }),
     ]);
   });
 

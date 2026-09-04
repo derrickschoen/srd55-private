@@ -235,12 +235,15 @@ export type MonsterOnHitEffect =
   | { readonly kind: 'speed_reduction'; readonly feet: 0; readonly duration: 'until_start_of_monster_next_turn' }
   | { readonly kind: 'raises_as_zombie'; readonly targetKind: 'Humanoid'; readonly delayHours: 24; readonly controllerLimit: 12; readonly preventedBy: readonly ['restored_to_life', 'body_destroyed'] };
 
+export type MonsterMultiattackComponent = MonsterAttackAction | MonsterSavingThrowAction;
+export type MonsterMultiattackCombination = 'any' | 'fixed' | 'one_attack_may_be_replaced';
+
 export interface MonsterMultiattackAction {
   readonly kind: 'multiattack';
   readonly id: string;
   readonly count: number;
   readonly actionIds: readonly string[];
-  readonly combination: 'any' | 'fixed' | 'one_attack_may_be_replaced';
+  readonly combination: MonsterMultiattackCombination;
   readonly mechanics?: readonly (MonsterTypedUnavailableMechanic & {
     readonly kind: 'also_uses_action_if_available';
     readonly actionId: string;

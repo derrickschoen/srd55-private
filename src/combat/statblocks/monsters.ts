@@ -243,7 +243,7 @@ export const UNICORN = monsterStatblock({
           { id: 'detect-evil-and-good', availability: 'at_will', manifestStatus: 'implemented' },
           { id: 'druidcraft', availability: 'at_will', manifestStatus: 'not_in_manifest' },
           { id: 'calm-emotions', availability: '1_per_day', manifestStatus: 'implemented' },
-          { id: 'dispel-evil-and-good', availability: '1_per_day', manifestStatus: 'not_in_manifest' },
+          { id: 'dispel-evil-and-good', availability: '1_per_day', manifestStatus: 'implemented' },
           { id: 'entangle', availability: '1_per_day', manifestStatus: 'implemented' },
           { id: 'pass-without-trace', availability: '1_per_day', manifestStatus: 'implemented' },
           { id: 'word-of-recall', availability: '1_per_day', manifestStatus: 'not_in_manifest' },

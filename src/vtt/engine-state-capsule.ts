@@ -15,7 +15,7 @@ import type {
   HostSplitCandidate,
 } from './speculative-plan-types';
 import type { PlanMaterialityReasonCode } from './plan-materiality';
-import type { EngineActorOption } from './turn-proposal';
+import type { EngineOfferableOption } from './turn-proposal';
 import type { EncounterTimelineProjection } from './session-timeline';
 export const ENGINE_INITIATIVE_PROJECTION_POLICY = 'initiative-intel-v1' as const;
 
@@ -51,7 +51,7 @@ export interface EngineProjectedActionApproach {
 export interface EngineActionRegistry {
   actionsFor(combatantId: CombatantId): readonly EngineProjectedAction[];
   approachesFor(combatantId: CombatantId): readonly EngineProjectedActionApproach[];
-  optionsFor(combatantId: CombatantId): readonly EngineActorOption[];
+  optionsFor(combatantId: CombatantId): readonly EngineOfferableOption[];
   planningFactsFor(combatantId: CombatantId): EngineProjectionCombatantFacts;
   planningHitPointsFor(combatantId: CombatantId): number;
   planningHitPointMaximumFor(combatantId: CombatantId): number;
@@ -90,7 +90,7 @@ export interface EngineProjectionCombatant {
   readonly movementRemainingFeet: number;
   readonly actions: readonly EngineProjectedAction[];
   readonly actionApproaches: readonly EngineProjectedActionApproach[];
-  readonly options: readonly EngineActorOption[];
+  readonly options: readonly EngineOfferableOption[];
   readonly planning: EngineProjectionCombatantFacts;
 }
 

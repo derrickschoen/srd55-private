@@ -53,6 +53,8 @@ function unresolvedRow(): DmTargetIntelRow {
     automaticCriticalMaximumDistanceFeet: null,
     minimumMovementFeet: null,
     unresolvedReasons: ['damage_unresolved'],
+    omittedRiders: [],
+    featureSupportFlags: [],
   };
 }
 

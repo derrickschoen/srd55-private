@@ -19,7 +19,7 @@ import {
   enginePlanningSpeedFeet,
   type EngineQueryPort,
 } from './engine-query-port';
-import { availableEngineActorOptions, type EngineActorOption, type EngineTurnProposal } from './intent-resolver';
+import { availableEngineActorOptions, type EngineOfferableOption, type EngineTurnProposal } from './intent-resolver';
 import { projectFutureMonsterTurns } from './monster-planning-state';
 import type {
   EngineSelectorRef,
@@ -283,7 +283,7 @@ export interface HostBaselineProposalPlanner {
   ): readonly EngineTurnProposal[];
 }
 
-function optionIsOffensive(option: EngineActorOption): boolean {
+function optionIsOffensive(option: EngineOfferableOption): boolean {
   return option.actionSlots.some((slot) => slot.slot === 'main' &&
     (slot.use.kind === 'attack' || slot.use.kind === 'multiattack' || slot.use.kind === 'saving_throw'));
 }
@@ -302,7 +302,9 @@ export const hostBaselineProposalPlanner: HostBaselineProposalPlanner = Object.f
       const fallback = options.find((option) => option.actionSlots.some((slot) =>
         slot.slot === 'main' && slot.use.kind === 'dodge')) ?? null;
       return [{ actorId, expectedRevision: state.revision, primaryOptionId: primary.optionId,
-        fallbackOptionId: fallback?.optionId ?? null, overrideJustification: null }];
+        fallbackOptionId: fallback?.optionId ?? null,
+        reason: 'Use the strongest currently available offensive option.',
+        overrideJustification: null }];
     });
   },
 });
@@ -333,7 +335,7 @@ function addDependency(
   });
 }
 
-function optionSelectors(option: EngineActorOption): readonly EngineSelectorRef[] {
+function optionSelectors(option: EngineOfferableOption): readonly EngineSelectorRef[] {
   return option.actionSlots.flatMap((slot) => {
     const use = slot.use;
     const selectors = use.kind === 'attack' || use.kind === 'saving_throw' ? [use.target]
@@ -345,7 +347,7 @@ function optionSelectors(option: EngineActorOption): readonly EngineSelectorRef[
 
 export function extractProposalFactDependencies(
   state: EncounterState,
-  options: readonly EngineActorOption[],
+  options: readonly EngineOfferableOption[],
   queries: EngineQueryPort = canonicalEngineQueryPort,
 ): readonly ProposalFactDependency[] {
   const entries: ProposalFactDependency[] = [];

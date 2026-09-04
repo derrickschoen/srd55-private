@@ -103,7 +103,7 @@ const EFFECT_PAYLOAD_KINDS = [
   'summoned_familiar', 'summoned_undead', 'teleport', 'temporary_banishment',
   'tiny_hut', 'trap_detection', 'truth_zone', 'universal_language', 'unseen_servant',
   'vampiric_touch', 'wall_of_fire', 'warding_bond', 'water_breathing', 'water_walk',
-  'web_area',
+  'web_area', 'condition_suppression', 'indifferent_toward_monster_side',
 ] as const satisfies readonly Exclude<EffectPayload, { readonly kind: 'sustained_effect' }>['kind'][];
 
 type MissingEffectPayloadKind = Exclude<

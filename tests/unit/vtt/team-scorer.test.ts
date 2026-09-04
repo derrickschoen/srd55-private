@@ -14,7 +14,7 @@ import {
   type TeamPlanEvaluation,
   type WastedTurnMarker,
 } from '../../../src/vtt/intel/team-scorer';
-import { engineOptionId, type EngineActorOption } from '../../../src/vtt/turn-proposal';
+import { engineOptionId, type EngineOfferableOption } from '../../../src/vtt/turn-proposal';
 
 function candidate(candidateId: string): TeamPlanCandidate {
   return { candidateId, label: `Plan ${candidateId}`, proposals: [] };
@@ -124,7 +124,7 @@ describe('team plan Pareto scorer', () => {
   });
 
   it('dominates a zero-feet Dash with an attack and renders the typed wasted-turn reason', () => {
-    const dashOption: EngineActorOption = {
+    const dashOption: EngineOfferableOption = {
       actorId: combatantId('combatant:blocked-dasher'),
       optionId: engineOptionId('option:dash-zero-feet'),
       revision: 1,
@@ -135,6 +135,7 @@ describe('team plan Pareto scorer', () => {
       },
       actionSlots: [{ slot: 'main', use: { kind: 'dash' } }],
       resourceCostLabels: [],
+      omittedRiders: [],
     };
     const marker = classifyWastedTurn(dashOption, 0, true);
     if (marker === null) throw new Error('Zero-feet Dash was not classified as a wasted turn.');
