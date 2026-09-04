@@ -10184,3 +10184,12 @@ SUPERVISOR NOTES (2026-09-04 19:05):
   Supervisor gate running (tsc/sg/touched tests/full vitest/three specs under the lock); mutation and commit follow.
 - D513 judging: both Luna-low packets judged by all three seats, 60/60 valid each, uiFeedback field present; keys
   SEALED (d513/luna-low-on-1, d513/luna-low-on-2). Luna-medium arm running; Sol-low next.
+
+D518 — OWNER (2026-09-04 19:30): "Retry reducing the text (all 5 categories) sent on the arms that have a screenshot
+with them. Let's see if we don't need to send as much text if we send a screenshot." Supervisor: the five D443
+categories reduced together on the caveman-full profile (rows best_exception, opportunityCost conditional, movement
+material_only, threats counts_exception_ids, gating = frontier candidates_summary / knowledge relevance_gated /
+failures headline_codes / adverts stubs / rare triggered / misc merged); profile d514-profile-reduced.json. Arms
+(d514, worktree dnd-wt-arena-img at ff1a6ca9, same seeds): luna-low-reduced-on, luna-low-reduced-off (control
+isolating the picture), luna-medium-reduced-on, sol-low-reduced-on, 30 rows each. Packets: reduced-on vs the d513
+full-text image-on arm of the same model/effort (primes 653, 659, 661), plus reduced-off vs d490 U (673). Keys sealed.
