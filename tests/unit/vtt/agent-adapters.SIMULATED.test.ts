@@ -47,6 +47,8 @@ import { readdir } from '../../helpers/test-filesystem-promises';
 const cwd = '/workspace/dnd-wt-vtt';
 const engineCommand = '/workspace/node';
 const engineArgs = ['/workspace/engine-mcp.mjs'];
+const codexFixtureHome = resolve('tests/fixtures/codex-home-SIMULATED');
+const codexFixtureClock = (): Date => new Date('2026-09-04T00:00:00.000Z');
 const invocation: AgentInvocation = {
   instructionSource: 'none',
   skill: null,
@@ -112,7 +114,8 @@ function binding(kind: AgentCliKind, id: string): AgentSessionBinding {
 function options(runner: AgentProcessRunner) {
   return {
     binary: 'SIMULATED-cli', cwd, engineCommand, engineArgs, processRunner: runner,
-    codexHome: resolve('tests/fixtures/codex-home-SIMULATED'),
+    codexHome: codexFixtureHome,
+    rolloutClock: codexFixtureClock,
   } as const;
 }
 
@@ -205,20 +208,52 @@ describe('SIMULATED agent CLI adapters — not live CLI verification', () => {
   it('SIMULATED Codex lists the rollout directory at most once per session binding (mutation: rescan per call)', async () => {
     let directoryListings = 0;
     const reader = new CodexRolloutContextReader(
-      resolve('tests/fixtures/codex-home-SIMULATED'),
+      codexFixtureHome,
       async (directory) => {
         directoryListings += 1;
         return readdir(directory, { withFileTypes: true });
       },
+      codexFixtureClock,
     );
-    const sessionDate = new Date('2026-09-03T00:00:00.000Z');
 
-    const first = await reader.read('codex-thread-123', sessionDate);
-    const second = await reader.read('codex-thread-123', sessionDate);
+    const first = await reader.read('codex-thread-123');
+    const second = await reader.read('codex-thread-123');
 
     expect(first).toEqual({ contextInputTokens: 71001, modelContextWindow: 258400 });
     expect(second).toEqual(first);
-    expect(directoryListings).toBe(1);
+    expect(directoryListings).toBe(4);
+  });
+
+  it('SIMULATED Codex finds a session rollout created yesterday when read today', async () => {
+    const reader = new CodexRolloutContextReader(codexFixtureHome, undefined, codexFixtureClock);
+
+    await expect(reader.read('codex-thread-123')).resolves.toEqual({
+      contextInputTokens: 71001,
+      modelContextWindow: 258400,
+    });
+  });
+
+  it('SIMULATED Codex scans exactly today and three prior UTC days (mutation: wrong-day-only or unbounded scan)', async () => {
+    const listedDirectories: string[] = [];
+    const reader = new CodexRolloutContextReader(
+      codexFixtureHome,
+      async (directory) => {
+        listedDirectories.push(directory);
+        return readdir(directory, { withFileTypes: true });
+      },
+      codexFixtureClock,
+    );
+
+    await expect(reader.read('codex-thread-123')).resolves.toEqual({
+      contextInputTokens: 71001,
+      modelContextWindow: 258400,
+    });
+    expect(listedDirectories).toEqual([
+      resolve(codexFixtureHome, 'sessions/2026/09/04'),
+      resolve(codexFixtureHome, 'sessions/2026/09/03'),
+      resolve(codexFixtureHome, 'sessions/2026/09/02'),
+      resolve(codexFixtureHome, 'sessions/2026/09/01'),
+    ]);
   });
 
   it('SIMULATED Codex extracts the UUID from captured stdout session id output', async () => {

@@ -43,6 +43,17 @@ export interface CodexContextUsage {
 const ROLLOUT_TAIL_CHUNK_BYTES = 64 * 1024;
 const ROLLOUT_TAIL_MAX_BYTES = 1024 * 1024;
 
+/**
+ * Probe today plus three prior UTC days: enough to retain a session across a
+ * short midnight boundary without turning per-call context lookup into an
+ * unbounded filesystem scan.
+ */
+export const CODEX_ROLLOUT_PREVIOUS_DAYS: 3 = 3;
+
+export type CodexRolloutClock = () => Date;
+
+const systemCodexRolloutClock: CodexRolloutClock = () => new Date();
+
 export interface CodexRolloutDirectoryEntry {
   readonly name: string;
   isFile(): boolean;
@@ -52,6 +63,10 @@ export type CodexRolloutDirectoryReader = (
   directory: string,
 ) => Promise<readonly CodexRolloutDirectoryEntry[]>;
 
+export interface CodexAgentAdapterOptions extends AgentAdapterOptions {
+  readonly rolloutClock?: CodexRolloutClock;
+}
+
 export class CodexRolloutContextReader {
   readonly #rolloutPathBySessionBinding = new Map<string, Promise<string>>();
 
@@ -59,40 +74,38 @@ export class CodexRolloutContextReader {
     private readonly codexHome: string,
     private readonly readDirectory: CodexRolloutDirectoryReader = async (directory) =>
       readdir(directory, { withFileTypes: true }),
+    private readonly clock: CodexRolloutClock = systemCodexRolloutClock,
   ) {}
 
-  async read(sessionId: string, sessionDate: Date): Promise<CodexContextUsage> {
+  async read(sessionId: string): Promise<CodexContextUsage> {
     let path = this.#rolloutPathBySessionBinding.get(sessionId);
     if (path === undefined) {
-      path = this.#resolveRolloutPath(sessionId, sessionDate);
+      path = this.#resolveRolloutPath(sessionId);
       this.#rolloutPathBySessionBinding.set(sessionId, path);
     }
     return readLastCodexContextUsage(await path, sessionId);
   }
 
-  async #resolveRolloutPath(sessionId: string, sessionDate: Date): Promise<string> {
-    const directory = resolve(
-      this.codexHome,
-      'sessions',
-      String(sessionDate.getUTCFullYear()).padStart(4, '0'),
-      String(sessionDate.getUTCMonth() + 1).padStart(2, '0'),
-      String(sessionDate.getUTCDate()).padStart(2, '0'),
-    );
-    let entries: readonly CodexRolloutDirectoryEntry[];
-    try {
-      entries = await this.readDirectory(directory);
-    } catch (error) {
-      throw new AgentAdapterError(
-        'malformed_output',
-        `Codex rollout directory could not be read for session ${sessionId}.`,
-        { cause: error },
-      );
+  async #resolveRolloutPath(sessionId: string): Promise<string> {
+    const today = this.clock();
+    const matches: string[] = [];
+    for (let previousDays = 0; previousDays <= CODEX_ROLLOUT_PREVIOUS_DAYS; previousDays += 1) {
+      const directory = codexRolloutDirectory(this.codexHome, today, previousDays);
+      let entries: readonly CodexRolloutDirectoryEntry[];
+      try {
+        entries = await this.readDirectory(directory);
+      } catch (error) {
+        if (isMissingDirectory(error)) continue;
+        throw new AgentAdapterError(
+          'malformed_output',
+          `Codex rollout directory could not be read for session ${sessionId}.`,
+          { cause: error },
+        );
+      }
+      matches.push(...entries
+        .filter((entry) => entry.isFile() && entry.name.includes(sessionId))
+        .map((entry) => resolve(directory, entry.name)));
     }
-    const matches = entries
-      .filter((entry) => entry.isFile() && (
-        entry.name.endsWith(`-${sessionId}.jsonl`) || entry.name.endsWith(`-${sessionId}.SIMULATED.jsonl`)
-      ))
-      .map((entry) => resolve(directory, entry.name));
     if (matches.length === 0) {
       throw new AgentAdapterError(
         'malformed_output',
@@ -116,10 +129,14 @@ export class CodexAgentSessionAdapter extends ProcessAgentSessionAdapter {
   readonly #contextReader: CodexRolloutContextReader;
   readonly #codexHome: string;
 
-  constructor(options: AgentAdapterOptions = {}) {
+  constructor(options: CodexAgentAdapterOptions = {}) {
     super(options);
     this.#codexHome = options.codexHome ?? process.env['CODEX_HOME'] ?? resolve(homedir(), '.codex');
-    this.#contextReader = new CodexRolloutContextReader(this.#codexHome);
+    this.#contextReader = new CodexRolloutContextReader(
+      this.#codexHome,
+      undefined,
+      options.rolloutClock,
+    );
   }
 
   start(invocation: AgentInvocation, signal: AbortSignal): Promise<AgentTurnResult> {
@@ -155,7 +172,6 @@ export class CodexAgentSessionAdapter extends ProcessAgentSessionAdapter {
     sessionId: string | null,
     signal: AbortSignal,
   ): Promise<AgentTurnResult> {
-    const rolloutSessionDate = codexRolloutSessionDate(sessionId);
     const output = await this.runner().run(
       this.invocationSpec(invocation, sessionId),
       invocation.prompt,
@@ -183,10 +199,7 @@ export class CodexAgentSessionAdapter extends ProcessAgentSessionAdapter {
       ? null
       : await codexAgentUsage(
           decoded.turnUsage,
-          await this.#contextReader.read(
-            decoded.sessionId,
-            rolloutSessionDate,
-          ),
+          await this.#contextReader.read(decoded.sessionId),
         );
     return {
       resumeSessionId: agentSessionIdFromCli(decoded.sessionId),
@@ -313,12 +326,23 @@ function decodeContextUsage(value: unknown): CodexContextUsage | null {
       };
 }
 
-function codexRolloutSessionDate(sessionId: string | null): Date {
-  if (sessionId === null) return new Date();
-  const uuidV7 = /^([0-9a-f]{8})-([0-9a-f]{4})-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.exec(sessionId);
-  if (uuidV7 === null) return new Date();
-  const milliseconds = Number.parseInt(`${uuidV7[1] ?? ''}${uuidV7[2] ?? ''}`, 16);
-  return Number.isSafeInteger(milliseconds) ? new Date(milliseconds) : new Date();
+function codexRolloutDirectory(codexHome: string, today: Date, previousDays: number): string {
+  const day = new Date(Date.UTC(
+    today.getUTCFullYear(),
+    today.getUTCMonth(),
+    today.getUTCDate() - previousDays,
+  ));
+  return resolve(
+    codexHome,
+    'sessions',
+    String(day.getUTCFullYear()).padStart(4, '0'),
+    String(day.getUTCMonth() + 1).padStart(2, '0'),
+    String(day.getUTCDate()).padStart(2, '0'),
+  );
+}
+
+function isMissingDirectory(error: unknown): boolean {
+  return record(error)?.['code'] === 'ENOENT';
 }
 
 async function readLastCodexContextUsage(path: string, sessionId: string): Promise<CodexContextUsage> {
