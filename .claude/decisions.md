@@ -9943,3 +9943,13 @@ starts only between lane gates — if it has not started by the next quiet windo
 it alone). Screenshot plan's own recommendations overridden by rulings: monster-side view (D506 says full),
 K=10 stratified one rep per seed kept; the 3×2 (Luna low, Luna medium, Sol low × image off/on, D509) replaces
 the plan's 2×2 in Increment 4.
+
+FINDING AGAINST MY OWN DISPATCH (supervisor, 2026-09-04 11:30): `.tmp-plans/` is gitignored, so the two new
+worktrees (dnd-wt-board-shot, dnd-wt-graph-slice) were created WITHOUT the binding plans. Graph-slice inc1
+stopped correctly ("FINAL REPORT — BLOCKED: the binding implementation plan is missing", 0 edits) — the right
+behaviour, and a wasted dispatch that was mine. Board-shot inc1 found the plan by reading the main repo's copy
+and proceeded. Fix: plans copied into both worktrees; graph-slice redispatched (01a06d02-d6b7). Rule: a new
+worktree gets its plan file copied in before dispatch; the dispatch checklist now includes `ls <wt>/.tmp-plans`.
+Also on inc5.5: codex changed tests/unit/db/codec-slot-is-never-an-identity.test.ts to skip tracked files that
+no longer exist on disk — an accommodation for the no-git rule after it deleted the four constants modules.
+Reverted before commit; with the deletions staged the unmodified test passes 4/4.
