@@ -36,11 +36,13 @@ import {
 } from '../renderer-profile';
 import {
   createEngineMcpApplication,
+  DEFAULT_OVERRIDE_POLICY,
   MutableEngineCapsuleFeed,
   type AdjudicationEnvelope,
   type AllowlistedRulesSource,
   type EngineMcpToolProfile,
   type EngineToolSurface,
+  type OverridePolicy,
   type TurnContextDeltaBase,
 } from './engine-server';
 import { jsonRpcParseError, type JsonRpcResponse, type McpHandler } from './handler';
@@ -158,6 +160,7 @@ export interface EngineMcpLauncherManifest {
   readonly requestId: string;
   readonly phase: 'initial' | 'correction' | 'speculative';
   readonly correctionNumber: 0 | 1;
+  readonly overridePolicy?: OverridePolicy;
   readonly room: number;
   readonly historyKind: string;
   /** Optional on disk so pre-Phase-2 launchers decode as round_plan. */
@@ -214,6 +217,7 @@ export function createEngineMcpRuntime(
     readonly onTurnContext?: (context: Readonly<Record<string, unknown>>) => void;
     readonly kbReadBudget?: KbReadBudget;
     readonly kbReadCallPhase?: KbReadCallPhase;
+    readonly overridePolicy?: OverridePolicy;
   } = {},
 ): EngineMcpRuntime {
   const candidates = state.combatants
@@ -340,6 +344,7 @@ export function createEngineMcpRuntime(
     ...(options.onTurnContext === undefined ? {} : { onTurnContext: options.onTurnContext }),
     ...(options.kbReadBudget === undefined ? {} : { kbReadBudget: options.kbReadBudget }),
     ...(options.kbReadCallPhase === undefined ? {} : { kbReadCallPhase: options.kbReadCallPhase }),
+    ...(options.overridePolicy === undefined ? {} : { overridePolicy: options.overridePolicy }),
   });
   return {
     handler: application,
@@ -408,6 +413,8 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
     typeof input['requestId'] === 'string' && input['requestId'].length > 0 &&
     (input['phase'] === 'initial' || input['phase'] === 'correction' || input['phase'] === 'speculative') &&
     (input['correctionNumber'] === 0 || input['correctionNumber'] === 1) &&
+    (input['overridePolicy'] === undefined || input['overridePolicy'] === 'strict' ||
+      input['overridePolicy'] === 'typed_reason') &&
     Number.isSafeInteger(input['room']) && typeof input['room'] === 'number' && input['room'] >= 1 &&
     typeof input['historyKind'] === 'string' && input['historyKind'].length > 0 &&
     (input['requestKind'] === undefined || input['requestKind'] === 'round_plan' ||
@@ -449,11 +456,16 @@ function isLauncherManifest(value: unknown): value is EngineMcpLauncherManifest 
 
 export type DecodedEngineMcpLauncherManifest = EngineMcpLauncherManifest & {
   readonly requestKind: EngineOrdinaryRequestKind;
+  readonly overridePolicy: OverridePolicy;
 };
 
 export function decodeEngineMcpLauncherManifest(value: unknown): DecodedEngineMcpLauncherManifest | null {
   if (!isLauncherManifest(value)) return null;
-  return { ...value, requestKind: value.requestKind ?? 'round_plan' };
+  return {
+    ...value,
+    requestKind: value.requestKind ?? 'round_plan',
+    overridePolicy: value.overridePolicy ?? DEFAULT_OVERRIDE_POLICY,
+  };
 }
 
 async function launcherManifest(path: string): Promise<DecodedEngineMcpLauncherManifest | null> {
@@ -505,6 +517,7 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
       requestId: manifest.requestId,
       phase: manifest.phase,
       correctionNumber: manifest.correctionNumber,
+      overridePolicy: manifest.overridePolicy,
       room: manifest.room,
       historyKind: manifest.historyKind,
       ...(manifest.requestKind === 'plan_adjustment' ? {

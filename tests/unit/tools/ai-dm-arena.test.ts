@@ -331,6 +331,10 @@ describe('AI-DM arena', () => {
       instructionSource: 'none', skill: null,
     }));
     expect(parseArenaArgs(common).intelMode).toBe('full');
+    expect(parseArenaArgs(common).overridePolicy).toBe('typed_reason');
+    expect(parseArenaArgs([...common, '--override-policy', 'strict']).overridePolicy).toBe('strict');
+    expect(() => parseArenaArgs([...common, '--override-policy', 'free_text']))
+      .toThrow('--override-policy must be strict or typed_reason');
     expect(parseArenaArgs(common).decisionTransport).toBe('mcp_minimal');
     expect(parseArenaArgs([...common, '--transport', 'final_indices']).decisionTransport)
       .toBe('final_indices');
@@ -368,6 +372,7 @@ describe('AI-DM arena', () => {
     }
 
     expect(finalRow.decisionTransport).toBe('final_indices');
+    expect(finalRow.overridePolicy).toBe('typed_reason');
     expect(finalRow.chosenOptionIndices).toBeDefined();
     expect(finalRow.chosenOptionIndices?.length).toBeGreaterThan(0);
     expect(minimalRow.decisionTransport).toBe('mcp_minimal');
@@ -674,12 +679,14 @@ describe('AI-DM arena', () => {
         instructionSource: 'none', skill: null,
         label: 'plain', model: 'model-plain', effort: 'low',
         escalationModel: null, escalationEffort: null, combatModel: 'monster_block_v1',
+        overridePolicy: 'typed_reason',
       },
       {
         instructionSource: 'none', skill: null,
         label: 'tiered', model: 'model-tiered', effort: 'high',
         escalationModel: 'arm-escalation', escalationEffort: 'xhigh',
         combatModel: 'monster_block_v1',
+        overridePolicy: 'typed_reason',
       },
     ]);
     expect(config).toMatchObject({
@@ -736,6 +743,49 @@ describe('AI-DM arena', () => {
       '--rooms', '1', '--reps', '1', '--seed', '3943001',
       '--out', join(directory, 'bad.jsonl'), '--initiative-profile', 'synthetic',
     ])).toThrow('--initiative-profile must be legacy or derived_v1');
+  });
+
+  it('selects independent override policies for preregistered interleaved arms', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-override-policy-'));
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '6203001',
+      '--out', join(directory, 'arena.jsonl'), '--interleave',
+      '--arm', 'S:gpt-5.6-luna:low',
+      '--arm', 'V:gpt-5.6-luna:low',
+      '--arm', 'U:gpt-5.6-luna:low',
+    ] as const;
+    const config = parseArenaArgs([
+      ...common,
+      '--arm-override-policy', 'S:strict',
+      '--arm-override-policy', 'V:typed_reason',
+      '--arm-override-policy', 'U:typed_reason',
+    ]);
+
+    expect(config.arms.map(({ label, overridePolicy }) => ({ label, overridePolicy }))).toEqual([
+      { label: 'S', overridePolicy: 'strict' },
+      { label: 'V', overridePolicy: 'typed_reason' },
+      { label: 'U', overridePolicy: 'typed_reason' },
+    ]);
+    expect(() => parseArenaArgs([...common, '--arm-override-policy', 'S:free_text']))
+      .toThrow('--arm-override-policy must use label:strict|typed_reason syntax');
+    expect(() => parseArenaArgs([...common, '--arm-override-policy', 'missing:strict']))
+      .toThrow('--arm-override-policy names unknown arm missing');
+  });
+
+  it('threads each interleaved arm policy into its persisted row', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-arm-override-row-'));
+    const rows = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--dry-run',
+      '--out', join(directory, 'arena.jsonl'), '--interleave',
+      '--combat-model', 'monster_block_v1', '--initiative-profile', 'legacy',
+      '--arm', 'S:gpt-5.6-luna:low', '--arm', 'V:gpt-5.6-luna:low',
+      '--arm-override-policy', 'S:strict', '--arm-override-policy', 'V:typed_reason',
+    ]));
+
+    expect(rows.map(({ arm, overridePolicy }) => ({ arm, overridePolicy }))).toEqual([
+      { arm: 'S', overridePolicy: 'strict' },
+      { arm: 'V', overridePolicy: 'typed_reason' },
+    ]);
   });
 
   it('rejects partial per-arm escalation suffixes and invalid escalation effort', () => {

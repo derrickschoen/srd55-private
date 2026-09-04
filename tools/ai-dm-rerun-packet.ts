@@ -92,6 +92,8 @@ export interface NeutralAction {
 /** Era-neutral executed-plan entry: the only plan shape a judge may see. */
 export interface NeutralPlanEntry {
   readonly actorId: unknown;
+  /** Judge-visible only in an explicitly reason-enabled packet. */
+  readonly reason?: string;
   readonly actions: readonly NeutralAction[];
   /** Executed movement, present in both eras' summaries; null when unrecorded. */
   readonly movementFeet: number | null;
@@ -129,7 +131,7 @@ const commonArenaRowSchema = z.object({
 const postShiftOnlyFieldNames = [
   'decisionTransport', 'firstDecisionAccepted', 'decisionAttempts',
   'decisionRejectionCodes', 'normalizationCodes', 'chosenOptionIndices',
-  'instructionSource', 'skillName', 'skillHash', 'rationale',
+  'instructionSource', 'skillName', 'skillHash', 'rationale', 'overridePolicy',
 ] as const;
 
 const chosenOptionIndicesSchema = z.array(z.object({
@@ -139,6 +141,7 @@ const chosenOptionIndicesSchema = z.array(z.object({
 }));
 
 const postShiftCommonArenaRowSchema = commonArenaRowSchema.extend({
+  overridePolicy: z.enum(['strict', 'typed_reason']).default('typed_reason'),
   firstDecisionAccepted: z.boolean(),
   decisionAttempts: safeIntegerSchema.min(0),
   decisionRejectionCodes: z.array(z.string()),
@@ -188,6 +191,7 @@ type CommonArenaRow = z.infer<typeof commonArenaRowSchema>;
 type ChosenOptionIndices = z.infer<typeof chosenOptionIndicesSchema>;
 type McpMinimalPostShiftArenaRow = CommonArenaRow & {
   readonly decisionTransport: 'mcp_minimal';
+  readonly overridePolicy: 'strict' | 'typed_reason';
   readonly firstDecisionAccepted: boolean;
   readonly decisionAttempts: number;
   readonly decisionRejectionCodes: readonly string[];
@@ -199,6 +203,7 @@ type McpMinimalPostShiftArenaRow = CommonArenaRow & {
 };
 type FinalIndicesPostShiftArenaRow = CommonArenaRow & {
   readonly decisionTransport: 'final_indices';
+  readonly overridePolicy: 'strict' | 'typed_reason';
   readonly firstDecisionAccepted: boolean;
   readonly decisionAttempts: number;
   readonly decisionRejectionCodes: readonly string[];
@@ -218,6 +223,13 @@ type ParsedArenaRow =
 export interface RerunProtocol {
   readonly seeds: readonly number[];
   readonly reps: number;
+}
+
+export interface RerunPacketBuilderOptions {
+  /** Decision reasons are excluded unless this is explicitly true. */
+  readonly reasonsVisible?: boolean;
+  /** Optional arm allowlist for a mixed visibility packet such as D490's V arm. */
+  readonly reasonVisibleArms?: readonly string[];
 }
 
 export const R1_10_PROTOCOL: RerunProtocol = { seeds: R1_10_SEEDS, reps: R1_10_REPS };
@@ -264,6 +276,7 @@ interface PreShiftValidatedArenaRow extends CommonValidatedArenaRow {
 
 interface CommonPostShiftValidatedArenaRow extends CommonValidatedArenaRow {
   readonly rowEra: 'post_shift';
+  readonly overridePolicy: 'strict' | 'typed_reason';
   readonly instructionSource: 'none' | 'kb' | 'skill';
   readonly skillName: 'engine-submission' | 'dm-round' | null;
   readonly skillHash: string | null;
@@ -354,6 +367,7 @@ interface PreShiftAnswerKeyEntry extends CommonAnswerKeyEntry {
 
 interface CommonPostShiftAnswerKeyEntry extends CommonAnswerKeyEntry {
   readonly rowEra: 'post_shift';
+  readonly overridePolicy: 'strict' | 'typed_reason';
   readonly rationale: string | null;
   readonly firstDecisionAccepted: boolean;
   readonly decisionAttempts: number;
@@ -401,6 +415,7 @@ const MODEL_IDENTITY_FIELDS = new Set([
   'selectedBranch', 'optionId', 'plannerLabel', 'planner', 'overrideKinds', 'overrideRejections',
   'rowEra',
   'decisionTransport', 'firstDecisionAccepted', 'decisionAttempts',
+  'overridePolicy',
   'decisionRejectionCodes', 'normalizationCodes',
   'chosenOptionIndices',
   // The round narrative is a deterministic era-specific renderer template
@@ -564,6 +579,7 @@ function validateRow(
   const postShiftCommon: CommonPostShiftValidatedArenaRow = {
     ...common,
     rowEra: 'post_shift',
+    overridePolicy: postShiftRow.overridePolicy,
     instructionSource: postShiftRow.instructionSource,
     skillName: postShiftRow.skillName,
     skillHash: postShiftRow.skillHash,
@@ -668,7 +684,13 @@ function engineAttribution(row: ValidatedArenaRow): JudgePacketEntry['attributio
   return 'not_model_authorized';
 }
 
-function neutralPlanEntry(plan: z.infer<typeof authorizedPlanEntrySchema>): NeutralPlanEntry {
+function neutralPlanEntry(
+  plan: z.infer<typeof authorizedPlanEntrySchema>,
+  reasonsVisible: boolean,
+): NeutralPlanEntry {
+  const visibleReason = reasonsVisible && plan.reason !== undefined
+    ? { reason: plan.reason }
+    : {};
   // Id preference (actionId over spellId over objectId) is deterministic but
   // only data-verified for the action kinds present in R1-10 rows (attack,
   // dodge, direct combatant targets). A rerun whose rows include spell or
@@ -680,6 +702,7 @@ function neutralPlanEntry(plan: z.infer<typeof authorizedPlanEntrySchema>): Neut
     if (current.success) {
       return {
         actorId: plan.actorId,
+        ...visibleReason,
         actions: current.data.actionSlots.map((slot) => ({
           kind: slot.kind,
           actionId: slot.actionId ?? slot.spellId ?? slot.objectId ?? null,
@@ -697,6 +720,7 @@ function neutralPlanEntry(plan: z.infer<typeof authorizedPlanEntrySchema>): Neut
       }
       return {
         actorId: plan.actorId,
+        ...visibleReason,
         actions: [{
           kind: plan.acceptedIntent.choice.kind,
           actionId: baseline.data.actionId,
@@ -711,6 +735,7 @@ function neutralPlanEntry(plan: z.infer<typeof authorizedPlanEntrySchema>): Neut
     const target = choice.target;
     return {
       actorId: plan.actorId,
+      ...visibleReason,
       actions: [{
         kind: choice.kind,
         actionId: choice.action_id ?? choice.spell_id ?? null,
@@ -726,9 +751,10 @@ function neutralPlanEntry(plan: z.infer<typeof authorizedPlanEntrySchema>): Neut
 
 function executedPlan(
   value: ValidatedArenaRow['authorizedPlan'],
+  reasonsVisible: boolean,
 ): readonly NeutralPlanEntry[] | null {
   if (value === null) return null;
-  return value.map(neutralPlanEntry);
+  return value.map((entry) => neutralPlanEntry(entry, reasonsVisible));
 }
 
 function packetOutcome(outcome: string): 'authorized' | 'refused' | 'service_null' | 'execution_failed' {
@@ -762,17 +788,23 @@ function shuffled<T>(values: readonly T[], seed: number): readonly T[] {
 }
 
 /** Rejects a packet that accidentally carries source-arm or model identity fields. */
-export function assertBlindedPacket(value: unknown, path = 'packet'): void {
+export function assertBlindedPacket(
+  value: unknown,
+  path = 'packet',
+  options: RerunPacketBuilderOptions = {},
+): void {
   if (Array.isArray(value)) {
-    value.forEach((entry, index) => assertBlindedPacket(entry, `${path}[${String(index)}]`));
+    value.forEach((entry, index) => assertBlindedPacket(entry, `${path}[${String(index)}]`, options));
     return;
   }
   if (value === null || typeof value !== 'object') return;
   for (const [key, nested] of Object.entries(value)) {
-    if (MODEL_IDENTITY_FIELDS.has(key)) {
+    const allowedVisibleReason = key === 'reason' && options.reasonsVisible === true &&
+      /\.executedPlan\[\d+\]$/u.test(path);
+    if (MODEL_IDENTITY_FIELDS.has(key) && !allowedVisibleReason) {
       throw new TypeError(`${path}.${key} leaks a model-identifying field into the blinded packet.`);
     }
-    assertBlindedPacket(nested, `${path}.${key}`);
+    assertBlindedPacket(nested, `${path}.${key}`, options);
   }
 }
 
@@ -790,10 +822,17 @@ function buildPacket(
   protocol: RerunProtocol,
   crossEra: boolean,
   armCardinality: ArmCardinality,
+  options: RerunPacketBuilderOptions,
 ): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
   if (!Number.isSafeInteger(shuffleSeed)) throw new TypeError('shuffleSeed must be a safe integer.');
   const inferredCrossEra = !crossEra && hasMixedRowEras(rows);
   const effectiveCrossEra = crossEra || inferredCrossEra;
+  if (options.reasonsVisible !== true && options.reasonVisibleArms !== undefined) {
+    throw new TypeError('reasonVisibleArms requires reasonsVisible: true.');
+  }
+  const reasonVisibleArms = options.reasonVisibleArms === undefined
+    ? null
+    : new Set(options.reasonVisibleArms);
   const validated = [...validateRows(rows, protocol, effectiveCrossEra, armCardinality, inferredCrossEra)]
     .sort((left, right) => left.seed - right.seed || left.rep - right.rep || left.arm.localeCompare(right.arm));
   const blinded = shuffled(validated, shuffleSeed).map((row, index) => ({
@@ -814,7 +853,13 @@ function buildPacket(
         caseId: `case-${String(row.room).padStart(2, '0')}-${String(row.rep)}`,
         outcome,
         attribution: engineAttribution(row),
-        executedPlan: outcome === 'authorized' ? executedPlan(row.authorizedPlan) : null,
+        executedPlan: outcome === 'authorized'
+          ? executedPlan(
+              row.authorizedPlan,
+              options.reasonsVisible === true &&
+                (reasonVisibleArms === null || reasonVisibleArms.has(row.arm)),
+            )
+          : null,
         rubric: rubric(outcome),
       };
     }),
@@ -835,6 +880,7 @@ function buildPacket(
       const postShiftCommon: CommonPostShiftAnswerKeyEntry = {
         ...common,
         rowEra: 'post_shift',
+        overridePolicy: row.overridePolicy,
         rationale: row.rationale,
         firstDecisionAccepted: row.firstDecisionAccepted,
         decisionAttempts: row.decisionAttempts,
@@ -859,7 +905,7 @@ function buildPacket(
       };
     }),
   };
-  assertBlindedPacket(packet);
+  assertBlindedPacket(packet, 'packet', options);
   return { packet, answerKey };
 }
 
@@ -868,9 +914,12 @@ export function buildRerunPacket(
   rows: readonly JsonRecord[],
   shuffleSeed: number,
   protocol: RerunProtocol = R1_10_PROTOCOL,
-  crossEra = false,
+  crossEraOrOptions: boolean | RerunPacketBuilderOptions = false,
+  options: RerunPacketBuilderOptions = {},
 ): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
-  return buildPacket(rows, shuffleSeed, protocol, crossEra, 'exactly_two');
+  const crossEra = typeof crossEraOrOptions === 'boolean' ? crossEraOrOptions : false;
+  const selectedOptions = typeof crossEraOrOptions === 'boolean' ? options : crossEraOrOptions;
+  return buildPacket(rows, shuffleSeed, protocol, crossEra, 'exactly_two', selectedOptions);
 }
 
 /** Builds one blinded packet from two or more arms sharing a case protocol. */
@@ -878,9 +927,39 @@ export function buildMultiArmRerunPacket(
   rows: readonly JsonRecord[],
   shuffleSeed: number,
   protocol: RerunProtocol = R1_10_PROTOCOL,
-  crossEra = false,
+  crossEraOrOptions: boolean | RerunPacketBuilderOptions = false,
+  options: RerunPacketBuilderOptions = {},
 ): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
-  return buildPacket(rows, shuffleSeed, protocol, crossEra, 'two_or_more');
+  const crossEra = typeof crossEraOrOptions === 'boolean' ? crossEraOrOptions : false;
+  const selectedOptions = typeof crossEraOrOptions === 'boolean' ? options : crossEraOrOptions;
+  return buildPacket(rows, shuffleSeed, protocol, crossEra, 'two_or_more', selectedOptions);
+}
+
+/**
+ * Builds D490's visibility-isolation packet from one arm. Every source row is
+ * represented twice: once with its actor reasons and once from the same row
+ * with reason rendering disabled.
+ */
+export function buildReasonVisibilityIsolationPacket(
+  rows: readonly JsonRecord[],
+  shuffleSeed: number,
+  protocol: RerunProtocol = R1_10_PROTOCOL,
+): { readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey } {
+  const sourceArms = new Set(rows.map((row) => row['arm']));
+  if (sourceArms.size !== 1 || [...sourceArms][0] === undefined ||
+    typeof [...sourceArms][0] !== 'string') {
+    throw new TypeError('Reason-visibility isolation requires rows from exactly one source arm.');
+  }
+  const visibleArm = 'reason_visible';
+  const hiddenArm = 'reason_hidden';
+  const duplicated = rows.flatMap((row): readonly JsonRecord[] => [
+    { ...row, arm: visibleArm },
+    { ...row, arm: hiddenArm },
+  ]);
+  return buildPacket(duplicated, shuffleSeed, protocol, false, 'exactly_two', {
+    reasonsVisible: true,
+    reasonVisibleArms: [visibleArm],
+  });
 }
 
 export async function createRerunPacket(config: RerunPacketConfig): Promise<{ readonly packet: JudgePacket; readonly answerKey: RerunAnswerKey }> {

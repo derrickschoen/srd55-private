@@ -454,7 +454,9 @@ describe('AI-DM engine MCP conversation runner', () => {
       action_slots: [{ slot: 'main', use: { kind: 'dodge' } }],
     }));
     expect(rejectionReasons).not.toContain('The engine could not authorize this proposal mechanic.');
-    expect(result.rows[0]).toEqual(expect.objectContaining({ outcome: 'authorized', refusals: [] }));
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      outcome: 'authorized', refusals: [], overridePolicy: 'typed_reason',
+    }));
     expect(result.rows[0]).toEqual(expect.objectContaining({
       plannedBy: { model: 'gpt-5.6-sol', effort: 'medium' },
       escalated: false,
@@ -1837,6 +1839,13 @@ describe('AI-DM engine MCP conversation runner', () => {
     expect(defaults.combatModel).toBe('initiative_segments_v1');
     expect(defaults.initiativeProfile).toBe('derived_v1');
     expect(defaults.intelMode).toBe('full');
+    expect(defaults.overridePolicy).toBe('typed_reason');
+    expect(parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--override-policy', 'strict',
+    ]).overridePolicy).toBe('strict');
+    expect(() => parseConversationArgs([
+      '--rooms', '1', '--out', outPath, '--override-policy', 'free_text',
+    ])).toThrow('--override-policy must be strict or typed_reason');
     expect(defaults.decisionTransport).toBe('mcp_minimal');
     expect(parseConversationArgs([
       '--rooms', '1', '--out', outPath, '--transport', 'final_indices',

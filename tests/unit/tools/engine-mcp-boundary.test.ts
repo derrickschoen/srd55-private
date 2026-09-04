@@ -86,6 +86,7 @@ describe('engine MCP process mutation boundary', () => {
     expect(decodeEngineMcpLauncherManifest(legacy)).toEqual({
       ...legacy,
       requestKind: 'round_plan',
+      overridePolicy: 'typed_reason',
     });
 
     const adjustment = {

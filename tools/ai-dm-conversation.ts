@@ -68,8 +68,13 @@ import { mcpRequestMeta } from '../src/vtt/mcp/handler';
 import {
   createEngineMcpRuntime, loadArenaFixture, type EngineMcpLauncherManifest,
 } from '../src/vtt/mcp/entrypoint';
-import type { IntelMode, TurnContextDeltaBase } from '../src/vtt/mcp/engine-server';
-import { renderEnginePrompt, TURN_CONTEXT_MAX_BYTES } from '../src/vtt/mcp/engine-server';
+import type { IntelMode, OverridePolicy, TurnContextDeltaBase } from '../src/vtt/mcp/engine-server';
+import {
+  DEFAULT_OVERRIDE_POLICY,
+  OVERRIDE_POLICIES,
+  renderEnginePrompt,
+  TURN_CONTEXT_MAX_BYTES,
+} from '../src/vtt/mcp/engine-server';
 import {
   applyRevisionDelta,
   type RevisionDeltaOperation,
@@ -185,6 +190,7 @@ const RULES_SOURCE = { get: () => null } as const;
 
 interface ConversationConfigBase {
   readonly intelMode: IntelMode;
+  readonly overridePolicy: OverridePolicy;
   readonly rendererProfile: RendererProfile;
   readonly combatModel: CombatModel;
   readonly initiativeProfile: RoomInitiativeProfile;
@@ -450,6 +456,8 @@ export interface ConversationRow {
   readonly knowledgeModel: 'engine_state';
   readonly hiddenOptions: readonly HiddenOptionRecord[];
   readonly intelMode: IntelMode;
+  /** Experimental policy attribution belongs to the answer key, never a blinded packet. */
+  readonly overridePolicy: OverridePolicy;
   readonly rendererAttribution: {
     readonly policyVersion: typeof RENDERER_POLICY_VERSION;
     readonly profile: RendererProfile;
@@ -709,6 +717,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
       '--transport', '--instruction-source', '--skill',
       '--combat-model', '--initiative-profile',
       '--intel-mode',
+      '--override-policy',
       '--renderer-profile',
       '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown conversation option ${option ?? '<missing>'}.`);
@@ -782,11 +791,16 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
   if (intelMode !== 'full' && intelMode !== 'off') {
     throw new TypeError('--intel-mode must be full or off.');
   }
+  const overridePolicy = values.get('--override-policy') ?? DEFAULT_OVERRIDE_POLICY;
+  if (!OVERRIDE_POLICIES.includes(overridePolicy as OverridePolicy)) {
+    throw new TypeError('--override-policy must be strict or typed_reason.');
+  }
   const rendererProfile = values.has('--renderer-profile')
     ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
     : DEFAULT_RENDERER_PROFILE;
   return {
     intelMode,
+    overridePolicy: overridePolicy as OverridePolicy,
     rendererProfile,
     combatModel: combatModel as CombatModel,
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
@@ -2179,6 +2193,7 @@ async function writeLauncher(input: {
   readonly directory: string;
   readonly name: string;
   readonly rendererProfile: RendererProfile;
+  readonly overridePolicy: OverridePolicy;
   readonly snapshot: EngineRoundSnapshot;
   readonly room: number;
   readonly historyKind: string;
@@ -2214,6 +2229,7 @@ async function writeLauncher(input: {
     runId: capsule.runId, branchId: capsule.branchId,
     revision: capsule.revision, requestId: request.requestId,
     phase: request.phase, correctionNumber: request.correctionNumber,
+    overridePolicy: input.overridePolicy,
     room: input.room, historyKind: input.historyKind, toolProfile: 'dm',
     rendererProfile: input.rendererProfile,
     initiativeProjection: capsule.projection.initiative,
@@ -2315,6 +2331,7 @@ function inProcessDmToolSession(input: {
   readonly snapshot: EngineRoundSnapshot;
   readonly intelMode: IntelMode;
   readonly rendererProfile: RendererProfile;
+  readonly overridePolicy: OverridePolicy;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly onProposal: (proposal: RoundTurnProposalEnvelope | PlanAdjustmentProposalEnvelope) => void;
   readonly onToolResult: (name: string, result: unknown) => void;
@@ -2354,6 +2371,7 @@ function inProcessDmToolSession(input: {
     } : { requestedActorCount: request.actors.length }),
     toolProfile: 'dm',
     rendererProfile: input.rendererProfile,
+    overridePolicy: input.overridePolicy,
     ...(input.onTurnContextRendered === undefined ? {} : {
       onTurnContextRendered: input.onTurnContextRendered,
     }),
@@ -2492,6 +2510,7 @@ function queueStructuredFinalDecision(input: {
   readonly snapshot: EngineRoundSnapshot;
   readonly intelMode: IntelMode;
   readonly rendererProfile: RendererProfile;
+  readonly overridePolicy: OverridePolicy;
   readonly turnContextDeltaBase?: TurnContextDeltaBase;
   readonly inheritedReactionGuidance: ReactionGuidanceDeclaration | null;
   /** G2.1 plugs its semantic decision-reason detector into this ingress seam. */
@@ -2530,6 +2549,7 @@ function queueStructuredFinalDecision(input: {
     snapshot: input.snapshot,
     intelMode: input.intelMode,
     rendererProfile: input.rendererProfile,
+    overridePolicy: input.overridePolicy,
     ...(input.turnContextDeltaBase === undefined ? {} : {
       turnContextDeltaBase: input.turnContextDeltaBase,
     }),
@@ -2984,6 +3004,7 @@ async function runConversationWithConfiguredIntel(
         : await structuredFinalOutput(config.decisionTransport, artifacts, `${key}-initial`, initialDecisionCatalog);
       const initialLauncher = await writeLauncher({
         rendererProfile: config.rendererProfile,
+        overridePolicy: config.overridePolicy,
         directory: artifacts, name: `${key}-initial`, snapshot: initialSnapshot, room,
         historyKind: round === 1 ? 'room_ready' : 'proposal_applied',
         ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
@@ -2998,6 +3019,7 @@ async function runConversationWithConfiguredIntel(
             snapshot: initialSnapshot,
             intelMode: config.intelMode,
             rendererProfile: config.rendererProfile,
+            overridePolicy: config.overridePolicy,
             ...(rowKbReadBudget === undefined ? {} : {
               kbReadBudget: rowKbReadBudget,
               kbReadCallPhase: 'initial',
@@ -3181,6 +3203,7 @@ async function runConversationWithConfiguredIntel(
         };
         const launcher = await writeLauncher({
           rendererProfile: config.rendererProfile,
+          overridePolicy: config.overridePolicy,
           directory: artifacts,
           name: `${key}-speculative-${String(window.monsters[0])}`,
           snapshot: sourceSnapshot,
@@ -3355,6 +3378,7 @@ async function runConversationWithConfiguredIntel(
             );
         const adjustmentLauncher = await writeLauncher({
           rendererProfile: config.rendererProfile,
+          overridePolicy: config.overridePolicy,
           directory: artifacts,
           name: `${adjustmentKey}-initial`,
           snapshot: adjustmentSnapshot,
@@ -3370,6 +3394,7 @@ async function runConversationWithConfiguredIntel(
               snapshot: adjustmentSnapshot,
               intelMode: config.intelMode,
               rendererProfile: config.rendererProfile,
+              overridePolicy: config.overridePolicy,
               ...(rowKbReadBudget === undefined ? {} : {
                 kbReadBudget: rowKbReadBudget,
                 kbReadCallPhase: 'adjustment',
@@ -3447,6 +3472,7 @@ async function runConversationWithConfiguredIntel(
               snapshot: adjustmentSnapshot,
               intelMode: config.intelMode,
               rendererProfile: config.rendererProfile,
+              overridePolicy: config.overridePolicy,
               ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
               inheritedReactionGuidance: journal.reactionGuidance(),
               reasonGate: STRUCTURED_FINAL_DECISION_REASON_GATE,
@@ -3556,6 +3582,7 @@ async function runConversationWithConfiguredIntel(
               );
           const correctionLauncher = await writeLauncher({
             rendererProfile: config.rendererProfile,
+            overridePolicy: config.overridePolicy,
             directory: artifacts,
             name: `${adjustmentKey}-correction`,
             snapshot: correctionSnapshot,
@@ -3571,6 +3598,7 @@ async function runConversationWithConfiguredIntel(
                 snapshot: correctionSnapshot,
                 intelMode: config.intelMode,
                 rendererProfile: config.rendererProfile,
+                overridePolicy: config.overridePolicy,
                 ...(rowKbReadBudget === undefined ? {} : {
                   kbReadBudget: rowKbReadBudget,
                   kbReadCallPhase: 'adjustment',
@@ -3613,6 +3641,7 @@ async function runConversationWithConfiguredIntel(
                     snapshot: correctionSnapshot,
                     intelMode: config.intelMode,
                     rendererProfile: config.rendererProfile,
+                    overridePolicy: config.overridePolicy,
                     ...(lastSeenTurnContext === undefined ? {} : {
                       turnContextDeltaBase: lastSeenTurnContext,
                     }),
@@ -3838,6 +3867,7 @@ async function runConversationWithConfiguredIntel(
                 snapshot: initialSnapshot,
                 intelMode: config.intelMode,
                 rendererProfile: config.rendererProfile,
+                overridePolicy: config.overridePolicy,
                 ...(lastSeenTurnContext === undefined ? {} : { turnContextDeltaBase: lastSeenTurnContext }),
                 inheritedReactionGuidance: journal.reactionGuidance(),
                 reasonGate: STRUCTURED_FINAL_DECISION_REASON_GATE,
@@ -3928,6 +3958,7 @@ async function runConversationWithConfiguredIntel(
             );
         const correctionLauncher = await writeLauncher({
           rendererProfile: config.rendererProfile,
+          overridePolicy: config.overridePolicy,
           directory: artifacts, name: `${key}-correction`, snapshot: correctionSnapshot,
           room, historyKind: 'proposal_correction_requested',
           ...(launcherKbRead === undefined ? {} : { kbRead: launcherKbRead }),
@@ -3943,6 +3974,7 @@ async function runConversationWithConfiguredIntel(
               snapshot: correctionSnapshot,
               intelMode: config.intelMode,
               rendererProfile: config.rendererProfile,
+              overridePolicy: config.overridePolicy,
               ...(rowKbReadBudget === undefined ? {} : {
                 kbReadBudget: rowKbReadBudget,
                 kbReadCallPhase: 'correction',
@@ -4230,6 +4262,7 @@ async function runConversationWithConfiguredIntel(
                     snapshot: correctionSnapshot,
                     intelMode: config.intelMode,
                     rendererProfile: config.rendererProfile,
+                    overridePolicy: config.overridePolicy,
                     ...(correctionTurnContextBase === undefined ? {} : {
                       turnContextDeltaBase: correctionTurnContextBase,
                     }),
@@ -4599,6 +4632,7 @@ async function runConversationWithConfiguredIntel(
                     });
                     const recalculationLauncher = await writeLauncher({
                       rendererProfile: config.rendererProfile,
+                      overridePolicy: config.overridePolicy,
                       directory: artifacts,
                       name: `${key}-speculation-recalc-${String(segmentActors[0])}`,
                       snapshot: recalculationSnapshot,
@@ -4613,6 +4647,7 @@ async function runConversationWithConfiguredIntel(
                           snapshot: recalculationSnapshot,
                           intelMode: config.intelMode,
                           rendererProfile: config.rendererProfile,
+                          overridePolicy: config.overridePolicy,
                           turnContextDeltaBase: pending.sourceTurnContext,
                           onProposal: (proposal) => {
                             if (isRoundProposal(proposal)) localRecalculationProposal = proposal;
@@ -4881,6 +4916,7 @@ async function runConversationWithConfiguredIntel(
         knowledgeModel: 'engine_state',
         hiddenOptions,
         intelMode: config.intelMode,
+        overridePolicy: config.overridePolicy,
         rendererAttribution: {
           policyVersion: RENDERER_POLICY_VERSION,
           profile: config.rendererProfile,

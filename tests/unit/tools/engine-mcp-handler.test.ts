@@ -1042,6 +1042,39 @@ describe('engine MCP dual-handshake full surface conformance', () => {
     expect(resourceFixture.runtime.proposals).toHaveLength(1);
   });
 
+  it('threads the D490 policy so strict rejects morale and typed_reason accepts it', async () => {
+    const submitMoraleOverride = async (overridePolicy: 'strict' | 'typed_reason') => {
+      const fixture = await fixtureRuntime({ requestedActorCount: 1, overridePolicy });
+      const facts = fixtureFacts(fixture.state, fixture.runtime);
+      const endTurn = fixture.runtime.feed.current().projection.combatants
+        .find((combatant) => combatant.id === facts.actor)?.options
+        .find((option) => option.actionSlots.some((slot) => slot.use.kind === 'end_turn'));
+      if (endTurn === undefined) throw new Error('Fixture End Turn option is absent.');
+      const result = structured(toolCall(fixture.runtime.handler, 'engine.submit_round_proposals', {
+        ...happyArguments('engine.submit_round_proposals', fixture.state, fixture.runtime),
+        idempotency_key: `round-morale-${overridePolicy}-0001`,
+        proposals: [{
+          ...facts.proposal,
+          primary_option_id: endTurn.optionId,
+          reason: 'Retreat from the front line because this creature has lost its nerve.',
+          override_justification: { kind: 'morale' },
+        }],
+      }));
+      return { result, proposals: fixture.runtime.proposals };
+    };
+
+    const strict = await submitMoraleOverride('strict');
+    expect(strict.result).toMatchObject({
+      status: 'rejected',
+      actor_refusals: [{ codes: ['OVERRIDE_UNJUSTIFIED'] }],
+    });
+    expect(strict.proposals).toEqual([]);
+
+    const typedReason = await submitMoraleOverride('typed_reason');
+    expect(typedReason.result['status']).toBe('proposed');
+    expect(typedReason.proposals).toHaveLength(1);
+  });
+
   it('D490 rejects a rubber-stamp override as OVERRIDE_UNJUSTIFIED without consuming the submission', async () => {
     const gapFixture = await fixtureRuntime({ requestedActorCount: 1 });
     const gapFacts = fixtureFacts(gapFixture.state, gapFixture.runtime);

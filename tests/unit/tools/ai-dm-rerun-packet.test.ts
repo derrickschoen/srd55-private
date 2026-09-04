@@ -7,6 +7,7 @@ import {
   R1_10_SEEDS,
   assertBlindedPacket,
   buildMultiArmRerunPacket,
+  buildReasonVisibilityIsolationPacket,
   buildRerunPacket,
   parseRerunPacketArgs,
   validateRerunRows,
@@ -121,6 +122,7 @@ describe('AI-DM R1-10 rerun packet', () => {
       entries: [
         {
           blindId: 'blind-001', arm: 'baseline', rowEra: 'post_shift', planner: 'model',
+          overridePolicy: 'typed_reason',
           overrideKinds: [], overrideRejections: [],
           decisionReasons: [{
             actorId: 'monster:ogre', reason: 'Attack the fighter to keep the front line occupied.',
@@ -132,6 +134,7 @@ describe('AI-DM R1-10 rerun packet', () => {
         },
         {
           blindId: 'blind-002', arm: 'intel', rowEra: 'post_shift', planner: 'engine_default',
+          overridePolicy: 'typed_reason',
           overrideKinds: [], overrideRejections: [], decisionReasons: [], rationale: null,
           decisionTransport: 'mcp_minimal', firstDecisionAccepted: false, decisionAttempts: 0,
           decisionRejectionCodes: [], normalizationCodes: [], indexZeroSelectionRate: 'not_applicable',
@@ -262,6 +265,7 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(result.answerKey.entries).toEqual([
       {
         blindId: 'blind-001', arm: 'baseline', rowEra: 'post_shift', planner: 'model',
+        overridePolicy: 'typed_reason',
         overrideKinds: ['objective'],
         overrideRejections: [{ actorId: 'monster:ogre', code: 'OVERRIDE_UNJUSTIFIED' }],
         decisionReasons: [], rationale: null,
@@ -271,6 +275,7 @@ describe('AI-DM R1-10 rerun packet', () => {
       },
       {
         blindId: 'blind-002', arm: 'intel', rowEra: 'post_shift', planner: 'sim_controller',
+        overridePolicy: 'typed_reason',
         overrideKinds: [], overrideRejections: [], decisionReasons: [], rationale: null,
         decisionTransport: 'mcp_minimal', firstDecisionAccepted: false, decisionAttempts: 0,
         decisionRejectionCodes: [], normalizationCodes: [], indexZeroSelectionRate: 'not_applicable',
@@ -546,6 +551,8 @@ describe('AI-DM R1-10 rerun packet', () => {
       .toThrow('leaks a model-identifying field');
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', normalizationCodes: ['stale_catalog'] }] }))
       .toThrow('leaks a model-identifying field');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', overridePolicy: 'strict' }] }))
+      .toThrow('leaks a model-identifying field');
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', instructionSource: 'skill' }] }))
       .toThrow('leaks a model-identifying field');
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', skillName: 'dm-round' }] }))
@@ -579,6 +586,67 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(JSON.stringify(result.packet)).not.toContain('tactical advantage');
     expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', reason: 'leaked' }] }))
       .toThrow('leaks a model-identifying field');
+  });
+
+  it('renders actor reason lines only when explicitly enabled (mutation: render reasons when off)', () => {
+    const source = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl');
+    const reason = 'Hold the doorway because the wounded ally needs room to withdraw.';
+    const rows = source.map((row, index) => index === 0 ? {
+      ...row,
+      authorizedPlan: [{
+        ...record((row['authorizedPlan'] as readonly unknown[])[0]),
+        reason,
+      }],
+    } : row);
+
+    const hidden = buildRerunPacket(rows, 1, tinyProtocol, { reasonsVisible: false });
+    expect(JSON.stringify(hidden.packet)).not.toContain(reason);
+    expect(() => assertBlindedPacket({
+      entries: [{ executedPlan: [{ actorId: 'monster:ogre', reason }] }],
+    })).toThrow('leaks a model-identifying field');
+
+    const visible = buildRerunPacket(rows, 1, tinyProtocol, { reasonsVisible: true });
+    expect(visible.packet.entries.flatMap((entry) => entry.executedPlan ?? []))
+      .toContainEqual(expect.objectContaining({ actorId: 'monster:ogre', reason }));
+    expect(() => assertBlindedPacket(visible.packet, 'packet', { reasonsVisible: true })).not.toThrow();
+  });
+
+  it('shows reasons only for V in a multi-arm packet and builds the prime-547 isolation pair from the same V rows', () => {
+    const source = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl')[0];
+    if (source === undefined) throw new Error('paired fixture is incomplete');
+    const reason = 'Break formation because morale has collapsed after the leader fell.';
+    const vRow = {
+      ...source,
+      arm: 'V',
+      overridePolicy: 'typed_reason',
+      authorizedPlan: [{
+        ...record((source['authorizedPlan'] as readonly unknown[])[0]),
+        reason,
+      }],
+    };
+    const threeArmRows = [
+      { ...vRow, arm: 'S', overridePolicy: 'strict' },
+      vRow,
+      { ...vRow, arm: 'U' },
+    ];
+    const threeArm = buildMultiArmRerunPacket(threeArmRows, 541, tinyProtocol, {
+      reasonsVisible: true,
+      reasonVisibleArms: ['V'],
+    });
+    const visibleBlindIds = new Set(threeArm.answerKey.entries
+      .filter((entry) => entry.arm === 'V')
+      .map((entry) => entry.blindId));
+    for (const entry of threeArm.packet.entries) {
+      const reasons = (entry.executedPlan ?? []).flatMap((plan) => plan.reason ?? []);
+      expect(reasons).toEqual(visibleBlindIds.has(entry.blindId) ? [reason] : []);
+    }
+
+    const isolation = buildReasonVisibilityIsolationPacket([vRow], 547, tinyProtocol);
+    expect(new Set(isolation.answerKey.entries.map((entry) => entry.arm)))
+      .toEqual(new Set(['reason_visible', 'reason_hidden']));
+    const reasonCounts = isolation.packet.entries.map((entry) =>
+      (entry.executedPlan ?? []).filter((plan) => plan.reason === reason).length).sort();
+    expect(reasonCounts).toEqual([0, 1]);
   });
 
   it('requires instruction provenance and the selected skill hash in every source row', () => {

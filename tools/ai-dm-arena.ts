@@ -15,7 +15,12 @@ import {
   type CombatModel,
   type TurnContextRenderEvidence,
 } from './ai-dm-conversation';
-import type { IntelMode } from '../src/vtt/mcp/engine-server';
+import {
+  DEFAULT_OVERRIDE_POLICY,
+  OVERRIDE_POLICIES,
+  type IntelMode,
+  type OverridePolicy,
+} from '../src/vtt/mcp/engine-server';
 import type { UnattendedReactionAskDefault } from '../src/vtt/reaction-offer-host-policy';
 import {
   AGENT_SKILL_NAMES,
@@ -63,12 +68,14 @@ interface ArenaArmBase {
   readonly escalationModel: string | null;
   readonly escalationEffort: ConversationEffort | null;
   readonly combatModel: CombatModel;
+  readonly overridePolicy: OverridePolicy;
 }
 
 export type ArenaArm = ArenaArmBase & AgentInstructionSource;
 
 interface ArenaConfigBase {
   readonly intelMode: IntelMode;
+  readonly overridePolicy: OverridePolicy;
   readonly rendererProfile: RendererProfile;
   readonly combatModel: CombatModel;
   readonly initiativeProfile: RoomInitiativeProfile;
@@ -188,6 +195,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   let generateMissingRooms = false;
   const rawArms: string[] = [];
   const rawArmCombatModels: string[] = [];
+  const rawArmOverridePolicies: string[] = [];
   for (let index = 0; index < argumentsValue.length; index += 1) {
     const option = argumentsValue[index];
     if (option === '--dry-run') { dryRun = true; continue; }
@@ -201,15 +209,17 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
       '--instruction-source', '--skill',
       '--reaction-ask-default',
       '--transport',
-      '--combat-model', '--initiative-profile', '--arm-combat-model',
+      '--combat-model', '--initiative-profile', '--arm-combat-model', '--arm-override-policy',
       '--party-policy',
       '--intel-mode',
+      '--override-policy',
       '--renderer-profile',
       '--basis', '--arm', '--local-base-url', '--local-model', '--local-api-key', '--local-think',
     ].includes(option ?? '')) throw new TypeError(`Unknown arena option ${option ?? '<missing>'}.`);
     const value = requiredValue(argumentsValue, index, option ?? '<missing>');
     if (option === '--arm') rawArms.push(value);
     else if (option === '--arm-combat-model') rawArmCombatModels.push(value);
+    else if (option === '--arm-override-policy') rawArmOverridePolicies.push(value);
     else values.set(option ?? '', value);
     index += 1;
   }
@@ -290,6 +300,10 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (intelMode !== 'full' && intelMode !== 'off') {
     throw new TypeError('--intel-mode must be full or off.');
   }
+  const overridePolicy = values.get('--override-policy') ?? DEFAULT_OVERRIDE_POLICY;
+  if (!OVERRIDE_POLICIES.includes(overridePolicy as OverridePolicy)) {
+    throw new TypeError('--override-policy must be strict or typed_reason.');
+  }
   const rendererProfile = values.has('--renderer-profile')
     ? rendererProfileSchema.parse(JSON.parse(values.get('--renderer-profile') ?? ''))
     : DEFAULT_RENDERER_PROFILE;
@@ -302,6 +316,18 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
     }
     if (armCombatModels.has(label)) throw new TypeError(`Duplicate --arm-combat-model for ${label}.`);
     armCombatModels.set(label, model as CombatModel);
+  }
+  const armOverridePolicies = new Map<string, OverridePolicy>();
+  for (const raw of rawArmOverridePolicies) {
+    const [label, policy, extra] = raw.split(':');
+    if (label === undefined || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u.test(label) ||
+      policy === undefined || extra !== undefined || !OVERRIDE_POLICIES.includes(policy as OverridePolicy)) {
+      throw new TypeError('--arm-override-policy must use label:strict|typed_reason syntax.');
+    }
+    if (armOverridePolicies.has(label)) {
+      throw new TypeError(`Duplicate --arm-override-policy for ${label}.`);
+    }
+    armOverridePolicies.set(label, policy as OverridePolicy);
   }
   const arms = rawArms.map((raw): ArenaArm => {
     const [label, armModel, armEffort, armEscalationModel, armEscalationEffort, extra] = raw.split(':');
@@ -328,6 +354,7 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
         ? null
         : armEscalationEffort as ConversationEffort,
       combatModel: armCombatModels.get(label) ?? combatModel as CombatModel,
+      overridePolicy: armOverridePolicies.get(label) ?? overridePolicy as OverridePolicy,
     };
   });
   if (new Set(arms.map((arm) => arm.label)).size !== arms.length) {
@@ -347,8 +374,16 @@ export function parseArenaArgs(argv: readonly string[], cwd = process.cwd()): Ar
   if (!interleave && armCombatModels.size > 0) {
     throw new TypeError('--arm-combat-model is only valid with --interleave.');
   }
+  const unknownArmPolicy = [...armOverridePolicies.keys()].find((label) => !armLabels.has(label));
+  if (unknownArmPolicy !== undefined) {
+    throw new TypeError(`--arm-override-policy names unknown arm ${unknownArmPolicy}.`);
+  }
+  if (!interleave && armOverridePolicies.size > 0) {
+    throw new TypeError('--arm-override-policy is only valid with --interleave.');
+  }
   return {
     intelMode,
+    overridePolicy: overridePolicy as OverridePolicy,
     rendererProfile,
     combatModel: combatModel as CombatModel,
     initiativeProfile: initiativeProfile as RoomInitiativeProfile,
@@ -483,6 +518,7 @@ function conversationConfig(
     readonly escalationEffort: ConversationEffort | null;
     readonly outPath: string;
     readonly combatModel?: CombatModel;
+    readonly overridePolicy?: OverridePolicy;
     readonly instruction?: AgentInstructionSource;
   },
 ): import('./ai-dm-conversation').ConversationConfig {
@@ -490,6 +526,7 @@ function conversationConfig(
   return {
     ...instructionSource,
     intelMode: config.intelMode,
+    overridePolicy: overrides.overridePolicy ?? config.overridePolicy,
     rendererProfile: config.rendererProfile,
     combatModel: overrides.combatModel ?? config.combatModel,
     initiativeProfile: config.initiativeProfile,
@@ -585,6 +622,7 @@ export async function runArena(
             escalationEffort: arm.escalationEffort ?? config.escalationEffort,
             outPath: resolve(temporaryDirectory, `${String(room)}-${String(rep)}-${arm.label}.jsonl`),
             combatModel: arm.combatModel,
+            overridePolicy: arm.overridePolicy,
             instruction: arm,
           }), {
             ...conversationOptions,

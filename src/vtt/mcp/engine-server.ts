@@ -35,6 +35,7 @@ import {
   enginePlayToken,
   type EngineOfferableOption,
   type EngineOptionMetric,
+  type EngineOverrideJustification,
 } from '../turn-proposal';
 import {
   DM_INTEL_QUERY_POLICY,
@@ -145,6 +146,9 @@ export const ENGINE_SPECULATIVE_DM_TOOL_NAMES = Object.freeze([
 export type EngineMcpToolProfile = 'full' | 'dm';
 export const INTEL_MODES = ['full', 'off'] as const;
 export type IntelMode = (typeof INTEL_MODES)[number];
+export const OVERRIDE_POLICIES = ['strict', 'typed_reason'] as const;
+export type OverridePolicy = (typeof OVERRIDE_POLICIES)[number];
+export const DEFAULT_OVERRIDE_POLICY: OverridePolicy = 'typed_reason';
 
 export interface EngineCapsuleFeed extends ReadonlyStateCapsuleSource {
   current(): EngineStateCapsule;
@@ -259,6 +263,7 @@ interface EngineMcpDependencies {
   }) => void;
   readonly kbReadBudget?: KbReadBudget;
   readonly kbReadCallPhase?: KbReadCallPhase;
+  readonly overridePolicy?: OverridePolicy;
 }
 
 export interface EngineToolSurface {
@@ -268,6 +273,44 @@ export interface EngineToolSurface {
 
 export interface EngineMcpApplication extends McpHandler {
   readonly toolSurface: EngineToolSurface;
+}
+
+interface OverridePolicyRule {
+  refusal(override: EngineOverrideJustification): { readonly code: 'OVERRIDE_UNJUSTIFIED'; readonly summary: string } | null;
+}
+
+const TYPED_REASON_OVERRIDE_RULE: OverridePolicyRule = {
+  refusal: () => null,
+};
+
+const STRICT_OVERRIDE_RULE: OverridePolicyRule = {
+  refusal(override) {
+    switch (override.kind) {
+      case 'engine_play':
+      case 'missing_metric':
+        return null;
+      case 'objective':
+      case 'morale':
+      case 'roleplay':
+      case 'resource_conservation':
+      case 'unknown_engine_gap':
+        return {
+          code: 'OVERRIDE_UNJUSTIFIED',
+          summary: 'The strict override policy accepts only engine_play or missing_metric justifications.',
+        };
+    }
+    override satisfies never;
+    throw new TypeError('Unknown override justification kind.');
+  },
+};
+
+function overridePolicyRule(policy: OverridePolicy): OverridePolicyRule {
+  switch (policy) {
+    case 'strict': return STRICT_OVERRIDE_RULE;
+    case 'typed_reason': return TYPED_REASON_OVERRIDE_RULE;
+  }
+  policy satisfies never;
+  throw new TypeError(`Unknown override policy ${String(policy)}.`);
 }
 
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
@@ -1168,6 +1211,9 @@ function renderFailureModesWithCoverage(): Readonly<Record<string, unknown>> {
 }
 
 export function createEngineMcpApplication(dependencies: EngineMcpDependencies): EngineMcpApplication {
+  const selectedOverridePolicy = overridePolicyRule(
+    dependencies.overridePolicy ?? DEFAULT_OVERRIDE_POLICY,
+  );
   if (dependencies.maximumToolResultBytes !== undefined && dependencies.maximumToolResultBytes > 64 * 1024) {
     throw new RangeError('maximumToolResultBytes cannot exceed the 64 KiB hard limit.');
   }
@@ -1401,6 +1447,10 @@ export function createEngineMcpApplication(dependencies: EngineMcpDependencies):
         code: 'OVERRIDE_UNJUSTIFIED',
         summary: 'An override reason must explain the decision instead of restating that an option was offered, legal, selected, or revision-bound.',
       };
+    }
+    if (override !== null) {
+      const policyRefusal = selectedOverridePolicy.refusal(override);
+      if (policyRefusal !== null) return policyRefusal;
     }
     if (dominance.status !== 'dominated') return null;
     if (override === null) {
