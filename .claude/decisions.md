@@ -10146,3 +10146,15 @@ second Fable art unit, claude/classic-art off claude/board-shot (inc2), owning t
 40 to 64 CSS px (20-cell room = 1280 px, the capture viewport) with the PNG budget unchanged. Folds in the
 legibility items (full names, HP band, coordinates, legend) so only one lane draws labels. Same art bible as D515,
 top-down grammar. Path-overlay merges on top; both lanes append to styles.css.
+
+SUPERVISOR RULINGS (2026-09-04 18:45) on the image-packet builder's two questions:
+1. D510(4) identity: the mismatching (room, round) rows between d513 image-on arms and the d490 off arms are the
+   model's own `maximum_options_per_actor` choices (traced 14:20), not engine differences; the packet build proceeds
+   with those rows kept and flagged in the report (README's hard block is overridden for this family only).
+2. inc2 rows carry no `boardImage.generation`; implicit "none" is accepted for this generation and is named
+   "g1-plain" in reports; the path-overlay and classic-art generations must set the field explicitly.
+Luna-low judging launched (packets 631/641, three seats, images attached via codex -i and Read-only claude seats).
+Iso art round 1 (unit C) screenshot reviewed: sprites, walls and floors now read as 16-bit at 2× density; open
+critique for round 2: floor and wall tops merge in the same blue-grey, the wall-top dither reads as noise at 2×,
+the room is cropped by the 960-px canvas clamp (camera is the supervisor's), labels are the sibling's fillText and
+overlap until renderLabel/stackLabelOffsets are wired in the r2 integration unit.
