@@ -18,7 +18,7 @@ import { ALERTING_POLICY } from '../../combat/alerting';
 import { SEARCH_MEMORY_POLICY } from '../../combat/search-memory';
 import type { McpToolDescriptor, SchemaViolation } from './handler';
 import { rendererAttributionSchema } from '../renderer-profile';
-import { KB_SUBJECTS } from '../knowledge-base-contract';
+import { KB_SUBJECTS } from '../knowledge-base-subjects';
 
 export const ENGINE_ACTOR_KNOWLEDGE_POLICY = 'actor-knowledge-v1' as const;
 export const ENGINE_LEGENDARY_WINDOWS_POLICY = 'legendary-windows-v1' as const;

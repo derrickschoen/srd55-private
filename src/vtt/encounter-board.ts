@@ -25,6 +25,10 @@ export interface EncounterBoardCombatant {
 
 export interface EncounterBoardProjectionShape {
   readonly bounds: { readonly columns: number; readonly rows: number };
+  readonly blockedCells?: readonly GridCell[];
+  readonly difficultTerrainRegions?: readonly EncounterBoardEnvironmentRegion[];
+  readonly obscurementRegions?: readonly EncounterBoardObscurementRegion[];
+  readonly environmentLightRegions?: readonly EncounterBoardLightRegion[];
   readonly combatants: readonly EncounterBoardCombatant[];
   readonly highlightedCombatant: CombatantId | null;
   readonly adjudicatedTargets: readonly CombatantId[];
@@ -37,6 +41,19 @@ export interface EncounterBoardProjectionShape {
   readonly lightOverlays?: readonly EncounterBoardLightOverlay[];
   readonly sustainedEffects?: readonly EncounterBoardSustainedEffect[];
   readonly targetLines?: readonly EncounterBoardTargetLine[];
+}
+
+export interface EncounterBoardEnvironmentRegion {
+  readonly id: string;
+  readonly cells: readonly GridCell[];
+}
+
+export interface EncounterBoardObscurementRegion extends EncounterBoardEnvironmentRegion {
+  readonly obscurement: 'light' | 'heavy' | 'magical_darkness';
+}
+
+export interface EncounterBoardLightRegion extends EncounterBoardEnvironmentRegion {
+  readonly level: 'bright' | 'dim' | 'darkness';
 }
 
 export interface EncounterBoardWorldObject {
@@ -180,6 +197,7 @@ export interface EncounterBoardCellModel {
   readonly column: number;
   readonly row: number;
   readonly layers: readonly EncounterBoardLayer[];
+  readonly mechanicalLayers: readonly EncounterBoardMechanicalLayer[];
   readonly token: EncounterBoardTokenModel | null;
   readonly tokens: readonly EncounterBoardTokenModel[];
   readonly worldObjects: readonly EncounterBoardWorldObject[];
@@ -189,6 +207,20 @@ export interface EncounterBoardCellModel {
     readonly level: 'bright' | 'dim';
   }[];
 }
+
+export type EncounterBoardMechanicalLayer =
+  | { readonly kind: 'blocked' }
+  | { readonly kind: 'difficult_terrain'; readonly regionId: string }
+  | {
+      readonly kind: 'obscurement';
+      readonly regionId: string;
+      readonly obscurement: EncounterBoardObscurementRegion['obscurement'];
+    }
+  | {
+      readonly kind: 'illumination';
+      readonly regionId: string;
+      readonly level: EncounterBoardLightRegion['level'];
+    };
 
 function cellKey(cell: { readonly column: number; readonly row: number }): string {
   return `${String(cell.column)},${String(cell.row)}`;
@@ -415,13 +447,8 @@ export function projectEncounterBoard(
   adjudicatedTargets: readonly CombatantId[] = [],
 ): DmEncounterBoardModel {
   const state = view.state;
-  const hidden = new Set(state.hiddenCombatants.map((entry) => entry.combatant));
-  const hiddenCells = state.tokens
-    .filter((entry) => hidden.has(entry.combatantId))
-    .map((entry) => ({ ...entry.position }));
   const positions = new Map(state.tokens.map((token) => [token.combatantId, token.position] as const));
   const combatants = state.combatants.flatMap((subject) => {
-    if (hidden.has(subject.profile.id)) return [];
     const position = positions.get(subject.profile.id);
     return position === undefined ? [] : [{
       id: subject.profile.id,
@@ -442,13 +469,26 @@ export function projectEncounterBoard(
   });
   return {
     bounds: { ...state.bounds },
+    blockedCells: state.blockedCells.map((cell) => ({ ...cell })),
+    difficultTerrainRegions: state.environment.difficultTerrainRegions.map((region) => ({
+      id: region.id,
+      cells: region.cells.map((cell) => ({ ...cell })),
+    })),
+    obscurementRegions: state.environment.obscurementRegions.map((region) => ({
+      id: region.id,
+      cells: region.cells.map((cell) => ({ ...cell })),
+      obscurement: region.obscurement,
+    })),
+    environmentLightRegions: state.environment.lightRegions.map((region) => ({
+      id: region.id,
+      cells: region.cells.map((cell) => ({ ...cell })),
+      level: region.level,
+    })),
     combatants,
     highlightedCombatant: state.activeCombatant,
     activeCombatant: state.activeCombatant,
     adjudicatedTargets: [...adjudicatedTargets],
-    foggedCells: [...new Map(
-      [...state.foggedCells, ...hiddenCells].map((cell) => [cellKey(cell), { ...cell }] as const),
-    ).values()],
+    foggedCells: state.foggedCells.map((cell) => ({ ...cell })),
     round: state.round,
     initiative: state.initiative.map((entry) => {
       const subject = state.combatants.find((candidate) => candidate.profile.id === entry.combatant);
@@ -503,6 +543,28 @@ export function encounterBoardRenderModel(
   const worldObjects = projection.worldObjects ?? [];
   const areas = projection.areas ?? [];
   const lights = projection.lightOverlays ?? [];
+  const blocked = new Set((projection.blockedCells ?? []).map(cellKey));
+  const difficultTerrain = new Map<string, string[]>();
+  for (const region of projection.difficultTerrainRegions ?? []) {
+    for (const cell of region.cells) {
+      const key = cellKey(cell);
+      difficultTerrain.set(key, [...(difficultTerrain.get(key) ?? []), region.id]);
+    }
+  }
+  const obscurement = new Map<string, EncounterBoardObscurementRegion[]>();
+  for (const region of projection.obscurementRegions ?? []) {
+    for (const cell of region.cells) {
+      const key = cellKey(cell);
+      obscurement.set(key, [...(obscurement.get(key) ?? []), region]);
+    }
+  }
+  const illumination = new Map<string, EncounterBoardLightRegion[]>();
+  for (const region of projection.environmentLightRegions ?? []) {
+    for (const cell of region.cells) {
+      const key = cellKey(cell);
+      illumination.set(key, [...(illumination.get(key) ?? []), region]);
+    }
+  }
   const cells: EncounterBoardCellModel[] = [];
 
   for (let row = 0; row < projection.bounds.rows; row += 1) {
@@ -520,6 +582,21 @@ export function encounterBoardRenderModel(
       const terrainAsset = terrain.get(key);
       if (terrainAsset !== undefined) layers.push({ role: 'terrain', assetId: terrainAsset });
       if (fog.has(key)) layers.push({ role: 'fog', assetId: art.fog.hidden });
+      const mechanicalLayers: EncounterBoardMechanicalLayer[] = [];
+      if (blocked.has(key)) mechanicalLayers.push({ kind: 'blocked' });
+      for (const regionId of difficultTerrain.get(key) ?? []) {
+        mechanicalLayers.push({ kind: 'difficult_terrain', regionId });
+      }
+      for (const lit of illumination.get(key) ?? []) {
+        mechanicalLayers.push({ kind: 'illumination', regionId: lit.id, level: lit.level });
+      }
+      for (const obscured of obscurement.get(key) ?? []) {
+        mechanicalLayers.push({
+          kind: 'obscurement',
+          regionId: obscured.id,
+          obscurement: obscured.obscurement,
+        });
+      }
 
       const tokens = (combatants.get(key) ?? []).map((combatant): EncounterBoardTokenModel => {
         const asset = art.combatantTokens[combatant.id];
@@ -552,6 +629,7 @@ export function encounterBoardRenderModel(
         column,
         row,
         layers: Object.freeze(layers),
+        mechanicalLayers: Object.freeze(mechanicalLayers),
         token: tokens[0] ?? null,
         tokens: Object.freeze(tokens),
         worldObjects: Object.freeze(cellObjects),

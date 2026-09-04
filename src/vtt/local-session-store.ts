@@ -750,3 +750,13 @@ export class IndexedDbBrowserSessionStore implements BrowserSessionStore {
     return value === undefined ? null : value as BrowserSaveMetadata;
   }
 }
+
+/** Imports a save and resolves only after the browser's durable write boundary acknowledges it. */
+export async function importBrowserSessionDurably(
+  store: Pick<IndexedDbBrowserSessionStore, 'import' | 'flush'>,
+  bytes: string,
+): Promise<EncounterSessionId> {
+  const sessionId = store.import(bytes);
+  await store.flush();
+  return sessionId;
+}

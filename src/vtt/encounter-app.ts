@@ -1,5 +1,4 @@
 import { canonicalJson } from '../commands/canonical-json';
-import type { AssetId } from '../assets/ids';
 import { starterArtDataUri } from '../assets/starter-art-resolver';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
@@ -20,8 +19,10 @@ import {
 } from './dm-encounter-host';
 import {
   encounterBoardRenderModel,
+  type EncounterBoardMechanicalLayer,
   type EncounterBoardProjectionShape,
 } from './encounter-board';
+import { encounterArtForBoard } from './encounter-art-selection';
 import type {
   DmBoardProjection,
   DmMovementPathPreview,
@@ -33,7 +34,7 @@ import {
   isHostWindowMessage,
   playerDecisionMessage,
 } from './local-window-channel';
-import { IndexedDbBrowserSessionStore } from './local-session-store';
+import { IndexedDbBrowserSessionStore, importBrowserSessionDurably } from './local-session-store';
 import {
   IndexedDbDirectoryHandlePersistence,
   SaveFolderRepository,
@@ -44,8 +45,6 @@ import {
   type SaveManagerEntry,
   type SaveManagerViewModel,
 } from './save-manager';
-import { REFERENCE_ENCOUNTER_ART } from './reference-encounter-art';
-import { VANE_WARREN_ART } from './vane-warren-art';
 import { decodeSavedSessionFingerprint } from './session-persistence';
 import type { EncounterSeed } from './session-seed';
 import type { StoredCharacterEncounter } from './stored-character-encounter';
@@ -84,10 +83,17 @@ function activationChoiceControls(
   const targets = slot.kind === 'calm_emotions_per_target' ? slot.targetIds : [null];
   return targets.map((targetId, index) => {
     const label = element('label', { className: 'engine-activation-choice' });
+    const identity = targetId === null ? String(index) : String(targetId);
+    label.dataset.renderKey = stableRenderKey(
+      'dm', 'engine-options', optionId, 'activation-choice', slot.kind, identity, 'label',
+    );
     const name = slot.kind.replaceAll('_', ' ');
     const prompt = targetId === null ? name : `${name} for ${String(targetId)}`;
     label.append(element('span', { text: `Choose ${prompt} at activation` }));
     const control = element('select');
+    control.dataset.renderKey = stableRenderKey(
+      'dm', 'engine-options', optionId, 'activation-choice', slot.kind, identity, 'select',
+    );
     control.dataset.optionId = optionId;
     control.dataset.choiceKind = slot.kind;
     if (targetId !== null) control.dataset.targetId = targetId;
@@ -123,6 +129,7 @@ export function renderHumanEngineOptionCatalog(
     group.dataset.actorId = actor.actorId;
     group.append(element('h3', { text: actor.actorName }));
     const list = element('ol');
+    list.dataset.renderKey = stableRenderKey('dm', 'engine-options', actor.actorId, 'options');
     for (const entry of actor.options) {
       const item = element('li', { text: entry.label });
       item.dataset.renderKey = stableRenderKey(
@@ -274,34 +281,23 @@ function renderBoard(
   projection: EncounterBoardProjectionShape,
   preview: ReadonlySet<string> = new Set(),
   movementDangerPreview: DmMovementPathPreview | null = null,
+  provenance?: {
+    readonly revision: number;
+    readonly round: number;
+    readonly stateDigest: string;
+  },
 ): HTMLDivElement {
-  const packageForBounds = projection.bounds.columns === VANE_WARREN_ART.room.columns &&
-    projection.bounds.rows === VANE_WARREN_ART.room.rows
-    ? VANE_WARREN_ART
-    : REFERENCE_ENCOUNTER_ART;
-  const pcFallback = packageForBounds.combatantTokens['combatant:fighter'];
-  const monsterFallback = packageForBounds.combatantTokens['combatant:training-brute'];
-  if (pcFallback === undefined || monsterFallback === undefined) {
-    throw new Error('Reference encounter token art is incomplete.');
-  }
-  const combatantTokens: Record<string, AssetId> = {};
-  for (const combatant of projection.combatants) {
-    combatantTokens[combatant.id] =
-      packageForBounds.combatantTokens[combatant.id] ??
-      (combatant.kind === 'player_character' ? pcFallback : monsterFallback);
-  }
-  const hasReferenceArt = projection.combatants.every(
-    (combatant) => packageForBounds.combatantTokens[combatant.id] !== undefined,
-  );
-  const art = hasReferenceArt
-    ? packageForBounds
-    : { ...packageForBounds, combatantTokens };
-  const models = hasReferenceArt
-    ? encounterBoardRenderModel(projection, packageForBounds)
-    : encounterBoardRenderModel(projection, art);
+  const art = encounterArtForBoard(projection);
+  const models = encounterBoardRenderModel(projection, art);
   const board = element('div', { className: 'encounter-board' });
   board.style.setProperty('--encounter-columns', String(projection.bounds.columns));
   board.dataset.artPackage = art.id;
+  board.dataset.boardAudience = provenance === undefined ? 'player' : 'dm';
+  if (provenance !== undefined) {
+    board.dataset.sourceRevision = String(provenance.revision);
+    board.dataset.sourceRound = String(provenance.round);
+    board.dataset.sourceStateDigest = provenance.stateDigest;
+  }
   const dangersByCell = new Map<string, DmMovementPathPreview['annotations'][number]['dangers']>(movementDangerPreview?.annotations.map(
     (annotation) => [`${String(annotation.cell.column)},${String(annotation.cell.row)}`, annotation.dangers] as const,
   ) ?? []);
@@ -317,6 +313,7 @@ function renderBoard(
       image.dataset.assetId = layer.assetId;
       cell.append(image);
     }
+    for (const layer of model.mechanicalLayers) cell.append(renderMechanicalLayer(layer));
     for (const light of model.lightOverlays) {
       const overlay = element('div', { className: `encounter-light encounter-light-${light.level}` });
       overlay.dataset.lightId = light.overlay.id;
@@ -432,6 +429,34 @@ function renderBoard(
     board.append(svg);
   }
   return board;
+}
+
+function renderMechanicalLayer(layer: EncounterBoardMechanicalLayer): HTMLDivElement {
+  const rendered = element('div', {
+    className: `encounter-mechanical-layer encounter-mechanical-${layer.kind}`,
+  });
+  rendered.setAttribute('aria-hidden', 'true');
+  switch (layer.kind) {
+    case 'blocked':
+      rendered.dataset.mechanicalKind = layer.kind;
+      return rendered;
+    case 'difficult_terrain':
+      rendered.dataset.mechanicalKind = layer.kind;
+      rendered.dataset.regionId = layer.regionId;
+      return rendered;
+    case 'obscurement':
+      rendered.dataset.mechanicalKind = layer.kind;
+      rendered.dataset.regionId = layer.regionId;
+      rendered.dataset.obscurement = layer.obscurement;
+      return rendered;
+    case 'illumination':
+      rendered.dataset.mechanicalKind = layer.kind;
+      rendered.dataset.regionId = layer.regionId;
+      rendered.dataset.lightLevel = layer.level;
+      return rendered;
+  }
+  const exhaustive: never = layer;
+  throw new Error(`Unhandled encounter mechanical layer ${String(exhaustive)}`);
 }
 
 const MOVEMENT_DANGER_LABELS: Readonly<Record<
@@ -762,6 +787,8 @@ class DmEncounterView {
     store: IndexedDbBrowserSessionStore,
     encounter?: StoredCharacterEncounter,
     initialSeed?: EncounterSeed,
+    private readonly boardSnapshotMode = false,
+    private readonly loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
   ) {
     this.#store = store;
     this.#sessionFlow = encounter?.sessionFlow ?? null;
@@ -803,9 +830,19 @@ class DmEncounterView {
     sessionId: string,
     encounter?: StoredCharacterEncounter,
     initialSeed?: EncounterSeed,
+    boardSnapshotMode = false,
+    loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
   ): Promise<DmEncounterView> {
     const store = await IndexedDbBrowserSessionStore.open(indexedDB, localStorage);
-    const view = new DmEncounterView(root, sessionId, store, encounter, initialSeed);
+    const view = new DmEncounterView(
+      root,
+      sessionId,
+      store,
+      encounter,
+      initialSeed,
+      boardSnapshotMode,
+      loadBoardSnapshotSession,
+    );
     await store.flush();
     return view;
   }
@@ -1026,6 +1063,13 @@ class DmEncounterView {
         }
       }
     }
+    if (this.boardSnapshotMode) {
+      if (this.loadBoardSnapshotSession === undefined) {
+        throw new Error('Snapshot-mode save loading has no session remount handler.');
+      }
+      await this.loadBoardSnapshotSession(save.sessionId);
+      return;
+    }
     const url = new URL(location.href);
     url.searchParams.set('encounter', 'reference');
     url.searchParams.set('view', 'dm');
@@ -1057,7 +1101,7 @@ class DmEncounterView {
         if (this.#store.revisions(decoded.sessionId).length !== 0) {
           throw new Error('That uploaded session already exists in browser autosaves.');
         }
-        this.#store.import(bytes);
+        await importBrowserSessionDurably(this.#store, bytes);
         this.#render();
       });
     }, { once: true });
@@ -1268,6 +1312,29 @@ class DmEncounterView {
     live.dataset.sessionRevision = String(this.#projection?.history.at(-1)?.revision ?? 0);
   }
 
+  #renderDmBoard(projection: DmBoardProjection): void {
+    const boardFog = new Set(projection.board.foggedCells.map(
+      (cell) => `${String(cell.column)},${String(cell.row)}`,
+    ));
+    if (projection.encounter.dmOnly.foggedCells.some(
+      (cell) => !boardFog.has(`${String(cell.column)},${String(cell.row)}`),
+    )) {
+      throw new Error('DM board omitted encounter fog.');
+    }
+    const movementPreview = projection.movementPreviews.find(
+      (preview) => preview.commandKey === this.#movementPreviewKey,
+    ) ?? null;
+    const previewCells = new Set(movementPreview?.path.map(
+      (cell) => `${String(cell.column)},${String(cell.row)}`,
+    ) ?? []);
+    this.#shell.append(renderBoard(projection.board, previewCells, movementPreview, {
+      revision: projection.encounter.revision,
+      round: projection.board.round,
+      stateDigest: projection.stateDigest,
+    }));
+    if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
+  }
+
   #renderFresh(): void {
     this.#shell.replaceChildren(
       element('p', { className: 'vtt-kicker', text: 'DM-local authority' }),
@@ -1275,6 +1342,12 @@ class DmEncounterView {
     );
     const projection = this.#projection;
     if (projection === null) return;
+    if (this.boardSnapshotMode) {
+      this.#shell.replaceChildren();
+      this.#renderDmBoard(projection);
+      this.#shell.append(this.#renderSaveManager());
+      return;
+    }
     if (this.#channelError !== null) {
       const error = element('p', { text: this.#channelError });
       error.setAttribute('role', 'alert');
@@ -1692,22 +1765,7 @@ class DmEncounterView {
       this.#shell.append(card);
     }
 
-    const boardFog = new Set(projection.board.foggedCells.map(
-      (cell) => `${String(cell.column)},${String(cell.row)}`,
-    ));
-    if (projection.encounter.dmOnly.foggedCells.some(
-      (cell) => !boardFog.has(`${String(cell.column)},${String(cell.row)}`),
-    )) {
-      throw new Error('DM board omitted encounter fog.');
-    }
-    const movementPreview = projection.movementPreviews.find(
-      (preview) => preview.commandKey === this.#movementPreviewKey,
-    ) ?? null;
-    const previewCells = new Set(movementPreview?.path.map(
-      (cell) => `${String(cell.column)},${String(cell.row)}`,
-    ) ?? []);
-    this.#shell.append(renderBoard(projection.board, previewCells, movementPreview));
-    if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
+    this.#renderDmBoard(projection);
 
     const tray = element('section', { className: 'dm-decision-tray' });
     tray.dataset.renderKey = stableRenderKey('dm', 'decision-tray');
@@ -2196,6 +2254,7 @@ export function mountEncounterVtt(
     readonly sessionId: string;
     readonly encounter?: StoredCharacterEncounter;
     readonly initialSeed?: EncounterSeed;
+    readonly boardSnapshotMode?: boolean;
   },
 ): EncounterVttMount {
   if (options.view === 'player') {
@@ -2206,14 +2265,36 @@ export function mountEncounterVtt(
   let mounted: DmEncounterView | null = null;
   let closed = false;
   root.replaceChildren(element('p', { className: 'dm-save-loading', text: 'Opening browser saves…' }));
-  void DmEncounterView.create(root, options.sessionId, options.encounter, options.initialSeed).then((view) => {
+  const openDmSession = async (
+    sessionId: string,
+    encounter?: StoredCharacterEncounter,
+    initialSeed?: EncounterSeed,
+  ): Promise<void> => {
+    mounted?.close();
+    mounted = null;
+    const view = await DmEncounterView.create(
+      root,
+      sessionId,
+      encounter,
+      initialSeed,
+      options.boardSnapshotMode,
+      options.boardSnapshotMode === true
+        ? async (nextSessionId) => {
+            const url = new URL(location.href);
+            url.searchParams.set('session', nextSessionId);
+            history.replaceState(history.state, '', url);
+            await openDmSession(nextSessionId);
+          }
+        : undefined,
+    );
     if (closed) {
       view.close();
       return;
     }
     mounted = view;
     view.mount();
-  }).catch((error: unknown) => {
+  };
+  void openDmSession(options.sessionId, options.encounter, options.initialSeed).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : 'Browser session storage failed.';
     const alert = element('p', { className: 'dm-save-error', text: message });
     alert.setAttribute('role', 'alert');

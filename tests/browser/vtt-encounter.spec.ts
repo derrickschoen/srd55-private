@@ -177,12 +177,11 @@ test('M38-PLAYER-NO-DM-CONTROLS and two local windows complete the resumable ref
   await expect(tray).toContainText('Training Brute moved from 3,3 to 4,3');
   await expect(dm.locator('.dm-pending-request')).toContainText('turn: Training Brute');
   await dm.getByRole('button', { name: 'Hide', exact: true }).click();
-  for (const board of [dm, page]) {
-    await expect(board.locator('[data-cell="4,3"] .encounter-art-fog')).toBeVisible();
-    await expect(
-      board.locator('[data-cell="4,3"] .encounter-token[data-kind="monster"]'),
-    ).toHaveCount(0);
-  }
+  await expect(dm.locator('[data-cell="4,3"] .encounter-token[data-kind="monster"]')).toBeVisible();
+  await expect(page.locator('[data-cell="4,3"] .encounter-art-fog')).toBeVisible();
+  await expect(
+    page.locator('[data-cell="4,3"] .encounter-token[data-kind="monster"]'),
+  ).toHaveCount(0);
   await expect(dm.getByRole('button', { name: 'End turn', exact: true })).toBeVisible();
 
   await dm.getByLabel('Adjudication target').selectOption({ label: 'Reference Fighter' });

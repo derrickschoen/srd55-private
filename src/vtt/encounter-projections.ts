@@ -1,4 +1,5 @@
 import { canonicalJson } from '../commands/canonical-json';
+import { sha256 } from '../crypto/sha256';
 import type { ControllerIdentity, ControllerRequest } from '../combat/controllers';
 import type {
   CoordinatorPause,
@@ -73,6 +74,7 @@ export interface PlayerBoardProjection {
 
 export interface DmBoardProjection {
   readonly audience: 'dm';
+  readonly stateDigest: string;
   readonly encounter: DmVisibleEncounterState;
   readonly board: DmEncounterBoardModel;
   readonly coordinator: PersistedCoordinatorState;
@@ -304,6 +306,7 @@ export function projectDmBoard(input: {
     }));
   return {
     audience: 'dm',
+    stateDigest: sha256(canonicalJson(input.view.state)),
     encounter: dmVisibleEncounter(input.view),
     board: projectEncounterBoard(input.view, input.coordinator.pendingRequest, targets),
     coordinator: input.coordinator,

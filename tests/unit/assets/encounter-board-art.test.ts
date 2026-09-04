@@ -81,10 +81,11 @@ describe('encounter package asset-id consumption', () => {
       `${repositoryRoot}src/vtt/encounter-app.ts`,
       'utf8',
     );
-    expect(source).toContain('projection.bounds.columns === VANE_WARREN_ART.room.columns');
-    expect(source).toContain('encounterBoardRenderModel(projection, packageForBounds)');
+    expect(source).toContain('encounterArtForBoard(projection)');
+    expect(source).toContain('encounterBoardRenderModel(projection, art)');
     expect(source).toContain('starterArtDataUri(layer.assetId)');
     expect(source).toContain('starterArtDataUri(model.token.assetId)');
     expect(source).toContain('projection.encounter.dmOnly.foggedCells');
+    expect(source).toContain('renderMechanicalLayer(layer)');
   });
 });
