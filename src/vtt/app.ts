@@ -80,8 +80,40 @@ export interface VttMount {
   close(): void;
 }
 
-export function mountVtt(root: HTMLElement): VttMount {
-  const app = new VttApplication(root, clientIdentity());
+export const VTT_ROUTES = [
+  '/vtt?compose=stored',
+  '/vtt?encounter=d365',
+  '/vtt?encounter=vane-warren',
+] as const;
+export type VttRoute = (typeof VTT_ROUTES)[number];
+export type VttNavigate = (route: VttRoute) => boolean;
+
+export function routedVttLink(
+  text: string,
+  route: VttRoute,
+  navigate: VttNavigate,
+): HTMLAnchorElement {
+  const link = element('a', { text });
+  link.href = route;
+  link.addEventListener('click', (event) => {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    navigate(route);
+  });
+  return link;
+}
+
+export function mountVtt(root: HTMLElement, navigate: VttNavigate): VttMount {
+  const app = new VttApplication(root, clientIdentity(), navigate);
   app.mount();
   return Object.freeze({ close: () => app.close() });
 }
@@ -140,6 +172,7 @@ class VttApplication {
   constructor(
     private readonly root: HTMLElement,
     private readonly localClientId: string,
+    private readonly navigate: VttNavigate,
   ) {}
 
   mount(): void {
@@ -159,12 +192,21 @@ class VttApplication {
         text: 'A live grid, tokens, visual fog, and a shared dice log. The board exists only while a peer keeps this page open.',
       }),
     );
-    const compose = element('a', { text: 'Compose a rules encounter from stored characters' });
-    compose.href = '/vtt?compose=stored';
-    const sampleDungeon = element('a', { text: 'Load the bundled sample dungeon' });
-    sampleDungeon.href = '/vtt?encounter=d365';
-    const vaneWarren = element('a', { text: 'Choose a Vane Warren leader fight' });
-    vaneWarren.href = '/vtt?encounter=vane-warren';
+    const compose = routedVttLink(
+      'Compose a rules encounter from stored characters',
+      '/vtt?compose=stored',
+      this.navigate,
+    );
+    const sampleDungeon = routedVttLink(
+      'Load the bundled sample dungeon',
+      '/vtt?encounter=d365',
+      this.navigate,
+    );
+    const vaneWarren = routedVttLink(
+      'Choose a Vane Warren leader fight',
+      '/vtt?encounter=vane-warren',
+      this.navigate,
+    );
     header.append(compose, sampleDungeon, vaneWarren);
     this.#buildConnectionPanel();
     this.#buildWorkspace();

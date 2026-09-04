@@ -62,7 +62,7 @@ import {
 } from './refusal-handling';
 import { reconcileStableRenderedChildren, stableRenderKey } from './stable-dom-render';
 import type { HumanEngineActorOptions } from './encounter-board-projection';
-import type { EngineActivationChoiceSlot } from './turn-proposal';
+import type { EngineActivationChoiceSlot, EngineOptionId } from './turn-proposal';
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const HEARTBEAT_TIMEOUT_MS = 1_000;
@@ -78,16 +78,26 @@ function element<K extends keyof HTMLElementTagNameMap>(
 }
 
 function activationChoiceControls(
-  optionId: string,
+  actorId: CombatantId,
+  optionId: EngineOptionId,
   slot: EngineActivationChoiceSlot,
 ): readonly HTMLElement[] {
   const targets = slot.kind === 'calm_emotions_per_target' ? slot.targetIds : [null];
   return targets.map((targetId, index) => {
     const label = element('label', { className: 'engine-activation-choice' });
+    const choiceIdentity = targetId ?? `single-${String(index)}`;
+    label.dataset.renderKey = stableRenderKey(
+      'dm', 'engine-options', actorId, optionId, 'activation-choice', slot.kind, choiceIdentity,
+      'label',
+    );
     const name = slot.kind.replaceAll('_', ' ');
     const prompt = targetId === null ? name : `${name} for ${String(targetId)}`;
     label.append(element('span', { text: `Choose ${prompt} at activation` }));
     const control = element('select');
+    control.dataset.renderKey = stableRenderKey(
+      'dm', 'engine-options', actorId, optionId, 'activation-choice', slot.kind, choiceIdentity,
+      'select',
+    );
     control.dataset.optionId = optionId;
     control.dataset.choiceKind = slot.kind;
     if (targetId !== null) control.dataset.targetId = targetId;
@@ -123,6 +133,7 @@ export function renderHumanEngineOptionCatalog(
     group.dataset.actorId = actor.actorId;
     group.append(element('h3', { text: actor.actorName }));
     const list = element('ol');
+    list.dataset.renderKey = stableRenderKey('dm', 'engine-options', actor.actorId, 'list');
     for (const entry of actor.options) {
       const item = element('li', { text: entry.label });
       item.dataset.renderKey = stableRenderKey(
@@ -132,7 +143,11 @@ export function renderHumanEngineOptionCatalog(
       item.dataset.optionId = entry.option.optionId;
       if (entry.availability === 'offerable' && entry.option.activationChoice !== undefined &&
         entry.option.activationChoice !== null) {
-        item.append(...activationChoiceControls(entry.option.optionId, entry.option.activationChoice));
+        item.append(...activationChoiceControls(
+          actor.actorId,
+          entry.option.optionId,
+          entry.option.activationChoice,
+        ));
       }
       list.append(item);
     }
