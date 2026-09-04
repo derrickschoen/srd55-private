@@ -10023,3 +10023,26 @@ using a worktree per experiment." Three rulings on the questions that followed:
 Supervisor mechanics: one worktree per lane/experiment; heavy commands in every brief carry the lock line;
 gate-wt2.sh takes the same lock; Fable subagent lanes split at file seams (iso r2a = projection/renderer/contract
 types, r2b = view/input/scene) and merge on claude/iso-vtt.
+
+SUPERVISOR NOTES (2026-09-04 14:20, parallel era, D511):
+- Landed: claude/tactical-v2 d76d1f19 (inc5.5), claude/board-shot 9da6c3b6 (inc1), claude/graph-slice 713a469f
+  (inc1, supervisor mutant SURVIVED: endpoint-kind check; killing test ordered first in inc2), claude/iso-vtt 57f4ebe4
+  (A/A2/B checkpoint, review round 1 open), main: node:crypto split (see commit). The reference DM view mounts again.
+- FINDING against my briefs: the lock path dnd-slim-runs/gate.lock is unwritable from the codex sandbox; conditions
+  inc1 and tactical inc5.6 stopped BLOCKED at their full-suite gate (correct behaviour). Lock moved to /tmp/dnd-gate.lock.
+- FINDING against my gate script: two concurrent gate-wt2 runs both took Playwright port 4310 (n=1 each); the
+  conditions Playwright gate was void. Ports now hash from the worktree name.
+- FINDING against the Fable subagent pattern: iso r2b ended its turn with its gates backgrounded ("will notify me"),
+  which a `claude -p` session cannot wait on; its gates never ran and it wrote no FINAL REPORT. Rule for Fable briefs:
+  gates run in the foreground; no backgrounding in -p mode. r2a could not hold the lock at all (its tool permission
+  refuses `flock <cmd>` as an arbitrary command runner). Supervisor gates cover both.
+- FINDING (open): round-1 prose is not a pure function of engine state. Room 6 round 1 has two prose variants across
+  five arms with identical repoCommit, seed, startingRoomDigest, stateBinding, initiative, pcTurns, offered-option
+  counts (27,3,3,3) and decisionAttempts 1: U and d510-control 15,500 bytes; V, S-strict and d512-sol 19,855 bytes
+  (extra multiattack+bonus-spell and Dash+spell option lines). Investigation dispatched read-only (prose-determinism).
+  Until explained, the D510(4) identity check pairs rows by variant, and room 6 is flagged in every packet.
+- FINDING (open): with the split in place, vane-warren-entry.spec reaches the DM view and throws
+  "Interactive SELECT has an unkeyed SELECT ancestor in the draft tree" (stable-dom invariant). Three other browser
+  failures (acceptance-walkthrough, player-build-and-share, superseded-species-selection) ran under load 11; re-run alone.
+- d512 Sol low image-off: 30/30, 0 timeouts, 0 refusals, first accepted 30/30, wall median 10.6 s / max 19.2 s,
+  0 rounds over 120 s while seven lanes ran (load 3–11). Reasoning tokens median 190. Off baseline for Sol is in hand.
