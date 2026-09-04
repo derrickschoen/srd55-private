@@ -9599,3 +9599,24 @@ Resolves plan unknowns 2–9 in principle; the concrete declarations are supervi
 
 One rules engine; under tactical_v2 the new options (bonus-action shove and dash, jump, surfaces, flight, summons,
 death burst) are offered to both sides. The neutral scored policy is the only monster-specific part. Single flag.
+
+CONTROL PACKET BUILT; KNOWLEDGE-GRAPH ARTICLE ASSESSED (supervisor,
+2026-09-03 23:30). Post-shift control: 30/30 rows, 0 timeouts, 0
+refusals, 132 per-actor reasons (D489 live). Packet needed two lane
+increments first — P1 (typed pre_shift/post_shift row union: the D443
+comparator rows lack the H1 fields and I refused to fabricate them) and
+P2 (chosenOptionIndices typed absent for mcp_minimal, required for
+final_indices; the control's rows truthfully carry no such key). Packet:
+60 entries, leaks none, prime 587; panel running; keys sealed (D498).
+Knowledge-graph article (owner's PDF, "Applying Knowledge Graphs", push
+retrieval via a pre-prompt hook made Haiku match Fable on a 3-hop trap,
+one question, six runs): my read, opus's and sol's agree that luna-low's
+measured deficits are envelope errors, rule application under a budget,
+and reasoning time — not missing facts; verified myself that kbReads is
+empty in 30/30 control rows and 30/30 comparator rows (the pull channel
+is unused). Sol adds that compressed renderer profiles (gating 5.44 vs
+cav-full 8.18) are where pushed facts could matter. Proposed, not yet
+ruled: a preregistered 2-arm "graph slice" experiment on final_indices
+(≤400-token typed rules slice generated FROM the KB fixtures, seeds from
+circumstanceFeatures, adopt at +0.2 with a seed-clustered interval), to
+run after the transport experiment. Owner decision pending.
