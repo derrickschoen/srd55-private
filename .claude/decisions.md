@@ -9877,3 +9877,19 @@ what they were shown, but the row is misattributing the reason. Rule for packet 
 selectedBranch is fallback, carry the fallback's own reason (or mark "fallback executed; primary reason
 not applicable") — never the primary's text. Also settled: Dash + Disengage in one turn is legal for
 those monsters (Nimble Escape bonus-action Disengage); the earlier judge complaints were wrong.
+
+## D504 — OWNER: board screenshots also feed UI feedback (2026-09-04)
+
+"We can also use the screenshots to have the AI DM and the AI judges give feedback on our UI and how to improve
+it." The board-screenshot plan gains a feedback channel: after a round (DM) or a packet (judges), a separate,
+non-scoring prompt asks what on the image was unclear, missing, or misleading, with concrete improvement
+suggestions; collected as typed rows, never mixed into the tactical score.
+
+## D505 — OWNER: parallel lane — Fable builds an alternative isometric VTT (2026-09-04)
+
+"In a parallel lane, I want you to use your fable intelligence to build an alternative isometric VTT. Inspired
+by pixel art as well as the first 2 Baldur's Gate and Diablo games." Binding for this lane: CLAUDE (Fable)
+implements, codex reviews (consensus role inversion recorded in memory). Inspiration only: no assets, names,
+sprites, palettes lifted from those games; all art is original and generated or authored in this repo under
+the project licence. Branch claude/iso-vtt, worktree dnd-wt-iso-vtt; it renders the same EncounterState as the
+existing board and mounts as an alternative view; the existing VTT is untouched.
