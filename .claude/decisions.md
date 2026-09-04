@@ -10130,3 +10130,11 @@ logged; off arms = d490 U/V, d510-control-medium, d512-sol-low-off). Identity ch
 inc3 (UI feedback tool, D513(3)) dispatched on claude/board-shot (01a06e5a). footprints inc1 committed 7032e199.
 browser-fix harvested: both main browser failures have first-bad commits (367527f7 unkeyed activation <select>;
 e71242fd composer link as document navigation) and fixes; codex reports Chromium 182/182; supervisor full gate queued.
+
+D515 — OWNER (2026-09-04 17:50): "Use your design ability as fable to make it look like modern retro inspired games
+in 16bit style with some higher resolution. It looks ugly." Supervisor: art-direction pass on the isometric view as
+its own Fable unit (claude/iso-art off claude/iso-vtt), confined to src/vtt/iso/pixel-art/* plus the resolution
+constants in the iso contract (atlas native resolution doubles: TILE 128×64, WALL_RISE 80, SPRITE 96×128; the
+camera's integer zoom starts at 1 so a 20-cell room still fits a 1080p viewport). The supervisor writes the art
+bible (brief-iso-art-C.md) and judges each round's screenshot; at most three rounds. Still inspiration only: no
+assets, palettes or names lifted from any game.
