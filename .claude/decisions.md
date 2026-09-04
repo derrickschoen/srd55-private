@@ -10212,3 +10212,17 @@ path-overlay merges; one combined landing; arena keeps g1 art meanwhile. (3) Eng
 tactical_v2 rebase onto main then increment 6; graph-slice increment 3; footprints increment 2 (D514 applied).
 (4) The iso view lands on main behind ?view=iso after codex review round 2 closes; footprints stay 1×1 until the
 engine lane lands.
+
+D513 UNSEALED (owner D520, 2026-09-04 19:50). Packets pair arm-a = image ON, arm-b = image OFF; the report's
+"arm-b − arm-a" is therefore OFF minus ON (negative = the picture helped). Panel means (n=30 paired, seed-clustered
+95% CI):
+  luna-low-on-1 vs U:        on 8.01, off 7.86, off−on −0.16 [−0.63, +0.24]
+  luna-low-on-2 vs V:        on 8.16, off 7.41, off−on −0.74 [−1.29, −0.31]   (CI excludes 0)
+  luna-medium-on vs control: on 8.20, off 7.87, off−on −0.33 [−0.73, +0.02]
+  sol-low-on vs sol-off:     on 7.84, off 7.81, off−on −0.03 [−0.12, +0.04]
+Reading: the picture helps Luna low (two replicates, +0.16 and +0.74; the second clears its interval), helps Luna
+medium by about a third of a point at the edge of its interval, and does nothing for Sol low, which is already at
+its text ceiling. CAVEAT (blinding): in an image packet the entries carrying a PNG are the image-on arm by
+construction, so seats could tell the arms apart; an image-blind rejudge of the same four packets (family d513t,
+same primes, images stripped, original judge script) was launched at 19:50 to bound that effect. Keys for d513t
+sealed until read beside these.
