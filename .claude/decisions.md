@@ -10235,3 +10235,13 @@ Off arms rerun in capture_only (d490 U/V-equivalents, the medium control, sol-of
 2-arm packet carries 60 images and image presence no longer identifies the arm. The d513t text-only rejudge continues
 only as a bound on judge behaviour, not as the scoring method. Increment "board-shot inc2.5 capture_only" dispatches
 after inc3 leaves the same files.
+
+D513t UNSEALED (image-blind rejudge of the same four packets, images stripped, same primes; 2026-09-04 20:05).
+Gain from the picture (on − off), judged WITH images vs judged BLIND to images:
+  luna-low-on-1:  +0.16 → +0.08   (blind CI [−0.32, +0.60])
+  luna-low-on-2:  +0.74 → +0.57   (blind CI [−0.03, +1.26])
+  luna-medium-on: +0.33 → +0.12   (blind CI [−0.16, +0.53])
+  sol-low-on:     +0.03 → +0.10   (blind CI [−0.02, +0.26])
+Reading: judges seeing pictures inflated the Luna deltas by 0.1–0.2, but the ordering and most of the size survive
+blind: the picture's benefit for Luna low is real in the second replicate and small-to-nil elsewhere; Sol unchanged.
+Per D521 the standing method is images for BOTH arms (capture_only reruns); these blind numbers stand as the bound.
