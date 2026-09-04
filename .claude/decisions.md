@@ -9743,3 +9743,31 @@ in the sealed panel (2-arm packet, 60 entries, leaks none, prime 599;
 every seat 60/60 valid). Voided predecessors: run 1 (schema rejected),
 runs 2–3 (row field dropped) — their first-decision rates (26/30,
 27/30) agree with run 4.
+
+OVERRIDE-POLICY EXPERIMENT (D490) ARMS RUN; PACKETS AND PANELS BUILT;
+KEYS SEALED (supervisor, 2026-09-04 07:15). Lane 8a459180 (O1). Three
+luna-low arms on brutal 10×3 seed 6203001: S strict (30 rows, 2
+timeouts, 28/30 first decision accepted), V typed_reason (30, 1, 28/30),
+U typed_reason second seat (30, 1). 0 decisionRejectionCodes on S and V.
+Three-arm packet 541 (svu, 90 entries) and isolation packet 547 (iso, 60
+entries, reasons visible for arm-v only) built with no leaks; every seat
+validated (sol/opus/fable, 90/90 and 60/60, 0 dup/missing/badsum/nulls).
+Keys d490-key-{svu,iso}.json sealed under D498 until the owner rules.
+
+TACTICAL_V2 INCREMENT 2 LANDED ON claude/tactical-v2 (supervisor,
+2026-09-04 07:15). Commit 487d2b62. Codex: canonical traversal shared by
+reducer/query port/pathfinder/evaluator, ground vs flying movement
+modes, closed known+custom surface union, overlap = greatest multiplier
+plus all hooks in stable region order, typed jump budgets, grease hook
+in the reducer. Verified myself: forced tsc 0, sg 0, full suite 550
+files / 9631 tests; my mutation (overlap max → first multiplier) killed
+by 8 tests, restore by cmp; contracts.ts sha unchanged; zero forbidden
+patterns in +621 lines; no claude invocation in the lane log. Finding
+worth keeping: the first full suite failed 31 tests because traversal
+became a perf regression (conversation suite 1,028 s); codex fixed it
+with immutable movement-world caches, not by touching timeouts (final
+suite 383 s). NUMERIC DECLARATIONS AWAITING OWNER RULING (all in
+src/combat/tactical-movement-constants.ts): ground 1×, difficult / mud /
+deep water 2×, grease 1×, jump budget floor(speed/3), grease DC 12 Dex
+save, Prone 1 round, 1 trigger per turn on entry; flight ignores all
+surfaces.
