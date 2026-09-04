@@ -9893,3 +9893,23 @@ implements, codex reviews (consensus role inversion recorded in memory). Inspira
 sprites, palettes lifted from those games; all art is original and generated or authored in this repo under
 the project licence. Branch claude/iso-vtt, worktree dnd-wt-iso-vtt; it renders the same EncounterState as the
 existing board and mounts as an alternative view; the existing VTT is untouched.
+
+## D506 — OWNER: the board screenshot shows everything (full DM view) (2026-09-04)
+
+The picture given to the AI DM is the real UI as the DM sees it: all tokens and terrain. The prose still
+governs what the monsters "know". Judges get the same picture.
+
+## D507 — OWNER: graph-slice experiment settings (2026-09-04)
+
+Transport: the normal back-and-forth (mcp_minimal), the production default and the control's transport; the
+slice rides on the round-plan tool result. Budget: 1,600 bytes (no tokenizer dependency). Corpus: the seven
+KB subjects only, not the playbook, so the test measures retrieval rather than repetition. Supervisor
+defaults for the plan's remaining items (owner may override): walk depth 3; the slice is included on the
+initial and correction prompts only; rule errors counted from typed engine/normalizer codes; "byte-identical
+when off" covers all model-facing bytes, tool availability and engine behaviour, with prompt-byte telemetry
+on the row; seeds 6205001–6205010 (verified unused).
+
+## D508 — OWNER: isometric VTT first deliverable is a playable view (2026-09-04)
+
+Not a static board: hover, selection, movement preview and turn controls from the first increment, mounted as
+an alternative view of the same encounter state. Fable implements; codex reviews.
