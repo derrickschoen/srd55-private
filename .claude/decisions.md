@@ -10206,3 +10206,9 @@ LANDED ON MAIN (supervisor, 2026-09-04 19:40): claude/browser-fix merged. With t
 browser suite on main is 182/182 (my run, 50 min, port 4710) for the first time since D466 C2. D513 judging complete:
 four packets (luna-low-on-1/2, luna-medium-on, sol-low-on), three seats each, 60/60 valid, keys SEALED pending the
 owner's word. D514 reduced-text arms running (started 19:36). Classic-art full vitest 9651 green; specs running.
+
+D520 — OWNER (2026-09-04 19:45): (1) UNSEAL D513 now (four packets). (2) Classic art (D516) stays on its branch until
+path-overlay merges; one combined landing; arena keeps g1 art meanwhile. (3) Engine lanes continue in parallel:
+tactical_v2 rebase onto main then increment 6; graph-slice increment 3; footprints increment 2 (D514 applied).
+(4) The iso view lands on main behind ?view=iso after codex review round 2 closes; footprints stay 1×1 until the
+engine lane lands.
