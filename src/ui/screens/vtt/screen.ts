@@ -4,7 +4,7 @@ import { defineScreen } from '../../screen';
 export const screen = defineScreen({
   id: 'vtt',
   matches: (route) => route.path === '/vtt',
-  render: async ({ root, route, rpc }) => {
+  render: async ({ root, route, router, rpc }) => {
     if (route.query.get('encounter') === 'vane-warren') {
       const { mountVaneWarren } = await import('../../../vtt/vane-warren-app');
       const requestedScenario = route.query.get('scenario');
@@ -36,7 +36,7 @@ export const screen = defineScreen({
       return () => mounted.close();
     }
     const { mountVtt } = await import('../../../vtt/app');
-    const mounted = mountVtt(root);
+    const mounted = mountVtt(root, (target) => router.navigate(target));
     return () => mounted.close();
   },
 });
