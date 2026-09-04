@@ -10226,3 +10226,12 @@ its text ceiling. CAVEAT (blinding): in an image packet the entries carrying a P
 construction, so seats could tell the arms apart; an image-blind rejudge of the same four packets (family d513t,
 same primes, images stripped, original judge script) was launched at 19:50 to bound that effect. Keys for d513t
 sealed until read beside these.
+
+D521 — OWNER (2026-09-04 20:00): "I still want the ai judges to have the screenshots to help them judge." Supervisor:
+judges keep the pictures. Blinding is restored by giving BOTH arms a picture: a new arena mode
+--board-image capture_only records the PNG per round (same capture, same row fields) without delivering the image
+block to the DM (the off-arm byte-identity test must still pass for prompt, startup and get_turn_context bytes).
+Off arms rerun in capture_only (d490 U/V-equivalents, the medium control, sol-off, and d514's reduced-off), so every
+2-arm packet carries 60 images and image presence no longer identifies the arm. The d513t text-only rejudge continues
+only as a bound on judge behaviour, not as the scoring method. Increment "board-shot inc2.5 capture_only" dispatches
+after inc3 leaves the same files.
