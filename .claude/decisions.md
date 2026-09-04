@@ -10165,3 +10165,22 @@ radius that falls off into cool darkness, desaturated shadow, walls nearest the 
 would occlude a token or the hovered cell. Runs as ONE Fable unit (D) on the merged iso branch (r2a + r2b + art C
 merged into claude/iso-vtt first), owning renderer/scene/view and pixel-art together; the camera default becomes
 fit-to-room at integer zoom with the 960-px clamp removed (supervisor's camera ruling).
+
+SUPERVISOR NOTES (2026-09-04 19:05):
+- Iso lane: r2a 17b7bc0c and r2b 454fe34b committed after quick gates (tsc/sg/iso tests/iso spec) and my mutations
+  (depth order reversed -> 5 failures; staged-move invalidation weakened -> 2 failures); art C e56d77f7 committed
+  (my palette mutation: the first attempt edited a comment and was VOID; the real one on the shadow-hue call killed
+  2 tests). All three merged into claude/iso-vtt (c960ebf6); two test-file conflicts resolved toward r2b, art C's
+  seam edits there re-applied by unit D. Unit D (D517 mood lighting, translucent near walls, camera fit-to-room,
+  label wiring, door_open kind) dispatched on the merged branch.
+- Classic art (D516) delivered by its Fable unit: 64-px generated tiles, archetype busts, board-chrome (full names
+  with obstacle-aware stacking, HP bars via actor-knowledge's hitPointKnowledge, zero-based engine coordinates on all
+  edges, legend); unit ran tsc/sg/219 tests and the three specs WITHOUT the lock (its tool permission refuses
+  flock; stated loudly); capture 1140×1012 / 1588×1140, PNG 229 KB; mutation labels_truncate_again killed. Its own
+  critique: world-object labels still cell-clipped; DM headings not bitmap; per-cell data-URI duplication. NEEDS-RULING
+  items: stale docs/design/assets-preview/starter-art-board.svg (delete at landing); seam edits to
+  tools/ai-dm-board-snapshot-check.ts, encounter-package.ts, intel/actor-knowledge.ts (export only) accepted; legacy
+  monster ids share archetype bytes (accepted); 24-column boards exceed 1280 px but are captured whole (accepted).
+  Supervisor gate running (tsc/sg/touched tests/full vitest/three specs under the lock); mutation and commit follow.
+- D513 judging: both Luna-low packets judged by all three seats, 60/60 valid each, uiFeedback field present; keys
+  SEALED (d513/luna-low-on-1, d513/luna-low-on-2). Luna-medium arm running; Sol-low next.
