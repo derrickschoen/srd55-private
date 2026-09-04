@@ -10055,3 +10055,9 @@ engine's own danger preview (previewMovementPathDangers: opportunity_attack, dif
 persistent_area_damage) fires are drawn red with a per-kind glyph and a legend. Own lane claude/path-overlay off
 claude/board-shot (inc1), disjoint from inc2's files; merges into board-shot before the image-on arms if it lands in
 time, otherwise as a second screenshot generation (both are recorded on the row so packets can tell them apart).
+D512 AMENDED — OWNER (2026-09-04 14:30): "Look at how bg3 shows path overlay and use that for an example." Design
+conventions only (no assets/names/palettes): one path line from the mover to the destination; colour change where
+the move crosses difficult terrain; a sharp arrow from the threatening enemy to the point on the path where the
+opportunity attack triggers; a destination marker with the distance; the part of the path beyond remaining movement
+shown differently. Owner's red rule wins for hazard colouring. Lane redispatched with the amended brief (first
+session killed at 10 min, 0 edits kept).
