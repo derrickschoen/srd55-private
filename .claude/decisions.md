@@ -9969,3 +9969,13 @@ LUNA-MEDIUM CONTROL ARM VERIFIED; ISO UNIT A COMPLETE; CONTRACT AMENDED (supervi
   questions, applied to the frozen contract: PixelArtAtlas gains `bitmap` (RGBA bytes) and `canvas` becomes
   nullable headless; `markFrames(mark)` added; PLACEHOLDER_PALETTE is unit B's to define in scene.ts, not the
   contract's. Codex reviews the contract and A's toolkit before the round closes.
+
+D509 AMENDED — OWNER: "Just run Luna medium with the winner of Luna low" (2026-09-04 11:52). The Luna-low winner
+is the post-shift control configuration (caveman-full renderer, mcp_minimal, KB bundle, typed_reason default;
+panel 8.06), which had already run on medium (d510-control-medium, 30/30, 0 timeouts). The rest of the chain
+was stopped: the strict-medium arm (partial, 6 min in) is VOID (file renamed *.VOID-stopped-by-owner); the
+completed final-indices-medium rows are kept as row-level secondaries only (index-0 anchoring 0.93 vs 0.94 at
+low; first decision 26/30 vs 27/30) and are not judged. Packet d510/control (Luna low d466 vs Luna medium,
+prime 619, 60 entries, leaks none) built and sent to the three seats; key sealed until the owner rules.
+Finding against my own shell hygiene: a pkill whose pattern words were in the same command line killed the
+supervisor's shell (exit 144) — the kill-loop-alone rule exists for exactly this, fourth instance.
