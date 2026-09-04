@@ -9565,3 +9565,10 @@ public ones.
 Asked whether to unseal now that every arm is judged. Owner: keep sealed, so old-era and new-era results are
 unsealed together after the post-shift control (caveman full profile, KB bundle, mcp_minimal, no skill) runs on the
 merged lane (G2.1 + H1-indices + H1.1 + H3).
+
+## D499 — OWNER: rerun the D483 s-gating arm at 240 s and judge that instead (2026-09-03)
+
+The 120 s runs (4/9/6 timeouts, incl. the alone run) stay on disk as a record but are not the judged arm. A fourth
+run at luna low, 240 s (the budget sol had), alone, same seeds/reps/KB; packet against the D443 luna-low twin with a
+fresh prime (577); the timing confound (luna twin ran at 120 s) is noted next to the result. The 120 s alone-run
+packet (prime 491) is kept sealed and reported as a secondary.
