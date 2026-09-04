@@ -58,7 +58,7 @@ function registeredRows(): JsonRecord[] {
       decisionAttempts: 1,
       decisionRejectionCodes: [],
       normalizationCodes: [],
-      chosenOptionIndices: [],
+      rationale: null,
       roundNarrative: null,
       authorizedPlan: null,
       // Era asymmetry is the real R1-10 shape: only the post-intel arm
@@ -120,21 +120,21 @@ describe('AI-DM R1-10 rerun packet', () => {
       version: 'ai-dm-rerun-packet-v1',
       entries: [
         {
-          blindId: 'blind-001', arm: 'baseline', planner: 'model',
+          blindId: 'blind-001', arm: 'baseline', rowEra: 'post_shift', planner: 'model',
           overrideKinds: [], overrideRejections: [],
           decisionReasons: [{
             actorId: 'monster:ogre', reason: 'Attack the fighter to keep the front line occupied.',
           }],
           rationale: 'The ogre pins the front line while its allies reposition.',
           decisionTransport: 'mcp_minimal', firstDecisionAccepted: true, decisionAttempts: 1,
-          decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [],
+          decisionRejectionCodes: [], normalizationCodes: [], indexZeroSelectionRate: 'not_applicable',
           instructionSource: 'none', skillName: null, skillHash: null,
         },
         {
-          blindId: 'blind-002', arm: 'intel', planner: 'engine_default',
+          blindId: 'blind-002', arm: 'intel', rowEra: 'post_shift', planner: 'engine_default',
           overrideKinds: [], overrideRejections: [], decisionReasons: [], rationale: null,
           decisionTransport: 'mcp_minimal', firstDecisionAccepted: false, decisionAttempts: 0,
-          decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [],
+          decisionRejectionCodes: [], normalizationCodes: [], indexZeroSelectionRate: 'not_applicable',
           skillName: 'engine-submission', skillHash: 'a'.repeat(64),
           instructionSource: 'skill',
         },
@@ -170,6 +170,79 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(buildRerunPacket(planMutated, 1, tinyProtocol).packet).not.toEqual(expectedPacket);
   });
 
+  it('builds a mixed-era packet while keeping pre-shift decision fields absent', () => {
+    const preShiftRow: JsonRecord = {
+      seed: 5_117_001,
+      room: 1,
+      round: 1,
+      arm: 'pre-shift',
+      startingRoomDigest: 'pre-shift-state',
+      combatModel: 'initiative_segments_v1',
+      initiativeOrder: [],
+      outcome: 'authorized',
+      plannedBy: { model: 'pre-shift-model', effort: 'low' },
+      repoCommit: 'pre-shift-commit',
+      roundNarrative: null,
+      authorizedPlan: null,
+    };
+    const postShiftRow: JsonRecord = {
+      ...preShiftRow,
+      arm: 'post-shift',
+      plannedBy: { model: 'post-shift-model', effort: 'low' },
+      repoCommit: 'post-shift-commit',
+      startingRoomDigest: 'post-shift-state',
+      decisionTransport: 'mcp_minimal',
+      firstDecisionAccepted: true,
+      decisionAttempts: 1,
+      decisionRejectionCodes: [],
+      normalizationCodes: [],
+      instructionSource: 'none',
+      skillName: null,
+      skillHash: null,
+      rationale: null,
+    };
+
+    const result = buildRerunPacket([preShiftRow, postShiftRow], 1, tinyProtocol);
+    expect(result.packet.entries).toHaveLength(2);
+    expect(JSON.stringify(result.packet)).not.toContain('rowEra');
+    expect(() => assertBlindedPacket({ entries: [{ blindId: 'blind-001', rowEra: 'pre_shift' }] }))
+      .toThrow('leaks a model-identifying field');
+    expect(result.answerKey.entries.map((entry) => entry.rowEra).sort())
+      .toEqual(['post_shift', 'pre_shift']);
+    const preShiftKey = result.answerKey.entries.find((entry) => entry.rowEra === 'pre_shift');
+    if (preShiftKey === undefined) throw new Error('missing pre-shift answer-key entry');
+    expect(preShiftKey).not.toHaveProperty('firstDecisionAccepted');
+    expect(preShiftKey).not.toHaveProperty('decisionTransport');
+    expect(preShiftKey).not.toHaveProperty('instructionSource');
+    expect(preShiftKey).not.toHaveProperty('skillName');
+    expect(preShiftKey).not.toHaveProperty('skillHash');
+    expect(preShiftKey).not.toHaveProperty('chosenOptionIndices');
+    expect(preShiftKey).not.toHaveProperty('rationale');
+
+    const mcpMinimalKey = result.answerKey.entries.find((entry) =>
+      'decisionTransport' in entry && entry.decisionTransport === 'mcp_minimal');
+    if (mcpMinimalKey === undefined) throw new Error('missing mcp_minimal answer-key entry');
+    expect(mcpMinimalKey).not.toHaveProperty('chosenOptionIndices');
+    expect(mcpMinimalKey.indexZeroSelectionRate).toBe('not_applicable');
+    expect(() => buildRerunPacket([
+      preShiftRow,
+      { ...postShiftRow, chosenOptionIndices: [] },
+    ], 1, tinyProtocol)).toThrow('.chosenOptionIndices is invalid');
+
+    const finalIndicesRow = { ...postShiftRow, decisionTransport: 'final_indices', chosenOptionIndices: [] };
+    const { chosenOptionIndices: _chosenOptionIndices, ...finalIndicesWithoutIndices } = finalIndicesRow;
+    expect(() => buildRerunPacket([preShiftRow, finalIndicesWithoutIndices], 1, tinyProtocol))
+      .toThrow('.chosenOptionIndices is invalid');
+
+    const { firstDecisionAccepted: _firstDecisionAccepted, ...missingFirstDecision } = postShiftRow;
+    expect(() => buildRerunPacket([preShiftRow, missingFirstDecision], 1, tinyProtocol))
+      .toThrow('.firstDecisionAccepted is invalid');
+    expect(() => buildRerunPacket([
+      { ...preShiftRow, decisionTransport: 'mcp_minimal' },
+      postShiftRow,
+    ], 1, tinyProtocol)).toThrow();
+  });
+
   it('scores execution_failed as zero and keeps planner and override evidence only in the answer key', () => {
     const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl')
       .map((row, index) => ({
@@ -188,19 +261,19 @@ describe('AI-DM R1-10 rerun packet', () => {
       entry.rubric.total === 0)).toBe(true);
     expect(result.answerKey.entries).toEqual([
       {
-        blindId: 'blind-001', arm: 'baseline', planner: 'model',
+        blindId: 'blind-001', arm: 'baseline', rowEra: 'post_shift', planner: 'model',
         overrideKinds: ['objective'],
         overrideRejections: [{ actorId: 'monster:ogre', code: 'OVERRIDE_UNJUSTIFIED' }],
         decisionReasons: [], rationale: null,
         decisionTransport: 'mcp_minimal', firstDecisionAccepted: true, decisionAttempts: 1,
-        decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [],
+        decisionRejectionCodes: [], normalizationCodes: [], indexZeroSelectionRate: 'not_applicable',
         instructionSource: 'none', skillName: null, skillHash: null,
       },
       {
-        blindId: 'blind-002', arm: 'intel', planner: 'sim_controller',
+        blindId: 'blind-002', arm: 'intel', rowEra: 'post_shift', planner: 'sim_controller',
         overrideKinds: [], overrideRejections: [], decisionReasons: [], rationale: null,
         decisionTransport: 'mcp_minimal', firstDecisionAccepted: false, decisionAttempts: 0,
-        decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [],
+        decisionRejectionCodes: [], normalizationCodes: [], indexZeroSelectionRate: 'not_applicable',
         instructionSource: 'skill', skillName: 'engine-submission', skillHash: 'a'.repeat(64),
       },
     ]);
@@ -250,7 +323,7 @@ describe('AI-DM R1-10 rerun packet', () => {
         decisionAttempts: 1,
         decisionRejectionCodes: [],
         normalizationCodes: [],
-        chosenOptionIndices: [],
+        rationale: null,
         plannerLabel: `${arm}-planner`,
         roundNarrative: `${arm} narrative`,
         authorizedPlan: null,
@@ -293,8 +366,8 @@ describe('AI-DM R1-10 rerun packet', () => {
       combatModel: 'initiative_segments_v1', initiativeOrder: [], outcome: 'authorized',
       plannedBy: { model: 'm', effort: 'low' }, roundNarrative: null,
       decisionTransport: 'mcp_minimal', firstDecisionAccepted: true, decisionAttempts: 1,
-      decisionRejectionCodes: [], normalizationCodes: [], chosenOptionIndices: [],
-      instructionSource: 'none', skillName: null, skillHash: null,
+      decisionRejectionCodes: [], normalizationCodes: [],
+      instructionSource: 'none', skillName: null, skillHash: null, rationale: null,
     };
     const paired = (plan: unknown, extra: Record<string, unknown> = {}): Record<string, unknown>[] =>
       ['a', 'b'].map((arm) => ({ ...base, arm, authorizedPlan: plan, ...extra }));
@@ -394,7 +467,7 @@ describe('AI-DM R1-10 rerun packet', () => {
             decisionAttempts: 1,
             decisionRejectionCodes: [],
             normalizationCodes: [],
-            chosenOptionIndices: [],
+            rationale: null,
             roundNarrative: null,
             authorizedPlan: null,
             ...(era === 'commit-new' ? {
@@ -500,6 +573,7 @@ describe('AI-DM R1-10 rerun packet', () => {
     const result = buildRerunPacket(rows, 1, tinyProtocol);
     expect(result.answerKey.entries[0]).toMatchObject({
       chosenOptionIndices: [{ actorId: 'monster:ogre', primaryOptionIndex: 0, fallbackOptionIndex: 1 }],
+      indexZeroSelectionRate: 1,
       decisionReasons: [{ actorId: 'monster:ogre', reason: 'The engine recommendation preserves the tactical advantage.' }],
     });
     expect(JSON.stringify(result.packet)).not.toContain('tactical advantage');
