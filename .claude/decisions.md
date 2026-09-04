@@ -10117,3 +10117,16 @@ D514 — OWNER (2026-09-04 15:45), footprints plan rulings gated before Incremen
 Supervisor defaults (not asked, UI/topology): 5 opening topology = plan rec; 6 audience-specific hidden geometry =
 plan rec (DM board shows every placed footprint incl. hidden-from-players, player projection per D513 rule 7);
 7 shared-cell stack interaction = plan rec.
+
+SCREENSHOTS LIVE IN THE ARENA (supervisor, 2026-09-04 17:42). board-shot inc2 committed ff1a6ca9 on claude/board-shot
+after my gate (tsc 0, sg 0, vitest 550/9618) and mutation (image-before-text fails the text-first test). Smoke
+(1 room, Luna low, --board-image png): boardImage {png, 26,417 B, 764×684, 317 ms capture}, effort recorded, first
+decision accepted, 16 tool calls, no image bytes in rawTurnContext; the PNG viewed by the supervisor shows tokens,
+difficult terrain, light, obscurement, doors and hazards. FINDING: token labels are truncated ("Refer…", "Sabe…") so
+identity is not readable from the picture; no HP band, coordinates or legend — legibility increment queued after
+path-overlay (brief-board-shot-inc4-legibility). D513(1): image-on arms started 17:42 from worktree dnd-wt-arena-img
+at ff1a6ca9 (run-d513-image-on.sh: luna-low-on-1, luna-low-on-2, luna-medium-on, sol-low-on; 30 rows each; load
+logged; off arms = d490 U/V, d510-control-medium, d512-sol-low-off). Identity check per D510(4) before packets.
+inc3 (UI feedback tool, D513(3)) dispatched on claude/board-shot (01a06e5a). footprints inc1 committed 7032e199.
+browser-fix harvested: both main browser failures have first-bad commits (367527f7 unkeyed activation <select>;
+e71242fd composer link as document navigation) and fixes; codex reports Chromium 182/182; supervisor full gate queued.
