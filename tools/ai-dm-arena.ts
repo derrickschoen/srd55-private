@@ -9,8 +9,8 @@ import {
   runConversation,
   type ConversationCli,
   type ConversationEffort,
+  type ConversationRowPersisted,
   type ConversationRunOptions,
-  type ConversationTokenCounts,
   type ConversationTransport,
   type CombatModel,
   type TurnContextRenderEvidence,
@@ -23,9 +23,7 @@ import {
   type AgentSessionAdapter,
   type AgentSkillName,
 } from '../src/vtt/agent-session';
-import type { DmIntelCapture } from '../src/vtt/dm-tactical-intel';
-import type { HiddenOptionRecord } from '../src/vtt/turn-option-registry';
-import type { LocalOpenAiConfig, LocalThinkMode } from '../src/vtt/agent-adapters/local-openai';
+import type { LocalOpenAiConfig } from '../src/vtt/agent-adapters/local-openai';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 import {
   applyRoomInitiativeProfile,
@@ -42,7 +40,6 @@ import {
   DEFAULT_RENDERER_PROFILE,
   circumstanceFeatureVectorSchema,
   rendererProfileSchema,
-  type CircumstanceFeatureVector,
   type RendererProfile,
 } from '../src/vtt/renderer-profile';
 import { DEFAULT_AI_DM_KB_ROOT } from '../src/vtt/knowledge-base-contract';
@@ -101,87 +98,30 @@ interface ArenaConfigBase {
 
 export type ArenaConfig = ArenaConfigBase & AgentInstructionSource;
 
-export interface ArenaRow {
-  readonly knowledgeModel: 'engine_state';
-  readonly hiddenOptions: readonly HiddenOptionRecord[];
-  readonly intelMode: IntelMode;
-  readonly rendererAttribution: import('./ai-dm-conversation').ConversationRow['rendererAttribution'];
-  readonly circumstanceFeatures: CircumstanceFeatureVector;
-  readonly combatModel: CombatModel;
-  readonly roundProtocolVersion: import('./ai-dm-conversation').ConversationRow['roundProtocolVersion'];
-  readonly startingRoomDigest: string;
+interface ArenaExtras {
   readonly seed: number;
   readonly basis: ArenaBasis;
   readonly probeVerdict: ArenaProbeVerdict | null;
   readonly arm: string;
-  readonly room: number;
-  readonly round: number;
-  readonly cli: ConversationCli;
-  readonly model: string;
-  readonly thinkMode: LocalThinkMode | null;
-  readonly kbHash: string | null;
-  readonly instructionSource: AgentInstructionSource['instructionSource'];
-  readonly skillName: AgentSkillName | null;
-  readonly skillHash: string | null;
-  readonly kbReads: readonly import('../src/vtt/mcp/knowledge-base').KbReadRecord[];
-  readonly repoCommit: string;
-  readonly rawTurnContext: string;
-  readonly turnContextGranularity: 'full' | 'turn_delta';
-  readonly snippetHash: string;
-  readonly snippetSetHash: string;
-  readonly suggestedPlay: import('./ai-dm-conversation').ConversationSuggestedPlay | null;
-  readonly suggestionAdopted: import('./ai-dm-conversation').ConversationSuggestionAdoption | null;
-  readonly contextRevision: number;
-  readonly projectionRevision: number;
-  /** Codex rollout ID; locate its full log with a rollout-*-<id>.jsonl glob. */
-  readonly sessionId: string | null;
-  readonly escalationSessionId: string | null;
-  readonly outcome: import('./ai-dm-conversation').ConversationRow['outcome'];
-  readonly executionErrorClass: import('./ai-dm-conversation').ConversationRow['executionErrorClass'];
-  readonly proposalId: string | null;
   readonly wall: number;
-  readonly tokens: ConversationTokenCounts;
-  readonly callUsage: readonly import('../src/vtt/agent-session').AgentCallUsage[];
-  readonly agentSessionGeneration: number;
-  readonly contextRolloverTriggerCount: number;
-  readonly contextRolloverThreshold: number | null;
-  readonly contextRolloverOccurred: boolean;
-  readonly agentSessionDigestHash: string | null;
-  readonly refusals: readonly string[];
-  readonly toolCalls: number;
-  readonly callsPerRound: number;
-  readonly agentDispatched: boolean;
-  readonly flapRetries: 0 | 1 | 2;
-  readonly serviceNull: boolean;
-  readonly decisionTransport: ConversationTransport;
-  readonly firstDecisionAccepted: boolean;
-  readonly decisionAttempts: number;
-  readonly decisionRejectionCodes: import('./ai-dm-conversation').ConversationRow['decisionRejectionCodes'];
-  readonly normalizationCodes: import('./ai-dm-conversation').ConversationRow['normalizationCodes'];
-  readonly contextTruncated: boolean;
-  readonly plannedBy: import('./ai-dm-conversation').ConversationPlannerAttribution | null;
-  readonly planner: import('./ai-dm-conversation').ConversationPlanner;
-  readonly overrideKinds: import('./ai-dm-conversation').ConversationRow['overrideKinds'];
-  readonly overrideRejections: import('./ai-dm-conversation').ConversationRow['overrideRejections'];
-  readonly autoSubmitBlocks: import('./ai-dm-conversation').ConversationRow['autoSubmitBlocks'];
-  readonly escalated: boolean;
-  readonly escalationModel: string | null;
-  readonly authorizedPlan: readonly import('./ai-dm-conversation').ConversationAuthorizedActorPlan[] | null;
-  readonly rationale: string | null;
-  readonly roundNarrative: string | null;
-  readonly chainEvidence: import('./ai-dm-conversation').ConversationChainEvidence;
-  readonly initiativeOrder: import('./ai-dm-conversation').ConversationRow['initiativeOrder'];
-  readonly partyPolicyHash: string | null;
-  readonly materialityPolicyHash: string | null;
-  readonly engineIntel: DmIntelCapture | null;
-  readonly adjustmentBudget: number;
-  readonly teamPlans: import('./ai-dm-conversation').ConversationTeamPlans;
-  readonly pcTurns: readonly import('./ai-dm-conversation').ConversationPcTurn[];
-  readonly adjustments: readonly import('./ai-dm-conversation').ConversationAdjustment[];
-  readonly monsterSegments: readonly import('./ai-dm-conversation').ConversationMonsterSegment[];
-  readonly roundTotals: import('./ai-dm-conversation').ConversationRow['roundTotals'];
-  readonly rlData?: import('./ai-dm-conversation').ConversationRlData;
 }
+
+function conversationPart(row: ConversationRowPersisted) {
+  return {
+    ...row,
+    hiddenOptions: structuredClone(row.hiddenOptions),
+    rendererAttribution: {
+      policyVersion: row.rendererAttribution.policyVersion,
+      profile: rendererProfileSchema.parse(row.rendererAttribution.profile),
+    },
+    circumstanceFeatures: circumstanceFeatureVectorSchema.parse(row.circumstanceFeatures),
+    kbReads: mapConversationKbReads(row),
+    callUsage: structuredClone(row.callUsage),
+  } satisfies ConversationRowPersisted;
+}
+
+export type ArenaConversationPart = ReturnType<typeof conversationPart>;
+export type ArenaRow = ArenaConversationPart & ArenaExtras;
 
 function requiredValue(argv: readonly string[], index: number, option: string): string {
   const value = argv[index + 1];
@@ -518,92 +458,17 @@ export function mapConversationKbReads(
 
 export function arenaRows(
   config: ArenaConfig,
-  rows: readonly import('./ai-dm-conversation').ConversationRow[],
+  rows: readonly ConversationRowPersisted[],
   arm: string,
   seeds: readonly number[],
 ): readonly ArenaRow[] {
   return rows.map((row): ArenaRow => ({
-    knowledgeModel: row.knowledgeModel,
-    hiddenOptions: structuredClone(row.hiddenOptions),
-    intelMode: row.intelMode,
-    rendererAttribution: {
-      policyVersion: row.rendererAttribution.policyVersion,
-      profile: rendererProfileSchema.parse(row.rendererAttribution.profile),
-    },
-    circumstanceFeatures: circumstanceFeatureVectorSchema.parse(row.circumstanceFeatures),
-    combatModel: row.combatModel,
-    roundProtocolVersion: row.roundProtocolVersion,
-    startingRoomDigest: row.startingRoomDigest,
+    ...conversationPart(row),
     seed: seeds[row.room - 1]!,
     basis: config.basis,
     probeVerdict: extractArenaProbeVerdict(config.basis, row.authorizedPlan),
     arm,
-    room: row.room,
-    round: row.round,
-    cli: row.cli,
-    model: row.model,
-    thinkMode: row.thinkMode,
-    kbHash: row.kbHash,
-    instructionSource: row.instructionSource,
-    skillName: row.skillName,
-    skillHash: row.skillHash,
-    kbReads: mapConversationKbReads(row),
-    repoCommit: row.repoCommit,
-    rawTurnContext: row.rawTurnContext,
-    turnContextGranularity: row.turnContextGranularity,
-    snippetHash: row.snippetHash,
-    snippetSetHash: row.snippetSetHash,
-    suggestedPlay: row.suggestedPlay,
-    suggestionAdopted: row.suggestionAdopted,
-    contextRevision: row.contextRevision,
-    projectionRevision: row.projectionRevision,
-    sessionId: row.sessionId,
-    escalationSessionId: row.escalationSessionId,
-    outcome: row.outcome,
-    proposalId: row.proposalId,
     wall: row.wallPerCreature,
-    tokens: row.tokens,
-    callUsage: structuredClone(row.callUsage),
-    agentSessionGeneration: row.agentSessionGeneration,
-    contextRolloverTriggerCount: row.contextRolloverTriggerCount,
-    contextRolloverThreshold: row.contextRolloverThreshold,
-    contextRolloverOccurred: row.contextRolloverOccurred,
-    agentSessionDigestHash: row.agentSessionDigestHash,
-    refusals: row.refusals,
-    toolCalls: row.toolCalls,
-    callsPerRound: row.callsPerRound,
-    agentDispatched: row.agentDispatched,
-    flapRetries: row.flapRetries,
-    serviceNull: row.serviceNull,
-    decisionTransport: row.decisionTransport,
-    firstDecisionAccepted: row.firstDecisionAccepted,
-    decisionAttempts: row.decisionAttempts,
-    decisionRejectionCodes: row.decisionRejectionCodes,
-    normalizationCodes: row.normalizationCodes,
-    contextTruncated: row.contextTruncated,
-    plannedBy: row.plannedBy,
-    planner: row.planner,
-    executionErrorClass: row.executionErrorClass,
-    overrideKinds: row.overrideKinds,
-    overrideRejections: row.overrideRejections,
-    autoSubmitBlocks: row.autoSubmitBlocks,
-    escalated: row.escalated,
-    escalationModel: row.escalationModel,
-    authorizedPlan: row.authorizedPlan,
-    rationale: row.rationale,
-    roundNarrative: row.roundNarrative,
-    chainEvidence: row.chainEvidence,
-    initiativeOrder: row.initiativeOrder,
-    partyPolicyHash: row.partyPolicyHash,
-    materialityPolicyHash: row.materialityPolicyHash,
-    engineIntel: row.engineIntel,
-    adjustmentBudget: row.adjustmentBudget,
-    teamPlans: row.teamPlans,
-    pcTurns: row.pcTurns,
-    adjustments: row.adjustments,
-    monsterSegments: row.monsterSegments,
-    roundTotals: row.roundTotals,
-    ...(row.rlData === undefined ? {} : { rlData: row.rlData }),
   }));
 }
 

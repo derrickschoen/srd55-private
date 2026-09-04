@@ -552,6 +552,9 @@ export interface ConversationRow {
   readonly rlData?: ConversationRlData;
 }
 
+/** The complete row shape written by the conversation runner. */
+export type ConversationRowPersisted = ConversationRow;
+
 export interface ConversationPlannerAttribution {
   readonly model: string;
   readonly effort: ConversationEffort;

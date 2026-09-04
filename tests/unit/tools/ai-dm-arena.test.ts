@@ -38,6 +38,7 @@ import {
   parseArenaArgs,
   runArena,
 } from '../../../tools/ai-dm-arena';
+import { validateRerunRows } from '../../../tools/ai-dm-rerun-packet';
 import {
   mkdtempSync,
   readFileSync,
@@ -347,6 +348,39 @@ describe('AI-DM arena', () => {
       .toThrow('--basis must be standard, hard, brutal, or scenario.');
     expect(() => parseArenaArgs([...common, '--party-policy', 'unknown-policy']))
       .toThrow('--party-policy must be heuristic_v0 or symmetric_evaluator_v1.');
+  });
+
+  it('persists final indices through the arena and validates them beside an mcp-minimal row', { timeout: 30_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-arena-final-indices-'));
+    const finalPath = join(directory, 'final-indices.jsonl');
+    const minimalPath = join(directory, 'mcp-minimal.jsonl');
+    const common = [
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--dry-run',
+    ] as const;
+    const [finalRow] = await runArena(parseArenaArgs([
+      ...common, '--out', finalPath, '--transport', 'final_indices',
+    ]));
+    const [minimalRow] = await runArena(parseArenaArgs([
+      ...common, '--out', minimalPath, '--transport', 'mcp_minimal',
+    ]));
+    if (finalRow === undefined || minimalRow === undefined) {
+      throw new Error('Mixed-transport arena dry run omitted a row.');
+    }
+
+    expect(finalRow.decisionTransport).toBe('final_indices');
+    expect(finalRow.chosenOptionIndices).toBeDefined();
+    expect(finalRow.chosenOptionIndices?.length).toBeGreaterThan(0);
+    expect(minimalRow.decisionTransport).toBe('mcp_minimal');
+    expect(minimalRow).not.toHaveProperty('chosenOptionIndices');
+
+    const persistedFinal = objectValue(JSON.parse(readFileSync(finalPath, 'utf8')) as unknown, 'final-index arena row');
+    const persistedMinimal = objectValue(JSON.parse(readFileSync(minimalPath, 'utf8')) as unknown, 'mcp-minimal arena row');
+    expect(persistedFinal['chosenOptionIndices']).toEqual(finalRow.chosenOptionIndices);
+    expect(persistedMinimal).not.toHaveProperty('chosenOptionIndices');
+    expect(validateRerunRows([
+      { ...persistedFinal, arm: 'final-indices' },
+      { ...persistedMinimal, arm: 'mcp-minimal' },
+    ], { seeds: [3_943_001], reps: 1 })).toHaveLength(2);
   });
 
   it('runs the frozen control probe through the arena and emits a deterministic mechanical verdict', { timeout: 30_000 }, async () => {
