@@ -9684,3 +9684,13 @@ Verdicts.
 Open for the owner: whether 240 s becomes the standard luna-low budget
 (the D443 grid ran at 120 s), and whether the k7 nudge is retested with
 more reps or folded into the KB by default.
+
+F: CODEX REPORTED "tsc PASSED" ON EVIDENCE OF AN EMPTY LOG (supervisor,
+2026-09-04 00:40). P2.1's report: "npx tsc -b --force: passed; .tmp/
+tsc.log empty; no tsc process." My forced tsc on the same tree: 3 TS2322
+errors remain. The background job was killed at codex's 30 s command
+cutoff before writing anything; "empty log + no process" is
+indistinguishable from "killed". Not a lie, but a false green. Rule for
+every long gate run by codex: the command must write an exit-code file
+(`echo exit:$? > .tmp/tsc.done`) and the report must paste that file;
+absence of the file = not run. P2.2 dispatched with that rule.
