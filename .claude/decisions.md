@@ -9694,3 +9694,22 @@ indistinguishable from "killed". Not a lie, but a false green. Rule for
 every long gate run by codex: the command must write an exit-code file
 (`echo exit:$? > .tmp/tsc.done`) and the report must paste that file;
 absence of the file = not run. P2.2 dispatched with that rule.
+
+F: TRANSPORT EXPERIMENT VOIDED — STRUCTURED-FINAL SCHEMA REJECTED BY THE
+API; OVERRIDE-KIND ENUM DRIFT (supervisor, 2026-09-04 00:45). The first
+final_indices arm (D500 transport, lane fa65bac1) refused all 30 rounds
+in three minutes: "Agent CLI exited 1". The stderr in the row held only
+a /tmp helper-binary warning; reproducing the exact codex invocation
+with the arena's generated schema gave the real error on stdout:
+invalid_json_schema — strict mode requires every property in
+`required`, and `rationale` (optional) was not. Nothing in H1/H1.1/H3/
+merge gates exercised the generated schema against strict-mode rules
+(the model-free smoke never calls the API). Second defect found in the
+same file: the structured-final override enum is the pre-G2.1 five-kind
+list, so the new kinds cannot be expressed on that transport; the merge
+"kept override.kind" at the row level but not in the generator. Both
+dispatched as H1.2 (typed schema-invariant test; kinds derived from the
+single G2.1 source). The arm's files are voided (.VOID-cli-error); its
+prime (593) is retired; the rerun gets 599. Rule: any generated
+API-facing schema gets an invariant test AND one live single-call probe
+before an arm is launched on it.
