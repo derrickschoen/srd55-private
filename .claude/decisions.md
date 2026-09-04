@@ -9713,3 +9713,18 @@ single G2.1 source). The arm's files are voided (.VOID-cli-error); its
 prime (593) is retired; the rerun gets 599. Rule: any generated
 API-facing schema gets an invariant test AND one live single-call probe
 before an arm is launched on it.
+
+F: TWO TRANSPORT ARMS WASTED ON A FIELD THE ARENA DROPS (supervisor,
+2026-09-04 03:30). H1.3 made the conversation runner emit
+chosenOptionIndices on final_indices rows, with passing runner-level
+tests; the arena (tools/ai-dm-arena.ts) declares its own row type and
+copies runner fields by hand, so the real arm's rows still lack the
+field and the packet builder refuses them. Runs 2 and 3 of the
+transport arm (30 rows each, 26/30 and 27/30 first-decision accepted,
+0–1 timeouts) are voided for packets; their row-level statistics stand.
+H1.4 dispatched: arena rows DERIVED from the runner row type with a
+compile-time key-set assertion so a field cannot be dropped again, plus
+an arena-level dry-run test that validates a persisted final_indices
+row through the packet builder. Rule: a row field is only "shipped"
+when the ARENA's persisted row passes the packet builder in a test; the
+runner's own row is not the artifact the experiments consume.
