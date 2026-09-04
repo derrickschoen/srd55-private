@@ -9586,3 +9586,11 @@ closed ruleset union, SRD-neutral wording, default off); private policy-
 spec rewrite in Larian-score terms on sol; replay increments 5–6 on sol.
 Critical path to unblind unchanged (arena → gate → control → panels →
 unseal); everything else now runs beside it.
+
+## D500 — OWNER: tactical_v2 mechanics are designed freely with neutral wording; BG3 numbers are private calibration targets only (2026-09-03)
+
+For the BG3-style mechanics behind the tactical_v2 flag (bonus-action shove, jump, bonus-action dash for all, mud /
+deep-water / grease surfaces, flight ignoring ground, summon actions, death burst): pick numbers that make the
+engine's behaviour match the video/replay results best, documented as our own design in neutral wording. BG3's own
+numbers stay in the private repo as calibration targets and are never the provenance of a public constant.
+Resolves plan unknowns 2–9 in principle; the concrete declarations are supervisor decisions recorded per increment.
