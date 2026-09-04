@@ -33,6 +33,32 @@ export const ENGINE_OPTION_METRICS = [
 ] as const;
 export type EngineOptionMetric = (typeof ENGINE_OPTION_METRICS)[number];
 
+export const SIMPLE_OVERRIDE_JUSTIFICATION_KINDS = [
+  'objective',
+  'morale',
+  'roleplay',
+  'resource_conservation',
+  'unknown_engine_gap',
+] as const;
+export const ENGINE_OVERRIDE_JUSTIFICATION_KINDS = [
+  ...SIMPLE_OVERRIDE_JUSTIFICATION_KINDS,
+  'engine_play',
+  'missing_metric',
+] as const;
+export type EngineOverrideJustificationKind = (typeof ENGINE_OVERRIDE_JUSTIFICATION_KINDS)[number];
+export type EngineOverrideJustification =
+  | { readonly kind: (typeof SIMPLE_OVERRIDE_JUSTIFICATION_KINDS)[number] }
+  | {
+      readonly kind: 'engine_play';
+      /** Null is retained through decoding so policy can return OVERRIDE_UNJUSTIFIED. */
+      readonly token: EnginePlayToken | null;
+    }
+  | {
+      readonly kind: 'missing_metric';
+      /** Null is retained through decoding so policy can return OVERRIDE_UNJUSTIFIED. */
+      readonly id: EngineOptionMetric | null;
+    };
+
 export const engineActionId = (value: string): EngineActionId => value as EngineActionId;
 export const engineSpellId = (value: string): EngineSpellId => value as EngineSpellId;
 export const enginePlayToken = (value: string): EnginePlayToken => value as EnginePlayToken;
@@ -151,19 +177,7 @@ export interface EngineTurnProposal {
   /** Verbatim, bounded explanation supplied by the decision author. */
   readonly reason: string;
   readonly activationChoice?: EngineActivationChoice | null;
-  readonly overrideJustification: null | (
-    {
-      readonly kind: 'objective' | 'morale' | 'roleplay' | 'resource_conservation' | 'unknown_engine_gap';
-    } | {
-      readonly kind: 'engine_play';
-      /** Null is retained through decoding so policy can return OVERRIDE_UNJUSTIFIED. */
-      readonly token: EnginePlayToken | null;
-    } | {
-      readonly kind: 'missing_metric';
-      /** Null is retained through decoding so policy can return OVERRIDE_UNJUSTIFIED. */
-      readonly id: EngineOptionMetric | null;
-    }
-  );
+  readonly overrideJustification: EngineOverrideJustification | null;
 }
 
 export interface ResolvedActionSlotUse {

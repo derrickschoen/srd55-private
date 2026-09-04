@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { combatantId, type CombatantId } from '../../../src/combat/values';
 import {
-  assertClosedObjectSchema,
+  assertStrictStructuredOutputSchema,
   bindDecision,
   createDecisionCatalog,
   decisionActorIndex,
@@ -10,11 +10,17 @@ import {
   minimalRoundSubmission,
   normalizeIndexDecision,
   renderDecisionCatalog,
+  strictStructuredOutputSchemaViolations,
   type DecisionActorIndex,
   type OptionIndex,
   type RawIdDecision,
 } from '../../../src/vtt/agent-round-decision';
-import { engineOptionId, type EngineTurnProposal } from '../../../src/vtt/turn-proposal';
+import {
+  ENGINE_OVERRIDE_JUSTIFICATION_KINDS,
+  engineOptionId,
+  enginePlayToken,
+  type EngineTurnProposal,
+} from '../../../src/vtt/turn-proposal';
 import { decisionReasonProblem } from '../../../src/vtt/decision-reason';
 
 function catalog(phase: 'initial' | 'correction' = 'initial') {
@@ -46,6 +52,7 @@ function validRaw(value: ReturnType<typeof catalog>) {
   return {
     catalogDigest: value.digest,
     reaction_guidance: { inherit: true } as const,
+    rationale: null,
     proposals: {
       'combatant:alpha': {
         primaryOptionIndex: 0, fallbackOptionIndex: 1, override: null,
@@ -57,6 +64,35 @@ function validRaw(value: ReturnType<typeof catalog>) {
       },
     },
   };
+}
+
+function schemaRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${label} must be a schema object.`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function generatedOverrideKinds(schema: unknown): readonly string[] {
+  const rootProperties = schemaRecord(schemaRecord(schema, 'root')['properties'], 'root properties');
+  const proposalProperties = schemaRecord(
+    schemaRecord(rootProperties['proposals'], 'proposals')['properties'],
+    'proposal properties',
+  );
+  const actorProperties = schemaRecord(
+    schemaRecord(proposalProperties['combatant:alpha'], 'actor proposal')['properties'],
+    'actor properties',
+  );
+  const variants = schemaRecord(actorProperties['override'], 'override')['anyOf'];
+  if (!Array.isArray(variants)) throw new TypeError('Override schema must contain anyOf variants.');
+  return variants.flatMap((variant) => {
+    const variantSchema = schemaRecord(variant, 'override variant');
+    if (variantSchema['type'] === 'null') return [];
+    const properties = schemaRecord(variantSchema['properties'], 'override variant properties');
+    const enumeration = schemaRecord(properties['kind'], 'override kind')['enum'];
+    if (!Array.isArray(enumeration)) throw new TypeError('Override kind must use enum.');
+    return enumeration.filter((kind): kind is string => typeof kind === 'string');
+  });
 }
 
 describe('A3 indexed round decisions', () => {
@@ -90,6 +126,7 @@ describe('A3 indexed round decisions', () => {
     const normalized = normalizeIndexDecision({
       catalog_digest: value.digest,
       reaction_guidance: { inherit: true },
+      rationale: null,
       proposals: {
         'combatant:alpha': {
           primary_option_index: 0, fallback_option_index: 1, override: null,
@@ -113,11 +150,13 @@ describe('A3 indexed round decisions', () => {
       catalogDigest: value.digest,
       catalog_digest: value.digest,
       reaction_guidance: { inherit: true },
+      rationale: null,
       proposals: {},
     }, value, null)).toMatchObject({ kind: 'rejected', code: 'dialect_mismatch' });
     expect(normalizeIndexDecision({
       catalogDigest: value.digest,
       reaction_guidance: { inherit: true },
+      rationale: null,
       proposals: {
         'combatant:alpha': {
           primary_option_index: 0, fallback_option_index: 1, override: null,
@@ -169,6 +208,7 @@ describe('A3 indexed round decisions', () => {
     expect(normalizeIndexDecision({
       catalogDigest: value.digest,
       reaction_guidance: { inherit: true },
+      rationale: null,
       proposals: validRaw(value).proposals,
     }, value, null)).toMatchObject({ kind: 'rejected', code: 'non_null_correction_fallback' });
     expect(finalIndicesDecisionSchema(value)).toMatchObject({
@@ -182,7 +222,7 @@ describe('A3 indexed round decisions', () => {
     });
   });
 
-  it('renders index 0 as the engine recommendation and closes every nested object schema (mutation: permit an extra nested property)', () => {
+  it('renders index 0 as the engine recommendation and satisfies every strict structured-output invariant', () => {
     const value = catalog();
     expect(renderDecisionCatalog(value)).toEqual({
       catalogDigest: value.digest,
@@ -200,9 +240,17 @@ describe('A3 indexed round decisions', () => {
         },
       ],
     });
-    expect(() => assertClosedObjectSchema(finalIndicesDecisionSchema(value))).not.toThrow();
-    expect(() => assertClosedObjectSchema({ type: 'object', properties: { nested: { type: 'object' } } }))
-      .toThrow('additionalProperties');
+    const schema = finalIndicesDecisionSchema(value);
+    expect(strictStructuredOutputSchemaViolations(schema)).toEqual([]);
+    expect(() => assertStrictStructuredOutputSchema(schema)).not.toThrow();
+    expect(strictStructuredOutputSchemaViolations({
+      type: 'object', additionalProperties: false,
+      properties: { requiredValue: { type: 'string', maxLength: 12 }, optionalValue: { type: 'string' } },
+      required: ['requiredValue'],
+    })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'required_properties_mismatch' }),
+      expect.objectContaining({ kind: 'forbidden_keyword', keyword: 'maxLength' }),
+    ]));
   });
 
   it('checks brand constructors rather than exporting total number casts (mutation: return a brand for an out-of-range number)', () => {
@@ -247,40 +295,37 @@ describe('A3 indexed round decisions', () => {
       .toMatchObject({ kind: 'rejected', code: 'invalid_shape' });
   });
 
-  it('uses the engine override kind vocabulary without a duplicate reason field', () => {
+  it('binds every engine override kind from the shared closed contract', () => {
     const value = catalog();
     const raw = validRaw(value);
-    const normalized = normalizeIndexDecision({
-      ...raw,
-      proposals: {
-        ...raw.proposals,
-        'combatant:alpha': { ...raw.proposals['combatant:alpha'], override: { kind: 'objective' } },
-      },
-    }, value, null);
-    if (normalized.kind !== 'accepted') throw new Error(`Expected accepted decision, got ${normalized.code}.`);
-
-    expect(bindDecision(value, normalized.decision, null).proposals[0]?.overrideJustification)
-      .toEqual({ kind: 'objective' });
-    expect(finalIndicesDecisionSchema(value)).toMatchObject({
-      properties: {
+    const overrides: readonly NonNullable<EngineTurnProposal['overrideJustification']>[] = [
+      { kind: 'objective' },
+      { kind: 'morale' },
+      { kind: 'roleplay' },
+      { kind: 'resource_conservation' },
+      { kind: 'unknown_engine_gap' },
+      { kind: 'engine_play', token: enginePlayToken('engine-play:test') },
+      { kind: 'missing_metric', id: 'expected_damage_milli' },
+    ];
+    for (const override of overrides) {
+      const normalized = normalizeIndexDecision({
+        ...raw,
         proposals: {
-          properties: {
-            'combatant:alpha': {
-              properties: {
-                override: {
-                  anyOf: expect.arrayContaining([
-                    expect.objectContaining({ required: ['kind'] }),
-                  ]),
-                },
-              },
-            },
-          },
+          ...raw.proposals,
+          'combatant:alpha': { ...raw.proposals['combatant:alpha'], override },
         },
-      },
-    });
+      }, value, null);
+      if (normalized.kind !== 'accepted') throw new Error(`Expected accepted decision, got ${normalized.code}.`);
+      expect(bindDecision(value, normalized.decision, null).proposals[0]?.overrideJustification).toEqual(override);
+    }
   });
 
-  it('requires each bounded decision reason before binding (mutation: make reason optional)', () => {
+  it('emits exactly the engine override kind list (mutation: drop one kind from the generator)', () => {
+    expect(generatedOverrideKinds(finalIndicesDecisionSchema(catalog())))
+      .toEqual(ENGINE_OVERRIDE_JUSTIFICATION_KINDS);
+  });
+
+  it('keeps index, reason, rationale, and digest bounds in normalization', () => {
     const value = catalog();
     const raw = validRaw(value);
     expect(normalizeIndexDecision({
@@ -290,18 +335,24 @@ describe('A3 indexed round decisions', () => {
         'combatant:alpha': { ...raw.proposals['combatant:alpha'], reason: '' },
       },
     }, value, null)).toMatchObject({ kind: 'rejected', code: 'REASON_REQUIRED' });
-    expect(finalIndicesDecisionSchema(value)).toMatchObject({
-      properties: {
-        proposals: {
-          properties: {
-            'combatant:alpha': {
-              properties: { reason: { maxLength: 240 } },
-              required: expect.arrayContaining(['reason']),
-            },
-          },
-        },
+    expect(normalizeIndexDecision({
+      ...raw,
+      proposals: {
+        ...raw.proposals,
+        'combatant:alpha': { ...raw.proposals['combatant:alpha'], primaryOptionIndex: 2 },
       },
-    });
+    }, value, null)).toMatchObject({ kind: 'rejected', code: 'unknown_option' });
+    expect(normalizeIndexDecision({
+      ...raw,
+      proposals: {
+        ...raw.proposals,
+        'combatant:alpha': { ...raw.proposals['combatant:alpha'], reason: 'r'.repeat(241) },
+      },
+    }, value, null)).toMatchObject({ kind: 'rejected', code: 'invalid_shape' });
+    expect(normalizeIndexDecision({ ...raw, rationale: 'r'.repeat(601) }, value, null))
+      .toMatchObject({ kind: 'rejected', code: 'invalid_shape' });
+    expect(normalizeIndexDecision({ ...raw, catalogDigest: 'wrong-digest' }, value, null))
+      .toMatchObject({ kind: 'rejected', code: 'stale_catalog' });
   });
 
   it('applies the shared semantic reason gate to structured-final decisions', () => {

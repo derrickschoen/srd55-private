@@ -174,6 +174,7 @@ class BoilerplateThenValidStructuredFinalAdapter implements AgentSessionAdapter 
         catalogDigest: catalog['catalogDigest'],
         reaction_guidance: { inherit: true },
         proposals,
+        rationale: null,
       }),
       usage: null,
       exit: 'completed',

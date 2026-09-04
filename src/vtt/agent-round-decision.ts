@@ -2,7 +2,17 @@ import type { CombatantId } from '../combat/values';
 import { canonicalJson } from '../commands/canonical-json';
 import { sha256 } from '../crypto/sha256';
 import type { ReactionGuidanceDeclaration } from './reaction-guidance';
-import type { EngineOptionId, EngineTurnProposal } from './turn-proposal';
+import {
+  ENGINE_OPTION_METRICS,
+  ENGINE_OVERRIDE_JUSTIFICATION_KINDS,
+  SIMPLE_OVERRIDE_JUSTIFICATION_KINDS,
+  enginePlayToken,
+  type EngineOptionId,
+  type EngineOptionMetric,
+  type EngineOverrideJustification,
+  type EngineOverrideJustificationKind,
+  type EngineTurnProposal,
+} from './turn-proposal';
 
 const decisionActorIndexBrand = Symbol('DecisionActorIndex');
 const decisionOptionIndexBrand = Symbol('DecisionOptionIndex');
@@ -49,7 +59,7 @@ export interface RawIdDecision {
 export interface RawIndexDecision {
   readonly catalogDigest: string;
   readonly reaction_guidance: { readonly inherit: true };
-  readonly rationale?: string;
+  readonly rationale: string | null;
   readonly proposals: Readonly<Record<string, {
     readonly primaryOptionIndex: number;
     readonly fallbackOptionIndex: number | null;
@@ -58,9 +68,7 @@ export interface RawIndexDecision {
   }>>;
 }
 
-export interface DecisionOverride {
-  readonly kind: 'morale' | 'objective' | 'roleplay' | 'resource_conservation' | 'unknown_engine_gap';
-}
+export type DecisionOverride = EngineOverrideJustification;
 
 export interface DecisionCatalogActor {
   readonly actorId: CombatantId;
@@ -182,15 +190,6 @@ function closedRecord(value: Readonly<Record<string, unknown>>, keys: readonly s
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
-function optionalClosedRecord(
-  value: Readonly<Record<string, unknown>>,
-  required: readonly string[],
-  optional: readonly string[],
-): boolean {
-  const allowed = new Set([...required, ...optional]);
-  return required.every((key) => key in value) && Object.keys(value).every((key) => allowed.has(key));
-}
-
 function frozen<T>(value: T): T {
   if (value !== null && typeof value === 'object') {
     for (const nested of Object.values(value as Record<string, unknown>)) frozen(nested);
@@ -260,13 +259,45 @@ function failure(code: DecisionNormalizationRejectionCode): DecisionNormalizatio
   return { kind: 'rejected', code, codes: [code] };
 }
 
+function isOverrideKind(value: unknown): value is EngineOverrideJustificationKind {
+  return typeof value === 'string' &&
+    (ENGINE_OVERRIDE_JUSTIFICATION_KINDS as readonly string[]).includes(value);
+}
+
+function isSimpleOverrideKind(
+  value: EngineOverrideJustificationKind,
+): value is (typeof SIMPLE_OVERRIDE_JUSTIFICATION_KINDS)[number] {
+  return (SIMPLE_OVERRIDE_JUSTIFICATION_KINDS as readonly string[]).includes(value);
+}
+
 function parseOverride(value: unknown): DecisionOverride | null | undefined {
   if (value === null) return null;
   const input = record(value);
-  if (input === null || !closedRecord(input, ['kind']) ||
-    (input['kind'] !== 'morale' && input['kind'] !== 'objective' && input['kind'] !== 'roleplay' &&
-      input['kind'] !== 'resource_conservation' && input['kind'] !== 'unknown_engine_gap')) return undefined;
-  return { kind: input['kind'] };
+  if (input === null || !isOverrideKind(input['kind'])) return undefined;
+  const kind = input['kind'];
+  if (isSimpleOverrideKind(kind)) {
+    return closedRecord(input, ['kind']) ? { kind } : undefined;
+  }
+  switch (kind) {
+    case 'engine_play': {
+      if (!closedRecord(input, ['kind', 'token'])) return undefined;
+      const token = input['token'];
+      if (token === null) return { kind, token: null };
+      return typeof token === 'string' && token.length > 0 && token.length <= 200
+        ? { kind, token: enginePlayToken(token) }
+        : undefined;
+    }
+    case 'missing_metric': {
+      if (!closedRecord(input, ['kind', 'id'])) return undefined;
+      const id = input['id'];
+      return id === null || (typeof id === 'string' &&
+        (ENGINE_OPTION_METRICS as readonly string[]).includes(id))
+        ? { kind, id: id as EngineOptionMetric | null }
+        : undefined;
+    }
+  }
+  kind satisfies never;
+  throw new Error('Unreachable override justification kind.');
 }
 
 type RawDialect = 'camel' | 'snake';
@@ -275,17 +306,17 @@ function rawDialect(input: Readonly<Record<string, unknown>>): RawDialect | null
   const hasCamel = 'catalogDigest' in input;
   const hasSnake = 'catalog_digest' in input;
   if (hasCamel === hasSnake) return null;
-  if (hasCamel && optionalClosedRecord(input, ['catalogDigest', 'proposals', 'reaction_guidance'], ['rationale'])) {
+  if (hasCamel && closedRecord(input, ['catalogDigest', 'proposals', 'reaction_guidance', 'rationale'])) {
     return 'camel';
   }
-  if (hasSnake && optionalClosedRecord(input, ['catalog_digest', 'proposals', 'reaction_guidance'], ['rationale'])) {
+  if (hasSnake && closedRecord(input, ['catalog_digest', 'proposals', 'reaction_guidance', 'rationale'])) {
     return 'snake';
   }
   return null;
 }
 
 function numberIndex(value: unknown): number | null {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null;
 }
 
 function outOfRange(value: number, upperExclusive: number): OutOfRange {
@@ -345,7 +376,8 @@ export function normalizeIndexDecision(
   if (reactionGuidanceRecord === null || !closedRecord(reactionGuidanceRecord, ['inherit']) ||
     reactionGuidanceRecord['inherit'] !== true) return failure('invalid_shape');
   const rationale = input['rationale'];
-  if (rationale !== undefined && (typeof rationale !== 'string' || rationale.length > 240)) {
+  if (rationale !== undefined && rationale !== null &&
+    (typeof rationale !== 'string' || rationale.trim().length === 0 || rationale.length > 600)) {
     return failure('invalid_shape');
   }
   const expectedActorIds = catalog.actors.map((actor) => actor.actorId);
@@ -470,44 +502,70 @@ export function minimalRoundSubmission(decision: BoundRoundDecision): Readonly<R
   };
 }
 
+function overrideKindSchema(kind: EngineOverrideJustificationKind): JsonSchema {
+  const kindProperty = { type: 'string', enum: [kind] };
+  if (isSimpleOverrideKind(kind)) {
+    return {
+      type: 'object',
+      additionalProperties: false,
+      properties: { kind: kindProperty },
+      required: ['kind'],
+    };
+  }
+  switch (kind) {
+    case 'engine_play':
+      return {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: kindProperty,
+          token: { anyOf: [{ type: 'null' }, { type: 'string' }] },
+        },
+        required: ['kind', 'token'],
+      };
+    case 'missing_metric':
+      return {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: kindProperty,
+          id: { anyOf: [{ type: 'null' }, { type: 'string', enum: ENGINE_OPTION_METRICS }] },
+        },
+        required: ['kind', 'id'],
+      };
+  }
+  kind satisfies never;
+  throw new Error('Unreachable override justification schema kind.');
+}
+
 function overrideSchema(): JsonSchema {
   return {
     anyOf: [
       { type: 'null' },
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          kind: {
-            type: 'string',
-            enum: ['morale', 'objective', 'roleplay', 'resource_conservation', 'unknown_engine_gap'],
-          },
-        },
-        required: ['kind'],
-      },
+      ...ENGINE_OVERRIDE_JUSTIFICATION_KINDS.map((kind) => overrideKindSchema(kind)),
     ],
   };
 }
 
 /**
- * The runtime contract is the sole source for Codex's strict final schema.
- * Catalog digest is a const so a stale rendered decision cannot decode as a
- * decision for the latest state.
+ * The engine override contract is the sole source for Codex's strict final
+ * schema. Bounds and digest equality remain normalizer responsibilities
+ * because the structured-output JSON Schema subset does not support them.
  */
 export function finalIndicesDecisionSchema(catalog: DecisionCatalog): JsonSchema {
   const fallback = catalog.phase === 'correction'
     ? { type: 'null' }
-    : { type: 'integer', minimum: 0 };
+    : { type: 'integer' };
   const proposalProperties: Record<string, JsonSchema> = {};
   for (const actor of catalog.actors) {
     proposalProperties[actor.actorId] = {
       type: 'object',
       additionalProperties: false,
       properties: {
-        primaryOptionIndex: { type: 'integer', minimum: 0 },
+        primaryOptionIndex: { type: 'integer' },
         fallbackOptionIndex: fallback,
         override: overrideSchema(),
-        reason: { type: 'string', minLength: 1, maxLength: 240 },
+        reason: { type: 'string' },
       },
       required: ['primaryOptionIndex', 'fallbackOptionIndex', 'override', 'reason'],
     };
@@ -516,7 +574,7 @@ export function finalIndicesDecisionSchema(catalog: DecisionCatalog): JsonSchema
     type: 'object',
     additionalProperties: false,
     properties: {
-      catalogDigest: { type: 'string', const: catalog.digest },
+      catalogDigest: { type: 'string', enum: [catalog.digest] },
       proposals: {
         type: 'object',
         additionalProperties: false,
@@ -526,29 +584,97 @@ export function finalIndicesDecisionSchema(catalog: DecisionCatalog): JsonSchema
       reaction_guidance: {
         type: 'object',
         additionalProperties: false,
-        properties: { inherit: { type: 'boolean', const: true } },
+        properties: { inherit: { type: 'boolean', enum: [true] } },
         required: ['inherit'],
       },
-      rationale: { type: 'string', maxLength: 240 },
+      rationale: { anyOf: [{ type: 'null' }, { type: 'string' }] },
     },
-    required: ['catalogDigest', 'proposals', 'reaction_guidance'],
+    required: ['catalogDigest', 'proposals', 'reaction_guidance', 'rationale'],
   };
 }
 
-/** Testable recursion guard for Codex's strict nested object requirement. */
-export function assertClosedObjectSchema(schema: unknown, path = 'schema'): void {
+export const STRICT_STRUCTURED_OUTPUT_FORBIDDEN_KEYWORDS = [
+  'minimum',
+  'maximum',
+  'minLength',
+  'maxLength',
+  'pattern',
+  'format',
+  'const',
+] as const;
+
+export type StrictStructuredOutputForbiddenKeyword =
+  (typeof STRICT_STRUCTURED_OUTPUT_FORBIDDEN_KEYWORDS)[number];
+
+export type StrictStructuredOutputSchemaViolation =
+  | { readonly kind: 'additional_properties'; readonly path: string }
+  | {
+      readonly kind: 'required_properties_mismatch';
+      readonly path: string;
+      readonly propertyKeys: readonly string[];
+      readonly requiredKeys: readonly string[];
+    }
+  | {
+      readonly kind: 'forbidden_keyword';
+      readonly path: string;
+      readonly keyword: StrictStructuredOutputForbiddenKeyword;
+    };
+
+/** Walk the emitted schema and return only violations of the strict-output subset. */
+export function strictStructuredOutputSchemaViolations(
+  schema: unknown,
+  path = 'schema',
+): readonly StrictStructuredOutputSchemaViolation[] {
+  const violations: StrictStructuredOutputSchemaViolation[] = [];
   if (Array.isArray(schema)) {
-    schema.forEach((nested, index) => assertClosedObjectSchema(nested, `${path}[${String(index)}]`));
-    return;
+    schema.forEach((nested, index) => {
+      violations.push(...strictStructuredOutputSchemaViolations(nested, `${path}[${String(index)}]`));
+    });
+    return violations;
   }
   const input = record(schema);
-  if (input === null) return;
+  if (input === null) return violations;
+  for (const keyword of STRICT_STRUCTURED_OUTPUT_FORBIDDEN_KEYWORDS) {
+    if (keyword in input) violations.push({ kind: 'forbidden_keyword', path, keyword });
+  }
   if (input['type'] === 'object') {
     if (input['additionalProperties'] !== false) {
-      throw new TypeError(`${path} object schema must set additionalProperties to false.`);
+      violations.push({ kind: 'additional_properties', path });
+    }
+    const properties = record(input['properties']);
+    const required = input['required'];
+    const propertyKeys = properties === null ? [] : Object.keys(properties).sort();
+    const requiredKeys = Array.isArray(required) && required.every((key) => typeof key === 'string')
+      ? [...required].sort()
+      : [];
+    if (properties === null || !Array.isArray(required) || requiredKeys.length !== required.length ||
+      propertyKeys.length !== requiredKeys.length ||
+      propertyKeys.some((key, index) => key !== requiredKeys[index])) {
+      violations.push({ kind: 'required_properties_mismatch', path, propertyKeys, requiredKeys });
     }
   }
   for (const [key, nested] of Object.entries(input)) {
-    assertClosedObjectSchema(nested, `${path}.${key}`);
+    if (key === 'properties') {
+      const properties = record(nested);
+      if (properties !== null) {
+        for (const [propertyKey, propertySchema] of Object.entries(properties)) {
+          violations.push(...strictStructuredOutputSchemaViolations(
+            propertySchema,
+            `${path}.properties[${JSON.stringify(propertyKey)}]`,
+          ));
+        }
+      }
+      continue;
+    }
+    violations.push(...strictStructuredOutputSchemaViolations(nested, `${path}.${key}`));
+  }
+  return violations;
+}
+
+/** Assert that every object and keyword obeys Codex's strict-output subset. */
+export function assertStrictStructuredOutputSchema(schema: unknown): void {
+  const violations = strictStructuredOutputSchemaViolations(schema);
+  if (violations.length > 0) {
+    throw new TypeError(`Strict structured-output schema invariant failed: ${JSON.stringify(violations)}`);
   }
 }

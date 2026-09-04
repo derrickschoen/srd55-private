@@ -2053,6 +2053,7 @@ function simulatedIndexedFinalDecision(prompt: string, phase: DecisionPhase): st
     catalogDigest: digest,
     reaction_guidance: { inherit: true },
     proposals,
+    rationale: null,
   });
 }
 

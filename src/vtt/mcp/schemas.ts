@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ENGINE_OPTION_METRICS } from '../turn-proposal';
+import { ENGINE_OPTION_METRICS, SIMPLE_OVERRIDE_JUSTIFICATION_KINDS } from '../turn-proposal';
 import { TACTICAL_EVALUATOR_POLICY } from '../../combat/tactical-evaluator';
 import { PLAY_NAMES, SKILL_NAMES } from '../snippet-registry-runtime';
 import { DM_INTEL_QUERY_POLICY, DM_TURN_INTEL_POLICY } from '../dm-tactical-intel';
@@ -77,7 +77,7 @@ const roundRationale = z.string().min(1).max(600).refine((value) => value.trim()
   .describe('Optional round-level rationale retained outside blinded judging packets.');
 const overrideJustification = z.discriminatedUnion('kind', [
   z.object({
-    kind: z.enum(['objective', 'morale', 'roleplay', 'resource_conservation', 'unknown_engine_gap']),
+    kind: z.enum(SIMPLE_OVERRIDE_JUSTIFICATION_KINDS),
   }).strict(),
   z.object({
     kind: z.literal('engine_play'),
