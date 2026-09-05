@@ -11415,3 +11415,13 @@ real defect (its unit is in flight) — it was present in every run including th
 
 a11y-board landed on main (lane f9aec870): my full suite 564/9,725, specs 2/2 on 4680. It touches the player
 projection (src/combat/visibility.ts), so its D429.1 mini-A/B runs when the load average allows a valid run.
+
+D558 — OWNER (2026-09-05 17:54): YES — the art pipeline may call an image model for REFERENCE SHEETS ONLY, never for
+shipped pixels. Supervisor reading: OpenAI image API is the approved model (local FLUX Klein 4B allowed later if a GPU
+is set up); references live in the private research repo (art-research/references/, never in any public tree,
+never copied into the repo, never used as a test fixture); the clean-room review checklist gains a similarity gate
+(procedural output must not reproduce a reference's structure; judges compare at native size); a seat that has seen
+a reference for an asset is not the implementer for that asset; the implementer receives written observations
+derived from references (what the light does, how a ramp steps), not the images, unless the supervisor decides a
+specific asset needs the picture and records it. Every generated reference is logged (prompt, model, date, asset)
+in references/LOG.md so provenance is auditable.
