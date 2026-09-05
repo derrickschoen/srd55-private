@@ -10503,3 +10503,17 @@ D526 — OWNER (2026-09-05 07:00): (1) Iso: keep the full review loop until a cl
 review 9, and so on; no landing until codex says LAND. (2) Footprints increments 1–4 land on main after the
 supervisor's full gate (browser suite included); increment 5 follows. (3) The g2 image-experiment rerun waits until
 EVERY probe class is ≥ 0.9 at Luna LOW (the original D525 bar); UI iteration continues class by class.
+
+LANDED ON BRANCH (2026-09-05 07:40): iso D9 3cb15b5f (round-8 majors: one role table with wall/obstacle leaf roles,
+full-stack picking with displayed-opaque pixels blocking, near walls drawn through darkness by the closed form
+colour t(1−a)/(1−ta), shade t·a). Unit mutation (obstacles skipped in picking) killed 3; my mutation (colour alpha
+without the renormalisation) killed 3 incl. the composited-pixel test; restore cmp identical. My quick gate on the
+restored tree: tsc 0, sg 0, iso 215/215, iso spec 1/1. Two supervisor rulings on the unit's NEEDS-RULING: opaque-only
+blocking is the intended reading; a blocked click resolves to the tile's cell. Codex review round 9 dispatched (sol
+high, read-only) as a HOLD/LAND round per D526.1.
+
+FINDING AGAINST MY OWN WORK (2026-09-05 07:37): I started the iso quick gate in the background and then applied my
+mutation to renderer.ts in the same worktree while it was running. The gate's vitest phase ran against the mutant
+and reported 3 failures that were my mutant's, not the tree's. I discarded that run and reran the gate on the
+restored tree (clean, numbers above). Rule going forward: a mutation and a gate never share a worktree at the same
+time; the gate runs to DONE first, or the mutation runs in the foreground before the gate starts.
