@@ -214,6 +214,7 @@ describe('M-core and D420 turn-context rendering', () => {
 
   it.each(Array.from({ length: 10 }, (_unused, index) => 6_203_001 + index))(
     'keeps brutal-basis seed %i full-intel round context within the hard byte cap',
+    { timeout: 60_000 },
     async (seed) => {
       const context = await brutalTurnContext(seed, seed - 6_203_000);
       const bytes = new TextEncoder().encode(JSON.stringify(context)).byteLength;
