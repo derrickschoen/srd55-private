@@ -11450,3 +11450,7 @@ References tool: the generator will take the key from `fireconnect key export --
 helper claude-fw uses), so no key file is needed; Fireworks amendment dispatched to the infra unit's session.
 Ghost lane: merge with main committed 35f8f6bf after my tsc 0 / sg 0 / focused 50/50; gate-wt4 (retry runners)
 launched. a11y mini-A/B running at load ~10 (may void).
+
+a11y-board D429.1 mini-A/B on main e5dcefda (18:06): per-room offense [1,0,2,2,3,2,0,VOID,3,1] (room 8 refused:
+CLI timeout at load ~10), dash 31 — era shape on the nine valid rooms (controls 1,1,2,2,3,2,0,2,3,1). PASSED with room
+8 void; the projection change did not move monster behaviour.
