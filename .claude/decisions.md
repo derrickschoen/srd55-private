@@ -11159,3 +11159,7 @@ a day (superseded rules removed, new rulings folded in, dated). Supervisor: code
 (read-only over the chronology, written to a scratch file outside .claude), the supervisor installs it on main,
 and a second codex seat reviews it against the log for omissions; the daily compaction is a supervisor duty
 recorded with a dated line at the top of RULES.md.
+
+D553 — OWNER (2026-09-05 15:12): arms, packets and fixtures of experiments that measured zero are KEPT FOR ONE
+GENERATION (until the next-generation rerun reports), then deleted. Applies to the g1 image arms, the D521
+capture_only arms and the D514 reduced-text arms: they go when the g3 (badges) generation reports.
