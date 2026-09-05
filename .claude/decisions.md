@@ -10802,3 +10802,23 @@ same tree; it ran under load 6.5 with D12's gates, a probe and Playwright concur
 the vitest phase is DISCARDED, not excused: a chained script reruns the full vitest alone under the lock as soon as
 the Playwright phase ends, then runs the iso full landing gate (browser suite). Both branches land on main only on
 a clean rerun.
+
+D527 — OWNER (2026-09-05 10:15): start a PARALLEL lane for the isometric UI using the same process as the classic
+view — the D519 comprehension probe against Luna medium first, then Luna low, until every fact class is ≥ 0.9 —
+and iterate the iso UI class by class exactly as the classic lane does. Supervisor setup: worktree dnd-wt-iso-probe,
+branch claude/iso-probe from claude/iso-vtt bc0c7657, claude/light-variant (probe inc4) merged in (four conflicts,
+codex resolves). Increment 1 (codex): the snapshot service and probe gain `--view classic|iso` and capture the iso
+canvas at the fit zoom; the same fact sheet and questions; an iso paragraph in the primer. The iso view today has
+no coordinate labels and no legend, so UI unit 1 (Fable) adds those in snapshot mode before the baseline is read
+as a UI result. Iso probe rows are a separate generation and never mixed with classic rows.
+
+D528 — OWNER (2026-09-05 10:18): every art-improvement round (iso AND classic UI units) is reviewed and judged by
+THREE seats, not codex alone: a Fable 5.1 subagent, an Opus 5 subagent, and codex gpt-5.6-sol at high. Same brief,
+same read-only access, the unit's screenshot(s) included (claude seats view the PNG with Read; codex via -i), run
+in parallel after the supervisor's gate and mutation. Each seat returns ranked findings and a LAND/HOLD line. The
+supervisor arbitrates by verification: a round HOLDs on any BLOCKER/MAJOR the supervisor confirms from any seat;
+a finding one seat raises and another rejects is settled by reading the code, never by vote. The owner accepts
+that a Fable reviewer session reviews Fable-authored units: the sessions are separate, codex stays the independent
+seat, and the review brief tells the Fable seat it is reviewing another session's work. Judge-seat priority (D525)
+still holds: arena judging outranks review seats on the shared account. Reviews are additive to the existing gates;
+nothing lands with fewer than three verdicts on the round.
