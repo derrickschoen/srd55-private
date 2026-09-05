@@ -10294,3 +10294,8 @@ therefore came from coarse layout cues (which side of the room the enemies are o
 comments. The probe reruns on the D516 classic art (names, coordinates, legend, HP bars) as soon as it commits;
 the target stays every class ≥ 0.9 at Luna low, and the light-level palette is the first thing to change if it
 still reads inverted.
+
+FINDING (2026-09-04 21:21): the Fable D2 unit dispatched at 20:15 did nothing — `claude -p` returned "You've hit your
+session limit · resets 9pm". Six Fable units and several `claude -p` judge seats ran today; the limit was reached
+around 20:15 and reset at 21:00. Relaunched at 21:22. Rule: check a Fable unit's log within a minute of dispatch
+for this message; a 63-byte log is the signature.
