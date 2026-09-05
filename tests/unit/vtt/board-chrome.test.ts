@@ -9,15 +9,17 @@ import {
   COORDINATE_CONVENTION,
   COORDINATE_GUTTER_PX,
   HP_BANDS,
-  LEGEND_ENTRIES,
   LEGEND_GAP_PX,
   LEGEND_HEIGHT_PX,
   boardChromeDimensions,
   hpBandOf,
+  legendEntriesFor,
+  lightLegendEntries,
   portraitBox,
   stackLabelOffsets,
   type NameplateLayout,
 } from '../../../src/vtt/board-chrome';
+import { LIGHT_ENCODINGS, LIGHT_LEVELS } from '../../../src/assets/light-encoding';
 import { projectEncounterBoard, type EncounterBoardProjectionShape } from '../../../src/vtt/encounter-board';
 import { renderBoard } from '../../../src/vtt/encounter-app';
 import { hitPointKnowledge } from '../../../src/vtt/intel/actor-knowledge';
@@ -239,9 +241,50 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     const labels = dm.querySelector('[data-coordinate-labels]');
     expect(labels?.querySelectorAll('[data-axis="column"]')).toHaveLength(projection.bounds.columns * 2);
     expect(labels?.querySelectorAll('[data-axis="row"]')).toHaveLength(projection.bounds.rows * 2);
+    // The reference room names no light region, so every cell is bright and the default encoding is 'tint'.
     const legend = dm.querySelector('[data-legend]');
-    expect(legend?.querySelectorAll('.encounter-legend-item').map((item) => item.getAttribute('data-legend-key'))).toEqual(LEGEND_ENTRIES.map((entry) => entry.key));
-    for (const band of HP_BANDS) expect(LEGEND_ENTRIES.some((entry) => entry.key === `hp-${band.replaceAll('_', '-')}`)).toBe(true);
+    // D525: the band is a minimum so a narrow board's rows are never clipped.
+    expect(legend?.getAttribute('style')).toContain(`min-height:${String(LEGEND_HEIGHT_PX)}px`);
+    expect(legend?.getAttribute('style')).not.toMatch(/(?:^|;)height:/u);
+    expect(legend?.getAttribute('data-light-encoding')).toBe('tint');
+    expect(legend?.getAttribute('data-room-default-light')).toBe('bright');
+    const tintEntries = legendEntriesFor('tint', 'bright');
+    expect(legend?.querySelectorAll('.encounter-legend-item').map((item) => item.getAttribute('data-legend-key'))).toEqual(tintEntries.map((entry) => entry.key));
+    for (const band of HP_BANDS) expect(tintEntries.some((entry) => entry.key === `hp-${band.replaceAll('_', '-')}`)).toBe(true);
+    expect(tintEntries.map((entry) => entry.label)).toContain('Bright light');
+  });
+
+  it('D525: every encoding keeps the non-light rows and swaps only the three light rows (symbol adds the room default)', () => {
+    for (const encoding of LIGHT_ENCODINGS) {
+      for (const roomDefault of LIGHT_LEVELS) {
+        const entries = legendEntriesFor(encoding, roomDefault);
+        const lightRows = lightLegendEntries(encoding, roomDefault);
+        const keys = entries.map((entry) => entry.key);
+        expect(new Set(keys).size, `${encoding}/${roomDefault} keys are unique`).toBe(keys.length);
+        expect(keys.slice(0, 5)).toEqual(['side-party', 'side-foe', 'hidden', 'difficult', 'obscured']);
+        expect(keys.slice(5, 5 + lightRows.length)).toEqual(lightRows.map((entry) => entry.key));
+        expect(keys.slice(5 + lightRows.length)).toEqual(['fog', 'blocked', 'object', 'light-source', 'hp-uninjured', 'hp-bloodied', 'hp-near-death', 'hp-unknown']);
+        expect(lightRows.map((entry) => entry.key).slice(0, 3)).toEqual(['bright', 'dim', 'darkness']);
+      }
+    }
+    expect(lightLegendEntries('inverse', 'bright').map((entry) => [entry.style, entry.label])).toEqual([
+      ['art', 'No veil = bright light'],
+      ['art', 'Light veil = dim'],
+      ['art', 'Heavy veil = darkness'],
+    ]);
+    const inverseRows = lightLegendEntries('inverse', 'bright');
+    expect(inverseRows.map((entry) => entry.style === 'art' ? entry.overlay : 'not-art')).toEqual([
+      null, 'art.map.overlay.light-veil-dim.v1', 'art.map.overlay.light-veil-dark.v1',
+    ]);
+    expect(lightLegendEntries('symbol', 'darkness').map((entry) => [entry.style, entry.label])).toEqual([
+      ['mark', 'BRIGHT'],
+      ['mark', 'DIM'],
+      ['mark', 'DARK'],
+      ['art', 'No glyph = DARK'],
+    ]);
+    expect(lightLegendEntries('symbol', 'dim').at(-1)?.label).toBe('No glyph = DIM');
+    // 'inverse' has no room-default row: the plain floor is always bright, whatever the majority level.
+    expect(lightLegendEntries('inverse', 'darkness')).toEqual(lightLegendEntries('inverse', 'bright'));
   });
 
   it('leaves the player board byte-identical to the DM board minus its chrome', () => {

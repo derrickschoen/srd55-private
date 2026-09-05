@@ -1000,3 +1000,48 @@
   background: #d8a24a;
   color: #14171f;
 }
+
+/* --- D525 light encodings: 'inverse' veils and 'symbol' corner glyphs ---- */
+
+.encounter-light-mark {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  pointer-events: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background-color: transparent;
+  background-position: center;
+  background-size: var(--encounter-tile-size) var(--encounter-tile-size);
+  background-repeat: no-repeat;
+}
+
+.encounter-light-mark[data-light-mark='light-veil-dim'] { background-image: var(--art-overlay-light-veil-dim); }
+.encounter-light-mark[data-light-mark='light-veil-dark'] { background-image: var(--art-overlay-light-veil-dark); }
+.encounter-light-mark[data-light-mark='light-glyph-bright'] { background-image: var(--art-overlay-light-glyph-bright); }
+.encounter-light-mark[data-light-mark='light-glyph-dim'] { background-image: var(--art-overlay-light-glyph-dim); }
+.encounter-light-mark[data-light-mark='light-glyph-dark'] { background-image: var(--art-overlay-light-glyph-dark); }
+
+/* Under either new encoding the floor stays plain: the 'tint' illumination layer draws nothing. */
+.encounter-board[data-light-encoding='inverse'] .encounter-mechanical-illumination,
+.encounter-board[data-light-encoding='symbol'] .encounter-mechanical-illumination {
+  background-color: transparent;
+  background-image: none;
+}
+
+.encounter-legend-art .encounter-legend-swatch {
+  border-radius: 0;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background-repeat: no-repeat;
+}
+
+.encounter-legend-mark .encounter-legend-swatch-mark {
+  display: block;
+  width: auto;
+  height: auto;
+  border: 0;
+  background: transparent;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}

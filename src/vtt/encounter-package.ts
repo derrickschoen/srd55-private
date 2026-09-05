@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { doorSetFor, doorSideAt, floorSetFor, wallSetFor } from '../assets/art-sets';
 import { assetIdSchema, type AssetId } from '../assets/ids';
+import { DEFAULT_LIGHT_ENCODING, LIGHT_ENCODINGS } from '../assets/light-encoding';
 import { resolveStarterArt } from '../assets/starter-art-resolver';
 
 const packageCellSchema = z.strictObject({
@@ -33,6 +34,8 @@ export const encounterArtPackageSchema = z.strictObject({
     adjudicated: assetIdSchema,
   }),
   combatantTokens: z.record(z.string().min(1), assetIdSchema),
+  /** D525: how light levels are drawn; omitted means 'tint', the pre-D525 board. */
+  lightEncoding: z.enum(LIGHT_ENCODINGS).default(DEFAULT_LIGHT_ENCODING),
 }).superRefine((value, context) => {
   const inBounds = (cell: { readonly column: number; readonly row: number }): boolean =>
     cell.column < value.room.columns && cell.row < value.room.rows;

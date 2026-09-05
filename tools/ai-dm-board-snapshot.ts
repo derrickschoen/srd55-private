@@ -20,6 +20,7 @@ import type { ControllerIdentity } from '../src/combat/controllers';
 import type { PersistedCoordinatorState } from '../src/combat/coordinator';
 import type { EncounterState } from '../src/combat/encounter';
 import { mulberry32 } from '../src/combat/random';
+import type { LightEncoding } from '../src/assets/light-encoding';
 import {
   encounterBranchId,
   encounterSessionId,
@@ -77,6 +78,8 @@ export interface BoardSnapshotManifest {
   readonly tileSizeCssPx: 64;
   readonly maximumPngBytes: 1_000_000;
   readonly capturePolicy: 'encounter-board-element-settled-v1';
+  /** D525: the light encoding forced through the snapshot page's URL, or null when the art package decided. */
+  readonly lightEncodingOverride: LightEncoding | null;
   readonly coldStartMs: number;
   readonly artifacts: readonly BoardImageArtifact[];
 }
@@ -89,6 +92,8 @@ export interface BoardSnapshotCapture {
 export interface BoardSnapshotServiceOptions {
   readonly outputDirectory: string;
   readonly forbiddenBoardStrings?: readonly string[];
+  /** D525: render every capture under this light encoding; a board that says otherwise is never captured. */
+  readonly lightEncoding?: LightEncoding;
 }
 
 function sha256Bytes(value: Uint8Array): string {
@@ -345,6 +350,7 @@ async function assertContainedArtifact(
 export class BoardSnapshotService implements AsyncDisposable {
   readonly #outputDirectory: string;
   readonly #forbiddenBoardStrings: readonly string[];
+  readonly #lightEncoding: LightEncoding | null;
   readonly #server: PreviewServer;
   readonly #context: BrowserContext;
   readonly #page: Page;
@@ -361,6 +367,7 @@ export class BoardSnapshotService implements AsyncDisposable {
   private constructor(input: {
     readonly outputDirectory: string;
     readonly forbiddenBoardStrings: readonly string[];
+    readonly lightEncoding: LightEncoding | null;
     readonly server: PreviewServer;
     readonly context: BrowserContext;
     readonly page: Page;
@@ -372,6 +379,7 @@ export class BoardSnapshotService implements AsyncDisposable {
   }) {
     this.#outputDirectory = input.outputDirectory;
     this.#forbiddenBoardStrings = input.forbiddenBoardStrings;
+    this.#lightEncoding = input.lightEncoding;
     this.#server = input.server;
     this.#context = input.context;
     this.#page = input.page;
@@ -411,7 +419,9 @@ export class BoardSnapshotService implements AsyncDisposable {
       });
       const page = context.pages()[0] ?? await context.newPage();
       const origin = `http://127.0.0.1:${String(port)}`;
-      await page.goto(`${origin}/vtt?encounter=reference&view=dm&boardSnapshot=1&session=board-snapshot-bootstrap`);
+      const lightEncoding = options.lightEncoding ?? null;
+      const encodingParameter = lightEncoding === null ? '' : `&lightEncoding=${lightEncoding}`;
+      await page.goto(`${origin}/vtt?encounter=reference&view=dm&boardSnapshot=1&session=board-snapshot-bootstrap${encodingParameter}`);
       await page.locator('.dm-save-manager').waitFor({ state: 'visible' });
       const browser = context.browser();
       if (browser === null) throw new Error('Persistent Chromium context has no browser handle.');
@@ -419,6 +429,7 @@ export class BoardSnapshotService implements AsyncDisposable {
       return new BoardSnapshotService({
         outputDirectory,
         forbiddenBoardStrings: [...(options.forbiddenBoardStrings ?? []), SNAPSHOT_CANARY],
+        lightEncoding,
         server,
         context,
         page,
@@ -446,6 +457,10 @@ export class BoardSnapshotService implements AsyncDisposable {
 
   get manifestPath(): string | null {
     return this.#manifestPath;
+  }
+
+  get lightEncoding(): LightEncoding | null {
+    return this.#lightEncoding;
   }
 
   async capture(input: BoardSnapshotCapture): Promise<BoardImageArtifact> {
@@ -560,8 +575,10 @@ export class BoardSnapshotService implements AsyncDisposable {
           candidate.dataset.boardAudience === 'dm' &&
           candidate.dataset.sourceRevision === String(expected.revision) &&
           candidate.dataset.sourceRound === String(expected.round) &&
-          candidate.dataset.sourceStateDigest === expected.stateDigest;
-      }, source, { polling: 'raf' }).then(() => {
+          candidate.dataset.sourceStateDigest === expected.stateDigest &&
+          // D525: a board rendered under another encoding than requested is never captured.
+          (expected.lightEncoding === null || candidate.dataset.lightEncoding === expected.lightEncoding);
+      }, { ...source, lightEncoding: this.#lightEncoding }, { polling: 'raf' }).then(() => {
         this.#page.off('pageerror', onPageError);
         resolveBoard();
       }, (error: unknown) => {
@@ -652,6 +669,7 @@ export class BoardSnapshotService implements AsyncDisposable {
       tileSizeCssPx: TILE_SIZE_CSS_PX,
       maximumPngBytes: MAX_BOARD_PNG_BYTES,
       capturePolicy: 'encounter-board-element-settled-v1',
+      lightEncodingOverride: this.#lightEncoding,
       coldStartMs: this.#coldStartMs,
       artifacts: [...this.#artifacts],
     };

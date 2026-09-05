@@ -23,6 +23,14 @@ import {
   wallSetFor,
 } from '../assets/art-sets';
 import { DEAD_TOKEN_ASSET_ID } from '../assets/starter-art-inputs';
+// ART-SEAM (D525): the light encoding decides which overlay, if any, a cell's light level draws.
+import {
+  cellLightLevels,
+  lightMarkFor,
+  roomDefaultLight,
+  type LightLevel,
+} from '../assets/light-encoding';
+import type { LightMarkEffect } from '../assets/pixel-art';
 import { hitPointKnowledge } from './intel/actor-knowledge';
 import type { ProjectedHitPointKnowledge } from './intel/contracts';
 import type { EncounterArtPackage } from './encounter-package';
@@ -73,7 +81,7 @@ export interface EncounterBoardObscurementRegion extends EncounterBoardEnvironme
 }
 
 export interface EncounterBoardLightRegion extends EncounterBoardEnvironmentRegion {
-  readonly level: 'bright' | 'dim' | 'darkness';
+  readonly level: LightLevel;
 }
 
 export interface EncounterBoardWorldObject {
@@ -212,12 +220,23 @@ export interface EncounterBoardTokenModel extends EncounterBoardCombatant {
   readonly marker: 'token' | 'corpse';
 }
 
+/**
+ * D525: the cell's effective light level (last region wins; unregioned is
+ * bright) and the overlay tile the package's encoding draws for it. 'tint'
+ * marks nothing here because its tints ride the illumination mechanical layer.
+ */
+export interface EncounterBoardCellLight {
+  readonly level: LightLevel;
+  readonly mark: LightMarkEffect | null;
+}
+
 export interface EncounterBoardCellModel {
   readonly key: string;
   readonly column: number;
   readonly row: number;
   readonly layers: readonly EncounterBoardLayer[];
   readonly mechanicalLayers: readonly EncounterBoardMechanicalLayer[];
+  readonly light: EncounterBoardCellLight;
   readonly token: EncounterBoardTokenModel | null;
   readonly tokens: readonly EncounterBoardTokenModel[];
   readonly worldObjects: readonly EncounterBoardWorldObject[];
@@ -544,6 +563,11 @@ export function projectEncounterBoard(
   };
 }
 
+/** The level most cells of this board share; the 'symbol' encoding leaves those unmarked. */
+export function roomDefaultLightOf(projection: EncounterBoardProjectionShape): LightLevel {
+  return roomDefaultLight(cellLightLevels(projection.bounds, projection.environmentLightRegions ?? []).values());
+}
+
 export function encounterBoardRenderModel(
   projection: EncounterBoardProjectionShape,
   art: EncounterArtPackage,
@@ -592,6 +616,8 @@ export function encounterBoardRenderModel(
       illumination.set(key, [...(illumination.get(key) ?? []), region]);
     }
   }
+  const lightLevels = cellLightLevels(projection.bounds, projection.environmentLightRegions ?? []);
+  const roomDefault = roomDefaultLight(lightLevels.values());
   const cells: EncounterBoardCellModel[] = [];
   // ART-SEAM (D516): the package names one floor/wall/door family; cells pick the member.
   const floorSet = floorSetFor(art.room.floor);
@@ -635,6 +661,13 @@ export function encounterBoardRenderModel(
         });
       }
 
+      const lightLevel = lightLevels.get(key);
+      if (lightLevel === undefined) throw new Error(`Cell ${key} has no light level.`);
+      const light: EncounterBoardCellLight = {
+        level: lightLevel,
+        mark: lightMarkFor(art.lightEncoding, lightLevel, roomDefault),
+      };
+
       const tokens = (combatants.get(key) ?? []).map((combatant): EncounterBoardTokenModel => {
         const asset = art.combatantTokens[combatant.id];
         if (asset === undefined) throw new Error(`Art package ${art.id} has no token for ${combatant.id}.`);
@@ -668,6 +701,7 @@ export function encounterBoardRenderModel(
         row,
         layers: Object.freeze(layers),
         mechanicalLayers: Object.freeze(mechanicalLayers),
+        light: Object.freeze(light),
         token: tokens[0] ?? null,
         tokens: Object.freeze(tokens),
         worldObjects: Object.freeze(cellObjects),

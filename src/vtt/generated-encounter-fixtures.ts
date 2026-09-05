@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { assetIdSchema, type AssetId } from '../assets/ids';
+import { DEFAULT_LIGHT_ENCODING } from '../assets/light-encoding';
 import { STARTER_ART_MANIFEST } from '../assets/starter-art-manifest';
 import { resolveStarterArt } from '../assets/starter-art-resolver';
 import {
@@ -781,6 +782,8 @@ export function encounterArtFromApprovedFixture(
       adjudicated: layout.ui.adjudicatedAssetId,
     },
     combatantTokens: layout.combatantTokens,
+    // ART-SEAM (D525): approved fixtures predate light encodings and draw the pre-D525 board.
+    lightEncoding: DEFAULT_LIGHT_ENCODING,
   };
 }
 

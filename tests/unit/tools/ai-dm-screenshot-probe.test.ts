@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { createEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { armorClass, worldObjectId } from '../../../src/combat/values';
 import type { WorldObject } from '../../../src/combat/world-objects';
+import { LIGHT_ENCODINGS } from '../../../src/assets/light-encoding';
 import {
   GENERAL_PRIMER,
+  LIGHT_ENCODING_PRIMER,
   PASS_THRESHOLD,
   PRIMER_VERSION,
   defaultProbeStateCandidates,
@@ -238,11 +240,45 @@ describe('D524 general screenshot primer', () => {
         ...cells.map((cell) => `${String(cell.column)},${String(cell.row)}`),
       ];
     }));
-    const normalizedPrimer = GENERAL_PRIMER.toLocaleLowerCase('en-US');
-    for (const fact of factSheetStrings) {
-      expect(normalizedPrimer, `primer leaked fact-sheet string ${JSON.stringify(fact)}`)
-        .not.toContain(fact.toLocaleLowerCase('en-US'));
+    // D525: the leak test covers the whole primer under every light encoding, not just the shared base.
+    for (const encoding of LIGHT_ENCODINGS) {
+      const normalizedPrimer = `${GENERAL_PRIMER} ${LIGHT_ENCODING_PRIMER[encoding]}`.toLocaleLowerCase('en-US');
+      for (const fact of factSheetStrings) {
+        expect(normalizedPrimer, `${encoding} primer leaked fact-sheet string ${JSON.stringify(fact)}`)
+          .not.toContain(fact.toLocaleLowerCase('en-US'));
+      }
     }
+  });
+
+  it('D525: gains exactly one sentence per light encoding, chosen by --light-encoding, and defaults to tint', () => {
+    expect(PRIMER_VERSION).toBe('d525-general-board-primer-v2');
+    for (const encoding of LIGHT_ENCODINGS) {
+      const sentence = LIGHT_ENCODING_PRIMER[encoding];
+      expect(sentence.match(/[.!?]/gu), `${encoding} is one sentence`).toHaveLength(1);
+      expect(sentence.endsWith('.')).toBe(true);
+      const prompt = screenshotQuestionPrompt('Q5', 'general', encoding);
+      expect(prompt).toContain(`General primer ${PRIMER_VERSION}: ${GENERAL_PRIMER} ${sentence}`);
+      for (const other of LIGHT_ENCODINGS) {
+        if (other !== encoding) expect(prompt).not.toContain(LIGHT_ENCODING_PRIMER[other]);
+      }
+      expect(screenshotQuestionPrompt('Q5', 'none', encoding)).not.toContain(sentence);
+    }
+    expect(screenshotQuestionPrompt('Q5', 'general')).toContain(LIGHT_ENCODING_PRIMER.tint);
+    // each sentence names the three levels the legend rows carry for that encoding
+    expect(LIGHT_ENCODING_PRIMER.inverse).toMatch(/unveiled floor is bright light/u);
+    expect(LIGHT_ENCODING_PRIMER.inverse).toMatch(/veil marks dim light/u);
+    expect(LIGHT_ENCODING_PRIMER.inverse).toMatch(/heavy dark veil marks darkness/u);
+    expect(LIGHT_ENCODING_PRIMER.symbol).toMatch(/sun marks bright light/u);
+    expect(LIGHT_ENCODING_PRIMER.symbol).toMatch(/crescent moon marks dim light/u);
+    expect(LIGHT_ENCODING_PRIMER.symbol).toMatch(/filled dark circle marks darkness/u);
+    expect(LIGHT_ENCODING_PRIMER.symbol).toContain('No glyph =');
+    expect(LIGHT_ENCODING_PRIMER.tint).toMatch(/untinted floor is also bright light/u);
+
+    const base = ['--models', 'gpt-5.6-luna:low', '--states', '1', '--seed', '1', '--images-root', 'dnd-slim-runs/x-images', '--out', 'dnd-slim-runs/x.jsonl', '--generation', 'g3'];
+    expect(parseScreenshotProbeArgs(base).lightEncoding).toBe('tint');
+    expect(parseScreenshotProbeArgs([...base, '--light-encoding', 'symbol']).lightEncoding).toBe('symbol');
+    expect(parseScreenshotProbeArgs([...base, '--light-encoding', 'inverse']).lightEncoding).toBe('inverse');
+    expect(() => parseScreenshotProbeArgs([...base, '--light-encoding', 'glow'])).toThrow('--light-encoding must be tint, symbol or inverse.');
   });
 
   it('omits the general primer when explicitly disabled', () => {
@@ -281,10 +317,12 @@ describe('D519 screenshot comprehension schema and CLI', () => {
         '--images-root', imagesRoot,
         '--out', outPath,
         '--generation', 'g2-classic-general',
+        '--light-encoding', 'inverse',
         '--simulate',
       ]);
       expect(config.primer).toBe('general');
       expect(config.comparePath).toBeNull();
+      expect(config.lightEncoding).toBe('inverse');
       const rows = await runScreenshotProbe(config, {
         candidates: [{ id: 'fixture-all-classes', state: everyClassState() }],
         snapshotService: service,
@@ -294,9 +332,12 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       expect(rows.every((row) => row.outcome === 'answered' && row.score === 1)).toBe(true);
       expect(rows.every((row) => row.primerVersion === PRIMER_VERSION)).toBe(true);
       expect(rows.every((row) => row.generation === 'g2-classic-general')).toBe(true);
+      expect(rows.every((row) => row.lightEncoding === 'inverse')).toBe(true);
+      expect(rows.every((row) => row.version === 'd525-screenshot-comprehension-row-v3')).toBe(true);
       expect(strictProbeGate(rows)).toBe(true);
       expect((await readFile(outPath, 'utf8')).trim().split('\n')).toHaveLength(20);
       const summary = await readFile(config.summaryPath, 'utf8');
+      expect(summary).toContain('Light encoding: inverse.');
       expect(summary).toContain('gpt-5.6-luna:low');
       expect(summary).toContain('gpt-5.6-luna:medium');
       expect(summary.match(/Strict all classes >= 0\.9: \*\*PASS\*\*/gu)).toHaveLength(2);
@@ -320,6 +361,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       });
       expect(impostorRows.every((row) => row.primerVersion === null)).toBe(true);
       expect(impostorRows.every((row) => row.generation === 'g1-like-for-like')).toBe(true);
+      expect(impostorRows.every((row) => row.lightEncoding === 'tint')).toBe(true);
       expect(strictProbeGate(impostorRows)).toBe(false);
       const comparisonSummary = await readFile(comparisonConfig.summaryPath, 'utf8');
       expect(comparisonSummary).toContain('Delta vs previous run');

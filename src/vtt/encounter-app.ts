@@ -2,6 +2,7 @@ import { canonicalJson } from '../commands/canonical-json';
 import { starterArtCssUrl, starterArtDataUri } from '../assets/starter-art-resolver';
 // ART-SEAM (D516): overlay art families and the DM board chrome.
 import { OVERLAY_ASSETS } from '../assets/art-sets';
+import type { LightEncoding } from '../assets/light-encoding';
 import { renderBoardChrome } from './board-chrome';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
@@ -290,8 +291,10 @@ export function renderBoard(
     readonly round: number;
     readonly stateDigest: string;
   },
+  // ART-SEAM (D525): the snapshot page overrides the package's light encoding from its URL.
+  lightEncoding?: LightEncoding,
 ): HTMLDivElement {
-  const art = encounterArtForBoard(projection);
+  const art = encounterArtForBoard(projection, lightEncoding);
   const models = encounterBoardRenderModel(projection, art);
   const board = element('div', { className: 'encounter-board' });
   board.style.setProperty('--encounter-columns', String(projection.bounds.columns));
@@ -300,6 +303,7 @@ export function renderBoard(
     board.style.setProperty(`--art-overlay-${effect}`, starterArtCssUrl(assetId));
   }
   board.dataset.artPackage = art.id;
+  board.dataset.lightEncoding = art.lightEncoding;
   board.dataset.boardAudience = provenance === undefined ? 'player' : 'dm';
   if (provenance !== undefined) {
     board.dataset.sourceRevision = String(provenance.revision);
@@ -322,6 +326,14 @@ export function renderBoard(
       cell.append(image);
     }
     for (const layer of model.mechanicalLayers) cell.append(renderMechanicalLayer(layer));
+    // ART-SEAM (D525): 'inverse' veils and 'symbol' glyphs; 'tint' marks nothing, so its DOM is unchanged.
+    if (model.light.mark !== null) {
+      const mark = element('div', { className: 'encounter-light-mark' });
+      mark.setAttribute('aria-hidden', 'true');
+      mark.dataset.lightLevel = model.light.level;
+      mark.dataset.lightMark = model.light.mark;
+      cell.append(mark);
+    }
     for (const light of model.lightOverlays) {
       const overlay = element('div', { className: `encounter-light encounter-light-${light.level}` });
       overlay.dataset.lightId = light.overlay.id;
@@ -437,7 +449,7 @@ export function renderBoard(
     board.append(svg);
   }
   // ART-SEAM (D516): the DM board gains names, HP bars, coordinates and a legend; the player board does not.
-  if (provenance !== undefined) renderBoardChrome(board, projection);
+  if (provenance !== undefined) renderBoardChrome(board, projection, art.lightEncoding);
   return board;
 }
 
@@ -799,6 +811,7 @@ class DmEncounterView {
     initialSeed?: EncounterSeed,
     private readonly boardSnapshotMode = false,
     private readonly loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
+    private readonly lightEncoding?: LightEncoding,
   ) {
     this.#store = store;
     this.#sessionFlow = encounter?.sessionFlow ?? null;
@@ -842,6 +855,7 @@ class DmEncounterView {
     initialSeed?: EncounterSeed,
     boardSnapshotMode = false,
     loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
+    lightEncoding?: LightEncoding,
   ): Promise<DmEncounterView> {
     const store = await IndexedDbBrowserSessionStore.open(indexedDB, localStorage);
     const view = new DmEncounterView(
@@ -852,6 +866,7 @@ class DmEncounterView {
       initialSeed,
       boardSnapshotMode,
       loadBoardSnapshotSession,
+      lightEncoding,
     );
     await store.flush();
     return view;
@@ -1341,7 +1356,7 @@ class DmEncounterView {
       revision: projection.encounter.revision,
       round: projection.board.round,
       stateDigest: projection.stateDigest,
-    }));
+    }, this.lightEncoding));
     if (movementPreview !== null) this.#shell.append(renderMovementDangerLegend(movementPreview));
   }
 
@@ -2265,6 +2280,8 @@ export function mountEncounterVtt(
     readonly encounter?: StoredCharacterEncounter;
     readonly initialSeed?: EncounterSeed;
     readonly boardSnapshotMode?: boolean;
+    /** D525: the snapshot page's `lightEncoding` URL parameter; absent, the art package decides. */
+    readonly lightEncoding?: LightEncoding;
   },
 ): EncounterVttMount {
   if (options.view === 'player') {
@@ -2296,6 +2313,7 @@ export function mountEncounterVtt(
             await openDmSession(nextSessionId);
           }
         : undefined,
+      options.lightEncoding,
     );
     if (closed) {
       view.close();

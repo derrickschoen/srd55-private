@@ -158,12 +158,14 @@ describe('encounter package asset-id consumption', () => {
       `${repositoryRoot}src/vtt/encounter-app.ts`,
       'utf8',
     );
-    expect(source).toContain('encounterArtForBoard(projection)');
+    // D525: the board takes the snapshot page's light-encoding override and hands the package's encoding to the chrome.
+    expect(source).toContain('encounterArtForBoard(projection, lightEncoding)');
     expect(source).toContain('encounterBoardRenderModel(projection, art)');
     expect(source).toContain('starterArtDataUri(layer.assetId)');
     expect(source).toContain('starterArtDataUri(model.token.assetId)');
     expect(source).toContain('projection.encounter.dmOnly.foggedCells');
     expect(source).toContain('renderMechanicalLayer(layer)');
-    expect(source).toContain('renderBoardChrome(board, projection)');
+    expect(source).toContain('renderBoardChrome(board, projection, art.lightEncoding)');
+    expect(source).toContain('board.dataset.lightEncoding = art.lightEncoding');
   });
 });

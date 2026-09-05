@@ -5,6 +5,7 @@
  * nothing is traced or copied from any game.
  */
 import { Bitmap, bayer2, hashNoise, type Ink } from './bitmap';
+import { LIGHT_GLYPHS, LIGHT_GLYPH_ORIGIN, outlineRows, type LightGlyphKind } from './light-glyphs';
 import { neutral, ramp, type PaletteRamp, type RampStep } from './palette';
 import { encodePng } from './png';
 
@@ -20,6 +21,13 @@ export const DOOR_STATES = ['closed', 'open'] as const;
 export type DoorState = (typeof DOOR_STATES)[number];
 export const TERRAIN_OBJECTS = ['rubble', 'crate', 'pillar', 'hazard'] as const;
 export type TerrainObject = (typeof TERRAIN_OBJECTS)[number];
+/** D525 'inverse' encoding: cool veils over dim and dark floor; bright floor stays plain. */
+export const LIGHT_VEIL_EFFECTS = ['light-veil-dim', 'light-veil-dark'] as const;
+export type LightVeilEffect = (typeof LIGHT_VEIL_EFFECTS)[number];
+/** D525 'symbol' encoding: a corner glyph per light level. */
+export const LIGHT_GLYPH_EFFECTS = ['light-glyph-bright', 'light-glyph-dim', 'light-glyph-dark'] as const;
+export type LightGlyphEffect = (typeof LIGHT_GLYPH_EFFECTS)[number];
+export type LightMarkEffect = LightVeilEffect | LightGlyphEffect;
 export const OVERLAY_EFFECTS = [
   'difficult',
   'obscurement-light',
@@ -30,6 +38,8 @@ export const OVERLAY_EFFECTS = [
   'light-darkness',
   'blocked',
   'light-source',
+  ...LIGHT_VEIL_EFFECTS,
+  ...LIGHT_GLYPH_EFFECTS,
 ] as const;
 export type OverlayEffect = (typeof OVERLAY_EFFECTS)[number];
 export const FOG_STATES = ['hidden', 'unexplored', 'revealed'] as const;
@@ -544,6 +554,39 @@ function paintLightSource(bitmap: Bitmap): void {
   bitmap.rect(29, 52, 7, 2, METAL(1));
 }
 
+/**
+ * D525 'inverse' veils. Dim: a cool 2×2-Bayer veil covering half the pixels at
+ * 80 % opacity, i.e. 40 % of the cell. Dark: a heavy 70 % veil from the
+ * neutral ramp (which also desaturates the stone) with a dithered cool cast.
+ */
+export const DIM_VEIL_ALPHA = 204;
+export const DIM_VEIL_BAYER_LEVEL = 2;
+export const DARK_VEIL_ALPHA = 179;
+export const DARK_VEIL_COOL_CAST_ALPHA = 60;
+
+function paintDimVeil(bitmap: Bitmap): void {
+  paintVeil(bitmap, shade(COOL(0), DIM_VEIL_ALPHA), DIM_VEIL_BAYER_LEVEL, 0);
+}
+
+function paintDarkVeil(bitmap: Bitmap): void {
+  paintVeil(bitmap, shade(neutral(0), DARK_VEIL_ALPHA), 4, 0);
+  paintVeil(bitmap, shade(COOL(1), DARK_VEIL_COOL_CAST_ALPHA), 2, 0);
+}
+
+/** D525 'symbol' glyph: the 7×7 mark at the tile's top-left with a 1-px outline ring. */
+function paintLightGlyph(bitmap: Bitmap, kind: LightGlyphKind): void {
+  const glyph = LIGHT_GLYPHS[kind];
+  const stamp = (rows: readonly string[], originX: number, originY: number, ink: Ink): void => {
+    rows.forEach((row, y) => {
+      Array.from(row).forEach((cell, x) => {
+        if (cell === '#') bitmap.put(originX + x, originY + y, ink);
+      });
+    });
+  };
+  stamp(outlineRows(glyph.rows), LIGHT_GLYPH_ORIGIN - 1, LIGHT_GLYPH_ORIGIN - 1, glyph.outline);
+  stamp(glyph.rows, LIGHT_GLYPH_ORIGIN, LIGHT_GLYPH_ORIGIN, glyph.ink);
+}
+
 function paintOverlay(bitmap: Bitmap, effect: OverlayEffect): void {
   switch (effect) {
     case 'difficult': paintDifficult(bitmap); return;
@@ -561,6 +604,11 @@ function paintOverlay(bitmap: Bitmap, effect: OverlayEffect): void {
     case 'light-darkness': paintVeil(bitmap, shade(neutral(0), 175), 4, 4); return;
     case 'blocked': paintBlocked(bitmap); return;
     case 'light-source': paintLightSource(bitmap); return;
+    case 'light-veil-dim': paintDimVeil(bitmap); return;
+    case 'light-veil-dark': paintDarkVeil(bitmap); return;
+    case 'light-glyph-bright': paintLightGlyph(bitmap, 'sun'); return;
+    case 'light-glyph-dim': paintLightGlyph(bitmap, 'crescent'); return;
+    case 'light-glyph-dark': paintLightGlyph(bitmap, 'disc'); return;
   }
 }
 

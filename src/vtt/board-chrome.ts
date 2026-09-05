@@ -9,20 +9,32 @@
  * every MCP payload use zero-based `column,row` numbers — so the labels are
  * the engine's column and row numbers, not letters.
  */
-import { HIDDEN_FOCUS_ASSET_ID } from '../assets/art-sets';
+import { HIDDEN_FOCUS_ASSET_ID, OVERLAY_ASSETS, STONE_FLOOR_SET_ID } from '../assets/art-sets';
+import type { AssetId } from '../assets/ids';
+import {
+  LIGHT_GLYPH_BY_LEVEL,
+  LIGHT_LEVELS,
+  LIGHT_LEVEL_LABELS,
+  LIGHT_VEIL_BY_LEVEL,
+  lightGlyphForLevel,
+  type LightEncoding,
+  type LightLevel,
+} from '../assets/light-encoding';
+import type { LightGlyph } from '../assets/light-glyphs';
 import { neutral, paletteHex, ramp, type PaletteColorRef } from '../assets/palette';
 import {
   GLYPH_HEIGHT,
   layoutPixelText,
   renderLifeGlyph,
+  renderPixelGlyph,
   renderPixelText,
   type LifeGlyph,
   type PixelTextLayout,
 } from '../assets/pixel-font';
-import { starterArtDataUri } from '../assets/starter-art-resolver';
+import { starterArtCssUrl, starterArtDataUri } from '../assets/starter-art-resolver';
 import type { LifeState } from '../combat/encounter';
 import type { CombatantId } from '../combat/values';
-import type { EncounterBoardCombatant, EncounterBoardProjectionShape } from './encounter-board';
+import { roomDefaultLightOf, type EncounterBoardCombatant, type EncounterBoardProjectionShape } from './encounter-board';
 import type { ProjectedHitPointKnowledge } from './intel/contracts';
 
 export const CHROME_TILE_PX = 64;
@@ -196,6 +208,11 @@ export function stackLabelOffsets(
   return placed;
 }
 
+/**
+ * The captured DM board size when the legend fits its 120-px minimum band,
+ * which every arena board (17+ columns) does. Narrower boards wrap the legend
+ * past the band and capture taller than this (D525).
+ */
 export function boardChromeDimensions(bounds: { readonly columns: number; readonly rows: number }): {
   readonly width: number;
   readonly height: number;
@@ -206,22 +223,41 @@ export function boardChromeDimensions(bounds: { readonly columns: number; readon
   };
 }
 
-export interface LegendEntry {
-  readonly key: string;
-  readonly label: string;
-  readonly swatch: PaletteColorRef;
-  readonly style: 'plate' | 'plate-dashed' | 'tint' | 'glyph' | 'hp';
-}
+/**
+ * A legend row. `swatch` rows show one palette colour; `art` rows show a real
+ * overlay tile over the plain flagstone (D525 'inverse' veils); `mark` rows
+ * show a light glyph at the chrome's 2× scale (D525 'symbol').
+ */
+export type LegendEntry =
+  | {
+      readonly key: string;
+      readonly label: string;
+      readonly style: 'plate' | 'plate-dashed' | 'tint' | 'glyph' | 'hp';
+      readonly swatch: PaletteColorRef;
+    }
+  | {
+      readonly key: string;
+      readonly label: string;
+      readonly style: 'art';
+      readonly floor: AssetId;
+      readonly overlay: AssetId | null;
+    }
+  | {
+      readonly key: string;
+      readonly label: string;
+      readonly style: 'mark';
+      readonly glyph: LightGlyph;
+    };
 
-export const LEGEND_ENTRIES: readonly LegendEntry[] = [
+const SIDE_LEGEND_ENTRIES: readonly LegendEntry[] = [
   { key: 'side-party', label: 'Party', swatch: ramp('cloth-cool', 3), style: 'plate' },
   { key: 'side-foe', label: 'Foe', swatch: ramp('cloth-warm', 3), style: 'plate' },
   { key: 'hidden', label: 'Hidden from players', swatch: neutral(8), style: 'plate-dashed' },
   { key: 'difficult', label: 'Difficult', swatch: ramp('earth', 2), style: 'tint' },
   { key: 'obscured', label: 'Obscured', swatch: neutral(6), style: 'tint' },
-  { key: 'bright', label: 'Bright light', swatch: ramp('skin', 6), style: 'tint' },
-  { key: 'dim', label: 'Dim light', swatch: ramp('cloth-warm', 5), style: 'tint' },
-  { key: 'darkness', label: 'Darkness', swatch: neutral(0), style: 'tint' },
+];
+
+const TAIL_LEGEND_ENTRIES: readonly LegendEntry[] = [
   { key: 'fog', label: 'Fog', swatch: neutral(1), style: 'tint' },
   { key: 'blocked', label: 'Blocked', swatch: ramp('stone', 2), style: 'glyph' },
   { key: 'object', label: 'Object', swatch: ramp('wood', 3), style: 'glyph' },
@@ -231,6 +267,43 @@ export const LEGEND_ENTRIES: readonly LegendEntry[] = [
   { key: 'hp-near-death', label: 'HP near death', swatch: HP_BAND_INK.near_death, style: 'hp' },
   { key: 'hp-unknown', label: 'HP unknown', swatch: HP_BAND_INK.unknown, style: 'hp' },
 ];
+
+/** The light rows depend on the encoding (D525); 'symbol' also names the unmarked room default. */
+export function lightLegendEntries(encoding: LightEncoding, roomDefault: LightLevel): readonly LegendEntry[] {
+  switch (encoding) {
+    case 'tint':
+      return [
+        { key: 'bright', label: 'Bright light', swatch: ramp('skin', 6), style: 'tint' },
+        { key: 'dim', label: 'Dim light', swatch: ramp('cloth-warm', 5), style: 'tint' },
+        { key: 'darkness', label: 'Darkness', swatch: neutral(0), style: 'tint' },
+      ];
+    case 'inverse':
+      return [
+        { key: 'bright', label: 'No veil = bright light', style: 'art', floor: STONE_FLOOR_SET_ID, overlay: null },
+        { key: 'dim', label: 'Light veil = dim', style: 'art', floor: STONE_FLOOR_SET_ID, overlay: OVERLAY_ASSETS[LIGHT_VEIL_BY_LEVEL.dim] },
+        { key: 'darkness', label: 'Heavy veil = darkness', style: 'art', floor: STONE_FLOOR_SET_ID, overlay: OVERLAY_ASSETS[LIGHT_VEIL_BY_LEVEL.darkness] },
+      ];
+    case 'symbol':
+      return [
+        ...LIGHT_LEVELS.map((level): LegendEntry => ({
+          key: level,
+          label: LIGHT_LEVEL_LABELS[level],
+          style: 'mark',
+          glyph: lightGlyphForLevel(level),
+        })),
+        { key: 'light-default', label: `No glyph = ${LIGHT_LEVEL_LABELS[roomDefault]}`, style: 'art', floor: STONE_FLOOR_SET_ID, overlay: null },
+      ];
+  }
+}
+
+export function legendEntriesFor(encoding: LightEncoding, roomDefault: LightLevel): readonly LegendEntry[] {
+  return [...SIDE_LEGEND_ENTRIES, ...lightLegendEntries(encoding, roomDefault), ...TAIL_LEGEND_ENTRIES];
+}
+
+/** The glyph asset each 'symbol' legend row stands for, so a test can tie the row to the tile. */
+export function legendGlyphAssetFor(level: LightLevel): AssetId {
+  return OVERLAY_ASSETS[LIGHT_GLYPH_BY_LEVEL[level]];
+}
 
 const TEXT_INK: PaletteColorRef = neutral(8);
 const COORDINATE_INK: PaletteColorRef = neutral(6);
@@ -394,17 +467,55 @@ function tokenChrome(
   return layer;
 }
 
-function legend(): HTMLElement {
+export const LEGEND_SWATCH_PX = 14;
+
+function legendSwatch(entry: LegendEntry): HTMLElement {
+  switch (entry.style) {
+    case 'plate':
+    case 'plate-dashed':
+    case 'tint':
+    case 'glyph':
+    case 'hp': {
+      const swatch = el('span', 'encounter-legend-swatch');
+      styled(swatch, { background: paletteHex(entry.swatch) });
+      return swatch;
+    }
+    case 'art': {
+      const swatch = el('span', 'encounter-legend-swatch');
+      const layers = [entry.overlay, entry.floor].flatMap((asset) => asset === null ? [] : [starterArtCssUrl(asset)]);
+      swatch.dataset.floorAssetId = entry.floor;
+      if (entry.overlay !== null) swatch.dataset.overlayAssetId = entry.overlay;
+      styled(swatch, {
+        'background-image': layers.join(','),
+        'background-size': `${String(LEGEND_SWATCH_PX)}px ${String(LEGEND_SWATCH_PX)}px`,
+      });
+      return swatch;
+    }
+    case 'mark': {
+      const rendered = renderPixelGlyph(entry.key, entry.glyph.rows, entry.glyph.ink, CHROME_TEXT_SCALE, entry.glyph.outline);
+      const swatch = el('img', 'encounter-legend-swatch encounter-legend-swatch-mark');
+      swatch.alt = '';
+      swatch.setAttribute('aria-hidden', 'true');
+      swatch.src = rendered.dataUri;
+      styled(swatch, { width: `${String(rendered.cssWidth)}px`, height: `${String(rendered.cssHeight)}px` });
+      return swatch;
+    }
+  }
+}
+
+function legend(entries: readonly LegendEntry[], lightEncoding: LightEncoding, roomDefault: LightLevel): HTMLElement {
   const box = el('aside', 'encounter-legend');
   box.dataset.legend = 'board-legend';
+  box.dataset.lightEncoding = lightEncoding;
+  box.dataset.roomDefaultLight = roomDefault;
   box.setAttribute('aria-label', 'Board legend');
-  styled(box, { height: `${String(LEGEND_HEIGHT_PX)}px`, 'margin-top': `${String(LEGEND_GAP_PX)}px` });
-  for (const entry of LEGEND_ENTRIES) {
+  // D525: a minimum, not a fixed height. A narrow board (the 10×7 reference room) wraps the rows past
+  // 120 px; a fixed height clipped its HP rows, which would confound the probe's HP class.
+  styled(box, { 'min-height': `${String(LEGEND_HEIGHT_PX)}px`, 'margin-top': `${String(LEGEND_GAP_PX)}px` });
+  for (const entry of entries) {
     const item = el('span', `encounter-legend-item encounter-legend-${entry.style}`);
     item.dataset.legendKey = entry.key;
-    const swatch = el('span', 'encounter-legend-swatch');
-    styled(swatch, { background: paletteHex(entry.swatch) });
-    item.append(swatch, textImage(entry.label, TEXT_INK, 'encounter-legend-text'));
+    item.append(legendSwatch(entry), textImage(entry.label, TEXT_INK, 'encounter-legend-text'));
     box.append(item);
   }
   return box;
@@ -413,15 +524,21 @@ function legend(): HTMLElement {
 /**
  * Appends the DM chrome to a rendered `.encounter-board`. The cells and their
  * children are untouched, so a player board is byte-identical without this.
+ * The legend's light rows follow the board's light encoding (D525).
  */
-export function renderBoardChrome(board: HTMLElement, projection: EncounterBoardProjectionShape): void {
+export function renderBoardChrome(
+  board: HTMLElement,
+  projection: EncounterBoardProjectionShape,
+  lightEncoding: LightEncoding,
+): void {
   board.dataset.boardChrome = 'on';
   board.dataset.coordinateLabels = COORDINATE_CONVENTION;
   board.dataset.encounterRows = String(projection.bounds.rows);
   board.style.setProperty('--encounter-rows', String(projection.bounds.rows));
+  const roomDefault = roomDefaultLightOf(projection);
   board.append(
     coordinateLabels(projection.bounds),
     tokenChrome(projection.combatants, projection.bounds),
-    legend(),
+    legend(legendEntriesFor(lightEncoding, roomDefault), lightEncoding, roomDefault),
   );
 }

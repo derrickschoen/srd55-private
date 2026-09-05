@@ -55,10 +55,22 @@ if (localEncounterLaunch) {
   const view = launchUrl.searchParams.get('view') === 'dm' ? 'dm' : 'player';
   const sessionId = launchUrl.searchParams.get('session') ?? 'reference-encounter';
   const boardSnapshotMode = launchUrl.searchParams.get('boardSnapshot') === '1';
-  void import('./vtt/encounter-app').then(({ mountEncounterVtt }) => {
-    const mounted = mountEncounterVtt(encounterRoot, { view, sessionId, boardSnapshotMode });
-    window.addEventListener('pagehide', () => mounted.close(), { once: true });
-  });
+  const lightEncodingParameter = launchUrl.searchParams.get('lightEncoding');
+  void Promise.all([import('./vtt/encounter-app'), import('./assets/light-encoding')]).then(
+    ([{ mountEncounterVtt }, { isLightEncoding }]) => {
+      // D525: a misspelt encoding must fail here, not silently capture a 'tint' board under another label.
+      if (lightEncodingParameter !== null && !isLightEncoding(lightEncodingParameter)) {
+        throw new Error(`Unknown lightEncoding ${lightEncodingParameter}; expected tint, symbol or inverse.`);
+      }
+      const mounted = mountEncounterVtt(encounterRoot, {
+        view,
+        sessionId,
+        boardSnapshotMode,
+        ...(lightEncodingParameter === null ? {} : { lightEncoding: lightEncodingParameter }),
+      });
+      window.addEventListener('pagehide', () => mounted.close(), { once: true });
+    },
+  );
 } else {
 
 const persistenceStatus =

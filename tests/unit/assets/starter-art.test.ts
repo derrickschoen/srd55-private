@@ -50,8 +50,16 @@ function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-const EXPECTED_ASSET_COUNT = 79;
+/** 36 tokens + 43 D516 room/state assets + 5 D525 light-encoding overlays (two veils, three glyphs). */
+const EXPECTED_ASSET_COUNT = 84;
 const EXPECTED_TOKEN_COUNT = 36;
+const EXPECTED_LIGHT_ENCODING_OVERLAY_IDS = [
+  'art.map.overlay.light-veil-dim.v1',
+  'art.map.overlay.light-veil-dark.v1',
+  'art.map.overlay.light-glyph-bright.v1',
+  'art.map.overlay.light-glyph-dim.v1',
+  'art.map.overlay.light-glyph-dark.v1',
+] as const;
 
 const EXPECTED_NAMED_TOKEN_IDS = [
   'art.token.pc.fighter.v1',
@@ -70,11 +78,14 @@ const EXPECTED_NAMED_TOKEN_IDS = [
 ] as const;
 
 describe('procedural starter-art manifest and deterministic outputs (D516, generator 2.0.0)', () => {
-  it('inventories 36 token busts (13 fixture-named, 22 archetype×side, 1 dead) and 43 room/state assets', () => {
+  it('inventories 36 token busts (13 fixture-named, 22 archetype×side, 1 dead) and 48 room/state assets', () => {
     expect(STARTER_ART_MANIFEST.assets).toHaveLength(EXPECTED_ASSET_COUNT);
     const tokens = STARTER_ART_MANIFEST.assets.filter((entry) => entry.kind === 'token').map((entry) => entry.id);
     expect(tokens).toHaveLength(EXPECTED_TOKEN_COUNT);
     expect(tokens.slice(0, EXPECTED_NAMED_TOKEN_IDS.length)).toEqual(EXPECTED_NAMED_TOKEN_IDS);
+    const ids = STARTER_ART_MANIFEST.assets.map((entry) => entry.id);
+    for (const id of EXPECTED_LIGHT_ENCODING_OVERLAY_IDS) expect(ids, id).toContain(id);
+    expect(STARTER_ART_MANIFEST.assets.filter((entry) => entry.kind === 'map' && entry.id.startsWith('art.map.overlay.'))).toHaveLength(14);
     expect(Object.keys(EXPECTED_STARTER_ART_SHA256)).toHaveLength(EXPECTED_ASSET_COUNT);
     expect(STARTER_ART_MANIFEST.generator).toEqual({
       id: 'starter-pixel-art',
@@ -225,6 +236,9 @@ describe('starter-art attribution reaches repository and distribution', () => {
     const preview = text(STARTER_ART_PREVIEW_PATH);
     expect(sha256(preview)).toBe(EXPECTED_PREVIEW_SHA256);
     expect(preview).toContain(`data-sprite-inventory="${String(EXPECTED_TOKEN_COUNT)}"`);
+    // D525: the preview embeds every asset once, so the five light-encoding overlays are pinned into its digest.
+    for (const id of EXPECTED_LIGHT_ENCODING_OVERLAY_IDS) expect(preview).toContain(`id="asset-${id.replaceAll('.', '-')}"`);
+    expect(preview.match(/<image id="asset-/gu)).toHaveLength(EXPECTED_ASSET_COUNT);
     for (const marker of [
       'data-projection="player"',
       'data-projection="dm"',
