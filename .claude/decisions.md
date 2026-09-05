@@ -10498,3 +10498,8 @@ MIGRATION-ORIGIN pending records only — an `awaiting_placement`-style phase en
 rules), its reducer and events, projection as a non-spatial roster entry, and the DM recovery panel with a
 legal-anchor preview. Growth/reversion keeps auto-relocation; no other core change. Core files touched for this are
 listed in the report and reviewed by the supervisor.
+
+D526 — OWNER (2026-09-05 07:00): (1) Iso: keep the full review loop until a clean round — D9 for the round-8 majors,
+review 9, and so on; no landing until codex says LAND. (2) Footprints increments 1–4 land on main after the
+supervisor's full gate (browser suite included); increment 5 follows. (3) The g2 image-experiment rerun waits until
+EVERY probe class is ≥ 0.9 at Luna LOW (the original D525 bar); UI iteration continues class by class.
