@@ -10410,3 +10410,15 @@ browser suite 184/185 before the main merge (the one failure being main's pre-fi
 three affected specs 3/3 after it. The DM board on main is now 64 px per cell with names, HP bars, coordinates,
 legend and option paths in snapshot mode; the arena captures and delivers the picture. D521 capture_only off arms
 complete; d513c packets (images on both sides, primes 677/683/691/701) building and judging now.
+
+D513c UNSEALED (2026-09-05 02:08) — the D521 method: image-on arms vs FRESH capture_only off arms, judges see a
+picture on both sides (arm-a = on, arm-b = off; "arm-b − arm-a" = off − on):
+  luna-low rep1: on 8.27 vs off 8.22 → +0.04 [−0.21, +0.32]
+  luna-low rep2: on 7.69 vs off 7.76 → −0.07 [−0.57, +0.52]
+  luna-medium:   on 8.01 vs off 7.99 → +0.02 [−0.14, +0.24]
+  sol-low:       on 7.76 vs off 7.83 → −0.10 [−0.27, +0.01]
+Reading: with a fair comparison (both arms fresh, both judged with pictures) the g1 screenshot changes decisions
+by NOTHING measurable at any model or effort. The earlier +0.74 / +0.57 for Luna-low rep 2 was against the old V
+replicate, which was itself a low-scoring run (7.41), i.e. replicate noise plus judge-side picture preference. This
+is consistent with the D519 probe: Luna cannot read the g1 picture, so it could not have used it. The experiment
+is only meaningful once the probe passes (D525), which is why arena reruns wait on the UI iteration.
