@@ -10377,3 +10377,11 @@ edge pixels miss clicks; (3) colour+mip+shade+shade-mip retained ≈120 MB befor
 Minors: unbranded atlas region coordinates, size/footprint not type-related (latent srd_space path), and two more.
 Unit D4 dispatched for the three majors and the region-brand minor; landing on main behind ?view=iso after a clean
 round 4 (D520).
+
+D525 LIGHT ENCODINGS, probe (6 states, case-folded, low / medium), tint (primer v2 with the light sentence) → inverse:
+  Q5 light 0.46→0.31 / 0.65→0.55 — 'inverse' is WORSE: with bright cells unmarked the model omits them
+  (1,368 "fact omitted"); the tint encoding with an explicit primer sentence ("pale warm tint = bright light") jumped
+  from 0.17/0.07 (no sentence) to 0.46/0.65. HP 0.27→0.46 / 0.61→0.80 and difficult terrain 0.43→0.73 at medium
+  improved under inverse (fewer competing overlays). Doors 0.08→0.00 and blocked cells still near zero in both.
+  'symbol' pending. Reading so far: an explicit marker per light level plus a primer sentence naming it is the
+  lever, not removing overlays; doors/blocked need their own glyph + primer wording next.
