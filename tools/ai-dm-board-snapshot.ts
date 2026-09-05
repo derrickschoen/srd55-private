@@ -19,6 +19,7 @@ import { canonicalJson } from '../src/commands/canonical-json';
 import type { ControllerIdentity } from '../src/combat/controllers';
 import type { PersistedCoordinatorState } from '../src/combat/coordinator';
 import type { EncounterState } from '../src/combat/encounter';
+import { projectDmView } from '../src/combat/visibility';
 import { mulberry32 } from '../src/combat/random';
 import {
   encounterBranchId,
@@ -31,6 +32,8 @@ import {
   MemoryMirrorSink,
   exportSavedSession,
 } from '../src/vtt/session-persistence';
+import { projectEncounterBoard } from '../src/vtt/encounter-board';
+import { serializeAccessibleBoard } from '../src/vtt/accessible-board';
 
 const repositoryRoot = resolve(fileURLToPath(new URL('../', import.meta.url)));
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -60,6 +63,13 @@ export interface BoardImageArtifact {
   readonly captureMs: number;
   readonly source: BoardImageSource;
   readonly chromiumVersion: string;
+  readonly html: BoardHtmlArtifact;
+}
+
+export interface BoardHtmlArtifact {
+  readonly relativePath: `board-html/${string}/board.html`;
+  readonly sha256: string;
+  readonly bytes: number;
 }
 
 export interface BoardSnapshotManifest {
@@ -275,6 +285,11 @@ function validateArtifactShape(artifact: BoardImageArtifact): void {
     !Number.isFinite(artifact.captureMs) || artifact.captureMs < 0) {
     throw new RangeError('Board image capture timing is invalid.');
   }
+  if (!SHA256_PATTERN.test(artifact.html.sha256) ||
+    artifact.html.relativePath !== `board-html/${artifact.html.sha256}/board.html` ||
+    !Number.isSafeInteger(artifact.html.bytes) || artifact.html.bytes < 1) {
+    throw new TypeError('Board HTML artifact must be content-addressed with a positive byte count.');
+  }
 }
 
 export async function readValidatedBoardImage(input: {
@@ -310,6 +325,30 @@ export async function readValidatedBoardImage(input: {
   return png;
 }
 
+export async function readValidatedBoardHtml(input: {
+  readonly artifact: BoardImageArtifact;
+  readonly artifactRoot: string;
+}): Promise<string> {
+  validateArtifactShape(input.artifact);
+  const root = resolve(input.artifactRoot);
+  const path = resolve(root, input.artifact.html.relativePath);
+  const inside = relative(root, path);
+  if (inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
+    throw new Error('Board HTML escaped its artifact root.');
+  }
+  const [realRoot, realPath] = await Promise.all([realpath(root), realpath(path)]);
+  const realInside = relative(realRoot, realPath);
+  if (realInside === '..' || realInside.startsWith(`..${sep}`) || isAbsolute(realInside)) {
+    throw new Error('Board HTML resolved outside its artifact root.');
+  }
+  const bytes = await readFile(realPath);
+  if (bytes.byteLength !== input.artifact.html.bytes ||
+    sha256Bytes(bytes) !== input.artifact.html.sha256) {
+    throw new Error('Board HTML bytes do not match their persisted artifact metadata.');
+  }
+  return bytes.toString('utf8');
+}
+
 async function writeContentAddressedPng(
   directory: string,
   digest: string,
@@ -330,9 +369,34 @@ async function writeContentAddressedPng(
   return `board-images/${digest}.png`;
 }
 
+async function writeContentAddressedHtml(
+  directory: string,
+  html: string,
+): Promise<BoardHtmlArtifact> {
+  const bytes = Buffer.from(html, 'utf8');
+  const digest = sha256Bytes(bytes);
+  const htmlDirectory = join(directory, 'board-html', digest);
+  await mkdir(htmlDirectory, { recursive: true });
+  const destination = join(htmlDirectory, 'board.html');
+  try {
+    await writeFile(destination, bytes, { flag: 'wx' });
+  } catch (error: unknown) {
+    if (!(error instanceof Error) || Reflect.get(error, 'code') !== 'EEXIST') throw error;
+    const existing = await readFile(destination);
+    if (!existing.equals(bytes)) {
+      throw new Error(`Content-addressed board HTML ${digest} has conflicting bytes.`);
+    }
+  }
+  return Object.freeze({
+    relativePath: `board-html/${digest}/board.html`,
+    sha256: digest,
+    bytes: bytes.byteLength,
+  });
+}
+
 async function assertContainedArtifact(
   outputDirectory: string,
-  relativePath: BoardImageArtifact['relativePath'],
+  relativePath: BoardImageArtifact['relativePath'] | BoardHtmlArtifact['relativePath'],
 ): Promise<void> {
   const absolute = resolve(outputDirectory, relativePath);
   const inside = relative(outputDirectory, absolute);
@@ -520,6 +584,13 @@ export class BoardSnapshotService implements AsyncDisposable {
     const dimensions = pngDimensions(png);
     const digest = sha256Bytes(png);
     const relativePath = await writeContentAddressedPng(this.#outputDirectory, digest, png);
+    const html = await writeContentAddressedHtml(this.#outputDirectory, serializeAccessibleBoard({
+      encounterName: 'Encounter board',
+      audience: 'dm',
+      round: input.state.round,
+      activeCombatant: input.state.activeCombatant,
+      board: projectEncounterBoard(projectDmView(input.state)),
+    }));
     const artifact: BoardImageArtifact = Object.freeze({
       version: 'arena-board-image-v1',
       audience: 'dm',
@@ -532,9 +603,11 @@ export class BoardSnapshotService implements AsyncDisposable {
       captureMs,
       source: { ...input.source },
       chromiumVersion: this.#chromiumVersion,
+      html,
     });
     assertBoardImageFresh(artifact, input.state, input.source);
     await assertContainedArtifact(this.#outputDirectory, artifact.relativePath);
+    await assertContainedArtifact(this.#outputDirectory, artifact.html.relativePath);
     this.#artifacts.push(artifact);
     await this.#writeManifest();
     return artifact;

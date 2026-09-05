@@ -28,6 +28,8 @@ import {
   type PlayerVisibleEncounterEvent,
 } from '../combat/visibility';
 import type { CombatantId } from '../combat/values';
+import type { ProjectedHitPointKnowledge } from './intel/contracts';
+import type { EncounterBoardWorldObject } from './encounter-board';
 import type { AdjudicationEnvelope } from './mcp/engine-server';
 import { dmWorldObjectOverrideCommand } from '../combat/world-object-actions';
 import type { SessionHistoryEntry } from './session-persistence';
@@ -74,7 +76,12 @@ export interface PlayerBoardProjection {
   readonly concealedCells: readonly GridCell[];
   readonly activeCombatant: CombatantId | null;
   readonly highlightedCombatant: CombatantId | null;
-  readonly combatants: readonly PlayerVisibleCombatant[];
+  readonly combatants: readonly (PlayerVisibleCombatant & {
+    readonly hitPointBand: ProjectedHitPointKnowledge;
+    readonly hitPoints?: number;
+    readonly hitPointMaximum?: number;
+  })[];
+  readonly worldObjects: readonly EncounterBoardWorldObject[];
   readonly activePcResources: TurnResources | null;
   readonly pendingRequest: ProjectedControllerRequest | null;
   readonly events: readonly PlayerVisibleEncounterEvent[];
@@ -229,16 +236,30 @@ export function projectPlayerBoard(
 ): PlayerBoardProjection {
   const ownerIds = new Set(view.ownedCombatants.map((subject) => subject.id));
   const owned = new Map(view.ownedCombatants.map((subject) => [subject.id, subject] as const));
-  const combatants = view.combatants.map((subject) =>
-    ownerIds.has(subject.id)
-      ? {
-          ...subject,
-          hitPoints: owned.get(subject.id)?.hitPoints ?? (() => {
-            throw new Error(`Player projection is missing owned Hit Points for ${subject.id}.`);
-          })(),
-        }
-      : subject,
-  );
+  const combatants = view.combatants.map((subject) => {
+    const own = owned.get(subject.id);
+    if (ownerIds.has(subject.id) && own === undefined) {
+      throw new Error(`Player projection is missing owned Hit Points for ${subject.id}.`);
+    }
+    const hitPointBand: ProjectedHitPointKnowledge = own === undefined || own.hitPointMaximum <= 0
+      ? { kind: 'unknown' }
+      : {
+          kind: 'perceived_band',
+          band: own.hitPoints >= own.hitPointMaximum
+            ? 'uninjured'
+            : own.hitPoints * 4 <= own.hitPointMaximum
+              ? 'near_death'
+              : 'bloodied',
+        };
+    return {
+      ...subject,
+      hitPointBand,
+      ...(own === undefined ? {} : {
+        hitPoints: own.hitPoints,
+        hitPointMaximum: own.hitPointMaximum,
+      }),
+    };
+  });
   const activePc = view.ownedCombatants.find((subject) => subject.id === view.activeCombatant);
   const adjudicatedSequence = coordinator.pause?.kind === 'adjudicated'
     ? coordinator.pause.eventSequence
@@ -253,6 +274,15 @@ export function projectPlayerBoard(
     activeCombatant: view.activeCombatant,
     highlightedCombatant: view.activeCombatant,
     combatants,
+    worldObjects: view.worldObjects.map((object) => ({
+      id: object.id,
+      name: object.name,
+      kind: object.kind,
+      position: { ...object.position },
+      cells: object.footprint.map((cell) => ({ ...cell })),
+      blocking: { ...object.blocking },
+      lightClass: object.kind === 'light-source' ? 'light-source' : 'none',
+    })),
     activePcResources: activePc?.turn ?? null,
     pendingRequest: projectedRequest(coordinator.pendingRequest, ownerIds),
     events: view.recentEvents,

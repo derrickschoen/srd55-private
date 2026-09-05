@@ -7,7 +7,14 @@ import type {
   SpellSlotState,
   TurnResources,
 } from './encounter';
-import { canCombatantSee, combatantSide, combatantSpace, effectiveCombatRules, effectiveCreatureSize } from './encounter';
+import {
+  canCombatantSee,
+  combatantConditions,
+  combatantSide,
+  combatantSpace,
+  effectiveCombatRules,
+  effectiveCreatureSize,
+} from './encounter';
 import type { KnownCreatureSize, SerializedPlacementMode } from './creature-space';
 import type { HiddenRollCategory } from './roll-visibility';
 import type { EncounterEvent } from './events';
@@ -112,6 +119,38 @@ interface PlayerVisibleCombatantIdentity {
   readonly life: LifeState;
   readonly active: boolean;
   readonly formName: string | null;
+  readonly conditions: readonly string[];
+}
+
+function playerVisibleConditions(
+  state: EncounterState,
+  id: CombatantId,
+  owned: boolean,
+): readonly string[] {
+  return combatantConditions(state, id).flatMap((condition): readonly string[] => {
+    if (owned) {
+      return [condition.name === 'Exhaustion'
+        ? `${condition.name} ${String(condition.level)}`
+        : condition.name];
+    }
+    switch (condition.name) {
+      case 'Blinded':
+      case 'Grappled':
+      case 'Paralyzed':
+      case 'Petrified':
+      case 'Prone':
+      case 'Restrained':
+      case 'Stunned':
+      case 'Unconscious': return [condition.name];
+      case 'Charmed':
+      case 'Deafened':
+      case 'Exhaustion':
+      case 'Frightened':
+      case 'Incapacitated':
+      case 'Invisible':
+      case 'Poisoned': return [];
+    }
+  });
 }
 
 export interface PlayerVisiblePlacedCombatant extends PlayerVisibleCombatantIdentity {
@@ -527,6 +566,7 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
         pendingReason: pending.kind,
         active: state.activeCombatant === subject.profile.id,
         formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
+        conditions: playerVisibleConditions(state, subject.profile.id, true),
       }];
     }
     const token = tokensByCombatant.get(subject.profile.id);
@@ -548,6 +588,7 @@ export function projectPlayerView(state: EncounterState, binding: PlayerSeatBind
       footprint: space.cells.map((cell) => ({ ...cell })) as [GridCell, ...GridCell[]],
       active: state.activeCombatant === subject.profile.id,
       formName: subject.wildShape?.formName ?? subject.form?.formName ?? null,
+      conditions: playerVisibleConditions(state, subject.profile.id, owned),
     }];
   }).sort((left, right) =>
     (initiativeOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
@@ -621,6 +662,7 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
           turn: structuredClone(subject.turn),
           spellSlots: structuredClone(subject.spellSlots),
           hiddenFromPlayers: state.hiddenCombatants.some((entry) => entry.combatant === subject.profile.id),
+          conditions: playerVisibleConditions(state, subject.profile.id, true),
         }];
       }
       const token = tokensByCombatant.get(subject.profile.id);
@@ -644,6 +686,7 @@ export function dmVisibleEncounter(view: DmView): DmVisibleEncounterState {
         turn: structuredClone(subject.turn),
         spellSlots: structuredClone(subject.spellSlots),
         hiddenFromPlayers: state.hiddenCombatants.some((entry) => entry.combatant === subject.profile.id),
+        conditions: playerVisibleConditions(state, subject.profile.id, true),
       }];
     }),
     sharedSpaceRelations: structuredClone(state.sharedSpaceRelations),

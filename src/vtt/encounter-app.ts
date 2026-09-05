@@ -54,9 +54,18 @@ import {
 import {
   SaveManagerController,
   buildSaveManagerViewModel,
+  downloadBrowserFile,
   type SaveManagerEntry,
   type SaveManagerViewModel,
 } from './save-manager';
+import {
+  readAccessibleBoardViewMode,
+  renderAccessibleBoard,
+  serializeAccessibleBoard,
+  writeAccessibleBoardViewMode,
+  type AccessibleBoardContext,
+  type AccessibleBoardViewMode,
+} from './accessible-board';
 import { decodeSavedSessionFingerprint } from './session-persistence';
 import type { EncounterSeed } from './session-seed';
 import type { StoredCharacterEncounter } from './stored-character-encounter';
@@ -299,6 +308,34 @@ function actionKey(action: EncounterCommand): string {
 }
 
 export type EncounterBoardStackSelection = Map<string, CombatantId>;
+
+function boardPresentationControls(input: {
+  readonly audience: 'dm' | 'player';
+  readonly mode: AccessibleBoardViewMode;
+  readonly context: AccessibleBoardContext;
+  readonly setMode: (mode: AccessibleBoardViewMode) => void;
+}): HTMLElement {
+  const controls = element('section', { className: 'board-presentation-controls' });
+  controls.dataset.renderKey = stableRenderKey(input.audience, 'board-presentation');
+  controls.setAttribute('aria-label', 'Board presentation');
+  const toggle = element('button', {
+    text: 'Screen-reader board',
+  });
+  toggle.type = 'button';
+  toggle.dataset.renderKey = stableRenderKey(input.audience, 'board-presentation', 'toggle');
+  toggle.setAttribute('aria-pressed', String(input.mode === 'screen_reader'));
+  toggle.addEventListener('click', () => {
+    input.setMode(input.mode === 'graphic' ? 'screen_reader' : 'graphic');
+  });
+  const download = element('button', { text: 'Export board as HTML' });
+  download.type = 'button';
+  download.dataset.renderKey = stableRenderKey(input.audience, 'board-presentation', 'export');
+  download.addEventListener('click', () => {
+    downloadBrowserFile('board.html', serializeAccessibleBoard(input.context), 'text/html');
+  });
+  controls.append(toggle, download);
+  return controls;
+}
 
 export function applyPendingPlacementFocus(
   root: HTMLElement,
@@ -980,11 +1017,13 @@ class PlayerEncounterView {
   #lastHeartbeat = 0;
   readonly #stackSelection: EncounterBoardStackSelection = new Map();
   readonly #heartbeatCheck: number;
+  #boardView: AccessibleBoardViewMode;
 
   constructor(
     private readonly root: HTMLElement,
     private readonly sessionId: string,
   ) {
+    this.#boardView = readAccessibleBoardViewMode(localStorage, 'player');
     this.#channel = new BroadcastChannel(`srd55:vtt:${sessionId}`);
     this.#channel.addEventListener('message', this.#onMessage);
     this.#heartbeatCheck = window.setInterval(() => {
@@ -1141,9 +1180,30 @@ class PlayerEncounterView {
       }));
     }
     this.#shell.append(activePanel);
-    const board = renderBoard(projection, this.#preview(), null, undefined, null, this.#stackSelection);
-    board.addEventListener('pointermove', (event) => this.#aimAt(event));
-    this.#shell.append(board);
+    const boardContext: AccessibleBoardContext = {
+      encounterName: 'Reference encounter',
+      audience: 'player',
+      round: projection.round,
+      activeCombatant: projection.activeCombatant,
+      board: projection,
+    };
+    this.#shell.append(boardPresentationControls({
+      audience: 'player',
+      mode: this.#boardView,
+      context: boardContext,
+      setMode: (mode) => {
+        this.#boardView = mode;
+        writeAccessibleBoardViewMode(localStorage, 'player', mode);
+        this.#render();
+      },
+    }));
+    if (this.#boardView === 'screen_reader') {
+      this.#shell.append(renderAccessibleBoard(boardContext));
+    } else {
+      const board = renderBoard(projection, this.#preview(), null, undefined, null, this.#stackSelection);
+      board.addEventListener('pointermove', (event) => this.#aimAt(event));
+      this.#shell.append(board);
+    }
 
     const controls = element('section', { className: 'encounter-controls' });
     controls.dataset.renderKey = stableRenderKey('player', 'controls');
@@ -1249,6 +1309,7 @@ class DmEncounterView {
   } | null = null;
   #focusAfterRender: 'recovery' | 'active_token' | null = null;
   #showOfferedOptionPaths = false;
+  #boardView: AccessibleBoardViewMode;
   readonly #sessionFlow: StoredCharacterSessionFlow | null;
   #endSessionExported = false;
   #pendingSnapshot: DmEncounterHostSnapshot | null = null;
@@ -1273,6 +1334,7 @@ class DmEncounterView {
     private readonly boardSnapshotMode = false,
     private readonly loadBoardSnapshotSession?: (sessionId: string) => Promise<void>,
   ) {
+    this.#boardView = readAccessibleBoardViewMode(localStorage, 'dm');
     this.#store = store;
     this.#sessionFlow = encounter?.sessionFlow ?? null;
     this.#host = new DmEncounterHost(sessionId, this.#store, encounter === undefined
@@ -1571,12 +1633,7 @@ class DmEncounterView {
   }
 
   #download(name: string, bytes: string): void {
-    const anchor = element('a');
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/json' }));
-    anchor.href = url;
-    anchor.download = `${name}.vtt.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    downloadBrowserFile(`${name}.vtt.json`, bytes, 'application/json');
   }
 
   #openUpload(): void {
@@ -1974,6 +2031,23 @@ class DmEncounterView {
       }
     }
     if (!this.boardSnapshotMode) {
+      const boardContext: AccessibleBoardContext = {
+        encounterName: this.#sessionFlow?.name ?? 'Reference encounter',
+        audience: 'dm',
+        round: projection.board.round,
+        activeCombatant: projection.board.activeCombatant,
+        board: projection.board,
+      };
+      this.#shell.append(boardPresentationControls({
+        audience: 'dm',
+        mode: this.#boardView,
+        context: boardContext,
+        setMode: (mode) => {
+          this.#boardView = mode;
+          writeAccessibleBoardViewMode(localStorage, 'dm', mode);
+          this.#render();
+        },
+      }));
       const toggle = element('label', { className: 'dm-option-path-toggle' });
       toggle.dataset.renderKey = stableRenderKey('dm', 'option-path-toggle', 'label');
       const checkbox = element('input');
@@ -1986,6 +2060,10 @@ class DmEncounterView {
       });
       toggle.append(checkbox, element('span', { text: 'Show engine movement options' }));
       this.#shell.append(toggle);
+      if (this.#boardView === 'screen_reader') {
+        this.#shell.append(renderAccessibleBoard(boardContext));
+        return;
+      }
     }
     this.#shell.append(renderBoard(projection.board, previewCells, movementPreview, {
       revision: projection.encounter.revision,
