@@ -11425,3 +11425,12 @@ a reference for an asset is not the implementer for that asset; the implementer 
 derived from references (what the light does, how a ramp steps), not the images, unless the supervisor decides a
 specific asset needs the picture and records it. Every generated reference is logged (prompt, model, date, asset)
 in references/LOG.md so provenance is auditable.
+
+D558.1 — OWNER (2026-09-05 17:58): no OpenAI key exists; the owner has a FIREWORKS key (stored by the fireconnect tool in an
+encrypted keyring). Supervisor: the approved reference model becomes Fireworks-hosted FLUX.1 [schnell]
+(accounts/fireworks/models/flux-1-schnell, Apache-2.0 per the Fireworks model list I fetched); FLUX.1 [dev]
+variants (non-commercial licence) are NOT used even for references. The generator reads the key from a 0600 file
+the owner writes (~/.config/dnd-art/fireworks.key) or from FIREWORKS_API_KEY in the owner's own shell; the
+supervisor does not extract the credential from the keyring itself (an attempt to read fireconnect's key-handling
+source was blocked by the tool classifier and is not retried). Reference-only rule, log, similarity gate and seat
+separation unchanged from D558.
