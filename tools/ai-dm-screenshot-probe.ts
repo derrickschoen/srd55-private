@@ -22,6 +22,12 @@ import {
 } from '../src/combat/values';
 import { dmVisibleEncounter, projectDmView } from '../src/combat/visibility';
 import { projectEncounterBoard } from '../src/vtt/encounter-board';
+import {
+  assignCreatureBadges,
+  type CreatureBadgeColor,
+  type CreatureBadgeNumber,
+  type HpBand,
+} from '../src/vtt/board-chrome';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 import { referenceEncounterSetup, REFERENCE_MONSTER_ID } from '../src/vtt/reference-encounter';
 import { generateRoom } from '../src/vtt/room-generator';
@@ -37,11 +43,11 @@ import {
 const repositoryRoot = resolve(new URL('../', import.meta.url).pathname);
 const PROBE_VERSION = 'd519-screenshot-comprehension-v1' as const;
 const LEGACY_ROW_VERSION = 'd525-screenshot-comprehension-row-v5' as const;
-const ROW_VERSION = 'd529-screenshot-comprehension-row-v6' as const;
-export const NORMALISER_VERSION = 'd529-screenshot-name-normaliser-v2' as const;
-/** v5: plate leaders and coordinate-bearing OBJECT tags are explicit. */
-export const PRIMER_VERSION = 'd525-general-board-primer-v5' as const;
-export const GENERAL_PRIMER = 'This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue base plates identify party creatures; warm-red base plates identify foes. A name plate is a label, not a position: the creature stands in the cell its leader touches. An OBJECT-sigil tag in the legend rail names an object, and the coordinate printed on that tag is the cell where the object stands. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. Bars under tokens show hit-point bands using the colours named in the legend. The legend box names every terrain tint (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board glyph (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board.' as const;
+const PREVIOUS_ROW_VERSION = 'd529-screenshot-comprehension-row-v6' as const;
+const ROW_VERSION = 'd533-screenshot-comprehension-row-v7' as const;
+export const NORMALISER_VERSION = 'd533-screenshot-vocabulary-normaliser-v3' as const;
+export const PRIMER_VERSION = 'd533-general-board-primer-v6' as const;
+export const GENERAL_PRIMER = "This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue base rings identify party creatures; warm-red base rings identify foes. Each creature token carries a numbered coloured badge; the roster box under the board lists the full name, side and HP band for each number and colour. A creature stands in the cell that holds its badge. An OBJECT-sigil tag in the legend rail names an object, and the coordinate printed on that tag is the cell where the object stands. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. HP bars and roster words use green for uninjured, amber for bloodied, red for near death, and grey for unknown. The legend box names every terrain tint (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board glyph (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board." as const;
 /**
  * D525: the sentence describing how the board draws light levels, one per
  * convention. Each describes only the drawing convention — never a room fact —
@@ -54,13 +60,13 @@ export const LIGHT_PRIMER = {
 /**
  * D525 'full': one sentence per glyph family, naming the corner and the
  * meaning, in the corner order board-glyphs.ts fixes. The hidden mark rides
- * the token plate, so its sentence names the rim rather than a corner.
+ * the token's hidden ring, so its sentence names the rim rather than a corner.
  */
 export const GLYPH_FAMILY_PRIMER = {
   door: 'Doors are marked by a glyph in the top-right corner of the cell: a solid door slab crossed by a dark bar means the door is closed, and a door frame with an open gap and a swing arc means the door is open.',
   blocked: 'A blocked cell, such as a pillar or rubble, carries an X inside a square in the bottom-left corner of the cell.',
   veil: 'Fog is a veil of diagonal hatching with a cloud glyph in the bottom-right corner of the cell, obscurement is a dotted veil with a wave glyph just left of that corner, and a cell can carry both.',
-  hidden: 'A creature hidden from the players has a dashed ring around its plate, an eye crossed by a slash on the left rim of that ring, and the word HIDDEN inside its name plate.',
+  hidden: 'A creature hidden from the players has a dashed ring around its bust, an eye crossed by a slash on the left rim of that ring, and the word HIDDEN in its roster line.',
 } as const satisfies Readonly<Record<Exclude<CornerGlyphFamily, 'light'> | 'hidden', string>>;
 /** The sentences appended to the general primer for each board-glyph mode. */
 export const BOARD_GLYPH_PRIMER: Readonly<Record<BoardGlyphMode, readonly string[]>> = Object.freeze({
@@ -80,11 +86,11 @@ export const SCREENSHOT_QUESTION_IDS = [
 ] as const;
 export type ScreenshotQuestionId = (typeof SCREENSHOT_QUESTION_IDS)[number];
 export type ProbeEffort = 'low' | 'medium' | 'high' | 'xhigh';
-export type ProseHitPointBand = 'uninjured' | 'injured' | 'critical' | 'unknown';
+export type ProbeHitPointBand = HpBand;
 export type ProbeSide = 'party' | 'foe';
 export type ProbeLight = 'bright' | 'dim' | 'dark';
 export type PrimerMode = 'none' | 'general';
-export type PrimerVersion = typeof PRIMER_VERSION | null;
+export type PrimerVersion = typeof PRIMER_VERSION | 'd525-general-board-primer-v5' | null;
 
 declare const zeroBasedColumnBrand: unique symbol;
 declare const zeroBasedRowBrand: unique symbol;
@@ -98,9 +104,11 @@ export interface ProbeCell {
 
 export interface FactSheetCombatant {
   readonly displayName: string;
+  readonly badgeNumber: CreatureBadgeNumber;
+  readonly badgeColor: CreatureBadgeColor['id'];
   readonly cell: ProbeCell;
   readonly side: ProbeSide;
-  readonly hpBand: ProseHitPointBand;
+  readonly hpBand: ProbeHitPointBand;
   readonly life: LifeState;
   readonly hiddenFromPlayers: boolean;
 }
@@ -131,7 +139,7 @@ interface CreatureLocation {
 type ProbeAnswer =
   | { readonly version: typeof PROBE_VERSION; readonly question: 'Q1'; readonly creatures: readonly CreatureLocation[] }
   | { readonly version: typeof PROBE_VERSION; readonly question: 'Q2'; readonly creatures: readonly (CreatureLocation & { readonly side: ProbeSide })[] }
-  | { readonly version: typeof PROBE_VERSION; readonly question: 'Q3'; readonly creatures: readonly (CreatureLocation & { readonly hpBand: ProseHitPointBand })[] }
+  | { readonly version: typeof PROBE_VERSION; readonly question: 'Q3'; readonly creatures: readonly (CreatureLocation & { readonly hpBand: ProbeHitPointBand })[] }
   | { readonly version: typeof PROBE_VERSION; readonly question: 'Q4'; readonly cells: readonly ProbeCell[] }
   | {
       readonly version: typeof PROBE_VERSION;
@@ -208,7 +216,7 @@ interface ScreenshotProbeRowFields {
   readonly truth: ProbeAnswer;
   /** Parsed model payload exactly as supplied, before name normalization. */
   readonly answer: ProbeAnswer | null;
-  /** Scored payload: creature names canonicalized and visual plate tags removed. */
+  /** Scored payload: creature names canonicalized and legacy visual tags removed. */
   readonly normalizedAnswer: ProbeAnswer | null;
   readonly rawAnswer: string;
   readonly error: string | null;
@@ -274,7 +282,7 @@ const creatureSchema = z.object({
 const answerSchemas = {
   Q1: z.object({ version: z.literal(PROBE_VERSION), question: z.literal('Q1'), creatures: z.array(creatureSchema) }).strict(),
   Q2: z.object({ version: z.literal(PROBE_VERSION), question: z.literal('Q2'), creatures: z.array(creatureSchema.extend({ side: z.enum(['party', 'foe']) }).strict()) }).strict(),
-  Q3: z.object({ version: z.literal(PROBE_VERSION), question: z.literal('Q3'), creatures: z.array(creatureSchema.extend({ hpBand: z.enum(['uninjured', 'injured', 'critical', 'unknown']) }).strict()) }).strict(),
+  Q3: z.object({ version: z.literal(PROBE_VERSION), question: z.literal('Q3'), creatures: z.array(creatureSchema.extend({ hpBand: z.enum(['uninjured', 'bloodied', 'near_death', 'unknown']) }).strict()) }).strict(),
   Q4: z.object({ version: z.literal(PROBE_VERSION), question: z.literal('Q4'), cells: z.array(cellSchema) }).strict(),
   Q5: z.object({ version: z.literal(PROBE_VERSION), question: z.literal('Q5'), brightCells: z.array(cellSchema), dimCells: z.array(cellSchema), darkCells: z.array(cellSchema) }).strict(),
   Q6: z.object({ version: z.literal(PROBE_VERSION), question: z.literal('Q6'), doors: z.array(cellSchema.extend({ open: z.boolean() }).strict()) }).strict(),
@@ -287,7 +295,7 @@ const answerSchemas = {
 const QUESTION_TEXT = {
   Q1: 'List every creature visible on the board with its display name and grid coordinate.',
   Q2: 'List every creature and classify it as party or foe. Include its coordinate to identify repeated names.',
-  Q3: 'List every creature and its displayed HP band: uninjured, injured, critical, or unknown. Include its coordinate.',
+  Q3: 'List every creature and its displayed HP band: uninjured, bloodied, near_death, or unknown. Include its coordinate.',
   Q4: 'List every difficult-terrain cell.',
   Q5: 'Classify every board cell as bright, dim, or dark and list the cells in the matching arrays.',
   Q6: 'List every door cell and say whether the door is open.',
@@ -321,10 +329,10 @@ function orderedCells(cells: readonly GridCell[]): readonly ProbeCell[] {
 }
 
 /** Matches the prose renderer's HP classifier in src/vtt/mcp/engine-server.ts. */
-export function proseHitPointBand(hitPoints: number, maximum: number): ProseHitPointBand {
+export function screenshotHitPointBand(hitPoints: number, maximum: number): ProbeHitPointBand {
   if (maximum <= 0) return 'unknown';
   if (hitPoints >= maximum) return 'uninjured';
-  return hitPoints * 4 <= maximum ? 'critical' : 'injured';
+  return hitPoints * 4 <= maximum ? 'near_death' : 'bloodied';
 }
 
 export function deriveScreenshotFactSheet(state: EncounterState): ScreenshotFactSheet {
@@ -333,14 +341,19 @@ export function deriveScreenshotFactSheet(state: EncounterState): ScreenshotFact
   const board = projectEncounterBoard(dmView);
   const hidden = new Set(dmView.state.hiddenCombatants.map((entry) => entry.combatant));
   const visibleById = new Map(dmEncounter.combatants.map((entry) => [entry.id, entry] as const));
+  const badges = new Map(assignCreatureBadges(board.combatants).map((badge) => [badge.combatantId, badge] as const));
   const combatants = board.combatants.map((entry): FactSheetCombatant => {
     const projected = visibleById.get(entry.id);
     if (projected === undefined) throw new Error(`DM board combatant ${String(entry.id)} has no state projection.`);
+    const badge = badges.get(entry.id);
+    if (badge === undefined) throw new Error(`DM board combatant ${String(entry.id)} has no badge projection.`);
     return {
       displayName: entry.name,
+      badgeNumber: badge.number,
+      badgeColor: badge.color.id,
       cell: probeCell(entry.position),
       side: projected.kind === 'player_character' ? 'party' : 'foe',
-      hpBand: proseHitPointBand(projected.hitPoints, projected.rules.hitPointMaximum),
+      hpBand: screenshotHitPointBand(projected.hitPoints, projected.rules.hitPointMaximum),
       life: entry.life,
       hiddenFromPlayers: hidden.has(entry.id),
     };
@@ -536,8 +549,8 @@ function normalizedCreatureAnswerName(
 }
 
 /**
- * Names are visual labels rather than identity keys. Classic plates use upper
- * case, so scoring compares a canonical case-folded, whitespace-collapsed
+ * Names are visual labels rather than identity keys. The bitmap roster uses
+ * upper case, so scoring compares a canonical case-folded, whitespace-collapsed
  * form while the row retains the parsed and raw model payloads for audit.
  */
 export function normalizeProbeAnswer(
@@ -772,7 +785,7 @@ export function probeAnswerJsonSchema(question: ScreenshotQuestionId): Readonly<
     })) });
     case 'Q3': return objectSchema({ ...answerHeader(question), creatures: array(objectSchema({
       ...(jsonCreatureSchema['properties'] as Readonly<Record<string, unknown>>),
-      hpBand: scalarSchema('string', { enum: ['uninjured', 'injured', 'critical', 'unknown'] }),
+      hpBand: scalarSchema('string', { enum: ['uninjured', 'bloodied', 'near_death', 'unknown'] }),
     })) });
     case 'Q4': return objectSchema({ ...answerHeader(question), cells: array(jsonCellSchema) });
     case 'Q5': return objectSchema({ ...answerHeader(question), brightCells: array(jsonCellSchema), dimCells: array(jsonCellSchema), darkCells: array(jsonCellSchema) });
@@ -1365,17 +1378,17 @@ const comparisonProbeRowSchema = z.object({
 }).passthrough();
 
 const savedProbeRowSchema = z.object({
-  version: z.union([z.literal(LEGACY_ROW_VERSION), z.literal(ROW_VERSION)]),
+  version: z.union([z.literal(LEGACY_ROW_VERSION), z.literal(PREVIOUS_ROW_VERSION), z.literal(ROW_VERSION)]),
   resultKind: z.enum(['generated', 'rescored']).optional(),
   sourceFileSha256: z.union([z.string().regex(/^[0-9a-f]{64}$/u), z.null()]).optional(),
-  normaliserVersion: z.literal(NORMALISER_VERSION).optional(),
+  normaliserVersion: z.string().min(1).optional(),
   stateId: z.string().min(1),
   stateDigest: z.string().min(1),
   model: z.string().min(1),
   effort: effortSchema,
   question: z.enum(SCREENSHOT_QUESTION_IDS),
   promptVersion: z.literal(PROBE_VERSION),
-  primerVersion: z.union([z.literal(PRIMER_VERSION), z.null()]),
+  primerVersion: z.union([z.literal(PRIMER_VERSION), z.literal('d525-general-board-primer-v5'), z.null()]),
   generation: z.string().min(1),
   boardGlyphs: z.enum(['none', 'light', 'full']),
   png: z.object({
@@ -1578,6 +1591,7 @@ export function renderProbeSummary(
     `Pass criterion: every question class has mean Jaccard accuracy >= ${PASS_THRESHOLD.toFixed(1)}.`,
     '',
     `Board glyphs: ${[...new Set(rows.map((row) => row.boardGlyphs))].sort().join(', ')}.`,
+    'HP vocabulary: uninjured / bloodied / near_death / unknown.',
     '',
   ];
   for (const [key, group] of [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
@@ -1614,7 +1628,7 @@ function rescoreSavedRow(
   } catch (error) {
     throw new TypeError(`Invalid saved probe row ${String(rowNumber)} in ${path}.`, { cause: error });
   }
-  const legacyGeneration = saved.version === LEGACY_ROW_VERSION;
+  const legacyGeneration = saved.version !== ROW_VERSION;
   if (!legacyGeneration && (
     saved.resultKind !== 'generated' ||
     saved.sourceFileSha256 !== null ||
@@ -1625,7 +1639,26 @@ function rescoreSavedRow(
   if (saved.resultKind === 'rescored') {
     throw new TypeError(`Saved probe row ${String(rowNumber)} in ${path} is already rescored.`);
   }
-  const truth = parseProbeAnswer(saved.question, canonicalJson(saved.truth));
+  const normalizeOldHpVocabulary = (payload: unknown): unknown => {
+    const row = record(payload);
+    if (saved.question !== 'Q3' || row === null || !Array.isArray(row['creatures'])) return payload;
+    return {
+      ...row,
+      creatures: row['creatures'].map((value) => {
+        const creature = record(value);
+        if (creature === null) return value;
+        return {
+          ...creature,
+          hpBand: creature['hpBand'] === 'injured'
+            ? 'bloodied'
+            : creature['hpBand'] === 'critical'
+              ? 'near_death'
+              : creature['hpBand'],
+        };
+      }),
+    };
+  };
+  const truth = parseProbeAnswer(saved.question, canonicalJson(normalizeOldHpVocabulary(saved.truth)));
   const nameContext: ProbeNameNormalisationContext = {
     source: legacyGeneration ? 'legacy-rescore' : 'live',
     hiddenCreatureNames,
@@ -1664,7 +1697,8 @@ function rescoreSavedRow(
   }
   let answer: ProbeAnswer;
   try {
-    answer = parseProbeAnswer(saved.question, saved.rawAnswer);
+    const rawDecoded: unknown = JSON.parse(saved.rawAnswer) as unknown;
+    answer = parseProbeAnswer(saved.question, canonicalJson(normalizeOldHpVocabulary(rawDecoded)));
   } catch (error) {
     return {
       ...base,

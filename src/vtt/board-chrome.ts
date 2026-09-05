@@ -1,8 +1,7 @@
 /**
- * DM-board chrome (D516): full display names on widened plates, an HP bar
- * driven by the prose classifier's band, a life-state glyph, coordinate
- * labels, a hidden-from-players ring and a legend. Pure layout functions are
- * exported for tests; `renderBoardChrome` only turns a layout into DOM.
+ * DM-board chrome (D533): numbered coloured creature badges bind cells to a
+ * full 2x bitmap roster below the board. HP bands, life-state glyphs,
+ * coordinates, hidden rings and the board legend share that chrome.
  *
  * Coordinates: the prose the AI DM reads never names cells (it speaks in
  * distances), while the engine, the DM tray ("moved from 1,1 to 2,1") and
@@ -11,7 +10,7 @@
  *
  * D525: under the 'full' glyph mode the legend lists exactly the glyph
  * families the board shows, a hidden creature gains an eye-slash mark on its
- * plate rim and the word HIDDEN inside its name plate, and the life glyph on
+ * hidden ring and the word HIDDEN in its roster line, and the life glyph on
  * a door cell drops below the door mark instead of colliding with it.
  */
 import { HIDDEN_FOCUS_ASSET_ID, STONE_FLOOR_SET_ID } from '../assets/art-sets';
@@ -38,12 +37,12 @@ import { OVERLAY_ASSETS } from '../assets/art-sets';
 import { neutral, paletteHex, ramp, type PaletteColorRef } from '../assets/palette';
 import {
   GLYPH_HEIGHT,
-  LINE_GAP,
   layoutPixelText,
   normalizeLabelText,
   renderLifeGlyph,
   renderPixelGlyph,
   renderPixelText,
+  textPixelWidth,
   type LifeGlyph,
   type PixelTextLayout,
 } from '../assets/pixel-font';
@@ -68,32 +67,137 @@ export const BOARD_BORDER_PX = 2;
 export const COORDINATE_GUTTER_PX = 24;
 export const LEGEND_HEIGHT_PX = 120;
 export const LEGEND_GAP_PX = 8;
-export const NAMEPLATE_PADDING_PX = 1;
-export const NAMEPLATE_BORDER_PX = 1;
-export const NAMEPLATE_MAX_LINES = 4;
-/** Names at or below this normalized character count stay on one line. */
-export const NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT = 9;
-export const NAMEPLATE_STEM_THICKNESS_PX = 2;
-/** Every rendered leader must remain visibly associated at a 1× capture. */
-export const STEM_MIN_PX = 8;
-export const STEM_INK_HEX = '#eef0f5';
-export const STEM_OUTLINE_HEX = '#0d0f14';
-export const NAMEPLATE_CELL_INSET_PX = 1;
-export const NAMEPLATE_TEXT_SCALE = 1;
 export const HP_BAR_WIDTH_PX = 40;
 export const HP_BAR_HEIGHT_PX = 4;
 export const HP_BAR_BORDER_PX = 1;
-/** Where the HP bar's top border sits inside its cell; the bottom glyph row must end above it (D525). */
+/** Where the HP bar's top border sits inside its cell; badge and glyph boxes end above it. */
 export const HP_BAR_TOP_PX = CHROME_TILE_PX - HP_BAR_HEIGHT_PX - 2 * HP_BAR_BORDER_PX - 2;
-/** Plates finish above the HP bar and remain wholly inside their own cell. */
-export const NAMEPLATE_BOTTOM_PX = HP_BAR_TOP_PX;
 /** The last tile row a bottom-corner cell glyph's outline ring touches (D525). */
 export const CELL_GLYPH_RING_BOTTOM_PX = cellGlyphOrigin('blocked', CHROME_TILE_PX).y + CELL_GLYPH_SIZE;
 /** The life glyph's inset from the cell's top-right, and where it drops to under a door mark (D525). */
 export const LIFE_GLYPH_INSET_PX = 3;
 export const LIFE_GLYPH_BELOW_DOOR_PX = CELL_GLYPH_MARGIN + CELL_GLYPH_SIZE + 2;
-/** The hidden eye-slash mark's top-left inside its cell: centred on the plate's left rim (D525). */
+/** The hidden eye-slash mark's top-left inside its cell, on the hidden ring's left rim. */
 export const HIDDEN_GLYPH_ORIGIN = Object.freeze({ x: 1, y: 29 });
+
+export const CREATURE_BADGE_SLOT = 'top-centre' as const;
+export const CREATURE_BADGE_WIDTH_PX = 26;
+export const CREATURE_BADGE_HEIGHT_PX = 18;
+export const CREATURE_BADGE_LEFT_PX = (CHROME_TILE_PX - CREATURE_BADGE_WIDTH_PX) / 2;
+export const CREATURE_BADGE_TOP_PX = 2;
+export const CREATURE_BADGE_STACK_PITCH_PX = CREATURE_BADGE_HEIGHT_PX;
+export const MAX_BADGES_PER_CELL = 2;
+export const CREATURE_BUST_RING_INSET_PX = 7;
+export const CREATURE_BUST_RING_WIDTH_PX = CHROME_TILE_PX - 2 * CREATURE_BUST_RING_INSET_PX;
+export const CREATURE_BUST_RING_HEIGHT_PX = CHROME_TILE_PX - 2 * CREATURE_BUST_RING_INSET_PX;
+export const ROSTER_NAME_GLYPHS_PER_LINE = 18;
+export const ROSTER_ENTRY_GAP_PX = 4;
+export const ROSTER_ENTRY_FRAME_PX = 6;
+
+/** A closed board vocabulary; a render cannot silently invent or reuse a hue. */
+export const CREATURE_BADGE_COLORS = Object.freeze([
+  { id: 'scarlet', css: 'hsl(0 82% 58%)', hue: 0, lightness: 58 },
+  { id: 'orange', css: 'hsl(30 88% 52%)', hue: 30, lightness: 52 },
+  { id: 'gold', css: 'hsl(60 82% 48%)', hue: 60, lightness: 48 },
+  { id: 'lime', css: 'hsl(90 72% 48%)', hue: 90, lightness: 48 },
+  { id: 'green', css: 'hsl(120 68% 45%)', hue: 120, lightness: 45 },
+  { id: 'teal', css: 'hsl(150 72% 45%)', hue: 150, lightness: 45 },
+  { id: 'cyan', css: 'hsl(180 78% 45%)', hue: 180, lightness: 45 },
+  { id: 'azure', css: 'hsl(210 82% 58%)', hue: 210, lightness: 58 },
+  { id: 'indigo', css: 'hsl(240 75% 64%)', hue: 240, lightness: 64 },
+  { id: 'violet', css: 'hsl(270 76% 62%)', hue: 270, lightness: 62 },
+  { id: 'magenta', css: 'hsl(300 76% 56%)', hue: 300, lightness: 56 },
+  { id: 'rose', css: 'hsl(330 82% 62%)', hue: 330, lightness: 62 },
+] as const);
+
+export type CreatureBadgeColor = (typeof CREATURE_BADGE_COLORS)[number];
+declare const creatureBadgeNumberBrand: unique symbol;
+export type CreatureBadgeNumber = number & { readonly [creatureBadgeNumberBrand]: true };
+
+function creatureBadgeNumber(value: number): CreatureBadgeNumber {
+  if (!Number.isSafeInteger(value) || value < 1 || value > CREATURE_BADGE_COLORS.length) {
+    throw new RangeError(`Creature badge number must be 1..${String(CREATURE_BADGE_COLORS.length)}.`);
+  }
+  return value as CreatureBadgeNumber;
+}
+
+export interface CreatureBadgeAssignment {
+  readonly combatantId: CombatantId;
+  readonly number: CreatureBadgeNumber;
+  readonly color: CreatureBadgeColor;
+  readonly column: number;
+  readonly row: number;
+  readonly stackIndex: 0 | 1;
+}
+
+/** Stable roster order is the only numbering source in both live and snapshot DM views. */
+export function assignCreatureBadges(
+  combatants: readonly EncounterBoardCombatant[],
+): readonly CreatureBadgeAssignment[] {
+  if (combatants.length > CREATURE_BADGE_COLORS.length) {
+    throw new RangeError(`The closed creature-badge palette supports ${String(CREATURE_BADGE_COLORS.length)} creatures.`);
+  }
+  const cellCounts = new Map<string, number>();
+  return combatants.map((combatant, index): CreatureBadgeAssignment => {
+    const key = `${String(combatant.position.column)},${String(combatant.position.row)}`;
+    const stackIndex = cellCounts.get(key) ?? 0;
+    if (stackIndex >= MAX_BADGES_PER_CELL) {
+      throw new RangeError(`Cell ${key} exceeds the ${String(MAX_BADGES_PER_CELL)}-badge column.`);
+    }
+    cellCounts.set(key, stackIndex + 1);
+    return {
+      combatantId: combatant.id,
+      number: creatureBadgeNumber(index + 1),
+      color: CREATURE_BADGE_COLORS[index]!,
+      column: combatant.position.column,
+      row: combatant.position.row,
+      stackIndex: stackIndex as 0 | 1,
+    };
+  });
+}
+
+export function badgeColorDistance(
+  left: CreatureBadgeColor,
+  right: CreatureBadgeColor,
+): number {
+  const hue = Math.min(Math.abs(left.hue - right.hue), 360 - Math.abs(left.hue - right.hue)) / 180;
+  const lightness = Math.abs(left.lightness - right.lightness) / 100;
+  return Math.hypot(hue, lightness);
+}
+
+/** Word wrapping never resamples: long words become fixed 17-glyph pieces plus '-'. */
+export function layoutRosterName(displayName: string): PixelTextLayout {
+  const normalized = normalizeLabelText(displayName).trim();
+  const words = normalized.length === 0 ? ['?'] : normalized.split(' ');
+  const pieces = words.flatMap((word): readonly string[] => {
+    const result: string[] = [];
+    let remainder = word;
+    while (remainder.length > ROSTER_NAME_GLYPHS_PER_LINE) {
+      result.push(`${remainder.slice(0, ROSTER_NAME_GLYPHS_PER_LINE - 1)}-`);
+      remainder = remainder.slice(ROSTER_NAME_GLYPHS_PER_LINE - 1);
+    }
+    result.push(remainder);
+    return result;
+  });
+  const lines: string[] = [];
+  let current = '';
+  for (const piece of pieces) {
+    if (current === '') {
+      current = piece;
+    } else if (`${current} ${piece}`.length <= ROSTER_NAME_GLYPHS_PER_LINE) {
+      current = `${current} ${piece}`;
+    } else {
+      lines.push(current);
+      current = piece;
+    }
+  }
+  lines.push(current);
+  return {
+    lines,
+    width: Math.max(...lines.map(textPixelWidth), 0),
+    height: lines.length * GLYPH_HEIGHT + (lines.length - 1) * 2,
+  };
+}
 
 export const COORDINATE_CONVENTION = 'engine-column-row-zero-based' as const;
 
@@ -129,129 +233,28 @@ export function lifeGlyphFor(life: LifeState): LifeGlyph {
   }
 }
 
-/** The only word a plate can carry under its name (D525 'full': hidden from players). */
-export type NameplateTag = typeof HIDDEN_GLYPH_LABEL;
-const NAMEPLATE_TAG_INK: PaletteColorRef = ramp('cloth-warm', 6);
+export type HiddenRosterTag = typeof HIDDEN_GLYPH_LABEL;
+const HIDDEN_TAG_INK: PaletteColorRef = ramp('cloth-warm', 6);
 
 /** Creature and object labels are different visual concepts, enforced at their DOM boundary. */
-export type BoardLabelStyle = 'creature-plate' | 'object-tag';
-export const CREATURE_LABEL_STYLE: BoardLabelStyle = 'creature-plate';
+export type BoardLabelStyle = 'creature-roster' | 'object-tag';
+export const CREATURE_LABEL_STYLE: BoardLabelStyle = 'creature-roster';
 export const OBJECT_LABEL_STYLE: BoardLabelStyle = 'object-tag';
 
-export interface NameplateRequest {
-  readonly id: CombatantId;
-  readonly displayName: string;
-  readonly column: number;
-  readonly row: number;
-  readonly tag: NameplateTag | null;
+export interface BoardChromeDimensionContent {
+  readonly combatants: readonly Pick<EncounterBoardCombatant, 'name'>[];
+  readonly objects: readonly { readonly kind: string }[];
 }
 
-export interface NameplateLayout extends NameplateRequest {
-  readonly text: PixelTextLayout;
-  /** Relative to the grid's top-left (cell 0,0), in CSS px. */
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-  readonly placement: 'inside-token-cell';
-  /** The engine cell this plate identifies, even when collision stacking moves the plate away. */
-  readonly anchorCell: { readonly column: number; readonly row: number };
-  /** Grid-relative endpoints for the visible leader between plate and token-cell edge. */
-  readonly stem: {
-    readonly plate: { readonly x: number; readonly y: number };
-    readonly token: { readonly x: number; readonly y: number };
-  };
-}
-
-export function nameplateSize(displayName: string, tag: NameplateTag | null): {
-  readonly text: PixelTextLayout;
-  readonly width: number;
-  readonly height: number;
-} {
-  const normalizedLength = Array.from(normalizeLabelText(displayName).trim()).length;
-  const text = layoutPixelText(
-    displayName,
-    normalizedLength <= NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT ? 1 : NAMEPLATE_MAX_LINES,
-  );
-  const tagLayout = tag === null ? null : layoutPixelText(tag, 1);
-  const frame = 2 * (NAMEPLATE_PADDING_PX + NAMEPLATE_BORDER_PX);
-  const nativeWidth = Math.max(text.width, tagLayout?.width ?? 0);
-  const nativeHeight = text.height + (tagLayout === null ? 0 : LINE_GAP + tagLayout.height);
-  return {
-    text,
-    width: Math.min(
-      nativeWidth * NAMEPLATE_TEXT_SCALE + frame,
-      CHROME_TILE_PX - 2 * NAMEPLATE_CELL_INSET_PX,
-    ),
-    height: nativeHeight * NAMEPLATE_TEXT_SCALE + frame,
-  };
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.max(minimum, Math.min(value, maximum));
-}
-
-function anchorGeometry(
-  plate: Rect,
-  cell: { readonly column: number; readonly row: number },
-): Pick<NameplateLayout, 'anchorCell' | 'stem' | 'placement'> {
-  const left = cell.column * CHROME_TILE_PX;
-  const top = cell.row * CHROME_TILE_PX;
-  const centreX = clamp(left + CHROME_TILE_PX / 2, plate.x + 1, plate.x + plate.width - 1);
-  const plateEndpoint = { x: centreX, y: plate.y };
-  const token = { x: centreX, y: plate.y - STEM_MIN_PX };
-  return {
-    anchorCell: { column: cell.column, row: cell.row },
-    stem: { plate: plateEndpoint, token },
-    placement: 'inside-token-cell',
-  };
-}
-
-interface Rect {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-}
-
-/**
- * Places each plate wholly inside its own token cell, immediately above the
- * HP bar. Long names wrap to at most four compact pixel-font lines; they can
- * never expand into a fact-bearing neighbouring cell. Row-major order makes
- * the result a pure function of the input.
- */
-export function stackLabelOffsets(
-  requests: readonly NameplateRequest[],
-  bounds: { readonly columns: number; readonly rows: number },
-): readonly NameplateLayout[] {
-  if (bounds.columns < 1 || bounds.rows < 1) throw new RangeError('Nameplate bounds must contain at least one cell.');
-  const ordered = [...requests].sort((left, right) =>
-    left.row - right.row || left.column - right.column ||
-    (String(left.id) < String(right.id) ? -1 : String(left.id) > String(right.id) ? 1 : 0));
-  const placed: NameplateLayout[] = [];
-  for (const request of ordered) {
-    if (request.column < 0 || request.column >= bounds.columns || request.row < 0 || request.row >= bounds.rows) {
-      throw new RangeError(`Nameplate ${String(request.id)} is outside the board.`);
-    }
-    const size = nameplateSize(request.displayName, request.tag);
-    const centred = request.column * CHROME_TILE_PX + CHROME_TILE_PX / 2 - size.width / 2;
-    const candidateRect: Rect = {
-      x: Math.round(centred),
-      y: request.row * CHROME_TILE_PX + NAMEPLATE_BOTTOM_PX - size.height,
-      width: size.width,
-      height: size.height,
-    };
-    if (candidateRect.y - request.row * CHROME_TILE_PX < STEM_MIN_PX) {
-      throw new RangeError(`Nameplate ${String(request.id)} leaves no room for its ${String(STEM_MIN_PX)}px leader.`);
-    }
-    placed.push({
-      ...request,
-      text: size.text,
-      ...candidateRect,
-      ...anchorGeometry(candidateRect, request),
-    });
-  }
-  return placed;
+export function legendHeightPx(content: BoardChromeDimensionContent): number {
+  const rosterHeight = content.combatants.length === 0
+    ? 0
+    : 22 + content.combatants.reduce((height, combatant) =>
+        height + Math.max(GLYPH_HEIGHT * CHROME_TEXT_SCALE, layoutRosterName(combatant.name).height * CHROME_TEXT_SCALE) +
+          ROSTER_ENTRY_FRAME_PX + ROSTER_ENTRY_GAP_PX, 0);
+  const objectCount = content.objects.filter((object) => object.kind !== 'door').length;
+  const objectHeight = objectCount === 0 ? 0 : 22 + objectCount * 30;
+  return LEGEND_HEIGHT_PX + rosterHeight + objectHeight;
 }
 
 /**
@@ -259,13 +262,17 @@ export function stackLabelOffsets(
  * which every arena board (17+ columns) does. Narrower boards wrap the legend
  * past the band and capture taller than this (D525).
  */
-export function boardChromeDimensions(bounds: { readonly columns: number; readonly rows: number }): {
+export function boardChromeDimensions(
+  bounds: { readonly columns: number; readonly rows: number },
+  content: BoardChromeDimensionContent = { combatants: [], objects: [] },
+): {
   readonly width: number;
   readonly height: number;
 } {
   return {
     width: 2 * BOARD_BORDER_PX + 2 * COORDINATE_GUTTER_PX + bounds.columns * CHROME_TILE_PX,
-    height: 2 * BOARD_BORDER_PX + 2 * COORDINATE_GUTTER_PX + bounds.rows * CHROME_TILE_PX + LEGEND_GAP_PX + LEGEND_HEIGHT_PX,
+    height: 2 * BOARD_BORDER_PX + 2 * COORDINATE_GUTTER_PX + bounds.rows * CHROME_TILE_PX +
+      LEGEND_GAP_PX + legendHeightPx(content),
   };
 }
 
@@ -449,8 +456,8 @@ function coordinateLabels(bounds: { readonly columns: number; readonly rows: num
   return container;
 }
 
-/** The plate tag a combatant carries under a mode: HIDDEN under 'full' for a hidden creature, else none. */
-export function nameplateTagFor(mode: BoardGlyphMode, combatant: EncounterBoardCombatant): NameplateTag | null {
+/** The cell eye-slash accompanies a roster HIDDEN tag only in full glyph mode. */
+export function hiddenRosterTagFor(mode: BoardGlyphMode, combatant: EncounterBoardCombatant): HiddenRosterTag | null {
   return mode === 'full' && combatant.hiddenFromPlayers === true ? HIDDEN_GLYPH_LABEL : null;
 }
 
@@ -462,22 +469,14 @@ function tokenChrome(
 ): HTMLDivElement {
   const layer = el('div', 'encounter-token-chrome');
   layer.setAttribute('aria-hidden', 'true');
-  const leaders = el('div', 'encounter-nameplate-leaders');
-  const plateLayer = el('div', 'encounter-nameplate-plates');
-  const plates = stackLabelOffsets(
-    combatants.map((combatant) => ({
-      id: combatant.id,
-      displayName: combatant.name,
-      column: combatant.position.column,
-      row: combatant.position.row,
-      tag: nameplateTagFor(mode, combatant),
-    })),
-    bounds,
-  );
-  const byId = new Map(combatants.map((combatant) => [combatant.id, combatant] as const));
-  for (const plate of plates) {
-    const combatant = byId.get(plate.id);
-    if (combatant === undefined) continue;
+  const assignments = assignCreatureBadges(combatants);
+  for (const [index, combatant] of combatants.entries()) {
+    const assignment = assignments[index];
+    if (assignment === undefined) throw new Error(`Combatant ${String(combatant.id)} lost its badge assignment.`);
+    if (
+      combatant.position.column < 0 || combatant.position.column >= bounds.columns ||
+      combatant.position.row < 0 || combatant.position.row >= bounds.rows
+    ) throw new RangeError(`Combatant ${String(combatant.id)} is outside the board.`);
     const cellLeft = COORDINATE_GUTTER_PX + combatant.position.column * CHROME_TILE_PX;
     const cellTop = COORDINATE_GUTTER_PX + combatant.position.row * CHROME_TILE_PX;
     const cellKey = `${String(combatant.position.column)},${String(combatant.position.row)}`;
@@ -497,7 +496,7 @@ function tokenChrome(
       });
       layer.append(ring);
       // D525 'full': the eye-slash mark on the ring's left rim, at the tile's own 1× scale like the cell glyphs.
-      if (plate.tag !== null) {
+      if (hiddenRosterTagFor(mode, combatant) !== null) {
         const eye = renderPixelGlyph('hidden', HIDDEN_GLYPH.rows, HIDDEN_GLYPH.ink, 1, HIDDEN_GLYPH.outline);
         const eyeImage = el('img', 'encounter-hidden-glyph');
         eyeImage.alt = '';
@@ -553,66 +552,45 @@ function tokenChrome(
     });
     layer.append(lifeImage);
 
-    const nameplate = el('span', plate.tag === null ? 'encounter-nameplate' : 'encounter-nameplate encounter-nameplate-tagged');
-    nameplate.dataset.combatantId = combatant.id;
-    nameplate.dataset.displayName = combatant.name;
-    nameplate.dataset.labelStyle = CREATURE_LABEL_STYLE;
-    nameplate.dataset.anchorColumn = String(plate.anchorCell.column);
-    nameplate.dataset.anchorRow = String(plate.anchorCell.row);
-    nameplate.dataset.placement = plate.placement;
-    nameplate.dataset.lines = String(plate.text.lines.length);
-    if (plate.tag !== null) nameplate.dataset.tag = plate.tag;
-    styled(nameplate, {
+    const ringInset = CREATURE_BUST_RING_INSET_PX + assignment.stackIndex * 2;
+    const bustRing = el('span', 'encounter-creature-bust-ring');
+    bustRing.dataset.combatantId = combatant.id;
+    bustRing.dataset.badgeNumber = String(assignment.number);
+    bustRing.dataset.badgeColor = assignment.color.id;
+    styled(bustRing, {
       position: 'absolute',
-      left: `${String(COORDINATE_GUTTER_PX + plate.x)}px`,
-      top: `${String(COORDINATE_GUTTER_PX + plate.y)}px`,
-      width: `${String(plate.width)}px`,
-      height: `${String(plate.height)}px`,
+      left: `${String(cellLeft + ringInset)}px`,
+      top: `${String(cellTop + ringInset)}px`,
+      width: `${String(CREATURE_BUST_RING_WIDTH_PX - assignment.stackIndex * 4)}px`,
+      height: `${String(CREATURE_BUST_RING_HEIGHT_PX - assignment.stackIndex * 4)}px`,
+      border: `2px solid ${assignment.color.css}`,
     });
-    const stemDx = plate.stem.token.x - plate.stem.plate.x;
-    const stemDy = plate.stem.token.y - plate.stem.plate.y;
-    const stem = el('span', 'encounter-nameplate-stem');
-    stem.dataset.combatantId = combatant.id;
-    stem.dataset.anchorColumn = String(plate.anchorCell.column);
-    stem.dataset.anchorRow = String(plate.anchorCell.row);
-    stem.dataset.tokenX = String(plate.stem.token.x);
-    stem.dataset.tokenY = String(plate.stem.token.y);
-    stem.dataset.plateX = String(plate.stem.plate.x);
-    stem.dataset.plateY = String(plate.stem.plate.y);
-    styled(stem, {
+    layer.append(bustRing);
+
+    const badge = el('span', 'encounter-creature-badge');
+    badge.dataset.combatantId = combatant.id;
+    badge.dataset.badgeNumber = String(assignment.number);
+    badge.dataset.badgeColor = assignment.color.id;
+    badge.dataset.badgeSlot = CREATURE_BADGE_SLOT;
+    badge.dataset.anchorColumn = String(assignment.column);
+    badge.dataset.anchorRow = String(assignment.row);
+    badge.dataset.stackIndex = String(assignment.stackIndex);
+    styled(badge, {
       position: 'absolute',
-      left: `${String(COORDINATE_GUTTER_PX + plate.stem.plate.x)}px`,
-      top: `${String(COORDINATE_GUTTER_PX + plate.stem.plate.y)}px`,
-      width: `${String(Math.hypot(stemDx, stemDy))}px`,
-      height: `${String(NAMEPLATE_STEM_THICKNESS_PX)}px`,
-      background: STEM_INK_HEX,
-      'box-shadow': `0 0 0 1px ${STEM_OUTLINE_HEX}`,
-      transform: `rotate(${String(Math.atan2(stemDy, stemDx))}rad)`,
-      'transform-origin': '0 50%',
+      left: `${String(cellLeft + CREATURE_BADGE_LEFT_PX)}px`,
+      top: `${String(cellTop + CREATURE_BADGE_TOP_PX + assignment.stackIndex * CREATURE_BADGE_STACK_PITCH_PX)}px`,
+      width: `${String(CREATURE_BADGE_WIDTH_PX)}px`,
+      height: `${String(CREATURE_BADGE_HEIGHT_PX)}px`,
+      background: assignment.color.css,
     });
-    leaders.append(stem);
-    const text = renderPixelText(plate.text, TEXT_INK, NAMEPLATE_TEXT_SCALE);
-    const textImageNode = el('img', 'encounter-nameplate-text');
-    textImageNode.alt = '';
-    textImageNode.src = text.dataUri;
-    styled(textImageNode, {
-      width: `${String(Math.min(text.cssWidth, plate.width - 2 * (NAMEPLATE_PADDING_PX + NAMEPLATE_BORDER_PX)))}px`,
-      height: `${String(text.cssHeight)}px`,
-    });
-    nameplate.append(textImageNode);
-    if (plate.tag !== null) {
-      const renderedTag = renderPixelText(layoutPixelText(plate.tag, 1), NAMEPLATE_TAG_INK, NAMEPLATE_TEXT_SCALE);
-      const tagImage = el('img', 'encounter-nameplate-tag');
-      tagImage.alt = '';
-      tagImage.setAttribute('aria-hidden', 'true');
-      tagImage.src = renderedTag.dataUri;
-      styled(tagImage, { width: `${String(renderedTag.cssWidth)}px`, height: `${String(renderedTag.cssHeight)}px` });
-      tagImage.dataset.tag = plate.tag;
-      nameplate.append(tagImage);
-    }
-    plateLayer.append(nameplate);
+    const number = renderPixelText(layoutPixelText(String(assignment.number), 1), neutral(0), CHROME_TEXT_SCALE);
+    const numberImage = el('img', 'encounter-creature-badge-number');
+    numberImage.alt = '';
+    numberImage.src = number.dataUri;
+    styled(numberImage, { width: `${String(number.cssWidth)}px`, height: `${String(number.cssHeight)}px` });
+    badge.append(numberImage);
+    layer.append(badge);
   }
-  layer.append(leaders, plateLayer);
   return layer;
 }
 
@@ -657,7 +635,7 @@ type ProjectedWorldObjects = NonNullable<EncounterBoardProjectionShape['worldObj
 function objectTagRail(objects: ProjectedWorldObjects): HTMLElement {
   const rail = el('div', 'encounter-object-tag-rail');
   rail.dataset.objectTagRail = 'snapshot';
-  for (const object of objects) {
+  for (const object of objects.filter((candidate) => candidate.kind !== 'door')) {
     const tag = el('span', 'encounter-object-tag');
     tag.dataset.objectId = object.id;
     tag.dataset.labelStyle = OBJECT_LABEL_STYLE;
@@ -685,11 +663,83 @@ function objectTagRail(objects: ProjectedWorldObjects): HTMLElement {
   return rail;
 }
 
+function pixelImage(
+  layout: PixelTextLayout,
+  ink: PaletteColorRef,
+  className: string,
+  scale = CHROME_TEXT_SCALE,
+): HTMLImageElement {
+  const rendered = renderPixelText(layout, ink, scale);
+  const image = el('img', className);
+  image.alt = '';
+  image.setAttribute('aria-hidden', 'true');
+  image.src = rendered.dataUri;
+  styled(image, { width: `${String(rendered.cssWidth)}px`, height: `${String(rendered.cssHeight)}px` });
+  return image;
+}
+
+export function hpBandLabel(band: HpBand): 'UNINJURED' | 'BLOODIED' | 'NEAR DEATH' | 'UNKNOWN' {
+  switch (band) {
+    case 'uninjured': return 'UNINJURED';
+    case 'bloodied': return 'BLOODIED';
+    case 'near_death': return 'NEAR DEATH';
+    case 'unknown': return 'UNKNOWN';
+  }
+}
+
+function rosterBox(
+  combatants: readonly EncounterBoardCombatant[],
+  mode: BoardGlyphMode,
+): HTMLElement {
+  const box = el('section', 'encounter-roster-box');
+  box.dataset.creatureRoster = 'number-colour-name-side-hp';
+  box.append(textImage('ROSTER', TEXT_INK, 'encounter-roster-title'));
+  const assignments = assignCreatureBadges(combatants);
+  combatants.forEach((combatant, index) => {
+    const assignment = assignments[index];
+    if (assignment === undefined) throw new Error(`Combatant ${String(combatant.id)} lost its roster assignment.`);
+    const band = hpBandOf(combatant.hitPointBand);
+    const row = el('div', 'encounter-roster-entry');
+    row.dataset.combatantId = combatant.id;
+    row.dataset.rosterOrder = String(index + 1);
+    row.dataset.badgeNumber = String(assignment.number);
+    row.dataset.badgeColor = assignment.color.id;
+    row.dataset.fullName = combatant.name;
+    row.dataset.anchorColumn = String(combatant.position.column);
+    row.dataset.anchorRow = String(combatant.position.row);
+    row.dataset.labelStyle = CREATURE_LABEL_STYLE;
+    row.dataset.side = combatant.kind === 'player_character' ? 'party' : 'foe';
+    row.dataset.hpBand = band;
+    const number = pixelImage(layoutPixelText(String(assignment.number), 1), neutral(0), 'encounter-roster-number');
+    const swatch = el('span', 'encounter-roster-swatch');
+    swatch.dataset.badgeColor = assignment.color.id;
+    styled(swatch, { background: assignment.color.css });
+    const name = pixelImage(layoutRosterName(combatant.name), TEXT_INK, 'encounter-roster-name');
+    name.dataset.fullName = combatant.name;
+    const side = pixelImage(
+      layoutPixelText(combatant.kind === 'player_character' ? 'PARTY' : 'FOE', 1),
+      TEXT_INK,
+      'encounter-roster-side',
+    );
+    const hp = pixelImage(layoutPixelText(hpBandLabel(band), 1), HP_BAND_INK[band], 'encounter-roster-hp');
+    row.append(number, swatch, name, side, hp);
+    if (combatant.hiddenFromPlayers === true) {
+      const hidden = pixelImage(layoutPixelText(HIDDEN_GLYPH_LABEL, 1), HIDDEN_TAG_INK, 'encounter-roster-hidden');
+      hidden.dataset.tag = HIDDEN_GLYPH_LABEL;
+      row.append(hidden);
+    }
+    if (mode !== 'full') row.dataset.hiddenMarkMode = 'ring-only';
+    box.append(row);
+  });
+  return box;
+}
+
 function legend(
   entries: readonly LegendEntry[],
   mode: BoardGlyphMode,
   roomDefault: LightLevel,
   objects: ProjectedWorldObjects,
+  combatants: readonly EncounterBoardCombatant[],
   snapshotMode: boolean,
 ): HTMLElement {
   const box = el('aside', 'encounter-legend');
@@ -699,14 +749,18 @@ function legend(
   box.setAttribute('aria-label', 'Board legend');
   // D525: a minimum, not a fixed height. A narrow board (the 10×7 reference room) wraps the rows past
   // 120 px; a fixed height clipped its HP rows, which would confound the probe's HP class.
-  styled(box, { 'min-height': `${String(LEGEND_HEIGHT_PX)}px`, 'margin-top': `${String(LEGEND_GAP_PX)}px` });
+  styled(box, {
+    'min-height': `${String(legendHeightPx({ combatants, objects }))}px`,
+    'margin-top': `${String(LEGEND_GAP_PX)}px`,
+  });
   for (const entry of entries) {
     const item = el('span', `encounter-legend-item encounter-legend-${entry.style}`);
     item.dataset.legendKey = entry.key;
     item.append(legendSwatch(entry), textImage(entry.label, TEXT_INK, 'encounter-legend-text'));
     box.append(item);
   }
-  if (snapshotMode && objects.length > 0) box.append(objectTagRail(objects));
+  box.append(rosterBox(combatants, mode));
+  if (snapshotMode && objects.some((object) => object.kind !== 'door')) box.append(objectTagRail(objects));
   return box;
 }
 
@@ -735,6 +789,13 @@ export function renderBoardChrome(
   board.append(
     coordinateLabels(projection.bounds),
     tokenChrome(projection.combatants, projection.bounds, mode, doorCells),
-    legend(legendEntriesFor(mode, roomDefault, presence), mode, roomDefault, projection.worldObjects ?? [], snapshotMode),
+    legend(
+      legendEntriesFor(mode, roomDefault, presence),
+      mode,
+      roomDefault,
+      projection.worldObjects ?? [],
+      projection.combatants,
+      snapshotMode,
+    ),
   );
 }

@@ -494,20 +494,18 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
       encounterBoardRenderModel(everyClass, encounterArtForBoard(everyClass, 'full')), everyClass.combatants,
     )).map((entry) => entry.key)).toEqual(keys);
 
-    // the hidden creature: eye-slash on the plate rim, HIDDEN inside the plate, the dashed ring as before
+    // the hidden creature: eye-slash on the ring, HIDDEN in its roster line, and the dashed ring
     const eyes = dm.querySelectorAll('.encounter-hidden-glyph');
     expect(eyes.map((eye) => eye.getAttribute('data-combatant-id'))).toEqual([FOE]);
     expect(styleOf(eyes[0], 'left')).toBe(24 + 2 * 64 + 1 - 1);
     expect(styleOf(eyes[0], 'top')).toBe(24 + 2 * 64 + 29 - 1);
     expect(styleOf(eyes[0], 'width')).toBe(CELL_GLYPH_SIZE + 2);
     expect(dm.querySelectorAll('.encounter-hidden-ring').map((ring) => ring.getAttribute('data-combatant-id'))).toEqual([FOE]);
-    const plates = dm.querySelectorAll('.encounter-nameplate');
-    const foePlate = plates.find((plate) => plate.getAttribute('data-combatant-id') === FOE);
-    expect(foePlate?.getAttribute('data-tag')).toBe('HIDDEN');
-    expect(foePlate?.className).toBe('encounter-nameplate encounter-nameplate-tagged');
-    expect(foePlate?.querySelectorAll('.encounter-nameplate-tag').map((tag) => tag.getAttribute('data-tag'))).toEqual(['HIDDEN']);
-    expect(plates.filter((plate) => plate.getAttribute('data-tag') !== null)).toHaveLength(1);
-    expect(dm.querySelectorAll('.encounter-nameplate-tag')).toHaveLength(1);
+    const roster = dm.querySelectorAll('.encounter-roster-entry');
+    const foeRow = roster.find((row) => row.getAttribute('data-combatant-id') === FOE);
+    expect(foeRow?.querySelectorAll('.encounter-roster-hidden').map((tag) => tag.getAttribute('data-tag'))).toEqual(['HIDDEN']);
+    expect(dm.querySelectorAll('.encounter-roster-hidden')).toHaveLength(1);
+    expect(dm.querySelectorAll('.encounter-nameplate')).toHaveLength(0);
 
     // the scout stands in the open doorway: its life glyph drops below the door mark; the hero's does not
     const lifeOf = (id: string) => dm.querySelectorAll('.encounter-life-glyph').find((glyph) => glyph.getAttribute('data-combatant-id') === id);
@@ -520,12 +518,12 @@ describe('D525 board DOM under each mode on a room with every fact class', () =>
     }
   });
 
-  it("DM board under 'light': no vocabulary, no hidden mark or tag, life glyphs at the D516 inset, the D516 legend rows", () => {
+  it("DM board under 'light': no cell vocabulary, roster HIDDEN remains, life glyphs use the D516 inset, and legend rows remain", () => {
     const dm = interactiveElement(renderBoard(everyClass, new Set(), null, provenance, 'light'));
     expect(dm.querySelectorAll('.encounter-board-glyph')).toHaveLength(0);
     expect(dm.querySelectorAll('.encounter-hidden-glyph')).toHaveLength(0);
-    expect(dm.querySelectorAll('.encounter-nameplate-tag')).toHaveLength(0);
-    expect(dm.querySelectorAll('.encounter-nameplate').every((plate) => plate.getAttribute('data-tag') === null && plate.className === 'encounter-nameplate')).toBe(true);
+    expect(dm.querySelectorAll('.encounter-roster-hidden')).toHaveLength(1);
+    expect(dm.querySelectorAll('.encounter-nameplate')).toHaveLength(0);
     expect(dm.querySelectorAll('.encounter-hidden-ring')).toHaveLength(1);
     for (const glyph of dm.querySelectorAll('.encounter-life-glyph')) expect((styleOf(glyph, 'top') - 24) % 64).toBe(LIFE_GLYPH_INSET_PX);
     const keys = dm.querySelector('[data-legend]')?.querySelectorAll('.encounter-legend-item').map((item) => item.getAttribute('data-legend-key')) ?? [];

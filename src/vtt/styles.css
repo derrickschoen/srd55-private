@@ -160,7 +160,7 @@
 .encounter-token[data-marker='corpse'] {
   filter: grayscale(1);
   opacity: 0.7;
-  transform: rotate(90deg) scale(0.78);
+  transform: rotate(90deg);
 }
 
 .encounter-token-stacked {
@@ -759,6 +759,15 @@
   background-image: var(--art-overlay-light-source);
 }
 
+.encounter-world-object-sigil {
+  position: absolute;
+  top: 26px;
+  left: 26px;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
 .encounter-token { inset: 0; }
 
 /* The prone silhouette asset replaces the CSS rotation and grey-out. */
@@ -793,7 +802,7 @@
   padding: var(--chrome-gutter);
 }
 
-/* The chrome nameplate carries the full name; the in-cell label stays in the
+/* The chrome roster carries the full name; the in-cell label stays in the
    DOM for text queries but is visually hidden. */
 .encounter-board[data-board-chrome='on'] .encounter-token-label {
   position: absolute;
@@ -822,21 +831,17 @@
   pointer-events: none;
 }
 
-.encounter-nameplate-leaders,
-.encounter-nameplate-plates {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.encounter-nameplate-leaders { z-index: 0; }
-.encounter-nameplate-plates { z-index: 1; }
-
 .encounter-coordinate-label,
-.encounter-nameplate-text,
 .encounter-legend-text,
 .encounter-life-glyph,
-.encounter-hidden-ring {
+.encounter-hidden-ring,
+.encounter-creature-badge-number,
+.encounter-roster-title,
+.encounter-roster-number,
+.encounter-roster-name,
+.encounter-roster-side,
+.encounter-roster-hp,
+.encounter-roster-hidden {
   display: block;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
@@ -856,28 +861,20 @@
 
 .encounter-hp-fill { display: block; }
 
-.encounter-nameplate {
+.encounter-creature-badge {
   display: flex;
-  flex-direction: column;
   box-sizing: border-box;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  padding: 1px;
-  border: 1px solid #5c6578;
-  background: rgb(13 15 20 / 88%);
+  border: 2px solid #0d0f14;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #eef0f5;
 }
 
-.encounter-nameplate-stem {
+.encounter-creature-bust-ring {
   display: block;
-}
-
-/* Snapshot plates occupy only their own cell. Lift the bust so its face and
-   silhouette remain readable above the compact plate. */
-.encounter-board[data-board-snapshot='true'] .encounter-token-sprite,
-.encounter-board[data-board-snapshot='true'] .encounter-token-overlay {
-  transform: translateY(-7px) scale(0.84);
-  transform-origin: 50% 0;
+  box-sizing: border-box;
+  border-radius: 50%;
 }
 
 .encounter-legend {
@@ -887,7 +884,7 @@
   box-sizing: border-box;
   align-content: flex-start;
   gap: 6px 14px;
-  overflow: hidden;
+  overflow: visible;
   padding: 6px 8px;
   border: 2px solid #3a4152;
   background: #1b1f29;
@@ -948,6 +945,36 @@
   flex: 0 0 auto;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+}
+
+.encounter-roster-box {
+  display: flex;
+  flex: 1 0 100%;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+  border-top: 2px solid #3a4152;
+}
+
+.encounter-roster-entry {
+  display: grid;
+  grid-template-columns: 26px 18px max-content max-content max-content max-content;
+  gap: 8px;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 3px;
+  border: 1px solid #3a4152;
+  background: #0d0f14;
+}
+
+.encounter-roster-swatch {
+  display: block;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #0d0f14;
+  outline: 1px solid #eef0f5;
+  border-radius: 50%;
 }
 
 /* --- DM chrome: slate ground, 2 px pixel bevels, uppercase mono headings -- */
@@ -1106,11 +1133,6 @@
   display: block;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-}
-
-.encounter-nameplate-tagged {
-  flex-direction: column;
-  gap: 4px;
 }
 
 .encounter-legend-art .encounter-legend-swatch {

@@ -135,6 +135,8 @@ describe('D519 screenshot comprehension fact sheet', () => {
     expect(sheet.combatants).toEqual([
       {
         displayName: 'screenshot-hero',
+        badgeNumber: 1,
+        badgeColor: 'scarlet',
         cell: { column: 1, row: 1 },
         side: 'party',
         hpBand: 'uninjured',
@@ -143,13 +145,17 @@ describe('D519 screenshot comprehension fact sheet', () => {
       },
       {
         displayName: 'screenshot-foe',
+        badgeNumber: 2,
+        badgeColor: 'orange',
         cell: { column: 2, row: 2 },
         side: 'foe',
-        hpBand: 'critical',
+        hpBand: 'near_death',
         life: 'dying',
         hiddenFromPlayers: true,
       },
     ]);
+    expect(new Set(sheet.combatants.map((combatant) => combatant.badgeNumber)).size).toBe(sheet.combatants.length);
+    expect(new Set(sheet.combatants.map((combatant) => combatant.badgeColor)).size).toBe(sheet.combatants.length);
     expect(cells(sheet.difficultTerrainCells)).toEqual(['0,1']);
     expect(cells(sheet.obscuredCells)).toEqual(['3,1']);
     expect(cells(sheet.foggedCells)).toEqual(['4,3']);
@@ -286,17 +292,18 @@ describe('D524 general screenshot primer', () => {
     const primerPrompt = screenshotQuestionPrompt('Q1', 'general');
     expect(primerPrompt).toContain(`General primer ${PRIMER_VERSION}: ${GENERAL_PRIMER}`);
     expect(primerPrompt).toContain('Each grid square represents 5 feet');
-    expect(primerPrompt).toContain('Cool-blue base plates identify party creatures');
-    expect(primerPrompt).toContain('warm-red base plates identify foes');
-    expect(primerPrompt).toContain('A name plate is a label, not a position');
-    expect(primerPrompt).toContain('creature stands in the cell its leader touches');
+    expect(primerPrompt).toContain('Cool-blue base rings identify party creatures');
+    expect(primerPrompt).toContain('warm-red base rings identify foes');
+    expect(primerPrompt).toContain('Each creature token carries a numbered coloured badge');
+    expect(primerPrompt).toContain('roster box under the board lists the full name, side and HP band');
+    expect(primerPrompt).toContain('A creature stands in the cell that holds its badge');
     expect(primerPrompt).toContain('An OBJECT-sigil tag in the legend rail names an object');
     expect(primerPrompt).toContain('coordinate printed on that tag is the cell where the object stands');
     expect(primerPrompt).toContain('top-left cell, whose column and row are both zero');
     expect(primerPrompt).toContain('columns increase rightward and rows increase downward');
     expect(primerPrompt).toContain('share an edge or a corner, so diagonals count');
     expect(primerPrompt).toContain('Doors are drawn only where the engine has a door');
-    expect(primerPrompt).toContain('Bars under tokens show hit-point bands');
+    expect(primerPrompt).toContain('green for uninjured, amber for bloodied, red for near death, and grey for unknown');
     expect(primerPrompt).toContain('Difficult, Obscured, Bright light, Dim light, Darkness, and Fog');
     expect(primerPrompt).toContain('Blocked, Object, and Light source');
     expect(primerPrompt).toContain('walls, doors, and objects as they are drawn');
@@ -320,7 +327,7 @@ describe('D524 general screenshot primer', () => {
   });
 
   it('D525: appends the light sentence per mode plus one sentence per glyph family under full, chosen by --board-glyphs, defaulting to none', () => {
-    expect(PRIMER_VERSION).toBe('d525-general-board-primer-v5');
+    expect(PRIMER_VERSION).toBe('d533-general-board-primer-v6');
     expect(BOARD_GLYPH_PRIMER.none).toEqual([LIGHT_PRIMER.tint]);
     expect(BOARD_GLYPH_PRIMER.light).toEqual([LIGHT_PRIMER.glyph]);
     expect(BOARD_GLYPH_PRIMER.full).toEqual([
@@ -420,6 +427,19 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       const sheet = deriveScreenshotFactSheet(everyClassState());
       const rows = (['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10'] as const).map((question) => {
         const truth = truthAnswer(sheet, question);
+        const savedTruth = truth.question === 'Q3'
+          ? {
+              ...truth,
+              creatures: truth.creatures.map((creature) => ({
+                ...creature,
+                hpBand: creature.hpBand === 'bloodied'
+                  ? 'injured'
+                  : creature.hpBand === 'near_death'
+                    ? 'critical'
+                    : creature.hpBand,
+              })),
+            }
+          : truth;
         const raw = question === 'Q1'
           ? {
               ...truth,
@@ -434,7 +454,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
                   }))
                 : [],
             }
-          : truth;
+          : savedTruth;
         return {
           version: 'd525-screenshot-comprehension-row-v5',
           stateId: 'saved-state',
@@ -453,7 +473,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
           confusions: ['old normalizer'],
           wallMs: 12,
           tokens: null,
-          truth,
+          truth: savedTruth,
           answer: null,
           normalizedAnswer: null,
           rawAnswer: JSON.stringify(raw),
@@ -466,12 +486,14 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       const rescored = await rescoreScreenshotProbe(config);
       expect(rescored).toHaveLength(10);
       expect(rescored.every((row) => row.score === 1)).toBe(true);
-      expect(rescored.every((row) => row.version === 'd529-screenshot-comprehension-row-v6')).toBe(true);
+      expect(rescored.every((row) => row.version === 'd533-screenshot-comprehension-row-v7')).toBe(true);
       expect(rescored.every((row) => row.resultKind === 'rescored')).toBe(true);
       expect(rescored.every((row) => row.normaliserVersion === NORMALISER_VERSION)).toBe(true);
       expect(rescored.every((row) => row.sourceFileSha256 === createHash('sha256').update(savedBytes).digest('hex'))).toBe(true);
       expect(rescored[0]?.normalizedAnswer).toEqual(truthAnswer(sheet, 'Q1'));
+      expect(rescored.find((row) => row.question === 'Q3')?.normalizedAnswer).toEqual(truthAnswer(sheet, 'Q3'));
       expect(await readFile(config.summaryPath, 'utf8')).toContain('RESCORED ESTIMATE (image unchanged)');
+      expect(await readFile(config.summaryPath, 'utf8')).toContain('uninjured / bloodied / near_death / unknown');
       expect(renderProbeSummary(rescored)).toContain('RESCORED ESTIMATE (image unchanged)');
       expect(strictProbeGate(rescored)).toBe(false);
       await expect(rescoreScreenshotProbe(config)).rejects.toThrow();
@@ -549,7 +571,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       expect(rows.every((row) => row.primerVersion === PRIMER_VERSION)).toBe(true);
       expect(rows.every((row) => row.generation === 'g2-classic-general')).toBe(true);
       expect(rows.every((row) => row.boardGlyphs === 'full')).toBe(true);
-      expect(rows.every((row) => row.version === 'd529-screenshot-comprehension-row-v6')).toBe(true);
+      expect(rows.every((row) => row.version === 'd533-screenshot-comprehension-row-v7')).toBe(true);
       expect(rows.every((row) => row.resultKind === 'generated')).toBe(true);
       expect(rows.every((row) => row.sourceFileSha256 === null)).toBe(true);
       expect(rows.every((row) => row.normaliserVersion === NORMALISER_VERSION)).toBe(true);

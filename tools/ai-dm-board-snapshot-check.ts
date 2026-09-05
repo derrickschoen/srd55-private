@@ -77,8 +77,10 @@ try {
   if (mode === 'benchmark') {
     requireEqual(
       [...new Set(captures.map((artifact) => `${String(artifact.width)}x${String(artifact.height)}`))].sort(),
-      // D516: 64 px cells + 24 px coordinate gutters + 128 px legend band, see boardChromeDimensions().
-      ['1140x1012', '1588x1140'],
+      // D533: 64 px cells + 24 px coordinate gutters + the roster/object-aware
+      // legend height. The fixture inputs independently give 8/7 roster rows
+      // and 7/5 non-door object rows, respectively; see boardChromeDimensions().
+      ['1140x1458', '1588x1502'],
       'captured dimensions',
     );
   }

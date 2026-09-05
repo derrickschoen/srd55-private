@@ -2,7 +2,8 @@ import { canonicalJson } from '../commands/canonical-json';
 import { starterArtCssUrl, starterArtDataUri } from '../assets/starter-art-resolver';
 // ART-SEAM (D516): overlay art families and the DM board chrome.
 import { OVERLAY_ASSETS } from '../assets/art-sets';
-import type { BoardGlyphMode } from '../assets/board-glyphs';
+import { OBJECT_GLYPH, type BoardGlyphMode } from '../assets/board-glyphs';
+import { renderPixelGlyph } from '../assets/pixel-font';
 import { OBJECT_LABEL_STYLE, renderBoardChrome } from './board-chrome';
 import './styles.css';
 import { HumanController, type ControllerRequest } from '../combat/controllers';
@@ -379,6 +380,16 @@ export function renderBoard(
       placed.dataset.blocksLineOfSight = String(object.blocking.lineOfSight);
       placed.dataset.cover = object.blocking.cover;
       placed.dataset.lightClass = object.lightClass;
+      if (art.boardGlyphs === 'full' && object.kind !== 'door' && object.lightClass !== 'light-source') {
+        const rendered = renderPixelGlyph('object', OBJECT_GLYPH.rows, OBJECT_GLYPH.ink, 1, OBJECT_GLYPH.outline);
+        const sigil = element('img', { className: 'encounter-world-object-sigil' });
+        sigil.alt = '';
+        sigil.setAttribute('aria-hidden', 'true');
+        sigil.src = rendered.dataUri;
+        sigil.dataset.objectId = object.id;
+        sigil.setAttribute('style', `width:${String(rendered.cssWidth)}px;height:${String(rendered.cssHeight)}px`);
+        placed.append(sigil);
+      }
       if (!boardSnapshotMode &&
         model.column === object.position.column &&
         model.row === object.position.row

@@ -1,34 +1,43 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from '../../helpers/test-filesystem';
 import { createEncounter, reduceEncounter, type EncounterState } from '../../../src/combat/encounter';
 import { combatantId, worldObjectId } from '../../../src/combat/values';
 import { projectDmView } from '../../../src/combat/visibility';
-import { GLYPH_HEIGHT, LINE_GAP, PIXEL_FONT_GLYPHS, normalizeLabelText } from '../../../src/assets/pixel-font';
+import { normalizeLabelText, renderPixelText } from '../../../src/assets/pixel-font';
+import { neutral } from '../../../src/assets/palette';
 import {
   BOARD_BORDER_PX,
   CHROME_TILE_PX,
   COORDINATE_CONVENTION,
   COORDINATE_GUTTER_PX,
   HP_BANDS,
+  HP_BAR_HEIGHT_PX,
+  HP_BAR_BORDER_PX,
+  HP_BAR_TOP_PX,
+  HP_BAR_WIDTH_PX,
   LEGEND_GAP_PX,
   LEGEND_HEIGHT_PX,
-  NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT,
-  NAMEPLATE_TEXT_SCALE,
-  STEM_INK_HEX,
-  STEM_MIN_PX,
-  STEM_OUTLINE_HEX,
+  CREATURE_BADGE_COLORS,
+  CREATURE_BADGE_HEIGHT_PX,
+  CREATURE_BADGE_LEFT_PX,
+  CREATURE_BADGE_STACK_PITCH_PX,
+  CREATURE_BADGE_TOP_PX,
+  CREATURE_BADGE_WIDTH_PX,
   CREATURE_LABEL_STYLE,
   OBJECT_LABEL_STYLE,
+  assignCreatureBadges,
+  badgeColorDistance,
   boardChromeDimensions,
   hpBandOf,
+  layoutRosterName,
+  legendHeightPx,
   legendEntriesFor,
   lightLegendEntries,
-  nameplateSize,
-  stackLabelOffsets,
-  type NameplateLayout,
   type BoardLabelStyle,
 } from '../../../src/vtt/board-chrome';
-import { BOARD_GLYPH_MODES } from '../../../src/assets/board-glyphs';
+import { BOARD_GLYPH_MODES, CELL_GLYPH_KINDS, CELL_GLYPH_SIZE, cellGlyphOrigin } from '../../../src/assets/board-glyphs';
 import { LIGHT_LEVELS } from '../../../src/assets/light-encoding';
+import { LIGHT_GLYPH_ORIGIN, LIGHT_GLYPH_SIZE } from '../../../src/assets/light-glyphs';
 import { projectEncounterBoard, type BoardGlyphPresence, type EncounterBoardProjectionShape } from '../../../src/vtt/encounter-board';
 import { renderBoard } from '../../../src/vtt/encounter-app';
 import { hitPointKnowledge } from '../../../src/vtt/intel/actor-knowledge';
@@ -46,130 +55,80 @@ function overlaps(a: GeometryRect, b: GeometryRect): boolean {
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
-function expectNoOverlap(plates: readonly NameplateLayout[]): void {
-  for (let i = 0; i < plates.length; i += 1) {
-    for (let j = i + 1; j < plates.length; j += 1) {
-      expect(overlaps(plates[i]!, plates[j]!), `${plates[i]!.displayName} vs ${plates[j]!.displayName}`).toBe(false);
-    }
-  }
-}
+describe('D533 creature badge and roster types', () => {
+  const roster = [
+    { id: combatantId('combatant:a'), name: 'Reference Fighter', kind: 'player_character' as const, position: { column: 2, row: 1 } },
+    { id: combatantId('combatant:b'), name: 'Chronomancy Abomination', kind: 'monster' as const, position: { column: 2, row: 1 } },
+  ];
 
-function expectInsideAnchorCell(plate: NameplateLayout): void {
-  const left = plate.column * CHROME_TILE_PX;
-  const top = plate.row * CHROME_TILE_PX;
-  expect(plate.x, `${plate.displayName} left`).toBeGreaterThanOrEqual(left);
-  expect(plate.x + plate.width, `${plate.displayName} right`).toBeLessThanOrEqual(left + CHROME_TILE_PX);
-  expect(plate.y, `${plate.displayName} top`).toBeGreaterThanOrEqual(top);
-  expect(plate.y + plate.height, `${plate.displayName} bottom`).toBeLessThanOrEqual(top + CHROME_TILE_PX);
-}
-
-describe('stackLabelOffsets never lets two nameplates overlap', () => {
-  const bounds = { columns: 6, rows: 4 };
-
-  it('keeps adjacent long-name plates wholly inside their own cells', () => {
-    const plates = stackLabelOffsets([
-      { id: combatantId('combatant:a'), displayName: 'Reference Fighter', column: 2, row: 1, tag: null },
-      { id: combatantId('combatant:b'), displayName: 'Hobgoblin Warrior Captain', column: 2, row: 2, tag: null },
-      { id: combatantId('combatant:c'), displayName: 'Sabertooth Tiger', column: 3, row: 1, tag: 'HIDDEN' },
-      { id: combatantId('combatant:d'), displayName: 'Wolf', column: 1, row: 1, tag: null },
-      { id: combatantId('combatant:e'), displayName: 'Goblin Warrior', column: 3, row: 2, tag: null },
-    ], bounds);
-    expect(plates).toHaveLength(5);
-    expectNoOverlap(plates);
-    for (const plate of plates) {
-      expectInsideAnchorCell(plate);
-      expect(plate.text.lines.join(' ')).toBe(normalizeLabelText(plate.displayName));
-      expect(plate.anchorCell).toEqual({ column: plate.column, row: plate.row });
-      expect(plate.placement).toBe('inside-token-cell');
-      expect(Math.hypot(
-        plate.stem.token.x - plate.stem.plate.x,
-        plate.stem.token.y - plate.stem.plate.y,
-      )).toBeGreaterThanOrEqual(STEM_MIN_PX);
-      expect(plate.stem.token.x).toBeGreaterThan(plate.column * CHROME_TILE_PX);
-      expect(plate.stem.token.x).toBeLessThan((plate.column + 1) * CHROME_TILE_PX);
-      expect(plate.stem.token.y).toBeGreaterThan(plate.row * CHROME_TILE_PX);
-      expect(plate.stem.token.y).toBeLessThan((plate.row + 1) * CHROME_TILE_PX);
-    }
-    const tiger = plates.find((plate) => plate.displayName === 'Sabertooth Tiger');
-    // A HIDDEN tag adds one compact text line, and the contained placement accounts for it.
-    const untagged = nameplateSize('Sabertooth Tiger', null);
-    const tagged = nameplateSize('Sabertooth Tiger', 'HIDDEN');
-    expect(tagged.height).toBe(untagged.height + (LINE_GAP + GLYPH_HEIGHT) * NAMEPLATE_TEXT_SCALE);
-    expect(tagged.width).toBe(untagged.width);
-    expect(tiger?.height).toBe(tagged.height);
-    expect(nameplateSize('Ox', 'HIDDEN').width).toBeGreaterThan(nameplateSize('Ox', null).width);
+  it('assigns unique closed-palette colours and numbers in stable roster order, including a shared cell', () => {
+    const badges = assignCreatureBadges(roster);
+    expect(badges.map((badge) => badge.number)).toEqual([1, 2]);
+    expect(badges.map((badge) => badge.color)).toEqual(CREATURE_BADGE_COLORS.slice(0, 2));
+    expect(badges.map((badge) => badge.stackIndex)).toEqual([0, 1]);
+    expect(new Set(badges.map((badge) => badge.number)).size).toBe(badges.length);
+    expect(new Set(badges.map((badge) => badge.color.id)).size).toBe(badges.length);
+    expect(assignCreatureBadges(roster)).toEqual(badges);
   });
 
-  it('is a pure function of the input regardless of request order', () => {
-    const requests = [
-      { id: combatantId('combatant:x'), displayName: 'Ancient Red Dragon', column: 0, row: 0, tag: null },
-      { id: combatantId('combatant:y'), displayName: 'Ancient Blue Dragon', column: 1, row: 0, tag: null },
-      { id: combatantId('combatant:z'), displayName: 'Kobold', column: 0, row: 1, tag: null },
+  it('keeps every closed-palette pair numerically distinguishable', () => {
+    expect(CREATURE_BADGE_COLORS).toHaveLength(12);
+    for (let left = 0; left < CREATURE_BADGE_COLORS.length; left += 1) {
+      for (let right = left + 1; right < CREATURE_BADGE_COLORS.length; right += 1) {
+        expect(
+          badgeColorDistance(CREATURE_BADGE_COLORS[left]!, CREATURE_BADGE_COLORS[right]!),
+          `${CREATURE_BADGE_COLORS[left]!.id}/${CREATURE_BADGE_COLORS[right]!.id}`,
+        ).toBeGreaterThanOrEqual(1 / 6);
+      }
+    }
+  });
+
+  it('wraps full 2x roster names without losing glyphs and hyphenates overlong words at a fixed count', () => {
+    const layout = layoutRosterName('Chronomancysupercalifragilistic Hero');
+    expect(layout.lines[0]).toBe('CHRONOMANCYSUPERC-');
+    expect(layout.lines.every((line) => line.length <= 18)).toBe(true);
+    const reconstructed = layout.lines.join(' ').replaceAll('- ', '').replaceAll(' ', '');
+    expect(reconstructed).toBe(normalizeLabelText('Chronomancysupercalifragilistic Hero').replaceAll(' ', ''));
+    const rendered = renderPixelText(layout, neutral(8), 2);
+    expect(rendered.cssWidth).toBe(layout.width * 2);
+    expect(rendered.cssHeight).toBe(layout.height * 2);
+  });
+
+  it('keeps both badge slots disjoint from every corner glyph box and the HP bar', () => {
+    const badges = [0, 1].map((stackIndex): GeometryRect => ({
+      x: CREATURE_BADGE_LEFT_PX,
+      y: CREATURE_BADGE_TOP_PX + stackIndex * CREATURE_BADGE_STACK_PITCH_PX,
+      width: CREATURE_BADGE_WIDTH_PX,
+      height: CREATURE_BADGE_HEIGHT_PX,
+    }));
+    const glyphs = [
+      { x: LIGHT_GLYPH_ORIGIN - 1, y: LIGHT_GLYPH_ORIGIN - 1, width: LIGHT_GLYPH_SIZE + 2, height: LIGHT_GLYPH_SIZE + 2 },
+      ...CELL_GLYPH_KINDS.map((kind) => {
+        const origin = cellGlyphOrigin(kind, CHROME_TILE_PX);
+        return { x: origin.x - 1, y: origin.y - 1, width: CELL_GLYPH_SIZE + 2, height: CELL_GLYPH_SIZE + 2 };
+      }),
     ];
-    const forward = stackLabelOffsets(requests, bounds);
-    const reversed = stackLabelOffsets([...requests].reverse(), bounds);
-    expect(reversed).toEqual(forward);
-    expectNoOverlap(forward);
-  });
-
-  it('contains an exceptionally long plate without dropping any name glyphs', () => {
-    const [plate] = stackLabelOffsets([
-      { id: combatantId('combatant:long'), displayName: 'The Extraordinarily Long Named Abomination', column: 0, row: 0, tag: null },
-    ], { columns: 2, rows: 1 });
-    if (plate === undefined) throw new Error('Long-name plate was not laid out.');
-    expectInsideAnchorCell(plate);
-    expect(plate?.text.lines.join(' ')).toBe('THE EXTRAORDINARILY LONG NAMED ABOMINATION');
-  });
-
-  it('keeps names on one line through the stated character limit and wraps only beyond it', () => {
-    const atLimit = 'A'.repeat(NAMEPLATE_SINGLE_LINE_CHARACTER_LIMIT);
-    const beyondLimit = `${atLimit} B`;
-    expect(nameplateSize(atLimit, null).text.lines).toHaveLength(1);
-    expect(nameplateSize(beyondLimit, null).text.lines).toHaveLength(2);
-  });
-
-  it('anchors every plate and stem to its token cell over 200 seeded random rosters', () => {
-    let randomState = 0x5eed1234;
-    const random = (): number => {
-      randomState = (Math.imul(randomState, 1_664_525) + 1_013_904_223) >>> 0;
-      return randomState / 4_294_967_296;
+    const hp = {
+      x: Math.round((CHROME_TILE_PX - HP_BAR_WIDTH_PX) / 2) - HP_BAR_BORDER_PX,
+      y: HP_BAR_TOP_PX,
+      width: HP_BAR_WIDTH_PX + 2 * HP_BAR_BORDER_PX,
+      height: HP_BAR_HEIGHT_PX + 2 * HP_BAR_BORDER_PX,
     };
-    for (let sample = 0; sample < 200; sample += 1) {
-      const bounds = {
-        columns: 3 + Math.floor(random() * 7),
-        rows: 2 + Math.floor(random() * 6),
-      };
-      const cellCount = bounds.columns * bounds.rows;
-      const rosterSize = 1 + Math.floor(random() * Math.min(10, cellCount));
-      const cells = Array.from({ length: cellCount }, (_, index) => index);
-      for (let index = cells.length - 1; index > 0; index -= 1) {
-        const swap = Math.floor(random() * (index + 1));
-        [cells[index], cells[swap]] = [cells[swap]!, cells[index]!];
-      }
-      const requests = cells.slice(0, rosterSize).map((cell, index) => ({
-        id: combatantId(`combatant:random-${String(sample)}-${String(index)}`),
-        displayName: index % 3 === 0 ? `Long Random Creature ${String(sample)} ${String(index)}` : `Foe ${String(index)}`,
-        column: cell % bounds.columns,
-        row: Math.floor(cell / bounds.columns),
-        tag: index % 5 === 0 ? 'HIDDEN' as const : null,
-      }));
-      const plates = stackLabelOffsets(requests, bounds);
-      expectNoOverlap(plates);
-      for (const plate of plates) {
-        const request = requests.find((entry) => entry.id === plate.id);
-        expect(request).toBeDefined();
-        expect(plate.anchorCell).toEqual({ column: request?.column, row: request?.row });
-        expect(plate.stem.token.x).toBeGreaterThan(plate.anchorCell.column * CHROME_TILE_PX);
-        expect(plate.stem.token.x).toBeLessThan((plate.anchorCell.column + 1) * CHROME_TILE_PX);
-        expect(plate.stem.token.y).toBeGreaterThan(plate.anchorCell.row * CHROME_TILE_PX);
-        expect(plate.stem.token.y).toBeLessThan((plate.anchorCell.row + 1) * CHROME_TILE_PX);
-        expectInsideAnchorCell(plate);
-        expect(Math.hypot(
-          plate.stem.token.x - plate.stem.plate.x,
-          plate.stem.token.y - plate.stem.plate.y,
-        )).toBeGreaterThanOrEqual(STEM_MIN_PX);
-      }
+    for (const badge of badges) {
+      for (const [index, glyph] of glyphs.entries()) expect(overlaps(badge, glyph), `badge vs glyph ${String(index)}`).toBe(false);
+      expect(overlaps(badge, hp), 'badge vs HP bar').toBe(false);
     }
+  });
+
+  it('refuses to reuse a palette colour or overfill a two-badge cell column', () => {
+    const tooMany = Array.from({ length: CREATURE_BADGE_COLORS.length + 1 }, (_, index) => ({
+      id: combatantId(`combatant:palette-${String(index)}`), name: `Foe ${String(index)}`,
+      kind: 'monster' as const, position: { column: index, row: 0 },
+    }));
+    expect(() => assignCreatureBadges(tooMany)).toThrow('closed creature-badge palette');
+    expect(() => assignCreatureBadges([...roster, {
+      id: combatantId('combatant:c'), name: 'Third', kind: 'monster' as const, position: { column: 2, row: 1 },
+    }])).toThrow('2-badge column');
   });
 });
 
@@ -247,17 +206,6 @@ function withoutChrome(node: Serialized): Serialized {
   return { ...node, children: node.children.filter((child) => !CHROME_CLASSES.has(child.className)) };
 }
 
-function fullNameRectCount(name: string): number {
-  return Array.from(normalizeLabelText(name)).reduce((total, character) => {
-    const rows = PIXEL_FONT_GLYPHS.get(character) ?? PIXEL_FONT_GLYPHS.get('?') ?? [];
-    return total + rows.reduce((runs, row) => runs + (row.match(/#+/gu)?.length ?? 0), 0);
-  }, 0);
-}
-
-function rectCountOf(dataUri: string): number {
-  return decodeURIComponent(dataUri.slice('data:image/svg+xml;charset=utf-8,'.length)).split('<rect ').length - 1;
-}
-
 function inlinePixels(node: InteractiveTestElement, property: string): number {
   const match = node.getAttribute('style')?.match(new RegExp(`(?:^|;)${property}:(-?[0-9.]+)px(?:;|$)`, 'u'));
   if (match?.[1] === undefined) throw new Error(`${node.className} has no ${property} pixel style.`);
@@ -268,37 +216,6 @@ function numericData(node: InteractiveTestElement, attribute: string): number {
   const value = node.getAttribute(attribute);
   if (value === null) throw new Error(`${node.className} has no ${attribute}.`);
   return Number(value);
-}
-
-function pointInside(point: { readonly x: number; readonly y: number }, rect: GeometryRect): boolean {
-  return point.x > rect.x && point.x < rect.x + rect.width && point.y > rect.y && point.y < rect.y + rect.height;
-}
-
-function segmentCrossesRect(
-  start: { readonly x: number; readonly y: number },
-  end: { readonly x: number; readonly y: number },
-  rect: GeometryRect,
-): boolean {
-  if (pointInside(start, rect) || pointInside(end, rect)) return true;
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  let enter = 0;
-  let exit = 1;
-  for (const [p, q] of [
-    [-dx, start.x - rect.x],
-    [dx, rect.x + rect.width - start.x],
-    [-dy, start.y - rect.y],
-    [dy, rect.y + rect.height - start.y],
-  ] as const) {
-    if (p === 0) {
-      if (q <= 0) return false;
-      continue;
-    }
-    const ratio = q / p;
-    if (p < 0) enter = Math.max(enter, ratio);
-    else exit = Math.min(exit, ratio);
-  }
-  return enter < exit && exit > 0 && enter < 1;
 }
 
 describe('renderBoard: DM board with chrome, player board without', () => {
@@ -347,29 +264,41 @@ describe('renderBoard: DM board with chrome, player board without', () => {
   };
   const provenance = { revision: 3, round: 1, stateDigest: 'digest-under-test' };
 
-  it('draws every full display name, coordinates, HP bands and a legend on the DM board only', () => {
+  it('draws one unique badge and one full-name roster row per creature in stable number order', () => {
     const dm = interactiveElement(renderBoard(projection, new Set(), null, provenance));
     expect(dm.getAttribute('data-board-chrome')).toBe('on');
     expect(dm.getAttribute('data-coordinate-labels')).toBe(COORDINATE_CONVENTION);
 
-    const plates = dm.querySelectorAll('.encounter-nameplate');
-    expect(plates).toHaveLength(projection.combatants.length);
-    for (const combatant of projection.combatants) {
-      const plate = plates.find((candidate) => candidate.getAttribute('data-combatant-id') === combatant.id);
-      expect(plate?.getAttribute('data-display-name')).toBe(combatant.name);
-      expect(plate?.getAttribute('data-label-style')).toBe(CREATURE_LABEL_STYLE);
-      expect(plate?.getAttribute('data-anchor-column')).toBe(String(combatant.position.column));
-      expect(plate?.getAttribute('data-anchor-row')).toBe(String(combatant.position.row));
-      const text = plate?.querySelector('.encounter-nameplate-text') as StyledElement | null;
-      expect(text?.src, combatant.name).toBeDefined();
-      expect(rectCountOf(text?.src ?? ''), `${combatant.name} is drawn in full`).toBe(fullNameRectCount(combatant.name));
+    const badges = dm.querySelectorAll('.encounter-creature-badge');
+    const roster = dm.querySelectorAll('.encounter-roster-entry');
+    expect(badges).toHaveLength(projection.combatants.length);
+    expect(roster).toHaveLength(projection.combatants.length);
+    expect(dm.querySelectorAll('.encounter-nameplate')).toHaveLength(0);
+    expect(roster.map((row) => row.getAttribute('data-roster-order'))).toEqual(['1', '2', '3', '4']);
+    expect(new Set(badges.map((badge) => badge.getAttribute('data-badge-number'))).size).toBe(badges.length);
+    expect(new Set(badges.map((badge) => badge.getAttribute('data-badge-color'))).size).toBe(badges.length);
+    for (const [index, combatant] of projection.combatants.entries()) {
+      const badge = badges.find((candidate) => candidate.getAttribute('data-combatant-id') === combatant.id);
+      const row = roster.find((candidate) => candidate.getAttribute('data-combatant-id') === combatant.id);
+      expect(badge?.getAttribute('data-anchor-column')).toBe(String(combatant.position.column));
+      expect(badge?.getAttribute('data-anchor-row')).toBe(String(combatant.position.row));
+      expect(badge?.getAttribute('data-badge-number')).toBe(String(index + 1));
+      expect(row?.getAttribute('data-badge-number')).toBe(String(index + 1));
+      expect(row?.getAttribute('data-badge-color')).toBe(badge?.getAttribute('data-badge-color'));
+      expect(row?.getAttribute('data-full-name')).toBe(combatant.name);
+      expect(row?.getAttribute('data-label-style')).toBe(CREATURE_LABEL_STYLE);
+      const name = row?.querySelector('.encounter-roster-name') as StyledElement | null;
+      const expectedName = renderPixelText(layoutRosterName(combatant.name), neutral(8), 2);
+      expect(name?.src, combatant.name).toBe(expectedName.dataUri);
+      expect(name?.getAttribute('style')).toBe(`width:${String(expectedName.cssWidth)}px;height:${String(expectedName.cssHeight)}px`);
       const bar = dm.querySelectorAll('.encounter-hp-bar').find((candidate) => candidate.getAttribute('data-combatant-id') === combatant.id);
       expect(bar?.getAttribute('data-hp-band')).toBe(hpBandOf(combatant.hitPointBand));
       const glyph = dm.querySelectorAll('.encounter-life-glyph').find((candidate) => candidate.getAttribute('data-combatant-id') === combatant.id);
       expect(glyph?.getAttribute('data-life')).toBe(combatant.life);
     }
+    expect(roster.map((row) => row.getAttribute('data-full-name'))).toEqual(projection.combatants.map((combatant) => combatant.name));
     expect(dm.querySelectorAll('.encounter-hidden-ring').map((ring) => ring.getAttribute('data-combatant-id'))).toEqual(['combatant:training-brute']);
-    expect(dm.querySelectorAll('.encounter-nameplate-stem')).toHaveLength(projection.combatants.length);
+    expect(dm.querySelectorAll('.encounter-roster-hidden')).toHaveLength(1);
 
     const labels = dm.querySelector('[data-coordinate-labels]');
     expect(labels?.querySelectorAll('[data-axis="column"]')).toHaveLength(projection.bounds.columns * 2);
@@ -377,7 +306,7 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     // The reference room names no light region, so every cell is bright and the default mode is 'none'.
     const legend = dm.querySelector('[data-legend]');
     // D525: the band is a minimum so a narrow board's rows are never clipped.
-    expect(legend?.getAttribute('style')).toContain(`min-height:${String(LEGEND_HEIGHT_PX)}px`);
+    expect(legend?.getAttribute('style')).toContain(`min-height:${String(legendHeightPx({ combatants: projection.combatants, objects: projection.worldObjects ?? [] }))}px`);
     expect(legend?.getAttribute('style')).not.toMatch(/(?:^|;)height:/u);
     expect(legend?.getAttribute('data-board-glyphs')).toBe('none');
     expect(legend?.getAttribute('data-room-default-light')).toBe('bright');
@@ -385,21 +314,34 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     expect(legend?.querySelectorAll('.encounter-legend-item').map((item) => item.getAttribute('data-legend-key'))).toEqual(noneEntries.map((entry) => entry.key));
     for (const band of HP_BANDS) expect(noneEntries.some((entry) => entry.key === `hp-${band.replaceAll('_', '-')}`)).toBe(true);
     expect(noneEntries.map((entry) => entry.label)).toContain('Bright light');
-    // under 'none' no plate carries a tag and no eye-slash mark is drawn, hidden creature or not
-    expect(dm.querySelectorAll('.encounter-nameplate-tag')).toHaveLength(0);
+    // under 'none' no eye-slash cell mark is drawn; the roster still says HIDDEN
     expect(dm.querySelectorAll('.encounter-hidden-glyph')).toHaveLength(0);
-    expect(dm.querySelectorAll('.encounter-nameplate').every((plate) => plate.getAttribute('data-tag') === null)).toBe(true);
   });
 
-  it('moves snapshot object labels to an unclipped pixel-tag rail with the legend OBJECT sigil', () => {
+  it('keeps eight non-door objects in an unclipped growing rail, excludes doors, and stamps the crate sigil in cells', () => {
     const styles: readonly BoardLabelStyle[] = [CREATURE_LABEL_STYLE, OBJECT_LABEL_STYLE];
     expect(new Set(styles).size).toBe(2);
-    const liveDm = interactiveElement(renderBoard(projection, new Set(), null, provenance));
+    const objects = Array.from({ length: 8 }, (_, index) => ({
+      id: worldObjectId(`world-object:crate-${String(index)}`),
+      name: `Crate ${String(index + 1)}`,
+      kind: 'generic' as const,
+      position: { column: index, row: 1 },
+      cells: [{ column: index, row: 1 }],
+      blocking: { movement: false, lineOfSight: false, cover: 'none' as const },
+      lightClass: 'none' as const,
+    }));
+    const door = {
+      id: worldObjectId('world-object:rail-door'), name: 'Rail Door', kind: 'door' as const,
+      position: { column: 9, row: 1 }, cells: [{ column: 9, row: 1 }],
+      blocking: { movement: true, lineOfSight: true, cover: 'total' as const }, lightClass: 'none' as const,
+    };
+    const objectProjection = { ...projection, worldObjects: [...objects, door] };
+    const liveDm = interactiveElement(renderBoard(objectProjection, new Set(), null, provenance));
     const liveObjectLabel = liveDm.querySelector('.encounter-world-object-label');
     expect(liveObjectLabel?.getAttribute('data-label-style')).toBe(OBJECT_LABEL_STYLE);
 
-    const snapshotDm = interactiveElement(renderBoard(projection, new Set(), null, provenance, 'full', true));
-    const creaturePlate = snapshotDm.querySelector('.encounter-nameplate');
+    const snapshotDm = interactiveElement(renderBoard(objectProjection, new Set(), null, provenance, 'full', true));
+    const creatureRow = snapshotDm.querySelector('.encounter-roster-entry');
     const objectTag = snapshotDm.querySelector('.encounter-object-tag');
     const objectSigil = objectTag?.querySelector('.encounter-object-tag-sigil') as StyledElement | null;
     const legendSigil = snapshotDm.querySelector('[data-legend-key="object"]')
@@ -407,16 +349,25 @@ describe('renderBoard: DM board with chrome, player board without', () => {
     const objectText = objectTag?.querySelector('.encounter-object-tag-text');
     expect(snapshotDm.querySelector('.encounter-world-object-label')).toBeNull();
     expect(objectTag?.getAttribute('data-label-style')).toBe(OBJECT_LABEL_STYLE);
-    expect(objectTag?.getAttribute('data-anchor-column')).toBe('4');
+    expect(objectTag?.getAttribute('data-anchor-column')).toBe('0');
     expect(objectTag?.getAttribute('data-anchor-row')).toBe('1');
-    expect(objectText?.getAttribute('data-full-label')).toBe('Runed Brazier (4,1)');
+    expect(objectText?.getAttribute('data-full-label')).toBe('Crate 1 (0,1)');
     expect(objectSigil?.src).toBe(legendSigil?.src);
     expect(objectTag?.parentElement?.className).toBe('encounter-object-tag-rail');
-    expect(creaturePlate?.getAttribute('data-label-style')).toBe(CREATURE_LABEL_STYLE);
-    expect(objectTag?.getAttribute('data-label-style')).not.toBe(creaturePlate?.getAttribute('data-label-style'));
+    expect(creatureRow?.getAttribute('data-label-style')).toBe(CREATURE_LABEL_STYLE);
+    expect(objectTag?.getAttribute('data-label-style')).not.toBe(creatureRow?.getAttribute('data-label-style'));
+    expect(snapshotDm.querySelectorAll('.encounter-object-tag')).toHaveLength(8);
+    expect(snapshotDm.querySelectorAll('.encounter-object-tag').some((tag) => tag.getAttribute('data-object-id') === door.id)).toBe(false);
+    expect(snapshotDm.querySelectorAll('.encounter-world-object-sigil')).toHaveLength(8);
+    const expectedLegendHeight = legendHeightPx({ combatants: projection.combatants, objects: objectProjection.worldObjects });
+    expect(snapshotDm.querySelector('.encounter-legend')?.getAttribute('style')).toContain(`min-height:${String(expectedLegendHeight)}px`);
+    expect(boardChromeDimensions(projection.bounds, {
+      combatants: projection.combatants,
+      objects: objectProjection.worldObjects,
+    }).height).toBe(boardChromeDimensions(projection.bounds).height + expectedLegendHeight - LEGEND_HEIGHT_PX);
   });
 
-  it('renders 200 seeded rosters with outlined stems under every plate and no cross-cell plate coverage', () => {
+  it('renders exact 2x roster bitmaps and unique in-cell badges over 200 seeded rosters', () => {
     let randomState = 0x5eed1234;
     const random = (): number => {
       randomState = (Math.imul(randomState, 1_664_525) + 1_013_904_223) >>> 0;
@@ -447,28 +398,21 @@ describe('renderBoard: DM board with chrome, player board without', () => {
         adjudicatedTargets: [],
         worldObjects: [],
       }, new Set(), null, provenance, 'full', true));
-      const chrome = board.querySelector('.encounter-token-chrome');
-      if (chrome === null) throw new Error('Rendered board has no token chrome.');
-      const leaders = chrome.querySelector('.encounter-nameplate-leaders');
-      const plateLayer = chrome.querySelector('.encounter-nameplate-plates');
-      if (leaders === null || plateLayer === null) throw new Error('Rendered chrome lost its plate layers.');
-      expect(chrome.children.indexOf(leaders), `sample ${String(sample)} leader layer`).toBeLessThan(chrome.children.indexOf(plateLayer));
-      const plates = plateLayer.querySelectorAll('.encounter-nameplate');
-      const stems = leaders.querySelectorAll('.encounter-nameplate-stem');
-      expect(plates).toHaveLength(combatants.length);
-      expect(stems).toHaveLength(combatants.length);
-      const plateRects = new Map(plates.map((plate) => [plate.getAttribute('data-combatant-id'), {
-        x: inlinePixels(plate, 'left'),
-        y: inlinePixels(plate, 'top'),
-        width: inlinePixels(plate, 'width'),
-        height: inlinePixels(plate, 'height'),
-      }] as const));
-      for (const plate of plates) {
-        const id = plate.getAttribute('data-combatant-id');
-        const rect = plateRects.get(id);
-        if (id === null || rect === undefined) throw new Error('Rendered plate has no geometry identity.');
-        const column = numericData(plate, 'data-anchor-column');
-        const row = numericData(plate, 'data-anchor-row');
+      const badges = board.querySelectorAll('.encounter-creature-badge');
+      const rosterRows = board.querySelectorAll('.encounter-roster-entry');
+      expect(badges).toHaveLength(combatants.length);
+      expect(rosterRows).toHaveLength(combatants.length);
+      expect(new Set(badges.map((badge) => badge.getAttribute('data-badge-number'))).size).toBe(combatants.length);
+      expect(new Set(badges.map((badge) => badge.getAttribute('data-badge-color'))).size).toBe(combatants.length);
+      for (const badge of badges) {
+        const id = badge.getAttribute('data-combatant-id');
+        if (id === null) throw new Error('Rendered badge has no combatant identity.');
+        const column = numericData(badge, 'data-anchor-column');
+        const row = numericData(badge, 'data-anchor-row');
+        const rect = {
+          x: inlinePixels(badge, 'left'), y: inlinePixels(badge, 'top'),
+          width: inlinePixels(badge, 'width'), height: inlinePixels(badge, 'height'),
+        };
         const cellRect = {
           x: COORDINATE_GUTTER_PX + column * CHROME_TILE_PX,
           y: COORDINATE_GUTTER_PX + row * CHROME_TILE_PX,
@@ -479,44 +423,91 @@ describe('renderBoard: DM board with chrome, player board without', () => {
         expect(rect.y).toBeGreaterThanOrEqual(cellRect.y);
         expect(rect.x + rect.width).toBeLessThanOrEqual(cellRect.x + cellRect.width);
         expect(rect.y + rect.height).toBeLessThanOrEqual(cellRect.y + cellRect.height);
-        for (let otherRow = 0; otherRow < bounds.rows; otherRow += 1) {
-          for (let otherColumn = 0; otherColumn < bounds.columns; otherColumn += 1) {
-            if (otherColumn === column && otherRow === row) continue;
-            const otherCell = {
-              x: COORDINATE_GUTTER_PX + otherColumn * CHROME_TILE_PX,
-              y: COORDINATE_GUTTER_PX + otherRow * CHROME_TILE_PX,
-              width: CHROME_TILE_PX,
-              height: CHROME_TILE_PX,
-            };
-            expect(overlaps(rect, otherCell), `${id} covers cell ${String(otherColumn)},${String(otherRow)}`).toBe(false);
-          }
-        }
+        const hpRect = {
+          x: cellRect.x + Math.round((CHROME_TILE_PX - HP_BAR_WIDTH_PX) / 2) - 1,
+          y: cellRect.y + HP_BAR_TOP_PX,
+          width: HP_BAR_WIDTH_PX + 2,
+          height: HP_BAR_HEIGHT_PX + 2,
+        };
+        expect(overlaps(rect, hpRect), `${id} badge overlaps HP bar`).toBe(false);
       }
-      for (const stem of stems) {
-        const id = stem.getAttribute('data-combatant-id');
-        const anchor = combatants.find((combatant) => combatant.id === id)?.position;
-        if (id === null || anchor === undefined) throw new Error('Rendered stem has no anchor combatant.');
-        const start = {
-          x: COORDINATE_GUTTER_PX + numericData(stem, 'data-plate-x'),
-          y: COORDINATE_GUTTER_PX + numericData(stem, 'data-plate-y'),
-        };
-        const end = {
-          x: COORDINATE_GUTTER_PX + numericData(stem, 'data-token-x'),
-          y: COORDINATE_GUTTER_PX + numericData(stem, 'data-token-y'),
-        };
-        expect(inlinePixels(stem, 'width'), `${id} rendered length`).toBeGreaterThanOrEqual(STEM_MIN_PX);
-        expect(stem.getAttribute('style')).toContain(`background:${STEM_INK_HEX}`);
-        expect(stem.getAttribute('style')).toContain(`box-shadow:0 0 0 1px ${STEM_OUTLINE_HEX}`);
-        expect(end.x).toBeGreaterThan(COORDINATE_GUTTER_PX + anchor.column * CHROME_TILE_PX);
-        expect(end.x).toBeLessThan(COORDINATE_GUTTER_PX + (anchor.column + 1) * CHROME_TILE_PX);
-        expect(end.y).toBeGreaterThan(COORDINATE_GUTTER_PX + anchor.row * CHROME_TILE_PX);
-        expect(end.y).toBeLessThan(COORDINATE_GUTTER_PX + (anchor.row + 1) * CHROME_TILE_PX);
-        for (const [otherId, rect] of plateRects) {
-          if (otherId === id) continue;
-          expect(segmentCrossesRect(start, end, rect), `${id} stem crosses ${otherId ?? '<unknown>'}`).toBe(false);
-        }
+      for (const [index, row] of rosterRows.entries()) {
+        const combatant = combatants[index];
+        if (combatant === undefined) throw new Error('Roster row exceeds its source roster.');
+        expect(row.getAttribute('data-full-name')).toBe(combatant.name);
+        expect(row.getAttribute('data-roster-order')).toBe(String(index + 1));
+        const image = row.querySelector('.encounter-roster-name') as StyledElement | null;
+        const expected = renderPixelText(layoutRosterName(combatant.name), neutral(8), 2);
+        expect(image?.src, `sample ${String(sample)} ${combatant.name}`).toBe(expected.dataUri);
+        expect(image?.getAttribute('style')).toBe(`width:${String(expected.cssWidth)}px;height:${String(expected.cssHeight)}px`);
       }
     }
+  });
+
+  it('stacks two same-cell badges in number order without overlap', () => {
+    const shared = {
+      ...projection,
+      combatants: projection.combatants.slice(0, 2).map((combatant) => ({
+        ...combatant,
+        position: { column: 3, row: 2 },
+      })),
+    };
+    const board = interactiveElement(renderBoard(shared, new Set(), null, provenance, 'full', true));
+    const badges = board.querySelectorAll('.encounter-creature-badge');
+    expect(badges.map((badge) => [badge.getAttribute('data-badge-number'), badge.getAttribute('data-stack-index')]))
+      .toEqual([['1', '0'], ['2', '1']]);
+    const rects = badges.map((badge) => ({
+      x: inlinePixels(badge, 'left'), y: inlinePixels(badge, 'top'),
+      width: inlinePixels(badge, 'width'), height: inlinePixels(badge, 'height'),
+    }));
+    expect(overlaps(rects[0]!, rects[1]!)).toBe(false);
+    expect(inlinePixels(badges[0]!, 'left')).toBe(COORDINATE_GUTTER_PX + 3 * CHROME_TILE_PX + CREATURE_BADGE_LEFT_PX);
+    expect(inlinePixels(badges[1]!, 'top') - inlinePixels(badges[0]!, 'top')).toBe(CREATURE_BADGE_STACK_PITCH_PX);
+  });
+
+  it('uses identical bust and badge composition in live and snapshot DM modes', () => {
+    const live = interactiveElement(renderBoard(projection, new Set(), null, provenance, 'full', false));
+    const snapshot = interactiveElement(renderBoard(projection, new Set(), null, provenance, 'full', true));
+    expect(live.querySelectorAll('.encounter-token-sprite').map(serialize))
+      .toEqual(snapshot.querySelectorAll('.encounter-token-sprite').map(serialize));
+    expect(live.querySelectorAll('.encounter-creature-badge').map(serialize))
+      .toEqual(snapshot.querySelectorAll('.encounter-creature-badge').map(serialize));
+    expect(live.querySelectorAll('.encounter-nameplate')).toHaveLength(0);
+    expect(snapshot.querySelectorAll('.encounter-nameplate')).toHaveLength(0);
+  });
+
+  it('contains no non-integer CSS scale in declarations targeting rendered board elements', () => {
+    const boardStyles = readFileSync(new URL('../../../src/vtt/styles.css', import.meta.url), 'utf8');
+    const board = interactiveElement(renderBoard(projection, new Set(), null, provenance, 'full', true));
+    const renderedClasses = new Set<string>();
+    const visit = (node: InteractiveTestElement): void => {
+      for (const className of node.className.split(/\s+/u).filter((value) => value !== '')) {
+        renderedClasses.add(className);
+      }
+      for (const child of node.children) visit(child);
+    };
+    visit(board);
+    const applicableScales = [...boardStyles.matchAll(/([^{}]+)\{([^{}]*)\}/gu)].flatMap((rule) => {
+      const selector = rule[1] ?? '';
+      const declarations = rule[2] ?? '';
+      const selectorClasses = [...selector.matchAll(/\.([a-z][a-z0-9-]*)/gu)]
+        .flatMap((match) => match[1] === undefined ? [] : [match[1]]);
+      const targetsRenderedBoardElement = selectorClasses.length > 0 &&
+        selectorClasses.every((className) => renderedClasses.has(className));
+      if (!targetsRenderedBoardElement) return [];
+      return [...declarations.matchAll(/scale\(\s*(-?[0-9]+(?:\.[0-9]+)?)\s*\)/gu)].map((match) => ({
+        selector: selector.trim(),
+        value: Number(match[1]),
+      }));
+    });
+    expect(
+      applicableScales.filter(({ value }) => !Number.isInteger(value)),
+      JSON.stringify(applicableScales),
+    ).toEqual([]);
+    const everyDeclaredScale = [...boardStyles.matchAll(/scale\(\s*(-?[0-9]+(?:\.[0-9]+)?)\s*\)/gu)]
+      .map((match) => Number(match[1]));
+    expect(everyDeclaredScale.filter((value) => !Number.isInteger(value)), everyDeclaredScale.join(','))
+      .toEqual([]);
   });
 
   it("D525: 'none' and 'light' keep the D516 rows and swap only the light rows; the glyph modes add the room default", () => {

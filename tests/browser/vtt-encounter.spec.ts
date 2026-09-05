@@ -51,7 +51,43 @@ test('DM loads the bundled D365 dungeon and RPC-authored party into room 1', asy
   await expect(
     page.locator('.encounter-token[data-kind="monster"]', { hasText: 'Wolf' }),
   ).toHaveCount(2);
-  await expect(page.locator('.encounter-board')).toBeVisible();
+  const board = page.locator('.encounter-board');
+  await expect(board).toBeVisible();
+  await expect(board.locator('.encounter-nameplate')).toHaveCount(0);
+  await expect(board.locator('.encounter-creature-badge')).toHaveCount(9);
+  await expect(board.locator('.encounter-roster-entry')).toHaveCount(9);
+  const rosterContract = await board.evaluate((element) => {
+    const badges = Array.from(element.querySelectorAll<HTMLElement>('.encounter-creature-badge'));
+    const roster = Array.from(element.querySelectorAll<HTMLElement>('.encounter-roster-entry'));
+    const names = roster.map((row) => row.dataset.fullName ?? '');
+    return {
+      badgeNumbers: badges.map((badge) => badge.dataset.badgeNumber ?? ''),
+      badgeColors: badges.map((badge) => badge.dataset.badgeColor ?? ''),
+      rosterNumbers: roster.map((row) => row.dataset.badgeNumber ?? ''),
+      rosterNames: names,
+      rosterOrders: roster.map((row) => row.dataset.rosterOrder ?? ''),
+      rosterNameBitmapWidths: roster.map((row) => {
+        const image = row.querySelector<HTMLImageElement>('.encounter-roster-name');
+        return image === null ? null : [image.width, image.naturalWidth];
+      }),
+      bustBitmapBoxes: Array.from(element.querySelectorAll<HTMLImageElement>('.encounter-token-sprite'))
+        .map((image) => [image.getBoundingClientRect().width, image.naturalWidth]),
+    };
+  });
+  expect(rosterContract.badgeNumbers).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+  expect(rosterContract.badgeNumbers).toEqual(rosterContract.rosterNumbers);
+  expect(rosterContract.rosterOrders).toEqual(rosterContract.rosterNumbers);
+  expect(new Set(rosterContract.badgeColors).size).toBe(9);
+  expect(rosterContract.rosterNames).toEqual([
+    'Mirel Ash', 'Orin Reed', 'Brann Vale', 'Sera Dawn', 'Tamsin Quill',
+    'Goblin Warrior', 'Goblin Warrior', 'Wolf', 'Wolf',
+  ]);
+  for (const dimensions of rosterContract.rosterNameBitmapWidths) {
+    expect(dimensions).not.toBeNull();
+    expect(dimensions?.[0]).toBe(dimensions?.[1]);
+  }
+  expect(rosterContract.bustBitmapBoxes).toHaveLength(9);
+  expect(rosterContract.bustBitmapBoxes.every(([rendered, bitmap]) => rendered === 64 && bitmap === 64)).toBe(true);
 });
 
 test('DM composes stored builder characters and each PC defaults to human control', async ({

@@ -255,7 +255,7 @@ const tacticalOption = z.object({
   risks: z.array(risk).max(50), expectation: expectation.nullable(), refusals: z.array(refusal).max(20),
 }).strict();
 const actorStatus = z.object({
-  life: z.enum(['living', 'dying', 'stable', 'dead']), hit_point_band: z.enum(['uninjured', 'injured', 'critical', 'unknown']),
+  life: z.enum(['living', 'dying', 'stable', 'dead']), hit_point_band: z.enum(['uninjured', 'bloodied', 'near_death', 'unknown']),
   movement_feet: z.number().int().min(0), action_available: z.boolean(), bonus_action_available: z.boolean(), reaction_available: z.boolean(),
   effect_tags: z.array(identifier).max(100), pending_decision_ids: z.array(identifier).max(50),
 }).strict();
