@@ -88,7 +88,8 @@ describe('AI-DM R1-10 rerun packet', () => {
       .map((row, index) => ({
         ...row,
         boardImage: {
-          mode: 'png', sha256: 'a'.repeat(64), bytes: 96, width: 1, height: 1,
+          mode: index === 0 ? 'png' : 'capture_only',
+          sha256: 'a'.repeat(64), bytes: 96, width: 1, height: 1,
           captureMs: 1, relativePath: `board-images/${'a'.repeat(64)}.png`,
         },
         uiFeedback: index === 0 ? feedback : null,
@@ -99,6 +100,10 @@ describe('AI-DM R1-10 rerun packet', () => {
     expect(visible?.boardImage).toEqual(expect.objectContaining({
       mode: 'png', relativePath: `board-images/${'a'.repeat(64)}.png`,
     }));
+    expect(result.packet.entries.find((entry) => entry.boardImage?.mode === 'capture_only')?.boardImage)
+      .toEqual(expect.objectContaining({
+        mode: 'capture_only', relativePath: `board-images/${'a'.repeat(64)}.png`,
+      }));
   });
 
   it('builds the exact blinded packet and separate answer key from hand-built arena rows', () => {

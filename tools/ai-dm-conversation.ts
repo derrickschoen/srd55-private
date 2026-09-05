@@ -202,7 +202,7 @@ const INITIAL_COORDINATOR_STATE: PersistedCoordinatorState = {
 };
 const RULES_SOURCE = { get: () => null } as const;
 
-export const BOARD_IMAGE_MODES = ['off', 'png'] as const;
+export const BOARD_IMAGE_MODES = ['off', 'png', 'capture_only'] as const;
 export type BoardImageMode = (typeof BOARD_IMAGE_MODES)[number];
 
 export interface ConversationBoardSnapshotService {
@@ -486,8 +486,18 @@ export type ConversationBoardImage =
       readonly height: number;
       readonly captureMs: number;
       readonly relativePath: `board-images/${string}.png`;
+    }
+  | {
+      readonly mode: 'capture_only';
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly width: number;
+      readonly height: number;
+      readonly captureMs: number;
+      readonly relativePath: `board-images/${string}.png`;
     };
 
+export const BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION = 'Each grid square on the board image is 5 feet; distances in the text are in feet.';
 export const UI_FEEDBACK_STARTUP_INSTRUCTION = 'After an accepted round decision, you may call engine.submit_ui_feedback once to report how useful the board picture was. This optional feedback is never scored and never affects the encounter.';
 
 export interface ConversationBoardImageEvidence {
@@ -615,7 +625,7 @@ export type ConversationBoardImageFields =
       readonly boardImageEvidence: null;
     }
   | {
-      readonly boardImage: Extract<ConversationBoardImage, { readonly mode: 'png' }>;
+      readonly boardImage: Exclude<ConversationBoardImage, { readonly mode: 'off' }>;
       readonly boardImageEvidence: ConversationBoardImageEvidence;
     };
 
@@ -875,7 +885,7 @@ export function parseConversationArgs(argv: readonly string[], cwd = process.cwd
     : DEFAULT_RENDERER_PROFILE;
   const boardImageMode = values.get('--board-image') ?? 'off';
   if (!BOARD_IMAGE_MODES.includes(boardImageMode as BoardImageMode)) {
-    throw new TypeError('--board-image must be off or png.');
+    throw new TypeError('--board-image must be off, png, or capture_only.');
   }
   if (boardImageMode === 'png' && selectedCli === 'local-openai') {
     throw new TypeError('--board-image png requires an MCP-backed CLI.');
@@ -2911,7 +2921,7 @@ async function runConversationWithConfiguredIntel(
   const partyPolicy = options.partyPolicyOverride ?? config.partyPolicy;
   const knowledgeBase = await loadKnowledgeBase(config);
   const startupInstructions = config.boardImageMode === 'png'
-    ? `${knowledgeBase.startupInstructions}\n\n${UI_FEEDBACK_STARTUP_INSTRUCTION}`
+    ? `${knowledgeBase.startupInstructions}\n\n${BOARD_IMAGE_SCALE_STARTUP_INSTRUCTION}\n${UI_FEEDBACK_STARTUP_INSTRUCTION}`
     : knowledgeBase.startupInstructions;
   const freshSessionContext: FreshSessionContext = {
     knowledgeBaseBundleHash: knowledgeBase.combinedStartupHash,
@@ -3128,11 +3138,12 @@ async function runConversationWithConfiguredIntel(
         ? { kind: 'tool_driven' } as const
         : await structuredFinalOutput(config.decisionTransport, artifacts, `${key}-initial`, initialDecisionCatalog);
       let boardImageArtifact: BoardImageArtifact | null = null;
+      let boardImagePrimaryDispatchStartedAtUnixMs: number | null = null;
       let boardImageBinding: EngineMcpBoardImageBinding | undefined;
-      if (config.boardImageMode === 'png') {
+      if (config.boardImageMode !== 'off') {
         const snapshotService = options.boardSnapshotService;
         if (snapshotService === undefined) {
-          throw new Error('PNG board-image mode requires a live arena-scoped snapshot service.');
+          throw new Error('Capturing board-image modes require a live arena-scoped snapshot service.');
         }
         const source: BoardImageSource = {
           room,
@@ -3141,19 +3152,21 @@ async function runConversationWithConfiguredIntel(
           stateDigest: boardStateDigest(rendererState),
         };
         boardImageArtifact = await snapshotService.capture({ state: rendererState, source });
-        const primaryDispatchStartedAtUnixMs = Date.now();
+        boardImagePrimaryDispatchStartedAtUnixMs = Date.now();
         await readValidatedBoardImage({
           artifact: boardImageArtifact,
           artifactRoot: snapshotService.outputDirectory,
           state: rendererState,
           source,
-          primaryDispatchStartedAtUnixMs,
+          primaryDispatchStartedAtUnixMs: boardImagePrimaryDispatchStartedAtUnixMs,
         });
-        boardImageBinding = {
-          artifactRoot: snapshotService.outputDirectory,
-          artifact: boardImageArtifact,
-          primaryDispatchStartedAtUnixMs,
-        };
+        if (config.boardImageMode === 'png') {
+          boardImageBinding = {
+            artifactRoot: snapshotService.outputDirectory,
+            artifact: boardImageArtifact,
+            primaryDispatchStartedAtUnixMs: boardImagePrimaryDispatchStartedAtUnixMs,
+          };
+        }
       }
       const initialLauncher = await writeLauncher({
         rendererProfile: config.rendererProfile,
@@ -5077,11 +5090,11 @@ async function runConversationWithConfiguredIntel(
       }
       const boardImageFields: ConversationBoardImageFields = config.boardImageMode === 'off'
         ? { boardImage: { mode: 'off' }, boardImageEvidence: null }
-        : boardImageArtifact === null || boardImageBinding === undefined
-          ? (() => { throw new Error('PNG row cannot persist without a validated board artifact.'); })()
+        : boardImageArtifact === null || boardImagePrimaryDispatchStartedAtUnixMs === null
+          ? (() => { throw new Error('Capturing board-image row cannot persist without a validated board artifact.'); })()
           : {
               boardImage: {
-                mode: 'png',
+                mode: config.boardImageMode,
                 sha256: boardImageArtifact.sha256,
                 bytes: boardImageArtifact.bytes,
                 width: boardImageArtifact.width,
@@ -5091,7 +5104,7 @@ async function runConversationWithConfiguredIntel(
               },
               boardImageEvidence: {
                 capturedAtUnixMs: boardImageArtifact.capturedAtUnixMs,
-                primaryDispatchStartedAtUnixMs: boardImageBinding.primaryDispatchStartedAtUnixMs,
+                primaryDispatchStartedAtUnixMs: boardImagePrimaryDispatchStartedAtUnixMs,
                 source: { ...boardImageArtifact.source },
                 chromiumVersion: boardImageArtifact.chromiumVersion,
               },
@@ -5232,7 +5245,7 @@ export async function runConversation(
   process.env[environmentKey] = config.intelMode;
   let ownedSnapshotService: ConversationBoardSnapshotService | null = null;
   try {
-    if (config.boardImageMode === 'png' && options.boardSnapshotService === undefined) {
+    if (config.boardImageMode !== 'off' && options.boardSnapshotService === undefined) {
       const outputDirectory = boardImageOutputDirectory(config);
       ownedSnapshotService = options.boardSnapshotServiceFactory === undefined
         ? await BoardSnapshotService.start({ outputDirectory })
