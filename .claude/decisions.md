@@ -11088,3 +11088,13 @@ Round 4 dispatched to codex with all six. Verdicts archived and the seat-yield l
 ISO BASELINE PROBE (2026-09-05 14:38, Luna medium, 24 states, iso view with NO coordinate labels or legend, D527):
 identity 0.41 · side 0.31 · HP 0.29 · difficult 0.27 · light 0.52 (2,044 bright read as dim) · adjacency 0.41 ·
 hidden 0.71 · fog 0.38 · blocked 0.13 — the "before" picture for the iso lane, which stays paused (D531).
+
+FOOTPRINTS INC5 COMMITTED (2026-09-05 14:43): 17f86232 on claude/footprints — the plan's final verification pass:
+51-file consumer inventory with every anchor-only spatial consumer fixed (attacks, spells, auras, reactions,
+hiding, hazards, fog, perception, summons, teleports, forced movement, adjudication, generated rooms, MCP, board),
+serialized register exact (session 11, replay 6, capsule 2), independent migration/capsule corpora, and the
+carried coverage gap closed: the awaiting_placement guard is asserted over the whole EncounterCommand union.
+Codex: tsc 0, command outcomes 0, locked full suite 563/9725, locked build 0, schema regenerated with an empty
+diff, mutation killed. Mine: scan clean, frozen sha, tsc 0, sg 0, focused 35/35; my mutation ('end_turn'
+exempted from the guard) killed both guard tests. Full landing gate (browser suite) started 14:43; lands on main
+on green. The iso view still draws engine_1x1 (D511) — the iso lane is paused (D531).
