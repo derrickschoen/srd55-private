@@ -66,10 +66,14 @@ import {
 import type { QueuedSpeculativePlanEnvelope } from '../src/vtt/speculative-plan-types';
 import { mcpRequestMeta } from '../src/vtt/mcp/handler';
 import {
-  createEngineMcpRuntime, loadArenaFixture,
+  createEngineMcpRuntime, engineMcpUiFeedbackSpoolPath, loadArenaFixture,
   type EngineMcpBoardImageBinding,
   type EngineMcpLauncherManifest,
 } from '../src/vtt/mcp/entrypoint';
+import {
+  engineUiFeedbackSchema,
+  type EngineUiFeedback,
+} from '../src/vtt/mcp/schemas';
 import {
   BoardSnapshotService,
   boardStateDigest,
@@ -484,6 +488,8 @@ export type ConversationBoardImage =
       readonly relativePath: `board-images/${string}.png`;
     };
 
+export const UI_FEEDBACK_STARTUP_INSTRUCTION = 'After an accepted round decision, you may call engine.submit_ui_feedback once to report how useful the board picture was. This optional feedback is never scored and never affects the encounter.';
+
 export interface ConversationBoardImageEvidence {
   readonly capturedAtUnixMs: number;
   readonly primaryDispatchStartedAtUnixMs: number;
@@ -511,6 +517,7 @@ interface ConversationRowBase {
   readonly model: string;
   readonly effort: ConversationEffort;
   readonly escalationEffort: ConversationEffort | null;
+  readonly uiFeedback: EngineUiFeedback | null;
   readonly thinkMode: LocalThinkMode | null;
   readonly contextRevision: number;
   readonly projectionRevision: number;
@@ -1728,6 +1735,17 @@ function takeTurnContext(path: string): CapturedTurnContext | null {
   return raw === undefined ? null : capturedTurnContext(raw);
 }
 
+function takeUiFeedback(path: string | null): EngineUiFeedback | null {
+  if (path === null) return null;
+  let source: string;
+  try { source = readFileSync(path, 'utf8'); } catch { return null; }
+  const entries = source.split('\n').filter((line) => line.trim().length > 0);
+  if (entries.length > 1) throw new TypeError('UI feedback spool contains more than one report for a round.');
+  const encoded = entries[0];
+  if (encoded === undefined) return null;
+  return engineUiFeedbackSchema.parse(JSON.parse(encoded) as unknown);
+}
+
 async function driveScriptedMcp(
   cwd: string,
   launcherPath: string,
@@ -1951,6 +1969,24 @@ async function driveScriptedMcp(
     calls += 1;
     if (submitResult === null || submitResult['isError'] !== false) {
       throw new Error('engine.submit_round_proposals failed in the SIMULATED client.');
+    }
+    const submitted = asRecord(submitResult['structuredContent']);
+    if (manifest.boardImage !== undefined && submitted?.['status'] === 'proposed') {
+      const feedbackResult = asRecord(await mcpRequest(client, 'tools/call', {
+        name: 'engine.submit_ui_feedback',
+        arguments: {
+          readability: 4,
+          what_helped: ['The board picture made positions and nearby obstacles easy to compare.'],
+          what_confused: [],
+          missing: [],
+          suggestion: 'Keep the board picture aligned with the same round context.',
+        },
+      }));
+      calls += 1;
+      if (feedbackResult === null || feedbackResult['isError'] !== false ||
+        asRecord(feedbackResult['structuredContent'])?.['status'] !== 'recorded') {
+        throw new Error('engine.submit_ui_feedback failed in the SIMULATED client.');
+      }
     }
     return {
       calls,
@@ -2287,15 +2323,20 @@ async function writeLauncher(input: {
   readonly recoveryManifestPath: string;
   readonly spoolPath: string;
   readonly turnContextSpoolPath: string;
+  readonly uiFeedbackSpoolPath: string | null;
 }> {
   const fixturePath = join(input.directory, `${input.name}-fixture.json`);
   const spoolPath = join(input.directory, `${input.name}-proposals.jsonl`);
   const turnContextSpoolPath = join(input.directory, `${input.name}-turn-context.jsonl`);
   const manifestPath = join(input.directory, `${input.name}-launcher.json`);
   const recoveryManifestPath = join(input.directory, `${input.name}-launcher-full.json`);
+  const uiFeedbackSpoolPath = input.boardImage === undefined
+    ? null
+    : engineMcpUiFeedbackSpoolPath(spoolPath);
   await writeFile(fixturePath, input.snapshot.fixtureJson, 'utf8');
   await writeFile(spoolPath, '', 'utf8');
   await writeFile(turnContextSpoolPath, '', 'utf8');
+  if (uiFeedbackSpoolPath !== null) await writeFile(uiFeedbackSpoolPath, '', 'utf8');
   const capsule = input.snapshot.capsule;
   const request = capsule.request;
   if (request === null) throw new Error('Conversation launcher requires a pending request.');
@@ -2344,7 +2385,7 @@ async function writeLauncher(input: {
   await writeFile(manifestPath, canonicalJson(manifest), 'utf8');
   const { turnContextDeltaBase: _turnContextDeltaBase, ...fullManifest } = manifest;
   await writeFile(recoveryManifestPath, canonicalJson(fullManifest), 'utf8');
-  return { manifestPath, recoveryManifestPath, spoolPath, turnContextSpoolPath };
+  return { manifestPath, recoveryManifestPath, spoolPath, turnContextSpoolPath, uiFeedbackSpoolPath };
 }
 
 function fullTurnContextBase(
@@ -2869,9 +2910,12 @@ async function runConversationWithConfiguredIntel(
 ): Promise<ConversationRunResult> {
   const partyPolicy = options.partyPolicyOverride ?? config.partyPolicy;
   const knowledgeBase = await loadKnowledgeBase(config);
+  const startupInstructions = config.boardImageMode === 'png'
+    ? `${knowledgeBase.startupInstructions}\n\n${UI_FEEDBACK_STARTUP_INSTRUCTION}`
+    : knowledgeBase.startupInstructions;
   const freshSessionContext: FreshSessionContext = {
     knowledgeBaseBundleHash: knowledgeBase.combinedStartupHash,
-    startupInstructions: knowledgeBase.startupInstructions,
+    startupInstructions,
   };
   const repoCommit = await readRepoCommit(config.cwd);
   await writeFile(config.outPath, '', 'utf8');
@@ -3205,6 +3249,8 @@ async function runConversationWithConfiguredIntel(
       let escalationSessionId: string | null = null;
       let capturedRlData: ConversationRlData | undefined;
       let correctionTurnContextSpoolPath: string | null = null;
+      let correctionUiFeedbackSpoolPath: string | null = null;
+      let uiFeedback: EngineUiFeedback | null = null;
       let recordedCorrectionTurnContext: CapturedTurnContext | null = null;
       let initialCalls = 0;
       let adjustmentCalls = 0;
@@ -3343,7 +3389,7 @@ async function runConversationWithConfiguredIntel(
                 'speculate_round', sourceSnapshot.capsule, RULES_SOURCE, undefined, speculativeContext,
               ),
               launcher.manifestPath,
-              knowledgeBase.startupInstructions,
+              startupInstructions,
               planner,
               launcher.recoveryManifestPath,
               toolSession,
@@ -3813,7 +3859,7 @@ async function runConversationWithConfiguredIntel(
         const completedCorrectionProposal = recordedAdjustmentCorrectionProposal();
         if (config.captureRlData && adjustmentProposal?.submittedArguments !== undefined) {
           adjustmentRlData.push(rlCapture(
-            knowledgeBase.startupInstructions,
+            startupInstructions,
             adjustmentTurnContext,
             adjustmentProposal,
             config.intelMode,
@@ -3832,7 +3878,7 @@ async function runConversationWithConfiguredIntel(
           completedCorrectionProposal?.submittedArguments !== undefined &&
           adjustmentCorrectionContext !== null) {
           adjustmentRlData.push(rlCapture(
-            knowledgeBase.startupInstructions,
+            startupInstructions,
             adjustmentCorrectionContext,
             completedCorrectionProposal,
             config.intelMode,
@@ -3938,7 +3984,7 @@ async function runConversationWithConfiguredIntel(
                 ? `${retryNote}${turnContextPrompt(lastSeenTurnContext, config.intelMode)}\n\n${primaryPrompt}`
                 : primaryPrompt,
               initialLauncher.manifestPath,
-              journal.agentSession() === null ? knowledgeBase.startupInstructions : null,
+              journal.agentSession() === null ? startupInstructions : null,
               basePlanner,
               initialLauncher.recoveryManifestPath,
               initialToolSession,
@@ -4080,6 +4126,7 @@ async function runConversationWithConfiguredIntel(
           ...(boardImageBinding === undefined ? {} : { boardImage: boardImageBinding }),
         });
         correctionTurnContextSpoolPath = correctionLauncher.turnContextSpoolPath;
+        correctionUiFeedbackSpoolPath = correctionLauncher.uiFeedbackSpoolPath;
         let localCorrectionProposal: RoundTurnProposalEnvelope | null = null;
         const correctionToolSession = config.cli === 'local-openai'
           ? inProcessDmToolSession({
@@ -4140,7 +4187,7 @@ async function runConversationWithConfiguredIntel(
               : null;
             const proposalRlData = proposalTurnContext === null
               ? undefined
-              : rlCapture(knowledgeBase.startupInstructions, proposalTurnContext, proposal, config.intelMode, {
+              : rlCapture(startupInstructions, proposalTurnContext, proposal, config.intelMode, {
                   repoCommit,
                   model: config.model,
                   effort: config.effort,
@@ -4545,7 +4592,7 @@ async function runConversationWithConfiguredIntel(
               ...(exhaustionIntelCapture === null ? {} : { intelCapture: exhaustionIntelCapture }),
             };
             capturedRlData = rlCapture(
-              knowledgeBase.startupInstructions,
+              startupInstructions,
               recordedCorrectionTurnContext ?? getPlannedCorrectionTurnContext(),
               syntheticProposal,
               config.intelMode,
@@ -4961,6 +5008,8 @@ async function runConversationWithConfiguredIntel(
         recordedCorrectionTurnContext = takeTurnContext(correctionTurnContextSpoolPath) ??
           recordedCorrectionTurnContext;
       }
+      uiFeedback = takeUiFeedback(correctionUiFeedbackSpoolPath) ??
+        takeUiFeedback(initialLauncher.uiFeedbackSpoolPath);
       const recordedMonsterProposals = acceptedSubmission ??
         (segmentMonsterPlan.size === 0
           ? null
@@ -5063,6 +5112,7 @@ async function runConversationWithConfiguredIntel(
         room, round, cli: config.cli, model: config.model,
         effort: config.effort,
         escalationEffort: config.escalationEffort,
+        uiFeedback,
         ...boardImageFields,
         thinkMode: config.localOpenAi?.thinkMode ?? null,
         contextRevision, projectionRevision: capsuleRevision,

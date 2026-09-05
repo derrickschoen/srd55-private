@@ -76,6 +76,31 @@ function registeredRows(): JsonRecord[] {
 }
 
 describe('AI-DM R1-10 rerun packet', () => {
+  it('carries UI feedback beside its board image into the judge packet', () => {
+    const feedback = {
+      readability: 3,
+      what_helped: ['Visible spacing'],
+      what_confused: ['Overlapping labels'],
+      missing: [],
+      suggestion: 'Increase label contrast.',
+    } as const;
+    const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl')
+      .map((row, index) => ({
+        ...row,
+        boardImage: {
+          mode: 'png', sha256: 'a'.repeat(64), bytes: 96, width: 1, height: 1,
+          captureMs: 1, relativePath: `board-images/${'a'.repeat(64)}.png`,
+        },
+        uiFeedback: index === 0 ? feedback : null,
+      }));
+    const result = buildRerunPacket(rows, 1, tinyProtocol);
+    const visible = result.packet.entries.find((entry) => entry.uiFeedback !== null);
+    expect(visible?.uiFeedback).toEqual(feedback);
+    expect(visible?.boardImage).toEqual(expect.objectContaining({
+      mode: 'png', relativePath: `board-images/${'a'.repeat(64)}.png`,
+    }));
+  });
+
   it('builds the exact blinded packet and separate answer key from hand-built arena rows', () => {
     const rows = rowsFromFixture('tests/fixtures/ai-dm-rerun/paired-tiny.SIMULATED.jsonl')
       .map((row, index) => index !== 0 ? row : {

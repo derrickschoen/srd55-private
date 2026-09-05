@@ -75,6 +75,15 @@ const decisionReason = z.string().min(1).max(240).refine((value) => value.trim()
   .describe('One short sentence explaining why this option was chosen.');
 const roundRationale = z.string().min(1).max(600).refine((value) => value.trim().length > 0, 'Rationale cannot be blank.')
   .describe('Optional round-level rationale retained outside blinded judging packets.');
+const uiFeedbackText = z.string().max(280);
+export const engineUiFeedbackSchema = z.object({
+  readability: z.number().int().min(1).max(5),
+  what_helped: z.array(uiFeedbackText).max(5),
+  what_confused: z.array(uiFeedbackText).max(5),
+  missing: z.array(uiFeedbackText).max(5),
+  suggestion: uiFeedbackText,
+}).strict();
+export type EngineUiFeedback = z.infer<typeof engineUiFeedbackSchema>;
 const overrideJustification = z.discriminatedUnion('kind', [
   z.object({
     kind: z.enum(SIMPLE_OVERRIDE_JUSTIFICATION_KINDS),
@@ -905,6 +914,13 @@ const singleOutput = z.union([
 ]);
 const narrationOutput = z.object({ status: z.literal('queued'), narration_id: identifier, state_ref: stateRef, warnings: z.array(summaryText).max(20) }).strict();
 const adjudicationOutput = z.object({ status: z.literal('requested'), adjudication_request_id: identifier, state_ref: stateRef }).strict();
+const uiFeedbackOutput = z.union([
+  z.object({ status: z.literal('recorded') }).strict(),
+  z.object({
+    status: z.literal('rule_error'),
+    code: z.enum(['UI_FEEDBACK_DECISION_NOT_ACCEPTED', 'UI_FEEDBACK_ALREADY_SUBMITTED']),
+  }).strict(),
+]);
 
 const refInput = { state_ref: stateRef };
 const phaseProposalInput = z.object({ ...refInput, request_id: identifier, phase: z.enum(['initial', 'correction']), proposal: turnProposal }).strict();
@@ -1136,6 +1152,7 @@ export const ENGINE_TOOL_SPECS: readonly EngineToolSpec[] = Object.freeze([
   spec('engine.query_dice_expectation', 'Compare bounded analytic outcomes without consuming RNG.', z.object({ ...refInput, candidates: z.array(z.object({ candidate_id: z.string().min(1).max(100), actor_id: identifier, choice: actionChoice, movement: movementPreference.optional(), engagement: engagement.optional() }).strict()).min(1).max(20), include_distribution: z.boolean().optional() }).strict(), diceOutput),
   spec('engine.validate_proposal', 'Purely validate and preview one revision-bound composite option proposal.', phaseProposalInput, validateOutput),
   spec('engine.submit_round_proposals', 'Queue the round; include one short sentence per actor saying why this option. Minimal input: { proposals, rationale?, reaction_guidance? }; the launcher fills state_ref, request_id, phase, and a deterministic idempotency_key from this turn binding. The full explicit envelope { state_ref, request_id, phase, idempotency_key, proposals, rationale?, reaction_guidance? } is also accepted. One ACCEPTED submission per round; a call rejected for invalid arguments is not queued — fix it and call again.', submitRoundInput, roundOutput, true),
+  spec('engine.submit_ui_feedback', 'After an accepted round decision, optionally record one unscored report about the board image. Feedback never affects the encounter.', engineUiFeedbackSchema, uiFeedbackOutput, true),
   spec('engine.submit_plan_adjustment', 'Validate and queue a bounded patch over the remaining open monster plan.', submitPlanAdjustmentInput, adjustmentOutput, true),
   spec('engine.submit_speculative_round_plan', 'Structurally validate and queue one host-guarded contingent monster-round plan.', submitSpeculativeRoundPlanInput, speculativeRoundPlanOutput, true),
   spec('engine.submit_proposal', 'Validate and queue one separately controlled seat proposal.', submitProposalInput, singleOutput, true),

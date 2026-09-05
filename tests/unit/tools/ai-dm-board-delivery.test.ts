@@ -29,6 +29,7 @@ import {
 import {
   parseConversationArgs,
   runConversation,
+  UI_FEEDBACK_STARTUP_INSTRUCTION,
   type ConversationBoardSnapshotService,
 } from '../../../tools/ai-dm-conversation';
 import type {
@@ -263,6 +264,7 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     expect(service.captures[1]?.source.stateDigest).not.toBe(service.captures[0]?.source.stateDigest);
     expect(result.rows.map((row) => row.boardImage.mode)).toEqual(['png', 'png']);
     expect(result.rows.every((row) => row.effort === 'low' && row.escalationEffort === null)).toBe(true);
+    expect(result.rows.every((row) => row.uiFeedback === null)).toBe(true);
     expect(result.rows.every((row) => row.endToEndWall >= row.timeToFirstAction)).toBe(true);
     expect(result.rows.every((row) => row.boardImageEvidence !== null &&
       row.boardImageEvidence.capturedAtUnixMs <= row.boardImageEvidence.primaryDispatchStartedAtUnixMs)).toBe(true);
@@ -311,6 +313,29 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     expect(service.closed).toBe(true);
   });
 
+  it('persists simulated image feedback and gives judges the feedback beside the image', { timeout: 60_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'board-image-feedback-'));
+    const service = new FakeSnapshotService();
+    const invocations: AgentInvocation[] = [];
+    const rows = await runArena(parseArenaArgs([
+      '--rooms', '1', '--reps', '1', '--seed', '3943001', '--out', join(directory, 'rows.jsonl'),
+      '--dry-run', '--board-image', 'png', '--effort', 'low', '--initiative-profile', 'derived_v1',
+    ]), {
+      boardSnapshotServiceFactory: async () => service,
+      onPrimaryInvocation: (invocation) => { invocations.push(structuredClone(invocation)); },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.uiFeedback).toEqual({
+      readability: 4,
+      what_helped: ['The board picture made positions and nearby obstacles easy to compare.'],
+      what_confused: [],
+      missing: [],
+      suggestion: 'Keep the board picture aligned with the same round context.',
+    });
+    expect(invocations[0]?.instructions?.split(UI_FEEDBACK_STARTUP_INSTRUCTION)).toHaveLength(2);
+    expect(service.closed).toBe(true);
+  });
+
   it('image_flag_off_changes_prompt_bytes preserves the committed raw context and all invocation bytes', { timeout: 60_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'board-image-off-invariance-'));
     const invocations = new Map<string, AgentInvocation[]>();
@@ -354,6 +379,22 @@ describe('arena capture lifecycle and off-arm invariance', () => {
     const offMcpResult = record(record(offResponse, 'off MCP response')['result'], 'off MCP result');
     expect(offMcpResult['content']).toEqual([{ type: 'text', text: '{"exact":"structured"}' }]);
     expect(offMcpResult['structuredContent']).toEqual({ exact: 'structured' });
+  });
+
+  it('ui_feedback_offered_in_off_arm keeps the off-arm tool manifest byte-identical', () => {
+    const state = generateRoom(3_943_006).encounter.state;
+    const implicitOff = createEngineMcpRuntime(state, { toolProfile: 'dm' });
+    const explicitOff = createEngineMcpRuntime(state, { toolProfile: 'dm' });
+    const offBytes = canonicalJson(implicitOff.toolSurface.tools);
+    expect(canonicalJson(explicitOff.toolSurface.tools)).toBe(offBytes);
+    expect(offBytes).not.toContain('engine.submit_ui_feedback');
+
+    const png = dimensionedPng('feedback-tool');
+    const image = createEngineMcpRuntime(state, {
+      toolProfile: 'dm',
+      boardImageContent: { type: 'image', mimeType: 'image/png', data: png.toString('base64') },
+    });
+    expect(image.toolSurface.tools.map(({ name }) => name)).toContain('engine.submit_ui_feedback');
   });
 });
 

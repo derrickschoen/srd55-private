@@ -49,6 +49,7 @@ import {
 } from './engine-server';
 import { jsonRpcParseError, type JsonRpcResponse, type McpHandler } from './handler';
 import type { McpImageContentBlock } from './handler';
+import { engineUiFeedbackSchema, type EngineUiFeedback } from './schemas';
 import {
   decodeKbReadRecords,
   isKbSubjectSources,
@@ -148,6 +149,39 @@ export interface EngineMcpRuntime {
   readonly speculativePlans: readonly QueuedSpeculativePlanEnvelope[];
   readonly narrations: readonly NarrationEnvelope[];
   readonly adjudications: readonly AdjudicationEnvelope[];
+  readonly uiFeedback: readonly EngineUiFeedback[];
+}
+
+export function engineMcpUiFeedbackSpoolPath(proposalSpoolPath: string): string {
+  return `${proposalSpoolPath}.ui-feedback.jsonl`;
+}
+
+function nonemptySpoolLines(path: string): readonly string[] {
+  try {
+    return readFileSync(path, 'utf8').split('\n').filter((line) => line.trim().length > 0);
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+function launcherHasAcceptedRoundDecision(manifest: EngineMcpLauncherManifest): boolean {
+  const lines = nonemptySpoolLines(manifest.proposalSpoolPath);
+  for (const line of lines) {
+    const value: unknown = JSON.parse(line);
+    const proposal = record(value, 'proposal spool entry');
+    if (proposal['kind'] !== 'round_turn_proposal' || proposal['requestId'] !== manifest.requestId) {
+      throw new TypeError('Proposal spool contains an entry outside the launcher round binding.');
+    }
+  }
+  return lines.length > 0;
+}
+
+function launcherHasUiFeedback(manifest: EngineMcpLauncherManifest): boolean {
+  const lines = nonemptySpoolLines(engineMcpUiFeedbackSpoolPath(manifest.proposalSpoolPath));
+  if (lines.length > 1) throw new TypeError('UI feedback spool contains more than one report for a round.');
+  if (lines[0] !== undefined) engineUiFeedbackSchema.parse(JSON.parse(lines[0]) as unknown);
+  return lines.length === 1;
 }
 
 export interface EngineMcpBoardImageArtifact {
@@ -249,6 +283,9 @@ export function createEngineMcpRuntime(
     readonly kbReadCallPhase?: KbReadCallPhase;
     readonly overridePolicy?: OverridePolicy;
     readonly boardImageContent?: McpImageContentBlock;
+    readonly onUiFeedback?: (feedback: EngineUiFeedback) => void;
+    readonly roundDecisionAlreadyAccepted?: boolean;
+    readonly uiFeedbackAlreadySubmitted?: boolean;
   } = {},
 ): EngineMcpRuntime {
   const candidates = state.combatants
@@ -344,6 +381,7 @@ export function createEngineMcpRuntime(
   const speculativePlans: QueuedSpeculativePlanEnvelope[] = [];
   const narrations: NarrationEnvelope[] = [];
   const adjudications: AdjudicationEnvelope[] = [];
+  const uiFeedback: EngineUiFeedback[] = [];
   const application = createEngineMcpApplication({
     state: planningState,
     stateSource: feed,
@@ -361,6 +399,16 @@ export function createEngineMcpRuntime(
     } },
     narration: { append: (envelope) => { narrations.push(envelope); } },
     adjudications: { append: (envelope) => { adjudications.push(envelope); } },
+    ...(options.boardImageContent === undefined ? {} : {
+      uiFeedback: {
+        append: (feedback: EngineUiFeedback) => {
+          uiFeedback.push(structuredClone(feedback));
+          options.onUiFeedback?.(structuredClone(feedback));
+        },
+      },
+      roundDecisionAlreadyAccepted: options.roundDecisionAlreadyAccepted ?? false,
+      uiFeedbackAlreadySubmitted: options.uiFeedbackAlreadySubmitted ?? false,
+    }),
     rules: options.rules ?? { get: () => null },
     ...(options.maximumToolResultBytes === undefined ? {} : { maximumToolResultBytes: options.maximumToolResultBytes }),
     ...(options.maximumResourceBytes === undefined ? {} : { maximumResourceBytes: options.maximumResourceBytes }),
@@ -394,6 +442,7 @@ export function createEngineMcpRuntime(
     speculativePlans,
     narrations,
     adjudications,
+    uiFeedback,
   };
 }
 
@@ -671,6 +720,19 @@ export async function runEngineMcpEntrypoint(argv: readonly string[] = process.a
           : manifest.phase === 'correction' ? 'correction' as const : 'initial' as const,
       }),
       ...(boardImageContent === undefined ? {} : { boardImageContent }),
+      ...(boardImageContent === undefined ? {} : {
+        roundDecisionAlreadyAccepted: launcherHasAcceptedRoundDecision(manifest),
+        uiFeedbackAlreadySubmitted: launcherHasUiFeedback(manifest),
+      }),
+      ...(boardImageContent === undefined ? {} : {
+        onUiFeedback: (feedback: EngineUiFeedback) => {
+          appendFileSync(
+            engineMcpUiFeedbackSpoolPath(manifest.proposalSpoolPath),
+            `${JSON.stringify(feedback)}\n`,
+            'utf8',
+          );
+        },
+      }),
       onProposal: (proposal) => {
         appendFileSync(manifest.proposalSpoolPath, `${JSON.stringify(proposal)}\n`, 'utf8');
       },
