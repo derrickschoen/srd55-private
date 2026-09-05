@@ -10307,3 +10307,8 @@ RPG combat board viewed from above; each square is 5 feet; tokens are creatures,
 numbers along the edges are zero-based column,row; bars under tokens are hit-point bands; the legend names the
 terrain tints and glyphs; walls, doors and objects as drawn — and NOTHING about the specific room (no names, counts,
 positions, terrain facts). The primer is versioned with the question set so probe rows say which primer they used.
+
+D525 — OWNER (2026-09-04 21:45): (1) UNSEAL D514 now, labelled generation g1 (the picture Luna could barely read);
+a g2 rerun is a later second generation. (2) NO arena reruns on g2 yet: keep iterating the classic UI with the
+comprehension probe until every class is ≥ 0.9 at Luna low; only then rerun the image experiments. (3) Claude account
+priority: the fable JUDGE seat comes first; Fable art/iso units wait when the account is near its session limit.
