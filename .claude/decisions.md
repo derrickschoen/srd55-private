@@ -10517,3 +10517,86 @@ mutation to renderer.ts in the same worktree while it was running. The gate's vi
 and reported 3 failures that were my mutant's, not the tree's. I discarded that run and reran the gate on the
 restored tree (clean, numbers above). Rule going forward: a mutation and a gate never share a worktree at the same
 time; the gate runs to DONE first, or the mutation runs in the foreground before the gate starts.
+
+ISO REVIEW ROUND 9 (2026-09-05 07:50, codex sol high, read-only, on 3cb15b5f): HOLD — one MAJOR (token picking
+tests only the sprite region; marks and the HP bar are painted in the bundle but not hit-tested), five MINOR
+(partial-alpha pixels through translucentDarkness; plate width measured on the pre-uppercase UTF-16 string; widened
+seed/hex-colour primitives in the toolkit contract; isAppliedCondition validates only the name; obsolete widened
+`frame`). Verified by reading: role closure, opaque-only blocking, the darkness closed form and that its 1–2/channel
+tolerance would not hide the missing denominator, determinism, projection, fit zoom 2. Full text:
+
+FINDINGS
+
+### MAJOR
+
+- [src/vtt/iso/renderer.ts:509] — “Tokens hit on any visible pixel” is not implemented. Picking tests only the sprite region, while rendering paints sprite, marks, and HP bar as one standing bundle at lines 839–852.  
+  Failure: an active token’s chevron is visible above its sprite, but the sprite alpha there is zero; clicking the chevron falls through to a wall, another cell, or nothing instead of selecting the token.  
+  Fix: hit-test the token bundle in reverse internal paint order—HP bar, marks in reverse order, then sprite—and return the token for any alpha greater than zero.
+
+### MINOR
+
+- [src/vtt/iso/renderer.ts:263], [tests/unit/vtt/iso/renderer.test.ts:813] — `translucentDarkness` is exact only when the drawable pixel itself is opaque. The composited-pixel test explicitly skips every partial-alpha pixel.  
+  Failure: at zoom 1 or 3, mip-filtered wall edges have fractional alpha. For source alpha `p=0.5`, face translucency `t=0.35`, and dim-band darkness `a=8/13`, the implementation produces source opacity about `0.184`, versus the intended `t·p=0.175`, with incorrect colour/background coefficients. Those edge pixels become too opaque and too colourful.  
+  Fix: precompose colour and shade into a darkened wall surface, then composite that once at `t`; alternatively generate a per-pixel premultiplied result. Add partial-alpha mip pixels to the test.
+
+- [src/vtt/iso/pixel-art/bitmap.ts:309], [src/vtt/iso/pixel-art/bitmap.ts:423], [src/vtt/iso/scene.ts:992] — plate measurement and rendering use different character sequences. Rendering uppercases and iterates code points; width uses the original UTF-16 length.  
+  Failure: combatant name `Groß` is measured as four characters but rendered as uppercase `GROSS`; the final glyph is clipped. The placeholder kit has the same defect.  
+  Fix: uppercase once and measure the exact code-point sequence that is rendered.
+
+- [src/vtt/iso/contracts.ts:469], [src/vtt/iso/scene.ts:773] — toolkit constraints remain comment-only widened primitives. Palette entries are plain `string`, seeds are plain `number`, and the two implementations disagree about invalid seeds.  
+  Failure: `buildAtlas(1.5)` compiles; the pixel-art implementation throws, while the placeholder silently coerces it to seed `1`. A toolkit with `neutralRamp: ['red']` also compiles and fails only during shade construction.  
+  Fix: introduce validated `AtlasSeed` and hex-colour types in the shared contract, and make both implementations enforce the same construction boundary.
+
+- [src/vtt/iso/view.ts:155] — `isAppliedCondition` validates only the condition name while claiming the full discriminated union.  
+  Failure: `{conditions: [{name: 'Exhaustion'}]}` passes the guard and renders `Exhaustion undefined`; source-bearing conditions likewise pass without `source`.  
+  Fix: validate each variant’s required payload exhaustively, or remove this cross-lane structural shim once the typed projection lands.
+
+### NIT
+
+- [src/vtt/iso/contracts.ts:628], [src/vtt/iso/scene.ts:109] — obsolete `frame` remains a widened `number` despite the renderer using `AnimationTick` separately.  
+  Failure: negative, fractional, or `NaN` frame values compile and survive in `IsoScene`, although they have no rendering meaning.  
+  Fix: remove both fields in this pre-alpha codebase rather than retaining the dead compatibility surface.
+
+## VERIFIED BY READING
+
+- D9 role closure is correct: `wall` and `obstacle` are leaf roles in `TILE_ROLE`; `StandingTileKind` and `STANDING_TILE_KINDS` are derived; there is no parallel `WALL_TILE_KINDS`.
+- Invalid tile-role placement does not type-check. Atlas selections are nominal and couple kind with folded index; atlas lookup rechecks the index against its own table.
+- Nullable canvas handling is explicit: drawable surfaces use a discriminated bytes/canvas union, while name plates permit `canvas: null`.
+- D511/D513 ships as ruled: [src/vtt/iso/scene.ts:107] sets `engine_1x1`, and the view supplies that mode to scene construction, layout, and rendering.
+- `pickStanding` walks the painted standing list in reverse. Non-translucent tiles block only at displayed alpha `255`; translucent near walls are skipped. The remaining defect is token overlays, identified above.
+- The opaque-pixel darkness derivation is correct. Two source-over blits give the requested coefficients when `colour=t(1-a)/(1-ta)` and `shade=ta`. The one-/two-byte channel tolerance covers rounding and would not conceal the missing-denominator mutation across varied opaque pixels. It does not cover partial-alpha pixels.
+- Lighting and occlusion are deterministic scene data. No `Date` or `Math.random` dependency exists; tie-breaking and standing order avoid locale collation.
+- Projection centre round-trips, edge assignment, footprint helpers, and depth ordering are internally consistent.
+- For the reference `586×355` layout, `1920×1080` gives `floor(min(1856/586,1016/355)) = 2`. The view’s capped `1920×920` board viewport also gives zoom 2.
+- `door_open` and `glow_warm` are present and assigned respectively to wall and glow roles.
+- Camera transforms use rounded integer pan; DPR backing-store sizing, smoothing disablement, visibility scheduling, cancellation, resize observers, input listeners, and disposal paths are present.
+- Earlier D2–D8 closures remain present: logical/native density separation, palette-closed mip selection, atlas brands and residency, mechanical light projection, stable live-canvas retention, keyed panel reconciliation, click-time command lookup, and token-bundle draw ordering.
+- The classic `dm` selection remains unchanged in `main.ts`; `renderBoard`’s art extraction is source-equivalent to its previous conditional, and action labels/keys were moved without semantic changes. The asset test retained its prior assertions and added checks; it was not weakened.
+- The KB split is minimal. `knowledge-base-contract.ts` re-exports both `KB_SUBJECTS` and `KbSubject`, while browser-reachable schemas import only the leaf module.
+- No large atlas bitmap is passed to `toEqual`; byte equality uses scanning/hashes. The software canvas implements source-over using source alpha and global alpha.
+- No external image files, encoded sprite sheets, game names, or game-specific asset identifiers occur in the iso lane. Tiles and sprites are constructed from local drawing primitives.
+
+## NOT CHECKED
+
+- No compilation, tests, builds, browser runs, screenshots, or mutation gates were executed, per the review constraints.
+- The snapshot and the first `encounter-app.ts` integration changes entered history together in commit `57f4ebe4`; therefore git cannot prove the comment’s claim that the snapshot was captured beforehand. No later snapshot regeneration is present, and reading confirms current classic rendering remains equivalent.
+- External authorship cannot be proven from repository reading. The only imported-art-shaped literal data found are the bitmap glyph rows at [src/vtt/iso/pixel-art/bitmap.ts:363] and the fallback palette at [src/vtt/iso/scene.ts:596]; neither contains evidence tying it to Baldur’s Gate, Diablo, or another game.
+
+HOLD — MAJOR: token picking ignores visible marks and HP-bar pixels.
+
+REVIEW COMPLETE
+SUPERVISOR (2026-09-05 08:05): D10 dispatched for the round-9 major and all five minors (D526.1: a deferred minor
+costs a round). Fable seat free (no judging in flight).
+
+FINDING AGAINST MY OWN WORK (2026-09-05 08:00) — the 24-state probe measured the wrong subject. Probe inc3
+(4a46ac16, codex) wraps every catalogue creature name as `Probe <scope>: <name>` (scopedProbeCombatantNames) so
+plates read "PROBE ARENA 6203010: ARCHELON" on two lines; I harvested inc3 without noticing that the fixture had
+changed what the plates say. Luna strips the prefix inconsistently (14/24 medium Q1 answers keep it) and appends the
+plate tag word ("unicorn hidden"), and the scorer keys on the exact name, so the reported Luna-medium identity 0.32 /
+sides 0.16 / HP 0.09 are mostly scorer misses. My prefix-stripped, tag-stripped re-read (an estimate, not the
+tool's number): medium Q1 name+cell exact 119/172, low 98/172. The dominant residual error is real and new: the
+creature is placed 2 rows lower (offsets (+2,−1) 10×, (+2,0) 8× at medium) — the model reads the two-line plate's
+cell as the creature's cell. Objects with labels (Runed Brazier) were listed as creatures twice. Probe inc4
+dispatched to codex: scope prefix removed from display names, plate-tag words stripped before name comparison,
+plates anchored to the token cell with a visible stem, object labels styled unlike creature plates, `--rescore`
+for saved runs (labelled estimate). The 24-state run is VOID as a measurement; rerun after inc4.
