@@ -10476,3 +10476,9 @@ TWO FINDINGS from the glyph probe rows (2026-09-05 04:25):
    Same rule for any decorative object the engine does not track. UI unit next.
 2. ADJACENCY — the truth counts diagonal neighbours (5 ft, Chebyshev), the model reported only the orthogonal pair.
    The primer must define adjacency as sharing an edge OR a corner. Probe inc3.
+
+ISO REVIEW ROUND 8 (codex 01a070c4, 2026-09-05 05:20): HOLD again, three MAJORs of yet another class: wall/obstacle
+roles are a second hand-maintained table (a new standing kind silently becomes an obstacle); sprite picking passes
+through opaque obstacles that visually cover a token; translucent walls skip the mood-darkness pass. Per the recorded
+rule the iso lane now HOLDS with no further units until the owner answers the round-7 question (land behind ?view=iso
+with known issues, or continue). Eight rounds, eight classes.
