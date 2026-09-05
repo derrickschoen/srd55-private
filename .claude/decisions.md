@@ -11484,3 +11484,16 @@ and the image-as-template → agent-written SVG/procedural generator technique (
 what survives at 64/128 px, palette and grid discipline); the references tool gains an "observe → generator" step
 in its README; classic round 5 receives, at its turn end, the amendment that references (when the key is wired)
 are consumed as templates for code that draws, never as shipped pixels (D558).
+
+## FINDING — Fireworks serverless FLUX is not reachable from this account (2026-09-05 18:23)
+
+References tool (codex, Fireworks amendment, 12 unit tests green, dry-run fine) made one live call with the owner's
+key (via `fireconnect key export`): HTTP 404 {"code":"NOT_FOUND","message":"Model not found, inaccessible, and/or
+not deployed"} for accounts/fireworks/models/flux-1-schnell and for flux-1-schnell-fp8, on both api.fireworks.ai
+and us.api.fireworks.ai, on the documented workflows text_to_image path. The key itself is valid (models list
+200, 25 language/embedding models, no image model). Control plane: both FLUX models exist with state READY, kind
+FLUMINA_BASE_MODEL, deployedModelRefs [] — i.e. no serverless deployment behind them; they appear to require an
+on-demand deployment now. The D559 research note (F01/F02/F06) documents the endpoint but found no FLUX licence row
+on Fireworks' current licence page and no dated availability notice. Decision for the owner: pay for an on-demand
+FLUX deployment around each reference batch, or pick another provider. Tool bug found: the LOG row is written
+before the request succeeds (smoke-floor-01 is logged with no output file) — amendment queued.
