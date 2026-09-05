@@ -11331,3 +11331,18 @@ contrast 4.04 < 4.5), cmp-restored. Two browser specs queued under the lock on p
 crisp, roster and door rail readable; the art itself remains the flat look the owner named in D556. Four-seat panel
 dispatched with rotated perspectives (Fable game-feel, Opus-medium pixel-craft, sol-high ui-readability, sol-medium
 machine-readability carrying the round-3 probe numbers). Round-4 probe (primer v7, 24 states, medium+low) started.
+
+Correction (mine, 16:44): the round-4 entry above says "17:05"; the system clock was 16:41 when it was written. I stop
+writing estimated times; every timestamp from here is read from `date`.
+
+D557 — OWNER (2026-09-05 16:43): "Double the pixel density and try to implement the art techniques for classic view."
+Supervisor reading: (1) the classic board's native art resolution doubles — 128 px per cell instead of 64, tiles,
+tokens, glyphs, badges and rings drawn at the new native size (integer scaling only, no upscaled 64-px art); (2) the
+craft techniques from the D556 report's diagnosis become the classic view's drawing rules — one global light
+direction with a shared shadow colour and material-specific response, palette ramps with deliberate shadow/mid/
+highlight steps and restrained hue shifts, silhouette-first creature busts, no pillow shading, cluster discipline
+(no stray single pixels, no anti-aliased edges, no fractional placement), selective outlines that support hierarchy,
+review at native size beside neighbours and under overlays — each rule expressed as a validator test, not prose.
+Dispatched as classic round 5 (codex sol high, D532) on a new worktree from round 4's d5c74dd0; the D549 colour-
+blind/high-contrast presets move to round 6. Implementers read clean-room/final only; the craft rules are pasted
+into the brief as general pixel-art principles (no sources, no game names).
