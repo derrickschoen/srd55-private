@@ -10385,3 +10385,7 @@ D525 LIGHT ENCODINGS, probe (6 states, case-folded, low / medium), tint (primer 
   improved under inverse (fewer competing overlays). Doors 0.08→0.00 and blocked cells still near zero in both.
   'symbol' pending. Reading so far: an explicit marker per light level plus a primer sentence naming it is the
   lever, not removing overlays; doors/blocked need their own glyph + primer wording next.
+
+FINDING against my own shell hygiene (2026-09-05 01:25): a `pgrep -f` whose pattern was unbracketed matched my own
+command line and the loop killed the supervisor's shell (exit 144) — fifth instance. The bracketed form
+(`pgrep -f '[p]attern'`) worked on retry. Iso D4 committed; review round 4 dispatched.
