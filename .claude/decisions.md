@@ -11320,3 +11320,14 @@ roster_numeral_low_contrast shown killed; my tsc 0, sg 0; focused running.
 
 **D556 report delivered** (art-research/reports/2026-09-05-art-techniques.md,
 1,511 words, codex synthesis of four notes; private repo b78d844).
+
+CLASSIC ROUND 4 (2026-09-05 17:05): d5c74dd0 on claude/light-variant — pixel-art badge/ring bitmaps (board-chrome-art.ts,
+no CSS radius), roster numeral contrast ≥4.5:1, badge palette outside both side-hue bands and pairwise distinct
+under dichromacy matrices, 1..12 numeral clearance, typed object/door rail with coordinates, roster coordinates,
+primer v7. Codex: locked 559/9703, mutation roster_numeral_low_contrast killed. Mine: forbidden scan clean, tsc 0,
+sg 0, focused chrome+probe green; first mutation (hue-exclusion constant 35→5) VOID — the constant is read only by
+the test, not at runtime; second mutation (sand badge → warm cloth ramp) killed two tests (side-hue band, numeral
+contrast 4.04 < 4.5), cmp-restored. Two browser specs queued under the lock on port 4640. Captures viewed: badges
+crisp, roster and door rail readable; the art itself remains the flat look the owner named in D556. Four-seat panel
+dispatched with rotated perspectives (Fable game-feel, Opus-medium pixel-craft, sol-high ui-readability, sol-medium
+machine-readability carrying the round-3 probe numbers). Round-4 probe (primer v7, 24 states, medium+low) started.
