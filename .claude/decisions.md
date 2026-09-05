@@ -11069,3 +11069,11 @@ and is reported as a load flake rather than voiding the run. Known flakes: ai-dm
 experiment-orchestrator "failed_result_recorded_as_pass" (5 s), the arena three-room smoke (120 s), the
 brutal-basis byte-cap timing test, iso pixel-art atlas build (1.5 s wall clock), acceptance-walkthrough click
 (50 s, Playwright). Lanes stay parallel; the four voided runs today cost ~30 min of lock time.
+
+PROBE INC5 COMMITTED (2026-09-05 14:40): 0b17f3a0 on claude/probe5 (capture health, scale/offset sweeps, Q11
+before/after, role statement). Codex 559/9704 locked; my gate tsc 0, sg 0, tools tests 519/519. FINDING: my
+mutation — the empty-content floor MIN_NON_BACKGROUND_FRACTION set to 0 so an empty frame passes — SURVIVED the
+14 snapshot tests: the fixtures cover all-black, wrong size, uniform grey and healthy, but no fixture is "correct
+size, non-uniform, yet nearly empty" (a few stray pixels on background), so the empty_content branch is untested.
+Per D539 recorded and carried: probe inc6 opens with that killing fixture. Merge of claude/probe5 into
+claude/light-variant (round 3) follows the round-3 panel.
