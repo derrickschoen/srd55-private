@@ -10822,3 +10822,18 @@ that a Fable reviewer session reviews Fable-authored units: the sessions are sep
 seat, and the review brief tells the Fable seat it is reviewing another session's work. Judge-seat priority (D525)
 still holds: arena judging outranks review seats on the shared account. Reviews are additive to the existing gates;
 nothing lands with fewer than three verdicts on the round.
+
+D529 — OWNER (2026-09-05 10:30): (1) Art rounds are judged by PARALLEL seats: Fable 5.1, Opus 5 and codex sol high,
+EACH from several perspectives (art direction; player game-feel; pixel-art craft; human UI readability; machine
+readability for the AI DM) — one seat per model per perspective per round; the supervisor arbitrates by
+verification as in D528. (2) A thorough research programme on isometric RPG/ARPG games and modern retro
+16-bit-inspired games (Diablo II Resurrected, Marvel Cosmic Invasion, TMNT Shredder's Revenge and many more in
+those categories), by the high-level models from the same perspectives, stored in the PRIVATE repo. (3) From it,
+a clean-room design-documentation folder (documents in our own words: principles and measurable rules, no game
+names, no lifted palettes/assets/names) that implementers may read, and a separate NON-clean-room folder readable
+only by judges. Supervisor setup: ~/dnd-research-private/art-research (its own git repo, no remote, never pushed;
+outside every public tree): judges-only/<perspective>/<model>.md research notes (no third-party images stored —
+describe and link), clean-room/ documents gated by a codex leakage check before implementers may read them,
+rounds/ for verdicts. Fifteen research units dispatched now (3 models × 5 perspectives); the synthesis into
+clean-room documents follows when they land; the two rounds now awaiting landing (iso bc0c7657, classic inc4)
+get the remaining perspective seats once the judges-only notes exist so the judges can use them.
