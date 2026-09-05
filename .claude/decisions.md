@@ -10446,3 +10446,11 @@ alternatives container is unkeyed while holding keyed buttons (the stable-intera
 ?view=iso). Six rounds have each surfaced a new class of finding (art, geometry, memory, lighting truth, now DOM
 continuity). D7 dispatched for these three; if round 7 HOLDs on yet another class, the supervisor stops and asks
 the owner whether to land behind the flag with known issues or continue.
+
+ISO REVIEW ROUND 7 (codex 01a0708d, 2026-09-05 04:05): HOLD, no blocker, two MAJORs of a new class: (1) marks and
+HP bars are ordered globally after all sprites, so in a shared cell a corpse's red bar can overwrite the living
+token's green bar; (2) IsoCellView lets any TileKind appear as a floor or overlay (door_open as an overlay compiles
+and is silently skipped). ESCALATION per the round-6 rule — QUESTION FOR THE OWNER: seven rounds have each closed
+their findings and surfaced a new class; land ?view=iso on main now with these two recorded as known issues (it is
+additive and the classic view is proven byte-identical), or keep iterating? Supervisor default while the question
+stands: D8 dispatched for the two majors (small, concrete); landing waits for the owner's word or a clean round 8.
