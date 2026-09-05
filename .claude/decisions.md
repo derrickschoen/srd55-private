@@ -10437,3 +10437,12 @@ FOOTPRINTS INC2 COMMITTED d5001aa4. FINDING: my mutation — entered cells compu
 tests: the D514 entered-cells terrain/hazard rule has no test that fails when it is broken. Increment 3's brief
 opens with that killing test (a 2×2 creature stepping so that exactly one new cell is difficult must cost double;
 stepping so that a difficult cell is retained but none entered must not).
+
+ISO REVIEW ROUND 6 (codex 01a07066, 2026-09-05 03:20): HOLD — three MAJORs in the integration with the stable-DOM
+renderer: (1) the side panel's update() replaces every child, so a focused move button loses focus mid-flow and
+Enter cannot submit; (2) encounter-app appends the live iso canvas subtree to the detached draft before
+reconciliation, disconnecting it on every parent rerender (pointer capture can be lost); (3) the multi-path
+alternatives container is unkeyed while holding keyed buttons (the stable-interactive assertion can throw on
+?view=iso). Six rounds have each surfaced a new class of finding (art, geometry, memory, lighting truth, now DOM
+continuity). D7 dispatched for these three; if round 7 HOLDs on yet another class, the supervisor stops and asks
+the owner whether to land behind the flag with known issues or continue.
