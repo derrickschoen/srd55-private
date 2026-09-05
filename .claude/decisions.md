@@ -11036,3 +11036,7 @@ the commit or the landing.
 D540 — OWNER (2026-09-05 13:59): PICTURE FIRST for the next few days — classic rounds and probe increments
 outrank engine landings for the gate lock and model seats until the D536 medium bar passes. Engine lanes
 (conditions, tactical, graph-slice, footprints inc5) continue but yield the lock; iso stays paused (D531).
+
+D541 — OWNER (2026-09-05 14:01): pass evidence — one 24-board run per candidate; any class within 0.05 of the
+0.9 medium bar gets a second run with another seed and must pass on the combined score. A class passing only on
+a single run near the bar is "provisional", never "passed".
