@@ -4,7 +4,7 @@ import { base64 } from '../../src/assets/png';
 import { renderStarterArtPng } from '../../src/assets/starter-art-resolver';
 import { STARTER_ART_MANIFEST } from '../../src/assets/starter-art-manifest';
 import { TILE_SIZE } from '../../src/assets/pixel-art';
-import { combatantId } from '../../src/combat/values';
+import { combatantId, worldObjectId } from '../../src/combat/values';
 import { encounterBoardRenderModel } from '../../src/vtt/encounter-board';
 import { REFERENCE_ENCOUNTER_ART } from '../../src/vtt/reference-encounter-art';
 
@@ -74,6 +74,16 @@ function previewSvg(): string {
     combatants: party,
     highlightedCombatant: combatantId('combatant:fighter'),
     adjudicatedTargets: [combatantId('combatant:training-brute')],
+    // D525: previewed door art must be backed by the same engine object the board projects.
+    worldObjects: [{
+      id: worldObjectId('world-object:starter-art-preview-south-door'),
+      name: 'South Door',
+      kind: 'door' as const,
+      position: { column: 4, row: 6 },
+      cells: [{ column: 4, row: 6 }],
+      blocking: { movement: true, lineOfSight: true, cover: 'total' as const },
+      lightClass: 'none' as const,
+    }],
   };
   const tokenAssets = STARTER_ART_MANIFEST.assets.filter((asset) => asset.kind === 'token');
   const definitions = STARTER_ART_MANIFEST.assets.map((asset) =>

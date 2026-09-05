@@ -348,7 +348,8 @@ describe('D525 render model under each mode on a room with every fact class', ()
       expect(cells.every((cell) => cell.glyphs.length === 0), mode).toBe(true);
       expect(boardGlyphPresence(cells, everyClass.combatants)).toEqual({ cells: [], hidden: true });
     }
-    const cells = encounterBoardRenderModel(everyClass, encounterArtForBoard(everyClass, 'full'));
+    const art = encounterArtForBoard(everyClass, 'full');
+    const cells = encounterBoardRenderModel(everyClass, art);
     expect(cells).toHaveLength(24);
     for (const cell of cells) {
       expect(cell.glyphs.map((glyph) => glyph.kind), cell.key).toEqual(expectedGlyphsAt(cell));
@@ -360,10 +361,14 @@ describe('D525 render model under each mode on a room with every fact class', ()
     const counts = Object.fromEntries(CELL_GLYPH_KINDS.map((kind) => [kind, cells.filter((cell) => cell.glyphs.some((glyph) => glyph.kind === kind)).length]));
     expect(counts).toEqual({ 'door-closed': 1, 'door-open': 1, blocked: 1, fog: 1, obscured: 2 });
     expect(boardGlyphPresence(cells, everyClass.combatants)).toEqual({ cells: [...CELL_GLYPH_KINDS], hidden: true });
-    // the art package's decorative wall-band door is never a door glyph: the engine has no door there
-    const wallDoor = cells.find((cell) => cell.layers.some((layer) => layer.role === 'door'));
-    expect(wallDoor).toBeDefined();
-    expect(wallDoor?.glyphs.some((glyph) => CELL_GLYPHS[glyph.kind].family === 'door')).toBe(false);
+    // Door art and door glyphs have the same engine-owned source of truth.
+    const drawnDoors = cells.filter((cell) => cell.layers.some((layer) => layer.role === 'door'));
+    expect(drawnDoors.map((cell) => cell.key).sort()).toEqual(['0,2', '5,2']);
+    expect(drawnDoors.map((cell) => cell.layers.find((layer) => layer.role === 'door')?.assetId).sort())
+      .toEqual(['art.map.door.wood-e.v1', 'art.map.door.wood-open-w.v1']);
+    const decorativeCell = cells.find((cell) => cell.column === art.room.doorCell.column && cell.row === art.room.doorCell.row);
+    expect(decorativeCell?.layers.some((layer) => layer.role === 'door')).toBe(false);
+    expect(decorativeCell?.layers.some((layer) => layer.role === 'wall')).toBe(true);
     // the light glyphs still ride alongside
     expect(cells.filter((cell) => cell.light.mark !== null).map((cell) => cell.key).sort()).toEqual(['1,0', '2,0']);
   });

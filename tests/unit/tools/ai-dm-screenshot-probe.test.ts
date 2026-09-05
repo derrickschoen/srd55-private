@@ -9,12 +9,17 @@ import {
   GENERAL_PRIMER,
   GLYPH_FAMILY_PRIMER,
   LIGHT_PRIMER,
+  MIN_FACT_CLASS_STATE_COVERAGE,
   PASS_THRESHOLD,
   PRIMER_VERSION,
+  PROBE_CATALOGUE_SIZE,
+  bootstrapMeanInterval95,
   defaultProbeStateCandidates,
   deriveScreenshotFactSheet,
+  normalizeProbeAnswer,
   parseProbeAnswer,
   parseScreenshotProbeArgs,
+  probeCatalogueClassCoverage,
   runScreenshotProbe,
   scoreProbeAnswer,
   screenshotQuestionPrompt,
@@ -25,7 +30,7 @@ import {
   type ProbeSnapshotService,
   type ScreenshotFactSheet,
 } from '../../../tools/ai-dm-screenshot-probe';
-import type { BoardImageArtifact, BoardImageSource } from '../../../tools/ai-dm-board-snapshot';
+import { boardStateDigest, type BoardImageArtifact, type BoardImageSource } from '../../../tools/ai-dm-board-snapshot';
 import { mkdirSync } from '../../helpers/test-filesystem';
 import { mkdtemp, readFile, rm } from '../../helpers/test-filesystem-promises';
 import { monsterProfile, placedToken, playerProfile } from '../combat/fixtures';
@@ -162,6 +167,14 @@ describe('D519 screenshot comprehension fact sheet', () => {
       second: { displayName: 'screenshot-foe', cell: { column: 2, row: 2 } },
     }]);
   });
+
+  it('adjacency_ignores_diagonals: counts creatures whose cells share a corner as adjacent within 5 feet', () => {
+    const sheet = deriveScreenshotFactSheet(everyClassState());
+    expect(sheet.adjacencyPairs).toEqual([{
+      first: { displayName: 'screenshot-hero', cell: { column: 1, row: 1 } },
+      second: { displayName: 'screenshot-foe', cell: { column: 2, row: 2 } },
+    }]);
+  });
 });
 
 describe('D519 screenshot comprehension scoring', () => {
@@ -175,6 +188,26 @@ describe('D519 screenshot comprehension scoring', () => {
         confusions: [],
       });
     }
+  });
+
+  it('compares names case-insensitively with whitespace collapsed', () => {
+    const truth = parseProbeAnswer('Q1', JSON.stringify({
+      version: 'd519-screenshot-comprehension-v1',
+      question: 'Q1',
+      creatures: [{ name: 'Mirel Ash', column: 2, row: 1 }],
+    }));
+    const uppercase = parseProbeAnswer('Q1', JSON.stringify({
+      version: 'd519-screenshot-comprehension-v1',
+      question: 'Q1',
+      creatures: [{ name: '  MIREL   ASH  ', column: 2, row: 1 }],
+    }));
+
+    expect(scoreProbeAnswer(uppercase, truth)).toEqual({ score: 1, hallucinations: 0, confusions: [] });
+    expect(normalizeProbeAnswer(uppercase)).toEqual({
+      version: 'd519-screenshot-comprehension-v1',
+      question: 'Q1',
+      creatures: [{ name: 'mirel ash', column: 2, row: 1 }],
+    });
   });
 
   it('jaccard_ignores_hallucinations: penalizes an asserted row-shifted fact absent from truth', () => {
@@ -215,7 +248,10 @@ describe('D524 general screenshot primer', () => {
     expect(primerPrompt).toContain('Each grid square represents 5 feet');
     expect(primerPrompt).toContain('Cool-blue base plates identify party creatures');
     expect(primerPrompt).toContain('warm-red base plates identify foes');
-    expect(primerPrompt).toContain('zero-based column,row coordinates');
+    expect(primerPrompt).toContain('top-left cell, whose column and row are both zero');
+    expect(primerPrompt).toContain('columns increase rightward and rows increase downward');
+    expect(primerPrompt).toContain('share an edge or a corner, so diagonals count');
+    expect(primerPrompt).toContain('Doors are drawn only where the engine has a door');
     expect(primerPrompt).toContain('Bars under tokens show hit-point bands');
     expect(primerPrompt).toContain('Difficult, Obscured, Bright light, Dim light, Darkness, and Fog');
     expect(primerPrompt).toContain('Blocked, Object, and Light source');
@@ -253,7 +289,7 @@ describe('D524 general screenshot primer', () => {
   });
 
   it('D525: appends the light sentence per mode plus one sentence per glyph family under full, chosen by --board-glyphs, defaulting to none', () => {
-    expect(PRIMER_VERSION).toBe('d525-general-board-primer-v3');
+    expect(PRIMER_VERSION).toBe('d525-general-board-primer-v4');
     expect(BOARD_GLYPH_PRIMER.none).toEqual([LIGHT_PRIMER.tint]);
     expect(BOARD_GLYPH_PRIMER.light).toEqual([LIGHT_PRIMER.glyph]);
     expect(BOARD_GLYPH_PRIMER.full).toEqual([
@@ -324,6 +360,36 @@ describe('D519 screenshot comprehension schema and CLI', () => {
     expect(PASS_THRESHOLD).toBe(0.9);
   });
 
+  it('builds a deterministic 24-state catalogue with every fact class in at least six states', async () => {
+    const first = await defaultProbeStateCandidates();
+    const second = await defaultProbeStateCandidates();
+    expect(PROBE_CATALOGUE_SIZE).toBe(24);
+    expect(MIN_FACT_CLASS_STATE_COVERAGE).toBe(6);
+    expect(first).toHaveLength(PROBE_CATALOGUE_SIZE);
+    expect(new Set(first.map((candidate) => candidate.id)).size).toBe(PROBE_CATALOGUE_SIZE);
+    expect(new Set(first.map((candidate) => boardStateDigest(candidate.state))).size).toBe(PROBE_CATALOGUE_SIZE);
+    expect(second.map((candidate) => ({ id: candidate.id, digest: boardStateDigest(candidate.state) })))
+      .toEqual(first.map((candidate) => ({ id: candidate.id, digest: boardStateDigest(candidate.state) })));
+    const coverage = probeCatalogueClassCoverage(first);
+    for (const [question, count] of Object.entries(coverage)) {
+      expect(count, `${question} state coverage`).toBeGreaterThanOrEqual(MIN_FACT_CLASS_STATE_COVERAGE);
+    }
+  });
+
+  it('accepts --states through the catalogue size and rejects larger requests', () => {
+    const base = ['--models', 'gpt-5.6-luna:low', '--seed', '1', '--images-root', 'dnd-slim-runs/x-images', '--out', 'dnd-slim-runs/x.jsonl', '--generation', 'g3'];
+    expect(parseScreenshotProbeArgs([...base, '--states', String(PROBE_CATALOGUE_SIZE)]).stateCount).toBe(PROBE_CATALOGUE_SIZE);
+    expect(() => parseScreenshotProbeArgs([...base, '--states', String(PROBE_CATALOGUE_SIZE + 1)]))
+      .toThrow(`--states cannot exceed the ${String(PROBE_CATALOGUE_SIZE)}-state catalogue.`);
+  });
+
+  it('computes deterministic seeded 95% bootstrap intervals', () => {
+    expect(bootstrapMeanInterval95([0, 0.5, 1, 1], 6203001)).toEqual(
+      bootstrapMeanInterval95([0, 0.5, 1, 1], 6203001),
+    );
+    expect(bootstrapMeanInterval95([1, 1, 1], 6203001)).toEqual({ lower: 1, upper: 1 });
+  });
+
   it('rejects malformed, wrong-question, negative-coordinate, and extra-property answers', () => {
     expect(() => parseProbeAnswer('Q1', 'not-json')).toThrow('not JSON');
     expect(() => parseProbeAnswer('Q1', JSON.stringify({ version: 'd519-screenshot-comprehension-v1', question: 'Q2', creatures: [] }))).toThrow();
@@ -362,7 +428,13 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       expect(rows.every((row) => row.primerVersion === PRIMER_VERSION)).toBe(true);
       expect(rows.every((row) => row.generation === 'g2-classic-general')).toBe(true);
       expect(rows.every((row) => row.boardGlyphs === 'full')).toBe(true);
-      expect(rows.every((row) => row.version === 'd525-screenshot-comprehension-row-v4')).toBe(true);
+      expect(rows.every((row) => row.version === 'd525-screenshot-comprehension-row-v5')).toBe(true);
+      expect(rows.every((row) => row.answer !== null && row.normalizedAnswer !== null)).toBe(true);
+      for (const row of rows) {
+        if (row.answer === null) throw new Error('Perfect simulated answer was not recorded.');
+        expect(row.normalizedAnswer).toEqual(normalizeProbeAnswer(row.answer));
+        expect(parseProbeAnswer(row.question, row.rawAnswer)).toEqual(row.answer);
+      }
       expect(strictProbeGate(rows)).toBe(true);
       expect((await readFile(outPath, 'utf8')).trim().split('\n')).toHaveLength(20);
       const summary = await readFile(config.summaryPath, 'utf8');
@@ -394,6 +466,8 @@ describe('D519 screenshot comprehension schema and CLI', () => {
       expect(strictProbeGate(impostorRows)).toBe(false);
       const comparisonSummary = await readFile(comparisonConfig.summaryPath, 'utf8');
       expect(comparisonSummary).toContain('Delta vs previous run');
+      expect(comparisonSummary).toContain('Delta 95% bootstrap interval');
+      expect(comparisonSummary).toContain('signal');
       expect(comparisonSummary).toContain('-1.000');
       expect(comparisonSummary.match(/Strict all classes >= 0\.9: \*\*FAIL\*\*/gu)).toHaveLength(2);
       expect(service.closed).toBe(false);

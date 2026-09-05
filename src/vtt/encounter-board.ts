@@ -666,7 +666,6 @@ export function encounterBoardRenderModel(
   const floorSet = floorSetFor(art.room.floor);
   const wallSet = wallSetFor(art.room.wall);
   const doorSet = doorSetFor(art.room.door);
-  const doorSide = doorSideAt(art.room.doorCell.column, art.room.doorCell.row, projection.bounds);
 
   for (let row = 0; row < projection.bounds.rows; row += 1) {
     for (let column = 0; column < projection.bounds.columns; column += 1) {
@@ -676,9 +675,11 @@ export function encounterBoardRenderModel(
       ];
       const wallPiece = wallPieceAt(column, row, projection.bounds);
       if (wallPiece !== null) {
+        const doorState = doors.get(key);
+        const engineDoorSide = doorState === undefined ? null : doorSideAt(column, row, projection.bounds);
         layers.push(
-          doorSide !== null && column === art.room.doorCell.column && row === art.room.doorCell.row
-            ? { role: 'door', assetId: doorSet.pieces.closed[doorSide] }
+          engineDoorSide !== null && doorState !== undefined
+            ? { role: 'door', assetId: doorSet.pieces[doorState][engineDoorSide] }
             : { role: 'wall', assetId: wallSet.pieces[wallPiece] },
         );
       }

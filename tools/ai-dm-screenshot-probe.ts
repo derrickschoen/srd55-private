@@ -1,10 +1,8 @@
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import {
   appendFile,
   mkdir,
   readFile,
-  readdir,
   writeFile,
 } from 'node:fs/promises';
 import { basename, join, relative, resolve, sep } from 'node:path';
@@ -19,18 +17,13 @@ import {
   armorClass,
   combatantId,
   tokenId,
+  worldObjectId,
 } from '../src/combat/values';
 import { dmVisibleEncounter, projectDmView } from '../src/combat/visibility';
 import { projectEncounterBoard } from '../src/vtt/encounter-board';
 import { loadArenaFixture } from '../src/vtt/mcp/entrypoint';
 import { referenceEncounterSetup, REFERENCE_MONSTER_ID } from '../src/vtt/reference-encounter';
 import { generateRoom } from '../src/vtt/room-generator';
-import {
-  EncounterSessionJournal,
-  MemoryBrowserSessionStore,
-  MemoryMirrorSink,
-  importSavedSession,
-} from '../src/vtt/session-persistence';
 import { createVaneWarrenFight } from '../src/vtt/vane-warren';
 import { adaptWatabouDungeon } from '../src/vtt/watabou-adapter';
 import {
@@ -42,10 +35,10 @@ import {
 
 const repositoryRoot = resolve(new URL('../', import.meta.url).pathname);
 const PROBE_VERSION = 'd519-screenshot-comprehension-v1' as const;
-const ROW_VERSION = 'd525-screenshot-comprehension-row-v4' as const;
-/** v3 (D525): the general primer gains one sentence per glyph family under `--board-glyphs full`. */
-export const PRIMER_VERSION = 'd525-general-board-primer-v3' as const;
-export const GENERAL_PRIMER = 'This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue base plates identify party creatures; warm-red base plates identify foes. Numbers along the horizontal and vertical board edges are zero-based column,row coordinates, and answers must use that convention. Bars under tokens show hit-point bands using the colours named in the legend. The legend box names every terrain tint (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board glyph (Blocked, Object, and Light source). Interpret walls, doors, and objects as they are drawn on the board.' as const;
+const ROW_VERSION = 'd525-screenshot-comprehension-row-v5' as const;
+/** v4 (D525): coordinates, diagonal adjacency, and engine-owned doors are explicit. */
+export const PRIMER_VERSION = 'd525-general-board-primer-v4' as const;
+export const GENERAL_PRIMER = 'This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue base plates identify party creatures; warm-red base plates identify foes. The coordinate origin is the top-left cell, whose column and row are both zero; columns increase rightward and rows increase downward, matching the zero-based labels along the board edges. Two creatures are adjacent and within 5 feet when their cells share an edge or a corner, so diagonals count. Bars under tokens show hit-point bands using the colours named in the legend. The legend box names every terrain tint (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board glyph (Blocked, Object, and Light source). Doors are drawn only where the engine has a door. Interpret walls, doors, and objects as they are drawn on the board.' as const;
 /**
  * D525: the sentence describing how the board draws light levels, one per
  * convention. Each describes only the drawing convention — never a room fact —
@@ -75,6 +68,9 @@ export const BOARD_GLYPH_PRIMER: Readonly<Record<BoardGlyphMode, readonly string
 const AI_DM_CODEX_HOME = '/home/vagrant/.codex-aidm' as const;
 const REAL_CALL_CONCURRENCY = 4;
 export const PASS_THRESHOLD = 0.9;
+export const PROBE_CATALOGUE_SIZE = 24;
+export const MIN_FACT_CLASS_STATE_COVERAGE = 6;
+const BOOTSTRAP_RESAMPLES = 2_000;
 
 export const SCREENSHOT_QUESTION_IDS = [
   'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10',
@@ -207,7 +203,10 @@ export interface ScreenshotProbeRow {
   readonly wallMs: number;
   readonly tokens: ProbeTokenUsage | null;
   readonly truth: ProbeAnswer;
+  /** Parsed model payload exactly as supplied, before name normalization. */
   readonly answer: ProbeAnswer | null;
+  /** Scored payload: creature names case-folded with internal whitespace collapsed. */
+  readonly normalizedAnswer: ProbeAnswer | null;
   readonly rawAnswer: string;
   readonly error: string | null;
 }
@@ -491,6 +490,37 @@ export function parseProbeAnswer(question: ScreenshotQuestionId, rawAnswer: stri
   }
 }
 
+export function normalizedProbeName(name: string): string {
+  return name.trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en-US');
+}
+
+/**
+ * Names are visual labels rather than identity keys. Classic plates use upper
+ * case, so scoring compares a canonical case-folded, whitespace-collapsed
+ * form while the row retains the parsed and raw model payloads for audit.
+ */
+export function normalizeProbeAnswer(answer: ProbeAnswer): ProbeAnswer {
+  const creature = (entry: CreatureLocation): CreatureLocation => ({
+    ...entry,
+    name: normalizedProbeName(entry.name),
+  });
+  switch (answer.question) {
+    case 'Q1': return { ...answer, creatures: answer.creatures.map(creature) };
+    case 'Q2': return { ...answer, creatures: answer.creatures.map((entry) => ({ ...creature(entry), side: entry.side })) };
+    case 'Q3': return { ...answer, creatures: answer.creatures.map((entry) => ({ ...creature(entry), hpBand: entry.hpBand })) };
+    case 'Q4': return answer;
+    case 'Q5': return answer;
+    case 'Q6': return answer;
+    case 'Q7': return {
+      ...answer,
+      pairs: answer.pairs.map((pair) => ({ first: creature(pair.first), second: creature(pair.second) })),
+    };
+    case 'Q8': return { ...answer, creatures: answer.creatures.map(creature) };
+    case 'Q9': return answer;
+    case 'Q10': return answer;
+  }
+}
+
 interface ScorableFact {
   readonly key: string;
   readonly subject: string;
@@ -607,8 +637,8 @@ export interface ProbeScore {
 
 export function scoreProbeAnswer(answer: ProbeAnswer, truth: ProbeAnswer): ProbeScore {
   if (answer.question !== truth.question) throw new TypeError('Cannot score answers from different question classes.');
-  const answerFacts = factsForAnswer(answer);
-  const truthFacts = factsForAnswer(truth);
+  const answerFacts = factsForAnswer(normalizeProbeAnswer(answer));
+  const truthFacts = factsForAnswer(normalizeProbeAnswer(truth));
   const answerKeys = new Set(answerFacts.map((fact) => fact.key));
   const truthKeys = new Set(truthFacts.map((fact) => fact.key));
   let intersection = 0;
@@ -871,6 +901,9 @@ export function parseScreenshotProbeArgs(argv: readonly string[]): ScreenshotPro
   const stateCount = Number(requiredOption(values, '--states'));
   const seed = Number(requiredOption(values, '--seed'));
   if (!Number.isSafeInteger(stateCount) || stateCount < 1) throw new RangeError('--states must be a positive safe integer.');
+  if (stateCount > PROBE_CATALOGUE_SIZE) {
+    throw new RangeError(`--states cannot exceed the ${String(PROBE_CATALOGUE_SIZE)}-state catalogue.`);
+  }
   if (!Number.isSafeInteger(seed)) throw new RangeError('--seed must be a safe integer.');
   const imagesRoot = insideRepository(requiredOption(values, '--images-root'), '--images-root');
   if (!basename(imagesRoot).endsWith('-images')) throw new RangeError('--images-root basename must end in -images.');
@@ -913,58 +946,168 @@ function vanePlayers(): readonly CombatantProfile[] {
   ];
 }
 
-async function arenaSavePaths(directory: string): Promise<readonly string[]> {
-  let entries;
-  try {
-    entries = await readdir(directory, { withFileTypes: true });
-  } catch (error) {
-    if (record(error)?.['code'] === 'ENOENT') return [];
-    throw error;
-  }
-  const nested = await Promise.all(entries.map(async (entry): Promise<readonly string[]> => {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) return arenaSavePaths(path);
-    return entry.isFile() && entry.name.endsWith('.vtt.json') && path.toLowerCase().includes('arena')
-      ? [path]
-      : [];
-  }));
-  return nested.flat().sort();
+const GENERATED_PROBE_SEEDS = [
+  6_203_101, 6_203_102, 6_203_103, 6_203_104, 6_203_105,
+  6_203_106, 6_203_107, 6_203_108, 6_203_109, 6_203_110,
+] as const;
+
+function scopedProbeCombatantNames(state: EncounterState, scope: string): EncounterState {
+  return {
+    ...state,
+    combatants: state.combatants.map((combatant) => ({
+      ...combatant,
+      profile: { ...combatant.profile, name: `Probe ${scope}: ${combatant.profile.name}` },
+    })),
+  };
 }
 
-async function persistedArenaCandidates(): Promise<readonly ProbeStateCandidate[]> {
-  const paths = await arenaSavePaths(join(repositoryRoot, 'dnd-slim-runs'));
-  return Promise.all(paths.map(async (path, index): Promise<ProbeStateCandidate> => {
-    const store = new MemoryBrowserSessionStore();
-    const sessionId = importSavedSession(store, await readFile(path, 'utf8'));
-    const resumed = EncounterSessionJournal.resume(sessionId, store, new MemoryMirrorSink());
-    return { id: `arena-session-${String(index + 1)}-${basename(path, '.vtt.json')}`, state: resumed.encounterState };
-  }));
+function perimeterCells(state: EncounterState): readonly GridCell[] {
+  const cells: GridCell[] = [];
+  for (let column = 1; column < state.bounds.columns - 1; column += 1) {
+    cells.push({ column, row: 0 }, { column, row: state.bounds.rows - 1 });
+  }
+  for (let row = 1; row < state.bounds.rows - 1; row += 1) {
+    cells.push({ column: 0, row }, { column: state.bounds.columns - 1, row });
+  }
+  return cells;
+}
+
+function firstFreeCell(state: EncounterState, candidates: readonly GridCell[]): GridCell {
+  const occupied = new Set([
+    ...state.blockedCells.map(cellKey),
+    ...state.tokens.map((token) => cellKey(token.position)),
+    ...state.worldObjects.flatMap((object) => object.footprint.map(cellKey)),
+  ]);
+  const selected = candidates.find((cell) => !occupied.has(cellKey(cell)));
+  if (selected === undefined) throw new RangeError('Generated probe state has no free marker cell.');
+  return selected;
+}
+
+/** Adds only engine-owned facts to six seeded rooms whose source fixtures lack them. */
+function withProbeMarkers(state: EncounterState, seed: number): EncounterState {
+  const hiddenSubject = state.combatants.find((combatant) => combatant.profile.kind === 'monster');
+  if (hiddenSubject === undefined) throw new RangeError(`Generated probe room ${String(seed)} has no monster to hide.`);
+  const doorCell = firstFreeCell(state, perimeterCells(state));
+  const fogCandidates: GridCell[] = [];
+  for (let row = 1; row < state.bounds.rows - 1; row += 1) {
+    for (let column = 1; column < state.bounds.columns - 1; column += 1) fogCandidates.push({ column, row });
+  }
+  const fogCell = firstFreeCell(state, fogCandidates);
+  const doorOpen = seed % 2 === 0;
+  return {
+    ...state,
+    foggedCells: [...state.foggedCells, fogCell],
+    hiddenCombatants: [
+      ...state.hiddenCombatants.filter((entry) => entry.combatant !== hiddenSubject.profile.id),
+      { combatant: hiddenSubject.profile.id, stealthTotal: 20, edition: state.rulesEdition },
+    ],
+    worldObjects: [...state.worldObjects, {
+      id: worldObjectId(`world-object:screenshot-probe-door-${String(seed)}`),
+      name: doorOpen ? 'Probe Archway' : 'Probe Door',
+      kind: 'door',
+      position: doorCell,
+      footprint: [doorCell],
+      durability: { kind: 'indestructible' },
+      armorClass: armorClass(15),
+      damageResponses: [],
+      blocking: {
+        movement: !doorOpen,
+        lineOfSight: !doorOpen,
+        cover: doorOpen ? 'none' : 'total',
+      },
+      createdRevision: state.revision,
+    }],
+  };
+}
+
+export function deterministicGeneratedProbeCandidates(): readonly ProbeStateCandidate[] {
+  return GENERATED_PROBE_SEEDS.map((seed, index) => {
+    const generated = scopedProbeCombatantNames(
+      generateRoom(seed, { difficulty: 'brutal' }).encounter.state,
+      String(seed),
+    );
+    return {
+      id: `generated-brutal-${String(seed)}`,
+      state: index < MIN_FACT_CLASS_STATE_COVERAGE ? withProbeMarkers(generated, seed) : generated,
+    };
+  });
 }
 
 export async function defaultProbeStateCandidates(): Promise<readonly ProbeStateCandidate[]> {
-  const [small, maximum, persisted, watabouBytes] = await Promise.all([
-    loadArenaFixture(join(repositoryRoot, 'tests/fixtures/arena-basis-brutal/seed-6203002.json')),
-    loadArenaFixture(join(repositoryRoot, 'tests/fixtures/arena-basis-brutal/seed-6203004.json')),
-    persistedArenaCandidates(),
+  const [brutalFixtures, watabouBytes] = await Promise.all([
+    Promise.all(Array.from({ length: 10 }, (_, index) => {
+      const seed = 6_203_001 + index;
+      return loadArenaFixture(join(repositoryRoot, `tests/fixtures/arena-basis-brutal/seed-${String(seed)}.json`))
+        .then((state): ProbeStateCandidate => ({
+          id: `arena-brutal-${String(seed)}`,
+          state: scopedProbeCombatantNames(state, `arena ${String(seed)}`),
+        }));
+    })),
     readFile(join(repositoryRoot, 'tests/fixtures/watabou/one-page-dungeon-sample.json'), 'utf8'),
   ]);
-  const required: ProbeStateCandidate[] = [
-    { id: 'arena-brutal-6203002', state: small },
-    { id: 'arena-brutal-6203004', state: maximum },
-  ];
-  if (persisted.length > 0) return [...required, ...persisted];
   const reference = createEncounter(referenceEncounterSetup());
   const referenceWithHidden: EncounterState = {
     ...reference,
     hiddenCombatants: [{ combatant: REFERENCE_MONSTER_ID, stealthTotal: 20, edition: reference.rulesEdition }],
   };
-  return [
-    ...required,
-    { id: 'reference-hidden', state: referenceWithHidden },
-    { id: 'vane-warren-cinder-rite', state: createVaneWarrenFight('cinder-rite', vanePlayers()).encounter },
-    { id: 'watabou-generated-bounds', state: adaptWatabouDungeon(JSON.parse(watabouBytes) as unknown, { seed: 6203003 }).state },
-    { id: 'generated-bounds-24x24', state: generateRoom(6203001, { dimensions: { columns: 24, rows: 24 }, difficulty: 'brutal' }).encounter.state },
+  const candidates: readonly ProbeStateCandidate[] = [
+    ...brutalFixtures,
+    { id: 'reference-hidden', state: scopedProbeCombatantNames(referenceWithHidden, 'reference') },
+    {
+      id: 'vane-warren-cinder-rite',
+      state: scopedProbeCombatantNames(createVaneWarrenFight('cinder-rite', vanePlayers()).encounter, 'vane warren'),
+    },
+    {
+      id: 'watabou-generated-bounds',
+      state: scopedProbeCombatantNames(
+        adaptWatabouDungeon(JSON.parse(watabouBytes) as unknown, { seed: 6203003 }).state,
+        'watabou',
+      ),
+    },
+    {
+      id: 'generated-bounds-24x24',
+      state: scopedProbeCombatantNames(
+        generateRoom(6203001, { dimensions: { columns: 24, rows: 24 }, difficulty: 'brutal' }).encounter.state,
+        'large room',
+      ),
+    },
+    ...deterministicGeneratedProbeCandidates(),
   ];
+  if (candidates.length !== PROBE_CATALOGUE_SIZE) {
+    throw new Error(`Screenshot probe catalogue has ${String(candidates.length)} states; expected ${String(PROBE_CATALOGUE_SIZE)}.`);
+  }
+  return candidates;
+}
+
+function answerHasFacts(answer: ProbeAnswer): boolean {
+  switch (answer.question) {
+    case 'Q1': return answer.creatures.length > 0;
+    case 'Q2': return answer.creatures.length > 0;
+    case 'Q3': return answer.creatures.length > 0;
+    case 'Q4': return answer.cells.length > 0;
+    case 'Q5': return answer.brightCells.length + answer.dimCells.length + answer.darkCells.length > 0;
+    case 'Q6': return answer.doors.length > 0;
+    case 'Q7': return answer.pairs.length > 0;
+    case 'Q8': return answer.creatures.length > 0;
+    case 'Q9': return answer.foggedCells.length + answer.obscuredCells.length > 0;
+    case 'Q10': return answer.cells.length > 0;
+  }
+}
+
+export function probeCatalogueClassCoverage(
+  candidates: readonly ProbeStateCandidate[],
+): Readonly<Record<ScreenshotQuestionId, number>> {
+  const coverage = {
+    Q1: 0, Q2: 0, Q3: 0, Q4: 0, Q5: 0,
+    Q6: 0, Q7: 0, Q8: 0, Q9: 0, Q10: 0,
+  } satisfies Record<ScreenshotQuestionId, number>;
+  for (const candidate of candidates) {
+    const sheet = deriveScreenshotFactSheet(candidate.state);
+    for (const question of SCREENSHOT_QUESTION_IDS) {
+      if (answerHasFacts(truthAnswer(sheet, question))) coverage[question] += 1;
+    }
+  }
+  return coverage;
 }
 
 function shuffledCandidates(candidates: readonly ProbeStateCandidate[], seed: number): readonly ProbeStateCandidate[] {
@@ -1068,7 +1211,16 @@ async function runTask(
     rawAnswer: result.rawAnswer,
   } as const;
   if (result.error !== null) {
-    return { ...base, outcome: 'call_error', score: 0, hallucinations: 0, confusions: ['call error'], answer: null, error: result.error };
+    return {
+      ...base,
+      outcome: 'call_error',
+      score: 0,
+      hallucinations: 0,
+      confusions: ['call error'],
+      answer: null,
+      normalizedAnswer: null,
+      error: result.error,
+    };
   }
   let answer: ProbeAnswer;
   try {
@@ -1081,20 +1233,29 @@ async function runTask(
       hallucinations: 0,
       confusions: ['schema rejected'],
       answer: null,
+      normalizedAnswer: null,
       error: error instanceof Error ? error.message : String(error),
     };
   }
   const score = scoreProbeAnswer(answer, task.truth);
-  return { ...base, outcome: 'answered', ...score, answer, error: null };
+  return { ...base, outcome: 'answered', ...score, answer, normalizedAnswer: normalizeProbeAnswer(answer), error: null };
 }
 
 interface ClassSummary {
   readonly question: ScreenshotQuestionId;
   readonly accuracy: number;
+  readonly accuracyInterval95: BootstrapInterval;
   readonly hallucinations: number;
   readonly confusions: readonly string[];
   readonly passes: boolean;
   readonly deltaVsPrevious: number | null;
+  readonly deltaInterval95: BootstrapInterval | null;
+  readonly deltaAssessment: 'noise' | 'signal' | null;
+}
+
+export interface BootstrapInterval {
+  readonly lower: number;
+  readonly upper: number;
 }
 
 export interface ComparisonProbeRow {
@@ -1126,14 +1287,62 @@ function topConfusions(rows: readonly ScreenshotProbeRow[]): readonly string[] {
     .map(([confusion, count]) => `${confusion} (${String(count)})`);
 }
 
+function labelledSeed(seed: number, label: string): number {
+  let hash = seed >>> 0;
+  for (const character of label) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16_777_619) >>> 0;
+  }
+  return hash;
+}
+
+function seededUnitInterval(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ value >>> 15, value | 1);
+    value ^= value + Math.imul(value ^ value >>> 7, value | 61);
+    return ((value ^ value >>> 14) >>> 0) / 4_294_967_296;
+  };
+}
+
+export function bootstrapMeanInterval95(values: readonly number[], seed: number): BootstrapInterval {
+  if (values.length === 0) throw new RangeError('A bootstrap interval requires at least one value.');
+  if (!values.every(Number.isFinite)) throw new TypeError('Bootstrap values must be finite.');
+  const random = seededUnitInterval(seed);
+  const means: number[] = [];
+  for (let sample = 0; sample < BOOTSTRAP_RESAMPLES; sample += 1) {
+    let sum = 0;
+    for (let draw = 0; draw < values.length; draw += 1) {
+      const selected = values[Math.floor(random() * values.length)];
+      if (selected === undefined) throw new Error('Bootstrap sampler selected no value.');
+      sum += selected;
+    }
+    means.push(sum / values.length);
+  }
+  means.sort((left, right) => left - right);
+  const quantile = (probability: number): number => {
+    const value = means[Math.floor((means.length - 1) * probability)];
+    if (value === undefined) throw new Error('Bootstrap quantile is unavailable.');
+    return value;
+  };
+  return { lower: quantile(0.025), upper: quantile(0.975) };
+}
+
 function classSummaries(
   rows: readonly ScreenshotProbeRow[],
   previousRows: readonly ComparisonProbeRow[] | null = null,
+  bootstrapSeed = 0,
 ): readonly ClassSummary[] {
-  return SCREENSHOT_QUESTION_IDS.map((question) => {
+  return SCREENSHOT_QUESTION_IDS.map((question): ClassSummary => {
     const selected = rows.filter((row) => row.question === question);
     if (selected.length === 0) throw new Error(`Summary has no rows for ${question}.`);
     const accuracy = selected.reduce((sum, row) => sum + row.score, 0) / selected.length;
+    const accuracyInterval95 = bootstrapMeanInterval95(
+      selected.map((row) => row.score),
+      labelledSeed(bootstrapSeed, `${question}:accuracy`),
+    );
     const previousSelected = previousRows?.filter((row) => row.question === question) ?? null;
     if (previousSelected !== null && previousSelected.length === 0) {
       throw new Error(`Previous summary has no rows for ${question}.`);
@@ -1141,13 +1350,31 @@ function classSummaries(
     const previousAccuracy = previousSelected === null
       ? null
       : previousSelected.reduce((sum, row) => sum + row.score, 0) / previousSelected.length;
+    const pairedDeltas = previousSelected === null
+      ? null
+      : (() => {
+          const previousByKey = new Map(previousSelected.map((row) => [comparisonKey(row), row.score] as const));
+          return selected.map((row) => {
+            const previousScore = previousByKey.get(comparisonKey(row));
+            if (previousScore === undefined) throw new Error(`Previous run has no paired row for ${comparisonKey(row)}.`);
+            return row.score - previousScore;
+          });
+        })();
+    const deltaInterval95 = pairedDeltas === null
+      ? null
+      : bootstrapMeanInterval95(pairedDeltas, labelledSeed(bootstrapSeed, `${question}:delta`));
     return {
       question,
       accuracy,
+      accuracyInterval95,
       hallucinations: selected.reduce((sum, row) => sum + row.hallucinations, 0),
       confusions: accuracy < PASS_THRESHOLD ? topConfusions(selected) : [],
       passes: accuracy >= PASS_THRESHOLD,
       deltaVsPrevious: previousAccuracy === null ? null : accuracy - previousAccuracy,
+      deltaInterval95,
+      deltaAssessment: deltaInterval95 === null
+        ? null
+        : deltaInterval95.lower <= 0 && deltaInterval95.upper >= 0 ? 'noise' : 'signal',
     };
   }).sort((left, right) => left.accuracy - right.accuracy || left.question.localeCompare(right.question));
 }
@@ -1210,6 +1437,7 @@ export function strictProbeGate(rows: readonly ScreenshotProbeRow[]): boolean {
 export function renderProbeSummary(
   rows: readonly ScreenshotProbeRow[],
   previousRows: readonly ComparisonProbeRow[] | null = null,
+  bootstrapSeed = 0,
 ): string {
   if (previousRows !== null) assertComparableRuns(rows, previousRows);
   const groups = new Map<string, ScreenshotProbeRow[]>();
@@ -1230,22 +1458,28 @@ export function renderProbeSummary(
   for (const [key, group] of [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     const previousGroup = previousRows === null ? null : groupedRows(previousRows).get(key) ?? null;
     if (previousRows !== null && previousGroup === null) throw new Error(`Previous run has no ${key} rows.`);
-    const summaries = classSummaries(group, previousGroup);
+    const summaries = classSummaries(group, previousGroup, labelledSeed(bootstrapSeed, key));
     const allPass = summaries.every((entry) => entry.passes);
-    const deltaHeading = previousRows === null ? '' : ' Delta vs previous run |';
-    const deltaDivider = previousRows === null ? '' : '---:|';
+    const deltaHeading = previousRows === null ? '' : ' Delta vs previous run | Delta 95% bootstrap interval | Assessment |';
+    const deltaDivider = previousRows === null ? '' : '---:|---:|---|';
     lines.push(`## ${key}`, '', `Strict all classes >= 0.9: **${allPass ? 'PASS' : 'FAIL'}**`, '',
-      `| Class | Mean Jaccard |${deltaHeading} Hallucinations | Three most common confusions | Gate |`,
-      `|---|---:|${deltaDivider}---:|---|---|`);
+      `| Class | Mean Jaccard | Mean 95% bootstrap interval |${deltaHeading} Hallucinations | Three most common confusions | Gate |`,
+      `|---|---:|---:|${deltaDivider}---:|---|---|`);
     for (const summary of summaries) {
       const delta = summary.deltaVsPrevious === null
         ? ''
-        : ` ${summary.deltaVsPrevious >= 0 ? '+' : ''}${summary.deltaVsPrevious.toFixed(3)} |`;
-      lines.push(`| ${summary.question} | ${summary.accuracy.toFixed(3)} |${delta} ${String(summary.hallucinations)} | ${summary.confusions.join('; ') || '—'} | ${summary.passes ? 'PASS' : 'FAIL'} |`);
+        : ` ${summary.deltaVsPrevious >= 0 ? '+' : ''}${summary.deltaVsPrevious.toFixed(3)} | ${formatInterval(summary.deltaInterval95)} | ${summary.deltaAssessment === 'noise' ? 'noise' : 'signal'} |`;
+      lines.push(`| ${summary.question} | ${summary.accuracy.toFixed(3)} | ${formatInterval(summary.accuracyInterval95)} |${delta} ${String(summary.hallucinations)} | ${summary.confusions.join('; ') || '—'} | ${summary.passes ? 'PASS' : 'FAIL'} |`);
     }
     lines.push('');
   }
   return `${lines.join('\n')}\n`;
+}
+
+function formatInterval(interval: BootstrapInterval | null): string {
+  if (interval === null) return '—';
+  const signed = (value: number): string => `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
+  return `[${signed(interval.lower)}, ${signed(interval.upper)}]`;
 }
 
 export async function runScreenshotProbe(
@@ -1288,7 +1522,7 @@ export async function runScreenshotProbe(
     const rows = await mapConcurrent(tasks, config.simulate ? tasks.length : REAL_CALL_CONCURRENCY,
       (task) => runTask(task, answerer, schemas, config.imagesRoot, config.primer, config.generation, config.boardGlyphs));
     for (const row of rows) await appendFile(config.outPath, `${canonicalJson(row)}\n`, 'utf8');
-    await writeFile(config.summaryPath, renderProbeSummary(rows, comparisonRows), 'utf8');
+    await writeFile(config.summaryPath, renderProbeSummary(rows, comparisonRows, config.seed), 'utf8');
     return rows;
   } finally {
     await ownedService?.close();
@@ -1301,7 +1535,7 @@ async function main(): Promise<void> {
   const argv = scriptIndex < 0 ? process.argv.slice(2) : process.argv.slice(scriptIndex + 1);
   const config = parseScreenshotProbeArgs(argv);
   const rows = await runScreenshotProbe(config);
-  process.stdout.write(renderProbeSummary(rows));
+  process.stdout.write(renderProbeSummary(rows, null, config.seed));
 }
 
 const invokedPath = process.argv[1];

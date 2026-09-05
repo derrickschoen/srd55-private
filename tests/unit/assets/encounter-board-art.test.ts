@@ -2,7 +2,7 @@ import { readFileSync } from '../../helpers/test-filesystem';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { SHADE_ASSETS } from '../../../src/assets/art-sets';
-import { combatantId } from '../../../src/combat/values';
+import { combatantId, worldObjectId } from '../../../src/combat/values';
 import { encounterBoardRenderModel } from '../../../src/vtt/encounter-board';
 import { decodeEncounterArtPackage } from '../../../src/vtt/encounter-package';
 import { encounterArtForBoard } from '../../../src/vtt/encounter-art-selection';
@@ -51,12 +51,12 @@ describe('encounter package asset-id consumption', () => {
       .toEqual(expect.arrayContaining([
         'art.map.floor.stone.v1',
         'art.map.wall.stone.v1',
-        'art.map.door.wood-s.v1',
         'art.terrain.rubble.v1',
         'art.terrain.crate.v1',
         'art.terrain.pillar.v1',
         'art.terrain.hazard.v1',
       ]));
+    expect(player.flatMap((cell) => cell.layers).filter((layer) => layer.role === 'door')).toEqual([]);
   });
 
   it('D516: picks wall pieces, door orientation, floor variants and shade bands per cell', () => {
@@ -71,8 +71,23 @@ describe('encounter package asset-id consumption', () => {
     expect(wallOf(5, 6)).toBe('art.map.wall.stone-s.v1');
     expect(wallOf(0, 3)).toBe('art.map.wall.stone-w.v1');
     expect(wallOf(9, 3)).toBe('art.map.wall.stone-e.v1');
-    expect(wallOf(4, 6)).toBe('art.map.door.wood-s.v1');
+    expect(wallOf(4, 6)).toBe('art.map.wall.stone-s.v1');
     expect(wallOf(4, 3)).toBeUndefined();
+
+    const engineDoor = encounterBoardRenderModel({
+      ...projection,
+      worldObjects: [{
+        id: worldObjectId('world-object:south-door'),
+        name: 'South Door',
+        kind: 'door' as const,
+        position: { column: 4, row: 6 },
+        cells: [{ column: 4, row: 6 }],
+        blocking: { movement: true, lineOfSight: true, cover: 'total' as const },
+        lightClass: 'none' as const,
+      }],
+    }, REFERENCE_ENCOUNTER_ART);
+    expect(engineDoor.find((cell) => cell.column === 4 && cell.row === 6)?.layers)
+      .toContainEqual({ role: 'door', assetId: 'art.map.door.wood-s.v1' });
 
     const floors = new Set(model.map((cell) => cell.layers[0]?.assetId));
     expect(floors.size).toBe(4);
