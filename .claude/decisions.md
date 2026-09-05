@@ -11529,3 +11529,12 @@ references (D558). Server binds 127.0.0.1 on a port far from 4173; a headless AP
 into the private references folder with the D558 log; outputs never ship. Codex sol high installs and smokes it;
 the references tool gains provider "comfyui" afterwards. This replaces the Fireworks on-demand question (D558.1
 finding) — Fireworks stays for language routes only.
+
+D560.1 — OWNER (2026-09-05 18:46): "Try FLUX.2 Klein 4B quantized and Krea 2 Turbo aggressively quantized." Supervisor:
+the install lane was stopped (turn active; stop-then-resume rule) 6 minutes in, with ComfyUI cloned and CPU torch
+installed (4.1 GB), and resumed with the amendment: models are FLUX.2 Klein 4B in a quantized build (GGUF Q8/Q4 via
+the ComfyUI GGUF loader, or the official quantized release if one exists) and Krea 2 Turbo aggressively quantized
+(lowest usable GGUF quant). Licence rule adjusted by the owner's explicit naming: Krea 2 Turbo's licence is
+verified and recorded before download; if it is non-commercial, the weights may still be used locally for
+REFERENCE images only (they never ship, D558) and the licence text hash goes into models/LICENSES.md; anything that
+forbids even local generation is refused and reported. SD 1.5 is no longer downloaded unless both fail.
