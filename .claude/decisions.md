@@ -10454,3 +10454,15 @@ and is silently skipped). ESCALATION per the round-6 rule — QUESTION FOR THE O
 their findings and surfaced a new class; land ?view=iso on main now with these two recorded as known issues (it is
 additive and the classic view is proven byte-identical), or keep iterating? Supervisor default while the question
 stands: D8 dispatched for the two majors (small, concrete); landing waits for the owner's word or a clean round 8.
+
+D525 GLYPH VOCABULARY, probe (6 states, case-folded; 'light' glyphs → 'full' glyphs):
+  medium: light 0.69→0.99 · hidden 0.33→1.00 · fog/obscured 0.43→0.91 · blocked 0.34→0.96 · id+cell 0.77→0.85 —
+          four classes PASS the 0.9 gate at medium; doors 0.08→0.17, adjacency 0.64→0.37, difficult 0.71→0.55,
+          HP 0.55, side 0.72 remain.
+  low:    hidden 0.08→0.67 · blocked 0.26→0.69 · id+cell 0.72→0.80 · fog 0.32→0.44; light fell 0.81→0.61 and
+          adjacency 0.64→0.26 (glyph crowding at low effort).
+  Reading: explicit per-class glyphs + legend + primer is the recipe; at medium it solves light, hidden, fog and
+  blocked outright. Doors still hallucinate (97 "fact not present": the model reports door cells that are not
+  doors — investigate whether wall-piece art or the pillar column reads as doors); adjacency regressed (glyph
+  crowding or the primer's adjacency definition); difficult/HP/side need their own pass. Six boards remain noisy;
+  the probe's next increment must sample more states.
