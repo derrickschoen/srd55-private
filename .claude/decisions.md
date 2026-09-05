@@ -10335,3 +10335,11 @@ still read as dark/dim — the tint encoding, not the labels), doors (the glyph 
 does not yet, so answers are partly hallucinated pairs), fog at low. Next UI variants in that order (D525: probe
 first, no arena reruns). The probe's next increment case-folds names in the scorer; the primer run (inc2) is gated
 and will be rerun with that fix.
+
+SUPERVISOR RULING (2026-09-04 22:40) — footprints inc2 stopped BLOCKED, correctly: pack monsters and custom forms
+must persist a mechanical size (no Medium guess, D514), which changes the content-pack schema, whose exact published
+copy lives at docs/specs/content-pack.schema.json — a path my COMMON RULES forbid. That file is a GENERATED artifact of
+the code, not prose. Ruling: lanes may update docs/specs/*.schema.json ONLY by running the repository's schema
+generator (never by hand), and the increment's report must show the generator command and the resulting diff. The
+no-docs rule stands for everything else under docs/**. Codex's first locked suite on this increment showed 251
+failures before its fixes; the resumed session must finish with a real post-edit locked full suite and done-file.
