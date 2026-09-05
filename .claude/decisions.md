@@ -11195,3 +11195,12 @@ baseline "main or parent lane"; D514 limited to growth/reversion. The three
 conflicts (D25 vs D550, D249 vs D532, D352 vs owner-only scope) go to
 RULE-CONFLICTS.md with interim resolutions. Header no longer claims
 "codex-reviewed" ahead of the review; it now dates the applied audit.
+
+## Footprints inc5 LANDED on main 7c52da1c (2026-09-05 15:53)
+
+Gate on claude/footprints 17f86232 (my run, gate-wt-footprints.log):
+vitest 563 files / 9725 tests green, Playwright 185 passed (51.3 min).
+Merge --no-ff from the main repo, exit 0, 27 files, +847/-292, tree clean.
+D429.1 mini-A/B launched immediately (brutal, 10 rooms x 1 rep, seed
+6203001, luna low, full intel; miniab-footprints5.jsonl). D545 last-seen
+ghost-marker unit unblocks and is dispatched from this commit.
