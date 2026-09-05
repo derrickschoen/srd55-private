@@ -10863,3 +10863,26 @@ Footprints: quiet vitest rerun 563/9718 green; browser suite 183/185 — two vtt
 "Cannot read properties of undefined (reading 'actual')" at createEncounter (the spec's in-page fixture predates
 schema-2 placementMode); codex resumed to fix the root cause with a unit test. The 15 research units are writing
 (nine files, 5,200 lines so far).
+
+D530 — OWNER (2026-09-05 12:00): all Opus 5 seats run at MEDIUM effort (`claude -p --model claude-opus-5 --effort medium`)
+from now on; the research seats that already finished ran at the default.
+
+PROBE, 24 states, classic inc4 (plates with stems), Luna low / medium (2026-09-05 10:44; a real measurement — the
+first 24-state run was void): Q1 id+cell 0.65 / 0.70 · Q2 side 0.68 / 0.64 · Q3 HP 0.34 / 0.53 · Q4 difficult
+0.58 / 0.73 · Q5 light 0.62 / 0.98 · Q6 doors 0.35 / 0.47 · Q7 adjacent 0.43 / 0.52 · Q8 hidden 0.71 / 0.79 ·
+Q9 fog 0.48 / 0.67 · Q10 blocked 0.96 / 0.97. Against the rescored estimate of the void run (id 0.48 / 0.63) the
+stems moved identity by +0.17 / +0.07 — consistent with the review seats' finding that the stems are invisible at
+1×: the gain is from single-line names, not the leader. Light passes at medium; blocked passes at both. Doors
+(230 "fact not present" at low) and HP are the worst classes; classic round 2 (in flight) targets plates, stems,
+object tags and primer; doors and HP labels are round 3.
+
+LANDINGS ON BRANCHES (12:20): footprints 098c4830 (typed option-path fixture through combatToken + regression test;
+codex 563/9719 locked; my mutation killed after one void attempt) — full landing gate with the browser suite
+started 12:17 on the clean tree, load 2. iso-probe 9f9b349c (light-variant merged; --view iso capture; iso primer v1;
+codex 572/9936 locked; my mutation killed; one smoke-test timeout under load passes alone) — the iso BASELINE
+probe (Luna medium, 24 states, before the coordinate-label/legend unit) started 12:20 so the UI unit has a
+before/after. Classic round 2: codex STOPPED correctly (vtt-option-paths.spec.ts is not on claude/light-variant);
+resumed with that spec dropped. Iso D13: the first launch hit the Fable session limit (reset 12:00); relaunched
+12:05. Research: all fifteen judges-only files complete (12,668 lines, committed privately); clean-room synthesis
+dispatched to three seats (Opus at medium); codex leakage check follows the merge. Brainstorm (owner request):
+three seats drafting questions for the owner.
