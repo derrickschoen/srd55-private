@@ -11017,3 +11017,9 @@ measured in every probe run as a research curiosity, not a gate. Supersedes the 
 Current standing at medium (classic inc4 run, 24 states): light 0.98 and blocked 0.97 pass; hidden 0.79,
 difficult 0.73, identity 0.70, fog 0.67, side 0.64, HP 0.53, adjacency 0.52, doors 0.47 do not. Classic round 3
 (badges + roster box + one HP vocabulary) is the next candidate; its probe run reports medium first.
+
+D537 — OWNER (2026-09-05 13:52): ONE board with annotations as SWITCHABLE LAYERS. Coordinates, legend, per-class
+corner glyphs, badges/plates and the roster box are layers a human can turn off individually; the AI-DM snapshot
+and the probe capture always have every layer on. Art rounds judge the board with layers off (player look) AND
+on (snapshot); a change may not improve one at the other's expense. The classic lane implements the layer toggles
+as typed presentation state (a closed set of layer names, persisted per DM), with the snapshot mode forcing all on.
