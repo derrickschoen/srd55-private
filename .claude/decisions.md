@@ -10360,3 +10360,12 @@ D519 PROBE, g2 + general primer (D524), rescored case-folded, 6 states, low / me
   adjacency, HP at medium) and hurts blocked/hidden — the primer's wording for those two needs the legend's exact
   glyph names; light stays unreadable regardless of words, so the tint encoding is the next UI change (D525 order:
   light, doors, HP, adjacency). Six states is noisy; the next runs use 12 states.
+
+SUPERVISOR NOTES (2026-09-04 23:58): iso D3 committed 26ab27dc (review round 3 in flight, LAND/HOLD requested);
+board-shot inc2.5 capture_only committed f7400638; board-merge c2bb320b = inc2+inc3 + path-overlay + classic art,
+conflict resolved by codex, gate queued (inc2.5 merges in after it). D521 capture_only reruns of the four off arms
+started 23:53 from dnd-wt-arena-img2 at f7400638 (g1 art, engine identical). Light encodings delivered ('inverse',
+'symbol' behind a closed option, default 'tint'); the probe runs on all three (6 states, Luna low+medium) since
+23:37. Combined-board screenshot reviewed: paths' polylines too faint, badges pile at the top-right, the movement
+legend box covers cells 13–16 of rows 11–12 — a path-overlay round 2 (legend outside the grid, thicker lines with
+dark halo, badge stacking) is briefed after the probe says whether paths help or hurt comprehension.
