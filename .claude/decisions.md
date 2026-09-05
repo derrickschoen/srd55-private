@@ -11138,3 +11138,16 @@ round 5 (after round 4): palette variants as typed closed sets, contrast mode as
 
 D550 — OWNER (2026-09-05 15:05): the save format stays disposable (one-way migrations, no compatibility promise)
 until the PUBLIC RELEASE; from then on compatibility is promised. Early saves may not survive before that.
+
+D551 — OWNER (2026-09-05 15:08): AI-DM MEMORY — each round's context carries an engine-generated summary AND the
+pictures of ALL previous rounds; and when serious multi-round testing with the AI DM starts, all rounds of an
+encounter run in ONE model session (not a fresh context per round). Supervisor plan: (a) arena/conversation
+runner gains a per-encounter session mode — one MCP conversation across rounds, prior-round summaries appended by
+the engine (byte-identity fixtures extended), prior board images retained as earlier message content; (b) the
+image budget per round grows with round count — the capture cap and the cost per row are reported per round;
+(c) the "fresh context per round" mode stays available as the control arm. Codex unit after the current arena
+tooling lanes (probe inc5, flakes) land, since it changes the conversation runner and the row schema.
+
+CLEAN-ROOM OPEN (2026-09-05 15:08): the Opus v3 read reports all eleven documents CLEAN; with codex's v2 CLEAN
+the D542 gate is met — clean-room/final/ (v3) is readable by implementers from now on; every art brief from
+classic round 5 and the next iso unit onward cites it as the design authority (judges-only stays judges-only).
