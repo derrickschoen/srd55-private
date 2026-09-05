@@ -41,10 +41,12 @@ import {
 
 const repositoryRoot = resolve(new URL('../', import.meta.url).pathname);
 const PROBE_VERSION = 'd519-screenshot-comprehension-v1' as const;
-const ROW_VERSION = 'd519-screenshot-comprehension-row-v1' as const;
+const ROW_VERSION = 'd524-screenshot-comprehension-row-v2' as const;
+export const PRIMER_VERSION = 'd524-general-board-primer-v1' as const;
+export const GENERAL_PRIMER = 'This is a tabletop RPG combat board viewed from above. Each grid square represents 5 feet, and tokens represent creatures. Cool-blue base plates identify party creatures; warm-red base plates identify foes. Numbers along the horizontal and vertical board edges are zero-based column,row coordinates, and answers must use that convention. Bars under tokens show hit-point bands using the colours named in the legend. The legend box names every terrain tint (Difficult, Obscured, Bright light, Dim light, Darkness, and Fog) and every board glyph (Blocked, Object, and Light source). Interpret walls, doors, and objects as they are drawn on the board.' as const;
 const AI_DM_CODEX_HOME = '/home/vagrant/.codex-aidm' as const;
 const REAL_CALL_CONCURRENCY = 4;
-const PASS_THRESHOLD = 0.9;
+export const PASS_THRESHOLD = 0.9;
 
 export const SCREENSHOT_QUESTION_IDS = [
   'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10',
@@ -54,6 +56,8 @@ export type ProbeEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export type ProseHitPointBand = 'uninjured' | 'injured' | 'critical' | 'unknown';
 export type ProbeSide = 'party' | 'foe';
 export type ProbeLight = 'bright' | 'dim' | 'dark';
+export type PrimerMode = 'none' | 'general';
+export type PrimerVersion = typeof PRIMER_VERSION | null;
 
 declare const zeroBasedColumnBrand: unique symbol;
 declare const zeroBasedRowBrand: unique symbol;
@@ -137,6 +141,9 @@ export interface ScreenshotProbeConfig {
   readonly outPath: string;
   readonly summaryPath: string;
   readonly simulate: boolean;
+  readonly primer: PrimerMode;
+  readonly generation: string;
+  readonly comparePath: string | null;
 }
 
 export interface ProbeTokenUsage {
@@ -154,6 +161,8 @@ export interface ScreenshotProbeRow {
   readonly effort: ProbeEffort;
   readonly question: ScreenshotQuestionId;
   readonly promptVersion: typeof PROBE_VERSION;
+  readonly primerVersion: PrimerVersion;
+  readonly generation: string;
   readonly png: {
     readonly sha256: string;
     readonly relativePath: string;
@@ -582,12 +591,18 @@ export function scoreProbeAnswer(answer: ProbeAnswer, truth: ProbeAnswer): Probe
   };
 }
 
-export function screenshotQuestionPrompt(question: ScreenshotQuestionId): string {
-  return [
+export function screenshotQuestionPrompt(
+  question: ScreenshotQuestionId,
+  primer: PrimerMode = 'general',
+): string {
+  const questionLines = [
     `Question ${question}: ${QUESTION_TEXT[question]}`,
-    'Use zero-based column,row coordinates. Column letters or numbers and row numbers may appear along the board edges.',
+    'Use zero-based column,row coordinates. Column numbers and row numbers appear along the board edges.',
     'Inspect only the attached PNG. Return only JSON matching the supplied strict schema.',
-  ].join('\n');
+  ];
+  return primer === 'general'
+    ? [`General primer ${PRIMER_VERSION}: ${GENERAL_PRIMER}`, ...questionLines].join('\n')
+    : questionLines.join('\n');
 }
 
 function scalarSchema(type: 'string' | 'integer' | 'boolean', options: Readonly<Record<string, unknown>> = {}): Readonly<Record<string, unknown>> {
@@ -809,7 +824,7 @@ export function parseScreenshotProbeArgs(argv: readonly string[]): ScreenshotPro
       simulate = true;
       continue;
     }
-    if (!['--models', '--states', '--seed', '--images-root', '--out'].includes(option ?? '')) {
+    if (!['--models', '--states', '--seed', '--images-root', '--out', '--primer', '--generation', '--compare'].includes(option ?? '')) {
       throw new TypeError(`Unknown screenshot probe option ${option ?? '<missing>'}.`);
     }
     const value = argv[index + 1];
@@ -830,7 +845,26 @@ export function parseScreenshotProbeArgs(argv: readonly string[]): ScreenshotPro
   const outPath = insideRepository(requiredOption(values, '--out'), '--out');
   if (!outPath.endsWith('.jsonl')) throw new RangeError('--out must end in .jsonl.');
   const summaryPath = outPath.slice(0, -'.jsonl'.length) + '-summary.md';
-  return { models, stateCount, seed, imagesRoot, outPath, summaryPath, simulate };
+  const primerValue = values.get('--primer') ?? 'general';
+  if (primerValue !== 'none' && primerValue !== 'general') {
+    throw new TypeError('--primer must be none or general.');
+  }
+  const generation = requiredOption(values, '--generation');
+  const compareValue = values.get('--compare');
+  const comparePath = compareValue === undefined ? null : insideRepository(compareValue, '--compare');
+  if (comparePath !== null && !comparePath.endsWith('.jsonl')) throw new RangeError('--compare must end in .jsonl.');
+  return {
+    models,
+    stateCount,
+    seed,
+    imagesRoot,
+    outPath,
+    summaryPath,
+    simulate,
+    primer: primerValue,
+    generation,
+    comparePath,
+  };
 }
 
 function vanePlayers(): readonly CombatantProfile[] {
@@ -964,11 +998,13 @@ async function runTask(
   answerer: ProbeAnswerer,
   schemas: Readonly<Record<ScreenshotQuestionId, string>>,
   imagesRoot: string,
+  primer: PrimerMode,
+  generation: string,
 ): Promise<ScreenshotProbeRow> {
   const result = await answerer.answer({
     ...task.model,
     question: task.question,
-    prompt: screenshotQuestionPrompt(task.question),
+    prompt: screenshotQuestionPrompt(task.question, primer),
     schemaPath: schemas[task.question],
     imagePath: join(imagesRoot, task.artifact.relativePath),
     truth: task.truth,
@@ -981,6 +1017,8 @@ async function runTask(
     effort: task.model.effort,
     question: task.question,
     promptVersion: PROBE_VERSION,
+    primerVersion: primer === 'general' ? PRIMER_VERSION : null,
+    generation,
     png: {
       sha256: task.artifact.sha256,
       relativePath: task.artifact.relativePath,
@@ -1019,7 +1057,26 @@ interface ClassSummary {
   readonly hallucinations: number;
   readonly confusions: readonly string[];
   readonly passes: boolean;
+  readonly deltaVsPrevious: number | null;
 }
+
+export interface ComparisonProbeRow {
+  readonly stateId: string;
+  readonly stateDigest: string;
+  readonly model: string;
+  readonly effort: ProbeEffort;
+  readonly question: ScreenshotQuestionId;
+  readonly score: number;
+}
+
+const comparisonProbeRowSchema = z.object({
+  stateId: z.string().min(1),
+  stateDigest: z.string().min(1),
+  model: z.string().min(1),
+  effort: effortSchema,
+  question: z.enum(SCREENSHOT_QUESTION_IDS),
+  score: z.number().min(0).max(1),
+}).passthrough();
 
 function topConfusions(rows: readonly ScreenshotProbeRow[]): readonly string[] {
   const counts = new Map<string, number>();
@@ -1032,22 +1089,92 @@ function topConfusions(rows: readonly ScreenshotProbeRow[]): readonly string[] {
     .map(([confusion, count]) => `${confusion} (${String(count)})`);
 }
 
-function classSummaries(rows: readonly ScreenshotProbeRow[]): readonly ClassSummary[] {
+function classSummaries(
+  rows: readonly ScreenshotProbeRow[],
+  previousRows: readonly ComparisonProbeRow[] | null = null,
+): readonly ClassSummary[] {
   return SCREENSHOT_QUESTION_IDS.map((question) => {
     const selected = rows.filter((row) => row.question === question);
     if (selected.length === 0) throw new Error(`Summary has no rows for ${question}.`);
     const accuracy = selected.reduce((sum, row) => sum + row.score, 0) / selected.length;
+    const previousSelected = previousRows?.filter((row) => row.question === question) ?? null;
+    if (previousSelected !== null && previousSelected.length === 0) {
+      throw new Error(`Previous summary has no rows for ${question}.`);
+    }
+    const previousAccuracy = previousSelected === null
+      ? null
+      : previousSelected.reduce((sum, row) => sum + row.score, 0) / previousSelected.length;
     return {
       question,
       accuracy,
       hallucinations: selected.reduce((sum, row) => sum + row.hallucinations, 0),
       confusions: accuracy < PASS_THRESHOLD ? topConfusions(selected) : [],
       passes: accuracy >= PASS_THRESHOLD,
+      deltaVsPrevious: previousAccuracy === null ? null : accuracy - previousAccuracy,
     };
   }).sort((left, right) => left.accuracy - right.accuracy || left.question.localeCompare(right.question));
 }
 
-export function renderProbeSummary(rows: readonly ScreenshotProbeRow[]): string {
+function groupedRows<Row extends Pick<ComparisonProbeRow, 'model' | 'effort'>>(
+  rows: readonly Row[],
+): ReadonlyMap<string, readonly Row[]> {
+  const groups = new Map<string, Row[]>();
+  for (const row of rows) {
+    const key = `${row.model}:${row.effort}`;
+    const group = groups.get(key) ?? [];
+    group.push(row);
+    groups.set(key, group);
+  }
+  return groups;
+}
+
+function comparisonKey(row: ComparisonProbeRow): string {
+  return canonicalJson({
+    model: row.model,
+    effort: row.effort,
+    stateId: row.stateId,
+    stateDigest: row.stateDigest,
+    question: row.question,
+  });
+}
+
+function assertComparableRuns(
+  rows: readonly ScreenshotProbeRow[],
+  previousRows: readonly ComparisonProbeRow[],
+): void {
+  const keys = rows.map(comparisonKey);
+  const previousKeys = previousRows.map(comparisonKey);
+  if (new Set(keys).size !== keys.length) throw new TypeError('Current run has duplicate model/state/question rows.');
+  if (new Set(previousKeys).size !== previousKeys.length) throw new TypeError('Previous run has duplicate model/state/question rows.');
+  const ordered = [...keys].sort();
+  const previousOrdered = [...previousKeys].sort();
+  if (canonicalJson(ordered) !== canonicalJson(previousOrdered)) {
+    throw new TypeError('--compare requires the same models, efforts, states, and questions as the current run.');
+  }
+}
+
+async function readComparisonRows(path: string): Promise<readonly ComparisonProbeRow[]> {
+  const lines = (await readFile(path, 'utf8')).split('\n').filter((line) => line.trim().length > 0);
+  return lines.map((line, index) => {
+    try {
+      return comparisonProbeRowSchema.parse(JSON.parse(line) as unknown);
+    } catch (error) {
+      throw new TypeError(`Invalid comparison row ${String(index + 1)} in ${path}.`, { cause: error });
+    }
+  });
+}
+
+export function strictProbeGate(rows: readonly ScreenshotProbeRow[]): boolean {
+  const groups = groupedRows(rows);
+  return groups.size > 0 && [...groups.values()].every((group) =>
+    classSummaries(group).every((summary) => summary.passes));
+}
+
+export function renderProbeSummary(
+  rows: readonly ScreenshotProbeRow[],
+  previousRows: readonly ComparisonProbeRow[] | null = null,
+): string {
+  if (previousRows !== null) assertComparableRuns(rows, previousRows);
   const groups = new Map<string, ScreenshotProbeRow[]>();
   for (const row of rows) {
     const key = `${row.model}:${row.effort}`;
@@ -1062,13 +1189,20 @@ export function renderProbeSummary(rows: readonly ScreenshotProbeRow[]): string 
     '',
   ];
   for (const [key, group] of [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
-    const summaries = classSummaries(group);
+    const previousGroup = previousRows === null ? null : groupedRows(previousRows).get(key) ?? null;
+    if (previousRows !== null && previousGroup === null) throw new Error(`Previous run has no ${key} rows.`);
+    const summaries = classSummaries(group, previousGroup);
     const allPass = summaries.every((entry) => entry.passes);
+    const deltaHeading = previousRows === null ? '' : ' Delta vs previous run |';
+    const deltaDivider = previousRows === null ? '' : '---:|';
     lines.push(`## ${key}`, '', `Strict all classes >= 0.9: **${allPass ? 'PASS' : 'FAIL'}**`, '',
-      '| Class | Mean Jaccard | Hallucinations | Three most common confusions | Gate |',
-      '|---|---:|---:|---|---|');
+      `| Class | Mean Jaccard |${deltaHeading} Hallucinations | Three most common confusions | Gate |`,
+      `|---|---:|${deltaDivider}---:|---|---|`);
     for (const summary of summaries) {
-      lines.push(`| ${summary.question} | ${summary.accuracy.toFixed(3)} | ${String(summary.hallucinations)} | ${summary.confusions.join('; ') || '—'} | ${summary.passes ? 'PASS' : 'FAIL'} |`);
+      const delta = summary.deltaVsPrevious === null
+        ? ''
+        : ` ${summary.deltaVsPrevious >= 0 ? '+' : ''}${summary.deltaVsPrevious.toFixed(3)} |`;
+      lines.push(`| ${summary.question} | ${summary.accuracy.toFixed(3)} |${delta} ${String(summary.hallucinations)} | ${summary.confusions.join('; ') || '—'} | ${summary.passes ? 'PASS' : 'FAIL'} |`);
     }
     lines.push('');
   }
@@ -1079,6 +1213,7 @@ export async function runScreenshotProbe(
   config: ScreenshotProbeConfig,
   dependencies: ScreenshotProbeDependencies = {},
 ): Promise<readonly ScreenshotProbeRow[]> {
+  const comparisonRows = config.comparePath === null ? null : await readComparisonRows(config.comparePath);
   const candidates = dependencies.candidates ?? await defaultProbeStateCandidates();
   if (config.stateCount > candidates.length) {
     throw new RangeError(`Requested ${String(config.stateCount)} states, but only ${String(candidates.length)} are available.`);
@@ -1112,9 +1247,9 @@ export async function runScreenshotProbe(
         candidate, artifact, model, question, truth: truthAnswer(sheet, question),
       }))));
     const rows = await mapConcurrent(tasks, config.simulate ? tasks.length : REAL_CALL_CONCURRENCY,
-      (task) => runTask(task, answerer, schemas, config.imagesRoot));
+      (task) => runTask(task, answerer, schemas, config.imagesRoot, config.primer, config.generation));
     for (const row of rows) await appendFile(config.outPath, `${canonicalJson(row)}\n`, 'utf8');
-    await writeFile(config.summaryPath, renderProbeSummary(rows), 'utf8');
+    await writeFile(config.summaryPath, renderProbeSummary(rows, comparisonRows), 'utf8');
     return rows;
   } finally {
     await ownedService?.close();

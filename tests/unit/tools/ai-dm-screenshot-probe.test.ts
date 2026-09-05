@@ -4,13 +4,19 @@ import { createEncounter, type EncounterState } from '../../../src/combat/encoun
 import { armorClass, worldObjectId } from '../../../src/combat/values';
 import type { WorldObject } from '../../../src/combat/world-objects';
 import {
+  GENERAL_PRIMER,
+  PASS_THRESHOLD,
+  PRIMER_VERSION,
+  defaultProbeStateCandidates,
   deriveScreenshotFactSheet,
   parseProbeAnswer,
   parseScreenshotProbeArgs,
   runScreenshotProbe,
   scoreProbeAnswer,
+  screenshotQuestionPrompt,
   shiftedByOneRowAnswer,
   simulatedProbeAnswerer,
+  strictProbeGate,
   truthAnswer,
   type ProbeSnapshotService,
   type ScreenshotFactSheet,
@@ -198,7 +204,61 @@ describe('D519 screenshot comprehension scoring', () => {
   });
 });
 
+describe('D524 general screenshot primer', () => {
+  it('is versioned, uses generic classic-board conventions, and leaks no probed fact-sheet names or coordinates', async () => {
+    const primerPrompt = screenshotQuestionPrompt('Q1', 'general');
+    expect(primerPrompt).toContain(`General primer ${PRIMER_VERSION}: ${GENERAL_PRIMER}`);
+    expect(primerPrompt).toContain('Each grid square represents 5 feet');
+    expect(primerPrompt).toContain('Cool-blue base plates identify party creatures');
+    expect(primerPrompt).toContain('warm-red base plates identify foes');
+    expect(primerPrompt).toContain('zero-based column,row coordinates');
+    expect(primerPrompt).toContain('Bars under tokens show hit-point bands');
+    expect(primerPrompt).toContain('Difficult, Obscured, Bright light, Dim light, Darkness, and Fog');
+    expect(primerPrompt).toContain('Blocked, Object, and Light source');
+    expect(primerPrompt).toContain('walls, doors, and objects as they are drawn');
+
+    const sheets = [
+      deriveScreenshotFactSheet(everyClassState()),
+      ...(await defaultProbeStateCandidates()).map((candidate) => deriveScreenshotFactSheet(candidate.state)),
+    ];
+    const factSheetStrings = new Set(sheets.flatMap((sheet) => {
+      const cells = [
+        ...sheet.combatants.map((entry) => entry.cell),
+        ...sheet.difficultTerrainCells,
+        ...sheet.obscuredCells,
+        ...sheet.lightCells,
+        ...sheet.foggedCells,
+        ...sheet.blockedCells,
+        ...sheet.doors,
+        ...sheet.worldObjects,
+      ];
+      return [
+        ...sheet.combatants.map((entry) => entry.displayName),
+        ...sheet.worldObjects.map((entry) => entry.name),
+        ...cells.map((cell) => `${String(cell.column)},${String(cell.row)}`),
+      ];
+    }));
+    const normalizedPrimer = GENERAL_PRIMER.toLocaleLowerCase('en-US');
+    for (const fact of factSheetStrings) {
+      expect(normalizedPrimer, `primer leaked fact-sheet string ${JSON.stringify(fact)}`)
+        .not.toContain(fact.toLocaleLowerCase('en-US'));
+    }
+  });
+
+  it('omits the general primer when explicitly disabled', () => {
+    const prompt = screenshotQuestionPrompt('Q1', 'none');
+    expect(prompt).not.toContain(PRIMER_VERSION);
+    expect(prompt).not.toContain(GENERAL_PRIMER);
+    expect(prompt).toContain('Question Q1:');
+    expect(prompt).toContain('Use zero-based column,row coordinates');
+  });
+});
+
 describe('D519 screenshot comprehension schema and CLI', () => {
+  it('pins the strict threshold to 0.9', () => {
+    expect(PASS_THRESHOLD).toBe(0.9);
+  });
+
   it('rejects malformed, wrong-question, negative-coordinate, and extra-property answers', () => {
     expect(() => parseProbeAnswer('Q1', 'not-json')).toThrow('not JSON');
     expect(() => parseProbeAnswer('Q1', JSON.stringify({ version: 'd519-screenshot-comprehension-v1', question: 'Q2', creatures: [] }))).toThrow();
@@ -206,7 +266,7 @@ describe('D519 screenshot comprehension schema and CLI', () => {
     expect(() => parseProbeAnswer('Q10', JSON.stringify({ version: 'd519-screenshot-comprehension-v1', question: 'Q10', cells: [], prose: 'none' }))).toThrow();
   });
 
-  it('runs parsed --simulate CLI configuration end to end and writes rows plus strict summary', async () => {
+  it('runs perfect and impostor answerers through the strict gate and writes comparison metadata', async () => {
     const artifactRoot = resolve('dnd-slim-runs');
     mkdirSync(artifactRoot, { recursive: true });
     const directory = await mkdtemp(join(artifactRoot, 'd519-probe-test-'));
@@ -220,8 +280,11 @@ describe('D519 screenshot comprehension schema and CLI', () => {
         '--seed', '6203001',
         '--images-root', imagesRoot,
         '--out', outPath,
+        '--generation', 'g2-classic-general',
         '--simulate',
       ]);
+      expect(config.primer).toBe('general');
+      expect(config.comparePath).toBeNull();
       const rows = await runScreenshotProbe(config, {
         candidates: [{ id: 'fixture-all-classes', state: everyClassState() }],
         snapshotService: service,
@@ -229,11 +292,39 @@ describe('D519 screenshot comprehension schema and CLI', () => {
 
       expect(rows).toHaveLength(20);
       expect(rows.every((row) => row.outcome === 'answered' && row.score === 1)).toBe(true);
+      expect(rows.every((row) => row.primerVersion === PRIMER_VERSION)).toBe(true);
+      expect(rows.every((row) => row.generation === 'g2-classic-general')).toBe(true);
+      expect(strictProbeGate(rows)).toBe(true);
       expect((await readFile(outPath, 'utf8')).trim().split('\n')).toHaveLength(20);
       const summary = await readFile(config.summaryPath, 'utf8');
       expect(summary).toContain('gpt-5.6-luna:low');
       expect(summary).toContain('gpt-5.6-luna:medium');
       expect(summary.match(/Strict all classes >= 0\.9: \*\*PASS\*\*/gu)).toHaveLength(2);
+
+      const comparisonOutPath = join(directory, 'e2e-without-primer.jsonl');
+      const comparisonConfig = parseScreenshotProbeArgs([
+        '--models', 'gpt-5.6-luna:low,gpt-5.6-luna:medium',
+        '--states', '1',
+        '--seed', '6203001',
+        '--images-root', join(directory, 'e2e-without-primer-images'),
+        '--out', comparisonOutPath,
+        '--primer', 'none',
+        '--generation', 'g1-like-for-like',
+        '--compare', outPath,
+        '--simulate',
+      ]);
+      const impostorRows = await runScreenshotProbe(comparisonConfig, {
+        candidates: [{ id: 'fixture-all-classes', state: everyClassState() }],
+        snapshotService: service,
+        answerer: simulatedProbeAnswerer('shifted_row'),
+      });
+      expect(impostorRows.every((row) => row.primerVersion === null)).toBe(true);
+      expect(impostorRows.every((row) => row.generation === 'g1-like-for-like')).toBe(true);
+      expect(strictProbeGate(impostorRows)).toBe(false);
+      const comparisonSummary = await readFile(comparisonConfig.summaryPath, 'utf8');
+      expect(comparisonSummary).toContain('Delta vs previous run');
+      expect(comparisonSummary).toContain('-1.000');
+      expect(comparisonSummary.match(/Strict all classes >= 0\.9: \*\*FAIL\*\*/gu)).toHaveLength(2);
       expect(service.closed).toBe(false);
     } finally {
       await rm(directory, { recursive: true, force: true });
